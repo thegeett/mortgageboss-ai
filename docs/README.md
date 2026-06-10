@@ -1,0 +1,31 @@
+# Documentation
+
+Project documentation for **mortgageboss-ai**, a loan processing assistant for
+mortgage processors. Start here to find your way around.
+
+## Documents
+
+| Document                                             | What's in it                                              |
+| ---------------------------------------------------- | --------------------------------------------------------- |
+| [architecture.md](architecture.md)                   | System architecture overview, components, data flow, principles |
+| [glossary.md](glossary.md)                           | Mortgage domain terms and technical terms                 |
+| [poc-learnings.md](poc-learnings.md)                 | Lessons from the prototype (with a developer TODO section)|
+| [project-structure.md](project-structure.md)         | Repository layout and "where does X go?" conventions      |
+| [development-workflow.md](development-workflow.md)    | CI/CD pipelines and pre-commit hooks                      |
+| [phases/phase-1.md](phases/phase-1.md)               | Ticket-by-ticket phase plan (Epics 1–6)                   |
+| [tickets/](tickets/)                                 | Per-ticket implementation records (`LP-XXX.md`)           |
+
+> `database.md` (migrations & schema guide) will be added with Alembic in **LP-9**.
+
+## Also in the repository root
+
+- [`../README.md`](../README.md) — setup and quick start (the project's front door).
+- [`../decisions.md`](../decisions.md) — Architecture Decision Records (ADR log).
+- [`../CLAUDE.md`](../CLAUDE.md) — conventions for Claude Code; a concise summary
+  of how this project is built.
+
+## Canonical product plan
+
+The authoritative product plan is the external **V1 Build Plan v2**. The
+in-repo [`phases/phase-1.md`](phases/phase-1.md) mirrors its ticket breakdown for
+Phase 1.

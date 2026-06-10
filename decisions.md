@@ -16,6 +16,41 @@ Each decision is recorded as an entry with the following structure:
 - **Decision** — what was decided.
 - **Consequences** — the resulting trade-offs, both positive and negative.
 
+## Index
+
+| ADR | Title | Epic |
+| --- | ----- | ---- |
+| [001](#adr-001-use-a-monorepo-for-v1) | Use a monorepo for V1 | 1 |
+| [002](#adr-002-use-docker-compose-for-local-development-services) | Use Docker Compose for local development services | 1 |
+| [003](#adr-003-postgresql-16-over-17) | PostgreSQL 16 over 17 | 1 |
+| [004](#adr-004-mailhog-for-local-email-capture) | MailHog for local email capture | 1 |
+| [005](#adr-005-hardcoded-development-database-credentials) | Hardcoded development database credentials | 1 |
+| [006](#adr-006-use-colima-as-docker-runtime) | Use Colima as Docker runtime | 1 |
+| [007](#adr-007-python-312-for-the-backend) | Python 3.12 for the backend | 1 |
+| [008](#adr-008-uv-as-the-python-package-manager) | uv as the Python package manager | 1 |
+| [009](#adr-009-fastapi-as-the-backend-framework) | FastAPI as the backend framework | 1 |
+| [010](#adr-010-sqlalchemy-2x-with-async-support) | SQLAlchemy 2.x with async support | 1 |
+| [011](#adr-011-ruff-for-linting-and-formatting) | Ruff for linting and formatting | 1 |
+| [012](#adr-012-mypy-in-strict-mode-for-type-checking) | mypy in strict mode for type checking | 1 |
+| [013](#adr-013-nextjs-15-with-app-router-for-frontend) | Next.js 15 with App Router for frontend | 1 |
+| [014](#adr-014-typescript-strict-mode-for-frontend) | TypeScript strict mode for frontend | 1 |
+| [015](#adr-015-shadcnui-for-the-component-library) | shadcn/ui for the component library | 1 |
+| [016](#adr-016-biome-for-linting-and-formatting) | Biome for linting and formatting | 1 |
+| [017](#adr-017-pnpm-for-node-package-management) | pnpm for Node package management | 1 |
+| [018](#adr-018-tanstack-query-for-server-state-zustand-for-client-state) | TanStack Query + Zustand for state | 1 |
+| [019](#adr-019-system-font-stack-instead-of-custom-web-fonts) | System font stack instead of custom web fonts | 1 |
+| [020](#adr-020-pydantic-settings-for-configuration-management) | Pydantic Settings for configuration management | 1 |
+| [021](#adr-021-structured-logging-with-structlog) | Structured logging with structlog | 1 |
+| [022](#adr-022-async-only-database-access) | Async-only database access | 1 |
+| [023](#adr-023-three-tier-health-checks-basic-liveness-readiness) | Three-tier health checks | 1 |
+| [024](#adr-024-connection-pool-sizing) | Connection pool sizing | 1 |
+| [025](#adr-025-github-actions-for-ci) | GitHub Actions for CI | 1 |
+| [026](#adr-026-pre-commit-hooks-for-local-checks) | Pre-commit hooks for local checks | 1 |
+| [027](#adr-027-path-based-ci-triggering) | Path-based CI triggering | 1 |
+| [028](#adr-028-skip-integration-tests-in-ci-for-v1) | Skip integration tests in CI for V1 | 1 |
+| [029](#adr-029-coverage-as-a-metric-not-a-gate) | Coverage as a metric, not a gate | 1 |
+| [030](#adr-030-documentation-structure-and-conventions) | Documentation structure and conventions | 1 |
+
 ---
 
 ## ADR-001: Use a monorepo for V1
@@ -650,3 +685,31 @@ pragmatic over dogmatic.
 
 **Consequences:** Some areas may be under-tested; we will track coverage trends
 and can introduce gates in V2 if needed.
+
+---
+
+## ADR-030: Documentation structure and conventions
+
+- **Date:** 2026-06-10
+- **Status:** Accepted
+
+**Context:** As the project grows, documentation needs a coherent home and clear
+ownership so it stays useful and doesn't drift from the code.
+
+**Decision:** Use a centralized `docs/` folder with specific documents —
+`architecture.md`, `glossary.md`, `project-structure.md`, `poc-learnings.md`,
+`development-workflow.md`, an index at `docs/README.md`, and the phase plan under
+`docs/phases/` — plus per-ticket records in `docs/tickets/LP-XXX.md`. Cross-cutting
+concerns keep dedicated homes: ADRs in `decisions.md`, AI/assistant conventions in
+`CLAUDE.md`, and setup/navigation in the root `README.md`.
+
+**Alternatives considered:** A single large README; a wiki; docs colocated with
+code only.
+
+**Rationale:** Separation of concerns (setup vs architecture vs decisions vs
+domain terms) keeps each document scannable; per-ticket records create an audit
+trail; a glossary is essential in a jargon-heavy domain; an index aids navigation.
+
+**Consequences:** Documentation must be maintained alongside code; several
+documents to keep in sync; the `docs/README.md` index and this ADR define where
+each kind of content belongs.

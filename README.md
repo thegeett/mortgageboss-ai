@@ -3,9 +3,13 @@
 [![Backend CI](https://github.com/thegeett/mortgageboss-ai/actions/workflows/backend-ci.yml/badge.svg)](https://github.com/thegeett/mortgageboss-ai/actions/workflows/backend-ci.yml)
 [![Frontend CI](https://github.com/thegeett/mortgageboss-ai/actions/workflows/frontend-ci.yml/badge.svg)](https://github.com/thegeett/mortgageboss-ai/actions/workflows/frontend-ci.yml)
 
-A standalone loan processing assistant for mortgage loan processors at processing companies.
+A standalone loan processing assistant for mortgage loan processors at processing
+companies. It helps a processor assemble complete, accurate loan files —
+documents, data, verification findings, and conditions — before submission to
+underwriting.
 
-**Status:** Phase 1 — Foundation (in progress)
+**Project status:** Phase 1 (Foundation) — **Epic 1 complete**, building Epic 2
+(Database & Models).
 
 ## Architecture Overview
 
@@ -24,19 +28,37 @@ development is orchestrated with Docker Compose (Postgres, Redis, MailHog).
 
 ## Quick Start
 
-> Coming after LP-2 through LP-5 are complete.
+Prerequisites: a Docker runtime (Colima), Python 3.12 + [uv](https://docs.astral.sh/uv/),
+and Node 20+ + [pnpm](https://pnpm.io/). Then, in three terminals:
+
+```bash
+# 1. Local services (Postgres, Redis, MailHog)
+docker compose up -d
+
+# 2. Backend → http://localhost:8000  (docs at /docs)
+cd backend && uv sync && cp .env.example .env && uv run uvicorn app.main:app --reload
+
+# 3. Frontend → http://localhost:3000
+cd frontend && pnpm install && cp .env.example .env.local && pnpm dev
+```
+
+Visiting <http://localhost:3000> shows the home page with a live backend
+"System status" card. Full details are in the setup sections below. For backend
+work alone, Docker isn't strictly required until the database lands in Epic 2.
 
 ## Repository Structure
 
 | Path                  | Description                                                   |
 | --------------------- | ------------------------------------------------------------ |
-| `backend/`            | Python + FastAPI backend (filled in LP-3).                   |
-| `frontend/`           | Next.js + TypeScript frontend (filled in LP-5).              |
-| `docs/`               | Project documentation.                                       |
+| `backend/`            | Python + FastAPI backend.                                    |
+| `frontend/`           | Next.js + TypeScript frontend.                               |
+| `docs/`               | Project documentation (start at [`docs/README.md`](docs/README.md)). |
 | `docs/tickets/`       | Ticket-by-ticket implementation history (LP-XXX.md).         |
-| `docs/architecture/`  | Architecture documentation.                                  |
 | `scripts/`            | Development and operations scripts.                          |
 | `.github/workflows/`  | CI/CD workflow definitions.                                  |
+
+See [`docs/project-structure.md`](docs/project-structure.md) for a full,
+annotated layout and "where does X go?" conventions.
 
 ## Local Development Setup
 
@@ -337,7 +359,17 @@ hooks.
 
 ## Documentation
 
-- **Implementation history:** see [`docs/tickets/`](docs/tickets/) for a record
-  of what each ticket delivered.
-- **Architectural decisions:** see [`decisions.md`](decisions.md) for the
-  lightweight ADR log.
+Full documentation lives in [`docs/`](docs/README.md). Highlights:
+
+- **[docs/README.md](docs/README.md)** — the documentation index (start here).
+- **[Architecture](docs/architecture.md)** — system overview, components, data
+  flow, and the principles that guide design.
+- **[Glossary](docs/glossary.md)** — mortgage domain terms and technical terms.
+- **[Project structure](docs/project-structure.md)** — repository layout and
+  "where does X go?" conventions.
+- **[Development workflow](docs/development-workflow.md)** — CI and pre-commit.
+- **[POC learnings](docs/poc-learnings.md)** — lessons carried from the prototype.
+- **Implementation history:** [`docs/tickets/`](docs/tickets/) — what each ticket
+  delivered.
+- **Architectural decisions:** [`decisions.md`](decisions.md) — the ADR log.
+- **AI assistant conventions:** [`CLAUDE.md`](CLAUDE.md).
