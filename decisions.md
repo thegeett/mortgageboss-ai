@@ -287,3 +287,149 @@ codebase.
 **Consequences:** More upfront typing work; some libraries lack stub files
 (handled by `ignore_missing_imports` during V1); the team must understand Python
 typing well.
+
+---
+
+## ADR-013: Next.js 15 with App Router for frontend
+
+- **Date:** 2026-06-10
+- **Status:** Accepted
+
+**Context:** Choosing the frontend framework for the web UI.
+
+**Decision:** Use Next.js 15 with the App Router (not the Pages Router).
+
+**Alternatives considered:** Vite + React, Remix, plain React with React Router.
+
+**Rationale:** Server Components reduce client bundle size for data-heavy pages;
+file-based routing reduces boilerplate; built-in TypeScript and Tailwind support;
+production-grade with excellent DX; widely adopted with a strong community.
+
+**Consequences:** Learning curve for App Router patterns (Server vs Client
+Components); some libraries don't yet fully support Server Components.
+
+---
+
+## ADR-014: TypeScript strict mode for frontend
+
+- **Date:** 2026-06-10
+- **Status:** Accepted
+
+**Context:** Choosing a TypeScript configuration philosophy for the frontend.
+
+**Decision:** Enable `strict` mode plus `noUncheckedIndexedAccess` and
+`noImplicitOverride`.
+
+**Rationale:** Matches the backend's mypy strict-mode philosophy; catches more
+bugs at compile time; documents code intent.
+
+**Consequences:** More upfront typing work; some libraries with poor type
+definitions require workarounds.
+
+---
+
+## ADR-015: shadcn/ui for the component library
+
+- **Date:** 2026-06-10
+- **Status:** Accepted
+
+**Context:** Choosing a component library for the frontend.
+
+**Decision:** Use shadcn/ui (a copy-into-codebase approach built on Radix UI
+primitives).
+
+**Alternatives considered:** Material UI (too opinionated, heavy), Chakra UI
+(smaller community, runtime CSS-in-JS), Mantine (good but less customizable),
+build from scratch (too much work).
+
+**Rationale:** We own the component code and can customize it freely; accessible
+by default (Radix); pairs naturally with Tailwind; install components as needed
+(no bloat); professional look out of the box; very active maintenance.
+
+**Consequences:** Slight learning curve for the install-via-CLI workflow;
+component code lives in our repo (so we maintain it).
+
+---
+
+## ADR-016: Biome for linting and formatting
+
+- **Date:** 2026-06-10
+- **Status:** Accepted
+
+**Context:** Choosing code-quality tooling for the frontend.
+
+**Decision:** Use Biome (replaces ESLint + Prettier).
+
+**Alternatives considered:** ESLint + Prettier (the traditional choice).
+
+**Rationale:** A single fast tool replaces two; Rust-based (orders of magnitude
+faster than ESLint); modern; aligns with the backend choice of Ruff (also
+Rust-based, also a single-tool approach).
+
+**Consequences:** Smaller plugin ecosystem than ESLint; occasional
+incompatibilities with niche tools; rapidly evolving.
+
+---
+
+## ADR-017: pnpm for Node package management
+
+- **Date:** 2026-06-10
+- **Status:** Accepted
+
+**Context:** Choosing a Node package manager.
+
+**Decision:** Use pnpm.
+
+**Alternatives considered:** npm (default), yarn, bun.
+
+**Rationale:** Faster than npm; content-addressable storage (disk-efficient
+across multiple projects); strict `node_modules` structure prevents phantom
+dependencies; widely adopted in modern Next.js projects.
+
+**Consequences:** Developers must install pnpm separately (not part of Node's
+default); occasional incompatibilities with packages that assume npm.
+
+---
+
+## ADR-018: TanStack Query for server state, Zustand for client state
+
+- **Date:** 2026-06-10
+- **Status:** Accepted
+
+**Context:** Choosing a state-management strategy for the frontend.
+
+**Decision:** Use TanStack Query for server state (data from the backend API) and
+Zustand for client state (UI state, user preferences).
+
+**Alternatives considered:** Redux Toolkit + RTK Query (heavier), SWR (less
+feature-rich than TanStack Query), Jotai (atomic but adds complexity), Recoil
+(Meta-maintained but uncertain future).
+
+**Rationale:** Server state is fundamentally different from client state and
+deserves dedicated tooling; TanStack Query handles caching, refetching, and
+loading states declaratively; Zustand is the simplest modern client-state
+library; the boundary gives a clear mental model.
+
+**Consequences:** Two state libraries means two patterns to learn; works well
+when the boundary is kept clear.
+
+---
+
+## ADR-019: System font stack instead of custom web fonts
+
+- **Date:** 2026-06-10
+- **Status:** Accepted
+
+**Context:** Choosing the typography approach for the frontend.
+
+**Decision:** Use the system font stack (`-apple-system`, `BlinkMacSystemFont`,
+`Segoe UI`, etc.) instead of loading custom web fonts.
+
+**Alternatives considered:** Inter (popular modern sans-serif), Geist (Vercel's
+font, the Next.js default).
+
+**Rationale:** Zero font-loading delay (no FOUT/FOIT flash); native look on each
+platform; smaller bundle; no licensing concerns; one less dependency.
+
+**Consequences:** Slight visual variation across operating systems (a feature for
+native feel); can switch to a custom font in V2 if branding needs evolve.

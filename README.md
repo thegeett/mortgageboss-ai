@@ -175,6 +175,64 @@ cd backend
 uv run mypy app/
 ```
 
+## Frontend Setup
+
+The frontend is a [Next.js 15](https://nextjs.org/) (App Router) application
+written in TypeScript, styled with Tailwind CSS and [shadcn/ui](https://ui.shadcn.com),
+and managed with [pnpm](https://pnpm.io/). All commands below run from the
+`frontend/` directory.
+
+### Prerequisites
+
+- **Node.js 20+** — managing it via [nvm](https://github.com/nvm-sh/nvm) or
+  [fnm](https://github.com/Schniz/fnm) is recommended.
+- **pnpm** — install with:
+  ```bash
+  npm install -g pnpm
+  ```
+
+### First-time setup
+
+```bash
+cd frontend
+pnpm install
+cp .env.example .env.local
+```
+
+### Run the development server
+
+```bash
+cd frontend
+pnpm dev
+```
+
+Then visit <http://localhost:3000>.
+
+### Linting and formatting
+
+The frontend uses [Biome](https://biomejs.dev/) (replaces ESLint + Prettier).
+
+```bash
+cd frontend
+pnpm lint      # check lint + formatting
+pnpm lint:fix  # apply safe lint fixes + organize imports
+pnpm format    # apply formatting
+```
+
+### Type checking
+
+```bash
+cd frontend
+pnpm typecheck
+```
+
+### Building for production
+
+```bash
+cd frontend
+pnpm build
+```
+
 ## Documentation
 
 - **Implementation history:** see [`docs/tickets/`](docs/tickets/) for a record
