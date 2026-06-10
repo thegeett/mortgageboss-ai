@@ -167,3 +167,123 @@ Desktop.
 **Consequences:** The startup flow has one extra step compared to Docker Desktop
 — `colima start` must run before `docker compose up -d` (and `colima stop` when
 done). This is documented in the README "First-time Colima setup" subsection.
+
+---
+
+## ADR-007: Python 3.12 for the backend
+
+- **Date:** 2026-06-09
+- **Status:** Accepted
+
+**Context:** We must pin a Python major version for the backend.
+
+**Decision:** Use Python 3.12, pinned via `backend/.python-version`.
+
+**Rationale:** 3.12 is the current stable release with significant performance
+improvements over 3.11 and mature async support; it is widely supported by cloud
+platforms. 3.13 is too new for full ecosystem/stub support at the time of this
+decision.
+
+**Consequences:** We cannot use 3.13-only features; an upgrade can be revisited
+in V2 if warranted.
+
+---
+
+## ADR-008: uv as the Python package manager
+
+- **Date:** 2026-06-09
+- **Status:** Accepted
+
+**Context:** We need a Python package/dependency manager for the backend.
+
+**Decision:** Use [uv](https://docs.astral.sh/uv/) (from Astral).
+
+**Alternatives considered:** Poetry, pip-tools, pdm, pipenv.
+
+**Rationale:** Significantly faster than the alternatives; modern design centered
+on `pyproject.toml`; a built-in lock file (`uv.lock`) for reproducible installs;
+actively developed by Astral (the makers of Ruff, keeping our toolchain
+cohesive).
+
+**Consequences:** Slightly less mature than Poetry but stabilizing rapidly; the
+team must learn uv commands (`uv sync`, `uv add`, `uv run`).
+
+---
+
+## ADR-009: FastAPI as the backend framework
+
+- **Date:** 2026-06-09
+- **Status:** Accepted
+
+**Context:** We must choose a Python web framework.
+
+**Decision:** Use FastAPI.
+
+**Alternatives considered:** Django (too heavy, sync-first), Flask (no native
+async), Starlette (lower level).
+
+**Rationale:** Native async support is critical for AI workloads (concurrent LLM
+calls); automatic OpenAPI docs save documentation effort; first-class Pydantic
+integration aligns with our validation approach; high performance; a type-first
+philosophy that matches our use of type hints throughout.
+
+**Consequences:** Smaller ecosystem than Django; the team must understand async
+patterns; the framework evolves quickly, requiring us to stay current.
+
+---
+
+## ADR-010: SQLAlchemy 2.x with async support
+
+- **Date:** 2026-06-09
+- **Status:** Accepted
+
+**Context:** We must choose an ORM.
+
+**Decision:** Use SQLAlchemy 2.x in async mode with the `asyncpg` driver for
+PostgreSQL.
+
+**Alternatives considered:** Tortoise ORM (async-native but smaller community),
+Django ORM (sync, tied to Django), raw `asyncpg` (no ORM abstractions).
+
+**Rationale:** The most mature Python ORM; v2 has a clean async API; a large
+ecosystem; Alembic migrations integrate naturally; it is widely understood by
+Python developers.
+
+**Consequences:** A steeper learning curve than simpler ORMs; we must use the
+2.0 `Mapped` style consistently.
+
+---
+
+## ADR-011: Ruff for linting and formatting
+
+- **Date:** 2026-06-09
+- **Status:** Accepted
+
+**Context:** We need code-quality tooling (lint + format).
+
+**Decision:** Use Ruff, replacing black, isort, flake8, autoflake, and pylint.
+
+**Rationale:** A single tool replaces 4–5 separate ones; it is orders of
+magnitude faster; actively developed; configured in one place (`pyproject.toml`).
+
+**Consequences:** Some plugins from older tools are not yet supported; Ruff
+evolves quickly, so occasional breaking changes between versions are possible.
+
+---
+
+## ADR-012: mypy in strict mode for type checking
+
+- **Date:** 2026-06-09
+- **Status:** Accepted
+
+**Context:** We need a static type-checking strategy.
+
+**Decision:** Use mypy in strict mode (`strict = true`).
+
+**Rationale:** Catches bugs at development time; documents code intent; works
+well with FastAPI's type-first design; enforces consistent type hints across the
+codebase.
+
+**Consequences:** More upfront typing work; some libraries lack stub files
+(handled by `ignore_missing_imports` during V1); the team must understand Python
+typing well.

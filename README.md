@@ -117,6 +117,64 @@ docker compose down -v
 - **Viewing logs:** `docker compose logs -f <service>` (e.g. `postgres`,
   `redis`, `mailhog`) tails a service's logs to diagnose startup issues.
 
+## Backend Setup
+
+The backend is a Python 3.12 + FastAPI application managed with
+[uv](https://docs.astral.sh/uv/). All commands below run from the `backend/`
+directory.
+
+### Prerequisites
+
+- **Python 3.12** — managing it via [pyenv](https://github.com/pyenv/pyenv) or
+  [asdf](https://asdf-vm.com/) is recommended. `uv` can also fetch a matching
+  interpreter automatically (the version is pinned in `backend/.python-version`).
+- **uv** — install with:
+  ```bash
+  curl -LsSf https://astral.sh/uv/install.sh | sh
+  ```
+
+### First-time setup
+
+```bash
+cd backend
+uv sync          # creates .venv and installs all dependencies from uv.lock
+```
+
+### Run the development server
+
+```bash
+cd backend
+uv run uvicorn app.main:app --reload
+```
+
+Then visit:
+
+- <http://localhost:8000> — service welcome JSON
+- <http://localhost:8000/health> — health check
+- <http://localhost:8000/docs> — auto-generated OpenAPI (Swagger) docs
+
+### Tests
+
+```bash
+cd backend
+uv run pytest
+```
+
+### Linting and formatting
+
+```bash
+cd backend
+uv run ruff check .     # lint
+uv run ruff format .    # format
+```
+
+### Type checking
+
+```bash
+cd backend
+uv run mypy app/
+```
+
 ## Documentation
 
 - **Implementation history:** see [`docs/tickets/`](docs/tickets/) for a record
