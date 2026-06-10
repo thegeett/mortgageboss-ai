@@ -1,5 +1,8 @@
 # MortgageBoss AI
 
+[![Backend CI](https://github.com/thegeett/mortgageboss-ai/actions/workflows/backend-ci.yml/badge.svg)](https://github.com/thegeett/mortgageboss-ai/actions/workflows/backend-ci.yml)
+[![Frontend CI](https://github.com/thegeett/mortgageboss-ai/actions/workflows/frontend-ci.yml/badge.svg)](https://github.com/thegeett/mortgageboss-ai/actions/workflows/frontend-ci.yml)
+
 A standalone loan processing assistant for mortgage loan processors at processing companies.
 
 **Status:** Phase 1 — Foundation (in progress)
@@ -305,6 +308,32 @@ The backend exposes three health endpoints:
 | `/health`       | Human-readable overall status    | `200` healthy / `503` degraded, with per-dep checks |
 | `/health/live`  | Liveness probe (process alive)   | Always `200` if the process is up (no dep checks)  |
 | `/health/ready` | Readiness probe (can serve)      | `200` when all deps up, `503` if any dep is down   |
+
+## Continuous Integration
+
+Every push to `main` and every pull request targeting `main` runs automated
+checks via GitHub Actions:
+
+- **Backend** (`.github/workflows/backend-ci.yml`) — `ruff` lint, `ruff format`
+  check, `mypy` strict type checking, `pytest`, and `uv.lock` verification.
+- **Frontend** (`.github/workflows/frontend-ci.yml`) — Biome lint/format,
+  `tsc` type checking, and a production `next build`.
+
+Path filters mean each pipeline only runs when its area changes. CI status is
+shown by the badges at the top of this file.
+
+For fast local feedback, install the **pre-commit hooks** (lint, format, secret
+detection, and hygiene checks that run on every commit):
+
+```bash
+pipx install pre-commit   # or: pip install --user pre-commit / uv tool install pre-commit
+pre-commit install
+pre-commit run --all-files   # optional: run against the whole repo once
+```
+
+See [`docs/development-workflow.md`](docs/development-workflow.md) for the full
+workflow: what each check does, what to do when CI fails, and when (not) to skip
+hooks.
 
 ## Documentation
 

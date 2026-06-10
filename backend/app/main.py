@@ -92,9 +92,7 @@ async def health_check() -> JSONResponse:
     overall_healthy = db_ok and redis_ok
 
     return JSONResponse(
-        status_code=status.HTTP_200_OK
-        if overall_healthy
-        else status.HTTP_503_SERVICE_UNAVAILABLE,
+        status_code=status.HTTP_200_OK if overall_healthy else status.HTTP_503_SERVICE_UNAVAILABLE,
         content={
             "status": "healthy" if overall_healthy else "degraded",
             "service": settings.app_name,

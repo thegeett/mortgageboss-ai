@@ -28,17 +28,13 @@ class Settings(BaseSettings):
     debug: bool = False
 
     # Database
-    database_url: PostgresDsn = Field(
-        description="PostgreSQL connection URL with asyncpg driver"
-    )
+    database_url: PostgresDsn = Field(description="PostgreSQL connection URL with asyncpg driver")
     database_pool_size: int = 5
     database_max_overflow: int = 10
     database_pool_timeout: int = 30
 
     # Redis
-    redis_url: RedisDsn = Field(
-        description="Redis connection URL for cache and Celery broker"
-    )
+    redis_url: RedisDsn = Field(description="Redis connection URL for cache and Celery broker")
 
     # Anthropic
     anthropic_api_key: str = Field(description="Anthropic API key for Claude access")

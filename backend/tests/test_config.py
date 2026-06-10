@@ -6,14 +6,10 @@ from app.core.config import Settings, get_settings
 
 def test_settings_loads_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
     """Settings can be loaded from environment variables."""
-    monkeypatch.setenv(
-        "DATABASE_URL", "postgresql+asyncpg://user:pass@localhost:5432/test"
-    )
+    monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://user:pass@localhost:5432/test")
     monkeypatch.setenv("REDIS_URL", "redis://localhost:6379/0")
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
-    monkeypatch.setenv(
-        "JWT_SECRET_KEY", "test-secret-that-is-at-least-32-characters-long"
-    )
+    monkeypatch.setenv("JWT_SECRET_KEY", "test-secret-that-is-at-least-32-characters-long")
 
     # Clear the lru_cache
     get_settings.cache_clear()
@@ -25,9 +21,7 @@ def test_settings_loads_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_settings_rejects_short_jwt_secret(monkeypatch: pytest.MonkeyPatch) -> None:
     """JWT secret must be at least 32 characters."""
-    monkeypatch.setenv(
-        "DATABASE_URL", "postgresql+asyncpg://user:pass@localhost:5432/test"
-    )
+    monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://user:pass@localhost:5432/test")
     monkeypatch.setenv("REDIS_URL", "redis://localhost:6379/0")
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
     monkeypatch.setenv("JWT_SECRET_KEY", "too-short")

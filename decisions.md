@@ -542,3 +542,111 @@ connections before use, avoiding stale-connection errors.
 
 **Consequences:** The default pool may be too small for high-traffic production;
 monitoring will inform pool size in V2.
+
+---
+
+## ADR-025: GitHub Actions for CI
+
+- **Date:** 2026-06-10
+- **Status:** Accepted
+
+**Context:** We need automated checking of code changes.
+
+**Decision:** Use GitHub Actions.
+
+**Alternatives considered:** CircleCI, GitLab CI, Travis CI, self-hosted runners.
+
+**Rationale:** Already using GitHub for hosting (no separate vendor); generous
+free tier (2000 min/month for private repos); large ecosystem of actions;
+declarative YAML config; pay-per-use for overages.
+
+**Consequences:** Vendor lock-in to GitHub Actions syntax; some advanced features
+require paid plans for higher concurrency.
+
+---
+
+## ADR-026: Pre-commit hooks for local checks
+
+- **Date:** 2026-06-10
+- **Status:** Accepted
+
+**Context:** We need fast feedback before commits.
+
+**Decision:** Use the `pre-commit` framework to manage local hooks.
+
+**Alternatives considered:** Husky (Node-specific), git-only hooks (no shared
+config), no pre-commit checks at all.
+
+**Rationale:** Industry standard; supports both Python and JS hooks from one
+shareable YAML config; does not require Node like Husky does.
+
+**Consequences:** Developers must install pre-commit
+(`pipx install pre-commit && pre-commit install`); occasional false positives
+need to be addressed.
+
+> **Note on secret detection:** the ticket suggested gitleaks *or* detect-secrets.
+> We chose **detect-secrets** (Yelp) because its pre-commit hook is pure-Python
+> and installs with no external toolchain, whereas the gitleaks hook builds via
+> Go (not available on the dev machine). A `.secrets.baseline` records known,
+> intentional non-secrets (placeholders, test values, local dev credentials).
+
+---
+
+## ADR-027: Path-based CI triggering
+
+- **Date:** 2026-06-10
+- **Status:** Accepted
+
+**Context:** We want to avoid running unnecessary CI jobs.
+
+**Decision:** Backend CI triggers only on `backend/` changes; frontend CI only on
+`frontend/` changes (each also triggers on its own workflow file).
+
+**Rationale:** Saves CI minutes; faster feedback on the relevant pipeline;
+cleaner status reporting.
+
+**Consequences:** Cross-cutting changes to root files don't trigger either
+pipeline (acceptable for now); will revisit if root files start affecting
+backend/frontend behavior.
+
+---
+
+## ADR-028: Skip integration tests in CI for V1
+
+- **Date:** 2026-06-10
+- **Status:** Accepted
+
+**Context:** Some tests (e.g. the health checks) reach for Postgres and Redis.
+Whether to stand those services up in CI.
+
+**Decision:** For V1, run only unit tests in CI; tests that need real services
+are written to tolerate their absence (health checks assert `200` or `503`), and
+full service-backed integration testing is run locally.
+
+**Alternatives considered:** Spin up services in GitHub Actions, use
+testcontainers, mock everything.
+
+**Rationale:** Standing up services in CI adds complexity and time; for V1 with a
+solo dev, running integration checks locally before push is sufficient; CI still
+catches the most common breakage (lint, types, unit logic, build).
+
+**Consequences:** Integration breakage could escape to `main`; will revisit in
+Phase 7 (production readiness) to add full service setup in CI.
+
+---
+
+## ADR-029: Coverage as a metric, not a gate
+
+- **Date:** 2026-06-10
+- **Status:** Accepted
+
+**Context:** Whether to require a minimum test coverage in CI.
+
+**Decision:** Track coverage but do not fail the build for low coverage.
+
+**Rationale:** Coverage gates encourage gaming (tests written for coverage rather
+than correctness); V1 has a lot of scaffolding that is hard to meaningfully test;
+pragmatic over dogmatic.
+
+**Consequences:** Some areas may be under-tested; we will track coverage trends
+and can introduce gates in V2 if needed.
