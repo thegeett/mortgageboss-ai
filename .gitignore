@@ -1,0 +1,60 @@
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+env/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+*.egg-info/
+.eggs/
+dist/
+build/
+.coverage
+.coverage.*
+htmlcov/
+
+# ---- Node ----
+node_modules/
+.next/
+.turbo/
+out/
+*.tsbuildinfo
+.pnpm-store/
+
+# ---- Environment ----
+.env
+.env.local
+.env.*.local
+# Keep example env files tracked
+!.env.example
+
+# ---- IntelliJ / JetBrains ----
+.idea/
+# Shared code style settings may be committed
+!.idea/codeStyles/
+
+# ---- VS Code ----
+.vscode/
+# Shared editor settings may be committed
+!.vscode/settings.json
+
+# ---- OS ----
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+
+# ---- Logs ----
+*.log
+logs/
+
+# ---- Local storage (uploaded documents) ----
+storage/
+
+# ---- Databases ----
+*.db
+*.sqlite
+*.sqlite3
