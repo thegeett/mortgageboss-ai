@@ -1,0 +1,73 @@
+# Local development services for MortgageBoss AI.
+#
+# Usage:
+#   docker compose up -d      # start everything in the background
+#   docker compose ps         # check health
+#   docker compose down       # stop & remove containers (data persists in volumes)
+#   docker compose down -v    # also remove volumes (DESTROYS local data)
+#
+# NOTE: Credentials below are development-only and intentionally committed.
+#       Production credentials come from the hosting platform's environment.
+#       See decisions.md ADR-005.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: mortgageboss-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: mortgageboss
+      POSTGRES_PASSWORD: mortgageboss_dev_password
+      POSTGRES_DB: mortgageboss_dev
+    ports:
+      - "5432:5432"
+    volumes:
+      - mortgageboss-postgres-data:/var/lib/postgresql/data
+    networks:
+      - mortgageboss-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mortgageboss -d mortgageboss_dev"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  redis:
+    image: redis:7-alpine
+    container_name: mortgageboss-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - mortgageboss-redis-data:/data
+    networks:
+      - mortgageboss-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  mailhog:
+    image: mailhog/mailhog:latest
+    container_name: mortgageboss-mailhog
+    restart: unless-stopped
+    ports:
+      - "1025:1025"  # SMTP
+      - "8025:8025"  # Web UI
+    networks:
+      - mortgageboss-network
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8025"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  mortgageboss-postgres-data:
+  mortgageboss-redis-data:
+
+networks:
+  mortgageboss-network:
+    driver: bridge
