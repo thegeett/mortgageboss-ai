@@ -433,3 +433,112 @@ platform; smaller bundle; no licensing concerns; one less dependency.
 
 **Consequences:** Slight visual variation across operating systems (a feature for
 native feel); can switch to a custom font in V2 if branding needs evolve.
+
+---
+
+## ADR-020: Pydantic Settings for configuration management
+
+- **Date:** 2026-06-10
+- **Status:** Accepted
+
+**Context:** We need a way to load and validate application configuration.
+
+**Decision:** Use pydantic-settings (`BaseSettings`) for type-validated config
+loaded from environment variables and an optional `.env` file.
+
+**Alternatives considered:** python-dotenv directly, dynaconf, a custom config
+class.
+
+**Rationale:** We already use Pydantic for data validation; it is type-safe;
+gives clear error messages on missing/invalid required config; supports `.env`
+files for development; one library handles both app config and request
+validation.
+
+**Consequences:** Configuration is coupled to Pydantic version updates; the team
+must understand Pydantic patterns.
+
+---
+
+## ADR-021: Structured logging with structlog
+
+- **Date:** 2026-06-10
+- **Status:** Accepted
+
+**Context:** We need a logging strategy that works in both development and
+production.
+
+**Decision:** Use structlog with colored console rendering in development and
+JSON rendering in production (selected via `LOG_FORMAT`).
+
+**Alternatives considered:** Standard logging with custom formatters, loguru,
+python-json-logger.
+
+**Rationale:** Structured logs are essential for production observability;
+structlog has excellent dev DX (colored, pretty-printed); JSON output works with
+all log aggregators; it is performant.
+
+**Consequences:** Slightly steeper learning curve than stdlib logging; structlog
+patterns must be used consistently.
+
+---
+
+## ADR-022: Async-only database access
+
+- **Date:** 2026-06-10
+- **Status:** Accepted
+
+**Context:** Whether to support both sync and async database access.
+
+**Decision:** Async only — asyncpg driver, `AsyncSession`, and async dependency
+injection.
+
+**Alternatives considered:** Sync SQLAlchemy with sync routes, or a mix of sync
+and async.
+
+**Rationale:** FastAPI is async; mixing sync and async in Python causes subtle
+deadlocks and performance issues; concurrent LLM calls require async; it is a
+cleaner mental model.
+
+**Consequences:** Cannot easily use synchronous SQLAlchemy patterns; some
+libraries (e.g. older Alembic helpers) require async wrappers.
+
+---
+
+## ADR-023: Three-tier health checks (basic, liveness, readiness)
+
+- **Date:** 2026-06-10
+- **Status:** Accepted
+
+**Context:** How to design health check endpoints for monitoring and
+orchestration.
+
+**Decision:** Three endpoints — `/health` (overall status with detail),
+`/health/live` (process alive), `/health/ready` (can serve traffic).
+
+**Rationale:** Different orchestrators and monitoring tools need different
+signals; liveness should **not** check dependencies (a failing DB shouldn't
+restart the app); readiness **should** check dependencies (the orchestrator can
+stop routing traffic); `/health` provides human-readable detail.
+
+**Consequences:** Three endpoints to maintain, but the clear semantics make
+production monitoring easier.
+
+---
+
+## ADR-024: Connection pool sizing
+
+- **Date:** 2026-06-10
+- **Status:** Accepted
+
+**Context:** How to configure the database connection pool.
+
+**Decision:** Use a small pool for development (`size=5`, `overflow=10`),
+configurable via environment variables for production, with `pool_pre_ping`
+enabled.
+
+**Rationale:** Development doesn't need many connections; production can be tuned
+per deployment; overflow allows burst capacity; `pool_pre_ping` verifies
+connections before use, avoiding stale-connection errors.
+
+**Consequences:** The default pool may be too small for high-traffic production;
+monitoring will inform pool size in V2.

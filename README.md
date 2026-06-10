@@ -233,6 +233,79 @@ cd frontend
 pnpm build
 ```
 
+## Environment Configuration
+
+Both the backend and the frontend load configuration from environment variables.
+The pattern is: **commit `.env.example`** (documents every variable) and
+**gitignore the real `.env` / `.env.local`** (holds local secrets).
+
+### Backend (`backend/.env`)
+
+The backend uses [pydantic-settings](https://docs.pydantic.dev/latest/concepts/pydantic_settings/);
+`Settings` is validated on startup and the app **refuses to boot** if a required
+variable is missing or invalid (e.g. a JWT secret shorter than 32 characters).
+
+```bash
+cd backend
+cp .env.example .env
+# generate a real JWT secret and paste it into .env:
+python -c "import secrets; print(secrets.token_urlsafe(64))"
+```
+
+Variable groups:
+
+| Group       | Variables                                                            | Notes                                                       |
+| ----------- | -------------------------------------------------------------------- | ----------------------------------------------------------- |
+| Application | `APP_NAME`, `APP_VERSION`, `ENVIRONMENT`, `DEBUG`                     | `ENVIRONMENT` ∈ development \| staging \| production        |
+| Database    | `DATABASE_URL`, `DATABASE_POOL_SIZE`, `DATABASE_MAX_OVERFLOW`, `DATABASE_POOL_TIMEOUT` | URL **must** use the `postgresql+asyncpg://` scheme |
+| Redis       | `REDIS_URL`                                                          | Celery broker + cache                                       |
+| Anthropic   | `ANTHROPIC_API_KEY`, `ANTHROPIC_MODEL_*`                             | Get a key at <https://console.anthropic.com/> (a placeholder is fine in Phase 1) |
+| JWT / Auth  | `JWT_SECRET_KEY`, `JWT_ALGORITHM`, `JWT_*_EXPIRE_*`                   | Secret must be ≥ 32 chars                                   |
+| CORS        | `CORS_ALLOWED_ORIGINS`                                               | JSON array, e.g. `["http://localhost:3000"]`                |
+| Storage     | `STORAGE_BACKEND`, `STORAGE_LOCAL_PATH`                              | `local` for development                                     |
+| Email/SMTP  | `SMTP_HOST`, `SMTP_PORT`, `SMTP_FROM_*`                              | Points at **MailHog** (`localhost:1025`) in development     |
+| Logging     | `LOG_LEVEL`, `LOG_FORMAT`                                            | `LOG_FORMAT=console` for dev, `json` for production         |
+
+> The default `DATABASE_URL` and `REDIS_URL` in `.env.example` already match the
+> credentials in `docker-compose.yml`, so they work out of the box against the
+> local Docker services.
+
+### Frontend (`frontend/.env.local`)
+
+```bash
+cd frontend
+cp .env.example .env.local
+```
+
+The only variable is `NEXT_PUBLIC_API_URL` (defaults to `http://localhost:8000`),
+which the axios client uses as its base URL.
+
+### Verifying end-to-end connectivity
+
+```bash
+# Terminal 1: start local services
+docker compose up -d
+
+# Terminal 2: start the backend
+cd backend
+uv run uvicorn app.main:app --reload
+
+# Terminal 3: start the frontend
+cd frontend
+pnpm dev
+
+# Visit http://localhost:3000 — the "System status" card should show the
+# API server, PostgreSQL, and Redis as connected.
+```
+
+The backend exposes three health endpoints:
+
+| Endpoint        | Purpose                          | Behaviour                                          |
+| --------------- | -------------------------------- | -------------------------------------------------- |
+| `/health`       | Human-readable overall status    | `200` healthy / `503` degraded, with per-dep checks |
+| `/health/live`  | Liveness probe (process alive)   | Always `200` if the process is up (no dep checks)  |
+| `/health/ready` | Readiness probe (can serve)      | `200` when all deps up, `503` if any dep is down   |
+
 ## Documentation
 
 - **Implementation history:** see [`docs/tickets/`](docs/tickets/) for a record
