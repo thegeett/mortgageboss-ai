@@ -12,17 +12,20 @@ from app.models.base import (
     UUIDMixin,
     utcnow,
 )
+from app.models.company import Company
 from app.models.enums import RecordStatus, str_enum
-from app.models.helpers import only_active
+from app.models.helpers import only_active, scope_to_company
 from app.models.types import (
     LongStr,
     MediumStr,
     Money,
     ShortStr,
 )
+from app.models.user import User, UserRole
 
 __all__ = [
     "Base",
+    "Company",
     "LongStr",
     "MediumStr",
     "Money",
@@ -31,11 +34,13 @@ __all__ = [
     "SoftDeleteMixin",
     "TimestampMixin",
     "UUIDMixin",
+    "User",
+    "UserRole",
     "only_active",
+    "scope_to_company",
     "str_enum",
     "utcnow",
 ]
 
-# Concrete models will be imported here in later tickets (e.g. Company in
-# LP-11) with a re-export marker so linters keep the import. Importing them
-# here ensures Alembic autogenerate sees all tables.
+# Concrete models are imported here so Alembic autogenerate (which imports
+# app.models) sees every table on Base.metadata.

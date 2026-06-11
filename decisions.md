@@ -944,6 +944,19 @@ stores the member *name* by default).
 (slightly less strict at the DB level) in exchange for far easier evolution;
 all enum columns must use the helper.
 
+**Amendment (LP-11, 2026-06-10):** This ADR was written assuming `str_enum()`
+emitted the CHECK constraint, but the original helper omitted
+`create_constraint=True`. In SQLAlchemy 2.x that flag **defaults to `False`**,
+so non-native enums were generated as a plain `VARCHAR` with **no** CHECK — the
+column accepted any string. The gap surfaced when `User.role` became the first
+enum column to reach a real migration (LP-11) and `pg_constraint` showed zero
+CHECK rows. Fixed by adding `create_constraint=True` to `str_enum()`; the
+constraint now follows the naming convention (e.g. `ck_users_userrole`, from
+`ck_%(table_name)s_%(constraint_name)s` with the enum type name) and rejects
+out-of-range values at the database level, as this ADR originally intended.
+Enforcement is now at both the application (`StrEnum`) and database (CHECK)
+layers.
+
 ---
 
 ## ADR-038: Money stored as Numeric/Decimal, never float
@@ -1013,3 +1026,108 @@ building understanding; it avoids premature abstraction.
 
 **Consequences:** Some repetitive query code across services (acceptable); if
 real duplication emerges, introduce targeted helpers rather than a framework.
+
+---
+
+## ADR-041: Multi-tenancy via company_id scoping from day one
+
+- **Date:** 2026-06-10
+- **Status:** Accepted
+
+**Context:** The system will eventually serve multiple processing companies, and
+each company's data (including borrower PII) must be isolated from every other's.
+
+**Decision:** Build multi-tenancy from the very first business table. Every
+business entity links to a `Company` (directly via `company_id` or transitively
+through a parent), and queries are scoped with the `scope_to_company()` helper.
+
+**Alternatives considered:** a separate database per tenant (operational
+overhead, hard to manage at pilot scale); a schema per tenant (complexity);
+adding multi-tenancy later (a catastrophic, error-prone retrofit).
+
+**Rationale:** A shared database with `company_id` scoping is simplest for V1
+scale; building it from day one makes isolation a habit and avoids a dangerous
+retrofit. A single missed filter later would leak PII across tenants.
+
+**Consequences:** Every query touching company-owned data must be scoped
+(discipline required, helped by `scope_to_company()` and code review); a single
+shared database is acceptable at pilot scale.
+
+---
+
+## ADR-042: Email globally unique (not per-company)
+
+- **Date:** 2026-06-10
+- **Status:** Accepted
+
+**Context:** In a multi-tenant system, "unique" usually means unique *per
+tenant*. The question is whether a user's email should be unique per-company or
+globally.
+
+**Decision:** User email is **globally unique** across the entire system
+(enforced by a unique index on `users.email`).
+
+**Alternatives considered:** unique per company (would allow the same email in
+two different tenants, with company chosen separately at login).
+
+**Rationale:** Email is the login identity — one email alone must identify the
+user and determine their company, with no ambiguity. This matches the universal
+expectation that one email = one account.
+
+**Consequences:** A person working at two processing companies would need two
+different emails (a rare edge case, acceptable for V1). Note this is the
+**exception**: most other unique fields in tenant-owned tables should be unique
+*per company*, not globally.
+
+---
+
+## ADR-043: Explicit company-scoping helper (no automatic query filtering)
+
+- **Date:** 2026-06-10
+- **Status:** Accepted
+
+**Context:** Tenant isolation must be enforced on every query that touches
+company-owned data. The question is *how* — automatically or explicitly.
+
+**Decision:** Provide an explicit `scope_to_company(stmt, model, company_id)`
+helper that developers call. No automatic/magic session-level filtering in V1.
+
+**Alternatives considered:** SQLAlchemy session/ORM events that auto-inject a
+`company_id` filter (magic, surprising, hard to debug, easy to bypass
+accidentally); hand-written `.where(Model.company_id == ...)` everywhere
+(error-prone, no central named pattern).
+
+**Rationale:** Explicit-but-helped balances safety and comprehensibility. A
+single greppable helper name documents the rule and is easy to review for;
+automatic filtering is hard to debug and can hide bugs. Aligns with the goal of
+a codebase a solo developer can fully understand (see also ADR-040).
+
+**Consequences:** Developers must remember to call the helper (mitigated by it
+being the documented standard and enforced in review); the `CompanyScoped`
+protocol makes misuse a type error. May revisit automatic scoping in V2 if the
+explicit approach proves error-prone in practice.
+
+---
+
+## ADR-044: Companies and users soft-deleted, FK ondelete RESTRICT
+
+- **Date:** 2026-06-10
+- **Status:** Accepted
+
+**Context:** Deletion behavior must be defined for the first tenant tables
+(`companies`, `users`), which anchor the audit trail.
+
+**Decision:** Soft delete (`deleted_at`) for both companies and users. The
+`users → companies` foreign key uses `ondelete=RESTRICT`, and the
+`Company.users` relationship has **no destructive ORM cascade**.
+
+**Rationale:** Soft delete preserves the audit trail (who did what, even after a
+record is "removed"). We never hard-delete a company or user in normal
+operation; `RESTRICT` prevents accidentally orphaning users by deleting their
+company, and omitting the ORM cascade ensures the ORM never silently issues hard
+deletes either.
+
+**Consequences:** "Deleting" marks records inactive/deleted rather than removing
+them; queries must filter deleted rows (the `only_active()` helper). A genuine
+hard delete (e.g. GDPR erasure) would be a deliberate, separate operation, not
+the default path.

@@ -43,6 +43,7 @@ def str_enum(enum_cls: type[StrEnum], *, length: int = 32) -> SAEnum:
     return SAEnum(
         enum_cls,
         native_enum=False,
+        create_constraint=True,
         length=length,
         values_callable=values,
     )

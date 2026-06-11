@@ -101,9 +101,11 @@ status: Mapped[RecordStatus] = mapped_column(
 ```
 
 `str_enum()` configures the column as a bounded `VARCHAR` with a CHECK
-constraint (`native_enum=False`) rather than a PostgreSQL native `ENUM`, so
-adding a value needs no `ALTER TYPE` migration. It also sets `values_callable`
-so the enum **value** is persisted (SQLAlchemy would otherwise store the member
+constraint (`native_enum=False`, `create_constraint=True`) rather than a
+PostgreSQL native `ENUM`, so adding a value needs no `ALTER TYPE` migration. The
+CHECK is named by the convention (e.g. `ck_users_userrole`) and rejects
+out-of-range values at the database level. It also sets `values_callable` so the
+enum **value** is persisted (SQLAlchemy would otherwise store the member
 *name*). Each enum lives next to the model that owns it; only genuinely shared
 enums (like `RecordStatus`) live in `enums.py`. See **ADR-037**.
 
@@ -123,6 +125,48 @@ rows = (await session.scalars(stmt)).all()
 
 V1 has **no generic repository/CRUD layer** — services write explicit queries;
 small helpers like this cover the few genuinely repeated patterns (**ADR-040**).
+
+## Multi-tenancy
+
+The system is multi-tenant: the **tenant is a `Company`** (a processing
+company — the customer). Multi-tenancy is built in from the first business
+table so isolation is a habit everywhere, not a dangerous retrofit (**ADR-041**).
+
+- **Every business entity belongs to a company** — directly via a `company_id`
+  foreign key, or transitively through a parent that has one.
+- **Each `User` belongs to exactly one company** (`users.company_id`, FK
+  `ondelete=RESTRICT`). A user's **email is globally unique**, not unique
+  per-company: email is the login identity and alone determines the user's
+  company (**ADR-042**). Most *other* "unique" fields in tenant-owned tables
+  should instead be unique **per company** — global uniqueness is the exception,
+  reserved for login identity.
+- **Companies and users are soft-deleted**, never hard-deleted in normal
+  operation; the users→companies FK is `RESTRICT` and there is **no destructive
+  ORM cascade** (**ADR-044**).
+
+### The scoping rule
+
+Every query that touches company-owned data **MUST** be scoped to the current
+user's company. Forgetting to scope is a tenant data leak (one company seeing
+another's PII). Scoping is **explicit**, not magic session-level filtering, so
+the rule is greppable and debuggable (**ADR-043**). Use `scope_to_company()`
+from `app/models/helpers.py`:
+
+```python
+from sqlalchemy import select
+from app.models.helpers import only_active, scope_to_company
+
+stmt = select(User)
+stmt = scope_to_company(stmt, User, current_user.company_id)  # WHERE company_id = :id
+stmt = only_active(stmt, User)                                # AND deleted_at IS NULL
+rows = (await session.scalars(stmt)).all()
+```
+
+The helper accepts any model that carries a `company_id` (enforced at type-check
+time via the `CompanyScoped` protocol); the tenant root `Company` has no
+`company_id` and so is — correctly — not scopeable. It composes with
+`only_active()`. This is the core security pattern; the tenant-isolation test
+(`tests/models/test_tenant_isolation.py`) guards it.
 
 ## Writing a model test
 
@@ -218,3 +262,7 @@ PostgreSQL extensions the schema relies on:
 - **ADR-038** — Money stored as Numeric/Decimal, never float
 - **ADR-039** — Test database isolation via transaction rollback
 - **ADR-040** — No generic repository/CRUD abstraction in V1
+- **ADR-041** — Multi-tenancy via `company_id` scoping from day one
+- **ADR-042** — Email globally unique (not per-company)
+- **ADR-043** — Explicit company-scoping helper (no automatic query filtering)
+- **ADR-044** — Companies and users soft-deleted, FK `ondelete RESTRICT`
