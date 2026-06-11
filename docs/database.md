@@ -334,6 +334,58 @@ scoping anchor (the loan file) avoids a denormalized `company_id` drifting out o
 sync. Tenant-isolation tests assert a query scoped to company A never surfaces
 company B's borrowers.
 
+## Document model
+
+A **`Document`** is one uploaded file attached to a loan file (pay stub, bank
+statement, W-2, …). The row holds **metadata and a `storage_path`** — never the
+bytes. The binary lives in the storage backend (local in dev, S3 in prod —
+LP-35); Postgres holds the record, the backend holds the file (**ADR-055**).
+Storage metadata: `original_filename`, `mime_type`, `file_size_bytes`,
+`storage_path` (`VARCHAR(1024)` for long S3 keys / nested paths).
+
+Like borrowers and properties, a document is an **owned child** of the loan file
+(`loan_file_id` FK, `ondelete=CASCADE`) with **no `company_id`** — scoped
+transitively through the file (**ADR-052**). `loan_file.documents` is the
+one-to-many; `document.uploaded_by` is the (optional) uploader.
+
+### Classification: category (enum) vs document_type (string)
+
+A document carries two classification facets, both set later by the classifier
+(Epic 5 / Phase 2):
+
+- **`category`** — one of **eight** stable buckets from the processor's library:
+  `assets`, `borrower_info`, `credit`, `disclosures`, `income_employment`,
+  `property`, `misc`, `custom`. A small, stable set → a `str_enum` with a DB
+  CHECK constraint.
+- **`document_type`** — a **flexible indexed string** (`"pay_stub"`, `"w2"`, a
+  custom type, …). The full ~100-type set is finalized in Phase 2 and evolves,
+  so it is **not** an enum — an enum would force a migration on every new type.
+  Valid values are governed at the app layer, not the DB (**ADR-053**).
+- **`classification_confidence`** — a nullable float in `[0.0, 1.0]`.
+
+### Processing lifecycle (ADR-054)
+
+`status` is a `DocumentStatus` enum (VARCHAR + CHECK) defaulting to `PENDING`.
+Async tasks (Epic 5) move a document through:
+
+```
+PENDING → CLASSIFYING → CLASSIFIED → EXTRACTING → COMPLETED
+```
+
+plus `FAILED` (reason in `processing_error`) and `NEEDS_REVIEW` (low-confidence
+classification awaiting processor correction). Transitions are **not** enforced
+by a state machine in V1 — tasks set the status directly. `status` is indexed
+(dashboards filter by it).
+
+### Upload provenance (ADR-056)
+
+`upload_source` is an `UploadSource` enum (`USER_UPLOAD`, `BORROWER_INBOX`,
+`MISMO_IMPORT`). `uploaded_by_user_id` is a **nullable** FK to `users`
+(`ondelete=RESTRICT`), set **only** for `USER_UPLOAD` — borrower-inbox and MISMO
+imports have no user actor, so it is null. Any query that attributes a document
+to a user must handle that null. `RESTRICT` keeps an uploader from being
+hard-deleted out from under their documents (consistent with **ADR-044**).
+
 ## Writing a model test
 
 Database tests use a dedicated **test database** (`<dev_db>_test`,
@@ -443,3 +495,7 @@ PostgreSQL extensions the schema relies on:
 - **ADR-050** — ID generation in the service layer, not the model
 - **ADR-051** — Application-level encryption for SSN, not pgcrypto
 - **ADR-052** — Borrowers and properties are company-scoped transitively
+- **ADR-053** — Document type as a flexible string, category as an enum
+- **ADR-054** — Document processing lifecycle status
+- **ADR-055** — Document storage path in the database, bytes in the backend
+- **ADR-056** — Document upload provenance

@@ -36,6 +36,7 @@ from app.models.types import MEDIUM_STRING, SHORT_STRING, Money
 if TYPE_CHECKING:
     from app.models.borrower import Borrower
     from app.models.company import Company
+    from app.models.document import Document
     from app.models.lender import Lender
     from app.models.property import Property
 
@@ -141,6 +142,11 @@ class LoanFile(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     property: Mapped["Property | None"] = relationship(
         back_populates="loan_file",
         uselist=False,
+        cascade="all, delete-orphan",
+    )
+    # Uploaded documents (one-to-many, LP-15) — also an owned child of the file.
+    documents: Mapped[list["Document"]] = relationship(
+        back_populates="loan_file",
         cascade="all, delete-orphan",
     )
 

@@ -1374,3 +1374,116 @@ loan file never changes company, so the transitive relationship is stable.
   soft-deletes (`deleted_at`), so the cascade only bites on a true hard delete.
 - The same pattern will apply to other file-owned children (documents, extracted
   data, conditions) as they land.
+
+---
+
+## ADR-053: Document type as a flexible string, category as an enum
+
+- **Date:** 2026-06-11
+- **Status:** Accepted
+
+**Context:** A document has two classification facets: a broad **category** (one
+of the processor's eight library buckets) and a specific **document type** (pay
+stub, W-2, bank statement, … — a large set, finalized in Phase 2 at ~100 types).
+Each needs a storage choice on the `documents` table.
+
+**Decision:** `category` is a `DocumentCategory` `str_enum` with a DB CHECK
+constraint (ADR-037). `document_type` is a plain, indexed `VARCHAR` string with
+**no** CHECK — its valid values are governed at the application layer (the
+classifier and the Phase 2 type registry), not the database.
+
+**Rationale:** Categories are a small, stable, organizational set — exactly what
+a DB-enforced enum is for; an out-of-range category is a bug worth rejecting at
+the database. Document types are large and **evolving**: encoding them as an enum
+would mean a schema migration (and a coordinated deploy) every time a type is
+added or refined during Phase 2 and beyond. A flexible string decouples type
+evolution from schema changes while still being indexed for filtering.
+
+**Consequences:** There is no DB-level guarantee that `document_type` holds a
+"known" value — acceptable, because the classifier only ever writes registry
+values and the type set is an app-layer concern. `category` remains DB-enforced.
+If a stable, closed type vocabulary ever emerges, it could be promoted to an enum
+later via a normal migration.
+
+---
+
+## ADR-054: Document processing lifecycle status
+
+- **Date:** 2026-06-11
+- **Status:** Accepted
+
+**Context:** A document is processed asynchronously after upload (classification,
+then extraction — Epic 5 / Phase 2). The system needs to know where each document
+sits in that pipeline to drive the UI and to surface failures and low-confidence
+results for processor attention.
+
+**Decision:** A `DocumentStatus` `str_enum` (VARCHAR + CHECK, ADR-037) with
+`PENDING → CLASSIFYING → CLASSIFIED → EXTRACTING → COMPLETED`, plus `FAILED`
+(with the reason in `processing_error`) and `NEEDS_REVIEW` (low-confidence
+classification awaiting processor correction). Defaults to `PENDING`.
+
+**Rationale:** Async tasks transition documents through these states; the status
+drives UI affordances (spinners on in-flight states, a review flag on
+`NEEDS_REVIEW`, an error surface on `FAILED`). Splitting `CLASSIFYING`/`EXTRACTING`
+from their completed counterparts lets the UI distinguish "working" from "done"
+per stage.
+
+**Consequences:** Transitions are **not** enforced by a state machine in V1 —
+tasks set the status directly (mirrors the loan-file lifecycle, ADR-049). Keeping
+it VARCHAR + CHECK means adding a future state is a simple migration. `FAILED`
+pairs with `processing_error`; `NEEDS_REVIEW` is the hook for the human-correction
+flow built later.
+
+---
+
+## ADR-055: Document storage path in the database, bytes in the storage backend
+
+- **Date:** 2026-06-11
+- **Status:** Accepted
+
+**Context:** Every document has binary content (the uploaded PDF/image). It has to
+live somewhere, and the `documents` record has to reference it.
+
+**Decision:** The `documents` row stores **metadata** (`original_filename`,
+`mime_type`, `file_size_bytes`) and a `storage_path` pointing at the bytes in the
+storage backend (local filesystem in dev, S3 in production — LP-35). The binary
+is **never** stored in the database.
+
+**Rationale:** Storing large binaries in Postgres bloats the database, slows
+backups and replication, and wastes the relational engine on opaque blobs. A
+path plus external object storage is the standard pattern and lets the storage
+backend scale and be served independently. `storage_path` is `VARCHAR(1024)` so
+S3 keys and nested local paths fit comfortably.
+
+**Consequences:** The database and the storage backend must be kept consistent —
+an orphaned path (row without a file) or an orphaned file (bytes without a row)
+is possible and is handled in the upload/cleanup flow (Epic 5). Soft-deleting a
+document does not destroy the bytes, preserving the original for audit; physical
+cleanup of storage is a separate, deliberate operation.
+
+---
+
+## ADR-056: Document upload provenance
+
+- **Date:** 2026-06-11
+- **Status:** Accepted
+
+**Context:** A document can enter the system three ways: a processor uploads it, a
+borrower emails it to the file's inbox (ADR-036), or it arrives via a MISMO
+import. Audit and UI both benefit from knowing which.
+
+**Decision:** An `UploadSource` `str_enum` (`USER_UPLOAD`, `BORROWER_INBOX`,
+`MISMO_IMPORT`; VARCHAR + CHECK) records the channel, plus a **nullable**
+`uploaded_by_user_id` FK to `users` (`ondelete=RESTRICT`) that is set only for
+`USER_UPLOAD` — the other two sources have no user actor.
+
+**Rationale:** The source is first-class audit/UI metadata ("uploaded by Jane" vs
+"received from borrower"). `uploaded_by_user_id` is null when there is no user
+behind the upload, rather than inventing a synthetic system user. `RESTRICT`
+matches the soft-delete approach to users (ADR-044): a user who uploaded
+documents cannot be hard-deleted out from under them.
+
+**Consequences:** `uploaded_by_user_id` is nullable, so any query or UI that
+attributes a document to a user must handle the null case (inbox/MISMO). The
+source enum and the uploader column are independent but correlated — the
+application sets `uploaded_by_user_id` only alongside `USER_UPLOAD`.

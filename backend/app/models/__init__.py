@@ -14,6 +14,12 @@ from app.models.base import (
 )
 from app.models.borrower import Borrower, MaritalStatus
 from app.models.company import Company
+from app.models.document import (
+    Document,
+    DocumentCategory,
+    DocumentStatus,
+    UploadSource,
+)
 from app.models.encrypted_types import EncryptedString
 from app.models.enums import RecordStatus, str_enum
 from app.models.helpers import only_active, scope_to_company
@@ -32,6 +38,9 @@ __all__ = [
     "Base",
     "Borrower",
     "Company",
+    "Document",
+    "DocumentCategory",
+    "DocumentStatus",
     "EncryptedString",
     "Lender",
     "LoanFile",
@@ -50,6 +59,7 @@ __all__ = [
     "SoftDeleteMixin",
     "TimestampMixin",
     "UUIDMixin",
+    "UploadSource",
     "User",
     "UserRole",
     "only_active",
