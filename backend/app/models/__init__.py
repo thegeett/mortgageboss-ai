@@ -15,6 +15,7 @@ from app.models.base import (
 from app.models.company import Company
 from app.models.enums import RecordStatus, str_enum
 from app.models.helpers import only_active, scope_to_company
+from app.models.lender import Lender, LoanProgram
 from app.models.types import (
     LongStr,
     MediumStr,
@@ -26,6 +27,8 @@ from app.models.user import User, UserRole
 __all__ = [
     "Base",
     "Company",
+    "Lender",
+    "LoanProgram",
     "LongStr",
     "MediumStr",
     "Money",

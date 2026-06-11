@@ -59,6 +59,13 @@ Each decision is recorded as an entry with the following structure:
 | [038](#adr-038-money-stored-as-numericdecimal-never-float) | Money stored as Numeric/Decimal, never float | 2 |
 | [039](#adr-039-test-database-isolation-via-transaction-rollback) | Test database isolation via transaction rollback | 2 |
 | [040](#adr-040-no-generic-repositorycrud-abstraction-in-v1) | No generic repository/CRUD abstraction in V1 | 2 |
+| [041](#adr-041-multi-tenancy-via-company_id-scoping-from-day-one) | Multi-tenancy via company_id scoping from day one | 2 |
+| [042](#adr-042-email-globally-unique-not-per-company) | Email globally unique (not per-company) | 2 |
+| [043](#adr-043-explicit-company-scoping-helper-no-automatic-query-filtering) | Explicit company-scoping helper (no automatic query filtering) | 2 |
+| [044](#adr-044-companies-and-users-soft-deleted-fk-ondelete-restrict) | Companies and users soft-deleted, FK ondelete RESTRICT | 2 |
+| [045](#adr-045-per-company-unique-slugs-composite-uniqueness) | Per-company unique slugs (composite uniqueness) | 2 |
+| [046](#adr-046-lender-overlays-and-supported-programs-as-json) | Lender overlays and supported programs as JSON | 2 |
+| [047](#adr-047-loanprogram-enum-conventional-fha-shared-across-models) | LoanProgram enum (Conventional, FHA) shared across models | 2 |
 
 ---
 
@@ -1131,3 +1138,77 @@ deletes either.
 them; queries must filter deleted rows (the `only_active()` helper). A genuine
 hard delete (e.g. GDPR erasure) would be a deliberate, separate operation, not
 the default path.
+
+---
+
+## ADR-045: Per-company unique slugs (composite uniqueness)
+
+- **Date:** 2026-06-10
+- **Status:** Accepted
+
+**Context:** Lender slugs need to be unique, but the system is multi-tenant —
+"unique" must mean unique within a tenant, not across the whole system.
+
+**Decision:** A lender's `slug` is unique **per company** — a composite unique
+constraint on `(company_id, slug)` — not globally unique. The constraint is
+named explicitly (`uq_lenders_company_id_slug`) because the naming convention's
+`uq` template only incorporates the first column.
+
+**Rationale:** Two different processing companies may both work with UWM, and
+each needs its own lender record with slug `"uwm"`. Per-tenant uniqueness is the
+correct multi-tenant pattern. Contrast with user email, which is globally unique
+(ADR-042) precisely because it is a cross-tenant login identity.
+
+**Consequences:** Uniqueness checks in application code must be company-scoped.
+This pattern repeats for most "unique" fields in tenant-owned tables; global
+uniqueness is the exception, reserved for login identity.
+
+---
+
+## ADR-046: Lender overlays and supported programs as JSON
+
+- **Date:** 2026-06-10
+- **Status:** Accepted
+
+**Context:** A lender carries lender-specific rule overrides ("overlays") and a
+set of loan programs it handles. Both need a storage shape now, even though the
+overlay structure is not yet designed.
+
+**Decision:** Store `lender_overlays` as a JSON object (empty `{}` for now,
+structured in Phase 3) and `supported_programs` as a JSON list of `LoanProgram`
+values (e.g. `["conventional", "fha"]`).
+
+**Alternatives considered:** a separate overlay-rules table (premature — the
+structure is unknown until Phase 3); a join table for programs (over-engineering
+for a tiny set read with the lender).
+
+**Rationale:** The overlay structure is a Phase 3 design decision; creating the
+column now avoids a later migration. `supported_programs` is a small list always
+read together with the lender, so JSON is pragmatic.
+
+**Consequences:** Less schema enforcement on overlay/program contents — the DB
+does not constrain the JSON (acceptable for config data). Phase 3 will define and
+validate the overlay structure at the application layer; program values are
+validated against the `LoanProgram` enum in application code, not by the DB.
+
+---
+
+## ADR-047: LoanProgram enum (Conventional, FHA) shared across models
+
+- **Date:** 2026-06-10
+- **Status:** Accepted
+
+**Context:** Loan program is referenced by lenders (`supported_programs`) and
+will be referenced by loan files (LP-13). It needs one canonical definition.
+
+**Decision:** Define a `LoanProgram` enum (`CONVENTIONAL`, `FHA`) now, in the
+lender module (`app/models/lender.py`), reusable by loan files in LP-13.
+
+**Rationale:** A single source of truth for program values. V1 scope is
+Conventional + FHA; Jumbo (and VA, USDA) are deferred to V2 per the plan.
+
+**Consequences:** Adding programs later (Jumbo, VA, USDA) means adding enum
+values. When the enum backs an actual column (e.g. on loan files), it is stored
+as VARCHAR + CHECK via `str_enum()` (`native_enum=False`, ADR-037), so evolution
+needs no `ALTER TYPE`. As JSON list values on lenders, program values are not
+DB-constrained (ADR-046).

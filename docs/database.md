@@ -168,6 +168,47 @@ time via the `CompanyScoped` protocol); the tenant root `Company` has no
 `only_active()`. This is the core security pattern; the tenant-isolation test
 (`tests/models/test_tenant_isolation.py`) guards it.
 
+### Per-company uniqueness (the default for tenant-owned tables)
+
+In a multi-tenant system, **most "unique" fields are unique *per company*, not
+globally** — globally-unique fields (like user email, a login identity) are the
+exception (**ADR-045**). Enforce per-company uniqueness with a **composite
+unique constraint** on `(company_id, <field>)`, named explicitly because the
+naming convention's `uq` template only uses the first column:
+
+```python
+__table_args__ = (
+    UniqueConstraint("company_id", "slug", name="uq_lenders_company_id_slug"),
+)
+```
+
+This lets two different companies each have a record with slug `"uwm"` while
+preventing one company from having two. Uniqueness checks in application code
+must likewise be company-scoped.
+
+## Lender model
+
+A **`Lender`** (e.g. UWM, Sun-West) is an institution that loan files are
+submitted to. It **belongs to a company** (`company_id` FK, `ondelete=RESTRICT`)
+— each processing company configures its own lenders.
+
+- **`slug` is unique per company** (composite unique on `company_id` + `slug`,
+  per the pattern above) — *not* globally unique, in contrast with user email.
+- **Contact fields** (`contact_email`, `portal_url`, `contact_phone`, `notes`)
+  are designed for **direct underwriter communication** — processors work
+  directly with underwriters, not account-executive intermediaries.
+- **`lender_overlays`** (JSON object) holds lender-specific rule overrides. It
+  defaults to `{}` and is **left unstructured in V1** — the overlay schema is a
+  Phase 3 design decision, validated at the application layer then (**ADR-046**).
+  The column exists now so adding overlays later needs no migration.
+- **`supported_programs`** (JSON list) holds which programs the lender handles,
+  e.g. `["conventional", "fha"]`, using `LoanProgram` enum values (**ADR-047**).
+  Stored as a JSON list (not a join table) since it's a tiny set read with the
+  lender (**ADR-046**).
+
+`LoanProgram` (`CONVENTIONAL`, `FHA`) is defined in `app/models/lender.py` and
+is the single source of truth for program values, reused by loan files in LP-13.
+
 ## Writing a model test
 
 Database tests use a dedicated **test database** (`<dev_db>_test`,
@@ -266,3 +307,6 @@ PostgreSQL extensions the schema relies on:
 - **ADR-042** — Email globally unique (not per-company)
 - **ADR-043** — Explicit company-scoping helper (no automatic query filtering)
 - **ADR-044** — Companies and users soft-deleted, FK `ondelete RESTRICT`
+- **ADR-045** — Per-company unique slugs (composite uniqueness)
+- **ADR-046** — Lender overlays and supported programs as JSON
+- **ADR-047** — `LoanProgram` enum (Conventional, FHA) shared across models
