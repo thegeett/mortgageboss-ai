@@ -159,3 +159,30 @@ status badges in the README link straight to the latest runs.
    modified files.
 3. Push — GitHub Actions runs the relevant pipeline.
 4. Fix any CI failures before merging to `main`.
+
+## Seeding dev data
+
+There is no public signup (accounts are provisioned — see
+[`onboarding-and-tenancy.md`](onboarding-and-tenancy.md)). To get working accounts to
+log in with locally, run the minimal seed script (Postgres must be up — `docker compose
+up -d`):
+
+```bash
+cd backend
+uv run python -m app.scripts.seed_dev
+```
+
+It creates one company and two users with **real bcrypt-hashed** passwords, and prints
+the credentials. It is **idempotent** — safe to re-run (it reports "already existed"
+rather than duplicating). Defaults (override via `SEED_*` env vars):
+
+| | Email | Password | Role |
+| --- | --- | --- | --- |
+| Company | — (slug `demo`) | — | — |
+| Admin | `admin@demo.com` | `adminpass123` | ADMIN |
+| Processor | `processor@demo.com` | `processorpass123` | PROCESSOR |
+
+Log in with these via the frontend (`/login`) or `POST /api/v1/auth/login`. These are
+**DEV-ONLY** default passwords, not secrets — production users are provisioned
+differently (see the onboarding doc). The comprehensive seed (lenders, sample loan
+files, multiple companies) is a later ticket (LP-48).

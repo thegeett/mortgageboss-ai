@@ -2340,3 +2340,81 @@ Component/E2E testing (Testing Library / Playwright) can be added later if neede
 **Consequences:** A new dev dependency and `test` script. CI wiring of `pnpm test`
 into the frontend pipeline is a small follow-up (the frontend CI currently runs
 biome/tsc/build, per LP-8); until then tests run locally.
+
+---
+
+## ADR-088: Company-centric, invite-only tenancy (no public self-registration)
+
+- **Date:** 2026-06-11
+- **Status:** Accepted
+
+**Context:** How companies and users are onboarded, and where tenant isolation comes
+from. The product is an internal tool for processing companies handling GLBA-covered PII.
+
+**Decision:** Each **company is a tenant**, onboarded by the platform; the company
+**admin** provisions processors; invited users **inherit the inviting admin's company**.
+There is **no public self-registration**. `Company.slug` is the (future) subdomain
+identifier, but **tenant isolation is enforced via the authenticated user's
+`company_id`** (LP-24), independent of subdomains.
+
+**Rationale:** Public self-signup means *uncontrolled* tenant assignment — a user could
+end up in the wrong company, an isolation breach. Invite-only with admin-controlled
+assignment fits an internal PII tool. Isolation already works via `company_id` from the
+token, so subdomains are branding/UX, not the security mechanism.
+
+**Consequences:** Company creation is a platform function (a script in V1); users are
+admin/seed-provisioned. The full onboarding flow (invitation email + set-password) and
+subdomain routing are staged for later phases. Documented in
+`docs/onboarding-and-tenancy.md`.
+
+---
+
+## ADR-089: Minimal dev seed now; staged onboarding build
+
+- **Date:** 2026-06-11
+- **Status:** Accepted
+
+**Context:** Epic 4 (file CRUD) needs working, tenant-scoped accounts to build and test
+against. The full onboarding flow depends on infrastructure that doesn't exist yet:
+email (Phase 4), capability-token machinery (unbuilt), and DNS/TLS for subdomains
+(Phase 7).
+
+**Decision:** Build a **minimal, idempotent seed script** now
+(`app/scripts/seed_dev.py`): one company + one admin + one processor with real
+bcrypt-hashed passwords. Document and **stage** the full onboarding system — admin
+user-management after Epic 4; invitation/set-password capability-token flow after Phase 4
+email exists; subdomain routing in Phase 7. The comprehensive seed is LP-48.
+
+**Rationale:** Unblocks the core product without prematurely building features whose
+dependencies don't exist, while recording the full plan so it isn't lost. A standalone
+script **commits its own transaction** (unlike services, which flush and let a request
+handler commit).
+
+**Consequences:** Seeded accounts use dev-default passwords (env-overridable, documented
+DEV-ONLY, not secrets). The real onboarding UX arrives when its dependencies are ready,
+tracked in `docs/onboarding-and-tenancy.md`. Default seed emails use a normal TLD
+(`.com`) because the login endpoint's `EmailStr` rejects reserved TLDs like `.test`.
+
+---
+
+## ADR-090: Invitation and password-reset links are capability tokens (deferred)
+
+- **Date:** 2026-06-11
+- **Status:** Accepted
+
+**Context:** The future invitation flow ("set your own password" link) and password reset
+both deliver an emailed link that authorizes setting a password.
+
+**Decision:** Both are **capability-token** flows (ADR-036): a cryptographically random,
+single-use, expiring token generated with `secrets` (never sequential/derived). They
+**share one mechanism**, and both are **deferred** until email (Phase 4) and the
+capability-token infrastructure are built.
+
+**Rationale:** Possession of the link grants the ability to set a password / activate an
+account — a capability, which must be unguessable. This mirrors the loan-file
+`inbox_token` design and keeps a single, audited token mechanism rather than two ad-hoc
+ones.
+
+**Consequences:** When built, invitations and password reset reuse the same capability
+machinery. Until then, the seed script sets passwords directly. No password-bearing email
+is sent in V1.
