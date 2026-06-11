@@ -5,11 +5,11 @@ Services write explicit queries; these helpers cover the few patterns that
 would otherwise be repeated verbatim everywhere.
 """
 
-from typing import Any, Protocol
+from typing import Any, Protocol, cast
 from uuid import UUID
 
 from sqlalchemy import Select
-from sqlalchemy.orm import Mapped
+from sqlalchemy.orm import InstrumentedAttribute
 
 from app.models.base import SoftDeleteMixin
 
@@ -37,9 +37,22 @@ class CompanyScoped(Protocol):
     Used only to type :func:`scope_to_company`: a model is acceptable if it has
     a ``company_id`` mapped column. The tenant root (``Company`` itself) has no
     ``company_id`` and so is — correctly — not scopeable.
+
+    The member is declared as a **read-only property** returning the
+    class-access type (``InstrumentedAttribute[UUID]``), not a mutable
+    ``company_id: Mapped[UUID]`` attribute, on purpose. A mutable protocol
+    attribute is matched *invariantly* and the value type seen on an instance is
+    ``UUID`` (the mapped descriptor unwraps it), so ``type[CompanyScoped]`` would
+    reject every concrete model class — ``User``, ``LoanFile``, … — which is
+    exactly what we pass to :func:`scope_to_company`. A read-only property is
+    matched covariantly against *class* access, where ``Model.company_id`` is the
+    ``InstrumentedAttribute[UUID]`` column expression, so the model classes
+    satisfy the protocol while ``Company`` (no ``company_id``) is still correctly
+    rejected. We only read ``company_id`` here, so read-only is also honest.
     """
 
-    company_id: Mapped[UUID]
+    @property
+    def company_id(self) -> InstrumentedAttribute[UUID]: ...
 
 
 def scope_to_company[SelectT: Select[Any]](
@@ -58,4 +71,8 @@ def scope_to_company[SelectT: Select[Any]](
     Forgetting to scope a company-owned query is a tenant data leak — see the
     multi-tenancy section of ``docs/database.md`` and ADR-041/ADR-043.
     """
-    return stmt.where(model.company_id == company_id)
+    # Accessing the property on the protocol *type* loses the column-expression
+    # typing (mypy can't see it as InstrumentedAttribute through the property),
+    # so name what it genuinely is at class access before building the filter.
+    company_column = cast("InstrumentedAttribute[UUID]", model.company_id)
+    return stmt.where(company_column == company_id)

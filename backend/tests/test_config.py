@@ -37,6 +37,7 @@ def test_is_development_property() -> None:
         redis_url="redis://localhost:6379/0",  # type: ignore[arg-type]
         anthropic_api_key="key",
         jwt_secret_key="a" * 32,
+        encryption_key="a" * 44,  # pragma: allowlist secret  (dummy 44-char key)
     )
     assert settings.is_development is True
     assert settings.is_production is False
