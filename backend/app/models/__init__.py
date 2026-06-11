@@ -23,6 +23,12 @@ from app.models.document import (
 from app.models.encrypted_types import EncryptedString
 from app.models.enums import RecordStatus, str_enum
 from app.models.extraction import Extraction, ExtractionStatus
+from app.models.finding import (
+    Finding,
+    FindingCategory,
+    FindingResolutionStatus,
+    FindingStatus,
+)
 from app.models.helpers import only_active, scope_to_company
 from app.models.lender import Lender, LoanProgram
 from app.models.loan_file import LoanFile, LoanFileStatus, LoanPurpose
@@ -45,6 +51,10 @@ __all__ = [
     "EncryptedString",
     "Extraction",
     "ExtractionStatus",
+    "Finding",
+    "FindingCategory",
+    "FindingResolutionStatus",
+    "FindingStatus",
     "Lender",
     "LoanFile",
     "LoanFileStatus",

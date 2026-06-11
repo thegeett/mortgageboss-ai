@@ -1584,3 +1584,106 @@ possible in V1 — acceptable for the current scope. If such a need emerges (sea
 analytics, large-deposit flags spanning files), a `transactions` projection table
 fed from the current extraction can be introduced in a later phase without
 changing how extractions are stored.
+
+---
+
+## ADR-060: Finding status (red/yellow/green) and resolution lifecycle
+
+- **Date:** 2026-06-11
+- **Status:** Accepted
+
+**Context:** The verification engine (Phase 3) produces results against a loan
+file. Each result needs a representation of its severity and of where it sits in
+the processor's resolution workflow.
+
+**Decision:** Two enums per finding. `FindingStatus` captures **severity** —
+`RED` (blocking), `YELLOW` (review / may need a compensating factor), `GREEN`
+(passed). `FindingResolutionStatus` captures the **resolution lifecycle** —
+`OPEN`, `RESOLVED`, `ACCEPTED_RISK`, `WAIVED`. A resolution **trail**
+(`resolved_by_user_id`, `resolved_at`, `resolution_note`) records who resolved
+it, when, and why. Both enums are VARCHAR + CHECK (ADR-037).
+
+**Rationale:** Red/yellow/green matches how processors actually triage a file
+(blocking vs. review vs. passed). The resolution lifecycle captures the real
+workflow, including `ACCEPTED_RISK` — accepting a yellow flag with a compensating
+factor — which a pure boolean "resolved?" could not express. The trail makes
+verification auditable.
+
+**Consequences:** Two enums per finding plus three trail columns. Resolution is
+always written through `resolve_finding` so the trail stays consistent. Resolution
+state must survive re-verification — see ADR-061.
+
+---
+
+## ADR-061: Findings belong to the loan file; resolution persists across runs
+
+- **Date:** 2026-06-11
+- **Status:** Accepted
+
+**Context:** Verification runs repeatedly over a file's life. A finding has
+resolution state (a processor accepted a risk, waived an item) that must not be
+lost when verification re-runs and produces "the same" finding again.
+
+**Decision:** Findings belong to the **loan file** (a durable parent, owned child
+with FK `ondelete=CASCADE`), not to a verification run. They *reference* the run
+that produced them (`verification_id`), but their resolution state lives on the
+finding and persists. Matching a new run's findings to existing ones to carry
+resolution forward is Phase 3 logic, not part of this model.
+
+**Rationale:** The loan file is the stable anchor; a processor who accepted a
+yellow flag should not have to re-accept it on every run. Storing resolution on
+the finding (owned by the file) makes that persistence natural. Decoupling the
+finding's lifetime from a single run is what allows cross-run carry-forward later.
+
+**Consequences:** Findings are not per-run throwaway records. Phase 3 must
+implement run-to-run matching (by `rule_id` + target, say) to decide which
+existing finding a new result corresponds to and carry its resolution forward.
+Until then, each run simply creates findings.
+
+---
+
+## ADR-062: rule_id as a flexible dotted-namespace string
+
+- **Date:** 2026-06-11
+- **Status:** Accepted
+
+**Context:** Each finding is produced by a verification rule. The rule catalog is
+large (60–80+) and finalized in Phase 3. The finding needs to identify its rule.
+
+**Decision:** `rule_id` is an indexed `VARCHAR` string using a **dotted-namespace**
+convention — e.g. `income.paystub_recency`, `fha.mip_required`,
+`cross_source.income_consistency` — not an enum. Valid values are governed by the
+Phase 3 rule registry at the application layer, not a DB CHECK.
+
+**Rationale:** Same reasoning as document_type (ADR-053): a large, evolving set
+where an enum would force a migration per rule added or refined. Dotted namespaces
+are human-readable and group rules by area (the prefix mirrors `FindingCategory`),
+which is convenient for filtering and display.
+
+**Consequences:** No DB-level constraint on `rule_id` values — correctness is an
+app-layer concern. `rule_id` is indexed for filtering findings by rule.
+
+---
+
+## ADR-063: verification_id column added before its FK target exists
+
+- **Date:** 2026-06-11
+- **Status:** Accepted
+
+**Context:** A finding references the verification run that produced it, but the
+`Verification` model and its `verifications` table do not exist until LP-18.
+LP-17 still wants the column so the two tickets can be built independently.
+
+**Decision:** Add `verification_id` as a **nullable, indexed UUID column with no
+foreign-key constraint** in LP-17. LP-18 adds the FK constraint via a migration
+once the `verifications` table exists.
+
+**Rationale:** The column is ready for verification runs to populate (Phase 3)
+without coupling LP-17 to LP-18's table. Adding only the constraint later is a
+small, safe migration. Nothing writes `verification_id` until verification runs
+exist, so the interim lack of referential integrity is harmless.
+
+**Consequences:** Between LP-17 and LP-18 there is no DB-enforced referential
+integrity on `verification_id` (it is just a UUID). LP-18 must remember to add
+the FK constraint (`fk_findings_verification_id_verifications`). The column is
+indexed now, so the eventual constraint and lookups are cheap.

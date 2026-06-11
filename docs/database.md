@@ -433,6 +433,56 @@ collide with the still-current row on the partial index. Read the active data vi
 property over the loaded `extractions` collection — load it with
 `selectinload(Document.extractions)`).
 
+## Finding model
+
+A **`Finding`** is one verification result against a loan file (Phase 3's engine
+produces them): "pay stub is stale", "stated income differs from documents by
+15%", "missing 2023 W-2". `loan_file.findings` is the one-to-many; a finding is an
+**owned child** of the loan file (`loan_file_id` FK, `ondelete=CASCADE`) with
+**no `company_id`** — scoped transitively through the file (**ADR-052**).
+
+### Red / yellow / green, and categories
+
+`status` is a `FindingStatus` enum — **`red`** (blocking), **`yellow`** (review /
+may need a compensating factor), **`green`** (passed) — matching how processors
+triage. `category` is a `FindingCategory` enum (`income`, `assets`, `credit`,
+`property`, `documentation`, `cross_source`, `regulatory`). Both are VARCHAR +
+CHECK and indexed. `message` is the human-readable text; `details` is a JSON dict
+of structured supporting data (e.g. `{"stated": 16400, "verified": 14200,
+"variance_pct": 0.15}`).
+
+`rule_id` identifies the rule that produced the finding. It is a **flexible
+indexed string** using a dotted namespace (`income.paystub_recency`,
+`fha.mip_required`), **not** an enum — the rule catalog (60–80+) is finalized in
+Phase 3 and governed at the app layer (**ADR-062**).
+
+### Resolution lifecycle (persists across runs)
+
+`resolution_status` is a `FindingResolutionStatus` enum (`open` → `resolved` /
+`accepted_risk` / `waived`), defaulting to `open`, with a **trail**:
+`resolved_by_user_id` (FK to users, `SET NULL`), `resolved_at` (timezone-aware),
+`resolution_note`. `accepted_risk` captures accepting a yellow flag with a
+compensating factor — something a boolean "resolved?" couldn't express
+(**ADR-060**).
+
+Because findings belong to the **durable loan file** (not to a verification run),
+their resolution state **persists across verification runs** (**ADR-061**): a
+processor who accepts a risk doesn't lose that on the next run. Cross-run matching
+of new findings to existing ones (to carry resolution forward) is Phase 3 logic.
+
+Set resolution through `app.services.findings.resolve_finding(db, *, finding,
+resolution_status, user_id, note=None)` — it writes the status + trail together
+(or, for `OPEN`, clears the trail to re-open) and flushes. Don't mutate the
+resolution fields directly.
+
+### Linkages
+
+`source_document_id` (FK to documents, nullable, `SET NULL`) ties a finding to the
+document that triggered it, or is null for a file-level finding — the finding
+survives if the document is removed. `verification_id` references the verification
+run that produced it, but is a **nullable UUID with no FK constraint yet**: the
+`verifications` table arrives in **LP-18**, which adds the constraint (**ADR-063**).
+
 ## Writing a model test
 
 Database tests use a dedicated **test database** (`<dev_db>_test`,
@@ -549,3 +599,7 @@ PostgreSQL extensions the schema relies on:
 - **ADR-057** — Extracted data stored as JSON, typed at the application layer
 - **ADR-058** — Extraction versioning with one current per document
 - **ADR-059** — Bank-statement transactions in `extracted_data` JSON (no table in V1)
+- **ADR-060** — Finding status (red/yellow/green) and resolution lifecycle
+- **ADR-061** — Findings belong to the loan file; resolution persists across runs
+- **ADR-062** — `rule_id` as a flexible dotted-namespace string
+- **ADR-063** — `verification_id` column added before its FK target exists
