@@ -81,9 +81,58 @@ returns `404`, verified by tests. The scoping `company_id` is non-forgeable (it
 comes from the validated token + live user), so isolation holds regardless of what
 the client sends.
 
+## Borrowers & property (LP-29) — nested under a loan file
+
+Borrowers and the subject property have **no `company_id`** of their own — they are
+scoped **transitively through the parent file** (ADR-052/053). The endpoints are
+nested, and every route first resolves the parent file scoped to the caller's
+company (the `ScopedLoanFile` dependency): if the file isn't the caller's (or
+doesn't exist) it returns **`404` before the child is ever reached** — the tenant
+gate. Relevant ADRs: **ADR-096** (nested routes, transitive scoping), **ADR-097**
+(SSN in-but-masked-out), **ADR-098** (property singleton + minimal primary logic).
+
+### Borrowers — a collection
+
+Base path: `/api/v1/loan-files/{file_identifier}/borrowers`.
+
+| Method | Path | Success | Notes |
+| --- | --- | --- | --- |
+| GET | `/borrowers` | `200` `BorrowerResponse[]` | ordered by `borrower_position` |
+| POST | `/borrowers` | `201` `BorrowerResponse` | SSN accepted, stored encrypted |
+| GET | `/borrowers/{borrower_id}` | `200` `BorrowerResponse` | `404` if not under this file |
+| PATCH | `/borrowers/{borrower_id}` | `200` `BorrowerResponse` | partial; provided `ssn` re-encrypted |
+| DELETE | `/borrowers/{borrower_id}` | `204` | soft delete |
+
+**SSN — in-but-masked-out.** Create/update accept a raw `ssn`, written to the
+`EncryptedString` column (encrypted at rest). **No response carries a raw `ssn`** —
+only `masked_ssn` (`***-**-1234`). The raw SSN never leaves the server and is never
+logged (verified: encrypted at rest via raw SQL; no raw SSN in any response body).
+
+**Cross-file safety.** `get_borrower` matches both the borrower id **and** the
+`loan_file_id`, so a borrower id from a *different* file (even in the same company)
+is `404` under this file.
+
+**Primary/position (minimal V1).** The first borrower defaults to primary at
+position 1; later borrowers default to non-primary at the next position. Creating or
+updating a borrower to `is_primary=True` demotes the file's other borrowers (one
+primary). Otherwise primary state is client-managed.
+
+### Property — a per-file singleton
+
+Base path: `/api/v1/loan-files/{file_identifier}/property` (no child id — one per file).
+
+| Method | Path | Success | Notes |
+| --- | --- | --- | --- |
+| GET | `/property` | `200` `PropertyResponse` | `404` if none |
+| POST | `/property` | `201` `PropertyResponse` | **`409`** if one already exists |
+| PATCH | `/property` | `200` `PropertyResponse` | `404` if none |
+| DELETE | `/property` | `204` | soft delete; `404` if none |
+
+One active property per file (DB `unique(loan_file_id)`); a second create returns
+`409`.
+
 ## What's next
 
-- **LP-29** — loan-file frontend pages (list + detail) inside the LP-27 shell,
-  consuming these endpoints.
-- Later — document/borrower/property management endpoints; needs list, verification,
-  and conditions APIs.
+- **LP-30** — loan file service layer (consolidating/extending the service functions).
+- Later — loan-file frontend pages (list + detail) in the LP-27 shell; documents; needs
+  list, verification, and conditions APIs.

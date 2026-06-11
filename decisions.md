@@ -2550,3 +2550,84 @@ UI, conversation, email subjects) without a separate lookup. Soft delete preserv
 **Consequences:** The identifier lookup is a try-UUID-then-display-id branch (both scoped
 to the company). A deleted file is unreachable via the API but retained in the database;
 "undelete" would be a deliberate later feature.
+
+---
+
+## ADR-096: Nested borrower/property endpoints; transitive tenant scoping via the file
+
+- **Date:** 2026-06-11
+- **Status:** Accepted
+
+**Context:** Borrowers and the subject property are owned children of a loan file and
+have **no `company_id`** of their own (ADR-052/053). They need an API, and it must be
+tenant-isolated.
+
+**Decision:** Manage them under **nested routes** —
+`/loan-files/{file_identifier}/borrowers[/{id}]` and `/loan-files/{file_identifier}/property`
+— where every route first resolves the parent file scoped to the caller's company (a
+shared `ScopedLoanFile` dependency / `get_loan_file(company_id=current_user.company_id,
+...)`). If the file isn't the caller's, it returns **`404` before any child is
+touched** (the tenant gate). `get_borrower` additionally matches `loan_file_id`, so a
+borrower id from another file is `404` under this file.
+
+**Rationale:** The parent file is the natural, non-forgeable scope for its children;
+checking it first makes the tenant boundary **structural** and the nested URLs express
+the ownership. Children never carry a company id to forge.
+
+**Consequences:** Every child endpoint resolves the file first (one shared dependency);
+a missed file-scope check would be a leak — covered by cross-tenant and cross-file
+tests. Flat child endpoints (`/borrowers/{id}`) are avoided. The same pattern will
+serve documents and other owned children.
+
+---
+
+## ADR-097: SSN in-but-masked-out at the API boundary
+
+- **Date:** 2026-06-11
+- **Status:** Accepted
+
+**Context:** Processors must enter borrower SSNs, but the SSN is the most sensitive
+GLBA-covered field and must never leave the server or appear in logs (LP-14: encrypted
+at rest, masked for display).
+
+**Decision:** Borrower create/update accept a **raw `ssn`** as input, written to the
+`EncryptedString` column (encrypted at rest). **No response schema has a raw `ssn`
+field** — borrowers are returned with **`masked_ssn`** (`***-**-1234`) only. The raw
+SSN is never returned and never logged (no logging of borrower request bodies).
+
+**Rationale:** Input must accept the real value (you can't store what you can't
+receive), but output and logs must only ever see the masked form. Separating the
+request (`BorrowerCreate`/`Update`, with `ssn`) from the response
+(`BorrowerResponse`, with `masked_ssn`) makes the raw value unserializable on the way
+out — it's structurally impossible to leak via the response model.
+
+**Consequences:** Response schemas deliberately omit `ssn`; masking maps from the model
+property. Tests assert no raw SSN in any response body and that it's encrypted at rest
+(raw-column read). Any future SSN-bearing surface must repeat the masked-out discipline.
+
+---
+
+## ADR-098: Property is a per-file singleton (409 on duplicate); minimal primary-borrower logic
+
+- **Date:** 2026-06-11
+- **Status:** Accepted
+
+**Context:** A V1 loan file has exactly one subject property (LP-14: DB
+`unique(loan_file_id)`), and "which borrower is primary" needs *some* handling without
+a full rules engine.
+
+**Decision:** The property endpoints use **singleton** semantics: `GET`/`PATCH`/`DELETE`
+operate on the one property (`404` when none), and a second `POST` returns **`409`**
+(the service raises `PropertyExistsError`). Primary-borrower handling is **minimal**:
+the first borrower defaults to primary at position 1; later borrowers default to
+non-primary at the next position; creating/updating a borrower to `is_primary=True`
+demotes the others (one primary). Otherwise it's client-managed.
+
+**Rationale:** Matches the one-property-per-file constraint and keeps V1 simple.
+Multi-property files and rich primary-borrower rules (URLA validation, mandatory single
+primary) are deferred (Phase 1.5 / later).
+
+**Consequences:** Re-creating a property after soft-delete is a separate concern (the DB
+unique constraint still holds for the soft-deleted row; a partial unique index would be
+a later model change). Primary-borrower consistency is largely client-managed; revisit
+if the workflow needs stricter enforcement.

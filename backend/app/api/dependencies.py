@@ -27,8 +27,10 @@ from app.core.jwt import (
     WrongTokenTypeError,
     verify_token,
 )
+from app.models.loan_file import LoanFile
 from app.models.user import User, UserRole
 from app.services.auth import get_user_by_id
+from app.services.loan_files import get_loan_file
 
 # auto_error=False: HTTPBearer won't raise its own 403 on a missing header, so
 # we return a consistent 401 (with WWW-Authenticate: Bearer) ourselves.
@@ -129,3 +131,25 @@ def get_current_company_id(current_user: CurrentUser) -> UUID:
 
 
 CurrentCompanyId = Annotated[UUID, Depends(get_current_company_id)]
+
+
+async def get_scoped_loan_file(
+    file_identifier: str, db: DbSession, current_user: CurrentUser
+) -> LoanFile:
+    """Resolve the loan file in the path, scoped to the caller's company.
+
+    This is the **tenant gate** for nested resources (borrowers, property,
+    later documents): a child route declares it, so the parent file is fetched
+    via ``get_loan_file(company_id=current_user.company_id, ...)`` *first*. If
+    the file isn't the caller's (or doesn't exist) it raises ``404`` and the
+    child is never reached. ``file_identifier`` may be the UUID or the display id.
+    """
+    loan_file = await get_loan_file(
+        db, company_id=current_user.company_id, identifier=file_identifier
+    )
+    if loan_file is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Loan file not found")
+    return loan_file
+
+
+ScopedLoanFile = Annotated[LoanFile, Depends(get_scoped_loan_file)]

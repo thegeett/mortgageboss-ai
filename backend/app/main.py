@@ -8,7 +8,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.api.auth import router as auth_router
+from app.api.borrowers import router as borrowers_router
 from app.api.loan_files import router as loan_files_router
+from app.api.property import router as property_router
 from app.core.config import settings
 from app.core.database import (
     check_database_connection,
@@ -82,6 +84,8 @@ app.add_middleware(
 # login lives at "/api/v1/auth/login" and loan files at "/api/v1/loan-files".
 app.include_router(auth_router, prefix=API_V1_PREFIX)
 app.include_router(loan_files_router, prefix=API_V1_PREFIX)
+app.include_router(borrowers_router, prefix=API_V1_PREFIX)
+app.include_router(property_router, prefix=API_V1_PREFIX)
 
 
 @app.get("/")
