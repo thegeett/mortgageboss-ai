@@ -480,8 +480,52 @@ resolution fields directly.
 `source_document_id` (FK to documents, nullable, `SET NULL`) ties a finding to the
 document that triggered it, or is null for a file-level finding — the finding
 survives if the document is removed. `verification_id` references the verification
-run that produced it, but is a **nullable UUID with no FK constraint yet**: the
-`verifications` table arrives in **LP-18**, which adds the constraint (**ADR-063**).
+run that produced it (FK to verifications, nullable, `SET NULL`) — created bare in
+LP-17 (**ADR-063**) and wired with its FK in **LP-18** (**ADR-066**). SET NULL
+because a finding belongs to the loan file, not a run (see Verification model
+below).
+
+## Verification model
+
+A **`Verification`** is one execution ("press of the verify button") of the
+verification engine against a loan file — the engine is Phase 3. `loan_file.
+verifications` is the one-to-many; a run is an **owned child** of the loan file
+(`loan_file_id` FK, `ondelete=CASCADE`) with **no `company_id`** — scoped
+transitively through the file (**ADR-052**). It holds run-level metadata: `status`
+(`running`/`completed`/`failed`) and `trigger` (`manual`/`automatic`) — both
+VARCHAR + CHECK; `started_at` / `completed_at` (timezone-aware); denormalized
+summary counts; AI cost (`total_tokens_used`, `total_cost_estimate`); and
+`error_detail`.
+
+Run **status** (running/completed/failed) is the run's own execution state — wholly
+separate from a finding's red/yellow/green **status**.
+
+### Run ↔ findings: the SET NULL subtlety (ADR-064)
+
+A run **groups** the findings it produced (`verification.findings` /
+`finding.verification` via `findings.verification_id`). But findings **belong to
+the loan file**, not the run — their resolution state persists across runs
+(**ADR-061**). So the FK on `findings.verification_id` is **`ondelete=SET NULL`**:
+
+- **Deleting a run preserves its findings** and nulls their `verification_id`. The
+  `Verification.findings` relationship has **no destructive cascade** and uses
+  `passive_deletes=True`, deferring to the DB's SET NULL.
+- **Deleting the loan file removes both** runs and findings (they are its owned
+  children, cascade).
+
+That asymmetry — runs cascade from the file; findings do *not* cascade from runs —
+is the design's whole point (tested in `test_verification_findings_link.py`).
+
+### Summary counts (ADR-065)
+
+`red_count` / `yellow_count` / `green_count` are **denormalized** onto the run
+(default 0), populated by the engine in Phase 3, so run-history lists show
+at-a-glance summaries without aggregating findings each time.
+
+Create a run with `app.services.verifications.create_verification_run(db, *,
+loan_file_id, trigger)` — it makes a `RUNNING` run with `started_at = now` and
+zero counts (the engine fills the rest). This ticket also added the
+`findings.verification_id` FK that LP-17 deferred (**ADR-066**).
 
 ## Writing a model test
 
@@ -603,3 +647,6 @@ PostgreSQL extensions the schema relies on:
 - **ADR-061** — Findings belong to the loan file; resolution persists across runs
 - **ADR-062** — `rule_id` as a flexible dotted-namespace string
 - **ADR-063** — `verification_id` column added before its FK target exists
+- **ADR-064** — Verification run groups findings; findings reference but aren't owned by it
+- **ADR-065** — Denormalized summary counts on verification runs
+- **ADR-066** — `findings.verification_id` FK added in LP-18 (deferred from LP-17)

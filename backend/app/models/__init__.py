@@ -40,6 +40,11 @@ from app.models.types import (
     ShortStr,
 )
 from app.models.user import User, UserRole
+from app.models.verification import (
+    Verification,
+    VerificationStatus,
+    VerificationTrigger,
+)
 
 __all__ = [
     "Base",
@@ -75,6 +80,9 @@ __all__ = [
     "UploadSource",
     "User",
     "UserRole",
+    "Verification",
+    "VerificationStatus",
+    "VerificationTrigger",
     "only_active",
     "scope_to_company",
     "str_enum",

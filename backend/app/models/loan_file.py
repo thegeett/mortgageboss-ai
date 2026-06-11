@@ -40,6 +40,7 @@ if TYPE_CHECKING:
     from app.models.finding import Finding
     from app.models.lender import Lender
     from app.models.property import Property
+    from app.models.verification import Verification
 
 # Domain for the borrower inbox address. A module constant for now; may move to
 # settings later if it needs to vary per environment.
@@ -153,6 +154,12 @@ class LoanFile(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     # Verification findings (one-to-many, LP-17) — owned child of the file; their
     # resolution state persists across verification runs (ADR-061).
     findings: Mapped[list["Finding"]] = relationship(
+        back_populates="loan_file",
+        cascade="all, delete-orphan",
+    )
+    # Verification runs (one-to-many, LP-18) — owned child of the file. (Findings
+    # are NOT owned by a run; see Verification.findings / ADR-064.)
+    verifications: Mapped[list["Verification"]] = relationship(
         back_populates="loan_file",
         cascade="all, delete-orphan",
     )

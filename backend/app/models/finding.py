@@ -16,11 +16,12 @@ it, when, and why). It references the verification run that produced it
 Like other file-owned children, a finding has no ``company_id`` — it is
 company-scoped transitively through its loan file (ADR-052).
 
-**``verification_id`` has no FK constraint yet (ADR-063):** the
-``verifications`` table does not exist until LP-18, so for now ``verification_id``
-is a plain nullable, indexed UUID column. LP-18 adds the foreign-key constraint
-once its table exists. Nothing populates the column until verification runs land
-in Phase 3, so the missing referential integrity is harmless in the interim.
+``verification_id`` references the verification run that produced the finding.
+It was created as a bare nullable UUID in LP-17 (the ``verifications`` table did
+not exist yet, ADR-063); **LP-18 added the FK constraint** with
+``ondelete=SET NULL`` (ADR-066). SET NULL — not CASCADE — because a finding
+belongs to the loan file, not to a run, so deleting a run preserves the finding
+and only nulls this reference (ADR-064).
 """
 
 from datetime import datetime
@@ -39,6 +40,7 @@ if TYPE_CHECKING:
     from app.models.document import Document
     from app.models.loan_file import LoanFile
     from app.models.user import User
+    from app.models.verification import Verification
 
 
 class FindingStatus(StrEnum):
@@ -87,10 +89,15 @@ class Finding(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
         nullable=False,
     )
 
-    # The verification run that produced this finding. No FK constraint yet —
-    # the verifications table arrives in LP-18, which adds the constraint
-    # (ADR-063). Nullable + indexed for now.
-    verification_id: Mapped[UUID | None] = mapped_column(nullable=True, index=True)
+    # The verification run that produced this finding (LP-18 wired the FK).
+    # SET NULL, not CASCADE: a finding belongs to the loan file, not to a run, so
+    # deleting a run preserves the finding and just nulls this reference
+    # (ADR-064/ADR-066). Nullable (a finding may predate or outlive a run).
+    verification_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("verifications.id", ondelete="SET NULL"),
+        index=True,
+        nullable=True,
+    )
 
     # The document that triggered the finding, if any (a finding may be
     # file-level). SET NULL: if the document is removed, the finding remains.
@@ -135,6 +142,8 @@ class Finding(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     loan_file: Mapped["LoanFile"] = relationship(back_populates="findings")
     source_document: Mapped["Document | None"] = relationship()
     resolved_by: Mapped["User | None"] = relationship()
+    # The run that produced this finding (nullable; SET NULL on run deletion).
+    verification: Mapped["Verification | None"] = relationship(back_populates="findings")
 
     def __repr__(self) -> str:
         return (

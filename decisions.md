@@ -1687,3 +1687,84 @@ exist, so the interim lack of referential integrity is harmless.
 integrity on `verification_id` (it is just a UUID). LP-18 must remember to add
 the FK constraint (`fk_findings_verification_id_verifications`). The column is
 indexed now, so the eventual constraint and lookups are cheap.
+
+---
+
+## ADR-064: Verification run groups findings; findings reference but are not owned by it
+
+- **Date:** 2026-06-11
+- **Status:** Accepted
+
+**Context:** The verification engine (Phase 3) runs as a batch that produces many
+findings. We need a record of each run — to group its findings and keep run
+history — without making findings dependent on the run's lifetime.
+
+**Decision:** A `Verification` record represents one run and **groups** its
+findings via `findings.verification_id`. But findings belong to the **loan file**
+(ADR-061), so the FK on `findings.verification_id` is **`ondelete=SET NULL`**:
+deleting a run **preserves** its findings and just nulls their reference. The
+`Verification.findings` relationship has **no destructive cascade** and uses
+`passive_deletes=True` so the database's SET NULL does the work. The run *itself*
+is an owned child of the loan file (FK `ondelete=CASCADE`, ADR-052).
+
+**Rationale:** Runs provide history and run-level metadata and group the findings
+they produced, but a finding's resolution state is durable and tied to the file —
+it must survive run deletion (and re-runs). SET NULL expresses exactly that: the
+grouping is severable, the finding is not. `passive_deletes=True` is required so
+the async ORM defers to the DB-level SET NULL instead of trying to load and null
+the children itself on delete.
+
+**Consequences:** Deleting a run nulls its findings' `verification_id` and leaves
+the findings intact; deleting the loan file removes both runs and findings (they
+are its owned children). The asymmetry — runs cascade from the file, findings do
+*not* cascade from runs — is the whole point and is covered by tests.
+
+---
+
+## ADR-065: Denormalized summary counts on verification runs
+
+- **Date:** 2026-06-11
+- **Status:** Accepted
+
+**Context:** Run history wants at-a-glance summaries — how many red / yellow /
+green findings a run produced — shown in lists without re-aggregating findings
+each time.
+
+**Decision:** Store `red_count`, `yellow_count`, `green_count` directly on the
+`Verification` run (denormalized), defaulting to 0 and populated by the engine in
+Phase 3 when the run completes.
+
+**Rationale:** Cheap reads for run-history summaries without a `GROUP BY` over
+findings on every view. The engine that produces the findings is the single
+writer, so it can set the counts atomically as part of completing the run.
+
+**Consequences:** The counts are denormalized and must be kept consistent with
+the actual findings by their single writer (the engine). Minor denormalization is
+accepted for read convenience; if drift is ever a concern, the counts can be
+recomputed from findings.
+
+---
+
+## ADR-066: findings.verification_id FK added in LP-18 (deferred from LP-17)
+
+- **Date:** 2026-06-11
+- **Status:** Accepted (completes ADR-063)
+
+**Context:** LP-17 created `findings.verification_id` as a bare nullable UUID
+(ADR-063) because the `verifications` table did not exist yet. LP-18 creates that
+table.
+
+**Decision:** LP-18 adds the FK constraint
+(`fk_findings_verification_id_verifications`, `ondelete=SET NULL`) now that the
+target exists, in the same migration that creates `verifications` — so the
+migration touches **two** tables (a `CREATE TABLE` plus an `ALTER` adding the FK).
+The `finding.py` model is updated to declare the `ForeignKey` and a `verification`
+relationship.
+
+**Rationale:** Completes the deferred linkage cleanly once both tables exist,
+keeping the create and the wiring in one atomic migration. SET NULL matches
+ADR-064 (deleting a run preserves findings).
+
+**Consequences:** The migration's downgrade must drop the findings FK **before**
+dropping the `verifications` table (reverse order). Referential integrity on
+`verification_id` is now enforced.
