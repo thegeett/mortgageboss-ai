@@ -60,6 +60,98 @@ All timestamps are timezone-aware (`timestamptz`) and stored in UTC. Use the
 `utcnow()` helper in Python; convert to local time only at display time (in the
 frontend). See **ADR-033**.
 
+## Shared column types
+
+`app/models/types.py` provides annotated column types so precision, scale, and
+string lengths stay consistent across the schema. Use them as the `Mapped[...]`
+parameter:
+
+```python
+from app.models.types import Money, ShortStr
+
+class Account(Base):
+    name: Mapped[ShortStr]    # String(64)
+    balance: Mapped[Money]    # Numeric(14, 2) → Decimal
+```
+
+| Type | Backing column | Use for |
+| --- | --- | --- |
+| `Money` | `Numeric(14, 2)` | Any currency amount — up to ~1 trillion with cents |
+| `ShortStr` | `String(64)` | Names, short codes, slugs |
+| `MediumStr` | `String(256)` | Emails, titles, single-line addresses |
+| `LongStr` | `String(1024)` | Descriptions, notes, URLs |
+
+> **Money is always `Decimal`, never `float`.** Floats cannot represent decimal
+> currency exactly. Handle money as `Decimal` end-to-end. See **ADR-038**.
+
+## Enums
+
+Database-backed enums are Python `StrEnum` subclasses, stored as their **string
+value** (`"active"`), not as integers or the member name. Map them with the
+`str_enum()` helper from `app/models/enums.py`:
+
+```python
+from app.models.enums import RecordStatus, str_enum
+
+status: Mapped[RecordStatus] = mapped_column(
+    str_enum(RecordStatus),
+    default=RecordStatus.ACTIVE,
+    nullable=False,
+)
+```
+
+`str_enum()` configures the column as a bounded `VARCHAR` with a CHECK
+constraint (`native_enum=False`) rather than a PostgreSQL native `ENUM`, so
+adding a value needs no `ALTER TYPE` migration. It also sets `values_callable`
+so the enum **value** is persisted (SQLAlchemy would otherwise store the member
+*name*). Each enum lives next to the model that owns it; only genuinely shared
+enums (like `RecordStatus`) live in `enums.py`. See **ADR-037**.
+
+## Soft-delete helper
+
+`SoftDeleteMixin` adds `deleted_at` but does **not** filter automatically —
+excluding deleted rows is explicit per query. Use `only_active()` from
+`app/models/helpers.py`:
+
+```python
+from sqlalchemy import select
+from app.models.helpers import only_active
+
+stmt = only_active(select(Company), Company)   # adds WHERE deleted_at IS NULL
+rows = (await session.scalars(stmt)).all()
+```
+
+V1 has **no generic repository/CRUD layer** — services write explicit queries;
+small helpers like this cover the few genuinely repeated patterns (**ADR-040**).
+
+## Writing a model test
+
+Database tests use a dedicated **test database** (`<dev_db>_test`,
+auto-created, separate from dev) and the **transaction-rollback isolation**
+pattern: each test runs in a transaction that is rolled back, so tests never
+commit and never see each other's data (**ADR-039**). Just depend on the
+`db_session` fixture:
+
+```python
+from decimal import Decimal
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+async def test_company_create(db_session: AsyncSession) -> None:
+    company = Company(name="Acme")
+    db_session.add(company)
+    await db_session.flush()                    # flush, NOT commit
+    fetched = await db_session.get(Company, company.id)
+    assert fetched is not None
+```
+
+Notes:
+- Use `flush()` (not `commit()`) to push changes within the test's transaction;
+  a commit would defeat the rollback isolation.
+- The schema is built once per session via `Base.metadata.create_all` — tests
+  do **not** run migrations (those are verified separately).
+- Override the test database with the `TEST_DATABASE_URL` env var if needed.
+
 ## Alembic configuration
 
 - `backend/alembic.ini` — does **not** hardcode the database URL. `env.py`
@@ -122,3 +214,7 @@ PostgreSQL extensions the schema relies on:
 - **ADR-033** — Timezone-aware timestamps in UTC
 - **ADR-034** — UUID primary keys (with loan_files exception)
 - **ADR-035** — pgcrypto extension for encryption
+- **ADR-037** — Database-backed enums as VARCHAR with CHECK (`native_enum=False`)
+- **ADR-038** — Money stored as Numeric/Decimal, never float
+- **ADR-039** — Test database isolation via transaction rollback
+- **ADR-040** — No generic repository/CRUD abstraction in V1

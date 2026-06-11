@@ -67,4 +67,10 @@ ignore_missing_imports = true  # tighten as the project matures
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+# Run fixtures and tests on a single session-scoped event loop. The
+# session-scoped test_engine, the per-test db_session, and the test bodies all
+# touch the same asyncpg connections, which are bound to the loop that created
+# them; sharing one loop avoids "attached to a different loop" errors.
+asyncio_default_fixture_loop_scope = "session"
+asyncio_default_test_loop_scope = "session"
 pythonpath = ["."]

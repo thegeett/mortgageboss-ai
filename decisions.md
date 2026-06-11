@@ -55,6 +55,10 @@ Each decision is recorded as an entry with the following structure:
 | [033](#adr-033-timezone-aware-timestamps-in-utc) | Timezone-aware timestamps in UTC | 2 |
 | [034](#adr-034-uuid-primary-keys-with-loan_files-exception) | UUID primary keys (with loan_files exception) | 2 |
 | [035](#adr-035-pgcrypto-extension-for-encryption) | pgcrypto extension for encryption | 2 |
+| [037](#adr-037-database-backed-enums-as-varchar-with-check-native_enumfalse) | Database-backed enums as VARCHAR with CHECK | 2 |
+| [038](#adr-038-money-stored-as-numericdecimal-never-float) | Money stored as Numeric/Decimal, never float | 2 |
+| [039](#adr-039-test-database-isolation-via-transaction-rollback) | Test database isolation via transaction rollback | 2 |
+| [040](#adr-040-no-generic-repositorycrud-abstraction-in-v1) | No generic repository/CRUD abstraction in V1 | 2 |
 
 ---
 
@@ -828,3 +832,99 @@ without a scramble later.
 
 **Consequences:** Encryption/decryption logic must be implemented when those
 columns are added; key management is a separate concern deferred to Phase 7.
+
+---
+
+## ADR-037: Database-backed enums as VARCHAR with CHECK (native_enum=False)
+
+- **Date:** 2026-06-10
+- **Status:** Accepted
+
+**Context:** Models need enum fields (status, type, etc.) stored in the
+database. PostgreSQL offers a native `ENUM` type, but evolving one (adding a
+value) requires an awkward `ALTER TYPE` migration.
+
+**Decision:** Define enums as Python `StrEnum` and map them via the
+`str_enum()` helper (`app/models/enums.py`), which builds a SQLAlchemy `Enum`
+with `native_enum=False` (stored as `VARCHAR` + CHECK constraint) and a
+`values_callable` so the enum **value** is persisted, not the member name.
+
+**Rationale:** Adding a new value to a `VARCHAR`+CHECK column is a simple
+migration, not an `ALTER TYPE`; the stored values are human-readable; `StrEnum`
+is ergonomic in Python. Centralizing the mapping in `str_enum()` keeps every
+enum column consistent and prevents the name-vs-value footgun (SQLAlchemy
+stores the member *name* by default).
+
+**Consequences:** Validation is a CHECK constraint rather than a native type
+(slightly less strict at the DB level) in exchange for far easier evolution;
+all enum columns must use the helper.
+
+---
+
+## ADR-038: Money stored as Numeric/Decimal, never float
+
+- **Date:** 2026-06-10
+- **Status:** Accepted
+
+**Context:** The application handles currency amounts (loan amounts, fees,
+balances) that must be exact.
+
+**Decision:** Store money in `Numeric(14, 2)` columns via the `Money` annotated
+type (`app/models/types.py`) and always handle it as Python `Decimal`, never
+`float`.
+
+**Rationale:** Binary floats cannot represent decimal currency exactly, leading
+to rounding errors; financial software must use exact decimal arithmetic.
+`Numeric(14, 2)` supports amounts up to ~1 trillion with cents.
+
+**Consequences:** Code must consistently use `Decimal`; developers must avoid
+accidental `float` conversions (e.g. never `float(amount)` in calculations).
+
+---
+
+## ADR-039: Test database isolation via transaction rollback
+
+- **Date:** 2026-06-10
+- **Status:** Accepted
+
+**Context:** Database tests must be isolated from each other and must never
+touch the development database.
+
+**Decision:** Use a dedicated test database (`<dev_db>_test`, auto-created if
+missing, separate from dev), build the schema once per session via
+`Base.metadata.create_all`, and wrap each test in a transaction that is rolled
+back at the end. Tests never commit.
+
+**Alternatives considered:** create/drop tables per test (slower); truncate
+between tests (more code); sharing the dev database (dangerous).
+
+**Rationale:** Fast and fully isolated — tests cannot pollute each other or
+leave residue, and a separate database protects dev data. The single
+session-scoped event loop keeps the async engine, sessions, and tests on one
+loop (asyncpg connections are loop-bound).
+
+**Consequences:** Tests use `create_all`, not migrations, so they do not verify
+migrations themselves (migrations are verified separately — manually now, in CI
+in Phase 7); the transaction-rollback pattern is subtle but standard, and tests
+must `flush` rather than `commit`.
+
+---
+
+## ADR-040: No generic repository/CRUD abstraction in V1
+
+- **Date:** 2026-06-10
+- **Status:** Accepted
+
+**Context:** A common pattern is to build a generic repository / base-CRUD
+layer shared by all models.
+
+**Decision:** Do not build a generic repository abstraction in V1. Services
+write explicit queries; a few small, targeted helpers (e.g. `only_active()`)
+cover genuinely repeated patterns.
+
+**Rationale:** Generic repository layers add indirection that is hard to
+understand and debug; explicit queries are clearer for a solo developer
+building understanding; it avoids premature abstraction.
+
+**Consequences:** Some repetitive query code across services (acceptable); if
+real duplication emerges, introduce targeted helpers rather than a framework.

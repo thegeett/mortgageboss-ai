@@ -8,14 +8,13 @@ mortgage processors. Start here to find your way around.
 | Document                                             | What's in it                                              |
 | ---------------------------------------------------- | --------------------------------------------------------- |
 | [architecture.md](architecture.md)                   | System architecture overview, components, data flow, principles |
+| [database.md](database.md)                           | Database & migrations: base/mixins, shared types, enums, Alembic workflow |
 | [glossary.md](glossary.md)                           | Mortgage domain terms and technical terms                 |
 | [poc-learnings.md](poc-learnings.md)                 | Lessons from the prototype (with a developer TODO section)|
 | [project-structure.md](project-structure.md)         | Repository layout and "where does X go?" conventions      |
 | [development-workflow.md](development-workflow.md)    | CI/CD pipelines and pre-commit hooks                      |
 | [phases/phase-1.md](phases/phase-1.md)               | Ticket-by-ticket phase plan (Epics 1–6)                   |
 | [tickets/](tickets/)                                 | Per-ticket implementation records (`LP-XXX.md`)           |
-
-> `database.md` (migrations & schema guide) will be added with Alembic in **LP-9**.
 
 ## Also in the repository root
 
