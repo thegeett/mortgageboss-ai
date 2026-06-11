@@ -835,6 +835,91 @@ columns are added; key management is a separate concern deferred to Phase 7.
 
 ---
 
+## ADR-036: Loan file identifier strategy (three decoupled identifiers)
+
+**Date:** 2026-06-10
+**Status:** Accepted
+**Context phase:** Phase 1, Epic 2 (applies when LP-13 builds the loan file model)
+
+### Context
+
+A loan file needs to be referenced in several different contexts: internal
+database joins and foreign keys, human conversation between processors ("what's
+the status on LF-7K3M?"), and the borrower-facing inbox email address that
+documents are sent to.
+
+An early draft of the plan used a single sequential ID (e.g. "LF-105") for both
+human reference and the inbox address (lf-105@inbox.domain). This is insecure
+for two reasons:
+
+1. **Enumeration.** Sequential IDs let anyone who sees one valid ID guess
+   others, leaking the count and existence of files.
+2. **Capability exposure.** Deriving the public inbox address from a predictable
+   ID means anyone can compute valid inbox addresses for files they have no
+   relationship with — allowing them to inject documents or spam into other
+   borrowers' loan files. The inbox address is a *capability* (possession grants
+   the ability to send documents into a file), so it must not be predictable.
+
+The underlying principle: an **identifier** merely names a thing (access is
+controlled separately by auth), whereas a **capability** grants power by
+possession alone (it must be unguessable).
+
+### Decision
+
+Each loan file has **three distinct identifiers**, each with a different purpose
+and security posture:
+
+| Identifier | Example | Purpose | Exposure | Generation |
+|---|---|---|---|---|
+| UUID primary key | `7f3a8b2c-...` | Internal references, foreign keys, joins | Never exposed | uuid4 (from UUIDMixin) |
+| Display ID | `LF-7K3M` | Human reference in UI, conversation, email subjects | Authenticated users only | Non-sequential random readable code, collision-checked |
+| Inbox token | `a7k4nq2x9m3p` | Borrower inbox email address | Public (in the email address) | Cryptographically secure random, ~80+ bits entropy |
+
+**Display ID (Option C — non-sequential readable):**
+- Format `LF-XXXX`, characters drawn from an unambiguous alphabet
+  `23456789ABCDEFGHJKMNPQRSTUVWXYZ` (excludes 0/O, 1/I/L to avoid confusion
+  when spoken or typed).
+- Generated with the `secrets` module (not `random`).
+- Collision-checked against existing display IDs at creation; regenerate on the
+  rare collision.
+- Non-sequential so that a leaked display ID does not let an attacker enumerate
+  other files (defense in depth — the primary protection is still authentication
+  and per-company query scoping).
+
+**Inbox token (cryptographic capability):**
+- Generated via `secrets.token_urlsafe(12)` (~16 chars, ~96 bits entropy).
+- Used to construct the borrower inbox address:
+  `lf-{inbox_token}@inbox.mortgageboss.ai`.
+- **Never derived from the display ID** or any other predictable value.
+- Stored with a unique constraint as a safety net (collision probability is
+  negligible at this entropy).
+- Inbound email is matched to a file by this token. As defense in depth, the
+  sender is also validated against expected parties on the file; unexpected
+  senders are flagged for processor review rather than auto-processed.
+
+### Consequences
+
+- The display ID being human-friendly does not weaken security, because its
+  predictability is not the security mechanism (authentication and per-company
+  scoping are).
+- The inbox token being unguessable is the security mechanism for inbound email;
+  it must always be generated with `secrets`, never `random`, and never derived
+  from the display ID.
+- Three identifiers add minor complexity to the loan file model and creation
+  logic, but cleanly separate concerns.
+- This same identifier-vs-capability distinction applies elsewhere and should be
+  followed: password reset links, email verification links, and any future
+  "share link" features are capabilities and must be cryptographically random;
+  display IDs, usernames, and internal UUIDs are identifiers.
+
+### Applies to
+
+- LP-13 (loan file core model): implement display_id and inbox_token per this ADR.
+- LP-22+ (auth): apply capability thinking to password reset / email verification.
+- Any V2 share-link features.
+
+---
+
 ## ADR-037: Database-backed enums as VARCHAR with CHECK (native_enum=False)
 
 - **Date:** 2026-06-10
