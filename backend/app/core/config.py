@@ -50,6 +50,19 @@ class Settings(BaseSettings):
     jwt_access_token_expire_minutes: int = 60 * 24  # 24 hours
     jwt_refresh_token_expire_days: int = 30
 
+    # Application-level PII encryption (LP-14, ADR-051)
+    # Fernet key used to encrypt the most sensitive PII (e.g. borrower SSN) at
+    # rest. Application-level rather than pgcrypto, so a database-only
+    # compromise yields ciphertext but never the key (the key lives here, never
+    # in the database). Generate one with:
+    #   python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+    # Required, no default: the app refuses to start without it. Key rotation
+    # and secret-manager integration are Phase 7.
+    encryption_key: str = Field(
+        min_length=44,
+        description="Fernet key (44-char urlsafe base64) for application-level PII encryption",
+    )
+
     # CORS
     cors_allowed_origins: list[str] = ["http://localhost:3000"]
 

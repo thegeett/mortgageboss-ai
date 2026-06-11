@@ -1294,3 +1294,83 @@ unit-tested in isolation (it is the first thing built and verified in LP-13).
 correct identifiers; never hand-construct a `LoanFile` with manually-set
 identifiers in normal flow (tests that do so are explicitly probing the unique
 constraint). The model has no opinion on how its identifiers are produced.
+
+---
+
+## ADR-051: Application-level encryption for SSN, not pgcrypto
+
+- **Date:** 2026-06-10
+- **Status:** Accepted (reconsiders an LP-9 assumption)
+
+**Context:** The borrower SSN is the most sensitive field in the system, covered
+by GLBA, and must be encrypted at rest. LP-9 enabled the `pgcrypto` extension on
+the assumption it would encrypt this kind of field inside the database. LP-14
+revisits that choice before any encrypted column exists.
+
+**Decision:** Encrypt at the **application** level, not in the database. A custom
+SQLAlchemy `EncryptedString` type (`app/models/encrypted_types.py`) encrypts on
+write and decrypts on read using Fernet (authenticated AES-128-CBC + HMAC) from
+the `cryptography` library (`app/core/encryption.py`). The key lives in settings
+(`ENCRYPTION_KEY`, from the environment), **never** in the database. The column
+itself is plain `TEXT` holding ciphertext.
+
+**Rationale:** With pgcrypto, the encryption key has to be presented to the
+database (in SQL, a session GUC, or a function argument), so a database
+compromise — a leaked dump, a read replica, a stolen backup — can expose both
+ciphertext and the means to decrypt it. With application-level encryption the key
+never reaches Postgres, so a database-only compromise yields **ciphertext only**.
+Fernet is authenticated, so tampering is detected on decrypt rather than silently
+returning garbage. Keeping the crypto in Python also makes it unit-testable in
+isolation and portable if the storage backend changes.
+
+**Consequences:**
+- The `ssn` column is `TEXT` and stores ciphertext; verify-at-rest is part of the
+  test suite (raw SQL read shows ciphertext, never the plaintext).
+- Encryption is **non-deterministic** (a fresh IV per write), so an encrypted
+  column cannot be used in a SQL `WHERE` equality, index, `ORDER BY`, or unique
+  constraint. Fine for SSN (we never query by it); a future searchable-encrypted
+  field would need a separate deterministic blind-index column.
+- The SSN must never reach a log, repr, or error message — enforced by a
+  PII-safe `Borrower.__repr__` and a `masked_ssn` (`***-**-1234`) for display.
+- `ENCRYPTION_KEY` is a required setting (no default): the app refuses to start
+  without it, like `JWT_SECRET_KEY`.
+- **Scope:** only the SSN is encrypted in V1. Date of birth is sensitive but
+  left unencrypted (lower risk, needed for matching); broadening the encrypted
+  set is a deliberate later decision. **Key rotation** and **secret-manager**
+  integration are Phase 7; V1 uses a single active key from settings. `pgcrypto`
+  stays enabled (harmless) in case a future deterministic/DB-side need arises.
+
+---
+
+## ADR-052: Borrowers and properties are company-scoped transitively
+
+- **Date:** 2026-06-10
+- **Status:** Accepted
+
+**Context:** Multi-tenancy (ADR-041) requires every piece of business data to be
+isolated by company. Borrowers and properties are business data, so a query must
+never surface another company's borrowers/properties. The question is whether
+they carry their own `company_id` or inherit scoping through their loan file.
+
+**Decision:** Neither `borrowers` nor `properties` has a `company_id`. They are
+owned by a loan file (FK `loan_file_id`, `ondelete=CASCADE`) and are scoped to a
+company **transitively** through that file. Tenant-isolated queries scope the
+loan file (`scope_to_company(stmt, LoanFile, company_id)`) and reach borrowers/
+properties by joining on `loan_file_id`.
+
+**Rationale:** The loan file is the single owning aggregate root for everything
+attached to a processing engagement. A denormalized `company_id` on every child
+would be redundant, could drift out of sync with the file's company, and would
+invite a query that scopes the child's `company_id` while joining a file from a
+different company. One scoping anchor (the loan file) is simpler and safer. A
+loan file never changes company, so the transitive relationship is stable.
+
+**Consequences:**
+- Queries for borrowers/properties **must** join through the loan file and scope
+  that file; there is no `scope_to_company(select(Borrower), Borrower, ...)`
+  because `Borrower` has no `company_id` (the `CompanyScoped` protocol correctly
+  rejects it). Tenant-isolation tests assert this end-to-end.
+- Hard-deleting a loan file cascades to its borrowers and property; normal flow
+  soft-deletes (`deleted_at`), so the cascade only bites on a true hard delete.
+- The same pattern will apply to other file-owned children (documents, extracted
+  data, conditions) as they land.

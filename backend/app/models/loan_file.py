@@ -34,8 +34,10 @@ from app.models.lender import LoanProgram
 from app.models.types import MEDIUM_STRING, SHORT_STRING, Money
 
 if TYPE_CHECKING:
+    from app.models.borrower import Borrower
     from app.models.company import Company
     from app.models.lender import Lender
+    from app.models.property import Property
 
 # Domain for the borrower inbox address. A module constant for now; may move to
 # settings later if it needs to vary per environment.
@@ -125,6 +127,22 @@ class LoanFile(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     # ondelete=RESTRICT (ADR-044).
     company: Mapped["Company"] = relationship(back_populates="loan_files")
     lender: Mapped["Lender | None"] = relationship(back_populates="loan_files")
+
+    # Borrowers (one-to-many) and the subject property (one-to-one, LP-14). Both
+    # are owned by the file (FK ondelete=CASCADE on the child side). Borrowers
+    # are ordered by their position so loan_file.borrowers is deterministic.
+    # delete-orphan keeps the ORM in step with the DB cascade: removing a child
+    # from the collection deletes it.
+    borrowers: Mapped[list["Borrower"]] = relationship(
+        back_populates="loan_file",
+        order_by="Borrower.borrower_position",
+        cascade="all, delete-orphan",
+    )
+    property: Mapped["Property | None"] = relationship(
+        back_populates="loan_file",
+        uselist=False,
+        cascade="all, delete-orphan",
+    )
 
     def get_inbox_address(self) -> str:
         """Return the borrower inbox email address for this file.

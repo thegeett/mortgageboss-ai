@@ -12,11 +12,14 @@ from app.models.base import (
     UUIDMixin,
     utcnow,
 )
+from app.models.borrower import Borrower, MaritalStatus
 from app.models.company import Company
+from app.models.encrypted_types import EncryptedString
 from app.models.enums import RecordStatus, str_enum
 from app.models.helpers import only_active, scope_to_company
 from app.models.lender import Lender, LoanProgram
 from app.models.loan_file import LoanFile, LoanFileStatus, LoanPurpose
+from app.models.property import OccupancyType, Property, PropertyType
 from app.models.types import (
     LongStr,
     MediumStr,
@@ -27,15 +30,21 @@ from app.models.user import User, UserRole
 
 __all__ = [
     "Base",
+    "Borrower",
     "Company",
+    "EncryptedString",
     "Lender",
     "LoanFile",
     "LoanFileStatus",
     "LoanProgram",
     "LoanPurpose",
     "LongStr",
+    "MaritalStatus",
     "MediumStr",
     "Money",
+    "OccupancyType",
+    "Property",
+    "PropertyType",
     "RecordStatus",
     "ShortStr",
     "SoftDeleteMixin",

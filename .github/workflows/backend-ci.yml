@@ -80,3 +80,5 @@ jobs:
           REDIS_URL: redis://localhost:6379/0
           ANTHROPIC_API_KEY: test-key-for-ci
           JWT_SECRET_KEY: ci-test-secret-key-that-is-at-least-32-chars
+          # Throwaway Fernet key for CI only — never used outside the test run.
+          ENCRYPTION_KEY: iqh0Ofmzznt_dQRARaKEfFW2NSZ9k3lrzqTx3OFis14=  # pragma: allowlist secret

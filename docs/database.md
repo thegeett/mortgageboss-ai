@@ -270,6 +270,70 @@ enforcement can come later (**ADR-049**).
 > directly — only the service generates correct, collision-checked identifiers.
 > It uses `flush` (not `commit`), so the caller controls the transaction.
 
+## Borrower and property models
+
+A loan file owns the **people** and **real estate** attached to it:
+
+- **`Borrower`** — a borrower or co-borrower. A file has **one or more**
+  (one-to-many): a primary borrower plus zero or more co-borrowers. Names are
+  required; everything else (SSN, DOB, contact, `marital_status`) is nullable
+  because details arrive incrementally. `is_primary` flags the primary borrower
+  and `borrower_position` (1-based) orders them — `loan_file.borrowers` is
+  returned ordered by position.
+- **`Property`** — the **subject property**. A file has **exactly one** in V1
+  (one-to-one, `loan_file.property`), enforced by a **unique constraint** on
+  `properties.loan_file_id`; a second property on the same file fails at the
+  database. Address, `property_type`, `occupancy_type`, and the `Money` valuation
+  fields (`estimated_value`, `purchase_price`) are all nullable (a purchase is
+  often "TBD" early).
+
+Both are **owned by the loan file**: a `loan_file_id` FK with `ondelete=CASCADE`,
+so a hard delete of a file removes them (normal flow soft-deletes via
+`deleted_at`). Both also expose `marital_status` / `property_type` /
+`occupancy_type` as VARCHAR + CHECK enums (**ADR-037**).
+
+### SSN encryption at rest (ADR-051)
+
+The borrower **SSN is encrypted at rest**, encrypted/decrypted in the
+**application** (not pgcrypto), so the key never reaches the database and a
+database-only compromise yields only ciphertext:
+
+- `app/core/encryption.py` — Fernet (authenticated AES-128-CBC + HMAC) cipher
+  built from the required `ENCRYPTION_KEY` setting, with `encrypt_value` /
+  `decrypt_value` (None/empty → None).
+- `app/models/encrypted_types.py` — `EncryptedString`, a `TypeDecorator` over
+  `TEXT` that encrypts on write and decrypts on read. Declared like a normal
+  column: `ssn: Mapped[str | None] = mapped_column(EncryptedString, ...)`. The
+  raw column is plain `TEXT` holding ciphertext.
+- Encryption is **non-deterministic** (fresh IV per write), so an encrypted
+  column **cannot** be queried by equality, indexed, or made unique. Fine for SSN
+  (never queried by it).
+- The SSN never reaches a log/repr/error: `Borrower.__repr__` identifies by
+  position + `loan_file_id` only, and `Borrower.masked_ssn` returns `***-**-1234`
+  for display. **Date of birth is sensitive but unencrypted in V1** (lower risk,
+  needed for matching); broadening the encrypted set is a later decision.
+
+### Transitive company scoping (ADR-052)
+
+Neither `borrowers` nor `properties` carries a `company_id`. They are
+company-scoped **transitively** through their loan file. Scope the file and join
+the child:
+
+```python
+# Borrowers reachable only through the owning company's loan files.
+stmt = scope_to_company(
+    select(Borrower).join(LoanFile, Borrower.loan_file_id == LoanFile.id),
+    LoanFile,
+    current_user.company_id,
+)
+```
+
+There is intentionally no `scope_to_company(select(Borrower), Borrower, …)` —
+`Borrower` has no `company_id`, so the `CompanyScoped` protocol rejects it. One
+scoping anchor (the loan file) avoids a denormalized `company_id` drifting out of
+sync. Tenant-isolation tests assert a query scoped to company A never surfaces
+company B's borrowers.
+
 ## Writing a model test
 
 Database tests use a dedicated **test database** (`<dev_db>_test`,
@@ -348,8 +412,10 @@ Run from `backend/`:
 The initial migration (`..._enable_postgres_extensions.py`) enables the
 PostgreSQL extensions the schema relies on:
 
-- **pgcrypto** — column-level encryption for sensitive PII (SSN, account
-  numbers), used from LP-14. See **ADR-035**.
+- **pgcrypto** — database-side cryptographic functions. Originally intended for
+  PII encryption (**ADR-035**), but LP-14 chose **application-level** encryption
+  for the SSN instead (**ADR-051**), so pgcrypto is currently unused. It stays
+  enabled in case a future deterministic / DB-side need arises.
 - **uuid-ossp** — database-side UUID generation (we generate UUIDs in Python via
   `uuid4`, but this keeps the DB-side option available).
 
@@ -375,3 +441,5 @@ PostgreSQL extensions the schema relies on:
 - **ADR-048** — Display ID globally unique
 - **ADR-049** — Loan file status lifecycle
 - **ADR-050** — ID generation in the service layer, not the model
+- **ADR-051** — Application-level encryption for SSN, not pgcrypto
+- **ADR-052** — Borrowers and properties are company-scoped transitively
