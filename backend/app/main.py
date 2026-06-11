@@ -7,6 +7,7 @@ from fastapi import FastAPI, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+from app.api.auth import router as auth_router
 from app.core.config import settings
 from app.core.database import (
     check_database_connection,
@@ -14,6 +15,11 @@ from app.core.database import (
 )
 from app.core.logging import get_logger, setup_logging
 from app.core.redis import check_redis_connection, close_redis_connections
+
+# The versioned API prefix under which feature routers are mounted. The auth
+# refresh cookie is path-scoped to "{API_V1_PREFIX}/auth/refresh"; keep
+# app.api.auth.REFRESH_COOKIE_PATH in sync if this changes.
+API_V1_PREFIX = "/api/v1"
 
 # Configure logging before anything else
 setup_logging()
@@ -70,6 +76,10 @@ app.add_middleware(
     allow_methods=["GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["*"],
 )
+
+# Feature routers. auth_router has its own "/auth" prefix, so login lives at
+# "/api/v1/auth/login" and refresh at "/api/v1/auth/refresh".
+app.include_router(auth_router, prefix=API_V1_PREFIX)
 
 
 @app.get("/")

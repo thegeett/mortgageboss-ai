@@ -2023,3 +2023,113 @@ and refresh-token rotation / a blocklist later. Because authorization is looked 
 live (ADR-074), *deactivating* a user already blocks new actions immediately even
 without token revocation; revocation only matters for cutting off an
 already-authenticated session mid-token-life.
+
+---
+
+## ADR-076: Hybrid token transport — access in body, refresh in an httpOnly cookie
+
+- **Date:** 2026-06-11
+- **Status:** Accepted
+
+**Context:** LP-23 ships the login flow. The two tokens from LP-22 (a short-lived
+access token, a long-lived refresh token) must reach the browser. Where each is
+stored determines its exposure to XSS, CSRF, and interception.
+
+**Decision:** Use a **hybrid** transport. The **access** token is returned in the
+JSON response body; the SPA holds it in memory and sends it as
+`Authorization: Bearer`. The **refresh** token is set as a `Set-Cookie` with flags
+`httponly=True`, `secure=settings.is_production`, `samesite="lax"`,
+`path="/api/v1/auth/refresh"`, and `max_age` = the refresh-token lifetime. The
+refresh token is **never** in any response body.
+
+**Alternatives considered:** both tokens in `localStorage` (readable by any XSS —
+rejected for the powerful long-lived credential); both tokens in cookies (the access
+token would ride along on every request and need CSRF handling on all of them);
+refresh token in the body (would force JS storage, the very thing we're avoiding).
+
+**Rationale:** The refresh token is the high-value, long-lived credential, so it gets
+the strongest containment — an httpOnly cookie an XSS payload can't read, scoped by
+path so the browser only sends it to the refresh endpoint. The access token is
+short-lived and must be read by JS to attach it, so memory (not disk) is the
+pragmatic place; it dies with the tab. `secure` is environment-conditional so the
+cookie works over plain-HTTP `localhost` in dev but is HTTPS-only in prod —
+hardcoding either value would break dev or be insecure in prod.
+
+**Consequences:** Login sets the cookie and returns the access token in the body;
+refresh reads the cookie; logout clears it with the **same path/flags** (or the
+browser won't remove it). Dev cross-origin (`:3000` ↔ `:8000`) relies on CORS
+`allow_credentials=True` (LP-6) plus credentialed requests; `secure=False` +
+`samesite=lax` is the dev-working combination. CSRF posture is SameSite-only in V1.
+
+---
+
+## ADR-077: Anti-enumeration authentication failures
+
+- **Date:** 2026-06-11
+- **Status:** Accepted
+
+**Context:** A login endpoint that distinguishes "no such email" from "wrong
+password" lets an attacker enumerate which emails are registered.
+
+**Decision:** `authenticate_user` raises a single generic `AuthenticationError` with
+an identical message for **both** an unknown email and a wrong password; the endpoint
+maps it to a generic `401 "Invalid email or password"`. To also close the *timing*
+side-channel, the unknown-email path runs one bcrypt comparison against a throwaway
+hash so it isn't measurably faster than the wrong-password path. An inactive account
+raises a distinct `InactiveUserError` → `403`.
+
+**Rationale:** Identical responses (and comparable timing) prevent account
+enumeration. The inactive case is *not* an enumeration leak: it only occurs after the
+correct password is supplied, so the caller already knows the account exists — and a
+clear `403` is more useful to a legitimate, locked-out user than a generic `401`.
+
+**Consequences:** A single generic credential-failure path. The `403` for inactive
+accounts is a deliberate, documented exception to the "always generic" rule, justified
+by the password-already-proven condition.
+
+---
+
+## ADR-078: Refresh-token rotation-lite; no server-side reuse detection in V1
+
+- **Date:** 2026-06-11
+- **Status:** Accepted
+
+**Context:** A static refresh token reused for the life of the session is weaker than
+one that rotates. Full rotation-with-reuse-detection (invalidating a refresh token's
+whole family if an already-used one reappears) needs server-side state.
+
+**Decision:** **Rotation-lite** — every successful `POST /auth/refresh` issues a new
+refresh token (a sliding window) and sets it as the cookie, but V1 keeps **no**
+server-side store of issued/used refresh tokens and so does **no** reuse detection.
+This is consistent with the stateless-JWT posture (ADR-075).
+
+**Rationale:** Rotating on each refresh is strictly better than a static token at no
+infrastructure cost. Reuse-detection requires a stateful store and family-tracking
+that isn't warranted for the pilot; it is a V2 hardening item alongside revocation.
+
+**Consequences:** A stolen, unexpired refresh token is usable until it expires, and a
+replayed old token is not detected in V1. Mitigations are `httpOnly` (hard to steal)
+and the bounded lifetime. Documented as a known V1 limitation.
+
+---
+
+## ADR-079: No public registration; no login rate limiting in V1
+
+- **Date:** 2026-06-11
+- **Status:** Accepted
+
+**Context:** Two adjacent hardening questions for the auth surface: should there be a
+public signup endpoint, and should login be rate-limited?
+
+**Decision:** V1 has **no public registration** — users are admin/seed-provisioned —
+and **no login rate limiting**; rate limiting is deferred to Phase 7 hardening.
+
+**Rationale:** V1 is an invite/admin tool for a known set of processing-company users,
+so self-service signup isn't needed and a signup endpoint would be attack surface with
+no product value yet. Rate limiting is genuine hardening but needs a shared counter
+(Redis) and a considered policy; bcrypt's deliberate slowness is a partial brute-force
+mitigation in the meantime.
+
+**Consequences:** New users are created out-of-band (seed/admin tooling). Brute-force
+protection is a known V1 gap until Phase 7; the generic-error/timing work (ADR-077)
+and bcrypt slowness reduce but do not eliminate the risk.

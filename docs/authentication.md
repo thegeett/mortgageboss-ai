@@ -100,11 +100,99 @@ There is no store consulted on each request to invalidate a token before its `ex
   hardening item; a revocation store adds stateful infrastructure not warranted for
   the pilot.
 
+## Endpoints & token transport (LP-23)
+
+The auth endpoints live under `/api/v1/auth` (`app/api/auth.py`, mounted in
+`app/main.py`). They are thin orchestration over the utilities above; the substance
+is the **hybrid token transport**. Relevant ADRs: **ADR-076** (hybrid transport),
+**ADR-077** (anti-enumeration), **ADR-078** (rotation-lite), **ADR-079** (no signup
+/ no rate limiting in V1).
+
+### Hybrid transport, end to end
+
+| Token | Where it travels | Why |
+| --- | --- | --- |
+| **access** | JSON response **body** → client holds it in memory, sends `Authorization: Bearer` | short-lived; never persisted to disk, so it dies with the tab |
+| **refresh** | **httpOnly cookie** (`Set-Cookie`), never in any body | long-lived and powerful; httpOnly keeps it unreadable by JavaScript |
+
+The access token goes in the body because the SPA needs to read and attach it. The
+refresh token goes in an httpOnly cookie because it is the more powerful, long-lived
+credential — keeping it out of JS storage means an XSS bug cannot exfiltrate it.
+
+### The refresh cookie flags (and what each defends)
+
+The cookie is `refresh_token` (constant `REFRESH_TOKEN_COOKIE`), set with:
+
+| Flag | Value | Defends against |
+| --- | --- | --- |
+| `httponly` | always `True` | **XSS** — JavaScript (`document.cookie`) cannot read it |
+| `secure` | `settings.is_production` | **interception** — sent only over HTTPS in prod; `False` in local dev so it works over plain-HTTP `localhost` |
+| `samesite` | `"lax"` | **CSRF** — the browser won't attach it to cross-site POSTs |
+| `path` | `/api/v1/auth/refresh` (`REFRESH_COOKIE_PATH`) | **scope** — the browser sends it only on refresh requests, not on every API call |
+| `max-age` | `jwt_refresh_token_expire_days` (in seconds) | aligns cookie lifetime with the token's expiry |
+
+`secure` is **environment-conditional** on purpose: hardcoding `True` would break
+local dev over HTTP (the browser drops the cookie); hardcoding `False` would be
+insecure in production. Logout clears the cookie with the **same path and flags** —
+otherwise the browser treats it as a different cookie and the original survives.
+
+### Dev cross-origin note
+
+In dev the frontend (`localhost:3000`) and backend (`localhost:8000`) are different
+origins. CORS is configured with `allow_credentials=True` (LP-6), and the frontend
+must send requests with credentials enabled. The combination that works over local
+HTTP is **`secure=False` + `samesite="lax"` + credentialed requests**; if the refresh
+cookie fails to appear in dev, this trio is the first thing to check.
+
+### Endpoint contracts
+
+| Endpoint | Input | Success | Failure |
+| --- | --- | --- | --- |
+| `POST /auth/login` | `LoginRequest` (email, password) | `200` + `TokenResponse` (access token + `UserPublic`); sets refresh cookie | `401` generic for unknown email *or* wrong password (identical); `403` if the account is inactive |
+| `POST /auth/refresh` | refresh **cookie** (no body) | `200` + `TokenResponse`; sets a **rotated** refresh cookie | `401` if the cookie is missing, expired, invalid, the wrong type, or the user is gone/inactive |
+| `POST /auth/logout` | — | `204`; clears the refresh cookie | — |
+
+The LP-22 token errors all map to `401` on refresh: `TokenExpiredError`,
+`InvalidTokenError`, and `WrongTokenTypeError` (e.g. an access token presented to the
+refresh endpoint). The body of a login/refresh response **never** contains the
+refresh token or `hashed_password`; the access token still carries only
+`sub`/`type`/`exp`/`iat` (verified by test).
+
+### Anti-enumeration
+
+`authenticate_user` raises the **same** `AuthenticationError` with the **same**
+message for an unknown email and for a wrong password, so a client can never tell
+whether an email is registered (ADR-077). To avoid a *timing* signal too, the
+unknown-email path still runs one bcrypt comparison against a throwaway hash, so it
+isn't measurably faster than the wrong-password path. (An inactive account raises a
+distinct `InactiveUserError` → `403`; this is not an enumeration leak because the
+caller has already proven they know the password.)
+
+### Rotation-lite
+
+Every successful refresh issues a **new** refresh token (a sliding window), so an
+active session's refresh credential keeps moving. V1 does **not** implement
+server-side reuse-detection (which would need a store of issued/used tokens) —
+consistent with the stateless posture (ADR-078). A stolen, unexpired refresh token is
+usable until it expires; the mitigations are `httpOnly` (it's hard to steal in the
+first place) and the bounded lifetime.
+
+## V1 gaps (known, documented)
+
+- **No login rate limiting** — brute-force protection is deferred to Phase 7
+  hardening; bcrypt's slowness is a partial mitigation, not a substitute (ADR-079).
+- **No public registration** — users are admin/seed-provisioned; there is no signup
+  endpoint (ADR-079).
+- **CSRF posture is SameSite only** — no separate CSRF token in V1; `SameSite=Lax`
+  plus the scoped cookie path is the V1 defense.
+- **Stateless** — no server-side revocation of access *or* refresh tokens (ADR-075,
+  ADR-078); deactivating a user blocks new actions immediately because authorization
+  is looked up live.
+
 ## What's next
 
-- **LP-23** — login & refresh endpoints that call `verify_password`,
-  `create_access_token`, and `create_refresh_token`.
 - **LP-24** — the current-user dependency: extract the bearer token, `verify_token`
-  it as `ACCESS`, map the typed errors to HTTP responses, and look up the live user
-  (role, `is_active`, company) from the database.
-- **LP-25** — frontend token storage and refresh handling.
+  it as `ACCESS`, map the typed errors to HTTP responses, look up the live user
+  (role, `is_active`, company) from the database, and add `GET /auth/me` + route
+  protection.
+- **LP-25** — frontend token storage (access in memory) and refresh handling.
