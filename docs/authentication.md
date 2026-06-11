@@ -189,10 +189,70 @@ first place) and the bounded lifetime.
   ADR-078); deactivating a user blocks new actions immediately because authorization
   is looked up live.
 
+## Route protection (LP-24)
+
+Protected routes are guarded by **per-route FastAPI dependencies**, not global
+middleware (`app/api/dependencies.py`). A route opts into protection by *declaring*
+the dependency; public routes (login, refresh, logout, health) simply don't. This
+is cleaner than global middleware that has to maintain a list of public-route
+exemptions, and it makes each route's protection explicit and greppable. Relevant
+ADRs: **ADR-080** (dependencies not middleware), **ADR-081** (live-lookup cutoff),
+**ADR-082** (tenant context), **ADR-083** (`require_role`, 403 vs 401).
+
+### `get_current_user` flow
+
+1. Extract the `Authorization: Bearer <token>` credential (`HTTPBearer(auto_error=False)`).
+2. `verify_token(token, ACCESS)` — checks signature, expiry, and that it's an
+   *access* token (a refresh token here is the wrong type).
+3. Look the user up in the database by the token's `sub` (**live lookup**).
+4. Confirm the user exists and `is_active` is true.
+5. Return the live `User`.
+
+Steps 3–4 are the security core: **role, `company_id`, and `is_active` always come
+from the current DB record, never from the token** (the token carries only `sub`).
+Any failure — missing/malformed header, expired/invalid/wrong-type token, or a
+gone/inactive user — returns a uniform `401` with a `WWW-Authenticate: Bearer`
+challenge. `CurrentUser = Annotated[User, Depends(get_current_user)]` is the alias
+routes use; `get_current_user_optional` is the non-raising variant for routes that
+vary by auth state.
+
+### Deactivation cutoff (the V1 revocation substitute)
+
+Because the user is re-read on every request, setting `is_active=False` (or deleting
+the user, or changing their role) takes effect on their **very next request**, even
+with a still-valid token. This is how V1 cuts off access without a stateless-JWT
+revocation store (ADR-075/ADR-078) — verified by a test that flips `is_active=False`
+on a user holding a valid token and asserts the next call gets `401`.
+
+### `require_role` — 401 vs 403
+
+`require_role(*roles)` is a dependency factory that depends on `get_current_user`
+(so authentication always precedes authorization) and then checks the live user's
+role:
+
+- **401 Unauthorized** — not authenticated (no/invalid token). Authorization is
+  never even reached.
+- **403 Forbidden** — authenticated, but the role isn't permitted.
+
+V1 has only `PROCESSOR` and `ADMIN`; role checks are coarse (role-level, no
+per-resource ACLs).
+
+### Tenant context — activating Epic 2 multi-tenancy
+
+The request's tenant scope is **`current_user.company_id`**, exposed as
+`get_current_company_id` / `CurrentCompanyId`. Every business endpoint (Epic 4+)
+scopes its queries to it via `scope_to_company(stmt, Model, current_user.company_id)`
+(`app/models/helpers.py`). Because that `company_id` comes from the validated token
+plus the live user record, a caller **cannot forge another company's scope** — which
+is exactly what makes the Epic 2 multi-tenancy enforceable at runtime. A query that
+forgets to scope is a tenant leak; the helper gives the rule one greppable name.
+
+### `GET /auth/me`
+
+`GET /api/v1/auth/me` is the first protected endpoint and the end-to-end proof of the
+chain: it depends on `CurrentUser` and returns `UserPublic` (never `hashed_password`).
+
 ## What's next
 
-- **LP-24** — the current-user dependency: extract the bearer token, `verify_token`
-  it as `ACCESS`, map the typed errors to HTTP responses, look up the live user
-  (role, `is_active`, company) from the database, and add `GET /auth/me` + route
-  protection.
-- **LP-25** — frontend token storage (access in memory) and refresh handling.
+- **LP-25** — frontend token storage (access in memory), an axios Bearer interceptor,
+  silent refresh against the cookie endpoint, and the auth store.

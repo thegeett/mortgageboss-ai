@@ -16,6 +16,7 @@ CSRF posture, stateless / no server-side revocation).
 
 from fastapi import APIRouter, Cookie, HTTPException, Response, status
 
+from app.api.dependencies import CurrentUser
 from app.core.config import settings
 from app.core.database import DbSession
 from app.core.jwt import (
@@ -153,3 +154,14 @@ async def logout(response: Response) -> Response:
     _clear_refresh_cookie(response)
     response.status_code = status.HTTP_204_NO_CONTENT
     return response
+
+
+@router.get("/me", response_model=UserPublic)
+async def read_current_user(current_user: CurrentUser) -> UserPublic:
+    """Return the authenticated user (the first protected endpoint).
+
+    Proves the whole auth chain end to end: Bearer access token → live-user
+    lookup → active check (all in :func:`app.api.dependencies.get_current_user`).
+    Returns ``UserPublic`` — never ``hashed_password``.
+    """
+    return UserPublic.model_validate(current_user)

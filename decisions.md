@@ -2133,3 +2133,105 @@ mitigation in the meantime.
 **Consequences:** New users are created out-of-band (seed/admin tooling). Brute-force
 protection is a known V1 gap until Phase 7; the generic-error/timing work (ADR-077)
 and bcrypt slowness reduce but do not eliminate the risk.
+
+---
+
+## ADR-080: Auth via per-route dependencies, not global middleware
+
+- **Date:** 2026-06-11
+- **Status:** Accepted
+
+**Context:** LP-24 adds route protection. The ticket is titled "dependencies and
+middleware", but the two are different enforcement models: global middleware runs on
+every request and must carve out exemptions for public routes; per-route dependencies
+attach only where declared.
+
+**Decision:** Implement authentication/authorization as **FastAPI dependencies**
+declared per-route (`get_current_user`, `require_role(...)`). Public routes (login,
+refresh, logout, health) opt out simply by not declaring them. No global auth
+middleware. (Global request-logging/request-ID middleware is a separate Phase 7
+concern.)
+
+**Rationale:** Dependencies keep the auth logic in one reusable place, make each
+route's protection explicit and greppable, and avoid the brittle "exempt these paths"
+list that global middleware needs. They compose naturally (`require_role` depends on
+`get_current_user`) and integrate with OpenAPI.
+
+**Consequences:** Each protected route must declare the dependency; *forgetting* to
+leaves a route public. Mitigated by review, by `CurrentUser`/`require_role` being the
+obvious convention, and by Epic 4 endpoint tests. If a blanket default-deny is ever
+wanted, a router-level `dependencies=[...]` can apply one to a whole router.
+
+---
+
+## ADR-081: Live-user lookup on every authenticated request (deactivation cutoff)
+
+- **Date:** 2026-06-11
+- **Status:** Accepted
+
+**Context:** The access token carries only identity (`sub`); it deliberately omits
+role/company/active-status (ADR-074). Something must turn that identity into an
+authorization context on each request.
+
+**Decision:** `get_current_user` looks up the **live** user by `sub` and reads
+`role`, `company_id`, and `is_active` from the current DB record. A user that no
+longer exists or is inactive is rejected with `401`.
+
+**Rationale:** This realizes the minimal-claims design: deactivation and role changes
+take effect on the user's next request, with no stale token able to assert outdated
+authority. It is the V1 substitute for a token-revocation store (ADR-075) — `is_active`
+plus the live lookup is the cutoff mechanism.
+
+**Consequences:** One DB lookup per authenticated request — but the request needs the
+`User` object anyway, so it's not extra work. A deactivated user is locked out
+immediately on their next call (verified by test). A *stolen, unexpired* access token
+still works until expiry as long as the user stays active — the documented stateless
+limitation.
+
+---
+
+## ADR-082: Tenant context derives from the authenticated user
+
+- **Date:** 2026-06-11
+- **Status:** Accepted
+
+**Context:** Epic 2 built multi-tenancy (`company_id` scoping, `scope_to_company`) but
+nothing yet supplies the *current* company at runtime. LP-24 closes that gap.
+
+**Decision:** The request's tenant scope is **`current_user.company_id`**, exposed as
+`get_current_company_id` / `CurrentCompanyId`. Every business endpoint (Epic 4+) scopes
+its company-owned queries with `scope_to_company(stmt, Model, current_user.company_id)`.
+
+**Rationale:** The scoping `company_id` comes from the validated token plus the live
+user record, so a caller cannot present another company's id — the scope is
+**non-forgeable**. This is what activates the Epic 2 multi-tenancy at runtime and makes
+tenant isolation actually enforced rather than merely modelled.
+
+**Consequences:** Every company-owned query must scope to `current_user.company_id`; a
+missed scope is a tenant data leak. Mitigated by the single greppable helper, the
+convention, and Epic 4 cross-tenant tests. No cross-company access in V1 (no "switch
+company"); a user belongs to exactly one company.
+
+---
+
+## ADR-083: Role-based authorization via `require_role` (403 vs 401)
+
+- **Date:** 2026-06-11
+- **Status:** Accepted
+
+**Context:** Some routes (e.g. user/lender administration) must be limited to admins.
+V1 needs role-level gating, not per-resource permissions.
+
+**Decision:** A `require_role(*roles)` dependency factory depends on
+`get_current_user` and checks the live user's role: it raises **403** when the user is
+authenticated but lacks an allowed role, distinct from the **401** an unauthenticated
+request gets. Multiple roles may be permitted (`require_role(ADMIN, PROCESSOR)`).
+
+**Rationale:** Clear, conventional HTTP semantics — 401 = "who are you?", 403 = "I know
+who you are, you can't do this". Building on `get_current_user` guarantees
+authentication always precedes authorization. V1's two roles (PROCESSOR/ADMIN) need
+nothing finer.
+
+**Consequences:** Authorization is coarse (role-level); per-resource ACLs are out of
+scope for V1. The 401-vs-403 distinction is verified by test (a PROCESSOR on an
+admin-only route gets 403, not 401; an anonymous request gets 401).
