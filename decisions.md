@@ -2713,3 +2713,79 @@ without forcing an actor.
 get instrumented incrementally later (ADR-073 still holds). The activity-timeline UI is a
 later frontend concern. The two new enum values required a migration (and are reflected in
 tests via `create_all`).
+
+---
+
+## ADR-102: Keep LP-27's `(protected)` route group and `/loan-files` paths over the plan's `(app)`/`/files`
+
+- **Date:** 2026-06-11
+- **Status:** Accepted
+
+**Context:** The Phase-1 plan text says the Epic-4 frontend lives under `app/(app)/` with
+`/dashboard` and `/files`. LP-27 actually built a `(protected)` route group with
+`/dashboard` and `/loan-files` (matching the API resource and the nav).
+
+**Decision:** The dashboard and all Epic-4 frontend use LP-27's **`(protected)` group**
+and **`/loan-files`** paths, not the plan's `(app)`/`/files`. LP-31 replaces the
+`/dashboard` stub with the real dashboard; "New file" → `/loan-files/new` (LP-32), a row
+→ `/loan-files/{display_id}` (LP-33). The plan's paths are treated as indicative.
+
+**Rationale:** LP-27 made concrete, working choices the plan predates; renaming working
+code for no benefit causes churn. `/loan-files` aligns the URL, the nav item, and the API
+resource name.
+
+**Consequences:** LP-32/LP-33 follow the same scheme. The plan's `(app)`/`/files` wording
+is superseded.
+
+---
+
+## ADR-103: Small scoped extension to the loan-file list endpoint (search + summary fields + repeatable status)
+
+- **Date:** 2026-06-11
+- **Status:** Accepted
+
+**Context:** The dashboard needs real server-side search and real columns (property
+address, lender name) that the LP-28 summary lacked, and grouped filter pills that map to
+several statuses at once.
+
+**Decision:** Extend `GET /loan-files` *tightly* (not a redesign): an optional
+company-scoped **`search`** (matches `display_id` or a borrower's name, case-insensitive);
+add **`lender_name`** and **`property_address`** to `LoanFileSummary` (resolved via
+eager-loaded `lender`/`property`, null when absent); and make **`status` repeatable** (a
+list) so grouped pills filter to several statuses with correct pagination. Nothing else
+changes; `inbox_token`/raw `ssn` remain absent.
+
+**Rationale:** Faking these client-side (search over one page; "—" for lender/property;
+client-side multi-status filtering that breaks pagination/counts) would degrade the core
+screen and mislead. A tight, scoped extension keeps it honest. Search is always composed
+with `scope_to_company`, so it can't cross tenants (tested).
+
+**Consequences:** The summary resolves lender/property (eager-loaded to avoid N+1; the
+detail endpoint also eager-loads lender now). `status` accepts one *or* several values
+(single-value callers are unaffected). The endpoint is otherwise stable.
+
+---
+
+## ADR-104: Dashboard filter-pill status groupings
+
+- **Date:** 2026-06-11
+- **Status:** Accepted
+
+**Context:** The dashboard pills (All / Active / Action needed / Completed) must map the
+eight-value `LoanFileStatus` enum to a processor's mental model.
+
+**Decision:** One source of truth (`lib/loan-files/status.ts`): **All** = no filter;
+**Active** = `DRAFT`, `IN_PROCESSING`, `READY_TO_SUBMIT`, `SUBMITTED`, `CLEAR_TO_CLOSE`
+(the in-progress statuses — `CLEAR_TO_CLOSE` is included so no status is orphaned);
+**Action needed** = `IN_CONDITIONS` (a V1 proxy); **Completed** = `CLOSED`, `WITHDRAWN`.
+The four non-"All" groups are disjoint and together cover all eight statuses (verified by
+test). The same module also holds the single status → label/badge-colour mapping.
+
+**Rationale:** A processor thinks in "what's active / what needs me / what's done", not in
+eight raw statuses. Including `CLEAR_TO_CLOSE` in Active avoids a status that no pill
+surfaces. "Action needed" starts as `IN_CONDITIONS` and will later also include files with
+outstanding **blocking** needs once that's surfaced.
+
+**Consequences:** Groupings live in one place (UI + the repeatable `status` query). Refine
+"Action needed" when needs-surfacing exists. The plan's example Active set (four statuses)
+is extended by one (`CLEAR_TO_CLOSE`) for completeness — documented here.

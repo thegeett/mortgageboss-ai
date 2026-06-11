@@ -73,15 +73,23 @@ are still allowed (enforcement would be a separate ticket). Two enum values
 Unchanged from LP-28 — listing was not rebuilt for LP-30.
 
 Query params: `page` (default `1`, ≥1), `page_size` (default `20`, 1–100),
-`status` (optional `LoanFileStatus`). Returns `PaginatedLoanFiles`:
-`{ items: LoanFileSummary[], total, page, page_size }`, ordered newest-first
-(`created_at desc`), excluding soft-deleted and other companies' files. `total`
-is the full count for the filters, independent of the page.
+`status` (**repeatable** `LoanFileStatus` — `?status=draft&status=submitted` filters
+to any of them, so the dashboard's grouped pills paginate correctly), and `search`
+(LP-31). Returns `PaginatedLoanFiles`: `{ items: LoanFileSummary[], total, page,
+page_size }`, ordered newest-first (`created_at desc`), excluding soft-deleted and
+other companies' files. `total` is the full count for the filters, independent of
+the page.
+
+**`search` (LP-31, ADR-103)** — case-insensitive, matches `display_id` OR a
+borrower's name; **always company-scoped** (composed with `scope_to_company`), so it
+can never reach another company's files (verified by test).
 
 ### Summary vs detail
 
 - **`LoanFileSummary`** (list items) — lean: `id`, `display_id`, `status`,
   `loan_program`, `loan_purpose`, `loan_amount`, `lender_id`,
+  **`lender_name`** (the lender's name, or null), **`property_address`** (the
+  property's address line, or null — both LP-31, resolved via eager-load),
   `primary_borrower_name` (derived from the `is_primary` borrower),
   `created_at`, `updated_at`. **No `inbox_token`.**
 - **`LoanFileDetail`** (single file) — summary + `loan_officer_name`/`email` +

@@ -19,7 +19,7 @@ from app.core.database import get_db
 from app.core.jwt import create_access_token
 from app.core.security import hash_password
 from app.main import app
-from app.models import Borrower, Company, User, UserRole
+from app.models import Borrower, Company, Lender, Property, User, UserRole
 from app.models.activity_log import ActivityLog, ActivityType
 from app.models.loan_file import LoanFile
 from app.models.needs_item import NeedsItem
@@ -376,3 +376,41 @@ async def test_patch_status_and_delete_log_activities(
     }
     assert (ActivityType.STATUS_CHANGED, user.id) in types
     assert (ActivityType.FILE_DELETED, user.id) in types
+
+
+# --------------------------------------------------------------------------- #
+# LP-31: list summary extension (lender_name + property_address) + search
+# --------------------------------------------------------------------------- #
+
+
+async def test_list_summary_includes_lender_name_and_property_address(
+    client: AsyncClient, db: AsyncSession
+) -> None:
+    """The list summary resolves lender_name + property_address (None when absent)."""
+    company, _user, token = await _user_and_token(db, slug="acme", email="u@acme.com")
+    created = (await client.post(LOAN_FILES_URL, json={}, headers=_auth(token))).json()
+    loan_file = await db.scalar(select(LoanFile).where(LoanFile.id == created["id"]))
+    assert loan_file is not None
+
+    lender = Lender(company_id=company.id, name="Acme Bank", slug="acme-bank")
+    db.add(lender)
+    await db.flush()
+    loan_file.lender_id = lender.id
+    db.add(Property(loan_file_id=loan_file.id, address_line="123 Main St"))
+    await db.commit()
+
+    item = (await client.get(LOAN_FILES_URL, headers=_auth(token))).json()["items"][0]
+    assert item["lender_name"] == "Acme Bank"
+    assert item["property_address"] == "123 Main St"
+
+
+async def test_list_search_filters_by_display_id(client: AsyncClient, db: AsyncSession) -> None:
+    """The search query param narrows the list by display_id (company-scoped)."""
+    _company, _user, token = await _user_and_token(db, slug="acme", email="u@acme.com")
+    first = (await client.post(LOAN_FILES_URL, json={}, headers=_auth(token))).json()
+    await client.post(LOAN_FILES_URL, json={}, headers=_auth(token))
+
+    resp = await client.get(f"{LOAN_FILES_URL}?search={first['display_id']}", headers=_auth(token))
+    data = resp.json()
+    assert data["total"] == 1
+    assert data["items"][0]["display_id"] == first["display_id"]

@@ -75,18 +75,23 @@ async def list_files(
     current_user: CurrentUser,
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=100)] = 20,
-    status: Annotated[LoanFileStatus | None, Query()] = None,
+    status: Annotated[list[LoanFileStatus] | None, Query()] = None,
+    search: Annotated[str | None, Query(max_length=128)] = None,
 ) -> PaginatedLoanFiles:
     """List the caller's company's loan files (newest first), paginated.
 
-    Optional ``status`` filter. Excludes soft-deleted and other companies' files.
+    ``status`` is repeatable (``?status=draft&status=submitted``) so grouped
+    dashboard pills filter to several statuses at once. ``search`` (display_id or
+    borrower name, case-insensitive, company-scoped). Excludes soft-deleted and
+    other companies' files.
     """
     items, total = await list_loan_files(
         db,
         company_id=current_user.company_id,
         page=page,
         page_size=page_size,
-        status=status,
+        statuses=status,
+        search=search,
     )
     return PaginatedLoanFiles(
         items=[LoanFileSummary.from_model(item) for item in items],

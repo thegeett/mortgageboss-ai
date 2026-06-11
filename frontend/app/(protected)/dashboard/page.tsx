@@ -1,64 +1,135 @@
 "use client";
 
-import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { FileTable } from "@/components/dashboard/file-table";
+import { FilterPills } from "@/components/dashboard/filter-pills";
+import { SearchInput } from "@/components/dashboard/search-input";
+import { StatsCards } from "@/components/dashboard/stats-cards";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { useDebouncedValue } from "@/hooks/use-debounced-value";
+import { useLoanFiles } from "@/lib/api/loan-files";
+import { type FilterKey, statusesForFilter } from "@/lib/loan-files/status";
 import { useAuthStore } from "@/lib/stores/auth-store";
+import type { LoanFileSummary } from "@/lib/types/loan-file";
+import { ChevronLeft, ChevronRight, Plus } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { useMemo, useState } from "react";
+
+const PAGE_SIZE = 20;
 
 /**
- * Authenticated landing page. Renders inside the app shell (LP-27), so it has no
- * chrome of its own — logout lives in the header user menu. Shows the signed-in
- * user's details from the in-memory store. The real dashboard arrives in Epic 4+.
+ * Dashboard — the processor's worklist (LP-31). Renders inside the LP-27 shell:
+ * stats, filter pills, search, and the loan-file table, all driven by the
+ * LP-28 list endpoint. "New File" → /loan-files/new (LP-32); a row →
+ * /loan-files/{display_id} (LP-33).
  */
 export default function DashboardPage() {
-  const user = useAuthStore((state) => state.user);
+  const router = useRouter();
+  const firstName = useAuthStore((state) => state.user?.first_name);
+
+  const [filter, setFilter] = useState<FilterKey>("all");
+  const [searchInput, setSearchInput] = useState("");
+  const [page, setPage] = useState(1);
+  const search = useDebouncedValue(searchInput.trim(), 300);
+
+  const statuses = useMemo(() => statusesForFilter(filter), [filter]);
+
+  // Changing a filter or the search resets to the first page (done in the
+  // handlers rather than an effect, so there's no extra render/refetch).
+  const handleFilter = (next: FilterKey) => {
+    setFilter(next);
+    setPage(1);
+  };
+  const handleSearch = (next: string) => {
+    setSearchInput(next);
+    setPage(1);
+  };
+
+  const { data, isPending, isError } = useLoanFiles({
+    page,
+    pageSize: PAGE_SIZE,
+    statuses,
+    search,
+  });
+
+  const isFiltered = filter !== "all" || search !== "";
+  const total = data?.total ?? 0;
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const rangeStart = total === 0 ? 0 : (page - 1) * PAGE_SIZE + 1;
+  const rangeEnd = Math.min(page * PAGE_SIZE, total);
+
+  const goToFile = (file: LoanFileSummary) => router.push(`/loan-files/${file.display_id}`);
+  const newFile = () => router.push("/loan-files/new");
 
   return (
     <div className="space-y-6">
-      <div>
-        <h2 className="text-2xl font-bold tracking-tight text-gray-900">
-          {user ? `Welcome back, ${user.first_name}.` : "Welcome back."}
-        </h2>
-        <p className="mt-1 text-gray-500">
-          You&apos;re signed in. Loan files and processing tools arrive in a later phase.
-        </p>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight text-gray-900">
+            {firstName ? `Welcome back, ${firstName}.` : "Dashboard"}
+          </h1>
+          <p className="mt-1 text-sm text-gray-500">Your loan file worklist.</p>
+        </div>
+        <Button type="button" onClick={newFile} className="gap-2 self-start sm:self-auto">
+          <Plus className="h-4 w-4" />
+          New file
+        </Button>
       </div>
 
-      {user && (
-        <Card className="border-gray-200/80 shadow-sm">
-          <CardHeader>
-            <CardTitle className="text-base font-semibold text-gray-900">Your account</CardTitle>
-            <CardDescription>The identity this session is scoped to.</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <dl className="grid gap-px overflow-hidden rounded-lg border border-gray-200 bg-gray-200 text-sm sm:grid-cols-2">
-              <div className="bg-white px-4 py-3">
-                <dt className="text-xs font-medium uppercase tracking-wide text-gray-400">Name</dt>
-                <dd className="mt-1 font-medium text-gray-900">
-                  {user.first_name} {user.last_name}
-                </dd>
-              </div>
-              <div className="bg-white px-4 py-3">
-                <dt className="text-xs font-medium uppercase tracking-wide text-gray-400">Email</dt>
-                <dd className="mt-1 font-medium text-gray-900">{user.email}</dd>
-              </div>
-              <div className="bg-white px-4 py-3">
-                <dt className="text-xs font-medium uppercase tracking-wide text-gray-400">Role</dt>
-                <dd className="mt-1">
-                  <Badge variant="secondary" className="capitalize">
-                    {user.role}
-                  </Badge>
-                </dd>
-              </div>
-              <div className="bg-white px-4 py-3">
-                <dt className="text-xs font-medium uppercase tracking-wide text-gray-400">
-                  Company ID
-                </dt>
-                <dd className="mt-1 font-mono text-xs text-gray-600">{user.company_id}</dd>
-              </div>
-            </dl>
-          </CardContent>
-        </Card>
-      )}
+      <StatsCards />
+
+      <Card className="overflow-hidden border-gray-200/80 shadow-sm">
+        <div className="flex flex-col gap-3 border-b border-gray-100 p-4 sm:flex-row sm:items-center sm:justify-between">
+          <FilterPills value={filter} onChange={handleFilter} />
+          <SearchInput value={searchInput} onChange={handleSearch} />
+        </div>
+
+        <FileTable
+          files={data?.items ?? []}
+          isPending={isPending}
+          isError={isError}
+          isFiltered={isFiltered}
+          onSelect={goToFile}
+          onNewFile={newFile}
+        />
+
+        {!isError && total > 0 && (
+          <div className="flex items-center justify-between border-t border-gray-100 px-4 py-3 text-sm text-gray-500">
+            <span>
+              Showing <span className="font-medium text-gray-700">{rangeStart}</span>–
+              <span className="font-medium text-gray-700">{rangeEnd}</span> of{" "}
+              <span className="font-medium text-gray-700">{total}</span>
+            </span>
+            <div className="flex items-center gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="gap-1"
+                disabled={page <= 1}
+                onClick={() => setPage((current) => Math.max(1, current - 1))}
+              >
+                <ChevronLeft className="h-4 w-4" />
+                Prev
+              </Button>
+              <span className="tabular-nums">
+                Page {page} / {totalPages}
+              </span>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="gap-1"
+                disabled={page >= totalPages}
+                onClick={() => setPage((current) => Math.min(totalPages, current + 1))}
+              >
+                Next
+                <ChevronRight className="h-4 w-4" />
+              </Button>
+            </div>
+          </div>
+        )}
+      </Card>
     </div>
   );
 }

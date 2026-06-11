@@ -17,12 +17,13 @@ ADR-073) while the pure mutators stay logging-free for internal/test callers.
 
 from uuid import UUID
 
-from sqlalchemy import Select, func, select
+from sqlalchemy import Select, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.models.activity_log import ActivityType
 from app.models.base import utcnow
+from app.models.borrower import Borrower
 from app.models.helpers import only_active, scope_to_company
 from app.models.lender import LoanProgram
 from app.models.loan_file import LoanFile, LoanFileStatus, LoanPurpose
@@ -94,24 +95,44 @@ async def list_loan_files(
     company_id: UUID,
     page: int = 1,
     page_size: int = 20,
-    status: LoanFileStatus | None = None,
+    statuses: list[LoanFileStatus] | None = None,
+    search: str | None = None,
 ) -> tuple[list[LoanFile], int]:
     """List a company's loan files, newest first, paginated.
 
     Returns ``(items, total)`` where ``total`` is the full count for the same
-    filters (company + active + optional status), independent of the page.
-    Borrowers are eager-loaded so the summary's ``primary_borrower_name`` can be
-    computed without a lazy load.
+    filters (company + active + optional statuses + search), independent of the
+    page. ``statuses`` filters to any of the given statuses (so the dashboard's
+    grouped pills — e.g. "Active" = several statuses — paginate correctly).
+    ``search`` (case-insensitive) matches the ``display_id`` OR a primary/
+    co-borrower's name; it composes with the company scope, so it can never reach
+    another company's files. Borrowers, lender, and property are eager-loaded so
+    the summary fields are built without a lazy load.
     """
     base = _scoped(company_id)
-    if status is not None:
-        base = base.where(LoanFile.status == status)
+    if statuses:
+        base = base.where(LoanFile.status.in_(statuses))
+    if search:
+        pattern = f"%{search}%"
+        # Files whose display_id matches, OR that have an active borrower whose
+        # full name matches. The borrower subquery is joined by loan_file_id; the
+        # outer query stays company-scoped, so a cross-company match can't leak.
+        borrower_match = (
+            select(Borrower.loan_file_id)
+            .where(Borrower.deleted_at.is_(None))
+            .where((Borrower.first_name + " " + Borrower.last_name).ilike(pattern))
+        )
+        base = base.where(or_(LoanFile.display_id.ilike(pattern), LoanFile.id.in_(borrower_match)))
 
     count_stmt = select(func.count()).select_from(base.subquery())
     total = (await db.scalar(count_stmt)) or 0
 
     items_stmt = (
-        base.options(selectinload(LoanFile.borrowers))
+        base.options(
+            selectinload(LoanFile.borrowers),
+            selectinload(LoanFile.lender),
+            selectinload(LoanFile.property),
+        )
         .order_by(LoanFile.created_at.desc())
         .offset((page - 1) * page_size)
         .limit(page_size)
@@ -130,10 +151,12 @@ async def get_loan_file(
 
     Returns ``None`` if no active file with that identifier exists *in this
     company* — including when it exists in another company (it's simply out of
-    scope). Borrowers and property are eager-loaded for the detail view.
+    scope). Borrowers, lender, and property are eager-loaded for the detail view
+    (the summary fields ``lender_name``/``property_address`` need lender/property).
     """
     stmt = _scoped(company_id).options(
         selectinload(LoanFile.borrowers),
+        selectinload(LoanFile.lender),
         selectinload(LoanFile.property),
     )
     try:

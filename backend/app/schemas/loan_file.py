@@ -102,13 +102,19 @@ class LoanFileSummary(BaseModel):
     loan_purpose: LoanPurpose | None
     loan_amount: Decimal | None
     lender_id: UUID | None
+    lender_name: str | None
+    property_address: str | None
     primary_borrower_name: str | None
     created_at: datetime
     updated_at: datetime
 
     @classmethod
     def from_model(cls, loan_file: LoanFile) -> Self:
-        """Build a summary from an ORM file. ``borrowers`` must be loaded."""
+        """Build a summary from an ORM file.
+
+        ``borrowers``, ``lender``, and ``property`` must be eager-loaded (async
+        sessions can't lazy-load on attribute access) — ``list_loan_files`` does so.
+        """
         return cls(
             id=loan_file.id,
             display_id=loan_file.display_id,
@@ -117,6 +123,10 @@ class LoanFileSummary(BaseModel):
             loan_purpose=loan_file.loan_purpose,
             loan_amount=loan_file.loan_amount,
             lender_id=loan_file.lender_id,
+            lender_name=loan_file.lender.name if loan_file.lender is not None else None,
+            property_address=(
+                loan_file.property.address_line if loan_file.property is not None else None
+            ),
             primary_borrower_name=_primary_borrower_name(loan_file, list(loan_file.borrowers)),
             created_at=loan_file.created_at,
             updated_at=loan_file.updated_at,
@@ -146,6 +156,10 @@ class LoanFileDetail(LoanFileSummary):
             loan_purpose=loan_file.loan_purpose,
             loan_amount=loan_file.loan_amount,
             lender_id=loan_file.lender_id,
+            lender_name=loan_file.lender.name if loan_file.lender is not None else None,
+            property_address=(
+                loan_file.property.address_line if loan_file.property is not None else None
+            ),
             primary_borrower_name=_primary_borrower_name(loan_file, borrowers),
             created_at=loan_file.created_at,
             updated_at=loan_file.updated_at,

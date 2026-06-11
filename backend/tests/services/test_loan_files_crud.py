@@ -123,7 +123,7 @@ async def test_status_filter_and_pagination(db_session: AsyncSession) -> None:
     )
 
     drafts, draft_total = await list_loan_files(
-        db_session, company_id=a.id, status=LoanFileStatus.DRAFT
+        db_session, company_id=a.id, statuses=[LoanFileStatus.DRAFT]
     )
     assert draft_total == 2
     assert all(f.status is LoanFileStatus.DRAFT for f in drafts)
@@ -162,3 +162,67 @@ async def test_primary_borrower_name_is_derived(db_session: AsyncSession) -> Non
     items, _ = await list_loan_files(db_session, company_id=a.id)
     summary = LoanFileSummary.from_model(items[0])
     assert summary.primary_borrower_name == "Pat Buyer"
+
+
+async def test_statuses_filters_to_any_of_several(db_session: AsyncSession) -> None:
+    """A multi-status filter (the grouped pills) returns files in any given status."""
+    a = await _company(db_session, "acme")
+    f1 = await create_loan_file(db_session, company_id=a.id)  # DRAFT
+    f2 = await create_loan_file(db_session, company_id=a.id)  # -> IN_PROCESSING
+    await create_loan_file(db_session, company_id=a.id)  # DRAFT (excluded below)
+    await update_loan_file(
+        db_session, loan_file=f2, data=LoanFileUpdate(status=LoanFileStatus.SUBMITTED)
+    )
+
+    items, total = await list_loan_files(
+        db_session,
+        company_id=a.id,
+        statuses=[LoanFileStatus.SUBMITTED, LoanFileStatus.READY_TO_SUBMIT],
+    )
+    assert total == 1
+    assert {f.id for f in items} == {f2.id}
+    assert f1.id not in {f.id for f in items}
+
+
+async def test_search_matches_display_id_and_is_company_scoped(db_session: AsyncSession) -> None:
+    """search matches display_id, and never reaches another company's files."""
+    a = await _company(db_session, "company-a")
+    b = await _company(db_session, "company-b")
+    a_file = await create_loan_file(db_session, company_id=a.id)
+    b_file = await create_loan_file(db_session, company_id=b.id)
+
+    # A searching A's display_id → found.
+    items, total = await list_loan_files(db_session, company_id=a.id, search=a_file.display_id)
+    assert total == 1
+    assert items[0].id == a_file.id
+
+    # A searching B's display_id → nothing (company-scoped).
+    _, total_cross = await list_loan_files(db_session, company_id=a.id, search=b_file.display_id)
+    assert total_cross == 0
+
+
+async def test_search_matches_borrower_name_and_is_company_scoped(db_session: AsyncSession) -> None:
+    """search matches a borrower's name (case-insensitive), still company-scoped."""
+    a = await _company(db_session, "company-a")
+    b = await _company(db_session, "company-b")
+    await create_loan_file(db_session, company_id=a.id)
+    b_file = await create_loan_file(db_session, company_id=b.id)
+    db_session.add(
+        Borrower(
+            loan_file_id=b_file.id,
+            first_name="Wanda",
+            last_name="Uniquename",
+            is_primary=True,
+            borrower_position=1,
+        )
+    )
+    await db_session.flush()
+
+    # B finds it (case-insensitive).
+    items_b, total_b = await list_loan_files(db_session, company_id=b.id, search="wanda")
+    assert total_b == 1
+    assert items_b[0].id == b_file.id
+
+    # A cannot — the borrower is on B's file (the crux: search is scoped).
+    _, total_a = await list_loan_files(db_session, company_id=a.id, search="Wanda")
+    assert total_a == 0
