@@ -11,6 +11,7 @@ mortgage processors. Start here to find your way around.
 | [database.md](database.md)                           | Database & migrations: base/mixins, shared types, enums, Alembic workflow |
 | [authentication.md](authentication.md)               | Password hashing (bcrypt) and JWT (PyJWT) — minimal claims, stateless tradeoff |
 | [onboarding-and-tenancy.md](onboarding-and-tenancy.md) | Company/user onboarding model, tenancy, staged build plan, dev seed |
+| [frontend-architecture.md](frontend-architecture.md) | Route groups, the protected app shell, adding pages, role-aware nav |
 | [glossary.md](glossary.md)                           | Mortgage domain terms and technical terms                 |
 | [poc-learnings.md](poc-learnings.md)                 | Lessons from the prototype (with a developer TODO section)|
 | [project-structure.md](project-structure.md)         | Repository layout and "where does X go?" conventions      |

@@ -2418,3 +2418,59 @@ ones.
 **Consequences:** When built, invitations and password reset reuse the same capability
 machinery. Until then, the seed script sets passwords directly. No password-bearing email
 is sent in V1.
+
+---
+
+## ADR-091: Protected route group with a shared shell layout (structural protection)
+
+- **Date:** 2026-06-11
+- **Status:** Accepted
+
+**Context:** The authenticated app needs consistent chrome and a single place that
+enforces "you must be signed in", without per-page boilerplate or a login-screen flash
+on reload (the access token is in memory, so reload starts unauthenticated until the
+silent refresh resolves).
+
+**Decision:** Authenticated pages live in a Next.js **`(protected)` route group** whose
+`layout.tsx` (a) performs the auth check — redirecting to `/login` only **after** the
+silent-refresh check resolves as unauthenticated (showing a loader while
+`isInitializing`), and (b) renders the app shell (sidebar/header) around `{children}`.
+The `/login` page stays in `(auth)`, **outside** the group, and renders with no shell.
+This consolidates LP-25's protection into the layout (the `useRequireAuth` hook remains
+the reusable utility; pages no longer each guard themselves).
+
+**Rationale:** Protection and chrome are applied **once, structurally**, to everything
+authenticated — the frontend analog of the backend's "auth as a declared dependency"
+(LP-24). Adding a page = dropping a file in the group; it inherits both. Coordinating the
+redirect with the loading state prevents flicker and premature redirects on refresh.
+
+**Consequences:** Pages in the group must not assume they render without the shell. The
+layout must keep coordinating with the silent-refresh state. Frontend protection remains
+**UX, not security** — the backend is the boundary (ADR-086).
+
+---
+
+## ADR-092: App shell composition (sidebar + header + content), role-aware nav
+
+- **Date:** 2026-06-11
+- **Status:** Accepted
+
+**Context:** Authenticated users need a calm, consistent daily frame, and the nav must
+grow as Epic 4+ ships pages and must be able to gate admin-only destinations.
+
+**Decision:** The shell is a **sidebar** (wordmark + role-filtered nav with active-route
+state) + **header** (section title, mobile nav menu, account menu with logout) +
+**content** area, built on shadcn/ui and the LP-5 design tokens. Navigation is a single
+config (`lib/navigation.ts`, `NAV_ITEMS`) shared by the desktop sidebar and the mobile
+menu; an item may set `requiredRole`, and `visibleNavItems(role)` filters it.
+
+**Rationale:** One cohesive, polished frame reused everywhere; a single nav config keeps
+desktop/mobile in sync and makes adding a destination a one-line change; `requiredRole`
+gives role-aware nav without bespoke logic. Reusing shadcn + tokens keeps it on-brand,
+not a generic template.
+
+**Consequences:** New features add a `NAV_ITEMS` entry (and a page in the group).
+Role-gated items use the live user's role from the store; the gating is UX (the page and
+the backend enforce real access). Far-future destinations are not pre-added. Deep mobile
+polish is deferred — the sidebar collapses into the header menu below `md`, which is
+sufficient for V1.
