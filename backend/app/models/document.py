@@ -38,6 +38,7 @@ from app.models.enums import str_enum
 from app.models.types import SHORT_STRING, LongStr, MediumStr
 
 if TYPE_CHECKING:
+    from app.models.extraction import Extraction
     from app.models.loan_file import LoanFile
     from app.models.user import User
 
@@ -149,6 +150,27 @@ class Document(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     loan_file: Mapped["LoanFile"] = relationship(back_populates="documents")
     # One-directional: User has no documents collection (not needed in V1).
     uploaded_by: Mapped["User | None"] = relationship()
+    # Extraction versions (one-to-many, LP-16) — owned child of the document,
+    # ordered by version so the collection reads oldest-to-newest.
+    extractions: Mapped[list["Extraction"]] = relationship(
+        back_populates="document",
+        cascade="all, delete-orphan",
+        order_by="Extraction.version",
+    )
+
+    @property
+    def current_extraction(self) -> "Extraction | None":
+        """The current extraction version, or None if there are none.
+
+        A simple Python property over the loaded ``extractions`` collection
+        (ADR-058) rather than a second filtered relationship — clearer for V1 and
+        no extra query when ``extractions`` is already loaded. The caller must
+        have loaded ``extractions`` (e.g. ``selectinload(Document.extractions)``);
+        accessing it unloaded in async code raises, by design. The partial unique
+        index guarantees at most one ``is_current`` row, so the first match is
+        the answer.
+        """
+        return next((e for e in self.extractions if e.is_current), None)
 
     def __repr__(self) -> str:
         return (

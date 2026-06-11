@@ -386,6 +386,53 @@ imports have no user actor, so it is null. Any query that attributes a document
 to a user must handle that null. `RESTRICT` keeps an uploader from being
 hard-deleted out from under their documents (consistent with **ADR-044**).
 
+## Extraction model
+
+An **`Extraction`** is the structured data AI pulled out of a document (gross pay
+from a pay stub, the transaction list from a bank statement). `document.extractions`
+is the one-to-many; an extraction is an **owned child** of the document
+(`document_id` FK, `ondelete=CASCADE`) with **no `company_id`** — scoped
+transitively through `document → loan_file` (**ADR-052**). It also records AI
+**provenance** for cost tracking and debugging: `model_used`, `tokens_used`,
+`cost_estimate` (a `Float`, not `Money` — per-extraction costs are sub-cent
+estimates), and `error_detail` (set on a `FAILED` run). `extraction_status` is a
+`str_enum` (`succeeded` / `failed` / `partial`, VARCHAR + CHECK).
+
+### JSON data, typed at the application layer (ADR-057)
+
+`extracted_data` is a single **JSON** column. Its structure is **not** a generic
+field bag and **not** DB-enforced — it is governed by document-type-specific
+**Pydantic schemas at the application layer** (Phase 2). The extraction task
+validates a typed model and serializes it into the column; readers parse it back.
+This is the deliberate difference from the POC's generic `ExtractedField` rows
+(an EAV anti-pattern): V1 stores document-type-specific *structured* data that
+merely happens to be persisted as JSON. The tradeoff: no querying *inside* the
+JSON at the DB level in V1 — we read the whole extraction and parse it.
+
+**Bank-statement transactions live inside `extracted_data`** as a nested list in
+V1 — there is no separate transactions table (**ADR-059**). Cross-transaction
+querying isn't needed yet; a projection table can be added later if it is.
+
+### Versioning: one current per document (ADR-058)
+
+A document can be re-extracted (re-classification, prompt improvements). Each run
+is a new **`version`** (sequential per document, from 1); **`is_current`** marks
+the active one. A **partial unique index** enforces exactly one current per
+document at the database level:
+
+```
+uq_extractions_document_id_current  UNIQUE (document_id) WHERE is_current
+```
+
+Any number of historical (`is_current = false`) versions coexist; history is
+preserved. Create new versions through
+`app.services.extractions.create_extraction_version`, which **demotes the old
+current (and flushes) before inserting the new one** — otherwise the insert would
+collide with the still-current row on the partial index. Read the active data via
+`is_current = true` or the `Document.current_extraction` convenience (a Python
+property over the loaded `extractions` collection — load it with
+`selectinload(Document.extractions)`).
+
 ## Writing a model test
 
 Database tests use a dedicated **test database** (`<dev_db>_test`,
@@ -499,3 +546,6 @@ PostgreSQL extensions the schema relies on:
 - **ADR-054** — Document processing lifecycle status
 - **ADR-055** — Document storage path in the database, bytes in the backend
 - **ADR-056** — Document upload provenance
+- **ADR-057** — Extracted data stored as JSON, typed at the application layer
+- **ADR-058** — Extraction versioning with one current per document
+- **ADR-059** — Bank-statement transactions in `extracted_data` JSON (no table in V1)

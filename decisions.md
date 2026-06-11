@@ -1487,3 +1487,100 @@ documents cannot be hard-deleted out from under them.
 attributes a document to a user must handle the null case (inbox/MISMO). The
 source enum and the uploader column are independent but correlated — the
 application sets `uploaded_by_user_id` only alongside `USER_UPLOAD`.
+
+---
+
+## ADR-057: Extracted data stored as JSON, typed at the application layer
+
+- **Date:** 2026-06-11
+- **Status:** Accepted
+
+**Context:** Extracted data varies by document type — a pay stub has different
+fields than a bank statement, across a ~100-type set finalized in Phase 2. The
+`extractions` table needs a storage strategy that holds any document type's
+fields without sacrificing type safety.
+
+**Decision:** A single `extractions` table with one `extracted_data` **JSON**
+column. The *structure* of that JSON is governed by document-type-specific
+**Pydantic schemas at the application layer** (Phase 2), not by the database.
+
+**Alternatives considered:**
+- *Typed columns / a table per document type* (~100 rigid tables) — a schema
+  migration for every new or refined type; unworkable at the Phase 2 cadence.
+- *EAV generic field rows* (the POC's `ExtractedField` bag) — an anti-pattern:
+  loses all structure and type information, every read reassembles a record from
+  key-value rows.
+
+**Rationale:** One flexible table keeps the schema stable while document types
+evolve. Type safety is recovered in Python: the extraction task validates and
+serializes a typed Pydantic model into `extracted_data`, and readers parse it
+back. This is **deliberately different** from the POC's generic field bag — V1
+stores document-type-specific *structured* data that merely happens to be
+persisted as JSON.
+
+**Consequences:** There is no DB-level schema enforcement on `extracted_data`
+contents — correctness is a Python concern (the Phase 2 schemas). Querying
+*inside* the JSON at the DB level is not done in V1: we read the whole extraction
+and parse it. If cross-extraction field querying is ever needed, Postgres
+JSON(B) operators or a projection table can be added later.
+
+---
+
+## ADR-058: Extraction versioning with one current per document
+
+- **Date:** 2026-06-11
+- **Status:** Accepted
+
+**Context:** A document can be extracted more than once — re-classification, an
+improved prompt, a model upgrade. We want the latest result *and* the history,
+without ever losing a prior extraction.
+
+**Decision:** Extractions are **versioned**: a `version` integer (sequential per
+document, from 1) plus an `is_current` boolean. A **partial unique index**,
+`uq_extractions_document_id_current` = `UNIQUE (document_id) WHERE is_current`,
+guarantees exactly one current extraction per document while permitting any
+number of historical (`is_current = false`) rows. New versions are created
+through `app.services.extractions.create_extraction_version`.
+
+**Rationale:** Re-extraction creates a new version and keeps the prior ones for
+audit and comparison. The invariant "one current per document" is enforced at the
+**database** level by the partial index, not merely by application convention —
+so a bug can't silently leave two current rows. A partial index is the precise
+tool: full uniqueness on `document_id` would forbid history; uniqueness on
+`(document_id, is_current)` would still allow two `false` rows but only one
+`true`, which is *almost* right but allows no historical duplicates of `false`
+semantics cleanly — the `WHERE is_current` form expresses the intent exactly.
+
+**Consequences:** Creating a new version must **demote the old current first**
+(set `is_current = false` and flush) **before inserting** the new current row, or
+the insert violates the partial index. `create_extraction_version` encapsulates
+that ordering. Queries for "the current data" filter `is_current = true` (or use
+the `Document.current_extraction` convenience). Version numbers are taken over all
+rows (including soft-deleted), so they never repeat.
+
+---
+
+## ADR-059: Bank-statement transactions stored in extracted_data JSON (no table in V1)
+
+- **Date:** 2026-06-11
+- **Status:** Accepted
+
+**Context:** A bank statement contains a list of transactions — a sub-structure
+within the extracted data. We could model transactions as their own table or keep
+them inside the extraction JSON.
+
+**Decision:** Transactions live **inside** the extraction's `extracted_data` JSON
+as a nested list in V1. There is no separate `transactions` table.
+
+**Rationale:** V1 reads transactions only as part of the owning extraction (to
+display or verify a single statement); there is no requirement yet to query or
+aggregate *across* transactions (e.g. "all large deposits across every file").
+A separate table would add a join, a model, and migration surface for no current
+benefit, and it would duplicate the versioning concern (transactions belong to a
+specific extraction version).
+
+**Consequences:** Cross-transaction querying/aggregation at the DB level is not
+possible in V1 — acceptable for the current scope. If such a need emerges (search,
+analytics, large-deposit flags spanning files), a `transactions` projection table
+fed from the current extraction can be introduced in a later phase without
+changing how extractions are stored.
