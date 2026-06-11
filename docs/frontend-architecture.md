@@ -93,8 +93,40 @@ That's it: drop a file in the group, add a nav line. This is the frontend analog
 the backend's "auth as a declared dependency" — protection and chrome are applied
 structurally, in one place.
 
+## The file workspace (LP-33)
+
+A single loan file is a **tabbed workspace** built as a Next.js **nested layout**
+under the `(protected)` group:
+
+```
+app/(protected)/loan-files/[id]/
+  layout.tsx        # fetches the file once → persistent header + tab nav; renders {children}
+  page.tsx          # Overview (default; placeholder until LP-34)
+  documents/        verification/   communication/   conditions/   lender-package/
+```
+
+- **`[id]` is the file's `display_id`** (`/loan-files/LF-XXXX`) — human-friendly, and
+  the API accepts UUID or `display_id`. The dashboard rows (LP-31) and the intake redirect
+  (LP-32) both navigate by `display_id`.
+- **`layout.tsx`** (client) fetches the file via `useLoanFile(id)` and renders the
+  **persistent header** (borrower name with graceful fallback, `display_id`, status badge,
+  key dates) + **tab navigation**, with `{children}` (the active tab page) below. The
+  header/tabs stay put while you switch tabs; only the content changes.
+- **Tabs are route-based links**, not ARIA tabs/tabpanels (each tab is a sub-route); the
+  active link carries `aria-current="page"`, derived from `usePathname` via
+  `activeTabKey` (`lib/loan-files/tabs.ts`).
+- **All six tabs show now**; not-yet-built ones render clearly-labeled "coming in Phase X"
+  placeholders (ADR-109) — honest about the file's lifecycle without faking features.
+- **States:** skeleton header while loading; a `404` (missing *or* out-of-company —
+  tenant-safe, both surface the same) shows "File not found" with a way back; other errors
+  show a clean message.
+
+**Adding real tab content** (LP-34+): replace a tab's placeholder `page.tsx`; it fetches
+the same `["loan-file", id]` query (deduped by React Query) and renders into the existing
+shell — no header/tab rework. The status→badge mapping is the shared
+`components/status-badge.tsx` over `STATUS_META` (one mapping, reused everywhere).
+
 ## What's next
 
-- **Epic 4** — loan-file list and the file workspace, built as pages inside the
-  `(protected)` group (replacing the `/loan-files` stub), calling the API through
-  the authenticated client.
+- **LP-34** — the Overview tab's real content (file summary: borrowers, property, loan,
+  needs list).

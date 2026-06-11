@@ -7,8 +7,9 @@
  * current page visible while the next loads (no flicker on filter/search/page).
  */
 import { apiClient } from "@/lib/api/client";
-import type { LoanFileStatus, PaginatedLoanFiles } from "@/lib/types/loan-file";
+import type { LoanFileDetail, LoanFileStatus, PaginatedLoanFiles } from "@/lib/types/loan-file";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
+import { isAxiosError } from "axios";
 
 export const LOAN_FILES_PATH = "/api/v1/loan-files";
 
@@ -51,5 +52,25 @@ export function useLoanFiles(query: LoanFilesQuery) {
     queryKey: loanFilesQueryKey(query),
     queryFn: () => fetchLoanFiles(query),
     placeholderData: keepPreviousData,
+  });
+}
+
+// --- Single-file detail (LP-33) --------------------------------------------- //
+
+/** Fetch one file by UUID or display_id. The API 404s for not-found *or*
+ * out-of-company (tenant-safe — both surface the same). */
+export async function fetchLoanFile(identifier: string): Promise<LoanFileDetail> {
+  const response = await apiClient.get<LoanFileDetail>(`${LOAN_FILES_PATH}/${identifier}`);
+  return response.data;
+}
+
+export function useLoanFile(identifier: string) {
+  return useQuery({
+    queryKey: ["loan-file", identifier],
+    queryFn: () => fetchLoanFile(identifier),
+    enabled: Boolean(identifier),
+    // A 404 (missing or out-of-company) won't change on retry — surface it now.
+    retry: (failureCount, error) =>
+      !(isAxiosError(error) && error.response?.status === 404) && failureCount < 1,
   });
 }

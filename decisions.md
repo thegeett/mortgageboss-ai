@@ -2863,3 +2863,56 @@ the essential one.
 **Consequences:** Lenders appear once seeded; the dropdown shows "No lenders configured"
 meanwhile. Co-borrowers are a later addition. The lenders endpoint is tested for tenant
 scoping.
+
+---
+
+## ADR-108: File detail as a nested layout with a persistent header + route-based tabs
+
+- **Date:** 2026-06-11
+- **Status:** Accepted
+
+**Context:** A single loan file is a workspace with several aspects (overview, documents,
+verification, …). It needs structure that keeps the file's identity visible while moving
+between those aspects, and a place future feature-views slot into.
+
+**Decision:** Build it as a Next.js **nested layout** — `app/(protected)/loan-files/[id]/
+layout.tsx` fetches the file once (`useLoanFile`) and renders a **persistent header**
+(borrower name / `display_id` / status badge / dates) + **tab navigation**; each tab is a
+**page** rendering into `{children}`, so the header/tabs persist across tab switches. Tabs
+are **route-based links** (not ARIA tabs/tabpanels — each tab is a sub-route) with
+`aria-current` on the active link, derived from `usePathname`. The URL uses the
+**`display_id`** (`/loan-files/LF-XXXX`); the dashboard and intake already navigate by it.
+
+**Rationale:** This is the standard App Router tabbed-detail pattern; the file context stays
+on screen while you switch aspects; tabs map to the file's processing lifecycle; future
+feature-views become tab pages without rebuilding chrome. Route-based links (vs ARIA tabs)
+are the correct semantics when each tab is its own URL. The status→badge mapping is reused
+from one shared module (`components/status-badge.tsx` over `STATUS_META`) — no second copy.
+
+**Consequences:** Per-file features are added as tab pages (LP-34 fills Overview). The
+header/tabs are defined once. A `404` (missing or out-of-company — tenant-safe) shows "File
+not found".
+
+---
+
+## ADR-109: Show all file tabs now with clearly-labeled placeholders
+
+- **Date:** 2026-06-11
+- **Status:** Accepted
+
+**Context:** Most of the file's tabs lead to features built in later phases. Whether to show
+only the built tabs or all of them.
+
+**Decision:** Show **all six** tabs immediately; the not-yet-built ones render **unmistakable
+"coming in Phase X"** placeholders (a dashed-border card with the phase badge).
+
+**Rationale:** Unlike *top-level nav* — where phantom items mislead about what the app can do
+(so LP-27/ADR-092 pre-adds nothing) — clearly-labeled *file tabs* honestly convey the file's
+intended processing lifecycle and set expectations, **as long as each placeholder plainly
+states it's upcoming**. This is the difference between "the app claims a capability it lacks"
+and "this file will gain these aspects in these phases."
+
+**Consequences:** Tabs resolve to placeholders until their phases land; each placeholder must
+stay clearly *upcoming* (never a real-but-empty feature). The tab set + target phases live in
+one config (`lib/loan-files/tabs.ts`). A leaner overview+documents-only shell was the
+alternative.

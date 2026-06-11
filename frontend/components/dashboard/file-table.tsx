@@ -1,6 +1,6 @@
 "use client";
 
-import { StatusBadge } from "@/components/dashboard/status-badge";
+import { StatusBadge } from "@/components/status-badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import {

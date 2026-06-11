@@ -3,8 +3,9 @@ import type { LoanFileStatus } from "@/lib/types/loan-file";
 import { cn } from "@/lib/utils";
 
 /**
- * A calm, color-meaningful status pill (LP-31). Colours and labels come from the
- * single `STATUS_META` map so every surface shows a status the same way.
+ * A calm, color-meaningful loan-file status pill. Colours and labels come from
+ * the single `STATUS_META` map (LP-31), so every surface — dashboard table, file
+ * header (LP-33), … — shows a status the same way.
  */
 export function StatusBadge({ status }: { status: LoanFileStatus }) {
   const meta = STATUS_META[status];
