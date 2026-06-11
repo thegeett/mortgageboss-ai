@@ -8,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.api.auth import router as auth_router
+from app.api.loan_files import router as loan_files_router
 from app.core.config import settings
 from app.core.database import (
     check_database_connection,
@@ -77,9 +78,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Feature routers. auth_router has its own "/auth" prefix, so login lives at
-# "/api/v1/auth/login" and refresh at "/api/v1/auth/refresh".
+# Feature routers. Each router carries its own resource prefix under /api/v1, so
+# login lives at "/api/v1/auth/login" and loan files at "/api/v1/loan-files".
 app.include_router(auth_router, prefix=API_V1_PREFIX)
+app.include_router(loan_files_router, prefix=API_V1_PREFIX)
 
 
 @app.get("/")

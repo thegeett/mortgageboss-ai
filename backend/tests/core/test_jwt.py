@@ -80,9 +80,12 @@ def test_garbage_token_raises_invalid_error() -> None:
 
 
 def test_tampered_token_raises_invalid_error() -> None:
-    """Flipping a character in the signature raises InvalidTokenError."""
+    """Corrupting a character in the token raises InvalidTokenError."""
     token = create_access_token(uuid4())
-    tampered = token[:-1] + ("A" if token[-1] != "A" else "B")
+    # Flip the FIRST char: its bits are always significant. (The last base64
+    # char can carry unused trailing bits, so flipping it sometimes decodes to
+    # the same bytes — leaving the token valid and the test flaky.)
+    tampered = ("A" if token[0] != "A" else "B") + token[1:]
     with pytest.raises(InvalidTokenError):
         verify_token(tampered, TokenType.ACCESS)
 

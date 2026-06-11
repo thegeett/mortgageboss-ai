@@ -166,7 +166,9 @@ async def test_me_with_tampered_token_is_401(client: AsyncClient, db_session: As
     """A tampered/garbage token -> 401."""
     user = await _make_user(db_session)
     token = create_access_token(user.id)
-    tampered = token[:-1] + ("A" if token[-1] != "A" else "B")
+    # Flip the FIRST char (always significant; the last base64 char may have
+    # unused trailing bits, which would make this tamper a no-op and flaky).
+    tampered = ("A" if token[0] != "A" else "B") + token[1:]
     assert (await client.get(ME_URL, headers=_bearer(tampered))).status_code == 401
     assert (await client.get(ME_URL, headers=_bearer("not.a.jwt"))).status_code == 401
 

@@ -2474,3 +2474,79 @@ Role-gated items use the live user's role from the store; the gating is UX (the 
 the backend enforce real access). Far-future destinations are not pre-added. Deep mobile
 polish is deferred — the sidebar collapses into the header menu below `md`, which is
 sufficient for V1.
+
+---
+
+## ADR-093: Tenant scoping enforced by scoped queries; company from the authenticated user
+
+- **Date:** 2026-06-11
+- **Status:** Accepted
+
+**Context:** Loan files (LP-28) are the first tenant-owned business resource exposed via
+the API. Multi-tenancy was modelled in Epic 2 and the request's company made available in
+LP-24; this is where it must actually be enforced on reads and writes.
+
+**Decision:** Every loan-file query is **scoped to `current_user.company_id`** via
+`scope_to_company` (and `only_active`). The company is **never** accepted from the request
+body or query. Out-of-company access returns **`404`** (the scoped query finds nothing),
+not `403`. Create derives `company_id` from the user; a `company_id` in the body is ignored
+(it isn't in the schema).
+
+**Rationale:** Scoping the **query** (rather than fetching then checking ownership) means
+another tenant's row never enters the result set — there is no object to accidentally leak.
+The scope is **non-forgeable**: it comes from the validated token + live user, so a caller
+can't reach another company by sending its id. `404` (not `403`) avoids revealing that a
+resource exists (anti-enumeration).
+
+**Consequences:** Every company-owned endpoint must scope to the user's company; the
+pattern repeats for documents/conditions/etc. A missed scope is a tenant data leak —
+covered here by cross-tenant tests (A cannot list/get/update/delete B's files) and the
+greppable `scope_to_company` helper.
+
+---
+
+## ADR-094: Summary vs detail response schemas; capabilities never exposed
+
+- **Date:** 2026-06-11
+- **Status:** Accepted
+
+**Context:** List and single-file reads have different needs, and some model fields must
+never reach a client.
+
+**Decision:** List endpoints return a lean **`LoanFileSummary`**; single-file endpoints
+return a richer **`LoanFileDetail`** that may nest borrowers and the property. **`inbox_token`
+is never in any response** (it is a capability — the borrower inbox email), and **raw `ssn`
+is never exposed** — borrowers carry **`masked_ssn`** only. `primary_borrower_name` is a
+derived convenience on the summary (from the `is_primary` borrower).
+
+**Rationale:** Lean lists keep payloads small; rich detail serves the file view. The
+inbox token grants the ability to email documents into a file, so surfacing it would be a
+capability leak; the raw SSN is GLBA-covered PII that must never leave the server.
+
+**Consequences:** Exposing the inbox token (if ever needed) is a deliberate, separate
+feature, not an accidental field. All borrower views use `masked_ssn`. Tests assert no
+`inbox_token` / raw SSN appears in any response body.
+
+---
+
+## ADR-095: Loan files addressed by UUID or display_id; soft delete only
+
+- **Date:** 2026-06-11
+- **Status:** Accepted
+
+**Context:** Processors refer to files by their human `display_id` (`LF-XXXX`), while
+internal references use the UUID. Deletion must preserve the audit trail.
+
+**Decision:** The single-file endpoints (`GET`/`PATCH`/`DELETE`) accept **either** the
+UUID **or** the `display_id` in the path; the service tries to parse the identifier as a
+UUID and otherwise treats it as a display id. `DELETE` is a **soft delete** (sets
+`deleted_at`), never a hard delete; soft-deleted files are excluded by `only_active` and
+subsequently return `404`.
+
+**Rationale:** Accepting the display id matches how processors reference files (from the
+UI, conversation, email subjects) without a separate lookup. Soft delete preserves history
+(the standing repo decision) and keeps related records intact.
+
+**Consequences:** The identifier lookup is a try-UUID-then-display-id branch (both scoped
+to the company). A deleted file is unreachable via the API but retained in the database;
+"undelete" would be a deliberate later feature.

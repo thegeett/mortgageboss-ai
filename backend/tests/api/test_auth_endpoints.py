@@ -226,7 +226,9 @@ async def test_refresh_with_tampered_token_is_401(
     """A tampered refresh token fails signature verification -> 401."""
     user = await _make_user(db_session)
     token = create_refresh_token(user.id)
-    tampered = token[:-1] + ("A" if token[-1] != "A" else "B")
+    # Flip the FIRST char (always significant; the last base64 char may have
+    # unused trailing bits, which would make this tamper a no-op and flaky).
+    tampered = ("A" if token[0] != "A" else "B") + token[1:]
     _put_refresh_cookie(auth_client, tampered)
     resp = await auth_client.post(REFRESH_URL)
     assert resp.status_code == 401

@@ -61,8 +61,10 @@ def test_decrypt_rejects_tampered_ciphertext() -> None:
     """A tampered/invalid token raises ValueError without leaking the value."""
     token = encrypt_value(SSN)
     assert token is not None
-    # Flip the final character to corrupt the authentication tag.
-    tampered = token[:-1] + ("A" if token[-1] != "A" else "B")
+    # Corrupt the FIRST character: its bits are always significant. (The last
+    # base64 char can carry unused trailing bits, so flipping it sometimes
+    # decodes to the same bytes — leaving the token valid and the test flaky.)
+    tampered = ("A" if token[0] != "A" else "B") + token[1:]
     with pytest.raises(ValueError) as exc_info:
         decrypt_value(tampered)
     # The error message must not contain the plaintext.
