@@ -252,7 +252,66 @@ forgets to scope is a tenant leak; the helper gives the rule one greppable name.
 `GET /api/v1/auth/me` is the first protected endpoint and the end-to-end proof of the
 chain: it depends on `CurrentUser` and returns `UserPublic` (never `hashed_password`).
 
+## Frontend (client) auth — LP-25
+
+The browser is the other half of the hybrid transport. Relevant ADRs: **ADR-084**
+(in-memory access token), **ADR-085** (interceptor auto-refresh), **ADR-086**
+(route protection is UX, not security), **ADR-087** (Vitest).
+
+### In-memory access token
+
+The access token lives **only in the Zustand store** (`lib/stores/auth-store.ts`) —
+never `localStorage`, `sessionStorage`, or a JS-set cookie. It is deliberately
+volatile: a full page reload wipes it, and the on-load silent refresh re-establishes
+it. Keeping it out of persistent JS-readable storage limits what an XSS payload can
+exfiltrate; the more powerful refresh token is never reachable from JS at all (it's
+the httpOnly cookie the browser manages).
+
+### Silent refresh on load
+
+`components/auth-provider.tsx` wraps the app. On mount it makes **one** call to
+`POST /auth/refresh` (the browser sends the httpOnly refresh cookie automatically via
+`withCredentials`). Success populates the store (the user is "remembered" across
+reloads); failure leaves them unauthenticated. Until that attempt settles,
+`isInitializing` is true and the app renders a full-screen loader — so neither the
+login screen nor protected content flashes before the auth state is known.
+
+### Axios interceptors (`lib/api/client.ts`)
+
+- **Request** — reads the current token via `useAuthStore.getState()` (never a stale
+  closure) and sets `Authorization: Bearer <token>` when present.
+- **Response** — on a `401` from a normal API call: perform a **single-flight**
+  refresh (concurrent 401s await one shared in-flight `refreshAccessToken()` promise),
+  update the store, then retry the original request(s) with the new token. **Loop
+  protection:** the `/auth/login` and `/auth/refresh` endpoints are exempt from
+  auto-refresh, and each request is retried at most once (`_retry` flag). If the
+  refresh itself fails, the store is cleared and the browser is redirected to
+  `/login` (preserving the attempted path in `?next=`).
+
+### Auth API (`lib/api/auth.ts`)
+
+Typed wrappers over the endpoints: `login` (stores token + user), `logout` (clears the
+cookie server-side, then the store — even if the network call fails), `refreshSession`
+(used on load), and `fetchCurrentUser` (`GET /auth/me`).
+
+### Route protection is UX, not security
+
+`hooks/use-require-auth.ts` + the `app/(app)/layout.tsx` protected layout redirect
+unauthenticated users to `/login`. This is **purely UX** — it only avoids rendering
+authenticated chrome to someone who isn't signed in. The real boundary is the backend:
+every protected endpoint verifies the Bearer token and the live user (LP-24). Public
+routes (home, `/login`) live outside the `(app)` group and aren't guarded.
+
+### Login flow
+
+`app/(auth)/login/page.tsx` renders a styled card; `components/auth/login-form.tsx`
+(react-hook-form + zod) validates a well-formed email and non-empty password, calls
+`login()`, shows a loading state while submitting, and on success redirects to the
+`next` path (sanitized to internal paths) or `/dashboard`. On failure it shows the
+backend's generic message — it never reveals whether the email exists, and never logs
+credentials or tokens.
+
 ## What's next
 
-- **LP-25** — frontend token storage (access in memory), an axios Bearer interceptor,
-  silent refresh against the cookie endpoint, and the auth store.
+- **Epic 4** — business pages (loan-file list, file workspace), each living under the
+  protected `(app)` group and calling the API through the authenticated client.

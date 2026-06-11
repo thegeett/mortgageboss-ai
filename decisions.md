@@ -2235,3 +2235,108 @@ nothing finer.
 **Consequences:** Authorization is coarse (role-level); per-resource ACLs are out of
 scope for V1. The 401-vs-403 distinction is verified by test (a PROCESSOR on an
 admin-only route gets 403, not 401; an anonymous request gets 401).
+
+---
+
+## ADR-084: Access token kept in memory only (client half of hybrid transport)
+
+- **Date:** 2026-06-11
+- **Status:** Accepted
+
+**Context:** LP-25 builds the frontend auth. The backend's hybrid transport (LP-23)
+returns the access token in the login/refresh response body; the client must decide
+where to keep it.
+
+**Decision:** The access token lives **only in memory** — a Zustand store
+(`lib/stores/auth-store.ts`) — never `localStorage`, `sessionStorage`, or a JS-set
+cookie. It is intentionally volatile: a full page reload wipes it, and the on-load
+silent refresh re-establishes it from the httpOnly refresh cookie.
+
+**Alternatives considered:** `localStorage`/`sessionStorage` (readable by any XSS —
+rejected for an auth credential); a JS-readable cookie (same exposure plus CSRF
+surface). Memory plus silent refresh gives persistence-across-reload UX without
+persisting the credential to JS-readable storage.
+
+**Rationale:** Keeping the token out of persistent JS storage limits what an XSS
+payload can exfiltrate, and the powerful long-lived refresh token is never reachable
+from JS at all (httpOnly cookie). The reload cost is hidden by silent refresh.
+
+**Consequences:** Every full reload triggers one `/auth/refresh` round-trip before the
+app is usable (covered by a loading gate). Multiple tabs each maintain their own
+in-memory token but share the refresh cookie. There is no offline/persisted session.
+
+---
+
+## ADR-085: Axios interceptors — single-flight auto-refresh with loop protection
+
+- **Date:** 2026-06-11
+- **Status:** Accepted
+
+**Context:** Access tokens expire; the client should recover transparently without the
+user re-logging in, and without stampeding the refresh endpoint when several requests
+401 at once.
+
+**Decision:** A response interceptor (`lib/api/client.ts`) auto-refreshes on `401`:
+the first 401 starts one `refreshAccessToken()` promise, concurrent 401s **await the
+same in-flight promise** (single-flight), then all retry once with the new token.
+**Loop protection:** `/auth/login` and `/auth/refresh` are exempt from auto-refresh,
+and a `_retry` flag caps each request at one retry. If the refresh itself fails, the
+store is cleared and the user is redirected to `/login`. The request interceptor reads
+the token via `getState()` so it's always current, never a stale closure.
+
+**Rationale:** Single-flight avoids N parallel refreshes (which would also fight over
+the rotating refresh cookie). The exemptions and retry cap prevent infinite
+refresh→401→refresh loops. Reading live state keeps a just-refreshed token from being
+missed by an in-flight request.
+
+**Consequences:** Transparent session continuation for the user. A genuinely expired
+session ends in one clean redirect to login. The interceptor holds a small module-level
+in-flight promise (reset in `finally`).
+
+---
+
+## ADR-086: Frontend route protection is UX, not security
+
+- **Date:** 2026-06-11
+- **Status:** Accepted
+
+**Context:** The app needs to keep unauthenticated users out of authenticated areas,
+but client-side checks can always be bypassed.
+
+**Decision:** Client route protection (`hooks/use-require-auth.ts` + the
+`app/(app)/layout.tsx` protected layout) is treated as **UX only**: it redirects
+unauthenticated users to `/login` and avoids flashing authenticated chrome. It is
+**never** relied on for security — the backend (LP-24) is the real boundary, verifying
+the Bearer token and live user on every protected request. Public routes live outside
+the `(app)` group.
+
+**Rationale:** Anything the browser enforces, the browser can be made to skip; data is
+only ever as protected as the API that serves it. Keeping this explicit prevents a
+false sense of safety and keeps authorization logic where it's enforceable.
+
+**Consequences:** No sensitive data may be embedded in client bundles or fetched
+without the API's own authz. The protected layout is a convenience/UX layer; Epic 4
+pages still rely on the backend to reject unauthorized access.
+
+---
+
+## ADR-087: Vitest for frontend unit tests
+
+- **Date:** 2026-06-11
+- **Status:** Accepted
+
+**Context:** LP-25 introduces the first frontend logic worth unit-testing (the auth
+store and the login zod schema). The frontend had no test runner.
+
+**Decision:** Adopt **Vitest** (`pnpm test` → `vitest run`) for frontend unit tests,
+with a `node` test environment and the `@/*` path alias mirrored in `vitest.config.ts`.
+Scope for now: pure, non-React logic (store reducers/selectors, schema validation);
+interceptor/flow behaviour is verified manually against the running backend.
+
+**Rationale:** Vitest is fast, Vite/ESM-native, needs minimal config, and shares
+Jest-style APIs. It fits TS strict and the existing toolchain without a heavy setup.
+Component/E2E testing (Testing Library / Playwright) can be added later if needed.
+
+**Consequences:** A new dev dependency and `test` script. CI wiring of `pnpm test`
+into the frontend pipeline is a small follow-up (the frontend CI currently runs
+biome/tsc/build, per LP-8); until then tests run locally.
