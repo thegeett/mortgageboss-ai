@@ -44,6 +44,8 @@ class ActivityType(StrEnum):
     """
 
     FILE_CREATED = "file_created"
+    FILE_UPDATED = "file_updated"
+    FILE_DELETED = "file_deleted"
     STATUS_CHANGED = "status_changed"
     DOCUMENT_UPLOADED = "document_uploaded"
     DOCUMENT_PROCESSED = "document_processed"

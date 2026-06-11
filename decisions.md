@@ -2631,3 +2631,85 @@ primary) are deferred (Phase 1.5 / later).
 unique constraint still holds for the soft-deleted row; a partial unique index would be
 a later model change). Primary-borrower consistency is largely client-managed; revisit
 if the workflow needs stricter enforcement.
+
+---
+
+## ADR-099: Loan file creation is orchestrated (file + initial needs list + activity)
+
+- **Date:** 2026-06-11
+- **Status:** Accepted
+
+**Context:** Creating a loan file is a **workflow**, not just a row insert: a new file
+should arrive with a starting needs list and a recorded creation event. The minimal
+`create_loan_file` (LP-13: ids + DRAFT) does only the row.
+
+**Decision:** Add `create_loan_file_with_setup` to `services/loan_files.py` (do **not**
+fork a parallel module), composing the existing `create_loan_file` with
+`generate_initial_needs_list` and one `FILE_CREATED` `log_activity` call, all in the
+caller's transaction. The minimal `create_loan_file` stays for internal/test reuse; the
+POST endpoint now calls the orchestration. The external response contract is unchanged —
+the needs list and activity are internal side-effects.
+
+**Rationale:** Creation behaviour belongs in one cohesive workflow function; composing
+existing pieces avoids duplicating id-generation or listing logic. Keeping the minimal
+creator lets services/tests make a bare file when that's all they need.
+
+**Consequences:** Creating a file now also writes needs items + an activity (tests that
+assert related-row counts were updated). The needs count is folded into the activity
+detail rather than logging one activity per item (no spam).
+
+---
+
+## ADR-100: Initial needs list is a provisional program-based template (pending domain capture)
+
+- **Date:** 2026-06-11
+- **Status:** Accepted
+
+**Context:** A new file needs a starting needs list, but the authoritative program- and
+lender-specific requirements come from the domain expert (Priya) and have **not** been
+captured yet (a Phase 0 closeout item).
+
+**Decision:** `generate_initial_needs_list` uses a **modest, clearly-provisional**
+per-program starter template (`services/needs_templates.py`): a universal baseline
+(government ID, recent pay stubs, bank statements, W-2s) plus a placeholder FHA extra,
+created with origin `TEMPLATE`. It is a simple, easily-extended data structure marked
+`PROVISIONAL` with a `TODO(domain)`.
+
+**Rationale:** We need a working baseline now without prematurely encoding guessed-at
+requirements as authoritative (the premature-commitment trap). Being explicitly
+provisional keeps it honest and signals where domain refinement is required.
+
+**Consequences:** The template **will** be refined with Priya; downstream features treat
+it as a starting point, not a source of truth. Expanding it is a one-place data edit.
+
+---
+
+## ADR-101: Activity logging adopted for loan file operations (first use of log_activity)
+
+- **Date:** 2026-06-11
+- **Status:** Accepted
+
+**Context:** `log_activity` was built in LP-20 but, per ADR-071/ADR-073, **not yet wired
+into any operation** — adoption is incremental. The loan-file lifecycle is the
+highest-value place to start populating the audit trail.
+
+**Decision:** Loan file create/update/delete now record activities (the first adoption):
+`FILE_CREATED` on create; on update, `STATUS_CHANGED` with `{from, to}` for a status
+transition else `FILE_UPDATED` with the changed field names; `FILE_DELETED` on soft
+delete. The actor is the current user, threaded from the endpoint as `actor_user_id`. The
+pure mutators stay logging-free; thin `*_with_activity` wrappers (which the endpoints
+call) add the logging, mirroring the `create_loan_file` / `create_loan_file_with_setup`
+split. Two enum values — **`FILE_UPDATED`** and **`FILE_DELETED`** — were **added to
+`ActivityType`** (a VARCHAR + CHECK swap migration, the cheap evolution ADR-037 designed
+for) so updates/deletes log semantically-correct types rather than reusing an ill-fitting
+one.
+
+**Rationale:** Starting the audit trail on the loan-file lifecycle is the natural first
+adoption; using correct activity types (rather than overloading `NOTE_ADDED`) keeps the
+trail meaningful. The wrapper split keeps the pure functions usable internally/in tests
+without forcing an actor.
+
+**Consequences:** Activities accumulate per file (create/update/delete). Other operations
+get instrumented incrementally later (ADR-073 still holds). The activity-timeline UI is a
+later frontend concern. The two new enum values required a migration (and are reflected in
+tests via `create_all`).

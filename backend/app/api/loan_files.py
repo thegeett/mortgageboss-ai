@@ -26,11 +26,11 @@ from app.schemas.loan_file import (
     PaginatedLoanFiles,
 )
 from app.services.loan_files import (
-    create_loan_file,
+    create_loan_file_with_setup,
     get_loan_file,
     list_loan_files,
-    soft_delete_loan_file,
-    update_loan_file,
+    soft_delete_loan_file_with_activity,
+    update_loan_file_with_activity,
 )
 
 router = APIRouter(prefix="/loan-files", tags=["loan-files"])
@@ -44,12 +44,15 @@ async def create(
 ) -> LoanFileDetail:
     """Create a loan file in the caller's company (status DRAFT).
 
-    ``company_id`` is taken from the authenticated user, never the body. Reloads
-    the new file scoped so the response is built with relationships loaded.
+    ``company_id`` is taken from the authenticated user, never the body. Creation
+    is orchestrated (LP-30): the file also gets a provisional initial needs list
+    and a ``FILE_CREATED`` activity. Reloads the new file scoped so the response
+    is built with relationships loaded. The response contract is unchanged.
     """
-    loan_file = await create_loan_file(
+    loan_file = await create_loan_file_with_setup(
         db,
         company_id=current_user.company_id,
+        actor_user_id=current_user.id,
         lender_id=payload.lender_id,
         loan_program=payload.loan_program,
         loan_purpose=payload.loan_purpose,
@@ -110,20 +113,27 @@ async def update(
     """Partially update one of the caller's files; 404 if not in the company.
 
     Only provided fields change; identifiers/ownership are immutable (not in the
-    update schema)."""
+    update schema). Logs the change (LP-30): ``STATUS_CHANGED`` on a status
+    transition, else ``FILE_UPDATED``."""
     loan_file = await get_loan_file(db, company_id=current_user.company_id, identifier=identifier)
     if loan_file is None:
         raise _NOT_FOUND
-    await update_loan_file(db, loan_file=loan_file, data=payload)
+    await update_loan_file_with_activity(
+        db, loan_file=loan_file, data=payload, actor_user_id=current_user.id
+    )
     await db.commit()
     return LoanFileDetail.from_model(loan_file)
 
 
 @router.delete("/{identifier}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete(identifier: str, db: DbSession, current_user: CurrentUser) -> None:
-    """Soft-delete one of the caller's files; 404 if not in the company."""
+    """Soft-delete one of the caller's files; 404 if not in the company.
+
+    Logs a ``FILE_DELETED`` activity with the acting user (LP-30)."""
     loan_file = await get_loan_file(db, company_id=current_user.company_id, identifier=identifier)
     if loan_file is None:
         raise _NOT_FOUND
-    await soft_delete_loan_file(db, loan_file=loan_file)
+    await soft_delete_loan_file_with_activity(
+        db, loan_file=loan_file, actor_user_id=current_user.id
+    )
     await db.commit()

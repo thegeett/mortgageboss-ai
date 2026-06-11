@@ -20,7 +20,9 @@ from app.core.jwt import create_access_token
 from app.core.security import hash_password
 from app.main import app
 from app.models import Borrower, Company, User, UserRole
+from app.models.activity_log import ActivityLog, ActivityType
 from app.models.loan_file import LoanFile
+from app.models.needs_item import NeedsItem
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
@@ -311,3 +313,66 @@ async def test_unauthenticated_requests_are_401(client: AsyncClient, db: AsyncSe
         await client.patch(f"{LOAN_FILES_URL}/{ident}", json={"status": "withdrawn"})
     ).status_code == 401
     assert (await client.delete(f"{LOAN_FILES_URL}/{ident}")).status_code == 401
+
+
+# --------------------------------------------------------------------------- #
+# LP-30: creation orchestration + activity logging side-effects
+# --------------------------------------------------------------------------- #
+
+
+async def test_create_generates_needs_list_and_logs_activity(
+    client: AsyncClient, db: AsyncSession
+) -> None:
+    """POST is contract-unchanged, but now also creates needs items + FILE_CREATED.
+
+    Verified via the DB (the side-effects aren't in the response body).
+    """
+    _company, user, token = await _user_and_token(db, slug="acme", email="u@acme.com")
+    resp = await client.post(LOAN_FILES_URL, json={"loan_program": "fha"}, headers=_auth(token))
+    assert resp.status_code == 201
+    file_id = resp.json()["id"]
+
+    needs = (
+        (await db.execute(select(NeedsItem).where(NeedsItem.loan_file_id == file_id)))
+        .scalars()
+        .all()
+    )
+    assert len(needs) == 5  # universal baseline + FHA placeholder
+
+    created = (
+        (
+            await db.execute(
+                select(ActivityLog).where(
+                    ActivityLog.loan_file_id == file_id,
+                    ActivityLog.activity_type == ActivityType.FILE_CREATED,
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert len(created) == 1
+    assert created[0].actor_user_id == user.id
+
+
+async def test_patch_status_and_delete_log_activities(
+    client: AsyncClient, db: AsyncSession
+) -> None:
+    """PATCH (status) logs STATUS_CHANGED; DELETE logs FILE_DELETED — with the actor."""
+    _company, user, token = await _user_and_token(db, slug="acme", email="u@acme.com")
+    created = (await client.post(LOAN_FILES_URL, json={}, headers=_auth(token))).json()
+    fid = created["id"]
+
+    await client.patch(
+        f"{LOAN_FILES_URL}/{fid}", json={"status": "in_processing"}, headers=_auth(token)
+    )
+    await client.delete(f"{LOAN_FILES_URL}/{fid}", headers=_auth(token))
+
+    types = {
+        (a.activity_type, a.actor_user_id)
+        for a in (await db.execute(select(ActivityLog).where(ActivityLog.loan_file_id == fid)))
+        .scalars()
+        .all()
+    }
+    assert (ActivityType.STATUS_CHANGED, user.id) in types
+    assert (ActivityType.FILE_DELETED, user.id) in types

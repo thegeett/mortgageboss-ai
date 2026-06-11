@@ -1,4 +1,4 @@
-"""Loan file service — creation and core CRUD operations.
+"""Loan file service — creation, core CRUD, and lifecycle orchestration.
 
 Every query that reads or mutates a loan file is **scoped to one company** via
 :func:`scope_to_company` and excludes soft-deleted rows via :func:`only_active`.
@@ -6,6 +6,13 @@ Callers pass ``company_id`` (the authenticated user's company, LP-24); a file in
 another company is simply never returned — the endpoint maps that to a 404, so
 existence is never revealed (anti-enumeration). Services ``flush``; the endpoint
 controls the transaction and commits.
+
+Creation is a **workflow**, not just a row insert (LP-30): the minimal
+:func:`create_loan_file` (ids + DRAFT) stays for internal reuse, and
+:func:`create_loan_file_with_setup` composes it with a provisional initial needs
+list and a ``FILE_CREATED`` activity. Update/delete have ``*_with_activity``
+wrappers that record the audit trail (the first adoption of ``log_activity``,
+ADR-073) while the pure mutators stay logging-free for internal/test callers.
 """
 
 from uuid import UUID
@@ -14,15 +21,20 @@ from sqlalchemy import Select, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.models.activity_log import ActivityType
 from app.models.base import utcnow
 from app.models.helpers import only_active, scope_to_company
 from app.models.lender import LoanProgram
 from app.models.loan_file import LoanFile, LoanFileStatus, LoanPurpose
+from app.models.needs_item import NeedsItem, NeedsItemOrigin
 from app.schemas.loan_file import LoanFileUpdate
+from app.services.activity_log import log_activity
 from app.services.loan_file_ids import (
     generate_inbox_token,
     generate_unique_display_id,
 )
+from app.services.needs_items import create_needs_item
+from app.services.needs_templates import needs_for_program
 
 
 async def create_loan_file(
@@ -161,3 +173,137 @@ async def soft_delete_loan_file(db: AsyncSession, *, loan_file: LoanFile) -> Non
     """
     loan_file.deleted_at = utcnow()
     await db.flush()
+
+
+# --------------------------------------------------------------------------- #
+# Lifecycle orchestration + activity logging (LP-30)
+# --------------------------------------------------------------------------- #
+
+
+async def generate_initial_needs_list(
+    db: AsyncSession, *, loan_file_id: UUID, loan_program: LoanProgram | None
+) -> list[NeedsItem]:
+    """Create the file's provisional initial needs list (origin ``TEMPLATE``).
+
+    Uses the per-program starter template (``needs_for_program``); ``None`` →
+    the universal baseline only. The template is **provisional** and pending
+    domain refinement — see :mod:`app.services.needs_templates`. Uses ``flush``.
+    """
+    created: list[NeedsItem] = []
+    for template in needs_for_program(loan_program):
+        item = await create_needs_item(
+            db,
+            loan_file_id=loan_file_id,
+            title=template.title,
+            category=template.category,
+            needs_type=template.needs_type,
+            origin=NeedsItemOrigin.TEMPLATE,
+            priority=template.priority,
+        )
+        created.append(item)
+    return created
+
+
+async def create_loan_file_with_setup(
+    db: AsyncSession,
+    *,
+    company_id: UUID,
+    actor_user_id: UUID,
+    lender_id: UUID | None = None,
+    loan_program: LoanProgram | None = None,
+    loan_purpose: LoanPurpose | None = None,
+    loan_officer_name: str | None = None,
+    loan_officer_email: str | None = None,
+) -> LoanFile:
+    """Create a loan file as a workflow: the file + an initial needs list + a
+    ``FILE_CREATED`` activity, all in the caller's transaction.
+
+    Composes the existing :func:`create_loan_file` (ids, DRAFT) with
+    :func:`generate_initial_needs_list` and one ``log_activity`` call (the needs
+    count is folded into its detail rather than logging one activity per item).
+    Uses ``flush``; the endpoint commits.
+    """
+    loan_file = await create_loan_file(
+        db,
+        company_id=company_id,
+        lender_id=lender_id,
+        loan_program=loan_program,
+        loan_purpose=loan_purpose,
+        loan_officer_name=loan_officer_name,
+        loan_officer_email=loan_officer_email,
+    )
+    needs = await generate_initial_needs_list(
+        db, loan_file_id=loan_file.id, loan_program=loan_program
+    )
+    await log_activity(
+        db,
+        loan_file_id=loan_file.id,
+        activity_type=ActivityType.FILE_CREATED,
+        summary=f"Loan file {loan_file.display_id} created",
+        actor_user_id=actor_user_id,
+        detail={
+            "loan_program": loan_program.value if loan_program else None,
+            "loan_purpose": loan_purpose.value if loan_purpose else None,
+            "initial_needs_count": len(needs),
+        },
+    )
+    await db.flush()
+    return loan_file
+
+
+async def update_loan_file_with_activity(
+    db: AsyncSession,
+    *,
+    loan_file: LoanFile,
+    data: LoanFileUpdate,
+    actor_user_id: UUID,
+) -> LoanFile:
+    """Apply an update and record an activity for it.
+
+    Captures the status **before** applying changes so a transition is detected:
+    a status change logs ``STATUS_CHANGED`` with ``{from, to}``; any other field
+    change logs ``FILE_UPDATED`` with the changed field names; a no-op PATCH logs
+    nothing. Uses ``flush``; the endpoint commits.
+    """
+    old_status = loan_file.status
+    changed_fields = set(data.model_dump(exclude_unset=True).keys())
+
+    await update_loan_file(db, loan_file=loan_file, data=data)
+
+    if "status" in changed_fields and loan_file.status != old_status:
+        await log_activity(
+            db,
+            loan_file_id=loan_file.id,
+            activity_type=ActivityType.STATUS_CHANGED,
+            summary=f"Status changed from {old_status.value} to {loan_file.status.value}",
+            actor_user_id=actor_user_id,
+            detail={"from": old_status.value, "to": loan_file.status.value},
+        )
+    elif changed_fields:
+        await log_activity(
+            db,
+            loan_file_id=loan_file.id,
+            activity_type=ActivityType.FILE_UPDATED,
+            summary=f"Loan file {loan_file.display_id} updated",
+            actor_user_id=actor_user_id,
+            detail={"changed_fields": sorted(changed_fields)},
+        )
+    return loan_file
+
+
+async def soft_delete_loan_file_with_activity(
+    db: AsyncSession, *, loan_file: LoanFile, actor_user_id: UUID
+) -> None:
+    """Soft-delete a loan file and record a ``FILE_DELETED`` activity.
+
+    The activity is logged before the soft delete so it references the live file.
+    Uses ``flush``; the endpoint commits.
+    """
+    await log_activity(
+        db,
+        loan_file_id=loan_file.id,
+        activity_type=ActivityType.FILE_DELETED,
+        summary=f"Loan file {loan_file.display_id} deleted",
+        actor_user_id=actor_user_id,
+    )
+    await soft_delete_loan_file(db, loan_file=loan_file)

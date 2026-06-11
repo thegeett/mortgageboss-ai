@@ -45,7 +45,32 @@ soft delete).
 `company_id`** (derived from the user; a `company_id` in the body is ignored). A
 file may be created empty and filled in later.
 
+**Creation is orchestrated (LP-30).** Beyond inserting the row, `POST` also generates a
+**provisional initial needs list** (program-based starter template, origin `TEMPLATE`)
+and records a `FILE_CREATED` activity. These are internal side-effects — the **response
+contract is unchanged** (still `LoanFileDetail`). The needs template is *provisional* and
+pending domain refinement (ADR-100). See ADR-099 (orchestration) and ADR-101 (activity
+logging).
+
+### Activity logging (LP-30)
+
+Loan-file write operations now append to the file's audit trail (the first adoption of
+`log_activity`, ADR-101), with the acting user:
+
+| Operation | Activity | Detail |
+| --- | --- | --- |
+| `POST` (create) | `FILE_CREATED` | program/purpose + `initial_needs_count` |
+| `PATCH` (status change) | `STATUS_CHANGED` | `{from, to}` |
+| `PATCH` (other fields) | `FILE_UPDATED` | `{changed_fields: [...]}` |
+| `DELETE` (soft) | `FILE_DELETED` | — |
+
+This logs **status changes**, not a transition *state machine* — any-to-any status moves
+are still allowed (enforcement would be a separate ticket). Two enum values
+(`FILE_UPDATED`, `FILE_DELETED`) were added to `ActivityType` for this.
+
 ### List — pagination & filtering
+
+Unchanged from LP-28 — listing was not rebuilt for LP-30.
 
 Query params: `page` (default `1`, ≥1), `page_size` (default `20`, 1–100),
 `status` (optional `LoanFileStatus`). Returns `PaginatedLoanFiles`:
