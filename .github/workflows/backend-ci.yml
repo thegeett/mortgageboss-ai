@@ -21,6 +21,27 @@ jobs:
     name: Lint, Type Check, and Test
     runs-on: ubuntu-latest
 
+    # Database-backed tests (LP-10+) use a real Postgres via the db_session
+    # fixture, which creates a separate `<db>_test` database and builds the
+    # schema with create_all. Provision Postgres as a service so those tests can
+    # connect; the credentials/db below match the DATABASE_URL used by pytest.
+    # Redis is intentionally not provisioned — health-check tests tolerate its
+    # absence (asserting 200 or 503).
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: test
+          POSTGRES_PASSWORD: test  # pragma: allowlist secret  (ephemeral CI service, not a secret)
+          POSTGRES_DB: test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
