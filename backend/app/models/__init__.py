@@ -32,6 +32,12 @@ from app.models.finding import (
 from app.models.helpers import only_active, scope_to_company
 from app.models.lender import Lender, LoanProgram
 from app.models.loan_file import LoanFile, LoanFileStatus, LoanPurpose
+from app.models.needs_item import (
+    NeedsItem,
+    NeedsItemOrigin,
+    NeedsItemPriority,
+    NeedsItemStatus,
+)
 from app.models.property import OccupancyType, Property, PropertyType
 from app.models.types import (
     LongStr,
@@ -69,6 +75,10 @@ __all__ = [
     "MaritalStatus",
     "MediumStr",
     "Money",
+    "NeedsItem",
+    "NeedsItemOrigin",
+    "NeedsItemPriority",
+    "NeedsItemStatus",
     "OccupancyType",
     "Property",
     "PropertyType",

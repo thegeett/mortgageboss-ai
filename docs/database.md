@@ -527,6 +527,52 @@ loan_file_id, trigger)` — it makes a `RUNNING` run with `started_at = now` and
 zero counts (the engine fills the rest). This ticket also added the
 `findings.verification_id` FK that LP-17 deferred (**ADR-066**).
 
+## NeedsItem model
+
+A **`NeedsItem`** is one outstanding requirement on a loan file — a document to
+collect or information to gather. The needs list is the processor's running
+checklist answering "what am I still waiting on?" (**ADR-067**). It is a
+first-class entity (so processors can add **manual** needs), an **owned child** of
+the loan file (`loan_file_id` FK, `ondelete=CASCADE`) with **no `company_id`** —
+scoped transitively through the file (**ADR-052**). `loan_file.needs_items` is the
+one-to-many.
+
+### Lifecycle and origin
+
+`status` (`NeedsItemStatus`) moves `outstanding` → `requested` (asked of the
+borrower — sending is Phase 4) → `received` (a document satisfied it), or
+`waived`. `origin` (`NeedsItemOrigin`) records how the item was created:
+`manual` (the only one wired in V1), `finding` (Phase 3), `condition` (Phase 4.5),
+`template` (later) — the enum is ready, the generation logic is later-phase.
+`priority` is `blocking`/`standard`/`low`. All three are VARCHAR + CHECK and
+indexed. Transition items through the service helpers so status and timestamps
+stay consistent:
+
+- `create_needs_item(...)` → an `OUTSTANDING` item
+- `request_needs_item(db, *, needs_item)` → `REQUESTED` + `requested_at`
+- `satisfy_needs_item(db, *, needs_item, document_id)` → `RECEIVED` +
+  `satisfied_by_document_id` + `satisfied_at`
+
+### Classification and links
+
+`category` **reuses** the `DocumentCategory` enum (imported, not redefined) so the
+needs list groups like the document list; `needs_type` is a flexible indexed
+string for the specific item (`"w2"`, `"loe_large_deposit"`) — a DB-enforced
+category plus an app-layer type, mirroring documents (**ADR-068** / ADR-053).
+
+A need relates to:
+
+- **documents** — `satisfied_by_document_id` (nullable, `SET NULL`): the document
+  that fulfilled it.
+- **borrowers** — `borrower_id` (nullable, `SET NULL`): many needs are
+  borrower-provided; some are file-level.
+- **findings / conditions / templates** — via `origin` (the generators are
+  later-phase).
+
+Both the document and borrower links are **`SET NULL`** (**ADR-069**): the durable
+needs item survives if the referenced document or borrower is removed — the link
+just nulls (contrast the CASCADE loan-file FK).
+
 ## Writing a model test
 
 Database tests use a dedicated **test database** (`<dev_db>_test`,
@@ -650,3 +696,6 @@ PostgreSQL extensions the schema relies on:
 - **ADR-064** — Verification run groups findings; findings reference but aren't owned by it
 - **ADR-065** — Denormalized summary counts on verification runs
 - **ADR-066** — `findings.verification_id` FK added in LP-18 (deferred from LP-17)
+- **ADR-067** — NeedsItem as the loan file's requirement checklist
+- **ADR-068** — NeedsItem category reuses `DocumentCategory`; `needs_type` a flexible string
+- **ADR-069** — NeedsItem document and borrower links use `SET NULL`

@@ -1768,3 +1768,87 @@ ADR-064 (deleting a run preserves findings).
 **Consequences:** The migration's downgrade must drop the findings FK **before**
 dropping the `verifications` table (reverse order). Referential integrity on
 `verification_id` is now enforced.
+
+---
+
+## ADR-067: NeedsItem as the loan file's requirement checklist
+
+- **Date:** 2026-06-11
+- **Status:** Accepted
+
+**Context:** A processor needs to track outstanding requirements — "what am I
+still waiting on?" — distinct from documents that have arrived and from
+verification findings. This is the workflow checklist that drives document
+collection and borrower communication.
+
+**Decision:** A first-class `NeedsItem` model owned by the loan file, with a
+lifecycle (`OUTSTANDING` → `REQUESTED` → `RECEIVED`, or `WAIVED`), an `origin`
+(`MANUAL` / `FINDING` / `CONDITION` / `TEMPLATE`), a `priority`
+(`BLOCKING`/`STANDARD`/`LOW`), an optional target borrower, and an optional
+satisfying document. Transitions go through service helpers
+(`create_needs_item`, `request_needs_item`, `satisfy_needs_item`).
+
+**Rationale:** The needs list is the central workflow artifact, not a byproduct of
+findings. Modeling it as its own entity lets processors add **manual** needs now,
+and lets findings (Phase 3), lender conditions (Phase 4.5), and file-creation
+templates (later) generate needs in future phases — the `origin` enum already
+distinguishes the source. Driving transitions through helpers keeps the status
+and its timestamps (`requested_at`, `satisfied_at`) consistent.
+
+**Consequences:** Needs items are durable workflow state owned by the file
+(cascade from the file, ADR-052). Generation from findings/conditions/templates is
+later-phase logic; the schema supports every origin now. Lifecycle moves should
+use the helpers rather than mutating fields directly.
+
+---
+
+## ADR-068: NeedsItem category reuses DocumentCategory; needs_type is a flexible string
+
+- **Date:** 2026-06-11
+- **Status:** Accepted
+
+**Context:** A needs item has to say *what* it is for — broadly (a category) and
+specifically (a type). The same tension as documents applies (ADR-053).
+
+**Decision:** `category` **reuses** the existing `DocumentCategory` enum (the
+stable 8-value set, DB CHECK) — imported, not redefined. `needs_type` is a
+flexible, indexed app-layer string (e.g. `"w2"`, `"loe_large_deposit"`), not an
+enum.
+
+**Rationale:** Mirrors ADR-053: categories are stable and worth enforcing at the
+database; specific types are a large, evolving set governed at the app layer.
+**Reusing** `DocumentCategory` (rather than a parallel needs-category enum) means
+a need and the document that satisfies it share one categorization vocabulary, so
+the UI can group the needs list exactly like the document list.
+
+**Consequences:** No DB constraint on `needs_type` values. Needs categorization is
+deliberately coupled to the document category set — if document categories change,
+needs categories change with them (intended). The migration's CHECK on `category`
+is named `ck_needs_items_documentcategory` (it shares the enum's name).
+
+---
+
+## ADR-069: NeedsItem document and borrower links use SET NULL
+
+- **Date:** 2026-06-11
+- **Status:** Accepted
+
+**Context:** A needs item points at the document that satisfied it
+(`satisfied_by_document_id`) and optionally at the borrower it is for
+(`borrower_id`). What should happen to the needs item if that document or borrower
+is deleted?
+
+**Decision:** Both FKs are nullable with `ondelete=SET NULL`. Deleting the
+referenced document or borrower **nulls the link** and **preserves** the needs
+item.
+
+**Rationale:** A needs item is durable workflow state owned by the loan file
+(ADR-067), not by the document or borrower it references. Losing a referenced row
+should sever the link, not destroy the checklist item — the requirement still
+conceptually exists. (Contrast the loan-file FK, which is CASCADE: the item has no
+meaning without its file.)
+
+**Consequences:** After a satisfying document is removed, the item remains with a
+null `satisfied_by_document_id`; in V1 its `status` is left unchanged (a later
+phase may re-open a satisfied item to `OUTSTANDING` — that re-opening logic is not
+in this ticket). Same for a removed borrower: the item survives, file-level.

@@ -39,6 +39,7 @@ if TYPE_CHECKING:
     from app.models.document import Document
     from app.models.finding import Finding
     from app.models.lender import Lender
+    from app.models.needs_item import NeedsItem
     from app.models.property import Property
     from app.models.verification import Verification
 
@@ -160,6 +161,11 @@ class LoanFile(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     # Verification runs (one-to-many, LP-18) — owned child of the file. (Findings
     # are NOT owned by a run; see Verification.findings / ADR-064.)
     verifications: Mapped[list["Verification"]] = relationship(
+        back_populates="loan_file",
+        cascade="all, delete-orphan",
+    )
+    # Needs-list items (one-to-many, LP-19) — owned child of the file.
+    needs_items: Mapped[list["NeedsItem"]] = relationship(
         back_populates="loan_file",
         cascade="all, delete-orphan",
     )
