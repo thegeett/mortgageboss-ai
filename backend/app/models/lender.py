@@ -24,6 +24,7 @@ from app.models.types import LONG_STRING, MEDIUM_STRING, SHORT_STRING, MediumStr
 
 if TYPE_CHECKING:
     from app.models.company import Company
+    from app.models.loan_file import LoanFile
 
 
 class LoanProgram(StrEnum):
@@ -76,6 +77,7 @@ class Lender(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     # No destructive cascade: companies are soft-deleted, never hard-deleted, and
     # the company_id FK is ondelete=RESTRICT (ADR-044).
     company: Mapped["Company"] = relationship(back_populates="lenders")
+    loan_files: Mapped[list["LoanFile"]] = relationship(back_populates="lender")
 
     def __repr__(self) -> str:
         return f"<Lender {self.slug} (company={self.company_id})>"

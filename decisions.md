@@ -1212,3 +1212,85 @@ values. When the enum backs an actual column (e.g. on loan files), it is stored
 as VARCHAR + CHECK via `str_enum()` (`native_enum=False`, ADR-037), so evolution
 needs no `ALTER TYPE`. As JSON list values on lenders, program values are not
 DB-constrained (ADR-046).
+
+---
+
+## ADR-048: Display ID globally unique
+
+- **Date:** 2026-06-10
+- **Status:** Accepted
+
+**Context:** A loan file's `display_id` (the `LF-XXXX` human reference from
+[ADR-036](#adr-036-loan-file-identifier-strategy-three-decoupled-identifiers))
+could be unique per company or globally. Lender slugs are per-company
+(ADR-045), so the question is genuine.
+
+**Decision:** Display IDs are **globally unique**, enforced by a unique index on
+`loan_files.display_id`.
+
+**Rationale:** Display IDs are random and non-sequential, so global uniqueness is
+cheap (no contention, no per-company sequence). It avoids any ambiguity in
+cross-company support scenarios, email subjects, and logs — there is no scenario
+where two files anywhere should share a display ID. This contrasts with lender
+slugs, which are intentionally human-chosen and naturally collide across
+companies (two companies both work with "uwm"), so those are per-company.
+
+**Consequences:** Collision checking is global (already the case in
+`generate_unique_display_id`, which queries all files). Collision probability is
+negligible: 31**4 ≈ 924k codes with regeneration on the rare hit, and the unique
+index is the final safety net.
+
+---
+
+## ADR-049: Loan file status lifecycle
+
+- **Date:** 2026-06-10
+- **Status:** Accepted
+
+**Context:** The loan file needs a status enum capturing where it sits in the
+processing workflow, to drive dashboard filtering and the actions available on a
+file.
+
+**Decision:** A `LoanFileStatus` enum with the lifecycle `DRAFT → IN_PROCESSING
+→ READY_TO_SUBMIT → SUBMITTED → IN_CONDITIONS → CLEAR_TO_CLOSE → CLOSED`, plus
+`WITHDRAWN` as a terminal exit reachable from any earlier state. Stored as
+VARCHAR + CHECK via `str_enum()` (ADR-037), defaulting to `DRAFT`.
+
+**Rationale:** Mirrors the real processing workflow — origination handoff
+(`DRAFT`) through underwriting submission and condition resolution
+(`IN_CONDITIONS`) to `CLEAR_TO_CLOSE` and `CLOSED`. `WITHDRAWN` covers files that
+fall out at any point.
+
+**Consequences:** Transitions are **not** enforced by a state machine in V1 — any
+status can be set from any other at the model level. Workflow enforcement (valid
+transitions, side effects) can be layered on later without a schema change.
+Storing as VARCHAR + CHECK means adding a future status (e.g. `DENIED`) is a
+simple migration, not an `ALTER TYPE`.
+
+---
+
+## ADR-050: ID generation in the service layer, not the model
+
+- **Date:** 2026-06-10
+- **Status:** Accepted
+
+**Context:** The display ID and inbox token
+([ADR-036](#adr-036-loan-file-identifier-strategy-three-decoupled-identifiers))
+have to be generated somewhere. The options are a model default/`__init__`, or a
+dedicated service called during file creation.
+
+**Decision:** Generation lives in a dedicated service
+(`app/services/loan_file_ids.py`), called by the file-creation service
+(`app/services/loan_files.create_loan_file`). The `LoanFile` model only holds the
+`display_id` and `inbox_token` columns.
+
+**Rationale:** Generation involves real logic — cryptographically secure
+randomness (`secrets`), an unambiguous alphabet, and async collision checking
+against the database — none of which belongs in a declarative model. Keeping it
+in a service keeps the model clean and lets the security-sensitive generation be
+unit-tested in isolation (it is the first thing built and verified in LP-13).
+
+**Consequences:** File creation must go through `create_loan_file` to obtain
+correct identifiers; never hand-construct a `LoanFile` with manually-set
+identifiers in normal flow (tests that do so are explicitly probing the unique
+constraint). The model has no opinion on how its identifiers are produced.

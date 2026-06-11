@@ -16,6 +16,7 @@ from app.models.company import Company
 from app.models.enums import RecordStatus, str_enum
 from app.models.helpers import only_active, scope_to_company
 from app.models.lender import Lender, LoanProgram
+from app.models.loan_file import LoanFile, LoanFileStatus, LoanPurpose
 from app.models.types import (
     LongStr,
     MediumStr,
@@ -28,7 +29,10 @@ __all__ = [
     "Base",
     "Company",
     "Lender",
+    "LoanFile",
+    "LoanFileStatus",
     "LoanProgram",
+    "LoanPurpose",
     "LongStr",
     "MediumStr",
     "Money",

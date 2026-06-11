@@ -209,6 +209,67 @@ submitted to. It **belongs to a company** (`company_id` FK, `ondelete=RESTRICT`)
 `LoanProgram` (`CONVENTIONAL`, `FHA`) is defined in `app/models/lender.py` and
 is the single source of truth for program values, reused by loan files in LP-13.
 
+## Loan file model
+
+A **`LoanFile`** is the **central entity** of the system: borrowers, properties,
+documents, extracted data, verification findings, and conditions all reference
+it. It belongs to a company (`company_id` FK, `ondelete=RESTRICT`) and may
+reference a lender (`lender_id` FK, **nullable**, `ondelete=RESTRICT`) — the
+lender can be unassigned when a file is first created.
+
+Optional loan attributes are **nullable** because a file can be created manually
+before its details are known and filled in later (e.g. from a MISMO import or by
+the processor): `lender_id`, `loan_program`, `loan_purpose`, and `loan_amount`
+(`Money`, `NUMERIC(14,2)`) may all be unset at creation. The originating loan
+officer is stored as free text (`loan_officer_name`, `loan_officer_email`) — the
+LO is an external party, not a system user.
+
+### The three-identifier design (ADR-036)
+
+Every loan file carries **three distinct identifiers**, each with its own
+purpose and security posture. Mixing them up is a security bug, so they are kept
+strictly separate:
+
+| Identifier | Example | Purpose | Exposure | Generation |
+| --- | --- | --- | --- | --- |
+| `id` (UUID PK) | `7f3a8b2c-…` | FKs, joins, internal references | Never exposed | `uuid4` (from `UUIDMixin`) |
+| `display_id` | `LF-7K3M` | Human reference in UI, conversation, email subjects | Authenticated users only | Non-sequential random, collision-checked |
+| `inbox_token` | `a7k4nq2x9m3p` | Borrower inbox email address | Public (in the address) | `secrets.token_urlsafe(12)`, ~96 bits |
+
+- **`display_id`** is an *identifier*: it merely names a file. Access is gated by
+  auth + company scoping, so its predictability is low-risk. It uses an
+  **unambiguous alphabet** `23456789ABCDEFGHJKMNPQRSTUVWXYZ` (no `0/O`, `1/I/L`)
+  and is **globally unique** (**ADR-048**), collision-checked at creation with a
+  unique DB index as the safety net.
+- **`inbox_token`** is a *capability*: possession grants the ability to send
+  documents into a file, so it must be **cryptographically unguessable** and is
+  **never derived from the display ID** (independent generation). It builds the
+  borrower address `lf-{inbox_token}@inbox.mortgageboss.ai` via
+  `get_inbox_address()`.
+- Both the display ID's random characters and the inbox token use the `secrets`
+  module — **never `random`**. Generation lives in `app/services/loan_file_ids.py`
+  and is wired in by `app/services/loan_files.create_loan_file` (**ADR-050**);
+  the model only holds the columns.
+
+### Status lifecycle (ADR-049)
+
+`status` is a `LoanFileStatus` enum (VARCHAR + CHECK, **ADR-037**) defaulting to
+`DRAFT`. The happy path is:
+
+```
+DRAFT → IN_PROCESSING → READY_TO_SUBMIT → SUBMITTED
+      → IN_CONDITIONS → CLEAR_TO_CLOSE → CLOSED
+```
+
+plus `WITHDRAWN`, a terminal exit reachable from any earlier state. `loan_purpose`
+is a `LoanPurpose` enum (`PURCHASE`, `REFINANCE`). Transitions are **not** enforced
+by a state machine in V1 (any-to-any is allowed at the model level); workflow
+enforcement can come later (**ADR-049**).
+
+> Create loan files through `create_loan_file`, not by constructing `LoanFile`
+> directly — only the service generates correct, collision-checked identifiers.
+> It uses `flush` (not `commit`), so the caller controls the transaction.
+
 ## Writing a model test
 
 Database tests use a dedicated **test database** (`<dev_db>_test`,
@@ -310,3 +371,7 @@ PostgreSQL extensions the schema relies on:
 - **ADR-045** — Per-company unique slugs (composite uniqueness)
 - **ADR-046** — Lender overlays and supported programs as JSON
 - **ADR-047** — `LoanProgram` enum (Conventional, FHA) shared across models
+- **ADR-036** — Loan file identifier strategy (three decoupled identifiers)
+- **ADR-048** — Display ID globally unique
+- **ADR-049** — Loan file status lifecycle
+- **ADR-050** — ID generation in the service layer, not the model

@@ -16,6 +16,7 @@ from app.models.types import MediumStr, ShortStr
 
 if TYPE_CHECKING:
     from app.models.lender import Lender
+    from app.models.loan_file import LoanFile
     from app.models.user import User
 
 
@@ -39,6 +40,7 @@ class Company(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     # normal operation, and the child FKs are ondelete=RESTRICT (ADR-044).
     users: Mapped[list["User"]] = relationship(back_populates="company")
     lenders: Mapped[list["Lender"]] = relationship(back_populates="company")
+    loan_files: Mapped[list["LoanFile"]] = relationship(back_populates="company")
 
     def __repr__(self) -> str:
         return f"<Company {self.slug}>"
