@@ -1931,3 +1931,95 @@ one-value migration plus the integration — there is no cost to deferring.
 rejects them — verified by test). Adding a channel later is a small migration. The
 single-value CHECK renders as `channel = 'email'` rather than an `IN (...)` list,
 which is correct.
+
+---
+
+## ADR-073: bcrypt (via the `bcrypt` library) for password hashing
+
+- **Date:** 2026-06-11
+- **Status:** Accepted
+
+**Context:** Authentication (Epic 3) needs secure password storage. The
+`User.hashed_password` column (LP-11) has awaited a hashing scheme; LP-22 supplies
+it. Mortgage data is GLBA-covered PII, so passwords must be salted, slow-to-brute,
+and never stored or logged in plaintext.
+
+**Decision:** Hash passwords with **bcrypt**, using the maintained `bcrypt`
+library **directly** rather than passlib. The hashing/verification functions live
+isolated in `app/core/security.py` (`hash_password`, `verify_password`,
+`validate_password_strength`).
+
+**Alternatives considered:** passlib + bcrypt (recent passlib releases have a known
+runtime incompatibility with modern bcrypt — the version-detection code raises on
+import/use; avoided); Argon2id / scrypt (fine and more modern, but bcrypt is the
+pragmatic universal default and adequate here); hand-rolled hashing (never).
+
+**Rationale:** bcrypt is slow-by-design, auto-salted (a per-password salt, so equal
+passwords yield different hashes), and battle-tested. `checkpw` compares digests in
+constant time. Using the library directly avoids the passlib/bcrypt friction
+entirely.
+
+**Consequences:** bcrypt only considers the first 72 bytes of input; rather than let
+it silently truncate, `validate_password_strength` rejects passwords over 72 UTF-8
+bytes so the behaviour is explicit. Because hashing is isolated in `security.py`,
+swapping to Argon2 later is a localized change. The legacy `passlib[bcrypt]` /
+`python-jose` entries (and their type stubs) in `pyproject.toml` are now superseded
+by `bcrypt` + `pyjwt` and can be removed in a later cleanup.
+
+---
+
+## ADR-074: JWT auth with minimal, identity-only claims
+
+- **Date:** 2026-06-11
+- **Status:** Accepted
+
+**Context:** After login, requests must be authenticated statelessly. We need a
+token format and a claim policy before building the login endpoint (LP-23) and the
+current-user dependency (LP-24).
+
+**Decision:** Use **PyJWT**, **HS256**, signed with `settings.jwt_secret_key`. Issue
+both **access** and **refresh** tokens. Claims are limited to the minimal standard
+set: `sub` (user UUID as a string), `type` (`access`/`refresh`), `exp`, and `iat`.
+The token carries **NO** role, email, company, `is_active`, or other PII. Tokens are
+created/verified by pure functions in `app/core/jwt.py`; `verify_token` returns a
+typed `TokenPayload` (subject + token_type).
+
+**Rationale:** A JWT is *signed, not encrypted* — the payload is readable by anyone
+holding it, and access tokens are relatively long-lived. Encoding authorization data
+(role, active status) would let a stale token assert outdated permissions. Carrying
+identity only and looking up authorization **live from the database** (LP-24) means
+every request acts on current truth: deactivating a user or changing a role takes
+effect on the next request. HS256 (shared secret) suits a single backend service; no
+public-key distribution is needed.
+
+**Consequences:** Each authenticated request does a user lookup (acceptable — it is
+needed for `is_active`/`role` anyway). Token verification distinguishes three failure
+modes via distinct exception classes (`TokenExpiredError`, `InvalidTokenError`,
+`WrongTokenTypeError`) so LP-24 can map each to the correct HTTP status. All token
+timestamps are timezone-aware UTC.
+
+---
+
+## ADR-075: Stateless JWT — no revocation/blocklist in V1
+
+- **Date:** 2026-06-11
+- **Status:** Accepted
+
+**Context:** Whether to support server-side token revocation (a blocklist /
+deny-list) so an issued token can be invalidated before its `exp`.
+
+**Decision:** V1 uses **stateless JWT with no revocation store**. We rely on a
+bounded access-token lifetime (`jwt_access_token_expire_minutes`, default 24h) and
+defer revocation and refresh-token rotation to a later hardening pass.
+
+**Rationale:** A revocation store adds stateful infrastructure (a Redis/DB blocklist
+checked on every request) and operational complexity. For a pilot, a short access
+lifetime bounds the exposure window; the refresh token can be made short-lived or
+rotated when revocation is built. Full revocation is a V2 concern.
+
+**Consequences:** A stolen, unexpired access token remains valid until it expires —
+this is a known, documented V1 limitation. Mitigations are the bounded lifetime now
+and refresh-token rotation / a blocklist later. Because authorization is looked up
+live (ADR-074), *deactivating* a user already blocks new actions immediately even
+without token revocation; revocation only matters for cutting off an
+already-authenticated session mid-token-life.
