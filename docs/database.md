@@ -573,6 +573,57 @@ Both the document and borrower links are **`SET NULL`** (**ADR-069**): the durab
 needs item survives if the referenced document or borrower is removed — the link
 just nulls (contrast the CASCADE loan-file FK).
 
+## Communication and ActivityLog models
+
+Two **event-record** models, both owned children of the loan file (cascade,
+**ADR-052**) with no `company_id` (scoped transitively), but **deliberately
+separate** (**ADR-070**): a communication carries message fields; the activity log
+covers all events.
+
+### Communication
+
+A **`Communication`** is one message in or out of a loan file — a borrower document
+request, a lender condition response, an inbound borrower reply (which arrives via
+the file's inbox token, LP-13). `loan_file.communications` is the one-to-many. It
+is the data foundation for the Phase 4 communication module; **email sending and
+inbound routing are Phase 4** — this model is just the record (create via
+`app.services.communications.create_communication`).
+
+- `direction` (`inbound`/`outbound`), `channel` (**`email` only in V1** —
+  **ADR-072**), `status` (`draft`/`sent`/`delivered`/`failed` for outbound,
+  `received` for inbound) — all VARCHAR + CHECK; `direction` and `status` indexed.
+- `sender` / `recipient` / `subject` / `body`; `external_message_id` (for
+  threading); `sent_at`; `error_detail`.
+- `needs_item_id` (FK, nullable, `SET NULL`): the need a request concerns.
+  `initiated_by_user_id` (FK, nullable, `SET NULL`): null for inbound/system.
+
+### ActivityLog
+
+An **`ActivityLog`** entry is one recorded event on the file — file created, status
+changed, document uploaded, finding resolved, verification run, needs item
+satisfied, communication sent, note added. It is the audit trail / timeline.
+`loan_file.activity_logs` is the one-to-many.
+
+- `activity_type` (`ActivityType` enum, VARCHAR + CHECK, indexed) — a reasonable
+  initial set that grows as operations are instrumented.
+- `actor_user_id` (FK, nullable, `SET NULL`): **null = system-generated**.
+- `summary` (human-readable) and `detail` (JSON, type-specific, e.g.
+  `{"from": "in_processing", "to": "submitted"}`).
+
+**Append-only in spirit (ADR-071):** entries are written, not edited or deleted in
+normal operation. `app.services.activity_log.log_activity(db, *, loan_file_id,
+activity_type, summary, actor_user_id=None, detail=None)` is the single standard
+way to record an event; **wiring it into every operation is incremental** (not done
+all at once).
+
+### The distinction
+
+A communication is a **message** (sender/recipient/subject/body); the activity log
+covers **all events**, including non-message ones. They overlap at one point — a
+sent communication may also produce a `COMMUNICATION_SENT` activity entry — but the
+column shapes differ enough that one combined table would be mostly-null. Hence two
+tables.
+
 ## Writing a model test
 
 Database tests use a dedicated **test database** (`<dev_db>_test`,
@@ -699,3 +750,6 @@ PostgreSQL extensions the schema relies on:
 - **ADR-067** — NeedsItem as the loan file's requirement checklist
 - **ADR-068** — NeedsItem category reuses `DocumentCategory`; `needs_type` a flexible string
 - **ADR-069** — NeedsItem document and borrower links use `SET NULL`
+- **ADR-070** — Communication and ActivityLog as separate models
+- **ADR-071** — ActivityLog is append-only in spirit; instrumentation is incremental
+- **ADR-072** — Communication channel enum limited to EMAIL in V1

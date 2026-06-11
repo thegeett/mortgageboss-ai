@@ -34,7 +34,9 @@ from app.models.lender import LoanProgram
 from app.models.types import MEDIUM_STRING, SHORT_STRING, Money
 
 if TYPE_CHECKING:
+    from app.models.activity_log import ActivityLog
     from app.models.borrower import Borrower
+    from app.models.communication import Communication
     from app.models.company import Company
     from app.models.document import Document
     from app.models.finding import Finding
@@ -166,6 +168,15 @@ class LoanFile(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     )
     # Needs-list items (one-to-many, LP-19) — owned child of the file.
     needs_items: Mapped[list["NeedsItem"]] = relationship(
+        back_populates="loan_file",
+        cascade="all, delete-orphan",
+    )
+    # Messages and the audit-trail timeline (one-to-many, LP-20) — owned children.
+    communications: Mapped[list["Communication"]] = relationship(
+        back_populates="loan_file",
+        cascade="all, delete-orphan",
+    )
+    activity_logs: Mapped[list["ActivityLog"]] = relationship(
         back_populates="loan_file",
         cascade="all, delete-orphan",
     )

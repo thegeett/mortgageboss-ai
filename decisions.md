@@ -1852,3 +1852,82 @@ meaning without its file.)
 null `satisfied_by_document_id`; in V1 its `status` is left unchanged (a later
 phase may re-open a satisfied item to `OUTSTANDING` — that re-opening logic is not
 in this ticket). Same for a removed borrower: the item survives, file-level.
+
+---
+
+## ADR-070: Communication and ActivityLog as separate models
+
+- **Date:** 2026-06-11
+- **Status:** Accepted
+
+**Context:** Both a communication (a message in/out of a file) and an activity-log
+entry (something happened on the file) are event records owned by the loan file.
+We could model them as one table or two.
+
+**Decision:** Two separate models. `Communication` carries **message** fields —
+`direction`, `channel`, `sender`/`recipient`, `subject`/`body`, send status, a
+needs-item link. `ActivityLog` records **any event** — an `activity_type`, an
+optional actor, a human `summary`, and type-specific JSON `detail`.
+
+**Rationale:** The two have little column overlap: a communication needs message
+fields an activity entry doesn't, and the activity log covers non-message events
+(status changes, uploads, verification runs) that have no sender/recipient. One
+combined table would be mostly-null and semantically muddy. A *sent* communication
+can also produce an activity-log entry (`COMMUNICATION_SENT`) — they reference the
+same event from two angles, which is fine.
+
+**Consequences:** Two tables, both owned children of the loan file (cascade,
+ADR-052), both company-scoped transitively. Some conceptual overlap (a sent
+message is both a communication and an activity), handled by writing both records
+where it matters. Clear separation of message data vs. event data.
+
+---
+
+## ADR-071: ActivityLog is append-only in spirit; instrumentation is incremental
+
+- **Date:** 2026-06-11
+- **Status:** Accepted
+
+**Context:** The activity log is the file's audit trail and timeline. Two
+questions: are entries mutable, and how comprehensively do we log from day one?
+
+**Decision:** Activity-log entries are **append-only in spirit** — written, never
+edited or deleted in normal operation (the shared soft-delete columns exist for
+consistency but entries aren't deleted in normal flow). A single
+`log_activity` helper is the standard way to record an event. Wiring it into every
+operation happens **incrementally** as operations are built — not all at once in
+this ticket.
+
+**Rationale:** An audit trail is only trustworthy if history is immutable.
+Instrumenting every existing service now would touch all of them and balloon this
+ticket; establishing the helper and the pattern lets adoption be incremental and
+deliberate.
+
+**Consequences:** Early operations may not all log activities until they are
+instrumented. `log_activity` is the one standard entry point (don't construct
+`ActivityLog` ad hoc). Entries are not deleted in normal flow even though the
+columns allow it.
+
+---
+
+## ADR-072: Communication channel enum limited to EMAIL in V1
+
+- **Date:** 2026-06-11
+- **Status:** Accepted
+
+**Context:** Discovery noted several borrower-communication channels — email,
+phone, text, portal. V1's communication module is email-based (enabled by the loan
+file's inbox token, LP-13).
+
+**Decision:** The `CommunicationChannel` enum includes **only** `EMAIL` in V1.
+Other channels are added later as new VARCHAR + CHECK values when the sending
+integration for them is actually built.
+
+**Rationale:** Listing unbuilt channels would imply capabilities that don't exist.
+Because enums are VARCHAR + CHECK (ADR-037), adding a channel later is a trivial
+one-value migration plus the integration — there is no cost to deferring.
+
+**Consequences:** Non-email communications can't be represented in V1 (the CHECK
+rejects them — verified by test). Adding a channel later is a small migration. The
+single-value CHECK renders as `channel = 'email'` rather than an `IN (...)` list,
+which is correct.

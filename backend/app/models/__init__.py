@@ -5,6 +5,7 @@ added in subsequent tickets, they will also be imported here so that
 Alembic autogenerate can discover them.
 """
 
+from app.models.activity_log import ActivityLog, ActivityType
 from app.models.base import (
     Base,
     SoftDeleteMixin,
@@ -13,6 +14,12 @@ from app.models.base import (
     utcnow,
 )
 from app.models.borrower import Borrower, MaritalStatus
+from app.models.communication import (
+    Communication,
+    CommunicationChannel,
+    CommunicationDirection,
+    CommunicationStatus,
+)
 from app.models.company import Company
 from app.models.document import (
     Document,
@@ -53,8 +60,14 @@ from app.models.verification import (
 )
 
 __all__ = [
+    "ActivityLog",
+    "ActivityType",
     "Base",
     "Borrower",
+    "Communication",
+    "CommunicationChannel",
+    "CommunicationDirection",
+    "CommunicationStatus",
     "Company",
     "Document",
     "DocumentCategory",
