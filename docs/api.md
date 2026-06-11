@@ -164,6 +164,31 @@ Base path: `/api/v1/loan-files/{file_identifier}/property` (no child id — one 
 One active property per file (DB `unique(loan_file_id)`); a second create returns
 `409`.
 
+## Lenders (LP-32)
+
+| Method | Path | Auth | Success | Notes |
+| --- | --- | --- | --- | --- |
+| GET | `/api/v1/lenders` | yes | `200` `LenderSummary[]` | company-scoped; empty list when none |
+
+`LenderSummary` = `{ id, name, supported_programs }`. Company-scoped (only the
+caller's lenders), active only, ordered by name; no pagination (a company has few
+lenders). Populates the intake-form lender dropdown; lenders are seeded later (LP-48),
+so an empty list is a normal, graceful state.
+
+## Intake (LP-32) — client orchestration, no new endpoint
+
+The new-file intake form composes existing endpoints in sequence (Option A, file-first;
+ADR-105) — there is **no** atomic intake endpoint:
+
+1. `POST /loan-files` (the gate — on failure the form stays, retryable).
+2. `POST /loan-files/{id}/borrowers` (primary borrower) — best-effort.
+3. `POST /loan-files/{id}/property` — best-effort.
+
+If the file is created but step 2/3 fails, the client navigates to the file anyway with
+a non-blocking warning (a created DRAFT with partial info is usable); no rollback. The
+SSN is sent once to the borrower endpoint (encrypted at rest), returned only as
+`masked_ssn`, and never logged.
+
 ## What's next
 
 - **LP-30** — loan file service layer (consolidating/extending the service functions).

@@ -2789,3 +2789,77 @@ outstanding **blocking** needs once that's surfaced.
 **Consequences:** Groupings live in one place (UI + the repeatable `status` query). Refine
 "Action needed" when needs-surfacing exists. The plan's example Active set (four statuses)
 is extended by one (`CLEAR_TO_CLOSE`) for completeness — documented here.
+
+---
+
+## ADR-105: Intake orchestration — sequential, file-first (Option A)
+
+- **Date:** 2026-06-11
+- **Status:** Accepted
+
+**Context:** The new-file intake form captures borrower, property, loan, and lender info
+across separate resources. It needs a submit strategy: one atomic call, or composed calls.
+
+**Decision:** The form submits via **sequential** calls (Option A, file-first):
+`POST /loan-files` → `POST .../borrowers` (primary) → `POST .../property`. **File creation
+is the gate**: if it fails, show an error and stay on the form (retryable). If the file is
+created but the borrower or property step fails, **navigate to the file anyway** with a
+**non-blocking warning** (toast) that the part couldn't be saved and can be added on the
+file. **No client-side rollback**, and no atomic `POST /loan-files/intake` endpoint in V1.
+
+**Rationale:** A created DRAFT file with partial info is genuinely usable — files
+legitimately start sparse (LP-13) — so a half-saved file is a usable result, not an error
+dead-end. Composing existing endpoints needs no new transactional endpoint and matches how
+processors actually start files (create, then enrich).
+
+**Consequences:** A partial failure leaves a DRAFT missing its borrower/property, addable
+on the detail page (LP-33). An atomic intake endpoint is a possible future refinement if
+all-or-nothing creation ever matters. The dashboard list query is invalidated on success.
+
+---
+
+## ADR-106: Light, DRAFT-friendly intake validation
+
+- **Date:** 2026-06-11
+- **Status:** Accepted
+
+**Context:** How much to require on the intake form. A loan file can be created empty/DRAFT
+(LP-13); over-gating would fight that and the real workflow.
+
+**Decision:** **Minimal** required fields — only the primary borrower's **first + last
+name** — with **format validation only where a value is entered** (email, SSN pattern,
+2-letter state, ZIP, non-negative amounts; empty = "not provided"). No heavy required-field
+gate. Implemented with Zod (`z.union([z.literal(""), <format>])` for optional-with-format).
+
+**Rationale:** Forcing fields would block the sparse starts the model supports; format
+checks prevent bad data without blocking. Requiring the borrower name is the one real
+anchor (you're creating a file *for* a borrower) and keeps the orchestration simple (the
+primary borrower is always created).
+
+**Consequences:** Files can be created with little info and enriched later. Richer guided
+validation can be added if the workflow needs it.
+
+---
+
+## ADR-107: GET /lenders (company-scoped) for intake; primary-borrower-only intake in V1
+
+- **Date:** 2026-06-11
+- **Status:** Accepted
+
+**Context:** The intake lender dropdown needs real data, and the borrower section needs a
+scope decision (one borrower vs a repeatable co-borrower UI).
+
+**Decision:** Add a small **company-scoped `GET /lenders`** (`LenderSummary` =
+`{ id, name, supported_programs }`; `scope_to_company` + `only_active`; no pagination) to
+populate the dropdown — an empty list is a graceful state until lenders are seeded (LP-48).
+The V1 intake form captures the **primary borrower only**; co-borrowers are deferred
+(the API already supports multiple borrowers, so they can be added on the detail page or a
+later enhancement).
+
+**Rationale:** A real dropdown needs real, scoped data (no faking). A repeatable
+multi-borrower UI is complexity the first intake flow doesn't need; the primary borrower is
+the essential one.
+
+**Consequences:** Lenders appear once seeded; the dropdown shows "No lenders configured"
+meanwhile. Co-borrowers are a later addition. The lenders endpoint is tested for tenant
+scoping.
