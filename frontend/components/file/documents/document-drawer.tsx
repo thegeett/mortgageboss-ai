@@ -16,13 +16,14 @@ import {
   useDocumentDetail,
 } from "@/lib/api/documents";
 import { humanize } from "@/lib/format";
-import { extractionFields, formatConfidence, formatFileSize } from "@/lib/loan-files/documents";
+import { formatConfidence, formatFileSize } from "@/lib/loan-files/documents";
 import type { DocumentResponse } from "@/lib/types/document";
 import { format } from "date-fns";
 import { Download, FlaskConical, Loader2, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { DocumentStatusBadge } from "./document-status";
+import { ExtractionView } from "./extraction-view";
 
 /** Non-production only — matches the LP-40 dev endpoint's gating. */
 const IS_DEV = process.env.NODE_ENV !== "production";
@@ -139,24 +140,14 @@ function DrawerBody({
           ) : isError ? (
             <p className="mt-3 text-sm text-gray-400">Couldn’t load the extraction.</p>
           ) : extraction ? (
-            <dl className="mt-3 divide-y divide-gray-100 rounded-lg border border-gray-100">
-              {extractionFields(extraction.extracted_data).map((field) => (
-                <div
-                  key={field.key}
-                  className="flex items-start justify-between gap-3 px-3 py-2 text-sm"
-                >
-                  <dt className="shrink-0 text-gray-500">{field.label}</dt>
-                  <dd className="max-w-[62%] truncate text-right font-medium text-gray-900">
-                    {field.value}
-                  </dd>
-                </div>
-              ))}
+            <div className="mt-3">
+              <ExtractionView data={extraction.extracted_data} />
               {extraction.model_used && (
-                <p className="px-3 py-2 text-[11px] text-gray-400">
+                <p className="mt-2 text-[11px] text-gray-400">
                   Extracted by {extraction.model_used} · v{extraction.version}
                 </p>
               )}
-            </dl>
+            </div>
           ) : (
             <p className="mt-3 rounded-lg border border-dashed border-gray-200 px-3 py-4 text-sm text-gray-400">
               No extraction — this document is classified only.

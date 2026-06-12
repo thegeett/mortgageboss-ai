@@ -47,6 +47,31 @@ export interface DocumentResponse {
   updated_at: string;
 }
 
+/**
+ * Extraction shape (LP-39a). `extracted_data` is the typed core (each field a
+ * `{value, source}`) plus a grouped catch-all (`additional_sections`) — read
+ * leniently as a flexible record by the display helpers.
+ */
+
+/** Where a value was read from on the document (page + verbatim snippet). */
+export interface SourceLocation {
+  page: number | null;
+  snippet: string | null;
+}
+
+/** One captured catch-all field (value kept as a string). */
+export interface CatchAllField {
+  label: string;
+  value: string | null;
+  source: SourceLocation | null;
+}
+
+/** A named group of catch-all fields (e.g. "Deductions"). */
+export interface CatchAllSection {
+  section: string;
+  fields: CatchAllField[];
+}
+
 /** The current extraction (pay stubs in V1); `extracted_data` is a flexible record. */
 export interface ExtractionPublic {
   id: string;

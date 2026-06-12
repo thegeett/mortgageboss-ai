@@ -1,6 +1,8 @@
 import {
+  catchAllSections,
   extractionFields,
   formatFileSize,
+  formatSource,
   groupDocumentsByCategory,
   hasInProgressDocuments,
   isTerminalStatus,
@@ -101,23 +103,51 @@ describe("validateUploadFile", () => {
   });
 });
 
-describe("extractionFields", () => {
-  it("orders known pay-stub fields, formats money, and renders nulls as —", () => {
+describe("extractionFields (LP-39a typed core)", () => {
+  it("reads {value, source}, orders known fields, formats money, nulls as —", () => {
     const fields = extractionFields({
-      gross_pay: "4200.00",
-      employer_name: "ACME Corp",
-      hours: null,
+      gross_pay: { value: "4200.00", source: { page: 1, snippet: "Gross 4,200.00" } },
+      employer_name: { value: "ACME Corp", source: null },
+      hours: { value: null, source: null },
     });
     // employer_name comes before gross_pay per the known order.
     expect(fields.map((f) => f.key)).toEqual(["employer_name", "gross_pay", "hours"]);
-    expect(fields.find((f) => f.key === "gross_pay")?.value).toBe("$4,200.00");
+    const gross = fields.find((f) => f.key === "gross_pay");
+    expect(gross?.value).toBe("$4,200.00");
+    expect(gross?.source).toEqual({ page: 1, snippet: "Gross 4,200.00" });
     expect(fields.find((f) => f.key === "hours")?.value).toBe("—");
   });
 
-  it("includes unknown keys after the known ones", () => {
-    const fields = extractionFields({ custom_field: "x", gross_pay: "100" });
-    expect(fields[0]?.key).toBe("gross_pay");
-    expect(fields.some((f) => f.key === "custom_field")).toBe(true);
+  it("tolerates a bare value (no {value} wrapper)", () => {
+    const fields = extractionFields({ employer_name: "ACME Corp" });
+    expect(fields[0]?.value).toBe("ACME Corp");
+    expect(fields[0]?.source).toBeNull();
+  });
+});
+
+describe("catchAllSections", () => {
+  it("returns the grouped sections, ignoring odd shapes", () => {
+    const sections = catchAllSections({
+      additional_sections: [
+        { section: "Deductions", fields: [{ label: "401k", value: "210", source: null }] },
+        { section: "Bad" }, // no fields array → filtered out
+      ],
+    });
+    expect(sections.map((s) => s.section)).toEqual(["Deductions"]);
+    expect(sections[0]?.fields[0]?.label).toBe("401k");
+  });
+
+  it("returns [] when absent", () => {
+    expect(catchAllSections({ gross_pay: { value: "1" } })).toEqual([]);
+  });
+});
+
+describe("formatSource", () => {
+  it("formats page + snippet, or null when empty", () => {
+    expect(formatSource({ page: 2, snippet: "Gross 4,200" })).toBe("p.2: “Gross 4,200”");
+    expect(formatSource({ page: 3, snippet: null })).toBe("p.3");
+    expect(formatSource(null)).toBeNull();
+    expect(formatSource({ page: null, snippet: null })).toBeNull();
   });
 });
 

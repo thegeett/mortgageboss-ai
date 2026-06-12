@@ -3738,3 +3738,218 @@ over-engineering; the real taxonomy/matching is a domain decision deferred to Pr
 **Consequences:** V1 matching is basic (one income need per pay stub, by category); both the
 map and the rule are documented as provisional and will be refined. The category shown in the
 UI reflects this provisional map.
+
+---
+
+# Phase 3 Verification — design decisions (recorded in advance)
+
+ADR-140…144 were settled during Phase 1 (Epic 5) while shaping document
+extraction, and define how the **Phase 3 verification engine** will behave.
+Recorded now so they are settled, not re-litigated later. They are **forward-
+looking**: the extraction-shape foundation they depend on (per-field page +
+snippet; typed core + grouped catch-all — ADR-144) is **not yet implemented** —
+the current LP-39 `PayStubExtraction` is flat typed fields only. That shape is
+built in **LP-39a** (pay stub), then replicated for W-2 (LP-39b) and bank
+statement (LP-39c).
+
+---
+
+## ADR-140: Two-layer verification — AI surfaces facts/discrepancies, deterministic code judges thresholds
+
+- **Date:** 2026-06-12
+- **Status:** Accepted (Phase 3 design, recorded in advance)
+
+**Context:** Verification has two distinct kinds of work, suited to different tools: reading
+documents and spotting cross-source discrepancies (open-ended, including ones nobody
+pre-enumerated), versus applying a finite set of regulatory thresholds (DTI, LTV, recency,
+loan limits, overlays from Fannie/FHA/lender guidelines).
+
+**Decision:** Split verification into two layers with a **structured handoff** (never prose):
+
+  * **AI (perception/annotation)** — reads documents, extracts structured values, and performs
+    **open-ended cross-source discrepancy detection** as a *single general capability* (NOT a
+    method-per-finding). It emits **structured findings** (typed fields: type, amount,
+    source_doc, page, snippet, confidence, reasoning), catching known *and* novel discrepancies
+    (e.g. an undisclosed support obligation in a divorce decree) because it reads and compares
+    rather than executing pre-written checks.
+  * **Deterministic Python (judgment)** — a finite, enumerable set of regulatory rules, **one
+    function per rule**, consuming **structured data** (extracted values + human-confirmed
+    AI-surfaced corrections) and emitting auditable pass/fail findings against thresholds.
+
+The AI writes typed records; deterministic rules read typed fields. **There is no step where
+Python interprets AI prose.** AI fallibility (a missed or false flag) is **acceptable by
+design** because findings are surfaced for the **processor to resolve, not used as the final
+decision** — the same human-in-the-loop principle as document classification; threshold
+decisions remain deterministic and auditable.
+
+**Rationale:** Auditability (threshold calls are defensible to underwriters/regulators);
+consistency (rules give the same answer every run); regulatory faithfulness (guidelines *are*
+rules — encode them as rules); scalability (open-ended detection is ONE AI capability, not N
+hand-written methods, so it catches discrepancies nobody pre-enumerated). You cannot write a
+Python method to catch a discrepancy you didn't foresee — open-ended detection MUST be AI;
+"method per rule" applies only to the finite, specified regulatory rules.
+
+**Consequences:** The handoff is always structured data. Phase 3 builds the deterministic rule
+set incrementally; the AI cross-source layer is one capability over the full extracted material
+(hence ADR-144's catch-all). A human confirms AI corrections before they feed the deterministic
+recompute.
+
+---
+
+## ADR-141: Findings are blocking — APPLIED or OVERRIDDEN, nothing silently ignored
+
+- **Date:** 2026-06-12
+- **Status:** Accepted (Phase 3 design, recorded in advance)
+
+**Context:** Surfacing discrepancies is only useful if they can't be quietly dropped before
+submission.
+
+**Decision:** Every in-scope finding MUST be resolved before a file can be "ready to submit":
+
+  * **APPLIED** — incorporated into the file/numbers (e.g. an $800 decree obligation added to
+    liabilities, which feeds the deterministic DTI recompute), or
+  * **OVERRIDDEN** — explicitly dismissed by the processor **with a recorded reason**.
+
+No finding may be silently ignored; **OPEN findings block submission**. While any in-scope
+finding is OPEN, affected calculations (DTI/LTV, …) display an **alert** ("findings unresolved
+— this calculation may be incomplete"); the calculator queries open in-scope findings for the
+file.
+
+**Rationale:** A blocking, reason-required resolution makes the file's integrity auditable —
+every surfaced concern was either incorporated or explicitly judged not to matter, by a named
+processor. Alerting affected calculations prevents trusting a DTI/LTV that an unresolved
+finding might change.
+
+**Consequences:** Submission gating depends on the open-findings query (scoped by ADR-142's
+threshold). Resolution state (APPLIED/OVERRIDDEN + reason + actor) is recorded. "Resolve all
+findings" means "resolve all findings at the chosen thoroughness" (ADR-142).
+
+---
+
+## ADR-142: Aggression dial is a confidence threshold gating BOTH display and blocking
+
+- **Date:** 2026-06-12
+- **Status:** Accepted (Phase 3 design, recorded in advance)
+
+**Context:** Open-ended detection produces findings of varying confidence; processors want to
+tune thoroughness without paying to re-run the AI.
+
+**Decision:** The AI cross-source layer **detects and stores ALL findings, each with a
+confidence**. A per-file **aggression** setting (user-level default, per-file override) sets a
+confidence **cutoff applied at read time**: Conservative → high threshold (only high-confidence);
+Balanced (default) → medium; Thorough → low (almost everything, incl. low-confidence hunches).
+**Decision (2a.i): the threshold gates BOTH display AND blocking** — a finding below the active
+cutoff is neither shown nor blocking; one at/above is shown AND must be resolved. The **active
+aggression level at submission is recorded on the file** (auditable: what threshold was in
+effect when submitted).
+
+**Rationale:** Storing everything with confidence and filtering at read time means changing the
+dial **re-filters instantly — no AI re-run, no new cost**. Gating display and blocking together
+keeps "resolve all findings" coherent at the chosen thoroughness. Recording the level makes the
+submission defensible.
+
+**Consequences:** Detection persists all findings + confidence; display/blocking is a filtered
+view. A more thorough setting surfaces (and requires resolving) more findings. The submitted
+file carries the threshold in effect.
+
+---
+
+## ADR-143: Cross-source verification runs on-demand with a staleness flag (V1)
+
+- **Date:** 2026-06-12
+- **Status:** Accepted (Phase 3 design, recorded in advance)
+
+**Context:** Cross-source verification is heavy and needs multiple documents present together
+(the divorce-decree case requires the decree AND the stated liabilities), so it shouldn't fire
+piecemeal per upload.
+
+**Decision:** When any document changes (upload, type override, re-extraction), verification is
+marked **STALE** ("documents changed — verification out of date"). The processor **manually
+triggers** the heavy cross-source pass, so the comparison fires when the full material is
+present. **V1 is manual-trigger + staleness indication**; later phases automate verification on
+document change.
+
+**Rationale:** Manual trigger avoids redundant expensive passes on incomplete material and lets
+the processor decide when the file is ready to verify; the staleness flag keeps them honest
+about whether the current findings reflect the current documents.
+
+**Consequences:** A `stale` indicator on the file's verification state; a processor-initiated
+run. Automation is deferred.
+
+---
+
+## ADR-144: Extraction shape — typed core + grouped catch-all, with per-field source location
+
+- **Date:** 2026-06-12
+- **Status:** Accepted (Phase 3 design) — **implemented for the pay stub in LP-39a (ADR-145)**
+
+**Context:** Deterministic rules need typed fields to consume, but the AI cross-source layer
+(ADR-140) needs the *full* document material to catch discrepancies nobody pre-enumerated — and
+processors use all fields, not just the decision-driving ones. Trust requires showing *where* a
+value came from.
+
+**Decision:** Extraction captures **everything** on a document while keeping decision-driving
+fields **typed**:
+
+  * **Typed core** — the mortgage-decision-relevant fields, named and typed (e.g. pay stub
+    `gross_pay: Decimal`, `pay_period_end: date`). Defined by what the verification **rules**
+    consume; grows in Phase 3 as rules need fields (promoted from the catch-all). NOT a generic
+    field bag.
+  * **Grouped catch-all** — everything else, captured as sections → `{label, value, page,
+    snippet}`. Nothing is lost; the processor sees the full document; the AI cross-source layer
+    has the full material (the catch-all is what makes the divorce-decree obligation catchable
+    even when it isn't in the typed core).
+
+**Per-field source location** — every extracted field (typed and catch-all) carries **where it
+was read from**: a **page number** and a **verbatim snippet**, so a processor can click a
+finding and see the exact supporting line (the trust/audit mechanism). Visual bounding-box
+highlighting is deferred; **page + snippet is the V1 form**.
+
+**Rationale:** Typed core keeps deterministic rules consuming clean fields; the catch-all keeps
+the material complete for open-ended AI detection and for the processor; page+snippet makes
+findings traceable to the source. This is the foundation ADR-140/141/142 depend on.
+
+**Consequences:** Built for the pay stub in **LP-39a** (ADR-145) — `PayStubExtraction` is now a
+typed core (`TypedField` with source) + grouped catch-all. Then replicated for
+then replicated for **W-2 (LP-39b)** and **bank statement (LP-39c)**. The typed core grows in
+Phase 3 by promoting catch-all fields as rules require them. Until LP-39a lands, the verification
+engine's foundation is incomplete.
+
+---
+
+## ADR-145: Pay-stub extraction realizes the typed-core + grouped-catch-all + source shape (LP-39a)
+
+- **Date:** 2026-06-12
+- **Status:** Accepted — **implements ADR-144**
+
+**Context:** ADR-144 settled the extraction shape (typed core + grouped catch-all + per-field
+source) as a Phase 3 foundation, recorded in advance. LP-39a builds it concretely on the pay
+stub — the shape W-2 (LP-39b) and bank statement (LP-39c) reuse.
+
+**Decision:** Reusable shape types live in `app/ai/extraction/shape.py`:
+
+  * `SourceLocation { page: int | None, snippet: str | None }`,
+  * `TypedField[T] { value: T | None, source: SourceLocation | None }` (PEP 695 generic; a
+    present-but-uncoercible value → ``value=None`` but ``source`` is kept),
+  * `CatchAllField { label, value: str | None, source }` and
+    `CatchAllSection { section, fields: [...] }`.
+
+`PayStubExtraction` is reshaped to a **typed core** (each of the 11 decision fields a
+`TypedField` with source) + **`additional_sections: list[CatchAllSection]`** (everything else,
+by section). The result wrapper (`data/status/confidence/reasoning` + `.failed()`) and its
+behaviour are unchanged: full-document Sonnet reading, honest nulls, **tolerant coercion**
+(typed core only; catch-all values stay strings), defensive parsing, graceful failure (never
+raises), metadata-only logging (now counts: `core_fields_present`, `catch_all_sections`). The
+model returns a documented JSON contract (`typed_core` + `additional_sections`); the parser is
+tolerant (fences/prose, a flat fallback, bad sections/fields skipped). The richer JSON is
+stored unchanged in mechanism via `create_extraction_version` (LP-42); the LP-43 drawer shows
+the typed core + collapsible catch-all sections + a click-to-source affordance (page + snippet).
+
+**Rationale:** Realizes ADR-144 on a real type so the deterministic engine has typed fields,
+the AI cross-source layer has the full material, and findings are traceable to source — while
+preserving every LP-39 guarantee.
+
+**Consequences:** Status is derived from the **typed core** (catch-all doesn't affect it). The
+typed core is a V1 starter that grows in Phase 3 (promote catch-all fields as rules need them).
+The prompt + field set remain starters (Priya / POC). `_MAX_TOKENS` raised (4096) for the
+richer output. Reused as-is by LP-39b/LP-39c.

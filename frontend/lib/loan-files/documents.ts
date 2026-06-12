@@ -6,7 +6,13 @@
  * that drives live polling, client-side upload validation, and the extraction
  * field display. Colours use the LP-5 semantic tokens — never ad-hoc.
  */
-import type { DocumentCategory, DocumentResponse, DocumentStatus } from "@/lib/types/document";
+import type {
+  CatchAllSection,
+  DocumentCategory,
+  DocumentResponse,
+  DocumentStatus,
+  SourceLocation,
+} from "@/lib/types/document";
 
 // --- Status treatment ------------------------------------------------------- //
 
@@ -189,9 +195,11 @@ export function formatConfidence(value: number | null): string | null {
   return `${Math.round(value * 100)}%`;
 }
 
-// --- Extraction field display ----------------------------------------------- //
+// --- Extraction field display (LP-39a shape) -------------------------------- //
+// The stored `extracted_data` is the typed core (each field a {value, source})
+// + a grouped catch-all (`additional_sections`). We read it leniently.
 
-/** Preferred label + order for the known pay-stub fields; others fall through. */
+/** Preferred label + order for the known pay-stub typed-core fields. */
 export const EXTRACTION_FIELD_LABELS: Record<string, string> = {
   employer_name: "Employer",
   employee_name: "Employee",
@@ -212,6 +220,7 @@ export interface ExtractionField {
   key: string;
   label: string;
   value: string;
+  source: SourceLocation | null;
 }
 
 /** Money-ish keys we render as currency. */
@@ -228,30 +237,52 @@ function displayValue(key: string, raw: unknown): string {
   return String(raw);
 }
 
+/** Pull `{value, source}` out of a typed-core entry, tolerating odd shapes. */
+function readTypedField(entry: unknown): { value: unknown; source: SourceLocation | null } {
+  if (entry && typeof entry === "object" && "value" in entry) {
+    const obj = entry as { value?: unknown; source?: unknown };
+    const source =
+      obj.source && typeof obj.source === "object" ? (obj.source as SourceLocation) : null;
+    return { value: obj.value ?? null, source };
+  }
+  return { value: entry ?? null, source: null }; // tolerant: a bare value
+}
+
 /**
- * Turn an extraction's `extracted_data` into ordered, labelled key/value rows —
- * the known pay-stub fields first (in a sensible order), then any extra keys.
- * Absent/null values render as "—".
+ * The typed core as ordered, labelled rows (value + source) — the known pay-stub
+ * fields in a sensible order. Absent/null values render as "—".
  */
 export function extractionFields(data: Record<string, unknown>): ExtractionField[] {
-  const seen = new Set<string>();
   const fields: ExtractionField[] = [];
-
   for (const key of EXTRACTION_FIELD_ORDER) {
     if (key in data) {
-      seen.add(key);
+      const { value, source } = readTypedField(data[key]);
       fields.push({
         key,
         label: EXTRACTION_FIELD_LABELS[key] ?? key,
-        value: displayValue(key, data[key]),
+        value: displayValue(key, value),
+        source,
       });
     }
   }
-  for (const key of Object.keys(data)) {
-    if (!seen.has(key)) {
-      const label = key.charAt(0).toUpperCase() + key.slice(1).replace(/_/g, " ");
-      fields.push({ key, label, value: displayValue(key, data[key]) });
-    }
-  }
   return fields;
+}
+
+/** The grouped catch-all (`additional_sections`), or [] if absent/odd. */
+export function catchAllSections(data: Record<string, unknown>): CatchAllSection[] {
+  const raw = data.additional_sections;
+  if (!Array.isArray(raw)) return [];
+  return raw.filter(
+    (s): s is CatchAllSection =>
+      Boolean(s) && typeof s === "object" && Array.isArray((s as CatchAllSection).fields),
+  );
+}
+
+/** A compact "p.{page}: '{snippet}'" label for a source affordance, or null. */
+export function formatSource(source: SourceLocation | null): string | null {
+  if (!source) return null;
+  const parts: string[] = [];
+  if (source.page != null) parts.push(`p.${source.page}`);
+  if (source.snippet) parts.push(`“${source.snippet}”`);
+  return parts.length > 0 ? parts.join(": ") : null;
 }

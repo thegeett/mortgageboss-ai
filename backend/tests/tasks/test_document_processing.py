@@ -10,6 +10,7 @@ unexpected error → FAILED, never crashing), the classify→extract **routing**
 logged**.
 """
 
+from decimal import Decimal
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from uuid import uuid4
@@ -18,6 +19,7 @@ import pytest
 import structlog
 from app.ai.classification import ClassificationResult
 from app.ai.extraction.pay_stub import PayStubExtraction, PayStubExtractionResult
+from app.ai.extraction.shape import TypedField
 from app.core.security import hash_password
 from app.models import Company, User, UserRole
 from app.models.document import Document, DocumentCategory, DocumentStatus
@@ -91,7 +93,10 @@ def _patch_extract(monkeypatch: pytest.MonkeyPatch, result: PayStubExtractionRes
 
 def _paystub_success() -> PayStubExtractionResult:
     return PayStubExtractionResult(
-        data=PayStubExtraction(employer_name="ACME Corp", gross_pay="4200.00"),
+        data=PayStubExtraction(
+            employer_name=TypedField(value="ACME Corp"),
+            gross_pay=TypedField(value=Decimal("4200.00")),
+        ),
         status=ExtractionStatus.SUCCEEDED,
         confidence=0.95,
         reasoning="clear",
@@ -355,7 +360,10 @@ async def test_no_extracted_values_logged(
     _patch_extract(
         monkeypatch,
         PayStubExtractionResult(
-            data=PayStubExtraction(employer_name="SECRETCORP", gross_pay="9999.99"),
+            data=PayStubExtraction(
+                employer_name=TypedField(value="SECRETCORP"),
+                gross_pay=TypedField(value=Decimal("9999.99")),
+            ),
             status=ExtractionStatus.SUCCEEDED,
             confidence=0.95,
             input_tokens=10,

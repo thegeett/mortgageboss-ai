@@ -36,6 +36,7 @@ classification's cheaper one.
 """
 
 import json
+from collections.abc import Callable
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 from typing import Any
@@ -44,6 +45,7 @@ import structlog
 from pydantic import BaseModel, Field, ValidationError
 
 from app.ai.client import AIClientError, build_document_message, complete
+from app.ai.extraction.shape import CatchAllSection, TypedField
 from app.ai.parsing import coerce_confidence, extract_json_object
 from app.ai.prompt_loader import load_prompt
 from app.core.config import settings
@@ -55,8 +57,9 @@ _PROMPT_PATH = "extraction/pay_stub.txt"
 # Media types we can send to the model (matches the LP-36 upload allowlist and the
 # LP-37 document-block support); ``image/jpg`` is normalized to image/jpeg.
 _SUPPORTED_MEDIA_TYPES = frozenset({"application/pdf", "image/jpeg", "image/png", "image/jpg"})
-# A pay stub's JSON object is small but has ~11 fields + reasoning; give it room.
-_MAX_TOKENS = 1024
+# The response now captures EVERYTHING on the stub (typed core + grouped catch-all
+# with per-field source), so it can be sizeable — give the model room.
+_MAX_TOKENS = 4096
 
 # Date formats accepted from the model, tried in order (ISO first).
 _DATE_FORMATS = (
@@ -71,25 +74,35 @@ _DATE_FORMATS = (
 
 
 class PayStubExtraction(BaseModel):
-    """The structured values read from a pay stub.
+    """A pay stub in the LP-39a shape: typed core + grouped catch-all.
 
-    **V1 STARTER field set — refine with Priya (domain expert).** Every field is
-    nullable: a missing/illegible value is an honest ``None``, never fabricated.
-    Money is ``Decimal``; dates are ``date``; ``pay_frequency`` is a free string
-    for V1 (could become an enum later).
+    **Typed core** — the mortgage-decision-relevant fields, each a
+    :class:`TypedField` carrying the coerced value + its :class:`SourceLocation`
+    (page + verbatim snippet). Feeds DTI (income) + recency (dates). This core is a
+    **V1 starter — refine with Priya; grows in Phase 3** as deterministic rules
+    need fields (promoted from the catch-all).
+
+    **Grouped catch-all** (``additional_sections``) — *everything else* on the
+    stub (specific deductions, tax line items, employer address, check number, …),
+    grouped by the document's sections. Nothing on the document is lost; catch-all
+    values stay strings (not coerced).
     """
 
-    employer_name: str | None = None
-    employee_name: str | None = None
-    pay_period_start: date | None = None
-    pay_period_end: date | None = None
-    pay_date: date | None = None
-    gross_pay: Decimal | None = None  # period gross
-    net_pay: Decimal | None = None
-    ytd_gross: Decimal | None = None
-    pay_frequency: str | None = None  # e.g. "weekly" / "biweekly" / "semimonthly" / "monthly"
-    hours: Decimal | None = None
-    rate: Decimal | None = None
+    # --- Typed core (value + source) ---------------------------------------- #
+    employer_name: TypedField[str] = Field(default_factory=TypedField)
+    employee_name: TypedField[str] = Field(default_factory=TypedField)
+    pay_period_start: TypedField[date] = Field(default_factory=TypedField)
+    pay_period_end: TypedField[date] = Field(default_factory=TypedField)
+    pay_date: TypedField[date] = Field(default_factory=TypedField)
+    gross_pay: TypedField[Decimal] = Field(default_factory=TypedField)  # period gross
+    net_pay: TypedField[Decimal] = Field(default_factory=TypedField)
+    ytd_gross: TypedField[Decimal] = Field(default_factory=TypedField)
+    pay_frequency: TypedField[str] = Field(default_factory=TypedField)
+    hours: TypedField[Decimal] = Field(default_factory=TypedField)
+    rate: TypedField[Decimal] = Field(default_factory=TypedField)
+
+    # --- Grouped catch-all — everything else, by section -------------------- #
+    additional_sections: list[CatchAllSection] = Field(default_factory=list)
 
 
 class PayStubExtractionResult(BaseModel):
@@ -182,14 +195,87 @@ def _coerce_str(value: Any) -> str | None:
     return None
 
 
-def _parse_pay_stub_json(text: str) -> PayStubExtractionResult | None:
-    """Defensively parse a model response into a :class:`PayStubExtractionResult`.
+# The typed-core fields and the coercer for each (everything else → catch-all).
+_CORE_SPEC: tuple[tuple[str, Callable[[Any], Any]], ...] = (
+    ("employer_name", _coerce_str),
+    ("employee_name", _coerce_str),
+    ("pay_period_start", _coerce_date),
+    ("pay_period_end", _coerce_date),
+    ("pay_date", _coerce_date),
+    ("gross_pay", _coerce_decimal),
+    ("net_pay", _coerce_decimal),
+    ("ytd_gross", _coerce_decimal),
+    ("pay_frequency", _coerce_str),
+    ("hours", _coerce_decimal),
+    ("rate", _coerce_decimal),
+)
 
-    Extracts the JSON object (tolerating fences/prose), coerces each field
-    tolerantly (currency/date/string), and derives the status: ``FAILED`` if no
-    field was read, ``PARTIAL`` if a model-provided value couldn't be coerced
-    (data loss), else ``SUCCEEDED``. Returns ``None`` only when no JSON object can
-    be parsed at all (→ the caller produces the failed fallback). Never raises.
+
+def _coerce_page(value: Any) -> int | None:
+    """A page number → int; junk/absent → None."""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str) and value.strip().isdigit():
+        return int(value.strip())
+    return None
+
+
+def _source_payload(entry: dict[str, Any]) -> dict[str, Any] | None:
+    """Build a SourceLocation dict from an entry's page/snippet, or None if neither."""
+    page = _coerce_page(entry.get("page"))
+    raw_snippet = entry.get("snippet")
+    snippet = raw_snippet.strip() if isinstance(raw_snippet, str) and raw_snippet.strip() else None
+    if page is None and snippet is None:
+        return None
+    return {"page": page, "snippet": snippet}
+
+
+def _parse_catch_all(raw: Any) -> list[dict[str, Any]]:
+    """Pass through the grouped catch-all as section/field dicts (values stay strings).
+
+    Defensive: skips non-dict sections/fields and fields without a label; drops
+    empty sections; coerces only ``page`` (to int) and keeps ``snippet`` verbatim.
+    """
+    sections: list[dict[str, Any]] = []
+    if not isinstance(raw, list):
+        return sections
+    for sec in raw:
+        if not isinstance(sec, dict):
+            continue
+        name = sec.get("section")
+        section_name = name.strip() if isinstance(name, str) and name.strip() else "Other"
+        fields_out: list[dict[str, Any]] = []
+        raw_fields = sec.get("fields")
+        if isinstance(raw_fields, list):
+            for field in raw_fields:
+                if not isinstance(field, dict):
+                    continue
+                label = field.get("label")
+                if not isinstance(label, str) or not label.strip():
+                    continue
+                value = field.get("value")
+                value_str = None if value is None else (str(value).strip() or None)
+                fields_out.append(
+                    {"label": label.strip(), "value": value_str, "source": _source_payload(field)}
+                )
+        if fields_out:
+            sections.append({"section": section_name, "fields": fields_out})
+    return sections
+
+
+def _parse_pay_stub_json(text: str) -> PayStubExtractionResult | None:
+    """Defensively parse a model response into the new-shape result. Never raises.
+
+    Reads the documented JSON contract — ``typed_core`` (per-field
+    ``{value, page, snippet}``) + ``additional_sections`` (grouped catch-all) —
+    tolerating fences/prose and a flat fallback. The typed core is **coerced**
+    (currency/date/string; a present-but-uncoercible value → ``None``, source
+    kept); the catch-all is **passed through** as strings. Status is derived from
+    the typed core: no field read → ``FAILED``; a coercion loss → ``PARTIAL``;
+    else ``SUCCEEDED`` (the catch-all doesn't affect status). Returns ``None`` only
+    when no JSON object can be parsed.
     """
     snippet = extract_json_object(text)
     if snippet is None:
@@ -201,43 +287,36 @@ def _parse_pay_stub_json(text: str) -> PayStubExtractionResult | None:
     if not isinstance(payload, dict):
         return None
 
-    # The model may nest the fields under "data"/"fields", or put them at the top
-    # level — accept either so a reasonable response shape isn't rejected.
-    fields = payload.get("data")
-    if not isinstance(fields, dict):
-        fields = payload.get("fields")
-    if not isinstance(fields, dict):
-        fields = payload
+    # Typed core under "typed_core" (the contract); fall back to top-level keys.
+    core = payload.get("typed_core")
+    if not isinstance(core, dict):
+        core = payload
 
     coercion_lost = False
-
-    def take(key: str, coercer: Any) -> Any:
-        nonlocal coercion_lost
-        raw = fields.get(key)
+    core_payload: dict[str, Any] = {}
+    non_null = 0
+    for key, coercer in _CORE_SPEC:
+        entry = core.get(key)
+        if isinstance(entry, dict):
+            raw = entry.get("value")
+            source = _source_payload(entry)
+        else:
+            raw = entry  # tolerant: a bare value with no source
+            source = None
         coerced = coercer(raw)
-        # A non-empty model value that coerced to None is lost data → PARTIAL.
         if coerced is None and raw not in (None, "") and not isinstance(raw, bool):
-            coercion_lost = True
-        return coerced
+            coercion_lost = True  # a present value we couldn't coerce → data loss
+        if coerced is not None:
+            non_null += 1
+        core_payload[key] = {"value": coerced, "source": source}
+
+    sections = _parse_catch_all(payload.get("additional_sections"))
 
     try:
-        data = PayStubExtraction(
-            employer_name=_coerce_str(fields.get("employer_name")),
-            employee_name=_coerce_str(fields.get("employee_name")),
-            pay_period_start=take("pay_period_start", _coerce_date),
-            pay_period_end=take("pay_period_end", _coerce_date),
-            pay_date=take("pay_date", _coerce_date),
-            gross_pay=take("gross_pay", _coerce_decimal),
-            net_pay=take("net_pay", _coerce_decimal),
-            ytd_gross=take("ytd_gross", _coerce_decimal),
-            pay_frequency=_coerce_str(fields.get("pay_frequency")),
-            hours=take("hours", _coerce_decimal),
-            rate=take("rate", _coerce_decimal),
-        )
+        data = PayStubExtraction.model_validate({**core_payload, "additional_sections": sections})
     except ValidationError:
         return None
 
-    non_null = sum(1 for v in data.model_dump().values() if v is not None)
     if non_null == 0:
         status = ExtractionStatus.FAILED
     elif coercion_lost:
@@ -298,13 +377,15 @@ async def extract_pay_stub(content: bytes, media_type: str) -> PayStubExtraction
     result.input_tokens = resp.input_tokens
     result.output_tokens = resp.output_tokens
 
-    # Metadata only: status, confidence, and a count of non-null fields — NEVER
-    # the extracted values (income, employer, names are all PII).
-    fields_present = sum(1 for v in result.data.model_dump().values() if v is not None)
+    # Metadata only: status, confidence, and COUNTS — never the extracted values
+    # (income, employer, names are all PII). Counts: typed-core fields populated,
+    # and catch-all sections captured.
+    core_present = sum(1 for key, _ in _CORE_SPEC if getattr(result.data, key).value is not None)
     logger.info(
         "paystub_extraction_done",
         status=result.status,
         confidence=result.confidence,
-        fields_present=fields_present,
+        core_fields_present=core_present,
+        catch_all_sections=len(result.data.additional_sections),
     )
     return result

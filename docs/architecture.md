@@ -203,6 +203,26 @@ per-type pattern (typed schema + prompt + module) that Phase 2 replicates for th
 other ~100 types. (Originally took pre-extracted text; changed to full-document
 input in the LP-39 modification — ADR-128, following the LP-37 revision / ADR-126.)
 
+**Extraction shape (LP-39a, ADR-144/145).** The result captures **everything** on
+the document in a uniform shape — **typed core + grouped catch-all + per-field
+source** (reusable types in `app/ai/extraction/shape.py`, reused by W-2 LP-39b and
+bank statement LP-39c):
+
+- **Typed core** — the decision-driving fields, each a `TypedField` (coerced
+  `value` + `SourceLocation`). Feeds the Phase 3 deterministic rules (DTI/recency);
+  grows in Phase 3 as rules need fields.
+- **Grouped catch-all** (`additional_sections`) — *everything else*, as sections of
+  `{label, value, page, snippet}`. Nothing is lost: processors see the full
+  document and the Phase 3 AI cross-source layer has the full material to catch
+  discrepancies (e.g. an undisclosed decree obligation). Catch-all values stay
+  strings.
+- **Per-field source** — every field carries the `page` + verbatim `snippet` it was
+  read from (the click-to-source trust/audit mechanism). The LP-43 drawer shows the
+  typed core + collapsible catch-all sections + the source affordance.
+
+This is the foundation the Phase 3 verification engine consumes — see
+[`phase-3-verification-design.md`](phase-3-verification-design.md).
+
 - **Full-document input** — supported media types are `application/pdf`,
   `image/jpeg`, `image/png` (`image/jpg` normalized). An empty or unsupported
   document short-circuits to `failed(...)` **without an API call**. The loaded
@@ -421,3 +441,16 @@ The build is organized into epics (see [`phases/phase-1.md`](phases/phase-1.md))
 
 We are at the **end of Epic 1**: foundation built and documented; Epic 2 begins
 the database schema and models.
+
+**Phase 3 (verification) design — settled in advance.** While shaping document
+extraction in Epic 5, the verification engine's behaviour was decided and recorded
+as **ADR-140…144**: a two-layer split (AI surfaces facts/discrepancies as
+structured findings; deterministic Python judges the finite regulatory thresholds —
+structured handoff, never prose); **blocking findings** (resolve every in-scope
+finding APPLIED or OVERRIDDEN-with-reason before submit; open findings alert
+affected calculations); the **aggression dial as a confidence threshold** gating
+both display and blocking (detect-all-store-all, filter at read time, record the
+level at submission); **on-demand cross-source runs** with a staleness flag (V1);
+and the **typed-core + grouped-catch-all** extraction shape with per-field
+page+snippet. That extraction-shape foundation (ADR-144) is **not yet built** — the
+current LP-39 pay-stub extraction is flat typed fields; it lands in **LP-39a/b/c**.
