@@ -18,9 +18,18 @@ concerns so the AI features — document classification (LP-38) and extraction
 
 The wrapper owns the retry policy: the SDK's own retries are disabled
 (``max_retries=0``) so there is a single, observable retry authority here.
+
+**Document/image input (LP-37 revision).** Classification (LP-38) and extraction
+(LP-39) send the **full document** (PDF / image bytes) for native reading — no
+OCR, no pre-extracted text. :func:`build_document_block` / :func:`build_document_message`
+build the base64 content blocks; :func:`complete` forwards ``messages`` to the SDK
+unchanged, so document-bearing messages use the **same** retry/logging/timing path
+as text-only ones. The metadata-only logging covers this too: document bytes,
+base64 data, message content, and response text are **never** logged.
 """
 
 import asyncio
+import base64
 import random
 import time
 from dataclasses import dataclass
@@ -65,6 +74,65 @@ class AICompletion:
     input_tokens: int
     output_tokens: int
     model: str
+
+
+# --------------------------------------------------------------------------- #
+# Document / image content blocks (LP-37 revision)
+# --------------------------------------------------------------------------- #
+
+_PDF_MEDIA_TYPE = "application/pdf"
+# Image media types we accept — matches the LP-36 upload allowlist (PDF/JPEG/PNG).
+# The SDK also accepts image/gif and image/webp, but we don't ingest those.
+_IMAGE_MEDIA_TYPES = frozenset({"image/jpeg", "image/png"})
+
+
+def _normalize_media_type(media_type: str) -> str:
+    """Lowercase/trim a media type and fold the ``image/jpg`` alias to ``image/jpeg``."""
+    mt = media_type.lower().strip()
+    return "image/jpeg" if mt == "image/jpg" else mt
+
+
+def build_document_block(*, content: bytes, media_type: str) -> dict[str, Any]:
+    """Build a base64 ``document`` (PDF) or ``image`` (JPEG/PNG) content block.
+
+    The block shape is verified against the installed anthropic SDK (0.109.1):
+    a PDF becomes ``{"type": "document", "source": {"type": "base64",
+    "media_type": "application/pdf", "data": <b64>}}`` and an image the
+    equivalent ``{"type": "image", ...}``. ``image/jpg`` is normalized to
+    ``image/jpeg``. An unsupported media type raises :class:`ValueError`.
+
+    The bytes are base64-encoded (utf-8 decoded for JSON). The base64 payload is
+    document content (borrower PII) — it is **never** logged.
+    """
+    mt = _normalize_media_type(media_type)
+    data = base64.standard_b64encode(content).decode("utf-8")
+    if mt == _PDF_MEDIA_TYPE:
+        return {
+            "type": "document",
+            "source": {"type": "base64", "media_type": _PDF_MEDIA_TYPE, "data": data},
+        }
+    if mt in _IMAGE_MEDIA_TYPES:
+        return {
+            "type": "image",
+            "source": {"type": "base64", "media_type": mt, "data": data},
+        }
+    raise ValueError(f"Unsupported media type for AI document input: {media_type!r}")
+
+
+def build_document_message(
+    *, content: bytes, media_type: str, instruction: str | None = None
+) -> dict[str, Any]:
+    """Assemble a ``user`` message carrying a document/image block + optional text.
+
+    The content is a list ``[<document/image block>, {"type": "text", "text":
+    instruction}]`` (the text block is omitted when ``instruction`` is empty/None).
+    Callers pass the returned dict straight into ``complete(messages=[...])``;
+    standalone instructions can also go in ``complete(system=...)``.
+    """
+    blocks: list[dict[str, Any]] = [build_document_block(content=content, media_type=media_type)]
+    if instruction:
+        blocks.append({"type": "text", "text": instruction})
+    return {"role": "user", "content": blocks}
 
 
 @lru_cache(maxsize=1)

@@ -1,11 +1,15 @@
 """Tests for document classification (LP-38) — the AI wrapper is MOCKED.
 
 No real API calls and no key: ``complete`` is patched to return canned text or
-raise. The focus is the module's contract — defensive JSON parsing, graceful
-``unknown`` on every failure, the empty-text short-circuit, confidence clamping,
-and the privacy rule that the document text / raw response are never logged.
+raise. Classification now reads the **full document** (PDF/image bytes) natively
+(LP-38 modification, LP-37 revision), so the tests pass bytes + a media type. The
+focus is the module's contract — defensive JSON parsing, graceful ``unknown`` on
+every failure, the empty/unsupported-document short-circuit, confidence clamping,
+and the privacy rule that the document bytes/base64 / raw response are never
+logged. Dummy bytes are fine (the SDK/wrapper is mocked).
 """
 
+import base64
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -19,8 +23,9 @@ from app.ai.classification import (
 )
 from app.ai.client import AIClientError
 
-# A realistic-length document text (clears the _MIN_TEXT_LEN short-circuit).
-SAMPLE_TEXT = "ACME CORP  Pay period 06/01-06/15  Gross 5,000.00  Net 3,812.44  YTD 60,000"
+# Dummy document bytes — the wrapper is mocked, so these need not be real files.
+PDF_BYTES = b"%PDF-1.7 dummy pay stub bytes"
+PNG_BYTES = b"\x89PNG\r\n\x1a\n dummy image bytes"
 
 
 def _mock_complete(
@@ -94,15 +99,33 @@ async def test_success_returns_parsed_result(monkeypatch: pytest.MonkeyPatch) ->
         monkeypatch,
         text='{"document_type": "pay_stub", "confidence": 0.95, "reasoning": "earnings + YTD"}',
     )
-    result = await classify_document(SAMPLE_TEXT)
+    result = await classify_document(PDF_BYTES, "application/pdf")
     assert result.document_type == "pay_stub"
     assert result.confidence == 0.95
     assert mock.call_count == 1
-    # Uses the classification model + passes the text as the user message.
+    # Uses the classification model + sends a document block (not a text string).
     kwargs = mock.await_args.kwargs
     assert kwargs["model"] == classification_module.settings.anthropic_model_classification
-    assert kwargs["messages"][0]["content"] == SAMPLE_TEXT
     assert "system" in kwargs  # the prompt loaded from file
+    message = kwargs["messages"][0]
+    assert message["role"] == "user"
+    block = message["content"][0]
+    assert block["type"] == "document"
+    assert block["source"]["media_type"] == "application/pdf"
+    # The forwarded base64 round-trips back to the original bytes.
+    assert base64.standard_b64decode(block["source"]["data"]) == PDF_BYTES
+
+
+async def test_image_input_uses_image_block(monkeypatch: pytest.MonkeyPatch) -> None:
+    mock = _mock_complete(
+        monkeypatch,
+        text='{"document_type": "drivers_license", "confidence": 0.8, "reasoning": "photo id"}',
+    )
+    result = await classify_document(PNG_BYTES, "image/png")
+    assert result.document_type == "drivers_license"
+    block = mock.await_args.kwargs["messages"][0]["content"][0]
+    assert block["type"] == "image"
+    assert block["source"]["media_type"] == "image/png"
 
 
 async def test_success_with_fenced_json(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -110,7 +133,7 @@ async def test_success_with_fenced_json(monkeypatch: pytest.MonkeyPatch) -> None
         monkeypatch,
         text='```json\n{"document_type": "bank_statement", "confidence": 0.7, "reasoning": "transactions"}\n```',
     )
-    result = await classify_document(SAMPLE_TEXT)
+    result = await classify_document(PDF_BYTES, "application/pdf")
     assert result.document_type == "bank_statement"
     assert result.confidence == 0.7
 
@@ -121,14 +144,14 @@ async def test_low_confidence_returned_as_is(monkeypatch: pytest.MonkeyPatch) ->
         monkeypatch,
         text='{"document_type": "w2", "confidence": 0.3, "reasoning": "uncertain"}',
     )
-    result = await classify_document(SAMPLE_TEXT)
+    result = await classify_document(PDF_BYTES, "application/pdf")
     assert result.document_type == "w2"
     assert result.confidence == 0.3
 
 
 async def test_malformed_response_returns_unknown(monkeypatch: pytest.MonkeyPatch) -> None:
     _mock_complete(monkeypatch, text="I think this is a pay stub, definitely.")
-    result = await classify_document(SAMPLE_TEXT)
+    result = await classify_document(PDF_BYTES, "application/pdf")
     assert result.document_type == "unknown"
     assert result.confidence == 0.0
     assert "parse" in result.reasoning.lower()
@@ -136,18 +159,27 @@ async def test_malformed_response_returns_unknown(monkeypatch: pytest.MonkeyPatc
 
 async def test_ai_failure_returns_unknown_not_raised(monkeypatch: pytest.MonkeyPatch) -> None:
     _mock_complete(monkeypatch, exc=AIClientError("boom"))
-    result = await classify_document(SAMPLE_TEXT)
+    result = await classify_document(PDF_BYTES, "application/pdf")
     assert result.document_type == "unknown"
     assert result.confidence == 0.0
     assert "ai call failed" in result.reasoning.lower()
 
 
-@pytest.mark.parametrize("text", ["", "   ", "\n\t ", "short"])
-async def test_empty_or_short_text_skips_api(monkeypatch: pytest.MonkeyPatch, text: str) -> None:
+async def test_empty_document_skips_api(monkeypatch: pytest.MonkeyPatch) -> None:
     mock = _mock_complete(monkeypatch, text="{}")
-    result = await classify_document(text)
+    result = await classify_document(b"", "application/pdf")
     assert result.document_type == "unknown"
     assert mock.call_count == 0  # never called the API
+
+
+@pytest.mark.parametrize("media_type", ["text/plain", "application/zip", "image/gif", ""])
+async def test_unsupported_media_type_skips_api(
+    monkeypatch: pytest.MonkeyPatch, media_type: str
+) -> None:
+    mock = _mock_complete(monkeypatch, text="{}")
+    result = await classify_document(PDF_BYTES, media_type)
+    assert result.document_type == "unknown"
+    assert mock.call_count == 0  # unsupported type → no API call
 
 
 async def test_confidence_clamped_end_to_end(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -155,28 +187,31 @@ async def test_confidence_clamped_end_to_end(monkeypatch: pytest.MonkeyPatch) ->
         monkeypatch,
         text='{"document_type": "pay_stub", "confidence": 1.5, "reasoning": "over"}',
     )
-    result = await classify_document(SAMPLE_TEXT)
+    result = await classify_document(PDF_BYTES, "application/pdf")
     assert result.confidence == 1.0
 
 
 # --------------------------------------------------------------------------- #
-# PRIVACY: never log document text or raw response content
+# PRIVACY: never log document bytes/base64 or raw response content
 # --------------------------------------------------------------------------- #
 
 
-async def test_does_not_log_text_or_response_content(monkeypatch: pytest.MonkeyPatch) -> None:
-    pii_text = "John Q Borrower SSN 123-45-6789 gross 5000 account 111-222-333 " * 2
+async def test_does_not_log_bytes_base64_or_response_content(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pii_bytes = b"%PDF John Q Borrower SSN 123-45-6789 gross 5000 account 111-222-333"
+    pii_b64 = base64.standard_b64encode(pii_bytes).decode("utf-8")
     response_reasoning = "borrower address 42 Private Lane revealed here"
     _mock_complete(
         monkeypatch,
         text=f'{{"document_type": "pay_stub", "confidence": 0.9, "reasoning": "{response_reasoning}"}}',
     )
     with structlog.testing.capture_logs() as logs:
-        await classify_document(pii_text)
+        await classify_document(pii_bytes, "application/pdf")
 
     blob = " ".join(repr(e) for e in logs)
-    assert "123-45-6789" not in blob
-    assert pii_text not in blob
+    assert "123-45-6789" not in blob  # raw document bytes content
+    assert pii_b64 not in blob  # base64 payload never logged
     assert response_reasoning not in blob  # raw response content not logged
     # But a metadata success log IS emitted (type + confidence only).
     success = [e for e in logs if e["event"] == "classification_succeeded"]

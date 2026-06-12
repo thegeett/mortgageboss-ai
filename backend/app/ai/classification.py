@@ -1,21 +1,24 @@
 """Document classification (LP-38).
 
-Given a document's already-extracted **text**, decide what KIND of document it is
+Given a document's **bytes** (PDF or image), decide what KIND of document it is
 — ``pay_stub``, ``bank_statement``, ``w2``, … — with a confidence and a short
-reasoning. This is the first real use of the LP-37 AI wrapper and the first act
-of the system "understanding" a document; classification routes extraction
-(LP-39 extracts type-specifically, so the type must be known first).
+reasoning. The **full document** is sent to the Haiku-class model for **native
+reading** (no OCR, no pre-extracted text) via the LP-37 document/image content
+block (LP-37 revision, ADR-126). This is the first act of the system
+"understanding" a document; classification routes extraction (LP-39 extracts
+type-specifically, so the type must be known first).
 
 Two design rules matter here:
 
   * **Graceful failure** — AI is probabilistic and its dependencies fail.
     :func:`classify_document` NEVER raises: any failure (AI error, malformed
-    output, empty text) returns ``ClassificationResult.unknown(...)``. The
-    pipeline (LP-42) treats unknown / low-confidence as ``NEEDS_REVIEW`` — a far
-    better outcome than crashing on one document.
-  * **Privacy** — the document text and the model's raw response carry borrower
-    PII, so they are **never** logged. Only metadata (the classified type and
-    confidence) is logged here; the wrapper logs call metadata (tokens/latency).
+    output, empty/unsupported document) returns ``ClassificationResult.unknown(...)``.
+    The pipeline (LP-42) treats unknown / low-confidence as ``NEEDS_REVIEW`` — a
+    far better outcome than crashing on one document.
+  * **Privacy** — the document bytes (and their base64) and the model's raw
+    response carry borrower PII, so they are **never** logged. Only metadata (the
+    classified type and confidence) is logged here; the wrapper logs call
+    metadata (tokens/latency).
 
 ``document_type`` is a flexible string (LP-15), not an enum — the taxonomy is
 large and evolving (Phase 2). This module returns a result; persisting it onto
@@ -28,7 +31,7 @@ from typing import Any
 import structlog
 from pydantic import BaseModel, Field, ValidationError
 
-from app.ai.client import AIClientError, complete
+from app.ai.client import AIClientError, build_document_message, complete
 from app.ai.parsing import coerce_confidence, extract_json_object
 from app.ai.prompt_loader import load_prompt
 from app.core.config import settings
@@ -36,9 +39,9 @@ from app.core.config import settings
 logger = structlog.get_logger(__name__)
 
 _CLASSIFIER_PROMPT_PATH = "classification/document_classifier.txt"
-# Below this many non-whitespace characters there is nothing to classify — skip
-# the API call entirely (cost + latency) and return unknown.
-_MIN_TEXT_LEN = 10
+# Media types we can send to the model (matches the LP-36 upload allowlist and
+# the LP-37 document-block support); ``image/jpg`` is normalized to image/jpeg.
+_SUPPORTED_MEDIA_TYPES = frozenset({"application/pdf", "image/jpeg", "image/png", "image/jpg"})
 # Classification output is a tiny JSON object; cap tokens low.
 _MAX_TOKENS = 512
 
@@ -98,28 +101,37 @@ def _parse_classification_json(text: str) -> ClassificationResult | None:
         return None
 
 
-async def classify_document(text: str) -> ClassificationResult:
-    """Classify a document from its extracted text. Never raises.
+async def classify_document(content: bytes, media_type: str) -> ClassificationResult:
+    """Classify a document from its raw bytes (PDF/image). Never raises.
 
-    Empty/insufficient text short-circuits to ``unknown`` without an API call.
-    Otherwise it loads the file-based classification prompt, calls the LP-37
-    wrapper with the classification model, and parses the response defensively.
-    Any AI error or unparseable output returns ``ClassificationResult.unknown``.
-    The document text and raw response are never logged (PII).
+    An empty or unsupported document short-circuits to ``unknown`` without an API
+    call. Otherwise it loads the file-based classification prompt (the ``system``
+    instruction), sends the **full document** to the Haiku-class model as a
+    document/image content block (LP-37 ``build_document_message``), and parses
+    the response defensively. Any AI error or unparseable output returns
+    ``ClassificationResult.unknown``. The document bytes/base64 and raw response
+    are never logged (PII).
     """
-    if not text or len(text.strip()) < _MIN_TEXT_LEN:
-        return ClassificationResult.unknown("empty or insufficient text")
+    if not content or media_type.lower().strip() not in _SUPPORTED_MEDIA_TYPES:
+        return ClassificationResult.unknown("empty or unsupported document")
 
     system_prompt = load_prompt(_CLASSIFIER_PROMPT_PATH)
+    try:
+        # build_document_message base64-encodes the bytes into a document/image
+        # block; it raises ValueError on an unsupported type (already filtered).
+        message = build_document_message(content=content, media_type=media_type)
+    except ValueError:
+        return ClassificationResult.unknown("unsupported document media type")
+
     try:
         result = await complete(
             model=settings.anthropic_model_classification,
             system=system_prompt,
-            messages=[{"role": "user", "content": text}],
+            messages=[message],
             max_tokens=_MAX_TOKENS,
         )
     except AIClientError:
-        logger.warning("classification_ai_failed")  # metadata only — no content
+        logger.warning("classification_ai_failed")  # metadata only — no bytes/content
         return ClassificationResult.unknown("AI call failed")
 
     parsed = _parse_classification_json(result.text)
@@ -127,7 +139,7 @@ async def classify_document(text: str) -> ClassificationResult:
         logger.warning("classification_parse_failed")  # no raw response logged
         return ClassificationResult.unknown("could not parse classification")
 
-    # Metadata only: the classified type + confidence, never the text/response.
+    # Metadata only: the classified type + confidence, never the bytes/response.
     logger.info(
         "classification_succeeded",
         document_type=parsed.document_type,

@@ -130,6 +130,20 @@ cross-cutting concerns:
   **estimate** via a per-model pricing table; that estimate feeds
   `Extraction.cost_estimate` (LP-16) and `Verification.total_cost_estimate`
   (LP-18).
+- **Document / image input (LP-37 revision)** — the AI features send the **full
+  document** (PDF / image bytes) for **native reading** — no OCR, no
+  pre-extracted text. `build_document_block(content, media_type)` /
+  `build_document_message(...)` build base64 `document` (PDF) and `image`
+  (JPEG/PNG) content blocks (shape verified against the installed SDK);
+  `complete` forwards `messages` to the SDK **unchanged**, so document-bearing
+  messages use the **same** retry/logging/timing path as text. The metadata-only
+  logging covers this — document bytes, base64, message content, and response
+  text are never logged. **Known concern:** multi-page / large documents are
+  token-heavy (higher cost + latency) and there are per-request page/size limits
+  — *verify against current Anthropic docs*; page-splitting / size-guarding is
+  **deferred** (Option A — send the whole document for now). This repositions
+  deterministic PDF text extraction (LP-40) as a **dev-only comparison tool**,
+  not a pipeline step. See ADR-126.
 
 **Configuration to verify.** Model identifiers (`anthropic_model_classification`
 / `_extraction`) and the pricing table are **configuration that changes over
@@ -139,11 +153,20 @@ ADR-118 / ADR-119.
 
 ## Classification (LP-38)
 
-The first act of the system "understanding" a document. `classify_document(text:
-str) -> ClassificationResult` takes a document's already-extracted text (PDF text
-extraction is LP-40) and returns `{ document_type: str, confidence: float,
-reasoning: str }`. It is the first real use of the LP-37 AI wrapper and routes
-extraction — LP-39 extracts type-specifically, so the type must be known first.
+The first act of the system "understanding" a document. `classify_document(content:
+bytes, media_type: str) -> ClassificationResult` sends the **full document**
+(PDF/image bytes) to the Haiku-class model for **native reading** (no OCR, no
+pre-extracted text) via the LP-37 document/image content block, and returns
+`{ document_type: str, confidence: float, reasoning: str }`. It routes extraction
+— LP-39 extracts type-specifically, so the type must be known first.
+(Originally took pre-extracted text; changed to full-document input in the LP-38
+modification — ADR-127, following the LP-37 revision / ADR-126.)
+
+- **Full-document input** — supported media types are `application/pdf`,
+  `image/jpeg`, `image/png` (`image/jpg` normalized). An empty or unsupported
+  document short-circuits to `unknown` **without an API call**. The loaded prompt
+  is the `system` instruction; the document is the `user` message
+  (`build_document_message`).
 
 - **Type as a flexible string** — `document_type` is a lowercase slug
   (`pay_stub`, `bank_statement`, `w2`, …, or `unknown`), not an enum (LP-15); the
@@ -160,12 +183,12 @@ extraction — LP-39 extracts type-specifically, so the type must be known first
   (LP-42) treats unknown / low-confidence as `NEEDS_REVIEW`. The JSON parser is
   defensive — it tolerates ```` ```json ```` fences / prose, clamps confidence to
   `[0, 1]`, and falls back to `unknown` on garbage.
-- **Privacy** — the document text and the model's raw response carry borrower
-  PII and are **never** logged; only metadata (the classified type + confidence)
-  is. Uses `settings.anthropic_model_classification` (a cheaper Haiku-class model;
-  a `TODO`-marked value to verify). This module returns a result — persisting it
-  onto the `Document` is the pipeline's job (LP-42). See ADR-120 / ADR-121 /
-  ADR-122.
+- **Privacy** — the document bytes (and their base64) and the model's raw
+  response carry borrower PII and are **never** logged; only metadata (the
+  classified type + confidence) is. Uses `settings.anthropic_model_classification`
+  (a cheaper Haiku-class model; a `TODO`-marked value to verify). This module
+  returns a result — persisting it onto the `Document` is the pipeline's job
+  (LP-42). See ADR-120 / ADR-121 / ADR-122 / ADR-127.
 
 ## Extraction (pay stub — LP-39)
 

@@ -3342,3 +3342,73 @@ fields when one is malformed. Logging values would leak borrower PII.
 `NEEDS_REVIEW` (pipeline, LP-42). Per-field confidence is deferred (one overall confidence in
 V1). The defensive/tolerant parser is part of the contract and is tested against
 fenced/garbage input and bad field values.
+
+---
+
+## ADR-126: AI wrapper supports native document/image input (full-document reading)
+
+- **Date:** 2026-06-11
+- **Status:** Accepted
+- **Revises:** the LP-37 wrapper (ADR-117/118/119); updates the planned LP-40
+
+**Context:** The original plan had a deterministic PDF text-extraction step (LP-40) feed
+pre-extracted **text** to classification (LP-38) and extraction (LP-39). Architecture update:
+the AI features now send the **full document** (PDF / image bytes) to the model for native
+reading — text-layer PDFs, scanned images, and photos are handled uniformly, with no OCR
+step, mirroring the POC's full-document approach.
+
+**Decision:** Extend the LP-37 wrapper to accept document/image content blocks.
+`build_document_block(*, content: bytes, media_type: str)` builds a base64 `document` block
+for `application/pdf` and an `image` block for `image/jpeg` / `image/png` (`image/jpg`
+normalized to `image/jpeg`); unsupported types raise `ValueError`. `build_document_message`
+assembles a `user` message of `[<block>, optional text]`. The block shape is **verified
+against the installed anthropic SDK (0.109.1)**. `complete(...)` forwards `messages` to the
+SDK **unchanged**, so document-bearing messages flow through the same retry/logging/timing
+path — no signature break, text-only callers unaffected. All existing behavior (transient-only
+retry + backoff + jitter + cap, fail-fast on 4xx, `AICompletion` usage, `AIClientError`,
+cost.py) is preserved.
+
+**Rationale:** Native document reading is more capable and uniform than OCR-then-text and
+matches the POC. Keeping `complete` a pass-through for `messages` means one retry/observability
+path for all input shapes.
+
+**Consequences:** Document bytes are token-heavy → **higher per-document cost and latency**
+(tracked via cost.py). Per-request **page/size limits** exist — *verify against current
+Anthropic docs*; multi-page/size guarding is **deferred** (Option A: send the whole document),
+a documented known concern. Logging stays metadata-only and must **never** include document
+bytes, base64, message content, or response text (tested). Deterministic PDF text extraction
+(LP-40) is repositioned as a **dev-only comparison tool**, not a pipeline step. Model strings
+(`anthropic_model_classification` Haiku-class, `anthropic_model_extraction` Sonnet-class)
+remain placeholders to verify.
+
+---
+
+## ADR-127: Classification reads the full document natively (Haiku), not pre-extracted text
+
+- **Date:** 2026-06-11
+- **Status:** Accepted
+- **Revises:** ADR-120/121/122 (LP-38); follows ADR-126 (LP-37 revision)
+
+**Context:** LP-38 originally classified from a pre-extracted **text** string. Following the
+full-document AI decision (ADR-126), classification should read the actual document — text-
+layer PDFs, scans, and photos alike — rather than depend on a separate OCR/text step.
+
+**Decision:** `classify_document` changes signature from `(text: str)` to
+`(content: bytes, media_type: str)`. It sends the **full document** to the Haiku-class model
+as a document/image content block built with the LP-37 `build_document_message`. Supported
+media types are `application/pdf`, `image/jpeg`, `image/png` (`image/jpg` normalized); an
+empty or unsupported document short-circuits to `ClassificationResult.unknown(...)` **without
+an API call**. Everything else is **unchanged** — the `ClassificationResult` shape, the
+defensive JSON parser, the graceful-failure contract (any AI error / unparseable output →
+`unknown`, never raises), the file-based prompt (still a starter), the Haiku model, and
+metadata-only logging (now explicitly never logging document bytes/base64).
+
+**Rationale:** Native reading is more capable and uniform than OCR-then-text and keeps the
+Haiku/Sonnet split (cheap classify, capable extract). Reusing the LP-37 helper means one
+verified content-block shape and one retry/logging path.
+
+**Consequences:** Document bytes are token-heavy (cost tracked via cost.py); the per-request
+page/size concern and the deferred multi-page/size guarding are inherited from ADR-126.
+The typed result, defensive parsing, and graceful-failure contract are preserved (tests
+adapted to bytes + media type). Extraction (LP-39) gets the same treatment next. The Haiku
+model string remains a placeholder to verify.
