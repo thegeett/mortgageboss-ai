@@ -3265,3 +3265,80 @@ Skipping the API call on empty text saves cost and latency.
 **Consequences:** Callers always receive a `ClassificationResult`. Low-confidence/unknown is
 the human-review signal. The defensive parser is part of the contract and is tested against
 fenced/preambled/garbage input.
+
+---
+
+## ADR-123: Typed document-specific extraction (PayStubExtraction), not a generic field bag
+
+- **Date:** 2026-06-11
+- **Status:** Accepted
+
+**Context:** Extraction reads structured values out of a document. The POC used a generic
+`ExtractedField` bag (arbitrary key/value rows); LP-16 deliberately rejected that in favor of
+document-type-specific structure typed at the application layer and stored as JSON
+(`Extraction.extracted_data`, ADR-057). LP-39 builds the first such type.
+
+**Decision:** Extraction produces a typed, document-specific Pydantic schema —
+`PayStubExtraction` — with named, typed, mostly-nullable fields (`gross_pay: Decimal | None`,
+`pay_period_end: date | None`, …), wrapped in a `PayStubExtractionResult` (`data`, `status`,
+`confidence`, `reasoning`). It serializes to JSON for `Extraction.extracted_data` (persisted
+and versioned by LP-42, not here). `status` reuses LP-16's `ExtractionStatus`.
+
+**Rationale:** Typed fields are what make extracted data **verifiable** downstream — Phase 3
+compares `gross_pay` / `pay_period_end` as a `Decimal` / `date`, which a generic string bag
+can't support cleanly. JSON storage plus app-layer typing is exactly the LP-16 design.
+
+**Consequences:** Each document type needs its own schema + prompt + module — a per-type
+pattern. LP-39 builds one (pay stub); Phase 2 replicates it. The `PayStubExtraction` field
+set is a V1 starter to refine with the domain expert (Priya).
+
+---
+
+## ADR-124: Pay stub only for Phase 1; the per-type extraction pattern is the deliverable
+
+- **Date:** 2026-06-11
+- **Status:** Accepted
+
+**Context:** There are ~100 document types (finalized in Phase 2). Building all of them now
+would be premature; we first want to prove the full pipeline shape on one common type.
+
+**Decision:** Implement extraction end-to-end for the **pay stub only** in Phase 1
+(`extract_pay_stub`), establishing the module/schema/prompt pattern and the shared parsing
+helpers (`app/ai/parsing.py`, factored out of LP-38). The other types come in Phase 2 by
+replicating the pattern.
+
+**Rationale:** Proving upload → text → classify → extract on one income-central type
+de-risks the architecture before fanning out; the reusable **pattern** (and the shared
+defensive-parsing primitives) is the real asset, not the single type.
+
+**Consequences:** Only pay stubs extract in V1. The pattern + the shared `app/ai/parsing.py`
+helpers are reused by every future type. Classification (LP-38) was refactored to use the
+shared helpers (no behavior change).
+
+---
+
+## ADR-125: Honest nulls, no hallucination; extraction reads, it does not judge
+
+- **Date:** 2026-06-11
+- **Status:** Accepted
+
+**Context:** Extracted values feed deterministic verification (Phase 3). The
+AI-extracts / deterministic-verifies separation only holds if extraction is faithful — a
+fabricated value would corrupt every downstream check.
+
+**Decision:** Missing/illegible values are `null` — the prompt explicitly forbids guessing or
+inventing. Extraction reports what's on the document (including absences) and does **not**
+verify, compute, or judge plausibility (Phase 3's job). Value coercion is **tolerant**: a
+single uncoercible field drops to `None` and marks the run `PARTIAL` rather than failing the
+whole extraction. `extract_pay_stub` never raises; any AI/parse failure or empty text returns
+`PayStubExtractionResult.failed(...)`. The document text, raw response, and extracted values
+are never logged (PII) — only metadata (status, confidence, non-null field count).
+
+**Rationale:** A hallucinated income figure could falsely pass verification — far worse than
+a missing one that simply routes to review. Tolerant per-field coercion preserves the good
+fields when one is malformed. Logging values would leak borrower PII.
+
+**Consequences:** Downstream must handle nulls; low confidence / many nulls / `FAILED` →
+`NEEDS_REVIEW` (pipeline, LP-42). Per-field confidence is deferred (one overall confidence in
+V1). The defensive/tolerant parser is part of the contract and is tested against
+fenced/garbage input and bad field values.

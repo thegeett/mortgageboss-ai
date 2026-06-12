@@ -23,13 +23,13 @@ the ``Document`` is the pipeline's job (LP-42).
 """
 
 import json
-import re
 from typing import Any
 
 import structlog
 from pydantic import BaseModel, Field, ValidationError
 
 from app.ai.client import AIClientError, complete
+from app.ai.parsing import coerce_confidence, extract_json_object
 from app.ai.prompt_loader import load_prompt
 from app.core.config import settings
 
@@ -60,38 +60,15 @@ class ClassificationResult(BaseModel):
         return cls(document_type="unknown", confidence=0.0, reasoning=reason)
 
 
-def _extract_json_object(text: str) -> str | None:
-    """Pull the first balanced ``{...}`` object out of a model response.
-
-    Tolerates markdown ```` ```json ```` fences and leading/trailing prose by
-    scanning for the first ``{`` and matching its closing brace (brace-aware, so
-    nested objects are handled). Returns the JSON substring, or ``None`` if there
-    is no balanced object.
-    """
-    start = text.find("{")
-    if start == -1:
-        return None
-    depth = 0
-    for i in range(start, len(text)):
-        ch = text[i]
-        if ch == "{":
-            depth += 1
-        elif ch == "}":
-            depth -= 1
-            if depth == 0:
-                return text[start : i + 1]
-    return None
-
-
 def _parse_classification_json(text: str) -> ClassificationResult | None:
     """Defensively parse a model response into a :class:`ClassificationResult`.
 
-    Handles fenced / preambled JSON, clamps ``confidence`` into ``[0, 1]``, and
-    treats a missing/empty ``document_type`` as ``"unknown"``. Returns ``None``
-    (→ the caller produces the unknown fallback) on any malformed input; never
-    raises.
+    Handles fenced / preambled JSON (``extract_json_object``), clamps
+    ``confidence`` into ``[0, 1]``, and treats a missing/empty ``document_type``
+    as ``"unknown"``. Returns ``None`` (→ the caller produces the unknown
+    fallback) on any malformed input; never raises.
     """
-    snippet = _extract_json_object(text)
+    snippet = extract_json_object(text)
     if snippet is None:
         return None
     try:
@@ -106,7 +83,7 @@ def _parse_classification_json(text: str) -> ClassificationResult | None:
         raw_type.strip() if isinstance(raw_type, str) and raw_type.strip() else "unknown"
     )
 
-    confidence = _coerce_confidence(data.get("confidence"))
+    confidence = coerce_confidence(data.get("confidence"))
 
     raw_reasoning = data.get("reasoning")
     reasoning = raw_reasoning if isinstance(raw_reasoning, str) else ""
@@ -119,26 +96,6 @@ def _parse_classification_json(text: str) -> ClassificationResult | None:
         )
     except ValidationError:
         return None
-
-
-def _coerce_confidence(value: Any) -> float:
-    """Coerce a model-provided confidence to a float clamped to ``[0, 1]``.
-
-    Accepts numbers or numeric strings; anything unparseable becomes ``0.0`` (an
-    out-of-range or junk confidence must not raise or skew downstream review).
-    """
-    if isinstance(value, bool):  # bool is an int subclass — reject it explicitly
-        return 0.0
-    if isinstance(value, (int, float)):
-        number = float(value)
-    elif isinstance(value, str):
-        match = re.search(r"-?\d+(\.\d+)?", value)
-        if match is None:
-            return 0.0
-        number = float(match.group())
-    else:
-        return 0.0
-    return max(0.0, min(1.0, number))
 
 
 async def classify_document(text: str) -> ClassificationResult:

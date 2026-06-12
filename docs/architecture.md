@@ -167,6 +167,39 @@ extraction — LP-39 extracts type-specifically, so the type must be known first
   onto the `Document` is the pipeline's job (LP-42). See ADR-120 / ADR-121 /
   ADR-122.
 
+## Extraction (pay stub — LP-39)
+
+Where classification answered "what kind of document is this?", extraction
+answers "what does it say?". `extract_pay_stub(text: str) ->
+PayStubExtractionResult` reads the structured values out of a pay stub's text.
+**Phase 1 is pay stub only** — one document type end-to-end to establish the
+per-type pattern (typed schema + prompt + module) that Phase 2 replicates for the
+other ~100 types.
+
+- **Typed, not a field bag** — `PayStubExtraction` is a Pydantic schema with
+  named, typed, mostly-nullable fields (`gross_pay: Decimal | None`,
+  `pay_period_end: date | None`, …). This is the deliberate departure from the
+  POC's generic `ExtractedField` approach (LP-16, ADR-057): typed values are what
+  make extracted data **verifiable** downstream (Phase 3 checks them as `Decimal`
+  / `date`). The result serializes to JSON for `Extraction.extracted_data`,
+  persisted/versioned by the pipeline (LP-42), not here.
+- **Honest nulls, no hallucination** — a value not present/legible is `None`,
+  **never fabricated**; the prompt forbids guessing. A made-up income figure is
+  worse than a missing one (it could falsely pass verification). Extraction
+  **reads** faithfully; it does not verify/compute/judge (that's Phase 3).
+- **Tolerant coercion** — currency strings (`"$4,200.00"` → `Decimal`) and common
+  date formats are parsed; a single uncoercible field drops to `None` and marks
+  the run `PARTIAL` rather than failing the whole extraction. `status` reuses
+  LP-16's `ExtractionStatus` (`SUCCEEDED` / `PARTIAL` / `FAILED`).
+- **Graceful failure & privacy** — `extract_pay_stub` never raises (empty text /
+  AI error / unparseable → `PayStubExtractionResult.failed(...)`); the document
+  text, raw response, and extracted **values** are never logged (only status,
+  confidence, and a non-null field count). Reuses the LP-38 patterns —
+  `load_prompt`, the shared defensive parser (`app/ai/parsing.py`), graceful
+  failure — and uses `settings.anthropic_model_extraction` (a more capable
+  Sonnet-class model). The prompt and field set are **starters** (POC prompt /
+  Priya refinement). See ADR-123 / ADR-124 / ADR-125.
+
 ## Data flow (intended V1)
 
 How a loan file moves through the system once feature work lands:
