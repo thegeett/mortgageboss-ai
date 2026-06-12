@@ -4281,3 +4281,39 @@ consistent.
 **processing** status (LP-43, status-driven polling — a different, longer wait) is left untouched: a
 card may show a load skeleton (LP-47) and then a processing indicator (LP-43). Consistent with the
 LP-46 error states (the shared four-state model). Component tests reuse the LP-46 jsdom + RTL setup.
+
+---
+
+## ADR-157: Dev-only idempotent seed script with pre-canned extractions and fake PII
+
+- **Date:** 2026-06-12
+- **Status:** Accepted
+
+**Decision:** `backend/app/scripts/seed_dev_data.py` (run via
+`uv run python -m app.scripts.seed_dev_data [--reset]`) seeds realistic demo data — one company,
+an admin + a processor user, the UWM and Sun-West lenders, and **three loan files in various
+workflow states** (fresh / mid / near-submission) with fake-PII borrowers, properties, loan
+details, documents in various processing states (COMPLETED + NEEDS_REVIEW + PENDING), needs, and
+activity. It is **idempotent** (check-and-skip by stable identifiers — company slug, user email,
+lender slug; loan-file seeding skips if the company already has files), with a `--reset` that
+**hard-clears** the seeded company (DB cascade + its local storage subtree) and recreates it.
+**Dev-only**: a production guard refuses to run (exit 1, writes nothing) when
+`settings.is_production`. Documents get **pre-canned** extractions inserted directly — **no AI
+calls**: the extracted JSON is produced by building the real LP-39a Pydantic models
+(`PayStubExtraction` / `W2Extraction` / `BankStatementExtraction`) and serializing with
+`model_dump(mode="json")`, so the stored shape can't drift from a live run. All PII is **synthetic**
+(never-issued `900-` SSNs written through the encrypted `EncryptedString` column; fake
+names/addresses). A small valid placeholder PDF is stored per document so download works.
+
+**Rationale:** A populated, realistic DB is required to demo the product (LP-49) and review it with
+the domain expert (LP-50), and makes day-to-day development easier. Pre-canning extractions keeps
+the seed fast, deterministic, and keyless; building them from the real models avoids hand-written
+JSON drifting from the schema. Fake PII + a production guard + check-and-skip keep it safe to run
+and re-run anywhere but production.
+
+**Consequences:** The script needs occasional updates as the schema evolves (expected for a dev
+utility). Known dev credentials (`admin@summit-demo.com` / `priya@summit-demo.com`, password
+`DevPassword123!`) are dev-only and documented in the README. The earlier minimal seed
+(`app.scripts.seed_dev`, company `demo`) is kept for a quick two-user setup; `seed_dev_data` is the
+comprehensive demo seed. Emails use a real `.com` TLD because Pydantic `EmailStr` rejects reserved
+`.test`/`.example` TLDs and the login endpoint must accept the seeded accounts.

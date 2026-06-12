@@ -207,6 +207,38 @@ db_ping.delay().get(timeout=10)  # -> "db-ok"  (proves the async DB bridge)
 
 The real document-processing tasks are added in LP-42.
 
+### Seed demo data (LP-48) — DEV ONLY
+
+Populate the dev database with realistic demo data — a company, an **admin** + a
+**processor** user, the **UWM** and **Sun-West** lenders, and **three loan files
+in various workflow states** (fresh / mid / near-submission) with fake-PII
+borrowers, properties, documents (with **pre-canned** extractions — no AI calls),
+needs, and activity:
+
+```bash
+cd backend
+uv run python -m app.scripts.seed_dev_data          # check-and-skip (safe to re-run)
+uv run python -m app.scripts.seed_dev_data --reset  # hard-clear the seeded data + recreate
+```
+
+- **DEV ONLY** — the script refuses to run when `ENVIRONMENT=production`.
+- **Idempotent** — re-running skips existing records (no duplicates); `--reset`
+  clears the seeded company (and its storage) and recreates it fresh.
+- **No real PII** — synthetic names/addresses and never-issued `900-` SSNs (the
+  SSN is written through the encrypted column, displayed masked).
+- **No AI / no key / no broker** — extractions are inserted directly (built from
+  the real extraction models, so the shape matches a live run).
+
+Dev login (these passwords are local-dev conveniences, **not** secrets):
+
+| Role | Email | Password |
+| --- | --- | --- |
+| Admin | `admin@summit-demo.com` | `DevPassword123!` |
+| Processor | `priya@summit-demo.com` | `DevPassword123!` |
+
+> The earlier minimal seed (`app.scripts.seed_dev`, company `demo`) still exists
+> for a quick two-user setup; `seed_dev_data` is the comprehensive demo seed.
+
 ### Tests
 
 ```bash
