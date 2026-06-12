@@ -12,6 +12,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import type { LoanFileSummary } from "@/lib/types/loan-file";
+import { cn } from "@/lib/utils";
 import { formatDistanceToNow } from "date-fns";
 import { FolderPlus, SearchX, TriangleAlert } from "lucide-react";
 
@@ -42,14 +43,18 @@ function HeaderRow() {
   );
 }
 
+// Per-column widths roughly matching real content (ID short, address long) so
+// columns don't resize when rows arrive.
+const COLUMN_SKELETON_WIDTHS = ["w-16", "w-32", "w-40", "w-16", "w-24", "w-20"] as const;
+
 function LoadingRows() {
   return (
     <TableBody>
       {Array.from({ length: 6 }, (_, i) => i).map((row) => (
         <TableRow key={row}>
-          {COLUMNS.map((col) => (
+          {COLUMNS.map((col, i) => (
             <TableCell key={col}>
-              <Skeleton className="h-4 w-24" />
+              <Skeleton className={cn("h-4", COLUMN_SKELETON_WIDTHS[i])} />
             </TableCell>
           ))}
         </TableRow>
@@ -96,10 +101,13 @@ export function FileTable({
 
   if (isPending) {
     return (
-      <Table>
-        <HeaderRow />
-        <LoadingRows />
-      </Table>
+      <div aria-busy>
+        <output className="sr-only">Loading loan files</output>
+        <Table>
+          <HeaderRow />
+          <LoadingRows />
+        </Table>
+      </div>
     );
   }
 

@@ -1,6 +1,6 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { InlineErrorState } from "@/components/ui/error-state";
-import { Skeleton } from "@/components/ui/skeleton";
+import { SkeletonText } from "@/components/ui/skeleton";
 import type { ActivityPublic } from "@/lib/types/activity";
 import { formatDistanceToNow } from "date-fns";
 import { Activity } from "lucide-react";
@@ -32,13 +32,16 @@ export function ActivityFeed({
           Recent activity
         </CardTitle>
       </CardHeader>
-      <CardContent>
+      <CardContent aria-busy={isPending}>
         {isPending ? (
-          <div className="space-y-3">
-            <Skeleton className="h-4 w-full" />
-            <Skeleton className="h-4 w-5/6" />
-            <Skeleton className="h-4 w-2/3" />
-          </div>
+          <>
+            <output className="sr-only">Loading recent activity</output>
+            <SkeletonText
+              lines={4}
+              widths={["w-full", "w-5/6", "w-3/4", "w-2/3"]}
+              className="space-y-3"
+            />
+          </>
         ) : isError ? (
           <InlineErrorState message="Couldn't load activity." onRetry={onRetry} />
         ) : !activity || activity.length === 0 ? (

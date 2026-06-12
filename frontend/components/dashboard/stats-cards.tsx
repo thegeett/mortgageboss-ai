@@ -39,7 +39,12 @@ function StatTile({ card }: { card: StatCard }) {
         <card.icon className={cn("h-4 w-4", card.iconClass)} />
       </div>
       {isPending ? (
-        <Skeleton className="mt-2 h-8 w-12" />
+        // Occupy the same box as the number line (mt-1 + the 3xl line height) so
+        // the count arriving causes no vertical shift.
+        <div className="mt-1 flex h-9 items-center" aria-busy>
+          <span className="sr-only">Loading {card.label}</span>
+          <Skeleton className="h-8 w-14" />
+        </div>
       ) : (
         <p className="mt-1 text-3xl font-semibold tracking-tight text-gray-900">
           {isError ? "—" : (data?.total ?? 0)}

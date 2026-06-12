@@ -1,10 +1,11 @@
 "use client";
 
+import { Spinner } from "@/components/ui/spinner";
 import { useUploadDocuments } from "@/lib/api/documents";
 import { normalizeError } from "@/lib/errors/api-error";
 import { validateUploadFile } from "@/lib/loan-files/documents";
 import { cn } from "@/lib/utils";
-import { CloudUpload, Loader2 } from "lucide-react";
+import { CloudUpload } from "lucide-react";
 import { useCallback } from "react";
 import { type FileRejection, useDropzone } from "react-dropzone";
 import { toast } from "sonner";
@@ -96,7 +97,7 @@ export function DocumentDropzone({ fileId }: { fileId: string }) {
         )}
       >
         {upload.isPending ? (
-          <Loader2 className="h-5 w-5 animate-spin" aria-hidden />
+          <Spinner className="h-5 w-5" />
         ) : (
           <CloudUpload className="h-5 w-5" aria-hidden />
         )}

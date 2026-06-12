@@ -10,12 +10,13 @@ import {
   FormMessage,
 } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
+import { Spinner } from "@/components/ui/spinner";
 import { login } from "@/lib/api/auth";
 import { type LoginFormValues, loginSchema } from "@/lib/auth/schema";
 import { useIsAuthenticated } from "@/lib/stores/auth-store";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { isAxiosError } from "axios";
-import { AlertCircle, Eye, EyeOff, Loader2, LogIn } from "lucide-react";
+import { AlertCircle, Eye, EyeOff, LogIn } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
@@ -149,7 +150,7 @@ export function LoginForm() {
         <Button type="submit" size="lg" className="w-full gap-2" disabled={isSubmitting}>
           {isSubmitting ? (
             <>
-              <Loader2 className="h-4 w-4 animate-spin" />
+              <Spinner />
               Signing in…
             </>
           ) : (

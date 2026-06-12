@@ -4243,3 +4243,41 @@ a few high-value specifics (session expired, no access, network, processing fail
 transient failures recover via Retry without a full reload. Component tests required a jsdom + React
 Testing Library setup (opt-in per file via a `// @vitest-environment jsdom` docblock; a vite React
 plugin transforms `.tsx` tests). The mechanisms are reused by the rest of Epic 6.
+
+---
+
+## ADR-156: Loading states — skeletons for content, spinners for actions, coordinated four states
+
+- **Date:** 2026-06-12
+- **Status:** Accepted
+
+**Decision:** A small set of reusable loading primitives applied app-wide (LP-47), driven entirely
+by **consuming TanStack Query's** states (`isPending` for queries, `isPending` for mutations) — no
+new loading machinery:
+
+- **Content loads → shape-matching skeletons.** `Skeleton` (base, `aria-hidden`) plus
+  `SkeletonText` (line blocks) and `SkeletonRows` (row stacks) in `components/ui/skeleton.tsx`. The
+  skeleton occupies the same box as the content (matched dimensions: stat-card number, document
+  rows `h-[58px]`, table per-column widths, header title/subtitle) so content arrival causes **no
+  layout shift**.
+- **Actions → button spinners that disable.** One `Spinner` (`components/ui/spinner.tsx`); every
+  mutation button shows it + is `disabled` while `isPending`, which both signals work and
+  **prevents double-submit** (login, create file, upload, override, delete, logout).
+- **Navigation → route `loading.tsx`** shells for the dashboard and the file workspace (mirroring
+  each page's layout) so a transition reads as progress, not a frozen click.
+- **Four-state coordination.** Every async surface resolves to exactly one state at a time:
+  **loading** (skeleton) → **content** | **empty** (friendly empty state) | **error** (LP-46 state
+  + retry). No ambiguous blanks, no skeleton-then-blank.
+- **Accessibility.** Loading regions carry `aria-busy` + a visually-hidden `<output>` (role=status)
+  cue; the skeleton shapes are `aria-hidden`; disabled loading buttons convey state via their label.
+
+**Rationale:** Clear loading states are core to perceived quality and trust — no blank-then-pop, no
+frozen-looking screens, no accidental double-submits. Skeletons preserve layout and read faster
+than spinners for content; the four-state coordination means the user is never staring at an
+ambiguous blank. Consuming the query/mutation states (not inventing machinery) keeps it simple and
+consistent.
+
+**Consequences:** The reusable primitives replace the bespoke per-surface skeletons. The document
+**processing** status (LP-43, status-driven polling — a different, longer wait) is left untouched: a
+card may show a load skeleton (LP-47) and then a processing indicator (LP-43). Consistent with the
+LP-46 error states (the shared four-state model). Component tests reuse the LP-46 jsdom + RTL setup.

@@ -1,6 +1,6 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { InlineErrorState } from "@/components/ui/error-state";
-import { Skeleton } from "@/components/ui/skeleton";
+import { SkeletonRows } from "@/components/ui/skeleton";
 import {
   NEEDS_STATUS_LABELS,
   PRIORITY_META,
@@ -35,13 +35,12 @@ export function NeedsSection({
           <span className="text-sm font-medium text-gray-500">{outstanding} outstanding</span>
         )}
       </CardHeader>
-      <CardContent>
+      <CardContent aria-busy={isPending}>
         {isPending ? (
-          <div className="space-y-2">
-            <Skeleton className="h-9 w-full" />
-            <Skeleton className="h-9 w-full" />
-            <Skeleton className="h-9 w-full" />
-          </div>
+          <>
+            <output className="sr-only">Loading the needs list</output>
+            <SkeletonRows count={3} itemClassName="h-9" />
+          </>
         ) : isError ? (
           <InlineErrorState message="Couldn't load the needs list." onRetry={onRetry} />
         ) : !needs || needs.length === 0 ? (

@@ -1,7 +1,7 @@
 "use client";
 
 import { ErrorState } from "@/components/ui/error-state";
-import { Skeleton } from "@/components/ui/skeleton";
+import { SkeletonRows } from "@/components/ui/skeleton";
 import { humanize } from "@/lib/format";
 import { formatFileSize, groupDocumentsByCategory } from "@/lib/loan-files/documents";
 import type { DocumentResponse } from "@/lib/types/document";
@@ -51,11 +51,11 @@ function DocumentRow({
 }
 
 function ListSkeleton() {
+  // Match the real DocumentRow height (h-[58px]) so content arrival doesn't shift.
   return (
-    <div className="space-y-2">
-      {[0, 1, 2].map((i) => (
-        <Skeleton key={i} className="h-[58px] w-full rounded-lg" />
-      ))}
+    <div aria-busy>
+      <output className="sr-only">Loading documents</output>
+      <SkeletonRows count={3} itemClassName="h-[58px]" />
     </div>
   );
 }

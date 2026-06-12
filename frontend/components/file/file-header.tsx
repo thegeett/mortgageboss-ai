@@ -36,7 +36,8 @@ export function FileHeader({ file }: { file: LoanFileDetail | undefined }) {
       </Link>
 
       {file === undefined ? (
-        <div className="space-y-2">
+        <div className="space-y-2" aria-busy>
+          <output className="sr-only">Loading the file</output>
           <Skeleton className="h-8 w-64" />
           <Skeleton className="h-4 w-80" />
         </div>

@@ -194,7 +194,31 @@ Component tests run under jsdom + React Testing Library (opt-in per file via a
 `// @vitest-environment jsdom` docblock; `@vitejs/plugin-react` transforms the
 `.tsx` test files).
 
+## Loading states (LP-47)
+
+Consistent loading states driven by **consuming TanStack Query's** `isPending`
+(queries and mutations) — no bespoke loading machinery (ADR-156).
+
+- **Primitives** — `components/ui/skeleton.tsx` (`Skeleton` base [`aria-hidden`],
+  `SkeletonText`, `SkeletonRows`) and `components/ui/spinner.tsx` (`Spinner`,
+  `LoadingRegion`). Reused everywhere instead of per-surface skeletons.
+- **Content → skeletons** that match the content's box, so arrival causes **no
+  layout shift** (stat-card number, document rows `h-[58px]`, table per-column
+  widths, overview cards, the drawer extraction).
+- **Actions → button spinners that disable** — every mutation button shows the
+  `Spinner` + is `disabled` while pending, which **prevents double-submit**
+  (login, create, upload, override, delete, logout).
+- **Navigation → route shells** — `app/(protected)/dashboard/loading.tsx` and
+  `app/(protected)/loan-files/[id]/loading.tsx` mirror their page layout.
+- **Four-state coordination** — every async surface resolves to one state:
+  loading → content | empty | error (LP-46) + retry. No ambiguous blanks.
+- **Accessibility** — loading regions carry `aria-busy` + a visually-hidden
+  `<output>` (role=status) cue; skeleton shapes are `aria-hidden`.
+
+The document **processing** status (LP-43, status-driven polling) is a separate,
+longer wait and is left untouched: a card may show a load skeleton (LP-47) then a
+processing indicator (LP-43).
+
 ## What's next
 
-- **LP-47** — loading states & skeletons (the sibling of this ticket's error
-  states).
+- **LP-48** — seed data script.

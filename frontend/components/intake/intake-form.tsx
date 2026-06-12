@@ -12,6 +12,7 @@ import {
 } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
+import { Spinner } from "@/components/ui/spinner";
 import { type BorrowerPayload, type PropertyPayload, submitIntake } from "@/lib/api/intake";
 import { useLenders } from "@/lib/api/lenders";
 import { normalizeError } from "@/lib/errors/api-error";
@@ -28,7 +29,7 @@ import {
 } from "@/lib/validation/intake";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { AlertCircle, Loader2 } from "lucide-react";
+import { AlertCircle } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { type Control, type FieldPath, useForm } from "react-hook-form";
@@ -363,7 +364,7 @@ export function IntakeForm() {
             Cancel
           </Button>
           <Button type="submit" className="gap-2" disabled={isSubmitting}>
-            {isSubmitting && <Loader2 className="h-4 w-4 animate-spin" />}
+            {isSubmitting && <Spinner />}
             {isSubmitting ? "Creating…" : "Create file"}
           </Button>
         </div>

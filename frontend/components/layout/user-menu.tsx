@@ -8,6 +8,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Spinner } from "@/components/ui/spinner";
 import { logout } from "@/lib/api/auth";
 import type { User } from "@/lib/auth/types";
 import { ChevronDown, LogOut, Settings, UserRound } from "lucide-react";
@@ -80,7 +81,11 @@ export function UserMenu({ user }: { user: User }) {
           disabled={isLoggingOut}
           className="text-destructive focus:text-destructive"
         >
-          <LogOut className="mr-2 h-4 w-4" />
+          {isLoggingOut ? (
+            <Spinner className="mr-2 h-4 w-4" />
+          ) : (
+            <LogOut className="mr-2 h-4 w-4" />
+          )}
           {isLoggingOut ? "Signing out…" : "Log out"}
         </DropdownMenuItem>
       </DropdownMenuContent>

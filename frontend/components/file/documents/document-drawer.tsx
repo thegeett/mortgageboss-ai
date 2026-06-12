@@ -9,7 +9,8 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
-import { Skeleton } from "@/components/ui/skeleton";
+import { SkeletonText } from "@/components/ui/skeleton";
+import { Spinner } from "@/components/ui/spinner";
 import {
   downloadDocument,
   useDeleteDocument,
@@ -27,7 +28,7 @@ import {
 } from "@/lib/loan-files/documents";
 import type { DocumentResponse } from "@/lib/types/document";
 import { format } from "date-fns";
-import { Download, FlaskConical, Loader2, PencilLine, Trash2 } from "lucide-react";
+import { Download, FlaskConical, PencilLine, Trash2 } from "lucide-react";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import { DocumentStatusBadge } from "./document-status";
@@ -119,7 +120,7 @@ function TypeOverride({ summary, fileId }: { summary: DocumentResponse; fileId: 
           disabled={!changed || override.isPending}
           className="gap-1.5"
         >
-          {override.isPending && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+          {override.isPending && <Spinner className="h-3.5 w-3.5" />}
           Apply
         </Button>
       </div>
@@ -218,16 +219,19 @@ function DrawerBody({
         <TypeOverride summary={summary} fileId={fileId} />
 
         {/* Extraction */}
-        <section className="mt-6">
+        <section className="mt-6" aria-busy={isPending}>
           <h3 className="text-xs font-semibold uppercase tracking-wide text-gray-400">
             Extracted data
           </h3>
           {isPending ? (
-            <div className="mt-3 space-y-2">
-              <Skeleton className="h-4 w-full" />
-              <Skeleton className="h-4 w-3/4" />
-              <Skeleton className="h-4 w-2/3" />
-            </div>
+            <>
+              <output className="sr-only">Loading extracted data</output>
+              <SkeletonText
+                lines={4}
+                widths={["w-full", "w-5/6", "w-3/4", "w-2/3"]}
+                className="mt-3"
+              />
+            </>
           ) : isError ? (
             <InlineErrorState
               className="mt-1"
@@ -262,7 +266,7 @@ function DrawerBody({
               className="gap-1.5 text-xs"
             >
               {devTextLayer.isPending ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                <Spinner className="h-3.5 w-3.5" />
               ) : (
                 <FlaskConical className="h-3.5 w-3.5" />
               )}
@@ -297,8 +301,8 @@ function DrawerBody({
           disabled={del.isPending}
           className="gap-1.5 text-gray-500 hover:text-destructive"
         >
-          <Trash2 className="h-4 w-4" />
-          Remove
+          {del.isPending ? <Spinner className="h-4 w-4" /> : <Trash2 className="h-4 w-4" />}
+          {del.isPending ? "Removing…" : "Remove"}
         </Button>
         <Button
           type="button"
@@ -307,11 +311,7 @@ function DrawerBody({
           disabled={downloading}
           className="gap-1.5"
         >
-          {downloading ? (
-            <Loader2 className="h-4 w-4 animate-spin" />
-          ) : (
-            <Download className="h-4 w-4" />
-          )}
+          {downloading ? <Spinner className="h-4 w-4" /> : <Download className="h-4 w-4" />}
           Download
         </Button>
       </div>

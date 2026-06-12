@@ -1,7 +1,7 @@
 import { StatusBadge } from "@/components/status-badge";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Skeleton } from "@/components/ui/skeleton";
+import { SkeletonText } from "@/components/ui/skeleton";
 import { formatMoney, humanize } from "@/lib/format";
 import { programLabel, purposeLabel } from "@/lib/loan-files/labels";
 import type { BorrowerDetail } from "@/lib/types/borrower";
@@ -12,10 +12,12 @@ import type { LucideIcon } from "lucide-react";
 function OverviewCard({
   title,
   icon: Icon,
+  loading = false,
   children,
 }: {
   title: string;
   icon: LucideIcon;
+  loading?: boolean;
   children: React.ReactNode;
 }) {
   return (
@@ -26,7 +28,10 @@ function OverviewCard({
           {title}
         </CardTitle>
       </CardHeader>
-      <CardContent className="pt-0">{children}</CardContent>
+      <CardContent className="pt-0" aria-busy={loading}>
+        {loading && <output className="sr-only">Loading {title.toLowerCase()}</output>}
+        {children}
+      </CardContent>
     </Card>
   );
 }
@@ -41,13 +46,8 @@ function Row({ label, value }: { label: string; value: React.ReactNode }) {
 }
 
 function CardSkeleton() {
-  return (
-    <div className="space-y-2 py-1">
-      <Skeleton className="h-4 w-full" />
-      <Skeleton className="h-4 w-3/4" />
-      <Skeleton className="h-4 w-2/3" />
-    </div>
-  );
+  // Four label/value rows — roughly the height of a populated card body.
+  return <SkeletonText lines={4} widths={["w-full", "w-5/6", "w-4/6", "w-3/4"]} className="py-1" />;
 }
 
 function CardEmpty({ message }: { message: string }) {
@@ -85,7 +85,7 @@ export function BorrowerCard({
   onRetry,
 }: CardState & { borrowers: BorrowerDetail[] | undefined }) {
   return (
-    <OverviewCard title="Borrowers" icon={Users}>
+    <OverviewCard title="Borrowers" icon={Users} loading={isPending}>
       {isPending ? (
         <CardSkeleton />
       ) : isError ? (
@@ -126,7 +126,7 @@ export function PropertyCard({
 }: CardState & { file: LoanFileDetail | undefined }) {
   const property = file?.property;
   return (
-    <OverviewCard title="Subject property" icon={Building2}>
+    <OverviewCard title="Subject property" icon={Building2} loading={isPending}>
       {isPending ? (
         <CardSkeleton />
       ) : isError ? (
@@ -162,7 +162,7 @@ export function LoanCard({
   onRetry,
 }: CardState & { file: LoanFileDetail | undefined }) {
   return (
-    <OverviewCard title="Loan" icon={Landmark}>
+    <OverviewCard title="Loan" icon={Landmark} loading={isPending}>
       {isPending ? (
         <CardSkeleton />
       ) : isError || !file ? (
