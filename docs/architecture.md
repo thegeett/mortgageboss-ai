@@ -223,6 +223,20 @@ bank statement LP-39c):
 This is the foundation the Phase 3 verification engine consumes — see
 [`phase-3-verification-design.md`](phase-3-verification-design.md).
 
+**Per-type modules on this shape.** Each document type is its own module
+(`app/ai/extraction/<type>.py`) with a typed core + the grouped catch-all,
+sharing the coercion/parse helpers (`app/ai/extraction/parsing.py`):
+
+- **Pay stub** (LP-39a) — period figures (`gross_pay`, `pay_period_end`, …).
+- **W-2** (LP-39b, ADR-146) — a different typed core proving the shape
+  generalizes: `tax_year` (int) + employee/employer identity + the federal
+  wage/withholding **boxes 1-6** (`Decimal`); everything else (state/local, Box
+  12 codes, Box 13/14, …) → catch-all. The **employee SSN** is extracted (for the
+  Phase 3 identity cross-check) but **masked in display** (last-4) and **never
+  logged** (ADR-147). Not yet wired into the LP-42 pipeline — routing the fan-out
+  to all types is LP-39c.
+- **Bank statement** (LP-39c) — next, on the same shape + pipeline routing.
+
 - **Full-document input** — supported media types are `application/pdf`,
   `image/jpeg`, `image/png` (`image/jpg` normalized). An empty or unsupported
   document short-circuits to `failed(...)` **without an API call**. The loaded

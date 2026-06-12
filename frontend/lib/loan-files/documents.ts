@@ -199,8 +199,9 @@ export function formatConfidence(value: number | null): string | null {
 // The stored `extracted_data` is the typed core (each field a {value, source})
 // + a grouped catch-all (`additional_sections`). We read it leniently.
 
-/** Preferred label + order for the known pay-stub typed-core fields. */
+/** Preferred label + order for the known typed-core fields (pay stub + W-2). */
 export const EXTRACTION_FIELD_LABELS: Record<string, string> = {
+  // Pay stub (LP-39a)
   employer_name: "Employer",
   employee_name: "Employee",
   pay_period_start: "Pay period start",
@@ -212,6 +213,16 @@ export const EXTRACTION_FIELD_LABELS: Record<string, string> = {
   pay_frequency: "Pay frequency",
   hours: "Hours",
   rate: "Rate",
+  // W-2 (LP-39b)
+  tax_year: "Tax year",
+  employee_ssn: "Employee SSN",
+  employer_ein: "Employer EIN",
+  wages_tips_other_comp: "Wages (Box 1)",
+  federal_income_tax_withheld: "Federal tax withheld (Box 2)",
+  social_security_wages: "Social Security wages (Box 3)",
+  social_security_tax_withheld: "Social Security tax (Box 4)",
+  medicare_wages: "Medicare wages (Box 5)",
+  medicare_tax_withheld: "Medicare tax (Box 6)",
 };
 
 const EXTRACTION_FIELD_ORDER = Object.keys(EXTRACTION_FIELD_LABELS);
@@ -223,8 +234,26 @@ export interface ExtractionField {
   source: SourceLocation | null;
 }
 
-/** Money-ish keys we render as currency. */
-const MONEY_KEYS = new Set(["gross_pay", "net_pay", "ytd_gross", "rate"]);
+/** Money-ish keys we render as currency (pay stub + W-2 boxes). */
+const MONEY_KEYS = new Set([
+  "gross_pay",
+  "net_pay",
+  "ytd_gross",
+  "rate",
+  "wages_tips_other_comp",
+  "federal_income_tax_withheld",
+  "social_security_wages",
+  "social_security_tax_withheld",
+  "medicare_wages",
+  "medicare_tax_withheld",
+]);
+
+/** A label for a typed-core key — the known label, or a humanized fallback. */
+function labelFor(key: string): string {
+  return (
+    EXTRACTION_FIELD_LABELS[key] ?? key.charAt(0).toUpperCase() + key.slice(1).replace(/_/g, " ")
+  );
+}
 
 function displayValue(key: string, raw: unknown): string {
   if (raw === null || raw === undefined || raw === "") return "—";
@@ -249,23 +278,27 @@ function readTypedField(entry: unknown): { value: unknown; source: SourceLocatio
 }
 
 /**
- * The typed core as ordered, labelled rows (value + source) — the known pay-stub
- * fields in a sensible order. Absent/null values render as "—".
+ * The typed core as ordered, labelled rows (value + source). Works for any
+ * document type — known fields (pay stub / W-2) appear first in a sensible order,
+ * then any others. Sensitive fields (e.g. the W-2 SSN) are **masked** in display;
+ * absent/null values render as "—".
  */
 export function extractionFields(data: Record<string, unknown>): ExtractionField[] {
   const fields: ExtractionField[] = [];
-  for (const key of EXTRACTION_FIELD_ORDER) {
-    if (key in data) {
-      const { value, source } = readTypedField(data[key]);
-      fields.push({
-        key,
-        label: EXTRACTION_FIELD_LABELS[key] ?? key,
-        value: displayValue(key, value),
-        source,
-      });
-    }
+  for (const key of Object.keys(data)) {
+    if (key === "additional_sections") continue; // the catch-all is rendered separately
+    const { value, source } = readTypedField(data[key]);
+    const display = MASKED_FIELD_KEYS.has(key)
+      ? maskSsn(value == null ? null : String(value))
+      : displayValue(key, value);
+    fields.push({ key, label: labelFor(key), value: display, source });
   }
-  return fields;
+  // Known typed-core fields first (in order), then any others.
+  const orderIndex = (k: string) => {
+    const i = EXTRACTION_FIELD_ORDER.indexOf(k);
+    return i === -1 ? Number.MAX_SAFE_INTEGER : i;
+  };
+  return fields.sort((a, b) => orderIndex(a.key) - orderIndex(b.key));
 }
 
 /** The grouped catch-all (`additional_sections`), or [] if absent/odd. */
@@ -285,4 +318,18 @@ export function formatSource(source: SourceLocation | null): string | null {
   if (source.page != null) parts.push(`p.${source.page}`);
   if (source.snippet) parts.push(`“${source.snippet}”`);
   return parts.length > 0 ? parts.join(": ") : null;
+}
+
+/** Sensitive typed-core keys masked in display (e.g. the W-2 employee SSN, LP-39b). */
+export const MASKED_FIELD_KEYS = new Set(["employee_ssn"]);
+
+/**
+ * Mask an SSN to last-4 for display (LP-39b) — consistent with the borrower
+ * `masked_ssn` discipline. The raw value is never shown in full and never logged.
+ */
+export function maskSsn(ssn: string | null | undefined): string {
+  if (!ssn) return "—";
+  const digits = ssn.replace(/\D/g, "");
+  if (digits.length < 4) return "•••";
+  return `•••-••-${digits.slice(-4)}`;
 }

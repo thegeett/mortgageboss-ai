@@ -3953,3 +3953,63 @@ preserving every LP-39 guarantee.
 typed core is a V1 starter that grows in Phase 3 (promote catch-all fields as rules need them).
 The prompt + field set remain starters (Priya / POC). `_MAX_TOKENS` raised (4096) for the
 richer output. Reused as-is by LP-39b/LP-39c.
+
+---
+
+## ADR-146: W-2 extraction on the typed-core + grouped-catch-all shape (LP-39b)
+
+- **Date:** 2026-06-12
+- **Status:** Accepted
+
+**Context:** LP-39a established the extraction shape on the pay stub. The W-2 is the first
+replication — and a deliberately different case: a fixed federal form whose decision fields are
+**annual** figures (not the pay stub's period figures), proving the shape generalizes to a
+different typed core (what Phase 2's ~100-type fan-out needs).
+
+**Decision:** `extract_w2(content, media_type)` mirrors `extract_pay_stub` and reuses the
+LP-39a shape (`shape.py`) and the shared parser (`app/ai/extraction/parsing.py`, refactored out
+of the pay stub so there's no duplication — field coercers, the typed-core loop, catch-all
+pass-through, status rule). The **W-2 typed core** = `tax_year` (int) + employee/employer
+identity (`employee_name`, `employee_ssn`, `employer_name`, `employer_ein`) + the federal
+wage/withholding boxes 1-6 (`Decimal`) — the fields feeding income verification and cross-source
+identity/employer checks. **Everything else** (state/local Boxes 15-20, Box 12 codes, Box 13
+checkboxes, Box 14, control number, addresses) → the grouped catch-all. Every field carries
+page + snippet. All LP-39a behaviours are kept (full-document Sonnet reading, honest nulls,
+tolerant coercion, defensive parsing, graceful failure, metadata-only logging). The LP-43
+drawer renders W-2s with the same generic typed-core + catch-all + source view.
+
+**Rationale:** Proves "different typed core, same shape." The W-2's standardized boxes map
+cleanly to a typed core; the catch-all captures the full form for the Phase 3 cross-source
+layer. Refactoring the shared parser keeps the two (soon three) type modules DRY.
+
+**Consequences:** The typed core is a V1 starter that grows in Phase 3. `tax_year` is an int
+(new `coerce_int` helper); the boxes are `Decimal`; names/SSN/EIN are strings. **Not yet wired
+into the LP-42 pipeline** — routing the fan-out to all three types is LP-39c. Bank statement
+(LP-39c) reuses the same shape + shared parser.
+
+---
+
+## ADR-147: W-2 SSN — extracted for the identity cross-check, masked in display, never logged
+
+- **Date:** 2026-06-12
+- **Status:** Accepted
+
+**Context:** A W-2 contains the employee SSN. The Phase 3 identity cross-source check wants to
+compare the W-2 SSN against the borrower SSN — but a full SSN must never be logged or shown in
+full (the existing borrower `masked_ssn` discipline, LP-29/ADR-097).
+
+**Decision:** **Extract** `employee_ssn` into the W-2 typed core (so the cross-check can compare
+actual values), but treat it as **sensitive**: it is **never logged** (the metadata-only logging
+records only status/confidence/counts — never values, and the test asserts the SSN value is
+absent from logs), and it is **displayed masked** (last-4, e.g. `•••-••-6789`) in the LP-43
+drawer via a `maskSsn` helper, consistent with the borrower `masked_ssn` discipline. The raw
+value lives only in the tenant-scoped, access-controlled extraction JSON.
+
+**Rationale:** The identity cross-check needs the value; masking-in-display + never-logging
+keeps a full SSN from ever appearing in logs or the UI. (Alternative considered: not extracting
+the SSN at all and relying on the borrower model — rejected, so the cross-check can compare the
+W-2's actual SSN.)
+
+**Consequences:** A frontend `maskSsn` helper + a `MASKED_FIELD_KEYS` set (currently
+`employee_ssn`) the drawer masks. The no-values logging rule explicitly covers the SSN. Flagged
+for the user to confirm the extract-but-mask choice over not-extracting.

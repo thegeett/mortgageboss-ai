@@ -6,6 +6,7 @@ import {
   groupDocumentsByCategory,
   hasInProgressDocuments,
   isTerminalStatus,
+  maskSsn,
   validateUploadFile,
 } from "@/lib/loan-files/documents";
 import type { DocumentResponse, DocumentStatus } from "@/lib/types/document";
@@ -122,6 +123,30 @@ describe("extractionFields (LP-39a typed core)", () => {
     const fields = extractionFields({ employer_name: "ACME Corp" });
     expect(fields[0]?.value).toBe("ACME Corp");
     expect(fields[0]?.source).toBeNull();
+  });
+
+  it("masks the W-2 SSN and shows tax_year + boxes (LP-39b)", () => {
+    const fields = extractionFields({
+      tax_year: { value: 2024, source: null },
+      employee_ssn: { value: "123-45-6789", source: { page: 1, snippet: "a 123-45-6789" } },
+      wages_tips_other_comp: { value: "62000.00", source: null },
+      additional_sections: [{ section: "State/Local", fields: [] }], // ignored here
+    });
+    const ssn = fields.find((f) => f.key === "employee_ssn");
+    expect(ssn?.value).toBe("•••-••-6789"); // masked, never full
+    expect(fields.find((f) => f.key === "tax_year")?.value).toBe("2024");
+    expect(fields.find((f) => f.key === "wages_tips_other_comp")?.value).toBe("$62,000.00");
+    expect(fields.some((f) => f.key === "additional_sections")).toBe(false);
+  });
+});
+
+describe("maskSsn", () => {
+  it("shows only the last 4, or — / ••• for empty/short", () => {
+    expect(maskSsn("123-45-6789")).toBe("•••-••-6789");
+    expect(maskSsn("123456789")).toBe("•••-••-6789");
+    expect(maskSsn(null)).toBe("—");
+    expect(maskSsn(undefined)).toBe("—");
+    expect(maskSsn("12")).toBe("•••");
   });
 });
 

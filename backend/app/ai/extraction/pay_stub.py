@@ -36,15 +36,23 @@ classification's cheaper one.
 """
 
 import json
-from collections.abc import Callable
-from datetime import date, datetime
-from decimal import Decimal, InvalidOperation
+from datetime import date
+from decimal import Decimal
 from typing import Any
 
 import structlog
 from pydantic import BaseModel, Field, ValidationError
 
 from app.ai.client import AIClientError, build_document_message, complete
+from app.ai.extraction.parsing import (
+    CoreSpec,
+    coerce_date,
+    coerce_decimal,
+    coerce_str,
+    derive_status,
+    parse_catch_all,
+    parse_typed_core,
+)
 from app.ai.extraction.shape import CatchAllSection, TypedField
 from app.ai.parsing import coerce_confidence, extract_json_object
 from app.ai.prompt_loader import load_prompt
@@ -60,17 +68,6 @@ _SUPPORTED_MEDIA_TYPES = frozenset({"application/pdf", "image/jpeg", "image/png"
 # The response now captures EVERYTHING on the stub (typed core + grouped catch-all
 # with per-field source), so it can be sizeable — give the model room.
 _MAX_TOKENS = 4096
-
-# Date formats accepted from the model, tried in order (ISO first).
-_DATE_FORMATS = (
-    "%Y-%m-%d",
-    "%m/%d/%Y",
-    "%m/%d/%y",
-    "%m-%d-%Y",
-    "%B %d, %Y",
-    "%b %d, %Y",
-    "%d %B %Y",
-)
 
 
 class PayStubExtraction(BaseModel):
@@ -135,147 +132,30 @@ class PayStubExtractionResult(BaseModel):
         )
 
 
-def _coerce_decimal(value: Any) -> Decimal | None:
-    """Coerce a model value to ``Decimal``; junk/empty/``None`` → ``None``.
-
-    Tolerates currency strings like ``"$4,200.00"`` and bare numbers. A single
-    uncoercible value returns ``None`` (the caller marks the run PARTIAL) rather
-    than failing the whole extraction.
-    """
-    if value is None or isinstance(value, bool):
-        return None
-    if isinstance(value, (int, float)):
-        try:
-            return Decimal(str(value))
-        except InvalidOperation:
-            return None
-    if isinstance(value, str):
-        cleaned = value.strip().replace("$", "").replace(",", "").replace(" ", "")
-        if not cleaned:
-            return None
-        try:
-            return Decimal(cleaned)
-        except InvalidOperation:
-            return None
-    return None
-
-
-def _coerce_date(value: Any) -> date | None:
-    """Coerce a model value to ``date``; junk/empty/``None`` → ``None``.
-
-    Accepts ISO and common US formats; anything unparseable returns ``None``.
-    """
-    if value is None or isinstance(value, bool):
-        return None
-    if isinstance(value, datetime):
-        return value.date()
-    if isinstance(value, date):
-        return value
-    if isinstance(value, str):
-        candidate = value.strip()
-        if not candidate:
-            return None
-        try:
-            return date.fromisoformat(candidate)
-        except ValueError:
-            pass
-        for fmt in _DATE_FORMATS:
-            try:
-                return datetime.strptime(candidate, fmt).date()
-            except ValueError:
-                continue
-    return None
-
-
-def _coerce_str(value: Any) -> str | None:
-    """Coerce a model value to a non-empty trimmed string, else ``None``."""
-    if isinstance(value, str):
-        trimmed = value.strip()
-        return trimmed or None
-    return None
-
-
-# The typed-core fields and the coercer for each (everything else → catch-all).
-_CORE_SPEC: tuple[tuple[str, Callable[[Any], Any]], ...] = (
-    ("employer_name", _coerce_str),
-    ("employee_name", _coerce_str),
-    ("pay_period_start", _coerce_date),
-    ("pay_period_end", _coerce_date),
-    ("pay_date", _coerce_date),
-    ("gross_pay", _coerce_decimal),
-    ("net_pay", _coerce_decimal),
-    ("ytd_gross", _coerce_decimal),
-    ("pay_frequency", _coerce_str),
-    ("hours", _coerce_decimal),
-    ("rate", _coerce_decimal),
+# The typed-core fields and the coercer for each (everything else → catch-all),
+# using the shared coercers. ``pay_frequency`` is a free string for V1.
+_CORE_SPEC: CoreSpec = (
+    ("employer_name", coerce_str),
+    ("employee_name", coerce_str),
+    ("pay_period_start", coerce_date),
+    ("pay_period_end", coerce_date),
+    ("pay_date", coerce_date),
+    ("gross_pay", coerce_decimal),
+    ("net_pay", coerce_decimal),
+    ("ytd_gross", coerce_decimal),
+    ("pay_frequency", coerce_str),
+    ("hours", coerce_decimal),
+    ("rate", coerce_decimal),
 )
-
-
-def _coerce_page(value: Any) -> int | None:
-    """A page number → int; junk/absent → None."""
-    if isinstance(value, bool):
-        return None
-    if isinstance(value, int):
-        return value
-    if isinstance(value, str) and value.strip().isdigit():
-        return int(value.strip())
-    return None
-
-
-def _source_payload(entry: dict[str, Any]) -> dict[str, Any] | None:
-    """Build a SourceLocation dict from an entry's page/snippet, or None if neither."""
-    page = _coerce_page(entry.get("page"))
-    raw_snippet = entry.get("snippet")
-    snippet = raw_snippet.strip() if isinstance(raw_snippet, str) and raw_snippet.strip() else None
-    if page is None and snippet is None:
-        return None
-    return {"page": page, "snippet": snippet}
-
-
-def _parse_catch_all(raw: Any) -> list[dict[str, Any]]:
-    """Pass through the grouped catch-all as section/field dicts (values stay strings).
-
-    Defensive: skips non-dict sections/fields and fields without a label; drops
-    empty sections; coerces only ``page`` (to int) and keeps ``snippet`` verbatim.
-    """
-    sections: list[dict[str, Any]] = []
-    if not isinstance(raw, list):
-        return sections
-    for sec in raw:
-        if not isinstance(sec, dict):
-            continue
-        name = sec.get("section")
-        section_name = name.strip() if isinstance(name, str) and name.strip() else "Other"
-        fields_out: list[dict[str, Any]] = []
-        raw_fields = sec.get("fields")
-        if isinstance(raw_fields, list):
-            for field in raw_fields:
-                if not isinstance(field, dict):
-                    continue
-                label = field.get("label")
-                if not isinstance(label, str) or not label.strip():
-                    continue
-                value = field.get("value")
-                value_str = None if value is None else (str(value).strip() or None)
-                fields_out.append(
-                    {"label": label.strip(), "value": value_str, "source": _source_payload(field)}
-                )
-        if fields_out:
-            sections.append({"section": section_name, "fields": fields_out})
-    return sections
 
 
 def _parse_pay_stub_json(text: str) -> PayStubExtractionResult | None:
     """Defensively parse a model response into the new-shape result. Never raises.
 
-    Reads the documented JSON contract — ``typed_core`` (per-field
-    ``{value, page, snippet}``) + ``additional_sections`` (grouped catch-all) —
-    tolerating fences/prose and a flat fallback. The typed core is **coerced**
-    (currency/date/string; a present-but-uncoercible value → ``None``, source
-    kept); the catch-all is **passed through** as strings. Status is derived from
-    the typed core: no field read → ``FAILED``; a coercion loss → ``PARTIAL``;
-    else ``SUCCEEDED`` (the catch-all doesn't affect status). Returns ``None`` only
-    when no JSON object can be parsed.
+    Reads the documented JSON contract via the shared parser — ``typed_core``
+    (per-field ``{value, page, snippet}``, coerced + source) + ``additional_sections``
+    (grouped catch-all, passed through). Status comes from the typed core
+    (``derive_status``). Returns ``None`` only when no JSON object can be parsed.
     """
     snippet = extract_json_object(text)
     if snippet is None:
@@ -287,43 +167,15 @@ def _parse_pay_stub_json(text: str) -> PayStubExtractionResult | None:
     if not isinstance(payload, dict):
         return None
 
-    # Typed core under "typed_core" (the contract); fall back to top-level keys.
-    core = payload.get("typed_core")
-    if not isinstance(core, dict):
-        core = payload
-
-    coercion_lost = False
-    core_payload: dict[str, Any] = {}
-    non_null = 0
-    for key, coercer in _CORE_SPEC:
-        entry = core.get(key)
-        if isinstance(entry, dict):
-            raw = entry.get("value")
-            source = _source_payload(entry)
-        else:
-            raw = entry  # tolerant: a bare value with no source
-            source = None
-        coerced = coercer(raw)
-        if coerced is None and raw not in (None, "") and not isinstance(raw, bool):
-            coercion_lost = True  # a present value we couldn't coerce → data loss
-        if coerced is not None:
-            non_null += 1
-        core_payload[key] = {"value": coerced, "source": source}
-
-    sections = _parse_catch_all(payload.get("additional_sections"))
+    core_payload, non_null, coercion_lost = parse_typed_core(payload, _CORE_SPEC)
+    sections = parse_catch_all(payload.get("additional_sections"))
 
     try:
         data = PayStubExtraction.model_validate({**core_payload, "additional_sections": sections})
     except ValidationError:
         return None
 
-    if non_null == 0:
-        status = ExtractionStatus.FAILED
-    elif coercion_lost:
-        status = ExtractionStatus.PARTIAL
-    else:
-        status = ExtractionStatus.SUCCEEDED
-
+    status = derive_status(non_null, coercion_lost)
     confidence = coerce_confidence(payload.get("confidence"))
     raw_reasoning = payload.get("reasoning")
     reasoning = (
