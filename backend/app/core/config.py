@@ -38,8 +38,16 @@ class Settings(BaseSettings):
 
     # Anthropic
     anthropic_api_key: str = Field(description="Anthropic API key for Claude access")
+    # Model identifiers for the AI features (classification LP-38, extraction LP-39),
+    # used by the app/ai client wrapper (LP-37). These are CONFIGURATION, not baked-in
+    # facts — model strings change over time.
+    # TODO(models): verify against the current Anthropic docs before relying on these.
     anthropic_model_classification: str = "claude-haiku-4-5"
     anthropic_model_extraction: str = "claude-sonnet-4-5"
+    # AI retry policy (LP-37): transient failures (429/5xx/connection) are retried with
+    # exponential backoff + jitter, capped at this many attempts.
+    ai_max_retries: int = 3
+    ai_base_retry_delay_seconds: float = 1.0
 
     # JWT / Auth
     jwt_secret_key: str = Field(

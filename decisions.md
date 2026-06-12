@@ -3108,3 +3108,83 @@ consistent with the soft-delete-everywhere principle.
 **Consequences:** Storage accumulates soft-deleted files — a retention/cleanup policy is a
 later concern. Processing is not triggered here; an uploaded document sits `PENDING` until
 the pipeline lands.
+
+---
+
+## ADR-117: A single Anthropic client wrapper for all AI calls
+
+- **Date:** 2026-06-11
+- **Status:** Accepted
+
+**Context:** This is an AI-heavy product: classification (LP-38), extraction (LP-39), and
+later verification all call Claude. Each call needs the same cross-cutting handling —
+retries, observability, cost tracking — and we don't want that logic copy-pasted into every
+feature or each feature talking to the SDK directly.
+
+**Decision:** All Claude calls go through one wrapper (`app/ai/client.py`): a lazily
+initialized singleton `AsyncAnthropic` (`get_anthropic_client`, LP-35 factory style), and an
+async `complete(...)` that owns transient-only retry with exponential backoff + jitter and a
+max-attempts cap, latency timing, structured metadata logging, and token-usage surfacing
+(`AICompletion`). Cost estimation lives alongside in `app/ai/cost.py`. The wrapper owns
+retries, so the SDK's built-in retries are disabled (`max_retries=0`). The missing-key error
+fires at call time, not import, so the app and tests load without a key.
+
+**Rationale:** Centralizing the AI concerns keeps the features focused on their own logic
+and gives uniform retries/observability/cost with one place to evolve policy. A prompt-
+agnostic wrapper is reusable by every AI feature.
+
+**Consequences:** Features depend on `complete(...)`, not the SDK. The wrapper is the single
+authority for retry/logging/timing/cost policy. Streaming is out of scope for V1 (standard
+request/response).
+
+---
+
+## ADR-118: Retry transient errors only; log metadata, never content (PII)
+
+- **Date:** 2026-06-11
+- **Status:** Accepted
+
+**Context:** API calls fail in two very different ways — transient (rate limits, server
+blips, network) versus deterministic client errors (a malformed request, a bad key). And
+the prompts/responses carry borrower PII (pay-stub and bank-statement data).
+
+**Decision:** Retry **only transient** failures — 429, 5xx, and connection/timeout
+(`APIConnectionError`/`APITimeoutError`) — with exponential backoff + jitter up to the
+attempt cap; **fail fast** on every other 4xx (400/401/403/404/422). Structured logs record
+**metadata only** — model, input/output tokens, latency, attempt, outcome, error type — and
+**never** the prompt or response content. `_is_transient` classifies via the SDK's exception
+hierarchy.
+
+**Rationale:** Retrying a deterministic 4xx just wastes time and money and masks bugs;
+backoff + jitter avoids thundering herds on a shared rate limit. Prompt/response content is
+PII and must not leak into logs or aggregation; metadata is enough to operate and debug.
+
+**Consequences:** A bad-request bug surfaces immediately rather than after N retries.
+Debugging relies on metadata; any content logging would be a redacted, debug-only option,
+never the default. Tests assert that captured logs exclude prompt/response content.
+
+---
+
+## ADR-119: Cost estimation via a maintained pricing table (estimate, not billing)
+
+- **Date:** 2026-06-11
+- **Status:** Accepted
+
+**Context:** Per-call cost visibility matters for an AI-heavy product, but model strings and
+token prices change over time and must not be baked in as authoritative facts.
+
+**Decision:** `estimate_cost(model, input_tokens, output_tokens)` uses a per-model pricing
+table (`app/ai/cost.py::PRICING`, USD per token) that is **clearly marked as an estimate** to
+keep current with Anthropic pricing (`TODO(pricing)`); the model identifiers in settings are
+likewise marked `TODO(models)` to verify. An unknown model falls back to `DEFAULT_RATE`
+(`0.0`) and logs `ai_cost_unknown_model`. The estimate feeds `Extraction.cost_estimate`
+(LP-16) and `Verification.total_cost_estimate` (LP-18) — callers persist it.
+
+**Rationale:** An estimate is sufficient for tracking and trend-watching; treating prices
+and model strings as maintained configuration (not facts) keeps them honest as Anthropic's
+offerings change. A visible warning on unknown models flags table gaps instead of silently
+mis-costing.
+
+**Consequences:** The pricing table and model strings must be kept current — they are
+explicitly developer-verified. Output is an estimate, not a billing figure. Unknown models
+contribute `0.0` (and warn) rather than guessing.

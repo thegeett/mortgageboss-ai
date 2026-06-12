@@ -61,9 +61,11 @@ It is a **monorepo** with a conventional three-tier shape plus a few subsystems:
 - **File storage** — ✅ a storage abstraction (local filesystem in dev, S3 in
   production) for uploaded document bytes (LP-35; see [Storage](#storage-document-bytes--lp-35)).
   The upload endpoint and pipeline that use it arrive next in Epic 5.
-- **AI** — 📋 Anthropic Claude, used only for *perception*: classifying document
+- **AI** — Anthropic Claude, used only for *perception*: classifying document
   types and extracting structured fields from document text. Reached through an
-  async client wrapper with retries, logging, and cost tracking (Epic 5).
+  async client wrapper with retries, metadata logging, and cost estimation
+  (✅ LP-37; see [AI client](#ai-client-lp-37)). The classifier (LP-38) and
+  extractor (LP-39) that use it arrive next in Epic 5.
 - **Email** — 📋 SMTP, captured by MailHog locally (✅ infra running), used for
   borrower/loan-officer communication (Phase 4).
 
@@ -101,6 +103,39 @@ absolute paths, symlinks) with a `StorageError` *before* touching the
 filesystem; the storage root sits **outside any web-served/static directory**,
 so files are reachable only through auth'd endpoints; and stored files are
 **data, never executed**. See ADR-112 / ADR-113.
+
+## AI client (LP-37)
+
+Every Claude API call flows through one wrapper (`app/ai/client.py`) so the AI
+features — document classification (LP-38) and extraction (LP-39) — call
+`complete(...)` and stay focused on their own logic. The wrapper owns the
+cross-cutting concerns:
+
+- **Singleton client** — a lazy, cached `AsyncAnthropic` (`get_anthropic_client`,
+  mirroring the LP-35 storage factory). The missing-key error fires at **call
+  time**, not import, so the app and tests load without a key. The wrapper owns
+  retries, so the SDK's own retries are disabled (`max_retries=0`).
+- **Transient-only retries** — rate limits (429), server errors (5xx), and
+  connection/timeout errors are retried with **exponential backoff + jitter**, up
+  to `ai_max_retries` attempts. Deterministic 4xx (400/401/403/404/422) **fail
+  fast** — retrying them only wastes time and money. `_is_transient` classifies
+  via the SDK's exception hierarchy.
+- **Metadata-only logging (privacy)** — each attempt/outcome logs **metadata**
+  (model, token counts, latency, attempt, outcome, error type) and **never** the
+  prompt or response **content**, which carries borrower PII (pay-stub /
+  bank-statement data). Any content logging would be a redacted, debug-only
+  option — not the default.
+- **Usage surfaced for cost** — `complete` returns an `AICompletion` (text +
+  input/output tokens). `app/ai/cost.py::estimate_cost` turns usage into a USD
+  **estimate** via a per-model pricing table; that estimate feeds
+  `Extraction.cost_estimate` (LP-16) and `Verification.total_cost_estimate`
+  (LP-18).
+
+**Configuration to verify.** Model identifiers (`anthropic_model_classification`
+/ `_extraction`) and the pricing table are **configuration that changes over
+time** — both are marked with `TODO` to verify against current Anthropic docs.
+The cost output is an estimate for tracking, not a billing figure. See ADR-117 /
+ADR-118 / ADR-119.
 
 ## Data flow (intended V1)
 
