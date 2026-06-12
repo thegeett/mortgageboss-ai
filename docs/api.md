@@ -175,6 +175,31 @@ caller's lenders), active only, ordered by name; no pagination (a company has fe
 lenders). Populates the intake-form lender dropdown; lenders are seeded later (LP-48),
 so an empty list is a normal, graceful state.
 
+## Overview reads (LP-34) — needs & activity, nested under a file
+
+Two read-only lists for the file overview tab, both **nested under the file** and
+transitively company-scoped via the same `ScopedLoanFile` gate as borrowers/property
+(the parent file is resolved with the caller's company **first** → `404` if it isn't
+theirs; ADR-110).
+
+| Method | Path | Success | Notes |
+| --- | --- | --- | --- |
+| GET | `/api/v1/loan-files/{file_identifier}/needs` | `200` `NeedsItemPublic[]` | active items, **blocking-first** then oldest |
+| GET | `/api/v1/loan-files/{file_identifier}/activity` | `200` `ActivityPublic[]` | recent first, capped (20) |
+
+- `NeedsItemPublic` = `{ id, title, category, needs_type, status, priority, origin,
+  borrower_id, satisfied_by_document_id, created_at }`. The needs list is **provisional**
+  template data (LP-30, pending domain refinement) — shown as-is, not authoritative.
+- `ActivityPublic` = `{ id, activity_type, summary, actor_user_id, detail, created_at }`.
+  `detail` carries only safe structured data (e.g. status from/to, needs count) — never
+  SSNs or tokens.
+- Both 404 for an out-of-company file (tenant-safe, tested). No raw SSN / `inbox_token`.
+
+## Intake (LP-32) — client orchestration, no new endpoint
+
+The new-file intake form composes existing endpoints in sequence (Option A, file-first;
+ADR-105) — there is **no** atomic intake endpoint:
+
 ## Intake (LP-32) — client orchestration, no new endpoint
 
 The new-file intake form composes existing endpoints in sequence (Option A, file-first;

@@ -1,12 +1,10 @@
 import { StatusBadge } from "@/components/status-badge";
 import { Skeleton } from "@/components/ui/skeleton";
+import { programLabel, purposeLabel } from "@/lib/loan-files/labels";
 import type { LoanFileDetail } from "@/lib/types/loan-file";
 import { format, formatDistanceToNow } from "date-fns";
 import { ArrowLeft } from "lucide-react";
 import Link from "next/link";
-
-const PROGRAM_LABELS: Record<string, string> = { conventional: "Conventional", fha: "FHA" };
-const PURPOSE_LABELS: Record<string, string> = { purchase: "Purchase", refinance: "Refinance" };
 
 function fmtDate(iso: string): string {
   try {
@@ -53,13 +51,13 @@ export function FileHeader({ file }: { file: LoanFileDetail | undefined }) {
               {file.loan_program && (
                 <>
                   <span aria-hidden>·</span>
-                  <span>{PROGRAM_LABELS[file.loan_program] ?? file.loan_program}</span>
+                  <span>{programLabel(file.loan_program)}</span>
                 </>
               )}
               {file.loan_purpose && (
                 <>
                   <span aria-hidden>·</span>
-                  <span>{PURPOSE_LABELS[file.loan_purpose] ?? file.loan_purpose}</span>
+                  <span>{purposeLabel(file.loan_purpose)}</span>
                 </>
               )}
               {file.lender_name && (

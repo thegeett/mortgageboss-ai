@@ -9,10 +9,12 @@ the state.
 
 from uuid import UUID
 
+from sqlalchemy import case, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.base import utcnow
 from app.models.document import DocumentCategory
+from app.models.helpers import only_active
 from app.models.needs_item import (
     NeedsItem,
     NeedsItemOrigin,
@@ -77,3 +79,25 @@ async def satisfy_needs_item(
     needs_item.satisfied_at = utcnow()
     await db.flush()
     return needs_item
+
+
+# Priority order for display: blocking items first, then standard, then low.
+_PRIORITY_ORDER = case(
+    (NeedsItem.priority == NeedsItemPriority.BLOCKING, 0),
+    (NeedsItem.priority == NeedsItemPriority.STANDARD, 1),
+    (NeedsItem.priority == NeedsItemPriority.LOW, 2),
+    else_=3,
+)
+
+
+async def list_needs_items(db: AsyncSession, *, loan_file_id: UUID) -> list[NeedsItem]:
+    """The file's active needs items (LP-34), ordered blocking-first then oldest.
+
+    Takes an already scope-checked ``loan_file_id`` (the endpoint resolves the
+    parent file with the caller's company first). Excludes soft-deleted rows.
+    """
+    stmt = select(NeedsItem).where(NeedsItem.loan_file_id == loan_file_id)
+    stmt = only_active(stmt, NeedsItem)
+    stmt = stmt.order_by(_PRIORITY_ORDER, NeedsItem.created_at)
+    result = await db.execute(stmt)
+    return list(result.scalars().all())

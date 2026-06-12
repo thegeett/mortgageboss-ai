@@ -2916,3 +2916,52 @@ and "this file will gain these aspects in these phases."
 stay clearly *upcoming* (never a real-but-empty feature). The tab set + target phases live in
 one config (`lib/loan-files/tabs.ts`). A leaner overview+documents-only shell was the
 alternative.
+
+---
+
+## ADR-110: Overview surfaces needs + activity via small scoped reads
+
+- **Date:** 2026-06-11
+- **Status:** Accepted
+
+**Context:** The file overview (LP-34) needs the file's **needs list** and **activity
+feed** — data the LP-28 detail response doesn't carry.
+
+**Decision:** Add two small, read-only, **transitively company-scoped** endpoints —
+`GET /loan-files/{id}/needs` and `/activity` — rather than folding them into the detail
+response. Both reuse the LP-29 `ScopedLoanFile` gate (resolve the parent file with the
+caller's company **first** → `404` if it isn't theirs), so a file from another company
+returns `404` (tested). `needs` is ordered blocking-first; `activity` is recent-first,
+capped at 20. The overview composes these with the cached detail (borrower card uses the
+existing LP-29 `/borrowers` read for the richer fields).
+
+**Rationale:** The overview needs real needs/activity data; separate endpoints keep them
+independently loadable and reusable for the fuller needs/activity views later, and keep
+the detail response lean. Transitive scoping reuses the established pattern — no
+`company_id` from the client.
+
+**Consequences:** Two small endpoints added. The overview loads a few queries (detail +
+borrowers + needs + activity), each with its own loading/empty/error state. Folding into
+detail remains an option if ever preferred. The needs list is provisional template data
+(ADR-100) — shown as-is.
+
+---
+
+## ADR-111: Overview phase placeholders (AI summary, key metrics) kept honest
+
+- **Date:** 2026-06-11
+- **Status:** Accepted
+
+**Context:** The overview's intended full shape includes an AI summary and computed key
+metrics (DTI/LTV), both built in later phases.
+
+**Decision:** Show **clearly-labeled "coming in Phase X"** placeholders for the AI summary
+(Phase 6) and key metrics (Phase 3) on the overview — small dashed-border cards with the
+phase badge — alongside the real cards/needs/activity.
+
+**Rationale:** Conveys the overview's intended shape and roadmap without faking content,
+consistent with the honest-placeholder discipline (LP-33 tabs / ADR-109, the EMAIL-only
+enum / ADR-072). The real content lands in the named phases.
+
+**Consequences:** The placeholders remain clearly upcoming; the real AI summary (Phase 6)
+and metrics (Phase 3) replace them when those phases land.

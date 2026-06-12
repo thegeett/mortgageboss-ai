@@ -8,9 +8,11 @@ every operation is incremental (ADR-071), not done all at once.
 from typing import Any
 from uuid import UUID
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.activity_log import ActivityLog, ActivityType
+from app.models.helpers import only_active
 
 
 async def log_activity(
@@ -38,3 +40,18 @@ async def log_activity(
     db.add(entry)
     await db.flush()
     return entry
+
+
+async def list_recent_activity(
+    db: AsyncSession, *, loan_file_id: UUID, limit: int = 20
+) -> list[ActivityLog]:
+    """The file's recent activity (LP-34), most-recent-first, capped at ``limit``.
+
+    Takes an already scope-checked ``loan_file_id`` (the endpoint resolves the
+    parent file with the caller's company first). Excludes soft-deleted rows.
+    """
+    stmt = select(ActivityLog).where(ActivityLog.loan_file_id == loan_file_id)
+    stmt = only_active(stmt, ActivityLog)
+    stmt = stmt.order_by(ActivityLog.created_at.desc()).limit(limit)
+    result = await db.execute(stmt)
+    return list(result.scalars().all())

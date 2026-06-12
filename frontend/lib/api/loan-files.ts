@@ -7,11 +7,19 @@
  * current page visible while the next loads (no flicker on filter/search/page).
  */
 import { apiClient } from "@/lib/api/client";
+import type { ActivityPublic } from "@/lib/types/activity";
+import type { BorrowerDetail } from "@/lib/types/borrower";
 import type { LoanFileDetail, LoanFileStatus, PaginatedLoanFiles } from "@/lib/types/loan-file";
+import type { NeedsItemPublic } from "@/lib/types/needs-item";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { isAxiosError } from "axios";
 
 export const LOAN_FILES_PATH = "/api/v1/loan-files";
+
+/** A 404 (missing or out-of-company) won't change on retry — surface it now. */
+function noRetryOn404(failureCount: number, error: unknown): boolean {
+  return !(isAxiosError(error) && error.response?.status === 404) && failureCount < 1;
+}
 
 export interface LoanFilesQuery {
   page?: number;
@@ -69,8 +77,38 @@ export function useLoanFile(identifier: string) {
     queryKey: ["loan-file", identifier],
     queryFn: () => fetchLoanFile(identifier),
     enabled: Boolean(identifier),
-    // A 404 (missing or out-of-company) won't change on retry — surface it now.
-    retry: (failureCount, error) =>
-      !(isAxiosError(error) && error.response?.status === 404) && failureCount < 1,
+    retry: noRetryOn404,
+  });
+}
+
+// --- Overview reads (LP-34): borrowers, needs, activity --------------------- //
+
+export function useLoanFileBorrowers(identifier: string) {
+  return useQuery({
+    queryKey: ["loan-file-borrowers", identifier],
+    queryFn: async () =>
+      (await apiClient.get<BorrowerDetail[]>(`${LOAN_FILES_PATH}/${identifier}/borrowers`)).data,
+    enabled: Boolean(identifier),
+    retry: noRetryOn404,
+  });
+}
+
+export function useLoanFileNeeds(identifier: string) {
+  return useQuery({
+    queryKey: ["loan-file-needs", identifier],
+    queryFn: async () =>
+      (await apiClient.get<NeedsItemPublic[]>(`${LOAN_FILES_PATH}/${identifier}/needs`)).data,
+    enabled: Boolean(identifier),
+    retry: noRetryOn404,
+  });
+}
+
+export function useLoanFileActivity(identifier: string) {
+  return useQuery({
+    queryKey: ["loan-file-activity", identifier],
+    queryFn: async () =>
+      (await apiClient.get<ActivityPublic[]>(`${LOAN_FILES_PATH}/${identifier}/activity`)).data,
+    enabled: Boolean(identifier),
+    retry: noRetryOn404,
   });
 }
