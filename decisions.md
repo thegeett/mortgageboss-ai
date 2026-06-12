@@ -3581,3 +3581,160 @@ mutable loop/engine state across tasks, no cross-loop connection reuse. Proving 
 async work inside a `run_async`-driven coroutine and use `task_session()` (not the API's
 request-scoped `get_db`). `asyncio.run` can't be called from an already-running loop, so tasks
 stay sync at the Celery boundary.
+
+---
+
+## ADR-134: Documents tab — live status via poll-while-non-terminal
+
+- **Date:** 2026-06-12
+- **Status:** Accepted
+
+**Context:** Document processing (LP-42) runs in the background and changes `Document.status`
+over seconds (PENDING → … → COMPLETED / NEEDS_REVIEW / FAILED). The Documents tab (LP-43)
+must reflect that progress without a manual refresh, but shouldn't poll forever.
+
+**Decision:** `useLoanFileDocuments` uses a **function `refetchInterval`** that returns
+~2500ms while *any* document is in a non-terminal status (`hasInProgressDocuments`) and
+`false` once every document is terminal. After a successful upload the documents query is
+invalidated so the new PENDING docs appear and polling resumes. `Document.status` (set by the
+LP-42 pipeline) is the source of truth — not Celery's result backend; no websockets in V1.
+
+**Rationale:** Polling gives near-real-time progress with trivial infrastructure; stopping
+when settled avoids hammering the server indefinitely. A function `refetchInterval` keyed on
+the data is the idiomatic TanStack Query way to express "poll until settled".
+
+**Consequences:** The UI is live during processing and quiet once done. The terminal-vs-
+in-progress rule lives in one helper (`isTerminalStatus`/`hasInProgressDocuments`), unit-
+tested and reused by the spinner treatment. (Note: until LP-42 lands, documents stay PENDING,
+so the list polls without settling — the logic is correct; it just has nothing to advance.)
+
+---
+
+## ADR-135: Documents grouped by category; NEEDS_REVIEW surfaced honestly; override deferred to LP-44
+
+- **Date:** 2026-06-12
+- **Status:** Accepted
+
+**Context:** A file accumulates many documents of different kinds; the processor thinks in
+terms of categories. The AI classification is probabilistic and sometimes uncertain
+(low-confidence / unknown / failed extraction → `NEEDS_REVIEW`).
+
+**Decision:** Documents are displayed **grouped by their (AI-assigned) category** — the eight
+`DocumentCategory` values in a sensible order, plus a "Processing / uncategorized" group for
+not-yet-classified docs. `NEEDS_REVIEW` renders as an **amber attention state** ("the AI
+wasn't sure — look at this"); `FAILED` as red. The ability to **correct** the type/category is
+a distinct next step (**LP-44**); LP-43 only *displays* the state.
+
+**Rationale:** Category grouping matches the processor's mental model. Honestly surfacing AI
+uncertainty (rather than hiding it behind a confident-looking guess) is core to the
+AI-in-the-loop design. Separating display (LP-43) from correction (LP-44) keeps each ticket
+focused.
+
+**Consequences:** V1 shows the needs-review state without the correction action. Category
+reflects the AI's classification (the provisional map, LP-42). The status→treatment map is a
+single source (`DOCUMENT_STATUS_META`, design tokens), mirroring the LP-31 loan-file pattern.
+
+---
+
+## ADR-136: Dev-only text-layer comparison button (non-production)
+
+- **Date:** 2026-06-12
+- **Status:** Accepted
+
+**Context:** The LP-40 deterministic PDF text-layer endpoint is a dev-only comparison tool
+(ADR-129), present only in non-production. The drawer is the natural place to surface it.
+
+**Decision:** The document drawer renders a small **"Extract text layer (dev)"** button
+**only in non-production** (`process.env.NODE_ENV !== "production"`, which Next.js inlines and
+dead-code-eliminates from a production build), calling the LP-40 dev endpoint and showing the
+returned text (+ has_text / page_count) for comparison against the AI extraction. In
+production the button is absent and the endpoint 404s anyway — defence in depth.
+
+**Rationale:** Lets the developer compare deterministic text-layer output against the AI's
+reading on real documents, informing the possible future hybrid (ADR-129), while never
+shipping the affordance to production.
+
+**Consequences:** A dev affordance only; gated client-side to match the server gating. The
+shown text is dev-only and never logged.
+
+---
+
+## ADR-137: Document processing pipeline — classification routes extraction; status drives the UI
+
+- **Date:** 2026-06-12
+- **Status:** Accepted
+
+**Context:** Extraction is type-specific (LP-39), so the document type must be known first;
+and document processing (read + up to two AI calls) is too slow for the upload request.
+
+**Decision:** An async Celery task (`documents.process_document`) chains, per document:
+read bytes → **classify** (Haiku) → **route by type** → **extract if pay stub** (Sonnet) →
+persist a **versioned `Extraction`** (with token usage + `estimate_cost`) → satisfy a
+matching need → log activity → set a terminal status. **Classification routes extraction**:
+the type selects the extractor; Phase 1 has only the pay-stub branch, and every other type is
+**classified-only** (no extraction). The task transitions and **commits `Document.status`** at
+each stage (`PENDING → CLASSIFYING → CLASSIFIED → [EXTRACTING] → terminal`), which is the
+source of truth the UI polls (LP-43). It runs via the LP-41 sync→async bridge + worker
+session, and is enqueued from the upload endpoint (fire-and-forget, after commit).
+
+**Rationale:** Type-specific extraction requires the type first (hence separate classify +
+extract calls). Background processing keeps upload fast; committed status transitions give the
+UI real-time progress. Versioned extraction + cost tracking reuse LP-16/LP-37.
+
+**Consequences:** Phase 2 fans the routing out to more types; non-pay-stub types classify-only
+in V1. Cost/tokens are recorded per extraction (`PayStubExtractionResult` was minimally
+extended to surface usage). Status is DB-driven, not Celery's result backend.
+
+---
+
+## ADR-138: Per-document resilience — every document reaches a terminal status; failures isolated
+
+- **Date:** 2026-06-12
+- **Status:** Accepted
+
+**Context:** Real uploads are messy (scans, corrupt PDFs, ambiguous content, transient infra
+errors). A batch must process the good documents and flag the bad ones, never crash, and never
+leave a document stuck mid-pipeline.
+
+**Decision:** Each document is processed independently. **Graceful** classify/extract results
+(`unknown` / `failed`) and low confidence (< 0.5) → **`NEEDS_REVIEW`** (an *expected* outcome,
+the human-review signal). Any **unexpected** exception (storage/DB/etc.) → **`FAILED`** with a
+*safe* `processing_error` (e.g. `"processing error"` — never raw document content). One
+document's failure never crashes the worker or affects others, and **every handled path
+reaches a terminal status** (COMPLETED / NEEDS_REVIEW / FAILED) — never left in
+CLASSIFYING/EXTRACTING. The FAILED path sets the status on the loaded document and commits;
+only if that fails (a broken transaction) does it roll back, re-load, and retry once, logging
+and giving up if even that can't complete.
+
+**Rationale:** Separating *expected* AI uncertainty (review) from *unexpected* errors (failed)
+gives the processor an accurate signal. Reaching a terminal status keeps the polling UI honest
+(it settles). Isolation means a batch upload is robust to one bad file.
+
+**Consequences:** `processing_error` holds only safe messages. A document interrupted mid-task
+(worker killed) may sit in a transient state until **reprocessed** — the V1 recovery path;
+re-processing is safe (ADR-137: versioned extraction; needs not double-satisfied).
+
+---
+
+## ADR-139: Provisional type→category map and pay-stub needs-matching (refine with Priya / Phase 2)
+
+- **Date:** 2026-06-12
+- **Status:** Accepted
+
+**Context:** Closing the document→needs loop (a pay stub satisfies an income need) is valuable
+now, but the full type taxonomy and the needs model firm up with domain input (Priya) and
+Phase 2.
+
+**Decision:** A simple, clearly-marked **PROVISIONAL** document-type → `DocumentCategory` map
+(e.g. `pay_stub`/`w2`/… → `INCOME_EMPLOYMENT`, `bank_statement` → `ASSETS`, …; unknown → no
+category), and a simple **PROVISIONAL** needs rule: a processed pay stub marks the first
+`OUTSTANDING` `INCOME_EMPLOYMENT` need on the file `RECEIVED` (+ `satisfied_by_document_id`,
+`satisfied_at`) and logs a `NEEDS_ITEM_SATISFIED` activity. Only `OUTSTANDING` needs are
+touched (no double-satisfy). No match → no-op.
+
+**Rationale:** Demonstrates the end-to-end loop for the common pay-stub case without
+over-engineering; the real taxonomy/matching is a domain decision deferred to Priya / Phase 2.
+
+**Consequences:** V1 matching is basic (one income need per pay stub, by category); both the
+map and the rule are documented as provisional and will be refined. The category shown in the
+UI reflects this provisional map.

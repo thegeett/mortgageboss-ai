@@ -126,7 +126,45 @@ the same `["loan-file", id]` query (deduped by React Query) and renders into the
 shell — no header/tab rework. The status→badge mapping is the shared
 `components/status-badge.tsx` over `STATUS_META` (one mapping, reused everywhere).
 
+## The Documents tab (LP-43)
+
+The Documents tab (`[id]/documents/page.tsx`, replacing the LP-33 placeholder) is the
+operable document workspace — where the processor uploads documents and watches the
+pipeline read them.
+
+- **Upload** — a drag-and-drop (+ click-to-browse) zone (`react-dropzone`,
+  `components/file/documents/document-dropzone.tsx`) accepting PDF/JPG/PNG. It validates
+  type + size client-side for fast feedback (`validateUploadFile`), but the **server
+  (LP-36) is authoritative** — its `413`/`415` are surfaced as toasts too. Multiple files
+  at once. On success the mutation invalidates the documents query, so the new `pending`
+  documents appear and polling resumes.
+- **Live status polling** — `useLoanFileDocuments` (`lib/api/documents.ts`) uses a
+  **function `refetchInterval`**: ~2.5s while *any* document is non-terminal
+  (`hasInProgressDocuments`), `false` once all are terminal
+  (`completed`/`needs_review`/`failed`). So the list updates in near-real-time during
+  processing and **stops** when settled — `Document.status` is the source of truth. (ADR-134.)
+- **Grouped by category** — `groupDocumentsByCategory` buckets documents under the eight
+  `DocumentCategory` labels (in order) plus a "Processing / uncategorized" group for
+  not-yet-classified docs. Each row shows filename, classified type, size/date, and a live
+  status badge (`DocumentStatusBadge` — a spinner while processing; green completed, amber
+  **Needs review** (honest AI-uncertainty signal), red failed). Type **correction** is
+  LP-44. (ADR-135.)
+- **Detail drawer** — a shadcn `sheet` (`document-drawer.tsx`) fetches detail on open
+  (`useDocumentDetail`, enabled only while open): metadata + the extraction rendered as
+  labelled key/values (`extractionFields`; "No extraction — classified only" for
+  non-pay-stub types) + an authed **download** (blob via `/documents/{id}/download`) +
+  soft-delete.
+- **Dev-only text-layer button** — non-production only (`process.env.NODE_ENV !==
+  "production"`, statically eliminated from a prod build), calling the LP-40 dev endpoint
+  to show the deterministic text layer for comparison. Absent in production (and the
+  endpoint 404s there anyway). (ADR-136.)
+- **No leaks** — `storage_path` / raw `ssn` / `inbox_token` never appear (the endpoints
+  don't expose them); the dev text-layer text shows only via the gated dev button.
+
+The presentation/logic helpers live in `lib/loan-files/documents.ts` (status map, grouping,
+terminal rule, validation, extraction display) — unit-tested in `documents.test.ts`.
+
 ## What's next
 
-- **LP-34** — the Overview tab's real content (file summary: borrowers, property, loan,
-  needs list).
+- **LP-44** — manual document type override (correcting a `needs_review`/misclassified
+  document from the drawer).

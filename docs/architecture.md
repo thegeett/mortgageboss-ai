@@ -292,6 +292,44 @@ the real document-processing tasks (and enqueueing them from upload) are LP-42.
 
 See ADR-132 (Celery + Redis) and ADR-133 (sync tasks run async via a per-task loop).
 
+## Document processing pipeline (LP-42)
+
+The integration payoff: the Celery task `documents.process_document(document_id)`
+(`app/tasks/document_processing.py`) chains, for one document, **independently**:
+
+    read bytes → classify (Haiku) → route extraction by type →
+    extract if pay stub (Sonnet) → persist a versioned Extraction (+ cost) →
+    satisfy a matching need → log activity → set a TERMINAL status
+
+- **Classification routes extraction** — the type selects the extractor. Phase 1
+  has only the **pay-stub** branch (`extract_pay_stub` → a versioned `Extraction`
+  with token usage + `estimate_cost`); every other type is **classified-only**
+  (`document_type` set, no extraction) — expected V1. (ADR-137.)
+- **Status drives the UI** — the task transitions and **commits** at each stage
+  (`PENDING → CLASSIFYING → CLASSIFIED → [EXTRACTING] → COMPLETED / NEEDS_REVIEW /
+  FAILED`), so the LP-43 tab sees progress live. `Document.status` is the source
+  of truth.
+- **Resilience** (ADR-138) — each document is processed on its own; one failure
+  never crashes the worker or the batch. **Graceful** classify/extract outcomes
+  (`unknown` / `failed`) or low confidence (< 0.5) → **`NEEDS_REVIEW`** (expected,
+  not an error). An **unexpected** exception → **`FAILED`** with a *safe*
+  `processing_error` (never raw PII). Every handled path reaches a terminal
+  status — never left stuck in CLASSIFYING/EXTRACTING.
+- **Retry-safe** — re-running is safe: extraction uses `create_extraction_version`
+  (a new version, one current), and needs-matching only touches an `OUTSTANDING`
+  need, so it never double-satisfies.
+- **Async bridge** — the sync task runs the async pipeline via `run_async` + a
+  worker `task_session` (LP-41); transactions are managed in the coroutine.
+- **Enqueue on upload** — the LP-36 upload endpoint, *after* committing the
+  `PENDING` documents, fires `process_document.delay(...)` per document
+  (fire-and-forget); an enqueue hiccup doesn't fail the upload (the bytes/record
+  are safe and reprocessable).
+- **Needs match** (PROVISIONAL, ADR-139) — a processed pay stub marks the first
+  `OUTSTANDING` `INCOME_EMPLOYMENT` need `RECEIVED` (+ `satisfied_by_document_id`).
+  The type→category map and this rule are provisional (refine with Priya / Phase 2).
+- **Privacy** — never logs bytes/text/extracted values; only metadata
+  (ids, status, type, confidence, tokens/cost).
+
 ## Data flow (intended V1)
 
 How a loan file moves through the system once feature work lands:

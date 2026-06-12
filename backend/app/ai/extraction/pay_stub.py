@@ -106,6 +106,10 @@ class PayStubExtractionResult(BaseModel):
     status: ExtractionStatus
     confidence: float = Field(ge=0.0, le=1.0)
     reasoning: str | None = None
+    # Token usage from the AI call (LP-42 records cost from these). None when no
+    # call was made (empty/unsupported input) or it failed before a response.
+    input_tokens: int | None = None
+    output_tokens: int | None = None
 
     @classmethod
     def failed(cls, reason: str) -> "PayStubExtractionResult":
@@ -289,6 +293,10 @@ async def extract_pay_stub(content: bytes, media_type: str) -> PayStubExtraction
     if result is None:
         logger.warning("paystub_extraction_parse_failed")  # no raw response logged
         return PayStubExtractionResult.failed("could not parse extraction")
+
+    # Surface the call's token usage so the pipeline (LP-42) can record cost.
+    result.input_tokens = resp.input_tokens
+    result.output_tokens = resp.output_tokens
 
     # Metadata only: status, confidence, and a count of non-null fields — NEVER
     # the extracted values (income, employer, names are all PII).

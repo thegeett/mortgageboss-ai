@@ -21,6 +21,7 @@ from typing import Annotated
 from urllib.parse import quote
 from uuid import UUID, uuid4
 
+import structlog
 from fastapi import APIRouter, File, HTTPException, Response, UploadFile, status
 
 from app.api.dependencies import CurrentUser, ScopedLoanFile
@@ -44,6 +45,9 @@ from app.services.documents import (
     validate_upload,
 )
 from app.storage import get_storage_backend
+from app.tasks.document_processing import process_document
+
+log = structlog.get_logger(__name__)
 
 # Read uploads in 1 MB chunks so an over-limit file is rejected without buffering
 # far past the cap (see ``_read_capped``).
@@ -53,6 +57,19 @@ nested_router = APIRouter(prefix="/loan-files/{file_identifier}/documents", tags
 flat_router = APIRouter(prefix="/documents", tags=["documents"])
 
 _NOT_FOUND = HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
+
+
+def _enqueue_processing(document_id: UUID) -> None:
+    """Fire-and-forget enqueue of the LP-42 processing task for a stored document.
+
+    The document is already stored + committed (``PENDING``), so an enqueue
+    hiccup (broker down) must NOT fail the upload — the bytes and record are
+    safe and the document can be reprocessed. We log and move on.
+    """
+    try:
+        process_document.delay(str(document_id))
+    except Exception:
+        log.warning("document_enqueue_failed", document_id=str(document_id))
 
 
 async def _read_capped(upload: UploadFile, *, max_bytes: int) -> bytes:
@@ -137,6 +154,13 @@ async def upload(
         detail={"document_count": len(created)},
     )
     await db.commit()
+
+    # Enqueue background processing per document AFTER commit (fire-and-forget) —
+    # the upload returns immediately; processing advances each Document's status
+    # (LP-42). An enqueue failure doesn't fail the upload (the doc is safe/PENDING).
+    for document in created:
+        _enqueue_processing(document.id)
+
     return [DocumentResponse.model_validate(d) for d in created]
 
 

@@ -16,9 +16,8 @@ from celery import Celery
 
 from app.core.config import settings
 
-# Modules Celery imports so their @task definitions register. LP-42 appends its
-# own module ("app.tasks.document_processing") here.
-_TASK_MODULES = ["app.tasks.health"]
+# Modules Celery imports so their @task definitions register.
+_TASK_MODULES = ["app.tasks.health", "app.tasks.document_processing"]
 
 celery_app = Celery(
     "mortgageboss",

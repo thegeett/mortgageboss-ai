@@ -10,9 +10,11 @@ preserving the stored bytes.
 
 from collections.abc import AsyncIterator
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
 import pytest_asyncio
+from app.api import documents as documents_api
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.jwt import create_access_token
@@ -37,6 +39,14 @@ def _storage_tmp(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     get_storage_backend.cache_clear()
     yield
     get_storage_backend.cache_clear()
+
+
+@pytest.fixture(autouse=True)
+def _mock_enqueue(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
+    """Stub the LP-42 processing enqueue so upload tests never hit the real broker."""
+    delay = MagicMock()
+    monkeypatch.setattr(documents_api.process_document, "delay", delay)
+    return delay
 
 
 @pytest_asyncio.fixture
@@ -149,6 +159,25 @@ async def test_upload_multiple_files_in_one_request(
     )
     assert resp.status_code == 201
     assert len(resp.json()) == 3
+
+
+async def test_upload_enqueues_processing_per_document(
+    client: AsyncClient, db_session: AsyncSession, _mock_enqueue: object
+) -> None:
+    """The upload enqueues LP-42 processing once per uploaded document (after commit)."""
+    company, _user, token = await _make_user(db_session, slug="acme")
+    loan_file = await create_loan_file(db_session, company_id=company.id)
+    resp = await client.post(
+        _docs_url(loan_file.display_id),
+        headers=_auth(token),
+        files=[_pdf_part("a.pdf"), _pdf_part("b.png", PNG_BYTES, "image/png")],
+    )
+    assert resp.status_code == 201
+    created_ids = {d["id"] for d in resp.json()}
+    # delay() called once per document, with each document's id.
+    assert _mock_enqueue.call_count == 2  # type: ignore[attr-defined]
+    enqueued_ids = {call.args[0] for call in _mock_enqueue.call_args_list}  # type: ignore[attr-defined]
+    assert enqueued_ids == created_ids
 
 
 # --------------------------------------------------------------------------- #
