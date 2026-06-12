@@ -58,13 +58,49 @@ It is a **monorepo** with a conventional three-tier shape plus a few subsystems:
   classification → extraction pipeline outside the request cycle (Epic 5).
 - **Database** — ✅ PostgreSQL 16 (reachable; schema/models arrive in Epic 2).
   The **single source of truth** for all application state.
-- **File storage** — 📋 a storage abstraction (local filesystem in dev, S3 in
-  production) for uploaded documents (Epic 5).
+- **File storage** — ✅ a storage abstraction (local filesystem in dev, S3 in
+  production) for uploaded document bytes (LP-35; see [Storage](#storage-document-bytes--lp-35)).
+  The upload endpoint and pipeline that use it arrive next in Epic 5.
 - **AI** — 📋 Anthropic Claude, used only for *perception*: classifying document
   types and extracting structured fields from document text. Reached through an
   async client wrapper with retries, logging, and cost tracking (Epic 5).
 - **Email** — 📋 SMTP, captured by MailHog locally (✅ infra running), used for
   borrower/loan-officer communication (Phase 4).
+
+## Storage (document bytes — LP-35)
+
+Uploaded document **bytes** live in a storage backend, never in the database.
+The `Document` row holds only a `storage_path` pointing at them (LP-15,
+ADR-057). All byte I/O goes through a single abstraction so calling code never
+knows or cares where the bytes physically live.
+
+- **`StorageBackend` interface** (`app/storage/base.py`) — async
+  `save` / `read` / `delete` / `get_url`. `save` takes the server-controlled
+  ids + filename + bytes and returns the `storage_path` to persist;
+  `get_url` returns a direct URL or `None`.
+- **`LocalStorageBackend`** (`app/storage/local.py`) — dev backend writing under
+  a configured root (`storage_local_path`, default `./storage`). Blocking file
+  I/O is wrapped in `asyncio.to_thread` so the interface is genuinely async.
+  `get_url` returns `None` — local files are served only through the auth'd
+  download endpoint (LP-36), never a direct URL.
+- **Factory** (`app/storage/get_storage_backend`) — settings-driven
+  (`storage_backend`); returns the local backend today. An **S3 backend** lands
+  in production (Phase 7) as a new implementation + an `"s3"` branch — **no
+  calling-code changes** (`get_url` returns a presigned URL there).
+
+**Path pattern** — tenant-prefixed, UUID-named:
+`{company_id}/{file_id}/{document_id}.{ext}`. Every component is a
+**server-controlled UUID**; only the extension derives from the (sanitized,
+allowlisted) filename. This prevents collisions and removes user input from the
+path entirely.
+
+**Security.** File/path handling is a classic vulnerability source, so:
+the path is built from server ids, never user input; the local backend
+**resolves every path and rejects anything that escapes the root** (`../`,
+absolute paths, symlinks) with a `StorageError` *before* touching the
+filesystem; the storage root sits **outside any web-served/static directory**,
+so files are reachable only through auth'd endpoints; and stored files are
+**data, never executed**. See ADR-112 / ADR-113.
 
 ## Data flow (intended V1)
 

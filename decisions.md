@@ -2965,3 +2965,63 @@ enum / ADR-072). The real content lands in the named phases.
 
 **Consequences:** The placeholders remain clearly upcoming; the real AI summary (Phase 6)
 and metrics (Phase 3) replace them when those phases land.
+
+---
+
+## ADR-112: Storage abstraction with a local backend; S3 deferred to production
+
+- **Date:** 2026-06-11
+- **Status:** Accepted
+
+**Context:** Uploaded document **bytes** need a home. The `Document` model (LP-15,
+ADR-057) deliberately stores a `storage_path`, not the bytes — so something has to own
+the bytes behind that path. In dev we want zero infrastructure; in production we want
+durable, scalable object storage (S3). The upload endpoint (LP-36), PDF text extraction
+(LP-40), and the processing tasks (LP-42) will all read/write bytes and must not care
+where they live.
+
+**Decision:** Introduce a `StorageBackend` interface (async `save` / `read` / `delete` /
+`get_url`) with a `LocalStorageBackend` for dev (filesystem under a configured root). A
+settings-driven factory (`get_storage_backend`, keyed on `storage_backend`) returns the
+configured backend. An **S3 backend** is added in production (Phase 7) as a new
+implementation plus an `"s3"` branch in the factory — calling code talks only to the
+interface and does not change. Blocking file I/O is wrapped in `asyncio.to_thread` so the
+interface is genuinely async.
+
+**Rationale:** Decouples the application from where bytes live. Local keeps dev simple
+(no S3/minio to run); object storage gives production durability and scale. Swapping is a
+**config change, not a rewrite**. This realizes the LP-15 storage-path decision (ADR-057).
+
+**Consequences:** All document byte I/O flows through the interface. Adding S3 is a new
+class + config, no calling-code churn. `get_url` returns `None` for local (no direct URL);
+presigned URLs are an S3-era capability. The factory is an `lru_cache` singleton.
+
+---
+
+## ADR-113: Tenant-prefixed UUID storage path; path-traversal safety
+
+- **Date:** 2026-06-11
+- **Status:** Accepted
+
+**Context:** File and path handling is a classic vulnerability source (path traversal,
+collisions, executing uploaded content). Storage paths must be safe to build from request
+data and safe to resolve on disk.
+
+**Decision:** Storage paths are `{company_id}/{file_id}/{document_id}.{ext}`, built from
+**server-controlled UUIDs** (never user input); only the extension derives from the
+filename, and it is **sanitized** (lowercased, stripped to alphanumeric, enforced against
+an allowlist, falling back to `bin`). The `LocalStorageBackend` resolves every path and
+**rejects anything that escapes the storage root** — `../`, absolute paths, escaping
+symlinks — raising `StorageError` *before* any filesystem operation. The storage root
+sits **outside any web-served/static directory**, so stored files are reachable only
+through auth'd endpoints, and stored files are treated as **data, never executed**.
+
+**Rationale:** UUID path components prevent collisions and remove attacker-controlled
+strings from the path. The tenant prefix organizes bytes by company and leaves room for
+per-tenant storage controls. Resolving-then-checking is the robust traversal defense
+(it accounts for `..` and symlinks, not just string matching). Keeping the root out of
+any served directory means there is no direct-URL bypass of authorization.
+
+**Consequences:** Original filenames are kept on the `Document` record, not in the path.
+Strong, tested path-handling safety (traversal rejection is a dedicated test). Direct-URL
+access (`get_url`) is an S3-era feature (`None` for local — served via LP-36's endpoint).
