@@ -3412,3 +3412,114 @@ page/size concern and the deferred multi-page/size guarding are inherited from A
 The typed result, defensive parsing, and graceful-failure contract are preserved (tests
 adapted to bytes + media type). Extraction (LP-39) gets the same treatment next. The Haiku
 model string remains a placeholder to verify.
+
+---
+
+## ADR-128: Extraction reads the full document natively (Sonnet), not pre-extracted text
+
+- **Date:** 2026-06-11
+- **Status:** Accepted
+- **Revises:** ADR-123/124/125 (LP-39); follows ADR-126 (LP-37 revision) and ADR-127 (LP-38)
+
+**Context:** LP-39 originally extracted from a pre-extracted **text** string. Following the
+full-document AI decision (ADR-126) and the matching classification change (ADR-127),
+extraction should read the actual document — text-layer PDFs, scans, and photos alike — with
+no separate OCR/text step.
+
+**Decision:** `extract_pay_stub` changes signature from `(text: str)` to
+`(content: bytes, media_type: str)`. It sends the **full document** to the Sonnet-class model
+as a document/image content block built with the LP-37 `build_document_message`. Supported
+media types are `application/pdf`, `image/jpeg`, `image/png` (`image/jpg` normalized); an
+empty or unsupported document short-circuits to `PayStubExtractionResult.failed(...)`
+**without an API call**. Everything else is **unchanged** — the `PayStubExtraction` typed
+schema, honest nulls / no hallucination, the tolerant currency/date coercion (a single bad
+field → `None`, marking `PARTIAL`, not a whole-extraction failure), the defensive JSON parser,
+the graceful-failure contract (any AI error / unparseable output → `failed`, never raises),
+the file-based prompt (still a starter), the Sonnet model, and metadata-only logging (now
+explicitly never logging document bytes/base64; it already never logged extracted values).
+
+**Rationale:** Native reading is more capable and uniform than OCR-then-text; Sonnet is used
+for accuracy because extraction feeds loan decisions. Reusing the LP-37 helper means one
+verified content-block shape and one retry/logging path; the change mirrors ADR-127 for
+consistency across the AI features.
+
+**Consequences:** Document bytes are token-heavy (cost tracked via cost.py); the per-request
+page/size concern and the deferred multi-page/size guarding are inherited from ADR-126. The
+typed schema, honest nulls, tolerant coercion, and graceful-failure contract are preserved
+(tests adapted to bytes + media type). Pay stub remains the only type in Phase 1; the schema
+and prompt remain starters (Priya / POC). The Sonnet model string remains a placeholder to
+verify.
+
+---
+
+## ADR-129: Deterministic PDF text extraction repositioned as a dev-only comparison tool
+
+- **Date:** 2026-06-12
+- **Status:** Accepted
+- **Supersedes:** the original LP-40 plan (text extraction as a pipeline step)
+
+**Context:** The original plan fed deterministic PDF text into classification/extraction. The
+LP-37 revision (ADR-126) + LP-38/39 changes mean the pipeline now reads documents with AI
+**directly** (full-document native reading). So a deterministic text step is no longer needed
+in the pipeline — but the developer still wants to evaluate text-layer-vs-AI on real documents.
+
+**Decision:** Build the deterministic PDF text-layer extractor (`app/services/pdf_utils.py`)
+as a **dev-only comparison tool**, exposed through a production-gated endpoint (ADR-130), not
+as a pipeline step. It extracts a PDF's embedded text layer (multi-page, no OCR) and returns
+it for the developer to compare against the AI's reading, informing a possible future hybrid
+(deterministic text for cheap/easy cases, AI for the rest). `has_text` is **informational**
+(empty layer → likely a scan), **not** a routing signal — scans are the AI's job now.
+
+**Rationale:** Keeping it dev-only avoids committing the pipeline to a path still under
+evaluation, while preserving the option to promote the utility into a hybrid later. The
+utility code is reusable as-is if the hybrid is adopted.
+
+**Consequences:** No production dependency on text extraction; it never feeds the AI, updates
+the `Document`, or routes to `NEEDS_REVIEW`. OCR/scanned handling stays the AI's job. Whether
+to adopt a hybrid is an open question this tool informs.
+
+---
+
+## ADR-130: Dev-gated endpoints — present only in non-production
+
+- **Date:** 2026-06-12
+- **Status:** Accepted
+
+**Context:** Experiment/diagnostic affordances (like the text-layer comparison endpoint)
+shouldn't exist in production, but still touch real, tenant-scoped data.
+
+**Decision:** Development endpoints live on a dedicated dev router (`app/api/dev.py`) that is
+included in `main.py` **only when `not settings.is_production`**. In production the router is
+not mounted, so its routes are absent (404). Dev endpoints remain **auth'd** (`CurrentUser`)
+and **tenant-scoped** (`get_document_for_company`) — touching real documents is no excuse to
+skip isolation; `company_id` still comes from the user, never the request.
+
+**Rationale:** Router-level gating is simple and absolute — there is no production code path to
+the route, not merely a flag check inside it. Keeping auth + tenant scoping on dev tools means
+they can't become a tenant-isolation bypass even while they exist in dev.
+
+**Consequences:** The text-layer endpoint (and future dev tools) are non-prod only; a dev-only
+UI button (LP-43) will call it. Production gating is verified by a test that applies the same
+mount condition with `is_production` forced true and asserts the route is absent / 404s.
+
+---
+
+## ADR-131: PDF library — PyMuPDF for deterministic text extraction
+
+- **Date:** 2026-06-12
+- **Status:** Accepted
+
+**Decision:** Use **PyMuPDF** (`pymupdf` / fitz) for the deterministic PDF text-layer
+extractor, wrapped behind `app/services/pdf_utils.py` so the rest of the app never imports it
+directly.
+
+**Rationale:** PyMuPDF is fast, robust, reads from an in-memory byte stream
+(`open(stream=..., filetype="pdf")`), exposes `page_count` / `needs_pass` for graceful
+handling of encrypted files, and extracts per-page text simply (`page.get_text()`). A single
+dependency covers our needs; test PDFs are generated with the same library, so no extra
+fixture/`reportlab` dependency is needed.
+
+**Consequences:** PyMuPDF ships incomplete type hints, so a few narrowly-scoped, documented
+`# type: ignore[no-untyped-call]` comments are needed under mypy strict; its SWIG bindings emit
+harmless `DeprecationWarning`s that are filtered in pytest config. Richer layout/table
+extraction (and any OCR) can be added behind the same utility later if a hybrid is adopted.

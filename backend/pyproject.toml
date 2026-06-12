@@ -24,6 +24,7 @@ dependencies = [
     "cryptography>=48.0.1",
     "bcrypt>=5.0.0",
     "pyjwt>=2.13.0",
+    "pymupdf>=1.27.2.3",
 ]
 
 [dependency-groups]
@@ -77,3 +78,8 @@ asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "session"
 asyncio_default_test_loop_scope = "session"
 pythonpath = ["."]
+filterwarnings = [
+    # PyMuPDF's SWIG bindings (LP-40) emit harmless DeprecationWarnings about
+    # builtin SwigPyObject types lacking __module__ — third-party C extension noise.
+    "ignore:builtin type Swig.*has no __module__ attribute:DeprecationWarning",
+]

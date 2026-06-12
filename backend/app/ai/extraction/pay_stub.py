@@ -19,16 +19,20 @@ Core principles:
   * **Reads, doesn't judge.** Extraction reports faithfully what's on the document,
     including absences. Whether the income is plausible / sufficient is the
     verification engine's job (Phase 3) — this module does not compute or editorialize.
-  * **Graceful failure.** :func:`extract_pay_stub` never raises: empty text, an AI
-    error, or unparseable output all return ``PayStubExtractionResult.failed(...)``.
-  * **Privacy.** The document text, the raw response, and the extracted *values* are
-    borrower PII and are **never** logged — only metadata (status, confidence, and a
-    count of non-null fields).
+  * **Graceful failure.** :func:`extract_pay_stub` never raises: an empty/unsupported
+    document, an AI error, or unparseable output all return
+    ``PayStubExtractionResult.failed(...)``.
+  * **Privacy.** The document bytes (and their base64), the raw response, and the
+    extracted *values* are borrower PII and are **never** logged — only metadata
+    (status, confidence, and a count of non-null fields).
 
-Reuses the LP-38 patterns: the file-based prompt (``load_prompt``), the shared
-defensive parser (``app.ai.parsing``), graceful failure, and metadata-only logging.
-Uses ``settings.anthropic_model_extraction`` — a more capable Sonnet-class model,
-versus classification's cheaper one.
+Input is the **full document** (PDF/image bytes), sent to the Sonnet-class model for
+**native reading** (no OCR, no pre-extracted text) via the LP-37 document/image
+content block (LP-37 revision, ADR-126; this change ADR-128). Reuses the LP-38
+patterns: the file-based prompt (``load_prompt``), the shared defensive parser
+(``app.ai.parsing``), graceful failure, and metadata-only logging. Uses
+``settings.anthropic_model_extraction`` — a more capable Sonnet-class model, versus
+classification's cheaper one.
 """
 
 import json
@@ -39,7 +43,7 @@ from typing import Any
 import structlog
 from pydantic import BaseModel, Field, ValidationError
 
-from app.ai.client import AIClientError, complete
+from app.ai.client import AIClientError, build_document_message, complete
 from app.ai.parsing import coerce_confidence, extract_json_object
 from app.ai.prompt_loader import load_prompt
 from app.core.config import settings
@@ -48,9 +52,9 @@ from app.models.extraction import ExtractionStatus
 logger = structlog.get_logger(__name__)
 
 _PROMPT_PATH = "extraction/pay_stub.txt"
-# Below this many non-whitespace characters there is nothing to extract — skip
-# the API call and fail fast.
-_MIN_TEXT_LEN = 20
+# Media types we can send to the model (matches the LP-36 upload allowlist and the
+# LP-37 document-block support); ``image/jpg`` is normalized to image/jpeg.
+_SUPPORTED_MEDIA_TYPES = frozenset({"application/pdf", "image/jpeg", "image/png", "image/jpg"})
 # A pay stub's JSON object is small but has ~11 fields + reasoning; give it room.
 _MAX_TOKENS = 1024
 
@@ -248,28 +252,37 @@ def _parse_pay_stub_json(text: str) -> PayStubExtractionResult | None:
     )
 
 
-async def extract_pay_stub(text: str) -> PayStubExtractionResult:
-    """Extract structured pay stub values from already-extracted text. Never raises.
+async def extract_pay_stub(content: bytes, media_type: str) -> PayStubExtractionResult:
+    """Extract structured pay stub values from a document's bytes (PDF/image). Never raises.
 
-    Empty/insufficient text fails without an API call. Otherwise it loads the
-    file-based prompt, calls the LP-37 wrapper with the extraction model, and
-    parses defensively/tolerantly. Any AI error or unparseable output returns
-    ``PayStubExtractionResult.failed(...)``. The document text, raw response, and
-    extracted values are never logged (PII) — only metadata.
+    An empty or unsupported document fails without an API call. Otherwise it loads
+    the file-based prompt (the ``system`` instruction), sends the **full document**
+    to the Sonnet-class model as a document/image content block (LP-37
+    ``build_document_message``), and parses defensively/tolerantly. Any AI error or
+    unparseable output returns ``PayStubExtractionResult.failed(...)``. The document
+    bytes/base64, raw response, and extracted values are never logged (PII) — only
+    metadata.
     """
-    if not text or len(text.strip()) < _MIN_TEXT_LEN:
-        return PayStubExtractionResult.failed("empty or insufficient text")
+    if not content or media_type.lower().strip() not in _SUPPORTED_MEDIA_TYPES:
+        return PayStubExtractionResult.failed("empty or unsupported document")
 
     system_prompt = load_prompt(_PROMPT_PATH)
+    try:
+        # build_document_message base64-encodes the bytes into a document/image
+        # block; it raises ValueError on an unsupported type (already filtered).
+        message = build_document_message(content=content, media_type=media_type)
+    except ValueError:
+        return PayStubExtractionResult.failed("unsupported document media type")
+
     try:
         resp = await complete(
             model=settings.anthropic_model_extraction,
             system=system_prompt,
-            messages=[{"role": "user", "content": text}],
+            messages=[message],
             max_tokens=_MAX_TOKENS,
         )
     except AIClientError:
-        logger.warning("paystub_extraction_ai_failed")  # metadata only — no content
+        logger.warning("paystub_extraction_ai_failed")  # metadata only — no bytes/content
         return PayStubExtractionResult.failed("AI call failed")
 
     result = _parse_pay_stub_json(resp.text)

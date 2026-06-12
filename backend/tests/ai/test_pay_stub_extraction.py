@@ -1,13 +1,17 @@
 """Tests for pay stub extraction (LP-39) — the AI wrapper is MOCKED.
 
 No real API calls and no key: ``complete`` is patched to return canned text or
-raise. The focus is the contract — typed coercion (Decimal/date), HONEST NULLS
-(missing values are never fabricated), tolerant per-field coercion (one bad field
-→ None, not a whole-extraction failure), graceful ``failed`` on any error, the
-empty-text short-circuit, confidence clamping, and the privacy rule that the
-text / raw response / extracted VALUES are never logged.
+raise. Extraction now reads the **full document** (PDF/image bytes) natively
+(LP-39 modification, LP-37 revision), so the tests pass bytes + a media type. The
+focus is the contract — typed coercion (Decimal/date), HONEST NULLS (missing
+values are never fabricated), tolerant per-field coercion (one bad field → None,
+not a whole-extraction failure), graceful ``failed`` on any error, the
+empty/unsupported-document short-circuit, confidence clamping, and the privacy
+rule that the document bytes/base64 / raw response / extracted VALUES are never
+logged. Dummy bytes are fine (the SDK/wrapper is mocked).
 """
 
+import base64
 import json
 from datetime import date
 from decimal import Decimal
@@ -26,10 +30,9 @@ from app.ai.extraction.pay_stub import (
 )
 from app.models.extraction import ExtractionStatus
 
-SAMPLE_TEXT = (
-    "ACME CORP  Employee: Jane Doe  Pay period 06/01/2024 - 06/15/2024  "
-    "Pay date 06/20/2024  Gross $4,200.00  Net $3,180.55  YTD Gross $50,400.00"
-)
+# Dummy document bytes — the wrapper is mocked, so these need not be real files.
+PDF_BYTES = b"%PDF-1.7 dummy pay stub bytes"
+PNG_BYTES = b"\x89PNG\r\n\x1a\n dummy image bytes"
 
 FULL_JSON = json.dumps(
     {
@@ -189,19 +192,32 @@ def test_accepts_fields_nested_under_data_key() -> None:
 
 async def test_extract_success(monkeypatch: pytest.MonkeyPatch) -> None:
     mock = _mock_complete(monkeypatch, text=FULL_JSON)
-    result = await extract_pay_stub(SAMPLE_TEXT)
+    result = await extract_pay_stub(PDF_BYTES, "application/pdf")
     assert result.status == ExtractionStatus.SUCCEEDED
     assert result.data.gross_pay == Decimal("4200.00")
     assert mock.call_count == 1
     kwargs = mock.await_args.kwargs
     assert kwargs["model"] == pay_stub_module.settings.anthropic_model_extraction
-    assert kwargs["messages"][0]["content"] == SAMPLE_TEXT
     assert "system" in kwargs
+    # Sends a document block (not a text string); base64 round-trips to the bytes.
+    block = kwargs["messages"][0]["content"][0]
+    assert block["type"] == "document"
+    assert block["source"]["media_type"] == "application/pdf"
+    assert base64.standard_b64decode(block["source"]["data"]) == PDF_BYTES
+
+
+async def test_extract_image_input_uses_image_block(monkeypatch: pytest.MonkeyPatch) -> None:
+    mock = _mock_complete(monkeypatch, text=FULL_JSON)
+    result = await extract_pay_stub(PNG_BYTES, "image/png")
+    assert result.status == ExtractionStatus.SUCCEEDED
+    block = mock.await_args.kwargs["messages"][0]["content"][0]
+    assert block["type"] == "image"
+    assert block["source"]["media_type"] == "image/png"
 
 
 async def test_extract_malformed_returns_failed(monkeypatch: pytest.MonkeyPatch) -> None:
     _mock_complete(monkeypatch, text="I read a pay stub for Jane, gross was around 4k.")
-    result = await extract_pay_stub(SAMPLE_TEXT)
+    result = await extract_pay_stub(PDF_BYTES, "application/pdf")
     assert result.status == ExtractionStatus.FAILED
     assert result.confidence == 0.0
     assert result.data == PayStubExtraction()  # all-null
@@ -210,26 +226,36 @@ async def test_extract_malformed_returns_failed(monkeypatch: pytest.MonkeyPatch)
 
 async def test_extract_ai_failure_returns_failed(monkeypatch: pytest.MonkeyPatch) -> None:
     _mock_complete(monkeypatch, exc=AIClientError("boom"))
-    result = await extract_pay_stub(SAMPLE_TEXT)
+    result = await extract_pay_stub(PDF_BYTES, "application/pdf")
     assert result.status == ExtractionStatus.FAILED
     assert "ai call failed" in (result.reasoning or "").lower()
 
 
-@pytest.mark.parametrize("text", ["", "   ", "too short"])
-async def test_extract_empty_or_short_skips_api(monkeypatch: pytest.MonkeyPatch, text: str) -> None:
+async def test_extract_empty_document_skips_api(monkeypatch: pytest.MonkeyPatch) -> None:
     mock = _mock_complete(monkeypatch, text=FULL_JSON)
-    result = await extract_pay_stub(text)
+    result = await extract_pay_stub(b"", "application/pdf")
     assert result.status == ExtractionStatus.FAILED
     assert mock.call_count == 0  # never called the API
 
 
+@pytest.mark.parametrize("media_type", ["text/plain", "application/zip", "image/gif", ""])
+async def test_extract_unsupported_media_type_skips_api(
+    monkeypatch: pytest.MonkeyPatch, media_type: str
+) -> None:
+    mock = _mock_complete(monkeypatch, text=FULL_JSON)
+    result = await extract_pay_stub(PDF_BYTES, media_type)
+    assert result.status == ExtractionStatus.FAILED
+    assert mock.call_count == 0  # unsupported type → no API call
+
+
 # --------------------------------------------------------------------------- #
-# PRIVACY: never log text / raw response / extracted values
+# PRIVACY: never log document bytes/base64 / raw response / extracted values
 # --------------------------------------------------------------------------- #
 
 
-async def test_does_not_log_text_response_or_values(monkeypatch: pytest.MonkeyPatch) -> None:
-    pii_text = "Jane Doe SSN 123-45-6789 employer SECRETCORP gross $9,999.99 " * 2
+async def test_does_not_log_bytes_base64_or_values(monkeypatch: pytest.MonkeyPatch) -> None:
+    pii_bytes = b"%PDF Jane Doe SSN 123-45-6789 employer SECRETCORP gross 9999.99"
+    pii_b64 = base64.standard_b64encode(pii_bytes).decode("utf-8")
     _mock_complete(
         monkeypatch,
         text=json.dumps(
@@ -243,13 +269,13 @@ async def test_does_not_log_text_response_or_values(monkeypatch: pytest.MonkeyPa
         ),
     )
     with structlog.testing.capture_logs() as logs:
-        result = await extract_pay_stub(pii_text)
+        result = await extract_pay_stub(pii_bytes, "application/pdf")
 
     blob = " ".join(repr(e) for e in logs)
-    assert "123-45-6789" not in blob
+    assert "123-45-6789" not in blob  # raw document byte content
+    assert pii_b64 not in blob  # base64 payload never logged
     assert "SECRETCORP" not in blob  # extracted value not logged
     assert "9999.99" not in blob
-    assert pii_text not in blob
     # The metadata log IS present: status, confidence, field count only.
     done = [e for e in logs if e["event"] == "paystub_extraction_done"]
     assert len(done) == 1

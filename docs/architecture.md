@@ -193,11 +193,19 @@ modification — ADR-127, following the LP-37 revision / ADR-126.)
 ## Extraction (pay stub — LP-39)
 
 Where classification answered "what kind of document is this?", extraction
-answers "what does it say?". `extract_pay_stub(text: str) ->
-PayStubExtractionResult` reads the structured values out of a pay stub's text.
-**Phase 1 is pay stub only** — one document type end-to-end to establish the
+answers "what does it say?". `extract_pay_stub(content: bytes, media_type: str) ->
+PayStubExtractionResult` sends the **full document** (PDF/image bytes) to the
+Sonnet-class model for **native reading** (no OCR, no pre-extracted text) via the
+LP-37 document/image content block, and reads the structured values out of a pay
+stub. **Phase 1 is pay stub only** — one document type end-to-end to establish the
 per-type pattern (typed schema + prompt + module) that Phase 2 replicates for the
-other ~100 types.
+other ~100 types. (Originally took pre-extracted text; changed to full-document
+input in the LP-39 modification — ADR-128, following the LP-37 revision / ADR-126.)
+
+- **Full-document input** — supported media types are `application/pdf`,
+  `image/jpeg`, `image/png` (`image/jpg` normalized). An empty or unsupported
+  document short-circuits to `failed(...)` **without an API call**. The loaded
+  prompt is the `system` instruction; the document is the `user` message.
 
 - **Typed, not a field bag** — `PayStubExtraction` is a Pydantic schema with
   named, typed, mostly-nullable fields (`gross_pay: Decimal | None`,
@@ -214,14 +222,44 @@ other ~100 types.
   date formats are parsed; a single uncoercible field drops to `None` and marks
   the run `PARTIAL` rather than failing the whole extraction. `status` reuses
   LP-16's `ExtractionStatus` (`SUCCEEDED` / `PARTIAL` / `FAILED`).
-- **Graceful failure & privacy** — `extract_pay_stub` never raises (empty text /
-  AI error / unparseable → `PayStubExtractionResult.failed(...)`); the document
-  text, raw response, and extracted **values** are never logged (only status,
-  confidence, and a non-null field count). Reuses the LP-38 patterns —
-  `load_prompt`, the shared defensive parser (`app/ai/parsing.py`), graceful
-  failure — and uses `settings.anthropic_model_extraction` (a more capable
-  Sonnet-class model). The prompt and field set are **starters** (POC prompt /
-  Priya refinement). See ADR-123 / ADR-124 / ADR-125.
+- **Graceful failure & privacy** — `extract_pay_stub` never raises (empty/
+  unsupported document / AI error / unparseable → `PayStubExtractionResult.failed(...)`);
+  the document **bytes** (and their base64), raw response, and extracted **values**
+  are never logged (only status, confidence, and a non-null field count). Reuses
+  the LP-38 patterns — `load_prompt`, the shared defensive parser
+  (`app/ai/parsing.py`), graceful failure — and uses
+  `settings.anthropic_model_extraction` (a more capable Sonnet-class model). The
+  prompt and field set are **starters** (POC prompt / Priya refinement). See
+  ADR-123 / ADR-124 / ADR-125 / ADR-128.
+
+## Dev-only text-layer extraction (LP-40)
+
+The production pipeline reads documents with **AI directly** (full-document native
+reading, LP-38/39), so deterministic PDF text extraction is **not** a pipeline
+step. LP-40 builds it as a **dev-only comparison tool**: a developer can extract a
+real document's text layer and compare it against the AI's reading, informing a
+possible future **hybrid** (cheap deterministic text for easy cases, AI for the
+rest). It does **not** classify, extract, update the `Document`, or route anything
+to review.
+
+- **Extractor** (`app/services/pdf_utils.py`) — `extract_text_from_pdf(content:
+  bytes) -> PdfTextExtractionResult` (`text`, `page_count`, `has_text`,
+  `extraction_ok`, `error_reason`). Deterministic (PyMuPDF, no AI, no OCR),
+  multi-page, async (blocking call wrapped in `asyncio.to_thread`). **Graceful
+  failure** — corrupt/encrypted/invalid → `extraction_ok=False`, never raises.
+  `has_text` (≥ 20 stripped chars) is **informational** — an empty text layer
+  suggests a scan; it is **not** a routing signal (scans are the AI's job).
+- **Dev-gated endpoint** (`app/api/dev.py`) — `POST
+  /api/v1/dev/documents/{id}/extract-text-layer`, mounted in `main.py` **only when
+  `not settings.is_production`**, so in production the route is **absent (404)**.
+  Still **auth'd and tenant-scoped** via `get_document_for_company` (a Company A
+  user can't extract a Company B document → 404) — a dev tool is no excuse to skip
+  isolation. Non-PDF documents get a clear `extraction_ok=False` "PDF only"
+  response. The endpoint **returns** the text (its purpose) but the text is
+  **never logged** (PII). The dev-only UI button that calls it is LP-43.
+
+See ADR-129 (repositioned as a dev tool), ADR-130 (dev-gated endpoints), ADR-131
+(PyMuPDF).
 
 ## Data flow (intended V1)
 

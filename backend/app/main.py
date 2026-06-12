@@ -97,6 +97,13 @@ app.include_router(activity_router, prefix=API_V1_PREFIX)
 app.include_router(documents_nested_router, prefix=API_V1_PREFIX)
 app.include_router(documents_flat_router, prefix=API_V1_PREFIX)
 
+# Dev-only endpoints (LP-40) — mounted ONLY outside production, so the routes are
+# absent (404) in prod. They remain auth'd and tenant-scoped.
+if not settings.is_production:
+    from app.api.dev import dev_router
+
+    app.include_router(dev_router, prefix=f"{API_V1_PREFIX}/dev")
+
 
 @app.get("/")
 async def root() -> dict[str, str]:
