@@ -3523,3 +3523,61 @@ fixture/`reportlab` dependency is needed.
 `# type: ignore[no-untyped-call]` comments are needed under mypy strict; its SWIG bindings emit
 harmless `DeprecationWarning`s that are filtered in pytest config. Richer layout/table
 extraction (and any OCR) can be added behind the same utility later if a hybrid is adopted.
+
+---
+
+## ADR-132: Celery + Redis for background document processing
+
+- **Date:** 2026-06-12
+- **Status:** Accepted
+
+**Context:** Document processing — read the bytes, classify (Haiku), extract (Sonnet) — is
+far too slow to run inside the upload HTTP request (multiple seconds, two AI calls). It must
+run asynchronously so upload returns quickly and the UI polls for status. Redis was already
+provisioned for this (LP-2).
+
+**Decision:** Use **Celery** with a **Redis** broker and result backend (from settings,
+defaulting to the existing `REDIS_URL` — not duplicated). The worker is a **separate process**
+from the API, run locally (`celery -A app.tasks.celery_app worker`) and as a Compose `worker`
+service (behind a profile so the default `docker compose up` stays infra-only). Serialization
+is **JSON only** (`accept_content=["json"]`, no pickle), times are UTC, and the Celery app
+object is import-safe (no live broker needed to create it). LP-41 is infrastructure only; the
+real tasks are LP-42.
+
+**Rationale:** Offloading slow work to a worker keeps the request fast. Redis is already
+running and is a standard, simple Celery broker. JSON/no-pickle removes a remote-code-execution
+vector. Import-safety lets the API process and the test suite import the app without Redis.
+
+**Consequences:** A worker process must run alongside the API (documented; Compose profile +
+local command). LP-42 adds the document-processing tasks and enqueues them from upload. Task
+**status is tracked via `Document.status`** (the DB is the source of truth); Celery's result
+backend is available but secondary. Flower/Beat (monitoring/periodic) are not set up yet.
+
+---
+
+## ADR-133: Sync Celery tasks run async code via a per-task event loop
+
+- **Date:** 2026-06-12
+- **Status:** Accepted
+
+**Context:** Celery tasks are traditionally **sync**, but this codebase is **async**
+throughout (async SQLAlchemy, the async AI wrapper, async storage). LP-42's tasks must call
+that async code from within a sync worker.
+
+**Decision:** A task base (`app/tasks/base.py`) bridges the two. `run_async(coro)` runs a
+coroutine to completion with `asyncio.run` — **a fresh event loop per task**. `task_session()`
+yields an async SQLAlchemy session from a **fresh engine created inside that per-task loop**
+with `NullPool`; the app's module-level `engine` is bound to the loop that first used it, so
+reusing it across per-task loops would raise "attached to a different loop" (asyncpg
+connections are loop-bound) — a per-task engine sidesteps that and is disposed when the task
+finishes. The `db_ping` validation task runs a real async `SELECT 1` to prove the bridge.
+
+**Rationale:** A per-task event loop is the simplest **correct** bridge for V1 — no shared
+mutable loop/engine state across tasks, no cross-loop connection reuse. Proving it with
+`db_ping` (not assuming it) catches lifecycle mistakes early.
+
+**Consequences:** A new event loop and new DB connections per task — acceptable at V1 volume;
+**revisit loop/pool reuse** if task throughput grows (a documented caveat). Tasks must do their
+async work inside a `run_async`-driven coroutine and use `task_session()` (not the API's
+request-scoped `get_db`). `asyncio.run` can't be called from an already-running loop, so tasks
+stay sync at the Celery boundary.

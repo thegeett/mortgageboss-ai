@@ -1,0 +1,10 @@
+# Keep the build context (and image) small and free of local-only / secret files.
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.env
+storage/
+*.log

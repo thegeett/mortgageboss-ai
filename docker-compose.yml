@@ -64,6 +64,34 @@ services:
       timeout: 5s
       retries: 3
 
+  # Celery worker (LP-41) — background task processing, a SEPARATE process from the
+  # API. Behind the "worker" profile so the default `docker compose up` stays
+  # infra-only; start it explicitly:  docker compose --profile worker up worker
+  # (locally you can instead run, from backend/:
+  #   uv run celery -A app.tasks.celery_app worker --loglevel=info
+  #   # on macOS/Colima add --pool=solo if the prefork pool misbehaves)
+  # Requires backend/.env (the app's required settings, e.g. ANTHROPIC_API_KEY).
+  worker:
+    build: ./backend
+    container_name: mortgageboss-worker
+    restart: unless-stopped
+    profiles: ["worker"]
+    command: ["uv", "run", "celery", "-A", "app.tasks.celery_app", "worker", "--loglevel=info"]
+    env_file:
+      - ./backend/.env
+    environment:
+      # Override host-based URLs with the Compose service names (the container
+      # reaches Postgres/Redis over the Compose network, not localhost).
+      DATABASE_URL: postgresql+asyncpg://mortgageboss:mortgageboss_dev_password@postgres:5432/mortgageboss_dev  # pragma: allowlist secret
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - mortgageboss-network
+
 volumes:
   mortgageboss-postgres-data:
   mortgageboss-redis-data:

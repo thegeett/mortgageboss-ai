@@ -178,6 +178,35 @@ Then visit:
 - <http://localhost:8000/health> — health check
 - <http://localhost:8000/docs> — auto-generated OpenAPI (Swagger) docs
 
+### Run the Celery worker (background tasks — LP-41)
+
+Document processing runs on a **Celery worker**, a separate process from the API
+(both use the Compose Postgres/Redis). Run it **locally** alongside the dev
+server:
+
+```bash
+cd backend
+uv run celery -A app.tasks.celery_app worker --loglevel=info
+# macOS/Colima: add --pool=solo if the default prefork pool misbehaves
+```
+
+Or as a **container** (behind the `worker` Compose profile, so the default
+`docker compose up` stays infra-only):
+
+```bash
+docker compose --profile worker up worker   # needs backend/.env
+```
+
+Validate the chain (broker → worker → task) from a Python shell while the worker runs:
+
+```python
+from app.tasks.health import ping, db_ping
+ping.delay().get(timeout=10)     # -> "pong"
+db_ping.delay().get(timeout=10)  # -> "db-ok"  (proves the async DB bridge)
+```
+
+The real document-processing tasks are added in LP-42.
+
 ### Tests
 
 ```bash

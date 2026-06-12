@@ -54,8 +54,9 @@ It is a **monorepo** with a conventional three-tier shape plus a few subsystems:
 - **Backend** — ✅ FastAPI (async), serving a JSON API. Today: configuration,
   CORS, structured logging, and health endpoints. 📋 Auth, loan-file CRUD,
   document, and verification routes arrive in later epics.
-- **Async workers** — 📋 Celery workers (Redis broker) that run the document
-  classification → extraction pipeline outside the request cycle (Epic 5).
+- **Async workers** — ✅ Celery worker (Redis broker) — the queue infra is built
+  (LP-41; see [Background tasks](#background-tasks-celery--lp-41)); the document
+  classification → extraction tasks that run on it arrive in LP-42.
 - **Database** — ✅ PostgreSQL 16 (reachable; schema/models arrive in Epic 2).
   The **single source of truth** for all application state.
 - **File storage** — ✅ a storage abstraction (local filesystem in dev, S3 in
@@ -260,6 +261,36 @@ to review.
 
 See ADR-129 (repositioned as a dev tool), ADR-130 (dev-gated endpoints), ADR-131
 (PyMuPDF).
+
+## Background tasks (Celery — LP-41)
+
+Document processing (PDF read + up to two AI calls) is too slow for the upload
+request, so it runs on a **Celery worker** — a separate process from the API,
+both backed by the same Redis and Postgres. LP-41 builds the **infrastructure**;
+the real document-processing tasks (and enqueueing them from upload) are LP-42.
+
+- **Celery app** (`app/tasks/celery_app.py`) — Redis broker + result backend (from
+  settings, defaulting to `REDIS_URL`). **JSON serialization only**
+  (`accept_content=["json"]`) — pickle is disabled (an RCE vector if the broker is
+  compromised). UTC; `task_track_started`; soft/hard time limits (120s/180s, sized
+  for two AI calls, tuned later). Creating the app object needs **no live broker**,
+  so it imports cleanly in the API process and tests.
+- **The sync→async bridge** (`app/tasks/base.py`) — Celery tasks are sync but the
+  codebase is async (DB, AI wrapper, storage). `run_async(coro)` runs a coroutine
+  to completion via `asyncio.run` — **a fresh event loop per task** (simplest
+  correct V1; revisit loop/pool reuse at higher volume). `task_session()` yields an
+  async session from a **fresh `NullPool` engine created inside that per-task
+  loop** — the module-level `engine` is bound to the loop that first used it, so a
+  per-task engine avoids "attached to a different loop" errors. `BaseTask` binds
+  `task_name`/`task_id` logging context (metadata only).
+- **Validation tasks** (`app/tasks/health.py`) — `ping` → `"pong"`; `db_ping` runs
+  a real async `SELECT 1` through the bridge → `"db-ok"`, **proving** the
+  sync→async + async-DB path works in the worker. Run the worker with `celery -A
+  app.tasks.celery_app worker` (locally or the Compose `worker` profile); see the
+  README. Status is tracked via `Document.status` (DB, the source of truth) in
+  LP-42 — Celery's result backend is available but secondary.
+
+See ADR-132 (Celery + Redis) and ADR-133 (sync tasks run async via a per-task loop).
 
 ## Data flow (intended V1)
 

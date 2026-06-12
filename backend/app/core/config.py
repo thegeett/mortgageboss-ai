@@ -36,6 +36,15 @@ class Settings(BaseSettings):
     # Redis
     redis_url: RedisDsn = Field(description="Redis connection URL for cache and Celery broker")
 
+    # Celery (LP-41) — broker + result backend, both on the configured Redis.
+    # Optional overrides (env CELERY_BROKER_URL / CELERY_RESULT_BACKEND) for pointing
+    # Celery at a different Redis in production; when unset they default to redis_url
+    # (the LP-2 Redis), so we don't duplicate that config. Broker and result backend
+    # share the same Redis URL/DB in V1 — Celery namespaces its keys, so a separate
+    # DB index is a later tuning, not required.
+    celery_broker_url_override: str | None = Field(default=None, alias="CELERY_BROKER_URL")
+    celery_result_backend_override: str | None = Field(default=None, alias="CELERY_RESULT_BACKEND")
+
     # Anthropic
     anthropic_api_key: str = Field(description="Anthropic API key for Claude access")
     # Model identifiers for the AI features (classification LP-38, extraction LP-39),
@@ -101,6 +110,18 @@ class Settings(BaseSettings):
     def is_production(self) -> bool:
         """True if running in production environment."""
         return self.environment == "production"
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def celery_broker_url(self) -> str:
+        """Celery broker URL — the override if set, else the configured Redis (LP-41)."""
+        return self.celery_broker_url_override or str(self.redis_url)
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def celery_result_backend(self) -> str:
+        """Celery result backend URL — the override if set, else the configured Redis."""
+        return self.celery_result_backend_override or str(self.redis_url)
 
 
 @lru_cache(maxsize=1)
