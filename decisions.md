@@ -3188,3 +3188,80 @@ mis-costing.
 **Consequences:** The pricing table and model strings must be kept current — they are
 explicitly developer-verified. Output is an estimate, not a billing figure. Unknown models
 contribute `0.0` (and warn) rather than guessing.
+
+---
+
+## ADR-120: Classification returns a typed result (type/confidence/reasoning); type is a flexible string
+
+- **Date:** 2026-06-11
+- **Status:** Accepted
+
+**Context:** Extraction (LP-39) is type-specific, so the document type must be determined
+first. The type taxonomy is large (~100 types) and evolving (finalized in Phase 2), and the
+pipeline needs a signal for when to route a document to human review.
+
+**Decision:** `classify_document(text: str) -> ClassificationResult` where
+`ClassificationResult` is `{ document_type: str, confidence: float in [0,1], reasoning: str }`.
+`document_type` is a **flexible lowercase string** (consistent with the LP-15 Document model),
+not an enum; `confidence` drives the downstream `NEEDS_REVIEW` decision; `reasoning` is a
+short human-readable note for debugging and processor trust. The module returns a result —
+persisting it onto the `Document` is the pipeline's job (LP-42).
+
+**Rationale:** A string type avoids a DB migration every time the taxonomy changes (governed
+at the app layer). Confidence lets the pipeline route low-confidence documents to review
+rather than trusting a guess. Reasoning aids debugging without exposing raw content.
+
+**Consequences:** Type validity is an app-layer concern, not enforced by an enum. The result
+is decoupled from persistence (LP-42 writes it). `unknown` + low confidence is the
+human-review signal.
+
+---
+
+## ADR-121: Prompts stored as files, loaded at runtime (starting with classification)
+
+- **Date:** 2026-06-11
+- **Status:** Accepted
+
+**Context:** Prompts are iterated, tuned content — not program logic — and the real
+classification prompt is a POC asset that the developer pastes in. We want to edit prompts
+without touching code, and to version/diff them.
+
+**Decision:** Prompts live as files under `app/ai/prompts/**/*.txt` and are loaded at runtime
+via `app/ai/prompt_loader.py::load_prompt(relative_path)` (resolved relative to the prompts
+dir — CWD-independent — path-checked against escape, and cached). The classification prompt
+is `classification/document_classifier.txt`; a clearly-marked **starter** ships until the POC
+prompt replaces it. Extraction (LP-39) reuses the same loader.
+
+**Rationale:** Files are versionable, diffable, and editable without a code change or
+redeploy of logic; one loading pattern serves every AI feature. Keeping the prompt out of
+Python means swapping in the POC prompt is a content edit, not a code edit.
+
+**Consequences:** Prompt edits don't require code changes. The starter prompt must be
+replaced with the POC's tuned prompt (flagged in the file and the ticket). The loader is the
+shared entry point for all prompts.
+
+---
+
+## ADR-122: Graceful failure — classification never crashes the pipeline
+
+- **Date:** 2026-06-11
+- **Status:** Accepted
+
+**Context:** AI is probabilistic and its dependencies fail (rate limits, malformed output,
+empty/garbage text). A single document's classification failure must not take down the batch
+processing pipeline (LP-42).
+
+**Decision:** `classify_document` **never raises**. Empty/insufficient text short-circuits to
+`ClassificationResult.unknown(...)` *without* an API call; an `AIClientError` or unparseable
+output returns `unknown` too. JSON parsing is defensive — it extracts the first balanced
+`{...}` object (tolerating ```` ```json ```` fences and surrounding prose), clamps
+`confidence` to `[0,1]`, and treats a missing/empty `document_type` as `unknown`. The
+pipeline (LP-42) treats unknown / low-confidence as `NEEDS_REVIEW`.
+
+**Rationale:** "Needs review" is a far better outcome than an exception that fails the batch.
+Defensive parsing is mandatory because model output is not guaranteed to be clean JSON.
+Skipping the API call on empty text saves cost and latency.
+
+**Consequences:** Callers always receive a `ClassificationResult`. Low-confidence/unknown is
+the human-review signal. The defensive parser is part of the contract and is tested against
+fenced/preambled/garbage input.

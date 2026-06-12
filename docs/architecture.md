@@ -137,6 +137,36 @@ time** — both are marked with `TODO` to verify against current Anthropic docs.
 The cost output is an estimate for tracking, not a billing figure. See ADR-117 /
 ADR-118 / ADR-119.
 
+## Classification (LP-38)
+
+The first act of the system "understanding" a document. `classify_document(text:
+str) -> ClassificationResult` takes a document's already-extracted text (PDF text
+extraction is LP-40) and returns `{ document_type: str, confidence: float,
+reasoning: str }`. It is the first real use of the LP-37 AI wrapper and routes
+extraction — LP-39 extracts type-specifically, so the type must be known first.
+
+- **Type as a flexible string** — `document_type` is a lowercase slug
+  (`pay_stub`, `bank_statement`, `w2`, …, or `unknown`), not an enum (LP-15); the
+  taxonomy is large and evolving (Phase 2). `confidence` drives downstream
+  review.
+- **Prompt as a file** — the prompt is loaded at runtime from
+  `app/ai/prompts/classification/document_classifier.txt` via
+  `app/ai/prompt_loader.py::load_prompt` (path-checked, cached), never hardcoded
+  in Python. A **starter** prompt ships; the tuned **POC prompt** is pasted into
+  that file (no code change). Extraction (LP-39) reuses the loader.
+- **Graceful failure** — `classify_document` **never raises**: empty/short text
+  short-circuits to `unknown` *without* an API call, and any AI error or
+  unparseable output returns `ClassificationResult.unknown(...)`. The pipeline
+  (LP-42) treats unknown / low-confidence as `NEEDS_REVIEW`. The JSON parser is
+  defensive — it tolerates ```` ```json ```` fences / prose, clamps confidence to
+  `[0, 1]`, and falls back to `unknown` on garbage.
+- **Privacy** — the document text and the model's raw response carry borrower
+  PII and are **never** logged; only metadata (the classified type + confidence)
+  is. Uses `settings.anthropic_model_classification` (a cheaper Haiku-class model;
+  a `TODO`-marked value to verify). This module returns a result — persisting it
+  onto the `Document` is the pipeline's job (LP-42). See ADR-120 / ADR-121 /
+  ADR-122.
+
 ## Data flow (intended V1)
 
 How a loan file moves through the system once feature work lands:
