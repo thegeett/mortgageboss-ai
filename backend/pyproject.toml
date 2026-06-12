@@ -83,3 +83,20 @@ filterwarnings = [
     # builtin SwigPyObject types lacking __module__ — third-party C extension noise.
     "ignore:builtin type Swig.*has no __module__ attribute:DeprecationWarning",
 ]
+
+[tool.coverage.run]
+source = ["app"]
+# Async route handlers + services run inside SQLAlchemy's greenlet-spawned
+# context (greenlet_spawn). Without tracing greenlets, coverage silently drops
+# every line executed during request handling — under-counting the API layer
+# even though the handlers ran (LP-45). Trace greenlets (and threads) so the
+# measured coverage reflects what the integration suite actually exercises.
+concurrency = ["greenlet", "thread"]
+
+[tool.coverage.report]
+exclude_also = [
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+    "@(abc\\.)?abstractmethod",
+    "if __name__ == .__main__.:",
+]

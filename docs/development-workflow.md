@@ -121,9 +121,43 @@ pipeline, and vice versa.
 3. `pnpm typecheck` — `tsc --noEmit`.
 4. `pnpm build` — production `next build`.
 
-> **Integration tests:** CI does not start Postgres/Redis. The health-check
-> tests tolerate absent services (they assert `200` *or* `503`), so they pass in
-> CI. Full service-backed integration testing is a Phase 7 concern (see ADR-028).
+> **Service-backed tests:** CI runs a **Postgres** service container, so the
+> DB-backed suites (models, services, and the API integration suite) run against
+> a real test database. Redis/Celery are **not** started — the health-check tests
+> tolerate an absent broker (assert `200` *or* `503`), and the integration suite
+> mocks Celery `.delay` rather than running a worker. Full broker-backed
+> end-to-end testing (a live worker) remains a later concern (see ADR-028).
+
+## Integration tests (LP-45)
+
+`backend/tests/integration/` exercises the API through the **real stack** — real
+HTTP (httpx `AsyncClient` via `ASGITransport`), real DB, real auth/JWTs, real
+routing/DI/services/tenant-scoping, and real local storage (a temp dir). **Only**
+the AI (`classify_document` / `extract_*`) and Celery dispatch (`.delay`) are
+mocked, because they are slow/costly/non-deterministic/external (ADR-152). They
+**complement** the unit suites (`tests/ai`, `tests/tasks`, `tests/services`),
+testing the seams those suites mock.
+
+What they cover: the auth, loan-file, document, borrower/property, and override
+flows end-to-end; a **systematic tenant-isolation pass** (every company-scoped
+route → `404` cross-company, lists don't leak — the security-critical goal); and
+contract/leak checks (no `storage_path` / `inbox_token` / raw SSN / unmasked
+account number in any response).
+
+Run with coverage:
+
+```bash
+cd backend
+uv run pytest tests/integration -v                 # just the integration suite
+uv run pytest --cov=app --cov-report=term-missing  # whole suite + coverage
+```
+
+Coverage is configured (`[tool.coverage.run]`) with
+`concurrency = ["greenlet", "thread"]` — **required** so coverage traces code
+running inside SQLAlchemy's greenlet async context; without it the async handler
+and service lines are silently dropped (ADR-153). Current overall coverage of
+`app/` is **~93%**, with the API layer near-complete and complete tenant-isolation
+coverage.
 
 ### Viewing results
 

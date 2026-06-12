@@ -4125,3 +4125,55 @@ types (`pay_stub`/`w2`/`bank_statement`) re-extract; any other type relabels **c
 (no API call) — surfaced in the drawer via `typeReExtracts`. Enqueue failure can't lose the
 override (already committed); it's logged (`reprocess_enqueue_failed`, metadata-only) and the doc
 can be reprocessed.
+
+---
+
+## ADR-152: Integration test strategy — real stack, mock only AI + Celery dispatch
+
+- **Date:** 2026-06-12
+- **Status:** Accepted
+
+**Decision:** The API integration suite (LP-45, `backend/tests/integration/`) exercises the
+**real stack**: real HTTP (httpx `AsyncClient` via `ASGITransport`), real DB (the session-scoped
+`test_engine` + a commit-safe savepoint session), real auth (real JWTs), real
+routing/DI/services/tenant-scoping, and real local storage (a temp dir). **Only** the AI
+(`classify_document` / `extract_*`) and Celery dispatch (`.delay`) are mocked — they are
+slow/costly/non-deterministic/external. An upload test asserts `.delay` was *called*; a pipeline
+test calls the processing core directly with the AI mocked. Tenant isolation is verified
+**systematically**: every enumerated company-scoped route is asserted `404` cross-company, and
+lists are asserted not to leak. Target ~70% of `app/` overall with **complete** coverage of the
+company-scoped routes.
+
+**Rationale:** Integration tests catch the seam bugs unit tests mock away — an unscoped route, a
+leaked field, a wrong status code. Multi-company data isolation is security-critical and must be
+proven against a real request→DB→response path, route by route, not spot-checked. Reusing the
+existing `test_engine` + savepoint pattern (rather than a parallel harness) keeps one DB story.
+
+**Consequences:** A fast (~10s for the integration module), deterministic suite that needs no API
+key and no broker. Reusable, composable fixtures (`client`, `auth_client`, `company_a`/`company_b`,
+entity factories, AI/dispatch mocks) are the foundation for the rest of Epic 6 (LP-46/47). AI
+behavior stays unit-tested in `tests/ai` + `tests/tasks`; the integration suite complements, not
+replaces, the unit suites. CI already runs a Postgres service container, so the suite runs in CI
+unchanged.
+
+---
+
+## ADR-153: Coverage must trace SQLAlchemy's greenlet context (`concurrency`)
+
+- **Date:** 2026-06-12
+- **Status:** Accepted
+
+**Decision:** Configure `coverage` with `concurrency = ["greenlet", "thread"]` (in
+`[tool.coverage.run]`), plus `source = ["app"]` and standard report excludes.
+
+**Rationale:** SQLAlchemy's async engine runs DB work inside greenlet-spawned contexts
+(`greenlet_spawn`). With the default thread-only tracer, coverage silently **drops every line
+executed during async request handling** — route handlers and services ran (the integration tests
+got real `200`/`201` responses) yet showed as *uncovered*, under-counting the API layer by ~20
+points (e.g. `app/api/loan_files.py` measured 60% but is actually exercised end-to-end). This was
+surfaced by LP-45 and is a *measurement* defect, not a test gap.
+
+**Consequences:** Coverage now reflects what the suite actually exercises (API layer ~99–100% on
+most routers; **93%** of `app/` overall). The fix is global (helps all existing endpoint tests
+too). No product code changed — the bug was in how coverage was measured, exactly the kind of gap
+the LP-45 coverage AC exists to expose.
