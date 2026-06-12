@@ -3025,3 +3025,86 @@ any served directory means there is no direct-URL bypass of authorization.
 **Consequences:** Original filenames are kept on the `Document` record, not in the path.
 Strong, tested path-handling safety (traversal rejection is a dedicated test). Direct-URL
 access (`get_url`) is an S3-era feature (`None` for local — served via LP-36's endpoint).
+
+---
+
+## ADR-114: Document URL shape — nested upload/list, flat get/download/delete; flat routes scoped via document→file→company
+
+- **Date:** 2026-06-11
+- **Status:** Accepted
+
+**Context:** Documents are owned children of a loan file with no `company_id` of their own
+(ADR-052/053). Some operations are inherently file-scoped (upload, list); single-document
+operations (get, download, delete) only need the document id. We need both ergonomic URLs
+and airtight tenant isolation.
+
+**Decision:** Upload/list are **nested** under `/loan-files/{file_identifier}/documents`
+and use the LP-29 `ScopedLoanFile` gate (resolve the parent file with the caller's company
+first → `404`). Get-one/download/delete are **flat** under `/documents/{document_id}` and
+resolve the document's company by **joining `Document → LoanFile`** in
+`get_document_for_company`, filtering on `LoanFile.company_id == current_user.company_id`
+(and `only_active` on both). A flat route returns `404` unless the document's file belongs
+to the caller's company — never loading a document by id alone.
+
+**Rationale:** Nested routes match how uploads/lists are scoped (per file); flat routes are
+convenient for single-document actions whose id is globally unique. Because documents have
+no own `company_id`, the join through the loan file is the tenant boundary. `404` (not
+`403`) avoids revealing that a document exists in another company (anti-enumeration).
+
+**Consequences:** Every flat-route handler MUST use the company-scoped lookup; this is
+covered by cross-tenant tests (a Company A user cannot get/download/delete a Company B
+document by id, nor upload to/list a Company B file). `company_id` is always taken from the
+authenticated user, never the request.
+
+---
+
+## ADR-115: Upload validation (50 MB; PDF/JPEG/PNG by content-type + magic bytes); bytes served only via the auth'd download
+
+- **Date:** 2026-06-11
+- **Status:** Accepted
+
+**Context:** Uploads are an attack surface (resource exhaustion, type spoofing, serving
+attacker content). The bytes carry tenant-sensitive borrower PII.
+
+**Decision:** Uploaded files are limited to **50 MB** and to **PDF/JPEG/PNG**, validated by
+a **content-type allowlist AND a magic-byte signature** whose detected type must match the
+declared one (`%PDF`, `\x89PNG\r\n\x1a\n`, `\xff\xd8\xff`). The size check reads in chunks
+and aborts at the cap, so an oversized upload is never fully buffered. A batch is
+all-or-nothing: if any file fails validation the whole request is rejected and nothing is
+persisted. Size failures map to `413`, type failures to `415`. Stored bytes are served
+**only** through the auth'd `/documents/{id}/download` route (no direct URL); `get_url`
+returns `None` for the local backend. This pairs with the LP-35 path/extension
+sanitization (defense in depth).
+
+**Rationale:** The size cap bounds resource use; the type allowlist restricts to
+processable, lower-risk formats; magic bytes resist content-type spoofing (a `.txt`
+labelled `application/pdf` is rejected). Serving only via the authenticated endpoint keeps
+PII behind authorization and avoids any direct-URL bypass.
+
+**Consequences:** Non-PDF/image types are rejected (revisit if more types are needed). A
+defense-in-depth posture (endpoint validation + storage sanitization). Deep content
+validation / virus scanning remains a later hardening item.
+
+---
+
+## ADR-116: Soft-delete preserves stored bytes; documents start at status PENDING
+
+- **Date:** 2026-06-11
+- **Status:** Accepted
+
+**Context:** Deleting a document and the lifecycle of a freshly uploaded one both need a
+defined policy, consistent with the project's soft-delete and processing discipline.
+
+**Decision:** Deleting a document is a **soft delete** (`deleted_at`) that **preserves the
+stored file** — only the record is hidden from active reads; the bytes remain in the
+storage backend for audit. Uploaded documents start at status **`PENDING`** (with
+`upload_source = USER_UPLOAD`, `uploaded_by_user_id = current_user.id`), the signal the
+processing pipeline (LP-42) picks up. Uploads also append a `DOCUMENT_UPLOADED` activity.
+
+**Rationale:** Preserving originals supports the audit trail and any future undelete.
+`PENDING` cleanly decouples upload from processing (triggered separately in LP-42),
+consistent with the soft-delete-everywhere principle.
+
+**Consequences:** Storage accumulates soft-deleted files — a retention/cleanup policy is a
+later concern. Processing is not triggered here; an uploaded document sits `PENDING` until
+the pipeline lands.

@@ -200,6 +200,56 @@ theirs; ADR-110).
 The new-file intake form composes existing endpoints in sequence (Option A, file-first;
 ADR-105) — there is **no** atomic intake endpoint:
 
+## Documents (LP-36) — nested upload/list, flat get/download/delete
+
+Where documents enter the system. Upload and list are **nested** under a loan file;
+single-document operations are **flat** under `/documents/{id}`. The bytes live in the
+LP-35 storage backend (the `Document` row holds only an internal `storage_path`, **never
+exposed**); the only way to fetch them is the auth'd `/download` route. Uploaded documents
+start at status **`pending`** (the processing pipeline, LP-42, picks them up). Relevant
+ADRs: **ADR-114** (URL shape + flat-route scoping), **ADR-115** (upload validation +
+auth'd-download), **ADR-116** (soft-delete preserves bytes, PENDING on upload).
+
+| Method | Path | Success | Notes |
+| --- | --- | --- | --- |
+| POST | `/loan-files/{file_identifier}/documents` | `201` `DocumentResponse[]` | multipart, **one or many** files; nested (file gate) |
+| GET | `/loan-files/{file_identifier}/documents` | `200` `DocumentResponse[]` | the file's active documents, newest-first |
+| GET | `/documents/{document_id}` | `200` `DocumentDetailResponse` | + current extraction (or `null`); flat scoping |
+| GET | `/documents/{document_id}/download` | `200` bytes | auth'd byte stream; `Content-Disposition: attachment` |
+| DELETE | `/documents/{document_id}` | `204` | soft delete; **stored bytes preserved** |
+
+### Two scoping shapes (the crux)
+
+- **Nested routes** (upload/list) scope-check the parent file **first** via the
+  `ScopedLoanFile` gate (LP-29) — a Company B user uploading to / listing a Company A file
+  gets `404`.
+- **Flat routes** (get/download/delete) — a document has **no `company_id`** of its own, so
+  `get_document_for_company` resolves it by **joining `Document → LoanFile`** and filtering
+  on the file's company. A Company A user can **never** get/download/delete a Company B
+  document by id (`404` each — indistinguishable from missing; anti-enumeration). A flat
+  route never loads a document by id alone. `company_id` always comes from `current_user`.
+
+### Upload validation
+
+Each file is validated before any are stored (an invalid file rejects the **whole
+request**, so a batch is all-or-nothing and never partially persisted):
+
+- **Size** — max **50 MB**; read in chunks and aborted at the cap (an oversized upload is
+  never fully buffered) → **`413`**.
+- **Type** — `application/pdf`, `image/jpeg`, `image/png` only, by **content-type allowlist
+  AND magic-byte signature** (`%PDF`, `\x89PNG…`, `\xff\xd8\xff`); the detected type must
+  match the declared one, so content-type spoofing is rejected → **`415`**. Pairs with the
+  LP-35 extension sanitization (defense in depth).
+
+### Schemas
+
+- **`DocumentResponse`** — `id`, `loan_file_id`, `original_filename`, `mime_type`,
+  `file_size_bytes`, `document_type`, `category`, `classification_confidence`, `status`,
+  `upload_source`, `uploaded_by_user_id`, `created_at`, `updated_at`. **No `storage_path`.**
+- **`DocumentDetailResponse`** — `DocumentResponse` + `current_extraction`
+  (`ExtractionPublic` `{ id, version, extracted_data, extraction_status, model_used,
+  created_at }`) or `null` (always `null` until extraction runs, Phase 2).
+
 ## Intake (LP-32) — client orchestration, no new endpoint
 
 The new-file intake form composes existing endpoints in sequence (Option A, file-first;
