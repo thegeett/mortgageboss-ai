@@ -72,6 +72,16 @@ export interface CatchAllSection {
   fields: CatchAllField[];
 }
 
+/** One bank-statement transaction row (LP-39c; values are JSON strings). */
+export interface Transaction {
+  date: string | null;
+  description: string | null;
+  amount: string | null;
+  transaction_type: string | null;
+  running_balance: string | null;
+  source: SourceLocation | null;
+}
+
 /** The current extraction (pay stubs in V1); `extracted_data` is a flexible record. */
 export interface ExtractionPublic {
   id: string;

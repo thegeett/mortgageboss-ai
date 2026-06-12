@@ -38,7 +38,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ai.classification import classify_document
 from app.ai.cost import estimate_cost
-from app.ai.extraction.pay_stub import extract_pay_stub
+from app.ai.extraction import EXTRACTORS, Extractor
 from app.core.config import settings
 from app.models.activity_log import ActivityType
 from app.models.base import utcnow
@@ -89,21 +89,24 @@ async def _load_document(db: AsyncSession, document_id: str) -> Document | None:
     return document
 
 
-async def _satisfy_needs_for_pay_stub(db: AsyncSession, document: Document) -> None:
-    """Mark one OUTSTANDING income need on the file RECEIVED (PROVISIONAL rule).
+async def _satisfy_needs_for_document(db: AsyncSession, document: Document) -> None:
+    """Mark one OUTSTANDING need in the document's category RECEIVED (PROVISIONAL rule).
 
-    **PROVISIONAL — refine with Priya / Phase 2.** V1 rule: a processed pay stub
-    satisfies the first OUTSTANDING needs item on the same loan file whose
-    category is ``INCOME_EMPLOYMENT``. Only ``OUTSTANDING`` needs are touched, so
+    **PROVISIONAL — refine with Priya / Phase 2.** V1 rule: a successfully-extracted
+    document satisfies the first OUTSTANDING needs item on the same loan file whose
+    category matches the document's (e.g. a pay stub / W-2 → an income need; a bank
+    statement → an assets need). Only ``OUTSTANDING`` needs are touched, so
     re-processing never double-satisfies (a ``RECEIVED`` need is left alone). No
-    match → no-op (fine).
+    category or no match → no-op.
     """
+    if document.category is None:
+        return
     stmt = (
         select(NeedsItem)
         .where(
             NeedsItem.loan_file_id == document.loan_file_id,
             NeedsItem.status == NeedsItemStatus.OUTSTANDING,
-            NeedsItem.category == DocumentCategory.INCOME_EMPLOYMENT,
+            NeedsItem.category == document.category,
         )
         .order_by(NeedsItem.created_at)
         .limit(1)
@@ -119,7 +122,7 @@ async def _satisfy_needs_for_pay_stub(db: AsyncSession, document: Document) -> N
         db,
         loan_file_id=document.loan_file_id,
         activity_type=ActivityType.NEEDS_ITEM_SATISFIED,
-        summary="A pay stub satisfied an income document need",
+        summary="A document satisfied an outstanding need",
         detail={"need_id": str(need.id), "document_id": str(document.id)},
     )
 
@@ -174,11 +177,12 @@ async def _process_document(db: AsyncSession, document_id: str) -> None:
             )
             return
 
-        # --- Route extraction by type --------------------------------------- #
-        if classification.document_type == "pay_stub":
-            await _extract_pay_stub_branch(db, document, content)
+        # --- Route extraction by type (registry dispatch, LP-39c) ----------- #
+        extractor = EXTRACTORS.get(classification.document_type)
+        if extractor is not None:
+            await _extract_branch(db, document, content, extractor)
         else:
-            # No extractor for this type in Phase 1 — classified-only (expected).
+            # No extractor registered for this type — classified-only (expected V1).
             document.status = DocumentStatus.COMPLETED
             await db.commit()
             logger.info(
@@ -196,12 +200,19 @@ async def _process_document(db: AsyncSession, document_id: str) -> None:
         await _mark_failed(db, document, document_id)
 
 
-async def _extract_pay_stub_branch(db: AsyncSession, document: Document, content: bytes) -> None:
-    """Extract a pay stub, persist a versioned extraction (+ cost), set terminal status."""
+async def _extract_branch(
+    db: AsyncSession, document: Document, content: bytes, extractor: Extractor
+) -> None:
+    """Run the registered extractor, persist a versioned extraction (+ cost), set terminal status.
+
+    Type-agnostic (LP-39c): any extractor result is stored uniformly via
+    ``create_extraction_version`` (its ``data.model_dump`` JSON), and the
+    typed-core/transactions/catch-all shape just rides in that JSON.
+    """
     document.status = DocumentStatus.EXTRACTING
     await db.commit()
 
-    result = await extract_pay_stub(content, document.mime_type)
+    result = await extractor(content, document.mime_type)
 
     tokens_used: int | None = None
     cost_estimate: float | None = None
@@ -232,7 +243,7 @@ async def _extract_pay_stub_branch(db: AsyncSession, document: Document, content
         return
 
     document.status = DocumentStatus.COMPLETED
-    await _satisfy_needs_for_pay_stub(db, document)
+    await _satisfy_needs_for_document(db, document)
     await db.commit()
     logger.info(
         "document_completed",
@@ -269,6 +280,35 @@ async def _mark_failed(db: AsyncSession, document: Document, document_id: str) -
             await db.commit()
     except Exception:
         logger.error("process_document_mark_failed_error", document_id=document_id)
+
+
+async def reprocess_document_extraction(db: AsyncSession, document: Document) -> None:
+    """Re-run extraction for an already-classified document via the SAME registry.
+
+    The reusable core a type-override / reprocess flow (LP-44) calls after changing
+    a document's ``document_type``: it re-reads the bytes and runs the registered
+    extractor for the (new) type through the same ``_extract_branch`` — so a manual
+    correction to any of the three types re-extracts correctly, and an unregistered
+    type falls back to classified-only. Retry-safe (versioned extraction; needs not
+    double-satisfied) and resilient (unexpected error → FAILED). Never raises.
+
+    The LP-44 override **endpoint/UI** is not built here — this is the core it uses.
+    """
+    extractor = EXTRACTORS.get(document.document_type or "")
+    if extractor is None:
+        document.status = DocumentStatus.COMPLETED  # classified-only
+        await db.commit()
+        return
+    try:
+        content = await get_storage_backend().read(document.storage_path)
+        await _extract_branch(db, document, content, extractor)
+    except Exception as exc:
+        logger.warning(
+            "reprocess_document_failed",
+            document_id=str(document.id),
+            error_type=type(exc).__name__,
+        )
+        await _mark_failed(db, document, str(document.id))
 
 
 async def _run(document_id: str) -> None:

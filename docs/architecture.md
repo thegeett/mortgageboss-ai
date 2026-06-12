@@ -235,7 +235,23 @@ sharing the coercion/parse helpers (`app/ai/extraction/parsing.py`):
   Phase 3 identity cross-check) but **masked in display** (last-4) and **never
   logged** (ADR-147). Not yet wired into the LP-42 pipeline — routing the fan-out
   to all types is LP-39c.
-- **Bank statement** (LP-39c) — next, on the same shape + pipeline routing.
+- **Bank statement** (LP-39c, ADR-148) — the hardest: a typed core (account/
+  balance) + a **first-class typed transactions list** (`transactions[]` —
+  `{date, description, amount, transaction_type, running_balance, source}`, ADR-061)
+  + catch-all. All transactions across all pages; **never hallucinated**; generous
+  `max_tokens` and **truncated/malformed → graceful `.failed()`**. The **account
+  number** is masked-in-display + never-logged (ADR-150). The LP-43 drawer renders
+  a transactions table.
+
+**Type→extractor registry (ADR-149).** The pipeline routes extraction via
+`EXTRACTORS = {pay_stub, w2, bank_statement}` (`app/ai/extraction/__init__.py`),
+not an `if/elif` — `process_document` and the reprocess core
+(`reprocess_document_extraction`, the function a type-override/LP-44 calls) both
+look up the extractor by classified type; an unregistered type is classified-only.
+Result types share a structural `ExtractionResult` Protocol so any extraction is
+stored uniformly via `create_extraction_version`. **Adding a Phase 2 type = write
+an extractor + register it.** All three Phase 1 types now extract live in the
+pipeline.
 
 - **Full-document input** — supported media types are `application/pdf`,
   `image/jpeg`, `image/png` (`image/jpg` normalized). An empty or unsupported

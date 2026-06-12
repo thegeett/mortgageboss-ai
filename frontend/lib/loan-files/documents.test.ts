@@ -1,11 +1,13 @@
 import {
   catchAllSections,
   extractionFields,
+  extractionTransactions,
   formatFileSize,
   formatSource,
   groupDocumentsByCategory,
   hasInProgressDocuments,
   isTerminalStatus,
+  maskLast4,
   maskSsn,
   validateUploadFile,
 } from "@/lib/loan-files/documents";
@@ -147,6 +149,38 @@ describe("maskSsn", () => {
     expect(maskSsn(null)).toBe("—");
     expect(maskSsn(undefined)).toBe("—");
     expect(maskSsn("12")).toBe("•••");
+  });
+});
+
+describe("maskLast4 (account number, LP-39c)", () => {
+  it("shows last 4, handling already-masked input", () => {
+    expect(maskLast4("****1234")).toBe("••••1234");
+    expect(maskLast4("000123456789")).toBe("••••6789");
+    expect(maskLast4(null)).toBe("—");
+  });
+});
+
+describe("extractionFields masks the account number (LP-39c)", () => {
+  it("masks account_number_masked with last-4, not the SSN format", () => {
+    const fields = extractionFields({
+      account_number_masked: { value: "****1234", source: null },
+      ending_balance: { value: "5230.18", source: null },
+      transactions: [{ amount: "1" }], // excluded from typed-core rows
+    });
+    expect(fields.find((f) => f.key === "account_number_masked")?.value).toBe("••••1234");
+    expect(fields.find((f) => f.key === "ending_balance")?.value).toBe("$5,230.18");
+    expect(fields.some((f) => f.key === "transactions")).toBe(false);
+  });
+});
+
+describe("extractionTransactions", () => {
+  it("returns the transaction rows, ignoring non-objects/absent", () => {
+    expect(
+      extractionTransactions({
+        transactions: [{ date: "2024-06-03", amount: "100" }, null, "nope"],
+      }),
+    ).toHaveLength(1);
+    expect(extractionTransactions({ ending_balance: { value: "1" } })).toEqual([]);
   });
 });
 

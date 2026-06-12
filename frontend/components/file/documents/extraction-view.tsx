@@ -1,9 +1,72 @@
 "use client";
 
-import { catchAllSections, extractionFields, formatSource } from "@/lib/loan-files/documents";
-import type { SourceLocation } from "@/lib/types/document";
+import {
+  catchAllSections,
+  extractionFields,
+  extractionTransactions,
+  formatSource,
+} from "@/lib/loan-files/documents";
+import type { SourceLocation, Transaction } from "@/lib/types/document";
 import { ChevronRight, Quote } from "lucide-react";
 import { useState } from "react";
+
+function money(value: string | null): string {
+  if (!value) return "—";
+  const n = Number(value);
+  return Number.isNaN(n)
+    ? value
+    : n.toLocaleString("en-US", { style: "currency", currency: "USD" });
+}
+
+/**
+ * The bank statement transactions (LP-39c) as a scannable table. Long lists scroll
+ * within a bounded area; amounts are right-aligned and tinted by direction.
+ */
+function TransactionsTable({ transactions }: { transactions: Transaction[] }) {
+  return (
+    <div>
+      <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-gray-400">
+        Transactions <span className="text-gray-300">· {transactions.length}</span>
+      </p>
+      <div className="max-h-72 overflow-y-auto rounded-lg border border-gray-100">
+        <table className="w-full text-sm">
+          <thead className="sticky top-0 bg-gray-50 text-[11px] uppercase tracking-wide text-gray-400">
+            <tr>
+              <th className="px-2 py-1.5 text-left font-medium">Date</th>
+              <th className="px-2 py-1.5 text-left font-medium">Description</th>
+              <th className="px-2 py-1.5 text-right font-medium">Amount</th>
+              <th className="px-2 py-1.5 text-right font-medium">Balance</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-100">
+            {transactions.map((t, i) => {
+              const isWithdrawal = /withdraw|debit|fee/i.test(t.transaction_type ?? "");
+              return (
+                <tr key={`${t.date}-${i}`} className="hover:bg-gray-50/60">
+                  <td className="whitespace-nowrap px-2 py-1.5 text-gray-500">{t.date ?? "—"}</td>
+                  <td
+                    className="max-w-[10rem] truncate px-2 py-1.5 text-gray-900"
+                    title={t.description ?? ""}
+                  >
+                    {t.description ?? "—"}
+                  </td>
+                  <td
+                    className={`whitespace-nowrap px-2 py-1.5 text-right font-medium ${isWithdrawal ? "text-gray-600" : "text-success"}`}
+                  >
+                    {money(t.amount)}
+                  </td>
+                  <td className="whitespace-nowrap px-2 py-1.5 text-right text-gray-500">
+                    {money(t.running_balance)}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
 
 /**
  * One field row (label + value) with a click-to-source affordance: when the field
@@ -58,6 +121,7 @@ function FieldRow({
  */
 export function ExtractionView({ data }: { data: Record<string, unknown> }) {
   const core = extractionFields(data);
+  const transactions = extractionTransactions(data);
   const sections = catchAllSections(data);
 
   return (
@@ -74,6 +138,8 @@ export function ExtractionView({ data }: { data: Record<string, unknown> }) {
           ))}
         </dl>
       )}
+
+      {transactions.length > 0 && <TransactionsTable transactions={transactions} />}
 
       {sections.length > 0 && (
         <div className="space-y-2">

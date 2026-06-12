@@ -4013,3 +4013,82 @@ W-2's actual SSN.)
 **Consequences:** A frontend `maskSsn` helper + a `MASKED_FIELD_KEYS` set (currently
 `employee_ssn`) the drawer masks. The no-values logging rule explicitly covers the SSN. Flagged
 for the user to confirm the extract-but-mask choice over not-extracting.
+
+---
+
+## ADR-148: Bank statement extraction — typed core + typed transactions list (ADR-061) + grouped catch-all
+
+- **Date:** 2026-06-12
+- **Status:** Accepted
+
+**Context:** The bank statement is the hardest of the three Phase 1 types: its decision-relevant
+content is a **list of transactions** (often dozens, across multiple pages) plus balances, not
+a flat field set. ADR-061 settled that transactions live in the extraction JSON as a nested
+structure; this implements it.
+
+**Decision:** `extract_bank_statement` reuses the LP-39a shape, extended with a **first-class
+typed transactions list**: `BankStatementExtraction` = a typed core (account/balance fields,
+each a `TypedField` with source) + `transactions: list[Transaction]` (each `{date, description,
+amount, transaction_type, running_balance, source}`, money→`Decimal`/date→`date`) +
+`additional_sections` (catch-all). Capture **all** transactions across **all** pages (Option A,
+whole document). **Never hallucinate a transaction** — unreadable → skip/null (a fabricated
+transaction corrupts asset/deposit analysis); the parser drops fully-empty rows and nulls bad
+fields while keeping the row. `max_tokens` is generous (8192) for long lists, and a
+**truncated/malformed** response fails gracefully (`.failed()`), never crashing. Status counts
+transactions as content (a statement may be mostly its list).
+
+**Rationale:** Transactions must be **structured** for the Phase 3 verification/cross-source
+layer (deposits, ending balance, fees), not loose catch-all. Honest extraction (no invented
+rows) is critical because the figures feed asset/reserve analysis.
+
+**Consequences:** The multi-page/token concern (LP-37 revision) is most acute here — generous
+cap + graceful truncation handling. Transaction **analysis** (large-deposit flags, NSF,
+sourcing) is Phase 3, not here. The typed core grows in Phase 3. Completes the Phase 1
+extraction set (pay stub + W-2 + bank statement).
+
+---
+
+## ADR-149: Type→extractor dispatch registry (pipeline fan-out to all types)
+
+- **Date:** 2026-06-12
+- **Status:** Accepted — supersedes LP-42's single-branch routing
+
+**Context:** LP-42 routed extraction with `if document_type == "pay_stub"`. With three types
+(and ~100 in Phase 2) that single branch doesn't scale.
+
+**Decision:** A registry `EXTRACTORS: dict[str, Extractor]` (`app/ai/extraction/__init__.py`)
+maps `document_type` → its async extractor (`pay_stub` / `w2` / `bank_statement`). The pipeline
+(`_process_document`) and the reprocess core (`reprocess_document_extraction`, the reusable
+function LP-44's override calls) both route via `EXTRACTORS.get(...)`: present → run it +
+`create_extraction_version(result.data.model_dump(mode="json"), ...)` + terminal status;
+absent → classified-only. The result types share a structural `ExtractionResult` Protocol
+(`data` with `model_dump`, `status`, `confidence`, `reasoning`, token usage) so any extraction
+is stored uniformly. Adding a Phase 2 type = write an extractor + register it.
+
+**Rationale:** The type-routed design always meant to fan out; a registry is the clean,
+scalable form. A shared result Protocol lets the pipeline stay type-agnostic.
+
+**Consequences:** One place to register extractors. All LP-42 resilience/retry-safety + the
+needs/activity behavior are preserved (the needs rule generalized: a document satisfies an
+OUTSTANDING need in **its** category — income for pay stub/W-2, assets for bank statement).
+The account-number/SSN masking patterns travel with their types. The LP-44 override **endpoint/
+UI** is not built here — only the reprocess core that uses the registry.
+
+---
+
+## ADR-150: Bank account number — captured masked, never logged, displayed masked
+
+- **Date:** 2026-06-12
+- **Status:** Accepted
+
+**Decision:** `account_number_masked` follows the LP-39b SSN pattern (ADR-147): captured as
+printed (usually already masked), **never logged** (metadata-only logging records status /
+confidence / counts — never values, transactions, or the account number; tested), and
+**displayed masked** to last-4 (`maskLast4`, generalizing `maskSsn`) in the LP-43 drawer. The
+raw value lives only in the tenant-scoped extraction JSON.
+
+**Rationale:** Same as the SSN: downstream may need the value, but a full account number must
+never appear in logs or the UI.
+
+**Consequences:** `MASKED_FIELD_KEYS` (frontend) now covers `employee_ssn` + `account_number_masked`;
+the masking pattern is reusable for future sensitive fields.

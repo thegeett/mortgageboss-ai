@@ -18,8 +18,10 @@ from uuid import uuid4
 import pytest
 import structlog
 from app.ai.classification import ClassificationResult
+from app.ai.extraction.bank_statement import BankStatementExtraction, BankStatementExtractionResult
 from app.ai.extraction.pay_stub import PayStubExtraction, PayStubExtractionResult
 from app.ai.extraction.shape import TypedField
+from app.ai.extraction.w2 import W2Extraction, W2ExtractionResult
 from app.core.security import hash_password
 from app.models import Company, User, UserRole
 from app.models.document import Document, DocumentCategory, DocumentStatus
@@ -87,8 +89,16 @@ def _patch_classify(monkeypatch: pytest.MonkeyPatch, result: ClassificationResul
     monkeypatch.setattr(pipeline, "classify_document", AsyncMock(return_value=result))
 
 
-def _patch_extract(monkeypatch: pytest.MonkeyPatch, result: PayStubExtractionResult) -> None:
-    monkeypatch.setattr(pipeline, "extract_pay_stub", AsyncMock(return_value=result))
+def _patch_extract(
+    monkeypatch: pytest.MonkeyPatch,
+    result: PayStubExtractionResult,
+    *,
+    document_type: str = "pay_stub",
+) -> AsyncMock:
+    """Patch the registry's extractor for ``document_type`` with a canned result."""
+    mock = AsyncMock(return_value=result)
+    monkeypatch.setitem(pipeline.EXTRACTORS, document_type, mock)
+    return mock
 
 
 def _paystub_success() -> PayStubExtractionResult:
@@ -148,24 +158,23 @@ async def test_happy_path_pay_stub(
 # --------------------------------------------------------------------------- #
 
 
-async def test_classified_only_non_pay_stub(
+async def test_classified_only_unregistered_type(
     monkeypatch: pytest.MonkeyPatch, db_session: AsyncSession
 ) -> None:
+    """A type with no registered extractor (e.g. credit_report in V1) → classified-only."""
     doc = await _setup_document(db_session)
     _patch_storage(monkeypatch)
     _patch_classify(
-        monkeypatch, ClassificationResult(document_type="w2", confidence=0.9, reasoning="x")
+        monkeypatch,
+        ClassificationResult(document_type="credit_report", confidence=0.9, reasoning="x"),
     )
-    extract = AsyncMock()
-    monkeypatch.setattr(pipeline, "extract_pay_stub", extract)
 
     await pipeline._process_document(db_session, str(doc.id))
     await db_session.refresh(doc)
 
     assert doc.status == DocumentStatus.COMPLETED
-    assert doc.document_type == "w2"
-    assert doc.category == DocumentCategory.INCOME_EMPLOYMENT
-    assert extract.call_count == 0  # no extractor for w2 in Phase 1
+    assert doc.document_type == "credit_report"
+    assert doc.category == DocumentCategory.CREDIT
     assert await _current_extraction(db_session, doc.id) is None  # no extraction created
 
 
@@ -187,8 +196,7 @@ async def test_low_confidence_or_unknown_needs_review(
     doc = await _setup_document(db_session)
     _patch_storage(monkeypatch)
     _patch_classify(monkeypatch, classification)
-    extract = AsyncMock()
-    monkeypatch.setattr(pipeline, "extract_pay_stub", extract)
+    extract = _patch_extract(monkeypatch, _paystub_success())  # registered but should not run
 
     await pipeline._process_document(db_session, str(doc.id))
     await db_session.refresh(doc)
@@ -377,3 +385,99 @@ async def test_no_extracted_values_logged(
     blob = " ".join(repr(e) for e in logs)
     assert "SECRETCORP" not in blob
     assert "9999.99" not in blob
+
+
+# --------------------------------------------------------------------------- #
+# Registry routing (LP-39c) — all three types route; unregistered → classified-only
+# --------------------------------------------------------------------------- #
+
+
+def _w2_success() -> W2ExtractionResult:
+    return W2ExtractionResult(
+        data=W2Extraction(tax_year=TypedField(value=2024)),
+        status=ExtractionStatus.SUCCEEDED,
+        confidence=0.9,
+        input_tokens=10,
+        output_tokens=5,
+    )
+
+
+def _bank_success() -> BankStatementExtractionResult:
+    return BankStatementExtractionResult(
+        data=BankStatementExtraction(ending_balance=TypedField(value=Decimal("5230.18"))),
+        status=ExtractionStatus.SUCCEEDED,
+        confidence=0.9,
+        input_tokens=10,
+        output_tokens=5,
+    )
+
+
+@pytest.mark.parametrize(
+    ("document_type", "result_factory"),
+    [
+        ("pay_stub", _paystub_success),
+        ("w2", _w2_success),
+        ("bank_statement", _bank_success),
+    ],
+)
+async def test_registry_routes_each_type_to_its_extractor(
+    monkeypatch: pytest.MonkeyPatch, db_session: AsyncSession, document_type: str, result_factory
+) -> None:
+    doc = await _setup_document(db_session)
+    _patch_storage(monkeypatch)
+    _patch_classify(
+        monkeypatch,
+        ClassificationResult(document_type=document_type, confidence=0.95, reasoning="x"),
+    )
+    mock = _patch_extract(monkeypatch, result_factory(), document_type=document_type)
+
+    await pipeline._process_document(db_session, str(doc.id))
+    await db_session.refresh(doc)
+
+    assert mock.call_count == 1  # the registered extractor ran
+    assert doc.status == DocumentStatus.COMPLETED
+    assert doc.document_type == document_type
+    extraction = await _current_extraction(db_session, doc.id)
+    assert extraction is not None
+    assert extraction.extraction_status == ExtractionStatus.SUCCEEDED
+
+
+# --------------------------------------------------------------------------- #
+# reprocess_document_extraction uses the SAME registry (LP-44 core)
+# --------------------------------------------------------------------------- #
+
+
+async def test_reprocess_uses_registry(
+    monkeypatch: pytest.MonkeyPatch, db_session: AsyncSession
+) -> None:
+    # A document already classified as w2 → reprocess re-extracts via the registry.
+    doc = await _setup_document(db_session)
+    doc.document_type = "w2"
+    doc.category = DocumentCategory.INCOME_EMPLOYMENT
+    doc.status = DocumentStatus.CLASSIFIED
+    await db_session.commit()
+    _patch_storage(monkeypatch)
+    mock = _patch_extract(monkeypatch, _w2_success(), document_type="w2")
+
+    await pipeline.reprocess_document_extraction(db_session, doc)
+    await db_session.refresh(doc)
+
+    assert mock.call_count == 1
+    assert doc.status == DocumentStatus.COMPLETED
+    assert await _current_extraction(db_session, doc.id) is not None
+
+
+async def test_reprocess_unregistered_type_is_classified_only(
+    monkeypatch: pytest.MonkeyPatch, db_session: AsyncSession
+) -> None:
+    doc = await _setup_document(db_session)
+    doc.document_type = "credit_report"  # no registered extractor
+    doc.status = DocumentStatus.CLASSIFIED
+    await db_session.commit()
+    _patch_storage(monkeypatch)
+
+    await pipeline.reprocess_document_extraction(db_session, doc)
+    await db_session.refresh(doc)
+
+    assert doc.status == DocumentStatus.COMPLETED
+    assert await _current_extraction(db_session, doc.id) is None

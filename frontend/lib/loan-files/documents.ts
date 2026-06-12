@@ -12,6 +12,7 @@ import type {
   DocumentResponse,
   DocumentStatus,
   SourceLocation,
+  Transaction,
 } from "@/lib/types/document";
 
 // --- Status treatment ------------------------------------------------------- //
@@ -223,6 +224,17 @@ export const EXTRACTION_FIELD_LABELS: Record<string, string> = {
   social_security_tax_withheld: "Social Security tax (Box 4)",
   medicare_wages: "Medicare wages (Box 5)",
   medicare_tax_withheld: "Medicare tax (Box 6)",
+  // Bank statement (LP-39c)
+  account_holder_name: "Account holder",
+  bank_name: "Bank",
+  account_number_masked: "Account number",
+  account_type: "Account type",
+  statement_period_start: "Statement period start",
+  statement_period_end: "Statement period end",
+  beginning_balance: "Beginning balance",
+  ending_balance: "Ending balance",
+  total_deposits: "Total deposits",
+  total_withdrawals: "Total withdrawals",
 };
 
 const EXTRACTION_FIELD_ORDER = Object.keys(EXTRACTION_FIELD_LABELS);
@@ -234,18 +246,25 @@ export interface ExtractionField {
   source: SourceLocation | null;
 }
 
-/** Money-ish keys we render as currency (pay stub + W-2 boxes). */
+/** Money-ish keys we render as currency (pay stub + W-2 boxes + bank balances). */
 const MONEY_KEYS = new Set([
+  // Pay stub
   "gross_pay",
   "net_pay",
   "ytd_gross",
   "rate",
+  // W-2 boxes
   "wages_tips_other_comp",
   "federal_income_tax_withheld",
   "social_security_wages",
   "social_security_tax_withheld",
   "medicare_wages",
   "medicare_tax_withheld",
+  // Bank statement balances/totals
+  "beginning_balance",
+  "ending_balance",
+  "total_deposits",
+  "total_withdrawals",
 ]);
 
 /** A label for a typed-core key — the known label, or a humanized fallback. */
@@ -283,13 +302,20 @@ function readTypedField(entry: unknown): { value: unknown; source: SourceLocatio
  * then any others. Sensitive fields (e.g. the W-2 SSN) are **masked** in display;
  * absent/null values render as "—".
  */
+function maskedDisplay(key: string, value: unknown): string {
+  const raw = value == null ? null : String(value);
+  // The SSN gets the ***-**-#### format; other ids (account number) get last-4.
+  return key === "employee_ssn" ? maskSsn(raw) : maskLast4(raw);
+}
+
 export function extractionFields(data: Record<string, unknown>): ExtractionField[] {
   const fields: ExtractionField[] = [];
   for (const key of Object.keys(data)) {
-    if (key === "additional_sections") continue; // the catch-all is rendered separately
+    // The catch-all and the transactions list are rendered separately.
+    if (key === "additional_sections" || key === "transactions") continue;
     const { value, source } = readTypedField(data[key]);
     const display = MASKED_FIELD_KEYS.has(key)
-      ? maskSsn(value == null ? null : String(value))
+      ? maskedDisplay(key, value)
       : displayValue(key, value);
     fields.push({ key, label: labelFor(key), value: display, source });
   }
@@ -299,6 +325,13 @@ export function extractionFields(data: Record<string, unknown>): ExtractionField
     return i === -1 ? Number.MAX_SAFE_INTEGER : i;
   };
   return fields.sort((a, b) => orderIndex(a.key) - orderIndex(b.key));
+}
+
+/** The bank statement transactions (`transactions`), or [] if absent/odd. */
+export function extractionTransactions(data: Record<string, unknown>): Transaction[] {
+  const raw = data.transactions;
+  if (!Array.isArray(raw)) return [];
+  return raw.filter((t): t is Transaction => Boolean(t) && typeof t === "object");
 }
 
 /** The grouped catch-all (`additional_sections`), or [] if absent/odd. */
@@ -320,8 +353,8 @@ export function formatSource(source: SourceLocation | null): string | null {
   return parts.length > 0 ? parts.join(": ") : null;
 }
 
-/** Sensitive typed-core keys masked in display (e.g. the W-2 employee SSN, LP-39b). */
-export const MASKED_FIELD_KEYS = new Set(["employee_ssn"]);
+/** Sensitive typed-core keys masked in display (W-2 SSN LP-39b; bank acct LP-39c). */
+export const MASKED_FIELD_KEYS = new Set(["employee_ssn", "account_number_masked"]);
 
 /**
  * Mask an SSN to last-4 for display (LP-39b) — consistent with the borrower
@@ -332,4 +365,16 @@ export function maskSsn(ssn: string | null | undefined): string {
   const digits = ssn.replace(/\D/g, "");
   if (digits.length < 4) return "•••";
   return `•••-••-${digits.slice(-4)}`;
+}
+
+/**
+ * Mask any identifier to its last 4 chars for display (LP-39c, generalizes the SSN
+ * mask) — e.g. a bank account number. Already-masked input (e.g. "****1234") shows
+ * its last 4. Never shown in full.
+ */
+export function maskLast4(value: string | null | undefined): string {
+  if (!value) return "—";
+  const trimmed = value.trim();
+  const tail = trimmed.replace(/[^A-Za-z0-9]/g, "").slice(-4);
+  return tail ? `••••${tail}` : "••••";
 }
