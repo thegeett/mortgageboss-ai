@@ -4092,3 +4092,36 @@ never appear in logs or the UI.
 
 **Consequences:** `MASKED_FIELD_KEYS` (frontend) now covers `employee_ssn` + `account_number_masked`;
 the masking pattern is reusable for future sensitive fields.
+
+---
+
+## ADR-151: Manual type override — PATCH that reuses the LP-39c re-extraction core
+
+- **Date:** 2026-06-12
+- **Status:** Accepted
+
+**Decision:** The human-correction half of human-in-the-loop is a single **`PATCH
+/api/v1/documents/{id}`** endpoint (`document_type`). It is tenant-scoped via
+`get_document_for_company` (out-of-company → `404`, anti-enumeration), sets the new type,
+**re-derives** the category from the existing type→category map (`category_for_type`, factored
+out of `_process_document`), marks the classification **human-overridden**
+(`classification_confidence = 1.0`), clears any stale `processing_error`, logs a
+**`DOCUMENT_TYPE_OVERRIDDEN`** activity, commits, then **fire-and-forget enqueues the existing
+LP-39c re-extraction** (`reprocess_document.delay`). A thin Celery task wrapper
+(`reprocess_document` → `reprocess_document_extraction(db, document)`) was added; the **core was
+reused unchanged** — registry-based, skips classification, new version, resilient.
+
+**Rationale:** LP-39c deliberately built the reprocess core ahead of this ticket ("the function
+LP-44's override calls"). Reusing it keeps a single re-extraction path (no duplicated
+classification-skipping / resilience logic). Pinning confidence to `1.0` makes the human type
+authoritative so the re-extraction isn't immediately re-flagged `NEEDS_REVIEW` for low
+confidence. Re-deriving the category (not trusting a client-supplied one) keeps the type→category
+mapping server-owned.
+
+**Consequences:** Adding `DOCUMENT_TYPE_OVERRIDDEN` to the `ActivityType` VARCHAR+CHECK enum
+required an Alembic constraint-swap migration (raw-SQL drop/add, per the LP-30 pattern, to avoid
+naming-convention re-prefixing). The endpoint is PATCH (partial update of one field). Extractable
+types (`pay_stub`/`w2`/`bank_statement`) re-extract; any other type relabels **classified-only**
+(no API call) — surfaced in the drawer via `typeReExtracts`. Enqueue failure can't lose the
+override (already committed); it's logged (`reprocess_enqueue_failed`, metadata-only) and the doc
+can be reprocessed.

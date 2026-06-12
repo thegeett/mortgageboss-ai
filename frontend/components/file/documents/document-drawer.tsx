@@ -14,13 +14,19 @@ import {
   useDeleteDocument,
   useDevTextLayer,
   useDocumentDetail,
+  useOverrideDocumentType,
 } from "@/lib/api/documents";
 import { humanize } from "@/lib/format";
-import { formatConfidence, formatFileSize } from "@/lib/loan-files/documents";
+import {
+  OVERRIDE_TYPE_OPTIONS,
+  formatConfidence,
+  formatFileSize,
+  typeReExtracts,
+} from "@/lib/loan-files/documents";
 import type { DocumentResponse } from "@/lib/types/document";
 import { format } from "date-fns";
-import { Download, FlaskConical, Loader2, Trash2 } from "lucide-react";
-import { useState } from "react";
+import { Download, FlaskConical, Loader2, PencilLine, Trash2 } from "lucide-react";
+import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import { DocumentStatusBadge } from "./document-status";
 import { ExtractionView } from "./extraction-view";
@@ -43,6 +49,84 @@ function fmtDate(iso: string): string {
   } catch {
     return "—";
   }
+}
+
+/**
+ * Manual document-type override (LP-44) — the human-correction half of the loop.
+ * When the AI is unsure (`needs_review`) or simply wrong, the processor sets the
+ * authoritative type here; saving PATCHes the document and the server re-runs
+ * extraction for the corrected type (relabel-only for types we don't extract).
+ */
+function TypeOverride({ summary, fileId }: { summary: DocumentResponse; fileId: string }) {
+  const override = useOverrideDocumentType(fileId, summary.id);
+  const [selected, setSelected] = useState(summary.document_type ?? "");
+  const needsReview = summary.status === "needs_review";
+
+  // Keep the current type selectable even when it isn't one of the standard options.
+  const options = useMemo(() => {
+    const current = summary.document_type;
+    if (current && !OVERRIDE_TYPE_OPTIONS.some((o) => o.value === current)) {
+      return [{ value: current, label: humanize(current) }, ...OVERRIDE_TYPE_OPTIONS];
+    }
+    return OVERRIDE_TYPE_OPTIONS;
+  }, [summary.document_type]);
+
+  const changed = selected !== "" && selected !== summary.document_type;
+
+  function handleSave() {
+    override.mutate(selected, {
+      onSuccess: () =>
+        toast.success(`Type set to ${humanize(selected)}`, {
+          description: typeReExtracts(selected)
+            ? "Re-extracting in the background…"
+            : "Relabeled — this type isn’t extracted.",
+        }),
+      onError: () => toast.error("Couldn’t update the type"),
+    });
+  }
+
+  return (
+    <section className="mt-6">
+      <h3 className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-gray-400">
+        <PencilLine className="h-3.5 w-3.5" />
+        Correct type
+      </h3>
+      {needsReview && (
+        <p className="mt-2 rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-warning">
+          The AI wasn’t confident about this classification — confirm or correct the type below.
+        </p>
+      )}
+      <div className="mt-3 flex items-center gap-2">
+        <select
+          value={selected}
+          onChange={(e) => setSelected(e.target.value)}
+          disabled={override.isPending}
+          className="h-9 flex-1 rounded-md border border-gray-200 bg-white px-2.5 text-sm text-gray-900 focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary disabled:opacity-60"
+        >
+          {options.map((o) => (
+            <option key={o.value} value={o.value}>
+              {o.label}
+            </option>
+          ))}
+        </select>
+        <Button
+          type="button"
+          size="sm"
+          onClick={handleSave}
+          disabled={!changed || override.isPending}
+          className="gap-1.5"
+        >
+          {override.isPending && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+          Apply
+        </Button>
+      </div>
+      <p className="mt-1.5 text-[11px] text-gray-400">
+        {typeReExtracts(selected)
+          ? "Saving re-runs extraction for this type."
+          : "This type is recorded only — no data is extracted."}
+      </p>
+    </section>
+  );
 }
 
 export function DocumentDrawer({
@@ -125,6 +209,9 @@ function DrawerBody({
           <Row label="Size" value={formatFileSize(summary.file_size_bytes)} />
           <Row label="Uploaded" value={fmtDate(summary.created_at)} />
         </section>
+
+        {/* Manual type override (LP-44) */}
+        <TypeOverride summary={summary} fileId={fileId} />
 
         {/* Extraction */}
         <section className="mt-6">

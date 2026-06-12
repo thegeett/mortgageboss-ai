@@ -78,6 +78,13 @@ _TYPE_TO_CATEGORY: dict[str, DocumentCategory] = {
 }
 
 
+def category_for_type(document_type: str | None) -> DocumentCategory | None:
+    """The provisional category for a document type (or None if unmapped)."""
+    if document_type is None:
+        return None
+    return _TYPE_TO_CATEGORY.get(document_type)
+
+
 async def _load_document(db: AsyncSession, document_id: str) -> Document | None:
     """Load an active document by id (string from the task message)."""
     try:
@@ -147,7 +154,7 @@ async def _process_document(db: AsyncSession, document_id: str) -> None:
         await db.commit()
         classification = await classify_document(content, document.mime_type)
         document.document_type = classification.document_type
-        document.category = _TYPE_TO_CATEGORY.get(classification.document_type)
+        document.category = category_for_type(classification.document_type)
         document.classification_confidence = classification.confidence
         document.status = DocumentStatus.CLASSIFIED
         await db.commit()
@@ -317,7 +324,28 @@ async def _run(document_id: str) -> None:
         await _process_document(db, document_id)
 
 
+async def _run_reprocess(document_id: str) -> None:
+    """Open a worker session, load the document, and re-extract it (entrypoint)."""
+    async with task_session() as db:
+        document = await _load_document(db, document_id)
+        if document is None:
+            logger.info("reprocess_document_missing", document_id=document_id)
+            return
+        await reprocess_document_extraction(db, document)
+
+
 @celery_app.task(name="documents.process_document")  # type: ignore[untyped-decorator]
 def process_document(document_id: str) -> None:
     """Celery task: process one uploaded document end-to-end (sync→async bridge)."""
     run_async(_run(document_id))
+
+
+@celery_app.task(name="documents.reprocess_document")  # type: ignore[untyped-decorator]
+def reprocess_document(document_id: str) -> None:
+    """Celery task: re-extract a document after a manual type override (LP-44).
+
+    A thin wrapper over the existing :func:`reprocess_document_extraction` core
+    (LP-39c, registry-based, skips classification, new version, resilient) — the
+    PATCH override endpoint enqueues this.
+    """
+    run_async(_run_reprocess(document_id))

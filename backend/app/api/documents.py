@@ -31,6 +31,7 @@ from app.models.document import Document
 from app.schemas.document import (
     DocumentDetailResponse,
     DocumentResponse,
+    DocumentTypeOverrideRequest,
     ExtractionPublic,
 )
 from app.services.activity_log import log_activity
@@ -45,7 +46,11 @@ from app.services.documents import (
     validate_upload,
 )
 from app.storage import get_storage_backend
-from app.tasks.document_processing import process_document
+from app.tasks.document_processing import (
+    category_for_type,
+    process_document,
+    reprocess_document,
+)
 
 log = structlog.get_logger(__name__)
 
@@ -70,6 +75,18 @@ def _enqueue_processing(document_id: UUID) -> None:
         process_document.delay(str(document_id))
     except Exception:
         log.warning("document_enqueue_failed", document_id=str(document_id))
+
+
+def _enqueue_reprocess(document_id: UUID) -> None:
+    """Fire-and-forget enqueue of the LP-39c re-extraction task after a type override.
+
+    The type change is already committed, so an enqueue hiccup (broker down) must
+    NOT lose the override — the document is updated and can be reprocessed.
+    """
+    try:
+        reprocess_document.delay(str(document_id))
+    except Exception:
+        log.warning("reprocess_enqueue_failed", document_id=str(document_id))
 
 
 async def _read_capped(upload: UploadFile, *, max_bytes: int) -> bytes:
@@ -188,6 +205,53 @@ async def retrieve(
             ExtractionPublic.model_validate(extraction) if extraction is not None else None
         ),
     )
+
+
+@flat_router.patch("/{document_id}", response_model=DocumentResponse)
+async def override_document_type(
+    document_id: UUID,
+    body: DocumentTypeOverrideRequest,
+    current_user: CurrentUser,
+    db: DbSession,
+) -> DocumentResponse:
+    """Manually override a document's type, then re-extract for the corrected type (LP-44).
+
+    The human-correction half of the loop: LP-43 surfaces a misclassified /
+    ``NEEDS_REVIEW`` document; this PATCH sets the authoritative type. It
+    re-derives the category, marks the classification **human-overridden**
+    (``classification_confidence = 1.0`` — so re-extraction isn't re-flagged
+    NEEDS_REVIEW for low confidence), clears any stale ``processing_error``, audits
+    the change, and **enqueues the existing LP-39c re-extraction** (which skips
+    classification and uses this type via the EXTRACTORS registry; an unmapped type
+    relabels classified-only). Tenant-scoped (``404`` for another company's
+    document); re-extraction runs in the background and shows live in the UI.
+    """
+    document = await get_document_for_company(
+        db, document_id=document_id, company_id=current_user.company_id
+    )
+    if document is None:
+        raise _NOT_FOUND
+
+    new_type = body.document_type.strip()
+    document.document_type = new_type
+    document.category = category_for_type(new_type)
+    document.classification_confidence = 1.0  # human-set type is authoritative
+    document.processing_error = None
+
+    await log_activity(
+        db,
+        loan_file_id=document.loan_file_id,
+        activity_type=ActivityType.DOCUMENT_TYPE_OVERRIDDEN,
+        summary=f"Type changed to {new_type}",
+        actor_user_id=current_user.id,
+        detail={"document_id": str(document.id), "document_type": new_type},
+    )
+    await db.commit()
+
+    # Re-extract in the background (fire-and-forget; the override is already saved).
+    _enqueue_reprocess(document.id)
+
+    return DocumentResponse.model_validate(document)
 
 
 @flat_router.get("/{document_id}/download")

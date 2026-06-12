@@ -109,6 +109,34 @@ export function useDeleteDocument(fileId: string) {
   });
 }
 
+// --- Manual type override (LP-44) ------------------------------------------- //
+
+export async function overrideDocumentType(
+  documentId: string,
+  documentType: string,
+): Promise<DocumentResponse> {
+  const res = await apiClient.patch<DocumentResponse>(`${API_V1}/documents/${documentId}`, {
+    document_type: documentType,
+  });
+  return res.data;
+}
+
+/**
+ * Override a document's type, then re-extract (LP-44). On success, invalidate the
+ * list + this document's detail so live polling shows the re-processing (the
+ * server enqueues the existing LP-39c re-extraction).
+ */
+export function useOverrideDocumentType(fileId: string, documentId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (documentType: string) => overrideDocumentType(documentId, documentType),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: documentsQueryKey(fileId) });
+      void queryClient.invalidateQueries({ queryKey: documentDetailQueryKey(documentId) });
+    },
+  });
+}
+
 // --- Dev-only text-layer extraction (LP-40; non-production) ------------------ //
 
 export async function fetchDevTextLayer(documentId: string): Promise<TextLayerExtraction> {

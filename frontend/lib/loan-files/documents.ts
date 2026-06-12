@@ -356,6 +356,28 @@ export function formatSource(source: SourceLocation | null): string | null {
 /** Sensitive typed-core keys masked in display (W-2 SSN LP-39b; bank acct LP-39c). */
 export const MASKED_FIELD_KEYS = new Set(["employee_ssn", "account_number_masked"]);
 
+// --- Document type override (LP-44) ----------------------------------------- //
+
+/** Types that re-extract on override (the rest relabel classified-only). */
+export const EXTRACTABLE_TYPES = new Set(["pay_stub", "w2", "bank_statement"]);
+
+/** Selectable types for the override control (value + human label). */
+export const OVERRIDE_TYPE_OPTIONS: { value: string; label: string }[] = [
+  { value: "pay_stub", label: "Pay stub" },
+  { value: "w2", label: "W-2" },
+  { value: "bank_statement", label: "Bank statement" },
+  { value: "tax_return_1040", label: "Tax return (1040)" },
+  { value: "drivers_license", label: "Driver’s license" },
+  { value: "credit_report", label: "Credit report" },
+  { value: "gift_letter", label: "Gift letter" },
+  { value: "other", label: "Other" },
+];
+
+/** True if overriding to this type will re-run extraction (vs relabel-only). */
+export function typeReExtracts(documentType: string | null | undefined): boolean {
+  return documentType != null && EXTRACTABLE_TYPES.has(documentType);
+}
+
 /**
  * Mask an SSN to last-4 for display (LP-39b) — consistent with the borrower
  * `masked_ssn` discipline. The raw value is never shown in full and never logged.

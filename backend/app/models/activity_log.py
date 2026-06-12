@@ -49,6 +49,7 @@ class ActivityType(StrEnum):
     STATUS_CHANGED = "status_changed"
     DOCUMENT_UPLOADED = "document_uploaded"
     DOCUMENT_PROCESSED = "document_processed"
+    DOCUMENT_TYPE_OVERRIDDEN = "document_type_overridden"
     FINDING_RESOLVED = "finding_resolved"
     VERIFICATION_RUN = "verification_run"
     NEEDS_ITEM_CREATED = "needs_item_created"

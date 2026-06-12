@@ -13,10 +13,16 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.models.document import DocumentCategory, DocumentStatus, UploadSource
 from app.models.extraction import ExtractionStatus
+
+
+class DocumentTypeOverrideRequest(BaseModel):
+    """A manual document-type correction (LP-44). The human-set type is authoritative."""
+
+    document_type: str = Field(min_length=1, max_length=64)
 
 
 class DocumentResponse(BaseModel):

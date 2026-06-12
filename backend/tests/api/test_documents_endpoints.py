@@ -49,6 +49,14 @@ def _mock_enqueue(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
     return delay
 
 
+@pytest.fixture(autouse=True)
+def _mock_reprocess(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
+    """Stub the LP-39c re-extraction enqueue (fired by the LP-44 type override)."""
+    delay = MagicMock()
+    monkeypatch.setattr(documents_api.reprocess_document, "delay", delay)
+    return delay
+
+
 @pytest_asyncio.fixture
 async def client(db_session: AsyncSession) -> AsyncIterator[AsyncClient]:
     async def _override_get_db() -> AsyncIterator[AsyncSession]:
@@ -311,6 +319,77 @@ async def test_delete_soft_deletes_and_preserves_bytes(
 
 
 # --------------------------------------------------------------------------- #
+# Manual type override (LP-44)
+# --------------------------------------------------------------------------- #
+
+
+def _override_url(doc_id: str) -> str:
+    return f"/api/v1/documents/{doc_id}"
+
+
+async def test_override_sets_type_category_and_marks_human_overridden(
+    client: AsyncClient, db_session: AsyncSession, _mock_reprocess: MagicMock
+) -> None:
+    """PATCH sets the type, re-derives category, marks human-overridden, clears error."""
+    company, _user, token = await _make_user(db_session, slug="acme")
+    loan_file = await create_loan_file(db_session, company_id=company.id)
+    doc = await _upload_one(client, loan_file.display_id, token)
+
+    resp = await client.patch(
+        _override_url(doc["id"]), headers=_auth(token), json={"document_type": "bank_statement"}
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["document_type"] == "bank_statement"
+    # Re-derived from the type→category map (assets for a bank statement).
+    assert body["category"] == "assets"
+    # Human-set type is authoritative — confidence pinned to 1.0.
+    assert body["classification_confidence"] == 1.0
+    # The existing LP-39c re-extraction was enqueued exactly once with this doc id.
+    _mock_reprocess.assert_called_once_with(doc["id"])
+
+
+async def test_override_enqueues_reprocess(
+    client: AsyncClient, db_session: AsyncSession, _mock_reprocess: MagicMock
+) -> None:
+    """The override fires the LP-39c re-extraction task (fire-and-forget)."""
+    company, _user, token = await _make_user(db_session, slug="acme")
+    loan_file = await create_loan_file(db_session, company_id=company.id)
+    doc = await _upload_one(client, loan_file.display_id, token)
+
+    resp = await client.patch(
+        _override_url(doc["id"]), headers=_auth(token), json={"document_type": "w2"}
+    )
+    assert resp.status_code == 200
+    _mock_reprocess.assert_called_once_with(doc["id"])
+
+
+async def test_override_rejects_empty_type(
+    client: AsyncClient, db_session: AsyncSession, _mock_reprocess: MagicMock
+) -> None:
+    """An empty/whitespace document_type is a 422 (min_length=1) and enqueues nothing."""
+    company, _user, token = await _make_user(db_session, slug="acme")
+    loan_file = await create_loan_file(db_session, company_id=company.id)
+    doc = await _upload_one(client, loan_file.display_id, token)
+
+    resp = await client.patch(
+        _override_url(doc["id"]), headers=_auth(token), json={"document_type": ""}
+    )
+    assert resp.status_code == 422
+    _mock_reprocess.assert_not_called()
+
+
+async def test_override_unauthenticated_is_401(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    company, _user, token = await _make_user(db_session, slug="acme")
+    loan_file = await create_loan_file(db_session, company_id=company.id)
+    doc = await _upload_one(client, loan_file.display_id, token)
+    resp = await client.patch(_override_url(doc["id"]), json={"document_type": "w2"})
+    assert resp.status_code == 401
+
+
+# --------------------------------------------------------------------------- #
 # CRITICAL: cross-tenant isolation
 # --------------------------------------------------------------------------- #
 
@@ -324,12 +403,17 @@ async def test_company_b_cannot_touch_company_a_document(
     doc = await _upload_one(client, a_file.display_id, a_token)
     doc_id = doc["id"]
 
-    # B cannot get / download / delete A's document by id → 404 each.
+    # B cannot get / download / delete / override A's document by id → 404 each.
     assert (
         await client.get(f"/api/v1/documents/{doc_id}", headers=_auth(b_token))
     ).status_code == 404
     assert (
         await client.get(f"/api/v1/documents/{doc_id}/download", headers=_auth(b_token))
+    ).status_code == 404
+    assert (
+        await client.patch(
+            f"/api/v1/documents/{doc_id}", headers=_auth(b_token), json={"document_type": "w2"}
+        )
     ).status_code == 404
     assert (
         await client.delete(f"/api/v1/documents/{doc_id}", headers=_auth(b_token))

@@ -1,4 +1,5 @@
 import {
+  OVERRIDE_TYPE_OPTIONS,
   catchAllSections,
   extractionFields,
   extractionTransactions,
@@ -9,6 +10,7 @@ import {
   isTerminalStatus,
   maskLast4,
   maskSsn,
+  typeReExtracts,
   validateUploadFile,
 } from "@/lib/loan-files/documents";
 import type { DocumentResponse, DocumentStatus } from "@/lib/types/document";
@@ -215,5 +217,26 @@ describe("formatFileSize", () => {
     expect(formatFileSize(512)).toBe("512 B");
     expect(formatFileSize(1536)).toBe("1.5 KB");
     expect(formatFileSize(5 * 1024 * 1024)).toBe("5.0 MB");
+  });
+});
+
+describe("typeReExtracts (LP-44 override hint)", () => {
+  it("is true only for the extractable types", () => {
+    expect(typeReExtracts("pay_stub")).toBe(true);
+    expect(typeReExtracts("w2")).toBe(true);
+    expect(typeReExtracts("bank_statement")).toBe(true);
+  });
+
+  it("is false for relabel-only / unknown / empty types", () => {
+    expect(typeReExtracts("drivers_license")).toBe(false);
+    expect(typeReExtracts("other")).toBe(false);
+    expect(typeReExtracts(null)).toBe(false);
+    expect(typeReExtracts(undefined)).toBe(false);
+    expect(typeReExtracts("")).toBe(false);
+  });
+
+  it("offers the extractable types as selectable override options", () => {
+    const values = OVERRIDE_TYPE_OPTIONS.map((o) => o.value);
+    for (const t of ["pay_stub", "w2", "bank_statement"]) expect(values).toContain(t);
   });
 });
