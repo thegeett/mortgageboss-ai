@@ -17,7 +17,7 @@ import { useState } from "react";
  */
 export default function DocumentsPage() {
   const { id } = useParams<{ id: string }>();
-  const { data: documents, isPending, isError } = useLoanFileDocuments(id);
+  const { data: documents, isPending, isError, refetch } = useLoanFileDocuments(id);
   const [selected, setSelected] = useState<DocumentResponse | null>(null);
 
   return (
@@ -27,6 +27,7 @@ export default function DocumentsPage() {
         documents={documents}
         isPending={isPending}
         isError={isError}
+        onRetry={() => void refetch()}
         onSelect={setSelected}
       />
       <DocumentDrawer document={selected} fileId={id} onClose={() => setSelected(null)} />

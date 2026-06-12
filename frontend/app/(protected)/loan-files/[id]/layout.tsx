@@ -20,11 +20,11 @@ import { useParams } from "next/navigation";
 export default function FileLayout({ children }: { children: React.ReactNode }) {
   const params = useParams<{ id: string }>();
   const id = params.id;
-  const { data: file, isError, error } = useLoanFile(id);
+  const { data: file, isError, error, refetch } = useLoanFile(id);
 
   if (isError) {
     const notFound = isAxiosError(error) && error.response?.status === 404;
-    return <FileError notFound={notFound} />;
+    return <FileError notFound={notFound} onRetry={() => void refetch()} />;
   }
 
   return (

@@ -4177,3 +4177,69 @@ surfaced by LP-45 and is a *measurement* defect, not a test gap.
 most routers; **93%** of `app/` overall). The fix is global (helps all existing endpoint tests
 too). No product code changed — the bug was in how coverage was measured, exactly the kind of gap
 the LP-45 coverage AC exists to expose.
+
+---
+
+## ADR-154: Consistent API error envelope + global exception handler (safe by default)
+
+- **Date:** 2026-06-12
+- **Status:** Accepted
+
+**Decision:** Every API error returns one envelope —
+`{"error": {"type": str, "message": str, "details"?: [{"field", "message"}]}}` — with the correct
+status code (LP-46, `app/core/errors.py`). A global handler (`register_exception_handlers`) maps:
+unhandled `Exception` → a SAFE generic 500 (`"An unexpected error occurred. Please try again."`),
+`HTTPException` → the envelope with its (already-safe) detail and a `type` derived from the status,
+and `RequestValidationError` → 422 with field-level `details`. The full detail of an unhandled
+error is logged server-side as PII-safe **metadata only** (error type, request path/method) — never
+the request body, an extracted value, an SSN, or a stack trace.
+
+**Rationale:** A single shape lets the frontend handle every error uniformly (one normalizer, one
+set of states). Safe messages protect internals (security — no stack trace / internal path / DB
+text) and borrower data (privacy — no PII in responses or logs). A catch-all `Exception` handler
+guarantees a raw 500 / framework HTML never reaches a client. The endpoint `detail` strings were
+audited and are already safe, generic messages ("Loan file not found"), so passing them through
+leaks nothing.
+
+**Consequences:** The response shape changed from FastAPI's default `{"detail": ...}` to the
+envelope (one auth test updated; the frontend reads `error.message` with a legacy `detail`
+fallback). Validation messages describe the *constraint*, not the submitted value, so no input is
+echoed. Debugging relies on server-side logs, not client responses. The envelope is the contract
+the rest of Epic 6 (and the frontend error UX) builds on.
+
+---
+
+## ADR-155: Frontend error UX — axios normalization, error boundary, specific states + retry
+
+- **Date:** 2026-06-12
+- **Status:** Accepted
+
+**Decision:** The frontend turns failures into clear, recoverable states (LP-46):
+
+- **Normalization** (`lib/errors/api-error.ts`): `normalizeError()` maps any throw — axios error,
+  network failure, stray `Error` — into one `{ kind, status, message, details }`, reading the
+  LP-154 envelope (with a legacy `detail` fallback and a safe generic default). The UI never shows
+  a raw status or stack.
+- **Global 401 / session expiry**: the existing axios refresh-retry layer, on a truly-dead session,
+  clears auth and redirects to `/login?...&reason=session_expired`; the login form shows a "your
+  session expired" notice (a query param survives the navigation that a toast would not).
+- **Error boundary** (`components/error-boundary.tsx`): a top-level class boundary (in `Providers`)
+  plus one around the app-shell content — a render crash shows a friendly "Something went wrong" +
+  Try again (remounts the subtree; clears the query cache on the top-level reset), **never a white
+  screen**. The raw error/stack is console-only, never rendered.
+- **Specific states + retry** (`components/ui/error-state.tsx`): a consistent inline error panel
+  (and compact inline variant) with a Retry that re-runs the failed query — applied to the
+  documents list, the document drawer's extraction, and the overview sections; the file-level 404
+  state stays "doesn't exist or no access".
+- **Consistent mutation feedback**: upload / override / delete / create surface success and a
+  safe normalized failure message via sonner.
+
+**Rationale:** Graceful, informative failure is core to a professional tool's trustworthiness — no
+blank screens, no infinite spinners, no console-only errors. The user always sees a message and a
+way forward. Mechanisms (normalizer, boundary, standard states) over a bespoke message per error;
+a few high-value specifics (session expired, no access, network, processing failed).
+
+**Consequences:** One error shape and a small set of reusable components handle errors app-wide;
+transient failures recover via Retry without a full reload. Component tests required a jsdom + React
+Testing Library setup (opt-in per file via a `// @vitest-environment jsdom` docblock; a vite React
+plugin transforms `.tsx` tests). The mechanisms are reused by the rest of Epic 6.

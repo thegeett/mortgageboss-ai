@@ -1,5 +1,6 @@
 "use client";
 
+import { ErrorState } from "@/components/ui/error-state";
 import { Skeleton } from "@/components/ui/skeleton";
 import { humanize } from "@/lib/format";
 import { formatFileSize, groupDocumentsByCategory } from "@/lib/loan-files/documents";
@@ -68,19 +69,23 @@ export function DocumentList({
   documents,
   isPending,
   isError,
+  onRetry,
   onSelect,
 }: {
   documents: DocumentResponse[] | undefined;
   isPending: boolean;
   isError: boolean;
+  onRetry?: () => void;
   onSelect: (document: DocumentResponse) => void;
 }) {
   if (isPending) return <ListSkeleton />;
   if (isError) {
     return (
-      <p className="rounded-lg border border-gray-200 bg-white px-4 py-6 text-center text-sm text-gray-500">
-        Couldn’t load the documents. Please try again.
-      </p>
+      <ErrorState
+        title="Couldn’t load your documents"
+        message="Something went wrong loading this file’s documents."
+        onRetry={onRetry}
+      />
     );
   }
   if (!documents || documents.length === 0) {

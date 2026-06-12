@@ -1,6 +1,7 @@
 "use client";
 
 import { Button } from "@/components/ui/button";
+import { InlineErrorState } from "@/components/ui/error-state";
 import {
   Sheet,
   SheetContent,
@@ -16,6 +17,7 @@ import {
   useDocumentDetail,
   useOverrideDocumentType,
 } from "@/lib/api/documents";
+import { getErrorMessage } from "@/lib/errors/api-error";
 import { humanize } from "@/lib/format";
 import {
   OVERRIDE_TYPE_OPTIONS,
@@ -81,7 +83,8 @@ function TypeOverride({ summary, fileId }: { summary: DocumentResponse; fileId: 
             ? "Re-extracting in the background…"
             : "Relabeled — this type isn’t extracted.",
         }),
-      onError: () => toast.error("Couldn’t update the type"),
+      onError: (error) =>
+        toast.error("Couldn’t update the type", { description: getErrorMessage(error) }),
     });
   }
 
@@ -157,7 +160,7 @@ function DrawerBody({
   fileId: string;
   onClose: () => void;
 }) {
-  const { data: detail, isPending, isError } = useDocumentDetail(summary.id);
+  const { data: detail, isPending, isError, refetch } = useDocumentDetail(summary.id);
   const del = useDeleteDocument(fileId);
   const devTextLayer = useDevTextLayer(summary.id);
   const [downloading, setDownloading] = useState(false);
@@ -185,7 +188,8 @@ function DrawerBody({
         toast.success("Document removed");
         onClose();
       },
-      onError: () => toast.error("Couldn’t remove the document"),
+      onError: (error) =>
+        toast.error("Couldn’t remove the document", { description: getErrorMessage(error) }),
     });
   }
 
@@ -225,7 +229,11 @@ function DrawerBody({
               <Skeleton className="h-4 w-2/3" />
             </div>
           ) : isError ? (
-            <p className="mt-3 text-sm text-gray-400">Couldn’t load the extraction.</p>
+            <InlineErrorState
+              className="mt-1"
+              message="Couldn’t load the extraction."
+              onRetry={() => void refetch()}
+            />
           ) : extraction ? (
             <div className="mt-3">
               <ExtractionView data={extraction.extracted_data} />

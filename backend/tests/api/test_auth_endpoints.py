@@ -150,7 +150,8 @@ async def test_login_wrong_password_is_401_with_no_cookie(
     user = await _make_user(db_session)
     resp = await auth_client.post(LOGIN_URL, json={"email": user.email, "password": WRONG_PASSWORD})
     assert resp.status_code == 401
-    assert resp.json()["detail"] == "Invalid email or password"
+    # LP-46 envelope: {"error": {"type", "message"}}.
+    assert resp.json()["error"]["message"] == "Invalid email or password"
     assert REFRESH_TOKEN_COOKIE not in _set_cookie_header(resp)
 
 

@@ -33,18 +33,35 @@ export default function OverviewPage() {
           borrowers={borrowers.data}
           isPending={borrowers.isPending}
           isError={borrowers.isError}
+          onRetry={() => void borrowers.refetch()}
         />
-        <PropertyCard file={file.data} isPending={file.isPending} isError={file.isError} />
-        <LoanCard file={file.data} isPending={file.isPending} isError={file.isError} />
+        <PropertyCard
+          file={file.data}
+          isPending={file.isPending}
+          isError={file.isError}
+          onRetry={() => void file.refetch()}
+        />
+        <LoanCard
+          file={file.data}
+          isPending={file.isPending}
+          isError={file.isError}
+          onRetry={() => void file.refetch()}
+        />
       </div>
 
-      <NeedsSection needs={needs.data} isPending={needs.isPending} isError={needs.isError} />
+      <NeedsSection
+        needs={needs.data}
+        isPending={needs.isPending}
+        isError={needs.isError}
+        onRetry={() => void needs.refetch()}
+      />
 
       <div className="grid gap-4 lg:grid-cols-2">
         <ActivityFeed
           activity={activity.data}
           isPending={activity.isPending}
           isError={activity.isError}
+          onRetry={() => void activity.refetch()}
         />
         <div className="space-y-4">
           <OverviewPlaceholder

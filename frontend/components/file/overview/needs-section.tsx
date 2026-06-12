@@ -1,4 +1,5 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { InlineErrorState } from "@/components/ui/error-state";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   NEEDS_STATUS_LABELS,
@@ -14,10 +15,12 @@ export function NeedsSection({
   needs,
   isPending,
   isError,
+  onRetry,
 }: {
   needs: NeedsItemPublic[] | undefined;
   isPending: boolean;
   isError: boolean;
+  onRetry?: () => void;
 }) {
   const outstanding = needs ? outstandingNeedsCount(needs) : 0;
 
@@ -40,7 +43,7 @@ export function NeedsSection({
             <Skeleton className="h-9 w-full" />
           </div>
         ) : isError ? (
-          <p className="py-4 text-sm text-gray-400">Couldn&apos;t load the needs list.</p>
+          <InlineErrorState message="Couldn't load the needs list." onRetry={onRetry} />
         ) : !needs || needs.length === 0 ? (
           <p className="py-4 text-sm text-gray-400">No outstanding needs.</p>
         ) : (

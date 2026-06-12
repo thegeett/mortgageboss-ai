@@ -1,24 +1,24 @@
 "use client";
 
 import { useUploadDocuments } from "@/lib/api/documents";
+import { normalizeError } from "@/lib/errors/api-error";
 import { validateUploadFile } from "@/lib/loan-files/documents";
 import { cn } from "@/lib/utils";
-import { isAxiosError } from "axios";
 import { CloudUpload, Loader2 } from "lucide-react";
 import { useCallback } from "react";
 import { type FileRejection, useDropzone } from "react-dropzone";
 import { toast } from "sonner";
 
-/** Map a server validation failure to a friendly message (LP-36 is authoritative). */
+/** Map a server upload failure to a friendly message (LP-36 server is authoritative). */
 function serverErrorMessage(error: unknown): string {
-  if (isAxiosError(error)) {
-    const status = error.response?.status;
-    if (status === 413) return "A file exceeds the 50 MB limit.";
-    if (status === 415) return "A file type isn't supported (use PDF, JPG, or PNG).";
-    const detail = (error.response?.data as { detail?: string } | undefined)?.detail;
-    if (detail) return detail;
-  }
-  return "Upload failed. Please try again.";
+  const normalized = normalizeError(error);
+  // A couple of high-value specifics; otherwise trust the safe server message.
+  if (normalized.status === 413) return "A file exceeds the 50 MB limit.";
+  if (normalized.status === 415) return "A file type isn't supported (use PDF, JPG, or PNG).";
+  if (normalized.kind === "network") return normalized.message;
+  return normalized.message === "Something went wrong. Please try again."
+    ? "Upload failed. Please try again."
+    : normalized.message;
 }
 
 /**

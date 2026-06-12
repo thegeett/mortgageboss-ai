@@ -164,7 +164,37 @@ pipeline read them.
 The presentation/logic helpers live in `lib/loan-files/documents.ts` (status map, grouping,
 terminal rule, validation, extraction display) — unit-tested in `documents.test.ts`.
 
+## Error handling & feedback (LP-46)
+
+Failures are turned into clear, recoverable states (ADR-155) — no white screens,
+no infinite spinners, no console-only errors.
+
+- **Normalization** — `lib/errors/api-error.ts` `normalizeError()` maps any throw
+  (axios error, network failure, stray `Error`) into one
+  `{ kind, status, message, details }`, reading the backend envelope (LP-46) with
+  a legacy `detail` fallback and a safe generic default. Components display
+  `message` and branch on `kind`; mutation toasts use `getErrorMessage()`.
+- **Session expiry** — the axios layer (`lib/api/client.ts`) refreshes once on a
+  `401`; when the session is truly gone it clears auth and redirects to
+  `/login?next=…&reason=session_expired`, and the login form shows a "your
+  session expired" notice (a query param survives the navigation a toast would
+  not).
+- **Error boundary** — `components/error-boundary.tsx` (a class `ErrorBoundary` +
+  `DefaultErrorFallback`) is mounted top-level in `Providers` and around the
+  app-shell content. A render crash shows a friendly "Something went wrong" +
+  Try again (remounts the subtree; clears the query cache on the top-level
+  reset) instead of a blank page. The raw error is console-only, never rendered.
+- **Inline error states + retry** — `components/ui/error-state.tsx` (`ErrorState`
+  panel + compact `InlineErrorState`), each with a Retry that re-runs the failed
+  query. Used by the documents list, the drawer's extraction, and the overview
+  sections; the file-level 404 keeps the "doesn't exist or no access" state
+  (`FileError`).
+
+Component tests run under jsdom + React Testing Library (opt-in per file via a
+`// @vitest-environment jsdom` docblock; `@vitejs/plugin-react` transforms the
+`.tsx` test files).
+
 ## What's next
 
-- **LP-44** — manual document type override (correcting a `needs_review`/misclassified
-  document from the drawer).
+- **LP-47** — loading states & skeletons (the sibling of this ticket's error
+  states).

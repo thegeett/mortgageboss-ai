@@ -71,12 +71,17 @@ export async function refreshAccessToken(): Promise<string> {
   return refreshPromise;
 }
 
-/** Hard redirect to the login page, preserving where the user was headed. */
+/**
+ * Hard redirect to the login page after the session is truly gone, preserving
+ * where the user was headed and flagging *why* (so login shows a "session
+ * expired" message instead of silently bouncing them — LP-46). A query param
+ * survives the navigation reliably, unlike a toast the redirect would kill.
+ */
 function redirectToLogin(): void {
   if (typeof window === "undefined") return;
   if (window.location.pathname.startsWith("/login")) return;
   const next = encodeURIComponent(window.location.pathname + window.location.search);
-  window.location.assign(`/login?next=${next}`);
+  window.location.assign(`/login?next=${next}&reason=session_expired`);
 }
 
 // --- Response interceptor: auto-refresh once on 401, then retry ------------- //

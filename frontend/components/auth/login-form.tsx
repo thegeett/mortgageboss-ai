@@ -41,6 +41,9 @@ export function LoginForm() {
   const searchParams = useSearchParams();
   const isAuthenticated = useIsAuthenticated();
   const nextPath = getSafeNext(searchParams.get("next"));
+  // When the axios layer bounces an expired session here, tell the user why
+  // (LP-46) rather than dropping them on a bare login screen.
+  const sessionExpired = searchParams.get("reason") === "session_expired";
 
   const [formError, setFormError] = useState<string | null>(null);
   const [showPassword, setShowPassword] = useState(false);
@@ -73,6 +76,12 @@ export function LoginForm() {
   return (
     <Form {...form}>
       <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-5" noValidate>
+        {sessionExpired && !formError && (
+          <output className="flex items-start gap-2 rounded-md border border-warning/30 bg-warning/10 px-3 py-2.5 text-sm text-warning">
+            <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+            <span>Your session expired. Please sign in again to continue.</span>
+          </output>
+        )}
         {formError && (
           <div
             role="alert"

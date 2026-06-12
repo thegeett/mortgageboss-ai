@@ -14,6 +14,7 @@ import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { type BorrowerPayload, type PropertyPayload, submitIntake } from "@/lib/api/intake";
 import { useLenders } from "@/lib/api/lenders";
+import { normalizeError } from "@/lib/errors/api-error";
 import {
   INTAKE_DEFAULTS,
   type IntakeFormValues,
@@ -184,9 +185,15 @@ export function IntakeForm() {
     let result: Awaited<ReturnType<typeof submitIntake>>;
     try {
       result = await mutation.mutateAsync({ loanFile, borrower, property });
-    } catch {
-      // File creation (the gate) failed — stay on the form so the user can retry.
-      setFormError("We couldn't create the loan file. Check your connection and try again.");
+    } catch (error) {
+      // File creation (the gate) failed — stay on the form so the user can retry,
+      // surfacing the safe, normalized server/network message (LP-46).
+      const normalized = normalizeError(error);
+      setFormError(
+        normalized.kind === "network"
+          ? normalized.message
+          : "We couldn't create the loan file. Please try again.",
+      );
       return;
     }
 

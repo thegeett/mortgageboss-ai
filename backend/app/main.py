@@ -21,6 +21,7 @@ from app.core.database import (
     check_database_connection,
     close_database_connections,
 )
+from app.core.errors import register_exception_handlers
 from app.core.logging import get_logger, setup_logging
 from app.core.redis import check_redis_connection, close_redis_connections
 
@@ -74,6 +75,11 @@ app = FastAPI(
     version=settings.app_version,
     lifespan=lifespan,
 )
+
+# Consistent, SAFE error envelope for every API error (LP-46). Registered before
+# the routers so unhandled exceptions, HTTPExceptions, and validation errors all
+# return one shape ({"error": {type, message, details?}}) and never leak internals.
+register_exception_handlers(app)
 
 
 # CORS configuration

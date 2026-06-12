@@ -1,4 +1,5 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { InlineErrorState } from "@/components/ui/error-state";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { ActivityPublic } from "@/lib/types/activity";
 import { formatDistanceToNow } from "date-fns";
@@ -16,10 +17,12 @@ export function ActivityFeed({
   activity,
   isPending,
   isError,
+  onRetry,
 }: {
   activity: ActivityPublic[] | undefined;
   isPending: boolean;
   isError: boolean;
+  onRetry?: () => void;
 }) {
   return (
     <Card className="border-gray-200/80 shadow-sm">
@@ -37,7 +40,7 @@ export function ActivityFeed({
             <Skeleton className="h-4 w-2/3" />
           </div>
         ) : isError ? (
-          <p className="py-4 text-sm text-gray-400">Couldn&apos;t load activity.</p>
+          <InlineErrorState message="Couldn't load activity." onRetry={onRetry} />
         ) : !activity || activity.length === 0 ? (
           <p className="py-4 text-sm text-gray-400">No activity yet.</p>
         ) : (

@@ -6,7 +6,7 @@ import { formatMoney, humanize } from "@/lib/format";
 import { programLabel, purposeLabel } from "@/lib/loan-files/labels";
 import type { BorrowerDetail } from "@/lib/types/borrower";
 import type { LoanFileDetail } from "@/lib/types/loan-file";
-import { Building2, Landmark, Users } from "lucide-react";
+import { Building2, Landmark, TriangleAlert, Users } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
 function OverviewCard({
@@ -54,22 +54,42 @@ function CardEmpty({ message }: { message: string }) {
   return <p className="py-4 text-sm text-gray-400">{message}</p>;
 }
 
+function CardError({ message, onRetry }: { message: string; onRetry?: () => void }) {
+  return (
+    <div role="alert" className="flex items-center gap-2 py-4 text-sm text-gray-500">
+      <TriangleAlert className="h-4 w-4 shrink-0 text-destructive" />
+      <span>{message}</span>
+      {onRetry && (
+        <button
+          type="button"
+          onClick={onRetry}
+          className="font-medium text-primary underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1"
+        >
+          Retry
+        </button>
+      )}
+    </div>
+  );
+}
+
 interface CardState {
   isPending: boolean;
   isError: boolean;
+  onRetry?: () => void;
 }
 
 export function BorrowerCard({
   borrowers,
   isPending,
   isError,
+  onRetry,
 }: CardState & { borrowers: BorrowerDetail[] | undefined }) {
   return (
     <OverviewCard title="Borrowers" icon={Users}>
       {isPending ? (
         <CardSkeleton />
       ) : isError ? (
-        <CardEmpty message="Couldn't load borrowers." />
+        <CardError message="Couldn't load borrowers." onRetry={onRetry} />
       ) : !borrowers || borrowers.length === 0 ? (
         <CardEmpty message="No borrower added yet." />
       ) : (
@@ -102,6 +122,7 @@ export function PropertyCard({
   file,
   isPending,
   isError,
+  onRetry,
 }: CardState & { file: LoanFileDetail | undefined }) {
   const property = file?.property;
   return (
@@ -109,7 +130,7 @@ export function PropertyCard({
       {isPending ? (
         <CardSkeleton />
       ) : isError ? (
-        <CardEmpty message="Couldn't load the property." />
+        <CardError message="Couldn't load the property." onRetry={onRetry} />
       ) : !property ? (
         <CardEmpty message="No property added yet." />
       ) : (
@@ -138,13 +159,14 @@ export function LoanCard({
   file,
   isPending,
   isError,
+  onRetry,
 }: CardState & { file: LoanFileDetail | undefined }) {
   return (
     <OverviewCard title="Loan" icon={Landmark}>
       {isPending ? (
         <CardSkeleton />
       ) : isError || !file ? (
-        <CardEmpty message="Couldn't load loan details." />
+        <CardError message="Couldn't load loan details." onRetry={onRetry} />
       ) : (
         <div>
           <Row label="Status" value={<StatusBadge status={file.status} />} />

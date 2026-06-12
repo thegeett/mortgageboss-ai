@@ -23,6 +23,29 @@ for the tenancy model.
 - **Transactions** — `get_db` does not auto-commit; write endpoints commit after
   the service flushes.
 
+## Error responses (LP-46)
+
+Every error uses **one envelope** (ADR-154), so a client has a single shape to
+handle:
+
+```json
+{ "error": { "type": "not_found", "message": "Loan file not found" } }
+```
+
+- `type` — a stable code derived from the status (`unauthorized`, `forbidden`,
+  `not_found`, `conflict`, `validation_error`, `internal_error`, …).
+- `message` — a **SAFE**, human-readable sentence. Never a stack trace, internal
+  path, DB text, or PII.
+- `details` — present only for **422** validation errors: a list of
+  `{ "field": "loan_amount", "message": "…" }` (the message describes the
+  *constraint*, never echoes the submitted value).
+
+A global handler (`app/core/errors.py`) guarantees the envelope for: any
+unhandled exception → a generic **500** (`"An unexpected error occurred…"`; full
+detail logged server-side as PII-safe metadata only — error type, path, method),
+`HTTPException` (404/401/403/409/…), and `RequestValidationError` (422). No
+endpoint returns a raw 500, a stack trace, or framework HTML.
+
 ## Loan files (LP-28)
 
 Base path: `/api/v1/loan-files`. Identifiers in paths may be the **UUID** or the
