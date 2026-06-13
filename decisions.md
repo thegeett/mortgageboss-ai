@@ -4293,8 +4293,9 @@ LP-46 error states (the shared four-state model). Component tests reuse the LP-4
 `uv run python -m app.scripts.seed_dev_data [--reset]`) seeds realistic demo data — one company,
 an admin + a processor user, the UWM and Sun-West lenders, and **three loan files in various
 workflow states** (fresh / mid / near-submission) with fake-PII borrowers, properties, loan
-details, documents in various processing states (COMPLETED + NEEDS_REVIEW + PENDING), needs, and
-activity. It is **idempotent** (check-and-skip by stable identifiers — company slug, user email,
+details, documents in various processing states (COMPLETED with extractions, COMPLETED
+classified-only, and NEEDS_REVIEW — all terminal, so seeded files never poll without a worker),
+needs, and activity. It is **idempotent** (check-and-skip by stable identifiers — company slug, user email,
 lender slug; loan-file seeding skips if the company already has files), with a `--reset` that
 **hard-clears** the seeded company (DB cascade + its local storage subtree) and recreates it.
 **Dev-only**: a production guard refuses to run (exit 1, writes nothing) when
@@ -4317,3 +4318,28 @@ utility). Known dev credentials (`admin@summit-demo.com` / `priya@summit-demo.co
 (`app.scripts.seed_dev`, company `demo`) is kept for a quick two-user setup; `seed_dev_data` is the
 comprehensive demo seed. Emails use a real `.com` TLD because Pydantic `EmailStr` rejects reserved
 `.test`/`.example` TLDs and the login endpoint must accept the seeded accounts.
+
+---
+
+## ADR-158: Documents live-poll has a backstop (stop polling a stuck document)
+
+- **Date:** 2026-06-12
+- **Status:** Accepted
+
+**Decision:** The documents-list live poll (LP-43, `useLoanFileDocuments`) keeps a hard cap:
+`documentsRefetchInterval(documents, fetchCount)` polls every 2.5s while any document is
+non-terminal, but stops once **either** all documents are terminal **or** the fetch count exceeds a
+backstop (`MAX_STATUS_POLLS` ≈ 40 fetches ≈ 100s). A page refresh resumes polling.
+
+**Rationale:** A document only leaves a non-terminal state (`pending`/`classifying`/`extracting`)
+when a Celery worker processes it. With no worker running — common in local dev and demos — a
+document sits `PENDING` forever, and the unbounded poll hammered the endpoint indefinitely
+(observed on a seeded/uploaded doc with no worker). Normal processing settles in a few polls, far
+under the cap, so live updates are unchanged; the backstop only bounds the pathological "stuck doc"
+case.
+
+**Consequences:** Worst case, a genuinely stuck document stops auto-refreshing after ~100s (the
+documents stay visible — only the background refresh stops; refresh to resume). The function is
+extracted and unit-tested. Separately, the LP-48 seed was adjusted so its documents are all in
+**terminal** states (no perpetually-`PENDING` seeded doc), so seeded files don't rely on the
+backstop at all.

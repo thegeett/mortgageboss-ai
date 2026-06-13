@@ -19,7 +19,27 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { isAxiosError } from "axios";
 
 const API_V1 = "/api/v1";
-const POLL_INTERVAL_MS = 2500;
+export const POLL_INTERVAL_MS = 2500;
+// Backstop: stop auto-polling after this many fetches even if a document is
+// still in a non-terminal state, so a document that won't advance — no Celery
+// worker running, or a pipeline that died — doesn't make the page hammer the
+// endpoint forever. Normal processing settles in a few polls (well under this
+// cap); a refresh resumes polling. ~40 × 2.5s ≈ 100s.
+export const MAX_STATUS_POLLS = 40;
+
+/**
+ * The polling interval for the documents list: keep polling while any document
+ * is in-progress, but stop once everything is terminal OR the backstop is hit.
+ * Extracted (and exported) so the backstop is unit-testable.
+ */
+export function documentsRefetchInterval(
+  documents: DocumentResponse[] | undefined,
+  fetchCount: number,
+): number | false {
+  if (!documents || !hasInProgressDocuments(documents)) return false;
+  if (fetchCount > MAX_STATUS_POLLS) return false; // stuck doc → stop hammering
+  return POLL_INTERVAL_MS;
+}
 
 /** A 404 (missing or out-of-company) won't change on retry — surface it. */
 function noRetryOn404(failureCount: number, error: unknown): boolean {
@@ -43,11 +63,10 @@ export function useLoanFileDocuments(fileId: string) {
     queryFn: () => fetchLoanFileDocuments(fileId),
     enabled: Boolean(fileId),
     retry: noRetryOn404,
-    // Poll WHILE any document is in-progress; STOP once all are terminal.
-    refetchInterval: (query) => {
-      const docs = query.state.data;
-      return docs && hasInProgressDocuments(docs) ? POLL_INTERVAL_MS : false;
-    },
+    // Poll WHILE any document is in-progress; STOP once all are terminal or the
+    // backstop trips (dataUpdateCount = the number of successful fetches so far).
+    refetchInterval: (query) =>
+      documentsRefetchInterval(query.state.data, query.state.dataUpdateCount),
   });
 }
 

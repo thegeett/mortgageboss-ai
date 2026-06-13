@@ -679,17 +679,19 @@ async def _seed_loan_files(
         cost_estimate=0.0098,
         error_detail="Some fields were low-confidence; flagged for review.",
     )
-    # A document still waiting in the queue (PENDING, no extraction yet).
-    await _add_document(
+    # A photo ID: COMPLETED but classified-only — a driver's license isn't an
+    # extractable type, so the pipeline classifies it and stores no extraction
+    # (the realistic outcome; nothing stays stuck without a worker).
+    id_doc = await _add_document(
         db,
         company=company,
         loan_file=file_c,
         uploader=processor,
         filename="ellis-id.pdf",
-        document_type=None,
-        category=None,
-        status=DocumentStatus.PENDING,
-        confidence=None,
+        document_type="drivers_license",
+        category=DocumentCategory.BORROWER_INFO,
+        status=DocumentStatus.COMPLETED,
+        confidence=0.93,
     )
     await _add_need(
         db,
@@ -704,7 +706,8 @@ async def _seed_loan_files(
         loan_file=file_c,
         title="Government-issued photo ID",
         category=DocumentCategory.BORROWER_INFO,
-        status=NeedsItemStatus.REQUESTED,
+        status=NeedsItemStatus.RECEIVED,
+        satisfied_by=id_doc,
     )
     await _add_need(
         db,
