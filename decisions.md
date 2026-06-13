@@ -4477,3 +4477,33 @@ logged**; logging is metadata-only (ids + counts); the raw file is tenant-scoped
 *borrower* address has no typed column on `Borrower` (only the subject property has an address), so
 it's parsed but not persisted to a typed field — a later model change. The import record + raw file
 set up future re-import/versioning.
+
+---
+
+## ADR-163: MISMO upload endpoint — inline (not Celery), thin orchestration, graceful error mapping
+
+- **Date:** 2026-06-12
+- **Status:** Accepted
+
+**Decision:** `POST /api/v1/loan-files/import-mismo` (in the loan-files router) accepts a multipart
+MISMO file (XML or HTML-wrapped) and runs **parse (LP-51) → create (LP-53) inline** (synchronously,
+in-request), then commits and returns the created file plus parse warnings (`MismoImportResponse =
+{ loan_file: LoanFileDetail, warnings: [...] }`, status `201`). The endpoint is **thin** — boundary
+concerns only: it reads the bytes with a size cap (`413` over ~10 MB), rejects an empty upload
+(`422`), and takes `company_id` from the authenticated user (never the body). Content validation is
+`parse_mismo`'s job (don't over-restrict content-type). Failures map to safe **LP-46 envelope**
+errors: `MismoParseError` (not-XML / not-MISMO) → `400`; `MismoImportError` (the floor — no borrower
+and no loan) → `422`; an unexpected error → the global safe `500`. A **partial parse** is *not* an
+error — it returns `201` with the created file and the warnings (success-with-warnings). It reloads
++ returns via `LoanFileDetail` exactly like the manual create endpoint (converges).
+
+**Rationale:** MISMO parsing is **fast, deterministic** work (lxml on a ~60 KB file + a few inserts,
+**no AI**) — unlike document processing, which is slow/AI-bound and therefore uses Celery (LP-41/42).
+So inline is appropriate, simpler (no enqueue/poll/status-lifecycle), and the response *being* the
+created file matches **import-directly** (the frontend navigates straight to the populated file).
+The endpoint stays thin because the work lives in the services; graceful errors reuse LP-46.
+
+**Consequences:** no background job for MISMO import; if a real file ever proved slow it could move
+to background later. The SSN is masked in the response (existing `LoanFileDetail`) and never logged;
+logging is metadata-only (file id, source format, warning count). LP-55 (the upload UI) calls this
+endpoint.
