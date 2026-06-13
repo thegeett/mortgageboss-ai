@@ -126,7 +126,8 @@ function Group({
   title,
   children,
   onAdd,
-}: { title: string; children: React.ReactNode; onAdd: () => void }) {
+  empty = false,
+}: { title: string; children: React.ReactNode; onAdd: () => void; empty?: boolean }) {
   return (
     <section className="mt-5 first:mt-0">
       <div className="mb-1.5 flex items-center justify-between">
@@ -140,7 +141,13 @@ function Group({
           Add
         </button>
       </div>
-      <div className="space-y-2">{children}</div>
+      {empty ? (
+        <p className="rounded-lg border border-dashed border-gray-200 px-3 py-2.5 text-xs text-gray-400">
+          None imported — use “Add” if any apply.
+        </p>
+      ) : (
+        <div className="space-y-2">{children}</div>
+      )}
     </section>
   );
 }
@@ -198,6 +205,7 @@ export function StatedFinancialsEditor({
         <Group
           key={b.id}
           title={`Income — ${b.full_name || "Borrower"}`}
+          empty={b.income_items.length === 0 && b.employers.length === 0}
           onAdd={() =>
             edit.addIncome.mutate(
               { borrowerId: b.id, body: {} },
@@ -235,6 +243,7 @@ export function StatedFinancialsEditor({
 
       <Group
         title="Liabilities"
+        empty={data.liabilities.length === 0}
         onAdd={() =>
           edit.addLiability.mutate(
             {},
@@ -261,6 +270,7 @@ export function StatedFinancialsEditor({
 
       <Group
         title="Assets"
+        empty={data.assets.length === 0}
         onAdd={() =>
           edit.addAsset.mutate({}, { onSuccess: () => toast.success("Asset added"), onError })
         }

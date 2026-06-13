@@ -4588,3 +4588,45 @@ warnings flagged). Extending an Update schema automatically makes that field edi
 existing endpoint — the pattern to follow for future fields. Reusing `FILE_UPDATED` keeps edit
 provenance coarse (summary text, not a typed diff); a finer field-level audit, if needed, is a later
 change. Scope is **correct + add/remove rows**, not a from-scratch application builder.
+
+## ADR-166: Phase-1.5 consolidation — parser hardened against synthetic variants (one real file), with an honest limitation
+
+- **Date:** 2026-06-13
+- **Status:** Accepted
+
+**Decision:** Close Phase 1.5 by making the MISMO feature durable: full-flow integration tests
+(upload → parse → create → store → read → edit, real stack), a systematic tenant-isolation pass
+across every new MISMO endpoint (each 404 cross-company), parser hardening against MORE files, MISMO
+flow polish, a MISMO seed file, and docs. Two substantive choices are recorded here:
+
+1. **Hardening against synthetic variants, stated honestly.** No additional real MISMO files were
+   supplied (checked `/mnt/user-data/uploads/` and the repo — only `MISMO16940192.xml` exists). Rather
+   than overclaim robustness, the parser is hardened against **synthetic variants derived from the one
+   real file** (FHA mortgage type, a genuine distinct second borrower, missing optional sections, an
+   unsupported mortgage type, a zero-income deal, HTML-wrapped) via a small builder
+   (`tests/mismo/synthetic.py`). These **confirm** the LP-51 tolerance claims hold for those specific
+   variations (multi-borrower income/employers attribute to the correct borrower; FHA/VA/unknown types
+   are tolerated; dropped sections degrade to empty + warnings, never a crash). They **do not** exercise
+   real-LOS variation (different element ordering/namespaces, FHA-specific sections like UFMIP/MIP/case
+   number, true co-borrower layouts). The ticket states this limitation plainly: a real FHA file and a
+   real multi-borrower file are still needed to fully harden. No parser **fix** was required because no
+   real second file exposed a gap — only a proactive hardening was added (see #2).
+
+2. **One proactive needed-now warning — zero-income deals.** The probe surfaced that a deal with no
+   stated income for any borrower parsed silently (no warning). Income drives DTI, so a zero-income
+   parse is almost always an incomplete file or a parse gap. The parser now appends a non-blocking
+   `parse_warning` ("No income was found for any borrower.") in that case — consistent with the
+   existing needed-now warnings (missing borrower name, base loan amount, property value) and the
+   honest, non-blocking warnings philosophy (ADR-164). It does not fire on the real fixture (which has
+   income), so existing exact-value tests are unchanged.
+
+**Rationale:** a parser validated against a single example is fragile; the synthetic variants test the
+tolerance claim against structural variation now, and the honest limitation note keeps the robustness
+claim truthful. The seed gains a MISMO-imported file (the real fixture scrubbed to fully-synthetic PII,
+run through the real LP-53 import service) so dev data exercises the MISMO path end to end without
+storing any real person's data.
+
+**Consequences:** Phase 1.5 is documented complete with explicit deferred items (re-import/versioning,
+smart-needs/LP-58, AI-fallback, core-field edit UI). When real files arrive, drop them into
+`tests/fixtures/mismo/` and add assertions — the synthetic builder and the full-flow/isolation tests
+are the harness they slot into. Otherwise this is testing/polish/hardening; no architectural change.

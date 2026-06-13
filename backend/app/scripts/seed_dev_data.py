@@ -6,12 +6,16 @@ Usage::
     uv run python -m app.scripts.seed_dev_data --reset  # clear seeded data + recreate
 
 Creates one company, an **admin** + a **processor** user (known dev credentials,
-printed at the end), the **UWM** and **Sun-West** lenders, and **three loan files
-in various workflow states** (fresh / mid / near-submission) — each with a
+printed at the end), the **UWM** and **Sun-West** lenders, and **four loan files**
+— three in various workflow states (fresh / mid / near-submission), each with a
 fake-PII borrower (synthetic SSN written through the encrypted column), a
 property, loan details, documents in various processing states with
 **pre-canned** extractions (no AI calls — the extraction JSON is built from the
-real LP-39a Pydantic models so the shape can't drift), needs items, and activity.
+real LP-39a Pydantic models so the shape can't drift), needs items, and activity;
+plus a fourth file **imported from MISMO** (LP-57) through the real import service
+(the fixture scrubbed to fully-synthetic PII), so the seed includes a file with
+real stated financials (income/employers/liabilities/assets) and a MismoImport
+record — exercising the MISMO path end to end.
 
 Safety:
 - **Production guard** — refuses to run if ``settings`` says production.
@@ -36,6 +40,7 @@ from pathlib import Path
 from uuid import UUID, uuid4
 
 import structlog
+from lxml import etree
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -46,6 +51,8 @@ from app.ai.extraction.w2 import W2Extraction
 from app.core.config import settings
 from app.core.database import async_session_maker
 from app.core.security import hash_password
+from app.mismo.import_service import create_loan_file_from_mismo
+from app.mismo.parser import NS, parse_mismo
 from app.models.activity_log import ActivityType
 from app.models.base import utcnow
 from app.models.borrower import Borrower, MaritalStatus
@@ -77,6 +84,14 @@ _ADMIN_EMAIL = "admin@summit-demo.com"
 _PROCESSOR_EMAIL = "priya@summit-demo.com"
 _SEED_PASSWORD = "DevPassword123!"  # pragma: allowlist secret  (DEV-ONLY, documented)
 _MODEL_USED = "claude-sonnet-4-6"  # plausible placeholder for seeded extractions
+
+# The one real MISMO fixture — sanitized to fully-synthetic PII before seeding so
+# the seed exercises the real import path (LP-53) without storing any real person's
+# data. Dev-only script, so reading from tests/fixtures is acceptable.
+_MISMO_FIXTURE = (
+    Path(__file__).resolve().parents[2] / "tests" / "fixtures" / "mismo" / "MISMO16940192.xml"
+)
+_SYNTHETIC_SSN = "900223344"  # pragma: allowlist secret  (never-issued 900- range)
 
 
 # --------------------------------------------------------------------------- #
@@ -424,6 +439,39 @@ async def _add_need(
 
 
 # --------------------------------------------------------------------------- #
+# MISMO seed — the real fixture, scrubbed to fully-synthetic PII
+# --------------------------------------------------------------------------- #
+
+
+def _synthetic_mismo_bytes() -> bytes | None:
+    """The real fixture with ALL borrower/party PII replaced by synthetic values.
+
+    Returns ``None`` if the fixture is absent (so the seed degrades gracefully).
+    Scrubs every individual name, email, phone, and SSN — so the seeded MISMO file
+    contains no real person's data while still exercising the real parse/import.
+    """
+    if not _MISMO_FIXTURE.exists():
+        return None
+    root = etree.fromstring(_MISMO_FIXTURE.read_bytes())
+
+    def _set_all(xpath: str, value: str) -> None:
+        for el in root.findall(xpath, NS):
+            el.text = value
+
+    _set_all(".//m:INDIVIDUAL/m:NAME/m:FirstName", "Casey")
+    _set_all(".//m:INDIVIDUAL/m:NAME/m:LastName", "Demo")
+    _set_all(".//m:INDIVIDUAL/m:NAME/m:FullName", "Casey Demo")
+    _set_all(".//m:CONTACT_POINT_EMAIL/m:ContactPointEmailValue", "casey.demo@example.com")
+    _set_all(".//m:CONTACT_POINT_TELEPHONE/m:ContactPointTelephoneValue", "2065550100")
+    for tid in root.findall(".//m:TAXPAYER_IDENTIFIER", NS):
+        ttype = tid.find("m:TaxpayerIdentifierType", NS)
+        tvalue = tid.find("m:TaxpayerIdentifierValue", NS)
+        if ttype is not None and ttype.text == "SocialSecurityNumber" and tvalue is not None:
+            tvalue.text = _SYNTHETIC_SSN
+    return bytes(etree.tostring(root))
+
+
+# --------------------------------------------------------------------------- #
 # The three loan files, in various workflow states
 # --------------------------------------------------------------------------- #
 
@@ -726,6 +774,26 @@ async def _seed_loan_files(
         )
     created += 1
 
+    # --- File D — imported from MISMO (exercises the real LP-53 import path) --- #
+    # Uses the real fixture scrubbed to fully-synthetic PII, run through the same
+    # import service the upload endpoint uses, so the seed includes a file with
+    # real stated financials (income/employers/liabilities/assets) + the raw file
+    # + a MismoImport record — the MISMO path, end to end. Skipped if the fixture
+    # is unavailable (graceful).
+    mismo_bytes = _synthetic_mismo_bytes()
+    if mismo_bytes is not None:
+        parsed = parse_mismo(mismo_bytes)
+        await create_loan_file_from_mismo(
+            db,
+            parsed=parsed,
+            company_id=company.id,
+            raw_content=mismo_bytes,
+            actor_user_id=processor.id,
+        )
+        created += 1
+    else:
+        logger.info("seed_mismo_skipped_fixture_missing", path=str(_MISMO_FIXTURE))
+
     return created
 
 
@@ -875,6 +943,7 @@ def _print_summary(
     print("\n=== Dev seed complete (DEV-ONLY) ===")
     print(f"Company: {_COMPANY_NAME} (slug: {_COMPANY_SLUG}) [{state}]")
     print(f"Loan files seeded this run: {files_created} (re-runs skip existing)")
+    print("  Incl. one file imported from MISMO (synthetic PII) — the LP-53 import path.")
     print("Login (DEV-ONLY passwords):")
     print(f"  Admin:     {_ADMIN_EMAIL} / {_SEED_PASSWORD}")
     print(f"  Processor: {_PROCESSOR_EMAIL} / {_SEED_PASSWORD}")

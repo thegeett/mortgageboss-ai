@@ -234,6 +234,11 @@ def _parse_borrowers(deal: etree._Element, ctx: _Ctx) -> list[ParsedBorrower]:
     for i, b in enumerate(borrowers):
         if not (b.full_name or b.last_name):
             ctx.warnings.append(f"Borrower #{i + 1} is missing a name.")
+    # Needed-now: stated income drives DTI. A deal with no income for ANY borrower
+    # is almost always an incomplete file or a parse gap — flag it (non-blocking),
+    # rather than silently importing a file with no income at all.
+    if borrowers and not any(b.income_items for b in borrowers):
+        ctx.warnings.append("No income was found for any borrower.")
     return borrowers
 
 
