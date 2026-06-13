@@ -4343,3 +4343,38 @@ documents stay visible — only the background refresh stops; refresh to resume)
 extracted and unit-tested. Separately, the LP-48 seed was adjusted so its documents are all in
 **terminal** states (no perpetually-`PENDING` seeded doc), so seeded files don't rely on the
 backstop at all.
+
+---
+
+## ADR-159: Deterministic MISMO parsing (lxml/XPath) — typed core + catch-all, tolerant + exact
+
+- **Date:** 2026-06-12
+- **Status:** Accepted
+
+**Decision:** MISMO 3.4 application files are parsed **deterministically** with lxml/XPath
+(`app/mismo/parser.py` → `parse_mismo(content) -> ParsedMismo`), not by AI. The result is a
+**typed core** (borrowers — name/DOB/SSN/contact/address/income/employers/1003 declarations; loan;
+property; liabilities; assets — the stated data needed for file creation and Phase-3 verification)
+plus a **catch-all** of every other leaf in the deal, grouped by section, so nothing is lost.
+Values are read **exactly** (`Decimal` for money/rates, `date` for dates, SSN verbatim). The parser
+is **tolerant**: a missing/optional element becomes `None`/`[]` with a `parse_warning` for
+needed-now fields, never a crash. It accepts raw XML **and** HTML-wrapped XML (the embedded
+`<MESSAGE>…</MESSAGE>` island is sliced out first; `source_format` records which). Validation
+failures (not XML / not MISMO / no DEAL) raise `MismoParseError` with a safe message; missing data
+yields a partial parse + warnings rather than failing. **AI-fallback** for non-compliant files is a
+documented **future** option, not built.
+
+**Rationale:** MISMO is a standardized, machine-parseable schema and the sister's LOS emits
+compliant MISMO, so deterministic parsing is exact, free, fast, and auditable. The stated financial
+data is the source-of-truth baseline (the *stated* side of stated-vs-verified) and must be read
+exactly — an AI misread of stated income/amounts would corrupt that baseline. The typed-core +
+catch-all shape mirrors document extraction (LP-39a) and guarantees no field is dropped. lxml is
+configured XXE-safe (`resolve_entities=False`, `no_network=True`).
+
+**Consequences:** The catch-all tracks which leaves the typed core consumed (via stable element
+paths) so it captures exactly "everything else" — and the **SSN is consumed**, so it never lands in
+the catch-all. Logging is **metadata-only** (counts, source format, warning count) — never the SSN,
+names, amounts, or raw content. The next ticket consumes `ParsedMismo` to map to DB models, encrypt
+the SSN, and create a loan file. A real sample
+(`backend/tests/fixtures/mismo/MISMO16940192.xml`) anchors correctness with exact-value tests; the
+typed core grows as later phases need more fields, and more real files will harden tolerance.

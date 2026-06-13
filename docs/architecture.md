@@ -380,6 +380,35 @@ The integration payoff: the Celery task `documents.process_document(document_id)
 - **Privacy** — never logs bytes/text/extracted values; only metadata
   (ids, status, type, confidence, tokens/cost).
 
+## MISMO parsing (LP-51)
+
+MISMO import is the **primary** file-creation path — the processor receives loan applications as
+**MISMO 3.4 XML** from her LOS rather than typing forms. `app/mismo/parser.py` →
+`parse_mismo(content: bytes | str) -> ParsedMismo` parses it.
+
+- **Deterministic, not AI** (lxml/XPath). MISMO is a standardized, machine-parseable schema and the
+  stated financial data is the **source-of-truth baseline** (the *stated* side of stated-vs-verified)
+  that must be read **exactly** — an AI misread would corrupt it. Deterministic is exact, free,
+  fast, auditable. AI-fallback for non-compliant files is a documented **future** option.
+- **Typed core + catch-all** (`app/mismo/schema.py`, mirrors the LP-39a extraction shape): a typed
+  core (borrowers — name/SSN/DOB/contact/income/employers/1003 declarations; loan; property;
+  liabilities; assets — the stated data needed now + by Phase-3 verification) plus a **catch-all** of
+  every other leaf in the deal, grouped by section, so **nothing is dropped**. Money/rates are
+  `Decimal`, dates are `date`.
+- **Tolerant**: a missing/optional element → `None`/`[]` with a `parse_warning` for needed-now
+  fields; never crashes. Multiple borrowers supported.
+- **HTML-wrapped XML**: if the file is HTML wrapping the MISMO XML, the embedded `<MESSAGE>…
+  </MESSAGE>` island is sliced out first (`source_format` records `xml` vs `html`).
+- **Validation**: not-XML / not-MISMO / no-DEAL → `MismoParseError` (safe message); missing data →
+  a partial parse + warnings (never an unhandled crash). lxml is XXE-safe (no entity resolution, no
+  network).
+- **PII**: the borrower SSN is parsed into the structure but **never logged** (metadata-only logging
+  — counts/format/warning-count) and is kept out of the catch-all; encryption/masking is downstream.
+
+The parser produces an intermediate representation only; mapping to DB models, encrypting the SSN,
+and creating a loan file are later Phase-1.5 tickets. A real sample
+(`tests/fixtures/mismo/MISMO16940192.xml`) anchors correctness with exact-value tests.
+
 ## Data flow (intended V1)
 
 How a loan file moves through the system once feature work lands:
