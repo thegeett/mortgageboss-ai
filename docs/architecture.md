@@ -405,8 +405,20 @@ MISMO import is the **primary** file-creation path — the processor receives lo
 - **PII**: the borrower SSN is parsed into the structure but **never logged** (metadata-only logging
   — counts/format/warning-count) and is kept out of the catch-all; encryption/masking is downstream.
 
-The parser produces an intermediate representation only; mapping to DB models, encrypting the SSN,
-and creating a loan file are later Phase-1.5 tickets. A real sample
+The parser produces an intermediate representation only.
+
+### MISMO import service (LP-53)
+
+`app/mismo/import_service.py` → `create_loan_file_from_mismo(db, *, parsed, company_id, raw_content,
+…)` is the single seam that maps a `ParsedMismo` into the LP-52 models and creates a populated
+`LoanFile` (borrower(s) + property + loan terms + stated income/employers/liabilities/assets +
+catch-all + a stored raw file for audit + a `MismoImport` record). It **reuses Epic 4's
+`create_loan_file` / `create_property`** so a MISMO file **converges** on the same `LoanFile` as a
+manually-created one. The whole creation is **transactional** (the service flushes; the endpoint
+commits — all-or-nothing). **Import-directly**: a partial parse still creates the file (missing →
+`None`) with `parse_warnings` on the `MismoImport`; the floor is a borrower **or** loan present
+(else `MismoImportError`). The SSN is stored only through the encrypted Borrower column and is never
+logged; logging is metadata-only; the raw file is tenant-scoped. A real sample
 (`tests/fixtures/mismo/MISMO16940192.xml`) anchors correctness with exact-value tests.
 
 ## Data flow (intended V1)

@@ -4440,3 +4440,40 @@ preserved. The import record is the audit trail and the foundation for future re
 **Consequences:** PII in the catch-all / raw file is access-controlled (tenant-scoped via the file)
 and never logged. The bytes of the raw file are written by the upload path (LP-53/54); this ticket
 provides the column/reference. Re-import/versioning builds on the import record.
+
+---
+
+## ADR-162: MISMO import service — the mapping seam; converges with manual creation; transactional; partial-parse create+warn
+
+- **Date:** 2026-06-12
+- **Status:** Accepted
+
+**Decision:** `create_loan_file_from_mismo(db, *, parsed, company_id, raw_content, source_format=None,
+actor_user_id=None)` (`app/mismo/import_service.py`) is the single seam that maps a `ParsedMismo`
+(LP-51) into the LP-52 models and creates a populated `LoanFile`. It **reuses Epic 4's
+`create_loan_file` and `create_property`** so a MISMO file is the *same* `LoanFile` (same model, same
+downstream) as a manually-created one — they **converge**. Borrowers are constructed directly
+(rather than via `create_borrower`) so they can carry the MISMO-only fields, tolerate a
+non-`EmailStr` email, and position multiple borrowers; the resulting `Borrower` is identical. It maps
+the stated financials into `StatedIncomeItem`/`StatedEmployer` (per borrower) and
+`StatedLiability`/`StatedAsset` (per file), stores the catch-all + a stored raw MISMO file (audit) +
+a `MismoImport` record, and logs a `FILE_CREATED` activity. The service **flushes**; the caller (the
+LP-54 endpoint) **commits**, so the whole creation is one **all-or-nothing** transaction. MISMO
+category strings are mapped to our small domain enums (marital / program / purpose / occupancy) with
+**unknown → None** (the file is still created); large/evolving categories stay flexible strings.
+
+**Partial-parse (import-directly):** a parse with missing optional fields still creates the file
+(missing → `None`); `parse_warnings` are stored on the `MismoImport` (status `PARTIAL`) and surfaced
+later (LP-55/56). **Floor:** if there is *no* borrower **and** no loan at all, raise
+`MismoImportError`; anything above that (a borrower **or** loan present) creates the file.
+
+**Rationale:** isolating the mapping keeps the parser and the models ignorant of each other.
+Convergence keeps one kind of file. Import-directly + tolerant parsing means a partial file is
+created and corrected later, not blocked. Exact `Decimal` mapping preserves the source-of-truth
+baseline. The SSN is stored only through the existing encrypted Borrower column and is **never
+logged**; logging is metadata-only (ids + counts); the raw file is tenant-scoped and never logged.
+
+**Consequences:** LP-54 (endpoint) calls this service and owns the commit. Known gap: the MISMO
+*borrower* address has no typed column on `Borrower` (only the subject property has an address), so
+it's parsed but not persisted to a typed field — a later model change. The import record + raw file
+set up future re-import/versioning.
