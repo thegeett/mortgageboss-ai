@@ -168,6 +168,43 @@ async def test_created_file_scoped_to_user_company(
     assert (await client.get(f"/api/v1/loan-files/{file_id}")).status_code == 404
 
 
+async def test_stated_financials_read_after_import(
+    auth_client: AsyncClient, raw_bytes: bytes
+) -> None:
+    """After import, the stated-financials read exposes the populated data (LP-55)."""
+    file_id = (await auth_client.post(IMPORT_URL, files=_upload(raw_bytes))).json()["loan_file"][
+        "id"
+    ]
+    resp = await auth_client.get(f"/api/v1/loan-files/{file_id}/stated-financials")
+    assert resp.status_code == 200
+    body = resp.json()
+    borrower = body["borrowers"][0]
+    assert borrower["full_name"] == "Mahesh Chhotala"
+    assert borrower["masked_ssn"] is not None and "900112233" not in resp.text  # masked, not raw
+    assert len(borrower["income_items"]) == 2
+    assert len(borrower["employers"]) == 3
+    assert len(body["liabilities"]) == 10
+    assert len(body["assets"]) == 9
+    assert body["loan_terms"]["note_rate_percent"] == "6.8750"
+    assert body["mismo_import"]["source_format"] == "xml"
+    assert body["mismo_import"]["warnings"] == []
+
+
+async def test_stated_financials_tenant_scoped(
+    auth_client: AsyncClient, client: AsyncClient, db, company_a: Company, raw_bytes: bytes
+) -> None:
+    from tests.integration import factories
+
+    file_id = (await auth_client.post(IMPORT_URL, files=_upload(raw_bytes))).json()["loan_file"][
+        "id"
+    ]
+    other = await factories.make_company(db, slug="other-sf")
+    other_user = await factories.make_user(db, company=other, email="x@other-sf.com")
+    client.headers["Authorization"] = f"Bearer {factories.token_for(other_user)}"
+    resp = await client.get(f"/api/v1/loan-files/{file_id}/stated-financials")
+    assert resp.status_code == 404  # not the caller's file
+
+
 async def test_no_pii_logged(auth_client: AsyncClient, raw_bytes: bytes) -> None:
     with structlog.testing.capture_logs() as logs:
         resp = await auth_client.post(IMPORT_URL, files=_upload(raw_bytes))

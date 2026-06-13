@@ -29,6 +29,7 @@ from app.schemas.loan_file import (
     PaginatedLoanFiles,
 )
 from app.schemas.mismo import MismoImportResponse
+from app.schemas.stated_financials import StatedFinancialsResponse
 from app.services.loan_files import (
     create_loan_file_with_setup,
     get_loan_file,
@@ -36,6 +37,7 @@ from app.services.loan_files import (
     soft_delete_loan_file_with_activity,
     update_loan_file_with_activity,
 )
+from app.services.stated_financials import get_stated_financials
 
 log = structlog.get_logger(__name__)
 
@@ -216,6 +218,24 @@ async def retrieve(identifier: str, db: DbSession, current_user: CurrentUser) ->
     if loan_file is None:
         raise _NOT_FOUND
     return LoanFileDetail.from_model(loan_file)
+
+
+@router.get("/{identifier}/stated-financials", response_model=StatedFinancialsResponse)
+async def stated_financials(
+    identifier: str, db: DbSession, current_user: CurrentUser
+) -> StatedFinancialsResponse:
+    """The file's **stated** application data (LP-55) — read-only.
+
+    The multi-row stated financials (income/employers/liabilities/assets), the
+    extended MISMO loan/property fields, and the latest import record (its parse
+    warnings). Populated by MISMO import (LP-53); empty/null on a manual file.
+    Tenant-scoped via the company-scoped file lookup (``404`` if not the
+    caller's). SSN is masked. Display only — editing is LP-56.
+    """
+    loan_file = await get_loan_file(db, company_id=current_user.company_id, identifier=identifier)
+    if loan_file is None:
+        raise _NOT_FOUND
+    return await get_stated_financials(db, loan_file=loan_file)
 
 
 @router.patch("/{identifier}", response_model=LoanFileDetail)

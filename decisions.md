@@ -4507,3 +4507,40 @@ The endpoint stays thin because the work lives in the services; graceful errors 
 to background later. The SSN is masked in the response (existing `LoanFileDetail`) and never logged;
 logging is metadata-only (file id, source format, warning count). LP-55 (the upload UI) calls this
 endpoint.
+
+---
+
+## ADR-164: MISMO upload as the primary create-file path; import-directly; honest non-blocking warnings
+
+- **Date:** 2026-06-12
+- **Status:** Accepted
+
+**Decision:** The "New file" screen leads with **Upload MISMO** (a prominent drag-and-drop zone for
+XML/HTML, `components/intake/mismo-upload.tsx`); the manual Epic 4 intake form is **reused** and
+repositioned as the secondary fallback (revealed via "Create manually"). On a successful upload the
+populated file **opens immediately** (import-directly — `router.push` to the created file, plus a
+success toast); there is no preview/confirm step. The imported **stated financials** are displayed
+on the file's Overview ("Application data (stated)" — income/employers per borrower, the file's
+liabilities and assets, the extended loan terms), **display-only** (editing is LP-56). Parse
+warnings (a partial import) are surfaced **honestly and non-blocking** ("Imported — a few fields
+need your attention … you can fill these in"), not as a failure. Upload failures show the LP-54 safe
+envelope message friendly (via the LP-46 normalizer); the upload trigger disables while pending
+(LP-47, double-submit prevention).
+
+To display the stated financials the frontend needs them exposed, so a **minimal read-only,
+tenant-scoped** endpoint was added — `GET /api/v1/loan-files/{id}/stated-financials`
+(`StatedFinancialsResponse`: borrowers with income/employers, liabilities, assets, extended
+loan/property fields, and the latest import record's warnings). It's a read of already-stored data
+(no pipeline/model change); the import's warnings persist there, so the opened file shows them even
+after navigation. SSN is masked throughout.
+
+**Rationale:** the processor receives loan applications as MISMO from the loan officer, not by
+typing — the product should match how the work actually happens. Import-directly + opening the
+populated file is the payoff ("upload and it's filled in"); displaying the stated financials is the
+visible proof the import worked; honest non-blocking warnings keep a partial import usable (and set
+up editing in LP-56).
+
+**Consequences:** file creation is reoriented around MISMO (manual is the fallback). The
+stated-financials read is the seam later phases extend (Phase-3 cross-checks against documents will
+show alongside the stated values). LP-56 adds editing of the imported data. Composes existing
+patterns (drag-drop LP-43, errors LP-46, loading LP-47, the Epic 4 form, the detail view).

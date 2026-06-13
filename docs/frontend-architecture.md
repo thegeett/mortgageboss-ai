@@ -219,6 +219,35 @@ The document **processing** status (LP-43, status-driven polling) is a separate,
 longer wait and is left untouched: a card may show a load skeleton (LP-47) then a
 processing indicator (LP-43).
 
+## MISMO upload — the primary create-file path (LP-55)
+
+File creation is reoriented around **MISMO import** (the processor receives loan
+apps as MISMO from her loan officer, not by typing). The "New file" screen
+(`app/(protected)/loan-files/new/page.tsx`) leads with **Upload MISMO** — a
+prominent drag-and-drop zone (`components/intake/mismo-upload.tsx`, echoing the
+LP-43 dropzone) accepting XML/HTML; the reused Epic 4 intake form is the
+secondary "Create manually" fallback, revealed on demand.
+
+- **Import-directly:** on a successful upload (`useImportMismo` → the LP-54
+  endpoint), `router.push` opens the created, populated file immediately (no
+  preview/confirm) + a success toast.
+- **Stated-financials display:** the file Overview shows an "Application data
+  (stated)" card (`StatedFinancialsSection`) — per-borrower income + employers,
+  the file's liabilities and assets, the stated loan terms — backed by a
+  read-only `GET /loan-files/{id}/stated-financials`. **Display only** (editing
+  is LP-56); SSN masked.
+- **Honest, non-blocking warnings:** a partial import's `parse_warnings` persist
+  on the import record and are shown on the opened file ("Imported — a few fields
+  need your attention … you can fill these in"), framed as what-to-check, not a
+  failure.
+- **Graceful + fast:** upload failures show the LP-54 safe envelope friendly (via
+  the LP-46 normalizer); the trigger disables while pending (LP-47), and import
+  is fast/inline so it's a quick state.
+
+Composes existing patterns (drag-drop LP-43, errors LP-46, loading LP-47, the
+Epic 4 form, the detail view) — minimal new surface area.
+
 ## What's next
 
-- **LP-48** — seed data script.
+- **LP-56** — edit the imported data (make the stated fields/financials
+  editable).
