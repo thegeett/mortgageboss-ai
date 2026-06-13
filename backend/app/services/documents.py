@@ -1,0 +1,195 @@
+"""Document service — upload validation, CRUD, and flat-route scoping (LP-36).
+
+Documents are **owned children** of a loan file with no ``company_id`` of their
+own (ADR-052/053): they are company-scoped **transitively** through the file.
+Two scoping shapes are served here:
+
+  * **Nested** operations (create/list) take an already scope-checked
+    ``loan_file`` / ``loan_file_id`` — the endpoint resolves the parent file with
+    the caller's company first (the LP-29 file gate).
+  * **Flat** operations (get/download/delete by document id) have no file in the
+    path, so :func:`get_document_for_company` resolves the document's company by
+    **joining through its loan file** and returns ``None`` unless that file
+    belongs to the caller's company. A flat route must NEVER load a document by
+    id alone — that is the cross-tenant leak this guards against.
+
+Upload bytes are validated (size + type via content-type allowlist *and*
+magic-byte signature) before they reach the storage layer (LP-35); the
+extension is sanitized there too (defense in depth). Services ``flush``; the
+endpoint commits. Soft-delete preserves the stored bytes (audit).
+"""
+
+from uuid import UUID
+
+from fastapi import status
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.models.base import utcnow
+from app.models.document import Document, DocumentStatus, UploadSource
+from app.models.extraction import Extraction
+from app.models.helpers import only_active
+from app.models.loan_file import LoanFile
+
+# --------------------------------------------------------------------------- #
+# Upload validation
+# --------------------------------------------------------------------------- #
+
+#: Hard cap on a single uploaded file (50 MB).
+MAX_FILE_SIZE_BYTES = 50 * 1024 * 1024
+
+#: Content types we accept. Mortgage documents are PDFs and scans (images).
+ALLOWED_CONTENT_TYPES = frozenset({"application/pdf", "image/jpeg", "image/png"})
+
+#: Magic-byte signatures → the content type they prove. A file's real type is
+#: detected from its leading bytes and must match the declared content type,
+#: which resists content-type spoofing (declaring ``application/pdf`` for a PNG).
+_MAGIC: tuple[tuple[bytes, str], ...] = (
+    (b"%PDF", "application/pdf"),
+    (b"\x89PNG\r\n\x1a\n", "image/png"),
+    (b"\xff\xd8\xff", "image/jpeg"),
+)
+
+
+class DocumentValidationError(Exception):
+    """An uploaded file failed size/type validation.
+
+    Carries the HTTP status the endpoint should map to: ``413`` for an
+    over-limit file, ``415`` for an unsupported/mismatched type.
+    """
+
+    def __init__(self, message: str, *, http_status: int) -> None:
+        super().__init__(message)
+        self.message = message
+        self.http_status = http_status
+
+
+def _detect_content_type(content: bytes) -> str | None:
+    """The content type proven by the leading magic bytes, or ``None``."""
+    for signature, content_type in _MAGIC:
+        if content.startswith(signature):
+            return content_type
+    return None
+
+
+def validate_upload(*, content: bytes, declared_content_type: str) -> str:
+    """Validate an uploaded file's size and type; return the verified content type.
+
+    Enforces the 50 MB cap, the content-type allowlist, AND that the bytes'
+    magic-byte signature matches the declared type (so a renamed/relabelled file
+    can't slip past the allowlist). Raises :class:`DocumentValidationError` —
+    ``413`` for size, ``415`` for type — on the first failure.
+    """
+    if len(content) > MAX_FILE_SIZE_BYTES:
+        raise DocumentValidationError(
+            "File exceeds the 50MB limit",
+            http_status=status.HTTP_413_CONTENT_TOO_LARGE,
+        )
+    declared = (declared_content_type or "").split(";", 1)[0].strip().lower()
+    if declared not in ALLOWED_CONTENT_TYPES:
+        raise DocumentValidationError(
+            f"Unsupported file type: {declared_content_type!r}. Allowed: PDF, JPEG, PNG.",
+            http_status=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+        )
+    detected = _detect_content_type(content)
+    if detected is None or detected != declared:
+        raise DocumentValidationError(
+            "File content does not match its declared type (PDF, JPEG, or PNG).",
+            http_status=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+        )
+    return declared
+
+
+# --------------------------------------------------------------------------- #
+# Service functions
+# --------------------------------------------------------------------------- #
+
+
+async def create_document(
+    db: AsyncSession,
+    *,
+    loan_file: LoanFile,
+    document_id: UUID,
+    filename: str,
+    mime_type: str,
+    size: int,
+    storage_path: str,
+    uploaded_by_user_id: UUID | None,
+    upload_source: UploadSource = UploadSource.USER_UPLOAD,
+) -> Document:
+    """Create a ``PENDING`` document record for ``loan_file``.
+
+    ``document_id`` is the UUID already used to build the storage path (LP-35),
+    so the record and the stored bytes share one id. The processing pipeline
+    (LP-42) later advances the status. Uses ``flush``; the endpoint commits.
+    """
+    document = Document(
+        id=document_id,
+        loan_file_id=loan_file.id,
+        original_filename=filename,
+        mime_type=mime_type,
+        file_size_bytes=size,
+        storage_path=storage_path,
+        status=DocumentStatus.PENDING,
+        upload_source=upload_source,
+        uploaded_by_user_id=uploaded_by_user_id,
+    )
+    db.add(document)
+    await db.flush()
+    return document
+
+
+async def list_documents(db: AsyncSession, *, loan_file_id: UUID) -> list[Document]:
+    """The file's active documents, newest first. (File gate done by the caller.)"""
+    stmt = select(Document).where(Document.loan_file_id == loan_file_id)
+    stmt = only_active(stmt, Document)
+    stmt = stmt.order_by(Document.created_at.desc())
+    result = await db.execute(stmt)
+    return list(result.scalars().all())
+
+
+async def get_document_for_company(
+    db: AsyncSession, *, document_id: UUID, company_id: UUID
+) -> Document | None:
+    """Fetch an active document **only if** its loan file is the company's.
+
+    The flat-route tenant gate: documents have no ``company_id``, so this joins
+    ``Document -> LoanFile`` and filters on the file's company. Returns ``None``
+    if the document doesn't exist, is soft-deleted, lives under a soft-deleted
+    file, or belongs to another company — the endpoint turns that into ``404``,
+    so a cross-tenant id is indistinguishable from a missing one.
+    """
+    stmt = (
+        select(Document)
+        .join(LoanFile, Document.loan_file_id == LoanFile.id)
+        .where(Document.id == document_id, LoanFile.company_id == company_id)
+    )
+    stmt = only_active(stmt, Document)
+    stmt = only_active(stmt, LoanFile)
+    document: Document | None = await db.scalar(stmt)
+    return document
+
+
+async def soft_delete_document(db: AsyncSession, *, document: Document) -> None:
+    """Soft-delete a document (set ``deleted_at``).
+
+    Never a hard delete, and the **stored bytes are preserved** (audit) — only
+    the record is hidden from active reads. Uses ``flush``; the endpoint commits.
+    """
+    document.deleted_at = utcnow()
+    await db.flush()
+
+
+async def get_current_extraction(db: AsyncSession, *, document: Document) -> Extraction | None:
+    """The document's current extraction (LP-16), or ``None`` if none yet.
+
+    Queried directly (rather than via the ``current_extraction`` property) so the
+    flat detail route need not eager-load the whole ``extractions`` collection.
+    """
+    stmt = select(Extraction).where(
+        Extraction.document_id == document.id,
+        Extraction.is_current.is_(True),
+    )
+    stmt = only_active(stmt, Extraction)
+    extraction: Extraction | None = await db.scalar(stmt)
+    return extraction

@@ -1,0 +1,11 @@
+# Code ownership for mortgageboss-ai
+# Format: pattern @owner
+# Docs: https://docs.github.com/articles/about-code-owners
+
+# Default owner for everything
+* @thegeett
+
+# Specific area ownership (placeholder for a future team)
+# /backend/app/ai/          @ai-team
+# /backend/app/verification/ @rules-team
+# /frontend/                @ui-team

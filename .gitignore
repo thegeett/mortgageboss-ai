@@ -52,7 +52,10 @@ Thumbs.db
 logs/
 
 # ---- Local storage (uploaded documents) ----
-storage/
+# Anchored to the runtime upload locations so it does NOT match the
+# backend/app/storage/ Python package (which is source code, not uploads).
+/storage/
+/backend/storage/
 
 # ---- Databases ----
 *.db

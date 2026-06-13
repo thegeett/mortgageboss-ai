@@ -1,0 +1,101 @@
+# Local development services for MortgageBoss AI.
+#
+# Usage:
+#   docker compose up -d      # start everything in the background
+#   docker compose ps         # check health
+#   docker compose down       # stop & remove containers (data persists in volumes)
+#   docker compose down -v    # also remove volumes (DESTROYS local data)
+#
+# NOTE: Credentials below are development-only and intentionally committed.
+#       Production credentials come from the hosting platform's environment.
+#       See decisions.md ADR-005.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: mortgageboss-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: mortgageboss
+      POSTGRES_PASSWORD: mortgageboss_dev_password
+      POSTGRES_DB: mortgageboss_dev
+    ports:
+      - "5432:5432"
+    volumes:
+      - mortgageboss-postgres-data:/var/lib/postgresql/data
+    networks:
+      - mortgageboss-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mortgageboss -d mortgageboss_dev"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  redis:
+    image: redis:7-alpine
+    container_name: mortgageboss-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - mortgageboss-redis-data:/data
+    networks:
+      - mortgageboss-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  mailhog:
+    image: mailhog/mailhog:latest
+    container_name: mortgageboss-mailhog
+    restart: unless-stopped
+    ports:
+      - "1025:1025"  # SMTP
+      - "8025:8025"  # Web UI
+    networks:
+      - mortgageboss-network
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8025"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # Celery worker (LP-41) — background task processing, a SEPARATE process from the
+  # API. Behind the "worker" profile so the default `docker compose up` stays
+  # infra-only; start it explicitly:  docker compose --profile worker up worker
+  # (locally you can instead run, from backend/:
+  #   uv run celery -A app.tasks.celery_app worker --loglevel=info
+  #   # on macOS/Colima add --pool=solo if the prefork pool misbehaves)
+  # Requires backend/.env (the app's required settings, e.g. ANTHROPIC_API_KEY).
+  worker:
+    build: ./backend
+    container_name: mortgageboss-worker
+    restart: unless-stopped
+    profiles: ["worker"]
+    command: ["uv", "run", "celery", "-A", "app.tasks.celery_app", "worker", "--loglevel=info"]
+    env_file:
+      - ./backend/.env
+    environment:
+      # Override host-based URLs with the Compose service names (the container
+      # reaches Postgres/Redis over the Compose network, not localhost).
+      DATABASE_URL: postgresql+asyncpg://mortgageboss:mortgageboss_dev_password@postgres:5432/mortgageboss_dev  # pragma: allowlist secret
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - mortgageboss-network
+
+volumes:
+  mortgageboss-postgres-data:
+  mortgageboss-redis-data:
+
+networks:
+  mortgageboss-network:
+    driver: bridge

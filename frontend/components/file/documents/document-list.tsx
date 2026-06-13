@@ -1,0 +1,122 @@
+"use client";
+
+import { ErrorState } from "@/components/ui/error-state";
+import { SkeletonRows } from "@/components/ui/skeleton";
+import { humanize } from "@/lib/format";
+import { formatFileSize, groupDocumentsByCategory } from "@/lib/loan-files/documents";
+import type { DocumentResponse } from "@/lib/types/document";
+import { formatDistanceToNow } from "date-fns";
+import { FileText } from "lucide-react";
+import { DocumentStatusBadge } from "./document-status";
+
+function relativeTime(iso: string): string {
+  try {
+    return formatDistanceToNow(new Date(iso), { addSuffix: true });
+  } catch {
+    return "";
+  }
+}
+
+function DocumentRow({
+  document,
+  onSelect,
+}: {
+  document: DocumentResponse;
+  onSelect: (document: DocumentResponse) => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={() => onSelect(document)}
+      className="flex w-full items-center gap-3 rounded-lg border border-gray-200/80 bg-white px-3.5 py-3 text-left shadow-sm transition-colors hover:border-gray-300 hover:bg-gray-50/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+    >
+      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-gray-100 text-gray-400">
+        <FileText className="h-4 w-4" aria-hidden />
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-sm font-medium text-gray-900">
+          {document.original_filename}
+        </span>
+        <span className="mt-0.5 block truncate text-xs text-gray-500">
+          {document.document_type ? humanize(document.document_type) : "—"}
+          <span className="text-gray-300"> · </span>
+          {formatFileSize(document.file_size_bytes)}
+          <span className="text-gray-300"> · </span>
+          {relativeTime(document.created_at)}
+        </span>
+      </span>
+      <DocumentStatusBadge status={document.status} />
+    </button>
+  );
+}
+
+function ListSkeleton() {
+  // Match the real DocumentRow height (h-[58px]) so content arrival doesn't shift.
+  return (
+    <div aria-busy>
+      <output className="sr-only">Loading documents</output>
+      <SkeletonRows count={3} itemClassName="h-[58px]" />
+    </div>
+  );
+}
+
+/**
+ * The file's documents grouped by category (the eight categories in order, plus
+ * a "Processing / uncategorized" group for not-yet-classified docs). Each row
+ * shows the filename, classified type, size/date, and a live status badge.
+ */
+export function DocumentList({
+  documents,
+  isPending,
+  isError,
+  onRetry,
+  onSelect,
+}: {
+  documents: DocumentResponse[] | undefined;
+  isPending: boolean;
+  isError: boolean;
+  onRetry?: () => void;
+  onSelect: (document: DocumentResponse) => void;
+}) {
+  if (isPending) return <ListSkeleton />;
+  if (isError) {
+    return (
+      <ErrorState
+        title="Couldn’t load your documents"
+        message="Something went wrong loading this file’s documents."
+        onRetry={onRetry}
+      />
+    );
+  }
+  if (!documents || documents.length === 0) {
+    return (
+      <div className="rounded-lg border border-dashed border-gray-200 bg-white px-6 py-10 text-center">
+        <p className="text-sm font-medium text-gray-900">No documents yet</p>
+        <p className="mt-1 text-sm text-gray-500">Drag files onto the area above to upload.</p>
+      </div>
+    );
+  }
+
+  const groups = groupDocumentsByCategory(documents);
+  return (
+    <div className="space-y-6">
+      {groups.map((group) => (
+        <section key={group.key}>
+          <div className="mb-2 flex items-center gap-2">
+            <h3 className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+              {group.label}
+            </h3>
+            <span className="rounded-full bg-gray-100 px-1.5 text-[11px] font-medium text-gray-500">
+              {group.documents.length}
+            </span>
+          </div>
+          <div className="space-y-2">
+            {group.documents.map((doc) => (
+              <DocumentRow key={doc.id} document={doc} onSelect={onSelect} />
+            ))}
+          </div>
+        </section>
+      ))}
+    </div>
+  );
+}
