@@ -4378,3 +4378,65 @@ names, amounts, or raw content. The next ticket consumes `ParsedMismo` to map to
 the SSN, and create a loan file. A real sample
 (`backend/tests/fixtures/mismo/MISMO16940192.xml`) anchors correctness with exact-value tests; the
 typed core grows as later phases need more fields, and more real files will harden tolerance.
+
+---
+
+## ADR-160: Stated-financials data model — Phase-3-shaped, one-to-many, tenant-scoped via the file
+
+- **Date:** 2026-06-12
+- **Status:** Accepted
+
+**Decision:** MISMO stated financials are persisted as new **one-to-many** models
+(`app/models/stated_financials.py`): `StatedIncomeItem` + `StatedEmployer` (FK → **borrower**),
+`StatedLiability` + `StatedAsset` (FK → **loan_file**). They are typed for **Phase-3 deterministic
+comparison** — `Decimal` amounts (exact, summable) and the MISMO category (`income_type` /
+`liability_type` / `asset_type`) as a **flexible string** (the MISMO enumerations are large/evolving,
+so they are *not* CHECK-enums — ADR-037). The existing `Borrower` / `Property` / `LoanFile` models
+are **extended** (not duplicated) with the MISMO core fields they lacked, all **nullable** (manual
+creation leaves them empty): Borrower `dependent_count` / `citizenship` / `declarations` (JSON);
+Property `valuation_amount` / `attachment_type` / `construction_method` / `financed_unit_count`;
+LoanFile `note_amount` / `note_rate_percent` (Numeric(7,4)) / `lien_priority` / `amortization_type` /
+`amortization_months` / `application_received_date`. Tenant-scoped **transitively** via the loan
+file (ADR-053) — no own `company_id` — with `ON DELETE CASCADE` from the parent.
+
+**FK placement** is by what Phase-3 needs: income/employers are per-borrower (MISMO nests them under
+the borrower role; income verification is per-borrower); liabilities/assets are per-file (MISMO
+carries them at the deal level; DTI and reserves are file-level).
+
+**Reuse vs add** (gap analysis): MISMO `birth_date`→`date_of_birth`, `marital_status`,
+`classification`→`is_primary`, `usage_type`→`occupancy_type`, `sales_contract_amount`→`purchase_price`,
+`base_loan_amount`→`loan_amount`, `mortgage_type`→`loan_program`, `loan_purpose` all already existed
+and are reused; only the genuinely-missing fields were added.
+
+**Rationale:** the stated financials are multi-row structured data (many incomes/liabilities/assets)
+that Phase-3 must compare against document-extracted values, so they must be typed/summable/queryable
+rows, not loose JSON. The same core entities serve manual + MISMO creation (they converge), so
+MISMO's extra fields extend them rather than forking a parallel model.
+
+**Consequences:** the shape is a **starter**, refined with Priya / as Phase-3 rules firm up. LP-53
+maps `ParsedMismo` into these. Soft-delete + the tenant-isolation/CHECK test conventions apply; each
+new model has a per-model tenant-isolation test.
+
+---
+
+## ADR-161: MISMO catch-all + raw-file + import-record storage (capture-all + audit)
+
+- **Date:** 2026-06-12
+- **Status:** Accepted
+
+**Decision:** A `MismoImport` model (`app/models/mismo_import.py`, FK → loan_file, cascade) is the
+home for everything an import produces beyond the typed core: LP-51's **catch_all** (every non-core
+MISMO leaf, grouped) as JSON; the **parse_warnings**; a **raw_file_path** reference to the original
+MISMO file preserved in the storage layer for **audit**; and `source_format` + a `status`
+(`MismoImportStatus` — COMPLETED/PARTIAL/FAILED, a small stable CHECK-enum). One row per import;
+`imported_at` is `created_at`.
+
+**Rationale:** the "extract all fields" decision means nothing is lost — the catch-all is queryable
+later without re-parsing. The source-of-truth baseline must be **auditable**, so the original file is
+preserved. The import record is the audit trail and the foundation for future re-import / versioning
+(deferred). Putting all import-derived data on `MismoImport` (rather than scattering it onto
+`LoanFile`) keeps the file model lean and groups the audit data.
+
+**Consequences:** PII in the catch-all / raw file is access-controlled (tenant-scoped via the file)
+and never logged. The bytes of the raw file are written by the upload path (LP-53/54); this ticket
+provides the column/reference. Re-import/versioning builds on the import record.

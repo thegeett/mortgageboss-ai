@@ -624,6 +624,37 @@ sent communication may also produce a `COMMUNICATION_SENT` activity entry — bu
 column shapes differ enough that one combined table would be mostly-null. Hence two
 tables.
 
+## Stated-financials & MISMO import models (LP-52)
+
+The **stated** half of stated-vs-verified — the baseline MISMO import produces and
+Phase-3 verification compares documents against (**ADR-160/161**). All are owned
+children of the file, scoped **transitively** (no `company_id`, **ADR-053**), with
+`ON DELETE CASCADE`.
+
+- **`StatedIncomeItem`** / **`StatedEmployer`** — FK → **borrower** (MISMO nests
+  them under the borrower role; income verification is per-borrower).
+- **`StatedLiability`** / **`StatedAsset`** — FK → **loan_file** (MISMO carries
+  them at the deal level; DTI back-end and reserves are file-level).
+
+They are **typed for deterministic Phase-3 comparison**: `Decimal` amounts (exact,
+summable) and the MISMO category (`income_type` / `liability_type` / `asset_type`)
+as a **flexible string** — the MISMO enumerations are large/evolving, so they are
+*not* CHECK-enums (**ADR-037**). The shape is a starter, refined as Phase-3 firms up.
+
+The existing `Borrower` / `Property` / `LoanFile` models are **extended** (not
+duplicated) with the MISMO core fields they lacked — all **nullable**, so manual
+creation leaves them empty (Borrower `dependent_count`/`citizenship`/`declarations`;
+Property `valuation_amount`/`attachment_type`/`construction_method`/`financed_unit_count`;
+LoanFile `note_amount`/`note_rate_percent`/`lien_priority`/`amortization_type`/
+`amortization_months`/`application_received_date`). The same core entities serve
+manual + MISMO creation.
+
+**`MismoImport`** (FK → loan_file) is the catch-all + audit record: `source_format`,
+`status` (a small CHECK-enum), `parse_warnings` (JSON), **`catch_all`** (JSON —
+LP-51's everything-else, available later without re-parsing), and `raw_file_path`
+(a reference to the original MISMO file preserved for audit). PII in the
+catch-all/raw file is tenant-scoped and never logged.
+
 ## Writing a model test
 
 Database tests use a dedicated **test database** (`<dev_db>_test`,

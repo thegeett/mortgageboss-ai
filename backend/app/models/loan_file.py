@@ -21,11 +21,13 @@ in by :func:`app.services.loan_files.create_loan_file` (ADR-050); the model
 only holds the columns. The status lifecycle is described in ADR-049.
 """
 
+from datetime import date
+from decimal import Decimal
 from enum import StrEnum
 from typing import TYPE_CHECKING
 from uuid import UUID
 
-from sqlalchemy import ForeignKey, String
+from sqlalchemy import Date, ForeignKey, Integer, Numeric, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, SoftDeleteMixin, TimestampMixin, UUIDMixin
@@ -41,8 +43,10 @@ if TYPE_CHECKING:
     from app.models.document import Document
     from app.models.finding import Finding
     from app.models.lender import Lender
+    from app.models.mismo_import import MismoImport
     from app.models.needs_item import NeedsItem
     from app.models.property import Property
+    from app.models.stated_financials import StatedAsset, StatedLiability
     from app.models.verification import Verification
 
 # Domain for the borrower inbox address. A module constant for now; may move to
@@ -117,6 +121,17 @@ class LoanFile(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     loan_purpose: Mapped[LoanPurpose | None] = mapped_column(str_enum(LoanPurpose), nullable=True)
     loan_amount: Mapped[Money | None] = mapped_column(nullable=True)
 
+    # --- MISMO core loan terms (LP-52) — nullable; manual creation leaves empty.
+    # (base_loan_amount → loan_amount, mortgage_type → loan_program, loan_purpose
+    # already exist; these are the genuinely-missing terms.)
+    note_amount: Mapped[Money | None] = mapped_column(nullable=True)
+    # Note rate as a percent, e.g. 6.8750 — Numeric(7, 4), exact (never float).
+    note_rate_percent: Mapped[Decimal | None] = mapped_column(Numeric(7, 4), nullable=True)
+    lien_priority: Mapped[str | None] = mapped_column(String(SHORT_STRING), nullable=True)
+    amortization_type: Mapped[str | None] = mapped_column(String(SHORT_STRING), nullable=True)
+    amortization_months: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    application_received_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+
     # --- Lifecycle ---------------------------------------------------------
     status: Mapped[LoanFileStatus] = mapped_column(
         str_enum(LoanFileStatus),
@@ -177,6 +192,21 @@ class LoanFile(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
         cascade="all, delete-orphan",
     )
     activity_logs: Mapped[list["ActivityLog"]] = relationship(
+        back_populates="loan_file",
+        cascade="all, delete-orphan",
+    )
+    # Stated financials carried at the deal level (LP-52) — owned children of the
+    # file (DTI back-end / reserves are file-level).
+    stated_liabilities: Mapped[list["StatedLiability"]] = relationship(
+        back_populates="loan_file",
+        cascade="all, delete-orphan",
+    )
+    stated_assets: Mapped[list["StatedAsset"]] = relationship(
+        back_populates="loan_file",
+        cascade="all, delete-orphan",
+    )
+    # MISMO import records (catch-all + audit, LP-52) — owned children of the file.
+    mismo_imports: Mapped[list["MismoImport"]] = relationship(
         back_populates="loan_file",
         cascade="all, delete-orphan",
     )
