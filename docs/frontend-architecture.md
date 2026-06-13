@@ -233,9 +233,9 @@ secondary "Create manually" fallback, revealed on demand.
   preview/confirm) + a success toast.
 - **Stated-financials display:** the file Overview shows an "Application data
   (stated)" card (`StatedFinancialsSection`) — per-borrower income + employers,
-  the file's liabilities and assets, the stated loan terms — backed by a
-  read-only `GET /loan-files/{id}/stated-financials`. **Display only** (editing
-  is LP-56); SSN masked.
+  the file's liabilities and assets, the stated loan terms — backed by
+  `GET /loan-files/{id}/stated-financials`. Editable in place (see LP-56 below);
+  SSN masked.
 - **Honest, non-blocking warnings:** a partial import's `parse_warnings` persist
   on the import record and are shown on the opened file ("Imported — a few fields
   need your attention … you can fill these in"), framed as what-to-check, not a
@@ -247,7 +247,31 @@ secondary "Create manually" fallback, revealed on demand.
 Composes existing patterns (drag-drop LP-43, errors LP-46, loading LP-47, the
 Epic 4 form, the detail view) — minimal new surface area.
 
+## Editing the imported data (LP-56)
+
+The MISMO-import safety net: the "Application data (stated)" card flips between
+**display** and **edit** via an Edit/Done toggle in its header
+(`StatedFinancialsSection`). Edit mode renders `StatedFinancialsEditor` — an
+inline, in-place editor (no separate route/modal) for correcting a parse gap or
+adding/removing a row.
+
+- **Generic editable row:** one `EditableRow` drives all four stated kinds from a
+  `FieldDef[]` config (income, employers, liabilities, assets). Save sends **only
+  changed fields** (diffed against the row's initial values) and an emptied field
+  is sent as `null`, not `""`; per-group **Add** appends a blank row to fill,
+  **Remove** soft-deletes. Stated loan terms are a single PATCH on the file.
+- **One mutation hook:** `useStatedFinancialsEdit(fileId)` exposes
+  update/delete/add mutations (PATCH/DELETE `…/{kind}/{id}`, POST under the
+  file/borrower) + `updateLoanTerms`; every mutation invalidates
+  `statedFinancialsQueryKey(fileId)` (and `["loan-file", fileId]` for terms) so the
+  display re-reads. Reuses the Epic-4 PATCH endpoints for core fields by extending
+  the Update schemas server-side — no new core-edit UI.
+- **Safe by construction:** edits are audited server-side (activity log),
+  tenant-scoped (cross-company → 404), validated (bad amount → 422 → LP-46 toast),
+  and SSN is replaced via the existing encrypted re-enter path (never edited
+  masked-in-place, never echoed). Errors surface through the LP-46 normalizer;
+  pending mutations show LP-47 spinners and disable Save.
+
 ## What's next
 
-- **LP-56** — edit the imported data (make the stated fields/financials
-  editable).
+- Epic 5+ verification/conditions surfaces (see `docs/phases/`).

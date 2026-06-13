@@ -28,6 +28,7 @@ from app.schemas.stated_financials import (
     MismoImportSummary,
     StatedAssetPublic,
     StatedBorrowerPublic,
+    StatedEmployerPublic,
     StatedFinancialsResponse,
     StatedIncomeItemPublic,
     StatedLiabilityPublic,
@@ -49,7 +50,7 @@ async def get_stated_financials(
     borrower_ids = [b.id for b in borrowers]
 
     income_by_borrower: dict[UUID, list[StatedIncomeItemPublic]] = defaultdict(list)
-    employers_by_borrower: dict[UUID, list[str]] = defaultdict(list)
+    employers_by_borrower: dict[UUID, list[StatedEmployerPublic]] = defaultdict(list)
     if borrower_ids:
         for item in (
             await db.scalars(
@@ -61,6 +62,7 @@ async def get_stated_financials(
         ).all():
             income_by_borrower[item.borrower_id].append(
                 StatedIncomeItemPublic(
+                    id=item.id,
                     monthly_amount=item.monthly_amount,
                     income_type=item.income_type,
                     employment_income=item.employment_income,
@@ -74,8 +76,11 @@ async def get_stated_financials(
                 )
             )
         ).all():
-            if emp.employer_name:
-                employers_by_borrower[emp.borrower_id].append(emp.employer_name)
+            employers_by_borrower[emp.borrower_id].append(
+                StatedEmployerPublic(
+                    id=emp.id, employer_name=emp.employer_name, is_current=emp.is_current
+                )
+            )
 
     borrower_views = [
         StatedBorrowerPublic(
@@ -96,6 +101,7 @@ async def get_stated_financials(
 
     liabilities = [
         StatedLiabilityPublic(
+            id=row.id,
             liability_type=row.liability_type,
             monthly_payment=row.monthly_payment,
             unpaid_balance=row.unpaid_balance,
@@ -111,7 +117,9 @@ async def get_stated_financials(
         ).all()
     ]
     assets = [
-        StatedAssetPublic(asset_type=row.asset_type, value=row.value, holder_name=row.holder_name)
+        StatedAssetPublic(
+            id=row.id, asset_type=row.asset_type, value=row.value, holder_name=row.holder_name
+        )
         for row in (
             await db.scalars(
                 only_active(
@@ -167,3 +175,59 @@ async def get_stated_financials(
         property_extras=property_extras,
         mismo_import=import_summary,
     )
+
+
+# --------------------------------------------------------------------------- #
+# Per-resource tenant scoping (LP-56) — resource → (borrower →) file → company.
+# Returns the row only if it belongs to the caller's company (else None → 404).
+# --------------------------------------------------------------------------- #
+
+
+async def get_stated_liability_for_company(
+    db: AsyncSession, *, item_id: UUID, company_id: UUID
+) -> StatedLiability | None:
+    stmt = (
+        select(StatedLiability)
+        .join(LoanFile, StatedLiability.loan_file_id == LoanFile.id)
+        .where(StatedLiability.id == item_id, LoanFile.company_id == company_id)
+    )
+    result: StatedLiability | None = await db.scalar(only_active(stmt, StatedLiability))
+    return result
+
+
+async def get_stated_asset_for_company(
+    db: AsyncSession, *, item_id: UUID, company_id: UUID
+) -> StatedAsset | None:
+    stmt = (
+        select(StatedAsset)
+        .join(LoanFile, StatedAsset.loan_file_id == LoanFile.id)
+        .where(StatedAsset.id == item_id, LoanFile.company_id == company_id)
+    )
+    result: StatedAsset | None = await db.scalar(only_active(stmt, StatedAsset))
+    return result
+
+
+async def get_stated_income_for_company(
+    db: AsyncSession, *, item_id: UUID, company_id: UUID
+) -> StatedIncomeItem | None:
+    stmt = (
+        select(StatedIncomeItem)
+        .join(Borrower, StatedIncomeItem.borrower_id == Borrower.id)
+        .join(LoanFile, Borrower.loan_file_id == LoanFile.id)
+        .where(StatedIncomeItem.id == item_id, LoanFile.company_id == company_id)
+    )
+    result: StatedIncomeItem | None = await db.scalar(only_active(stmt, StatedIncomeItem))
+    return result
+
+
+async def get_stated_employer_for_company(
+    db: AsyncSession, *, item_id: UUID, company_id: UUID
+) -> StatedEmployer | None:
+    stmt = (
+        select(StatedEmployer)
+        .join(Borrower, StatedEmployer.borrower_id == Borrower.id)
+        .join(LoanFile, Borrower.loan_file_id == LoanFile.id)
+        .where(StatedEmployer.id == item_id, LoanFile.company_id == company_id)
+    )
+    result: StatedEmployer | None = await db.scalar(only_active(stmt, StatedEmployer))
+    return result

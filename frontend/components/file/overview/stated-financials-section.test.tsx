@@ -26,19 +26,22 @@ function financials(overrides: Partial<StatedFinancials> = {}): StatedFinancials
         citizenship: "PermanentResidentAlien",
         is_primary: true,
         declarations: null,
-        income_items: [{ monthly_amount: "7000.00", income_type: "Base", employment_income: true }],
-        employers: ["Cascade Logistics LLC"],
+        income_items: [
+          { id: "inc1", monthly_amount: "7000.00", income_type: "Base", employment_income: true },
+        ],
+        employers: [{ id: "emp1", employer_name: "Cascade Logistics LLC", is_current: true }],
       },
     ],
     liabilities: [
       {
+        id: "liab1",
         liability_type: "MortgageLoan",
         monthly_payment: "4263.00",
         unpaid_balance: "582417.00",
         holder_name: "NR/SMS/CAL",
       },
     ],
-    assets: [{ asset_type: "GiftOfCash", value: "56000.00", holder_name: "Relative" }],
+    assets: [{ id: "ast1", asset_type: "GiftOfCash", value: "56000.00", holder_name: "Relative" }],
     loan_terms: {
       note_amount: "1104000.00",
       note_rate_percent: "6.8750",
@@ -85,7 +88,7 @@ describe("StatedFinancialsSection", () => {
     render(<StatedFinancialsSection fileId="LF-1" />);
     expect(screen.getByText(/need your attention/i)).toBeDefined();
     expect(screen.getByText("Subject property is missing an estimated value.")).toBeDefined();
-    expect(screen.getByText(/you can fill these in/i)).toBeDefined();
+    expect(screen.getByText(/fill these in/i)).toBeDefined();
   });
 
   it("renders nothing for a file with no stated data (e.g. manual creation)", () => {

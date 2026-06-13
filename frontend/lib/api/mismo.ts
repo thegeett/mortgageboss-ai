@@ -9,7 +9,7 @@
  */
 import { apiClient } from "@/lib/api/client";
 import type { MismoImportResult, StatedFinancials } from "@/lib/types/stated-financials";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { isAxiosError } from "axios";
 
 const API_V1 = "/api/v1";
@@ -53,4 +53,87 @@ export function useStatedFinancials(identifier: string) {
     enabled: Boolean(identifier),
     retry: noRetryOn404,
   });
+}
+
+// --- Editing the imported data (LP-56) -------------------------------------- //
+
+/** The flat resource segment for a stated row's PATCH/DELETE. */
+export type StatedKind =
+  | "stated-liabilities"
+  | "stated-assets"
+  | "stated-income-items"
+  | "stated-employers";
+
+type Body = Record<string, unknown>;
+
+async function patchStatedRow(kind: StatedKind, id: string, body: Body): Promise<void> {
+  await apiClient.patch(`${API_V1}/${kind}/${id}`, body);
+}
+async function deleteStatedRow(kind: StatedKind, id: string): Promise<void> {
+  await apiClient.delete(`${API_V1}/${kind}/${id}`);
+}
+async function addFileRow(
+  fileId: string,
+  kind: "stated-liabilities" | "stated-assets",
+  body: Body,
+) {
+  await apiClient.post(`${API_V1}/loan-files/${fileId}/${kind}`, body);
+}
+async function addBorrowerRow(
+  fileId: string,
+  borrowerId: string,
+  kind: "stated-income" | "stated-employers",
+  body: Body,
+) {
+  await apiClient.post(`${API_V1}/loan-files/${fileId}/borrowers/${borrowerId}/${kind}`, body);
+}
+async function patchLoanTerms(fileId: string, body: Body): Promise<void> {
+  await apiClient.patch(`${API_V1}/loan-files/${fileId}`, body);
+}
+
+/**
+ * All the stated-data edit mutations for a file (LP-56), each invalidating the
+ * stated-financials read (and the loan-file read for loan terms) so the display
+ * updates after a save/add/remove.
+ */
+export function useStatedFinancialsEdit(fileId: string) {
+  const queryClient = useQueryClient();
+  const invalidate = () => {
+    void queryClient.invalidateQueries({ queryKey: statedFinancialsQueryKey(fileId) });
+    void queryClient.invalidateQueries({ queryKey: ["loan-file", fileId] });
+  };
+
+  return {
+    updateRow: useMutation({
+      mutationFn: ({ kind, id, body }: { kind: StatedKind; id: string; body: Body }) =>
+        patchStatedRow(kind, id, body),
+      onSuccess: invalidate,
+    }),
+    deleteRow: useMutation({
+      mutationFn: ({ kind, id }: { kind: StatedKind; id: string }) => deleteStatedRow(kind, id),
+      onSuccess: invalidate,
+    }),
+    addLiability: useMutation({
+      mutationFn: (body: Body) => addFileRow(fileId, "stated-liabilities", body),
+      onSuccess: invalidate,
+    }),
+    addAsset: useMutation({
+      mutationFn: (body: Body) => addFileRow(fileId, "stated-assets", body),
+      onSuccess: invalidate,
+    }),
+    addIncome: useMutation({
+      mutationFn: ({ borrowerId, body }: { borrowerId: string; body: Body }) =>
+        addBorrowerRow(fileId, borrowerId, "stated-income", body),
+      onSuccess: invalidate,
+    }),
+    addEmployer: useMutation({
+      mutationFn: ({ borrowerId, body }: { borrowerId: string; body: Body }) =>
+        addBorrowerRow(fileId, borrowerId, "stated-employers", body),
+      onSuccess: invalidate,
+    }),
+    updateLoanTerms: useMutation({
+      mutationFn: (body: Body) => patchLoanTerms(fileId, body),
+      onSuccess: invalidate,
+    }),
+  };
 }

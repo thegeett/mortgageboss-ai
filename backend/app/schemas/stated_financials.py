@@ -16,12 +16,20 @@ from pydantic import BaseModel
 
 
 class StatedIncomeItemPublic(BaseModel):
+    id: UUID  # needed for editing (LP-56)
     monthly_amount: Decimal | None
     income_type: str | None
     employment_income: bool | None
 
 
+class StatedEmployerPublic(BaseModel):
+    id: UUID  # needed for editing (LP-56)
+    employer_name: str | None
+    is_current: bool | None
+
+
 class StatedLiabilityPublic(BaseModel):
+    id: UUID  # needed for editing (LP-56)
     liability_type: str | None
     monthly_payment: Decimal | None
     unpaid_balance: Decimal | None
@@ -29,6 +37,7 @@ class StatedLiabilityPublic(BaseModel):
 
 
 class StatedAssetPublic(BaseModel):
+    id: UUID  # needed for editing (LP-56)
     asset_type: str | None
     value: Decimal | None
     holder_name: str | None
@@ -47,7 +56,34 @@ class StatedBorrowerPublic(BaseModel):
     is_primary: bool
     declarations: dict[str, str] | None
     income_items: list[StatedIncomeItemPublic]
-    employers: list[str]
+    employers: list[StatedEmployerPublic]
+
+
+# --- Edit inputs (LP-56) — all fields optional (POST add → fill; PATCH partial). #
+
+
+class StatedIncomeItemInput(BaseModel):
+    monthly_amount: Decimal | None = None
+    income_type: str | None = None
+    employment_income: bool | None = None
+
+
+class StatedEmployerInput(BaseModel):
+    employer_name: str | None = None
+    is_current: bool | None = None
+
+
+class StatedLiabilityInput(BaseModel):
+    liability_type: str | None = None
+    monthly_payment: Decimal | None = None
+    unpaid_balance: Decimal | None = None
+    holder_name: str | None = None
+
+
+class StatedAssetInput(BaseModel):
+    asset_type: str | None = None
+    value: Decimal | None = None
+    holder_name: str | None = None
 
 
 class MismoImportSummary(BaseModel):

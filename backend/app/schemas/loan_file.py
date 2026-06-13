@@ -12,7 +12,7 @@ The public contract for the loan-file CRUD endpoints. Two read shapes: a lean
 from the authenticated user (LP-24), never the client.
 """
 
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 from typing import Self
 from uuid import UUID
@@ -52,6 +52,13 @@ class LoanFileUpdate(BaseModel):
     status: LoanFileStatus | None = None
     loan_officer_name: str | None = None
     loan_officer_email: EmailStr | None = None
+    # MISMO-specific loan terms (LP-56) — editable after import.
+    note_amount: Decimal | None = None
+    note_rate_percent: Decimal | None = None
+    lien_priority: str | None = None
+    amortization_type: str | None = None
+    amortization_months: int | None = None
+    application_received_date: date | None = None
 
 
 class BorrowerPublic(BaseModel):

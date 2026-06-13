@@ -4544,3 +4544,47 @@ up editing in LP-56).
 stated-financials read is the seam later phases extend (Phase-3 cross-checks against documents will
 show alongside the stated values). LP-56 adds editing of the imported data. Composes existing
 patterns (drag-drop LP-43, errors LP-46, loading LP-47, the Epic 4 form, the detail view).
+
+## ADR-165: Imported data is editable in place — reuse Epic-4 PATCH for core fields, add stated-financials CRUD; audited, SSN-safe
+
+- **Date:** 2026-06-13
+- **Status:** Accepted
+
+**Decision:** MISMO-imported data is **reviewable and editable** (not read-only), completing the
+import-directly safety net: a parse gap or wrong value (flagged by the LP-55 warnings) is corrected
+on the opened file rather than by re-importing. Editing splits along the existing seam:
+
+- **Core fields → reuse Epic-4 PATCH.** The borrower/property/loan-file PATCH endpoints already apply
+  fields generically (`model_dump(exclude_unset=True)` → `setattr`), so editing the MISMO-specific
+  core fields needed only **extending the Update schemas** (`BorrowerUpdate`: `dependent_count`,
+  `citizenship`, `declarations`; `PropertyUpdate`: `valuation_amount`, `attachment_type`,
+  `construction_method`, `financed_unit_count`; `LoanFileUpdate`: `note_amount`, `note_rate_percent`,
+  `lien_priority`, `amortization_type`, `amortization_months`, `application_received_date`) — no new
+  core-edit endpoints or UI. **SSN** is replaced through the existing `BorrowerUpdate.ssn` encrypted
+  re-enter path (re-encrypted, masked in the response, never edited masked-in-place, never echoed).
+- **Stated financials → add multi-row CRUD.** New tenant-scoped endpoints
+  (`app/api/stated_financials.py`): POST under the file/borrower, PATCH/DELETE by row id, for the four
+  LP-52 kinds (income, employers, liabilities, assets). Scoping is transitive (row → [borrower →]
+  file → company; cross-company → **404**, anti-enumeration). Add builds `Model(**model_dump())`;
+  update setattrs `model_dump(exclude_unset)`; delete is **soft** (`deleted_at`). All four edit
+  actions are **audited** via the existing `FILE_UPDATED` activity type with a human summary
+  ("Edited/Added/Removed a stated …") — chosen over a new `ActivityType` enum value to avoid a
+  migration for a within-file edit.
+- **Read carries ids.** The LP-55 stated-financials read was extended to include each row's `id` and
+  to return employers as objects (`{id, employer_name, is_current}`) so the editor can target rows;
+  this rippled to the frontend types and the display.
+- **Frontend:** the "Application data (stated)" card flips display ⇄ edit via an Edit/Done toggle
+  (`StatedFinancialsEditor`); a single generic `EditableRow` drives all kinds from a `FieldDef[]`
+  config, sends only changed fields (empty → `null`), and per-group Add/Remove. One hook
+  (`useStatedFinancialsEdit`) owns the mutations + cache invalidation.
+
+**Rationale:** the original MISMO (raw file + `MismoImport` record) is preserved, so editing corrects
+the *derived* application data without losing the source of truth. Reusing the generic PATCH path is
+the smallest correct change for core fields; CRUD is genuinely new only for the multi-row stated
+financials. Auditing every edit and scoping by company keep the file submission-grade and tenant-safe.
+
+**Consequences:** the import flow is now end-to-end usable (upload → opens populated → fix what the
+warnings flagged). Extending an Update schema automatically makes that field editable through the
+existing endpoint — the pattern to follow for future fields. Reusing `FILE_UPDATED` keeps edit
+provenance coarse (summary text, not a typed diff); a finer field-level audit, if needed, is a later
+change. Scope is **correct + add/remove rows**, not a from-scratch application builder.

@@ -6,12 +6,20 @@
 import type { LoanFileDetail } from "@/lib/types/loan-file";
 
 export interface StatedIncomeItem {
+  id: string;
   monthly_amount: string | null;
   income_type: string | null;
   employment_income: boolean | null;
 }
 
+export interface StatedEmployer {
+  id: string;
+  employer_name: string | null;
+  is_current: boolean | null;
+}
+
 export interface StatedLiability {
+  id: string;
   liability_type: string | null;
   monthly_payment: string | null;
   unpaid_balance: string | null;
@@ -19,6 +27,7 @@ export interface StatedLiability {
 }
 
 export interface StatedAsset {
+  id: string;
   asset_type: string | null;
   value: string | null;
   holder_name: string | null;
@@ -35,7 +44,7 @@ export interface StatedBorrower {
   is_primary: boolean;
   declarations: Record<string, string> | null;
   income_items: StatedIncomeItem[];
-  employers: string[];
+  employers: StatedEmployer[];
 }
 
 export interface MismoImportSummary {

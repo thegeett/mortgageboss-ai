@@ -1,5 +1,7 @@
 "use client";
 
+import { StatedFinancialsEditor } from "@/components/file/overview/stated-financials-editor";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { InlineErrorState } from "@/components/ui/error-state";
 import { SkeletonText } from "@/components/ui/skeleton";
@@ -7,7 +9,8 @@ import { useStatedFinancials } from "@/lib/api/mismo";
 import { formatMoney } from "@/lib/format";
 import type { StatedAsset, StatedBorrower, StatedLiability } from "@/lib/types/stated-financials";
 import { format } from "date-fns";
-import { Banknote, FileSpreadsheet, Info, Landmark, Wallet } from "lucide-react";
+import { Banknote, Check, FileSpreadsheet, Info, Landmark, Pencil, Wallet } from "lucide-react";
+import { useState } from "react";
 
 function importedOn(iso: string): string {
   try {
@@ -59,9 +62,9 @@ function BorrowerBlock({ borrower }: { borrower: StatedBorrower }) {
       </p>
       {borrower.income_items.length > 0 && (
         <div className="mt-1.5">
-          {borrower.income_items.map((inc, i) => (
+          {borrower.income_items.map((inc) => (
             <Cell
-              key={`${inc.income_type}-${i}`}
+              key={inc.id}
               label={`${inc.income_type ?? "Income"}${inc.employment_income ? " · employment" : ""}`}
               value={`${formatMoney(inc.monthly_amount)}/mo`}
             />
@@ -71,7 +74,10 @@ function BorrowerBlock({ borrower }: { borrower: StatedBorrower }) {
       {borrower.employers.length > 0 && (
         <p className="mt-2 text-xs text-gray-500">
           <span className="text-gray-400">Employers: </span>
-          {borrower.employers.join(", ")}
+          {borrower.employers
+            .map((e) => e.employer_name)
+            .filter(Boolean)
+            .join(", ")}
         </p>
       )}
     </div>
@@ -110,6 +116,7 @@ function AssetRow({ asset }: { asset: StatedAsset }) {
  */
 export function StatedFinancialsSection({ fileId }: { fileId: string }) {
   const { data, isPending, isError, refetch } = useStatedFinancials(fileId);
+  const [editing, setEditing] = useState(false);
 
   const hasData =
     !!data &&
@@ -123,7 +130,7 @@ export function StatedFinancialsSection({ fileId }: { fileId: string }) {
 
   return (
     <Card className="border-gray-200/80 shadow-sm">
-      <CardHeader className="pb-3">
+      <CardHeader className="flex-row items-center justify-between space-y-0 pb-3">
         <CardTitle className="flex items-center gap-2 text-sm font-semibold text-gray-900">
           <FileSpreadsheet className="h-4 w-4 text-gray-400" />
           Application data (stated)
@@ -133,6 +140,18 @@ export function StatedFinancialsSection({ fileId }: { fileId: string }) {
             </span>
           )}
         </CardTitle>
+        {data && !isPending && !isError && (
+          <Button
+            type="button"
+            size="sm"
+            variant={editing ? "default" : "outline"}
+            onClick={() => setEditing((e) => !e)}
+            className="h-7 gap-1.5 text-xs"
+          >
+            {editing ? <Check className="h-3.5 w-3.5" /> : <Pencil className="h-3.5 w-3.5" />}
+            {editing ? "Done" : "Edit"}
+          </Button>
+        )}
       </CardHeader>
       <CardContent aria-busy={isPending}>
         {isPending ? (
@@ -161,53 +180,58 @@ export function StatedFinancialsSection({ fileId }: { fileId: string }) {
                     ))}
                   </ul>
                   <p className="mt-1.5 pl-7 text-xs text-warning/80">
-                    The file was created — you can fill these in.
+                    The file was created —{" "}
+                    {editing ? "fill these in below." : 'use "Edit" to fill these in.'}
                   </p>
                 </div>
               )}
 
-              {data.borrowers.some((b) => b.income_items.length > 0 || b.employers.length > 0) && (
-                <SubSection icon={Banknote} title="Income & employment">
-                  <div className="space-y-2">
-                    {data.borrowers.map((b) => (
-                      <BorrowerBlock key={b.id} borrower={b} />
-                    ))}
-                  </div>
-                </SubSection>
-              )}
+              {editing && <StatedFinancialsEditor fileId={fileId} data={data} />}
 
-              {data.liabilities.length > 0 && (
+              {!editing &&
+                data.borrowers.some((b) => b.income_items.length > 0 || b.employers.length > 0) && (
+                  <SubSection icon={Banknote} title="Income & employment">
+                    <div className="space-y-2">
+                      {data.borrowers.map((b) => (
+                        <BorrowerBlock key={b.id} borrower={b} />
+                      ))}
+                    </div>
+                  </SubSection>
+                )}
+
+              {!editing && data.liabilities.length > 0 && (
                 <SubSection icon={Landmark} title="Liabilities" count={data.liabilities.length}>
-                  {data.liabilities.map((l, i) => (
-                    <LiabilityRow key={`${l.liability_type}-${l.holder_name}-${i}`} liability={l} />
+                  {data.liabilities.map((l) => (
+                    <LiabilityRow key={l.id} liability={l} />
                   ))}
                 </SubSection>
               )}
 
-              {data.assets.length > 0 && (
+              {!editing && data.assets.length > 0 && (
                 <SubSection icon={Wallet} title="Assets" count={data.assets.length}>
-                  {data.assets.map((a, i) => (
-                    <AssetRow key={`${a.asset_type}-${a.holder_name}-${i}`} asset={a} />
+                  {data.assets.map((a) => (
+                    <AssetRow key={a.id} asset={a} />
                   ))}
                 </SubSection>
               )}
 
-              {(data.loan_terms.note_rate_percent || data.loan_terms.amortization_months) && (
-                <SubSection icon={Wallet} title="Loan terms (stated)">
-                  {data.loan_terms.note_rate_percent && (
-                    <Cell label="Note rate" value={`${data.loan_terms.note_rate_percent}%`} />
-                  )}
-                  {data.loan_terms.amortization_type && (
-                    <Cell label="Amortization" value={data.loan_terms.amortization_type} />
-                  )}
-                  {data.loan_terms.amortization_months && (
-                    <Cell label="Term" value={`${data.loan_terms.amortization_months} mo`} />
-                  )}
-                  {data.loan_terms.lien_priority && (
-                    <Cell label="Lien" value={data.loan_terms.lien_priority} />
-                  )}
-                </SubSection>
-              )}
+              {!editing &&
+                (data.loan_terms.note_rate_percent || data.loan_terms.amortization_months) && (
+                  <SubSection icon={Wallet} title="Loan terms (stated)">
+                    {data.loan_terms.note_rate_percent && (
+                      <Cell label="Note rate" value={`${data.loan_terms.note_rate_percent}%`} />
+                    )}
+                    {data.loan_terms.amortization_type && (
+                      <Cell label="Amortization" value={data.loan_terms.amortization_type} />
+                    )}
+                    {data.loan_terms.amortization_months && (
+                      <Cell label="Term" value={`${data.loan_terms.amortization_months} mo`} />
+                    )}
+                    {data.loan_terms.lien_priority && (
+                      <Cell label="Lien" value={data.loan_terms.lien_priority} />
+                    )}
+                  </SubSection>
+                )}
             </>
           )
         )}
