@@ -212,6 +212,21 @@ findings later" deferral is **closed** here.
 - This ticket **records** findings (single-document); Phase 3 does the
   **cross-source** comparison. The full display is **LP-72**.
 
+### Implications engine (LP-67) — the first consumer of findings
+
+The implications engine (`app/services/implications.py`) turns each finding into a
+`SuggestedNeed` for the processor: an `obligation` finding → "payment history /
+obligation documentation"; `income_related` → "VOE / income explanation";
+`property_interest` → "property documentation review"; `discrepancy_candidate` →
+"review"; `other` → none. The locked rule is **surface + suggest, do NOT act**: it
+produces suggestions only — it **never** mutates the financial picture, persists
+anything, or creates a needs-list item (acting is Phase 3, human-confirmed). Each
+`SuggestedNeed` is **explainable + traceable** (`reasoning` + `source_finding_id` →
+`source_document_id`). It is **findings-scoped** (one finding → its implied need) —
+the holistic, whole-file needs reasoning is **LP-69**, which *consumes* these
+suggestions (an on-demand intermediate; no table) among everything else. **LP-68**
+(the needs engine) ingests them too.
+
 ## Tier 1 extractors
 
 A Tier-1 type routes to its registered extractor in `EXTRACTORS`
@@ -306,7 +321,11 @@ for any unrecognized document (+ full-text index), the `DocumentFinding`
 infrastructure (uniform across tiers), and the divorce-decree findings wiring
 (LP-63 loop closed). **The three-tier handling is complete.**
 
-**Next:** LP-67 (the implications engine — findings → suggested needs) and LP-72
-(the full tier-aware detail view + package groundwork + the full-text search UI).
-The taxonomy, indicators, typed-core field sets, and finding types refine with
-Priya over time.
+**LP-67 (the implications engine):** the first consumer of findings — maps each
+finding → a `SuggestedNeed` with explainable reasoning (surface + suggest, not act;
+findings-scoped; an on-demand intermediate feeding LP-68/69).
+
+**Next:** LP-68 (the needs-list engine — models/states/per-file serialization,
+ingesting LP-67's suggestions) → LP-69 (holistic AI needs reasoning) → LP-72 (the
+full tier-aware detail view + package groundwork + the full-text search UI). The
+taxonomy, indicators, field sets, and finding/need types refine with Priya.

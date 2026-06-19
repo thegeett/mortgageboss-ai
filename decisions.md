@@ -5087,3 +5087,54 @@ analyze). LP-67 reads `DocumentFinding`s to suggest needs; Phase 3 cross-checks 
 and may produce verification `Finding`s; LP-72 builds the full tier-aware detail + the findings display; the
 full-text **search UI** is future (the index exists now). Accuracy is refine-able with real/varied documents
 (human-in-the-loop), and the finding-type set refines with Priya.
+
+## ADR-176: Implications engine — findings → suggested needs (surface + suggest, not act; findings-scoped, feeding LP-69)
+
+- **Date:** 2026-06-19
+- **Status:** Accepted
+
+**Context:** Findings (LP-66) are passive observations — "this document asserts a $500/mo child support
+obligation." They are only useful if they become actionable. The implications engine is the **first consumer
+of findings**: it turns each into a *suggestion* for the processor ("→ consider a need to document this
+obligation") — the bridge from findings (what documents say) to the needs list (what the file still requires).
+The needs-list model/engine itself is LP-68 and the holistic AI needs reasoning is LP-69, so LP-67 must
+produce a clean intermediate that feeds them without depending on them.
+
+**Decision:**
+
+- **Surface + suggest, do NOT act (the locked constraint).** The engine produces `SuggestedNeed`s the
+  processor disposes of — it **never** mutates the financial picture (no silent debt-adding, no DTI change),
+  **never persists anything**, and **never creates a needs-list item**. Acting on findings is Phase 3
+  (human-confirmed); disposing of suggestions is the LP-68/70 needs flow. The functions are pure
+  (`suggest_needs_for_finding`) or read-only (`suggest_needs_for_loan_file` does a single `SELECT`). A test
+  asserts that running the engine creates no `NeedsItem` and mutates no finding.
+- **A bounded, explainable, findings-scoped mapping.** Each `DocumentFindingType` maps to a sensible
+  suggested need: `obligation` → payment history / obligation documentation; `income_related` → VOE / income
+  explanation; `property_interest` → property documentation review; `discrepancy_candidate` → review
+  (Phase 3 does the cross-check); `other` → **no suggestion** (a sensible "none", not a noisy generic). The
+  mapping is **deterministic** (no AI) — bounded and testable; the heavy holistic reasoning is LP-69. (A
+  small AI call to phrase suggestions could be added later, but the core is a bounded mapping.)
+- **Explainable + traceable.** Every `SuggestedNeed` carries `reasoning` (the human-readable *why*, e.g.
+  "Because document X asserts a $500.00/monthly obligation, the file should document this recurring
+  obligation") plus `source_finding_id` + `source_document_id` — the machine-traceable chain
+  *suggestion → finding → document*. Trustworthy, not mysterious.
+- **An on-demand intermediate, not a new table.** `SuggestedNeed` is a Pydantic structure produced **on
+  demand** — a pure projection over the persisted findings (no table, no migration, recomputed when needed).
+  Persisting would risk staleness and a premature schema LP-68 would reshape. LP-68 (the needs engine) and
+  LP-69 (the AI needs reasoning) ingest these suggestions as ONE input source and decide how/whether each
+  becomes a real needs-list item.
+- **Findings-scoped, NOT file-scoped.** LP-67 maps *one finding → its implied need(s)*. The holistic,
+  whole-file reasoning (the complete needs list from stated data + documents + findings + these suggestions)
+  is **LP-69**, which consumes these among everything else. LP-67 does not duplicate that — it is a focused,
+  composable mapper that *feeds* it.
+
+**Rationale:** turning passive observations into active suggestions is what makes findings useful;
+surface-not-act keeps the human in control of what affects the financial picture (the human-in-the-loop
+spine); a bounded findings-scoped mapping keeps LP-67 small and composable, feeding LP-69's holistic
+reasoning without duplicating it; explainability makes suggestions actionable; an on-demand intermediate
+avoids a premature schema.
+
+**Consequences:** LP-68 builds the needs model/engine that ingests these suggestions (deciding which become
+needs-list items); LP-69 does the holistic AI needs reasoning (consuming findings + these suggestions among
+everything else); LP-70 surfaces needs in the UI; Phase 3 acts on findings (cross-source) with the human in
+the loop. The mapping refines as the needs work + Priya input land.
