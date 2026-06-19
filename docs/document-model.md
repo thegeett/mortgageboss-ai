@@ -172,9 +172,19 @@ Registered so far:
   `gift_letter` (attestation-oriented — donor + relationship + `gift_amount` + the
   `no_repayment_attestation` that distinguishes a gift from undisclosed debt). These
   cross-check in Phase 3 against the stated MISMO assets (Phase 1.5).
+- **LP-62 (property cluster):** spans two contexts. *Subject-property facts* →
+  LTV + housing expense: `purchase_agreement` (`sales_price` is the LTV basis),
+  `homeowners_insurance` (`coverage_amount` + `annual_premium`). *Other-property
+  obligations* → DTI: `mortgage_statement` (`monthly_payment`), `property_tax_bill`
+  (`annual_tax_amount`; `due_dates` kept as a string — often two installments),
+  `hoa_statement` (`dues_amount` + frequency). The mortgage/tax/HOA extractors
+  **capture `property_address`** but do **not** decide subject-vs-other — Phase 3
+  matches the address. (The appraisal also feeds LTV but is **Tier 2** in the
+  catalog today — a candidate for Tier-1 promotion later, flagged for Priya.)
 
-A Tier-1 type whose extractor isn't registered yet (the LP-62..64 clusters) is
-handled gracefully as classified-only (see above) until its extractor lands.
+A Tier-1 type whose extractor isn't registered yet (the LP-63/64 clusters —
+borrower-info, tax returns) is handled gracefully as classified-only (see above)
+until its extractor lands.
 
 ## What's built vs. what's next
 
@@ -193,6 +203,10 @@ confidence-gated routing (low → `NEEDS_REVIEW`; confident-`unknown` → Tier 3
 retirement account (vested-vs-total), gift letter (attestation) — registered and
 routed.
 
-**Next:** LP-62..64 (the remaining Tier-1 clusters: property, borrower-info, tax
-returns) → LP-65 (Tier-2 summary) → LP-66 (Tier-3 analyzer). The taxonomy,
-indicators, and typed-core field sets refine with Priya over time.
+**LP-62 (property Tier-1 batch):** the property cluster — purchase agreement,
+homeowner's insurance, mortgage statement, property tax bill, HOA statement
+(address captured for subject-vs-other) — registered and routed.
+
+**Next:** LP-63/64 (the remaining Tier-1 clusters: borrower-info, tax returns) →
+LP-65 (Tier-2 summary) → LP-66 (Tier-3 analyzer). The taxonomy, indicators, and
+typed-core field sets refine with Priya over time.

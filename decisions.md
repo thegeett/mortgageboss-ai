@@ -4833,3 +4833,47 @@ assets.
 **Consequences:** LP-62..64 extend Tier 1 to the property/borrower-info/tax-return clusters; the field sets
 refine with Priya; the detail drawer renders these like the others; account numbers are masked + never
 logged; accuracy is validated with real samples over time.
+
+## ADR-171: Tier 1 property extractors — the established pattern, spanning subject-property facts and other-property obligations
+
+- **Date:** 2026-06-18
+- **Status:** Accepted
+
+**Context:** LP-62 is the third Tier-1 extractor batch — the property cluster: purchase agreement,
+homeowner's insurance, mortgage statement, property tax bill, HOA statement. Property documents serve two
+distinct verification purposes, and one of them creates a matching problem worth recording.
+
+**Decision:** Add five extractors, each following the LP-39a shape exactly (typed core of ``TypedField``\\ s
+with ``SourceLocation`` + grouped ``additional_sections`` catch-all, the shared tolerant parser, graceful
+``.failed()``, the uniform result interface, metadata-only logging), and register them in ``EXTRACTORS``.
+Key points:
+
+- **The cluster spans two contexts.** *Subject-property facts* drive LTV and housing expense: the purchase
+  agreement's ``sales_price`` (the LTV basis, cross-checking the stated MISMO ``SalesContractAmount``) and
+  the insurance binder's ``coverage_amount`` + ``annual_premium`` (housing expense). *Other-property
+  obligations* drive DTI: the mortgage statement's ``monthly_payment``, the tax bill's ``annual_tax_amount``,
+  and the HOA statement's ``dues_amount`` — each cross-checking the stated MISMO liabilities.
+- **Capture the property address; do NOT decide subject-vs-other.** A mortgage statement / tax bill / HOA
+  statement may be for the subject property OR another property the borrower owns. Each extractor captures
+  ``property_address`` in its typed core, and the prompts are explicit that the model must **not** decide
+  which property it is — Phase 3 matches the address to the subject property. Keeping the matching out of the
+  extractor avoids guessing and keeps the extraction a faithful read.
+- **``due_dates`` (tax bill) stays a string.** A property tax bill commonly has two installment due dates;
+  capturing them verbatim as a string loses nothing (vs. forcing a single ``date``), and Phase 3 can parse.
+- **V1 starters, refined with Priya; accuracy honestly scoped.** No sample property documents were available,
+  so tests verify the **mechanism/shape** (typed-core + catch-all, source locations, type coercion, graceful
+  failure, the address capture, the routing reaches each) — **not** per-document accuracy.
+- **The appraisal is deliberately NOT extracted here.** The appraisal's appraised value also feeds LTV, which
+  might argue for Tier-1 extraction, but the catalog currently classifies ``appraisal`` as **Tier 2**
+  (recognized, not extracted). This ticket honors the catalog and does not extract it. **Flagged** as a
+  candidate for Tier-1 promotion in a future catalog refinement with Priya — noted, not acted on here.
+
+**Rationale:** following the established pattern keeps every extraction uniform downstream. Capturing the
+address (without deciding subject-vs-other) is what lets Phase 3 correctly separate the borrower's housing
+expense on the subject property from obligations on other properties — getting that wrong would mis-state
+DTI. These typed cores are exactly the values Phase 3 cross-checks against the stated MISMO property +
+liabilities.
+
+**Consequences:** LP-63/64 extend Tier 1 to the borrower-info and tax-return clusters; the field sets refine
+with Priya; the detail drawer renders these like the others; the appraisal's Tier-1 promotion is an open
+question for the catalog/Priya; accuracy is validated with real samples over time.

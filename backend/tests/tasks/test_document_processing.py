@@ -169,20 +169,20 @@ async def test_tier1_without_extractor_is_classified_only(
     """
     doc = await _setup_document(db_session)
     _patch_storage(monkeypatch)
-    # purchase_agreement is Tier 1 in the catalog but its extractor is an LP-62..64
-    # type (not yet registered) — so it exercises the graceful classified-only branch.
+    # tax_return is Tier 1 in the catalog but its extractor is an LP-64 type (not
+    # yet registered) — so it exercises the graceful classified-only branch.
     _patch_classify(
         monkeypatch,
-        ClassificationResult(document_type="purchase_agreement", confidence=0.9, reasoning="x"),
+        ClassificationResult(document_type="tax_return", confidence=0.9, reasoning="x"),
     )
 
     await pipeline._process_document(db_session, str(doc.id))
     await db_session.refresh(doc)
 
     assert doc.status == DocumentStatus.COMPLETED  # terminal
-    assert doc.document_type == "purchase_agreement"
+    assert doc.document_type == "tax_return"
     assert doc.tier == Tier.TIER_1
-    assert doc.category == DocumentCategory.PROPERTY
+    assert doc.category == DocumentCategory.INCOME_EMPLOYMENT
     assert await _current_extraction(db_session, doc.id) is None  # no extractor ran
 
 
@@ -615,6 +615,61 @@ async def test_lp61_types_route_to_their_extractor(
     assert doc.status == DocumentStatus.COMPLETED
     assert doc.tier == Tier.TIER_1
     assert doc.category == DocumentCategory.ASSETS
+    assert await _current_extraction(db_session, doc.id) is not None  # an extraction was persisted
+
+
+# --------------------------------------------------------------------------- #
+# LP-62 — the property Tier 1 cluster is now registered + routed
+# --------------------------------------------------------------------------- #
+
+
+def test_lp62_property_extractors_registered() -> None:
+    """The five LP-62 property types map to their extractors in the registry."""
+    from app.ai.extraction import EXTRACTORS
+    from app.ai.extraction.hoa_statement import extract_hoa_statement
+    from app.ai.extraction.homeowners_insurance import extract_homeowners_insurance
+    from app.ai.extraction.mortgage_statement import extract_mortgage_statement
+    from app.ai.extraction.property_tax_bill import extract_property_tax_bill
+    from app.ai.extraction.purchase_agreement import extract_purchase_agreement
+
+    assert EXTRACTORS["purchase_agreement"] is extract_purchase_agreement
+    assert EXTRACTORS["homeowners_insurance"] is extract_homeowners_insurance
+    assert EXTRACTORS["mortgage_statement"] is extract_mortgage_statement
+    assert EXTRACTORS["property_tax_bill"] is extract_property_tax_bill
+    assert EXTRACTORS["hoa_statement"] is extract_hoa_statement
+
+
+@pytest.mark.parametrize(
+    "document_type",
+    [
+        "purchase_agreement",
+        "homeowners_insurance",
+        "mortgage_statement",
+        "property_tax_bill",
+        "hoa_statement",
+    ],
+)
+async def test_lp62_types_route_to_their_extractor(
+    monkeypatch: pytest.MonkeyPatch, db_session: AsyncSession, document_type: str
+) -> None:
+    """A Tier-1 property type now reaches its extractor — NOT the classified-only
+    no-extractor fallback (the pipeline is type-agnostic, so a canned success
+    result suffices)."""
+    doc = await _setup_document(db_session)
+    _patch_storage(monkeypatch)
+    _patch_classify(
+        monkeypatch,
+        ClassificationResult(document_type=document_type, confidence=0.95, reasoning="x"),
+    )
+    mock = _patch_extract(monkeypatch, _paystub_success(), document_type=document_type)
+
+    await pipeline._process_document(db_session, str(doc.id))
+    await db_session.refresh(doc)
+
+    assert mock.call_count == 1  # routed to the registered extractor (Tier 1), not the fallback
+    assert doc.status == DocumentStatus.COMPLETED
+    assert doc.tier == Tier.TIER_1
+    assert doc.category == DocumentCategory.PROPERTY
     assert await _current_extraction(db_session, doc.id) is not None  # an extraction was persisted
 
 
