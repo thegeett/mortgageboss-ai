@@ -10,7 +10,6 @@ import { apiClient } from "@/lib/api/client";
 import type { ActivityPublic } from "@/lib/types/activity";
 import type { BorrowerDetail } from "@/lib/types/borrower";
 import type { LoanFileDetail, LoanFileStatus, PaginatedLoanFiles } from "@/lib/types/loan-file";
-import type { NeedsItemPublic } from "@/lib/types/needs-item";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { isAxiosError } from "axios";
 
@@ -93,15 +92,8 @@ export function useLoanFileBorrowers(identifier: string) {
   });
 }
 
-export function useLoanFileNeeds(identifier: string) {
-  return useQuery({
-    queryKey: ["loan-file-needs", identifier],
-    queryFn: async () =>
-      (await apiClient.get<NeedsItemPublic[]>(`${LOAN_FILES_PATH}/${identifier}/needs`)).data,
-    enabled: Boolean(identifier),
-    retry: noRetryOn404,
-  });
-}
+// The needs list moved to its own data layer (LP-70) — see `lib/api/needs.ts`,
+// which adds live polling + the disposition mutations.
 
 export function useLoanFileActivity(identifier: string) {
   return useQuery({

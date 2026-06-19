@@ -5250,3 +5250,59 @@ Priya. Do not read the (mock-based) tests as proposal-quality validation — the
 display — the disposition + reasoning groundwork supports it); the reasoning quality refines with Priya + the
 correction loop; real AI cost/latency/eval; the re-reasoning on every document arrival is a cost to watch
 (debouncing is a future optimization); Phase 3 acts on findings (cross-source) with the human in the loop.
+
+## ADR-179: Needs-list dashboard — the self-maintaining checklist (reasoning surfaced; disposition flow; subtle updating, not a queue meter)
+
+- **Date:** 2026-06-19
+- **Status:** Accepted
+
+**Context:** LP-68 built the needs ENGINE (states, satisfaction, per-file serialization, the thin
+floor) and LP-69 the AI REASONING (holistic propose-with-reasoning + the correction-capture) — all
+backend. The needs list is the product's highest-value differentiator, but its VALUE is only realized
+in the UI: the processor's at-a-glance "what's outstanding, and why". LP-70 is that face — the first
+major Phase-2 UI ticket and the screen most worth demoing to Priya.
+
+**Decision:** The needs-list dashboard (on the loan-file overview) surfaces LP-68/69 as a
+**self-maintaining checklist** — open the file → a tailored checklist appears (the MISMO floor + the
+AI reasoning produce it; LP-70 displays it).
+
+- **The five states made visual + action-oriented.** Each `status` carries a colored dot + pill and
+  rolls up into one of four groups, rendered top-to-bottom: **Needs action** (pending / requested /
+  rejected) → **In review** (received) → **Complete** (verified) → **Set aside** (waived). "What needs
+  action" sits apart from "done" and "in flight" so the processor sees what to do next at a glance.
+- **The AI reasoning surfaced — explainability made visible (the trust-making element).** Every need
+  shows its LP-69 "why" ("Needs tax returns because the borrower has self-employment income…") in an
+  inset note. This is what makes the AI proposals trustworthy/evaluable rather than a mysterious
+  checklist — the distinctive element vs. a dumb checklist, and the signature of the screen.
+- **The disposition flow — the AI proposes, the processor disposes (the human-in-the-loop guardrail,
+  made interactive).** A PROPOSED need leads with a one-click **Confirm**; an overflow menu offers
+  **Adjust** (edit), **Waive** (with a reason), and **Dismiss** (with a reason); a header control
+  **Adds** a need the AI missed. Every action calls a tenant-scoped, **audited** write API and feeds
+  LP-69's correction-capture (confirm/adjust → CONFIRMED; dismiss → DISMISSED + waived; add → a
+  CONFIRMED manual need). The processor controls; the AI did the heavy lifting.
+- **Live updates as documents arrive.** The dashboard reads the (already-polling) documents query to
+  know when any document is in-flight and feeds that to the needs query as a `live` flag, so the list
+  polls while a document processes and settles once it's done — a satisfied need visibly moves
+  Pending → Received → Verified with no manual refresh. A backstop stops the poll if a pipeline stalls.
+- **A subtle "updating" cue — NOT a queue-depth meter.** While the list is settling, a soft "Updating…"
+  cue shows the OUTCOME (the list keeping current). It is deliberately **not** an "engine running" /
+  "N files queued" indicator: the per-file serialization is a fast internal mechanism, not a
+  user-facing batch job, so it stays invisible. (Per the prior decision.)
+- **Tenant-scoped read + write APIs.** All routes nest under the loan file (the LP-29 file gate →
+  `404` cross-company); a per-need action additionally `404`s a need not in the path file. The needs
+  response carries only the need's own fields (titles / types / reasoning / the satisfying document's
+  filename) — no raw borrower PII. Four new `activity_type` values audit the dispositions
+  (confirm / adjust / dismiss / waive; add reuses `needs_item_created`).
+
+**Rationale:** the needs list's value lives in the UI, so the dashboard is where the differentiator
+becomes tangible; surfacing the reasoning makes the AI proposals trustworthy (explainable) and
+evaluable; the disposition flow keeps the human in control and feeds the LP-69 improvement loop; the
+action-oriented grouping answers "what do I do next?" at a glance; the subtle-updating-not-queue-meter
+respects that the serialization is a fast internal mechanism, not a batch job to expose.
+
+**Consequences:** LP-71 (document versioning / AI staleness) and LP-72 (the tier-aware document detail)
+build the remaining Phase-2 UI; the dashboard is the screen most worth demoing to Priya, and the
+disposition → correction signal matures with use + her input; Phase 3 adds cross-source rules to
+"Verified". The old provisional `NeedsSection` (LP-34, the compact list) is replaced by this dashboard;
+the needs read hook moved into its own data layer (`lib/api/needs.ts`) with live polling + the
+disposition mutations.

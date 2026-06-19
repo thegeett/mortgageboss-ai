@@ -377,7 +377,23 @@ the gate**; the reasoning quality is the **highest-value Priya refinement** and 
 prompt (`ai/prompts/needs/needs_reasoning.txt`) is a sensible starter. A real AI
 call — cost/latency/eval apply; the assembled PII context is **never logged**.
 
-**Next:** LP-70 (the needs-list UI + confirm/adjust/dismiss/waive flow + the
-reasoning display) → LP-72 (the full tier-aware detail view + package groundwork +
-the full-text search UI). The taxonomy, field sets, and finding/need types — and
-the reasoning quality — refine with Priya.
+**LP-70 (the needs-list dashboard — the differentiator's face):** the first major
+Phase-2 UI — a **self-maintaining checklist** on the loan-file overview that
+surfaces LP-68/69 (open the file → a tailored checklist appears). The **five states
+made visual + action-oriented**: needs group into **Needs action** (pending /
+requested / rejected) → **In review** (received) → **Complete** (verified) → **Set
+aside** (waived), so "what to do next" reads at a glance. Each need shows its **AI
+reasoning** (the "why", LP-69) in an inset note — explainability made visible, the
+trust-making element. The **disposition flow** (the AI proposes, the processor
+disposes): Confirm / Adjust / Waive / Dismiss / Add — each a tenant-scoped, audited
+write that feeds LP-69's correction-capture. **Live updates** as documents arrive
+(the needs query polls off the documents-in-flight flag; a satisfied need moves
+Pending → Received → Verified with no manual refresh) plus a **subtle "Updating…"
+cue** that shows the outcome, **not** a queue-depth/"engine running" meter (the
+per-file serialization stays invisible). Tenant-scoped read + write APIs nest under
+the file (`404` cross-company); the needs response carries no raw PII. See
+**ADR-179**.
+
+**Next:** LP-71 (document versioning + AI staleness) → LP-72 (the full tier-aware
+detail view + package groundwork + the full-text search UI). The taxonomy, field
+sets, finding/need types — and the reasoning quality — refine with Priya.

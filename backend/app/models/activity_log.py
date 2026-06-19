@@ -54,6 +54,10 @@ class ActivityType(StrEnum):
     VERIFICATION_RUN = "verification_run"
     NEEDS_ITEM_CREATED = "needs_item_created"
     NEEDS_ITEM_SATISFIED = "needs_item_satisfied"
+    NEEDS_ITEM_CONFIRMED = "needs_item_confirmed"  # processor confirmed a proposed need (LP-70)
+    NEEDS_ITEM_ADJUSTED = "needs_item_adjusted"  # processor edited a need (LP-70)
+    NEEDS_ITEM_DISMISSED = "needs_item_dismissed"  # processor dismissed a proposal (LP-70)
+    NEEDS_ITEM_WAIVED = "needs_item_waived"  # processor waived a need (LP-70)
     COMMUNICATION_SENT = "communication_sent"
     COMMUNICATION_RECEIVED = "communication_received"
     NOTE_ADDED = "note_added"
