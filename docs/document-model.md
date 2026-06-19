@@ -181,10 +181,17 @@ Registered so far:
   **capture `property_address`** but do **not** decide subject-vs-other — Phase 3
   matches the address. (The appraisal also feeds LTV but is **Tier 2** in the
   catalog today — a candidate for Tier-1 promotion later, flagged for Priya.)
+- **LP-63 (borrower-info/legal cluster):** `drivers_license` (the most PII-dense
+  doc — `id_number_masked` + `date_of_birth` captured for the identity check but
+  **never logged**; `expiration_date` for staleness), `divorce_decree`
+  (`support_obligations` + `property_awards` as first-class typed lists — the
+  alimony/child-support obligations are the Phase 3 undisclosed-obligation
+  feedstock, **captured now**; formal *findings* are wired when the findings
+  infrastructure lands in LP-66/67), and `letter_of_explanation` — the **reused**
+  LP-60 general-LOE extractor (one extractor, not two).
 
-A Tier-1 type whose extractor isn't registered yet (the LP-63/64 clusters —
-borrower-info, tax returns) is handled gracefully as classified-only (see above)
-until its extractor lands.
+The only remaining Tier-1 type without an extractor is `tax_return` (LP-64) — it
+is handled gracefully as classified-only (see above) until its extractor lands.
 
 ## What's built vs. what's next
 
@@ -207,6 +214,10 @@ routed.
 homeowner's insurance, mortgage statement, property tax bill, HOA statement
 (address captured for subject-vs-other) — registered and routed.
 
-**Next:** LP-63/64 (the remaining Tier-1 clusters: borrower-info, tax returns) →
-LP-65 (Tier-2 summary) → LP-66 (Tier-3 analyzer). The taxonomy, indicators, and
-typed-core field sets refine with Priya over time.
+**LP-63 (borrower-info/legal Tier-1 batch):** driver's license (heightened PII),
+divorce decree (obligations captured; findings wired in LP-66/67), and the reused
+general LOE — registered and routed.
+
+**Next:** LP-64 completes Tier 1 (tax returns) → LP-65 (Tier-2 summary) → LP-66
+(Tier-3 analyzer). The taxonomy, indicators, and typed-core field sets refine with
+Priya over time.

@@ -18,6 +18,8 @@ from typing import Protocol
 from pydantic import BaseModel
 
 from app.ai.extraction.bank_statement import extract_bank_statement
+from app.ai.extraction.divorce_decree import extract_divorce_decree
+from app.ai.extraction.drivers_license import extract_drivers_license
 from app.ai.extraction.form_1099 import extract_1099
 from app.ai.extraction.gift_letter import extract_gift_letter
 from app.ai.extraction.hoa_statement import extract_hoa_statement
@@ -75,6 +77,10 @@ EXTRACTORS: dict[str, Extractor] = {
     "mortgage_statement": extract_mortgage_statement,
     "property_tax_bill": extract_property_tax_bill,
     "hoa_statement": extract_hoa_statement,
+    # LP-63 — Tier 1 borrower-info / legal cluster. (letter_of_explanation is the
+    # general-LOE extractor from LP-60, reused — registered above.)
+    "drivers_license": extract_drivers_license,
+    "divorce_decree": extract_divorce_decree,
 }
 
 __all__ = ["EXTRACTORS", "ExtractionResult", "Extractor"]

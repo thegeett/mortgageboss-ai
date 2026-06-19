@@ -674,6 +674,51 @@ async def test_lp62_types_route_to_their_extractor(
 
 
 # --------------------------------------------------------------------------- #
+# LP-63 — the borrower-info/legal Tier 1 cluster is registered + routed
+# --------------------------------------------------------------------------- #
+
+
+def test_lp63_borrower_info_extractors_registered() -> None:
+    """drivers_license + divorce_decree map to their extractors; the LOE is reused."""
+    from app.ai.extraction import EXTRACTORS
+    from app.ai.extraction.divorce_decree import extract_divorce_decree
+    from app.ai.extraction.drivers_license import extract_drivers_license
+    from app.ai.extraction.letter_of_explanation import extract_letter_of_explanation
+
+    assert EXTRACTORS["drivers_license"] is extract_drivers_license
+    assert EXTRACTORS["divorce_decree"] is extract_divorce_decree
+    # The general LOE is the LP-60 extractor, reused (not duplicated).
+    assert EXTRACTORS["letter_of_explanation"] is extract_letter_of_explanation
+
+
+@pytest.mark.parametrize(
+    "document_type", ["drivers_license", "divorce_decree", "letter_of_explanation"]
+)
+async def test_lp63_types_route_to_their_extractor(
+    monkeypatch: pytest.MonkeyPatch, db_session: AsyncSession, document_type: str
+) -> None:
+    """A Tier-1 borrower-info/legal type reaches its extractor — NOT the
+    classified-only no-extractor fallback (the pipeline is type-agnostic, so a
+    canned success result suffices)."""
+    doc = await _setup_document(db_session)
+    _patch_storage(monkeypatch)
+    _patch_classify(
+        monkeypatch,
+        ClassificationResult(document_type=document_type, confidence=0.95, reasoning="x"),
+    )
+    mock = _patch_extract(monkeypatch, _paystub_success(), document_type=document_type)
+
+    await pipeline._process_document(db_session, str(doc.id))
+    await db_session.refresh(doc)
+
+    assert mock.call_count == 1  # routed to the registered extractor (Tier 1), not the fallback
+    assert doc.status == DocumentStatus.COMPLETED
+    assert doc.tier == Tier.TIER_1
+    assert doc.category == DocumentCategory.BORROWER_INFO
+    assert await _current_extraction(db_session, doc.id) is not None  # an extraction was persisted
+
+
+# --------------------------------------------------------------------------- #
 # reprocess_document_extraction uses the SAME registry (LP-44 core)
 # --------------------------------------------------------------------------- #
 

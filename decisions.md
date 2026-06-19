@@ -4877,3 +4877,54 @@ liabilities.
 **Consequences:** LP-63/64 extend Tier 1 to the borrower-info and tax-return clusters; the field sets refine
 with Priya; the detail drawer renders these like the others; the appraisal's Tier-1 promotion is an open
 question for the catalog/Priya; accuracy is validated with real samples over time.
+
+## ADR-172: Tier 1 borrower-info/legal extractors — heightened ID PII, divorce-decree obligations captured (findings sequenced to LP-66/67), the LOE reused
+
+- **Date:** 2026-06-18
+- **Status:** Accepted
+
+**Context:** LP-63 is the fourth Tier-1 extractor batch — the borrower-info/legal cluster: the driver's
+license / government ID (identity, KYC), the divorce decree (legal obligations/awards), and the general
+Letter of Explanation. Two things make this batch different from the prior extractor batches: the ID is the
+most PII-dense document in the product, and the divorce decree produces *findings* whose infrastructure
+isn't built yet.
+
+**Decision:** Add the ID and divorce-decree extractors (following the LP-39a shape exactly) and **reuse** the
+existing LOE extractor; register the two new types in ``EXTRACTORS``. Key choices:
+
+- **Heightened ID PII — the W-2 SSN discipline (ADR-147), at its strictest.** The whole ID is PII.
+  ``id_number_masked`` is captured masked (last 4, the model masks it), ``date_of_birth`` is captured for the
+  Phase 3 identity cross-check — and **no extracted value is ever logged** (only status / confidence /
+  counts). The raw values live only in the tenant-scoped extraction JSON (ID number masked, DOB masked in
+  display). A dedicated test asserts the DOB, the ID number, the name, and the address never appear in logs.
+  All ID test data is **synthetic** — never a real identity document.
+- **The ID expiration is captured.** An expired ID is invalid; ``expiration_date`` feeds validity / staleness
+  (LP-71).
+- **Divorce-decree obligations captured now; formal findings sequenced to LP-66/67.** The support
+  obligations (alimony / child support) are the canonical undisclosed-obligation feedstock Phase 3
+  cross-checks against the stated liabilities. Because a decree can set more than one obligation, they are
+  captured as a **first-class typed list** (``support_obligations`` — type/amount/frequency/payer, each with
+  source), alongside a ``property_awards`` list — the same structured-rows extension the bank statement uses
+  for transactions (ADR-061), **not** a new shape. **Surfacing them as formal findings** (the structured
+  observations the implications engine + Phase 3 read) is **wired when the findings infrastructure exists
+  (LP-66/67)** — this ticket captures the data without building findings infrastructure prematurely. Nothing
+  is lost: the obligations are in the typed list today.
+- **The general LOE is reused, not duplicated.** LP-60 already built the ``letter_of_explanation`` extractor
+  with a general ``subject`` + ``explanation_summary`` + referenced facts, and the catalog files it under
+  ``borrower_info``. It already serves the general variant; this ticket reuses it (only the prompt was
+  lightly broadened to enumerate general subjects — no schema/registry change), so there is one LOE
+  extractor, not two.
+- **V1 starters, refined with Priya; accuracy honestly scoped.** No sample documents were available, so the
+  tests verify the **mechanism/shape** (incl. the critical PII no-logging check and the obligation-list
+  capture) — not per-document accuracy.
+
+**Rationale:** identity and legal documents establish who the borrower is and what legal obligations affect
+the loan. The ID's PII density demands the strictest no-logging discipline in the codebase. Capturing the
+decree's obligations now (as structured rows) means the cross-check feedstock exists the moment the findings
+infrastructure lands, without a re-extraction — and capture-now/wire-later avoids building findings
+infrastructure out of order. Reusing the LOE keeps one extractor for one catalog type.
+
+**Consequences:** LP-64 completes Tier 1 (tax returns); LP-66/67 build the findings infrastructure that
+surfaces the divorce-decree obligations as findings and cross-checks them (Phase 3); the ID expiration feeds
+staleness (LP-71); accuracy is validated with real (synthetic / redacted — never real) samples; field sets
+refine with Priya.
