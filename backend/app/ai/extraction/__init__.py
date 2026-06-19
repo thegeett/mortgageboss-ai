@@ -32,6 +32,7 @@ from app.ai.extraction.profit_and_loss import extract_profit_and_loss
 from app.ai.extraction.property_tax_bill import extract_property_tax_bill
 from app.ai.extraction.purchase_agreement import extract_purchase_agreement
 from app.ai.extraction.retirement_account import extract_retirement_account
+from app.ai.extraction.tax_return import extract_tax_return
 from app.ai.extraction.voe import extract_voe
 from app.ai.extraction.w2 import extract_w2
 from app.models.extraction import ExtractionStatus
@@ -81,6 +82,9 @@ EXTRACTORS: dict[str, Extractor] = {
     # general-LOE extractor from LP-60, reused — registered above.)
     "drivers_license": extract_drivers_license,
     "divorce_decree": extract_divorce_decree,
+    # LP-64 — Tier 1 tax returns (the nested 1040 + schedules bundle). Completes
+    # Tier 1: every Tier-1 catalog type now has an extractor.
+    "tax_return": extract_tax_return,
 }
 
 __all__ = ["EXTRACTORS", "ExtractionResult", "Extractor"]

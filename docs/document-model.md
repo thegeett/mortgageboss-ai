@@ -189,9 +189,18 @@ Registered so far:
   feedstock, **captured now**; formal *findings* are wired when the findings
   infrastructure lands in LP-66/67), and `letter_of_explanation` — the **reused**
   LP-60 general-LOE extractor (one extractor, not two).
+- **LP-64 (tax returns — the nested one):** `tax_return` is a **nested bundle** —
+  a 1040 typed core + typed **income-critical schedules** (`schedule_c` [a list —
+  `net_profit` is the self-employment heart], `schedule_e` [present-or-null, with
+  a `properties` list + `depreciation`], `k1s` [a list]) + the catch-all (other
+  schedules B/D/1/2/3, attachments). Variable composition: a schedule is empty/null
+  if absent; repeatable schedules are lists. Generous token budget (16384) for the
+  multi-page bundle; SSN masked + never logged. It **captures the figures**; Phase 3
+  does the qualifying-income math + the two-year comparison.
 
-The only remaining Tier-1 type without an extractor is `tax_return` (LP-64) — it
-is handled gracefully as classified-only (see above) until its extractor lands.
+**Tier 1 is complete** — every Tier-1 catalog type now has a registered extractor
+(a test asserts this). A future Tier-1 type added to the catalog before its
+extractor is built would still be handled gracefully as classified-only.
 
 ## What's built vs. what's next
 
@@ -218,6 +227,8 @@ homeowner's insurance, mortgage statement, property tax bill, HOA statement
 divorce decree (obligations captured; findings wired in LP-66/67), and the reused
 general LOE — registered and routed.
 
-**Next:** LP-64 completes Tier 1 (tax returns) → LP-65 (Tier-2 summary) → LP-66
-(Tier-3 analyzer). The taxonomy, indicators, and typed-core field sets refine with
-Priya over time.
+**LP-64 (tax returns — the last Tier-1 batch):** the nested 1040 + schedules
+(C/E/K-1) bundle — registered and routed. **Tier 1 is now complete.**
+
+**Next:** LP-65 (Tier-2 summary path) → LP-66 (Tier-3 generic analyzer). The
+taxonomy, indicators, and typed-core field sets refine with Priya over time.

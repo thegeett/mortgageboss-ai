@@ -162,15 +162,16 @@ async def test_happy_path_pay_stub(
 async def test_tier1_without_extractor_is_classified_only(
     monkeypatch: pytest.MonkeyPatch, db_session: AsyncSession
 ) -> None:
-    """A Tier-1 type whose extractor isn't built yet (LP-60..64) → classified-only.
+    """A Tier-1 type with no registered extractor → classified-only (graceful branch).
 
-    Graceful, NOT a crash: the doc is correctly classified + tiered + categorized;
-    deep extraction arrives when the extractor registers. Terminal status.
+    Every Tier-1 catalog type now HAS an extractor (LP-60..64 complete), so to
+    exercise the graceful branch we remove one from the registry — simulating a
+    future Tier-1 type cataloged before its extractor is built. Graceful, NOT a
+    crash: the doc is correctly classified + tiered + categorized; terminal status.
     """
     doc = await _setup_document(db_session)
     _patch_storage(monkeypatch)
-    # tax_return is Tier 1 in the catalog but its extractor is an LP-64 type (not
-    # yet registered) — so it exercises the graceful classified-only branch.
+    monkeypatch.delitem(pipeline.EXTRACTORS, "tax_return")  # simulate "no extractor yet"
     _patch_classify(
         monkeypatch,
         ClassificationResult(document_type="tax_return", confidence=0.9, reasoning="x"),
@@ -716,6 +717,51 @@ async def test_lp63_types_route_to_their_extractor(
     assert doc.tier == Tier.TIER_1
     assert doc.category == DocumentCategory.BORROWER_INFO
     assert await _current_extraction(db_session, doc.id) is not None  # an extraction was persisted
+
+
+# --------------------------------------------------------------------------- #
+# LP-64 — tax returns: Tier 1 is now COMPLETE (every Tier-1 type has an extractor)
+# --------------------------------------------------------------------------- #
+
+
+def test_tax_return_registered() -> None:
+    from app.ai.extraction import EXTRACTORS
+    from app.ai.extraction.tax_return import extract_tax_return
+
+    assert EXTRACTORS["tax_return"] is extract_tax_return
+
+
+def test_every_tier_1_catalog_type_has_an_extractor() -> None:
+    """LP-60..64 complete: no Tier-1 catalog type falls to the classified-only fallback."""
+    from app.ai.extraction import EXTRACTORS
+    from app.documents.catalog import CATALOG
+    from app.models.document import Tier
+
+    tier_1 = {slug for slug, (tier, _) in CATALOG.items() if tier is Tier.TIER_1}
+    missing = sorted(tier_1 - set(EXTRACTORS))
+    assert missing == [], f"Tier-1 types still without an extractor: {missing}"
+
+
+async def test_tax_return_routes_to_its_extractor(
+    monkeypatch: pytest.MonkeyPatch, db_session: AsyncSession
+) -> None:
+    """tax_return reaches its extractor (Tier 1) — not the classified-only fallback."""
+    doc = await _setup_document(db_session)
+    _patch_storage(monkeypatch)
+    _patch_classify(
+        monkeypatch,
+        ClassificationResult(document_type="tax_return", confidence=0.95, reasoning="x"),
+    )
+    mock = _patch_extract(monkeypatch, _paystub_success(), document_type="tax_return")
+
+    await pipeline._process_document(db_session, str(doc.id))
+    await db_session.refresh(doc)
+
+    assert mock.call_count == 1
+    assert doc.status == DocumentStatus.COMPLETED
+    assert doc.tier == Tier.TIER_1
+    assert doc.category == DocumentCategory.INCOME_EMPLOYMENT
+    assert await _current_extraction(db_session, doc.id) is not None
 
 
 # --------------------------------------------------------------------------- #

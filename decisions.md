@@ -4928,3 +4928,59 @@ infrastructure out of order. Reusing the LOE keeps one extractor for one catalog
 surfaces the divorce-decree obligations as findings and cross-checks them (Phase 3); the ID expiration feeds
 staleness (LP-71); accuracy is validated with real (synthetic / redacted — never real) samples; field sets
 refine with Priya.
+
+## ADR-173: Nested tax-return extraction — a 1040 core + typed income-critical schedules + catch-all (Tier 1 complete)
+
+- **Date:** 2026-06-18
+- **Status:** Accepted
+
+**Context:** LP-64 is the final and hardest Tier-1 extractor. A tax return is **not one form** — it is Form
+1040 plus a **variable** set of schedules (Schedule C self-employment, Schedule E rental, K-1 partnership,
+plus B/D/1/2/3 and attachments), and which schedules are present depends on the borrower. The single-form
+typed-core+catch-all shape (LP-39a) doesn't fit a variable, nested bundle. Crucially, **the self-employed
+case is the point**: for a W-2 employee the return is largely redundant, but for a self-employed borrower the
+return is THE primary income document — Schedule C ``net_profit`` is the qualifying-income figure (the real
+MISMO sample borrower had self-employment income from multiple LLCs — exactly this case).
+
+**Decision:** Extract the tax return as a **nested** bundle that extends — not replaces — the established
+shape: a **1040 typed core** + **typed income-critical schedule sub-structures** + the grouped catch-all.
+
+- **Type the income-critical schedules; catch-all the rest.** ``schedule_c`` (a **list** — a borrower can
+  have several businesses; ``net_profit`` is the heart), ``schedule_e`` (present-or-null, with a
+  ``properties`` list + ``total_net_rental_income`` + ``depreciation``), and ``k1s`` (a list) are typed.
+  Every other schedule (B/D/1/2/3, W-2s/1099s included in the bundle, attachments) goes to
+  ``additional_sections`` — captured, not deeply typed. Which schedules/figures to promote to typed is a
+  refine-with-Priya question.
+- **Variable composition, no hallucination.** A schedule absent → an empty list / ``null`` (never assumed); a
+  fully-empty schedule entry is dropped (no invented schedules). Each schedule field is a ``TypedField`` with
+  ``SourceLocation`` parsed through the **same** shared typed-core parser, so the nesting reuses the existing
+  machinery rather than inventing new parsing. Status is derived from the 1040 core **and** the schedules (a
+  self-employed return may be mostly its schedules).
+- **Generous token budget.** A multi-page, multi-schedule bundle is the most content of any extractor, so
+  ``max_tokens`` is 16384 (vs 4096 for single-form extractors); a truncated/malformed response still fails
+  gracefully (``.failed()``).
+- **Same result interface despite nested data.** ``TaxReturnExtractionResult`` exposes the same
+  ``data`` / ``status`` / ``confidence`` / ``.failed()`` / ``model_dump`` interface as every other extractor,
+  so the pipeline + ``create_extraction_version`` + the detail drawer handle the nested data uniformly.
+- **Captures figures for Phase 3; does NOT compute income.** The qualifying-income derivation (combining
+  Schedule C net profit + add-backs, the two-year comparison) is Phase 3. This ticket extracts one return's
+  figures accurately.
+- **SSN masked + never logged** (ADR-147). Tax returns are among the most sensitive documents; metadata-only
+  logging (counts + which-schedules-present), no return values or SSN in logs.
+
+**Rationale:** the nested typed-core+catch-all handles the variable composition while typing exactly the
+high-value schedules that drive the self-employed income picture — the case where the return matters most.
+Reusing the shared parser for each schedule keeps the nesting from being a new shape. The figures are the
+feedstock for Phase 3's income math.
+
+**Accuracy — honestly (emphatically) scoped.** A tax return is the most varied, multi-schedule document of
+any extractor here. With **no real sample returns available**, the tests verify the nested **mechanism/shape**
+(the 1040 core, Schedule C ``net_profit``, the present-or-null + repeatable schedules, the catch-all, the
+SSN no-logging, graceful failure) — **NOT** extraction accuracy against real returns. A multi-schedule
+extractor tested only against constructed inputs is **especially unproven**; accuracy must be validated
+against real (synthetic/redacted) **self-employed** returns over time and the field set refined with Priya.
+
+**Consequences:** **Tier 1 breadth is complete** (LP-60..64 — every Tier-1 catalog type now has an
+extractor, asserted by a test). Phase 3 derives qualifying income from the captured figures + does the
+two-year comparison; which schedules/figures to type refines with Priya; tax-return accuracy needs
+real-return validation most acutely of any extractor. Phase 2 now moves to the Tier 2/3 handlers (LP-65/66).
