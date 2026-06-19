@@ -45,6 +45,10 @@ class BorrowerUpdate(BaseModel):
     marital_status: MaritalStatus | None = None
     is_primary: bool | None = None
     borrower_position: int | None = None
+    # MISMO-specific core fields (LP-56) — editable after import.
+    dependent_count: int | None = None
+    citizenship: str | None = None
+    declarations: dict[str, str] | None = None
 
 
 class BorrowerResponse(BaseModel):

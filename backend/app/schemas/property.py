@@ -40,6 +40,11 @@ class PropertyUpdate(BaseModel):
     occupancy_type: OccupancyType | None = None
     estimated_value: Decimal | None = None
     purchase_price: Decimal | None = None
+    # MISMO-specific core fields (LP-56) — editable after import.
+    valuation_amount: Decimal | None = None
+    attachment_type: str | None = None
+    construction_method: str | None = None
+    financed_unit_count: int | None = None
 
 
 class PropertyResponse(BaseModel):

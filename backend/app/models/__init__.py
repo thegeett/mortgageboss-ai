@@ -39,6 +39,7 @@ from app.models.finding import (
 from app.models.helpers import only_active, scope_to_company
 from app.models.lender import Lender, LoanProgram
 from app.models.loan_file import LoanFile, LoanFileStatus, LoanPurpose
+from app.models.mismo_import import MismoImport, MismoImportStatus
 from app.models.needs_item import (
     NeedsItem,
     NeedsItemOrigin,
@@ -46,6 +47,12 @@ from app.models.needs_item import (
     NeedsItemStatus,
 )
 from app.models.property import OccupancyType, Property, PropertyType
+from app.models.stated_financials import (
+    StatedAsset,
+    StatedEmployer,
+    StatedIncomeItem,
+    StatedLiability,
+)
 from app.models.types import (
     LongStr,
     MediumStr,
@@ -87,6 +94,8 @@ __all__ = [
     "LongStr",
     "MaritalStatus",
     "MediumStr",
+    "MismoImport",
+    "MismoImportStatus",
     "Money",
     "NeedsItem",
     "NeedsItemOrigin",
@@ -98,6 +107,10 @@ __all__ = [
     "RecordStatus",
     "ShortStr",
     "SoftDeleteMixin",
+    "StatedAsset",
+    "StatedEmployer",
+    "StatedIncomeItem",
+    "StatedLiability",
     "TimestampMixin",
     "UUIDMixin",
     "UploadSource",

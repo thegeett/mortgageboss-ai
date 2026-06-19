@@ -137,6 +137,29 @@ returns `404`, verified by tests. The scoping `company_id` is non-forgeable (it
 comes from the validated token + live user), so isolation holds regardless of what
 the client sends.
 
+### MISMO import (LP-54) — the primary file-creation path
+
+`POST /api/v1/loan-files/import-mismo` (multipart `file`) imports a MISMO 3.4 file
+(XML **or** HTML-wrapped) and creates a fully-populated loan file. It runs parse
+(LP-51) → create (LP-53) **inline** (synchronous, no Celery — MISMO parsing is fast
+deterministic lxml work, no AI, unlike document processing) and the response **is**
+the created file (import-directly). `company_id` is the authenticated user's.
+
+| Method | Path | Body | Success | Notes |
+| --- | --- | --- | --- | --- |
+| POST | `/loan-files/import-mismo` | multipart `file` | `201` `{ loan_file: LoanFileDetail, warnings: [...] }` | inline parse→create; SSN masked |
+
+- **Success-with-warnings:** a *partial* parse (missing optional fields) still
+  returns `201` with the created file and the `warnings` list (shown as "imported
+  with N warnings").
+- **Errors** (LP-46 envelope, safe messages): unparseable / not-MISMO → `400`; a
+  file with no borrower **and** no loan → `422`; empty upload → `422`; oversized
+  (> ~10 MB) → `413`; unexpected → safe `500`.
+- Boundary validation only (present + size); the *content* is validated by the
+  parser, so content-type isn't over-restricted.
+- The raw MISMO file is stored for audit; the SSN is masked in the response and
+  never logged (metadata-only logging).
+
 ## Borrowers & property (LP-29) — nested under a loan file
 
 Borrowers and the subject property have **no `company_id`** of their own — they are

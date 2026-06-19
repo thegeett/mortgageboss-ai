@@ -13,10 +13,13 @@ service flushes.
 
 from typing import Annotated
 
-from fastapi import APIRouter, HTTPException, Query, status
+import structlog
+from fastapi import APIRouter, File, HTTPException, Query, UploadFile, status
 
 from app.api.dependencies import CurrentUser
 from app.core.database import DbSession
+from app.mismo.import_service import MismoImportError, create_loan_file_from_mismo
+from app.mismo.parser import MismoParseError, parse_mismo
 from app.models.loan_file import LoanFileStatus
 from app.schemas.loan_file import (
     LoanFileCreate,
@@ -25,6 +28,8 @@ from app.schemas.loan_file import (
     LoanFileUpdate,
     PaginatedLoanFiles,
 )
+from app.schemas.mismo import MismoImportResponse
+from app.schemas.stated_financials import StatedFinancialsResponse
 from app.services.loan_files import (
     create_loan_file_with_setup,
     get_loan_file,
@@ -32,10 +37,33 @@ from app.services.loan_files import (
     soft_delete_loan_file_with_activity,
     update_loan_file_with_activity,
 )
+from app.services.stated_financials import get_stated_financials
+
+log = structlog.get_logger(__name__)
 
 router = APIRouter(prefix="/loan-files", tags=["loan-files"])
 
 _NOT_FOUND = HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Loan file not found")
+
+# MISMO import is parsed inline (fast, deterministic — no AI/Celery). The cap is
+# generous (a real MISMO is ~60 KB) and only rejects absurd uploads.
+_MAX_MISMO_BYTES = 10 * 1024 * 1024
+_MISMO_CHUNK = 1024 * 1024
+
+
+async def _read_capped(upload: UploadFile, *, max_bytes: int) -> bytes:
+    """Read an upload into memory, aborting (413) once it exceeds ``max_bytes``."""
+    chunks: list[bytes] = []
+    total = 0
+    while chunk := await upload.read(_MISMO_CHUNK):
+        total += len(chunk)
+        if total > max_bytes:
+            raise HTTPException(
+                status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+                detail="The MISMO file exceeds the size limit.",
+            )
+        chunks.append(chunk)
+    return b"".join(chunks)
 
 
 @router.post("", response_model=LoanFileDetail, status_code=status.HTTP_201_CREATED)
@@ -67,6 +95,87 @@ async def create(
     if created is None:  # pragma: no cover - just created, always found
         raise _NOT_FOUND
     return LoanFileDetail.from_model(created)
+
+
+@router.post(
+    "/import-mismo",
+    response_model=MismoImportResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def import_mismo(
+    current_user: CurrentUser,
+    db: DbSession,
+    file: Annotated[UploadFile, File(description="A MISMO 3.4 XML (or HTML-wrapped) file")],
+) -> MismoImportResponse:
+    """Import a MISMO 3.4 file → a fully-populated loan file (LP-54).
+
+    The primary file-creation path: the processor uploads the MISMO her LOS
+    produced and gets back the populated file. A **thin** boundary — the work is
+    in the services it orchestrates **inline** (no Celery): MISMO parsing is fast,
+    deterministic lxml work with no AI (unlike document processing), so
+    parse + create run in-request and the response *is* the created file
+    (import-directly).
+
+    Boundary validation only (a file is present + a size cap); the *content* is
+    validated by :func:`parse_mismo`, which accepts raw XML and HTML-wrapped XML.
+    ``company_id`` is the authenticated user's (never the body). A **partial
+    parse still creates the file** and returns its ``warnings`` (success with
+    warnings). Failures map to safe LP-46 envelope errors: an unparseable /
+    not-MISMO file → ``400``; a file with no usable borrower or loan → ``422``.
+    """
+    raw = await _read_capped(file, max_bytes=_MAX_MISMO_BYTES)
+    if not raw:
+        raise HTTPException(
+            status_code=422,
+            detail="No file provided.",  # 422 literal: avoids a Starlette deprecation
+        )
+
+    try:
+        parsed = parse_mismo(raw)
+    except MismoParseError as exc:
+        # Safe message only (rendered into the LP-46 envelope). The underlying
+        # detail is never surfaced.
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="This file couldn't be parsed as a MISMO file.",
+        ) from exc
+
+    try:
+        loan_file = await create_loan_file_from_mismo(
+            db,
+            parsed=parsed,
+            company_id=current_user.company_id,
+            raw_content=raw,
+            source_format=parsed.source_format,
+            actor_user_id=current_user.id,
+        )
+    except MismoImportError as exc:
+        raise HTTPException(
+            status_code=422,  # Unprocessable Content (literal avoids a deprecation)
+            detail="This MISMO file is missing the borrower and loan data needed to create a file.",
+        ) from exc
+
+    await db.commit()
+
+    # Reload scoped, with relationships eager-loaded for the response (same as the
+    # manual create path — MISMO and manual converge on the same response).
+    created = await get_loan_file(
+        db, company_id=current_user.company_id, identifier=str(loan_file.id)
+    )
+    if created is None:  # pragma: no cover - just created, always found
+        raise _NOT_FOUND
+
+    # Metadata-only logging — NEVER the SSN, names, amounts, or file content.
+    log.info(
+        "mismo_import_endpoint",
+        loan_file_id=str(loan_file.id),
+        source_format=parsed.source_format,
+        warnings=len(parsed.parse_warnings),
+    )
+    return MismoImportResponse(
+        loan_file=LoanFileDetail.from_model(created),
+        warnings=parsed.parse_warnings,
+    )
 
 
 @router.get("", response_model=PaginatedLoanFiles)
@@ -109,6 +218,24 @@ async def retrieve(identifier: str, db: DbSession, current_user: CurrentUser) ->
     if loan_file is None:
         raise _NOT_FOUND
     return LoanFileDetail.from_model(loan_file)
+
+
+@router.get("/{identifier}/stated-financials", response_model=StatedFinancialsResponse)
+async def stated_financials(
+    identifier: str, db: DbSession, current_user: CurrentUser
+) -> StatedFinancialsResponse:
+    """The file's **stated** application data (LP-55) — read-only.
+
+    The multi-row stated financials (income/employers/liabilities/assets), the
+    extended MISMO loan/property fields, and the latest import record (its parse
+    warnings). Populated by MISMO import (LP-53); empty/null on a manual file.
+    Tenant-scoped via the company-scoped file lookup (``404`` if not the
+    caller's). SSN is masked. Display only — editing is LP-56.
+    """
+    loan_file = await get_loan_file(db, company_id=current_user.company_id, identifier=identifier)
+    if loan_file is None:
+        raise _NOT_FOUND
+    return await get_stated_financials(db, loan_file=loan_file)
 
 
 @router.patch("/{identifier}", response_model=LoanFileDetail)

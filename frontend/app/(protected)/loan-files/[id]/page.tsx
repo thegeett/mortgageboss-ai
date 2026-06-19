@@ -4,6 +4,7 @@ import { ActivityFeed } from "@/components/file/overview/activity-feed";
 import { NeedsSection } from "@/components/file/overview/needs-section";
 import { BorrowerCard, LoanCard, PropertyCard } from "@/components/file/overview/overview-cards";
 import { OverviewPlaceholder } from "@/components/file/overview/overview-placeholder";
+import { StatedFinancialsSection } from "@/components/file/overview/stated-financials-section";
 import {
   useLoanFile,
   useLoanFileActivity,
@@ -48,6 +49,9 @@ export default function OverviewPage() {
           onRetry={() => void file.refetch()}
         />
       </div>
+
+      {/* The data MISMO import populated (LP-55) — hidden for files without it. */}
+      <StatedFinancialsSection fileId={id} />
 
       <NeedsSection
         needs={needs.data}

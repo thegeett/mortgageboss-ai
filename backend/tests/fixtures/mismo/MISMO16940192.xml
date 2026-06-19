@@ -1,0 +1,1056 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<MESSAGE xmlns="http://www.mismo.org/residential/2009/schemas" xmlns:DU="http://www.datamodelextension.org/Schema/DU" xmlns:ULAD="http://www.datamodelextension.org/Schema/ULAD" xmlns:xlink="http://www.w3.org/1999/xlink" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" MISMOReferenceModelIdentifier="3.4.032420160128" xsi:schemaLocation="http://www.mismo.org/residential/2009/schemas DU_Wrapper_3.4.0_B324.xsd">
+  <ABOUT_VERSIONS>
+    <ABOUT_VERSION>
+      <CreatedDatetime>2026-06-08T13:35:25.644Z</CreatedDatetime>
+    </ABOUT_VERSION>
+  </ABOUT_VERSIONS>
+  <DEAL_SETS>
+    <DEAL_SET>
+      <DEALS>
+        <DEAL>
+          <ASSETS>
+            <ASSET SequenceNumber="1" xlink:label="ASSET_1">
+              <ASSET_DETAIL>
+                <AssetCashOrMarketValueAmount>56000.00</AssetCashOrMarketValueAmount>
+                <AssetType>GiftOfCash</AssetType>
+                <FundsSourceType>Relative</FundsSourceType>
+              </ASSET_DETAIL>
+            </ASSET>
+            <ASSET SequenceNumber="2" xlink:label="ASSET_2">
+              <ASSET_DETAIL>
+                <AssetCashOrMarketValueAmount>243000.00</AssetCashOrMarketValueAmount>
+                <AssetType>RetirementFund</AssetType>
+              </ASSET_DETAIL>
+              <ASSET_HOLDER>
+                <NAME>
+                  <FullName>Fidelity</FullName>
+                </NAME>
+              </ASSET_HOLDER>
+            </ASSET>
+            <ASSET SequenceNumber="3" xlink:label="ASSET_3">
+              <ASSET_DETAIL>
+                <AssetCashOrMarketValueAmount>19000.00</AssetCashOrMarketValueAmount>
+                <AssetType>Stock</AssetType>
+              </ASSET_DETAIL>
+              <ASSET_HOLDER>
+                <NAME>
+                  <FullName>Fidelity</FullName>
+                </NAME>
+              </ASSET_HOLDER>
+            </ASSET>
+            <ASSET SequenceNumber="4" xlink:label="ASSET_4">
+              <ASSET_DETAIL>
+                <AssetCashOrMarketValueAmount>35000.00</AssetCashOrMarketValueAmount>
+                <AssetType>CheckingAccount</AssetType>
+              </ASSET_DETAIL>
+              <ASSET_HOLDER>
+                <NAME>
+                  <FullName>Bank Of America</FullName>
+                </NAME>
+              </ASSET_HOLDER>
+            </ASSET>
+            <ASSET SequenceNumber="5" xlink:label="ASSET_5">
+              <OWNED_PROPERTY>
+                <OWNED_PROPERTY_DETAIL>
+                  <OwnedPropertyDispositionStatusType>Retain</OwnedPropertyDispositionStatusType>
+                  <OwnedPropertyLienUPBAmount>311262.00</OwnedPropertyLienUPBAmount>
+                  <OwnedPropertyOwnedUnitCount>1</OwnedPropertyOwnedUnitCount>
+                  <OwnedPropertyRentalIncomeNetAmount>-2381.00</OwnedPropertyRentalIncomeNetAmount>
+                  <OwnedPropertySubjectIndicator>false</OwnedPropertySubjectIndicator>
+                </OWNED_PROPERTY_DETAIL>
+                <PROPERTY SequenceNumber="1">
+                  <ADDRESS>
+                    <AddressLineText>100 NORTH STREET</AddressLineText>
+                    <CityName>Elmwood Park</CityName>
+                    <CountryCode>US</CountryCode>
+                    <CountryName>United States</CountryName>
+                    <PostalCode>07407</PostalCode>
+                    <StateCode>NJ</StateCode>
+                  </ADDRESS>
+                  <PROPERTY_DETAIL>
+                    <PropertyCurrentUsageType>PrimaryResidence</PropertyCurrentUsageType>
+                    <PropertyEstimatedValueAmount>750000.00</PropertyEstimatedValueAmount>
+                    <PropertyUsageType>Investment</PropertyUsageType>
+                  </PROPERTY_DETAIL>
+                </PROPERTY>
+              </OWNED_PROPERTY>
+            </ASSET>
+            <ASSET SequenceNumber="6" xlink:label="ASSET_6">
+              <OWNED_PROPERTY>
+                <OWNED_PROPERTY_DETAIL>
+                  <OwnedPropertyDispositionStatusType>Retain</OwnedPropertyDispositionStatusType>
+                  <OwnedPropertyLienUPBAmount>582417.00</OwnedPropertyLienUPBAmount>
+                  <OwnedPropertyOwnedUnitCount>4</OwnedPropertyOwnedUnitCount>
+                  <OwnedPropertyRentalIncomeNetAmount>-4263.00</OwnedPropertyRentalIncomeNetAmount>
+                  <OwnedPropertySubjectIndicator>false</OwnedPropertySubjectIndicator>
+                </OWNED_PROPERTY_DETAIL>
+                <PROPERTY SequenceNumber="1">
+                  <ADDRESS>
+                    <AddressLineText>267 Manhattan Avenue</AddressLineText>
+                    <CityName>Jersey City</CityName>
+                    <CountryCode>US</CountryCode>
+                    <CountyName>HUDSON County</CountyName>
+                    <PostalCode>07307</PostalCode>
+                    <StateCode>NJ</StateCode>
+                  </ADDRESS>
+                  <PROPERTY_DETAIL>
+                    <PropertyCurrentUsageType>Investment</PropertyCurrentUsageType>
+                    <PropertyEstimatedValueAmount>1400000.00</PropertyEstimatedValueAmount>
+                    <PropertyUsageType>Investment</PropertyUsageType>
+                  </PROPERTY_DETAIL>
+                </PROPERTY>
+              </OWNED_PROPERTY>
+            </ASSET>
+            <ASSET SequenceNumber="7" xlink:label="ASSET_7">
+              <OWNED_PROPERTY>
+                <OWNED_PROPERTY_DETAIL>
+                  <OwnedPropertyDispositionStatusType>Retain</OwnedPropertyDispositionStatusType>
+                  <OwnedPropertyLienUPBAmount>351804.00</OwnedPropertyLienUPBAmount>
+                  <OwnedPropertyRentalIncomeNetAmount>-2579.00</OwnedPropertyRentalIncomeNetAmount>
+                  <OwnedPropertySubjectIndicator>false</OwnedPropertySubjectIndicator>
+                </OWNED_PROPERTY_DETAIL>
+                <PROPERTY SequenceNumber="1">
+                  <ADDRESS>
+                    <AddressLineText>129 Shaw Street</AddressLineText>
+                    <CityName>Garfield</CityName>
+                    <CountryCode>US</CountryCode>
+                    <CountryName>United States</CountryName>
+                    <CountyName>BERGEN County</CountyName>
+                    <PostalCode>07026</PostalCode>
+                    <StateCode>NJ</StateCode>
+                  </ADDRESS>
+                  <PROPERTY_DETAIL>
+                    <PropertyCurrentUsageType>Investment</PropertyCurrentUsageType>
+                    <PropertyEstimatedValueAmount>640000.00</PropertyEstimatedValueAmount>
+                    <PropertyUsageType>Investment</PropertyUsageType>
+                  </PROPERTY_DETAIL>
+                </PROPERTY>
+              </OWNED_PROPERTY>
+            </ASSET>
+            <ASSET SequenceNumber="8" xlink:label="ASSET_8">
+              <OWNED_PROPERTY>
+                <OWNED_PROPERTY_DETAIL>
+                  <OwnedPropertyDispositionStatusType>Retain</OwnedPropertyDispositionStatusType>
+                  <OwnedPropertyLienUPBAmount>405282.00</OwnedPropertyLienUPBAmount>
+                  <OwnedPropertyRentalIncomeGrossAmount>3000.00</OwnedPropertyRentalIncomeGrossAmount>
+                  <OwnedPropertyRentalIncomeNetAmount>-869.00</OwnedPropertyRentalIncomeNetAmount>
+                  <OwnedPropertySubjectIndicator>false</OwnedPropertySubjectIndicator>
+                </OWNED_PROPERTY_DETAIL>
+                <PROPERTY SequenceNumber="1">
+                  <ADDRESS>
+                    <AddressLineText>324 Midland Avenue</AddressLineText>
+                    <CityName>Saddle Brook</CityName>
+                    <CountryCode>US</CountryCode>
+                    <CountryName>United States</CountryName>
+                    <CountyName>BERGEN County</CountyName>
+                    <PostalCode>07663</PostalCode>
+                    <StateCode>NJ</StateCode>
+                  </ADDRESS>
+                  <PROPERTY_DETAIL>
+                    <PropertyCurrentUsageType>Investment</PropertyCurrentUsageType>
+                    <PropertyEstimatedValueAmount>765000.00</PropertyEstimatedValueAmount>
+                    <PropertyUsageType>Investment</PropertyUsageType>
+                  </PROPERTY_DETAIL>
+                </PROPERTY>
+              </OWNED_PROPERTY>
+            </ASSET>
+            <ASSET SequenceNumber="9" xlink:label="ASSET_9">
+              <OWNED_PROPERTY>
+                <OWNED_PROPERTY_DETAIL>
+                  <OwnedPropertyDispositionStatusType>Retain</OwnedPropertyDispositionStatusType>
+                  <OwnedPropertyLienUPBAmount>539618.00</OwnedPropertyLienUPBAmount>
+                  <OwnedPropertyRentalIncomeGrossAmount>4000.00</OwnedPropertyRentalIncomeGrossAmount>
+                  <OwnedPropertyRentalIncomeNetAmount>-1795.00</OwnedPropertyRentalIncomeNetAmount>
+                  <OwnedPropertySubjectIndicator>false</OwnedPropertySubjectIndicator>
+                </OWNED_PROPERTY_DETAIL>
+                <PROPERTY SequenceNumber="1">
+                  <ADDRESS>
+                    <AddressLineText>862 Pavonia Avenue</AddressLineText>
+                    <CityName>Jersey City</CityName>
+                    <CountryCode>US</CountryCode>
+                    <CountryName>United States</CountryName>
+                    <CountyName>HUDSON County</CountyName>
+                    <PostalCode>07306</PostalCode>
+                    <StateCode>NJ</StateCode>
+                  </ADDRESS>
+                  <PROPERTY_DETAIL>
+                    <PropertyCurrentUsageType>Investment</PropertyCurrentUsageType>
+                    <PropertyEstimatedValueAmount>720000.00</PropertyEstimatedValueAmount>
+                    <PropertyUsageType>Investment</PropertyUsageType>
+                  </PROPERTY_DETAIL>
+                </PROPERTY>
+              </OWNED_PROPERTY>
+            </ASSET>
+          </ASSETS>
+          <COLLATERALS>
+            <COLLATERAL>
+              <SUBJECT_PROPERTY SequenceNumber="1">
+                <ADDRESS>
+                  <AddressLineText>60 North Street</AddressLineText>
+                  <CityName>Elmwood Park</CityName>
+                  <CountryCode>US</CountryCode>
+                  <CountyName>Bergen County</CountyName>
+                  <PostalCode>074072749</PostalCode>
+                  <StateCode>NJ</StateCode>
+                </ADDRESS>
+                <LOCATION_IDENTIFIER>
+                  <CENSUS_INFORMATION/>
+                  <FIPS_INFORMATION>
+                    <FIPSCountyCode>003</FIPSCountyCode>
+                    <FIPSStateNumericCode>34</FIPSStateNumericCode>
+                  </FIPS_INFORMATION>
+                  <GENERAL_IDENTIFIER/>
+                </LOCATION_IDENTIFIER>
+                <PROPERTY_DETAIL>
+                  <AttachmentType>Detached</AttachmentType>
+                  <CommunityPropertyStateIndicator>false</CommunityPropertyStateIndicator>
+                  <ConstructionMethodType>SiteBuilt</ConstructionMethodType>
+                  <FinancedUnitCount>1</FinancedUnitCount>
+                  <PropertyEstateType>FeeSimple</PropertyEstateType>
+                  <PropertyEstimatedValueAmount>1380000.00</PropertyEstimatedValueAmount>
+                  <PropertyExistingCleanEnergyLienIndicator>false</PropertyExistingCleanEnergyLienIndicator>
+                  <PropertyInProjectIndicator>false</PropertyInProjectIndicator>
+                  <PropertyMixedUsageIndicator>false</PropertyMixedUsageIndicator>
+                  <PropertyPreviouslyOccupiedIndicator>false</PropertyPreviouslyOccupiedIndicator>
+                  <PropertyUsageType>PrimaryResidence</PropertyUsageType>
+                  <PUDIndicator>false</PUDIndicator>
+                </PROPERTY_DETAIL>
+                <PROPERTY_VALUATIONS>
+                  <PROPERTY_VALUATION>
+                    <PROPERTY_VALUATION_DETAIL>
+                      <PropertyValuationAmount>1380000.00</PropertyValuationAmount>
+                    </PROPERTY_VALUATION_DETAIL>
+                  </PROPERTY_VALUATION>
+                </PROPERTY_VALUATIONS>
+                <SALES_CONTRACTS>
+                  <SALES_CONTRACT>
+                    <SALES_CONTRACT_DETAIL>
+                      <SalesContractAmount>1380000.00</SalesContractAmount>
+                    </SALES_CONTRACT_DETAIL>
+                  </SALES_CONTRACT>
+                </SALES_CONTRACTS>
+              </SUBJECT_PROPERTY>
+            </COLLATERAL>
+          </COLLATERALS>
+          <LIABILITIES>
+            <LIABILITY SequenceNumber="1" xlink:label="LIABILITY_1">
+              <LIABILITY_DETAIL>
+                <LiabilityAccountIdentifier>676189939</LiabilityAccountIdentifier>
+                <LiabilityExclusionIndicator>false</LiabilityExclusionIndicator>
+                <LiabilityMonthlyPaymentAmount>4263.00</LiabilityMonthlyPaymentAmount>
+                <LiabilityPaymentIncludesTaxesInsuranceIndicator>false</LiabilityPaymentIncludesTaxesInsuranceIndicator>
+                <LiabilityPayoffStatusIndicator>false</LiabilityPayoffStatusIndicator>
+                <LiabilityType>MortgageLoan</LiabilityType>
+                <LiabilityUnpaidBalanceAmount>582417.00</LiabilityUnpaidBalanceAmount>
+                <EXTENSION>
+                  <MISMO>
+                    <TERMS_OF_LOAN>
+                      <LienPriorityType>FirstLien</LienPriorityType>
+                    </TERMS_OF_LOAN>
+                  </MISMO>
+                </EXTENSION>
+              </LIABILITY_DETAIL>
+              <LIABILITY_HOLDER>
+                <ADDRESS>
+                  <CountryCode>USA</CountryCode>
+                  <CountryName>United States</CountryName>
+                </ADDRESS>
+                <NAME>
+                  <FullName>NR/SMS/CAL</FullName>
+                </NAME>
+              </LIABILITY_HOLDER>
+            </LIABILITY>
+            <LIABILITY SequenceNumber="2" xlink:label="LIABILITY_2">
+              <LIABILITY_DETAIL>
+                <LiabilityAccountIdentifier>2770033347980</LiabilityAccountIdentifier>
+                <LiabilityExclusionIndicator>false</LiabilityExclusionIndicator>
+                <LiabilityMonthlyPaymentAmount>4795.00</LiabilityMonthlyPaymentAmount>
+                <LiabilityPaymentIncludesTaxesInsuranceIndicator>false</LiabilityPaymentIncludesTaxesInsuranceIndicator>
+                <LiabilityPayoffStatusIndicator>false</LiabilityPayoffStatusIndicator>
+                <LiabilityType>MortgageLoan</LiabilityType>
+                <LiabilityUnpaidBalanceAmount>539618.00</LiabilityUnpaidBalanceAmount>
+                <EXTENSION>
+                  <MISMO>
+                    <TERMS_OF_LOAN>
+                      <LienPriorityType>FirstLien</LienPriorityType>
+                    </TERMS_OF_LOAN>
+                  </MISMO>
+                </EXTENSION>
+              </LIABILITY_DETAIL>
+              <LIABILITY_HOLDER>
+                <ADDRESS>
+                  <AddressLineText>3815 SOUTH WEST TEMPLE S</AddressLineText>
+                  <CityName>SALT LAKE CITY</CityName>
+                  <CountryCode>USA</CountryCode>
+                  <CountryName>United States</CountryName>
+                  <PostalCode>84115</PostalCode>
+                </ADDRESS>
+                <NAME>
+                  <FullName>SELPORTSVC</FullName>
+                </NAME>
+              </LIABILITY_HOLDER>
+            </LIABILITY>
+            <LIABILITY SequenceNumber="3" xlink:label="LIABILITY_3">
+              <LIABILITY_DETAIL>
+                <LiabilityAccountIdentifier>6440000321481</LiabilityAccountIdentifier>
+                <LiabilityExclusionIndicator>false</LiabilityExclusionIndicator>
+                <LiabilityMonthlyPaymentAmount>3119.00</LiabilityMonthlyPaymentAmount>
+                <LiabilityPaymentIncludesTaxesInsuranceIndicator>false</LiabilityPaymentIncludesTaxesInsuranceIndicator>
+                <LiabilityPayoffStatusIndicator>false</LiabilityPayoffStatusIndicator>
+                <LiabilityType>MortgageLoan</LiabilityType>
+                <LiabilityUnpaidBalanceAmount>405282.00</LiabilityUnpaidBalanceAmount>
+                <EXTENSION>
+                  <MISMO>
+                    <TERMS_OF_LOAN>
+                      <LienPriorityType>FirstLien</LienPriorityType>
+                    </TERMS_OF_LOAN>
+                  </MISMO>
+                </EXTENSION>
+              </LIABILITY_DETAIL>
+              <LIABILITY_HOLDER>
+                <ADDRESS>
+                  <CountryCode>USA</CountryCode>
+                  <CountryName>United States</CountryName>
+                </ADDRESS>
+                <NAME>
+                  <FullName>FAY SERVICING LLC</FullName>
+                </NAME>
+              </LIABILITY_HOLDER>
+            </LIABILITY>
+            <LIABILITY SequenceNumber="4" xlink:label="LIABILITY_4">
+              <LIABILITY_DETAIL>
+                <LiabilityAccountIdentifier>695856773</LiabilityAccountIdentifier>
+                <LiabilityExclusionIndicator>false</LiabilityExclusionIndicator>
+                <LiabilityMonthlyPaymentAmount>2579.00</LiabilityMonthlyPaymentAmount>
+                <LiabilityPaymentIncludesTaxesInsuranceIndicator>false</LiabilityPaymentIncludesTaxesInsuranceIndicator>
+                <LiabilityPayoffStatusIndicator>false</LiabilityPayoffStatusIndicator>
+                <LiabilityType>MortgageLoan</LiabilityType>
+                <LiabilityUnpaidBalanceAmount>351804.00</LiabilityUnpaidBalanceAmount>
+                <EXTENSION>
+                  <MISMO>
+                    <TERMS_OF_LOAN>
+                      <LienPriorityType>FirstLien</LienPriorityType>
+                    </TERMS_OF_LOAN>
+                  </MISMO>
+                </EXTENSION>
+              </LIABILITY_DETAIL>
+              <LIABILITY_HOLDER>
+                <ADDRESS>
+                  <AddressLineText>350 HIGHLAND DR</AddressLineText>
+                  <CityName>LEWISVILLE</CityName>
+                  <CountryCode>USA</CountryCode>
+                  <CountryName>United States</CountryName>
+                  <PostalCode>75067</PostalCode>
+                </ADDRESS>
+                <NAME>
+                  <FullName>NATIONSTAR/MR COOPER</FullName>
+                </NAME>
+              </LIABILITY_HOLDER>
+            </LIABILITY>
+            <LIABILITY SequenceNumber="5" xlink:label="LIABILITY_5">
+              <LIABILITY_DETAIL>
+                <LiabilityAccountIdentifier>714283066</LiabilityAccountIdentifier>
+                <LiabilityExclusionIndicator>false</LiabilityExclusionIndicator>
+                <LiabilityMonthlyPaymentAmount>2381.00</LiabilityMonthlyPaymentAmount>
+                <LiabilityPaymentIncludesTaxesInsuranceIndicator>false</LiabilityPaymentIncludesTaxesInsuranceIndicator>
+                <LiabilityPayoffStatusIndicator>false</LiabilityPayoffStatusIndicator>
+                <LiabilityType>MortgageLoan</LiabilityType>
+                <LiabilityUnpaidBalanceAmount>311262.00</LiabilityUnpaidBalanceAmount>
+                <EXTENSION>
+                  <MISMO>
+                    <TERMS_OF_LOAN>
+                      <LienPriorityType>FirstLien</LienPriorityType>
+                    </TERMS_OF_LOAN>
+                  </MISMO>
+                </EXTENSION>
+              </LIABILITY_DETAIL>
+              <LIABILITY_HOLDER>
+                <ADDRESS>
+                  <CountryCode>USA</CountryCode>
+                  <CountryName>United States</CountryName>
+                </ADDRESS>
+                <NAME>
+                  <FullName>ROCKET MORTGAGE LLC</FullName>
+                </NAME>
+              </LIABILITY_HOLDER>
+            </LIABILITY>
+            <LIABILITY SequenceNumber="6" xlink:label="LIABILITY_6">
+              <LIABILITY_DETAIL>
+                <LiabilityAccountIdentifier>511311825629</LiabilityAccountIdentifier>
+                <LiabilityExclusionIndicator>false</LiabilityExclusionIndicator>
+                <LiabilityMonthlyPaymentAmount>914.00</LiabilityMonthlyPaymentAmount>
+                <LiabilityPaymentIncludesTaxesInsuranceIndicator>false</LiabilityPaymentIncludesTaxesInsuranceIndicator>
+                <LiabilityPayoffStatusIndicator>false</LiabilityPayoffStatusIndicator>
+                <LiabilityType>Installment</LiabilityType>
+                <LiabilityUnpaidBalanceAmount>25212.00</LiabilityUnpaidBalanceAmount>
+              </LIABILITY_DETAIL>
+              <LIABILITY_HOLDER>
+                <ADDRESS>
+                  <AddressLineText>PO BOX 19752</AddressLineText>
+                  <CityName>IRVINE</CityName>
+                  <PostalCode>92623</PostalCode>
+                </ADDRESS>
+                <CONTACT_POINTS>
+                  <CONTACT_POINT SequenceNumber="1">
+                    <CONTACT_POINT_TELEPHONE>
+                      <ContactPointTelephoneValue>8002898004</ContactPointTelephoneValue>
+                    </CONTACT_POINT_TELEPHONE>
+                    <CONTACT_POINT_DETAIL>
+                      <ContactPointRoleType>Home</ContactPointRoleType>
+                    </CONTACT_POINT_DETAIL>
+                  </CONTACT_POINT>
+                </CONTACT_POINTS>
+                <NAME>
+                  <FullName>WFBNA AUTO</FullName>
+                </NAME>
+              </LIABILITY_HOLDER>
+            </LIABILITY>
+            <LIABILITY SequenceNumber="7" xlink:label="LIABILITY_7">
+              <LIABILITY_DETAIL>
+                <LiabilityAccountIdentifier>5000330150</LiabilityAccountIdentifier>
+                <LiabilityExclusionIndicator>false</LiabilityExclusionIndicator>
+                <LiabilityMonthlyPaymentAmount>593.00</LiabilityMonthlyPaymentAmount>
+                <LiabilityPaymentIncludesTaxesInsuranceIndicator>false</LiabilityPaymentIncludesTaxesInsuranceIndicator>
+                <LiabilityPayoffStatusIndicator>false</LiabilityPayoffStatusIndicator>
+                <LiabilityType>Installment</LiabilityType>
+                <LiabilityUnpaidBalanceAmount>18281.00</LiabilityUnpaidBalanceAmount>
+              </LIABILITY_DETAIL>
+              <LIABILITY_HOLDER>
+                <ADDRESS>
+                  <AddressLineText>264 E MERRICK RD</AddressLineText>
+                  <CityName>VALLEY STREAM</CityName>
+                  <PostalCode>11580</PostalCode>
+                </ADDRESS>
+                <CONTACT_POINTS>
+                  <CONTACT_POINT SequenceNumber="1">
+                    <CONTACT_POINT_TELEPHONE>
+                      <ContactPointTelephoneValue>5165610030</ContactPointTelephoneValue>
+                    </CONTACT_POINT_TELEPHONE>
+                    <CONTACT_POINT_DETAIL>
+                      <ContactPointRoleType>Home</ContactPointRoleType>
+                    </CONTACT_POINT_DETAIL>
+                  </CONTACT_POINT>
+                </CONTACT_POINTS>
+                <NAME>
+                  <FullName>JOVIA FINANCIAL FCU</FullName>
+                </NAME>
+              </LIABILITY_HOLDER>
+            </LIABILITY>
+            <LIABILITY SequenceNumber="8" xlink:label="LIABILITY_8">
+              <LIABILITY_DETAIL>
+                <LiabilityAccountIdentifier>542418******</LiabilityAccountIdentifier>
+                <LiabilityExclusionIndicator>false</LiabilityExclusionIndicator>
+                <LiabilityMonthlyPaymentAmount>116.00</LiabilityMonthlyPaymentAmount>
+                <LiabilityPaymentIncludesTaxesInsuranceIndicator>false</LiabilityPaymentIncludesTaxesInsuranceIndicator>
+                <LiabilityPayoffStatusIndicator>false</LiabilityPayoffStatusIndicator>
+                <LiabilityType>Revolving</LiabilityType>
+                <LiabilityUnpaidBalanceAmount>11589.00</LiabilityUnpaidBalanceAmount>
+              </LIABILITY_DETAIL>
+              <LIABILITY_HOLDER>
+                <ADDRESS>
+                  <AddressLineText>PO BOX 9001037</AddressLineText>
+                  <CityName>LOUISVILLE</CityName>
+                  <PostalCode>40290-1037</PostalCode>
+                </ADDRESS>
+                <CONTACT_POINTS>
+                  <CONTACT_POINT SequenceNumber="1">
+                    <CONTACT_POINT_TELEPHONE>
+                      <ContactPointTelephoneValue>8009505114</ContactPointTelephoneValue>
+                    </CONTACT_POINT_TELEPHONE>
+                    <CONTACT_POINT_DETAIL>
+                      <ContactPointRoleType>Home</ContactPointRoleType>
+                    </CONTACT_POINT_DETAIL>
+                  </CONTACT_POINT>
+                </CONTACT_POINTS>
+                <NAME>
+                  <FullName>CITICARDS CBNA</FullName>
+                </NAME>
+              </LIABILITY_HOLDER>
+            </LIABILITY>
+            <LIABILITY SequenceNumber="9" xlink:label="LIABILITY_9">
+              <LIABILITY_DETAIL>
+                <LiabilityAccountIdentifier>603532******2808</LiabilityAccountIdentifier>
+                <LiabilityExclusionIndicator>false</LiabilityExclusionIndicator>
+                <LiabilityMonthlyPaymentAmount>107.00</LiabilityMonthlyPaymentAmount>
+                <LiabilityPaymentIncludesTaxesInsuranceIndicator>false</LiabilityPaymentIncludesTaxesInsuranceIndicator>
+                <LiabilityPayoffStatusIndicator>false</LiabilityPayoffStatusIndicator>
+                <LiabilityType>Revolving</LiabilityType>
+                <LiabilityUnpaidBalanceAmount>10497.00</LiabilityUnpaidBalanceAmount>
+              </LIABILITY_DETAIL>
+              <LIABILITY_HOLDER>
+                <ADDRESS>
+                  <AddressLineText>PO BOX 9001010</AddressLineText>
+                  <CityName>LOUISVILLE</CityName>
+                  <PostalCode>40290-1010</PostalCode>
+                </ADDRESS>
+                <CONTACT_POINTS>
+                  <CONTACT_POINT SequenceNumber="1">
+                    <CONTACT_POINT_TELEPHONE>
+                      <ContactPointTelephoneValue>8006770232</ContactPointTelephoneValue>
+                    </CONTACT_POINT_TELEPHONE>
+                    <CONTACT_POINT_DETAIL>
+                      <ContactPointRoleType>Home</ContactPointRoleType>
+                    </CONTACT_POINT_DETAIL>
+                  </CONTACT_POINT>
+                </CONTACT_POINTS>
+                <NAME>
+                  <FullName>THD/CBNA</FullName>
+                </NAME>
+              </LIABILITY_HOLDER>
+            </LIABILITY>
+            <LIABILITY SequenceNumber="10" xlink:label="LIABILITY_10">
+              <LIABILITY_DETAIL>
+                <LiabilityAccountIdentifier>410039******3247</LiabilityAccountIdentifier>
+                <LiabilityExclusionIndicator>false</LiabilityExclusionIndicator>
+                <LiabilityMonthlyPaymentAmount>128.00</LiabilityMonthlyPaymentAmount>
+                <LiabilityPaymentIncludesTaxesInsuranceIndicator>false</LiabilityPaymentIncludesTaxesInsuranceIndicator>
+                <LiabilityPayoffStatusIndicator>false</LiabilityPayoffStatusIndicator>
+                <LiabilityType>Revolving</LiabilityType>
+                <LiabilityUnpaidBalanceAmount>4513.00</LiabilityUnpaidBalanceAmount>
+              </LIABILITY_DETAIL>
+              <LIABILITY_HOLDER>
+                <ADDRESS>
+                  <AddressLineText>PO BOX 9001037</AddressLineText>
+                  <CityName>LOUISVILLE</CityName>
+                  <PostalCode>40290-1037</PostalCode>
+                </ADDRESS>
+                <CONTACT_POINTS>
+                  <CONTACT_POINT SequenceNumber="1">
+                    <CONTACT_POINT_TELEPHONE>
+                      <ContactPointTelephoneValue>8005335600</ContactPointTelephoneValue>
+                    </CONTACT_POINT_TELEPHONE>
+                    <CONTACT_POINT_DETAIL>
+                      <ContactPointRoleType>Home</ContactPointRoleType>
+                    </CONTACT_POINT_DETAIL>
+                  </CONTACT_POINT>
+                </CONTACT_POINTS>
+                <NAME>
+                  <FullName>CITI</FullName>
+                </NAME>
+              </LIABILITY_HOLDER>
+            </LIABILITY>
+          </LIABILITIES>
+          <LOANS>
+            <LOAN LoanRoleType="SubjectLoan" xlink:label="LOAN_1" SequenceNumber="1">
+              <AMORTIZATION>
+                <AMORTIZATION_RULE>
+                  <AmortizationType>Fixed</AmortizationType>
+                  <LoanAmortizationPeriodCount>360</LoanAmortizationPeriodCount>
+                  <LoanAmortizationPeriodType>Month</LoanAmortizationPeriodType>
+                </AMORTIZATION_RULE>
+              </AMORTIZATION>
+              <CLOSING_INFORMATION>
+                <CLOSING_ADJUSTMENT_ITEMS>
+                  <CLOSING_ADJUSTMENT_ITEM SequenceNumber="1">
+                    <CLOSING_ADJUSTMENT_ITEM_DETAIL>
+                      <ClosingAdjustmentItemAmount>12375.84</ClosingAdjustmentItemAmount>
+                      <ClosingAdjustmentItemType>LenderCredit</ClosingAdjustmentItemType>
+                    </CLOSING_ADJUSTMENT_ITEM_DETAIL>
+                  </CLOSING_ADJUSTMENT_ITEM>
+                </CLOSING_ADJUSTMENT_ITEMS>
+                <CLOSING_INFORMATION_DETAIL>
+                  <CashFromBorrowerAtClosingAmount>290357.66</CashFromBorrowerAtClosingAmount>
+                  <CurrentRateSetDate>2026-06-04</CurrentRateSetDate>
+                </CLOSING_INFORMATION_DETAIL>
+              </CLOSING_INFORMATION>
+              <DOCUMENT_SPECIFIC_DATA_SETS>
+                <DOCUMENT_SPECIFIC_DATA_SET SequenceNumber="1">
+                  <URLA>
+                    <URLA_DETAIL>
+                      <ApplicationTakenMethodType>Internet</ApplicationTakenMethodType>
+                      <EstimatedClosingCostsAmount>21041.00</EstimatedClosingCostsAmount>
+                      <PrepaidItemsEstimatedAmount>5692.50</PrepaidItemsEstimatedAmount>
+                      <SellerPaidClosingCostsAmount>0.00</SellerPaidClosingCostsAmount>
+                    </URLA_DETAIL>
+                  </URLA>
+                </DOCUMENT_SPECIFIC_DATA_SET>
+              </DOCUMENT_SPECIFIC_DATA_SETS>
+              <HOUSING_EXPENSES>
+                <HOUSING_EXPENSE SequenceNumber="1">
+                  <HousingExpensePaymentAmount>200.00</HousingExpensePaymentAmount>
+                  <HousingExpenseTimingType>Proposed</HousingExpenseTimingType>
+                  <HousingExpenseType>HomeownersInsurance</HousingExpenseType>
+                </HOUSING_EXPENSE>
+                <HOUSING_EXPENSE SequenceNumber="2">
+                  <HousingExpensePaymentAmount>1500.00</HousingExpensePaymentAmount>
+                  <HousingExpenseTimingType>Proposed</HousingExpenseTimingType>
+                  <HousingExpenseType>RealEstateTax</HousingExpenseType>
+                </HOUSING_EXPENSE>
+                <HOUSING_EXPENSE SequenceNumber="3">
+                  <HousingExpensePaymentAmount>7252.49</HousingExpensePaymentAmount>
+                  <HousingExpenseTimingType>Proposed</HousingExpenseTimingType>
+                  <HousingExpenseType>FirstMortgagePrincipalAndInterest</HousingExpenseType>
+                </HOUSING_EXPENSE>
+              </HOUSING_EXPENSES>
+              <LOAN_DETAIL>
+                <ApplicationReceivedDate>2026-06-02</ApplicationReceivedDate>
+                <BalloonIndicator>false</BalloonIndicator>
+                <BelowMarketSubordinateFinancingIndicator>false</BelowMarketSubordinateFinancingIndicator>
+                <BuydownTemporarySubsidyFundingIndicator>false</BuydownTemporarySubsidyFundingIndicator>
+                <ConstructionLoanIndicator>false</ConstructionLoanIndicator>
+                <ConversionOfContractForDeedIndicator>false</ConversionOfContractForDeedIndicator>
+                <InitialFixedPeriodEffectiveMonthsCount>360</InitialFixedPeriodEffectiveMonthsCount>
+                <InterestOnlyIndicator>false</InterestOnlyIndicator>
+                <NegativeAmortizationIndicator>false</NegativeAmortizationIndicator>
+                <PrepaymentPenaltyIndicator>false</PrepaymentPenaltyIndicator>
+                <TotalMortgagedPropertiesCount>0</TotalMortgagedPropertiesCount>
+              </LOAN_DETAIL>
+              <LOAN_IDENTIFIERS>
+                <LOAN_IDENTIFIER SequenceNumber="1">
+                  <LoanIdentifier>16940192</LoanIdentifier>
+                  <LoanIdentifierType>LenderLoan</LoanIdentifierType>
+                </LOAN_IDENTIFIER>
+              </LOAN_IDENTIFIERS>
+              <ORIGINATION_SYSTEMS>
+                <ORIGINATION_SYSTEM>
+                  <LoanOriginationSystemLoanIdentifier>c372a011-1556-4c68-b6ae-f5ca0c88a0b1</LoanOriginationSystemLoanIdentifier>
+                  <LoanOriginationSystemName>ARIVE</LoanOriginationSystemName>
+                  <LoanOriginationSystemVendorIdentifier>VWZLEN01X</LoanOriginationSystemVendorIdentifier>
+                  <LoanOriginationSystemVersionIdentifier>6.0.0</LoanOriginationSystemVersionIdentifier>
+                </ORIGINATION_SYSTEM>
+              </ORIGINATION_SYSTEMS>
+              <TERMS_OF_LOAN>
+                <BaseLoanAmount>1104000.00</BaseLoanAmount>
+                <LienPriorityType>FirstLien</LienPriorityType>
+                <LoanPurposeType>Purchase</LoanPurposeType>
+                <MortgageType>Conventional</MortgageType>
+                <NoteAmount>1104000.00</NoteAmount>
+                <NoteRatePercent>6.875</NoteRatePercent>
+              </TERMS_OF_LOAN>
+            </LOAN>
+          </LOANS>
+          <PARTIES>
+            <PARTY SequenceNumber="1">
+              <INDIVIDUAL>
+                <CONTACT_POINTS>
+                  <CONTACT_POINT SequenceNumber="1">
+                    <CONTACT_POINT_EMAIL>
+                      <ContactPointEmailValue>maheshmpc9@gmail.com</ContactPointEmailValue>
+                    </CONTACT_POINT_EMAIL>
+                  </CONTACT_POINT>
+                  <CONTACT_POINT SequenceNumber="2">
+                    <CONTACT_POINT_TELEPHONE>
+                      <ContactPointTelephoneValue>2562263263</ContactPointTelephoneValue>
+                    </CONTACT_POINT_TELEPHONE>
+                    <CONTACT_POINT_DETAIL>
+                      <ContactPointRoleType>Mobile</ContactPointRoleType>
+                    </CONTACT_POINT_DETAIL>
+                  </CONTACT_POINT>
+                </CONTACT_POINTS>
+                <NAME>
+                  <FirstName>Mahesh</FirstName>
+                  <FullName>Mahesh Chhotala</FullName>
+                  <LastName>Chhotala</LastName>
+                </NAME>
+              </INDIVIDUAL>
+              <ADDRESSES>
+                <ADDRESS>
+                  <AddressLineText>100 North Street</AddressLineText>
+                  <AddressType>Mailing</AddressType>
+                  <CityName>Elmwood Park</CityName>
+                  <CountryCode>US</CountryCode>
+                  <PostalCode>07407</PostalCode>
+                  <StateCode>NJ</StateCode>
+                </ADDRESS>
+              </ADDRESSES>
+              <LANGUAGES>
+                <LANGUAGE>
+                  <LanguageCode>eng</LanguageCode>
+                </LANGUAGE>
+              </LANGUAGES>
+              <ROLES>
+                <ROLE SequenceNumber="1" xlink:label="BORROWER_1">
+                  <BORROWER>
+                    <BORROWER_DETAIL>
+                      <BorrowerBirthDate>1984-02-17</BorrowerBirthDate>
+                      <BorrowerClassificationType>Primary</BorrowerClassificationType>
+                      <CommunityPropertyStateResidentIndicator>false</CommunityPropertyStateResidentIndicator>
+                      <DependentCount>3</DependentCount>
+                      <MaritalStatusType>Married</MaritalStatusType>
+                      <SelfDeclaredMilitaryServiceIndicator>false</SelfDeclaredMilitaryServiceIndicator>
+                    </BORROWER_DETAIL>
+                    <COUNSELING>
+                      <COUNSELING_EVENTS>
+                        <COUNSELING_EVENT SequenceNumber="1" xlink:label="COUNSELING_EVENT_1">
+                          <COUNSELING_EVENT_DETAIL>
+                            <CounselingConfirmationIndicator>false</CounselingConfirmationIndicator>
+                            <CounselingType>Education</CounselingType>
+                          </COUNSELING_EVENT_DETAIL>
+                        </COUNSELING_EVENT>
+                        <COUNSELING_EVENT SequenceNumber="2" xlink:label="COUNSELING_EVENT_2">
+                          <COUNSELING_EVENT_DETAIL>
+                            <CounselingConfirmationIndicator>false</CounselingConfirmationIndicator>
+                            <CounselingType>Counseling</CounselingType>
+                          </COUNSELING_EVENT_DETAIL>
+                        </COUNSELING_EVENT>
+                      </COUNSELING_EVENTS>
+                    </COUNSELING>
+                    <CURRENT_INCOME>
+                      <CURRENT_INCOME_ITEMS>
+                        <CURRENT_INCOME_ITEM SequenceNumber="1" xlink:label="CURRENT_INCOME_ITEM_1">
+                          <CURRENT_INCOME_ITEM_DETAIL>
+                            <CurrentIncomeMonthlyTotalAmount>7000.00</CurrentIncomeMonthlyTotalAmount>
+                            <EmploymentIncomeIndicator>true</EmploymentIncomeIndicator>
+                            <IncomeType>Base</IncomeType>
+                          </CURRENT_INCOME_ITEM_DETAIL>
+                        </CURRENT_INCOME_ITEM>
+                        <CURRENT_INCOME_ITEM SequenceNumber="2" xlink:label="CURRENT_INCOME_ITEM_2">
+                          <CURRENT_INCOME_ITEM_DETAIL>
+                            <CurrentIncomeMonthlyTotalAmount>9400.00</CurrentIncomeMonthlyTotalAmount>
+                            <EmploymentIncomeIndicator>true</EmploymentIncomeIndicator>
+                            <IncomeType>Base</IncomeType>
+                          </CURRENT_INCOME_ITEM_DETAIL>
+                        </CURRENT_INCOME_ITEM>
+                      </CURRENT_INCOME_ITEMS>
+                    </CURRENT_INCOME>
+                    <DECLARATION>
+                      <DECLARATION_DETAIL>
+                        <BankruptcyIndicator>false</BankruptcyIndicator>
+                        <CitizenshipResidencyType>PermanentResidentAlien</CitizenshipResidencyType>
+                        <HomeownerPastThreeYearsType>Yes</HomeownerPastThreeYearsType>
+                        <IntentToOccupyType>Yes</IntentToOccupyType>
+                        <OutstandingJudgmentsIndicator>false</OutstandingJudgmentsIndicator>
+                        <PartyToLawsuitIndicator>false</PartyToLawsuitIndicator>
+                        <PresentlyDelinquentIndicator>false</PresentlyDelinquentIndicator>
+                        <PriorPropertyDeedInLieuConveyedIndicator>false</PriorPropertyDeedInLieuConveyedIndicator>
+                        <PriorPropertyForeclosureCompletedIndicator>false</PriorPropertyForeclosureCompletedIndicator>
+                        <PriorPropertyShortSaleCompletedIndicator>false</PriorPropertyShortSaleCompletedIndicator>
+                        <PriorPropertyTitleType>JointWithSpouse</PriorPropertyTitleType>
+                        <PriorPropertyUsageType>PrimaryResidence</PriorPropertyUsageType>
+                        <PropertyProposedCleanEnergyLienIndicator>false</PropertyProposedCleanEnergyLienIndicator>
+                        <UndisclosedBorrowedFundsIndicator>false</UndisclosedBorrowedFundsIndicator>
+                        <UndisclosedComakerOfNoteIndicator>false</UndisclosedComakerOfNoteIndicator>
+                        <UndisclosedCreditApplicationIndicator>false</UndisclosedCreditApplicationIndicator>
+                        <UndisclosedMortgageApplicationIndicator>false</UndisclosedMortgageApplicationIndicator>
+                        <EXTENSION>
+                          <OTHER>
+                            <ULAD:DECLARATION_DETAIL_EXTENSION>
+                              <ULAD:SpecialBorrowerSellerRelationshipIndicator>false</ULAD:SpecialBorrowerSellerRelationshipIndicator>
+                            </ULAD:DECLARATION_DETAIL_EXTENSION>
+                          </OTHER>
+                        </EXTENSION>
+                      </DECLARATION_DETAIL>
+                    </DECLARATION>
+                    <DEPENDENTS>
+                      <DEPENDENT>
+                        <DependentAgeYearsCount>6</DependentAgeYearsCount>
+                      </DEPENDENT>
+                      <DEPENDENT>
+                        <DependentAgeYearsCount>6</DependentAgeYearsCount>
+                      </DEPENDENT>
+                      <DEPENDENT>
+                        <DependentAgeYearsCount>8</DependentAgeYearsCount>
+                      </DEPENDENT>
+                    </DEPENDENTS>
+                    <EMPLOYERS>
+                      <EMPLOYER SequenceNumber="1" xlink:label="EMPLOYER_1">
+                        <LEGAL_ENTITY>
+                          <LEGAL_ENTITY_DETAIL>
+                            <FullName>Swad Mania LLC</FullName>
+                          </LEGAL_ENTITY_DETAIL>
+                        </LEGAL_ENTITY>
+                        <ADDRESS>
+                          <AddressLineText>664 Summit Avenue</AddressLineText>
+                          <CityName>Jersey City</CityName>
+                          <CountryCode>US</CountryCode>
+                          <CountryName>United States</CountryName>
+                          <CountyName>HUDSON</CountyName>
+                          <PostalCode>07306</PostalCode>
+                          <StateCode>NJ</StateCode>
+                        </ADDRESS>
+                        <EMPLOYMENT>
+                          <EmploymentBorrowerSelfEmployedIndicator>false</EmploymentBorrowerSelfEmployedIndicator>
+                          <EmploymentClassificationType>Secondary</EmploymentClassificationType>
+                          <EmploymentPositionDescription>Owner</EmploymentPositionDescription>
+                          <EmploymentStartDate>2023-06-15</EmploymentStartDate>
+                          <EmploymentStatusType>Current</EmploymentStatusType>
+                          <SpecialBorrowerEmployerRelationshipIndicator>false</SpecialBorrowerEmployerRelationshipIndicator>
+                          <EXTENSION>
+                            <OTHER>
+                              <DU:EMPLOYMENT_EXTENSION>
+                                <DU:ForeignIncomeIndicator>false</DU:ForeignIncomeIndicator>
+                                <DU:SeasonalIncomeIndicator>false</DU:SeasonalIncomeIndicator>
+                              </DU:EMPLOYMENT_EXTENSION>
+                            </OTHER>
+                          </EXTENSION>
+                        </EMPLOYMENT>
+                      </EMPLOYER>
+                      <EMPLOYER SequenceNumber="2" xlink:label="EMPLOYER_2">
+                        <LEGAL_ENTITY>
+                          <LEGAL_ENTITY_DETAIL>
+                            <FullName>CHHOTALA REALTY LLC</FullName>
+                          </LEGAL_ENTITY_DETAIL>
+                        </LEGAL_ENTITY>
+                        <ADDRESS/>
+                        <EMPLOYMENT>
+                          <EmploymentBorrowerSelfEmployedIndicator>true</EmploymentBorrowerSelfEmployedIndicator>
+                          <EmploymentClassificationType>Secondary</EmploymentClassificationType>
+                          <EmploymentMonthlyIncomeAmount>34289.00</EmploymentMonthlyIncomeAmount>
+                          <EmploymentPositionDescription>Owner</EmploymentPositionDescription>
+                          <EmploymentStartDate>2021-05-26</EmploymentStartDate>
+                          <EmploymentStatusType>Current</EmploymentStatusType>
+                          <OwnershipInterestType>GreaterThanOrEqualTo25Percent</OwnershipInterestType>
+                          <SpecialBorrowerEmployerRelationshipIndicator>false</SpecialBorrowerEmployerRelationshipIndicator>
+                          <EXTENSION>
+                            <OTHER>
+                              <DU:EMPLOYMENT_EXTENSION>
+                                <DU:ForeignIncomeIndicator>false</DU:ForeignIncomeIndicator>
+                                <DU:SeasonalIncomeIndicator>false</DU:SeasonalIncomeIndicator>
+                              </DU:EMPLOYMENT_EXTENSION>
+                            </OTHER>
+                          </EXTENSION>
+                        </EMPLOYMENT>
+                      </EMPLOYER>
+                      <EMPLOYER SequenceNumber="3" xlink:label="EMPLOYER_3">
+                        <LEGAL_ENTITY>
+                          <CONTACTS>
+                            <CONTACT>
+                              <CONTACT_POINTS>
+                                <CONTACT_POINT SequenceNumber="1">
+                                  <CONTACT_POINT_TELEPHONE>
+                                    <ContactPointTelephoneValue>8005562323</ContactPointTelephoneValue>
+                                  </CONTACT_POINT_TELEPHONE>
+                                  <CONTACT_POINT_DETAIL>
+                                    <ContactPointRoleType>Work</ContactPointRoleType>
+                                  </CONTACT_POINT_DETAIL>
+                                </CONTACT_POINT>
+                              </CONTACT_POINTS>
+                            </CONTACT>
+                          </CONTACTS>
+                          <LEGAL_ENTITY_DETAIL>
+                            <FullName>Thermofisher Life Science - PPD Development LP</FullName>
+                          </LEGAL_ENTITY_DETAIL>
+                        </LEGAL_ENTITY>
+                        <ADDRESS/>
+                        <EMPLOYMENT>
+                          <EmploymentBorrowerSelfEmployedIndicator>false</EmploymentBorrowerSelfEmployedIndicator>
+                          <EmploymentClassificationType>Primary</EmploymentClassificationType>
+                          <EmploymentPositionDescription>CDM Programmer II</EmploymentPositionDescription>
+                          <EmploymentStartDate>2022-02-01</EmploymentStartDate>
+                          <EmploymentStatusType>Current</EmploymentStatusType>
+                          <SpecialBorrowerEmployerRelationshipIndicator>false</SpecialBorrowerEmployerRelationshipIndicator>
+                          <EXTENSION>
+                            <OTHER>
+                              <DU:EMPLOYMENT_EXTENSION>
+                                <DU:ForeignIncomeIndicator>false</DU:ForeignIncomeIndicator>
+                                <DU:SeasonalIncomeIndicator>false</DU:SeasonalIncomeIndicator>
+                              </DU:EMPLOYMENT_EXTENSION>
+                            </OTHER>
+                          </EXTENSION>
+                        </EMPLOYMENT>
+                      </EMPLOYER>
+                    </EMPLOYERS>
+                    <GOVERNMENT_MONITORING>
+                      <GOVERNMENT_MONITORING_DETAIL>
+                        <HMDAEthnicityCollectedBasedOnVisualObservationOrSurnameIndicator>false</HMDAEthnicityCollectedBasedOnVisualObservationOrSurnameIndicator>
+                        <HMDAEthnicityRefusalIndicator>false</HMDAEthnicityRefusalIndicator>
+                        <HMDAGenderCollectedBasedOnVisualObservationOrNameIndicator>false</HMDAGenderCollectedBasedOnVisualObservationOrNameIndicator>
+                        <HMDAGenderRefusalIndicator>false</HMDAGenderRefusalIndicator>
+                        <HMDARaceCollectedBasedOnVisualObservationOrSurnameIndicator>false</HMDARaceCollectedBasedOnVisualObservationOrSurnameIndicator>
+                        <HMDARaceRefusalIndicator>true</HMDARaceRefusalIndicator>
+                        <EXTENSION>
+                          <OTHER>
+                            <ULAD:GOVERNMENT_MONITORING_DETAIL_EXTENSION>
+                              <ULAD:ApplicationTakenMethodType>Internet</ULAD:ApplicationTakenMethodType>
+                              <ULAD:HMDAGenderType>Male</ULAD:HMDAGenderType>
+                            </ULAD:GOVERNMENT_MONITORING_DETAIL_EXTENSION>
+                          </OTHER>
+                        </EXTENSION>
+                      </GOVERNMENT_MONITORING_DETAIL>
+                      <EXTENSION>
+                        <OTHER>
+                          <ULAD:GOVERNMENT_MONITORING_EXTENSION>
+                            <ULAD:HMDA_ETHNICITIES>
+                              <ULAD:HMDA_ETHNICITY>
+                                <ULAD:HMDAEthnicityType>NotHispanicOrLatino</ULAD:HMDAEthnicityType>
+                              </ULAD:HMDA_ETHNICITY>
+                            </ULAD:HMDA_ETHNICITIES>
+                          </ULAD:GOVERNMENT_MONITORING_EXTENSION>
+                        </OTHER>
+                      </EXTENSION>
+                    </GOVERNMENT_MONITORING>
+                    <HOUSING_EXPENSES>
+                      <HOUSING_EXPENSE SequenceNumber="1">
+                        <HousingExpensePaymentAmount>2381.00</HousingExpensePaymentAmount>
+                        <HousingExpenseTimingType>Present</HousingExpenseTimingType>
+                        <HousingExpenseType>FirstMortgagePrincipalAndInterest</HousingExpenseType>
+                      </HOUSING_EXPENSE>
+                    </HOUSING_EXPENSES>
+                    <MILITARY_SERVICES>
+                      <MILITARY_SERVICE/>
+                    </MILITARY_SERVICES>
+                    <RESIDENCES>
+                      <RESIDENCE SequenceNumber="1">
+                        <ADDRESS>
+                          <AddressLineText>100 North Street</AddressLineText>
+                          <CityName>Elmwood Park</CityName>
+                          <CountryCode>US</CountryCode>
+                          <PostalCode>07407</PostalCode>
+                          <StateCode>NJ</StateCode>
+                        </ADDRESS>
+                        <RESIDENCE_DETAIL>
+                          <BorrowerResidencyBasisType>Own</BorrowerResidencyBasisType>
+                          <BorrowerResidencyDurationMonthsCount>108</BorrowerResidencyDurationMonthsCount>
+                          <BorrowerResidencyType>Current</BorrowerResidencyType>
+                        </RESIDENCE_DETAIL>
+                      </RESIDENCE>
+                    </RESIDENCES>
+                  </BORROWER>
+                  <ROLE_DETAIL>
+                    <PartyRoleType>Borrower</PartyRoleType>
+                  </ROLE_DETAIL>
+                </ROLE>
+              </ROLES>
+              <TAXPAYER_IDENTIFIERS>
+                <TAXPAYER_IDENTIFIER SequenceNumber="1">
+                  <TaxpayerIdentifierType>SocialSecurityNumber</TaxpayerIdentifierType>
+                  <TaxpayerIdentifierValue>900112233</TaxpayerIdentifierValue>
+                </TAXPAYER_IDENTIFIER>
+              </TAXPAYER_IDENTIFIERS>
+            </PARTY>
+            <PARTY>
+              <ROLES>
+                <ROLE SequenceNumber="1" xlink:label="HOUSING_COUNSELING_AGENCY_1">
+                  <ROLE_DETAIL>
+                    <PartyRoleType>HousingCounselingAgency</PartyRoleType>
+                  </ROLE_DETAIL>
+                </ROLE>
+              </ROLES>
+            </PARTY>
+            <PARTY>
+              <ROLES>
+                <ROLE SequenceNumber="2" xlink:label="HOUSING_COUNSELING_AGENCY_2">
+                  <ROLE_DETAIL>
+                    <PartyRoleType>HousingCounselingAgency</PartyRoleType>
+                  </ROLE_DETAIL>
+                </ROLE>
+              </ROLES>
+            </PARTY>
+            <PARTY SequenceNumber="4">
+              <LEGAL_ENTITY>
+                <LEGAL_ENTITY_DETAIL>
+                  <FullName>VEMA MORTGAGE, LLC</FullName>
+                </LEGAL_ENTITY_DETAIL>
+              </LEGAL_ENTITY>
+              <ADDRESSES>
+                <ADDRESS>
+                  <AddressAdditionalLineText>Suite 540</AddressAdditionalLineText>
+                  <AddressLineText>3250 W Big Beaver Rd</AddressLineText>
+                  <AddressType>Mailing</AddressType>
+                  <CityName>Troy</CityName>
+                  <PostalCode>48084</PostalCode>
+                  <StateCode>MI</StateCode>
+                </ADDRESS>
+              </ADDRESSES>
+              <ROLES>
+                <ROLE SequenceNumber="1" xlink:label="LOAN_ORIGINATION_COMPANY_1">
+                  <LICENSES>
+                    <LICENSE SequenceNumber="1">
+                      <LICENSE_DETAIL>
+                        <LicenseAuthorityLevelType>Private</LicenseAuthorityLevelType>
+                        <LicenseIdentifier>1019911</LicenseIdentifier>
+                      </LICENSE_DETAIL>
+                    </LICENSE>
+                    <LICENSE SequenceNumber="2">
+                      <LICENSE_DETAIL>
+                        <LicenseAuthorityLevelType>PublicState</LicenseAuthorityLevelType>
+                        <LicenseExpirationDate>2025-01-01</LicenseExpirationDate>
+                        <LicenseIdentifier>1019911</LicenseIdentifier>
+                        <LicenseIssuingAuthorityStateCode>NJ</LicenseIssuingAuthorityStateCode>
+                      </LICENSE_DETAIL>
+                    </LICENSE>
+                  </LICENSES>
+                  <ROLE_DETAIL>
+                    <PartyRoleType>LoanOriginationCompany</PartyRoleType>
+                  </ROLE_DETAIL>
+                </ROLE>
+              </ROLES>
+            </PARTY>
+            <PARTY SequenceNumber="5">
+              <INDIVIDUAL>
+                <CONTACT_POINTS>
+                  <CONTACT_POINT>
+                    <CONTACT_POINT_TELEPHONE>
+                      <ContactPointTelephoneValue>5865365360</ContactPointTelephoneValue>
+                    </CONTACT_POINT_TELEPHONE>
+                    <CONTACT_POINT_DETAIL>
+                      <ContactPointRoleType>Work</ContactPointRoleType>
+                    </CONTACT_POINT_DETAIL>
+                  </CONTACT_POINT>
+                  <CONTACT_POINT>
+                    <CONTACT_POINT_EMAIL>
+                      <ContactPointEmailValue>chirag@vemamortgage.com</ContactPointEmailValue>
+                    </CONTACT_POINT_EMAIL>
+                  </CONTACT_POINT>
+                </CONTACT_POINTS>
+                <NAME>
+                  <FirstName>Chirag</FirstName>
+                  <FullName>Chirag Rachhadia</FullName>
+                  <IndividualTitleDescription>Mortgage Loan Officer</IndividualTitleDescription>
+                  <LastName>Rachhadia</LastName>
+                </NAME>
+              </INDIVIDUAL>
+              <ROLES>
+                <ROLE SequenceNumber="1" xlink:label="LOAN_ORIGINATOR_1">
+                  <LOAN_ORIGINATOR>
+                    <LoanOriginatorType>Broker</LoanOriginatorType>
+                  </LOAN_ORIGINATOR>
+                  <LICENSES>
+                    <LICENSE SequenceNumber="1">
+                      <LICENSE_DETAIL>
+                        <LicenseAuthorityLevelType>Private</LicenseAuthorityLevelType>
+                        <LicenseIdentifier>1890628</LicenseIdentifier>
+                      </LICENSE_DETAIL>
+                    </LICENSE>
+                    <LICENSE SequenceNumber="2">
+                      <LICENSE_DETAIL>
+                        <LicenseAuthorityLevelType>PublicState</LicenseAuthorityLevelType>
+                        <LicenseExpirationDate>2025-01-01</LicenseExpirationDate>
+                        <LicenseIdentifier>1890628</LicenseIdentifier>
+                        <LicenseIssuingAuthorityStateCode>NJ</LicenseIssuingAuthorityStateCode>
+                      </LICENSE_DETAIL>
+                    </LICENSE>
+                  </LICENSES>
+                  <ROLE_DETAIL>
+                    <PartyRoleType>LoanOriginator</PartyRoleType>
+                  </ROLE_DETAIL>
+                </ROLE>
+              </ROLES>
+            </PARTY>
+          </PARTIES>
+          <RELATIONSHIPS>
+            <RELATIONSHIP SequenceNumber="1" xlink:from="ASSET_1" xlink:to="BORROWER_1" xlink:arcrole="urn:fdc:mismo.org:2009:residential/ASSET_IsAssociatedWith_ROLE"/>
+            <RELATIONSHIP SequenceNumber="2" xlink:from="ASSET_2" xlink:to="BORROWER_1" xlink:arcrole="urn:fdc:mismo.org:2009:residential/ASSET_IsAssociatedWith_ROLE"/>
+            <RELATIONSHIP SequenceNumber="3" xlink:from="ASSET_3" xlink:to="BORROWER_1" xlink:arcrole="urn:fdc:mismo.org:2009:residential/ASSET_IsAssociatedWith_ROLE"/>
+            <RELATIONSHIP SequenceNumber="4" xlink:from="ASSET_4" xlink:to="BORROWER_1" xlink:arcrole="urn:fdc:mismo.org:2009:residential/ASSET_IsAssociatedWith_ROLE"/>
+            <RELATIONSHIP SequenceNumber="5" xlink:from="ASSET_5" xlink:to="BORROWER_1" xlink:arcrole="urn:fdc:mismo.org:2009:residential/ASSET_IsAssociatedWith_ROLE"/>
+            <RELATIONSHIP SequenceNumber="6" xlink:from="ASSET_6" xlink:to="BORROWER_1" xlink:arcrole="urn:fdc:mismo.org:2009:residential/ASSET_IsAssociatedWith_ROLE"/>
+            <RELATIONSHIP SequenceNumber="7" xlink:from="ASSET_7" xlink:to="BORROWER_1" xlink:arcrole="urn:fdc:mismo.org:2009:residential/ASSET_IsAssociatedWith_ROLE"/>
+            <RELATIONSHIP SequenceNumber="8" xlink:from="ASSET_8" xlink:to="BORROWER_1" xlink:arcrole="urn:fdc:mismo.org:2009:residential/ASSET_IsAssociatedWith_ROLE"/>
+            <RELATIONSHIP SequenceNumber="9" xlink:from="ASSET_9" xlink:to="BORROWER_1" xlink:arcrole="urn:fdc:mismo.org:2009:residential/ASSET_IsAssociatedWith_ROLE"/>
+            <RELATIONSHIP SequenceNumber="10" xlink:from="LIABILITY_1" xlink:to="BORROWER_1" xlink:arcrole="urn:fdc:mismo.org:2009:residential/LIABILITY_IsAssociatedWith_ROLE"/>
+            <RELATIONSHIP SequenceNumber="11" xlink:from="LIABILITY_2" xlink:to="BORROWER_1" xlink:arcrole="urn:fdc:mismo.org:2009:residential/LIABILITY_IsAssociatedWith_ROLE"/>
+            <RELATIONSHIP SequenceNumber="12" xlink:from="LIABILITY_3" xlink:to="BORROWER_1" xlink:arcrole="urn:fdc:mismo.org:2009:residential/LIABILITY_IsAssociatedWith_ROLE"/>
+            <RELATIONSHIP SequenceNumber="13" xlink:from="LIABILITY_4" xlink:to="BORROWER_1" xlink:arcrole="urn:fdc:mismo.org:2009:residential/LIABILITY_IsAssociatedWith_ROLE"/>
+            <RELATIONSHIP SequenceNumber="14" xlink:from="LIABILITY_5" xlink:to="BORROWER_1" xlink:arcrole="urn:fdc:mismo.org:2009:residential/LIABILITY_IsAssociatedWith_ROLE"/>
+            <RELATIONSHIP SequenceNumber="15" xlink:from="LIABILITY_6" xlink:to="BORROWER_1" xlink:arcrole="urn:fdc:mismo.org:2009:residential/LIABILITY_IsAssociatedWith_ROLE"/>
+            <RELATIONSHIP SequenceNumber="16" xlink:from="LIABILITY_7" xlink:to="BORROWER_1" xlink:arcrole="urn:fdc:mismo.org:2009:residential/LIABILITY_IsAssociatedWith_ROLE"/>
+            <RELATIONSHIP SequenceNumber="17" xlink:from="LIABILITY_8" xlink:to="BORROWER_1" xlink:arcrole="urn:fdc:mismo.org:2009:residential/LIABILITY_IsAssociatedWith_ROLE"/>
+            <RELATIONSHIP SequenceNumber="18" xlink:from="LIABILITY_9" xlink:to="BORROWER_1" xlink:arcrole="urn:fdc:mismo.org:2009:residential/LIABILITY_IsAssociatedWith_ROLE"/>
+            <RELATIONSHIP SequenceNumber="19" xlink:from="LIABILITY_10" xlink:to="BORROWER_1" xlink:arcrole="urn:fdc:mismo.org:2009:residential/LIABILITY_IsAssociatedWith_ROLE"/>
+            <RELATIONSHIP SequenceNumber="20" xlink:from="CURRENT_INCOME_ITEM_2" xlink:to="EMPLOYER_3" xlink:arcrole="urn:fdc:mismo.org:2009:residential/CURRENT_INCOME_ITEM_IsAssociatedWith_EMPLOYER"/>
+            <RELATIONSHIP SequenceNumber="21" xlink:from="CURRENT_INCOME_ITEM_1" xlink:to="EMPLOYER_1" xlink:arcrole="urn:fdc:mismo.org:2009:residential/CURRENT_INCOME_ITEM_IsAssociatedWith_EMPLOYER"/>
+            <RELATIONSHIP SequenceNumber="22" xlink:from="ASSET_5" xlink:to="LIABILITY_5" xlink:arcrole="urn:fdc:mismo.org:2009:residential/ASSET_IsAssociatedWith_LIABILITY"/>
+            <RELATIONSHIP SequenceNumber="23" xlink:from="ASSET_6" xlink:to="LIABILITY_1" xlink:arcrole="urn:fdc:mismo.org:2009:residential/ASSET_IsAssociatedWith_LIABILITY"/>
+            <RELATIONSHIP SequenceNumber="24" xlink:from="ASSET_7" xlink:to="LIABILITY_4" xlink:arcrole="urn:fdc:mismo.org:2009:residential/ASSET_IsAssociatedWith_LIABILITY"/>
+            <RELATIONSHIP SequenceNumber="25" xlink:from="ASSET_8" xlink:to="LIABILITY_3" xlink:arcrole="urn:fdc:mismo.org:2009:residential/ASSET_IsAssociatedWith_LIABILITY"/>
+            <RELATIONSHIP SequenceNumber="26" xlink:from="ASSET_9" xlink:to="LIABILITY_2" xlink:arcrole="urn:fdc:mismo.org:2009:residential/ASSET_IsAssociatedWith_LIABILITY"/>
+            <RELATIONSHIP SequenceNumber="27" xlink:from="COUNSELING_EVENT_1" xlink:to="HOUSING_COUNSELING_AGENCY_1" xlink:arcrole="urn:fdc:mismo.org:2009:residential/COUNSELING_EVENT_IsAssociatedWith_ROLE"/>
+            <RELATIONSHIP SequenceNumber="28" xlink:from="COUNSELING_EVENT_2" xlink:to="HOUSING_COUNSELING_AGENCY_2" xlink:arcrole="urn:fdc:mismo.org:2009:residential/COUNSELING_EVENT_IsAssociatedWith_ROLE"/>
+          </RELATIONSHIPS>
+        </DEAL>
+      </DEALS>
+    </DEAL_SET>
+  </DEAL_SETS>
+</MESSAGE>

@@ -18,12 +18,12 @@ from enum import StrEnum
 from typing import TYPE_CHECKING
 from uuid import UUID
 
-from sqlalchemy import ForeignKey, String
+from sqlalchemy import ForeignKey, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, SoftDeleteMixin, TimestampMixin, UUIDMixin
 from app.models.enums import str_enum
-from app.models.types import MEDIUM_STRING, Money
+from app.models.types import MEDIUM_STRING, SHORT_STRING, Money
 
 if TYPE_CHECKING:
     from app.models.loan_file import LoanFile
@@ -86,8 +86,17 @@ class Property(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
 
     # --- Valuation (Decimal, never float — see app.models.types.Money) ------
     estimated_value: Mapped[Money | None] = mapped_column(nullable=True)
-    # Purchase price applies to purchases; null on refinances.
+    # Purchase price applies to purchases; null on refinances. (MISMO
+    # SalesContractAmount maps here.)
     purchase_price: Mapped[Money | None] = mapped_column(nullable=True)
+
+    # --- MISMO core fields (LP-52) — nullable; manual creation leaves them empty.
+    # (usage_type → occupancy_type and sales_contract_amount → purchase_price
+    # already exist; these are the genuinely-missing ones.)
+    valuation_amount: Mapped[Money | None] = mapped_column(nullable=True)
+    attachment_type: Mapped[str | None] = mapped_column(String(SHORT_STRING), nullable=True)
+    construction_method: Mapped[str | None] = mapped_column(String(SHORT_STRING), nullable=True)
+    financed_unit_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     # --- Relationships -----------------------------------------------------
     loan_file: Mapped["LoanFile"] = relationship(back_populates="property")

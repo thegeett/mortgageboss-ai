@@ -4343,3 +4343,290 @@ documents stay visible — only the background refresh stops; refresh to resume)
 extracted and unit-tested. Separately, the LP-48 seed was adjusted so its documents are all in
 **terminal** states (no perpetually-`PENDING` seeded doc), so seeded files don't rely on the
 backstop at all.
+
+---
+
+## ADR-159: Deterministic MISMO parsing (lxml/XPath) — typed core + catch-all, tolerant + exact
+
+- **Date:** 2026-06-12
+- **Status:** Accepted
+
+**Decision:** MISMO 3.4 application files are parsed **deterministically** with lxml/XPath
+(`app/mismo/parser.py` → `parse_mismo(content) -> ParsedMismo`), not by AI. The result is a
+**typed core** (borrowers — name/DOB/SSN/contact/address/income/employers/1003 declarations; loan;
+property; liabilities; assets — the stated data needed for file creation and Phase-3 verification)
+plus a **catch-all** of every other leaf in the deal, grouped by section, so nothing is lost.
+Values are read **exactly** (`Decimal` for money/rates, `date` for dates, SSN verbatim). The parser
+is **tolerant**: a missing/optional element becomes `None`/`[]` with a `parse_warning` for
+needed-now fields, never a crash. It accepts raw XML **and** HTML-wrapped XML (the embedded
+`<MESSAGE>…</MESSAGE>` island is sliced out first; `source_format` records which). Validation
+failures (not XML / not MISMO / no DEAL) raise `MismoParseError` with a safe message; missing data
+yields a partial parse + warnings rather than failing. **AI-fallback** for non-compliant files is a
+documented **future** option, not built.
+
+**Rationale:** MISMO is a standardized, machine-parseable schema and the sister's LOS emits
+compliant MISMO, so deterministic parsing is exact, free, fast, and auditable. The stated financial
+data is the source-of-truth baseline (the *stated* side of stated-vs-verified) and must be read
+exactly — an AI misread of stated income/amounts would corrupt that baseline. The typed-core +
+catch-all shape mirrors document extraction (LP-39a) and guarantees no field is dropped. lxml is
+configured XXE-safe (`resolve_entities=False`, `no_network=True`).
+
+**Consequences:** The catch-all tracks which leaves the typed core consumed (via stable element
+paths) so it captures exactly "everything else" — and the **SSN is consumed**, so it never lands in
+the catch-all. Logging is **metadata-only** (counts, source format, warning count) — never the SSN,
+names, amounts, or raw content. The next ticket consumes `ParsedMismo` to map to DB models, encrypt
+the SSN, and create a loan file. A real sample
+(`backend/tests/fixtures/mismo/MISMO16940192.xml`) anchors correctness with exact-value tests; the
+typed core grows as later phases need more fields, and more real files will harden tolerance.
+
+---
+
+## ADR-160: Stated-financials data model — Phase-3-shaped, one-to-many, tenant-scoped via the file
+
+- **Date:** 2026-06-12
+- **Status:** Accepted
+
+**Decision:** MISMO stated financials are persisted as new **one-to-many** models
+(`app/models/stated_financials.py`): `StatedIncomeItem` + `StatedEmployer` (FK → **borrower**),
+`StatedLiability` + `StatedAsset` (FK → **loan_file**). They are typed for **Phase-3 deterministic
+comparison** — `Decimal` amounts (exact, summable) and the MISMO category (`income_type` /
+`liability_type` / `asset_type`) as a **flexible string** (the MISMO enumerations are large/evolving,
+so they are *not* CHECK-enums — ADR-037). The existing `Borrower` / `Property` / `LoanFile` models
+are **extended** (not duplicated) with the MISMO core fields they lacked, all **nullable** (manual
+creation leaves them empty): Borrower `dependent_count` / `citizenship` / `declarations` (JSON);
+Property `valuation_amount` / `attachment_type` / `construction_method` / `financed_unit_count`;
+LoanFile `note_amount` / `note_rate_percent` (Numeric(7,4)) / `lien_priority` / `amortization_type` /
+`amortization_months` / `application_received_date`. Tenant-scoped **transitively** via the loan
+file (ADR-053) — no own `company_id` — with `ON DELETE CASCADE` from the parent.
+
+**FK placement** is by what Phase-3 needs: income/employers are per-borrower (MISMO nests them under
+the borrower role; income verification is per-borrower); liabilities/assets are per-file (MISMO
+carries them at the deal level; DTI and reserves are file-level).
+
+**Reuse vs add** (gap analysis): MISMO `birth_date`→`date_of_birth`, `marital_status`,
+`classification`→`is_primary`, `usage_type`→`occupancy_type`, `sales_contract_amount`→`purchase_price`,
+`base_loan_amount`→`loan_amount`, `mortgage_type`→`loan_program`, `loan_purpose` all already existed
+and are reused; only the genuinely-missing fields were added.
+
+**Rationale:** the stated financials are multi-row structured data (many incomes/liabilities/assets)
+that Phase-3 must compare against document-extracted values, so they must be typed/summable/queryable
+rows, not loose JSON. The same core entities serve manual + MISMO creation (they converge), so
+MISMO's extra fields extend them rather than forking a parallel model.
+
+**Consequences:** the shape is a **starter**, refined with Priya / as Phase-3 rules firm up. LP-53
+maps `ParsedMismo` into these. Soft-delete + the tenant-isolation/CHECK test conventions apply; each
+new model has a per-model tenant-isolation test.
+
+---
+
+## ADR-161: MISMO catch-all + raw-file + import-record storage (capture-all + audit)
+
+- **Date:** 2026-06-12
+- **Status:** Accepted
+
+**Decision:** A `MismoImport` model (`app/models/mismo_import.py`, FK → loan_file, cascade) is the
+home for everything an import produces beyond the typed core: LP-51's **catch_all** (every non-core
+MISMO leaf, grouped) as JSON; the **parse_warnings**; a **raw_file_path** reference to the original
+MISMO file preserved in the storage layer for **audit**; and `source_format` + a `status`
+(`MismoImportStatus` — COMPLETED/PARTIAL/FAILED, a small stable CHECK-enum). One row per import;
+`imported_at` is `created_at`.
+
+**Rationale:** the "extract all fields" decision means nothing is lost — the catch-all is queryable
+later without re-parsing. The source-of-truth baseline must be **auditable**, so the original file is
+preserved. The import record is the audit trail and the foundation for future re-import / versioning
+(deferred). Putting all import-derived data on `MismoImport` (rather than scattering it onto
+`LoanFile`) keeps the file model lean and groups the audit data.
+
+**Consequences:** PII in the catch-all / raw file is access-controlled (tenant-scoped via the file)
+and never logged. The bytes of the raw file are written by the upload path (LP-53/54); this ticket
+provides the column/reference. Re-import/versioning builds on the import record.
+
+---
+
+## ADR-162: MISMO import service — the mapping seam; converges with manual creation; transactional; partial-parse create+warn
+
+- **Date:** 2026-06-12
+- **Status:** Accepted
+
+**Decision:** `create_loan_file_from_mismo(db, *, parsed, company_id, raw_content, source_format=None,
+actor_user_id=None)` (`app/mismo/import_service.py`) is the single seam that maps a `ParsedMismo`
+(LP-51) into the LP-52 models and creates a populated `LoanFile`. It **reuses Epic 4's
+`create_loan_file` and `create_property`** so a MISMO file is the *same* `LoanFile` (same model, same
+downstream) as a manually-created one — they **converge**. Borrowers are constructed directly
+(rather than via `create_borrower`) so they can carry the MISMO-only fields, tolerate a
+non-`EmailStr` email, and position multiple borrowers; the resulting `Borrower` is identical. It maps
+the stated financials into `StatedIncomeItem`/`StatedEmployer` (per borrower) and
+`StatedLiability`/`StatedAsset` (per file), stores the catch-all + a stored raw MISMO file (audit) +
+a `MismoImport` record, and logs a `FILE_CREATED` activity. The service **flushes**; the caller (the
+LP-54 endpoint) **commits**, so the whole creation is one **all-or-nothing** transaction. MISMO
+category strings are mapped to our small domain enums (marital / program / purpose / occupancy) with
+**unknown → None** (the file is still created); large/evolving categories stay flexible strings.
+
+**Partial-parse (import-directly):** a parse with missing optional fields still creates the file
+(missing → `None`); `parse_warnings` are stored on the `MismoImport` (status `PARTIAL`) and surfaced
+later (LP-55/56). **Floor:** if there is *no* borrower **and** no loan at all, raise
+`MismoImportError`; anything above that (a borrower **or** loan present) creates the file.
+
+**Rationale:** isolating the mapping keeps the parser and the models ignorant of each other.
+Convergence keeps one kind of file. Import-directly + tolerant parsing means a partial file is
+created and corrected later, not blocked. Exact `Decimal` mapping preserves the source-of-truth
+baseline. The SSN is stored only through the existing encrypted Borrower column and is **never
+logged**; logging is metadata-only (ids + counts); the raw file is tenant-scoped and never logged.
+
+**Consequences:** LP-54 (endpoint) calls this service and owns the commit. Known gap: the MISMO
+*borrower* address has no typed column on `Borrower` (only the subject property has an address), so
+it's parsed but not persisted to a typed field — a later model change. The import record + raw file
+set up future re-import/versioning.
+
+---
+
+## ADR-163: MISMO upload endpoint — inline (not Celery), thin orchestration, graceful error mapping
+
+- **Date:** 2026-06-12
+- **Status:** Accepted
+
+**Decision:** `POST /api/v1/loan-files/import-mismo` (in the loan-files router) accepts a multipart
+MISMO file (XML or HTML-wrapped) and runs **parse (LP-51) → create (LP-53) inline** (synchronously,
+in-request), then commits and returns the created file plus parse warnings (`MismoImportResponse =
+{ loan_file: LoanFileDetail, warnings: [...] }`, status `201`). The endpoint is **thin** — boundary
+concerns only: it reads the bytes with a size cap (`413` over ~10 MB), rejects an empty upload
+(`422`), and takes `company_id` from the authenticated user (never the body). Content validation is
+`parse_mismo`'s job (don't over-restrict content-type). Failures map to safe **LP-46 envelope**
+errors: `MismoParseError` (not-XML / not-MISMO) → `400`; `MismoImportError` (the floor — no borrower
+and no loan) → `422`; an unexpected error → the global safe `500`. A **partial parse** is *not* an
+error — it returns `201` with the created file and the warnings (success-with-warnings). It reloads
++ returns via `LoanFileDetail` exactly like the manual create endpoint (converges).
+
+**Rationale:** MISMO parsing is **fast, deterministic** work (lxml on a ~60 KB file + a few inserts,
+**no AI**) — unlike document processing, which is slow/AI-bound and therefore uses Celery (LP-41/42).
+So inline is appropriate, simpler (no enqueue/poll/status-lifecycle), and the response *being* the
+created file matches **import-directly** (the frontend navigates straight to the populated file).
+The endpoint stays thin because the work lives in the services; graceful errors reuse LP-46.
+
+**Consequences:** no background job for MISMO import; if a real file ever proved slow it could move
+to background later. The SSN is masked in the response (existing `LoanFileDetail`) and never logged;
+logging is metadata-only (file id, source format, warning count). LP-55 (the upload UI) calls this
+endpoint.
+
+---
+
+## ADR-164: MISMO upload as the primary create-file path; import-directly; honest non-blocking warnings
+
+- **Date:** 2026-06-12
+- **Status:** Accepted
+
+**Decision:** The "New file" screen leads with **Upload MISMO** (a prominent drag-and-drop zone for
+XML/HTML, `components/intake/mismo-upload.tsx`); the manual Epic 4 intake form is **reused** and
+repositioned as the secondary fallback (revealed via "Create manually"). On a successful upload the
+populated file **opens immediately** (import-directly — `router.push` to the created file, plus a
+success toast); there is no preview/confirm step. The imported **stated financials** are displayed
+on the file's Overview ("Application data (stated)" — income/employers per borrower, the file's
+liabilities and assets, the extended loan terms), **display-only** (editing is LP-56). Parse
+warnings (a partial import) are surfaced **honestly and non-blocking** ("Imported — a few fields
+need your attention … you can fill these in"), not as a failure. Upload failures show the LP-54 safe
+envelope message friendly (via the LP-46 normalizer); the upload trigger disables while pending
+(LP-47, double-submit prevention).
+
+To display the stated financials the frontend needs them exposed, so a **minimal read-only,
+tenant-scoped** endpoint was added — `GET /api/v1/loan-files/{id}/stated-financials`
+(`StatedFinancialsResponse`: borrowers with income/employers, liabilities, assets, extended
+loan/property fields, and the latest import record's warnings). It's a read of already-stored data
+(no pipeline/model change); the import's warnings persist there, so the opened file shows them even
+after navigation. SSN is masked throughout.
+
+**Rationale:** the processor receives loan applications as MISMO from the loan officer, not by
+typing — the product should match how the work actually happens. Import-directly + opening the
+populated file is the payoff ("upload and it's filled in"); displaying the stated financials is the
+visible proof the import worked; honest non-blocking warnings keep a partial import usable (and set
+up editing in LP-56).
+
+**Consequences:** file creation is reoriented around MISMO (manual is the fallback). The
+stated-financials read is the seam later phases extend (Phase-3 cross-checks against documents will
+show alongside the stated values). LP-56 adds editing of the imported data. Composes existing
+patterns (drag-drop LP-43, errors LP-46, loading LP-47, the Epic 4 form, the detail view).
+
+## ADR-165: Imported data is editable in place — reuse Epic-4 PATCH for core fields, add stated-financials CRUD; audited, SSN-safe
+
+- **Date:** 2026-06-13
+- **Status:** Accepted
+
+**Decision:** MISMO-imported data is **reviewable and editable** (not read-only), completing the
+import-directly safety net: a parse gap or wrong value (flagged by the LP-55 warnings) is corrected
+on the opened file rather than by re-importing. Editing splits along the existing seam:
+
+- **Core fields → reuse Epic-4 PATCH.** The borrower/property/loan-file PATCH endpoints already apply
+  fields generically (`model_dump(exclude_unset=True)` → `setattr`), so editing the MISMO-specific
+  core fields needed only **extending the Update schemas** (`BorrowerUpdate`: `dependent_count`,
+  `citizenship`, `declarations`; `PropertyUpdate`: `valuation_amount`, `attachment_type`,
+  `construction_method`, `financed_unit_count`; `LoanFileUpdate`: `note_amount`, `note_rate_percent`,
+  `lien_priority`, `amortization_type`, `amortization_months`, `application_received_date`) — no new
+  core-edit endpoints or UI. **SSN** is replaced through the existing `BorrowerUpdate.ssn` encrypted
+  re-enter path (re-encrypted, masked in the response, never edited masked-in-place, never echoed).
+- **Stated financials → add multi-row CRUD.** New tenant-scoped endpoints
+  (`app/api/stated_financials.py`): POST under the file/borrower, PATCH/DELETE by row id, for the four
+  LP-52 kinds (income, employers, liabilities, assets). Scoping is transitive (row → [borrower →]
+  file → company; cross-company → **404**, anti-enumeration). Add builds `Model(**model_dump())`;
+  update setattrs `model_dump(exclude_unset)`; delete is **soft** (`deleted_at`). All four edit
+  actions are **audited** via the existing `FILE_UPDATED` activity type with a human summary
+  ("Edited/Added/Removed a stated …") — chosen over a new `ActivityType` enum value to avoid a
+  migration for a within-file edit.
+- **Read carries ids.** The LP-55 stated-financials read was extended to include each row's `id` and
+  to return employers as objects (`{id, employer_name, is_current}`) so the editor can target rows;
+  this rippled to the frontend types and the display.
+- **Frontend:** the "Application data (stated)" card flips display ⇄ edit via an Edit/Done toggle
+  (`StatedFinancialsEditor`); a single generic `EditableRow` drives all kinds from a `FieldDef[]`
+  config, sends only changed fields (empty → `null`), and per-group Add/Remove. One hook
+  (`useStatedFinancialsEdit`) owns the mutations + cache invalidation.
+
+**Rationale:** the original MISMO (raw file + `MismoImport` record) is preserved, so editing corrects
+the *derived* application data without losing the source of truth. Reusing the generic PATCH path is
+the smallest correct change for core fields; CRUD is genuinely new only for the multi-row stated
+financials. Auditing every edit and scoping by company keep the file submission-grade and tenant-safe.
+
+**Consequences:** the import flow is now end-to-end usable (upload → opens populated → fix what the
+warnings flagged). Extending an Update schema automatically makes that field editable through the
+existing endpoint — the pattern to follow for future fields. Reusing `FILE_UPDATED` keeps edit
+provenance coarse (summary text, not a typed diff); a finer field-level audit, if needed, is a later
+change. Scope is **correct + add/remove rows**, not a from-scratch application builder.
+
+## ADR-166: Phase-1.5 consolidation — parser hardened against synthetic variants (one real file), with an honest limitation
+
+- **Date:** 2026-06-13
+- **Status:** Accepted
+
+**Decision:** Close Phase 1.5 by making the MISMO feature durable: full-flow integration tests
+(upload → parse → create → store → read → edit, real stack), a systematic tenant-isolation pass
+across every new MISMO endpoint (each 404 cross-company), parser hardening against MORE files, MISMO
+flow polish, a MISMO seed file, and docs. Two substantive choices are recorded here:
+
+1. **Hardening against synthetic variants, stated honestly.** No additional real MISMO files were
+   supplied (checked `/mnt/user-data/uploads/` and the repo — only `MISMO16940192.xml` exists). Rather
+   than overclaim robustness, the parser is hardened against **synthetic variants derived from the one
+   real file** (FHA mortgage type, a genuine distinct second borrower, missing optional sections, an
+   unsupported mortgage type, a zero-income deal, HTML-wrapped) via a small builder
+   (`tests/mismo/synthetic.py`). These **confirm** the LP-51 tolerance claims hold for those specific
+   variations (multi-borrower income/employers attribute to the correct borrower; FHA/VA/unknown types
+   are tolerated; dropped sections degrade to empty + warnings, never a crash). They **do not** exercise
+   real-LOS variation (different element ordering/namespaces, FHA-specific sections like UFMIP/MIP/case
+   number, true co-borrower layouts). The ticket states this limitation plainly: a real FHA file and a
+   real multi-borrower file are still needed to fully harden. No parser **fix** was required because no
+   real second file exposed a gap — only a proactive hardening was added (see #2).
+
+2. **One proactive needed-now warning — zero-income deals.** The probe surfaced that a deal with no
+   stated income for any borrower parsed silently (no warning). Income drives DTI, so a zero-income
+   parse is almost always an incomplete file or a parse gap. The parser now appends a non-blocking
+   `parse_warning` ("No income was found for any borrower.") in that case — consistent with the
+   existing needed-now warnings (missing borrower name, base loan amount, property value) and the
+   honest, non-blocking warnings philosophy (ADR-164). It does not fire on the real fixture (which has
+   income), so existing exact-value tests are unchanged.
+
+**Rationale:** a parser validated against a single example is fragile; the synthetic variants test the
+tolerance claim against structural variation now, and the honest limitation note keeps the robustness
+claim truthful. The seed gains a MISMO-imported file (the real fixture scrubbed to fully-synthetic PII,
+run through the real LP-53 import service) so dev data exercises the MISMO path end to end without
+storing any real person's data.
+
+**Consequences:** Phase 1.5 is documented complete with explicit deferred items (re-import/versioning,
+smart-needs/LP-58, AI-fallback, core-field edit UI). When real files arrive, drop them into
+`tests/fixtures/mismo/` and add assertions — the synthetic builder and the full-flow/isolation tests
+are the harness they slot into. Otherwise this is testing/polish/hardening; no architectural change.

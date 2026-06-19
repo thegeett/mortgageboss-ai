@@ -17,10 +17,24 @@ questions; when unsure about a mortgage term, flag it rather than guess.
 
 ## Current status
 
-**Phase 1 — Foundation.** Epic 1 (Repo & Infrastructure Setup, LP-1…LP-8) is
-**complete**: skeleton, Docker services, backend + frontend scaffolding,
-environment config, health checks, and CI/CD. **Epic 2 (Database & Models, LP-9+)
-is next.** The full plan is in [`docs/phases/phase-1.md`](docs/phases/phase-1.md).
+**Phase 1 — Foundation: complete** (Epics 1–6, LP-1…LP-49) — infra, data model,
+loan-file/document/borrower/property/needs/activity APIs + frontend, the AI
+extraction pipeline, integration tests, error/loading polish, and seed data.
+
+**Phase 1.5 — MISMO Import: complete** (LP-51…LP-57). The full feature: a
+deterministic tolerant parser (LP-51) → stated-financials models + extended core
++ catch-all + raw-file storage (LP-52) → mapping/creation service (LP-53) →
+inline upload endpoint (LP-54) → frontend display + read endpoint (LP-55) →
+editability for all fields + in-UI stated-financials/loan-terms editing (LP-56) →
+full-flow tests, a tenant-isolation pass, multi-file parser hardening, polish, a
+MISMO seed file, and docs (LP-57). **Deferred (future):** re-import/versioning/diff,
+smart-needs-from-MISMO (LP-58), AI-fallback parsing, core-field edit UI. Hardening
+note: validated against **one real file** + synthetic variants — more real files
+(esp. a real FHA and a real multi-borrower export) are needed to fully harden (see
+[`docs/tickets/LP-57.md`](docs/tickets/LP-57.md)).
+
+**Phase 2 — Document Handling is next.** The full plan for Phase 1 is in
+[`docs/phases/phase-1.md`](docs/phases/phase-1.md).
 
 ## Tech stack
 

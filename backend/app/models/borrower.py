@@ -31,7 +31,7 @@ from enum import StrEnum
 from typing import TYPE_CHECKING
 from uuid import UUID
 
-from sqlalchemy import Boolean, Date, ForeignKey, Integer, String
+from sqlalchemy import JSON, Boolean, Date, ForeignKey, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, SoftDeleteMixin, TimestampMixin, UUIDMixin
@@ -41,6 +41,7 @@ from app.models.types import MEDIUM_STRING, SHORT_STRING
 
 if TYPE_CHECKING:
     from app.models.loan_file import LoanFile
+    from app.models.stated_financials import StatedEmployer, StatedIncomeItem
 
 
 class MaritalStatus(StrEnum):
@@ -109,8 +110,27 @@ class Borrower(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     # 1-based ordering of borrowers on the file (primary is typically 1).
     borrower_position: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
 
+    # --- MISMO core fields (LP-52) — nullable; manual creation leaves them empty.
+    # (birth_date → date_of_birth, marital_status, classification → is_primary all
+    # already exist above; these are the genuinely-missing ones.)
+    dependent_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    citizenship: Mapped[str | None] = mapped_column(String(SHORT_STRING), nullable=True)
+    # The 1003 declaration indicators (BankruptcyIndicator, IntentToOccupyType, …)
+    # as raw string values — a large/evolving set, kept as flexible JSON; feeds
+    # Phase-3 cross-source verification.
+    declarations: Mapped[dict[str, str] | None] = mapped_column(JSON, nullable=True)
+
     # --- Relationships -----------------------------------------------------
     loan_file: Mapped["LoanFile"] = relationship(back_populates="borrowers")
+    # Stated financials owned by this borrower (LP-52).
+    stated_income_items: Mapped[list["StatedIncomeItem"]] = relationship(
+        back_populates="borrower",
+        cascade="all, delete-orphan",
+    )
+    stated_employers: Mapped[list["StatedEmployer"]] = relationship(
+        back_populates="borrower",
+        cascade="all, delete-orphan",
+    )
 
     @property
     def full_name(self) -> str:
