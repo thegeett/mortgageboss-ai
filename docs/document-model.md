@@ -144,16 +144,44 @@ sent to review — it routes to Tier 3.)
   reach `COMPLETED`. LP-65/66 fill the real summary / analyzer **in place**; the
   routing structure is already complete.
 
+## Tier 1 extractors
+
+A Tier-1 type routes to its registered extractor in `EXTRACTORS`
+(`app/ai/extraction/__init__.py`). Every extractor follows the **LP-39a shape**: a
+typed core of `TypedField`s (each carrying the coerced `value` + its
+`SourceLocation`) for the decision-relevant fields, plus an `additional_sections`
+grouped **catch-all** for everything else (nothing is lost; a catch-all field can
+be promoted to the typed core later). Same result interface, the shared tolerant
+parser, honest nulls, and graceful `.failed()`. The typed cores are **V1 starters,
+refined with Priya**; accuracy is validated against real samples over time.
+
+Registered so far:
+
+- **LP-39 (Phase 1):** `pay_stub`, `w2` (SSN masked + never logged),
+  `bank_statement`.
+- **LP-60 (income/employment cluster):** `1099` (one extractor for the whole
+  NEC/INT/DIV/MISC/R **series** — a `form_subtype` slug + the primary
+  `income_amount`; recipient TIN masked + never logged), `voe` (employer-verified
+  employment + income), `profit_and_loss` (self-employment income — `net_profit`
+  is the key figure), `letter_of_explanation` (prose-light: `subject` +
+  `explanation_summary` + a primary reference).
+
+A Tier-1 type whose extractor isn't registered yet (the LP-61..64 clusters) is
+handled gracefully as classified-only (see above) until its extractor lands.
+
 ## What's built vs. what's next
 
 **LP-58 (foundation):** the `Tier` enum + `tier` column (+ migration), the catalog
 + helpers, catalog-driven category, and tier-aware routing (Tier 1 fully working
 via the registry; Tier 2/3 cleanly stubbed). The 3 existing types route as Tier 1.
 
-**LP-59 (this breadth):** the full ~80-type catalog, the comprehensive
-catalog-synced classification prompt (per-type indicators), the advisory
-category, and confidence-gated routing (low → `NEEDS_REVIEW`; confident-`unknown`
-→ Tier 3).
+**LP-59 (breadth):** the full ~80-type catalog, the comprehensive catalog-synced
+classification prompt (per-type indicators), the advisory category, and
+confidence-gated routing (low → `NEEDS_REVIEW`; confident-`unknown` → Tier 3).
 
-**Next:** LP-60..64 (Tier-1 extractors) → LP-65 (Tier-2 summary) → LP-66 (Tier-3
-analyzer). The taxonomy + indicators refine with Priya over time.
+**LP-60 (first Tier-1 extractor batch):** the income/employment cluster — 1099
+(with subtypes), VOE, P&L, income LOE — registered and routed.
+
+**Next:** LP-61..64 (the remaining Tier-1 clusters: assets, property,
+borrower-info, tax returns) → LP-65 (Tier-2 summary) → LP-66 (Tier-3 analyzer).
+The taxonomy, indicators, and typed-core field sets refine with Priya over time.

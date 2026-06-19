@@ -4738,3 +4738,47 @@ industry-standard taxonomy is a strong, reviewable starting point while the real
 still handled gracefully per ADR-167); LP-65/66 fill the Tier-2/3 handlers; the taxonomy + indicators refine
 with Priya and tune against real documents over time. Accuracy is honestly scoped: the mechanism + a
 representative spread are tested now; full per-type accuracy is an ongoing, real-document-dependent effort.
+
+## ADR-169: Tier 1 income/employment extractors (1099/VOE/P&L/income-LOE) — the established pattern, with 1099 subtypes folded into one extractor
+
+- **Date:** 2026-06-18
+- **Status:** Accepted
+
+**Context:** LP-58/59 route a Tier-1 document to its registered extractor, but only the 3 Phase-1 extractors
+(pay_stub/w2/bank_statement) existed — the other Tier-1 types fell through to classified-only. LP-60 is the
+first batch of new extractors: the income/employment cluster (1099, VOE, P&L, income LOE), the income side
+of Phase 3 DTI. This is repetitive application of an established pattern, not new architecture — but one
+shape question (the 1099 series) and one honesty question (no sample documents) are worth recording.
+
+**Decision:** Add four extractors, each following the LP-39a shape exactly (a typed core of
+``TypedField``\\ s with ``SourceLocation`` + a grouped ``additional_sections`` catch-all, the shared tolerant
+parser, ``derive_status``, graceful ``.failed()``, the same result interface, metadata-only logging) and
+registered in ``EXTRACTORS`` so the Tier-1 routing reaches them. Specific choices:
+
+- **1099 — one extractor for the whole series, not five.** The 1099 is a series (NEC/INT/DIV/MISC/R) with
+  different relevant boxes. Rather than a separate extractor/type per subtype, the typed core carries a
+  ``form_subtype`` slug + a single ``income_amount`` (the primary figure *for that subtype*, selected by the
+  prompt); every specific box lands in the catch-all. One catalog type (``1099``), one extractor, the
+  subtype preserved for Phase 3 (NEC ≈ self-employment income; INT/DIV ≈ asset income).
+- **LOE — prose-light typed core.** A Letter of Explanation has no fixed form, so its typed core is
+  deliberately minimal (``subject`` + ``explanation_summary`` + a single primary referenced
+  employer/date/amount); additional references go to the catch-all. Capture *what is explained*, not rigid
+  fields. (The same type also appears in the LP-63 borrower-info context; the extractor is shared.)
+- **Sensitive TINs follow the W-2 SSN discipline (ADR-147).** The 1099 ``recipient_tin`` (an SSN for an
+  individual) is extracted into the typed core for the Phase 3 identity cross-check but is **never logged**
+  (only counts + the non-PII subtype) and is masked in display.
+- **Typed cores are V1 starters, refined with Priya; accuracy is honestly scoped.** No sample 1099/VOE/P&L/
+  LOE documents were available, so the tests verify the **mechanism/shape** (the extractor returns the
+  typed-core + catch-all shape, coerces types, carries source locations, fails gracefully, the 1099 subtype
+  variation, the routing reaches each) — **not** extraction accuracy against real forms. The catch-all is
+  the safety net: a missing field is captured, not lost, and can be promoted to the typed core later.
+
+**Rationale:** following the established pattern keeps every extraction uniform downstream (the pipeline,
+``create_extraction_version``, the detail drawer handle them identically). Folding the 1099 subtypes into one
+extractor matches how the catalog/classifier treat ``1099`` as a single type and avoids five near-duplicate
+modules, while the subtype slug keeps the income-vs-asset distinction. Honest accuracy scoping avoids
+claiming per-form correctness we can't demonstrate without real documents.
+
+**Consequences:** LP-61..64 extend Tier 1 to the asset/property/borrower-info/tax-return clusters the same
+way; the field sets refine with Priya; the detail drawer (LP-72) renders these like the existing three;
+real samples validate accuracy over time. Sensitive TINs/SSNs are masked in display + never logged.

@@ -169,18 +169,20 @@ async def test_tier1_without_extractor_is_classified_only(
     """
     doc = await _setup_document(db_session)
     _patch_storage(monkeypatch)
+    # gift_letter is Tier 1 in the catalog but its extractor is an LP-61..64 type
+    # (not yet registered) — so it exercises the graceful classified-only branch.
     _patch_classify(
         monkeypatch,
-        ClassificationResult(document_type="1099", confidence=0.9, reasoning="x"),
+        ClassificationResult(document_type="gift_letter", confidence=0.9, reasoning="x"),
     )
 
     await pipeline._process_document(db_session, str(doc.id))
     await db_session.refresh(doc)
 
     assert doc.status == DocumentStatus.COMPLETED  # terminal
-    assert doc.document_type == "1099"
+    assert doc.document_type == "gift_letter"
     assert doc.tier == Tier.TIER_1
-    assert doc.category == DocumentCategory.INCOME_EMPLOYMENT
+    assert doc.category == DocumentCategory.ASSETS
     assert await _current_extraction(db_session, doc.id) is None  # no extractor ran
 
 
@@ -513,6 +515,63 @@ async def test_registry_routes_each_type_to_its_extractor(
     extraction = await _current_extraction(db_session, doc.id)
     assert extraction is not None
     assert extraction.extraction_status == ExtractionStatus.SUCCEEDED
+
+
+# --------------------------------------------------------------------------- #
+# LP-60 — the income/employment Tier 1 cluster is now registered + routed
+# --------------------------------------------------------------------------- #
+
+
+def test_lp60_income_employment_extractors_registered() -> None:
+    """The four LP-60 types map to their extractors in the registry."""
+    from app.ai.extraction import EXTRACTORS
+    from app.ai.extraction.form_1099 import extract_1099
+    from app.ai.extraction.letter_of_explanation import extract_letter_of_explanation
+    from app.ai.extraction.profit_and_loss import extract_profit_and_loss
+    from app.ai.extraction.voe import extract_voe
+
+    assert pipeline.EXTRACTORS is EXTRACTORS
+    assert EXTRACTORS["1099"] is extract_1099
+    assert EXTRACTORS["voe"] is extract_voe
+    assert EXTRACTORS["profit_and_loss"] is extract_profit_and_loss
+    assert EXTRACTORS["letter_of_explanation"] is extract_letter_of_explanation
+
+
+@pytest.mark.parametrize(
+    ("document_type", "category"),
+    [
+        ("1099", DocumentCategory.INCOME_EMPLOYMENT),
+        ("voe", DocumentCategory.INCOME_EMPLOYMENT),
+        ("profit_and_loss", DocumentCategory.INCOME_EMPLOYMENT),
+        # LOE is filed under borrower_info in the catalog (it explains, broadly).
+        ("letter_of_explanation", DocumentCategory.BORROWER_INFO),
+    ],
+)
+async def test_lp60_types_route_to_their_extractor(
+    monkeypatch: pytest.MonkeyPatch,
+    db_session: AsyncSession,
+    document_type: str,
+    category: DocumentCategory,
+) -> None:
+    """A Tier-1 LP-60 type now reaches its extractor — NOT the classified-only
+    no-extractor fallback (the result data shape is irrelevant here; the pipeline
+    is type-agnostic, so a canned success result suffices)."""
+    doc = await _setup_document(db_session)
+    _patch_storage(monkeypatch)
+    _patch_classify(
+        monkeypatch,
+        ClassificationResult(document_type=document_type, confidence=0.95, reasoning="x"),
+    )
+    mock = _patch_extract(monkeypatch, _paystub_success(), document_type=document_type)
+
+    await pipeline._process_document(db_session, str(doc.id))
+    await db_session.refresh(doc)
+
+    assert mock.call_count == 1  # routed to the registered extractor (Tier 1), not the fallback
+    assert doc.status == DocumentStatus.COMPLETED
+    assert doc.tier == Tier.TIER_1
+    assert doc.category == category
+    assert await _current_extraction(db_session, doc.id) is not None  # an extraction was persisted
 
 
 # --------------------------------------------------------------------------- #
