@@ -78,7 +78,7 @@ async def test_needs_and_activity_list_the_files_items(
     needs = (await client.get(_needs_url(loan_file.display_id), headers=_auth(token))).json()
     assert len(needs) == 5  # universal baseline + FHA placeholder (LP-30)
     assert all(item["origin"] == "template" for item in needs)
-    assert all(item["status"] == "outstanding" for item in needs)
+    assert all(item["status"] == "pending" for item in needs)  # LP-68 default (was outstanding)
 
     activity = (await client.get(_activity_url(loan_file.display_id), headers=_auth(token))).json()
     assert any(entry["activity_type"] == "file_created" for entry in activity)

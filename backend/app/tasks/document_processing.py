@@ -4,8 +4,8 @@ On upload, :func:`process_document` chains, for one document, independently:
 
     read bytes → classify (Haiku) → look up the type's tier in the catalog →
     route by tier → (Tier 1) extract via the registry (Sonnet) → persist a
-    versioned Extraction (+ cost) → satisfy a matching need → log activity →
-    set a TERMINAL status.
+    versioned Extraction (+ cost) → set a TERMINAL status → enqueue the per-file
+    needs update (LP-68, serialized) → log activity.
 
 Classification + the catalog **route** handling (LP-58, tier-aware): the
 classified type's tier (from :mod:`app.documents.catalog`) selects the path —
@@ -25,8 +25,8 @@ Every handled path reaches a terminal status (COMPLETED / NEEDS_REVIEW / FAILED)
 — never left stuck in CLASSIFYING / EXTRACTING.
 
 **Retry-safe.** Re-running is safe: extraction uses ``create_extraction_version``
-(a new version, not a duplicate current), and needs-matching only acts on an
-``OUTSTANDING`` need (a ``RECEIVED`` one is left alone).
+(a new version, not a duplicate current), and the needs update (LP-68, a separate
+per-file-serialized task) only advances an OPEN need (a satisfied one is left alone).
 
 **Async bridge (LP-41).** The Celery task is sync; the real work (DB, storage,
 classify, extract) is async, run via ``run_async`` inside one coroutine using a
@@ -50,11 +50,9 @@ from app.ai.summarization import summarize_document
 from app.core.config import settings
 from app.documents.catalog import get_category, get_tier
 from app.models.activity_log import ActivityType
-from app.models.base import utcnow
 from app.models.document import Document, DocumentStatus, Tier
 from app.models.extraction import ExtractionStatus
 from app.models.helpers import only_active
-from app.models.needs_item import NeedsItem, NeedsItemStatus
 from app.services.activity_log import log_activity
 from app.services.document_findings import (
     coerce_finding_type,
@@ -65,6 +63,7 @@ from app.services.extractions import create_extraction_version
 from app.storage import get_storage_backend
 from app.tasks.base import run_async, task_session
 from app.tasks.celery_app import celery_app
+from app.tasks.needs import update_needs_for_document
 
 logger = structlog.get_logger(__name__)
 
@@ -84,42 +83,17 @@ async def _load_document(db: AsyncSession, document_id: str) -> Document | None:
     return document
 
 
-async def _satisfy_needs_for_document(db: AsyncSession, document: Document) -> None:
-    """Mark one OUTSTANDING need in the document's category RECEIVED (PROVISIONAL rule).
+def _enqueue_needs_update(loan_file_id: UUID, document_id: UUID) -> None:
+    """Fire-and-forget enqueue of the LP-68 per-file-serialized needs update.
 
-    **PROVISIONAL — refine with Priya / Phase 2.** V1 rule: a successfully-extracted
-    document satisfies the first OUTSTANDING needs item on the same loan file whose
-    category matches the document's (e.g. a pay stub / W-2 → an income need; a bank
-    statement → an assets need). Only ``OUTSTANDING`` needs are touched, so
-    re-processing never double-satisfies (a ``RECEIVED`` need is left alone). No
-    category or no match → no-op.
+    The document already reached a terminal status (committed); the needs update is
+    a separate, serialized task (:mod:`app.tasks.needs`). An enqueue hiccup (broker
+    down) must NOT fail processing — the document is safe and the update can re-run.
     """
-    if document.category is None:
-        return
-    stmt = (
-        select(NeedsItem)
-        .where(
-            NeedsItem.loan_file_id == document.loan_file_id,
-            NeedsItem.status == NeedsItemStatus.OUTSTANDING,
-            NeedsItem.category == document.category,
-        )
-        .order_by(NeedsItem.created_at)
-        .limit(1)
-    )
-    stmt = only_active(stmt, NeedsItem)
-    need = await db.scalar(stmt)
-    if need is None:
-        return
-    need.status = NeedsItemStatus.RECEIVED
-    need.satisfied_by_document_id = document.id
-    need.satisfied_at = utcnow()
-    await log_activity(
-        db,
-        loan_file_id=document.loan_file_id,
-        activity_type=ActivityType.NEEDS_ITEM_SATISFIED,
-        summary="A document satisfied an outstanding need",
-        detail={"need_id": str(need.id), "document_id": str(document.id)},
-    )
+    try:
+        update_needs_for_document.delay(str(loan_file_id), str(document_id))
+    except Exception:
+        logger.warning("needs_update_enqueue_failed", document_id=str(document_id))
 
 
 async def _process_document(db: AsyncSession, document_id: str) -> None:
@@ -183,6 +157,11 @@ async def _process_document(db: AsyncSession, document_id: str) -> None:
         # handling path, and every path reaches a terminal status (resilience).
         # A confident "unknown" routes here to Tier 3 (catalog default).
         await _route_by_tier(db, document, content)
+
+        # --- Update the needs list (LP-68) — SERIALIZED per loan file -------- #
+        # The document is now terminal + committed; advance any matching need in a
+        # separate per-file-serialized task (concurrent arrivals never race).
+        _enqueue_needs_update(document.loan_file_id, document.id)
     except Exception as exc:
         # UNEXPECTED (storage/DB/etc.) — never crash the worker or the batch.
         logger.warning(
@@ -356,10 +335,10 @@ async def _extract_branch(
         return
 
     document.status = DocumentStatus.COMPLETED
-    await _satisfy_needs_for_document(db, document)
-    # Record any findings the extraction surfaced (LP-66) — e.g. a divorce decree's
-    # support obligations → findings, via the SAME mechanism the Tier 3 analyzer
-    # uses (closing the LP-63 deferral; uniform findings across tiers).
+    # The needs update (satisfaction-matching) is enqueued once, per-file-serialized,
+    # at the end of _process_document (LP-68) — not inline here (which would race
+    # under concurrent same-file arrivals). Record any findings the extraction
+    # surfaced (LP-66) — e.g. a divorce decree's obligations → findings (LP-63 loop).
     findings_count = await record_findings_from_extraction(db, document, result.data)
     await db.commit()
     logger.info(

@@ -48,6 +48,7 @@ from app.models.loan_file import LoanFile, LoanFileStatus, LoanPurpose
 from app.models.mismo_import import MismoImport, MismoImportStatus
 from app.models.needs_item import (
     NeedsItem,
+    NeedsItemDisposition,
     NeedsItemOrigin,
     NeedsItemPriority,
     NeedsItemStatus,
@@ -107,6 +108,7 @@ __all__ = [
     "MismoImportStatus",
     "Money",
     "NeedsItem",
+    "NeedsItemDisposition",
     "NeedsItemOrigin",
     "NeedsItemPriority",
     "NeedsItemStatus",

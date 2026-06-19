@@ -50,7 +50,7 @@ async def _make_document(db_session: AsyncSession, loan_file: LoanFile) -> Docum
 
 
 async def test_create_needs_item_is_outstanding(db_session: AsyncSession) -> None:
-    """create_needs_item makes an OUTSTANDING item with the given fields."""
+    """create_needs_item makes a PENDING item with the given fields."""
     loan_file = await _make_loan_file(db_session, "acme")
 
     item = await create_needs_item(
@@ -63,7 +63,7 @@ async def test_create_needs_item_is_outstanding(db_session: AsyncSession) -> Non
         description="Need the 2023 W-2.",
     )
 
-    assert item.status is NeedsItemStatus.OUTSTANDING
+    assert item.status is NeedsItemStatus.PENDING
     assert item.origin is NeedsItemOrigin.MANUAL
     assert item.title == "2023 W-2"
     assert item.category is DocumentCategory.INCOME_EMPLOYMENT

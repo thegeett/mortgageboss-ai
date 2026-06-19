@@ -1,7 +1,7 @@
 """Tests for the NeedsItem model (LP-19).
 
 Covers the needs-list record against a real table: field round-tripping, the
-OUTSTANDING/MANUAL/STANDARD defaults, the four enum CHECK constraints
+PENDING/MANUAL/STANDARD defaults, the four enum CHECK constraints
 (status/origin/priority/category), needs_type as a flexible string, the nullable
 borrower and satisfied-document links, relationships, multiple items per file,
 soft delete, and tenant isolation.
@@ -81,14 +81,14 @@ async def _add_needs_item(
 
 
 async def test_create_needs_item_defaults(db_session: AsyncSession) -> None:
-    """A new item defaults to OUTSTANDING / MANUAL / STANDARD with null links."""
+    """A new item defaults to PENDING / MANUAL / STANDARD with null links."""
     company = await _make_company(db_session, "acme")
     loan_file = await _make_loan_file(db_session, company)
     item = await _add_needs_item(db_session, loan_file, title="2023 W-2")
 
     await db_session.refresh(item)
     assert item.title == "2023 W-2"
-    assert item.status is NeedsItemStatus.OUTSTANDING
+    assert item.status is NeedsItemStatus.PENDING
     assert item.origin is NeedsItemOrigin.MANUAL
     assert item.priority is NeedsItemPriority.STANDARD
     assert item.category is None
@@ -139,7 +139,7 @@ async def test_status_check_constraint_rejects_invalid_value(db_session: AsyncSe
         async with db_session.begin_nested():
             await db_session.execute(
                 text("UPDATE needs_items SET status = :bad WHERE id = :id"),
-                {"bad": "pending", "id": item.id},
+                {"bad": "bogus_status", "id": item.id},
             )
 
 

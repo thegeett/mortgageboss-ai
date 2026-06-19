@@ -227,6 +227,31 @@ the holistic, whole-file needs reasoning is **LP-69**, which *consumes* these
 suggestions (an on-demand intermediate; no table) among everything else. **LP-68**
 (the needs engine) ingests them too.
 
+## Needs-list engine (LP-68) — the deterministic backbone
+
+The needs list (the file's living checklist of required documents) is a `NeedsItem`
+with a **five-state arrival lifecycle**: `PENDING` → `RECEIVED` → `VERIFIED` |
+`REJECTED`; any → `WAIVED`. Driven by **document arrivals + processor actions, not
+AI** (LP-68 is deterministic; the case-by-case intelligence is LP-69). Key pieces:
+
+- **Type-level satisfaction-matching** (`app/services/needs_engine.py`): when a
+  document reaches a terminal status, the oldest open need whose `needs_type` equals
+  the document's `document_type` advances Received → Verified (the doc passed) |
+  Rejected (it failed). ("Verified" = extraction passed; Phase 3 adds cross-source
+  rules later. Quantity/recency matching is a future refinement.)
+- **Per-file serialization — the race fix** (`app/tasks/needs.py`): the needs update
+  runs as a **separate Celery task** that acquires a **per-loan-file Redis lock**
+  before applying the matching. Concurrent arrivals for the SAME file apply one at a
+  time (no lost update / double-satisfaction); DIFFERENT files update in parallel.
+- **A thin deterministic floor**: near-certain needs seeded from the stated MISMO
+  data (employment → pay stubs + W-2; purchase → purchase agreement; assets → bank
+  statement), wired into the MISMO import. Thin — LP-69's AI augments it.
+- **Source-agnostic + disposition groundwork**: a need carries its `origin` (floor /
+  suggestion / ai_reasoning / …), a `disposition` (proposed/confirmed/waived/dismissed
+  — AI proposes in LP-69, the processor confirms in LP-70), and `reasoning` +
+  `source_finding_id`. `ingest_suggested_need` turns an LP-67 `SuggestedNeed` into a
+  need (carrying the reasoning + source link); LP-69 proposals ingest the same way.
+
 ## Tier 1 extractors
 
 A Tier-1 type routes to its registered extractor in `EXTRACTORS`
@@ -325,7 +350,12 @@ infrastructure (uniform across tiers), and the divorce-decree findings wiring
 finding → a `SuggestedNeed` with explainable reasoning (surface + suggest, not act;
 findings-scoped; an on-demand intermediate feeding LP-68/69).
 
-**Next:** LP-68 (the needs-list engine — models/states/per-file serialization,
-ingesting LP-67's suggestions) → LP-69 (holistic AI needs reasoning) → LP-72 (the
-full tier-aware detail view + package groundwork + the full-text search UI). The
-taxonomy, indicators, field sets, and finding/need types refine with Priya.
+**LP-68 (the needs-list engine):** the deterministic backbone — the five-state
+lifecycle, type-level satisfaction-matching, **per-file serialization** (the race
+fix), a thin deterministic floor from the stated MISMO data, and source-agnostic
+ingestion (floor + LP-67 suggestions; LP-69 proposals plug in the same way).
+
+**Next:** LP-69 (holistic AI needs reasoning, ingesting via the same path) → LP-70
+(the needs-list UI + confirm/waive flow) → LP-72 (the full tier-aware detail view +
+package groundwork + the full-text search UI). The taxonomy, field sets, and
+finding/need types refine with Priya.

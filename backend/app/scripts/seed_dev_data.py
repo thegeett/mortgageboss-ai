@@ -536,7 +536,7 @@ async def _seed_loan_files(
         loan_file=file_a,
         title="Most recent pay stub",
         category=DocumentCategory.INCOME_EMPLOYMENT,
-        status=NeedsItemStatus.OUTSTANDING,
+        status=NeedsItemStatus.PENDING,
         priority=NeedsItemPriority.BLOCKING,
     )
     await _add_need(
@@ -544,14 +544,14 @@ async def _seed_loan_files(
         loan_file=file_a,
         title="Two most recent W-2s",
         category=DocumentCategory.INCOME_EMPLOYMENT,
-        status=NeedsItemStatus.OUTSTANDING,
+        status=NeedsItemStatus.PENDING,
     )
     await _add_need(
         db,
         loan_file=file_a,
         title="Two months of bank statements",
         category=DocumentCategory.ASSETS,
-        status=NeedsItemStatus.OUTSTANDING,
+        status=NeedsItemStatus.PENDING,
     )
     created += 1
 
@@ -640,7 +640,7 @@ async def _seed_loan_files(
         loan_file=file_b,
         title="Two months of bank statements",
         category=DocumentCategory.ASSETS,
-        status=NeedsItemStatus.OUTSTANDING,
+        status=NeedsItemStatus.PENDING,
         priority=NeedsItemPriority.BLOCKING,
     )
     await log_activity(
@@ -762,7 +762,7 @@ async def _seed_loan_files(
         loan_file=file_c,
         title="Homeowners insurance declaration",
         category=DocumentCategory.PROPERTY,
-        status=NeedsItemStatus.OUTSTANDING,
+        status=NeedsItemStatus.PENDING,
     )
     for doc in (bank_c, review_doc):
         await log_activity(

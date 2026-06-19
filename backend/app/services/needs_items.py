@@ -17,6 +17,7 @@ from app.models.document import DocumentCategory
 from app.models.helpers import only_active
 from app.models.needs_item import (
     NeedsItem,
+    NeedsItemDisposition,
     NeedsItemOrigin,
     NeedsItemPriority,
     NeedsItemStatus,
@@ -34,10 +35,17 @@ async def create_needs_item(
     origin: NeedsItemOrigin = NeedsItemOrigin.MANUAL,
     priority: NeedsItemPriority = NeedsItemPriority.STANDARD,
     description: str | None = None,
+    disposition: NeedsItemDisposition = NeedsItemDisposition.PROPOSED,
+    reasoning: str | None = None,
+    source_finding_id: UUID | None = None,
 ) -> NeedsItem:
-    """Create an ``OUTSTANDING`` needs item on a loan file.
+    """Create a ``PENDING`` needs item on a loan file (LP-68).
 
-    Uses ``flush`` rather than ``commit`` so the caller controls the transaction.
+    ``origin`` is the source-agnostic provenance (floor / suggestion / ai_reasoning /
+    manual); ``disposition`` is the human-confirmation lifecycle (default PROPOSED;
+    the floor passes CONFIRMED); ``reasoning`` + ``source_finding_id`` carry the
+    explainability for a suggestion-derived need. Uses ``flush`` so the caller
+    controls the transaction.
     """
     item = NeedsItem(
         loan_file_id=loan_file_id,
@@ -48,7 +56,10 @@ async def create_needs_item(
         origin=origin,
         priority=priority,
         description=description,
-        status=NeedsItemStatus.OUTSTANDING,
+        status=NeedsItemStatus.PENDING,
+        disposition=disposition,
+        reasoning=reasoning,
+        source_finding_id=source_finding_id,
     )
     db.add(item)
     await db.flush()

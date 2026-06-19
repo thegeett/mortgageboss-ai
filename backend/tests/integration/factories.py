@@ -117,7 +117,7 @@ async def make_needs_item(
         category=DocumentCategory.INCOME_EMPLOYMENT,
         origin=NeedsItemOrigin.MANUAL,
         priority=NeedsItemPriority.STANDARD,
-        status=NeedsItemStatus.OUTSTANDING,
+        status=NeedsItemStatus.PENDING,
     )
     db.add(item)
     await db.flush()

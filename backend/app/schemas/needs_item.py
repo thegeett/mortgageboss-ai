@@ -11,7 +11,12 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict
 
 from app.models.document import DocumentCategory
-from app.models.needs_item import NeedsItemOrigin, NeedsItemPriority, NeedsItemStatus
+from app.models.needs_item import (
+    NeedsItemDisposition,
+    NeedsItemOrigin,
+    NeedsItemPriority,
+    NeedsItemStatus,
+)
 
 
 class NeedsItemPublic(BaseModel):
@@ -25,7 +30,10 @@ class NeedsItemPublic(BaseModel):
     needs_type: str | None
     status: NeedsItemStatus
     priority: NeedsItemPriority
-    origin: NeedsItemOrigin
+    origin: NeedsItemOrigin  # the source-agnostic provenance (floor/suggestion/ai_reasoning/…)
+    # The human-confirmation lifecycle + the explainability "why" (LP-68 → LP-69/70).
+    disposition: NeedsItemDisposition
+    reasoning: str | None
     borrower_id: UUID | None
     satisfied_by_document_id: UUID | None
     created_at: datetime

@@ -8,10 +8,14 @@ findings, so a processor can add manual needs and later phases can generate need
 from verification findings (Phase 3), lender conditions (Phase 4.5), or a
 file-creation template — see :class:`NeedsItemOrigin`.
 
-A need moves through a lifecycle (:class:`NeedsItemStatus`): ``OUTSTANDING`` →
-``REQUESTED`` (asked of the borrower — sending is Phase 4) → ``RECEIVED`` (a
-document satisfied it), or ``WAIVED``. When satisfied it links to the document
-that fulfilled it (``satisfied_by_document_id``).
+A need moves through the LP-68 five-state arrival lifecycle
+(:class:`NeedsItemStatus`): ``PENDING`` → ``RECEIVED`` (a matching document
+arrived) → ``VERIFIED`` (it passed) | ``REJECTED`` (it failed); any →
+``WAIVED``. ``REQUESTED`` (borrower-outreach, LP-19) is an orthogonal pre-existing
+state. Orthogonally, a need carries a :class:`NeedsItemDisposition` (the
+AI-proposes / processor-confirms lifecycle, LP-68 groundwork for LP-69/70) and a
+source-agnostic ``origin`` (floor / suggestion / ai_reasoning / …). When satisfied
+it links to the document that fulfilled it (``satisfied_by_document_id``).
 
 Classification mirrors the document model: ``category`` reuses the stable
 :class:`~app.models.document.DocumentCategory` enum (DB CHECK), while
@@ -45,30 +49,64 @@ if TYPE_CHECKING:
 
 
 class NeedsItemStatus(StrEnum):
-    """Lifecycle status of a needs item.
+    """Document-arrival lifecycle of a needs item (LP-68).
 
-    ``OUTSTANDING`` (not yet requested) → ``REQUESTED`` (asked of the borrower)
-    → ``RECEIVED`` (a document satisfied it). ``WAIVED`` when the requirement no
-    longer applies.
+    The **five locked states** are the arrival/verification spine (deterministic —
+    driven by document arrivals + processor actions, NOT AI):
+
+      ``PENDING`` (the file needs this; not yet arrived — the default) →
+      ``RECEIVED`` (a matching document arrived, not yet verified) →
+      ``VERIFIED`` (the document passed — extraction succeeded; Phase 3 adds
+      cross-source rules later) | ``REJECTED`` (a document arrived but failed —
+      expired/illegible/wrong; the need is still open, with a reason). Any state →
+      ``WAIVED`` (the processor decided it doesn't apply).
+
+    ``REQUESTED`` (LP-19) is preserved as an **orthogonal, pre-existing** state on
+    the borrower-outreach axis (the item was asked of the borrower; sending is
+    Phase 4) — a need *awaiting arrival* may be ``PENDING`` or ``REQUESTED``, and
+    both are satisfiable.
     """
 
-    OUTSTANDING = "outstanding"
-    REQUESTED = "requested"
-    RECEIVED = "received"
-    WAIVED = "waived"
+    PENDING = "pending"  # needs this doc; not yet arrived (default)
+    REQUESTED = "requested"  # asked of the borrower (LP-19; awaiting arrival)
+    RECEIVED = "received"  # a matching doc arrived, not yet verified
+    VERIFIED = "verified"  # the doc passed — the need is satisfied
+    REJECTED = "rejected"  # a doc arrived but failed; still open, with a reason
+    WAIVED = "waived"  # the processor decided it doesn't apply
 
 
 class NeedsItemOrigin(StrEnum):
-    """How the needs item was created.
+    """How the needs item was created — the source-agnostic provenance (LP-68).
 
-    Only ``MANUAL`` is wired in V1; the others are origins that later phases will
-    populate (the enum supports them now so the schema is ready).
+    The needs engine HOLDS needs regardless of source. LP-68 wires the deterministic
+    ``FLOOR`` (near-certain needs from the stated MISMO data) + ``SUGGESTION`` (from
+    LP-67's findings-implications); LP-69 adds ``AI_REASONING`` (holistic AI
+    proposals). ``MANUAL`` is a processor-added need; ``FINDING``/``CONDITION``/
+    ``TEMPLATE`` are earlier-defined origins later phases populate.
     """
 
     MANUAL = "manual"
     FINDING = "finding"  # generated from a verification finding (Phase 3)
     CONDITION = "condition"  # generated from a lender condition (Phase 4.5)
-    TEMPLATE = "template"  # generated from a file-creation template (later)
+    TEMPLATE = "template"  # generated from a file-creation template
+    FLOOR = "floor"  # the deterministic floor, from the stated MISMO data (LP-68)
+    SUGGESTION = "suggestion"  # ingested from an LP-67 finding-implication suggestion
+    AI_REASONING = "ai_reasoning"  # an LP-69 holistic AI proposal
+
+
+class NeedsItemDisposition(StrEnum):
+    """The human-confirmation lifecycle (LP-68 groundwork for LP-69/70).
+
+    Orthogonal to :class:`NeedsItemStatus` (the arrival lifecycle): disposition is
+    "is this a real need?" — AI proposes (LP-69), the processor confirms/dismisses
+    (LP-70). The deterministic floor is ``CONFIRMED`` (near-certain); a suggestion /
+    AI proposal starts ``PROPOSED``.
+    """
+
+    PROPOSED = "proposed"  # surfaced (e.g. by AI), awaiting a processor decision
+    CONFIRMED = "confirmed"  # a real need (the floor, or processor-confirmed)
+    WAIVED = "waived"  # the processor waived it (mirrors the WAIVED status)
+    DISMISSED = "dismissed"  # the processor judged the proposal not a real need
 
 
 class NeedsItemPriority(StrEnum):
@@ -125,9 +163,26 @@ class NeedsItem(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     )
     status: Mapped[NeedsItemStatus] = mapped_column(
         str_enum(NeedsItemStatus),
-        default=NeedsItemStatus.OUTSTANDING,
+        default=NeedsItemStatus.PENDING,
         index=True,
         nullable=False,
+    )
+    # The human-confirmation lifecycle (LP-68 groundwork for LP-69/70), orthogonal
+    # to ``status``. Default PROPOSED; the floor sets CONFIRMED.
+    disposition: Mapped[NeedsItemDisposition] = mapped_column(
+        str_enum(NeedsItemDisposition),
+        default=NeedsItemDisposition.PROPOSED,
+        index=True,
+        nullable=False,
+    )
+    # The "why" — explainability for a suggestion- / AI-derived need (LP-67/69).
+    reasoning: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # The source finding for an ingested suggestion (LP-67) → the document-finding
+    # it derives from. SET NULL: the durable need survives if the finding is removed.
+    source_finding_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("document_findings.id", ondelete="SET NULL"),
+        index=True,
+        nullable=True,
     )
 
     # --- Satisfaction + request trail --------------------------------------
@@ -140,6 +195,8 @@ class NeedsItem(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     )
     satisfied_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     requested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # The reason a need was REJECTED (doc failed) or WAIVED (doesn't apply).
+    reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # --- Relationships -----------------------------------------------------

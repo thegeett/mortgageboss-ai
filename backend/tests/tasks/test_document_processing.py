@@ -109,6 +109,16 @@ def _patch_summarize(monkeypatch: pytest.MonkeyPatch, summary: str | None) -> As
     return mock
 
 
+@pytest.fixture(autouse=True)
+def _mock_needs_enqueue(monkeypatch: pytest.MonkeyPatch):
+    """Stub the LP-68 per-file needs-update enqueue so pipeline tests never hit the broker."""
+    from unittest.mock import MagicMock
+
+    delay = MagicMock()
+    monkeypatch.setattr(pipeline.update_needs_for_document, "delay", delay)
+    return delay
+
+
 def _patch_analyze(monkeypatch: pytest.MonkeyPatch, analysis) -> AsyncMock:
     """Patch the Tier 3 ``analyze_document`` call (no real AI) with a canned analysis."""
     mock = AsyncMock(return_value=analysis)
@@ -528,18 +538,20 @@ async def _add_income_need(db: AsyncSession, loan_file_id) -> NeedsItem:
         needs_type="pay_stub",
         origin=NeedsItemOrigin.TEMPLATE,
         priority=NeedsItemPriority.STANDARD,
-        status=NeedsItemStatus.OUTSTANDING,
+        status=NeedsItemStatus.PENDING,
     )
     db.add(need)
     await db.commit()
     return need
 
 
-async def test_pay_stub_satisfies_outstanding_income_need(
-    monkeypatch: pytest.MonkeyPatch, db_session: AsyncSession
+async def test_pay_stub_enqueues_per_file_needs_update(
+    monkeypatch: pytest.MonkeyPatch, db_session: AsyncSession, _mock_needs_enqueue
 ) -> None:
+    """A processed document ENQUEUES the per-file-serialized needs update (LP-68) —
+    the satisfaction-matching itself runs in that task (tested in needs_engine)."""
     doc = await _setup_document(db_session)
-    need = await _add_income_need(db_session, doc.loan_file_id)
+    await _add_income_need(db_session, doc.loan_file_id)
     _patch_storage(monkeypatch)
     _patch_classify(
         monkeypatch, ClassificationResult(document_type="pay_stub", confidence=0.95, reasoning="x")
@@ -547,11 +559,11 @@ async def test_pay_stub_satisfies_outstanding_income_need(
     _patch_extract(monkeypatch, _paystub_success())
 
     await pipeline._process_document(db_session, str(doc.id))
-    await db_session.refresh(need)
+    await db_session.refresh(doc)
 
-    assert need.status == NeedsItemStatus.RECEIVED
-    assert need.satisfied_by_document_id == doc.id
-    assert need.satisfied_at is not None
+    assert doc.status == DocumentStatus.COMPLETED
+    # The needs update was enqueued for THIS file + document (serialized per file).
+    _mock_needs_enqueue.assert_called_once_with(str(doc.loan_file_id), str(doc.id))
 
 
 async def test_no_matching_need_is_a_noop(
@@ -599,10 +611,10 @@ async def test_retry_safe_versions_and_no_double_satisfy(
     assert sum(1 for e in all_versions if e.is_current) == 1
     assert {e.version for e in all_versions} == {1, 2}
 
-    # The need was satisfied once and not re-satisfied by the second run.
+    # The need is untouched by the pipeline itself (satisfaction is the enqueued
+    # per-file needs task's job; re-run safety is the engine's, tested separately).
     await db_session.refresh(need)
-    assert need.status == NeedsItemStatus.RECEIVED
-    assert need.satisfied_by_document_id == doc.id
+    assert need.status == NeedsItemStatus.PENDING
 
 
 # --------------------------------------------------------------------------- #

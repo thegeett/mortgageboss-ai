@@ -5138,3 +5138,58 @@ avoids a premature schema.
 needs-list items); LP-69 does the holistic AI needs reasoning (consuming findings + these suggestions among
 everything else); LP-70 surfaces needs in the UI; Phase 3 acts on findings (cross-source) with the human in
 the loop. The mapping refines as the needs work + Priya input land.
+
+## ADR-177: Needs-list engine — five states, deterministic type-level matching, per-file serialization, a thin floor (AI is LP-69)
+
+- **Date:** 2026-06-19
+- **Status:** Accepted
+
+**Context:** The needs list — the file's living checklist of what it still requires — is the highest-value
+differentiator and must be **solid** before the AI layers on. It is stateful (a need moves through a
+lifecycle) and concurrent (real processing dumps batches of documents for a file). LP-68 builds the
+DETERMINISTIC engine (states, satisfaction-matching, serialization, a thin floor); LP-69 adds the
+case-by-case AI reasoning; LP-70 builds the UI.
+
+**Decision:**
+
+- **Five-state arrival lifecycle** (on the existing LP-19 `NeedsItem`): `PENDING` → `RECEIVED` → `VERIFIED`
+  | `REJECTED`; any → `WAIVED`. Driven by **document arrivals + processor actions, not AI**. (`OUTSTANDING`
+  was renamed to `PENDING`; `VERIFIED`/`REJECTED` added. The LP-19 `REQUESTED` borrower-outreach state is
+  kept as an orthogonal pre-existing value — a need awaiting arrival may be `PENDING` or `REQUESTED`, and
+  both are satisfiable.) Transitions are guarded by a valid-transition map (an invalid transition raises).
+  `"Verified" = the document passed (extraction succeeded)`; Phase 3 adds cross-source rules later.
+- **Deterministic, type-level satisfaction-matching.** When a document reaches a terminal status, the engine
+  advances the oldest open need whose `needs_type` equals the document's `document_type`: Received → Verified
+  (the document `COMPLETED`) | Rejected (it `NEEDS_REVIEW`/`FAILED`). No false matches; no AI.
+  Quantity/recency-granular matching ("2 pay stubs", "within 30 days") is a documented future refinement.
+- **Per-file serialization (the race fix).** The needs update runs as a **separate Celery task**
+  (`needs.update_for_document`, enqueued after a document is terminal) that acquires a **per-loan-file Redis
+  lock** before applying the matching. Concurrent arrivals for the SAME file apply one at a time (no lost
+  update / double-satisfaction on the shared needs state); DIFFERENT files (different lock keys) update in
+  PARALLEL. The lock auto-expires (`timeout`) so a crashed worker never deadlocks a file. A naive inline
+  "doc arrives → update needs" within each per-document task would race under batch arrivals — hence the move
+  out of the pipeline into a serialized task.
+- **A thin deterministic floor.** A small set of **near-certain** needs seeded from the **stated MISMO data**
+  (employment income → pay stubs + W-2; a purchase → purchase agreement; stated assets → a bank statement),
+  wired into the MISMO import. Floor needs are `origin=FLOOR`, `disposition=CONFIRMED` (near-certain), and
+  the seeder is idempotent. Thin by design — the bulk of the intelligence is LP-69's AI reasoning, which
+  augments this baseline.
+- **Source-agnostic + disposition groundwork.** A need carries its `origin` (the source-agnostic provenance:
+  `floor` / `suggestion` / `ai_reasoning` / …) and a `disposition` (the human-confirmation lifecycle:
+  proposed / confirmed / waived / dismissed — AI proposes in LP-69, the processor confirms in LP-70), plus
+  `reasoning` + `source_finding_id` for explainability. `ingest_suggested_need` turns an LP-67 `SuggestedNeed`
+  into a need (carrying the reasoning + the source-finding link); LP-69's proposals ingest the same way.
+
+**Rationale:** the needs list must be correct under concurrency before the AI layers on, so the deterministic
+engine is built + tested on its own (states, matching, serialization, floor). Per-file serialization is a
+hard requirement — without it, batch document arrivals corrupt the shared needs state. The thin floor
+guarantees the obvious needs deterministically (the reliable baseline AI augments). Source-agnostic +
+disposition groundwork lets LP-67/69/70 plug in cleanly. Separating the deterministic engine (LP-68) from the
+AI intelligence (LP-69) keeps each well-tested.
+
+**Consequences:** LP-69 adds the holistic AI-reasoned needs (the bulk of the intelligence), ingesting via the
+same source-agnostic path; LP-70 builds the UI (the dashboard + the confirm/waive flow, which the disposition
+groundwork supports); Phase 3 adds cross-source rules to "Verified"; quantity/recency-granular matching is a
+future refinement; the floor + the finding→need mapping refine with Priya. The needs migration (`93a861456e2f`)
+renames `outstanding`→`pending`, adds `verified`/`rejected`, the new origins, and the disposition/reasoning/
+source columns.
