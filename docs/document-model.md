@@ -355,7 +355,29 @@ lifecycle, type-level satisfaction-matching, **per-file serialization** (the rac
 fix), a thin deterministic floor from the stated MISMO data, and source-agnostic
 ingestion (floor + LP-67 suggestions; LP-69 proposals plug in the same way).
 
-**Next:** LP-69 (holistic AI needs reasoning, ingesting via the same path) → LP-70
-(the needs-list UI + confirm/waive flow) → LP-72 (the full tier-aware detail view +
-package groundwork + the full-text search UI). The taxonomy, field sets, and
-finding/need types refine with Priya.
+**LP-69 (holistic AI needs reasoning — the differentiator):** the needs list's
+intelligence — an AI call (Sonnet) reasons over the **whole file** (stated MISMO
+data + documents present + findings + LP-67 suggestions) and **proposes** needs,
+each with **file-specific reasoning**. Two guardrails make it trustworthy:
+(1) **explainability** — every proposal carries reasoning grounded in *this* file's
+data (a proposal with no reasoning is dropped); (2) **confirmation** — proposals
+ingest as `disposition=PROPOSED`, `origin=ai_reasoning` (the AI proposes, never
+disposes; the processor confirms/adjusts/dismisses in LP-70). It **reconciles** —
+the assembled context lists what's already covered (the floor, LP-67's suggestions,
+documents present, existing needs incl. dismissed), and reasoning + a deterministic
+filter ensure it never duplicates them (LP-69 is the *culminating* holistic
+reasoner over LP-68's floor + LP-67's findings-implications). Two triggers, both
+through LP-68's per-file serialization: at **MISMO creation** (the "upload → a
+tailored checklist appears" payoff — absorbs the deferred smart-needs-from-MISMO)
+and **re-proposed** as documents/findings arrive. Corrections (confirm/adjust/
+dismiss) are captured on the need's `disposition`; the simple V1 use folds them into
+"already covered" so a dismissed proposal isn't re-proposed (a full learning loop is
+future). Honestly scoped: **reasoned, explainable, improvable — not perfect out of
+the gate**; the reasoning quality is the **highest-value Priya refinement** and the
+prompt (`ai/prompts/needs/needs_reasoning.txt`) is a sensible starter. A real AI
+call — cost/latency/eval apply; the assembled PII context is **never logged**.
+
+**Next:** LP-70 (the needs-list UI + confirm/adjust/dismiss/waive flow + the
+reasoning display) → LP-72 (the full tier-aware detail view + package groundwork +
+the full-text search UI). The taxonomy, field sets, and finding/need types — and
+the reasoning quality — refine with Priya.

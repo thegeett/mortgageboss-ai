@@ -24,7 +24,7 @@ future refinement; matching is type-level now.
 
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 from uuid import UUID
 
 import structlog
@@ -123,6 +123,44 @@ async def transition_need(
 async def waive_need(db: AsyncSession, *, need: NeedsItem, reason: str | None = None) -> NeedsItem:
     """Processor action: waive a need (any state → WAIVED), with a reason."""
     return await transition_need(db, need=need, to_state=NeedsItemStatus.WAIVED, reason=reason)
+
+
+async def record_need_correction(
+    db: AsyncSession,
+    *,
+    need: NeedsItem,
+    action: Literal["confirm", "dismiss", "adjust"],
+    note: str | None = None,
+) -> NeedsItem:
+    """Capture a processor's disposition of an (AI-)proposed need — the LP-69 signal.
+
+    The disposition is recorded **on the need** (the captured signal): ``confirm`` /
+    ``adjust`` → ``CONFIRMED`` (a real need); ``dismiss`` → ``DISMISSED`` + the need is
+    waived (not a real need). The simple V1 *use* of this signal: the AI reasoning
+    folds existing needs (incl. dismissed) into "already covered", so a dismissed
+    proposal is not re-proposed. A richer corrections store + a full learning loop is
+    a documented future evolution. The processor's confirm/adjust/dismiss UI is LP-70;
+    this is the capture it calls. Uses ``flush``.
+    """
+    if action == "dismiss":
+        # Dismissed = not a real need for this file → take it out of the open set,
+        # then mark the disposition DISMISSED (more specific than the WAIVED the
+        # transition sets).
+        if need.status is not NeedsItemStatus.WAIVED:
+            await transition_need(db, need=need, to_state=NeedsItemStatus.WAIVED, reason=note)
+        need.disposition = NeedsItemDisposition.DISMISSED
+    else:  # confirm / adjust — the processor kept it
+        need.disposition = NeedsItemDisposition.CONFIRMED
+    if note is not None:
+        need.notes = note
+    await db.flush()
+    logger.info(
+        "needs_item_correction",
+        need_id=str(need.id),
+        action=action,  # a category, not PII
+        origin=need.origin,
+    )
+    return need
 
 
 # --------------------------------------------------------------------------- #

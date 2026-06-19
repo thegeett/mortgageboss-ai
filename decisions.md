@@ -5193,3 +5193,60 @@ groundwork supports); Phase 3 adds cross-source rules to "Verified"; quantity/re
 future refinement; the floor + the finding→need mapping refine with Priya. The needs migration (`93a861456e2f`)
 renames `outstanding`→`pending`, adds `verified`/`rejected`, the new origins, and the disposition/reasoning/
 source columns.
+
+## ADR-178: AI needs reasoning — holistic propose-with-reasoning + confirm + improve (the differentiator)
+
+- **Date:** 2026-06-19
+- **Status:** Accepted
+
+**Context:** The needs list's value is in proposing the RIGHT documents for a *specific* file — which is
+inherently case-by-case and unenumerable (a static rule table can't cover "self-employed across two
+businesses → two years of returns + a P&L; recently divorced with a support obligation → payment history;
+gift from a relative → gift letter + sourcing"). LP-68 built the deterministic engine (states, matching, a
+thin floor); LP-69 adds the intelligence — the highest-value, most distinctive capability in the product, and
+the most Priya-dependent (the reasoning quality is her domain knowledge).
+
+**Decision:** The needs list's intelligence is **AI reasoning over the WHOLE file** (the stated MISMO data +
+the documents present + the findings + LP-67's suggestions) → **proposed** needs, each with **file-specific
+reasoning** — holistic and file-scoped (contrast LP-67's findings-scoped *one finding → its implied need*).
+
+- **The two guardrails (what makes AI-driven needs trustworthy).** (1) **Explainability** — every proposed
+  need carries reasoning grounded in *this* file's data (not boilerplate); the parser **rejects** a proposal
+  with no reasoning. (2) **Confirmation** — proposals are ingested as `disposition=PROPOSED` (NOT
+  authoritative), `origin=ai_reasoning`, with the reasoning; the processor confirms/adjusts/dismisses (LP-70).
+  The AI proposes (smart) but **never disposes** (the human controls).
+- **Reconciliation — no duplication.** LP-69 is the *culminating* reasoner: it is told (and deterministically
+  filters by) what's already covered — the floor (LP-68), LP-67's suggestions, the documents present, and the
+  existing needs (incl. dismissed ones) — and proposes only what's NOT already there. It does not re-propose
+  the floor's needs.
+- **Two triggers, both through LP-68's per-file serialization.** (1) At **MISMO file creation**, reason over
+  the stated data → the initial proposed needs (the "upload a MISMO → a tailored checklist appears" payoff —
+  this **absorbs the deferred smart-needs-from-MISMO** from Phase 1.5). (2) **Re-proposed** as documents /
+  findings arrive (the picture changed). Both run as needs-updates under the per-file Redis lock — no race.
+- **Improves from corrections (V1: capture + simple use).** A processor's confirm/adjust/dismiss is captured
+  as the **disposition on the need** (`confirm`/`adjust` → CONFIRMED; `dismiss` → DISMISSED + waived). The
+  simple V1 *use*: the reasoning folds existing needs (incl. dismissed) into "already covered", so a dismissed
+  proposal is **not re-proposed**. A richer corrections store + a full learning loop is a documented future
+  evolution — V1 is the capture-mechanism + simple use, not sophisticated learning.
+- **A sensible starter, refined with Priya (EMPHATIC).** The prompt encodes "reason like a loan processor"
+  on a **sensible starter** understanding. The reasoning QUALITY is **the highest-value Priya input** ("walk
+  me through a real file: what do you chase, and why?") and is sharpened by the correction signal. A real AI
+  reasoning call (Sonnet, substantial context — cost + latency + eval apply). The assembled context carries
+  PII and is **never logged** (counts only).
+
+**Rationale:** required documents are case-by-case and unenumerable, so reasoning over the file (like a
+processor) is the right mechanism, not a static table; the two guardrails make AI-driven needs trustworthy
+(explainable + human-confirmed) — the AI is smart but not unilateral; reconciliation keeps the floor
+(deterministic baseline) + LP-67 (findings-implications) + LP-69 (holistic) composing cleanly without
+duplication; running at MISMO creation delivers the headline payoff and absorbs the deferred
+smart-needs-from-MISMO.
+
+**Accuracy — honestly scoped.** V1 proposes **reasoned, explainable, improvable** needs the processor
+confirms — **NOT perfect out of the gate**. The quality improves via the correction signal + refinement with
+Priya. Do not read the (mock-based) tests as proposal-quality validation — they verify the *mechanism* + the
+*guardrails*; real-file quality is an ongoing, Priya-dependent effort.
+
+**Consequences:** LP-70 builds the UI (the dashboard + the confirm/adjust/dismiss/waive flow + the reasoning
+display — the disposition + reasoning groundwork supports it); the reasoning quality refines with Priya + the
+correction loop; real AI cost/latency/eval; the re-reasoning on every document arrival is a cost to watch
+(debouncing is a future optimization); Phase 3 acts on findings (cross-source) with the human in the loop.
