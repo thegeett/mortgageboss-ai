@@ -28,6 +28,11 @@ from app.models.document import (
     Tier,
     UploadSource,
 )
+from app.models.document_finding import (
+    DocumentFinding,
+    DocumentFindingStatus,
+    DocumentFindingType,
+)
 from app.models.encrypted_types import EncryptedString
 from app.models.enums import RecordStatus, str_enum
 from app.models.extraction import Extraction, ExtractionStatus
@@ -79,6 +84,9 @@ __all__ = [
     "Company",
     "Document",
     "DocumentCategory",
+    "DocumentFinding",
+    "DocumentFindingStatus",
+    "DocumentFindingType",
     "DocumentStatus",
     "EncryptedString",
     "Extraction",

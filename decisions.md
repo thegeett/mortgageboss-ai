@@ -5029,3 +5029,61 @@ no rule consumes.
 tier-aware detail view + package groundwork; the summary is refine-able and low-stakes; Tier 2 docs appear in
 the Documents tab and (later) the lender package. The summary is best confirmed against real documents over
 time, but the stakes are low.
+
+## ADR-175: Tier 3 generic analyzer + the document-findings infrastructure (uniform across tiers)
+
+- **Date:** 2026-06-19
+- **Status:** Accepted
+
+**Context:** Two related needs. (1) **Tier 3** — the long-tail: documents no predefined schema anticipates (a
+court order, a trust, a personal-loan agreement, a handwritten letter). Without handling they are opaque
+files. (2) **Findings** — multiple earlier tickets deferred to "when the findings infrastructure exists":
+LP-63's divorce-decree obligations are captured but not yet surfaced as findings, and the implications engine
+(LP-67) + Phase 3's cross-source verification both need a structured place to read document observations
+from. This ticket builds both, and they meet: the Tier 3 analyzer is the first big *producer* of findings.
+
+**Decision:**
+
+- **One generic analyzer for all Tier 3 docs** (`app/ai/generic_analyzer.py`, filling the LP-58 stub). No
+  per-type logic: a single flexible analysis produces **generic slots** that work for any document —
+  `document_type_guess`, `key_parties`, `key_dates`, `key_amounts`, `key_findings`, `summary`, `full_text`.
+  **Sonnet** (it is *understanding*, not a cheap one-liner) with a generous budget. Like the other AI
+  helpers it never raises (`None` on failure); a failed analysis still finalizes the document. The analysis +
+  the **full text** are stored on the document, and the full text gets a **GIN full-text index** (Tier 3 docs
+  can't be found by type, so search matters most for them — the data + index now; the search UI is future).
+- **A `DocumentFinding` model — single-document observations, uniform across tiers.** A finding is something a
+  *single* document asserts that may affect the loan (an obligation, a property interest, an income item, a
+  discrepancy candidate). Shape: `finding_type` + `description` + common typed fields (`amount`, `frequency`)
+  + a flexible `details` JSON catch-all (findings vary — an obligation has amount+frequency, a property
+  finding has an address) + `status`, source-linked to its `document` and **tenant-scoped transitively**
+  (`document -> loan_file -> company`, no own `company_id`, ADR-052). **One shared recording mechanism**
+  (`create_document_finding`) is used by *both* the Tier 3 analyzer's `key_findings` **and** the Tier 1
+  divorce-decree extractor's obligations, so LP-67 + Phase 3 consume findings identically regardless of which
+  tier surfaced them.
+- **Distinct from the Phase 3 verification `Finding`.** The existing `Finding` (table `findings`) is a Phase 3
+  *verification result* (a rule's red/yellow/green flag against the whole loan file, with a resolution trail).
+  A `DocumentFinding` (table `document_findings`) is an *input observation* from one document; Phase 3 reads
+  these and may *produce* a verification `Finding`. Two genuinely different concepts → two models / two
+  tables, **not** an overload of `Finding` (which would conflate input observations with verification
+  results). The ticket said "Finding model"; the pre-existing `Finding` made `DocumentFinding` the honest name.
+- **The LP-63 loop is closed.** The divorce decree's captured support obligations are wired into findings via
+  `record_findings_from_extraction` (in `_extract_branch`, on a successful extraction) → the same
+  `create_document_finding`. A divorce decree's `$1,200/mo` obligation becomes the same kind of finding a
+  Tier 3 court order's judgment does.
+- **Visible + recorded.** Findings are persisted (the Phase 3 / LP-67 feedstock) and surfaced via a
+  tenant-scoped read endpoint (`GET /loan-files/{id}/findings`, `ScopedLoanFile` → 404 cross-company). The
+  full tier-aware *display* (Tier 1 fields / Tier 2 summary / Tier 3 analysis + findings) is LP-72.
+- **Moderate accuracy stakes.** Findings are **surfaced for a human to assess** (human-in-the-loop) — more
+  than a Tier 2 summary, less than Tier 1 extraction. They are *not* silently fed to calculations; Phase 3
+  does the cross-check.
+
+**Rationale:** a single flexible analyzer makes the long-tail legible without ~80 more schemas; findings need
+one structured home so the implications engine + Phase 3 read them uniformly regardless of source tier;
+recording findings *structurally* (not just as text) is what lets Phase 3 cross-check them; the divorce-decree
+wiring closes the "capture now, wire later" deferral with no re-extraction.
+
+**Consequences:** the **three-tier handling is complete** (Tier 1 extract / Tier 2 summarize / Tier 3
+analyze). LP-67 reads `DocumentFinding`s to suggest needs; Phase 3 cross-checks them against the stated data
+and may produce verification `Finding`s; LP-72 builds the full tier-aware detail + the findings display; the
+full-text **search UI** is future (the index exists now). Accuracy is refine-able with real/varied documents
+(human-in-the-loop), and the finding-type set refines with Priya.

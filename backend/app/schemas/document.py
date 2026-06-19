@@ -67,3 +67,5 @@ class DocumentDetailResponse(DocumentResponse):
     """A document plus its current extraction (``None`` until extraction runs)."""
 
     current_extraction: ExtractionPublic | None
+    # The Tier 3 generic-analyzer output (LP-66), if any — for the LP-72 detail view.
+    generic_analysis: dict[str, Any] | None = None

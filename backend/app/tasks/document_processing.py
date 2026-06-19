@@ -11,8 +11,9 @@ Classification + the catalog **route** handling (LP-58, tier-aware): the
 classified type's tier (from :mod:`app.documents.catalog`) selects the path —
 **Tier 1** runs the registered extractor (a Tier-1 type whose extractor isn't
 built yet is classified-only); **Tier 2** is the shared recognize/summarize path
-(LP-65 — one lightweight summary for any Tier-2 type); **Tier 3** is the
-generic-analyzer path (an LP-66 stub). The
+(LP-65 — one lightweight summary for any Tier-2 type); **Tier 3** is the shared
+generic-analyzer path (LP-66 — one flexible analysis + recorded findings + indexed
+text for any unrecognized document). The
 ``Document.status`` field is the source of truth the UI polls (LP-43), so the
 status is transitioned and committed at each stage.
 
@@ -44,6 +45,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.ai.classification import classify_document
 from app.ai.cost import estimate_cost
 from app.ai.extraction import EXTRACTORS, Extractor
+from app.ai.generic_analyzer import analyze_document
 from app.ai.summarization import summarize_document
 from app.core.config import settings
 from app.documents.catalog import get_category, get_tier
@@ -54,6 +56,11 @@ from app.models.extraction import ExtractionStatus
 from app.models.helpers import only_active
 from app.models.needs_item import NeedsItem, NeedsItemStatus
 from app.services.activity_log import log_activity
+from app.services.document_findings import (
+    coerce_finding_type,
+    create_document_finding,
+    record_findings_from_extraction,
+)
 from app.services.extractions import create_extraction_version
 from app.storage import get_storage_backend
 from app.tasks.base import run_async, task_session
@@ -198,7 +205,8 @@ async def _route_by_tier(db: AsyncSession, document: Document, content: bytes) -
         status), NOT a crash; its extractor arrives in a later ticket.
       * **Tier 2** → the shared recognize/summarize path (LP-65) — one mechanism
         for every Tier-2 type: a lightweight summary, then a terminal status.
-      * **Tier 3** → the generic-analyzer path — a clean stub for LP-66.
+      * **Tier 3** → the shared generic-analyzer path (LP-66) — one flexible
+        analysis for any unrecognized document (+ recorded findings, indexed text).
 
     The low-confidence / ``unknown`` gate already routed those to NEEDS_REVIEW
     before this point, so here the document is a confidently-classified type.
@@ -215,7 +223,7 @@ async def _route_by_tier(db: AsyncSession, document: Document, content: bytes) -
     elif document.tier == Tier.TIER_2:
         await _tier2_summarize(db, document, content)
     else:  # Tier.TIER_3 (the catalog default for uncataloged long-tail types)
-        await _tier3_analyze_stub(db, document)
+        await _tier3_analyze(db, document, content)
 
 
 async def _complete_classified_only(db: AsyncSession, document: Document, *, reason: str) -> None:
@@ -261,22 +269,47 @@ async def _tier2_summarize(db: AsyncSession, document: Document, content: bytes)
     )
 
 
-async def _tier3_analyze_stub(db: AsyncSession, document: Document) -> None:
-    """Tier 3 (long-tail) handling — a CLEAN STUB for LP-66 (terminal status).
+async def _tier3_analyze(db: AsyncSession, document: Document, content: bytes) -> None:
+    """Tier 3 (long-tail) handling — the ONE shared generic-analyzer path (LP-66).
 
-    A Tier-3 document is a confidently-classified type the catalog doesn't know
-    (the long-tail). LP-66 will run a generic analyzer to produce a structured
-    summary *here*, without restructuring the routing. For now we record it as
-    handled at its tier and reach a terminal status. Metadata-only log (no PII).
+    No per-type logic: any unrecognized document is run through the flexible generic
+    analyzer (:func:`app.ai.generic_analyzer.analyze_document`) → a structured-but-
+    flexible analysis (type guess, parties, dates, amounts, findings, summary, full
+    text). The analysis + the full text (indexed for search) are stored on the
+    document, each ``key_finding`` is recorded as a :class:`DocumentFinding` via the
+    SAME ``create_document_finding`` the Tier 1 divorce decree uses (uniform findings
+    across tiers), and the document reaches a terminal status.
+
+    **Graceful** (resilience): ``analyze_document`` never raises and returns ``None``
+    on failure; a failed analysis still finalizes the document (analysis null, no
+    findings) — never stuck, never a crash. Metadata-only log (no extracted values).
     """
+    analysis = await analyze_document(content, document.mime_type)
+    findings_count = 0
+    if analysis is not None:
+        # Store the structured analysis (the full text lives in its own column).
+        document.generic_analysis = analysis.model_dump(mode="json", exclude={"full_text"})
+        document.full_text = analysis.full_text
+        for f in analysis.key_findings:
+            await create_document_finding(
+                db,
+                document=document,
+                finding_type=coerce_finding_type(f.finding_type),
+                description=f.description or "(no description)",
+                amount=f.amount,
+                frequency=f.frequency,
+                details=f.details,
+            )
+            findings_count += 1
+
     document.status = DocumentStatus.COMPLETED
     await db.commit()
     logger.info(
-        "document_tier3_long_tail",
+        "document_tier3_analyzed",
         document_id=str(document.id),
         document_type=document.document_type,
-        category=document.category,
-        analysis="pending_lp66",
+        has_analysis=analysis is not None,
+        findings_count=findings_count,
     )
 
 
@@ -324,6 +357,10 @@ async def _extract_branch(
 
     document.status = DocumentStatus.COMPLETED
     await _satisfy_needs_for_document(db, document)
+    # Record any findings the extraction surfaced (LP-66) — e.g. a divorce decree's
+    # support obligations → findings, via the SAME mechanism the Tier 3 analyzer
+    # uses (closing the LP-63 deferral; uniform findings across tiers).
+    findings_count = await record_findings_from_extraction(db, document, result.data)
     await db.commit()
     logger.info(
         "document_completed",
@@ -331,6 +368,7 @@ async def _extract_branch(
         extraction_status=result.status,
         tokens_used=tokens_used,
         cost_estimate=cost_estimate,
+        findings_count=findings_count,
     )
 
 

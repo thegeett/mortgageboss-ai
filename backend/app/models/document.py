@@ -27,10 +27,10 @@ company-scoped **transitively** through the loan file (ADR-052).
 """
 
 from enum import StrEnum
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
-from sqlalchemy import Float, ForeignKey, Integer, String, Text
+from sqlalchemy import JSON, Float, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, SoftDeleteMixin, TimestampMixin, UUIDMixin
@@ -157,6 +157,13 @@ class Document(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     # processor reference. NOT structured data (that is the Tier 1 extraction). Null
     # for Tier 1 docs and when summarization fails (forgiving — low stakes).
     summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # The Tier 3 generic-analyzer output (LP-66) — a structured-but-flexible JSON
+    # blob (type guess, parties, dates, amounts, findings, summary) for an
+    # *unrecognized* document. Null for Tier 1/2 and on analyzer failure.
+    generic_analysis: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    # The document's full text (LP-66), indexed for search — set for Tier 3 docs
+    # (which can't be found by type). A GIN full-text index lives in the migration.
+    full_text: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # --- Processing lifecycle (ADR-054) ------------------------------------
     status: Mapped[DocumentStatus] = mapped_column(

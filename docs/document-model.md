@@ -140,8 +140,8 @@ sent to review — it routes to Tier 3.)
   → `COMPLETED`** (no crash), exactly as Phase 1 handled a type with no registered
   extractor. (Tier 1 is now complete — LP-60..64 — so this only applies to a future
   type cataloged before its extractor.)
-- **Tier 3 is still a clean stub** that records the document at its tier and reaches
-  `COMPLETED`. LP-66 fills the real analyzer **in place**; the routing is complete.
+- All three tier paths are now **real** (Tier 1 extract / Tier 2 summarize / Tier 3
+  analyze) — the three-tier handling is complete.
 
 ## Tier 2 — the shared summary path (LP-65)
 
@@ -170,6 +170,47 @@ Key properties:
   document — it appears in the Documents tab under its category with its summary
   (a subtle list line + a "Summary" block in the drawer). The full tier-aware
   detail view (Tier 1 fields / Tier 2 summary / Tier 3 findings) is **LP-72**.
+
+## Tier 3 — the generic analyzer (LP-66)
+
+Every Tier 3 (long-tail / unrecognized) document goes through **one shared path**
+(`_tier3_analyze`) — **no per-type logic**. A document no predefined schema
+anticipates (a court order, a trust, an unusual asset statement, a personal-loan
+agreement, a handwritten letter) is made *legible* by a single flexible analysis
+(`app/ai/generic_analyzer.py`, **Sonnet**, generous budget) into **generic slots**
+that work for any document:
+
+- `document_type_guess`, `key_parties` (name + role), `key_dates`, `key_amounts`,
+  `key_findings` (things that may affect the loan), `summary`, and `full_text`.
+- The analysis + the `full_text` are stored on the document; the full text gets a
+  **GIN full-text index** (Tier 3 docs can't be found by type, so search matters
+  most for them — the data + index now; the search UI is future).
+- **Graceful** (like the other AI helpers): `analyze_document` returns `None` on
+  failure; the document still finalizes (analysis null, no findings).
+- **Moderate-stakes** — the analysis surfaces things for a human to assess
+  (human-in-the-loop), not calculation-grade extraction.
+
+## Findings (LP-66) — the LP-67 + Phase 3 feedstock
+
+A **`DocumentFinding`** is a single-document **observation** that may affect the
+loan (an obligation, a property interest, an income item, a discrepancy candidate).
+It is recorded **as data** (not just text) and is **uniform across tiers**: the
+Tier 3 analyzer's `key_findings` AND the Tier 1 **divorce-decree** obligations
+(LP-63) are recorded via the **same** mechanism (`create_document_finding`), so the
+implications engine (LP-67) and Phase 3's cross-source verification consume them
+identically regardless of which tier surfaced them. LP-63's "capture now, wire
+findings later" deferral is **closed** here.
+
+- **Shape:** `finding_type` + `description` + common typed fields (`amount`,
+  `frequency`) + a flexible `details` JSON catch-all (findings vary) + `status`.
+- **Tenant-scoped** transitively via `document → loan_file → company` (no own
+  `company_id`); surfaced via `GET /loan-files/{id}/findings` (404 cross-company).
+- **Distinct from the Phase 3 verification `Finding`** (a rule's red/yellow/green
+  result with a resolution trail). A `DocumentFinding` is an *input observation*;
+  Phase 3 reads these and may *produce* a verification `Finding`. Two models, two
+  tables (`document_findings` vs `findings`).
+- This ticket **records** findings (single-document); Phase 3 does the
+  **cross-source** comparison. The full display is **LP-72**.
 
 ## Tier 1 extractors
 
@@ -260,6 +301,12 @@ general LOE — registered and routed.
 **LP-65 (Tier 2 — the shared summary path):** one lightweight Haiku summary for
 every recognized type (no per-type logic); the gist is stored + minimally visible.
 
-**Next:** LP-66 (Tier-3 generic analyzer + findings) → LP-72 (the full tier-aware
-detail view + package groundwork). The taxonomy, indicators, and typed-core field
-sets refine with Priya over time.
+**LP-66 (Tier 3 — the generic analyzer + findings):** one flexible Sonnet analysis
+for any unrecognized document (+ full-text index), the `DocumentFinding`
+infrastructure (uniform across tiers), and the divorce-decree findings wiring
+(LP-63 loop closed). **The three-tier handling is complete.**
+
+**Next:** LP-67 (the implications engine — findings → suggested needs) and LP-72
+(the full tier-aware detail view + package groundwork + the full-text search UI).
+The taxonomy, indicators, typed-core field sets, and finding types refine with
+Priya over time.

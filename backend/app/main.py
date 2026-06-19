@@ -10,6 +10,7 @@ from fastapi.responses import JSONResponse
 from app.api.activity import router as activity_router
 from app.api.auth import router as auth_router
 from app.api.borrowers import router as borrowers_router
+from app.api.document_findings import router as findings_router
 from app.api.documents import flat_router as documents_flat_router
 from app.api.documents import nested_router as documents_nested_router
 from app.api.lenders import router as lenders_router
@@ -103,6 +104,7 @@ app.include_router(needs_router, prefix=API_V1_PREFIX)
 app.include_router(activity_router, prefix=API_V1_PREFIX)
 app.include_router(documents_nested_router, prefix=API_V1_PREFIX)
 app.include_router(documents_flat_router, prefix=API_V1_PREFIX)
+app.include_router(findings_router, prefix=API_V1_PREFIX)
 app.include_router(stated_financials_router, prefix=API_V1_PREFIX)
 
 # Dev-only endpoints (LP-40) — mounted ONLY outside production, so the routes are

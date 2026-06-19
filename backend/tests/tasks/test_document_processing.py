@@ -25,6 +25,7 @@ from app.ai.extraction.w2 import W2Extraction, W2ExtractionResult
 from app.core.security import hash_password
 from app.models import Company, User, UserRole
 from app.models.document import Document, DocumentCategory, DocumentStatus, Tier
+from app.models.document_finding import DocumentFindingType
 from app.models.extraction import Extraction, ExtractionStatus
 from app.models.needs_item import (
     NeedsItem,
@@ -106,6 +107,19 @@ def _patch_summarize(monkeypatch: pytest.MonkeyPatch, summary: str | None) -> As
     mock = AsyncMock(return_value=summary)
     monkeypatch.setattr(pipeline, "summarize_document", mock)
     return mock
+
+
+def _patch_analyze(monkeypatch: pytest.MonkeyPatch, analysis) -> AsyncMock:
+    """Patch the Tier 3 ``analyze_document`` call (no real AI) with a canned analysis."""
+    mock = AsyncMock(return_value=analysis)
+    monkeypatch.setattr(pipeline, "analyze_document", mock)
+    return mock
+
+
+async def _findings_for(db: AsyncSession, loan_file_id):
+    from app.services.document_findings import list_findings_for_loan_file
+
+    return await list_findings_for_loan_file(db, loan_file_id=loan_file_id)
 
 
 def _paystub_success() -> PayStubExtractionResult:
@@ -276,49 +290,145 @@ async def test_tier2_summary_failure_is_graceful(
     assert doc.summary is None  # recognized + categorized, no gist — forgiving
 
 
-async def test_tier3_routes_to_analyzer_stub(
+def _generic_analysis_with_finding():
+    from app.ai.generic_analyzer import AnalyzedFinding, GenericAnalysis
+
+    return GenericAnalysis(
+        document_type_guess="civil court judgment",
+        summary="A civil judgment against the borrower.",
+        full_text="IN THE CIRCUIT COURT ... judgment entered ...",
+        key_findings=[
+            AnalyzedFinding(
+                finding_type="obligation",
+                description="Outstanding civil judgment",
+                amount=Decimal("8200.00"),
+                details={"creditor": "Acme Bank"},
+            )
+        ],
+    )
+
+
+async def test_tier3_analyzed_findings_recorded_and_text_indexed(
     monkeypatch: pytest.MonkeyPatch, db_session: AsyncSession
 ) -> None:
-    """A confidently-classified but UNCATALOGED type → the Tier-3 analyzer stub (LP-66)."""
+    """A Tier-3 doc → the generic analyzer (LP-66): analysis + full text stored, the
+    key_findings recorded as DocumentFindings, terminal status."""
     doc = await _setup_document(db_session)
     _patch_storage(monkeypatch)
     _patch_classify(
         monkeypatch,
         ClassificationResult(document_type="boat_registration", confidence=0.9, reasoning="x"),
     )
+    analyze = _patch_analyze(monkeypatch, _generic_analysis_with_finding())
 
     await pipeline._process_document(db_session, str(doc.id))
     await db_session.refresh(doc)
 
+    assert analyze.call_count == 1
     assert doc.status == DocumentStatus.COMPLETED  # terminal
-    assert doc.document_type == "boat_registration"
-    assert doc.tier == Tier.TIER_3  # catalog default for the long-tail
-    assert doc.category == DocumentCategory.MISC
-    assert await _current_extraction(db_session, doc.id) is None  # generic analysis is a stub
+    assert doc.tier == Tier.TIER_3
+    assert doc.generic_analysis is not None  # structured analysis stored
+    assert doc.generic_analysis["document_type_guess"] == "civil court judgment"
+    assert "full_text" not in doc.generic_analysis  # full text lives in its own column
+    assert doc.full_text and "CIRCUIT COURT" in doc.full_text  # indexed for search
+    findings = await _findings_for(db_session, doc.loan_file_id)
+    assert len(findings) == 1
+    assert findings[0].finding_type is DocumentFindingType.OBLIGATION
+    assert findings[0].amount == Decimal("8200.00")
+    assert await _current_extraction(db_session, doc.id) is None  # not a Tier 1 extraction
 
 
-async def test_confident_unknown_routes_to_tier3_not_review(
-    monkeypatch: pytest.MonkeyPatch, db_session: AsyncSession
+@pytest.mark.parametrize("document_type", ["boat_registration", "unknown", "mystery_affidavit"])
+async def test_tier3_one_shared_path_for_any_unknown(
+    monkeypatch: pytest.MonkeyPatch, db_session: AsyncSession, document_type: str
 ) -> None:
-    """LP-59: a HIGH-confidence ``unknown`` → Tier 3 (generic analyzer), NOT review.
-
-    The model is confident the document is NONE of the known types — that is the
-    Tier-3 analyzer's job, not a human-review case.
-    """
+    """Different unrecognized docs all go through the SAME analyzer path (no branching)."""
     doc = await _setup_document(db_session)
     _patch_storage(monkeypatch)
     _patch_classify(
         monkeypatch,
-        ClassificationResult(document_type="unknown", confidence=0.9, reasoning="not a known type"),
+        ClassificationResult(document_type=document_type, confidence=0.9, reasoning="x"),
     )
+    analyze = _patch_analyze(monkeypatch, _generic_analysis_with_finding())
 
     await pipeline._process_document(db_session, str(doc.id))
     await db_session.refresh(doc)
 
-    assert doc.status == DocumentStatus.COMPLETED  # terminal (Tier-3 stub), not NEEDS_REVIEW
+    assert analyze.call_count == 1  # one shared mechanism, regardless of type
     assert doc.tier == Tier.TIER_3
-    assert doc.category == DocumentCategory.MISC
-    assert await _current_extraction(db_session, doc.id) is None
+    assert doc.status == DocumentStatus.COMPLETED
+
+
+async def test_tier3_analyzer_failure_is_graceful(
+    monkeypatch: pytest.MonkeyPatch, db_session: AsyncSession
+) -> None:
+    """Analyzer failure → terminal status, no analysis, no findings (never stuck/crash)."""
+    doc = await _setup_document(db_session)
+    _patch_storage(monkeypatch)
+    _patch_classify(
+        monkeypatch,
+        ClassificationResult(document_type="unknown", confidence=0.9, reasoning="not known"),
+    )
+    _patch_analyze(monkeypatch, None)  # analyzer "failed"
+
+    await pipeline._process_document(db_session, str(doc.id))
+    await db_session.refresh(doc)
+
+    assert doc.status == DocumentStatus.COMPLETED  # terminal, not stuck / crashed
+    assert doc.tier == Tier.TIER_3
+    assert doc.generic_analysis is None and doc.full_text is None
+    assert await _findings_for(db_session, doc.loan_file_id) == []
+
+
+async def test_divorce_decree_extraction_records_findings_via_pipeline(
+    monkeypatch: pytest.MonkeyPatch, db_session: AsyncSession
+) -> None:
+    """LP-63 loop closed (LP-66): a divorce-decree (Tier 1) extraction records its
+    obligations as DocumentFindings via the SAME mechanism the Tier 3 analyzer uses."""
+    from decimal import Decimal
+
+    from app.ai.extraction.divorce_decree import (
+        DivorceDecreeExtraction,
+        DivorceDecreeExtractionResult,
+        SupportObligation,
+    )
+
+    doc = await _setup_document(db_session)
+    _patch_storage(monkeypatch)
+    _patch_classify(
+        monkeypatch,
+        ClassificationResult(document_type="divorce_decree", confidence=0.95, reasoning="x"),
+    )
+    result = DivorceDecreeExtractionResult(
+        data=DivorceDecreeExtraction(
+            party_1_name=TypedField(value="Jane Doe"),
+            support_obligations=[
+                SupportObligation(
+                    obligation_type="child_support",
+                    amount=Decimal("1200.00"),
+                    frequency="monthly",
+                    payer="John Doe",
+                )
+            ],
+        ),
+        status=ExtractionStatus.SUCCEEDED,
+        confidence=0.9,
+        input_tokens=10,
+        output_tokens=5,
+    )
+    _patch_extract(monkeypatch, result, document_type="divorce_decree")
+
+    await pipeline._process_document(db_session, str(doc.id))
+    await db_session.refresh(doc)
+
+    assert doc.status == DocumentStatus.COMPLETED
+    assert doc.tier == Tier.TIER_1  # the divorce decree is Tier 1 — findings come from extraction
+    findings = await _findings_for(db_session, doc.loan_file_id)
+    assert len(findings) == 1
+    # Uniform with the Tier 3 analyzer's findings — same DocumentFinding shape.
+    assert findings[0].finding_type is DocumentFindingType.OBLIGATION
+    assert findings[0].amount == Decimal("1200.00") and findings[0].frequency == "monthly"
+    assert findings[0].details["source"] == "divorce_decree"
 
 
 # --------------------------------------------------------------------------- #
