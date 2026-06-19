@@ -26,6 +26,7 @@ from fastapi import APIRouter, File, HTTPException, Response, UploadFile, status
 
 from app.api.dependencies import CurrentUser, ScopedLoanFile
 from app.core.database import DbSession
+from app.documents.catalog import get_category, get_tier
 from app.models.activity_log import ActivityType
 from app.models.document import Document
 from app.schemas.document import (
@@ -47,7 +48,6 @@ from app.services.documents import (
 )
 from app.storage import get_storage_backend
 from app.tasks.document_processing import (
-    category_for_type,
     process_document,
     reprocess_document,
 )
@@ -234,7 +234,9 @@ async def override_document_type(
 
     new_type = body.document_type.strip()
     document.document_type = new_type
-    document.category = category_for_type(new_type)
+    # Catalog-driven (LP-58): re-derive both tier and category from the new type.
+    document.tier = get_tier(new_type)
+    document.category = get_category(new_type)
     document.classification_confidence = 1.0  # human-set type is authoritative
     document.processing_error = None
 

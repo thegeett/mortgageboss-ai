@@ -15,7 +15,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.models.document import DocumentCategory, DocumentStatus, UploadSource
+from app.models.document import DocumentCategory, DocumentStatus, Tier, UploadSource
 from app.models.extraction import ExtractionStatus
 
 
@@ -37,6 +37,8 @@ class DocumentResponse(BaseModel):
     file_size_bytes: int
     document_type: str | None
     category: DocumentCategory | None
+    # The level-of-investment tier the document was handled as (LP-58, catalog-driven).
+    tier: Tier | None
     classification_confidence: float | None
     status: DocumentStatus
     upload_source: UploadSource

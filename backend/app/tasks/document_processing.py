@@ -2,12 +2,16 @@
 
 On upload, :func:`process_document` chains, for one document, independently:
 
-    read bytes → classify (Haiku) → route extraction by type →
-    extract if pay stub (Sonnet) → persist a versioned Extraction (+ cost) →
-    satisfy a matching need → log activity → set a TERMINAL status.
+    read bytes → classify (Haiku) → look up the type's tier in the catalog →
+    route by tier → (Tier 1) extract via the registry (Sonnet) → persist a
+    versioned Extraction (+ cost) → satisfy a matching need → log activity →
+    set a TERMINAL status.
 
-Classification **routes** extraction: the type selects the extractor (Phase 1 has
-only the pay-stub branch; every other type is "classified only"). The
+Classification + the catalog **route** handling (LP-58, tier-aware): the
+classified type's tier (from :mod:`app.documents.catalog`) selects the path —
+**Tier 1** runs the registered extractor (a Tier-1 type whose extractor isn't
+built yet is classified-only); **Tier 2** is the recognized/summarize path (an
+LP-65 stub); **Tier 3** is the generic-analyzer path (an LP-66 stub). The
 ``Document.status`` field is the source of truth the UI polls (LP-43), so the
 status is transitioned and committed at each stage.
 
@@ -40,9 +44,10 @@ from app.ai.classification import classify_document
 from app.ai.cost import estimate_cost
 from app.ai.extraction import EXTRACTORS, Extractor
 from app.core.config import settings
+from app.documents.catalog import get_category, get_tier
 from app.models.activity_log import ActivityType
 from app.models.base import utcnow
-from app.models.document import Document, DocumentCategory, DocumentStatus
+from app.models.document import Document, DocumentStatus, Tier
 from app.models.extraction import ExtractionStatus
 from app.models.helpers import only_active
 from app.models.needs_item import NeedsItem, NeedsItemStatus
@@ -57,32 +62,6 @@ logger = structlog.get_logger(__name__)
 # Below this classification/extraction confidence (or an "unknown" type) the
 # document is routed to human review rather than trusted. Tune with real data.
 _CONFIDENCE_THRESHOLD = 0.5
-
-# PROVISIONAL document-type → category map — refine in Phase 2 with the full
-# taxonomy / Priya. Unknown/absent types get no category (None).
-_TYPE_TO_CATEGORY: dict[str, DocumentCategory] = {
-    "pay_stub": DocumentCategory.INCOME_EMPLOYMENT,
-    "w2": DocumentCategory.INCOME_EMPLOYMENT,
-    "tax_return_1040": DocumentCategory.INCOME_EMPLOYMENT,
-    "voe": DocumentCategory.INCOME_EMPLOYMENT,
-    "profit_and_loss": DocumentCategory.INCOME_EMPLOYMENT,
-    "award_letter": DocumentCategory.INCOME_EMPLOYMENT,
-    "bank_statement": DocumentCategory.ASSETS,
-    "gift_letter": DocumentCategory.ASSETS,
-    "credit_report": DocumentCategory.CREDIT,
-    "drivers_license": DocumentCategory.BORROWER_INFO,
-    "passport": DocumentCategory.BORROWER_INFO,
-    "mortgage_statement": DocumentCategory.PROPERTY,
-    "homeowners_insurance": DocumentCategory.PROPERTY,
-    "purchase_agreement": DocumentCategory.PROPERTY,
-}
-
-
-def category_for_type(document_type: str | None) -> DocumentCategory | None:
-    """The provisional category for a document type (or None if unmapped)."""
-    if document_type is None:
-        return None
-    return _TYPE_TO_CATEGORY.get(document_type)
 
 
 async def _load_document(db: AsyncSession, document_id: str) -> Document | None:
@@ -154,7 +133,10 @@ async def _process_document(db: AsyncSession, document_id: str) -> None:
         await db.commit()
         classification = await classify_document(content, document.mime_type)
         document.document_type = classification.document_type
-        document.category = category_for_type(classification.document_type)
+        # Catalog-driven (LP-58): the type's tier (for routing) + category (for
+        # filing) both come from the single source of truth, so they never drift.
+        document.tier = get_tier(classification.document_type)
+        document.category = get_category(classification.document_type)
         document.classification_confidence = classification.confidence
         document.status = DocumentStatus.CLASSIFIED
         await db.commit()
@@ -184,19 +166,10 @@ async def _process_document(db: AsyncSession, document_id: str) -> None:
             )
             return
 
-        # --- Route extraction by type (registry dispatch, LP-39c) ----------- #
-        extractor = EXTRACTORS.get(classification.document_type)
-        if extractor is not None:
-            await _extract_branch(db, document, content, extractor)
-        else:
-            # No extractor registered for this type — classified-only (expected V1).
-            document.status = DocumentStatus.COMPLETED
-            await db.commit()
-            logger.info(
-                "document_classified_only",
-                document_id=str(document.id),
-                document_type=classification.document_type,
-            )
+        # --- Route by tier (catalog-driven, LP-58) -------------------------- #
+        # The catalog gave the document its tier above; each tier has one
+        # handling path, and every path reaches a terminal status (resilience).
+        await _route_by_tier(db, document, content)
     except Exception as exc:
         # UNEXPECTED (storage/DB/etc.) — never crash the worker or the batch.
         logger.warning(
@@ -205,6 +178,92 @@ async def _process_document(db: AsyncSession, document_id: str) -> None:
             error_type=type(exc).__name__,
         )  # metadata only — no PII
         await _mark_failed(db, document, document_id)
+
+
+async def _route_by_tier(db: AsyncSession, document: Document, content: bytes) -> None:
+    """Dispatch a classified document to its tier's handling path (LP-58).
+
+    The tier was set from the catalog during classification. Exactly one branch
+    runs and every branch reaches a terminal status:
+
+      * **Tier 1** → the existing EXTRACTORS registry (unchanged for the 3 built
+        types). A Tier-1 type whose extractor isn't built yet (LP-60..64) has no
+        registry entry → handled gracefully as *classified-only* (a terminal
+        status), NOT a crash; its extractor arrives in a later ticket.
+      * **Tier 2** → the recognized/summarize path — a clean stub for LP-65.
+      * **Tier 3** → the generic-analyzer path — a clean stub for LP-66.
+
+    The low-confidence / ``unknown`` gate already routed those to NEEDS_REVIEW
+    before this point, so here the document is a confidently-classified type.
+    """
+    if document.tier == Tier.TIER_1:
+        extractor = EXTRACTORS.get(document.document_type or "")
+        if extractor is not None:
+            await _extract_branch(db, document, content, extractor)
+        else:
+            # A Tier-1 type whose extractor isn't registered yet (LP-60..64).
+            # Classified-only — the same terminal handling the pipeline has always
+            # used for a type with no extractor; deep extraction arrives later.
+            await _complete_classified_only(db, document, reason="tier1_extractor_pending")
+    elif document.tier == Tier.TIER_2:
+        await _tier2_summarize_stub(db, document)
+    else:  # Tier.TIER_3 (the catalog default for uncataloged long-tail types)
+        await _tier3_analyze_stub(db, document)
+
+
+async def _complete_classified_only(db: AsyncSession, document: Document, *, reason: str) -> None:
+    """Mark a correctly-classified document COMPLETED with no extraction (terminal).
+
+    Used when no extractor runs: a Tier-1 type whose extractor isn't built yet
+    (LP-60..64). The document is classified + categorized; it simply has no deep
+    extraction. Metadata-only log (no PII).
+    """
+    document.status = DocumentStatus.COMPLETED
+    await db.commit()
+    logger.info(
+        "document_classified_only",
+        document_id=str(document.id),
+        document_type=document.document_type,
+        reason=reason,
+    )
+
+
+async def _tier2_summarize_stub(db: AsyncSession, document: Document) -> None:
+    """Tier 2 (recognized) handling — a CLEAN STUB for LP-65 (terminal status).
+
+    A Tier-2 document is correctly classified + categorized but gets no deep
+    extraction; LP-65 will add a short AI summary for processor reference *here*,
+    without restructuring the routing. For now we record it as handled at its
+    tier and reach a terminal status. Metadata-only log (no PII).
+    """
+    document.status = DocumentStatus.COMPLETED
+    await db.commit()
+    logger.info(
+        "document_tier2_recognized",
+        document_id=str(document.id),
+        document_type=document.document_type,
+        category=document.category,
+        summary="pending_lp65",
+    )
+
+
+async def _tier3_analyze_stub(db: AsyncSession, document: Document) -> None:
+    """Tier 3 (long-tail) handling — a CLEAN STUB for LP-66 (terminal status).
+
+    A Tier-3 document is a confidently-classified type the catalog doesn't know
+    (the long-tail). LP-66 will run a generic analyzer to produce a structured
+    summary *here*, without restructuring the routing. For now we record it as
+    handled at its tier and reach a terminal status. Metadata-only log (no PII).
+    """
+    document.status = DocumentStatus.COMPLETED
+    await db.commit()
+    logger.info(
+        "document_tier3_long_tail",
+        document_id=str(document.id),
+        document_type=document.document_type,
+        category=document.category,
+        analysis="pending_lp66",
+    )
 
 
 async def _extract_branch(

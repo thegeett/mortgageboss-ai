@@ -24,7 +24,7 @@ from app.ai.extraction.shape import TypedField
 from app.ai.extraction.w2 import W2Extraction, W2ExtractionResult
 from app.core.security import hash_password
 from app.models import Company, User, UserRole
-from app.models.document import Document, DocumentCategory, DocumentStatus
+from app.models.document import Document, DocumentCategory, DocumentStatus, Tier
 from app.models.extraction import Extraction, ExtractionStatus
 from app.models.needs_item import (
     NeedsItem,
@@ -143,6 +143,7 @@ async def test_happy_path_pay_stub(
     assert doc.status == DocumentStatus.COMPLETED
     assert doc.document_type == "pay_stub"
     assert doc.category == DocumentCategory.INCOME_EMPLOYMENT
+    assert doc.tier == Tier.TIER_1  # catalog-driven, set during classification
     assert doc.classification_confidence == 0.95
 
     extraction = await _current_extraction(db_session, doc.id)
@@ -154,14 +155,39 @@ async def test_happy_path_pay_stub(
 
 
 # --------------------------------------------------------------------------- #
-# Classified-only (non-pay-stub) — expected V1
+# Tier-aware routing (LP-58) — Tier 1 (no extractor yet) / Tier 2 / Tier 3
 # --------------------------------------------------------------------------- #
 
 
-async def test_classified_only_unregistered_type(
+async def test_tier1_without_extractor_is_classified_only(
     monkeypatch: pytest.MonkeyPatch, db_session: AsyncSession
 ) -> None:
-    """A type with no registered extractor (e.g. credit_report in V1) → classified-only."""
+    """A Tier-1 type whose extractor isn't built yet (LP-60..64) → classified-only.
+
+    Graceful, NOT a crash: the doc is correctly classified + tiered + categorized;
+    deep extraction arrives when the extractor registers. Terminal status.
+    """
+    doc = await _setup_document(db_session)
+    _patch_storage(monkeypatch)
+    _patch_classify(
+        monkeypatch,
+        ClassificationResult(document_type="1099", confidence=0.9, reasoning="x"),
+    )
+
+    await pipeline._process_document(db_session, str(doc.id))
+    await db_session.refresh(doc)
+
+    assert doc.status == DocumentStatus.COMPLETED  # terminal
+    assert doc.document_type == "1099"
+    assert doc.tier == Tier.TIER_1
+    assert doc.category == DocumentCategory.INCOME_EMPLOYMENT
+    assert await _current_extraction(db_session, doc.id) is None  # no extractor ran
+
+
+async def test_tier2_routes_to_summarize_stub(
+    monkeypatch: pytest.MonkeyPatch, db_session: AsyncSession
+) -> None:
+    """A Tier-2 type (e.g. credit_report) → the recognize/summarize stub (LP-65)."""
     doc = await _setup_document(db_session)
     _patch_storage(monkeypatch)
     _patch_classify(
@@ -172,10 +198,32 @@ async def test_classified_only_unregistered_type(
     await pipeline._process_document(db_session, str(doc.id))
     await db_session.refresh(doc)
 
-    assert doc.status == DocumentStatus.COMPLETED
+    assert doc.status == DocumentStatus.COMPLETED  # terminal
     assert doc.document_type == "credit_report"
+    assert doc.tier == Tier.TIER_2
     assert doc.category == DocumentCategory.CREDIT
-    assert await _current_extraction(db_session, doc.id) is None  # no extraction created
+    assert await _current_extraction(db_session, doc.id) is None  # no deep extraction
+
+
+async def test_tier3_routes_to_analyzer_stub(
+    monkeypatch: pytest.MonkeyPatch, db_session: AsyncSession
+) -> None:
+    """A confidently-classified but UNCATALOGED type → the Tier-3 analyzer stub (LP-66)."""
+    doc = await _setup_document(db_session)
+    _patch_storage(monkeypatch)
+    _patch_classify(
+        monkeypatch,
+        ClassificationResult(document_type="boat_registration", confidence=0.9, reasoning="x"),
+    )
+
+    await pipeline._process_document(db_session, str(doc.id))
+    await db_session.refresh(doc)
+
+    assert doc.status == DocumentStatus.COMPLETED  # terminal
+    assert doc.document_type == "boat_registration"
+    assert doc.tier == Tier.TIER_3  # catalog default for the long-tail
+    assert doc.category == DocumentCategory.MISC
+    assert await _current_extraction(db_session, doc.id) is None  # generic analysis is a stub
 
 
 # --------------------------------------------------------------------------- #
@@ -437,6 +485,7 @@ async def test_registry_routes_each_type_to_its_extractor(
     assert mock.call_count == 1  # the registered extractor ran
     assert doc.status == DocumentStatus.COMPLETED
     assert doc.document_type == document_type
+    assert doc.tier == Tier.TIER_1  # all 3 existing types route as Tier 1 (no regression)
     extraction = await _current_extraction(db_session, doc.id)
     assert extraction is not None
     assert extraction.extraction_status == ExtractionStatus.SUCCEEDED

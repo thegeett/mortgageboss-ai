@@ -25,6 +25,7 @@ from app.models.document import (
     Document,
     DocumentCategory,
     DocumentStatus,
+    Tier,
     UploadSource,
 )
 from app.models.encrypted_types import EncryptedString
@@ -111,6 +112,7 @@ __all__ = [
     "StatedEmployer",
     "StatedIncomeItem",
     "StatedLiability",
+    "Tier",
     "TimestampMixin",
     "UUIDMixin",
     "UploadSource",

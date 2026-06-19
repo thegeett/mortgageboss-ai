@@ -4630,3 +4630,63 @@ storing any real person's data.
 smart-needs/LP-58, AI-fallback, core-field edit UI). When real files arrive, drop them into
 `tests/fixtures/mismo/` and add assertions — the synthetic builder and the full-flow/isolation tests
 are the harness they slot into. Otherwise this is testing/polish/hardening; no architectural change.
+
+## ADR-167: Three-tier document model — a catalog-driven, tier-aware pipeline that extends (not rebuilds) the extractor registry
+
+- **Date:** 2026-06-18
+- **Status:** Accepted
+
+**Context:** Phase 1 handled 3 document types (`pay_stub` / `w2` / `bank_statement`) with full structured
+extraction via the `EXTRACTORS` registry. Phase 2 scales the document set to ~80-100 types. Giving every
+type full field-level extraction is infeasible and wasteful — most types are low-value or rarely seen, and
+each extractor is real engineering (a schema, a prompt, tests). But the long-tail still has to be
+*recognized* and *handled*, not dropped. The pipeline (`process_document`) already classifies (Haiku) then
+routes; we needed a way to invest extraction effort where it pays off without rebuilding that pipeline.
+
+**Decision:** Introduce a **three-tier model** keyed on a document's type, with handling routed by tier
+*after* classification:
+
+- **Tier 1 — first-class (~18 types):** full structured extraction via the **existing** `EXTRACTORS`
+  registry. The 3 Phase-1 types *are* Tier 1 and are unchanged. The registry **is** the Tier-1 mechanism.
+- **Tier 2 — recognized (~60-80 types):** classified + categorized + (later) a short AI summary; no deep
+  extraction.
+- **Tier 3 — long-tail:** anything not matching a known type → a generic analyzer produces a structured
+  summary.
+
+The single source of truth for *which* tier (and which filing category) a type gets is a **catalog**
+(`app/documents/catalog.py`): a maintainable `document_type -> (tier, category)` dict with
+`get_tier` / `get_category` helpers and a default of `(Tier 3, Misc)` for uncataloged types. The catalog —
+**not** the database, **not** scattered `if/elif` — owns this knowledge, so adding/refining a type is a
+one-line edit (no migration, ADR-053). It replaces the Phase-1 provisional `_TYPE_TO_CATEGORY` map, so tier
+and category can never drift apart. A `tier` column is added to `documents` (VARCHAR + CHECK, ADR-037,
+nullable until classified) recording how each document was *handled*; the type→tier *mapping* stays in the
+catalog, not the DB.
+
+`process_document` consults the catalog after classification and branches by tier — Tier 1 → the registry;
+Tier 2 → a summarize path; Tier 3 → a generic-analyzer path — with the pre-existing low-confidence/`unknown`
+gate still routing those to `NEEDS_REVIEW` first. **Every document takes exactly one path and reaches a
+terminal status** (the resilience discipline). Two specific choices:
+
+1. **A Tier-1 type whose extractor isn't built yet** (the LP-60..64 types, cataloged now) has no registry
+   entry → handled as **classified-only / `COMPLETED`** (no crash), exactly as Phase 1 already handled a
+   type with no extractor. Its extractor simply registers later and the same path runs extraction. Chosen
+   over `NEEDS_REVIEW` because the document is *correctly recognized* — nothing for a human to fix — and this
+   keeps the existing "unregistered type" behavior unchanged.
+2. **Tier 2 and Tier 3 are clean stubs** (`_tier2_summarize_stub` / `_tier3_analyze_stub`) that record the
+   document at its tier and reach `COMPLETED`. LP-65/66 fill the real summary/analyzer *in place* without
+   restructuring the routing — the seam is complete now.
+
+**Rationale:** tiering concentrates extraction engineering on the docs whose exact data drives Phase 3
+verification (Tier 1), while still recognizing and filing the rest (Tier 2/3) — the level-of-investment
+matches the value. A catalog centralizes the type→tier+category knowledge in one readable place that grows
+(LP-59 adds all ~80 types) and refines with the domain expert (Priya), with no schema churn. Extending the
+existing registry + classification pipeline — rather than building a parallel one — means the 3 existing
+types keep working byte-for-byte and the new machinery is purely additive.
+
+**Consequences:** LP-59 fills the full ~80-type catalog + the matching comprehensive classification; LP-60..64
+add Tier-1 extractors (each just registers in `EXTRACTORS`; the catalog already lists them); LP-65 fills the
+Tier-2 summary stub; LP-66 fills the Tier-3 analyzer stub. The catalog and the tier/category sets are
+expected to evolve with Priya. Because the stubs currently set `COMPLETED`, a Tier 2/3 (or
+extractor-pending Tier 1) document reads as "completed" with no extraction — honest for the foundation
+(the doc *is* handled as far as this tier goes today), and the later tickets add the summary/analysis
+without a status redesign.

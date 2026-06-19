@@ -60,6 +60,30 @@ class DocumentCategory(StrEnum):
     CUSTOM = "custom"
 
 
+class Tier(StrEnum):
+    """The level-of-investment tier a document type is handled at (LP-58, ADR-167).
+
+    The three-tier model scales the pipeline from a handful of types to ~80-100
+    without giving every type full structured extraction:
+
+      * ``TIER_1`` — first-class: full structured extraction via the EXTRACTORS
+        registry. High-value docs whose exact data drives Phase 3 verification.
+      * ``TIER_2`` — recognized: classified + categorized + a short AI summary,
+        stored/viewable, no deep extraction.
+      * ``TIER_3`` — long-tail: didn't match a known type → a generic analyzer
+        produces a structured summary.
+
+    A small, stable set — a good fit for a DB-enforced enum (VARCHAR + CHECK,
+    ADR-037). The document_type → tier mapping is **not** in the DB: it lives in
+    the catalog (:mod:`app.documents.catalog`, the single source of truth), so a
+    type's tier can be added/refined without a migration.
+    """
+
+    TIER_1 = "tier_1"
+    TIER_2 = "tier_2"
+    TIER_3 = "tier_3"
+
+
 class DocumentStatus(StrEnum):
     """Processing lifecycle status for a document (ADR-054).
 
@@ -122,6 +146,10 @@ class Document(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     category: Mapped[DocumentCategory | None] = mapped_column(
         str_enum(DocumentCategory), nullable=True
     )
+    # The level-of-investment tier the document was HANDLED as, looked up from the
+    # document-type catalog during classification (LP-58). Nullable until
+    # classified. Catalog-driven (:mod:`app.documents.catalog`), never a DB rule.
+    tier: Mapped[Tier | None] = mapped_column(str_enum(Tier), nullable=True)
     # Classifier confidence in [0.0, 1.0]; bounds are an app-layer concern.
     classification_confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
 
