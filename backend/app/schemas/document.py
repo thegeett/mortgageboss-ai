@@ -39,6 +39,9 @@ class DocumentResponse(BaseModel):
     category: DocumentCategory | None
     # The level-of-investment tier the document was handled as (LP-58, catalog-driven).
     tier: Tier | None
+    # A short human-readable gist for Tier 2 (recognized) documents (LP-65); null
+    # for Tier 1 (which carries structured extraction instead) and on summary failure.
+    summary: str | None
     classification_confidence: float | None
     status: DocumentStatus
     upload_source: UploadSource

@@ -30,6 +30,9 @@ export type UploadSource = "user_upload" | "borrower_inbox" | "mismo_import";
 
 export type ExtractionStatus = "succeeded" | "failed" | "partial";
 
+/** The level-of-investment tier a document was handled as (LP-58). */
+export type DocumentTier = "tier_1" | "tier_2" | "tier_3";
+
 /** A document's metadata (the list item). */
 export interface DocumentResponse {
   id: string;
@@ -39,6 +42,10 @@ export interface DocumentResponse {
   file_size_bytes: number;
   document_type: string | null;
   category: DocumentCategory | null;
+  /** The tier the document was handled as (LP-58). */
+  tier: DocumentTier | null;
+  /** A short human-readable gist for Tier 2 (recognized) documents (LP-65). */
+  summary: string | null;
   classification_confidence: number | null;
   status: DocumentStatus;
   upload_source: UploadSource;

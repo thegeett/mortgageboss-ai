@@ -44,6 +44,10 @@ function DocumentRow({
           <span className="text-gray-300"> · </span>
           {relativeTime(document.created_at)}
         </span>
+        {/* Tier 2 (recognized) docs carry a short summary gist (LP-65). */}
+        {document.summary && (
+          <span className="mt-0.5 block truncate text-xs text-gray-400">{document.summary}</span>
+        )}
       </span>
       <DocumentStatusBadge status={document.status} />
     </button>

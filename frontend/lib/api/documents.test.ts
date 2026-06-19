@@ -11,6 +11,8 @@ function doc(status: DocumentStatus): DocumentResponse {
     file_size_bytes: 10,
     document_type: null,
     category: null,
+    tier: null,
+    summary: null,
     classification_confidence: null,
     status,
     upload_source: "user_upload",

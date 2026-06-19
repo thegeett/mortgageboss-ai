@@ -25,6 +25,8 @@ function doc(overrides: Partial<DocumentResponse> = {}): DocumentResponse {
     file_size_bytes: 1024,
     document_type: null,
     category: null,
+    tier: null,
+    summary: null,
     classification_confidence: null,
     status: "pending",
     upload_source: "user_upload",

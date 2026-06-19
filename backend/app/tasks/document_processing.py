@@ -10,8 +10,9 @@ On upload, :func:`process_document` chains, for one document, independently:
 Classification + the catalog **route** handling (LP-58, tier-aware): the
 classified type's tier (from :mod:`app.documents.catalog`) selects the path —
 **Tier 1** runs the registered extractor (a Tier-1 type whose extractor isn't
-built yet is classified-only); **Tier 2** is the recognized/summarize path (an
-LP-65 stub); **Tier 3** is the generic-analyzer path (an LP-66 stub). The
+built yet is classified-only); **Tier 2** is the shared recognize/summarize path
+(LP-65 — one lightweight summary for any Tier-2 type); **Tier 3** is the
+generic-analyzer path (an LP-66 stub). The
 ``Document.status`` field is the source of truth the UI polls (LP-43), so the
 status is transitioned and committed at each stage.
 
@@ -43,6 +44,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.ai.classification import classify_document
 from app.ai.cost import estimate_cost
 from app.ai.extraction import EXTRACTORS, Extractor
+from app.ai.summarization import summarize_document
 from app.core.config import settings
 from app.documents.catalog import get_category, get_tier
 from app.models.activity_log import ActivityType
@@ -194,7 +196,8 @@ async def _route_by_tier(db: AsyncSession, document: Document, content: bytes) -
         types). A Tier-1 type whose extractor isn't built yet (LP-60..64) has no
         registry entry → handled gracefully as *classified-only* (a terminal
         status), NOT a crash; its extractor arrives in a later ticket.
-      * **Tier 2** → the recognized/summarize path — a clean stub for LP-65.
+      * **Tier 2** → the shared recognize/summarize path (LP-65) — one mechanism
+        for every Tier-2 type: a lightweight summary, then a terminal status.
       * **Tier 3** → the generic-analyzer path — a clean stub for LP-66.
 
     The low-confidence / ``unknown`` gate already routed those to NEEDS_REVIEW
@@ -210,7 +213,7 @@ async def _route_by_tier(db: AsyncSession, document: Document, content: bytes) -
             # used for a type with no extractor; deep extraction arrives later.
             await _complete_classified_only(db, document, reason="tier1_extractor_pending")
     elif document.tier == Tier.TIER_2:
-        await _tier2_summarize_stub(db, document)
+        await _tier2_summarize(db, document, content)
     else:  # Tier.TIER_3 (the catalog default for uncataloged long-tail types)
         await _tier3_analyze_stub(db, document)
 
@@ -232,14 +235,21 @@ async def _complete_classified_only(db: AsyncSession, document: Document, *, rea
     )
 
 
-async def _tier2_summarize_stub(db: AsyncSession, document: Document) -> None:
-    """Tier 2 (recognized) handling — a CLEAN STUB for LP-65 (terminal status).
+async def _tier2_summarize(db: AsyncSession, document: Document, content: bytes) -> None:
+    """Tier 2 (recognized) handling — the ONE shared path for every Tier-2 type (LP-65).
 
-    A Tier-2 document is correctly classified + categorized but gets no deep
-    extraction; LP-65 will add a short AI summary for processor reference *here*,
-    without restructuring the routing. For now we record it as handled at its
-    tier and reach a terminal status. Metadata-only log (no PII).
+    No per-type logic: any Tier-2 document (already classified + categorized, LP-59)
+    gets a single lightweight 1-2 sentence AI **summary** (a human-reference gist,
+    not extraction — :func:`app.ai.summarization.summarize_document`, a cheap Haiku
+    call) and reaches a terminal status. The document is a normal, package-eligible
+    file document filed under its category.
+
+    **Graceful** (resilience): ``summarize_document`` never raises and returns
+    ``None`` on failure; a failed summary still finalizes the document (recognized +
+    categorized, ``summary`` null) — never stuck, never a crash. Metadata-only log
+    (the summary text itself is never logged — it can quote document PII).
     """
+    document.summary = await summarize_document(content, document.mime_type)
     document.status = DocumentStatus.COMPLETED
     await db.commit()
     logger.info(
@@ -247,7 +257,7 @@ async def _tier2_summarize_stub(db: AsyncSession, document: Document) -> None:
         document_id=str(document.id),
         document_type=document.document_type,
         category=document.category,
-        summary="pending_lp65",
+        has_summary=document.summary is not None,
     )
 
 

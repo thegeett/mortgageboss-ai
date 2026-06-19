@@ -4984,3 +4984,48 @@ against real (synthetic/redacted) **self-employed** returns over time and the fi
 extractor, asserted by a test). Phase 3 derives qualifying income from the captured figures + does the
 two-year comparison; which schedules/figures to type refines with Priya; tax-return accuracy needs
 real-return validation most acutely of any extractor. Phase 2 now moves to the Tier 2/3 handlers (LP-65/66).
+
+## ADR-174: Tier 2 shared summary path — one lightweight mechanism for ~60-80 recognized types
+
+- **Date:** 2026-06-19
+- **Status:** Accepted
+
+**Context:** Tier 2 is the bulk of the taxonomy — the ~60-80 *recognized* document types that need to be
+classified, filed, and glanceable, but whose individual field values nobody computes on (unlike Tier 1's
+income/asset/property figures). LP-58 stubbed the Tier 2 routing path; this fills it. The whole point of the
+tier model is efficiency: ~18 extractors + **1** Tier-2 path + 1 Tier-3 analyzer, not ~80 extractors.
+
+**Decision:** Handle every Tier 2 document through **one shared path** (`_tier2_summarize`, filling the LP-58
+stub) — **no per-type logic** (no `flood_certification.py` / `credit_report.py`). The document arrives
+already classified + categorized (LP-59); the path adds a single lightweight AI **summary** and finalizes:
+
+- **A gist, not extraction.** The summary is a 1-2 sentence human-readable answer to "what is this document,
+  briefly?" (what it is + a key identifying detail) — **not** structured data, **not** typed fields, **not**
+  source locations. The sharp contrast with Tier 1: Tier 1 extracts precise values that *drive decisions*;
+  Tier 2 summarizes for *human reference*.
+- **Cheap.** `summarize_document` uses the **Haiku-class** (classification) model, capped at 256 tokens —
+  low cost-per-document is the point of Tier 2 (one cheap call across ~80 types). A response cap guards a
+  rambling answer without failing it.
+- **Forgiving / low-stakes.** A slightly-off gist is fine (human reference, not a calculation) — accuracy is
+  proportionately light and refine-able, unlike a wrong Tier-1 figure.
+- **Graceful.** `summarize_document` never raises and returns `None` on any failure; a failed summary still
+  finalizes the document (recognized + categorized, `summary` null) — never stuck, never a crash (the
+  resilience discipline). The summary text is **never logged** (it can quote document PII) — only a length /
+  presence flag.
+- **Normal, package-eligible documents.** A Tier 2 doc is a first-class file document — it appears in the
+  Documents tab under its category with its summary, and is part of the file (package groundwork is LP-72;
+  assembly is Phase 6). Not second-class.
+- **Stored + minimally visible.** A nullable `summary` TEXT column on `documents` (migration `b344317498a5`,
+  up/down) holds the gist; the frontend shows it lightly (a subtle line in the document list + a "Summary"
+  block in the existing drawer). The **full tier-aware detail view** (Tier 1 fields / Tier 2 summary / Tier 3
+  findings) is **LP-72** — this ticket only makes the summary visible.
+
+**Rationale:** the ~60-80 recognized types must be handled, but giving each its own extractor (or even its own
+summary logic) is exactly the waste the tier model avoids. One shared recognize-and-summarize path gives broad
+coverage cheaply; a forgiving summary is the right level of investment for documents whose exact field values
+no rule consumes.
+
+**Consequences:** LP-66 fills the Tier 3 stub (the generic analyzer + findings); LP-72 builds the full
+tier-aware detail view + package groundwork; the summary is refine-able and low-stakes; Tier 2 docs appear in
+the Documents tab and (later) the lender package. The summary is best confirmed against real documents over
+time, but the stakes are low.

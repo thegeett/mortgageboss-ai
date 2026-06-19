@@ -215,6 +215,15 @@ function DrawerBody({
           <Row label="Uploaded" value={fmtDate(summary.created_at)} />
         </section>
 
+        {/* Tier 2 (recognized) docs carry a short summary gist (LP-65) — a
+            human-reference "what is this?", not structured extraction. */}
+        {summary.summary && (
+          <section className="mt-6">
+            <h3 className="text-xs font-semibold uppercase tracking-wide text-gray-400">Summary</h3>
+            <p className="mt-2 text-sm text-gray-700">{summary.summary}</p>
+          </section>
+        )}
+
         {/* Manual type override (LP-44) */}
         <TypeOverride summary={summary} fileId={fileId} />
 

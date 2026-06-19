@@ -101,6 +101,13 @@ def _patch_extract(
     return mock
 
 
+def _patch_summarize(monkeypatch: pytest.MonkeyPatch, summary: str | None) -> AsyncMock:
+    """Patch the Tier 2 ``summarize_document`` call (no real AI) with a canned gist."""
+    mock = AsyncMock(return_value=summary)
+    monkeypatch.setattr(pipeline, "summarize_document", mock)
+    return mock
+
+
 def _paystub_success() -> PayStubExtractionResult:
     return PayStubExtractionResult(
         data=PayStubExtraction(
@@ -187,25 +194,86 @@ async def test_tier1_without_extractor_is_classified_only(
     assert await _current_extraction(db_session, doc.id) is None  # no extractor ran
 
 
-async def test_tier2_routes_to_summarize_stub(
+async def test_tier2_summarized_and_terminal(
     monkeypatch: pytest.MonkeyPatch, db_session: AsyncSession
 ) -> None:
-    """A Tier-2 type (e.g. credit_report) → the recognize/summarize stub (LP-65)."""
+    """A Tier-2 type (e.g. credit_report) → the shared summary path (LP-65): a short
+    gist is stored and the doc reaches a terminal status, with NO deep extraction."""
     doc = await _setup_document(db_session)
     _patch_storage(monkeypatch)
     _patch_classify(
         monkeypatch,
         ClassificationResult(document_type="credit_report", confidence=0.9, reasoning="x"),
     )
+    gist = "Tri-merge consumer credit report dated 2026-06-01 for the borrower."
+    summarize = _patch_summarize(monkeypatch, gist)
 
     await pipeline._process_document(db_session, str(doc.id))
     await db_session.refresh(doc)
 
+    assert summarize.call_count == 1  # the shared summarize path ran
     assert doc.status == DocumentStatus.COMPLETED  # terminal
     assert doc.document_type == "credit_report"
     assert doc.tier == Tier.TIER_2
     assert doc.category == DocumentCategory.CREDIT
+    assert doc.summary == gist  # the gist is stored
+    assert len(doc.summary) < 200  # a brief gist, not a giant extraction blob
     assert await _current_extraction(db_session, doc.id) is None  # no deep extraction
+
+
+@pytest.mark.parametrize(
+    ("document_type", "category"),
+    [
+        ("credit_report", DocumentCategory.CREDIT),
+        ("flood_certification", DocumentCategory.PROPERTY),
+        ("closing_disclosure", DocumentCategory.DISCLOSURES),
+        ("verification_of_deposit", DocumentCategory.ASSETS),
+    ],
+)
+async def test_tier2_one_shared_path_for_every_type(
+    monkeypatch: pytest.MonkeyPatch,
+    db_session: AsyncSession,
+    document_type: str,
+    category: DocumentCategory,
+) -> None:
+    """Different Tier-2 types all go through the SAME path — no per-type branching."""
+    doc = await _setup_document(db_session)
+    _patch_storage(monkeypatch)
+    _patch_classify(
+        monkeypatch,
+        ClassificationResult(document_type=document_type, confidence=0.9, reasoning="x"),
+    )
+    summarize = _patch_summarize(monkeypatch, "A short recognized-document gist.")
+
+    await pipeline._process_document(db_session, str(doc.id))
+    await db_session.refresh(doc)
+
+    assert summarize.call_count == 1  # one shared mechanism, regardless of type
+    assert doc.tier == Tier.TIER_2
+    assert doc.category == category
+    assert doc.status == DocumentStatus.COMPLETED
+    assert doc.summary == "A short recognized-document gist."
+    assert await _current_extraction(db_session, doc.id) is None
+
+
+async def test_tier2_summary_failure_is_graceful(
+    monkeypatch: pytest.MonkeyPatch, db_session: AsyncSession
+) -> None:
+    """Summarization failure → the doc still reaches a terminal status, summary null."""
+    doc = await _setup_document(db_session)
+    _patch_storage(monkeypatch)
+    _patch_classify(
+        monkeypatch,
+        ClassificationResult(document_type="credit_report", confidence=0.9, reasoning="x"),
+    )
+    _patch_summarize(monkeypatch, None)  # summarization "failed" (returns None)
+
+    await pipeline._process_document(db_session, str(doc.id))
+    await db_session.refresh(doc)
+
+    assert doc.status == DocumentStatus.COMPLETED  # terminal, not stuck / crashed
+    assert doc.tier == Tier.TIER_2
+    assert doc.summary is None  # recognized + categorized, no gist — forgiving
 
 
 async def test_tier3_routes_to_analyzer_stub(

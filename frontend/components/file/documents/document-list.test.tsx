@@ -15,6 +15,8 @@ function doc(overrides: Partial<DocumentResponse> = {}): DocumentResponse {
     file_size_bytes: 1024,
     document_type: "pay_stub",
     category: "income_employment",
+    tier: "tier_1",
+    summary: null,
     classification_confidence: 0.9,
     status: "completed",
     upload_source: "user_upload",
@@ -47,6 +49,31 @@ describe("DocumentList — loading → content | empty | error", () => {
   it("shows the empty state when loaded with no documents", () => {
     render(<DocumentList documents={[]} isPending={false} isError={false} onSelect={vi.fn()} />);
     expect(screen.getByText("No documents yet")).toBeDefined();
+  });
+
+  it("renders a Tier 2 document's summary gist (LP-65)", () => {
+    const gist = "Tri-merge consumer credit report dated 2026-06-01.";
+    render(
+      <DocumentList
+        documents={[doc({ tier: "tier_2", document_type: "credit_report", summary: gist })]}
+        isPending={false}
+        isError={false}
+        onSelect={vi.fn()}
+      />,
+    );
+    expect(screen.getByText(gist)).toBeDefined();
+  });
+
+  it("renders no summary line for a Tier 1 document (summary null)", () => {
+    render(
+      <DocumentList
+        documents={[doc({ summary: null })]}
+        isPending={false}
+        isError={false}
+        onSelect={vi.fn()}
+      />,
+    );
+    expect(screen.getByText("paystub.pdf")).toBeDefined(); // row renders; no summary line
   });
 
   it("shows an error state with retry when the load fails", () => {

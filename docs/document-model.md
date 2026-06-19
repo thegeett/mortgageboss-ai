@@ -125,7 +125,7 @@ read bytes → classify (Haiku) → set tier + category from the catalog →
   else route by tier:
     Tier 1 → EXTRACTORS registry          (extractor built → extract;
                                             not built yet → classified-only)
-    Tier 2 → _tier2_summarize_stub        (LP-65 — terminal)
+    Tier 2 → _tier2_summarize             (LP-65 — one shared summary path; terminal)
     Tier 3 → _tier3_analyze_stub          (LP-66 — terminal; a confident
                                             "unknown" lands here)
 ```
@@ -136,13 +136,40 @@ sent to review — it routes to Tier 3.)
 **Every document takes exactly one path and reaches a terminal status**
 (`COMPLETED` / `NEEDS_REVIEW` / `FAILED`) — never left stuck. Two notes:
 
-- **A Tier-1 type whose extractor isn't built yet** (the LP-60..64 types,
-  cataloged now) is handled as **classified-only → `COMPLETED`** (no crash),
-  exactly as Phase 1 handled a type with no registered extractor. When its
-  extractor registers, the same path runs extraction — no pipeline change.
-- **Tier 2 / Tier 3 are clean stubs** that record the document at its tier and
-  reach `COMPLETED`. LP-65/66 fill the real summary / analyzer **in place**; the
-  routing structure is already complete.
+- **A Tier-1 type whose extractor isn't built yet** is handled as **classified-only
+  → `COMPLETED`** (no crash), exactly as Phase 1 handled a type with no registered
+  extractor. (Tier 1 is now complete — LP-60..64 — so this only applies to a future
+  type cataloged before its extractor.)
+- **Tier 3 is still a clean stub** that records the document at its tier and reaches
+  `COMPLETED`. LP-66 fills the real analyzer **in place**; the routing is complete.
+
+## Tier 2 — the shared summary path (LP-65)
+
+Every Tier 2 (recognized) document goes through **one shared path**
+(`_tier2_summarize`) — **no per-type logic**. This is the efficiency of the tier
+model: ~18 extractors + **1** Tier-2 summary path + 1 Tier-3 analyzer, not ~80
+extractors. The document arrives already classified + categorized (LP-59); the path:
+
+1. generates a single lightweight **summary** — a 1-2 sentence human-readable gist
+   ("what is this document, briefly?" — `app/ai/summarization.py`, a cheap
+   **Haiku** call, capped at 256 tokens), stored on `documents.summary`;
+2. reaches a terminal status (`COMPLETED`).
+
+Key properties:
+
+- **A gist, not extraction.** The summary answers "what is this?" for human
+  reference (e.g. *"Flood zone determination for 60 North Street — Zone X, minimal
+  risk."*). The contrast with Tier 1: Tier 1 extracts precise values that drive
+  decisions; Tier 2 summarizes for reference. **Low-stakes and forgiving** — a
+  slightly-off gist is fine.
+- **Graceful.** `summarize_document` never raises and returns `None` on failure; a
+  failed summary still finalizes the document (recognized + categorized, `summary`
+  null). The summary text is **never logged** (it can quote PII) — only a length /
+  presence flag.
+- **Normal, package-eligible documents.** A Tier 2 doc is a first-class file
+  document — it appears in the Documents tab under its category with its summary
+  (a subtle list line + a "Summary" block in the drawer). The full tier-aware
+  detail view (Tier 1 fields / Tier 2 summary / Tier 3 findings) is **LP-72**.
 
 ## Tier 1 extractors
 
@@ -230,5 +257,9 @@ general LOE — registered and routed.
 **LP-64 (tax returns — the last Tier-1 batch):** the nested 1040 + schedules
 (C/E/K-1) bundle — registered and routed. **Tier 1 is now complete.**
 
-**Next:** LP-65 (Tier-2 summary path) → LP-66 (Tier-3 generic analyzer). The
-taxonomy, indicators, and typed-core field sets refine with Priya over time.
+**LP-65 (Tier 2 — the shared summary path):** one lightweight Haiku summary for
+every recognized type (no per-type logic); the gist is stored + minimally visible.
+
+**Next:** LP-66 (Tier-3 generic analyzer + findings) → LP-72 (the full tier-aware
+detail view + package groundwork). The taxonomy, indicators, and typed-core field
+sets refine with Priya over time.
