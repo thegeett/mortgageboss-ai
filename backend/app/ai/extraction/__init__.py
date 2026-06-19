@@ -19,9 +19,12 @@ from pydantic import BaseModel
 
 from app.ai.extraction.bank_statement import extract_bank_statement
 from app.ai.extraction.form_1099 import extract_1099
+from app.ai.extraction.gift_letter import extract_gift_letter
+from app.ai.extraction.investment_account import extract_investment_account
 from app.ai.extraction.letter_of_explanation import extract_letter_of_explanation
 from app.ai.extraction.pay_stub import extract_pay_stub
 from app.ai.extraction.profit_and_loss import extract_profit_and_loss
+from app.ai.extraction.retirement_account import extract_retirement_account
 from app.ai.extraction.voe import extract_voe
 from app.ai.extraction.w2 import extract_w2
 from app.models.extraction import ExtractionStatus
@@ -57,6 +60,10 @@ EXTRACTORS: dict[str, Extractor] = {
     "voe": extract_voe,
     "profit_and_loss": extract_profit_and_loss,
     "letter_of_explanation": extract_letter_of_explanation,
+    # LP-61 — Tier 1 asset cluster.
+    "investment_account": extract_investment_account,
+    "retirement_account": extract_retirement_account,
+    "gift_letter": extract_gift_letter,
 }
 
 __all__ = ["EXTRACTORS", "ExtractionResult", "Extractor"]

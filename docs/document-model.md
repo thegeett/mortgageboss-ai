@@ -165,8 +165,15 @@ Registered so far:
   employment + income), `profit_and_loss` (self-employment income — `net_profit`
   is the key figure), `letter_of_explanation` (prose-light: `subject` +
   `explanation_summary` + a primary reference).
+- **LP-61 (asset/reserves cluster):** `investment_account` (`total_value` is the
+  reserves figure; holdings → catch-all; account number masked), `retirement_account`
+  (tracks `vested_balance` **and** `total_balance` separately — vested is the
+  accessible/reserves figure; never assumed equal to total; account masked),
+  `gift_letter` (attestation-oriented — donor + relationship + `gift_amount` + the
+  `no_repayment_attestation` that distinguishes a gift from undisclosed debt). These
+  cross-check in Phase 3 against the stated MISMO assets (Phase 1.5).
 
-A Tier-1 type whose extractor isn't registered yet (the LP-61..64 clusters) is
+A Tier-1 type whose extractor isn't registered yet (the LP-62..64 clusters) is
 handled gracefully as classified-only (see above) until its extractor lands.
 
 ## What's built vs. what's next
@@ -182,6 +189,10 @@ confidence-gated routing (low → `NEEDS_REVIEW`; confident-`unknown` → Tier 3
 **LP-60 (first Tier-1 extractor batch):** the income/employment cluster — 1099
 (with subtypes), VOE, P&L, income LOE — registered and routed.
 
-**Next:** LP-61..64 (the remaining Tier-1 clusters: assets, property,
-borrower-info, tax returns) → LP-65 (Tier-2 summary) → LP-66 (Tier-3 analyzer).
-The taxonomy, indicators, and typed-core field sets refine with Priya over time.
+**LP-61 (asset Tier-1 batch):** the asset/reserves cluster — investment account,
+retirement account (vested-vs-total), gift letter (attestation) — registered and
+routed.
+
+**Next:** LP-62..64 (the remaining Tier-1 clusters: property, borrower-info, tax
+returns) → LP-65 (Tier-2 summary) → LP-66 (Tier-3 analyzer). The taxonomy,
+indicators, and typed-core field sets refine with Priya over time.

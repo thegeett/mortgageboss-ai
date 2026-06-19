@@ -4782,3 +4782,54 @@ claiming per-form correctness we can't demonstrate without real documents.
 **Consequences:** LP-61..64 extend Tier 1 to the asset/property/borrower-info/tax-return clusters the same
 way; the field sets refine with Priya; the detail drawer (LP-72) renders these like the existing three;
 real samples validate accuracy over time. Sensitive TINs/SSNs are masked in display + never logged.
+
+## ADR-170: Tier 1 asset extractors (investment/retirement/gift-letter) — the established pattern, with the vested-vs-total and gift-attestation nuances
+
+- **Date:** 2026-06-18
+- **Status:** Accepted
+
+**Context:** LP-61 is the second Tier-1 extractor batch — the asset/reserves cluster. Bank statements (the
+most common asset doc) are already Tier 1 (LP-39c); this adds the other major asset documents: an investment
+statement, a retirement statement, and a gift letter. Assets prove the borrower has the funds for the down
+payment, closing costs, and reserves (the lender-required cushion), and these typed cores are cross-checked
+in Phase 3 against the stated assets imported from the MISMO (Phase 1.5 — e.g. a file's stated
+"RetirementFund $243,000, Stock $19,000, GiftOfCash $56,000"). Repetitive application of the established
+pattern, with two nuances worth recording.
+
+**Decision:** Add three extractors, each following the LP-39a shape exactly (typed core of ``TypedField``\\ s
+with ``SourceLocation`` + grouped ``additional_sections`` catch-all, the shared tolerant parser, graceful
+``.failed()``, the uniform result interface, metadata-only logging), modeled on the **bank statement**
+extractor (the closest template — an asset doc with a masked account, a statement period, and balances), and
+registered in ``EXTRACTORS``. Specific choices:
+
+- **Investment + retirement are flat (typed core + catch-all), not transactional.** Unlike the bank
+  statement, the decision figure is a single balance/value, not a transaction list, so holdings (if
+  itemized) go to the catch-all rather than a first-class list. ``total_value`` (investment) and the two
+  retirement balances are the typed-core figures.
+- **Retirement tracks vested AND total balances separately.** ``vested_balance`` is the portion the borrower
+  actually owns/can access (unvested employer funds aren't available; even vested funds carry early-withdrawal
+  penalties), so it is the reserves-relevant number — but the prompt is told **not** to assume
+  ``vested == total``: if only one balance is shown and vesting isn't mentioned, it fills ``total_balance``
+  and leaves ``vested_balance`` null. Both are captured for Phase 3 to use the right one.
+- **The gift letter is attestation-oriented (prose-aware), like the LOE.** Its typed core captures the
+  parties + ``gift_amount`` + property + a ``no_repayment_attestation`` — the statement that the funds are a
+  genuine gift with no expectation of repayment. That attestation is what distinguishes a gift (an asset)
+  from undisclosed debt; it is captured as text (present/absent + wording), left **null** when the letter
+  doesn't state it (never fabricated). No account number is present.
+- **Account numbers follow the bank-statement masking discipline (ADR-149).** ``account_number_masked``
+  (investment, retirement) is captured masked (last 4), **never logged**, and masked in display.
+- **V1 starters, refined with Priya; accuracy honestly scoped.** No sample investment/retirement/gift-letter
+  documents were available, so tests verify the **mechanism/shape** (the typed-core + catch-all shape, source
+  locations, type coercion, graceful failure, the vested-vs-total distinction, the gift attestation, the
+  routing reaches each) — **not** per-document accuracy, validated as real documents flow through.
+
+**Rationale:** following the established pattern keeps every extraction uniform downstream. The
+vested-vs-total separation and the no-fabrication rule keep the reserves figure honest (over-counting
+unvested funds, or assuming vesting, would inflate reserves). Capturing the gift attestation cleanly is the
+single most important thing about a gift letter — without it, gifted funds could be mistaken for an
+undisclosed liability. These cores are exactly the values Phase 3 cross-checks against the stated MISMO
+assets.
+
+**Consequences:** LP-62..64 extend Tier 1 to the property/borrower-info/tax-return clusters; the field sets
+refine with Priya; the detail drawer renders these like the others; account numbers are masked + never
+logged; accuracy is validated with real samples over time.
