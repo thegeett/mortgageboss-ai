@@ -4690,3 +4690,51 @@ expected to evolve with Priya. Because the stubs currently set `COMPLETED`, a Ti
 extractor-pending Tier 1) document reads as "completed" with no extraction — honest for the foundation
 (the doc *is* handled as far as this tier goes today), and the later tickets add the summary/analysis
 without a status redesign.
+
+## ADR-168: Comprehensive ~80-type classification — catalog-synced prompt, confidence-gated, industry-standard starter
+
+- **Date:** 2026-06-18
+- **Status:** Accepted
+
+**Context:** LP-58 built tier-aware routing but seeded the catalog with only a starter set, and the Phase-1
+classification prompt knew ~3 types — so most real documents would classify as `unknown` and default to
+Tier 3, never reaching their correct tier/category. To make the three-tier model real across breadth, the
+classifier needs the knowledge to recognize the full document set. The resident domain expert's (Priya's)
+real document library is not yet available, so the taxonomy has to start from somewhere defensible.
+
+**Decision:** Expand the catalog to the **full ~80-type taxonomy** (88 types: 18 Tier 1, 70 Tier 2, across
+all seven categories) drawn from an **industry-standard** US residential mortgage document set, and rewrite
+the classification prompt to recognize all of them. Specifics:
+
+- **One taxonomy, two artifacts, kept in sync by construction.** The catalog (`app/documents/catalog.py`)
+  is the structural source of truth (type → tier + category). The recognition knowledge — each type's
+  **distinguishing indicators** — lives in `DOCUMENT_TYPE_INDICATORS` (`app/ai/classification_prompt.py`).
+  The prompt's *type list is derived from the catalog*: `render_classification_prompt()` iterates the
+  catalog (grouped by category) and injects each type + indicator into a template (the framing/output rules
+  stay an editable `.txt`). A test asserts the indicator set exactly equals the catalog set, so the two
+  cannot drift — adding a type to the catalog without describing it fails CI.
+- **The classifier returns type + category + confidence.** Category is **advisory** (parsed for
+  observability); the authoritative category persisted on the document is the **catalog's** `get_category` —
+  one source of truth (ADR-167), so a model/catalog disagreement can't mis-file a document.
+- **Confidence gates routing, and the `unknown` slug alone does not.** The pipeline now branches on
+  *confidence*, not on `document_type == "unknown"`: **low confidence** (the model is unsure *which* known
+  type — it could be one) → `NEEDS_REVIEW` (a human confirms via the LP-44 override); **high-confidence
+  `unknown`** (the model is sure it is *none* of the known types) → falls through to tier routing, where the
+  catalog maps it to **Tier 3** (the generic analyzer — that is its purpose). The graceful error fallback
+  still returns `unknown` at **zero** confidence, so AI failures land in `NEEDS_REVIEW`, not Tier 3. The
+  threshold stays `0.5` (LP-42).
+- **Industry-standard starter, honestly scoped.** The taxonomy + indicators are explicitly a starting
+  point to **refine with Priya**; per-type accuracy is to be validated against real labeled documents over
+  time. Tests verify the *mechanism* + a representative spread, not exhaustive per-type accuracy (real
+  labeled documents for all ~80 types are not available).
+
+**Rationale:** deriving the prompt's type list from the catalog removes the single biggest drift risk of a
+large taxonomy (a prompt that lists types the system can't route, or routes types it never describes).
+Confidence-gating keeps uncertain classifications human-checked rather than confidently mis-filed, while
+letting genuinely-novel documents flow to the generic analyzer instead of clogging review. An
+industry-standard taxonomy is a strong, reviewable starting point while the real library is pending.
+
+**Consequences:** LP-60..64 add the Tier-1 extractors (a Tier-1-classified type without an extractor yet is
+still handled gracefully per ADR-167); LP-65/66 fill the Tier-2/3 handlers; the taxonomy + indicators refine
+with Priya and tune against real documents over time. Accuracy is honestly scoped: the mechanism + a
+representative spread are tested now; full per-type accuracy is an ongoing, real-document-dependent effort.

@@ -21,11 +21,17 @@ Why a catalog and not scattered ``if/elif`` or a DB table:
   * **Single source of truth** — both the tier (for routing) and the category
     (for filing / needs-matching) come from here, so they never drift apart.
 
-The catalog **grows** (LP-59 adds the full ~80-type set + the matching
-classification) and **refines with Priya** (the domain expert) as the taxonomy
-settles. It is intentionally seeded — not exhaustive — today: the 3 existing
-Tier-1 types, the planned Tier-1 types, and a starter Tier-2 set per category
-(enough to prove tier-aware routing end to end).
+The catalog now spans the **full ~80-type taxonomy** (LP-59): ~18 Tier-1 types
+plus a comprehensive Tier-2 set across the seven categories. It is an
+INDUSTRY-STANDARD STARTER — the document types a US residential mortgage file
+typically draws on — **not** yet validated against the resident domain expert's
+(Priya's) real library; expect it to **refine with Priya** and per-type accuracy
+to be confirmed against real labeled documents over time.
+
+The catalog is also the source of truth for the classifier's **type list**: the
+classification prompt is built from these slugs (see
+:mod:`app.ai.classification_prompt`), so the two cannot drift — a type the
+classifier can return is a type the catalog knows, and vice versa.
 """
 
 from app.models.document import DocumentCategory, Tier
@@ -33,48 +39,130 @@ from app.models.document import DocumentCategory, Tier
 # --------------------------------------------------------------------------- #
 # The catalog — document_type -> (tier, category)
 # --------------------------------------------------------------------------- #
-# The slugs match the classifier's lowercase ``document_type`` output. Keep this
-# grouped by tier (then category) so it reads as a maintainable taxonomy, not a
-# flat lookup table. LP-59 fills it out to all ~80 types.
+# The slugs match the classifier's lowercase ``document_type`` output. Organized
+# by CATEGORY (then tier within it) so it reads as a maintainable taxonomy — the
+# same by-category structure the classification prompt uses. The ~18 Tier-1 types
+# (full extraction, LP-60..64) are marked; everything else is Tier 2 (recognized).
+#
+# This is an INDUSTRY-STANDARD STARTER taxonomy (LP-59): the document types a US
+# residential mortgage file typically draws on. It is **not** validated against
+# the resident domain expert's (Priya's) real document library yet — that review
+# is deferred. Treat it as a strong starting point to **refine with Priya**, and
+# expect per-type accuracy to be validated against real labeled documents over
+# time. Maintainable by design: add/rename/retier a type with a one-line edit
+# (and add its recognition indicators in app/ai/classification_prompt.py — a test
+# keeps the two in sync).
 CATALOG: dict[str, tuple[Tier, DocumentCategory]] = {
-    # --- Tier 1 — first-class extraction --------------------------------- #
-    # Existing (extractors built in Phase 1; route as Tier 1 unchanged).
-    "pay_stub": (Tier.TIER_1, DocumentCategory.INCOME_EMPLOYMENT),
-    "w2": (Tier.TIER_1, DocumentCategory.INCOME_EMPLOYMENT),
-    "bank_statement": (Tier.TIER_1, DocumentCategory.ASSETS),
-    # Planned (cataloged as Tier 1 now; extractors arrive in LP-60..64). Until
-    # an extractor is registered, the pipeline handles these as classified-only
-    # (a terminal status) — see the routing in app.tasks.document_processing.
-    "tax_return": (Tier.TIER_1, DocumentCategory.INCOME_EMPLOYMENT),
-    "1099": (Tier.TIER_1, DocumentCategory.INCOME_EMPLOYMENT),
-    "voe": (Tier.TIER_1, DocumentCategory.INCOME_EMPLOYMENT),
-    "profit_and_loss": (Tier.TIER_1, DocumentCategory.INCOME_EMPLOYMENT),
-    "investment_account": (Tier.TIER_1, DocumentCategory.ASSETS),
-    "retirement_account": (Tier.TIER_1, DocumentCategory.ASSETS),
-    "gift_letter": (Tier.TIER_1, DocumentCategory.ASSETS),
-    "purchase_agreement": (Tier.TIER_1, DocumentCategory.PROPERTY),
-    "homeowners_insurance": (Tier.TIER_1, DocumentCategory.PROPERTY),
-    "mortgage_statement": (Tier.TIER_1, DocumentCategory.PROPERTY),
-    "property_tax_bill": (Tier.TIER_1, DocumentCategory.PROPERTY),
-    "hoa_statement": (Tier.TIER_1, DocumentCategory.PROPERTY),
-    "drivers_license": (Tier.TIER_1, DocumentCategory.BORROWER_INFO),
-    "divorce_decree": (Tier.TIER_1, DocumentCategory.BORROWER_INFO),
-    "letter_of_explanation": (Tier.TIER_1, DocumentCategory.BORROWER_INFO),
-    # --- Tier 2 — recognized (starter set; LP-59 adds the full ~80) ------ #
-    # A handful per category — enough to prove Tier-2 routing. Summary path
-    # (LP-65) is stubbed; these are classified + categorized today.
+    # ===================================================================== #
+    # Income / Employment
+    # ===================================================================== #
+    "pay_stub": (Tier.TIER_1, DocumentCategory.INCOME_EMPLOYMENT),  # T1
+    "w2": (Tier.TIER_1, DocumentCategory.INCOME_EMPLOYMENT),  # T1
+    "1099": (Tier.TIER_1, DocumentCategory.INCOME_EMPLOYMENT),  # T1
+    "tax_return": (Tier.TIER_1, DocumentCategory.INCOME_EMPLOYMENT),  # T1
+    "voe": (Tier.TIER_1, DocumentCategory.INCOME_EMPLOYMENT),  # T1
+    "profit_and_loss": (Tier.TIER_1, DocumentCategory.INCOME_EMPLOYMENT),  # T1
+    "tax_transcript": (Tier.TIER_2, DocumentCategory.INCOME_EMPLOYMENT),
+    "form_4506c": (Tier.TIER_2, DocumentCategory.INCOME_EMPLOYMENT),
+    "business_tax_return": (Tier.TIER_2, DocumentCategory.INCOME_EMPLOYMENT),
+    "k1_statement": (Tier.TIER_2, DocumentCategory.INCOME_EMPLOYMENT),
+    "social_security_award_letter": (Tier.TIER_2, DocumentCategory.INCOME_EMPLOYMENT),
+    "pension_statement": (Tier.TIER_2, DocumentCategory.INCOME_EMPLOYMENT),
+    "retirement_income_letter": (Tier.TIER_2, DocumentCategory.INCOME_EMPLOYMENT),
+    "unemployment_income_letter": (Tier.TIER_2, DocumentCategory.INCOME_EMPLOYMENT),
+    "disability_income_letter": (Tier.TIER_2, DocumentCategory.INCOME_EMPLOYMENT),
+    "child_support_income": (Tier.TIER_2, DocumentCategory.INCOME_EMPLOYMENT),
+    "alimony_income": (Tier.TIER_2, DocumentCategory.INCOME_EMPLOYMENT),
+    "rental_income_schedule": (Tier.TIER_2, DocumentCategory.INCOME_EMPLOYMENT),
+    "commission_income_statement": (Tier.TIER_2, DocumentCategory.INCOME_EMPLOYMENT),
+    "employment_offer_letter": (Tier.TIER_2, DocumentCategory.INCOME_EMPLOYMENT),
+    # ===================================================================== #
+    # Assets
+    # ===================================================================== #
+    "bank_statement": (Tier.TIER_1, DocumentCategory.ASSETS),  # T1
+    "investment_account": (Tier.TIER_1, DocumentCategory.ASSETS),  # T1
+    "retirement_account": (Tier.TIER_1, DocumentCategory.ASSETS),  # T1
+    "gift_letter": (Tier.TIER_1, DocumentCategory.ASSETS),  # T1
     "verification_of_deposit": (Tier.TIER_2, DocumentCategory.ASSETS),
-    "award_letter": (Tier.TIER_2, DocumentCategory.INCOME_EMPLOYMENT),
-    "social_security_statement": (Tier.TIER_2, DocumentCategory.INCOME_EMPLOYMENT),
-    "flood_certification": (Tier.TIER_2, DocumentCategory.PROPERTY),
-    "appraisal_report": (Tier.TIER_2, DocumentCategory.PROPERTY),
+    "brokerage_statement": (Tier.TIER_2, DocumentCategory.ASSETS),
+    "money_market_statement": (Tier.TIER_2, DocumentCategory.ASSETS),
+    "certificate_of_deposit": (Tier.TIER_2, DocumentCategory.ASSETS),
+    "earnest_money_receipt": (Tier.TIER_2, DocumentCategory.ASSETS),
+    "gift_donor_bank_statement": (Tier.TIER_2, DocumentCategory.ASSETS),
+    "life_insurance_statement": (Tier.TIER_2, DocumentCategory.ASSETS),
+    "sale_of_asset_proof": (Tier.TIER_2, DocumentCategory.ASSETS),
+    "crypto_account_statement": (Tier.TIER_2, DocumentCategory.ASSETS),
+    # ===================================================================== #
+    # Property
+    # ===================================================================== #
+    "purchase_agreement": (Tier.TIER_1, DocumentCategory.PROPERTY),  # T1
+    "homeowners_insurance": (Tier.TIER_1, DocumentCategory.PROPERTY),  # T1
+    "mortgage_statement": (Tier.TIER_1, DocumentCategory.PROPERTY),  # T1
+    "property_tax_bill": (Tier.TIER_1, DocumentCategory.PROPERTY),  # T1
+    "hoa_statement": (Tier.TIER_1, DocumentCategory.PROPERTY),  # T1
+    "appraisal": (Tier.TIER_2, DocumentCategory.PROPERTY),
     "title_commitment": (Tier.TIER_2, DocumentCategory.PROPERTY),
+    "preliminary_title_report": (Tier.TIER_2, DocumentCategory.PROPERTY),
+    "flood_certification": (Tier.TIER_2, DocumentCategory.PROPERTY),
+    "flood_insurance_policy": (Tier.TIER_2, DocumentCategory.PROPERTY),
+    "survey": (Tier.TIER_2, DocumentCategory.PROPERTY),
+    "warranty_deed": (Tier.TIER_2, DocumentCategory.PROPERTY),
+    "home_inspection_report": (Tier.TIER_2, DocumentCategory.PROPERTY),
+    "pest_inspection_report": (Tier.TIER_2, DocumentCategory.PROPERTY),
+    "well_septic_certification": (Tier.TIER_2, DocumentCategory.PROPERTY),
+    "condo_questionnaire": (Tier.TIER_2, DocumentCategory.PROPERTY),
+    "payoff_statement": (Tier.TIER_2, DocumentCategory.PROPERTY),
+    "lease_agreement": (Tier.TIER_2, DocumentCategory.PROPERTY),
+    # ===================================================================== #
+    # Credit
+    # ===================================================================== #
     "credit_report": (Tier.TIER_2, DocumentCategory.CREDIT),
     "credit_explanation_letter": (Tier.TIER_2, DocumentCategory.CREDIT),
+    "credit_supplement": (Tier.TIER_2, DocumentCategory.CREDIT),
+    "bankruptcy_discharge": (Tier.TIER_2, DocumentCategory.CREDIT),
+    "foreclosure_documentation": (Tier.TIER_2, DocumentCategory.CREDIT),
+    "judgment_documentation": (Tier.TIER_2, DocumentCategory.CREDIT),
+    "collection_account_letter": (Tier.TIER_2, DocumentCategory.CREDIT),
+    "debt_payoff_statement": (Tier.TIER_2, DocumentCategory.CREDIT),
+    "student_loan_statement": (Tier.TIER_2, DocumentCategory.CREDIT),
+    "installment_loan_statement": (Tier.TIER_2, DocumentCategory.CREDIT),
+    # ===================================================================== #
+    # Disclosures
+    # ===================================================================== #
     "closing_disclosure": (Tier.TIER_2, DocumentCategory.DISCLOSURES),
     "loan_estimate": (Tier.TIER_2, DocumentCategory.DISCLOSURES),
+    "borrower_authorization": (Tier.TIER_2, DocumentCategory.DISCLOSURES),
+    "intent_to_proceed": (Tier.TIER_2, DocumentCategory.DISCLOSURES),
+    "notice_of_right_to_cancel": (Tier.TIER_2, DocumentCategory.DISCLOSURES),
+    "truth_in_lending": (Tier.TIER_2, DocumentCategory.DISCLOSURES),
+    "servicing_disclosure": (Tier.TIER_2, DocumentCategory.DISCLOSURES),
+    "affiliated_business_disclosure": (Tier.TIER_2, DocumentCategory.DISCLOSURES),
+    "privacy_notice": (Tier.TIER_2, DocumentCategory.DISCLOSURES),
+    "e_consent_disclosure": (Tier.TIER_2, DocumentCategory.DISCLOSURES),
+    # ===================================================================== #
+    # Borrower Info
+    # ===================================================================== #
+    "drivers_license": (Tier.TIER_1, DocumentCategory.BORROWER_INFO),  # T1
+    "divorce_decree": (Tier.TIER_1, DocumentCategory.BORROWER_INFO),  # T1
+    "letter_of_explanation": (Tier.TIER_1, DocumentCategory.BORROWER_INFO),  # T1
     "passport": (Tier.TIER_2, DocumentCategory.BORROWER_INFO),
     "social_security_card": (Tier.TIER_2, DocumentCategory.BORROWER_INFO),
+    "permanent_resident_card": (Tier.TIER_2, DocumentCategory.BORROWER_INFO),
+    "visa_documentation": (Tier.TIER_2, DocumentCategory.BORROWER_INFO),
+    "birth_certificate": (Tier.TIER_2, DocumentCategory.BORROWER_INFO),
+    "marriage_certificate": (Tier.TIER_2, DocumentCategory.BORROWER_INFO),
+    "military_id": (Tier.TIER_2, DocumentCategory.BORROWER_INFO),
+    "power_of_attorney": (Tier.TIER_2, DocumentCategory.BORROWER_INFO),
+    "trust_documentation": (Tier.TIER_2, DocumentCategory.BORROWER_INFO),
+    "name_affidavit": (Tier.TIER_2, DocumentCategory.BORROWER_INFO),
+    # ===================================================================== #
+    # Misc — recognized loan-file documents that don't fit the buckets above.
+    # (The Tier-3 default below catches anything UNCATALOGED; these are known.)
+    # ===================================================================== #
+    "uniform_residential_loan_application": (Tier.TIER_2, DocumentCategory.MISC),
+    "underwriting_approval": (Tier.TIER_2, DocumentCategory.MISC),
+    "rate_lock_agreement": (Tier.TIER_2, DocumentCategory.MISC),
+    "general_correspondence": (Tier.TIER_2, DocumentCategory.MISC),
 }
 
 # The default for any type not in the catalog: the long-tail Tier 3 / Misc bucket.
@@ -111,3 +199,12 @@ def get_category(document_type: str | None) -> DocumentCategory:
 def is_cataloged(document_type: str | None) -> bool:
     """Whether ``document_type`` is a known (cataloged) type, vs. long-tail."""
     return bool(document_type) and document_type in CATALOG
+
+
+def types_for_category(category: DocumentCategory) -> list[str]:
+    """All cataloged type slugs in ``category``, in catalog (insertion) order.
+
+    The classification prompt groups its type listing by category using this, so
+    the prompt's structure is driven by the catalog — one source of truth.
+    """
+    return [slug for slug, (_, cat) in CATALOG.items() if cat is category]

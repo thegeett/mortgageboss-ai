@@ -120,3 +120,58 @@ def test_existing_three_types_present_as_tier_1() -> None:
     """A guard: the 3 Phase-1 types must remain cataloged as Tier 1."""
     for slug in ("pay_stub", "w2", "bank_statement"):
         assert CATALOG[slug][0] is Tier.TIER_1
+
+
+# --------------------------------------------------------------------------- #
+# Comprehensive taxonomy (LP-59) — ~80 types, ~18 Tier 1, spread across all 7
+# categories. The exact count is a starter (refine with Priya); assert the shape.
+# --------------------------------------------------------------------------- #
+
+
+def test_catalog_is_comprehensive() -> None:
+    """The taxonomy spans ~80 types (industry-standard starter)."""
+    assert len(CATALOG) >= 80
+
+
+def test_eighteen_tier_1_types() -> None:
+    """The ~18 first-class extraction types (LP-58); the rest are Tier 2."""
+    tier_1 = [slug for slug, (tier, _) in CATALOG.items() if tier is Tier.TIER_1]
+    assert len(tier_1) == 18
+
+
+def test_all_seven_categories_represented() -> None:
+    present = {category for _, category in CATALOG.values()}
+    assert present == {
+        DocumentCategory.INCOME_EMPLOYMENT,
+        DocumentCategory.ASSETS,
+        DocumentCategory.PROPERTY,
+        DocumentCategory.CREDIT,
+        DocumentCategory.DISCLOSURES,
+        DocumentCategory.BORROWER_INFO,
+        DocumentCategory.MISC,
+    }
+
+
+@pytest.mark.parametrize(
+    ("document_type", "tier", "category"),
+    [
+        # A spread across categories + both tiers (LP-59 additions).
+        ("tax_transcript", Tier.TIER_2, DocumentCategory.INCOME_EMPLOYMENT),
+        ("k1_statement", Tier.TIER_2, DocumentCategory.INCOME_EMPLOYMENT),
+        ("brokerage_statement", Tier.TIER_2, DocumentCategory.ASSETS),
+        ("certificate_of_deposit", Tier.TIER_2, DocumentCategory.ASSETS),
+        ("appraisal", Tier.TIER_2, DocumentCategory.PROPERTY),
+        ("warranty_deed", Tier.TIER_2, DocumentCategory.PROPERTY),
+        ("bankruptcy_discharge", Tier.TIER_2, DocumentCategory.CREDIT),
+        ("student_loan_statement", Tier.TIER_2, DocumentCategory.CREDIT),
+        ("notice_of_right_to_cancel", Tier.TIER_2, DocumentCategory.DISCLOSURES),
+        ("intent_to_proceed", Tier.TIER_2, DocumentCategory.DISCLOSURES),
+        ("permanent_resident_card", Tier.TIER_2, DocumentCategory.BORROWER_INFO),
+        ("power_of_attorney", Tier.TIER_2, DocumentCategory.BORROWER_INFO),
+        ("uniform_residential_loan_application", Tier.TIER_2, DocumentCategory.MISC),
+        ("rate_lock_agreement", Tier.TIER_2, DocumentCategory.MISC),
+    ],
+)
+def test_spread_of_new_types(document_type: str, tier: Tier, category: DocumentCategory) -> None:
+    assert get_tier(document_type) is tier
+    assert get_category(document_type) == category

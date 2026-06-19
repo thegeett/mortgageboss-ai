@@ -152,23 +152,27 @@ async def _process_document(db: AsyncSession, document_id: str) -> None:
             },
         )
 
-        # --- Low-confidence / unknown gate → human review -------------------- #
-        if (
-            classification.document_type == "unknown"
-            or classification.confidence < _CONFIDENCE_THRESHOLD
-        ):
+        # --- Low-confidence gate → human review (LP-59) --------------------- #
+        # CONFIDENCE — not the "unknown" slug — decides here. A low-confidence
+        # result means the model is unsure WHICH type it is (it could be a known
+        # type) → a human confirms/corrects (the LP-44 override). A HIGH-confidence
+        # "unknown" (the model is sure it is NONE of the known types) is NOT caught
+        # here: it falls through to tier routing, where the catalog maps it to
+        # Tier 3 (the generic analyzer — that is its purpose).
+        if classification.confidence < _CONFIDENCE_THRESHOLD:
             document.status = DocumentStatus.NEEDS_REVIEW
             await db.commit()
             logger.info(
                 "document_needs_review",
                 document_id=str(document.id),
-                reason="low_confidence_or_unknown",
+                reason="low_confidence",
             )
             return
 
         # --- Route by tier (catalog-driven, LP-58) -------------------------- #
         # The catalog gave the document its tier above; each tier has one
         # handling path, and every path reaches a terminal status (resilience).
+        # A confident "unknown" routes here to Tier 3 (catalog default).
         await _route_by_tier(db, document, content)
     except Exception as exc:
         # UNEXPECTED (storage/DB/etc.) — never crash the worker or the batch.

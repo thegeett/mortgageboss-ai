@@ -226,6 +226,30 @@ async def test_tier3_routes_to_analyzer_stub(
     assert await _current_extraction(db_session, doc.id) is None  # generic analysis is a stub
 
 
+async def test_confident_unknown_routes_to_tier3_not_review(
+    monkeypatch: pytest.MonkeyPatch, db_session: AsyncSession
+) -> None:
+    """LP-59: a HIGH-confidence ``unknown`` → Tier 3 (generic analyzer), NOT review.
+
+    The model is confident the document is NONE of the known types — that is the
+    Tier-3 analyzer's job, not a human-review case.
+    """
+    doc = await _setup_document(db_session)
+    _patch_storage(monkeypatch)
+    _patch_classify(
+        monkeypatch,
+        ClassificationResult(document_type="unknown", confidence=0.9, reasoning="not a known type"),
+    )
+
+    await pipeline._process_document(db_session, str(doc.id))
+    await db_session.refresh(doc)
+
+    assert doc.status == DocumentStatus.COMPLETED  # terminal (Tier-3 stub), not NEEDS_REVIEW
+    assert doc.tier == Tier.TIER_3
+    assert doc.category == DocumentCategory.MISC
+    assert await _current_extraction(db_session, doc.id) is None
+
+
 # --------------------------------------------------------------------------- #
 # Low-confidence / unknown → NEEDS_REVIEW (no extraction)
 # --------------------------------------------------------------------------- #
