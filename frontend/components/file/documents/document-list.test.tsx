@@ -31,6 +31,8 @@ function doc(overrides: Partial<DocumentResponse> = {}): DocumentResponse {
     possible_duplicate: false,
     staleness: { is_stale: false, kind: null, reason: null, resolution: null, as_of_date: null },
     package_fit: { fit: true, reason: null },
+    standard_name: "",
+    package_qualification: { qualified: false, reason: "not_extracted" },
     ...overrides,
   };
 }
@@ -164,5 +166,44 @@ describe("DocumentList — versioning + staleness (LP-71)", () => {
     );
     // Each row notes the other same-type document (informational, not blocking).
     expect(screen.getAllByText(/1 other/i).length).toBe(2);
+  });
+});
+
+describe("DocumentList — standard naming + package-ready (LP-72)", () => {
+  it("shows the derived standard name as the primary label", () => {
+    render(
+      <DocumentList
+        documents={[doc({ standard_name: "Pay-Stub_Thermofisher-PPD_2026-05-22" })]}
+        isPending={false}
+        isError={false}
+        onSelect={vi.fn()}
+      />,
+    );
+    expect(screen.getByText("Pay-Stub_Thermofisher-PPD_2026-05-22")).toBeDefined();
+    expect(screen.queryByText("paystub.pdf")).toBeNull(); // raw filename not the primary label
+  });
+
+  it("shows a package-ready indicator on a qualified document", () => {
+    render(
+      <DocumentList
+        documents={[doc({ package_qualification: { qualified: true, reason: null } })]}
+        isPending={false}
+        isError={false}
+        onSelect={vi.fn()}
+      />,
+    );
+    expect(screen.getByLabelText("Package-ready")).toBeDefined();
+  });
+
+  it("shows no package-ready indicator when not qualified", () => {
+    render(
+      <DocumentList
+        documents={[doc({ package_qualification: { qualified: false, reason: "stale" } })]}
+        isPending={false}
+        isError={false}
+        onSelect={vi.fn()}
+      />,
+    );
+    expect(screen.queryByLabelText("Package-ready")).toBeNull();
   });
 });

@@ -14,6 +14,7 @@ from app.documents.staleness import (
     RecencyRule,
     evaluate_staleness,
     package_fitness,
+    package_qualification,
 )
 from app.models.document import Document, DocumentStatus, StalenessResolution, UploadSource
 from app.models.extraction import Extraction, ExtractionStatus
@@ -166,3 +167,52 @@ def test_windows_are_configurable() -> None:
     assert RECENCY_WINDOWS["pay_stub"].max_age_days == 30
     # The structure supports both rule kinds for Priya's refinement.
     assert isinstance(ExpirationRule(fields=("expiration_date",)), ExpirationRule)
+
+
+# --------------------------------------------------------------------------- #
+# Package qualification (LP-72) — current + fresh + typed + extracted
+# --------------------------------------------------------------------------- #
+
+
+def _fresh(doc: Document) -> object:
+    """Staleness for a fresh document (no window/date)."""
+    return evaluate_staleness(doc, None, today=TODAY)
+
+
+def test_qualified_when_current_fresh_typed_and_extracted() -> None:
+    doc = _doc("pay_stub")  # COMPLETED, current, typed
+    q = package_qualification(doc, _fresh(doc))
+    assert q.qualified is True and q.reason is None
+
+
+def test_not_qualified_when_superseded() -> None:
+    doc = _doc("pay_stub", is_current=False)
+    q = package_qualification(doc, _fresh(doc))
+    assert q.qualified is False and q.reason == "superseded"
+
+
+def test_not_qualified_when_stale() -> None:
+    doc = _doc("pay_stub")
+    ext = _extraction({"pay_date": (date(2026, 4, 1)).isoformat()})  # aged
+    q = package_qualification(doc, evaluate_staleness(doc, ext, today=TODAY))
+    assert q.qualified is False and q.reason == "stale"
+
+
+def test_not_qualified_when_untyped() -> None:
+    doc = _doc(None)  # no document_type yet
+    q = package_qualification(doc, _fresh(doc))
+    assert q.qualified is False and q.reason == "untyped"
+
+
+def test_not_qualified_when_not_extracted() -> None:
+    doc = _doc("pay_stub")
+    doc.status = DocumentStatus.NEEDS_REVIEW  # processing didn't fully succeed
+    q = package_qualification(doc, _fresh(doc))
+    assert q.qualified is False and q.reason == "not_extracted"
+
+
+def test_qualification_priority_superseded_before_stale() -> None:
+    doc = _doc("pay_stub", is_current=False)
+    ext = _extraction({"pay_date": (date(2026, 4, 1)).isoformat()})  # also aged
+    q = package_qualification(doc, evaluate_staleness(doc, ext, today=TODAY))
+    assert q.reason == "superseded"  # versioning checked first

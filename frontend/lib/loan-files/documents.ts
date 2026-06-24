@@ -107,6 +107,18 @@ export function versionLabel(doc: DocumentResponse): string | null {
   return doc.version_count > 1 ? `v${doc.version} of ${doc.version_count}` : null;
 }
 
+/**
+ * A subtle "Package-ready" indicator (LP-72) for a qualified document, else null. The
+ * not-qualified reasons (stale, superseded) are already surfaced by their own cues, so
+ * this only adds the positive, informational signal. Phase 6 assembles the package.
+ */
+export function packageReadyBadge(doc: DocumentResponse): DocumentBadge | null {
+  if (doc.package_qualification.qualified) {
+    return { label: "Package-ready", className: "bg-success/10 text-success border-success/20" };
+  }
+  return null;
+}
+
 /** A short note for a historical (superseded) document, or null if current. */
 export function supersededNote(doc: DocumentResponse): string | null {
   return doc.is_current ? null : "Superseded by a newer version";

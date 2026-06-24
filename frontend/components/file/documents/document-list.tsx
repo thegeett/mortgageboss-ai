@@ -7,13 +7,14 @@ import {
   formatFileSize,
   groupDocumentsByCategory,
   otherCurrentSameType,
+  packageReadyBadge,
   stalenessBadge,
   versionLabel,
 } from "@/lib/loan-files/documents";
 import type { DocumentResponse } from "@/lib/types/document";
 import { cn } from "@/lib/utils";
 import { formatDistanceToNow } from "date-fns";
-import { Copy, FileText } from "lucide-react";
+import { Copy, FileText, PackageCheck } from "lucide-react";
 import { DocumentStatusBadge } from "./document-status";
 
 function relativeTime(iso: string): string {
@@ -48,13 +49,20 @@ function DocumentRow({
       </span>
       <span className="min-w-0 flex-1">
         <span className="flex items-center gap-1.5">
+          {/* The derived standard name (LP-72) is the scannable primary label. */}
           <span className="truncate text-sm font-medium text-gray-900">
-            {document.original_filename}
+            {document.standard_name || document.original_filename}
           </span>
           {vlabel && (
             <span className="shrink-0 rounded-full border border-gray-200 bg-gray-50 px-1.5 py-0 text-[10px] font-medium text-gray-500">
               {vlabel}
             </span>
+          )}
+          {packageReadyBadge(document) && (
+            <PackageCheck
+              className="h-3.5 w-3.5 shrink-0 text-success"
+              aria-label="Package-ready"
+            />
           )}
         </span>
         <span className="mt-0.5 block truncate text-xs text-gray-500">

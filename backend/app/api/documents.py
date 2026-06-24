@@ -184,7 +184,7 @@ async def upload(
     for document in created:
         _enqueue_processing(document.id)
 
-    return [DocumentResponse.model_validate(d) for d in created]
+    return [await build_document_response(db, document=d) for d in created]
 
 
 @nested_router.get("", response_model=list[DocumentResponse])

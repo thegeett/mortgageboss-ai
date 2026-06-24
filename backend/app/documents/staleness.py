@@ -29,7 +29,7 @@ from typing import Any, Literal
 from pydantic import BaseModel
 
 from app.models.base import utcnow
-from app.models.document import Document, StalenessResolution
+from app.models.document import Document, DocumentStatus, StalenessResolution
 from app.models.extraction import Extraction
 
 StalenessKind = Literal["aged", "expired"]
@@ -157,3 +157,38 @@ def package_fitness(document: Document, staleness: StalenessInfo) -> PackageFitn
     if staleness.is_stale:
         return PackageFitness(fit=False, reason="stale")
     return PackageFitness(fit=True, reason=None)
+
+
+QualificationReason = Literal["superseded", "stale", "untyped", "not_extracted"]
+
+
+class PackageQualification(BaseModel):
+    """Whether a document is PACKAGE-READY (LP-72) — the fuller groundwork for Phase 6.
+
+    Extends fitness (current + fresh) with the processing state: a document is
+    **qualified** when it is CURRENT (LP-71 versioning) + FRESH (LP-71 staleness) +
+    TYPED (recognized — a ``document_type``) + EXTRACTED (processing succeeded —
+    terminal ``COMPLETED``). Phase 6 will assemble the package from qualified documents;
+    LP-72 just computes the flag so each document knows its readiness.
+    """
+
+    qualified: bool
+    reason: QualificationReason | None  # the first failing criterion, or None
+
+
+def package_qualification(document: Document, staleness: StalenessInfo) -> PackageQualification:
+    """Compute a document's package qualification (current + fresh + typed + extracted).
+
+    Consumes LP-71's signals (``is_current`` + ``staleness``) plus the extraction state.
+    Reasons are checked in priority order; the first failure is reported. Groundwork —
+    this does NOT assemble or render the package (Phase 6).
+    """
+    if not document.is_current:
+        return PackageQualification(qualified=False, reason="superseded")
+    if staleness.is_stale:
+        return PackageQualification(qualified=False, reason="stale")
+    if not document.document_type:
+        return PackageQualification(qualified=False, reason="untyped")
+    if document.status is not DocumentStatus.COMPLETED:
+        return PackageQualification(qualified=False, reason="not_extracted")
+    return PackageQualification(qualified=True, reason=None)

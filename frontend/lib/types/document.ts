@@ -55,6 +55,15 @@ export interface PackageFitness {
   reason: string | null;
 }
 
+/** Why a document isn't package-qualified (LP-72). */
+export type QualificationReason = "superseded" | "stale" | "untyped" | "not_extracted";
+
+/** Package qualification (LP-72): current + fresh + typed + extracted → qualified. */
+export interface PackageQualification {
+  qualified: boolean;
+  reason: QualificationReason | null;
+}
+
 /** A document's metadata (the list item). */
 export interface DocumentResponse {
   id: string;
@@ -86,6 +95,10 @@ export interface DocumentResponse {
   // --- Staleness + package fitness (LP-71) ---
   staleness: StalenessInfo;
   package_fit: PackageFitness;
+  // --- LP-72: a derived display name + the package-qualification flag ---
+  /** A consistent {Type}_{Identifier}_{Date} display name (the stored file is untouched). */
+  standard_name: string;
+  package_qualification: PackageQualification;
 }
 
 /**
@@ -133,9 +146,39 @@ export interface ExtractionPublic {
   created_at: string;
 }
 
-/** A document + its current extraction (the drawer detail). */
+/** Tier 3 generic-analyzer output (LP-66) — the flexible findings for a long-tail doc. */
+export interface AnalyzedParty {
+  name: string | null;
+  role: string | null;
+}
+export interface AnalyzedDate {
+  date: string | null;
+  description: string | null;
+}
+export interface AnalyzedAmount {
+  value: string | number | null;
+  context: string | null;
+}
+export interface AnalyzedFinding {
+  finding_type: string | null;
+  description: string | null;
+  amount: string | number | null;
+  frequency: string | null;
+}
+export interface GenericAnalysis {
+  document_type_guess?: string | null;
+  key_parties?: AnalyzedParty[];
+  key_dates?: AnalyzedDate[];
+  key_amounts?: AnalyzedAmount[];
+  key_findings?: AnalyzedFinding[];
+  summary?: string | null;
+}
+
+/** A document + its current extraction + (Tier 3) generic analysis (the drawer detail). */
 export interface DocumentDetailResponse extends DocumentResponse {
   current_extraction: ExtractionPublic | null;
+  /** Tier 3 only — the generic analyzer's parties/dates/amounts/findings (LP-66). */
+  generic_analysis: GenericAnalysis | null;
 }
 
 /** The dev-only text-layer extraction (LP-40; non-production endpoint). */

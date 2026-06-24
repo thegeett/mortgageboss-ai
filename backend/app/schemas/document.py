@@ -15,7 +15,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.documents.staleness import PackageFitness, StalenessInfo
+from app.documents.staleness import PackageFitness, PackageQualification, StalenessInfo
 from app.models.document import Document, DocumentCategory, DocumentStatus, Tier, UploadSource
 from app.models.extraction import ExtractionStatus
 
@@ -77,6 +77,15 @@ class DocumentResponse(BaseModel):
         default_factory=lambda: PackageFitness(fit=True, reason=None)
     )
 
+    # --- LP-72: a derived display name + the package-qualification flag ----------
+    # A consistent ``{Type}_{Identifier}_{Date}`` name derived from the extracted data
+    # (a display name — the stored file is untouched). Defaults to the raw filename.
+    standard_name: str = ""
+    # Package-ready = current + fresh + typed + extracted (consumes LP-71 + extraction).
+    package_qualification: PackageQualification = Field(
+        default_factory=lambda: PackageQualification(qualified=False, reason="not_extracted")
+    )
+
     @classmethod
     def from_model(
         cls,
@@ -85,13 +94,17 @@ class DocumentResponse(BaseModel):
         version_count: int,
         staleness: StalenessInfo,
         package_fit: PackageFitness,
+        standard_name: str,
+        package_qualification: PackageQualification,
     ) -> Self:
-        """Build the response, attaching the computed version-count/staleness/fitness."""
+        """Build the response, attaching the computed versioning/staleness/naming/fitness."""
         return cls.model_validate(document).model_copy(
             update={
                 "version_count": version_count,
                 "staleness": staleness,
                 "package_fit": package_fit,
+                "standard_name": standard_name,
+                "package_qualification": package_qualification,
             }
         )
 

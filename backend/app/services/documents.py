@@ -26,7 +26,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.documents.staleness import evaluate_staleness, package_fitness
+from app.documents.naming import standard_name
+from app.documents.staleness import evaluate_staleness, package_fitness, package_qualification
 from app.models.base import utcnow
 from app.models.document import Document, DocumentStatus, StalenessResolution, UploadSource
 from app.models.extraction import Extraction
@@ -234,8 +235,28 @@ async def get_current_extraction(db: AsyncSession, *, document: Document) -> Ext
 
 
 # --------------------------------------------------------------------------- #
-# Response building — enrich a document with versioning + staleness + fitness (LP-71)
+# Response building — enrich with versioning + staleness + naming + qualification
+# (LP-71 + LP-72)
 # --------------------------------------------------------------------------- #
+
+
+def _enrich(
+    document: Document, extraction: Extraction | None, *, version_count: int
+) -> DocumentResponse:
+    """Assemble the enriched response from a document + its current extraction.
+
+    Computes the LP-71 staleness/fitness + the LP-72 standard name + package
+    qualification. Pure (no DB) so list/single builders share one place.
+    """
+    staleness = evaluate_staleness(document, extraction)
+    return DocumentResponse.from_model(
+        document,
+        version_count=version_count,
+        staleness=staleness,
+        package_fit=package_fitness(document, staleness),
+        standard_name=standard_name(document, extraction),
+        package_qualification=package_qualification(document, staleness),
+    )
 
 
 async def build_document_response(db: AsyncSession, *, document: Document) -> DocumentResponse:
@@ -245,26 +266,14 @@ async def build_document_response(db: AsyncSession, *, document: Document) -> Do
     """
     extraction = await get_current_extraction(db, document=document)
     count = await version_count(db, document=document)
-    staleness = evaluate_staleness(document, extraction)
-    return DocumentResponse.from_model(
-        document,
-        version_count=count,
-        staleness=staleness,
-        package_fit=package_fitness(document, staleness),
-    )
+    return _enrich(document, extraction, version_count=count)
 
 
 async def build_document_detail(db: AsyncSession, *, document: Document) -> DocumentDetailResponse:
     """Build the enriched detail response (base + current extraction + generic analysis)."""
     extraction = await get_current_extraction(db, document=document)
     count = await version_count(db, document=document)
-    staleness = evaluate_staleness(document, extraction)
-    base = DocumentResponse.from_model(
-        document,
-        version_count=count,
-        staleness=staleness,
-        package_fit=package_fitness(document, staleness),
-    )
+    base = _enrich(document, extraction, version_count=count)
     return DocumentDetailResponse(
         **base.model_dump(),
         current_extraction=(
@@ -277,21 +286,13 @@ async def build_document_detail(db: AsyncSession, *, document: Document) -> Docu
 async def build_document_responses(
     db: AsyncSession, documents: list[Document]
 ) -> list[DocumentResponse]:
-    """Build the enriched list response — version counts batched, staleness from the
-    eager-loaded current extraction (no N+1). ``documents`` must have ``extractions``
+    """Build the enriched list response — version counts batched, staleness/naming from
+    the eager-loaded current extraction (no N+1). ``documents`` must have ``extractions``
     loaded (``list_documents`` does)."""
     group_ids = {d.version_group_id for d in documents if d.version_group_id is not None}
     counts = await version_counts_for_group_ids(db, group_ids=group_ids)
     responses: list[DocumentResponse] = []
     for d in documents:
         count = counts.get(d.version_group_id, 1) if d.version_group_id is not None else 1
-        staleness = evaluate_staleness(d, d.current_extraction)
-        responses.append(
-            DocumentResponse.from_model(
-                d,
-                version_count=count,
-                staleness=staleness,
-                package_fit=package_fitness(d, staleness),
-            )
-        )
+        responses.append(_enrich(d, d.current_extraction, version_count=count))
     return responses

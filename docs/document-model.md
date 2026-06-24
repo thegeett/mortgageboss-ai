@@ -439,6 +439,21 @@ is Phase 6. UI: version history, the Replace control, calm staleness warnings, g
 surfacing — **helpful, not blocking**. The main list shows current versions only
 (historical via the drawer). See **ADR-183**.
 
-**Next:** LP-72 (the full tier-aware detail view + package groundwork + the full-text
-search UI). The taxonomy, field sets, finding/need types — the reasoning quality, and
-the recency windows — refine with Priya.
+**LP-72 (tier-aware detail + standard naming + package-qualification groundwork):**
+the last Phase-2 feature — surfaces the tier work in the UI + makes documents
+package-ready. **Tier-aware detail:** the drawer ADAPTS to the tier — Tier 1 → the
+structured extracted fields; Tier 2 → the recognition summary + category; Tier 3 →
+the generic analyzer's findings (parties/dates/amounts) + summary (proportional
+investment made visible). **Standard naming:** a derived `{Type}_{Identifier}_{Date}`
+display name (no spaces) from the extracted data (e.g.
+`Pay-Stub_Thermofisher-PPD_2026-05-22`), with a `{Type}_{UploadDate}` fallback — a
+display name (the stored file is untouched); non-PII fields only;
+`app/documents/naming.py`. **Package qualification:** each document computes
+`package_qualified` = current (LP-71) + fresh (LP-71) + typed + extracted — groundwork
+consuming LP-71's signals; Phase 6 assembles the package from qualified documents.
+Surfaces, doesn't re-do (no re-extraction, no package assembly). See **ADR-185**.
+
+**Next:** LP-73 (Phase 2 testing & hardening) closes the phase. Phase 6 assembles the
+lender package from package-qualified documents with the standard naming. The
+taxonomy, field sets, finding/need types — the reasoning quality, the recency
+windows, and the naming/qualification rules — refine with Priya.

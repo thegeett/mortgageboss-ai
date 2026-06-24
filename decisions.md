@@ -5528,3 +5528,47 @@ production-correct direction (Phase 7) — not implemented now.
 end-to-end (verified: a previously-failed pay stub reprocessed → `completed`, extracted, need satisfied).
 Already-failed documents don't auto-retry — re-upload (or reprocess) after the fix. The pipeline /
 extractors / LP-71 code are unchanged (purely infra/config).
+
+## ADR-185: Tier-aware document detail + standard naming + package-qualification groundwork (LP-72)
+
+- **Date:** 2026-06-25
+- **Status:** Accepted
+
+**Context:** The tier model (LP-58..66) scales document handling — Tier 1 (full structured extraction),
+Tier 2 (recognize + summarize), Tier 3 (generic analysis). LP-71 added the freshness signals (current /
+fresh). The last Phase-2 feature ticket surfaces all of it in the UI and adds the two pieces that make a
+document **package-ready**: a consistent name and a computed fitness. (Surfaces existing work — no
+re-extraction, no package assembly.)
+
+**Decision (three pieces):**
+
+- **Tier-aware document detail.** The detail view ADAPTS to the document's tier — the proportional-investment
+  philosophy made visible: **Tier 1** → the structured extracted fields (deep, type-specific); **Tier 2** →
+  the recognition summary + category (light); **Tier 3** → the generic analyzer's findings (parties / dates /
+  amounts / findings) + summary (flexible). It extends the LP-43 drawer (branches on `tier`), not a rebuild;
+  pending/failed states degrade gracefully; PII stays masked.
+
+- **Standard naming.** A derived `{Type}_{KeyIdentifier}_{Date}` display name (no spaces) from the type +
+  extracted data (e.g. `Pay-Stub_Thermofisher-PPD_2026-05-22`, `Bank-Statement_Bank-of-America_2026-04-30`),
+  with a sensible `{Type}_{UploadDate}` fallback for sparse data (Tier 2/3 / extraction pending / missing
+  identifier). It is a **display/derived** name — the stored file is untouched. Only non-PII fields feed it
+  (never SSN / account number / DOB). Per-type rules are a plain config (`app/documents/naming.py`); they
+  refine with use / Priya.
+
+- **Package-qualification groundwork.** Each document computes a `package_qualification`: **qualified** =
+  CURRENT (LP-71 versioning) + FRESH (LP-71 staleness) + TYPED (recognized) + EXTRACTED (processing succeeded,
+  terminal `COMPLETED`). It consumes LP-71's signals + the extraction state and reports the first failing
+  criterion (superseded / stale / untyped / not_extracted). **Groundwork** — LP-72 makes each document KNOW
+  its readiness; **Phase 6** assembles the package from qualified documents. A subtle "Package-ready"
+  indicator surfaces it (informational), but nothing assembles/renders a package.
+
+**Rationale:** the tier model's value is realized when the detail shows the appropriate depth per tier; a
+derived consistent name makes lists scannable and the eventual lender package professionally named
+(underwriters expect consistent naming — a package of `scan1.pdf` is unprofessional); qualification consumes
+LP-71's current/fresh signals so Phase 6 can filter to qualified documents — LP-72 lays the groundwork
+without building the package.
+
+**Consequences:** LP-73 closes Phase 2 (testing/hardening). Phase 6 assembles the lender package from
+package-qualified documents (filtering on the qualification LP-72 computes) using the standard naming. Phase 3
+adds cross-source verification. The naming convention + qualification rules refine with Priya / use. The
+standard name is display-only (the stored file is never renamed).

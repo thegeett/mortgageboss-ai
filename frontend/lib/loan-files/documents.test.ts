@@ -11,6 +11,7 @@ import {
   maskLast4,
   maskSsn,
   otherCurrentSameType,
+  packageReadyBadge,
   stalenessBadge,
   supersededNote,
   typeReExtracts,
@@ -45,6 +46,8 @@ function doc(overrides: Partial<DocumentResponse> = {}): DocumentResponse {
     possible_duplicate: false,
     staleness: { is_stale: false, kind: null, reason: null, resolution: null, as_of_date: null },
     package_fit: { fit: true, reason: null },
+    standard_name: "",
+    package_qualification: { qualified: false, reason: "not_extracted" },
     ...overrides,
   };
 }
@@ -325,5 +328,24 @@ describe("otherCurrentSameType", () => {
     const a = doc({ id: "a", document_type: "pay_stub", is_current: false });
     const b = doc({ id: "b", document_type: "pay_stub" });
     expect(otherCurrentSameType(a, [a, b])).toEqual([]);
+  });
+});
+
+// --- Package-ready badge (LP-72) ------------------------------------------- //
+
+describe("packageReadyBadge", () => {
+  it("flags a qualified document (success-toned)", () => {
+    const badge = packageReadyBadge(
+      doc({ package_qualification: { qualified: true, reason: null } }),
+    );
+    expect(badge?.label).toBe("Package-ready");
+    expect(badge?.className).toContain("success");
+  });
+
+  it("is null for a not-qualified document", () => {
+    const badge = packageReadyBadge(
+      doc({ package_qualification: { qualified: false, reason: "stale" } }),
+    );
+    expect(badge).toBeNull();
   });
 });

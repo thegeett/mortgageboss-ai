@@ -27,11 +27,12 @@ import {
   OVERRIDE_TYPE_OPTIONS,
   formatConfidence,
   formatFileSize,
+  packageReadyBadge,
   typeReExtracts,
   validateUploadFile,
   versionLabel,
 } from "@/lib/loan-files/documents";
-import type { DocumentResponse } from "@/lib/types/document";
+import type { DocumentDetailResponse, DocumentResponse, DocumentTier } from "@/lib/types/document";
 import { cn } from "@/lib/utils";
 import { format } from "date-fns";
 import {
@@ -39,6 +40,7 @@ import {
   Download,
   FlaskConical,
   History,
+  PackageCheck,
   PencilLine,
   RefreshCw,
   SlashSquare,
@@ -49,6 +51,7 @@ import { useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { DocumentStatusBadge } from "./document-status";
 import { ExtractionView } from "./extraction-view";
+import { GenericAnalysisView } from "./generic-analysis-view";
 
 /** Non-production only — matches the LP-40 dev endpoint's gating. */
 const IS_DEV = process.env.NODE_ENV !== "production";
@@ -334,6 +337,130 @@ function VersionHistory({ summary, fileId }: { summary: DocumentResponse; fileId
   );
 }
 
+const TIER_LABELS: Record<DocumentTier, string> = {
+  tier_1: "Tier 1 · full extraction",
+  tier_2: "Tier 2 · recognized",
+  tier_3: "Tier 3 · generic analysis",
+};
+
+/**
+ * Tier-aware document detail (LP-72) — the view ADAPTS to the document's tier, the
+ * proportional-investment philosophy made visible:
+ *   Tier 1 → the structured EXTRACTED FIELDS (deep, type-specific).
+ *   Tier 2 → the SUMMARY + category (light recognition).
+ *   Tier 3 → the FINDINGS (parties/dates/amounts) + summary (flexible).
+ * Loading / error / pending-classification states are handled gracefully.
+ */
+function TierDetail({
+  summary,
+  detail,
+  isPending,
+  isError,
+  refetch,
+}: {
+  summary: DocumentResponse;
+  detail: DocumentDetailResponse | undefined;
+  isPending: boolean;
+  isError: boolean;
+  refetch: () => void;
+}) {
+  const tier = summary.tier;
+
+  return (
+    <section className="mt-6" aria-busy={isPending}>
+      <div className="flex items-center justify-between">
+        <h3 className="text-xs font-semibold uppercase tracking-wide text-gray-400">
+          Document detail
+        </h3>
+        {tier && <span className="text-[11px] text-gray-400">{TIER_LABELS[tier]}</span>}
+      </div>
+
+      {isPending ? (
+        <>
+          <output className="sr-only">Loading document detail</output>
+          <SkeletonText lines={4} widths={["w-full", "w-5/6", "w-3/4", "w-2/3"]} className="mt-3" />
+        </>
+      ) : isError ? (
+        <InlineErrorState
+          className="mt-1"
+          message="Couldn’t load the document detail."
+          onRetry={refetch}
+        />
+      ) : (
+        <TierBody summary={summary} detail={detail} />
+      )}
+    </section>
+  );
+}
+
+function TierBody({
+  summary,
+  detail,
+}: {
+  summary: DocumentResponse;
+  detail: DocumentDetailResponse | undefined;
+}) {
+  // Not yet classified (pending pipeline) — no tier to branch on.
+  if (!summary.tier) {
+    return (
+      <p className="mt-3 rounded-lg border border-dashed border-gray-200 px-3 py-4 text-sm text-gray-400">
+        Still processing — the detail appears once classification + extraction finish.
+      </p>
+    );
+  }
+
+  // TIER 1 — the structured extracted fields.
+  if (summary.tier === "tier_1") {
+    const extraction = detail?.current_extraction ?? null;
+    if (!extraction) {
+      return (
+        <p className="mt-3 rounded-lg border border-dashed border-gray-200 px-3 py-4 text-sm text-gray-400">
+          No extracted data yet for this document.
+        </p>
+      );
+    }
+    return (
+      <div className="mt-3">
+        <ExtractionView data={extraction.extracted_data} />
+        {extraction.model_used && (
+          <p className="mt-2 text-[11px] text-gray-400">
+            Extracted by {extraction.model_used} · v{extraction.version}
+          </p>
+        )}
+      </div>
+    );
+  }
+
+  // TIER 2 — the recognition summary + category.
+  if (summary.tier === "tier_2") {
+    return (
+      <div className="mt-3 space-y-2">
+        <p className="text-sm text-gray-700">
+          {summary.summary ?? "Recognized document — no summary available."}
+        </p>
+        {summary.category && (
+          <p className="text-xs text-gray-400">Category · {humanize(summary.category)}</p>
+        )}
+      </div>
+    );
+  }
+
+  // TIER 3 — the generic analyzer's findings + summary.
+  const analysis = detail?.generic_analysis ?? null;
+  return (
+    <div className="mt-3">
+      {analysis?.summary && <p className="text-sm text-gray-700">{analysis.summary}</p>}
+      {analysis ? (
+        <GenericAnalysisView analysis={analysis} />
+      ) : (
+        <p className="mt-3 rounded-lg border border-dashed border-gray-200 px-3 py-4 text-sm text-gray-400">
+          No analysis available for this document.
+        </p>
+      )}
+    </div>
+  );
+}
+
 export function DocumentDrawer({
   document: summary,
   fileId,
@@ -368,7 +495,6 @@ function DrawerBody({
   const [downloading, setDownloading] = useState(false);
 
   const confidence = formatConfidence(summary.classification_confidence);
-  const extraction = detail?.current_extraction ?? null;
 
   async function handleDownload() {
     setDownloading(true);
@@ -398,12 +524,24 @@ function DrawerBody({
   return (
     <>
       <SheetHeader>
-        <SheetTitle className="truncate pr-8">{summary.original_filename}</SheetTitle>
-        <SheetDescription className="flex items-center gap-2">
+        {/* The derived standard name (LP-72) leads — scannable + package-consistent;
+            the raw upload filename is shown as secondary. */}
+        <SheetTitle className="truncate pr-8">
+          {summary.standard_name || summary.original_filename}
+        </SheetTitle>
+        <SheetDescription className="flex flex-wrap items-center gap-2">
           <DocumentStatusBadge status={summary.status} />
           <span className="text-gray-400">·</span>
           <span>{summary.document_type ? humanize(summary.document_type) : "Unclassified"}</span>
+          {packageReadyBadge(summary) && (
+            <span className="inline-flex items-center gap-1 rounded-full border border-success/20 bg-success/10 px-2 py-0.5 text-[10px] font-medium text-success">
+              <PackageCheck className="h-3 w-3" aria-hidden /> Package-ready
+            </span>
+          )}
         </SheetDescription>
+        {summary.standard_name && summary.standard_name !== summary.original_filename && (
+          <p className="truncate text-[11px] text-gray-400">File: {summary.original_filename}</p>
+        )}
       </SheetHeader>
 
       <div className="flex-1 overflow-y-auto px-6 py-4">
@@ -419,53 +557,17 @@ function DrawerBody({
         {/* Staleness warning (LP-71) — calm, with resolve options. */}
         <StalenessWarning summary={summary} fileId={fileId} />
 
-        {/* Tier 2 (recognized) docs carry a short summary gist (LP-65) — a
-            human-reference "what is this?", not structured extraction. */}
-        {summary.summary && (
-          <section className="mt-6">
-            <h3 className="text-xs font-semibold uppercase tracking-wide text-gray-400">Summary</h3>
-            <p className="mt-2 text-sm text-gray-700">{summary.summary}</p>
-          </section>
-        )}
-
         {/* Manual type override (LP-44) */}
         <TypeOverride summary={summary} fileId={fileId} />
 
-        {/* Extraction */}
-        <section className="mt-6" aria-busy={isPending}>
-          <h3 className="text-xs font-semibold uppercase tracking-wide text-gray-400">
-            Extracted data
-          </h3>
-          {isPending ? (
-            <>
-              <output className="sr-only">Loading extracted data</output>
-              <SkeletonText
-                lines={4}
-                widths={["w-full", "w-5/6", "w-3/4", "w-2/3"]}
-                className="mt-3"
-              />
-            </>
-          ) : isError ? (
-            <InlineErrorState
-              className="mt-1"
-              message="Couldn’t load the extraction."
-              onRetry={() => void refetch()}
-            />
-          ) : extraction ? (
-            <div className="mt-3">
-              <ExtractionView data={extraction.extracted_data} />
-              {extraction.model_used && (
-                <p className="mt-2 text-[11px] text-gray-400">
-                  Extracted by {extraction.model_used} · v{extraction.version}
-                </p>
-              )}
-            </div>
-          ) : (
-            <p className="mt-3 rounded-lg border border-dashed border-gray-200 px-3 py-4 text-sm text-gray-400">
-              No extraction — this document is classified only.
-            </p>
-          )}
-        </section>
+        {/* Tier-aware detail (LP-72) — Tier 1 fields / Tier 2 summary / Tier 3 findings. */}
+        <TierDetail
+          summary={summary}
+          detail={detail}
+          isPending={isPending}
+          isError={isError}
+          refetch={() => void refetch()}
+        />
 
         {/* Version history (LP-71) — shown when the document has versions. */}
         <VersionHistory summary={summary} fileId={fileId} />
