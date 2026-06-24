@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import type { NeedsItemPublic } from "@/lib/types/needs-item";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // The dashboard fetches via hooks; mock the two data layers it depends on so the
 // test drives the data and asserts the rendered checklist + the disposition wiring.
@@ -9,6 +9,7 @@ const { confirmMutate } = vi.hoisted(() => ({ confirmMutate: vi.fn() }));
 
 const useNeeds = vi.fn();
 const useLoanFileDocuments = vi.fn();
+const useLoanFile = vi.fn();
 
 vi.mock("@/lib/api/needs", () => ({
   useNeeds: (...args: unknown[]) => useNeeds(...args),
@@ -21,6 +22,10 @@ vi.mock("@/lib/api/needs", () => ({
 
 vi.mock("@/lib/api/documents", () => ({
   useLoanFileDocuments: (...args: unknown[]) => useLoanFileDocuments(...args),
+}));
+
+vi.mock("@/lib/api/loan-files", () => ({
+  useLoanFile: (...args: unknown[]) => useLoanFile(...args),
 }));
 
 import { NeedsDashboard } from "./needs-dashboard";
@@ -63,6 +68,15 @@ function setNeeds(state: Record<string, unknown>) {
     ...state,
   });
 }
+
+function setAiStatus(status: "pending" | "completed" | "failed" | null) {
+  useLoanFile.mockReturnValue({ data: status === null ? {} : { ai_needs_status: status } });
+}
+
+beforeEach(() => {
+  // Default: no AI-needs note (settled/not-triggered). Tests override via setAiStatus.
+  useLoanFile.mockReturnValue({ data: { ai_needs_status: null } });
+});
 
 afterEach(() => {
   cleanup();
@@ -149,5 +163,36 @@ describe("NeedsDashboard", () => {
     render(<NeedsDashboard fileId="f1" />);
     expect(screen.getByText("Complete")).toBeDefined();
     expect(screen.getByText(/tax_return_2023\.pdf/)).toBeDefined();
+  });
+
+  // LP-71.5 — the AI-needs reasoning note (no silent floor-only-as-complete)
+
+  it("notes that more needs may appear while AI reasoning is pending", () => {
+    setDocuments(false);
+    setNeeds({
+      data: [need({ origin: "floor", disposition: "confirmed", needs_type: "pay_stub" })],
+    });
+    setAiStatus("pending");
+    render(<NeedsDashboard fileId="f1" />);
+    expect(screen.getByText(/more needs may appear/i)).toBeDefined();
+  });
+
+  it("warns that the list may be incomplete when AI reasoning failed", () => {
+    setDocuments(false);
+    setNeeds({
+      data: [need({ origin: "floor", disposition: "confirmed", needs_type: "pay_stub" })],
+    });
+    setAiStatus("failed");
+    render(<NeedsDashboard fileId="f1" />);
+    expect(screen.getByText(/may be incomplete/i)).toBeDefined();
+  });
+
+  it("shows no AI note once reasoning is complete", () => {
+    setDocuments(false);
+    setNeeds({ data: [need()] });
+    setAiStatus("completed");
+    render(<NeedsDashboard fileId="f1" />);
+    expect(screen.queryByText(/more needs may appear/i)).toBeNull();
+    expect(screen.queryByText(/may be incomplete/i)).toBeNull();
   });
 });

@@ -244,7 +244,16 @@ async def seed_floor_needs(db: AsyncSession, loan_file: LoanFile) -> list[NeedsI
     MISMO file won't duplicate). The floor is intentionally thin — the bulk of the
     intelligence is LP-69's AI reasoning, which augments this baseline. Floor needs
     are ``origin=FLOOR`` and ``disposition=CONFIRMED`` (near-certain). Uses ``flush``.
+
+    Flushes FIRST so the stated-data rules see the caller's just-added rows: the
+    session runs ``autoflush=False`` (ADR), so ``StatedIncomeItem`` / ``StatedAsset``
+    rows that a caller ``db.add``-ed but hasn't flushed are invisible to the SELECTs
+    in :func:`_has_stated_employment_income` / :func:`_has_stated_assets`. Without
+    this flush the employment (→ pay stubs + W-2) and asset (→ bank statements) rules
+    silently miss the data and only the purchase rule (in-memory ``loan_purpose``)
+    fires (LP-71.5).
     """
+    await db.flush()
     existing = await db.scalar(
         only_active(
             select(NeedsItem.id)

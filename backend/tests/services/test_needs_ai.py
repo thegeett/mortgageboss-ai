@@ -22,7 +22,7 @@ from app.models import Company, User, UserRole
 from app.models.borrower import Borrower
 from app.models.document import Document, DocumentStatus
 from app.models.document_finding import DocumentFindingType
-from app.models.loan_file import LoanFile, LoanPurpose
+from app.models.loan_file import AiNeedsStatus, LoanFile, LoanPurpose
 from app.models.needs_item import NeedsItemDisposition, NeedsItemOrigin, NeedsItemStatus
 from app.models.stated_financials import StatedAsset, StatedIncomeItem, StatedLiability
 from app.services import needs_ai as needs_ai_module
@@ -30,6 +30,7 @@ from app.services.document_findings import create_document_finding
 from app.services.loan_files import create_loan_file
 from app.services.needs_ai import (
     apply_ai_needs,
+    apply_ai_needs_for_file_id,
     assemble_file_context,
     propose_needs,
 )
@@ -177,14 +178,46 @@ async def test_proposal_without_reasoning_is_rejected(
     assert [p.need_type for p in proposals] == ["tax_return"]
 
 
-async def test_ai_failure_is_graceful(
+async def test_ai_failure_is_graceful_and_records_failed(
     db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """LP-71.5: a swallowed AI failure records FAILED (not silent) and never raises."""
     from app.ai.client import AIClientError
 
     lf = await _self_employed_file(db_session)
     monkeypatch.setattr(needs_ai_module, "complete", AsyncMock(side_effect=AIClientError("boom")))
     assert await propose_needs(db_session, lf) == []  # never raises
+    assert lf.ai_needs_status is AiNeedsStatus.FAILED  # the failure is visible, not silent
+
+
+async def test_apply_ai_needs_for_file_id_marks_completed(
+    db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """LP-71.5: a successful reasoning run flips the file's AI-needs status to COMPLETED."""
+    lf = await _self_employed_file(db_session)
+    lf.ai_needs_status = AiNeedsStatus.PENDING  # as the import leaves it
+    await db_session.flush()
+    _mock_ai(
+        monkeypatch,
+        [{"need_description": "Tax returns", "need_type": "tax_return", "reasoning": "self-emp"}],
+    )
+    await apply_ai_needs_for_file_id(db_session, lf.id)
+    assert lf.ai_needs_status is AiNeedsStatus.COMPLETED
+
+
+async def test_apply_ai_needs_for_file_id_keeps_failed(
+    db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """LP-71.5: an AI failure during the task leaves the status FAILED (not COMPLETED)."""
+    from app.ai.client import AIClientError
+
+    lf = await _self_employed_file(db_session)
+    lf.ai_needs_status = AiNeedsStatus.PENDING
+    await db_session.flush()
+    monkeypatch.setattr(needs_ai_module, "complete", AsyncMock(side_effect=AIClientError("boom")))
+    created = await apply_ai_needs_for_file_id(db_session, lf.id)
+    assert created == []
+    assert lf.ai_needs_status is AiNeedsStatus.FAILED
 
 
 # --------------------------------------------------------------------------- #

@@ -5306,3 +5306,54 @@ disposition → correction signal matures with use + her input; Phase 3 adds cro
 "Verified". The old provisional `NeedsSection` (LP-34, the compact list) is replaced by this dashboard;
 the needs read hook moved into its own data layer (`lib/api/needs.ts`) with live polling + the
 disposition mutations.
+
+## ADR-180: Floor seeds after a flush + AI-needs reasoning state is visible (LP-71.5)
+
+- **Date:** 2026-06-24
+- **Status:** Accepted
+
+**Context:** A real MISMO import (employment income + self-employment + a gift + several assets,
+Conventional Purchase) produced a needs list with only **"Purchase agreement"** — the deterministic
+floor's purchase rule — instead of the expected rich list (pay stubs, W-2, tax returns, gift letter,
+asset statements, …). A read-only diagnostic found two independent defects.
+
+**Defect 1 — the floor's stated-data rules were dead-on-arrival in the import path.** The session runs
+``autoflush=False`` (chosen so flush timing is explicit). In ``create_loan_file_from_mismo`` the stated
+``StatedIncomeItem`` / ``StatedAsset`` rows were ``db.add``-ed but **not flushed** before
+``seed_floor_needs`` ran. The floor's ``_has_stated_employment_income`` / ``_has_stated_assets`` run
+SELECTs — which, with autoflush off and no preceding flush, **could not see the pending rows** → the
+employment (→ pay stubs + W-2) and asset (→ bank statements) rules returned False. Only the purchase
+rule fired, because it reads ``loan_file.loan_purpose`` (an in-memory attribute), not a query. (Proof:
+imported files had the income/assets committed in the DB, yet only ``purchase_agreement`` was seeded;
+the DB had **zero** ``ai_reasoning`` needs ever.)
+
+**Defect 2 — the import silently "promised" AI needs.** LP-69's reasoning runs as an async Celery task
+(enqueued after commit). With no worker running, the task sits in the queue and the AI needs never
+appear — with **no signal** to the processor. And ``propose_needs`` swallows ``AIClientError`` → returns
+``[]`` with only a warning log, so an AI failure also yields a floor-only list silently. In a
+loan-processing tool, a short list silently presented as complete is a real safety gap (a processor may
+not chase documents they actually need).
+
+**Decision:**
+
+- **Fix 1 (the bug):** ``seed_floor_needs`` now ``await db.flush()``es **first**, so it always sees a
+  caller's just-added stated rows regardless of the session's autoflush setting. Placed inside the floor
+  function (not just at the call site) so every caller is protected. The floor's **rules are unchanged** —
+  they were correct; they just couldn't see the data. The deterministic floor now fires the
+  employment/asset needs on import **independent of the AI/worker**.
+- **Fix 2 (visibility, minimal):** a nullable ``ai_needs_status`` column on ``loan_files``
+  (``pending`` / ``completed`` / ``failed``; NULL = not triggered). The MISMO import sets ``PENDING``
+  (reasoning enqueued); the task entrypoint flips it to ``COMPLETED`` on a successful run; a swallowed
+  ``AIClientError`` records ``FAILED`` (no longer silent). The needs dashboard surfaces it — "AI is still
+  reviewing — more needs may appear" (pending) / "AI review didn't finish — this list may be incomplete"
+  (failed) — so a floor-only list is **never silently presented as complete**. It is **informational,
+  never blocking**: the import and the floor succeed regardless.
+
+**Out of scope (operational):** the Celery worker not running is fixed by starting it
+(``docker compose --profile worker up -d worker``), not by code. This ticket ensures (a) the floor works
+without the worker and (b) the worker's absence/failure is visible, not silent.
+
+**Consequences:** the deterministic floor is now reliable on import; the async AI reasoning's state is
+legible end-to-end; existing files default to ``ai_needs_status = NULL`` (no backfill). A future, richer
+"retry AI reasoning" affordance (vs. re-importing) and a fuller corrections/learning loop remain future
+work (LP-69's noted evolution).

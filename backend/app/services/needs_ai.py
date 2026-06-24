@@ -56,7 +56,7 @@ from app.models.borrower import Borrower
 from app.models.document import Document
 from app.models.document_finding import DocumentFinding
 from app.models.helpers import only_active
-from app.models.loan_file import LoanFile
+from app.models.loan_file import AiNeedsStatus, LoanFile
 from app.models.needs_item import NeedsItem, NeedsItemDisposition, NeedsItemOrigin
 from app.models.stated_financials import (
     StatedAsset,
@@ -283,7 +283,12 @@ async def propose_needs(db: AsyncSession, loan_file: LoanFile) -> list[ProposedN
             max_tokens=_MAX_TOKENS,
         )
     except AIClientError:
+        # Don't fail silently (LP-71.5): record FAILED so a floor-only list after an AI
+        # failure is distinguishable from a complete one. Never raises / blocks — the
+        # floor is independent; the AI is additive.
         logger.warning("needs_reasoning_ai_failed", loan_file_id=str(loan_file.id))
+        loan_file.ai_needs_status = AiNeedsStatus.FAILED
+        await db.flush()
         return []
 
     proposals = _parse_proposals(result.text)
@@ -352,8 +357,17 @@ async def _load_loan_file(db: AsyncSession, loan_file_id: UUID) -> LoanFile | No
 
 
 async def apply_ai_needs_for_file_id(db: AsyncSession, loan_file_id: UUID) -> list[NeedsItem]:
-    """Load the file (active) and run :func:`apply_ai_needs` — the task entrypoint."""
+    """Load the file (active) and run :func:`apply_ai_needs` — the task entrypoint.
+
+    Settles the AI-needs status (LP-71.5): the run flips ``PENDING`` → ``COMPLETED``,
+    unless the reasoning marked it ``FAILED`` (a swallowed ``AIClientError``), which is
+    left intact so the failure stays visible. Informational only — never blocks.
+    """
     loan_file = await _load_loan_file(db, loan_file_id)
     if loan_file is None:
         return []
-    return await apply_ai_needs(db, loan_file)
+    created = await apply_ai_needs(db, loan_file)
+    if loan_file.ai_needs_status is not AiNeedsStatus.FAILED:
+        loan_file.ai_needs_status = AiNeedsStatus.COMPLETED
+        await db.flush()
+    return created

@@ -394,6 +394,21 @@ per-file serialization stays invisible). Tenant-scoped read + write APIs nest un
 the file (`404` cross-company); the needs response carries no raw PII. See
 **ADR-179**.
 
+**LP-71.5 (floor flush-timing fix + AI-needs visibility):** a diagnostic found a
+MISMO import producing only the floor's "Purchase agreement". Two fixes: (1) the
+floor (`seed_floor_needs`) now **flushes first**, so its employment/asset rules see
+the just-added stated rows (the session runs `autoflush=False`) and the
+deterministic floor (pay stubs + W-2 + bank statements) fires on import
+**independent of the AI/worker** — the rules were always correct, they just couldn't
+see the data; (2) a nullable `ai_needs_status` on the loan file
+(`pending`/`completed`/`failed`) makes LP-69's **async** reasoning state visible —
+the dashboard says "AI is still reviewing — more needs may appear" or "AI review
+didn't finish — this list may be incomplete", so a floor-only list is never silently
+shown as complete (the AI failure swallow now records `failed`). Informational,
+never blocking. See **ADR-180**. *(A separate operational note: LP-69's reasoning
+runs in a Celery worker — `docker compose --profile worker up -d worker` — which
+must be running for AI needs to be produced.)*
+
 **Next:** LP-71 (document versioning + AI staleness) → LP-72 (the full tier-aware
 detail view + package groundwork + the full-text search UI). The taxonomy, field
 sets, finding/need types — and the reasoning quality — refine with Priya.

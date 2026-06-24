@@ -21,7 +21,7 @@ from pydantic import BaseModel, ConfigDict, EmailStr
 
 from app.models.borrower import Borrower
 from app.models.lender import LoanProgram
-from app.models.loan_file import LoanFile, LoanFileStatus, LoanPurpose
+from app.models.loan_file import AiNeedsStatus, LoanFile, LoanFileStatus, LoanPurpose
 from app.models.property import OccupancyType, PropertyType
 
 
@@ -147,6 +147,10 @@ class LoanFileDetail(LoanFileSummary):
 
     loan_officer_name: str | None
     loan_officer_email: str | None
+    # The async AI-needs reasoning state (LP-71.5) — pending/completed/failed, or null
+    # if no reasoning was triggered. Lets the needs dashboard say "more may be coming"
+    # or "reasoning didn't complete" instead of presenting a floor-only list as final.
+    ai_needs_status: AiNeedsStatus | None
     borrowers: list[BorrowerPublic]
     property: PropertyPublic | None
 
@@ -172,6 +176,7 @@ class LoanFileDetail(LoanFileSummary):
             updated_at=loan_file.updated_at,
             loan_officer_name=loan_file.loan_officer_name,
             loan_officer_email=loan_file.loan_officer_email,
+            ai_needs_status=loan_file.ai_needs_status,
             borrowers=[BorrowerPublic.model_validate(b) for b in borrowers],
             property=(
                 PropertyPublic.model_validate(loan_file.property)

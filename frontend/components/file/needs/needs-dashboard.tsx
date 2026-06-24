@@ -6,11 +6,13 @@ import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { InlineErrorState } from "@/components/ui/error-state";
 import { SkeletonRows } from "@/components/ui/skeleton";
 import { useLoanFileDocuments } from "@/lib/api/documents";
+import { useLoanFile } from "@/lib/api/loan-files";
 import { useNeeds } from "@/lib/api/needs";
 import { hasInProgressDocuments } from "@/lib/loan-files/documents";
 import { groupNeeds, outstandingNeedsCount, proposedNeedsCount } from "@/lib/loan-files/needs";
+import type { AiNeedsStatus } from "@/lib/types/loan-file";
 import { cn } from "@/lib/utils";
-import { ClipboardList } from "lucide-react";
+import { ClipboardList, Sparkles, TriangleAlert } from "lucide-react";
 
 /**
  * The needs-list dashboard (LP-70) — the self-maintaining checklist, the face of
@@ -27,8 +29,10 @@ import { ClipboardList } from "lucide-react";
  */
 export function NeedsDashboard({ fileId }: { fileId: string }) {
   const documents = useLoanFileDocuments(fileId);
+  const file = useLoanFile(fileId);
   const live = hasInProgressDocuments(documents.data ?? []);
   const needs = useNeeds(fileId, { live });
+  const aiStatus = file.data?.ai_needs_status ?? null;
 
   const items = needs.data ?? [];
   const groups = groupNeeds(items);
@@ -64,6 +68,7 @@ export function NeedsDashboard({ fileId }: { fileId: string }) {
       </CardHeader>
 
       <CardContent aria-busy={needs.isPending}>
+        <AiNeedsNote status={aiStatus} />
         {needs.isPending ? (
           <>
             <output className="sr-only">Loading the needs list</output>
@@ -99,6 +104,43 @@ export function NeedsDashboard({ fileId }: { fileId: string }) {
       </CardContent>
     </Card>
   );
+}
+
+/**
+ * The AI-needs reasoning note (LP-71.5) — so a floor-only list is never silently
+ * presented as complete. `pending`: the async reasoning is still running (more needs
+ * may appear). `failed`: it didn't finish (the list may be incomplete). Otherwise
+ * nothing — a settled, complete list needs no note.
+ */
+function AiNeedsNote({ status }: { status: AiNeedsStatus | null }) {
+  if (status === "pending") {
+    return (
+      <div
+        className="mb-3 flex items-start gap-2 rounded-md bg-info/5 px-3 py-2"
+        aria-live="polite"
+      >
+        <Sparkles className="mt-0.5 h-3.5 w-3.5 shrink-0 text-info" aria-hidden />
+        <p className="text-xs text-gray-600">
+          AI is still reviewing this file — more needs may appear shortly.
+        </p>
+      </div>
+    );
+  }
+  if (status === "failed") {
+    return (
+      <div
+        aria-live="polite"
+        className="mb-3 flex items-start gap-2 rounded-md bg-warning/5 px-3 py-2"
+      >
+        <TriangleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0 text-warning" aria-hidden />
+        <p className="text-xs text-gray-600">
+          AI review didn't finish, so this checklist may be incomplete. The required documents below
+          are still accurate — re-import the file to retry the AI review.
+        </p>
+      </div>
+    );
+  }
+  return null;
 }
 
 /** The subtle, transient "updating" cue — a soft pulsing dot + label. */
