@@ -19,6 +19,14 @@ function doc(status: DocumentStatus): DocumentResponse {
     uploaded_by_user_id: "u1",
     created_at: "2026-06-12T10:00:00Z",
     updated_at: "2026-06-12T10:00:00Z",
+    version: 1,
+    is_current: true,
+    version_group_id: null,
+    supersedes_document_id: null,
+    version_count: 1,
+    possible_duplicate: false,
+    staleness: { is_stale: false, kind: null, reason: null, resolution: null, as_of_date: null },
+    package_fit: { fit: true, reason: null },
   };
 }
 

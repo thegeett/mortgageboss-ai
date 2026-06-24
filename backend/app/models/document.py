@@ -30,7 +30,7 @@ from enum import StrEnum
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
-from sqlalchemy import JSON, Float, ForeignKey, Integer, String, Text
+from sqlalchemy import JSON, Boolean, Float, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, SoftDeleteMixin, TimestampMixin, UUIDMixin
@@ -116,6 +116,21 @@ class UploadSource(StrEnum):
     MISMO_IMPORT = "mismo_import"
 
 
+class StalenessResolution(StrEnum):
+    """The processor's decision on a flagged-stale document (LP-71).
+
+    Staleness is computed deterministically (the extracted date vs. a recency window,
+    or a newer version exists). When a CURRENT document is flagged stale, the processor
+    RESOLVES it: ``WAIVED`` (not required to be fresher for this file) or ``ACCEPTED``
+    (acknowledged, used as-is). The third resolution — *replace* — is the versioning
+    flow (the doc becomes historical), so it isn't a value here. Auto-resolution is V2.
+    A ``None`` resolution means the staleness flag (if any) is unresolved/active.
+    """
+
+    WAIVED = "waived"
+    ACCEPTED = "accepted"
+
+
 class Document(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     """An uploaded file attached to a loan file (metadata + storage path)."""
 
@@ -174,6 +189,37 @@ class Document(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     )
     # Failure reason, populated when status is FAILED.
     processing_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # --- Versioning (Model C, LP-71) ---------------------------------------
+    # New uploads are CURRENT + standalone (NO replacement assumption — multiples are
+    # normal: a set of pay stubs / months of statements are NOT replacements). An
+    # EXPLICIT replace supersedes a specific document: the old → historical
+    # (is_current False), the new → current, BOTH kept for audit, sharing a
+    # version_group. ``version_group_id`` is NULL for a standalone (single-version)
+    # document and the originating document's id once a group forms. ``version`` is
+    # the 1-based ordinal within the group. ``supersedes_document_id`` is the
+    # immediate predecessor (the audit chain; SET NULL so the chain degrades, not breaks).
+    version: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    is_current: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False, index=True)
+    version_group_id: Mapped[UUID | None] = mapped_column(index=True, nullable=True)
+    supersedes_document_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("documents.id", ondelete="SET NULL"), nullable=True
+    )
+
+    # --- Staleness (LP-71) — the processor's resolution of a flagged-stale doc ----
+    # Staleness itself is COMPUTED (the extracted date vs. a recency window, or a newer
+    # version exists) — not stored. This records the processor's RESOLUTION (waive /
+    # accept) so a resolved flag clears; NULL = unresolved. Replace is the versioning
+    # flow (the doc goes historical), so it's not a value here. Auto-resolution is V2.
+    staleness_resolution: Mapped[StalenessResolution | None] = mapped_column(
+        str_enum(StalenessResolution), nullable=True
+    )
+
+    # An auto-ingested document (e.g. emailed by the borrower) can't be explicitly
+    # "replaced" by a click, so it arrives flagged as a possible duplicate/replacement
+    # for the processor to resolve. Set by ingestion (a later feature); the mechanism
+    # + the gentle surfacing live here now. Default False (a normal user upload).
+    possible_duplicate: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
     # --- Provenance (ADR-056) ----------------------------------------------
     upload_source: Mapped[UploadSource] = mapped_column(str_enum(UploadSource), nullable=False)

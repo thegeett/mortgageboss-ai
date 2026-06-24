@@ -50,6 +50,10 @@ class ActivityType(StrEnum):
     DOCUMENT_UPLOADED = "document_uploaded"
     DOCUMENT_PROCESSED = "document_processed"
     DOCUMENT_TYPE_OVERRIDDEN = "document_type_overridden"
+    DOCUMENT_REPLACED = (
+        "document_replaced"  # explicit replace — old historical, new current (LP-71)
+    )
+    DOCUMENT_STALENESS_RESOLVED = "document_staleness_resolved"  # processor waived/accepted (LP-71)
     FINDING_RESOLVED = "finding_resolved"
     VERIFICATION_RUN = "verification_run"
     NEEDS_ITEM_CREATED = "needs_item_created"

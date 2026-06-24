@@ -24,12 +24,16 @@ from uuid import UUID
 from fastapi import status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
+from app.documents.staleness import evaluate_staleness, package_fitness
 from app.models.base import utcnow
-from app.models.document import Document, DocumentStatus, UploadSource
+from app.models.document import Document, DocumentStatus, StalenessResolution, UploadSource
 from app.models.extraction import Extraction
 from app.models.helpers import only_active
 from app.models.loan_file import LoanFile
+from app.schemas.document import DocumentDetailResponse, DocumentResponse, ExtractionPublic
+from app.services.document_versioning import version_count, version_counts_for_group_ids
 
 # --------------------------------------------------------------------------- #
 # Upload validation
@@ -140,12 +144,46 @@ async def create_document(
 
 
 async def list_documents(db: AsyncSession, *, loan_file_id: UUID) -> list[Document]:
-    """The file's active documents, newest first. (File gate done by the caller.)"""
+    """The file's active documents, newest first. (File gate done by the caller.)
+
+    Eager-loads ``extractions`` so the response builder can compute staleness from the
+    current extraction's dates without an N+1 (LP-71).
+    """
     stmt = select(Document).where(Document.loan_file_id == loan_file_id)
     stmt = only_active(stmt, Document)
+    stmt = stmt.options(selectinload(Document.extractions))
     stmt = stmt.order_by(Document.created_at.desc())
     result = await db.execute(stmt)
     return list(result.scalars().all())
+
+
+async def get_version_group_documents(db: AsyncSession, *, document: Document) -> list[Document]:
+    """All active documents in this document's version group, oldest→newest (LP-71).
+
+    A standalone document (no group) returns just itself. Used by the version-history view.
+    """
+    if document.version_group_id is None:
+        return [document]
+    stmt = (
+        select(Document)
+        .where(Document.version_group_id == document.version_group_id)
+        .options(selectinload(Document.extractions))
+        .order_by(Document.version)
+    )
+    return list((await db.scalars(only_active(stmt, Document))).all())
+
+
+async def resolve_staleness(db: AsyncSession, *, document: Document, action: str) -> Document:
+    """Record the processor's staleness resolution (LP-71): ``waive`` or ``accept``.
+
+    Clears the active staleness flag (the assessment respects the stored resolution).
+    *Replace* is the versioning flow, not a value here. Uses ``flush``.
+    """
+    document.staleness_resolution = (
+        StalenessResolution.WAIVED if action == "waive" else StalenessResolution.ACCEPTED
+    )
+    await db.flush()
+    return document
 
 
 async def get_document_for_company(
@@ -193,3 +231,67 @@ async def get_current_extraction(db: AsyncSession, *, document: Document) -> Ext
     stmt = only_active(stmt, Extraction)
     extraction: Extraction | None = await db.scalar(stmt)
     return extraction
+
+
+# --------------------------------------------------------------------------- #
+# Response building — enrich a document with versioning + staleness + fitness (LP-71)
+# --------------------------------------------------------------------------- #
+
+
+async def build_document_response(db: AsyncSession, *, document: Document) -> DocumentResponse:
+    """Build one enriched response (fetches the current extraction + version count).
+
+    For single-document endpoints (detail / override / replace / resolve / upload).
+    """
+    extraction = await get_current_extraction(db, document=document)
+    count = await version_count(db, document=document)
+    staleness = evaluate_staleness(document, extraction)
+    return DocumentResponse.from_model(
+        document,
+        version_count=count,
+        staleness=staleness,
+        package_fit=package_fitness(document, staleness),
+    )
+
+
+async def build_document_detail(db: AsyncSession, *, document: Document) -> DocumentDetailResponse:
+    """Build the enriched detail response (base + current extraction + generic analysis)."""
+    extraction = await get_current_extraction(db, document=document)
+    count = await version_count(db, document=document)
+    staleness = evaluate_staleness(document, extraction)
+    base = DocumentResponse.from_model(
+        document,
+        version_count=count,
+        staleness=staleness,
+        package_fit=package_fitness(document, staleness),
+    )
+    return DocumentDetailResponse(
+        **base.model_dump(),
+        current_extraction=(
+            ExtractionPublic.model_validate(extraction) if extraction is not None else None
+        ),
+        generic_analysis=document.generic_analysis,
+    )
+
+
+async def build_document_responses(
+    db: AsyncSession, documents: list[Document]
+) -> list[DocumentResponse]:
+    """Build the enriched list response — version counts batched, staleness from the
+    eager-loaded current extraction (no N+1). ``documents`` must have ``extractions``
+    loaded (``list_documents`` does)."""
+    group_ids = {d.version_group_id for d in documents if d.version_group_id is not None}
+    counts = await version_counts_for_group_ids(db, group_ids=group_ids)
+    responses: list[DocumentResponse] = []
+    for d in documents:
+        count = counts.get(d.version_group_id, 1) if d.version_group_id is not None else 1
+        staleness = evaluate_staleness(d, d.current_extraction)
+        responses.append(
+            DocumentResponse.from_model(
+                d,
+                version_count=count,
+                staleness=staleness,
+                package_fit=package_fitness(d, staleness),
+            )
+        )
+    return responses

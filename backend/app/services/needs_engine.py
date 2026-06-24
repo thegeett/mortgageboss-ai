@@ -216,6 +216,28 @@ async def apply_document_to_needs(db: AsyncSession, document: Document) -> Needs
     return need
 
 
+async def reopen_needs_satisfied_by(db: AsyncSession, *, document_id: UUID) -> list[NeedsItem]:
+    """Re-open any needs a (now-superseded) document had satisfied (LP-71 replace).
+
+    When a document is explicitly replaced, the need it fulfilled must re-evaluate
+    against the CURRENT version: this resets such needs to ``PENDING`` and clears the
+    satisfying link, so when the replacement document finishes processing,
+    :func:`apply_document_to_needs` re-satisfies the need with the new current document.
+    Sets the fields directly (a deliberate reset, not a guarded lifecycle move). Uses
+    ``flush``; the caller owns the transaction (and re-evaluation is serialized per
+    file via the replacement document's pipeline).
+    """
+    stmt = select(NeedsItem).where(NeedsItem.satisfied_by_document_id == document_id)
+    needs = list((await db.scalars(only_active(stmt, NeedsItem))).all())
+    for need in needs:
+        need.status = NeedsItemStatus.PENDING
+        need.satisfied_by_document_id = None
+        need.satisfied_at = None
+    if needs:
+        await db.flush()
+    return needs
+
+
 # --------------------------------------------------------------------------- #
 # The thin deterministic floor (from the stated MISMO data)
 # --------------------------------------------------------------------------- #

@@ -3,10 +3,17 @@
 import { ErrorState } from "@/components/ui/error-state";
 import { SkeletonRows } from "@/components/ui/skeleton";
 import { humanize } from "@/lib/format";
-import { formatFileSize, groupDocumentsByCategory } from "@/lib/loan-files/documents";
+import {
+  formatFileSize,
+  groupDocumentsByCategory,
+  otherCurrentSameType,
+  stalenessBadge,
+  versionLabel,
+} from "@/lib/loan-files/documents";
 import type { DocumentResponse } from "@/lib/types/document";
+import { cn } from "@/lib/utils";
 import { formatDistanceToNow } from "date-fns";
-import { FileText } from "lucide-react";
+import { Copy, FileText } from "lucide-react";
 import { DocumentStatusBadge } from "./document-status";
 
 function relativeTime(iso: string): string {
@@ -19,11 +26,17 @@ function relativeTime(iso: string): string {
 
 function DocumentRow({
   document,
+  allDocuments,
   onSelect,
 }: {
   document: DocumentResponse;
+  allDocuments: DocumentResponse[];
   onSelect: (document: DocumentResponse) => void;
 }) {
+  const stale = stalenessBadge(document);
+  const vlabel = versionLabel(document);
+  const others = otherCurrentSameType(document, allDocuments);
+
   return (
     <button
       type="button"
@@ -34,8 +47,15 @@ function DocumentRow({
         <FileText className="h-4 w-4" aria-hidden />
       </span>
       <span className="min-w-0 flex-1">
-        <span className="block truncate text-sm font-medium text-gray-900">
-          {document.original_filename}
+        <span className="flex items-center gap-1.5">
+          <span className="truncate text-sm font-medium text-gray-900">
+            {document.original_filename}
+          </span>
+          {vlabel && (
+            <span className="shrink-0 rounded-full border border-gray-200 bg-gray-50 px-1.5 py-0 text-[10px] font-medium text-gray-500">
+              {vlabel}
+            </span>
+          )}
         </span>
         <span className="mt-0.5 block truncate text-xs text-gray-500">
           {document.document_type ? humanize(document.document_type) : "—"}
@@ -47,6 +67,29 @@ function DocumentRow({
         {/* Tier 2 (recognized) docs carry a short summary gist (LP-65). */}
         {document.summary && (
           <span className="mt-0.5 block truncate text-xs text-gray-400">{document.summary}</span>
+        )}
+        {/* Calm, informational cues — staleness + gentle duplicate surfacing (LP-71). */}
+        {(stale || others.length > 0) && (
+          <span className="mt-1 flex flex-wrap items-center gap-1.5">
+            {stale && (
+              <span
+                className={cn(
+                  "inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-medium",
+                  stale.className,
+                )}
+              >
+                {stale.label}
+              </span>
+            )}
+            {others.length > 0 && (
+              <span className="inline-flex items-center gap-1 text-[11px] text-gray-400">
+                <Copy className="h-3 w-3" aria-hidden />
+                {others.length} other{" "}
+                {document.document_type ? humanize(document.document_type) : "document"}
+                {others.length === 1 ? "" : "s"}
+              </span>
+            )}
+          </span>
         )}
       </span>
       <DocumentStatusBadge status={document.status} />
@@ -101,7 +144,10 @@ export function DocumentList({
     );
   }
 
-  const groups = groupDocumentsByCategory(documents);
+  // Show CURRENT versions only — historical (superseded) versions are reached via the
+  // version history in the drawer (LP-71), so the list stays uncluttered.
+  const current = documents.filter((d) => d.is_current);
+  const groups = groupDocumentsByCategory(current);
   return (
     <div className="space-y-6">
       {groups.map((group) => (
@@ -116,7 +162,7 @@ export function DocumentList({
           </div>
           <div className="space-y-2">
             {group.documents.map((doc) => (
-              <DocumentRow key={doc.id} document={doc} onSelect={onSelect} />
+              <DocumentRow key={doc.id} document={doc} allDocuments={current} onSelect={onSelect} />
             ))}
           </div>
         </section>

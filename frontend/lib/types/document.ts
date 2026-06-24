@@ -33,6 +33,28 @@ export type ExtractionStatus = "succeeded" | "failed" | "partial";
 /** The level-of-investment tier a document was handled as (LP-58). */
 export type DocumentTier = "tier_1" | "tier_2" | "tier_3";
 
+/** The processor's resolution of a flagged-stale document (LP-71). */
+export type StalenessResolution = "waived" | "accepted";
+
+/** Why a document is (or would be) stale: aged past its window, or expired. */
+export type StalenessKind = "aged" | "expired";
+
+/** A document's freshness assessment (LP-71) — deterministic, date-driven. */
+export interface StalenessInfo {
+  is_stale: boolean;
+  kind: StalenessKind | null;
+  reason: string | null;
+  resolution: StalenessResolution | null;
+  as_of_date: string | null;
+}
+
+/** Whether a document is fit for the lender package (current + fresh) — groundwork (LP-71). */
+export interface PackageFitness {
+  fit: boolean;
+  /** Why not fit: "superseded" | "stale" | null. */
+  reason: string | null;
+}
+
 /** A document's metadata (the list item). */
 export interface DocumentResponse {
   id: string;
@@ -52,6 +74,18 @@ export interface DocumentResponse {
   uploaded_by_user_id: string | null;
   created_at: string;
   updated_at: string;
+  // --- Versioning (Model C, LP-71) ---
+  version: number;
+  is_current: boolean;
+  version_group_id: string | null;
+  supersedes_document_id: string | null;
+  /** How many versions are in this document's group (1 = standalone). */
+  version_count: number;
+  /** The email-ingest "possible duplicate" flag (surfaced gently). */
+  possible_duplicate: boolean;
+  // --- Staleness + package fitness (LP-71) ---
+  staleness: StalenessInfo;
+  package_fit: PackageFitness;
 }
 
 /**

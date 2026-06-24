@@ -10,10 +10,14 @@ import {
   isTerminalStatus,
   maskLast4,
   maskSsn,
+  otherCurrentSameType,
+  stalenessBadge,
+  supersededNote,
   typeReExtracts,
   validateUploadFile,
+  versionLabel,
 } from "@/lib/loan-files/documents";
-import type { DocumentResponse, DocumentStatus } from "@/lib/types/document";
+import type { DocumentResponse, DocumentStatus, StalenessInfo } from "@/lib/types/document";
 import { describe, expect, it } from "vitest";
 
 function doc(overrides: Partial<DocumentResponse> = {}): DocumentResponse {
@@ -33,6 +37,14 @@ function doc(overrides: Partial<DocumentResponse> = {}): DocumentResponse {
     uploaded_by_user_id: "u1",
     created_at: "2026-06-12T10:00:00Z",
     updated_at: "2026-06-12T10:00:00Z",
+    version: 1,
+    is_current: true,
+    version_group_id: null,
+    supersedes_document_id: null,
+    version_count: 1,
+    possible_duplicate: false,
+    staleness: { is_stale: false, kind: null, reason: null, resolution: null, as_of_date: null },
+    package_fit: { fit: true, reason: null },
     ...overrides,
   };
 }
@@ -240,5 +252,78 @@ describe("typeReExtracts (LP-44 override hint)", () => {
   it("offers the extractable types as selectable override options", () => {
     const values = OVERRIDE_TYPE_OPTIONS.map((o) => o.value);
     for (const t of ["pay_stub", "w2", "bank_statement"]) expect(values).toContain(t);
+  });
+});
+
+// --- Versioning + staleness helpers (LP-71) -------------------------------- //
+
+function staleness(overrides: Partial<StalenessInfo> = {}): StalenessInfo {
+  return {
+    is_stale: false,
+    kind: null,
+    reason: null,
+    resolution: null,
+    as_of_date: null,
+    ...overrides,
+  };
+}
+
+describe("stalenessBadge", () => {
+  it("flags an aged document (warning-toned)", () => {
+    const badge = stalenessBadge(doc({ staleness: staleness({ is_stale: true, kind: "aged" }) }));
+    expect(badge?.label).toBe("May be stale");
+    expect(badge?.className).toContain("warning");
+  });
+
+  it("flags an expired document", () => {
+    const badge = stalenessBadge(
+      doc({ staleness: staleness({ is_stale: true, kind: "expired" }) }),
+    );
+    expect(badge?.label).toBe("Expired");
+  });
+
+  it("shows a muted note once resolved", () => {
+    const badge = stalenessBadge(doc({ staleness: staleness({ resolution: "waived" }) }));
+    expect(badge?.label).toBe("Staleness waived");
+    expect(badge?.className).toContain("gray");
+  });
+
+  it("is null for a fresh document", () => {
+    expect(stalenessBadge(doc())).toBeNull();
+  });
+});
+
+describe("versionLabel", () => {
+  it("shows 'v2 of 2' for a multi-version document", () => {
+    expect(versionLabel(doc({ version: 2, version_count: 2 }))).toBe("v2 of 2");
+  });
+  it("is null for a standalone document", () => {
+    expect(versionLabel(doc({ version: 1, version_count: 1 }))).toBeNull();
+  });
+});
+
+describe("supersededNote", () => {
+  it("notes a historical document", () => {
+    expect(supersededNote(doc({ is_current: false }))).toBe("Superseded by a newer version");
+  });
+  it("is null for the current version", () => {
+    expect(supersededNote(doc({ is_current: true }))).toBeNull();
+  });
+});
+
+describe("otherCurrentSameType", () => {
+  it("finds other current documents of the same type (gentle duplicate surfacing)", () => {
+    const a = doc({ id: "a", document_type: "pay_stub" });
+    const b = doc({ id: "b", document_type: "pay_stub" });
+    const c = doc({ id: "c", document_type: "w2" });
+    const historical = doc({ id: "d", document_type: "pay_stub", is_current: false });
+    const all = [a, b, c, historical];
+    expect(otherCurrentSameType(a, all).map((d) => d.id)).toEqual(["b"]); // not c (type), not d (historical)
+  });
+
+  it("returns none for a historical document", () => {
+    const a = doc({ id: "a", document_type: "pay_stub", is_current: false });
+    const b = doc({ id: "b", document_type: "pay_stub" });
+    expect(otherCurrentSameType(a, [a, b])).toEqual([]);
   });
 });

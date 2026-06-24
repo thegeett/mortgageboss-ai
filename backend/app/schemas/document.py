@@ -10,12 +10,13 @@ extraction (LP-16) — ``None`` until the processing pipeline (LP-42) runs.
 """
 
 from datetime import datetime
-from typing import Any
+from typing import Any, Self
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.models.document import DocumentCategory, DocumentStatus, Tier, UploadSource
+from app.documents.staleness import PackageFitness, StalenessInfo
+from app.models.document import Document, DocumentCategory, DocumentStatus, Tier, UploadSource
 from app.models.extraction import ExtractionStatus
 
 
@@ -25,8 +26,19 @@ class DocumentTypeOverrideRequest(BaseModel):
     document_type: str = Field(min_length=1, max_length=64)
 
 
+class StalenessResolveRequest(BaseModel):
+    """Resolve a flagged-stale document (LP-71): waive or accept (replace is its own flow)."""
+
+    action: str = Field(pattern="^(waive|accept)$")
+    reason: str | None = Field(default=None, max_length=2000)
+
+
+def _empty_staleness() -> StalenessInfo:
+    return StalenessInfo(is_stale=False, kind=None, reason=None, resolution=None, as_of_date=None)
+
+
 class DocumentResponse(BaseModel):
-    """An uploaded document's metadata (no ``storage_path``)."""
+    """An uploaded document's metadata (no ``storage_path``) + versioning/staleness."""
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -48,6 +60,40 @@ class DocumentResponse(BaseModel):
     uploaded_by_user_id: UUID | None
     created_at: datetime
     updated_at: datetime
+
+    # --- Versioning (Model C, LP-71) — current/historical + the version group ----
+    version: int = 1
+    is_current: bool = True
+    version_group_id: UUID | None = None
+    supersedes_document_id: UUID | None = None
+    # How many versions are in this document's group (1 = standalone). Computed.
+    version_count: int = 1
+    # The email-ingest "possible duplicate" flag (surfaced gently). Default False.
+    possible_duplicate: bool = False
+
+    # --- Staleness + package fitness (LP-71) — computed, deterministic -----------
+    staleness: StalenessInfo = Field(default_factory=_empty_staleness)
+    package_fit: PackageFitness = Field(
+        default_factory=lambda: PackageFitness(fit=True, reason=None)
+    )
+
+    @classmethod
+    def from_model(
+        cls,
+        document: Document,
+        *,
+        version_count: int,
+        staleness: StalenessInfo,
+        package_fit: PackageFitness,
+    ) -> Self:
+        """Build the response, attaching the computed version-count/staleness/fitness."""
+        return cls.model_validate(document).model_copy(
+            update={
+                "version_count": version_count,
+                "staleness": staleness,
+                "package_fit": package_fit,
+            }
+        )
 
 
 class ExtractionPublic(BaseModel):

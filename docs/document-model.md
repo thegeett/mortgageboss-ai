@@ -421,6 +421,24 @@ Priya**, e.g. credit authorization, disclosures). It fires deterministically on
 import, independent of the AI/worker. The division: **universal → floor,
 situation-specific → AI.** See **ADR-182**.
 
-**Next:** LP-71 (document versioning + AI staleness) → LP-72 (the full tier-aware
-detail view + package groundwork + the full-text search UI). The taxonomy, field
-sets, finding/need types — and the reasoning quality — refine with Priya.
+**LP-71 (document versioning + AI staleness detection):** two paired capabilities for
+documents changing over a file's life. **Versioning (Model C):** new uploads are
+normal/current/standalone (multiples are normal — no replacement assumption, no
+over-prompting); an **explicit replace** supersedes a specific current document (old →
+historical, new → current, both kept for audit in a `version_group`, the satisfied
+need re-evaluates against the new version via LP-68's serialized update); **gentle
+duplicate surfacing** (informational, client-side) + the email-ingest
+`possible_duplicate` flag concept. **Staleness (deterministic, date-driven — a
+threshold like DTI):** the Tier-1 extracted date (pay date / statement period / ID
+expiration — LP-60..64) vs. a **configurable recency window** (pay stub ~30d, bank
+statement ~60d) or expiration → flagged with a reason; the processor resolves
+(replace/waive/accept; auto → V2). The windows are **sensible starters — refine with
+Priya** (a plain config dict, `app/documents/staleness.py`). Both feed **package
+fitness** (current + fresh → fit; historical/stale → flagged) — groundwork; assembly
+is Phase 6. UI: version history, the Replace control, calm staleness warnings, gentle
+surfacing — **helpful, not blocking**. The main list shows current versions only
+(historical via the drawer). See **ADR-183**.
+
+**Next:** LP-72 (the full tier-aware detail view + package groundwork + the full-text
+search UI). The taxonomy, field sets, finding/need types — the reasoning quality, and
+the recency windows — refine with Priya.

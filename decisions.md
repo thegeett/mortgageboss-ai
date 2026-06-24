@@ -5441,3 +5441,59 @@ the universal-needs list grows with Priya's input via a one-line addition; LP-63
 extractor handles the ID once uploaded; the floor's conditional rules and LP-69's reasoning are
 unchanged. (Manually-created files still get their template needs via the LP-30 setup path, not the
 MISMO floor.)
+
+## ADR-183: Document versioning (Model C) + date-driven staleness detection (LP-71)
+
+- **Date:** 2026-06-25
+- **Status:** Accepted
+
+**Context:** Documents change over a file's life — a corrected statement supersedes an erroneous
+one (versioning), and a document ages out of a lender's recency window (staleness). Both are about
+document FRESHNESS over time and both feed whether a document belongs in the lender package. The needs
+list and pipeline already existed; documents had only *extraction* versioning (re-extraction), not
+*document* versioning.
+
+**Decision (two paired capabilities):**
+
+- **Versioning — Model C (the locked hybrid).** New uploads are NORMAL: each is CURRENT + standalone
+  with **no replacement assumption** — multiples are normal (a set of pay stubs / months of statements
+  are not replacements), so a same-type upload is never auto-treated as a replacement (no
+  over-prompting). Replacement is **explicit**: the processor supersedes a specific (current) document
+  with a new upload — the old → HISTORICAL (`is_current=False`), the new → CURRENT, BOTH kept for audit
+  in a shared `version_group`, the new linked via `supersedes_document_id`, and the need the old
+  satisfied **re-opens to re-evaluate** against the new current version (through the new document's
+  pipeline, LP-68 serialized). **Gentle duplicate surfacing** is informational ("you have N other pay
+  stubs", derived client-side), never a blocking prompt. An **email-ingested** document (which can't be
+  click-replaced) carries a `possible_duplicate` flag for the processor to resolve (the mechanism; email
+  ingestion is later).
+
+- **Staleness — deterministic, date-driven (a threshold, like DTI).** Staleness is computed, not a new
+  AI call: the AI's contribution is the *date extraction* (the Tier 1 extractors already capture pay
+  date / statement period / ID expiration); the logic compares that date to a **configurable recency
+  window** (pay stub ~30 days, bank statement ~60 days) or an **expiration** (ID / insurance past its
+  date) → flagged with a reason. A superseded version (a newer one is current) is the versioning side of
+  "a newer version exists". The processor RESOLVES a flag (replace / waive / accept — stored on the
+  document); auto-resolution is **V2**. The recency windows are **sensible industry-standard starters —
+  REFINE WITH PRIYA** (her lenders' [UWM, Sun-West] exact windows vary by program); they are a plain
+  config dict (`RECENCY_WINDOWS` / `EXPIRATION_RULES`), so editing them is the whole knob.
+
+- **Package fitness (groundwork).** Versioning (current vs. historical) + staleness (fresh vs. stale)
+  combine into a document's fitness for the lender package: current + not-stale → fit; historical
+  (superseded) or stale-unresolved → flagged (not silently included). The package itself is Phase 6 and
+  the qualified status is partly LP-72 — this is the data.
+
+- **Warnings are helpful, not blocking.** The UI surfaces version history ("v2 of N", the chain), the
+  explicit Replace control, calm staleness warnings (the reason + resolve options), and the gentle
+  duplicate hint — clear-but-calm; the processor decides.
+
+**Rationale:** multiples are normal in mortgage files, so a same-type upload isn't a replacement —
+explicit replace + gentle surfacing handles real replacement without false prompts; staleness as a
+threshold fed by the AI-extracted dates keeps it deterministic + auditable ("AI extracts, deterministic
+logic judges"); recency windows are domain knowledge (refine with Priya); surfacing both keeps
+stale/superseded documents out of the package; helpful-not-blocking respects the processor's judgment.
+
+**Consequences:** LP-72 builds the tier-aware detail + the qualified package status (using the
+current/historical + staleness data); Phase 6 assembles the package from fit documents; the recency
+windows refine with Priya; auto-resolution is V2; the `possible_duplicate` flag activates when email
+ingestion is built. The main document list shows current versions only (historical reached via the
+drawer's version history) so it stays uncluttered.

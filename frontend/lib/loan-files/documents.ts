@@ -73,6 +73,60 @@ export function hasInProgressDocuments(documents: DocumentResponse[]): boolean {
   return documents.some((d) => !isTerminalStatus(d.status));
 }
 
+// --- Versioning + staleness display (LP-71) --------------------------------- //
+
+export interface DocumentBadge {
+  label: string;
+  className: string;
+}
+
+/**
+ * A calm staleness badge for a document, or null if fresh/not-applicable. An active
+ * flag is warning-toned ("Expired" / "May be stale"); a resolved one reads as a quiet,
+ * muted note ("Staleness waived/accepted"). Helpful, not alarming.
+ */
+export function stalenessBadge(doc: DocumentResponse): DocumentBadge | null {
+  const { is_stale, kind, resolution } = doc.staleness;
+  if (is_stale) {
+    return {
+      label: kind === "expired" ? "Expired" : "May be stale",
+      className: "bg-warning/10 text-warning border-warning/20",
+    };
+  }
+  if (resolution) {
+    return {
+      label: resolution === "waived" ? "Staleness waived" : "Staleness accepted",
+      className: "bg-gray-100 text-gray-500 border-gray-200",
+    };
+  }
+  return null;
+}
+
+/** "v2 of 3" when the document is part of a multi-version group, else null. */
+export function versionLabel(doc: DocumentResponse): string | null {
+  return doc.version_count > 1 ? `v${doc.version} of ${doc.version_count}` : null;
+}
+
+/** A short note for a historical (superseded) document, or null if current. */
+export function supersededNote(doc: DocumentResponse): string | null {
+  return doc.is_current ? null : "Superseded by a newer version";
+}
+
+/**
+ * Other CURRENT documents of the same type on the file — the gentle duplicate
+ * surfacing ("you have other pay stubs"). Informational, derived client-side from the
+ * list the page already has; never a blocking prompt.
+ */
+export function otherCurrentSameType(
+  doc: DocumentResponse,
+  all: DocumentResponse[],
+): DocumentResponse[] {
+  if (!doc.document_type || !doc.is_current) return [];
+  return all.filter(
+    (d) => d.id !== doc.id && d.is_current && d.document_type === doc.document_type,
+  );
+}
+
 // --- Categories + grouping -------------------------------------------------- //
 
 /** Human labels + display order for the eight categories. */

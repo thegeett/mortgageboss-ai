@@ -16,7 +16,10 @@ import {
   useDeleteDocument,
   useDevTextLayer,
   useDocumentDetail,
+  useDocumentVersions,
   useOverrideDocumentType,
+  useReplaceDocument,
+  useResolveStaleness,
 } from "@/lib/api/documents";
 import { getErrorMessage } from "@/lib/errors/api-error";
 import { humanize } from "@/lib/format";
@@ -25,11 +28,24 @@ import {
   formatConfidence,
   formatFileSize,
   typeReExtracts,
+  validateUploadFile,
+  versionLabel,
 } from "@/lib/loan-files/documents";
 import type { DocumentResponse } from "@/lib/types/document";
+import { cn } from "@/lib/utils";
 import { format } from "date-fns";
-import { Download, FlaskConical, PencilLine, Trash2 } from "lucide-react";
-import { useMemo, useState } from "react";
+import {
+  Check,
+  Download,
+  FlaskConical,
+  History,
+  PencilLine,
+  RefreshCw,
+  SlashSquare,
+  Trash2,
+  TriangleAlert,
+} from "lucide-react";
+import { useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { DocumentStatusBadge } from "./document-status";
 import { ExtractionView } from "./extraction-view";
@@ -133,6 +149,191 @@ function TypeOverride({ summary, fileId }: { summary: DocumentResponse; fileId: 
   );
 }
 
+/**
+ * Explicit replace (Model C, LP-71) — the processor deliberately supersedes THIS
+ * document with a new upload (old → historical, new → current, both kept). A hidden
+ * file input + a button; reused in the staleness warning and the footer.
+ */
+function ReplaceButton({
+  summary,
+  fileId,
+  label = "Replace",
+  variant = "outline",
+  className,
+}: {
+  summary: DocumentResponse;
+  fileId: string;
+  label?: string;
+  variant?: "outline" | "ghost";
+  className?: string;
+}) {
+  const replace = useReplaceDocument(fileId, summary.id);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  function onFile(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    const error = validateUploadFile(file);
+    if (error) {
+      toast.error("Can’t replace", { description: error.reason });
+      return;
+    }
+    replace.mutate(file, {
+      onSuccess: () =>
+        toast.success("Replacing document", {
+          description: "The new version is processing; the old one is kept as history.",
+        }),
+      onError: (err) => toast.error("Couldn’t replace", { description: getErrorMessage(err) }),
+    });
+  }
+
+  return (
+    <>
+      <input
+        ref={inputRef}
+        type="file"
+        accept=".pdf,.jpg,.jpeg,.png"
+        className="hidden"
+        onChange={onFile}
+      />
+      <Button
+        type="button"
+        variant={variant}
+        size="sm"
+        disabled={replace.isPending}
+        onClick={() => inputRef.current?.click()}
+        className={cn("gap-1.5", className)}
+      >
+        {replace.isPending ? (
+          <Spinner className="h-3.5 w-3.5" />
+        ) : (
+          <RefreshCw className="h-3.5 w-3.5" />
+        )}
+        {label}
+      </Button>
+    </>
+  );
+}
+
+/**
+ * Staleness warning (LP-71) — calm, helpful, NOT blocking. A flagged-stale current
+ * document shows its reason + the resolve options (Replace / Waive / Accept). A
+ * resolved one shows a quiet note. The processor decides; auto-resolution is V2.
+ */
+function StalenessWarning({ summary, fileId }: { summary: DocumentResponse; fileId: string }) {
+  const resolve = useResolveStaleness(fileId, summary.id);
+  const staleness = summary.staleness;
+
+  if (staleness.resolution) {
+    return (
+      <p className="mt-4 text-xs text-gray-500">
+        Staleness {staleness.resolution === "waived" ? "waived" : "accepted"} — using this document
+        as-is.
+      </p>
+    );
+  }
+  if (!staleness.is_stale) return null;
+
+  function act(action: "waive" | "accept") {
+    resolve.mutate(
+      { action },
+      {
+        onSuccess: () =>
+          toast.success(action === "waive" ? "Staleness waived" : "Document accepted"),
+        onError: (err) => toast.error("Couldn’t resolve", { description: getErrorMessage(err) }),
+      },
+    );
+  }
+
+  return (
+    <section className="mt-4 rounded-lg border border-warning/30 bg-warning/5 px-3.5 py-3">
+      <div className="flex items-center gap-1.5 text-sm font-medium text-warning">
+        <TriangleAlert className="h-4 w-4 shrink-0" aria-hidden />
+        {staleness.kind === "expired" ? "This document has expired" : "This document may be stale"}
+      </div>
+      {staleness.reason && <p className="mt-1 text-xs text-gray-600">{staleness.reason}</p>}
+      <div className="mt-2.5 flex flex-wrap items-center gap-2">
+        <ReplaceButton summary={summary} fileId={fileId} label="Replace" />
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          disabled={resolve.isPending}
+          onClick={() => act("waive")}
+          className="gap-1.5 text-gray-600"
+        >
+          <SlashSquare className="h-3.5 w-3.5" /> Waive
+        </Button>
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          disabled={resolve.isPending}
+          onClick={() => act("accept")}
+          className="gap-1.5 text-gray-600"
+        >
+          <Check className="h-3.5 w-3.5" /> Accept as-is
+        </Button>
+      </div>
+    </section>
+  );
+}
+
+/**
+ * Version history (LP-71) — when a document has versions, shows "v2 of N" and the
+ * chain (which is current, the prior versions), each downloadable (audit).
+ */
+function VersionHistory({ summary, fileId }: { summary: DocumentResponse; fileId: string }) {
+  const enabled = summary.version_count > 1;
+  const { data, isPending } = useDocumentVersions(summary.id, enabled);
+  if (!enabled) return null;
+
+  return (
+    <section className="mt-6">
+      <h3 className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-gray-400">
+        <History className="h-3.5 w-3.5" />
+        Version history
+        <span className="font-normal normal-case text-gray-400">· {versionLabel(summary)}</span>
+      </h3>
+      {isPending ? (
+        <SkeletonText lines={2} widths={["w-full", "w-2/3"]} className="mt-3" />
+      ) : (
+        <ul className="mt-3 space-y-1.5">
+          {(data ?? []).map((version) => (
+            <li
+              key={version.id}
+              className="flex items-center justify-between gap-2 rounded-md border border-gray-100 px-2.5 py-1.5 text-xs"
+            >
+              <span className="flex min-w-0 items-center gap-1.5">
+                <span className="font-medium text-gray-700">v{version.version}</span>
+                {version.is_current ? (
+                  <span className="rounded-full border border-success/20 bg-success/10 px-1.5 text-[10px] font-medium text-success">
+                    Current
+                  </span>
+                ) : (
+                  <span className="rounded-full border border-gray-200 bg-gray-50 px-1.5 text-[10px] font-medium text-gray-400">
+                    Historical
+                  </span>
+                )}
+                <span className="truncate text-gray-500">{version.original_filename}</span>
+              </span>
+              <button
+                type="button"
+                onClick={() => void downloadDocument(version.id, version.original_filename)}
+                className="shrink-0 text-gray-400 hover:text-gray-600"
+                aria-label={`Download v${version.version}`}
+              >
+                <Download className="h-3.5 w-3.5" />
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
 export function DocumentDrawer({
   document: summary,
   fileId,
@@ -215,6 +416,9 @@ function DrawerBody({
           <Row label="Uploaded" value={fmtDate(summary.created_at)} />
         </section>
 
+        {/* Staleness warning (LP-71) — calm, with resolve options. */}
+        <StalenessWarning summary={summary} fileId={fileId} />
+
         {/* Tier 2 (recognized) docs carry a short summary gist (LP-65) — a
             human-reference "what is this?", not structured extraction. */}
         {summary.summary && (
@@ -262,6 +466,9 @@ function DrawerBody({
             </p>
           )}
         </section>
+
+        {/* Version history (LP-71) — shown when the document has versions. */}
+        <VersionHistory summary={summary} fileId={fileId} />
 
         {/* Dev-only text-layer comparison (non-production) */}
         {IS_DEV && (
@@ -313,16 +520,19 @@ function DrawerBody({
           {del.isPending ? <Spinner className="h-4 w-4" /> : <Trash2 className="h-4 w-4" />}
           {del.isPending ? "Removing…" : "Remove"}
         </Button>
-        <Button
-          type="button"
-          size="sm"
-          onClick={handleDownload}
-          disabled={downloading}
-          className="gap-1.5"
-        >
-          {downloading ? <Spinner className="h-4 w-4" /> : <Download className="h-4 w-4" />}
-          Download
-        </Button>
+        <div className="flex items-center gap-2">
+          <ReplaceButton summary={summary} fileId={fileId} />
+          <Button
+            type="button"
+            size="sm"
+            onClick={handleDownload}
+            disabled={downloading}
+            className="gap-1.5"
+          >
+            {downloading ? <Spinner className="h-4 w-4" /> : <Download className="h-4 w-4" />}
+            Download
+          </Button>
+        </div>
       </div>
     </>
   );

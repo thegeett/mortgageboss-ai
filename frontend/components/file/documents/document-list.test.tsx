@@ -23,6 +23,14 @@ function doc(overrides: Partial<DocumentResponse> = {}): DocumentResponse {
     uploaded_by_user_id: "u1",
     created_at: "2026-06-12T10:00:00Z",
     updated_at: "2026-06-12T10:00:00Z",
+    version: 1,
+    is_current: true,
+    version_group_id: null,
+    supersedes_document_id: null,
+    version_count: 1,
+    possible_duplicate: false,
+    staleness: { is_stale: false, kind: null, reason: null, resolution: null, as_of_date: null },
+    package_fit: { fit: true, reason: null },
     ...overrides,
   };
 }
@@ -88,5 +96,73 @@ describe("DocumentList — loading → content | empty | error", () => {
       />,
     );
     expect(screen.getByText("Couldn’t load your documents")).toBeDefined();
+  });
+});
+
+describe("DocumentList — versioning + staleness (LP-71)", () => {
+  it("shows the version label for a multi-version document", () => {
+    render(
+      <DocumentList
+        documents={[doc({ version: 2, version_count: 2 })]}
+        isPending={false}
+        isError={false}
+        onSelect={vi.fn()}
+      />,
+    );
+    expect(screen.getByText("v2 of 2")).toBeDefined();
+  });
+
+  it("shows a calm staleness badge on a stale document", () => {
+    render(
+      <DocumentList
+        documents={[
+          doc({
+            staleness: {
+              is_stale: true,
+              kind: "aged",
+              reason: "Dated 45 days ago",
+              resolution: null,
+              as_of_date: null,
+            },
+          }),
+        ]}
+        isPending={false}
+        isError={false}
+        onSelect={vi.fn()}
+      />,
+    );
+    expect(screen.getByText("May be stale")).toBeDefined();
+  });
+
+  it("hides historical (superseded) versions from the main list", () => {
+    render(
+      <DocumentList
+        documents={[
+          doc({ id: "cur", original_filename: "current.pdf", is_current: true }),
+          doc({ id: "old", original_filename: "old.pdf", is_current: false }),
+        ]}
+        isPending={false}
+        isError={false}
+        onSelect={vi.fn()}
+      />,
+    );
+    expect(screen.getByText("current.pdf")).toBeDefined();
+    expect(screen.queryByText("old.pdf")).toBeNull(); // reached via version history, not the list
+  });
+
+  it("gently surfaces other current documents of the same type", () => {
+    render(
+      <DocumentList
+        documents={[
+          doc({ id: "a", document_type: "pay_stub", category: "income_employment" }),
+          doc({ id: "b", document_type: "pay_stub", category: "income_employment" }),
+        ]}
+        isPending={false}
+        isError={false}
+        onSelect={vi.fn()}
+      />,
+    );
+    // Each row notes the other same-type document (informational, not blocking).
+    expect(screen.getAllByText(/1 other/i).length).toBe(2);
   });
 });
