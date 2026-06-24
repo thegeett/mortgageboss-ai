@@ -5357,3 +5357,43 @@ without the worker and (b) the worker's absence/failure is visible, not silent.
 legible end-to-end; existing files default to ``ai_needs_status = NULL`` (no backfill). A future, richer
 "retry AI reasoning" affordance (vs. re-importing) and a fuller corrections/learning loop remain future
 work (LP-69's noted evolution).
+
+## ADR-181: Per-loop async Redis client for Celery tasks (LP-68 serialization-infra fix)
+
+- **Date:** 2026-06-24
+- **Status:** Accepted
+
+**Context:** LP-68's per-file needs serialization uses a Redis lock
+(``loan_file_needs_lock`` → ``get_redis_client()``). ``get_redis_client`` returned a
+**process-global** ``redis.asyncio`` client whose connections bind to the event loop
+that created them. Celery runs each task on a **fresh** loop (``run_async`` =
+``asyncio.run`` per task — see :mod:`app.tasks.base`). So the first needs task created
+the client on loop A; once loop A closed, every subsequent task (loop B, C, …) reused
+that client and crashed with ``RuntimeError: Event loop is closed`` the moment it
+touched the lock — **before** any need was created or status updated. The bug stayed
+latent until the worker actually ran LP-69 needs tasks (the unit tests masked it with
+a ``_loop_bound_redis`` fixture that hands out a per-loop client). The companion DB
+path was already correct: ``task_session`` builds a **fresh engine per task loop** for
+exactly this reason (asyncpg connections are loop-bound).
+
+**Decision:** Make ``get_redis_client()`` **loop-aware** — cache the client keyed on
+the running event loop and rebuild it when the loop changes. Under the API's single
+long-lived loop the same client is reused (no behaviour change, connection reuse
+preserved); under a Celery worker each per-task loop gets its own loop-local client,
+so a client bound to a closed loop is never reused. This mirrors ``task_session``'s
+per-loop engine — the Redis client now follows the same rule the DB engine already
+did.
+
+**Rationale:** keying the singleton on the loop is the minimal, root-cause fix; it
+preserves the desired single-client reuse in the API while making the worker correct,
+and it keeps the lock/redis call sites unchanged. Alternatives considered: a fresh
+client per ``loan_file_needs_lock`` call (more churn, extra connects on a hot path) or
+a synchronous redis client for the lock (diverges from the async-first stack).
+
+**Consequences:** the per-file needs serialization (and any other async-Redis use)
+now works under the worker's per-task loops; LP-69's AI reasoning tasks run to
+completion (create the proposed needs + settle ``ai_needs_status``). A regression
+test (``tests/core/test_redis_loop.py``) drives two ``asyncio.run`` loops and pings in
+each — it reproduces the exact ``Event loop is closed`` crash without the fix. The
+running worker image must be rebuilt to pick this up
+(``docker compose --profile worker up -d --build worker``).
