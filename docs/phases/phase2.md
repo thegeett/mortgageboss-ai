@@ -130,7 +130,7 @@ Produces docs/tickets/LP-70.md + ADRs
 
 
 Versioning, Staleness & Detail
-LP-71 — Document Versioning + AI Staleness Detection
+  LP-71 — Document Versioning + AI Staleness Detection
 Replace (Model C) + the staleness-warning capability.
 
 Model C replace: new docs upload normally (multiples are normal — no replace assumption); explicit replace of a specific document (old → historical, new → current, both kept for audit, the need re-evaluates against current); gentle duplicate/replacement surfacing (informational); email-ingested → new + "possible duplicate" flag
