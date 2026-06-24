@@ -84,6 +84,17 @@ services:
       # reaches Postgres/Redis over the Compose network, not localhost).
       DATABASE_URL: postgresql+asyncpg://mortgageboss:mortgageboss_dev_password@postgres:5432/mortgageboss_dev  # pragma: allowlist secret
       REDIS_URL: redis://redis:6379/0
+    volumes:
+      # SHARED STORAGE — the API runs on the HOST and writes uploaded files to
+      # backend/storage (STORAGE_LOCAL_PATH=./storage). The worker runs here in the
+      # container (WORKDIR /app), so its ./storage → /app/storage. Without this mount
+      # that directory is empty and every document fails to PROCESS with a StorageError
+      # at read time (the worker can't see the host's files). Mount the SAME host
+      # backend/storage into the container so both read/write one storage root.
+      # NOTE: the relative ./storage is the trap (it resolves to different real dirs on
+      # host vs. container). The robust long-term answer is object storage (S3/MinIO —
+      # already supported via storage_backend) so host + worker share a network store.
+      - ./backend/storage:/app/storage
     depends_on:
       postgres:
         condition: service_healthy

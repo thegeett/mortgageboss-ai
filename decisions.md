@@ -5497,3 +5497,34 @@ current/historical + staleness data); Phase 6 assembles the package from fit doc
 windows refine with Priya; auto-resolution is V2; the `possible_duplicate` flag activates when email
 ingestion is built. The main document list shows current versions only (historical reached via the
 drawer's version history) so it stays uncluttered.
+
+## ADR-184: Share the storage directory with the Dockerized Celery worker (host writes / worker reads)
+
+- **Date:** 2026-06-25
+- **Status:** Accepted
+
+**Context:** Document processing (classify → extract) runs in the Celery worker, which reads the uploaded
+file's bytes from the storage backend. In local dev the API runs on the **host** and writes uploads to
+`STORAGE_LOCAL_PATH=./storage` → the host's `backend/storage`. The worker runs in **Docker** (`build:
+./backend`, WORKDIR `/app`), so its `./storage` resolves to `/app/storage` **inside the container**. The
+worker service had no volume for storage, so `/app/storage` was empty: every document failed at the
+file-read step with `StorageError` (`backend/app/storage/local.py:70`) — ~0.03s, before classification, so
+`document_type` stayed NULL and all documents failed uniformly. (Not a code regression; surfaced when the
+worker moved into Docker during LP-71.x verification. AI-reasoning tasks were unaffected because they read
+only the DB, never a file.)
+
+**Decision:** Mount the host's `backend/storage` into the worker container at the path it resolves
+`./storage` to: `volumes: ["./backend/storage:/app/storage"]` on the `worker` service. The host API and the
+Docker worker then share one storage root. Only the worker needs the mount (the API is on the host and sees
+`backend/storage` directly).
+
+**Rationale / trap:** the **relative** `./storage` is the underlying trap — it resolves to different real
+directories on the host (`backend/storage`) vs. in the container (`/app/storage`). The minimal local-dev fix
+is the shared mount. An absolute `STORAGE_LOCAL_PATH` + the shared mount, or **object storage (S3/MinIO —
+already supported via `storage_backend`)** so host + worker share a *network* store, is the robust
+production-correct direction (Phase 7) — not implemented now.
+
+**Consequences:** Dockerized document processing reads the uploaded files; classify/extract/needs work
+end-to-end (verified: a previously-failed pay stub reprocessed → `completed`, extracted, need satisfied).
+Already-failed documents don't auto-retry — re-upload (or reprocess) after the fix. The pipeline /
+extractors / LP-71 code are unchanged (purely infra/config).
