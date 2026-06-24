@@ -123,7 +123,14 @@ async def test_floor_fires_employment_and_asset_rules_on_import(db_session: Asyn
     assert "w2" in floor  # employment income → W-2
     assert "bank_statement" in floor  # stated assets → bank statements
     assert "purchase_agreement" in floor  # the purchase rule still fires
-    assert set(floor) == {"pay_stub", "w2", "bank_statement", "purchase_agreement"}
+    assert "drivers_license" in floor  # universal: a Government ID for the borrower (LP-71.6)
+    assert set(floor) == {
+        "pay_stub",
+        "w2",
+        "bank_statement",
+        "purchase_agreement",
+        "drivers_license",
+    }
 
 
 async def test_floor_seeds_once_no_duplicates(db_session: AsyncSession) -> None:
@@ -137,7 +144,9 @@ async def test_floor_seeds_once_no_duplicates(db_session: AsyncSession) -> None:
     )
     floor = await _floor_types(db_session, lf.id)
     assert len(floor) == len(set(floor))  # no duplicate needs_types
-    assert len(floor) == 4
+    # 4 conditional (pay_stub, w2, bank_statement, purchase_agreement) + 1 universal ID
+    # (single borrower) = 5.
+    assert len(floor) == 5
 
 
 # --------------------------------------------------------------------------- #

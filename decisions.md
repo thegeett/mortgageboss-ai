@@ -5397,3 +5397,47 @@ test (``tests/core/test_redis_loop.py``) drives two ``asyncio.run`` loops and pi
 each — it reproduces the exact ``Event loop is closed`` crash without the fix. The
 running worker image must be rebuilt to pick this up
 (``docker compose --profile worker up -d --build worker``).
+
+## ADR-182: The floor covers universal needs (borrower ID, per-borrower) — universal → floor, situation-specific → AI
+
+- **Date:** 2026-06-24
+- **Status:** Accepted
+
+**Context:** A real MISMO import produced a needs list with no **borrower identification**
+(driver's license / government ID) — a near-universal requirement on every loan file (lenders
+verify identity per Patriot Act / KYC). The ID was expected to come from LP-69's AI reasoning,
+but didn't: the AI reasons about what's *distinctive* about a file (self-employment → tax returns;
+a gift → a gift letter), and a universal requirement like an ID is the **opposite** of distinctive,
+so the AI under-proposes it (too "obvious" to surface as situation-specific). The floor (LP-68) had
+only conditional rules (employment → pay stubs + W-2; assets → bank statements; purchase → purchase
+agreement) and no universal baseline.
+
+**Decision:** The deterministic floor (`seed_floor_needs`) now includes **universal needs** —
+always-required on every file regardless of the borrower's situation — starting with a borrower
+**Government ID**, seeded **per borrower** (co-borrowers each get their own ID need, the title +
+`borrower_id` identifying which borrower; `needs_type=drivers_license`, the catalog's Tier-1 ID type).
+The universal needs are a clearly separated, commented section (`_PER_BORROWER_UNIVERSAL` /
+`_PER_FILE_UNIVERSAL`) so adding another always-required need is a one-line change. **The full
+universal-needs list refines with Priya** — the ID is the first/clearest; she'll likely confirm
+others (e.g. a credit authorization, certain disclosures).
+
+**Rationale:** universal needs belong in the **floor**, not the AI:
+- An ID is required on every file regardless of situation — it's *universal, not distinctive*, so the
+  AI reasoning (which surfaces what's special about a file) may under-propose it. The right home for
+  always-true needs is the deterministic floor.
+- The floor being "thin" should not mean *missing its universal baseline* — thin means few
+  conditional rules, but the always-true needs must be reliably present.
+- The floor fires **immediately on import**, independent of the AI/worker (so the ID appears even
+  when the worker is down, and even when the AI omits it). It reads the borrowers (visible post-flush,
+  LP-71.5).
+- **Per-borrower** because each borrower needs their own ID; **extensible** because Priya will name
+  more universal needs.
+
+**Division of labor (clarified):** **universal → floor** (deterministic, always-true); **situation-specific
+→ AI** (LP-69, what's distinctive about the file).
+
+**Consequences:** every imported file reliably gets a Government ID need per borrower from the floor;
+the universal-needs list grows with Priya's input via a one-line addition; LP-63's `drivers_license`
+extractor handles the ID once uploaded; the floor's conditional rules and LP-69's reasoning are
+unchanged. (Manually-created files still get their template needs via the LP-30 setup path, not the
+MISMO floor.)

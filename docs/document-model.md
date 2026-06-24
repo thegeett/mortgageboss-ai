@@ -409,6 +409,18 @@ never blocking. See **ADR-180**. *(A separate operational note: LP-69's reasonin
 runs in a Celery worker — `docker compose --profile worker up -d worker` — which
 must be running for AI needs to be produced.)*
 
+**LP-71.6 (universal needs in the floor — borrower ID, per-borrower):** a real
+import surfaced no borrower **ID** need. An ID is *universal* (required on every file
+regardless of situation), so it belongs in the deterministic **floor**, not LP-69's
+AI reasoning — the AI surfaces what's *distinctive* about a file, so it under-proposes
+an "obvious" always-true need. `seed_floor_needs` now seeds a Government ID
+(`drivers_license`) **per borrower** (co-borrowers each get their own, identified by
+name + `borrower_id`), in a clearly separated, extensible universal-needs section
+(`_PER_BORROWER_UNIVERSAL` / `_PER_FILE_UNIVERSAL` — **refine the full list with
+Priya**, e.g. credit authorization, disclosures). It fires deterministically on
+import, independent of the AI/worker. The division: **universal → floor,
+situation-specific → AI.** See **ADR-182**.
+
 **Next:** LP-71 (document versioning + AI staleness) → LP-72 (the full tier-aware
 detail view + package groundwork + the full-text search UI). The taxonomy, field
 sets, finding/need types — and the reasoning quality — refine with Priya.

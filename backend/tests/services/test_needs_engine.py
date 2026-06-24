@@ -18,7 +18,7 @@ from app.core.config import settings
 from app.core.security import hash_password
 from app.models import Company, User, UserRole
 from app.models.borrower import Borrower
-from app.models.document import Document, DocumentStatus
+from app.models.document import Document, DocumentCategory, DocumentStatus
 from app.models.document_finding import DocumentFindingType
 from app.models.loan_file import LoanFile, LoanPurpose
 from app.models.needs_item import (
@@ -208,8 +208,9 @@ async def test_floor_from_stated_employment_and_purchase(db_session: AsyncSessio
 
     created = await seed_floor_needs(db_session, lf)
     types = {n.needs_type for n in created}
-    # employment income → pay_stub + w2; purchase → purchase_agreement; assets → bank_statement
-    assert types == {"pay_stub", "w2", "purchase_agreement", "bank_statement"}
+    # universal → drivers_license (per borrower); employment income → pay_stub + w2;
+    # purchase → purchase_agreement; assets → bank_statement
+    assert types == {"drivers_license", "pay_stub", "w2", "purchase_agreement", "bank_statement"}
     assert all(n.origin is NeedsItemOrigin.FLOOR for n in created)
     assert all(n.disposition is NeedsItemDisposition.CONFIRMED for n in created)  # near-certain
 
@@ -217,14 +218,74 @@ async def test_floor_from_stated_employment_and_purchase(db_session: AsyncSessio
 async def test_floor_is_idempotent(db_session: AsyncSession) -> None:
     lf = await _loan_file(db_session, purpose=LoanPurpose.PURCHASE)
     first = await seed_floor_needs(db_session, lf)
-    assert len(first) == 1  # purchase_agreement only (no stated income/assets)
+    assert len(first) == 1  # purchase_agreement only (no borrower, no stated income/assets)
     second = await seed_floor_needs(db_session, lf)
     assert second == []  # already seeded — no duplicates
 
 
 async def test_floor_thin_when_no_stated_data(db_session: AsyncSession) -> None:
-    lf = await _loan_file(db_session, purpose=LoanPurpose.REFINANCE)  # no income/assets/purchase
+    # No borrower, no income/assets/purchase → nothing to seed (the universal ID rule
+    # is per-borrower, so a borrower-less file has no ID need).
+    lf = await _loan_file(db_session, purpose=LoanPurpose.REFINANCE)
     assert await seed_floor_needs(db_session, lf) == []
+
+
+# --------------------------------------------------------------------------- #
+# Universal floor needs (LP-71.6) — the always-required baseline (per-borrower ID)
+# --------------------------------------------------------------------------- #
+
+
+async def test_floor_seeds_a_government_id_per_borrower(db_session: AsyncSession) -> None:
+    """Every borrower gets their own ID floor need, identifying which borrower (co-borrowers)."""
+    lf = await _loan_file(db_session, purpose=LoanPurpose.REFINANCE)  # no conditional rules
+    db_session.add(
+        Borrower(loan_file_id=lf.id, first_name="Jane", last_name="Doe", is_primary=True)
+    )
+    db_session.add(
+        Borrower(loan_file_id=lf.id, first_name="John", last_name="Doe", borrower_position=2)
+    )
+    await db_session.flush()
+
+    created = await seed_floor_needs(db_session, lf)
+    ids = [n for n in created if n.needs_type == "drivers_license"]
+    # One ID per borrower (2 borrowers → 2 distinct ID needs), each a FLOOR need.
+    assert len(ids) == 2
+    assert all(n.origin is NeedsItemOrigin.FLOOR for n in ids)
+    assert all(n.borrower_id is not None for n in ids)  # linked to the borrower
+    titles = {n.title for n in ids}
+    assert titles == {"Government ID — Jane Doe", "Government ID — John Doe"}
+
+
+async def test_floor_seeds_one_id_for_a_single_borrower(db_session: AsyncSession) -> None:
+    lf = await _loan_file(db_session, purpose=LoanPurpose.REFINANCE)
+    db_session.add(Borrower(loan_file_id=lf.id, first_name="Solo", last_name="Borrower"))
+    await db_session.flush()
+
+    created = await seed_floor_needs(db_session, lf)
+    ids = [n for n in created if n.needs_type == "drivers_license"]
+    assert len(ids) == 1  # single borrower → one ID
+    assert ids[0].category is DocumentCategory.BORROWER_INFO
+
+
+async def test_id_floor_need_is_deterministic_no_ai(db_session: AsyncSession) -> None:
+    """The ID is a FLOOR need — it appears from seeding alone, with no AI/worker involved."""
+    lf = await _loan_file(db_session, purpose=LoanPurpose.REFINANCE)
+    db_session.add(Borrower(loan_file_id=lf.id, first_name="Pat", last_name="Q"))
+    await db_session.flush()
+
+    created = await seed_floor_needs(db_session, lf)  # deterministic; no AI call
+    assert any(n.needs_type == "drivers_license" for n in created)
+
+
+async def test_id_floor_need_no_duplicates_on_reseed(db_session: AsyncSession) -> None:
+    lf = await _loan_file(db_session, purpose=LoanPurpose.REFINANCE)
+    db_session.add(Borrower(loan_file_id=lf.id, first_name="Dee", last_name="Dup"))
+    await db_session.flush()
+
+    first = await seed_floor_needs(db_session, lf)
+    assert sum(n.needs_type == "drivers_license" for n in first) == 1
+    second = await seed_floor_needs(db_session, lf)
+    assert second == []  # already seeded — no duplicate ID
 
 
 # --------------------------------------------------------------------------- #

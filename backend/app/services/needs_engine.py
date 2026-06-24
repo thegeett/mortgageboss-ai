@@ -237,8 +237,44 @@ async def _has_stated_assets(db: AsyncSession, loan_file_id: UUID) -> bool:
     return await db.scalar(only_active(stmt, StatedAsset)) is not None
 
 
+async def _active_borrowers(db: AsyncSession, loan_file_id: UUID) -> list[Borrower]:
+    """The file's active borrowers, ordered (primary first by position).
+
+    Queried (not via ``loan_file.borrowers``) so it's safe in the async import path
+    where the relationship isn't eager-loaded; the rows are visible post-flush (LP-71.5).
+    """
+    stmt = (
+        select(Borrower)
+        .where(Borrower.loan_file_id == loan_file_id)
+        .order_by(Borrower.borrower_position)
+    )
+    return list((await db.scalars(only_active(stmt, Borrower))).all())
+
+
+# Universal floor needs — required on EVERY file regardless of the borrower's
+# situation (so they belong in the deterministic floor, NOT LP-69's situation-specific
+# reasoning, which may under-propose an "obvious" universal need). Each entry is
+# (needs_type, title, category). **Refine the full list with Priya** — the borrower ID
+# is the first/clearest universal need; she'll likely confirm others. To extend:
+#   * a PER-BORROWER universal need (one per borrower) → add to ``_PER_BORROWER_UNIVERSAL``
+#   * a PER-FILE universal need (one per file) → add to ``_PER_FILE_UNIVERSAL``
+# (e.g. a credit authorization or certain initial disclosures, pending Priya's input).
+_PER_BORROWER_UNIVERSAL: list[tuple[str, str, DocumentCategory]] = [
+    ("drivers_license", "Government ID", DocumentCategory.BORROWER_INFO),
+]
+_PER_FILE_UNIVERSAL: list[tuple[str, str, DocumentCategory]] = []
+
+
 async def seed_floor_needs(db: AsyncSession, loan_file: LoanFile) -> list[NeedsItem]:
-    """Seed the THIN deterministic floor of near-certain needs from the stated data.
+    """Seed the THIN deterministic floor of near-certain needs.
+
+    Two parts: **universal needs** (always required on every file — a Government ID
+    per borrower; refine the full list with Priya, see ``_PER_BORROWER_UNIVERSAL`` /
+    ``_PER_FILE_UNIVERSAL``) and **conditional rules** from the stated data
+    (employment income → pay stubs + W-2; a purchase → purchase agreement; stated
+    assets → bank statements). Universal needs live in the floor — NOT LP-69's AI
+    reasoning — precisely because they're not distinctive: the AI surfaces what's
+    *special* about a file, so it may under-propose an obvious always-true need.
 
     Idempotent: if the file already has floor needs, this is a no-op (re-importing a
     MISMO file won't duplicate). The floor is intentionally thin — the bulk of the
@@ -268,6 +304,42 @@ async def seed_floor_needs(db: AsyncSession, loan_file: LoanFile) -> list[NeedsI
     if existing is not None:
         return []  # already seeded
 
+    created: list[NeedsItem] = []
+
+    # --- UNIVERSAL NEEDS (always required, every file — deterministic, NOT AI) ----
+    # Per-borrower universals (a Government ID for EACH borrower — co-borrowers each
+    # need their own), then per-file universals. See ``_PER_BORROWER_UNIVERSAL`` /
+    # ``_PER_FILE_UNIVERSAL`` above (extensible; refine the full list with Priya).
+    for borrower in await _active_borrowers(db, loan_file.id):
+        # Identify which borrower each ID is for (name in the title + the borrower link).
+        name = borrower.full_name.strip() or f"Borrower {borrower.borrower_position}"
+        for needs_type, title, category in _PER_BORROWER_UNIVERSAL:
+            created.append(
+                await create_needs_item(
+                    db,
+                    loan_file_id=loan_file.id,
+                    title=f"{title} — {name}",
+                    needs_type=needs_type,
+                    category=category,
+                    borrower_id=borrower.id,
+                    origin=NeedsItemOrigin.FLOOR,
+                    disposition=NeedsItemDisposition.CONFIRMED,
+                )
+            )
+    for needs_type, title, category in _PER_FILE_UNIVERSAL:
+        created.append(
+            await create_needs_item(
+                db,
+                loan_file_id=loan_file.id,
+                title=title,
+                needs_type=needs_type,
+                category=category,
+                origin=NeedsItemOrigin.FLOOR,
+                disposition=NeedsItemDisposition.CONFIRMED,
+            )
+        )
+
+    # --- CONDITIONAL FLOOR RULES (situation-dependent, but still deterministic) ---
     specs: list[tuple[str, str, DocumentCategory]] = []
     if await _has_stated_employment_income(db, loan_file.id):
         specs.append(("pay_stub", "Recent pay stubs", DocumentCategory.INCOME_EMPLOYMENT))
@@ -277,18 +349,19 @@ async def seed_floor_needs(db: AsyncSession, loan_file: LoanFile) -> list[NeedsI
     if await _has_stated_assets(db, loan_file.id):
         specs.append(("bank_statement", "Bank statements", DocumentCategory.ASSETS))
 
-    created: list[NeedsItem] = []
     for needs_type, title, category in specs:
-        need = await create_needs_item(
-            db,
-            loan_file_id=loan_file.id,
-            title=title,
-            needs_type=needs_type,
-            category=category,
-            origin=NeedsItemOrigin.FLOOR,
-            disposition=NeedsItemDisposition.CONFIRMED,
+        created.append(
+            await create_needs_item(
+                db,
+                loan_file_id=loan_file.id,
+                title=title,
+                needs_type=needs_type,
+                category=category,
+                origin=NeedsItemOrigin.FLOOR,
+                disposition=NeedsItemDisposition.CONFIRMED,
+            )
         )
-        created.append(need)
+
     if created:
         logger.info("needs_floor_seeded", loan_file_id=str(loan_file.id), count=len(created))
     return created
