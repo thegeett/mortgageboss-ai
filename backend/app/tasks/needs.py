@@ -17,17 +17,36 @@ already-present needs, so a re-run never piles up duplicates.
 from uuid import UUID
 
 import structlog
+from celery import Task
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.document import Document
 from app.models.helpers import only_active
+from app.models.loan_file import AiNeedsStatus, LoanFile
 from app.services.needs_ai import apply_ai_needs_for_file_id
 from app.services.needs_engine import apply_document_to_needs, loan_file_needs_lock
 from app.tasks.base import run_async, task_session
 from app.tasks.celery_app import celery_app
+from app.tasks.retry import MAX_RETRIES, retry_or_terminal
 
 logger = structlog.get_logger(__name__)
+
+
+async def _mark_ai_needs_failed(loan_file_id: str) -> None:
+    """Terminal-failed (LP-73): record ``ai_needs_status=FAILED`` so an exhausted task
+    is VISIBLE (LP-71.5), never a silent permanent pending."""
+    try:
+        file_pk = UUID(loan_file_id)
+    except ValueError:
+        return
+    async with task_session() as db:
+        loan_file = await db.scalar(
+            only_active(select(LoanFile).where(LoanFile.id == file_pk), LoanFile)
+        )
+        if loan_file is not None:
+            loan_file.ai_needs_status = AiNeedsStatus.FAILED
+            await db.commit()
 
 
 async def _load_document(db: AsyncSession, document_id: str) -> Document | None:
@@ -64,13 +83,34 @@ async def _run_propose_ai_needs(loan_file_id: str) -> None:
         await db.commit()
 
 
-@celery_app.task(name="needs.update_for_document")  # type: ignore[untyped-decorator]
-def update_needs_for_document(loan_file_id: str, document_id: str) -> None:
-    """Celery task: advance the file's needs for a processed document (LP-68 + LP-69)."""
-    run_async(_run_needs_update(loan_file_id, document_id))
+@celery_app.task(  # type: ignore[untyped-decorator]
+    bind=True, name="needs.update_for_document", max_retries=MAX_RETRIES
+)
+def update_needs_for_document(self: Task, loan_file_id: str, document_id: str) -> None:
+    """Celery task: advance the file's needs for a processed document (LP-68 + LP-69).
+
+    Bounded-retry on a transient failure (LP-73); on exhaustion records the visible
+    terminal-failed state instead of leaving the file silently stranded.
+    """
+    retry_or_terminal(
+        self,
+        lambda: run_async(_run_needs_update(loan_file_id, document_id)),
+        on_exhausted=lambda: run_async(_mark_ai_needs_failed(loan_file_id)),
+        event="needs_update_exhausted",
+    )
 
 
-@celery_app.task(name="needs.propose_ai_needs")  # type: ignore[untyped-decorator]
-def propose_ai_needs(loan_file_id: str) -> None:
-    """Celery task: the initial AI-reasoned proposed needs (enqueued at MISMO creation)."""
-    run_async(_run_propose_ai_needs(loan_file_id))
+@celery_app.task(  # type: ignore[untyped-decorator]
+    bind=True, name="needs.propose_ai_needs", max_retries=MAX_RETRIES
+)
+def propose_ai_needs(self: Task, loan_file_id: str) -> None:
+    """Celery task: the initial AI-reasoned proposed needs (enqueued at MISMO creation).
+
+    Bounded-retry (LP-73); on exhaustion records the visible terminal-failed state.
+    """
+    retry_or_terminal(
+        self,
+        lambda: run_async(_run_propose_ai_needs(loan_file_id)),
+        on_exhausted=lambda: run_async(_mark_ai_needs_failed(loan_file_id)),
+        event="propose_ai_needs_exhausted",
+    )

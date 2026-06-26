@@ -39,6 +39,7 @@ worker async session (``task_session``).
 from uuid import UUID
 
 import structlog
+from celery import Task
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -64,6 +65,7 @@ from app.storage import get_storage_backend
 from app.tasks.base import run_async, task_session
 from app.tasks.celery_app import celery_app
 from app.tasks.needs import update_needs_for_document
+from app.tasks.retry import MAX_RETRIES, retry_or_terminal
 
 logger = structlog.get_logger(__name__)
 
@@ -424,18 +426,47 @@ async def _run_reprocess(document_id: str) -> None:
         await reprocess_document_extraction(db, document)
 
 
-@celery_app.task(name="documents.process_document")  # type: ignore[untyped-decorator]
-def process_document(document_id: str) -> None:
-    """Celery task: process one uploaded document end-to-end (sync→async bridge)."""
-    run_async(_run(document_id))
+async def _mark_document_failed(document_id: str) -> None:
+    """Terminal-failed (LP-73): set the document FAILED if a transient infra error
+    (e.g. a DB/Redis blip outside the pipeline's own handling) exhausted retries —
+    so it is never left silently stranded in a non-terminal status."""
+    async with task_session() as db:
+        document = await _load_document(db, document_id)
+        if document is not None:
+            await _mark_failed(db, document, document_id)
 
 
-@celery_app.task(name="documents.reprocess_document")  # type: ignore[untyped-decorator]
-def reprocess_document(document_id: str) -> None:
+@celery_app.task(  # type: ignore[untyped-decorator]
+    bind=True, name="documents.process_document", max_retries=MAX_RETRIES
+)
+def process_document(self: Task, document_id: str) -> None:
+    """Celery task: process one uploaded document end-to-end (sync→async bridge).
+
+    The pipeline itself never raises (it sets its own terminal status); this bounded
+    retry (LP-73) covers a transient infra error *around* it, and on exhaustion marks
+    the document FAILED rather than leaving it stranded.
+    """
+    retry_or_terminal(
+        self,
+        lambda: run_async(_run(document_id)),
+        on_exhausted=lambda: run_async(_mark_document_failed(document_id)),
+        event="process_document_exhausted",
+    )
+
+
+@celery_app.task(  # type: ignore[untyped-decorator]
+    bind=True, name="documents.reprocess_document", max_retries=MAX_RETRIES
+)
+def reprocess_document(self: Task, document_id: str) -> None:
     """Celery task: re-extract a document after a manual type override (LP-44).
 
     A thin wrapper over the existing :func:`reprocess_document_extraction` core
     (LP-39c, registry-based, skips classification, new version, resilient) — the
-    PATCH override endpoint enqueues this.
+    PATCH override endpoint enqueues this. Bounded-retry on a transient blip (LP-73).
     """
-    run_async(_run_reprocess(document_id))
+    retry_or_terminal(
+        self,
+        lambda: run_async(_run_reprocess(document_id)),
+        on_exhausted=lambda: run_async(_mark_document_failed(document_id)),
+        event="reprocess_document_exhausted",
+    )

@@ -65,17 +65,19 @@ services:
       retries: 3
 
   # Celery worker (LP-41) — background task processing, a SEPARATE process from the
-  # API. Behind the "worker" profile so the default `docker compose up` stays
-  # infra-only; start it explicitly:  docker compose --profile worker up worker
+  # API. Starts BY DEFAULT (LP-73): a normal `docker compose up -d` brings it up, so
+  # the async/AI features (document processing, the AI needs reasoning) never silently
+  # fail because no worker is consuming — that was a recurring Phase-2 footgun (the
+  # worker used to be behind a "worker" profile). Requires backend/.env (the app's
+  # required settings, e.g. ANTHROPIC_API_KEY). After a code change, rebuild it:
+  #   docker compose up -d --build worker
   # (locally you can instead run, from backend/:
   #   uv run celery -A app.tasks.celery_app worker --loglevel=info
   #   # on macOS/Colima add --pool=solo if the prefork pool misbehaves)
-  # Requires backend/.env (the app's required settings, e.g. ANTHROPIC_API_KEY).
   worker:
     build: ./backend
     container_name: mortgageboss-worker
     restart: unless-stopped
-    profiles: ["worker"]
     command: ["uv", "run", "celery", "-A", "app.tasks.celery_app", "worker", "--loglevel=info"]
     env_file:
       - ./backend/.env

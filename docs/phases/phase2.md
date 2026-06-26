@@ -164,3 +164,53 @@ Produces docs/tickets/LP-73.md + ADRs
 
 Summary Table
 TicketTitleCoreLP-58Three-Tier Model: Foundation & RoutingThe tier mechanism + category structure + routingLP-59Comprehensive ClassificationHaiku knows all ~80 types → type/category/tier/confidenceLP-60Tier 1: Income/Employment1099, VOE, P&L, LOE (income) extractorsLP-61Tier 1: AssetsInvestment, retirement, gift letter extractorsLP-62Tier 1: PropertyPurchase agreement, insurance, mortgage statement, tax bill, HOALP-63Tier 1: Borrower-Info & LegalDriver's license/ID, divorce decree, LOE (PII-careful)LP-64Tier 1: Tax Returns (carved-out)1040 + schedules — the complex oneLP-65Tier 2: RecognizedClassify + categorize + AI summary, no deep extractionLP-66Tier 3: Generic Analyzer + FindingsStructured-flexible analysis of anything; findings visible + recordedLP-67Implications EngineFindings → suggested needs (surface, not act)LP-68Needs-List EngineModels/states + per-file serialization + deterministic floorLP-69AI Needs ReasoningPropose-with-reasoning + confirm + improve; MISMO-seededLP-70Needs-List FrontendThe processor's self-maintaining checklist dashboardLP-71Versioning + AI StalenessModel C replace + staleness warningsLP-72Detail Extensions + Standard NamingTier-aware detail + no-space naming + package groundworkLP-73Phase 2 Testing & HardeningIntegration, isolation, real-doc hardening, polish — closes Phase 2
+
+
+---
+
+## Phase 2 — Complete (closed by LP-73)
+
+Phase 2 (Document Handling) is **closed: built, tested, and hardened.** What it delivered:
+
+- **The three-tier document model + findings (LP-58..66):** catalog-driven routing; ~18 Tier-1
+  extractors (structured fields); Tier-2 recognize-and-summarize; Tier-3 generic analysis; the uniform
+  extraction shape + `DocumentFinding`.
+- **The needs-list differentiator (LP-67..70):** the implications engine (findings → suggested needs),
+  the deterministic engine (five states, satisfaction-matching, per-file serialization, the thin floor +
+  universal ID), the AI reasoning (propose-with-reasoning, confirm, improve), and the self-maintaining
+  dashboard.
+- **Versioning + staleness (LP-71):** Model-C explicit replace (current/historical, audit), date-driven
+  staleness (recency windows + expiration), package fitness — all helpful-not-blocking.
+- **Tier-aware detail + standard naming + package qualification (LP-72):** proportional-investment detail,
+  derived `{Type}_{Identifier}_{Date}` names, current+fresh+typed+extracted → package-ready (groundwork).
+- **Testing & hardening (LP-73):** the worker starts by default; bounded task retry with a visible
+  terminal-failed; the de-patched (real-Redis) concurrency test; **real-stack integration tests that
+  exercise the seams** (real storage/DB/pipeline, AI mocked only at the model boundary) — the response to
+  the phase's lesson that four bugs passed unit tests and broke in the seams; a tenant-isolation sweep.
+
+### Deferred (explicitly — nothing lost)
+
+- **Phase 3 — cross-source verification:** the `DocumentFinding`s + the typed extraction feed the
+  deterministic cross-document checks (DTI/LTV, identity/employer cross-checks, undisclosed obligations).
+  "Verified" needs gain cross-source rules then.
+- **Phase 6 — lender-package assembly:** assembles the package from **package-qualified** documents
+  (LP-72's flag) using the **standard naming**. LP-72 is the groundwork; no assembly was built.
+- **Phase 7 — object storage:** the **S3 backend is not yet implemented** (`get_storage_backend` raises
+  for `"s3"`); the dev model is all-in-Docker with a shared local-storage volume. Validating the S3 path
+  against MinIO is deferred with the backend.
+- **V2 — auto-resolution of staleness** (LP-71: the processor resolves manually for now);
+  **re-import/versioning/diff of MISMO** (LP-57); a **richer needs corrections/learning loop** (LP-69
+  captures the signal + uses it simply).
+
+### Domain-tuning is ongoing (the Priya-refinement honesty — NOT overclaimed)
+
+Phase 2 hardened the **mechanisms** and tested the **system**; it did **not** finalize the
+**domain-tuning**, which continues with Priya (the resident domain expert):
+
+- the **AI needs-reasoning quality** (LP-69) — sharpened by real files + her "what do you chase, and why";
+- the **recency windows** (LP-71) — her lenders' (UWM, Sun-West) exact windows, varying by program;
+- the **universal-needs list** (LP-71.6) — the ID is the clear first; she'll confirm others;
+- the **standard-naming convention** (LP-72) and the **type taxonomy / Tier-1 field sets** (LP-58..64).
+
+So: Phase 2 is **done as built/tested/hardened**; the **domain-tuning is ongoing**. The structure is
+closed; the mortgage-domain refinement is a continuing collaboration — we do not claim domain-completeness.

@@ -5572,3 +5572,76 @@ without building the package.
 package-qualified documents (filtering on the qualification LP-72 computes) using the standard naming. Phase 3
 adds cross-source verification. The naming convention + qualification rules refine with Priya / use. The
 standard name is display-only (the stored file is never renamed).
+
+## ADR-186: Operational robustness — worker by default + bounded-retry with a visible terminal-failed (LP-73)
+
+- **Date:** 2026-06-26
+- **Status:** Accepted
+
+**Context:** Two Phase-2 footguns were operational, not logical: (1) the Celery **worker was
+behind a Docker Compose profile**, so a normal `docker compose up` left it OFF — the async/AI
+features (document processing, the AI needs reasoning) silently did nothing, and it was hard to
+diagnose. (2) A **transient task failure** (a DB/Redis blip, an AI timeout) had **no retry** — it left
+the file permanently in a non-terminal state with no signal (the "stuck pending" case, LF-VNC4).
+
+**Decision:**
+
+- **Worker by default.** The `worker` service no longer has a `profiles:` gate — `docker compose up -d`
+  brings it up. Async/AI features can't silently break because no worker is consuming. (Rebuild after a
+  code change: `docker compose up -d --build worker`.)
+- **Bounded retry with a visible terminal-failed.** A shared `retry_or_terminal` (`app/tasks/retry.py`)
+  wraps the needs + document tasks: on a transient error it retries up to `MAX_RETRIES` (3) with capped
+  exponential backoff (5/10/20s…); on **exhaustion** it records a **visible terminal-failed state**
+  (`ai_needs_status=FAILED` for needs, `status=FAILED` for documents — consistent with LP-71.5's
+  visibility) and the task fails — **never a silent permanent pending**. A scheduled `Retry` propagates
+  untouched (not double-handled).
+
+**Rationale:** a worker that's off by default is a recurring diagnosis trap; making it default removes
+the footgun. A transient blip shouldn't strand a file, and an exhausted failure must be *visible* (the
+phase already learned that silence is the enemy). The document pipeline already reaches its own terminal
+status internally, so the retry there guards the infra *around* it; the needs tasks are where the
+stuck-pending actually occurred.
+
+**Consequences:** the full stack comes up with one command; transient failures self-heal; permanent
+failures are visible and (per LP-71.5) surfaced in the UI. The retry counts/backoff are sensible
+starters — tune with real task latencies.
+
+## ADR-187: Real-stack integration testing + de-patched concurrency test + consistent dev model (LP-73)
+
+- **Date:** 2026-06-26
+- **Status:** Accepted
+
+**Context:** Phase 2 shipped four bugs that **all passed unit tests and broke on the real stack** — a
+flush-timing bug (the floor couldn't see stated data), a Redis per-loop event-loop crash (every worker
+task died), a silent AI-failure swallow (a floor-only needs list looked complete), and a host/worker
+**storage split** (the Docker worker couldn't read host-written files). Every one lived in a **seam
+between components** and was invisible to mocked-component unit tests.
+
+**Decision:**
+
+- **Real-stack integration tests that exercise the seams.** `tests/integration/test_phase2_real_stack.py`
+  drives the REAL storage backend (an actual write **then** read — the storage-split catcher), the real
+  DB, the real pipeline orchestration, and the real needs-satisfaction matching — mocking **only the AI
+  model boundary** (classify / extract / summarize / analyze). It covers Tier 1/2/3 processing, a
+  missing-file → graceful FAILED, the upload → satisfies-need seam, and the MISMO → floor + AI-reasoning
+  seam. A consolidated **tenant-isolation sweep** (`test_phase2_tenant_isolation.py`) asserts every
+  Phase-2 endpoint 404s cross-company.
+- **De-patched the LP-68 concurrency test.** It used to monkeypatch a fresh per-loop Redis client — which
+  is exactly what *hid* the per-loop bug. It now runs against the **real loop-aware `get_redis_client`**
+  (resetting the module singleton around the test), so a regression of the loop fix surfaces here; the
+  cross-loop regression itself is guarded by `tests/core/test_redis_loop.py`.
+- **One consistent local-dev model: all-in-Docker with a shared storage volume.** The host-API /
+  Docker-worker split caused the storage bug; the chosen model is the worker in Docker (now default)
+  sharing `backend/storage` via the volume mount (the storage fix). Documented in
+  `docs/development-workflow.md`. **The S3 storage backend is NOT yet implemented** (`get_storage_backend`
+  raises for `"s3"`) — it's **Phase-7** work; validating it against MinIO is deferred with it (no
+  overclaim that the production storage path is tested).
+
+**Rationale:** the phase's lesson is that green unit tests are not enough when the bugs live in the
+seams; the integration tests must exercise the assembled system, mocking only the model boundary. The
+de-patched test removes the fixture that masked a real bug. Resolving the dev-model asymmetry removes the
+storage footgun's root.
+
+**Consequences:** the seams are now under test; future seam regressions (storage, loop, flush, silent
+failure) are far more likely to be caught in CI. The S3 backend + its MinIO validation are honestly
+deferred to Phase 7.

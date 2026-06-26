@@ -13,8 +13,6 @@ from uuid import uuid4
 
 import pytest
 import pytest_asyncio
-import redis.asyncio as aioredis
-from app.core.config import settings
 from app.core.security import hash_password
 from app.models import Company, User, UserRole
 from app.models.borrower import Borrower
@@ -28,7 +26,6 @@ from app.models.needs_item import (
     NeedsItemStatus,
 )
 from app.models.stated_financials import StatedAsset, StatedIncomeItem
-from app.services import needs_engine
 from app.services.document_findings import create_document_finding
 from app.services.implications import SuggestedNeed
 from app.services.loan_files import create_loan_file
@@ -329,16 +326,27 @@ async def test_ingest_suggested_need_carries_reasoning_and_source(db_session: As
 
 
 @pytest_asyncio.fixture
-async def _loop_bound_redis(monkeypatch: pytest.MonkeyPatch):
-    """A fresh Redis client bound to this test's event loop (avoids singleton/loop issues)."""
-    client = aioredis.from_url(str(settings.redis_url), decode_responses=True)
-    monkeypatch.setattr(needs_engine, "get_redis_client", lambda: client)
-    yield client
-    await client.aclose()
+async def _real_redis():
+    """Reset the module Redis singleton around the test so the lock runs against the
+    REAL loop-aware ``get_redis_client`` (LP-68.x fix) — NOT a per-loop monkeypatch.
+
+    The Redis per-loop event-loop bug HID precisely because the old concurrency test
+    monkeypatched a fresh per-loop client. De-patched (LP-73): this exercises the real
+    client + the real lock against real Redis, so a regression of the loop fix would
+    surface here. (The cross-loop regression itself is guarded by
+    ``tests/core/test_redis_loop.py``.)
+    """
+    from app.core import redis as redis_module
+
+    redis_module._redis_client = None
+    redis_module._redis_loop = None
+    yield
+    redis_module._redis_client = None
+    redis_module._redis_loop = None
 
 
 async def test_per_file_lock_serializes_same_file_parallelizes_different(
-    _loop_bound_redis,
+    _real_redis,
 ) -> None:
     """SAME file → the lock is exclusive (a second acquire fails while held); DIFFERENT
     files → independent locks acquire in parallel. The serialization primitive."""

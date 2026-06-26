@@ -453,7 +453,18 @@ display name (the stored file is untouched); non-PII fields only;
 consuming LP-71's signals; Phase 6 assembles the package from qualified documents.
 Surfaces, doesn't re-do (no re-extraction, no package assembly). See **ADR-185**.
 
-**Next:** LP-73 (Phase 2 testing & hardening) closes the phase. Phase 6 assembles the
-lender package from package-qualified documents with the standard naming. The
-taxonomy, field sets, finding/need types — the reasoning quality, the recency
-windows, and the naming/qualification rules — refine with Priya.
+**LP-73 (Phase 2 testing, polish & hardening — the capstone):** turns "the features
+are built" into "the assembled system works." The worker starts by default; a bounded
+task retry records a visible terminal-failed on exhaustion (no silent permanent
+pending); the LP-68 concurrency test is de-patched onto the real loop-aware Redis
+client; **real-stack integration tests exercise the seams** (real storage write+read,
+real DB, the real pipeline — AI mocked only at the model boundary) — the response to
+the phase's lesson that four bugs passed unit tests and broke in the seams; a
+tenant-isolation sweep covers the Phase-2 endpoints. See **ADR-186, ADR-187**.
+
+**Phase 2 is closed** (built/tested/hardened). **Deferred:** Phase 3 cross-source
+verification (the findings feed it); Phase 6 lender-package assembly (the qualification
+groundwork feeds it); Phase 7 object storage (the S3 backend isn't implemented yet);
+and the **ongoing Priya domain-tuning** (the reasoning quality, the recency windows, the
+universal-needs list, the naming convention, the taxonomy/field sets) — mechanisms
+hardened, domain-tuning continuing, not overclaimed. **Next:** Phase 3.
