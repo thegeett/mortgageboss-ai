@@ -12,9 +12,13 @@ Two design rules matter here:
 
   * **Graceful failure** — AI is probabilistic and its dependencies fail.
     :func:`classify_document` NEVER raises: any failure (AI error, malformed
-    output, empty/unsupported document) returns ``ClassificationResult.unknown(...)``.
-    The pipeline (LP-42) treats unknown / low-confidence as ``NEEDS_REVIEW`` — a
-    far better outcome than crashing on one document.
+    output, empty/unsupported document) returns ``ClassificationResult.unknown(...)``
+    at **zero** confidence, which the pipeline (LP-42) routes to ``NEEDS_REVIEW``
+    — a far better outcome than crashing on one document. Note the distinction
+    (LP-59): a *low-confidence* result (the model is unsure which known type) →
+    ``NEEDS_REVIEW``; a *high-confidence* ``unknown`` (the model is confident it
+    is none of the known types) → Tier 3 (the generic analyzer). Confidence, not
+    the ``unknown`` slug alone, decides.
   * **Privacy** — the document bytes (and their base64) and the model's raw
     response carry borrower PII, so they are **never** logged. Only metadata (the
     classified type and confidence) is logged here; the wrapper logs call
@@ -31,14 +35,13 @@ from typing import Any
 import structlog
 from pydantic import BaseModel, Field, ValidationError
 
+from app.ai.classification_prompt import render_classification_prompt
 from app.ai.client import AIClientError, build_document_message, complete
 from app.ai.parsing import coerce_confidence, extract_json_object
-from app.ai.prompt_loader import load_prompt
 from app.core.config import settings
 
 logger = structlog.get_logger(__name__)
 
-_CLASSIFIER_PROMPT_PATH = "classification/document_classifier.txt"
 # Media types we can send to the model (matches the LP-36 upload allowlist and
 # the LP-37 document-block support); ``image/jpg`` is normalized to image/jpeg.
 _SUPPORTED_MEDIA_TYPES = frozenset({"application/pdf", "image/jpeg", "image/png", "image/jpg"})
@@ -51,11 +54,15 @@ class ClassificationResult(BaseModel):
 
     ``document_type`` is a flexible lowercase slug (``"unknown"`` when unsure);
     ``confidence`` is clamped to ``[0, 1]``; ``reasoning`` is a short human note.
+    ``category`` is the model's ADVISORY category (LP-59) — the authoritative
+    category persisted on the document is the catalog's (``get_category``), so the
+    two never drift; this is kept for observability/cross-check and may be ``None``.
     """
 
     document_type: str
     confidence: float = Field(ge=0.0, le=1.0)
     reasoning: str
+    category: str | None = None
 
     @classmethod
     def unknown(cls, reason: str) -> "ClassificationResult":
@@ -91,11 +98,19 @@ def _parse_classification_json(text: str) -> ClassificationResult | None:
     raw_reasoning = data.get("reasoning")
     reasoning = raw_reasoning if isinstance(raw_reasoning, str) else ""
 
+    raw_category = data.get("category")
+    category = (
+        raw_category.strip().lower()
+        if isinstance(raw_category, str) and raw_category.strip()
+        else None
+    )
+
     try:
         return ClassificationResult(
             document_type=document_type,
             confidence=confidence,
             reasoning=reasoning,
+            category=category,
         )
     except ValidationError:
         return None
@@ -105,8 +120,9 @@ async def classify_document(content: bytes, media_type: str) -> ClassificationRe
     """Classify a document from its raw bytes (PDF/image). Never raises.
 
     An empty or unsupported document short-circuits to ``unknown`` without an API
-    call. Otherwise it loads the file-based classification prompt (the ``system``
-    instruction), sends the **full document** to the Haiku-class model as a
+    call. Otherwise it builds the comprehensive classification prompt from the
+    document-type catalog (LP-59 ``render_classification_prompt`` — all ~80 types
+    + their indicators), sends the **full document** to the Haiku-class model as a
     document/image content block (LP-37 ``build_document_message``), and parses
     the response defensively. Any AI error or unparseable output returns
     ``ClassificationResult.unknown``. The document bytes/base64 and raw response
@@ -115,7 +131,7 @@ async def classify_document(content: bytes, media_type: str) -> ClassificationRe
     if not content or media_type.lower().strip() not in _SUPPORTED_MEDIA_TYPES:
         return ClassificationResult.unknown("empty or unsupported document")
 
-    system_prompt = load_prompt(_CLASSIFIER_PROMPT_PATH)
+    system_prompt = render_classification_prompt()
     try:
         # build_document_message base64-encodes the bytes into a document/image
         # block; it raises ValueError on an unsupported type (already filtered).
@@ -139,10 +155,12 @@ async def classify_document(content: bytes, media_type: str) -> ClassificationRe
         logger.warning("classification_parse_failed")  # no raw response logged
         return ClassificationResult.unknown("could not parse classification")
 
-    # Metadata only: the classified type + confidence, never the bytes/response.
+    # Metadata only: the classified type, confidence, + advisory category — never
+    # the bytes/response.
     logger.info(
         "classification_succeeded",
         document_type=parsed.document_type,
         confidence=parsed.confidence,
+        model_category=parsed.category,
     )
     return parsed

@@ -40,7 +40,7 @@ from app.mismo.schema import ParsedBorrower, ParsedMismo
 from app.models.activity_log import ActivityType
 from app.models.borrower import Borrower, MaritalStatus
 from app.models.lender import LoanProgram
-from app.models.loan_file import LoanFile, LoanPurpose
+from app.models.loan_file import AiNeedsStatus, LoanFile, LoanPurpose
 from app.models.mismo_import import MismoImport, MismoImportStatus
 from app.models.property import OccupancyType
 from app.models.stated_financials import (
@@ -52,6 +52,7 @@ from app.models.stated_financials import (
 from app.schemas.property import PropertyCreate
 from app.services.activity_log import log_activity
 from app.services.loan_files import create_loan_file
+from app.services.needs_engine import seed_floor_needs
 from app.services.properties import create_property
 from app.storage import get_storage_backend
 
@@ -203,6 +204,18 @@ async def create_loan_file_from_mismo(
             raw_file_path=raw_path,
         )
     )
+
+    # The thin deterministic needs floor (LP-68) — near-certain needs seeded from
+    # the stated MISMO data just persisted (employment → pay stubs + W-2; a purchase
+    # → purchase agreement; stated assets → a bank statement). ``seed_floor_needs``
+    # flushes first so it sees the rows added above (LP-71.5). LP-69 augments this.
+    await seed_floor_needs(db, loan_file)
+
+    # The import enqueues LP-69's async AI reasoning (the endpoint dispatches it after
+    # commit). Mark it PENDING so a floor-only list isn't silently shown as complete —
+    # the task flips it to COMPLETED / FAILED when it settles (LP-71.5). Informational,
+    # never blocking: the floor above is independent of the AI.
+    loan_file.ai_needs_status = AiNeedsStatus.PENDING
 
     # Audit activity (metadata only — converges with a manually-created file).
     await log_activity(

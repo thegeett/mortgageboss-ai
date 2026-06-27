@@ -65,17 +65,19 @@ services:
       retries: 3
 
   # Celery worker (LP-41) — background task processing, a SEPARATE process from the
-  # API. Behind the "worker" profile so the default `docker compose up` stays
-  # infra-only; start it explicitly:  docker compose --profile worker up worker
+  # API. Starts BY DEFAULT (LP-73): a normal `docker compose up -d` brings it up, so
+  # the async/AI features (document processing, the AI needs reasoning) never silently
+  # fail because no worker is consuming — that was a recurring Phase-2 footgun (the
+  # worker used to be behind a "worker" profile). Requires backend/.env (the app's
+  # required settings, e.g. ANTHROPIC_API_KEY). After a code change, rebuild it:
+  #   docker compose up -d --build worker
   # (locally you can instead run, from backend/:
   #   uv run celery -A app.tasks.celery_app worker --loglevel=info
   #   # on macOS/Colima add --pool=solo if the prefork pool misbehaves)
-  # Requires backend/.env (the app's required settings, e.g. ANTHROPIC_API_KEY).
   worker:
     build: ./backend
     container_name: mortgageboss-worker
     restart: unless-stopped
-    profiles: ["worker"]
     command: ["uv", "run", "celery", "-A", "app.tasks.celery_app", "worker", "--loglevel=info"]
     env_file:
       - ./backend/.env
@@ -84,6 +86,17 @@ services:
       # reaches Postgres/Redis over the Compose network, not localhost).
       DATABASE_URL: postgresql+asyncpg://mortgageboss:mortgageboss_dev_password@postgres:5432/mortgageboss_dev  # pragma: allowlist secret
       REDIS_URL: redis://redis:6379/0
+    volumes:
+      # SHARED STORAGE — the API runs on the HOST and writes uploaded files to
+      # backend/storage (STORAGE_LOCAL_PATH=./storage). The worker runs here in the
+      # container (WORKDIR /app), so its ./storage → /app/storage. Without this mount
+      # that directory is empty and every document fails to PROCESS with a StorageError
+      # at read time (the worker can't see the host's files). Mount the SAME host
+      # backend/storage into the container so both read/write one storage root.
+      # NOTE: the relative ./storage is the trap (it resolves to different real dirs on
+      # host vs. container). The robust long-term answer is object storage (S3/MinIO —
+      # already supported via storage_backend) so host + worker share a network store.
+      - ./backend/storage:/app/storage
     depends_on:
       postgres:
         condition: service_healthy

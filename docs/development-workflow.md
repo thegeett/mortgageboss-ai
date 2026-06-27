@@ -194,6 +194,36 @@ status badges in the README link straight to the latest runs.
 3. Push — GitHub Actions runs the relevant pipeline.
 4. Fix any CI failures before merging to `main`.
 
+## Running the full local stack (the consistent dev model — LP-73)
+
+Document processing and the AI needs reasoning run in a **Celery worker**, a separate
+process from the API. The settled local-dev model is **all-in-Docker with a shared
+storage volume** — chosen to remove the host-API / Docker-worker asymmetry that caused a
+real bug (the worker couldn't read host-written files):
+
+```bash
+docker compose up -d            # postgres, redis, mailhog — AND the worker (default)
+```
+
+- The **worker starts by default** (LP-73 — it's no longer behind a profile), so the
+  async/AI features can't silently do nothing because no worker is consuming. After a
+  backend code change, rebuild it: `docker compose up -d --build worker`. Watch it with
+  `docker logs -f mortgageboss-worker`.
+- **Shared storage:** the API (run on the host with `uvicorn`) writes uploads to
+  `backend/storage`; the worker container mounts that same directory at `/app/storage`
+  (the `worker.volumes` entry), so both read/write one storage root. The relative
+  `STORAGE_LOCAL_PATH=./storage` resolves to different real dirs on host vs. container —
+  the volume is what makes them one. (Object storage, S3/MinIO, is the production answer;
+  the **S3 backend is not yet implemented** — Phase 7.)
+- Alternative: run the worker **on the host** (`cd backend && uv run celery -A
+  app.tasks.celery_app worker --loglevel=info`) so it shares the host filesystem directly
+  (no volume needed). Pick one model; don't mix host-API + Docker-worker without the
+  shared volume.
+
+If documents upload but never leave "processing" (or the AI needs never appear), the
+worker is almost certainly not running, not rebuilt after a change, or can't see storage —
+check `docker logs mortgageboss-worker` first.
+
 ## Seeding dev data
 
 There is no public signup (accounts are provisioned — see

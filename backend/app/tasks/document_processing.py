@@ -2,12 +2,18 @@
 
 On upload, :func:`process_document` chains, for one document, independently:
 
-    read bytes → classify (Haiku) → route extraction by type →
-    extract if pay stub (Sonnet) → persist a versioned Extraction (+ cost) →
-    satisfy a matching need → log activity → set a TERMINAL status.
+    read bytes → classify (Haiku) → look up the type's tier in the catalog →
+    route by tier → (Tier 1) extract via the registry (Sonnet) → persist a
+    versioned Extraction (+ cost) → set a TERMINAL status → enqueue the per-file
+    needs update (LP-68, serialized) → log activity.
 
-Classification **routes** extraction: the type selects the extractor (Phase 1 has
-only the pay-stub branch; every other type is "classified only"). The
+Classification + the catalog **route** handling (LP-58, tier-aware): the
+classified type's tier (from :mod:`app.documents.catalog`) selects the path —
+**Tier 1** runs the registered extractor (a Tier-1 type whose extractor isn't
+built yet is classified-only); **Tier 2** is the shared recognize/summarize path
+(LP-65 — one lightweight summary for any Tier-2 type); **Tier 3** is the shared
+generic-analyzer path (LP-66 — one flexible analysis + recorded findings + indexed
+text for any unrecognized document). The
 ``Document.status`` field is the source of truth the UI polls (LP-43), so the
 status is transitioned and committed at each stage.
 
@@ -19,8 +25,8 @@ Every handled path reaches a terminal status (COMPLETED / NEEDS_REVIEW / FAILED)
 — never left stuck in CLASSIFYING / EXTRACTING.
 
 **Retry-safe.** Re-running is safe: extraction uses ``create_extraction_version``
-(a new version, not a duplicate current), and needs-matching only acts on an
-``OUTSTANDING`` need (a ``RECEIVED`` one is left alone).
+(a new version, not a duplicate current), and the needs update (LP-68, a separate
+per-file-serialized task) only advances an OPEN need (a satisfied one is left alone).
 
 **Async bridge (LP-41).** The Celery task is sync; the real work (DB, storage,
 classify, extract) is async, run via ``run_async`` inside one coroutine using a
@@ -33,56 +39,39 @@ worker async session (``task_session``).
 from uuid import UUID
 
 import structlog
+from celery import Task
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ai.classification import classify_document
 from app.ai.cost import estimate_cost
 from app.ai.extraction import EXTRACTORS, Extractor
+from app.ai.generic_analyzer import analyze_document
+from app.ai.summarization import summarize_document
 from app.core.config import settings
+from app.documents.catalog import get_category, get_tier
 from app.models.activity_log import ActivityType
-from app.models.base import utcnow
-from app.models.document import Document, DocumentCategory, DocumentStatus
+from app.models.document import Document, DocumentStatus, Tier
 from app.models.extraction import ExtractionStatus
 from app.models.helpers import only_active
-from app.models.needs_item import NeedsItem, NeedsItemStatus
 from app.services.activity_log import log_activity
+from app.services.document_findings import (
+    coerce_finding_type,
+    create_document_finding,
+    record_findings_from_extraction,
+)
 from app.services.extractions import create_extraction_version
 from app.storage import get_storage_backend
 from app.tasks.base import run_async, task_session
 from app.tasks.celery_app import celery_app
+from app.tasks.needs import update_needs_for_document
+from app.tasks.retry import MAX_RETRIES, retry_or_terminal
 
 logger = structlog.get_logger(__name__)
 
 # Below this classification/extraction confidence (or an "unknown" type) the
 # document is routed to human review rather than trusted. Tune with real data.
 _CONFIDENCE_THRESHOLD = 0.5
-
-# PROVISIONAL document-type → category map — refine in Phase 2 with the full
-# taxonomy / Priya. Unknown/absent types get no category (None).
-_TYPE_TO_CATEGORY: dict[str, DocumentCategory] = {
-    "pay_stub": DocumentCategory.INCOME_EMPLOYMENT,
-    "w2": DocumentCategory.INCOME_EMPLOYMENT,
-    "tax_return_1040": DocumentCategory.INCOME_EMPLOYMENT,
-    "voe": DocumentCategory.INCOME_EMPLOYMENT,
-    "profit_and_loss": DocumentCategory.INCOME_EMPLOYMENT,
-    "award_letter": DocumentCategory.INCOME_EMPLOYMENT,
-    "bank_statement": DocumentCategory.ASSETS,
-    "gift_letter": DocumentCategory.ASSETS,
-    "credit_report": DocumentCategory.CREDIT,
-    "drivers_license": DocumentCategory.BORROWER_INFO,
-    "passport": DocumentCategory.BORROWER_INFO,
-    "mortgage_statement": DocumentCategory.PROPERTY,
-    "homeowners_insurance": DocumentCategory.PROPERTY,
-    "purchase_agreement": DocumentCategory.PROPERTY,
-}
-
-
-def category_for_type(document_type: str | None) -> DocumentCategory | None:
-    """The provisional category for a document type (or None if unmapped)."""
-    if document_type is None:
-        return None
-    return _TYPE_TO_CATEGORY.get(document_type)
 
 
 async def _load_document(db: AsyncSession, document_id: str) -> Document | None:
@@ -96,42 +85,17 @@ async def _load_document(db: AsyncSession, document_id: str) -> Document | None:
     return document
 
 
-async def _satisfy_needs_for_document(db: AsyncSession, document: Document) -> None:
-    """Mark one OUTSTANDING need in the document's category RECEIVED (PROVISIONAL rule).
+def _enqueue_needs_update(loan_file_id: UUID, document_id: UUID) -> None:
+    """Fire-and-forget enqueue of the LP-68 per-file-serialized needs update.
 
-    **PROVISIONAL — refine with Priya / Phase 2.** V1 rule: a successfully-extracted
-    document satisfies the first OUTSTANDING needs item on the same loan file whose
-    category matches the document's (e.g. a pay stub / W-2 → an income need; a bank
-    statement → an assets need). Only ``OUTSTANDING`` needs are touched, so
-    re-processing never double-satisfies (a ``RECEIVED`` need is left alone). No
-    category or no match → no-op.
+    The document already reached a terminal status (committed); the needs update is
+    a separate, serialized task (:mod:`app.tasks.needs`). An enqueue hiccup (broker
+    down) must NOT fail processing — the document is safe and the update can re-run.
     """
-    if document.category is None:
-        return
-    stmt = (
-        select(NeedsItem)
-        .where(
-            NeedsItem.loan_file_id == document.loan_file_id,
-            NeedsItem.status == NeedsItemStatus.OUTSTANDING,
-            NeedsItem.category == document.category,
-        )
-        .order_by(NeedsItem.created_at)
-        .limit(1)
-    )
-    stmt = only_active(stmt, NeedsItem)
-    need = await db.scalar(stmt)
-    if need is None:
-        return
-    need.status = NeedsItemStatus.RECEIVED
-    need.satisfied_by_document_id = document.id
-    need.satisfied_at = utcnow()
-    await log_activity(
-        db,
-        loan_file_id=document.loan_file_id,
-        activity_type=ActivityType.NEEDS_ITEM_SATISFIED,
-        summary="A document satisfied an outstanding need",
-        detail={"need_id": str(need.id), "document_id": str(document.id)},
-    )
+    try:
+        update_needs_for_document.delay(str(loan_file_id), str(document_id))
+    except Exception:
+        logger.warning("needs_update_enqueue_failed", document_id=str(document_id))
 
 
 async def _process_document(db: AsyncSession, document_id: str) -> None:
@@ -154,7 +118,10 @@ async def _process_document(db: AsyncSession, document_id: str) -> None:
         await db.commit()
         classification = await classify_document(content, document.mime_type)
         document.document_type = classification.document_type
-        document.category = category_for_type(classification.document_type)
+        # Catalog-driven (LP-58): the type's tier (for routing) + category (for
+        # filing) both come from the single source of truth, so they never drift.
+        document.tier = get_tier(classification.document_type)
+        document.category = get_category(classification.document_type)
         document.classification_confidence = classification.confidence
         document.status = DocumentStatus.CLASSIFIED
         await db.commit()
@@ -170,33 +137,33 @@ async def _process_document(db: AsyncSession, document_id: str) -> None:
             },
         )
 
-        # --- Low-confidence / unknown gate → human review -------------------- #
-        if (
-            classification.document_type == "unknown"
-            or classification.confidence < _CONFIDENCE_THRESHOLD
-        ):
+        # --- Low-confidence gate → human review (LP-59) --------------------- #
+        # CONFIDENCE — not the "unknown" slug — decides here. A low-confidence
+        # result means the model is unsure WHICH type it is (it could be a known
+        # type) → a human confirms/corrects (the LP-44 override). A HIGH-confidence
+        # "unknown" (the model is sure it is NONE of the known types) is NOT caught
+        # here: it falls through to tier routing, where the catalog maps it to
+        # Tier 3 (the generic analyzer — that is its purpose).
+        if classification.confidence < _CONFIDENCE_THRESHOLD:
             document.status = DocumentStatus.NEEDS_REVIEW
             await db.commit()
             logger.info(
                 "document_needs_review",
                 document_id=str(document.id),
-                reason="low_confidence_or_unknown",
+                reason="low_confidence",
             )
             return
 
-        # --- Route extraction by type (registry dispatch, LP-39c) ----------- #
-        extractor = EXTRACTORS.get(classification.document_type)
-        if extractor is not None:
-            await _extract_branch(db, document, content, extractor)
-        else:
-            # No extractor registered for this type — classified-only (expected V1).
-            document.status = DocumentStatus.COMPLETED
-            await db.commit()
-            logger.info(
-                "document_classified_only",
-                document_id=str(document.id),
-                document_type=classification.document_type,
-            )
+        # --- Route by tier (catalog-driven, LP-58) -------------------------- #
+        # The catalog gave the document its tier above; each tier has one
+        # handling path, and every path reaches a terminal status (resilience).
+        # A confident "unknown" routes here to Tier 3 (catalog default).
+        await _route_by_tier(db, document, content)
+
+        # --- Update the needs list (LP-68) — SERIALIZED per loan file -------- #
+        # The document is now terminal + committed; advance any matching need in a
+        # separate per-file-serialized task (concurrent arrivals never race).
+        _enqueue_needs_update(document.loan_file_id, document.id)
     except Exception as exc:
         # UNEXPECTED (storage/DB/etc.) — never crash the worker or the batch.
         logger.warning(
@@ -205,6 +172,126 @@ async def _process_document(db: AsyncSession, document_id: str) -> None:
             error_type=type(exc).__name__,
         )  # metadata only — no PII
         await _mark_failed(db, document, document_id)
+
+
+async def _route_by_tier(db: AsyncSession, document: Document, content: bytes) -> None:
+    """Dispatch a classified document to its tier's handling path (LP-58).
+
+    The tier was set from the catalog during classification. Exactly one branch
+    runs and every branch reaches a terminal status:
+
+      * **Tier 1** → the existing EXTRACTORS registry (unchanged for the 3 built
+        types). A Tier-1 type whose extractor isn't built yet (LP-60..64) has no
+        registry entry → handled gracefully as *classified-only* (a terminal
+        status), NOT a crash; its extractor arrives in a later ticket.
+      * **Tier 2** → the shared recognize/summarize path (LP-65) — one mechanism
+        for every Tier-2 type: a lightweight summary, then a terminal status.
+      * **Tier 3** → the shared generic-analyzer path (LP-66) — one flexible
+        analysis for any unrecognized document (+ recorded findings, indexed text).
+
+    The low-confidence / ``unknown`` gate already routed those to NEEDS_REVIEW
+    before this point, so here the document is a confidently-classified type.
+    """
+    if document.tier == Tier.TIER_1:
+        extractor = EXTRACTORS.get(document.document_type or "")
+        if extractor is not None:
+            await _extract_branch(db, document, content, extractor)
+        else:
+            # A Tier-1 type whose extractor isn't registered yet (LP-60..64).
+            # Classified-only — the same terminal handling the pipeline has always
+            # used for a type with no extractor; deep extraction arrives later.
+            await _complete_classified_only(db, document, reason="tier1_extractor_pending")
+    elif document.tier == Tier.TIER_2:
+        await _tier2_summarize(db, document, content)
+    else:  # Tier.TIER_3 (the catalog default for uncataloged long-tail types)
+        await _tier3_analyze(db, document, content)
+
+
+async def _complete_classified_only(db: AsyncSession, document: Document, *, reason: str) -> None:
+    """Mark a correctly-classified document COMPLETED with no extraction (terminal).
+
+    Used when no extractor runs: a Tier-1 type whose extractor isn't built yet
+    (LP-60..64). The document is classified + categorized; it simply has no deep
+    extraction. Metadata-only log (no PII).
+    """
+    document.status = DocumentStatus.COMPLETED
+    await db.commit()
+    logger.info(
+        "document_classified_only",
+        document_id=str(document.id),
+        document_type=document.document_type,
+        reason=reason,
+    )
+
+
+async def _tier2_summarize(db: AsyncSession, document: Document, content: bytes) -> None:
+    """Tier 2 (recognized) handling — the ONE shared path for every Tier-2 type (LP-65).
+
+    No per-type logic: any Tier-2 document (already classified + categorized, LP-59)
+    gets a single lightweight 1-2 sentence AI **summary** (a human-reference gist,
+    not extraction — :func:`app.ai.summarization.summarize_document`, a cheap Haiku
+    call) and reaches a terminal status. The document is a normal, package-eligible
+    file document filed under its category.
+
+    **Graceful** (resilience): ``summarize_document`` never raises and returns
+    ``None`` on failure; a failed summary still finalizes the document (recognized +
+    categorized, ``summary`` null) — never stuck, never a crash. Metadata-only log
+    (the summary text itself is never logged — it can quote document PII).
+    """
+    document.summary = await summarize_document(content, document.mime_type)
+    document.status = DocumentStatus.COMPLETED
+    await db.commit()
+    logger.info(
+        "document_tier2_recognized",
+        document_id=str(document.id),
+        document_type=document.document_type,
+        category=document.category,
+        has_summary=document.summary is not None,
+    )
+
+
+async def _tier3_analyze(db: AsyncSession, document: Document, content: bytes) -> None:
+    """Tier 3 (long-tail) handling — the ONE shared generic-analyzer path (LP-66).
+
+    No per-type logic: any unrecognized document is run through the flexible generic
+    analyzer (:func:`app.ai.generic_analyzer.analyze_document`) → a structured-but-
+    flexible analysis (type guess, parties, dates, amounts, findings, summary, full
+    text). The analysis + the full text (indexed for search) are stored on the
+    document, each ``key_finding`` is recorded as a :class:`DocumentFinding` via the
+    SAME ``create_document_finding`` the Tier 1 divorce decree uses (uniform findings
+    across tiers), and the document reaches a terminal status.
+
+    **Graceful** (resilience): ``analyze_document`` never raises and returns ``None``
+    on failure; a failed analysis still finalizes the document (analysis null, no
+    findings) — never stuck, never a crash. Metadata-only log (no extracted values).
+    """
+    analysis = await analyze_document(content, document.mime_type)
+    findings_count = 0
+    if analysis is not None:
+        # Store the structured analysis (the full text lives in its own column).
+        document.generic_analysis = analysis.model_dump(mode="json", exclude={"full_text"})
+        document.full_text = analysis.full_text
+        for f in analysis.key_findings:
+            await create_document_finding(
+                db,
+                document=document,
+                finding_type=coerce_finding_type(f.finding_type),
+                description=f.description or "(no description)",
+                amount=f.amount,
+                frequency=f.frequency,
+                details=f.details,
+            )
+            findings_count += 1
+
+    document.status = DocumentStatus.COMPLETED
+    await db.commit()
+    logger.info(
+        "document_tier3_analyzed",
+        document_id=str(document.id),
+        document_type=document.document_type,
+        has_analysis=analysis is not None,
+        findings_count=findings_count,
+    )
 
 
 async def _extract_branch(
@@ -250,7 +337,11 @@ async def _extract_branch(
         return
 
     document.status = DocumentStatus.COMPLETED
-    await _satisfy_needs_for_document(db, document)
+    # The needs update (satisfaction-matching) is enqueued once, per-file-serialized,
+    # at the end of _process_document (LP-68) — not inline here (which would race
+    # under concurrent same-file arrivals). Record any findings the extraction
+    # surfaced (LP-66) — e.g. a divorce decree's obligations → findings (LP-63 loop).
+    findings_count = await record_findings_from_extraction(db, document, result.data)
     await db.commit()
     logger.info(
         "document_completed",
@@ -258,6 +349,7 @@ async def _extract_branch(
         extraction_status=result.status,
         tokens_used=tokens_used,
         cost_estimate=cost_estimate,
+        findings_count=findings_count,
     )
 
 
@@ -334,18 +426,47 @@ async def _run_reprocess(document_id: str) -> None:
         await reprocess_document_extraction(db, document)
 
 
-@celery_app.task(name="documents.process_document")  # type: ignore[untyped-decorator]
-def process_document(document_id: str) -> None:
-    """Celery task: process one uploaded document end-to-end (sync→async bridge)."""
-    run_async(_run(document_id))
+async def _mark_document_failed(document_id: str) -> None:
+    """Terminal-failed (LP-73): set the document FAILED if a transient infra error
+    (e.g. a DB/Redis blip outside the pipeline's own handling) exhausted retries —
+    so it is never left silently stranded in a non-terminal status."""
+    async with task_session() as db:
+        document = await _load_document(db, document_id)
+        if document is not None:
+            await _mark_failed(db, document, document_id)
 
 
-@celery_app.task(name="documents.reprocess_document")  # type: ignore[untyped-decorator]
-def reprocess_document(document_id: str) -> None:
+@celery_app.task(  # type: ignore[untyped-decorator]
+    bind=True, name="documents.process_document", max_retries=MAX_RETRIES
+)
+def process_document(self: Task, document_id: str) -> None:
+    """Celery task: process one uploaded document end-to-end (sync→async bridge).
+
+    The pipeline itself never raises (it sets its own terminal status); this bounded
+    retry (LP-73) covers a transient infra error *around* it, and on exhaustion marks
+    the document FAILED rather than leaving it stranded.
+    """
+    retry_or_terminal(
+        self,
+        lambda: run_async(_run(document_id)),
+        on_exhausted=lambda: run_async(_mark_document_failed(document_id)),
+        event="process_document_exhausted",
+    )
+
+
+@celery_app.task(  # type: ignore[untyped-decorator]
+    bind=True, name="documents.reprocess_document", max_retries=MAX_RETRIES
+)
+def reprocess_document(self: Task, document_id: str) -> None:
     """Celery task: re-extract a document after a manual type override (LP-44).
 
     A thin wrapper over the existing :func:`reprocess_document_extraction` core
     (LP-39c, registry-based, skips classification, new version, resilient) — the
-    PATCH override endpoint enqueues this.
+    PATCH override endpoint enqueues this. Bounded-retry on a transient blip (LP-73).
     """
-    run_async(_run_reprocess(document_id))
+    retry_or_terminal(
+        self,
+        lambda: run_async(_run_reprocess(document_id)),
+        on_exhausted=lambda: run_async(_mark_document_failed(document_id)),
+        event="reprocess_document_exhausted",
+    )

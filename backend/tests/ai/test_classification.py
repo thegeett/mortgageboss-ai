@@ -89,6 +89,24 @@ def test_parse_missing_type_becomes_unknown() -> None:
     assert result.document_type == "unknown"
 
 
+def test_parse_captures_advisory_category() -> None:
+    """LP-59: the model's category is parsed (advisory; the catalog is authoritative)."""
+    result = _parse_classification_json(
+        '{"document_type": "w2", "category": "Income_Employment", "confidence": 0.9,'
+        ' "reasoning": "boxes 1-6"}'
+    )
+    assert result is not None
+    assert result.category == "income_employment"  # stripped + lowercased
+
+
+def test_parse_missing_category_is_none() -> None:
+    result = _parse_classification_json(
+        '{"document_type": "w2", "confidence": 0.9, "reasoning": "boxes"}'
+    )
+    assert result is not None
+    assert result.category is None
+
+
 # --------------------------------------------------------------------------- #
 # classify_document
 # --------------------------------------------------------------------------- #

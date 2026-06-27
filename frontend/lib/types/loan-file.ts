@@ -73,9 +73,13 @@ export interface PropertyPublic {
   purchase_price: string | null;
 }
 
+/** The state of LP-69's async AI needs reasoning (LP-71.5). `null` = not triggered. */
+export type AiNeedsStatus = "pending" | "completed" | "failed";
+
 export interface LoanFileDetail extends LoanFileSummary {
   loan_officer_name: string | null;
   loan_officer_email: string | null;
+  ai_needs_status: AiNeedsStatus | null;
   borrowers: BorrowerPublic[];
   property: PropertyPublic | null;
 }

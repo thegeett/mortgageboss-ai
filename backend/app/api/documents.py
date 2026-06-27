@@ -26,28 +26,34 @@ from fastapi import APIRouter, File, HTTPException, Response, UploadFile, status
 
 from app.api.dependencies import CurrentUser, ScopedLoanFile
 from app.core.database import DbSession
+from app.documents.catalog import get_category, get_tier
 from app.models.activity_log import ActivityType
 from app.models.document import Document
+from app.models.loan_file import LoanFile
 from app.schemas.document import (
     DocumentDetailResponse,
     DocumentResponse,
     DocumentTypeOverrideRequest,
-    ExtractionPublic,
+    StalenessResolveRequest,
 )
 from app.services.activity_log import log_activity
+from app.services.document_versioning import supersede_document
 from app.services.documents import (
     MAX_FILE_SIZE_BYTES,
     DocumentValidationError,
+    build_document_detail,
+    build_document_response,
+    build_document_responses,
     create_document,
-    get_current_extraction,
     get_document_for_company,
+    get_version_group_documents,
     list_documents,
+    resolve_staleness,
     soft_delete_document,
     validate_upload,
 )
 from app.storage import get_storage_backend
 from app.tasks.document_processing import (
-    category_for_type,
     process_document,
     reprocess_document,
 )
@@ -178,33 +184,41 @@ async def upload(
     for document in created:
         _enqueue_processing(document.id)
 
-    return [DocumentResponse.model_validate(d) for d in created]
+    return [await build_document_response(db, document=d) for d in created]
 
 
 @nested_router.get("", response_model=list[DocumentResponse])
 async def list_(loan_file: ScopedLoanFile, db: DbSession) -> list[DocumentResponse]:
-    """List the file's active documents, newest first. (File gate via dependency.)"""
+    """List the file's active documents, newest first (+ versioning/staleness/fitness)."""
     documents = await list_documents(db, loan_file_id=loan_file.id)
-    return [DocumentResponse.model_validate(d) for d in documents]
+    return await build_document_responses(db, documents)
 
 
 @flat_router.get("/{document_id}", response_model=DocumentDetailResponse)
 async def retrieve(
     document_id: UUID, current_user: CurrentUser, db: DbSession
 ) -> DocumentDetailResponse:
-    """Get one document + its current extraction; ``404`` if not the caller's."""
+    """Get one document + its current extraction (+ versioning/staleness); ``404`` if not the caller's."""
     document = await get_document_for_company(
         db, document_id=document_id, company_id=current_user.company_id
     )
     if document is None:
         raise _NOT_FOUND
-    extraction = await get_current_extraction(db, document=document)
-    return DocumentDetailResponse(
-        **DocumentResponse.model_validate(document).model_dump(),
-        current_extraction=(
-            ExtractionPublic.model_validate(extraction) if extraction is not None else None
-        ),
+    return await build_document_detail(db, document=document)
+
+
+@flat_router.get("/{document_id}/versions", response_model=list[DocumentResponse])
+async def versions(
+    document_id: UUID, current_user: CurrentUser, db: DbSession
+) -> list[DocumentResponse]:
+    """The document's version group, oldest→newest (LP-71). A standalone doc → just itself."""
+    document = await get_document_for_company(
+        db, document_id=document_id, company_id=current_user.company_id
     )
+    if document is None:
+        raise _NOT_FOUND
+    group = await get_version_group_documents(db, document=document)
+    return await build_document_responses(db, group)
 
 
 @flat_router.patch("/{document_id}", response_model=DocumentResponse)
@@ -234,7 +248,9 @@ async def override_document_type(
 
     new_type = body.document_type.strip()
     document.document_type = new_type
-    document.category = category_for_type(new_type)
+    # Catalog-driven (LP-58): re-derive both tier and category from the new type.
+    document.tier = get_tier(new_type)
+    document.category = get_category(new_type)
     document.classification_confidence = 1.0  # human-set type is authoritative
     document.processing_error = None
 
@@ -251,7 +267,111 @@ async def override_document_type(
     # Re-extract in the background (fire-and-forget; the override is already saved).
     _enqueue_reprocess(document.id)
 
-    return DocumentResponse.model_validate(document)
+    return await build_document_response(db, document=document)
+
+
+@flat_router.post(
+    "/{document_id}/replace",
+    response_model=DocumentResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def replace(
+    document_id: UUID,
+    current_user: CurrentUser,
+    db: DbSession,
+    file: Annotated[UploadFile, File(description="The new version of the document")],
+) -> DocumentResponse:
+    """Explicitly replace a document with a new upload (Model C, LP-71).
+
+    A **deliberate** supersession (NOT triggered by a same-type upload — multiples are
+    normal): the target (which must be the current version) becomes HISTORICAL, the new
+    upload becomes CURRENT in the same version group, BOTH are kept for audit, and the
+    need the old satisfied re-evaluates against the new current version (via the new
+    document's pipeline, LP-68 serialized). Tenant-scoped (``404``); audited.
+    """
+    old = await get_document_for_company(
+        db, document_id=document_id, company_id=current_user.company_id
+    )
+    if old is None:
+        raise _NOT_FOUND
+    if not old.is_current:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Only the current version of a document can be replaced.",
+        )
+
+    try:
+        content = await _read_capped(file, max_bytes=MAX_FILE_SIZE_BYTES)
+        mime_type = validate_upload(content=content, declared_content_type=file.content_type or "")
+    except DocumentValidationError as exc:
+        raise HTTPException(status_code=exc.http_status, detail=exc.message) from exc
+
+    loan_file = await db.get(LoanFile, old.loan_file_id)
+    if loan_file is None:  # pragma: no cover - the scoped doc guarantees its file exists
+        raise _NOT_FOUND
+
+    new_id = uuid4()
+    filename = file.filename or "upload"
+    storage_path = await get_storage_backend().save(
+        company_id=current_user.company_id,
+        file_id=old.loan_file_id,
+        document_id=new_id,
+        filename=filename,
+        content=content,
+    )
+    new_document = await create_document(
+        db,
+        loan_file=loan_file,
+        document_id=new_id,
+        filename=filename,
+        mime_type=mime_type,
+        size=len(content),
+        storage_path=storage_path,
+        uploaded_by_user_id=current_user.id,
+    )
+    await supersede_document(db, old_document=old, new_document=new_document)
+
+    await log_activity(
+        db,
+        loan_file_id=old.loan_file_id,
+        activity_type=ActivityType.DOCUMENT_REPLACED,
+        summary=f"Replaced {old.original_filename}",
+        actor_user_id=current_user.id,
+        detail={"old_document_id": str(old.id), "new_document_id": str(new_document.id)},
+    )
+    await db.commit()
+
+    # Process the new version (fire-and-forget); on completion it re-satisfies the need.
+    _enqueue_processing(new_document.id)
+    return await build_document_response(db, document=new_document)
+
+
+@flat_router.post("/{document_id}/resolve-staleness", response_model=DocumentResponse)
+async def resolve_staleness_endpoint(
+    document_id: UUID,
+    body: StalenessResolveRequest,
+    current_user: CurrentUser,
+    db: DbSession,
+) -> DocumentResponse:
+    """Resolve a flagged-stale document (LP-71): ``waive`` or ``accept`` (replace is its
+    own flow). Clears the staleness flag; the processor decides. Tenant-scoped; audited."""
+    document = await get_document_for_company(
+        db, document_id=document_id, company_id=current_user.company_id
+    )
+    if document is None:
+        raise _NOT_FOUND
+    action = "waive" if body.action == "waive" else "accept"
+    await resolve_staleness(db, document=document, action=action)
+    await log_activity(
+        db,
+        loan_file_id=document.loan_file_id,
+        activity_type=ActivityType.DOCUMENT_STALENESS_RESOLVED,
+        summary=f"Staleness {action}d for {document.original_filename}",
+        actor_user_id=current_user.id,
+        detail={"document_id": str(document.id), "action": action},
+    )
+    await db.commit()
+    return await build_document_response(db, document=document)
 
 
 @flat_router.get("/{document_id}/download")

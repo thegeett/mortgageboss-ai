@@ -11,12 +11,14 @@ from uuid import UUID
 
 from sqlalchemy import case, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.models.base import utcnow
 from app.models.document import DocumentCategory
 from app.models.helpers import only_active
 from app.models.needs_item import (
     NeedsItem,
+    NeedsItemDisposition,
     NeedsItemOrigin,
     NeedsItemPriority,
     NeedsItemStatus,
@@ -34,10 +36,17 @@ async def create_needs_item(
     origin: NeedsItemOrigin = NeedsItemOrigin.MANUAL,
     priority: NeedsItemPriority = NeedsItemPriority.STANDARD,
     description: str | None = None,
+    disposition: NeedsItemDisposition = NeedsItemDisposition.PROPOSED,
+    reasoning: str | None = None,
+    source_finding_id: UUID | None = None,
 ) -> NeedsItem:
-    """Create an ``OUTSTANDING`` needs item on a loan file.
+    """Create a ``PENDING`` needs item on a loan file (LP-68).
 
-    Uses ``flush`` rather than ``commit`` so the caller controls the transaction.
+    ``origin`` is the source-agnostic provenance (floor / suggestion / ai_reasoning /
+    manual); ``disposition`` is the human-confirmation lifecycle (default PROPOSED;
+    the floor passes CONFIRMED); ``reasoning`` + ``source_finding_id`` carry the
+    explainability for a suggestion-derived need. Uses ``flush`` so the caller
+    controls the transaction.
     """
     item = NeedsItem(
         loan_file_id=loan_file_id,
@@ -48,7 +57,10 @@ async def create_needs_item(
         origin=origin,
         priority=priority,
         description=description,
-        status=NeedsItemStatus.OUTSTANDING,
+        status=NeedsItemStatus.PENDING,
+        disposition=disposition,
+        reasoning=reasoning,
+        source_finding_id=source_finding_id,
     )
     db.add(item)
     await db.flush()
@@ -95,9 +107,59 @@ async def list_needs_items(db: AsyncSession, *, loan_file_id: UUID) -> list[Need
 
     Takes an already scope-checked ``loan_file_id`` (the endpoint resolves the
     parent file with the caller's company first). Excludes soft-deleted rows.
+    Eager-loads the satisfying document so the dashboard can name it (LP-70).
     """
     stmt = select(NeedsItem).where(NeedsItem.loan_file_id == loan_file_id)
     stmt = only_active(stmt, NeedsItem)
+    stmt = stmt.options(selectinload(NeedsItem.satisfied_by_document))
     stmt = stmt.order_by(_PRIORITY_ORDER, NeedsItem.created_at)
     result = await db.execute(stmt)
     return list(result.scalars().all())
+
+
+async def get_needs_item(
+    db: AsyncSession, *, loan_file_id: UUID, needs_item_id: UUID
+) -> NeedsItem | None:
+    """Fetch one active need within a loan file (LP-70), or ``None``.
+
+    Scoped to ``loan_file_id`` — the parent file is the tenant gate (the endpoint
+    resolves it with the caller's company first), so a need from another file is
+    unreachable. Eager-loads the satisfying document for the response.
+    """
+    stmt = (
+        select(NeedsItem)
+        .where(NeedsItem.id == needs_item_id, NeedsItem.loan_file_id == loan_file_id)
+        .options(selectinload(NeedsItem.satisfied_by_document))
+    )
+    stmt = only_active(stmt, NeedsItem)
+    item: NeedsItem | None = await db.scalar(stmt)
+    return item
+
+
+async def adjust_needs_item(
+    db: AsyncSession,
+    *,
+    needs_item: NeedsItem,
+    title: str | None = None,
+    description: str | None = None,
+    needs_type: str | None = None,
+    priority: NeedsItemPriority | None = None,
+) -> NeedsItem:
+    """Apply a processor edit to a need's content (LP-70 adjust) — a correction signal.
+
+    Only the provided (non-``None``) fields change. An adjusted need is one the
+    processor has taken ownership of, so its disposition becomes ``CONFIRMED`` (a
+    real need). The arrival ``status`` is untouched — editing the ask doesn't change
+    whether the document has arrived. Uses ``flush``.
+    """
+    if title is not None:
+        needs_item.title = title
+    if description is not None:
+        needs_item.description = description
+    if needs_type is not None:
+        needs_item.needs_type = needs_type
+    if priority is not None:
+        needs_item.priority = priority
+    needs_item.disposition = NeedsItemDisposition.CONFIRMED
+    await db.flush()
+    return needs_item

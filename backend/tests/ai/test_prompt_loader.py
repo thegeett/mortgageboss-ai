@@ -9,7 +9,8 @@ from app.ai.prompt_loader import load_prompt
 
 def test_loads_the_classifier_prompt() -> None:
     text = load_prompt("classification/document_classifier.txt")
-    assert "STARTER" in text  # the placeholder marker
+    # The LP-59 template carries the catalog-injection placeholder + the JSON shape.
+    assert "{document_type_catalog}" in text  # filled by render_classification_prompt
     assert "document_type" in text  # instructs the JSON shape
 
 

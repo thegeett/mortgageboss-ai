@@ -25,7 +25,13 @@ from app.models.document import (
     Document,
     DocumentCategory,
     DocumentStatus,
+    Tier,
     UploadSource,
+)
+from app.models.document_finding import (
+    DocumentFinding,
+    DocumentFindingStatus,
+    DocumentFindingType,
 )
 from app.models.encrypted_types import EncryptedString
 from app.models.enums import RecordStatus, str_enum
@@ -42,6 +48,7 @@ from app.models.loan_file import LoanFile, LoanFileStatus, LoanPurpose
 from app.models.mismo_import import MismoImport, MismoImportStatus
 from app.models.needs_item import (
     NeedsItem,
+    NeedsItemDisposition,
     NeedsItemOrigin,
     NeedsItemPriority,
     NeedsItemStatus,
@@ -78,6 +85,9 @@ __all__ = [
     "Company",
     "Document",
     "DocumentCategory",
+    "DocumentFinding",
+    "DocumentFindingStatus",
+    "DocumentFindingType",
     "DocumentStatus",
     "EncryptedString",
     "Extraction",
@@ -98,6 +108,7 @@ __all__ = [
     "MismoImportStatus",
     "Money",
     "NeedsItem",
+    "NeedsItemDisposition",
     "NeedsItemOrigin",
     "NeedsItemPriority",
     "NeedsItemStatus",
@@ -111,6 +122,7 @@ __all__ = [
     "StatedEmployer",
     "StatedIncomeItem",
     "StatedLiability",
+    "Tier",
     "TimestampMixin",
     "UUIDMixin",
     "UploadSource",

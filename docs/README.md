@@ -13,6 +13,7 @@ mortgage processors. Start here to find your way around.
 | [onboarding-and-tenancy.md](onboarding-and-tenancy.md) | Company/user onboarding model, tenancy, staged build plan, dev seed |
 | [frontend-architecture.md](frontend-architecture.md) | Route groups, the protected app shell, adding pages, role-aware nav |
 | [api.md](api.md)                                     | HTTP API surface: conventions, tenant scoping, loan-file CRUD |
+| [document-model.md](document-model.md)               | The three-tier document model: tiers, the type catalog, tier-aware routing |
 | [glossary.md](glossary.md)                           | Mortgage domain terms and technical terms                 |
 | [poc-learnings.md](poc-learnings.md)                 | Lessons from the prototype (with a developer TODO section)|
 | [project-structure.md](project-structure.md)         | Repository layout and "where does X go?" conventions      |

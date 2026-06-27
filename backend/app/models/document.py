@@ -27,10 +27,10 @@ company-scoped **transitively** through the loan file (ADR-052).
 """
 
 from enum import StrEnum
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
-from sqlalchemy import Float, ForeignKey, Integer, String, Text
+from sqlalchemy import JSON, Boolean, Float, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, SoftDeleteMixin, TimestampMixin, UUIDMixin
@@ -58,6 +58,30 @@ class DocumentCategory(StrEnum):
     PROPERTY = "property"
     MISC = "misc"
     CUSTOM = "custom"
+
+
+class Tier(StrEnum):
+    """The level-of-investment tier a document type is handled at (LP-58, ADR-167).
+
+    The three-tier model scales the pipeline from a handful of types to ~80-100
+    without giving every type full structured extraction:
+
+      * ``TIER_1`` — first-class: full structured extraction via the EXTRACTORS
+        registry. High-value docs whose exact data drives Phase 3 verification.
+      * ``TIER_2`` — recognized: classified + categorized + a short AI summary,
+        stored/viewable, no deep extraction.
+      * ``TIER_3`` — long-tail: didn't match a known type → a generic analyzer
+        produces a structured summary.
+
+    A small, stable set — a good fit for a DB-enforced enum (VARCHAR + CHECK,
+    ADR-037). The document_type → tier mapping is **not** in the DB: it lives in
+    the catalog (:mod:`app.documents.catalog`, the single source of truth), so a
+    type's tier can be added/refined without a migration.
+    """
+
+    TIER_1 = "tier_1"
+    TIER_2 = "tier_2"
+    TIER_3 = "tier_3"
 
 
 class DocumentStatus(StrEnum):
@@ -92,6 +116,21 @@ class UploadSource(StrEnum):
     MISMO_IMPORT = "mismo_import"
 
 
+class StalenessResolution(StrEnum):
+    """The processor's decision on a flagged-stale document (LP-71).
+
+    Staleness is computed deterministically (the extracted date vs. a recency window,
+    or a newer version exists). When a CURRENT document is flagged stale, the processor
+    RESOLVES it: ``WAIVED`` (not required to be fresher for this file) or ``ACCEPTED``
+    (acknowledged, used as-is). The third resolution — *replace* — is the versioning
+    flow (the doc becomes historical), so it isn't a value here. Auto-resolution is V2.
+    A ``None`` resolution means the staleness flag (if any) is unresolved/active.
+    """
+
+    WAIVED = "waived"
+    ACCEPTED = "accepted"
+
+
 class Document(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     """An uploaded file attached to a loan file (metadata + storage path)."""
 
@@ -122,8 +161,24 @@ class Document(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     category: Mapped[DocumentCategory | None] = mapped_column(
         str_enum(DocumentCategory), nullable=True
     )
+    # The level-of-investment tier the document was HANDLED as, looked up from the
+    # document-type catalog during classification (LP-58). Nullable until
+    # classified. Catalog-driven (:mod:`app.documents.catalog`), never a DB rule.
+    tier: Mapped[Tier | None] = mapped_column(str_enum(Tier), nullable=True)
     # Classifier confidence in [0.0, 1.0]; bounds are an app-layer concern.
     classification_confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # A short 1-2 sentence human-readable gist (LP-65), set by the Tier 2 shared
+    # summary path for *recognized* documents — what the document is, for quick
+    # processor reference. NOT structured data (that is the Tier 1 extraction). Null
+    # for Tier 1 docs and when summarization fails (forgiving — low stakes).
+    summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # The Tier 3 generic-analyzer output (LP-66) — a structured-but-flexible JSON
+    # blob (type guess, parties, dates, amounts, findings, summary) for an
+    # *unrecognized* document. Null for Tier 1/2 and on analyzer failure.
+    generic_analysis: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    # The document's full text (LP-66), indexed for search — set for Tier 3 docs
+    # (which can't be found by type). A GIN full-text index lives in the migration.
+    full_text: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # --- Processing lifecycle (ADR-054) ------------------------------------
     status: Mapped[DocumentStatus] = mapped_column(
@@ -134,6 +189,37 @@ class Document(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     )
     # Failure reason, populated when status is FAILED.
     processing_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # --- Versioning (Model C, LP-71) ---------------------------------------
+    # New uploads are CURRENT + standalone (NO replacement assumption — multiples are
+    # normal: a set of pay stubs / months of statements are NOT replacements). An
+    # EXPLICIT replace supersedes a specific document: the old → historical
+    # (is_current False), the new → current, BOTH kept for audit, sharing a
+    # version_group. ``version_group_id`` is NULL for a standalone (single-version)
+    # document and the originating document's id once a group forms. ``version`` is
+    # the 1-based ordinal within the group. ``supersedes_document_id`` is the
+    # immediate predecessor (the audit chain; SET NULL so the chain degrades, not breaks).
+    version: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    is_current: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False, index=True)
+    version_group_id: Mapped[UUID | None] = mapped_column(index=True, nullable=True)
+    supersedes_document_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("documents.id", ondelete="SET NULL"), nullable=True
+    )
+
+    # --- Staleness (LP-71) — the processor's resolution of a flagged-stale doc ----
+    # Staleness itself is COMPUTED (the extracted date vs. a recency window, or a newer
+    # version exists) — not stored. This records the processor's RESOLUTION (waive /
+    # accept) so a resolved flag clears; NULL = unresolved. Replace is the versioning
+    # flow (the doc goes historical), so it's not a value here. Auto-resolution is V2.
+    staleness_resolution: Mapped[StalenessResolution | None] = mapped_column(
+        str_enum(StalenessResolution), nullable=True
+    )
+
+    # An auto-ingested document (e.g. emailed by the borrower) can't be explicitly
+    # "replaced" by a click, so it arrives flagged as a possible duplicate/replacement
+    # for the processor to resolve. Set by ingestion (a later feature); the mechanism
+    # + the gentle surfacing live here now. Default False (a normal user upload).
+    possible_duplicate: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
     # --- Provenance (ADR-056) ----------------------------------------------
     upload_source: Mapped[UploadSource] = mapped_column(str_enum(UploadSource), nullable=False)

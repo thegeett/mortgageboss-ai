@@ -4630,3 +4630,1018 @@ storing any real person's data.
 smart-needs/LP-58, AI-fallback, core-field edit UI). When real files arrive, drop them into
 `tests/fixtures/mismo/` and add assertions — the synthetic builder and the full-flow/isolation tests
 are the harness they slot into. Otherwise this is testing/polish/hardening; no architectural change.
+
+## ADR-167: Three-tier document model — a catalog-driven, tier-aware pipeline that extends (not rebuilds) the extractor registry
+
+- **Date:** 2026-06-18
+- **Status:** Accepted
+
+**Context:** Phase 1 handled 3 document types (`pay_stub` / `w2` / `bank_statement`) with full structured
+extraction via the `EXTRACTORS` registry. Phase 2 scales the document set to ~80-100 types. Giving every
+type full field-level extraction is infeasible and wasteful — most types are low-value or rarely seen, and
+each extractor is real engineering (a schema, a prompt, tests). But the long-tail still has to be
+*recognized* and *handled*, not dropped. The pipeline (`process_document`) already classifies (Haiku) then
+routes; we needed a way to invest extraction effort where it pays off without rebuilding that pipeline.
+
+**Decision:** Introduce a **three-tier model** keyed on a document's type, with handling routed by tier
+*after* classification:
+
+- **Tier 1 — first-class (~18 types):** full structured extraction via the **existing** `EXTRACTORS`
+  registry. The 3 Phase-1 types *are* Tier 1 and are unchanged. The registry **is** the Tier-1 mechanism.
+- **Tier 2 — recognized (~60-80 types):** classified + categorized + (later) a short AI summary; no deep
+  extraction.
+- **Tier 3 — long-tail:** anything not matching a known type → a generic analyzer produces a structured
+  summary.
+
+The single source of truth for *which* tier (and which filing category) a type gets is a **catalog**
+(`app/documents/catalog.py`): a maintainable `document_type -> (tier, category)` dict with
+`get_tier` / `get_category` helpers and a default of `(Tier 3, Misc)` for uncataloged types. The catalog —
+**not** the database, **not** scattered `if/elif` — owns this knowledge, so adding/refining a type is a
+one-line edit (no migration, ADR-053). It replaces the Phase-1 provisional `_TYPE_TO_CATEGORY` map, so tier
+and category can never drift apart. A `tier` column is added to `documents` (VARCHAR + CHECK, ADR-037,
+nullable until classified) recording how each document was *handled*; the type→tier *mapping* stays in the
+catalog, not the DB.
+
+`process_document` consults the catalog after classification and branches by tier — Tier 1 → the registry;
+Tier 2 → a summarize path; Tier 3 → a generic-analyzer path — with the pre-existing low-confidence/`unknown`
+gate still routing those to `NEEDS_REVIEW` first. **Every document takes exactly one path and reaches a
+terminal status** (the resilience discipline). Two specific choices:
+
+1. **A Tier-1 type whose extractor isn't built yet** (the LP-60..64 types, cataloged now) has no registry
+   entry → handled as **classified-only / `COMPLETED`** (no crash), exactly as Phase 1 already handled a
+   type with no extractor. Its extractor simply registers later and the same path runs extraction. Chosen
+   over `NEEDS_REVIEW` because the document is *correctly recognized* — nothing for a human to fix — and this
+   keeps the existing "unregistered type" behavior unchanged.
+2. **Tier 2 and Tier 3 are clean stubs** (`_tier2_summarize_stub` / `_tier3_analyze_stub`) that record the
+   document at its tier and reach `COMPLETED`. LP-65/66 fill the real summary/analyzer *in place* without
+   restructuring the routing — the seam is complete now.
+
+**Rationale:** tiering concentrates extraction engineering on the docs whose exact data drives Phase 3
+verification (Tier 1), while still recognizing and filing the rest (Tier 2/3) — the level-of-investment
+matches the value. A catalog centralizes the type→tier+category knowledge in one readable place that grows
+(LP-59 adds all ~80 types) and refines with the domain expert (Priya), with no schema churn. Extending the
+existing registry + classification pipeline — rather than building a parallel one — means the 3 existing
+types keep working byte-for-byte and the new machinery is purely additive.
+
+**Consequences:** LP-59 fills the full ~80-type catalog + the matching comprehensive classification; LP-60..64
+add Tier-1 extractors (each just registers in `EXTRACTORS`; the catalog already lists them); LP-65 fills the
+Tier-2 summary stub; LP-66 fills the Tier-3 analyzer stub. The catalog and the tier/category sets are
+expected to evolve with Priya. Because the stubs currently set `COMPLETED`, a Tier 2/3 (or
+extractor-pending Tier 1) document reads as "completed" with no extraction — honest for the foundation
+(the doc *is* handled as far as this tier goes today), and the later tickets add the summary/analysis
+without a status redesign.
+
+## ADR-168: Comprehensive ~80-type classification — catalog-synced prompt, confidence-gated, industry-standard starter
+
+- **Date:** 2026-06-18
+- **Status:** Accepted
+
+**Context:** LP-58 built tier-aware routing but seeded the catalog with only a starter set, and the Phase-1
+classification prompt knew ~3 types — so most real documents would classify as `unknown` and default to
+Tier 3, never reaching their correct tier/category. To make the three-tier model real across breadth, the
+classifier needs the knowledge to recognize the full document set. The resident domain expert's (Priya's)
+real document library is not yet available, so the taxonomy has to start from somewhere defensible.
+
+**Decision:** Expand the catalog to the **full ~80-type taxonomy** (88 types: 18 Tier 1, 70 Tier 2, across
+all seven categories) drawn from an **industry-standard** US residential mortgage document set, and rewrite
+the classification prompt to recognize all of them. Specifics:
+
+- **One taxonomy, two artifacts, kept in sync by construction.** The catalog (`app/documents/catalog.py`)
+  is the structural source of truth (type → tier + category). The recognition knowledge — each type's
+  **distinguishing indicators** — lives in `DOCUMENT_TYPE_INDICATORS` (`app/ai/classification_prompt.py`).
+  The prompt's *type list is derived from the catalog*: `render_classification_prompt()` iterates the
+  catalog (grouped by category) and injects each type + indicator into a template (the framing/output rules
+  stay an editable `.txt`). A test asserts the indicator set exactly equals the catalog set, so the two
+  cannot drift — adding a type to the catalog without describing it fails CI.
+- **The classifier returns type + category + confidence.** Category is **advisory** (parsed for
+  observability); the authoritative category persisted on the document is the **catalog's** `get_category` —
+  one source of truth (ADR-167), so a model/catalog disagreement can't mis-file a document.
+- **Confidence gates routing, and the `unknown` slug alone does not.** The pipeline now branches on
+  *confidence*, not on `document_type == "unknown"`: **low confidence** (the model is unsure *which* known
+  type — it could be one) → `NEEDS_REVIEW` (a human confirms via the LP-44 override); **high-confidence
+  `unknown`** (the model is sure it is *none* of the known types) → falls through to tier routing, where the
+  catalog maps it to **Tier 3** (the generic analyzer — that is its purpose). The graceful error fallback
+  still returns `unknown` at **zero** confidence, so AI failures land in `NEEDS_REVIEW`, not Tier 3. The
+  threshold stays `0.5` (LP-42).
+- **Industry-standard starter, honestly scoped.** The taxonomy + indicators are explicitly a starting
+  point to **refine with Priya**; per-type accuracy is to be validated against real labeled documents over
+  time. Tests verify the *mechanism* + a representative spread, not exhaustive per-type accuracy (real
+  labeled documents for all ~80 types are not available).
+
+**Rationale:** deriving the prompt's type list from the catalog removes the single biggest drift risk of a
+large taxonomy (a prompt that lists types the system can't route, or routes types it never describes).
+Confidence-gating keeps uncertain classifications human-checked rather than confidently mis-filed, while
+letting genuinely-novel documents flow to the generic analyzer instead of clogging review. An
+industry-standard taxonomy is a strong, reviewable starting point while the real library is pending.
+
+**Consequences:** LP-60..64 add the Tier-1 extractors (a Tier-1-classified type without an extractor yet is
+still handled gracefully per ADR-167); LP-65/66 fill the Tier-2/3 handlers; the taxonomy + indicators refine
+with Priya and tune against real documents over time. Accuracy is honestly scoped: the mechanism + a
+representative spread are tested now; full per-type accuracy is an ongoing, real-document-dependent effort.
+
+## ADR-169: Tier 1 income/employment extractors (1099/VOE/P&L/income-LOE) — the established pattern, with 1099 subtypes folded into one extractor
+
+- **Date:** 2026-06-18
+- **Status:** Accepted
+
+**Context:** LP-58/59 route a Tier-1 document to its registered extractor, but only the 3 Phase-1 extractors
+(pay_stub/w2/bank_statement) existed — the other Tier-1 types fell through to classified-only. LP-60 is the
+first batch of new extractors: the income/employment cluster (1099, VOE, P&L, income LOE), the income side
+of Phase 3 DTI. This is repetitive application of an established pattern, not new architecture — but one
+shape question (the 1099 series) and one honesty question (no sample documents) are worth recording.
+
+**Decision:** Add four extractors, each following the LP-39a shape exactly (a typed core of
+``TypedField``\\ s with ``SourceLocation`` + a grouped ``additional_sections`` catch-all, the shared tolerant
+parser, ``derive_status``, graceful ``.failed()``, the same result interface, metadata-only logging) and
+registered in ``EXTRACTORS`` so the Tier-1 routing reaches them. Specific choices:
+
+- **1099 — one extractor for the whole series, not five.** The 1099 is a series (NEC/INT/DIV/MISC/R) with
+  different relevant boxes. Rather than a separate extractor/type per subtype, the typed core carries a
+  ``form_subtype`` slug + a single ``income_amount`` (the primary figure *for that subtype*, selected by the
+  prompt); every specific box lands in the catch-all. One catalog type (``1099``), one extractor, the
+  subtype preserved for Phase 3 (NEC ≈ self-employment income; INT/DIV ≈ asset income).
+- **LOE — prose-light typed core.** A Letter of Explanation has no fixed form, so its typed core is
+  deliberately minimal (``subject`` + ``explanation_summary`` + a single primary referenced
+  employer/date/amount); additional references go to the catch-all. Capture *what is explained*, not rigid
+  fields. (The same type also appears in the LP-63 borrower-info context; the extractor is shared.)
+- **Sensitive TINs follow the W-2 SSN discipline (ADR-147).** The 1099 ``recipient_tin`` (an SSN for an
+  individual) is extracted into the typed core for the Phase 3 identity cross-check but is **never logged**
+  (only counts + the non-PII subtype) and is masked in display.
+- **Typed cores are V1 starters, refined with Priya; accuracy is honestly scoped.** No sample 1099/VOE/P&L/
+  LOE documents were available, so the tests verify the **mechanism/shape** (the extractor returns the
+  typed-core + catch-all shape, coerces types, carries source locations, fails gracefully, the 1099 subtype
+  variation, the routing reaches each) — **not** extraction accuracy against real forms. The catch-all is
+  the safety net: a missing field is captured, not lost, and can be promoted to the typed core later.
+
+**Rationale:** following the established pattern keeps every extraction uniform downstream (the pipeline,
+``create_extraction_version``, the detail drawer handle them identically). Folding the 1099 subtypes into one
+extractor matches how the catalog/classifier treat ``1099`` as a single type and avoids five near-duplicate
+modules, while the subtype slug keeps the income-vs-asset distinction. Honest accuracy scoping avoids
+claiming per-form correctness we can't demonstrate without real documents.
+
+**Consequences:** LP-61..64 extend Tier 1 to the asset/property/borrower-info/tax-return clusters the same
+way; the field sets refine with Priya; the detail drawer (LP-72) renders these like the existing three;
+real samples validate accuracy over time. Sensitive TINs/SSNs are masked in display + never logged.
+
+## ADR-170: Tier 1 asset extractors (investment/retirement/gift-letter) — the established pattern, with the vested-vs-total and gift-attestation nuances
+
+- **Date:** 2026-06-18
+- **Status:** Accepted
+
+**Context:** LP-61 is the second Tier-1 extractor batch — the asset/reserves cluster. Bank statements (the
+most common asset doc) are already Tier 1 (LP-39c); this adds the other major asset documents: an investment
+statement, a retirement statement, and a gift letter. Assets prove the borrower has the funds for the down
+payment, closing costs, and reserves (the lender-required cushion), and these typed cores are cross-checked
+in Phase 3 against the stated assets imported from the MISMO (Phase 1.5 — e.g. a file's stated
+"RetirementFund $243,000, Stock $19,000, GiftOfCash $56,000"). Repetitive application of the established
+pattern, with two nuances worth recording.
+
+**Decision:** Add three extractors, each following the LP-39a shape exactly (typed core of ``TypedField``\\ s
+with ``SourceLocation`` + grouped ``additional_sections`` catch-all, the shared tolerant parser, graceful
+``.failed()``, the uniform result interface, metadata-only logging), modeled on the **bank statement**
+extractor (the closest template — an asset doc with a masked account, a statement period, and balances), and
+registered in ``EXTRACTORS``. Specific choices:
+
+- **Investment + retirement are flat (typed core + catch-all), not transactional.** Unlike the bank
+  statement, the decision figure is a single balance/value, not a transaction list, so holdings (if
+  itemized) go to the catch-all rather than a first-class list. ``total_value`` (investment) and the two
+  retirement balances are the typed-core figures.
+- **Retirement tracks vested AND total balances separately.** ``vested_balance`` is the portion the borrower
+  actually owns/can access (unvested employer funds aren't available; even vested funds carry early-withdrawal
+  penalties), so it is the reserves-relevant number — but the prompt is told **not** to assume
+  ``vested == total``: if only one balance is shown and vesting isn't mentioned, it fills ``total_balance``
+  and leaves ``vested_balance`` null. Both are captured for Phase 3 to use the right one.
+- **The gift letter is attestation-oriented (prose-aware), like the LOE.** Its typed core captures the
+  parties + ``gift_amount`` + property + a ``no_repayment_attestation`` — the statement that the funds are a
+  genuine gift with no expectation of repayment. That attestation is what distinguishes a gift (an asset)
+  from undisclosed debt; it is captured as text (present/absent + wording), left **null** when the letter
+  doesn't state it (never fabricated). No account number is present.
+- **Account numbers follow the bank-statement masking discipline (ADR-149).** ``account_number_masked``
+  (investment, retirement) is captured masked (last 4), **never logged**, and masked in display.
+- **V1 starters, refined with Priya; accuracy honestly scoped.** No sample investment/retirement/gift-letter
+  documents were available, so tests verify the **mechanism/shape** (the typed-core + catch-all shape, source
+  locations, type coercion, graceful failure, the vested-vs-total distinction, the gift attestation, the
+  routing reaches each) — **not** per-document accuracy, validated as real documents flow through.
+
+**Rationale:** following the established pattern keeps every extraction uniform downstream. The
+vested-vs-total separation and the no-fabrication rule keep the reserves figure honest (over-counting
+unvested funds, or assuming vesting, would inflate reserves). Capturing the gift attestation cleanly is the
+single most important thing about a gift letter — without it, gifted funds could be mistaken for an
+undisclosed liability. These cores are exactly the values Phase 3 cross-checks against the stated MISMO
+assets.
+
+**Consequences:** LP-62..64 extend Tier 1 to the property/borrower-info/tax-return clusters; the field sets
+refine with Priya; the detail drawer renders these like the others; account numbers are masked + never
+logged; accuracy is validated with real samples over time.
+
+## ADR-171: Tier 1 property extractors — the established pattern, spanning subject-property facts and other-property obligations
+
+- **Date:** 2026-06-18
+- **Status:** Accepted
+
+**Context:** LP-62 is the third Tier-1 extractor batch — the property cluster: purchase agreement,
+homeowner's insurance, mortgage statement, property tax bill, HOA statement. Property documents serve two
+distinct verification purposes, and one of them creates a matching problem worth recording.
+
+**Decision:** Add five extractors, each following the LP-39a shape exactly (typed core of ``TypedField``\\ s
+with ``SourceLocation`` + grouped ``additional_sections`` catch-all, the shared tolerant parser, graceful
+``.failed()``, the uniform result interface, metadata-only logging), and register them in ``EXTRACTORS``.
+Key points:
+
+- **The cluster spans two contexts.** *Subject-property facts* drive LTV and housing expense: the purchase
+  agreement's ``sales_price`` (the LTV basis, cross-checking the stated MISMO ``SalesContractAmount``) and
+  the insurance binder's ``coverage_amount`` + ``annual_premium`` (housing expense). *Other-property
+  obligations* drive DTI: the mortgage statement's ``monthly_payment``, the tax bill's ``annual_tax_amount``,
+  and the HOA statement's ``dues_amount`` — each cross-checking the stated MISMO liabilities.
+- **Capture the property address; do NOT decide subject-vs-other.** A mortgage statement / tax bill / HOA
+  statement may be for the subject property OR another property the borrower owns. Each extractor captures
+  ``property_address`` in its typed core, and the prompts are explicit that the model must **not** decide
+  which property it is — Phase 3 matches the address to the subject property. Keeping the matching out of the
+  extractor avoids guessing and keeps the extraction a faithful read.
+- **``due_dates`` (tax bill) stays a string.** A property tax bill commonly has two installment due dates;
+  capturing them verbatim as a string loses nothing (vs. forcing a single ``date``), and Phase 3 can parse.
+- **V1 starters, refined with Priya; accuracy honestly scoped.** No sample property documents were available,
+  so tests verify the **mechanism/shape** (typed-core + catch-all, source locations, type coercion, graceful
+  failure, the address capture, the routing reaches each) — **not** per-document accuracy.
+- **The appraisal is deliberately NOT extracted here.** The appraisal's appraised value also feeds LTV, which
+  might argue for Tier-1 extraction, but the catalog currently classifies ``appraisal`` as **Tier 2**
+  (recognized, not extracted). This ticket honors the catalog and does not extract it. **Flagged** as a
+  candidate for Tier-1 promotion in a future catalog refinement with Priya — noted, not acted on here.
+
+**Rationale:** following the established pattern keeps every extraction uniform downstream. Capturing the
+address (without deciding subject-vs-other) is what lets Phase 3 correctly separate the borrower's housing
+expense on the subject property from obligations on other properties — getting that wrong would mis-state
+DTI. These typed cores are exactly the values Phase 3 cross-checks against the stated MISMO property +
+liabilities.
+
+**Consequences:** LP-63/64 extend Tier 1 to the borrower-info and tax-return clusters; the field sets refine
+with Priya; the detail drawer renders these like the others; the appraisal's Tier-1 promotion is an open
+question for the catalog/Priya; accuracy is validated with real samples over time.
+
+## ADR-172: Tier 1 borrower-info/legal extractors — heightened ID PII, divorce-decree obligations captured (findings sequenced to LP-66/67), the LOE reused
+
+- **Date:** 2026-06-18
+- **Status:** Accepted
+
+**Context:** LP-63 is the fourth Tier-1 extractor batch — the borrower-info/legal cluster: the driver's
+license / government ID (identity, KYC), the divorce decree (legal obligations/awards), and the general
+Letter of Explanation. Two things make this batch different from the prior extractor batches: the ID is the
+most PII-dense document in the product, and the divorce decree produces *findings* whose infrastructure
+isn't built yet.
+
+**Decision:** Add the ID and divorce-decree extractors (following the LP-39a shape exactly) and **reuse** the
+existing LOE extractor; register the two new types in ``EXTRACTORS``. Key choices:
+
+- **Heightened ID PII — the W-2 SSN discipline (ADR-147), at its strictest.** The whole ID is PII.
+  ``id_number_masked`` is captured masked (last 4, the model masks it), ``date_of_birth`` is captured for the
+  Phase 3 identity cross-check — and **no extracted value is ever logged** (only status / confidence /
+  counts). The raw values live only in the tenant-scoped extraction JSON (ID number masked, DOB masked in
+  display). A dedicated test asserts the DOB, the ID number, the name, and the address never appear in logs.
+  All ID test data is **synthetic** — never a real identity document.
+- **The ID expiration is captured.** An expired ID is invalid; ``expiration_date`` feeds validity / staleness
+  (LP-71).
+- **Divorce-decree obligations captured now; formal findings sequenced to LP-66/67.** The support
+  obligations (alimony / child support) are the canonical undisclosed-obligation feedstock Phase 3
+  cross-checks against the stated liabilities. Because a decree can set more than one obligation, they are
+  captured as a **first-class typed list** (``support_obligations`` — type/amount/frequency/payer, each with
+  source), alongside a ``property_awards`` list — the same structured-rows extension the bank statement uses
+  for transactions (ADR-061), **not** a new shape. **Surfacing them as formal findings** (the structured
+  observations the implications engine + Phase 3 read) is **wired when the findings infrastructure exists
+  (LP-66/67)** — this ticket captures the data without building findings infrastructure prematurely. Nothing
+  is lost: the obligations are in the typed list today.
+- **The general LOE is reused, not duplicated.** LP-60 already built the ``letter_of_explanation`` extractor
+  with a general ``subject`` + ``explanation_summary`` + referenced facts, and the catalog files it under
+  ``borrower_info``. It already serves the general variant; this ticket reuses it (only the prompt was
+  lightly broadened to enumerate general subjects — no schema/registry change), so there is one LOE
+  extractor, not two.
+- **V1 starters, refined with Priya; accuracy honestly scoped.** No sample documents were available, so the
+  tests verify the **mechanism/shape** (incl. the critical PII no-logging check and the obligation-list
+  capture) — not per-document accuracy.
+
+**Rationale:** identity and legal documents establish who the borrower is and what legal obligations affect
+the loan. The ID's PII density demands the strictest no-logging discipline in the codebase. Capturing the
+decree's obligations now (as structured rows) means the cross-check feedstock exists the moment the findings
+infrastructure lands, without a re-extraction — and capture-now/wire-later avoids building findings
+infrastructure out of order. Reusing the LOE keeps one extractor for one catalog type.
+
+**Consequences:** LP-64 completes Tier 1 (tax returns); LP-66/67 build the findings infrastructure that
+surfaces the divorce-decree obligations as findings and cross-checks them (Phase 3); the ID expiration feeds
+staleness (LP-71); accuracy is validated with real (synthetic / redacted — never real) samples; field sets
+refine with Priya.
+
+## ADR-173: Nested tax-return extraction — a 1040 core + typed income-critical schedules + catch-all (Tier 1 complete)
+
+- **Date:** 2026-06-18
+- **Status:** Accepted
+
+**Context:** LP-64 is the final and hardest Tier-1 extractor. A tax return is **not one form** — it is Form
+1040 plus a **variable** set of schedules (Schedule C self-employment, Schedule E rental, K-1 partnership,
+plus B/D/1/2/3 and attachments), and which schedules are present depends on the borrower. The single-form
+typed-core+catch-all shape (LP-39a) doesn't fit a variable, nested bundle. Crucially, **the self-employed
+case is the point**: for a W-2 employee the return is largely redundant, but for a self-employed borrower the
+return is THE primary income document — Schedule C ``net_profit`` is the qualifying-income figure (the real
+MISMO sample borrower had self-employment income from multiple LLCs — exactly this case).
+
+**Decision:** Extract the tax return as a **nested** bundle that extends — not replaces — the established
+shape: a **1040 typed core** + **typed income-critical schedule sub-structures** + the grouped catch-all.
+
+- **Type the income-critical schedules; catch-all the rest.** ``schedule_c`` (a **list** — a borrower can
+  have several businesses; ``net_profit`` is the heart), ``schedule_e`` (present-or-null, with a
+  ``properties`` list + ``total_net_rental_income`` + ``depreciation``), and ``k1s`` (a list) are typed.
+  Every other schedule (B/D/1/2/3, W-2s/1099s included in the bundle, attachments) goes to
+  ``additional_sections`` — captured, not deeply typed. Which schedules/figures to promote to typed is a
+  refine-with-Priya question.
+- **Variable composition, no hallucination.** A schedule absent → an empty list / ``null`` (never assumed); a
+  fully-empty schedule entry is dropped (no invented schedules). Each schedule field is a ``TypedField`` with
+  ``SourceLocation`` parsed through the **same** shared typed-core parser, so the nesting reuses the existing
+  machinery rather than inventing new parsing. Status is derived from the 1040 core **and** the schedules (a
+  self-employed return may be mostly its schedules).
+- **Generous token budget.** A multi-page, multi-schedule bundle is the most content of any extractor, so
+  ``max_tokens`` is 16384 (vs 4096 for single-form extractors); a truncated/malformed response still fails
+  gracefully (``.failed()``).
+- **Same result interface despite nested data.** ``TaxReturnExtractionResult`` exposes the same
+  ``data`` / ``status`` / ``confidence`` / ``.failed()`` / ``model_dump`` interface as every other extractor,
+  so the pipeline + ``create_extraction_version`` + the detail drawer handle the nested data uniformly.
+- **Captures figures for Phase 3; does NOT compute income.** The qualifying-income derivation (combining
+  Schedule C net profit + add-backs, the two-year comparison) is Phase 3. This ticket extracts one return's
+  figures accurately.
+- **SSN masked + never logged** (ADR-147). Tax returns are among the most sensitive documents; metadata-only
+  logging (counts + which-schedules-present), no return values or SSN in logs.
+
+**Rationale:** the nested typed-core+catch-all handles the variable composition while typing exactly the
+high-value schedules that drive the self-employed income picture — the case where the return matters most.
+Reusing the shared parser for each schedule keeps the nesting from being a new shape. The figures are the
+feedstock for Phase 3's income math.
+
+**Accuracy — honestly (emphatically) scoped.** A tax return is the most varied, multi-schedule document of
+any extractor here. With **no real sample returns available**, the tests verify the nested **mechanism/shape**
+(the 1040 core, Schedule C ``net_profit``, the present-or-null + repeatable schedules, the catch-all, the
+SSN no-logging, graceful failure) — **NOT** extraction accuracy against real returns. A multi-schedule
+extractor tested only against constructed inputs is **especially unproven**; accuracy must be validated
+against real (synthetic/redacted) **self-employed** returns over time and the field set refined with Priya.
+
+**Consequences:** **Tier 1 breadth is complete** (LP-60..64 — every Tier-1 catalog type now has an
+extractor, asserted by a test). Phase 3 derives qualifying income from the captured figures + does the
+two-year comparison; which schedules/figures to type refines with Priya; tax-return accuracy needs
+real-return validation most acutely of any extractor. Phase 2 now moves to the Tier 2/3 handlers (LP-65/66).
+
+## ADR-174: Tier 2 shared summary path — one lightweight mechanism for ~60-80 recognized types
+
+- **Date:** 2026-06-19
+- **Status:** Accepted
+
+**Context:** Tier 2 is the bulk of the taxonomy — the ~60-80 *recognized* document types that need to be
+classified, filed, and glanceable, but whose individual field values nobody computes on (unlike Tier 1's
+income/asset/property figures). LP-58 stubbed the Tier 2 routing path; this fills it. The whole point of the
+tier model is efficiency: ~18 extractors + **1** Tier-2 path + 1 Tier-3 analyzer, not ~80 extractors.
+
+**Decision:** Handle every Tier 2 document through **one shared path** (`_tier2_summarize`, filling the LP-58
+stub) — **no per-type logic** (no `flood_certification.py` / `credit_report.py`). The document arrives
+already classified + categorized (LP-59); the path adds a single lightweight AI **summary** and finalizes:
+
+- **A gist, not extraction.** The summary is a 1-2 sentence human-readable answer to "what is this document,
+  briefly?" (what it is + a key identifying detail) — **not** structured data, **not** typed fields, **not**
+  source locations. The sharp contrast with Tier 1: Tier 1 extracts precise values that *drive decisions*;
+  Tier 2 summarizes for *human reference*.
+- **Cheap.** `summarize_document` uses the **Haiku-class** (classification) model, capped at 256 tokens —
+  low cost-per-document is the point of Tier 2 (one cheap call across ~80 types). A response cap guards a
+  rambling answer without failing it.
+- **Forgiving / low-stakes.** A slightly-off gist is fine (human reference, not a calculation) — accuracy is
+  proportionately light and refine-able, unlike a wrong Tier-1 figure.
+- **Graceful.** `summarize_document` never raises and returns `None` on any failure; a failed summary still
+  finalizes the document (recognized + categorized, `summary` null) — never stuck, never a crash (the
+  resilience discipline). The summary text is **never logged** (it can quote document PII) — only a length /
+  presence flag.
+- **Normal, package-eligible documents.** A Tier 2 doc is a first-class file document — it appears in the
+  Documents tab under its category with its summary, and is part of the file (package groundwork is LP-72;
+  assembly is Phase 6). Not second-class.
+- **Stored + minimally visible.** A nullable `summary` TEXT column on `documents` (migration `b344317498a5`,
+  up/down) holds the gist; the frontend shows it lightly (a subtle line in the document list + a "Summary"
+  block in the existing drawer). The **full tier-aware detail view** (Tier 1 fields / Tier 2 summary / Tier 3
+  findings) is **LP-72** — this ticket only makes the summary visible.
+
+**Rationale:** the ~60-80 recognized types must be handled, but giving each its own extractor (or even its own
+summary logic) is exactly the waste the tier model avoids. One shared recognize-and-summarize path gives broad
+coverage cheaply; a forgiving summary is the right level of investment for documents whose exact field values
+no rule consumes.
+
+**Consequences:** LP-66 fills the Tier 3 stub (the generic analyzer + findings); LP-72 builds the full
+tier-aware detail view + package groundwork; the summary is refine-able and low-stakes; Tier 2 docs appear in
+the Documents tab and (later) the lender package. The summary is best confirmed against real documents over
+time, but the stakes are low.
+
+## ADR-175: Tier 3 generic analyzer + the document-findings infrastructure (uniform across tiers)
+
+- **Date:** 2026-06-19
+- **Status:** Accepted
+
+**Context:** Two related needs. (1) **Tier 3** — the long-tail: documents no predefined schema anticipates (a
+court order, a trust, a personal-loan agreement, a handwritten letter). Without handling they are opaque
+files. (2) **Findings** — multiple earlier tickets deferred to "when the findings infrastructure exists":
+LP-63's divorce-decree obligations are captured but not yet surfaced as findings, and the implications engine
+(LP-67) + Phase 3's cross-source verification both need a structured place to read document observations
+from. This ticket builds both, and they meet: the Tier 3 analyzer is the first big *producer* of findings.
+
+**Decision:**
+
+- **One generic analyzer for all Tier 3 docs** (`app/ai/generic_analyzer.py`, filling the LP-58 stub). No
+  per-type logic: a single flexible analysis produces **generic slots** that work for any document —
+  `document_type_guess`, `key_parties`, `key_dates`, `key_amounts`, `key_findings`, `summary`, `full_text`.
+  **Sonnet** (it is *understanding*, not a cheap one-liner) with a generous budget. Like the other AI
+  helpers it never raises (`None` on failure); a failed analysis still finalizes the document. The analysis +
+  the **full text** are stored on the document, and the full text gets a **GIN full-text index** (Tier 3 docs
+  can't be found by type, so search matters most for them — the data + index now; the search UI is future).
+- **A `DocumentFinding` model — single-document observations, uniform across tiers.** A finding is something a
+  *single* document asserts that may affect the loan (an obligation, a property interest, an income item, a
+  discrepancy candidate). Shape: `finding_type` + `description` + common typed fields (`amount`, `frequency`)
+  + a flexible `details` JSON catch-all (findings vary — an obligation has amount+frequency, a property
+  finding has an address) + `status`, source-linked to its `document` and **tenant-scoped transitively**
+  (`document -> loan_file -> company`, no own `company_id`, ADR-052). **One shared recording mechanism**
+  (`create_document_finding`) is used by *both* the Tier 3 analyzer's `key_findings` **and** the Tier 1
+  divorce-decree extractor's obligations, so LP-67 + Phase 3 consume findings identically regardless of which
+  tier surfaced them.
+- **Distinct from the Phase 3 verification `Finding`.** The existing `Finding` (table `findings`) is a Phase 3
+  *verification result* (a rule's red/yellow/green flag against the whole loan file, with a resolution trail).
+  A `DocumentFinding` (table `document_findings`) is an *input observation* from one document; Phase 3 reads
+  these and may *produce* a verification `Finding`. Two genuinely different concepts → two models / two
+  tables, **not** an overload of `Finding` (which would conflate input observations with verification
+  results). The ticket said "Finding model"; the pre-existing `Finding` made `DocumentFinding` the honest name.
+- **The LP-63 loop is closed.** The divorce decree's captured support obligations are wired into findings via
+  `record_findings_from_extraction` (in `_extract_branch`, on a successful extraction) → the same
+  `create_document_finding`. A divorce decree's `$1,200/mo` obligation becomes the same kind of finding a
+  Tier 3 court order's judgment does.
+- **Visible + recorded.** Findings are persisted (the Phase 3 / LP-67 feedstock) and surfaced via a
+  tenant-scoped read endpoint (`GET /loan-files/{id}/findings`, `ScopedLoanFile` → 404 cross-company). The
+  full tier-aware *display* (Tier 1 fields / Tier 2 summary / Tier 3 analysis + findings) is LP-72.
+- **Moderate accuracy stakes.** Findings are **surfaced for a human to assess** (human-in-the-loop) — more
+  than a Tier 2 summary, less than Tier 1 extraction. They are *not* silently fed to calculations; Phase 3
+  does the cross-check.
+
+**Rationale:** a single flexible analyzer makes the long-tail legible without ~80 more schemas; findings need
+one structured home so the implications engine + Phase 3 read them uniformly regardless of source tier;
+recording findings *structurally* (not just as text) is what lets Phase 3 cross-check them; the divorce-decree
+wiring closes the "capture now, wire later" deferral with no re-extraction.
+
+**Consequences:** the **three-tier handling is complete** (Tier 1 extract / Tier 2 summarize / Tier 3
+analyze). LP-67 reads `DocumentFinding`s to suggest needs; Phase 3 cross-checks them against the stated data
+and may produce verification `Finding`s; LP-72 builds the full tier-aware detail + the findings display; the
+full-text **search UI** is future (the index exists now). Accuracy is refine-able with real/varied documents
+(human-in-the-loop), and the finding-type set refines with Priya.
+
+## ADR-176: Implications engine — findings → suggested needs (surface + suggest, not act; findings-scoped, feeding LP-69)
+
+- **Date:** 2026-06-19
+- **Status:** Accepted
+
+**Context:** Findings (LP-66) are passive observations — "this document asserts a $500/mo child support
+obligation." They are only useful if they become actionable. The implications engine is the **first consumer
+of findings**: it turns each into a *suggestion* for the processor ("→ consider a need to document this
+obligation") — the bridge from findings (what documents say) to the needs list (what the file still requires).
+The needs-list model/engine itself is LP-68 and the holistic AI needs reasoning is LP-69, so LP-67 must
+produce a clean intermediate that feeds them without depending on them.
+
+**Decision:**
+
+- **Surface + suggest, do NOT act (the locked constraint).** The engine produces `SuggestedNeed`s the
+  processor disposes of — it **never** mutates the financial picture (no silent debt-adding, no DTI change),
+  **never persists anything**, and **never creates a needs-list item**. Acting on findings is Phase 3
+  (human-confirmed); disposing of suggestions is the LP-68/70 needs flow. The functions are pure
+  (`suggest_needs_for_finding`) or read-only (`suggest_needs_for_loan_file` does a single `SELECT`). A test
+  asserts that running the engine creates no `NeedsItem` and mutates no finding.
+- **A bounded, explainable, findings-scoped mapping.** Each `DocumentFindingType` maps to a sensible
+  suggested need: `obligation` → payment history / obligation documentation; `income_related` → VOE / income
+  explanation; `property_interest` → property documentation review; `discrepancy_candidate` → review
+  (Phase 3 does the cross-check); `other` → **no suggestion** (a sensible "none", not a noisy generic). The
+  mapping is **deterministic** (no AI) — bounded and testable; the heavy holistic reasoning is LP-69. (A
+  small AI call to phrase suggestions could be added later, but the core is a bounded mapping.)
+- **Explainable + traceable.** Every `SuggestedNeed` carries `reasoning` (the human-readable *why*, e.g.
+  "Because document X asserts a $500.00/monthly obligation, the file should document this recurring
+  obligation") plus `source_finding_id` + `source_document_id` — the machine-traceable chain
+  *suggestion → finding → document*. Trustworthy, not mysterious.
+- **An on-demand intermediate, not a new table.** `SuggestedNeed` is a Pydantic structure produced **on
+  demand** — a pure projection over the persisted findings (no table, no migration, recomputed when needed).
+  Persisting would risk staleness and a premature schema LP-68 would reshape. LP-68 (the needs engine) and
+  LP-69 (the AI needs reasoning) ingest these suggestions as ONE input source and decide how/whether each
+  becomes a real needs-list item.
+- **Findings-scoped, NOT file-scoped.** LP-67 maps *one finding → its implied need(s)*. The holistic,
+  whole-file reasoning (the complete needs list from stated data + documents + findings + these suggestions)
+  is **LP-69**, which consumes these among everything else. LP-67 does not duplicate that — it is a focused,
+  composable mapper that *feeds* it.
+
+**Rationale:** turning passive observations into active suggestions is what makes findings useful;
+surface-not-act keeps the human in control of what affects the financial picture (the human-in-the-loop
+spine); a bounded findings-scoped mapping keeps LP-67 small and composable, feeding LP-69's holistic
+reasoning without duplicating it; explainability makes suggestions actionable; an on-demand intermediate
+avoids a premature schema.
+
+**Consequences:** LP-68 builds the needs model/engine that ingests these suggestions (deciding which become
+needs-list items); LP-69 does the holistic AI needs reasoning (consuming findings + these suggestions among
+everything else); LP-70 surfaces needs in the UI; Phase 3 acts on findings (cross-source) with the human in
+the loop. The mapping refines as the needs work + Priya input land.
+
+## ADR-177: Needs-list engine — five states, deterministic type-level matching, per-file serialization, a thin floor (AI is LP-69)
+
+- **Date:** 2026-06-19
+- **Status:** Accepted
+
+**Context:** The needs list — the file's living checklist of what it still requires — is the highest-value
+differentiator and must be **solid** before the AI layers on. It is stateful (a need moves through a
+lifecycle) and concurrent (real processing dumps batches of documents for a file). LP-68 builds the
+DETERMINISTIC engine (states, satisfaction-matching, serialization, a thin floor); LP-69 adds the
+case-by-case AI reasoning; LP-70 builds the UI.
+
+**Decision:**
+
+- **Five-state arrival lifecycle** (on the existing LP-19 `NeedsItem`): `PENDING` → `RECEIVED` → `VERIFIED`
+  | `REJECTED`; any → `WAIVED`. Driven by **document arrivals + processor actions, not AI**. (`OUTSTANDING`
+  was renamed to `PENDING`; `VERIFIED`/`REJECTED` added. The LP-19 `REQUESTED` borrower-outreach state is
+  kept as an orthogonal pre-existing value — a need awaiting arrival may be `PENDING` or `REQUESTED`, and
+  both are satisfiable.) Transitions are guarded by a valid-transition map (an invalid transition raises).
+  `"Verified" = the document passed (extraction succeeded)`; Phase 3 adds cross-source rules later.
+- **Deterministic, type-level satisfaction-matching.** When a document reaches a terminal status, the engine
+  advances the oldest open need whose `needs_type` equals the document's `document_type`: Received → Verified
+  (the document `COMPLETED`) | Rejected (it `NEEDS_REVIEW`/`FAILED`). No false matches; no AI.
+  Quantity/recency-granular matching ("2 pay stubs", "within 30 days") is a documented future refinement.
+- **Per-file serialization (the race fix).** The needs update runs as a **separate Celery task**
+  (`needs.update_for_document`, enqueued after a document is terminal) that acquires a **per-loan-file Redis
+  lock** before applying the matching. Concurrent arrivals for the SAME file apply one at a time (no lost
+  update / double-satisfaction on the shared needs state); DIFFERENT files (different lock keys) update in
+  PARALLEL. The lock auto-expires (`timeout`) so a crashed worker never deadlocks a file. A naive inline
+  "doc arrives → update needs" within each per-document task would race under batch arrivals — hence the move
+  out of the pipeline into a serialized task.
+- **A thin deterministic floor.** A small set of **near-certain** needs seeded from the **stated MISMO data**
+  (employment income → pay stubs + W-2; a purchase → purchase agreement; stated assets → a bank statement),
+  wired into the MISMO import. Floor needs are `origin=FLOOR`, `disposition=CONFIRMED` (near-certain), and
+  the seeder is idempotent. Thin by design — the bulk of the intelligence is LP-69's AI reasoning, which
+  augments this baseline.
+- **Source-agnostic + disposition groundwork.** A need carries its `origin` (the source-agnostic provenance:
+  `floor` / `suggestion` / `ai_reasoning` / …) and a `disposition` (the human-confirmation lifecycle:
+  proposed / confirmed / waived / dismissed — AI proposes in LP-69, the processor confirms in LP-70), plus
+  `reasoning` + `source_finding_id` for explainability. `ingest_suggested_need` turns an LP-67 `SuggestedNeed`
+  into a need (carrying the reasoning + the source-finding link); LP-69's proposals ingest the same way.
+
+**Rationale:** the needs list must be correct under concurrency before the AI layers on, so the deterministic
+engine is built + tested on its own (states, matching, serialization, floor). Per-file serialization is a
+hard requirement — without it, batch document arrivals corrupt the shared needs state. The thin floor
+guarantees the obvious needs deterministically (the reliable baseline AI augments). Source-agnostic +
+disposition groundwork lets LP-67/69/70 plug in cleanly. Separating the deterministic engine (LP-68) from the
+AI intelligence (LP-69) keeps each well-tested.
+
+**Consequences:** LP-69 adds the holistic AI-reasoned needs (the bulk of the intelligence), ingesting via the
+same source-agnostic path; LP-70 builds the UI (the dashboard + the confirm/waive flow, which the disposition
+groundwork supports); Phase 3 adds cross-source rules to "Verified"; quantity/recency-granular matching is a
+future refinement; the floor + the finding→need mapping refine with Priya. The needs migration (`93a861456e2f`)
+renames `outstanding`→`pending`, adds `verified`/`rejected`, the new origins, and the disposition/reasoning/
+source columns.
+
+## ADR-178: AI needs reasoning — holistic propose-with-reasoning + confirm + improve (the differentiator)
+
+- **Date:** 2026-06-19
+- **Status:** Accepted
+
+**Context:** The needs list's value is in proposing the RIGHT documents for a *specific* file — which is
+inherently case-by-case and unenumerable (a static rule table can't cover "self-employed across two
+businesses → two years of returns + a P&L; recently divorced with a support obligation → payment history;
+gift from a relative → gift letter + sourcing"). LP-68 built the deterministic engine (states, matching, a
+thin floor); LP-69 adds the intelligence — the highest-value, most distinctive capability in the product, and
+the most Priya-dependent (the reasoning quality is her domain knowledge).
+
+**Decision:** The needs list's intelligence is **AI reasoning over the WHOLE file** (the stated MISMO data +
+the documents present + the findings + LP-67's suggestions) → **proposed** needs, each with **file-specific
+reasoning** — holistic and file-scoped (contrast LP-67's findings-scoped *one finding → its implied need*).
+
+- **The two guardrails (what makes AI-driven needs trustworthy).** (1) **Explainability** — every proposed
+  need carries reasoning grounded in *this* file's data (not boilerplate); the parser **rejects** a proposal
+  with no reasoning. (2) **Confirmation** — proposals are ingested as `disposition=PROPOSED` (NOT
+  authoritative), `origin=ai_reasoning`, with the reasoning; the processor confirms/adjusts/dismisses (LP-70).
+  The AI proposes (smart) but **never disposes** (the human controls).
+- **Reconciliation — no duplication.** LP-69 is the *culminating* reasoner: it is told (and deterministically
+  filters by) what's already covered — the floor (LP-68), LP-67's suggestions, the documents present, and the
+  existing needs (incl. dismissed ones) — and proposes only what's NOT already there. It does not re-propose
+  the floor's needs.
+- **Two triggers, both through LP-68's per-file serialization.** (1) At **MISMO file creation**, reason over
+  the stated data → the initial proposed needs (the "upload a MISMO → a tailored checklist appears" payoff —
+  this **absorbs the deferred smart-needs-from-MISMO** from Phase 1.5). (2) **Re-proposed** as documents /
+  findings arrive (the picture changed). Both run as needs-updates under the per-file Redis lock — no race.
+- **Improves from corrections (V1: capture + simple use).** A processor's confirm/adjust/dismiss is captured
+  as the **disposition on the need** (`confirm`/`adjust` → CONFIRMED; `dismiss` → DISMISSED + waived). The
+  simple V1 *use*: the reasoning folds existing needs (incl. dismissed) into "already covered", so a dismissed
+  proposal is **not re-proposed**. A richer corrections store + a full learning loop is a documented future
+  evolution — V1 is the capture-mechanism + simple use, not sophisticated learning.
+- **A sensible starter, refined with Priya (EMPHATIC).** The prompt encodes "reason like a loan processor"
+  on a **sensible starter** understanding. The reasoning QUALITY is **the highest-value Priya input** ("walk
+  me through a real file: what do you chase, and why?") and is sharpened by the correction signal. A real AI
+  reasoning call (Sonnet, substantial context — cost + latency + eval apply). The assembled context carries
+  PII and is **never logged** (counts only).
+
+**Rationale:** required documents are case-by-case and unenumerable, so reasoning over the file (like a
+processor) is the right mechanism, not a static table; the two guardrails make AI-driven needs trustworthy
+(explainable + human-confirmed) — the AI is smart but not unilateral; reconciliation keeps the floor
+(deterministic baseline) + LP-67 (findings-implications) + LP-69 (holistic) composing cleanly without
+duplication; running at MISMO creation delivers the headline payoff and absorbs the deferred
+smart-needs-from-MISMO.
+
+**Accuracy — honestly scoped.** V1 proposes **reasoned, explainable, improvable** needs the processor
+confirms — **NOT perfect out of the gate**. The quality improves via the correction signal + refinement with
+Priya. Do not read the (mock-based) tests as proposal-quality validation — they verify the *mechanism* + the
+*guardrails*; real-file quality is an ongoing, Priya-dependent effort.
+
+**Consequences:** LP-70 builds the UI (the dashboard + the confirm/adjust/dismiss/waive flow + the reasoning
+display — the disposition + reasoning groundwork supports it); the reasoning quality refines with Priya + the
+correction loop; real AI cost/latency/eval; the re-reasoning on every document arrival is a cost to watch
+(debouncing is a future optimization); Phase 3 acts on findings (cross-source) with the human in the loop.
+
+## ADR-179: Needs-list dashboard — the self-maintaining checklist (reasoning surfaced; disposition flow; subtle updating, not a queue meter)
+
+- **Date:** 2026-06-19
+- **Status:** Accepted
+
+**Context:** LP-68 built the needs ENGINE (states, satisfaction, per-file serialization, the thin
+floor) and LP-69 the AI REASONING (holistic propose-with-reasoning + the correction-capture) — all
+backend. The needs list is the product's highest-value differentiator, but its VALUE is only realized
+in the UI: the processor's at-a-glance "what's outstanding, and why". LP-70 is that face — the first
+major Phase-2 UI ticket and the screen most worth demoing to Priya.
+
+**Decision:** The needs-list dashboard (on the loan-file overview) surfaces LP-68/69 as a
+**self-maintaining checklist** — open the file → a tailored checklist appears (the MISMO floor + the
+AI reasoning produce it; LP-70 displays it).
+
+- **The five states made visual + action-oriented.** Each `status` carries a colored dot + pill and
+  rolls up into one of four groups, rendered top-to-bottom: **Needs action** (pending / requested /
+  rejected) → **In review** (received) → **Complete** (verified) → **Set aside** (waived). "What needs
+  action" sits apart from "done" and "in flight" so the processor sees what to do next at a glance.
+- **The AI reasoning surfaced — explainability made visible (the trust-making element).** Every need
+  shows its LP-69 "why" ("Needs tax returns because the borrower has self-employment income…") in an
+  inset note. This is what makes the AI proposals trustworthy/evaluable rather than a mysterious
+  checklist — the distinctive element vs. a dumb checklist, and the signature of the screen.
+- **The disposition flow — the AI proposes, the processor disposes (the human-in-the-loop guardrail,
+  made interactive).** A PROPOSED need leads with a one-click **Confirm**; an overflow menu offers
+  **Adjust** (edit), **Waive** (with a reason), and **Dismiss** (with a reason); a header control
+  **Adds** a need the AI missed. Every action calls a tenant-scoped, **audited** write API and feeds
+  LP-69's correction-capture (confirm/adjust → CONFIRMED; dismiss → DISMISSED + waived; add → a
+  CONFIRMED manual need). The processor controls; the AI did the heavy lifting.
+- **Live updates as documents arrive.** The dashboard reads the (already-polling) documents query to
+  know when any document is in-flight and feeds that to the needs query as a `live` flag, so the list
+  polls while a document processes and settles once it's done — a satisfied need visibly moves
+  Pending → Received → Verified with no manual refresh. A backstop stops the poll if a pipeline stalls.
+- **A subtle "updating" cue — NOT a queue-depth meter.** While the list is settling, a soft "Updating…"
+  cue shows the OUTCOME (the list keeping current). It is deliberately **not** an "engine running" /
+  "N files queued" indicator: the per-file serialization is a fast internal mechanism, not a
+  user-facing batch job, so it stays invisible. (Per the prior decision.)
+- **Tenant-scoped read + write APIs.** All routes nest under the loan file (the LP-29 file gate →
+  `404` cross-company); a per-need action additionally `404`s a need not in the path file. The needs
+  response carries only the need's own fields (titles / types / reasoning / the satisfying document's
+  filename) — no raw borrower PII. Four new `activity_type` values audit the dispositions
+  (confirm / adjust / dismiss / waive; add reuses `needs_item_created`).
+
+**Rationale:** the needs list's value lives in the UI, so the dashboard is where the differentiator
+becomes tangible; surfacing the reasoning makes the AI proposals trustworthy (explainable) and
+evaluable; the disposition flow keeps the human in control and feeds the LP-69 improvement loop; the
+action-oriented grouping answers "what do I do next?" at a glance; the subtle-updating-not-queue-meter
+respects that the serialization is a fast internal mechanism, not a batch job to expose.
+
+**Consequences:** LP-71 (document versioning / AI staleness) and LP-72 (the tier-aware document detail)
+build the remaining Phase-2 UI; the dashboard is the screen most worth demoing to Priya, and the
+disposition → correction signal matures with use + her input; Phase 3 adds cross-source rules to
+"Verified". The old provisional `NeedsSection` (LP-34, the compact list) is replaced by this dashboard;
+the needs read hook moved into its own data layer (`lib/api/needs.ts`) with live polling + the
+disposition mutations.
+
+## ADR-180: Floor seeds after a flush + AI-needs reasoning state is visible (LP-71.5)
+
+- **Date:** 2026-06-24
+- **Status:** Accepted
+
+**Context:** A real MISMO import (employment income + self-employment + a gift + several assets,
+Conventional Purchase) produced a needs list with only **"Purchase agreement"** — the deterministic
+floor's purchase rule — instead of the expected rich list (pay stubs, W-2, tax returns, gift letter,
+asset statements, …). A read-only diagnostic found two independent defects.
+
+**Defect 1 — the floor's stated-data rules were dead-on-arrival in the import path.** The session runs
+``autoflush=False`` (chosen so flush timing is explicit). In ``create_loan_file_from_mismo`` the stated
+``StatedIncomeItem`` / ``StatedAsset`` rows were ``db.add``-ed but **not flushed** before
+``seed_floor_needs`` ran. The floor's ``_has_stated_employment_income`` / ``_has_stated_assets`` run
+SELECTs — which, with autoflush off and no preceding flush, **could not see the pending rows** → the
+employment (→ pay stubs + W-2) and asset (→ bank statements) rules returned False. Only the purchase
+rule fired, because it reads ``loan_file.loan_purpose`` (an in-memory attribute), not a query. (Proof:
+imported files had the income/assets committed in the DB, yet only ``purchase_agreement`` was seeded;
+the DB had **zero** ``ai_reasoning`` needs ever.)
+
+**Defect 2 — the import silently "promised" AI needs.** LP-69's reasoning runs as an async Celery task
+(enqueued after commit). With no worker running, the task sits in the queue and the AI needs never
+appear — with **no signal** to the processor. And ``propose_needs`` swallows ``AIClientError`` → returns
+``[]`` with only a warning log, so an AI failure also yields a floor-only list silently. In a
+loan-processing tool, a short list silently presented as complete is a real safety gap (a processor may
+not chase documents they actually need).
+
+**Decision:**
+
+- **Fix 1 (the bug):** ``seed_floor_needs`` now ``await db.flush()``es **first**, so it always sees a
+  caller's just-added stated rows regardless of the session's autoflush setting. Placed inside the floor
+  function (not just at the call site) so every caller is protected. The floor's **rules are unchanged** —
+  they were correct; they just couldn't see the data. The deterministic floor now fires the
+  employment/asset needs on import **independent of the AI/worker**.
+- **Fix 2 (visibility, minimal):** a nullable ``ai_needs_status`` column on ``loan_files``
+  (``pending`` / ``completed`` / ``failed``; NULL = not triggered). The MISMO import sets ``PENDING``
+  (reasoning enqueued); the task entrypoint flips it to ``COMPLETED`` on a successful run; a swallowed
+  ``AIClientError`` records ``FAILED`` (no longer silent). The needs dashboard surfaces it — "AI is still
+  reviewing — more needs may appear" (pending) / "AI review didn't finish — this list may be incomplete"
+  (failed) — so a floor-only list is **never silently presented as complete**. It is **informational,
+  never blocking**: the import and the floor succeed regardless.
+
+**Out of scope (operational):** the Celery worker not running is fixed by starting it
+(``docker compose --profile worker up -d worker``), not by code. This ticket ensures (a) the floor works
+without the worker and (b) the worker's absence/failure is visible, not silent.
+
+**Consequences:** the deterministic floor is now reliable on import; the async AI reasoning's state is
+legible end-to-end; existing files default to ``ai_needs_status = NULL`` (no backfill). A future, richer
+"retry AI reasoning" affordance (vs. re-importing) and a fuller corrections/learning loop remain future
+work (LP-69's noted evolution).
+
+## ADR-181: Per-loop async Redis client for Celery tasks (LP-68 serialization-infra fix)
+
+- **Date:** 2026-06-24
+- **Status:** Accepted
+
+**Context:** LP-68's per-file needs serialization uses a Redis lock
+(``loan_file_needs_lock`` → ``get_redis_client()``). ``get_redis_client`` returned a
+**process-global** ``redis.asyncio`` client whose connections bind to the event loop
+that created them. Celery runs each task on a **fresh** loop (``run_async`` =
+``asyncio.run`` per task — see :mod:`app.tasks.base`). So the first needs task created
+the client on loop A; once loop A closed, every subsequent task (loop B, C, …) reused
+that client and crashed with ``RuntimeError: Event loop is closed`` the moment it
+touched the lock — **before** any need was created or status updated. The bug stayed
+latent until the worker actually ran LP-69 needs tasks (the unit tests masked it with
+a ``_loop_bound_redis`` fixture that hands out a per-loop client). The companion DB
+path was already correct: ``task_session`` builds a **fresh engine per task loop** for
+exactly this reason (asyncpg connections are loop-bound).
+
+**Decision:** Make ``get_redis_client()`` **loop-aware** — cache the client keyed on
+the running event loop and rebuild it when the loop changes. Under the API's single
+long-lived loop the same client is reused (no behaviour change, connection reuse
+preserved); under a Celery worker each per-task loop gets its own loop-local client,
+so a client bound to a closed loop is never reused. This mirrors ``task_session``'s
+per-loop engine — the Redis client now follows the same rule the DB engine already
+did.
+
+**Rationale:** keying the singleton on the loop is the minimal, root-cause fix; it
+preserves the desired single-client reuse in the API while making the worker correct,
+and it keeps the lock/redis call sites unchanged. Alternatives considered: a fresh
+client per ``loan_file_needs_lock`` call (more churn, extra connects on a hot path) or
+a synchronous redis client for the lock (diverges from the async-first stack).
+
+**Consequences:** the per-file needs serialization (and any other async-Redis use)
+now works under the worker's per-task loops; LP-69's AI reasoning tasks run to
+completion (create the proposed needs + settle ``ai_needs_status``). A regression
+test (``tests/core/test_redis_loop.py``) drives two ``asyncio.run`` loops and pings in
+each — it reproduces the exact ``Event loop is closed`` crash without the fix. The
+running worker image must be rebuilt to pick this up
+(``docker compose --profile worker up -d --build worker``).
+
+## ADR-182: The floor covers universal needs (borrower ID, per-borrower) — universal → floor, situation-specific → AI
+
+- **Date:** 2026-06-24
+- **Status:** Accepted
+
+**Context:** A real MISMO import produced a needs list with no **borrower identification**
+(driver's license / government ID) — a near-universal requirement on every loan file (lenders
+verify identity per Patriot Act / KYC). The ID was expected to come from LP-69's AI reasoning,
+but didn't: the AI reasons about what's *distinctive* about a file (self-employment → tax returns;
+a gift → a gift letter), and a universal requirement like an ID is the **opposite** of distinctive,
+so the AI under-proposes it (too "obvious" to surface as situation-specific). The floor (LP-68) had
+only conditional rules (employment → pay stubs + W-2; assets → bank statements; purchase → purchase
+agreement) and no universal baseline.
+
+**Decision:** The deterministic floor (`seed_floor_needs`) now includes **universal needs** —
+always-required on every file regardless of the borrower's situation — starting with a borrower
+**Government ID**, seeded **per borrower** (co-borrowers each get their own ID need, the title +
+`borrower_id` identifying which borrower; `needs_type=drivers_license`, the catalog's Tier-1 ID type).
+The universal needs are a clearly separated, commented section (`_PER_BORROWER_UNIVERSAL` /
+`_PER_FILE_UNIVERSAL`) so adding another always-required need is a one-line change. **The full
+universal-needs list refines with Priya** — the ID is the first/clearest; she'll likely confirm
+others (e.g. a credit authorization, certain disclosures).
+
+**Rationale:** universal needs belong in the **floor**, not the AI:
+- An ID is required on every file regardless of situation — it's *universal, not distinctive*, so the
+  AI reasoning (which surfaces what's special about a file) may under-propose it. The right home for
+  always-true needs is the deterministic floor.
+- The floor being "thin" should not mean *missing its universal baseline* — thin means few
+  conditional rules, but the always-true needs must be reliably present.
+- The floor fires **immediately on import**, independent of the AI/worker (so the ID appears even
+  when the worker is down, and even when the AI omits it). It reads the borrowers (visible post-flush,
+  LP-71.5).
+- **Per-borrower** because each borrower needs their own ID; **extensible** because Priya will name
+  more universal needs.
+
+**Division of labor (clarified):** **universal → floor** (deterministic, always-true); **situation-specific
+→ AI** (LP-69, what's distinctive about the file).
+
+**Consequences:** every imported file reliably gets a Government ID need per borrower from the floor;
+the universal-needs list grows with Priya's input via a one-line addition; LP-63's `drivers_license`
+extractor handles the ID once uploaded; the floor's conditional rules and LP-69's reasoning are
+unchanged. (Manually-created files still get their template needs via the LP-30 setup path, not the
+MISMO floor.)
+
+## ADR-183: Document versioning (Model C) + date-driven staleness detection (LP-71)
+
+- **Date:** 2026-06-25
+- **Status:** Accepted
+
+**Context:** Documents change over a file's life — a corrected statement supersedes an erroneous
+one (versioning), and a document ages out of a lender's recency window (staleness). Both are about
+document FRESHNESS over time and both feed whether a document belongs in the lender package. The needs
+list and pipeline already existed; documents had only *extraction* versioning (re-extraction), not
+*document* versioning.
+
+**Decision (two paired capabilities):**
+
+- **Versioning — Model C (the locked hybrid).** New uploads are NORMAL: each is CURRENT + standalone
+  with **no replacement assumption** — multiples are normal (a set of pay stubs / months of statements
+  are not replacements), so a same-type upload is never auto-treated as a replacement (no
+  over-prompting). Replacement is **explicit**: the processor supersedes a specific (current) document
+  with a new upload — the old → HISTORICAL (`is_current=False`), the new → CURRENT, BOTH kept for audit
+  in a shared `version_group`, the new linked via `supersedes_document_id`, and the need the old
+  satisfied **re-opens to re-evaluate** against the new current version (through the new document's
+  pipeline, LP-68 serialized). **Gentle duplicate surfacing** is informational ("you have N other pay
+  stubs", derived client-side), never a blocking prompt. An **email-ingested** document (which can't be
+  click-replaced) carries a `possible_duplicate` flag for the processor to resolve (the mechanism; email
+  ingestion is later).
+
+- **Staleness — deterministic, date-driven (a threshold, like DTI).** Staleness is computed, not a new
+  AI call: the AI's contribution is the *date extraction* (the Tier 1 extractors already capture pay
+  date / statement period / ID expiration); the logic compares that date to a **configurable recency
+  window** (pay stub ~30 days, bank statement ~60 days) or an **expiration** (ID / insurance past its
+  date) → flagged with a reason. A superseded version (a newer one is current) is the versioning side of
+  "a newer version exists". The processor RESOLVES a flag (replace / waive / accept — stored on the
+  document); auto-resolution is **V2**. The recency windows are **sensible industry-standard starters —
+  REFINE WITH PRIYA** (her lenders' [UWM, Sun-West] exact windows vary by program); they are a plain
+  config dict (`RECENCY_WINDOWS` / `EXPIRATION_RULES`), so editing them is the whole knob.
+
+- **Package fitness (groundwork).** Versioning (current vs. historical) + staleness (fresh vs. stale)
+  combine into a document's fitness for the lender package: current + not-stale → fit; historical
+  (superseded) or stale-unresolved → flagged (not silently included). The package itself is Phase 6 and
+  the qualified status is partly LP-72 — this is the data.
+
+- **Warnings are helpful, not blocking.** The UI surfaces version history ("v2 of N", the chain), the
+  explicit Replace control, calm staleness warnings (the reason + resolve options), and the gentle
+  duplicate hint — clear-but-calm; the processor decides.
+
+**Rationale:** multiples are normal in mortgage files, so a same-type upload isn't a replacement —
+explicit replace + gentle surfacing handles real replacement without false prompts; staleness as a
+threshold fed by the AI-extracted dates keeps it deterministic + auditable ("AI extracts, deterministic
+logic judges"); recency windows are domain knowledge (refine with Priya); surfacing both keeps
+stale/superseded documents out of the package; helpful-not-blocking respects the processor's judgment.
+
+**Consequences:** LP-72 builds the tier-aware detail + the qualified package status (using the
+current/historical + staleness data); Phase 6 assembles the package from fit documents; the recency
+windows refine with Priya; auto-resolution is V2; the `possible_duplicate` flag activates when email
+ingestion is built. The main document list shows current versions only (historical reached via the
+drawer's version history) so it stays uncluttered.
+
+## ADR-184: Share the storage directory with the Dockerized Celery worker (host writes / worker reads)
+
+- **Date:** 2026-06-25
+- **Status:** Accepted
+
+**Context:** Document processing (classify → extract) runs in the Celery worker, which reads the uploaded
+file's bytes from the storage backend. In local dev the API runs on the **host** and writes uploads to
+`STORAGE_LOCAL_PATH=./storage` → the host's `backend/storage`. The worker runs in **Docker** (`build:
+./backend`, WORKDIR `/app`), so its `./storage` resolves to `/app/storage` **inside the container**. The
+worker service had no volume for storage, so `/app/storage` was empty: every document failed at the
+file-read step with `StorageError` (`backend/app/storage/local.py:70`) — ~0.03s, before classification, so
+`document_type` stayed NULL and all documents failed uniformly. (Not a code regression; surfaced when the
+worker moved into Docker during LP-71.x verification. AI-reasoning tasks were unaffected because they read
+only the DB, never a file.)
+
+**Decision:** Mount the host's `backend/storage` into the worker container at the path it resolves
+`./storage` to: `volumes: ["./backend/storage:/app/storage"]` on the `worker` service. The host API and the
+Docker worker then share one storage root. Only the worker needs the mount (the API is on the host and sees
+`backend/storage` directly).
+
+**Rationale / trap:** the **relative** `./storage` is the underlying trap — it resolves to different real
+directories on the host (`backend/storage`) vs. in the container (`/app/storage`). The minimal local-dev fix
+is the shared mount. An absolute `STORAGE_LOCAL_PATH` + the shared mount, or **object storage (S3/MinIO —
+already supported via `storage_backend`)** so host + worker share a *network* store, is the robust
+production-correct direction (Phase 7) — not implemented now.
+
+**Consequences:** Dockerized document processing reads the uploaded files; classify/extract/needs work
+end-to-end (verified: a previously-failed pay stub reprocessed → `completed`, extracted, need satisfied).
+Already-failed documents don't auto-retry — re-upload (or reprocess) after the fix. The pipeline /
+extractors / LP-71 code are unchanged (purely infra/config).
+
+## ADR-185: Tier-aware document detail + standard naming + package-qualification groundwork (LP-72)
+
+- **Date:** 2026-06-25
+- **Status:** Accepted
+
+**Context:** The tier model (LP-58..66) scales document handling — Tier 1 (full structured extraction),
+Tier 2 (recognize + summarize), Tier 3 (generic analysis). LP-71 added the freshness signals (current /
+fresh). The last Phase-2 feature ticket surfaces all of it in the UI and adds the two pieces that make a
+document **package-ready**: a consistent name and a computed fitness. (Surfaces existing work — no
+re-extraction, no package assembly.)
+
+**Decision (three pieces):**
+
+- **Tier-aware document detail.** The detail view ADAPTS to the document's tier — the proportional-investment
+  philosophy made visible: **Tier 1** → the structured extracted fields (deep, type-specific); **Tier 2** →
+  the recognition summary + category (light); **Tier 3** → the generic analyzer's findings (parties / dates /
+  amounts / findings) + summary (flexible). It extends the LP-43 drawer (branches on `tier`), not a rebuild;
+  pending/failed states degrade gracefully; PII stays masked.
+
+- **Standard naming.** A derived `{Type}_{KeyIdentifier}_{Date}` display name (no spaces) from the type +
+  extracted data (e.g. `Pay-Stub_Thermofisher-PPD_2026-05-22`, `Bank-Statement_Bank-of-America_2026-04-30`),
+  with a sensible `{Type}_{UploadDate}` fallback for sparse data (Tier 2/3 / extraction pending / missing
+  identifier). It is a **display/derived** name — the stored file is untouched. Only non-PII fields feed it
+  (never SSN / account number / DOB). Per-type rules are a plain config (`app/documents/naming.py`); they
+  refine with use / Priya.
+
+- **Package-qualification groundwork.** Each document computes a `package_qualification`: **qualified** =
+  CURRENT (LP-71 versioning) + FRESH (LP-71 staleness) + TYPED (recognized) + EXTRACTED (processing succeeded,
+  terminal `COMPLETED`). It consumes LP-71's signals + the extraction state and reports the first failing
+  criterion (superseded / stale / untyped / not_extracted). **Groundwork** — LP-72 makes each document KNOW
+  its readiness; **Phase 6** assembles the package from qualified documents. A subtle "Package-ready"
+  indicator surfaces it (informational), but nothing assembles/renders a package.
+
+**Rationale:** the tier model's value is realized when the detail shows the appropriate depth per tier; a
+derived consistent name makes lists scannable and the eventual lender package professionally named
+(underwriters expect consistent naming — a package of `scan1.pdf` is unprofessional); qualification consumes
+LP-71's current/fresh signals so Phase 6 can filter to qualified documents — LP-72 lays the groundwork
+without building the package.
+
+**Consequences:** LP-73 closes Phase 2 (testing/hardening). Phase 6 assembles the lender package from
+package-qualified documents (filtering on the qualification LP-72 computes) using the standard naming. Phase 3
+adds cross-source verification. The naming convention + qualification rules refine with Priya / use. The
+standard name is display-only (the stored file is never renamed).
+
+## ADR-186: Operational robustness — worker by default + bounded-retry with a visible terminal-failed (LP-73)
+
+- **Date:** 2026-06-26
+- **Status:** Accepted
+
+**Context:** Two Phase-2 footguns were operational, not logical: (1) the Celery **worker was
+behind a Docker Compose profile**, so a normal `docker compose up` left it OFF — the async/AI
+features (document processing, the AI needs reasoning) silently did nothing, and it was hard to
+diagnose. (2) A **transient task failure** (a DB/Redis blip, an AI timeout) had **no retry** — it left
+the file permanently in a non-terminal state with no signal (the "stuck pending" case, LF-VNC4).
+
+**Decision:**
+
+- **Worker by default.** The `worker` service no longer has a `profiles:` gate — `docker compose up -d`
+  brings it up. Async/AI features can't silently break because no worker is consuming. (Rebuild after a
+  code change: `docker compose up -d --build worker`.)
+- **Bounded retry with a visible terminal-failed.** A shared `retry_or_terminal` (`app/tasks/retry.py`)
+  wraps the needs + document tasks: on a transient error it retries up to `MAX_RETRIES` (3) with capped
+  exponential backoff (5/10/20s…); on **exhaustion** it records a **visible terminal-failed state**
+  (`ai_needs_status=FAILED` for needs, `status=FAILED` for documents — consistent with LP-71.5's
+  visibility) and the task fails — **never a silent permanent pending**. A scheduled `Retry` propagates
+  untouched (not double-handled).
+
+**Rationale:** a worker that's off by default is a recurring diagnosis trap; making it default removes
+the footgun. A transient blip shouldn't strand a file, and an exhausted failure must be *visible* (the
+phase already learned that silence is the enemy). The document pipeline already reaches its own terminal
+status internally, so the retry there guards the infra *around* it; the needs tasks are where the
+stuck-pending actually occurred.
+
+**Consequences:** the full stack comes up with one command; transient failures self-heal; permanent
+failures are visible and (per LP-71.5) surfaced in the UI. The retry counts/backoff are sensible
+starters — tune with real task latencies.
+
+## ADR-187: Real-stack integration testing + de-patched concurrency test + consistent dev model (LP-73)
+
+- **Date:** 2026-06-26
+- **Status:** Accepted
+
+**Context:** Phase 2 shipped four bugs that **all passed unit tests and broke on the real stack** — a
+flush-timing bug (the floor couldn't see stated data), a Redis per-loop event-loop crash (every worker
+task died), a silent AI-failure swallow (a floor-only needs list looked complete), and a host/worker
+**storage split** (the Docker worker couldn't read host-written files). Every one lived in a **seam
+between components** and was invisible to mocked-component unit tests.
+
+**Decision:**
+
+- **Real-stack integration tests that exercise the seams.** `tests/integration/test_phase2_real_stack.py`
+  drives the REAL storage backend (an actual write **then** read — the storage-split catcher), the real
+  DB, the real pipeline orchestration, and the real needs-satisfaction matching — mocking **only the AI
+  model boundary** (classify / extract / summarize / analyze). It covers Tier 1/2/3 processing, a
+  missing-file → graceful FAILED, the upload → satisfies-need seam, and the MISMO → floor + AI-reasoning
+  seam. A consolidated **tenant-isolation sweep** (`test_phase2_tenant_isolation.py`) asserts every
+  Phase-2 endpoint 404s cross-company.
+- **De-patched the LP-68 concurrency test.** It used to monkeypatch a fresh per-loop Redis client — which
+  is exactly what *hid* the per-loop bug. It now runs against the **real loop-aware `get_redis_client`**
+  (resetting the module singleton around the test), so a regression of the loop fix surfaces here; the
+  cross-loop regression itself is guarded by `tests/core/test_redis_loop.py`.
+- **One consistent local-dev model: all-in-Docker with a shared storage volume.** The host-API /
+  Docker-worker split caused the storage bug; the chosen model is the worker in Docker (now default)
+  sharing `backend/storage` via the volume mount (the storage fix). Documented in
+  `docs/development-workflow.md`. **The S3 storage backend is NOT yet implemented** (`get_storage_backend`
+  raises for `"s3"`) — it's **Phase-7** work; validating it against MinIO is deferred with it (no
+  overclaim that the production storage path is tested).
+
+**Rationale:** the phase's lesson is that green unit tests are not enough when the bugs live in the
+seams; the integration tests must exercise the assembled system, mocking only the model boundary. The
+de-patched test removes the fixture that masked a real bug. Resolving the dev-model asymmetry removes the
+storage footgun's root.
+
+**Consequences:** the seams are now under test; future seam regressions (storage, loop, flush, silent
+failure) are far more likely to be caught in CI. The S3 backend + its MinIO validation are honestly
+deferred to Phase 7.

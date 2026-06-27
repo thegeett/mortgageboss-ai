@@ -81,6 +81,27 @@ class LoanPurpose(StrEnum):
     REFINANCE = "refinance"
 
 
+class AiNeedsStatus(StrEnum):
+    """The state of LP-69's AI needs reasoning for this file (LP-71.5 visibility).
+
+    AI reasoning runs as an async Celery task (enqueued at MISMO import); the
+    deterministic floor (LP-68) is seeded synchronously and is independent of it.
+    This field makes the async reasoning's state **visible** so a floor-only list is
+    never silently presented as complete:
+
+      ``PENDING`` (enqueued — more needs may still appear) → ``COMPLETED`` (the
+      reasoning ran) | ``FAILED`` (the AI call failed — the list may be incomplete).
+
+    ``None`` means no AI reasoning was triggered for this file (e.g. a manually
+    created file). The signal is informational, never blocking — the import and the
+    floor succeed regardless.
+    """
+
+    PENDING = "pending"
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+
 class LoanFile(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     """A single loan file being processed toward underwriting submission.
 
@@ -137,6 +158,13 @@ class LoanFile(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
         str_enum(LoanFileStatus),
         default=LoanFileStatus.DRAFT,
         nullable=False,
+    )
+
+    # --- AI needs reasoning state (LP-71.5) — async, informational ----------
+    # PENDING on import-enqueue → COMPLETED / FAILED when the task settles. NULL =
+    # no AI reasoning triggered (e.g. a manually created file). Never blocks.
+    ai_needs_status: Mapped[AiNeedsStatus | None] = mapped_column(
+        str_enum(AiNeedsStatus), nullable=True
     )
 
     # --- Originating loan officer (free-text; the LO is not a system user) --

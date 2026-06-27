@@ -12,6 +12,7 @@ service flushes.
 """
 
 from typing import Annotated
+from uuid import UUID
 
 import structlog
 from fastapi import APIRouter, File, HTTPException, Query, UploadFile, status
@@ -38,12 +39,27 @@ from app.services.loan_files import (
     update_loan_file_with_activity,
 )
 from app.services.stated_financials import get_stated_financials
+from app.tasks.needs import propose_ai_needs
 
 log = structlog.get_logger(__name__)
 
 router = APIRouter(prefix="/loan-files", tags=["loan-files"])
 
 _NOT_FOUND = HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Loan file not found")
+
+
+def _enqueue_ai_needs(loan_file_id: UUID) -> None:
+    """Fire-and-forget enqueue of the LP-69 initial AI needs reasoning for a new file.
+
+    The file is already committed; the reasoning runs in a separate per-file-serialized
+    task. A broker hiccup must not fail the import (the file is safe; needs can be
+    re-proposed).
+    """
+    try:
+        propose_ai_needs.delay(str(loan_file_id))
+    except Exception:
+        log.warning("ai_needs_enqueue_failed", loan_file_id=str(loan_file_id))
+
 
 # MISMO import is parsed inline (fast, deterministic — no AI/Celery). The cap is
 # generous (a real MISMO is ~60 KB) and only rejects absurd uploads.
@@ -156,6 +172,11 @@ async def import_mismo(
         ) from exc
 
     await db.commit()
+
+    # Reason over the stated data → the initial AI-proposed needs (LP-69), serialized
+    # per file. Fire-and-forget AFTER commit (the file is persisted, so the task sees
+    # it); an enqueue hiccup must NOT fail the import.
+    _enqueue_ai_needs(loan_file.id)
 
     # Reload scoped, with relationships eager-loaded for the response (same as the
     # manual create path — MISMO and manual converge on the same response).

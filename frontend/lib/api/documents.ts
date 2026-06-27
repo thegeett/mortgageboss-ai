@@ -156,6 +156,79 @@ export function useOverrideDocumentType(fileId: string, documentId: string) {
   });
 }
 
+// --- Versioning + staleness (LP-71) ----------------------------------------- //
+
+const activityQueryKey = (fileId: string) => ["loan-file-activity", fileId] as const;
+export const documentVersionsQueryKey = (documentId: string) =>
+  ["document-versions", documentId] as const;
+
+/** Explicitly replace a document with a new upload (old → historical, new → current). */
+export async function replaceDocument(documentId: string, file: File): Promise<DocumentResponse> {
+  const form = new FormData();
+  form.append("file", file);
+  const res = await apiClient.post<DocumentResponse>(
+    `${API_V1}/documents/${documentId}/replace`,
+    form,
+    { headers: { "Content-Type": "multipart/form-data" } },
+  );
+  return res.data;
+}
+
+export function useReplaceDocument(fileId: string, documentId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (file: File) => replaceDocument(documentId, file),
+    onSuccess: () => {
+      // The new version appears (processing); the old goes historical.
+      void queryClient.invalidateQueries({ queryKey: documentsQueryKey(fileId) });
+      void queryClient.invalidateQueries({ queryKey: documentDetailQueryKey(documentId) });
+      void queryClient.invalidateQueries({ queryKey: documentVersionsQueryKey(documentId) });
+      void queryClient.invalidateQueries({ queryKey: activityQueryKey(fileId) });
+    },
+  });
+}
+
+/** Resolve a flagged-stale document — waive or accept (replace is its own flow). */
+export async function resolveStaleness(
+  documentId: string,
+  action: "waive" | "accept",
+  reason?: string,
+): Promise<DocumentResponse> {
+  const res = await apiClient.post<DocumentResponse>(
+    `${API_V1}/documents/${documentId}/resolve-staleness`,
+    { action, reason: reason ?? null },
+  );
+  return res.data;
+}
+
+export function useResolveStaleness(fileId: string, documentId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ action, reason }: { action: "waive" | "accept"; reason?: string }) =>
+      resolveStaleness(documentId, action, reason),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: documentsQueryKey(fileId) });
+      void queryClient.invalidateQueries({ queryKey: documentDetailQueryKey(documentId) });
+      void queryClient.invalidateQueries({ queryKey: activityQueryKey(fileId) });
+    },
+  });
+}
+
+/** The document's version group (oldest → newest). Only fetched when the drawer needs it. */
+export async function fetchDocumentVersions(documentId: string): Promise<DocumentResponse[]> {
+  const res = await apiClient.get<DocumentResponse[]>(`${API_V1}/documents/${documentId}/versions`);
+  return res.data;
+}
+
+export function useDocumentVersions(documentId: string | null, enabled: boolean) {
+  return useQuery({
+    queryKey: documentVersionsQueryKey(documentId ?? ""),
+    queryFn: () => fetchDocumentVersions(documentId as string),
+    enabled: Boolean(documentId) && enabled,
+    retry: noRetryOn404,
+  });
+}
+
 // --- Dev-only text-layer extraction (LP-40; non-production) ------------------ //
 
 export async function fetchDevTextLayer(documentId: string): Promise<TextLayerExtraction> {

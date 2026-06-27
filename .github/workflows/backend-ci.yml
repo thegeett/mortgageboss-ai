@@ -25,8 +25,12 @@ jobs:
     # fixture, which creates a separate `<db>_test` database and builds the
     # schema with create_all. Provision Postgres as a service so those tests can
     # connect; the credentials/db below match the DATABASE_URL used by pytest.
-    # Redis is intentionally not provisioned — health-check tests tolerate its
-    # absence (asserting 200 or 503).
+    #
+    # Redis is provisioned too (LP-73): the real-stack tests exercise the actual
+    # loop-aware Redis client + the per-file lock against REAL Redis (the de-patched
+    # concurrency test, tests/core/test_redis_loop.py), and the Celery broker is Redis
+    # (so an enqueue in an endpoint test connects instead of hanging on retries). The
+    # whole point of the phase's hardening is testing the real seams, not mocks.
     services:
       postgres:
         image: postgres:16
@@ -38,6 +42,15 @@ jobs:
           - 5432:5432
         options: >-
           --health-cmd "pg_isready -U test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5

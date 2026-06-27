@@ -10,6 +10,7 @@ Complements ``test_mismo_import.py`` (endpoint-focused unit-of-API cases) by
 asserting the *chained* journey and the synthetic-variant imports.
 """
 
+from decimal import Decimal
 from pathlib import Path
 
 import pytest
@@ -57,7 +58,8 @@ async def test_full_journey_upload_to_edit(auth_client: AsyncClient, raw_bytes: 
     assert len(borrower["income_items"]) == 2
     assert len(borrower["employers"]) == 3
     assert len(fin["liabilities"]) == 10 and len(fin["assets"]) == 9
-    assert fin["loan_terms"]["note_rate_percent"] == "6.8750"
+    # Compare numerically — the serialized scale ("6.875" vs "6.8750") is incidental.
+    assert Decimal(fin["loan_terms"]["note_rate_percent"]) == Decimal("6.875")
 
     liab_id = fin["liabilities"][0]["id"]
     liab_count = len(fin["liabilities"])
