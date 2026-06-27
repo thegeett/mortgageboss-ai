@@ -7,6 +7,7 @@ safe errors (malformed / not-MISMO → 400; floor → 422), boundary validation
 (no file / oversized), auth, tenant scoping, SSN masked, and no-PII logging.
 """
 
+from decimal import Decimal
 from pathlib import Path
 
 import pytest
@@ -185,7 +186,9 @@ async def test_stated_financials_read_after_import(
     assert len(borrower["employers"]) == 3
     assert len(body["liabilities"]) == 10
     assert len(body["assets"]) == 9
-    assert body["loan_terms"]["note_rate_percent"] == "6.8750"
+    # Compare numerically — the serialized scale ("6.875" vs "6.8750") is incidental;
+    # the rate value is what matters.
+    assert Decimal(body["loan_terms"]["note_rate_percent"]) == Decimal("6.875")
     assert body["mismo_import"]["source_format"] == "xml"
     assert body["mismo_import"]["warnings"] == []
 
