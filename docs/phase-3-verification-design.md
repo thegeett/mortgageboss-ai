@@ -102,3 +102,70 @@ decision-driving fields **typed** so deterministic rules can consume them:
   case catchable — the obligation is captured even if it's not in the typed core).
 
 Built in LP-39a (pay stub), replicated for W-2 (LP-39b) and bank statement (LP-39c). (ADR-144/145.)
+
+## 8. The rule engine — implemented (LP-74)
+
+LP-74 builds the **engine** that the design above describes — the mechanism, with a few
+**sample** rules to prove it end-to-end. The real ~60 Conventional + ~50 FHA rules are
+LP-82..85; the real lender overlays are LP-80 (the LP-68 "engine before content" pattern).
+Backend only. Code lives in `backend/app/verification/` (pure) +
+`backend/app/services/verification_engine.py` (DB-facing). (ADR-188.)
+
+### 8.1 The uniform rule structure + the two linchpins
+
+Every rule — regulatory, investor, or overlay — shares **one** structure
+(`app/verification/rules/schema.py::VerificationRule`): a stable `rule_id`, a `layer`, an
+`applicability` (all_loans / program / lender), the typed `reads` field path(s), a
+`condition` (threshold-as-data), a `severity` (red/yellow), a finding `category`, a
+`description`, and a structured `source` citation. Rules are **definitions** (config-like,
+declared in code, seedable), not per-file rows.
+
+Two properties are the **linchpins** that make overlays possible:
+
+1. **Stable `rule_id`** (e.g. `conv.dti.back_end_max`) — a rule's identity. Overlays
+   override rules *by this id*.
+2. **Threshold-as-data** — the threshold is a `Condition` (`{op, value, unit}`) the fixed
+   `satisfies()` logic reads, **never hardcoded**. Because it is data, an overlay can supply a
+   different value and the *same* logic evaluates against it. **Rule logic is fixed;
+   thresholds are data.**
+
+### 8.2 Three-layer composition — base + overlay-diff → effective set
+
+`app/verification/registry.py` resolves the effective rule set for a file's **program +
+lender**:
+
+1. **Base** = all regulatory rules + the investor rules for the file's program (Conventional
+   **or** FHA, never both).
+2. **Patch** with the lender's overlay (`app/verification/overlays/schema.py::LenderOverlay`),
+   applied as a **diff**: an override replaces the base rule's threshold *by `rule_id`*
+   (identity/logic unchanged — only the `Condition`); a custom rule is appended.
+3. **Output** = a flat effective set with final thresholds.
+
+**The investor rule is the default** — un-overridden rules fall through; no overlay → all
+investor defaults. **Overlays are diffs, not full per-lender copies** (small, maintainable,
+auditable). The overlay value, where specified, wins.
+
+### 8.3 Deterministic evaluation — read → compare → emit
+
+`app/verification/engine.py::evaluate` takes a `FileFacts` snapshot
+(`app/verification/facts.py` — a typed field-path → value mapping) and the effective rules,
+and for each rule reads the typed field → compares to the (possibly overlay-patched)
+threshold → emits a pass/fail result. **Pure, deterministic, no AI** — the structured-data
+handoff of §1 ("AI surfaces, deterministic code judges"). A datum the file does not carry yet
+→ the rule is **not evaluated** (the engine never invents a verdict). The service
+(`verification_engine.py`) builds the facts from the file's stated/extracted data, resolves
+the rules, evaluates, and persists — **per file**, **tenant-scoped** (loan_file → company).
+
+> The fact computations in `build_file_facts` are intentionally minimal **sample** calcs;
+> the transparent DTI/LTV calculators are LP-76/77, and more typed fields get promoted as the
+> real rules land (LP-82..85).
+
+### 8.4 Two generators, one findings model
+
+The engine emits into the **shared** LP-66 `Finding` model in a **uniform shape** (rule_id,
+observed value, severity-derived status, the condition, structured source, source-location
+placeholder, reasoning), marked with a new minimal `origin` field (`deterministic_rule`). The
+AI cross-source layer (LP-78) feeds the **same** model as `ai_cross_source` — the findings
+path is **not** engine-exclusive. LP-75 does the fuller findings-model extension (confidence /
+resolution / blocking / source-location — §§3-4, 6); `origin` is the minimal field needed to
+emit in the uniform shape now.

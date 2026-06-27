@@ -5645,3 +5645,68 @@ storage footgun's root.
 **Consequences:** the seams are now under test; future seam regressions (storage, loop, flush, silent
 failure) are far more likely to be caught in CI. The S3 backend + its MinIO validation are honestly
 deferred to Phase 7.
+
+## ADR-188: Verification rule engine — uniform structure, three-layer composition, deterministic evaluation (LP-74)
+
+- **Date:** 2026-06-27
+- **Status:** Accepted
+
+**Context:** Phase 3 builds the verification engine. The *first* ticket is the engine itself — the
+mechanism before the ~60 Conventional + ~50 FHA rule content (LP-82..85), mirroring LP-68's
+"engine before content". The structural decisions here determine whether the rest of Phase 3
+(overlays, calculators, the aggression dial, the findings) compose cleanly or require an impossible
+retrofit. Verification rules come from three sources that must **compose**: regulatory (Layer 1, all
+loans), investor (Layer 2, per program — Fannie for Conventional, HUD for FHA), and lender overlay
+(Layer 3, per lender).
+
+**Decision:**
+
+- **One uniform rule structure for all three layers**, carrying a **stable `rule_id`** (e.g.
+  `conv.dti.back_end_max`), a `layer`, an `applicability` (all_loans / program / lender), the typed
+  `reads` field path(s), a **threshold-as-data** `condition` (`{op, value, unit}`), a `severity`
+  (red/yellow), a finding `category`, a `description`, and a structured `source` citation. Rules are
+  **definitions** (config-like, declared in code, seedable), not per-file rows.
+- **The two linchpins are airtight.** (1) Every rule has a **stable `rule_id`** — overlays reference
+  rules *by id*. (2) The **threshold is data** the fixed logic reads, never hardcoded — so an overlay
+  can supply a different value and the *same* `satisfies()` evaluates against it. Rule **logic is
+  fixed; thresholds are data**.
+- **Three-layer composition resolves a flat effective set per file.** Base = all regulatory rules +
+  the investor rules for the file's program (Conventional **or** FHA, never both). Patch with the
+  lender's overlay applied as a **diff**: an override replaces the base rule's threshold *by `rule_id`*
+  (identity/logic unchanged — only the `condition`); a custom rule is appended. **The investor rule is
+  the default** — un-overridden rules fall through; no overlay → all investor defaults. Overlays are
+  **diffs, not full per-lender copies** (small, maintainable, auditable).
+- **Evaluation is deterministic.** For each rule in the effective set: read the file's typed field →
+  compare to the (possibly overlay-patched) threshold → emit a pass/fail finding. **No AI** (the AI's
+  role is upstream extraction); the handoff is **structured data** — rules read typed fields, never
+  prose. A datum the file does not carry yet → the rule is *not evaluated* (the engine never invents a
+  verdict). The pure engine takes a `FileFacts` snapshot; the DB-facing service builds facts, resolves
+  rules, evaluates, and persists — per file, **tenant-scoped** (loan_file → company).
+- **Two generators, one findings model.** The engine emits into the shared LP-66 `Finding` model in a
+  **uniform shape** (rule_id, observed value, severity-derived status, the condition, structured
+  source, source-location placeholder, reasoning), marked with a new minimal `origin` field
+  (`deterministic_rule`). The Phase-3 AI cross-source layer (LP-78) feeds the **same** model as
+  `ai_cross_source`. The findings path is **not** engine-exclusive. LP-75 does the fuller findings-model
+  extension (confidence / resolution / blocking / source-location); `origin` is the minimal field
+  needed to emit in the uniform shape now.
+- **Built and proven with SAMPLE rules + a SAMPLE overlay.** A regulatory AML rule, Conventional/FHA
+  DTI caps, a pay-stub-recency rule, and a sample lender overlay (overriding the Conventional DTI to 45
+  and adding a reserves custom rule). The overlay-patched threshold (45) produces a finding where the
+  investor default (50) would not — proving the patch reaches evaluation. The real content is LP-82..85;
+  the real overlays LP-80.
+
+**Rationale:** the rule structure determines whether all of Phase 3 composes. Stable ids let overlays
+*reference* rules; thresholds-as-data let overlays *override* them — so an overlay is a clean patch, not
+a retrofit. Investor-default + overlay-as-diff keeps overlays small, visible, and maintainable.
+Deterministic evaluation is what makes verification **auditable and defensible** — a threshold check is
+correct by construction, not "probably right per the AI" (the locked "AI surfaces, deterministic code
+judges" principle). The two-generator accommodation lets LP-78's AI findings share the model without a
+later migration of the engine's emit path. Engine-before-content (sample rules) mirrors LP-68: a solid,
+tested mechanism first; the domain content later.
+
+**Consequences:** LP-75 extends the findings model (confidence / resolution / blocking /
+source-location); LP-76/77 add the transparent DTI/LTV calculators (and the real fact computations the
+engine's `build_file_facts` currently stubs as sample calcs); LP-78 adds the AI cross-source layer
+(feeding the shared model) + the APPLY → recompute loop; LP-79 the aggression dial; LP-80 the real UWM /
+Sun-West overlays (via this mechanism); LP-82..85 the real rule content (via this engine, promoting
+typed-core fields as rules need them). The engine is per-file (shared definitions, per-file runs).

@@ -77,6 +77,23 @@ class FindingResolutionStatus(StrEnum):
     WAIVED = "waived"
 
 
+class FindingOrigin(StrEnum):
+    """Which generator produced a finding (the *two-generator* seam, LP-74).
+
+    Findings flow into one shared model from more than one generator. LP-74's
+    deterministic rule engine emits ``DETERMINISTIC_RULE`` findings (a typed
+    field compared to a threshold — auditable, no AI). The Phase-3 AI
+    cross-source layer (LP-78) feeds the *same* model as ``AI_CROSS_SOURCE``.
+    The column lets a reader tell the two apart without the findings path being
+    engine-exclusive. (LP-75 does the fuller findings-model extension —
+    confidence / resolution / blocking; this is the minimal field needed to
+    emit in the uniform shape now.)
+    """
+
+    DETERMINISTIC_RULE = "deterministic_rule"
+    AI_CROSS_SOURCE = "ai_cross_source"
+
+
 class Finding(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     """A single verification result against a loan file."""
 
@@ -111,6 +128,17 @@ class Finding(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     # Flexible dotted-namespace string (e.g. "income.paystub_recency"), NOT an
     # enum: the rule catalog is large and finalized in Phase 3 (ADR-062).
     rule_id: Mapped[MediumStr] = mapped_column(index=True, nullable=False)
+    # Which generator produced this finding (LP-74 two-generator seam). The
+    # deterministic rule engine emits ``deterministic_rule``; the AI cross-source
+    # layer (LP-78) will feed the same model as ``ai_cross_source``. Defaults to
+    # ``deterministic_rule`` so existing/back-filled rows read as engine findings.
+    origin: Mapped[FindingOrigin] = mapped_column(
+        str_enum(FindingOrigin),
+        default=FindingOrigin.DETERMINISTIC_RULE,
+        server_default=FindingOrigin.DETERMINISTIC_RULE.value,
+        index=True,
+        nullable=False,
+    )
     status: Mapped[FindingStatus] = mapped_column(
         str_enum(FindingStatus), index=True, nullable=False
     )

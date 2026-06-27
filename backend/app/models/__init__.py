@@ -39,6 +39,7 @@ from app.models.extraction import Extraction, ExtractionStatus
 from app.models.finding import (
     Finding,
     FindingCategory,
+    FindingOrigin,
     FindingResolutionStatus,
     FindingStatus,
 )
@@ -94,6 +95,7 @@ __all__ = [
     "ExtractionStatus",
     "Finding",
     "FindingCategory",
+    "FindingOrigin",
     "FindingResolutionStatus",
     "FindingStatus",
     "Lender",
