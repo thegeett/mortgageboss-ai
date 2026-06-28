@@ -35,7 +35,7 @@ from app.core.logging import get_logger
 
 logger = get_logger(__name__)
 
-_MAX_TOKENS = 4096
+_MAX_TOKENS = 8192
 
 CROSS_SOURCE_SYSTEM_PROMPT = """\
 You are reviewing a mortgage loan file for DISCREPANCIES between what the borrower
@@ -50,7 +50,7 @@ document references but the stated assets omit). Read and compare; do not run a
 fixed checklist.
 
 High-value things worth checking (but do NOT limit yourself to these — surface ANY
-discrepancy you find):
+discrepancy you find, using the "other" type below):
 - Stated monthly income vs. income computed from the pay stubs / W-2s — flag a
   variance greater than 10%.
 - Stated employer vs. the employer named on the W-2 / pay stub.
@@ -60,15 +60,38 @@ You are SURFACING candidates for a human processor to review — you are not mak
 decision. It is acceptable to be uncertain; reflect that in the confidence. Do not
 invent discrepancies; if the stated data and the documents agree, return none.
 
+CHOOSE THE TYPE from this fixed list when one fits (use the EXACT string), so the
+same kind of discrepancy is labelled the same way every time:
+- "income_variance"            — stated income vs. income shown by pay stubs / W-2s
+- "employer_mismatch"          — stated employer vs. the employer on the documents
+- "gift_documentation_missing" — a stated gift lacks a gift letter / matching deposit
+- "co_borrower_income_missing" — a co-borrower is on the file but has no income/asset/
+                                 liability data or supporting documents
+- "property_address_mismatch"  — the subject-property address differs across sources
+- "loan_amount_variance"       — the loan amount is inconsistent with price / down payment
+- "asset_undocumented"         — a stated asset (e.g. stocks, account) lacks documentation
+- "undisclosed_obligation"     — an obligation in a document is absent from stated debts
+- "other"                      — ANY OTHER discrepancy, including novel ones no type above
+                                 covers (e.g. an ID address that matches the subject
+                                 property). For "other" the "description" is REQUIRED and
+                                 must clearly state the discrepancy. Never discard a real
+                                 discrepancy just because no named type fits — use "other".
+
+GRANULARITY (so the count is stable run to run):
+- Report each DISTINCT discrepancy exactly ONCE.
+- Do NOT split a single issue into multiple findings (e.g. one income variance is ONE
+  finding, not separate pay-stub / W-2 / YTD findings for the same income).
+- Do NOT merge two genuinely different issues into one finding.
+- Prefer a canonical type above; fall back to "other" (with a description) otherwise.
+
 Return ONLY a JSON object of this exact shape (no prose outside the JSON):
 {
   "findings": [
     {
-      "type": "income_variance" | "employer_mismatch" | "gift_mismatch" |
-              "undisclosed_obligation" | "<short_snake_case_for_anything_else>",
+      "type": "<one of the fixed types above, or \\"other\\">",
       "category": "income" | "assets" | "credit" | "property" | "cross_source",
       "severity": "red" | "yellow",
-      "description": "<one-line human summary>",
+      "description": "<one-line human summary; REQUIRED for the \\"other\\" type>",
       "stated_value": "<what the application stated, or null>",
       "document_value": "<what the documents show, or null>",
       "amount": "<the dollar amount at issue, or null>",
@@ -125,13 +148,25 @@ async def reason_cross_source(context_json: str) -> CrossSourceResult:
         system=CROSS_SOURCE_SYSTEM_PROMPT,
         messages=[{"role": "user", "content": context_json}],
         max_tokens=_MAX_TOKENS,
+        # Discrepancy detection is a judgement task, not creative writing — run it
+        # deterministically so the SAME file yields the SAME findings run to run.
+        temperature=0.0,
     )
+    # Truncation guard: a response cut at max_tokens leaves the JSON unbalanced, so
+    # the parser would drop ALL findings — surface that loudly, never silently.
+    if result.stop_reason == "max_tokens":
+        logger.warning(
+            "cross_source_response_truncated",  # the body was cut off (raise _MAX_TOKENS)
+            output_tokens=result.output_tokens,
+            max_tokens=_MAX_TOKENS,
+        )
     findings = _parse_findings(result.text)
     logger.info(
         "cross_source_reasoning_done",
         findings=len(findings),  # count only — never the findings' content (PII)
         input_tokens=result.input_tokens,
         output_tokens=result.output_tokens,
+        stop_reason=result.stop_reason,
     )
     return CrossSourceResult(
         findings=findings,
@@ -142,18 +177,33 @@ async def reason_cross_source(context_json: str) -> CrossSourceResult:
 
 
 def _parse_findings(text: str) -> list[CrossSourceRawFinding]:
-    """Defensively parse the AI response into structured findings (never raises)."""
+    """Defensively parse the AI response into structured findings (never raises).
+
+    Logs (counts only, never content) whenever the response can't be parsed or
+    individual entries are dropped — so silent losses are observable rather than
+    hidden behind an empty/short list.
+    """
     snippet = extract_json_object(text)
     if snippet is None:
+        logger.warning("cross_source_parse_no_json_object")  # no balanced {...} — likely truncated
         return []
     try:
         payload = json.loads(snippet)
     except (json.JSONDecodeError, ValueError):
+        logger.warning("cross_source_parse_invalid_json")
         return []
     raw_list = payload.get("findings") if isinstance(payload, dict) else None
     if not isinstance(raw_list, list):
+        logger.warning("cross_source_parse_no_findings_list")
         return []
-    return [f for item in raw_list if (f := _coerce_finding(item)) is not None]
+    parsed = [f for item in raw_list if (f := _coerce_finding(item)) is not None]
+    if len(parsed) != len(raw_list):
+        logger.warning(
+            "cross_source_findings_dropped",  # malformed entries the model returned
+            raw=len(raw_list),
+            parsed=len(parsed),
+        )
+    return parsed
 
 
 def _coerce_finding(item: Any) -> CrossSourceRawFinding | None:

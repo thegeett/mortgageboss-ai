@@ -67,13 +67,17 @@ class AICompletion:
     """The result of a successful completion call.
 
     Carries the concatenated text plus token usage so callers can both use the
-    output and record an estimated cost. No raw SDK objects leak out.
+    output and record an estimated cost. ``stop_reason`` is the model's finish
+    reason (e.g. ``"end_turn"``, ``"max_tokens"``) so callers can detect a
+    truncated response instead of silently parsing a cut-off body. No raw SDK
+    objects leak out.
     """
 
     text: str
     input_tokens: int
     output_tokens: int
     model: str
+    stop_reason: str | None = None
 
 
 # --------------------------------------------------------------------------- #
@@ -232,7 +236,8 @@ async def complete(
         )
         input_tokens = resp.usage.input_tokens
         output_tokens = resp.usage.output_tokens
-        # METADATA ONLY — token counts and timing, never the content.
+        stop_reason = getattr(resp, "stop_reason", None)
+        # METADATA ONLY — token counts, timing, finish reason; never the content.
         logger.info(
             "ai_call_succeeded",
             model=model,
@@ -240,12 +245,14 @@ async def complete(
             output_tokens=output_tokens,
             latency_ms=latency_ms,
             attempt=attempt,
+            stop_reason=stop_reason,
         )
         return AICompletion(
             text=text,
             input_tokens=input_tokens,
             output_tokens=output_tokens,
             model=model,
+            stop_reason=stop_reason,
         )
 
     # Unreachable: the loop either returns or raises. Belt-and-suspenders for mypy.

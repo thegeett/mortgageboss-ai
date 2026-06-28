@@ -1,14 +1,21 @@
 """The AI cross-source boundary (LP-78) — the prompt is general; parsing is defensive.
 
 No real key: tests the prompt's generality and the defensive structured-output
-parsing (the AI's perception is captured as typed findings, never prose).
+parsing (the AI's perception is captured as typed findings, never prose). Also
+covers the consistency hardening — canonical types with an "other" escape hatch
+for novel discrepancies, deterministic settings, and the truncation guard.
 """
 
+import app.ai.cross_source as cross_source
+import pytest
+from app.ai.client import AICompletion
 from app.ai.cross_source import (
     CROSS_SOURCE_SYSTEM_PROMPT,
     CrossSourceRawFinding,
     _parse_findings,
+    reason_cross_source,
 )
+from structlog.testing import capture_logs
 
 _VALID = """
 {"findings": [
@@ -30,6 +37,40 @@ def test_prompt_is_general_not_a_fixed_checklist() -> None:
     # It guides toward high-value comparisons but does not limit to them.
     assert "do not limit yourself to these" in prompt
     assert "surfacing candidates" in prompt  # human review, not a decision
+
+
+def test_prompt_has_canonical_types_with_an_open_other_escape_hatch() -> None:
+    """Canonical types stop label churn, but novel discrepancies MUST still survive."""
+    prompt = " ".join(CROSS_SOURCE_SYSTEM_PROMPT.lower().split())
+    # The known high-frequency types are pinned to exact strings.
+    for canonical in (
+        "income_variance",
+        "employer_mismatch",
+        "gift_documentation_missing",
+        "co_borrower_income_missing",
+        "property_address_mismatch",
+    ):
+        assert canonical in prompt
+    # The enum is NOT closed — "other" is first-class, with a required description,
+    # so novel findings are surfaced rather than discarded (the key constraint).
+    assert '"other"' in prompt
+    assert "never discard a real discrepancy" in prompt
+    # Granularity rules keep the count stable run to run.
+    assert "report each distinct discrepancy exactly once" in prompt
+    assert "do not split a single issue" in prompt
+
+
+def test_other_type_finding_parses_and_survives() -> None:
+    """A novel discrepancy reported as type 'other' is parsed (not dropped)."""
+    novel = (
+        '{"findings": [{"type": "other", "category": "property", "severity": "yellow",'
+        ' "description": "Driver\'s license address matches the subject property",'
+        ' "confidence": 0.7}]}'
+    )
+    findings = _parse_findings(novel)
+    assert len(findings) == 1
+    assert findings[0].type == "other"
+    assert "subject property" in (findings[0].description or "")
 
 
 def test_parses_structured_findings() -> None:
@@ -67,3 +108,54 @@ def test_skips_malformed_items_keeps_valid() -> None:
     assert len(findings) == 1
     assert findings[0].type == "gift_mismatch"
     assert findings[0].confidence == 1.0  # confidence clamped to [0, 1]
+
+
+def test_dropped_entries_are_logged() -> None:
+    """A malformed entry the model returned is surfaced (raw-vs-parsed), not silent."""
+    mixed = '{"findings": [{"description": "no type"}, {"type": "income_variance", "description": "ok"}]}'
+    with capture_logs() as logs:
+        _parse_findings(mixed)
+    events = [log["event"] for log in logs]
+    assert "cross_source_findings_dropped" in events
+
+
+async def test_reason_uses_deterministic_settings(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The pass runs at temperature 0 with the raised token budget (consistency)."""
+    captured: dict[str, object] = {}
+
+    async def _fake_complete(**kwargs: object) -> AICompletion:
+        captured.update(kwargs)
+        return AICompletion(
+            text='{"findings": []}',
+            input_tokens=10,
+            output_tokens=5,
+            model="m",
+            stop_reason="end_turn",
+        )
+
+    monkeypatch.setattr(cross_source, "complete", _fake_complete)
+    await reason_cross_source("{}")
+
+    assert captured["temperature"] == 0.0
+    assert captured["max_tokens"] == cross_source._MAX_TOKENS
+    assert cross_source._MAX_TOKENS >= 8192
+
+
+async def test_truncation_is_surfaced_not_silent(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A response cut at max_tokens logs a truncation warning (never silently dropped)."""
+
+    async def _truncated(**kwargs: object) -> AICompletion:
+        return AICompletion(
+            text="{garbage",
+            input_tokens=10,
+            output_tokens=8192,
+            model="m",
+            stop_reason="max_tokens",
+        )
+
+    monkeypatch.setattr(cross_source, "complete", _truncated)
+    with capture_logs() as logs:
+        result = await reason_cross_source("{}")
+    events = [log["event"] for log in logs]
+    assert "cross_source_response_truncated" in events
+    assert result.findings == []  # truncated body parsed to nothing — but it was surfaced

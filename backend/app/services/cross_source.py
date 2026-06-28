@@ -321,10 +321,12 @@ async def _stated_borrowers(db: AsyncSession, loan_file_id: UUID) -> list[dict[s
 
 
 async def _stated_liabilities(db: AsyncSession, loan_file_id: UUID) -> list[dict[str, Any]]:
+    # Deterministic order (LP-78): the AI must see identical input every run, so
+    # an unordered query can't reshuffle the context and nudge the output.
     stmt = only_active(
         select(StatedLiability).where(StatedLiability.loan_file_id == loan_file_id),
         StatedLiability,
-    )
+    ).order_by(StatedLiability.created_at, StatedLiability.id)
     rows = (await db.execute(stmt)).scalars().all()
     return [
         {
@@ -339,7 +341,7 @@ async def _stated_liabilities(db: AsyncSession, loan_file_id: UUID) -> list[dict
 async def _stated_assets(db: AsyncSession, loan_file_id: UUID) -> list[dict[str, Any]]:
     stmt = only_active(
         select(StatedAsset).where(StatedAsset.loan_file_id == loan_file_id), StatedAsset
-    )
+    ).order_by(StatedAsset.created_at, StatedAsset.id)
     rows = (await db.execute(stmt)).scalars().all()
     return [
         {"asset_type": r.asset_type, "value": _money(r.value), "holder_name": r.holder_name}
@@ -354,7 +356,7 @@ async def _verified_documents(db: AsyncSession, loan_file_id: UUID) -> list[dict
         .where(Document.loan_file_id == loan_file_id)
         .options(selectinload(Document.extractions)),
         Document,
-    )
+    ).order_by(Document.created_at, Document.id)
     documents = (await db.execute(stmt)).scalars().all()
     out: list[dict[str, Any]] = []
     for doc in documents:
