@@ -5,10 +5,15 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 const runMutate = vi.fn();
 const useVerificationMock = vi.fn();
+const invalidateQueries = vi.fn();
 
 vi.mock("@/lib/api/verification", () => ({
   useVerification: () => useVerificationMock(),
   useRunVerification: () => ({ mutate: runMutate, isPending: false }),
+}));
+
+vi.mock("@tanstack/react-query", () => ({
+  useQueryClient: () => ({ invalidateQueries }),
 }));
 
 import { VerificationPanel } from "./verification-panel";
@@ -51,6 +56,12 @@ function mock(overrides: Partial<ReturnType<typeof useVerificationMock>> = {}) {
     refetch: vi.fn(),
     ...overrides,
   });
+}
+
+/** The fixture's run, non-null (biome forbids `!`). */
+function baseRun() {
+  if (!STATUS.latest_run) throw new Error("fixture must have a run");
+  return STATUS.latest_run;
 }
 
 afterEach(() => {
@@ -104,5 +115,26 @@ describe("VerificationPanel", () => {
     render(<VerificationPanel fileId="LF-1" />);
     fireEvent.click(screen.getByRole("button", { name: /retry/i }));
     expect(refetch).toHaveBeenCalled();
+  });
+
+  it("counts findings from the list, not the run's per-run counts", () => {
+    // The run claims 5 yellow, but the list has 1 — the summary follows the list.
+    mock({ data: { ...STATUS, latest_run: { ...baseRun(), yellow_count: 5 } } });
+    render(<VerificationPanel fileId="LF-1" />);
+    expect(screen.getByText("1 finding")).toBeDefined();
+  });
+
+  it("refreshes the DTI + LTV calculators when a run completes", () => {
+    const runningRun = { ...baseRun(), status: "running" as const };
+    mock({ data: { ...STATUS, latest_run: runningRun } });
+    const { rerender } = render(<VerificationPanel fileId="LF-1" />);
+    expect(invalidateQueries).not.toHaveBeenCalled();
+
+    // The poll flips the run to completed → the finding-coupled calculators refresh.
+    mock({ data: { ...STATUS, latest_run: { ...runningRun, status: "completed" } } });
+    rerender(<VerificationPanel fileId="LF-1" />);
+
+    expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ["dti", "LF-1"] });
+    expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ["ltv", "LF-1"] });
   });
 });

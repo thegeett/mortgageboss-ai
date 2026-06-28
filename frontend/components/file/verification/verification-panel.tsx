@@ -15,16 +15,34 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { InlineErrorState } from "@/components/ui/error-state";
 import { SkeletonText } from "@/components/ui/skeleton";
 import { Spinner } from "@/components/ui/spinner";
+import { dtiQueryKey } from "@/lib/api/dti";
+import { ltvQueryKey } from "@/lib/api/ltv";
 import { useRunVerification, useVerification } from "@/lib/api/verification";
 import { formatPercent, humanize } from "@/lib/format";
 import type { VerificationFinding, VerificationStatus } from "@/lib/types/verification";
 import { cn } from "@/lib/utils";
+import { useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, Play, ScanSearch, Sparkles } from "lucide-react";
+import { useEffect, useRef } from "react";
 
 export function VerificationPanel({ fileId }: { fileId: string }) {
   const { data, isPending, isError, refetch } = useVerification(fileId);
   const run = useRunVerification(fileId);
   const running = data?.latest_run?.status === "running" || run.isPending;
+
+  // When a pass finishes, the findings changed — refresh the finding-coupled
+  // calculators so their "unresolved findings" alert + count reflect the new run
+  // (they're cached separately and won't refetch on their own).
+  const queryClient = useQueryClient();
+  const prevStatus = useRef<string | undefined>(undefined);
+  const status = data?.latest_run?.status;
+  useEffect(() => {
+    if (prevStatus.current === "running" && status === "completed") {
+      void queryClient.invalidateQueries({ queryKey: dtiQueryKey(fileId) });
+      void queryClient.invalidateQueries({ queryKey: ltvQueryKey(fileId) });
+    }
+    prevStatus.current = status;
+  }, [status, fileId, queryClient]);
 
   return (
     <Card className="border-gray-200/80 shadow-sm">
