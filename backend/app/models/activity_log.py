@@ -57,6 +57,7 @@ class ActivityType(StrEnum):
     FINDING_RESOLVED = "finding_resolved"
     VERIFICATION_RUN = "verification_run"
     DTI_OVERRIDDEN = "dti_overridden"  # processor overrode a DTI calculator input (LP-76)
+    LTV_OVERRIDDEN = "ltv_overridden"  # processor overrode an LTV calculator input (LP-77)
     NEEDS_ITEM_CREATED = "needs_item_created"
     NEEDS_ITEM_SATISFIED = "needs_item_satisfied"
     NEEDS_ITEM_CONFIRMED = "needs_item_confirmed"  # processor confirmed a proposed need (LP-70)

@@ -5826,3 +5826,54 @@ LP-82/83 encode the real DTI rules (the calculator computes DTI; the rules judge
 limit); the effective limit reflects overlays today; the other calculators (MI / self-employed income /
 reserves / max loan) are LP-87. Housing taxes/insurance/HOA are read from document extractions when
 present and are override-able otherwise (no dedicated property fields yet).
+
+## ADR-191: LTV calculator — LTV/CLTV/HCLTV, refinance-aware, reusing the DTI calculator model (LP-77)
+
+- **Date:** 2026-06-28
+- **Status:** Accepted
+
+**Context:** LTV (loan-to-value) is the second qualification pillar — where DTI asks "can the borrower
+afford the payment?", LTV asks "how much equity is in the deal?" (the lender's risk exposure). The
+vertical slice needs both. LP-76 proved a transparent / auto-populated / override-able / findings-coupled
+/ deterministic calculator; LP-77 applies that model to LTV, with the LTV-specific substance done
+correctly.
+
+**Decision:**
+
+- **Reuse LP-76's calculator model, applied to LTV.** Same transparent itemized breakdown + explicit
+  formulas, auto-population from the structured data, per-field override with an audit log, real-time
+  recalc (the override endpoints return the recomputed result), the findings coupling (unresolved-findings
+  alert + recompute-consumer), and pure deterministic math. The framework is reuse; the new substance is
+  the three ratios + refinance handling. A parallel `LtvOverride` table + `ltv_overridden` activity type
+  mirror the DTI ones (rather than disturbing LP-76).
+- **Three deterministic ratios, the subtleties correct + made visible.**
+  - **LTV = first loan ÷ the LESSER OF** purchase price and appraised value (for a purchase) — the lender
+    won't lend against a price above the appraisal. The basis (and which value won) is shown explicitly.
+  - **CLTV = (first + second + HELOC drawn balance) ÷ value.**
+  - **HCLTV = (first + second + HELOC CREDIT LIMIT) ÷ value** — the most conservative measure: a $0-balance
+    HELOC with a $100k line could be drawn tomorrow, so the full line counts. These two subtleties
+    (lesser-of, credit-limit-not-balance) are the trust mechanism — exactly what a processor wants verified
+    and what ChatGPT fumbles.
+- **Refinance-aware.** The loan purpose drives the denominator **and** the limit: a purchase uses the
+  lesser-of; a rate/term refinance uses the appraised value (no purchase price); a cash-out refinance uses
+  the appraised value with a **stricter** limit. A nullable `refinance_type` (rate_term / cash_out) on the
+  loan file carries the cash-out distinction.
+- **Program limits side-by-side, the effective + purpose-varying limit.** Sample LTV rules
+  (`conv/fha.ltv.purchase_max`, `conv/fha.ltv.cash_out_max`) are added to LP-74's registry; the calculator
+  selects the rule matching the program + purpose and reads the effective threshold (overlay-patchable),
+  with a pass/over status. (Real limits are LP-82/83; these are samples like LP-74's.)
+- **The appraised value is graceful.** It auto-populates from the MISMO valuation (else the estimated
+  value) and is **override-able** where neither is present — the appraisal isn't a Tier-1 extraction yet,
+  so the override is the graceful fallback. The appraisal is **not** promoted to Tier 1 here.
+
+**Rationale:** LTV's correctness subtleties (lesser-of, credit-limit) are precisely what a deterministic
+tool should nail; refinance-awareness is required because the denominator and limit depend on the loan
+purpose. Reusing LP-76's model keeps the two calculators consistent and trustworthy rather than
+reinventing — the processor learns one interaction and trusts both.
+
+**Consequences:** LP-79's dial sets the in-scope cutoff the alert uses; LP-81's verification tab surfaces
+both calculators (they already live there, side-by-side); LP-82/83 encode the real LTV rules (the
+calculator shows the limits; the rules judge); the appraisal may be promoted to Tier 1 later (its value
+feeds LTV); the other calculators (MI / self-employed / reserves / max loan) are LP-87. The sample LTV
+rules carry `reads` paths with no engine fact yet, so the rule engine skips them (the calculator resolves
+the limit directly) — they wire up with the real rules.

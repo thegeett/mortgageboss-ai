@@ -104,10 +104,83 @@ FHA_DTI_BACK_END_MAX = VerificationRule(
 )
 
 
+# --- Layer 2: investor LTV limits (per program, varying by loan purpose) ------
+# Sample LTV ceilings (LP-77). LTV limits VARY BY LOAN PURPOSE — a cash-out
+# refinance pulls equity out and carries a stricter ceiling than a purchase /
+# rate-term refi. The LTV calculator selects the rule_id matching the file's
+# program + purpose to show the effective limit. Real limits are LP-82/83. The
+# `reads` paths have no engine fact yet, so the rule engine skips them (the
+# calculator resolves the limit directly); they wire up with the real LTV rules.
+
+CONV_LTV_PURCHASE_MAX = VerificationRule(
+    rule_id="conv.ltv.purchase_max",
+    layer=RuleLayer.INVESTOR,
+    applicability=Applicability(scope=ApplicabilityScope.PROGRAM, program=LoanProgram.CONVENTIONAL),
+    reads=("ltv.ltv_pct",),
+    condition=Condition(op=Operator.LE, value=Decimal("97"), unit="percent"),
+    severity=RuleSeverity.RED,
+    category=FindingCategory.PROPERTY,
+    description="LTV at or under the Conventional purchase / rate-term maximum.",
+    source=RuleSource(
+        type="investor_guide",
+        citation="Fannie Mae Eligibility Matrix (sample threshold)",
+    ),
+)
+
+CONV_LTV_CASH_OUT_MAX = VerificationRule(
+    rule_id="conv.ltv.cash_out_max",
+    layer=RuleLayer.INVESTOR,
+    applicability=Applicability(scope=ApplicabilityScope.PROGRAM, program=LoanProgram.CONVENTIONAL),
+    reads=("ltv.ltv_pct",),
+    condition=Condition(op=Operator.LE, value=Decimal("80"), unit="percent"),
+    severity=RuleSeverity.RED,
+    category=FindingCategory.PROPERTY,
+    description="LTV at or under the Conventional cash-out refinance maximum (stricter).",
+    source=RuleSource(
+        type="investor_guide",
+        citation="Fannie Mae Eligibility Matrix — cash-out (sample threshold)",
+    ),
+)
+
+FHA_LTV_PURCHASE_MAX = VerificationRule(
+    rule_id="fha.ltv.purchase_max",
+    layer=RuleLayer.INVESTOR,
+    applicability=Applicability(scope=ApplicabilityScope.PROGRAM, program=LoanProgram.FHA),
+    reads=("ltv.ltv_pct",),
+    condition=Condition(op=Operator.LE, value=Decimal("96.5"), unit="percent"),
+    severity=RuleSeverity.RED,
+    category=FindingCategory.PROPERTY,
+    description="LTV at or under the FHA purchase / rate-term maximum.",
+    source=RuleSource(
+        type="investor_guide",
+        citation="HUD Handbook 4000.1 II.A.2 (sample threshold)",
+    ),
+)
+
+FHA_LTV_CASH_OUT_MAX = VerificationRule(
+    rule_id="fha.ltv.cash_out_max",
+    layer=RuleLayer.INVESTOR,
+    applicability=Applicability(scope=ApplicabilityScope.PROGRAM, program=LoanProgram.FHA),
+    reads=("ltv.ltv_pct",),
+    condition=Condition(op=Operator.LE, value=Decimal("80"), unit="percent"),
+    severity=RuleSeverity.RED,
+    category=FindingCategory.PROPERTY,
+    description="LTV at or under the FHA cash-out refinance maximum (stricter).",
+    source=RuleSource(
+        type="investor_guide",
+        citation="HUD Handbook 4000.1 II.A.5 — cash-out (sample threshold)",
+    ),
+)
+
+
 # All sample rule definitions, in one tuple for the registry.
 SAMPLE_RULES: tuple[VerificationRule, ...] = (
     AML_LARGE_DEPOSIT_REVIEW,
     PAYSTUB_RECENCY,
     CONV_DTI_BACK_END_MAX,
     FHA_DTI_BACK_END_MAX,
+    CONV_LTV_PURCHASE_MAX,
+    CONV_LTV_CASH_OUT_MAX,
+    FHA_LTV_PURCHASE_MAX,
+    FHA_LTV_CASH_OUT_MAX,
 )

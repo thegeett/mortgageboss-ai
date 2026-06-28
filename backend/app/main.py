@@ -16,6 +16,7 @@ from app.api.documents import nested_router as documents_nested_router
 from app.api.dti import router as dti_router
 from app.api.lenders import router as lenders_router
 from app.api.loan_files import router as loan_files_router
+from app.api.ltv import router as ltv_router
 from app.api.needs import router as needs_router
 from app.api.property import router as property_router
 from app.api.stated_financials import router as stated_financials_router
@@ -108,6 +109,7 @@ app.include_router(documents_flat_router, prefix=API_V1_PREFIX)
 app.include_router(findings_router, prefix=API_V1_PREFIX)
 app.include_router(stated_financials_router, prefix=API_V1_PREFIX)
 app.include_router(dti_router, prefix=API_V1_PREFIX)
+app.include_router(ltv_router, prefix=API_V1_PREFIX)
 
 # Dev-only endpoints (LP-40) — mounted ONLY outside production, so the routes are
 # absent (404) in prod. They remain auth'd and tenant-scoped.

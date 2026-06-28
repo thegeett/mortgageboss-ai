@@ -1,15 +1,15 @@
 "use client";
 
 /**
- * The DTI calculator (LP-76) — the headline "replace ChatGPT" surface.
+ * The LTV calculator (LP-77) — the second qualification pillar (equity / risk),
+ * the parallel to the DTI calculator (LP-76). Same transparent, auto-populated,
+ * override-able, findings-coupled, deterministic model — applied to the three LTV
+ * ratios.
  *
- * The value is **transparency**: the two ratios, the full itemized breakdown
- * (income / housing [PITI + MI + HOA] / each debt), the explicit formula, and the
- * effective program limit side-by-side. Every input is auto-populated and
- * override-able inline; overrides recompute in real time (the mutation returns the
- * recomputed calculation). An unresolved-findings alert warns when open findings
- * might make the numbers incomplete. The math is deterministic — this UI only
- * shows the work.
+ * The new substance is made visible: the **lesser-of** value basis (a purchase
+ * lends against the lower of price and appraisal) and the **HELOC credit limit**
+ * (HCLTV counts the full line, not the drawn balance). The loan purpose drives the
+ * denominator and the limit (refinance-aware).
  */
 
 import { Badge } from "@/components/ui/badge";
@@ -18,74 +18,76 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { InlineErrorState } from "@/components/ui/error-state";
 import { Input } from "@/components/ui/input";
 import { SkeletonText } from "@/components/ui/skeleton";
-import { useClearDtiOverride, useDti, useSetDtiOverride } from "@/lib/api/dti";
+import { useClearLtvOverride, useLtv, useSetLtvOverride } from "@/lib/api/ltv";
 import { formatMoneyPrecise, formatPercent, humanize } from "@/lib/format";
-import type { DtiCalculation, DtiLimit, DtiLineItem } from "@/lib/types/dti";
+import type { LtvCalculation, LtvLimit, LtvLineItem } from "@/lib/types/ltv";
 import { cn } from "@/lib/utils";
-import { AlertTriangle, Calculator, Check, Pencil, RotateCcw, X } from "lucide-react";
+import { AlertTriangle, Building2, Check, Pencil, RotateCcw, Scale, X } from "lucide-react";
 import { useState } from "react";
 
-export function DtiCalculator({ fileId }: { fileId: string }) {
-  const { data, isPending, isError, refetch } = useDti(fileId);
+export function LtvCalculator({ fileId }: { fileId: string }) {
+  const { data, isPending, isError, refetch } = useLtv(fileId);
 
   return (
     <Card className="border-gray-200/80 shadow-sm">
       <CardHeader className="space-y-1 pb-4">
-        <CardTitle className="flex items-center gap-2 text-base font-semibold text-gray-900">
+        <CardTitle className="flex flex-wrap items-center gap-2 text-base font-semibold text-gray-900">
           <span className="flex h-7 w-7 items-center justify-center rounded-md bg-primary/10 text-primary">
-            <Calculator className="h-4 w-4" />
+            <Building2 className="h-4 w-4" />
           </span>
-          DTI Calculator
+          LTV Calculator
           {data?.program && (
-            <Badge variant="secondary" className="ml-1 font-medium">
+            <Badge variant="secondary" className="font-medium">
               {humanize(data.program)}
+            </Badge>
+          )}
+          {data?.purpose && (
+            <Badge variant="outline" className="font-medium text-gray-600">
+              {humanize(data.purpose)}
             </Badge>
           )}
         </CardTitle>
         <p className="pl-9 text-xs text-gray-500">
-          Deterministic math · auto-populated from the file · every input shown and override-able.
+          Equity vs. risk — LTV / CLTV / HCLTV, deterministic and itemized.
         </p>
       </CardHeader>
       <CardContent aria-busy={isPending}>
         {isPending ? (
           <>
-            <output className="sr-only">Calculating debt-to-income</output>
+            <output className="sr-only">Calculating loan-to-value</output>
             <SkeletonText lines={6} />
           </>
         ) : isError || !data ? (
           <InlineErrorState
-            message="Couldn't calculate the DTI for this file."
+            message="Couldn't calculate the LTV for this file."
             onRetry={() => void refetch()}
           />
         ) : (
-          <DtiBody fileId={fileId} data={data} />
+          <LtvBody fileId={fileId} data={data} />
         )}
       </CardContent>
     </Card>
   );
 }
 
-function DtiBody({ fileId, data }: { fileId: string; data: DtiCalculation }) {
-  const setOverride = useSetDtiOverride(fileId);
-  const clearOverride = useClearDtiOverride(fileId);
+function LtvBody({ fileId, data }: { fileId: string; data: LtvCalculation }) {
+  const setOverride = useSetLtvOverride(fileId);
+  const clearOverride = useClearLtvOverride(fileId);
   const [editingKey, setEditingKey] = useState<string | null>(null);
   const isMutating = setOverride.isPending || clearOverride.isPending;
-
-  const onSave = (fieldKey: string, amount: string) => {
-    setOverride.mutate({ fieldKey, input: { amount } });
-    setEditingKey(null);
-  };
-  const onClear = (fieldKey: string) => {
-    clearOverride.mutate(fieldKey);
-    setEditingKey(null);
-  };
 
   const rowProps = {
     editingKey,
     onEdit: setEditingKey,
     onCancel: () => setEditingKey(null),
-    onSave,
-    onClear,
+    onSave: (fieldKey: string, amount: string) => {
+      setOverride.mutate({ fieldKey, input: { amount } });
+      setEditingKey(null);
+    },
+    onClear: (fieldKey: string) => {
+      clearOverride.mutate(fieldKey);
+      setEditingKey(null);
+    },
     disabled: isMutating,
   };
 
@@ -93,28 +95,16 @@ function DtiBody({ fileId, data }: { fileId: string; data: DtiCalculation }) {
     <div className="space-y-6">
       {data.findings.unresolved && <UnresolvedAlert count={data.findings.open_in_scope_count} />}
 
-      <HeroRatios data={data} />
+      <div className="grid gap-3 sm:grid-cols-3">
+        <LtvHeroTile ltv={data.ltv} limit={data.limit} />
+        <RatioTile label="CLTV" value={data.cltv} hint="+ second & HELOC drawn" />
+        <RatioTile label="HCLTV" value={data.hcltv} hint="+ full HELOC credit line" />
+      </div>
 
-      <BreakdownSection
-        title="Gross monthly income"
-        items={data.income_items}
-        subtotal={data.gross_monthly_income}
-        emptyHint="No income on file yet — add stated income or override below."
-        {...rowProps}
-      />
-      <BreakdownSection
-        title="Housing payment (PITI + MI + HOA)"
-        items={data.housing_items}
-        subtotal={data.housing_payment}
-        {...rowProps}
-      />
-      <BreakdownSection
-        title="Monthly debts"
-        items={data.debt_items}
-        subtotal={data.monthly_debts}
-        emptyHint="No other monthly debts on file."
-        {...rowProps}
-      />
+      <ValueBasisCallout data={data} />
+
+      <BreakdownSection title="Loan amounts" items={data.loan_items} {...rowProps} />
+      <BreakdownSection title="Property value" items={data.value_items} {...rowProps} />
 
       <FormulaReceipt data={data} />
     </div>
@@ -122,27 +112,10 @@ function DtiBody({ fileId, data }: { fileId: string; data: DtiCalculation }) {
 }
 
 // --------------------------------------------------------------------------- //
-// The headline ratios + the limit side-by-side
+// The ratios + the limit side-by-side
 // --------------------------------------------------------------------------- //
 
-function HeroRatios({ data }: { data: DtiCalculation }) {
-  return (
-    <div className="grid gap-3 sm:grid-cols-2">
-      <RatioTile label="Front-end DTI" value={data.front_end_dti} hint="housing ÷ income" />
-      <BackEndTile back={data.back_end_dti} limit={data.limit} />
-    </div>
-  );
-}
-
-function RatioTile({
-  label,
-  value,
-  hint,
-}: {
-  label: string;
-  value: string | null;
-  hint: string;
-}) {
+function RatioTile({ label, value, hint }: { label: string; value: string | null; hint: string }) {
   return (
     <div className="rounded-lg border border-gray-200 bg-gray-50/60 px-4 py-3">
       <div className="text-xs font-medium uppercase tracking-wide text-gray-400">{label}</div>
@@ -154,11 +127,11 @@ function RatioTile({
   );
 }
 
-function BackEndTile({ back, limit }: { back: string | null; limit: DtiLimit }) {
+function LtvHeroTile({ ltv, limit }: { ltv: string | null; limit: LtvLimit }) {
   const over = limit.status === "over";
   const known = limit.status !== "unknown";
-  const pct = back !== null ? Number(back) : null;
-  const cap = limit.back_end_max !== null ? Number(limit.back_end_max) : null;
+  const pct = ltv !== null ? Number(ltv) : null;
+  const cap = limit.ltv_max !== null ? Number(limit.ltv_max) : null;
   const fill = pct !== null && cap && cap > 0 ? Math.min((pct / cap) * 100, 100) : 0;
 
   return (
@@ -169,9 +142,7 @@ function BackEndTile({ back, limit }: { back: string | null; limit: DtiLimit }) 
       )}
     >
       <div className="flex items-center justify-between">
-        <span className="text-xs font-medium uppercase tracking-wide text-gray-500">
-          Back-end DTI
-        </span>
+        <span className="text-xs font-medium uppercase tracking-wide text-gray-500">LTV</span>
         {known && (
           <span
             className={cn(
@@ -190,11 +161,11 @@ function BackEndTile({ back, limit }: { back: string | null; limit: DtiLimit }) 
             over ? "text-destructive" : "text-gray-900",
           )}
         >
-          {formatPercent(back)}
+          {formatPercent(ltv)}
         </span>
-        {limit.back_end_max !== null && (
+        {limit.ltv_max !== null && (
           <span className="whitespace-nowrap text-sm text-gray-400">
-            / {formatPercent(limit.back_end_max)} limit
+            / {formatPercent(limit.ltv_max)} limit
           </span>
         )}
       </div>
@@ -210,6 +181,7 @@ function BackEndTile({ back, limit }: { back: string | null; limit: DtiLimit }) 
             {limit.source === "overlay"
               ? `Lender overlay${limit.lender_slug ? ` · ${limit.lender_slug}` : ""}`
               : "Program default"}
+            {limit.purpose_basis === "cash_out" ? " · cash-out" : ""}
           </div>
         </div>
       ) : (
@@ -219,8 +191,21 @@ function BackEndTile({ back, limit }: { back: string | null; limit: DtiLimit }) 
   );
 }
 
+/** The "lesser of" / appraised-value basis, made explicit (the trust subtlety). */
+function ValueBasisCallout({ data }: { data: LtvCalculation }) {
+  return (
+    <div className="flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm">
+      <Scale className="h-4 w-4 shrink-0 text-gray-400" />
+      <span className="text-gray-500">Value basis · {data.value_basis_label}</span>
+      <span className="ml-auto font-semibold tabular-nums text-gray-900">
+        {data.value_basis === null ? "—" : formatMoneyPrecise(data.value_basis)}
+      </span>
+    </div>
+  );
+}
+
 // --------------------------------------------------------------------------- //
-// The itemized breakdown (the transparency)
+// The itemized breakdown
 // --------------------------------------------------------------------------- //
 
 interface RowControls {
@@ -235,32 +220,15 @@ interface RowControls {
 function BreakdownSection({
   title,
   items,
-  subtotal,
-  emptyHint,
   ...controls
-}: {
-  title: string;
-  items: DtiLineItem[];
-  subtotal: string;
-  emptyHint?: string;
-} & RowControls) {
+}: { title: string; items: LtvLineItem[] } & RowControls) {
   return (
     <section>
       <h4 className="mb-1 text-xs font-semibold uppercase tracking-wide text-gray-400">{title}</h4>
       <div className="rounded-lg border border-gray-200">
-        {items.length === 0 && emptyHint ? (
-          <p className="px-3 py-2.5 text-sm text-gray-400">{emptyHint}</p>
-        ) : (
-          items.map((item) => <LineRow key={item.key} item={item} {...controls} />)
-        )}
-        <div className="flex items-center justify-between border-t border-gray-200 bg-gray-50/60 px-3 py-2">
-          <span className="text-xs font-semibold uppercase tracking-wide text-gray-500">
-            Subtotal
-          </span>
-          <span className="text-sm font-semibold tabular-nums text-gray-900">
-            {formatMoneyPrecise(subtotal)}
-          </span>
-        </div>
+        {items.map((item) => (
+          <LineRow key={item.key} item={item} {...controls} />
+        ))}
       </div>
     </section>
   );
@@ -274,7 +242,7 @@ function LineRow({
   onSave,
   onClear,
   disabled,
-}: { item: DtiLineItem } & RowControls) {
+}: { item: LtvLineItem } & RowControls) {
   const editing = editingKey === item.key;
   const [draft, setDraft] = useState<string>(item.amount);
 
@@ -306,7 +274,7 @@ function LineRow({
               if (e.key === "Enter") onSave(item.key, draft);
               if (e.key === "Escape") onCancel();
             }}
-            className="h-8 w-28 text-right text-sm tabular-nums"
+            className="h-8 w-32 text-right text-sm tabular-nums"
           />
           <Button
             size="icon"
@@ -363,22 +331,23 @@ function LineRow({
 }
 
 // --------------------------------------------------------------------------- //
-// The explicit formula + the unresolved-findings alert
+// The explicit formulas + the unresolved-findings alert
 // --------------------------------------------------------------------------- //
 
-function FormulaReceipt({ data }: { data: DtiCalculation }) {
+function FormulaReceipt({ data }: { data: LtvCalculation }) {
+  const firstLoan = data.loan_items.find((i) => i.key === "ltv.first_loan")?.amount ?? null;
   return (
-    <div className="rounded-lg border border-dashed border-gray-300 bg-gray-50/80 p-3">
+    <div className="space-y-1.5 rounded-lg border border-dashed border-gray-300 bg-gray-50/80 p-3">
       <div className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">
-        The formula
+        The formulas
       </div>
-      <p className="mt-1.5 font-mono text-xs leading-relaxed text-gray-600">
-        {data.back_end_formula}
-      </p>
-      <p className="mt-1 font-mono text-xs leading-relaxed text-gray-900">
-        = ({formatMoneyPrecise(data.housing_payment)} + {formatMoneyPrecise(data.monthly_debts)}) ÷{" "}
-        {formatMoneyPrecise(data.gross_monthly_income)} ={" "}
-        <span className="font-semibold">{formatPercent(data.back_end_dti)}</span>
+      <p className="font-mono text-xs leading-relaxed text-gray-600">{data.ltv_formula}</p>
+      <p className="font-mono text-xs leading-relaxed text-gray-600">{data.cltv_formula}</p>
+      <p className="font-mono text-xs leading-relaxed text-gray-600">{data.hcltv_formula}</p>
+      <p className="font-mono text-xs leading-relaxed text-gray-900">
+        LTV = {formatMoneyPrecise(firstLoan)} ÷{" "}
+        {data.value_basis === null ? "—" : formatMoneyPrecise(data.value_basis)} ={" "}
+        <span className="font-semibold">{formatPercent(data.ltv)}</span>
       </p>
     </div>
   );

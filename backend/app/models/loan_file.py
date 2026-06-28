@@ -81,6 +81,19 @@ class LoanPurpose(StrEnum):
     REFINANCE = "refinance"
 
 
+class RefinanceType(StrEnum):
+    """The kind of refinance (LP-77) — drives the LTV denominator + limit.
+
+    A **rate/term** refinance changes the rate/term only and uses LTV limits close
+    to a purchase; a **cash-out** refinance pulls equity out and carries a
+    **stricter** LTV limit. Null when the loan is a purchase (or the refinance type
+    is not yet stated).
+    """
+
+    RATE_TERM = "rate_term"
+    CASH_OUT = "cash_out"
+
+
 class AiNeedsStatus(StrEnum):
     """The state of LP-69's AI needs reasoning for this file (LP-71.5 visibility).
 
@@ -140,6 +153,11 @@ class LoanFile(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     # --- Loan attributes (all nullable; may arrive via MISMO/processor) -----
     loan_program: Mapped[LoanProgram | None] = mapped_column(str_enum(LoanProgram), nullable=True)
     loan_purpose: Mapped[LoanPurpose | None] = mapped_column(str_enum(LoanPurpose), nullable=True)
+    # The refinance kind (LP-77) — drives the LTV denominator + limit. Null for a
+    # purchase (or an as-yet-unstated refinance).
+    refinance_type: Mapped[RefinanceType | None] = mapped_column(
+        str_enum(RefinanceType), nullable=True
+    )
     loan_amount: Mapped[Money | None] = mapped_column(nullable=True)
 
     # --- MISMO core loan terms (LP-52) — nullable; manual creation leaves empty.

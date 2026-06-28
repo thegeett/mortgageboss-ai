@@ -251,3 +251,35 @@ endpoints return the **recomputed** calculation, so the UI updates from one roun
 when the calculation may be incomplete. (2) **Recompute on applied findings** — because the
 calculation reads the structured data live, applying a finding (§9.3 adds a liability) makes the
 next calculation recompute higher. The interlock landing in the calculator.
+
+## 11. The LTV calculator — implemented (LP-77)
+
+LP-77 builds the **LTV calculator** — the second qualification pillar (equity / risk), the parallel
+to the DTI calculator (§10). It **reuses LP-76's model** (transparent breakdown + explicit formulas,
+auto-population, override-with-audit, real-time recalc, the findings coupling, deterministic) applied
+to the three LTV ratios. Code: `app/verification/ltv.py` (pure), `app/services/ltv.py`,
+`app/api/ltv.py`, `frontend/components/file/ltv/`. (ADR-191.)
+
+### 11.1 Three ratios, the subtleties correct + visible
+
+* **LTV = first loan ÷ the LESSER OF** purchase price and appraised value (purchase) — the lender
+  won't lend against a price above the appraisal. The basis is shown explicitly.
+* **CLTV = (first + second + HELOC drawn) ÷ value.**
+* **HCLTV = (first + second + HELOC CREDIT LIMIT) ÷ value** — the full line, not the balance (a
+  $0-balance / $40k-line HELOC pushes HCLTV above CLTV). Pure `Decimal` math, half-up to 2 dp.
+
+The lesser-of and credit-limit subtleties are the trust mechanism (what ChatGPT fumbles).
+
+### 11.2 Refinance-aware
+
+The loan purpose drives the denominator + the limit: purchase → lesser-of; rate/term refi →
+appraised value; cash-out refi → appraised value + a **stricter** limit. A nullable `refinance_type`
+(rate_term / cash_out) carries the cash-out distinction.
+
+### 11.3 Reuses the DTI model + the appraised-value graceful handling
+
+Auto-populates the loan + property inputs; the **appraised value** comes from the MISMO valuation
+(else the estimated value) and is **override-able** where absent (the appraisal isn't Tier-1 yet).
+Every input is override-able with an audit log (`ltv_overridden`); the override endpoints recompute
+in the response. The effective limit (purpose-varying) resolves via LP-74's registry (sample LTV
+rules; overlay-patchable). The unresolved-findings alert + recompute-consumer reuse §9.3 / §10.4.
