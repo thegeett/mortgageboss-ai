@@ -30,12 +30,22 @@ from app.models.loan_file import LoanFile, LoanFileStatus, LoanPurpose
 from app.models.needs_item import NeedsItem, NeedsItemOrigin
 from app.schemas.loan_file import LoanFileUpdate
 from app.services.activity_log import log_activity
+from app.services.finding_blocking import is_file_blocked
 from app.services.loan_file_ids import (
     generate_inbox_token,
     generate_unique_display_id,
 )
 from app.services.needs_items import create_needs_item
 from app.services.needs_templates import needs_for_program
+
+
+class FileBlockedError(Exception):
+    """A file with open in-scope findings cannot be marked ready to submit (LP-75).
+
+    Raised when a status transition to ``READY_TO_SUBMIT`` is attempted while the
+    blocking computation reports open in-scope findings — every finding must be
+    resolved (applied or overridden) first. The endpoint maps this to a 409.
+    """
 
 
 async def create_loan_file(
@@ -290,6 +300,18 @@ async def update_loan_file_with_activity(
     """
     old_status = loan_file.status
     changed_fields = set(data.model_dump(exclude_unset=True).keys())
+
+    # Findings are blocking (LP-75): a file with open in-scope findings cannot be
+    # marked ready to submit. Check before applying so the transition is gated.
+    if (
+        "status" in changed_fields
+        and data.status is LoanFileStatus.READY_TO_SUBMIT
+        and old_status is not LoanFileStatus.READY_TO_SUBMIT
+        and await is_file_blocked(db, loan_file_id=loan_file.id)
+    ):
+        raise FileBlockedError(
+            "Open in-scope findings must be resolved before the file can submit."
+        )
 
     await update_loan_file(db, loan_file=loan_file, data=data)
 

@@ -5710,3 +5710,64 @@ engine's `build_file_facts` currently stubs as sample calcs); LP-78 adds the AI 
 (feeding the shared model) + the APPLY → recompute loop; LP-79 the aggression dial; LP-80 the real UWM /
 Sun-West overlays (via this mechanism); LP-82..85 the real rule content (via this engine, promoting
 typed-core fields as rules need them). The engine is per-file (shared definitions, per-file runs).
+
+## ADR-189: Findings model extension — confidence, resolution, blocking, source location (the uniform verification finding) (LP-75)
+
+- **Date:** 2026-06-27
+- **Status:** Accepted
+
+**Context:** LP-74 built the deterministic rule engine, emitting into the LP-66 `Finding` model. The
+locked Phase-3 architecture rests on **one** findings model that *both* generators (LP-74
+deterministic, LP-78 AI cross-source) feed and the human resolves *uniformly* — plus the Phase-2
+document findings (LP-66). LP-75 turns that model into the full verification finding by adding the four
+dimensions verification needs, **extending** the existing model rather than forking it.
+
+**Decision:**
+
+- **Extend the LP-66 `Finding`, do not build a new model.** Add four dimensions in place:
+  - **Confidence** (`confidence: float` in [0, 1], DB CHECK) — how sure the system is the finding is
+    real; the **aggression dial**'s substrate (LP-79) and the blocking input. Deterministic threshold
+    findings are **certain** (`DETERMINISTIC_CONFIDENCE = 1.0` — the math is exact); AI cross-source
+    findings (LP-78) **vary**. Defaults to 1.0 so a finding without an explicit value reads as trusted.
+  - **Resolution states** — extend the existing `FindingResolutionStatus` with **APPLIED** and
+    **OVERRIDDEN** (the two verification resolutions) alongside the default **OPEN**. APPLIED
+    *incorporates the finding into the structured data*; OVERRIDDEN *dismisses it with a recorded
+    reason* (reused `resolution_note`, required, enforced in the service). The legacy LP-17 states
+    (RESOLVED / ACCEPTED_RISK / WAIVED) remain for the document-finding flow; any non-OPEN state is
+    *resolved* for blocking. **No finding is silently ignored** — every one is applied or
+    overridden-with-reason, and the resolution is activity-logged.
+  - **Blocking** — a computation (`is_file_blocked`): a file is blocked from *ready to submit* while it
+    has any **open in-scope** finding, where *in-scope* = an actionable (red/yellow) open finding whose
+    **confidence ≥ the active cutoff**. LP-75 owns the computation and a standalone Balanced default;
+    **LP-79's dial sets the cutoff**. Wired into the ready-to-submit transition (a 409 at the endpoint);
+    green findings (passes) never block.
+  - **Source location** — `source_page` + `source_snippet` (a page number + a **verbatim** snippet):
+    the trust/audit anchor (click a finding → the exact document line), building on extraction's
+    per-field source. Bounding-box highlighting deferred; page + snippet is V1.
+- **One uniform shape across all three generators.** `FindingOrigin` gains `DOCUMENT_ANALYSIS`, so
+  deterministic_rule / ai_cross_source / document_analysis findings share **one** shape — type,
+  amount, source document, page, snippet, confidence, reasoning, severity (`status`), resolution, and
+  the origin provenance marker. The dial, the UI (LP-81), and the resolution flow treat findings
+  **uniformly** — they don't care *how* a finding was generated. "Two generators, one findings model"
+  made concrete in the data. The LP-74 engine now emits in this full shape (certain confidence + source
+  location).
+- **APPLY → recompute hook.** APPLYING a finding *changes the structured data* (e.g. an undisclosed
+  obligation is **added to liabilities**) — the trigger point of the AI↔deterministic interlock. LP-75
+  builds the hook: `apply_finding` performs the structured-data change (the canonical `add_liability`
+  case), records it on `applied_record`, and calls `mark_recompute_needed` (the explicit seam). The
+  **full** recompute loop is LP-78 (cross-source + the loop) + the calculators (LP-76/77); the
+  observable signal today is the structured-data change itself.
+
+**Rationale:** the locked architecture is one findings model both generators feed and the human
+resolves uniformly — so *extend* the uniform-feedstock model, never fork it. Confidence is the dial's
+substrate; the two resolutions + no-silent-ignore make findings blocking and auditable;
+APPLIED-incorporates-into-structured-data is the interlock that lets an AI-surfaced correction feed the
+deterministic recompute (the human-in-the-loop loop); source location is the trust mechanism. Reusing
+`resolution_note` for the override reason and the existing `resolution_status` enum (rather than a
+parallel resolution field) honours "extend, don't duplicate".
+
+**Consequences:** LP-79 builds the aggression dial (filters on confidence; gates display + blocking;
+records the active level at submission); LP-81 the findings UI + resolution flow; LP-78 the AI
+cross-source generator (feeding this model) + the full APPLY→recompute loop; LP-76/77 the DTI/LTV
+calculators (recompute on applied changes; the unresolved-findings alert). Bounding-box highlighting is
+deferred (page + snippet is V1).

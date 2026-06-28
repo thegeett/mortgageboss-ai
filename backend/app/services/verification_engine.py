@@ -47,6 +47,7 @@ from app.models.loan_file import LoanFile
 from app.models.stated_financials import StatedAsset, StatedIncomeItem, StatedLiability
 from app.models.verification import Verification, VerificationStatus, VerificationTrigger
 from app.services.verifications import create_verification_run
+from app.verification.confidence import DETERMINISTIC_CONFIDENCE
 from app.verification.engine import EngineFinding, evaluate
 from app.verification.facts import Fact, FileFacts
 from app.verification.registry import RuleRegistry, default_registry
@@ -119,10 +120,12 @@ async def run_verification(
 def _to_finding(result: EngineFinding, *, loan_file_id: UUID, verification_id: UUID) -> Finding:
     """Map an :class:`EngineFinding` onto the shared Finding model (uniform shape).
 
-    Emits in the uniform shape LP-78 can also produce: ``rule_id`` / origin,
-    observed value, severity-derived status, the condition, a structured source
-    citation, a source-location placeholder, and a plain-language reasoning line.
-    LP-75 enriches the model (confidence / resolution / blocking).
+    Emits in the uniform shape both other generators also produce (LP-75):
+    ``rule_id`` / origin, observed value, severity-derived status, the condition,
+    a structured source citation, **confidence**, **source location** (page +
+    snippet), and a plain-language reasoning line. Deterministic findings are
+    **certain** — confidence is :data:`DETERMINISTIC_CONFIDENCE` (the math is
+    exact, not probabilistic). Resolution defaults to OPEN (the model default).
     """
     rule = result.rule
     status = FindingStatus.GREEN if result.passed else _SEVERITY_TO_STATUS[rule.severity]
@@ -151,16 +154,34 @@ def _to_finding(result: EngineFinding, *, loan_file_id: UUID, verification_id: U
         "reasoning": reasoning,
     }
 
+    source_page, source_snippet = _source_location_fields(result.source_location)
+
     return Finding(
         loan_file_id=loan_file_id,
         verification_id=verification_id,
         rule_id=rule.rule_id,
         origin=FindingOrigin.DETERMINISTIC_RULE,
+        confidence=DETERMINISTIC_CONFIDENCE,
         status=status,
         category=rule.category,
         message=message,
         details=details,
+        source_page=source_page,
+        source_snippet=source_snippet,
     )
+
+
+def _source_location_fields(
+    source_location: dict[str, object] | None,
+) -> tuple[int | None, str | None]:
+    """Pull the page + verbatim snippet (if any) off a fact's source location."""
+    if not source_location:
+        return None, None
+    raw_page = source_location.get("page")
+    page = raw_page if isinstance(raw_page, int) else None
+    raw_snippet = source_location.get("snippet")
+    snippet = raw_snippet if isinstance(raw_snippet, str) else None
+    return page, snippet
 
 
 def _stringify(value: Decimal | int | None) -> str:
@@ -267,6 +288,7 @@ async def _most_recent_paystub_age(
     )
     newest_date: date | None = None
     newest_doc_id: UUID | None = None
+    newest_loc: dict[str, object] = {}
     for extraction, document in (await db.execute(stmt)).all():
         pay_date = _read_pay_date(extraction.extracted_data)
         if pay_date is None:
@@ -274,13 +296,30 @@ async def _most_recent_paystub_age(
         if newest_date is None or pay_date > newest_date:
             newest_date = pay_date
             newest_doc_id = document.id
+            newest_loc = _read_pay_date_location(extraction.extracted_data)
     if newest_date is None:
         return None
     age_days = (as_of - newest_date).days
-    return Fact(
-        value=age_days,
-        source={"document_id": str(newest_doc_id), "type": "extraction"},
-    )
+    # Carry the page + verbatim snippet through (the trust/audit anchor, LP-75).
+    source: dict[str, object] = {"document_id": str(newest_doc_id), "type": "extraction"}
+    source.update(newest_loc)
+    return Fact(value=age_days, source=source)
+
+
+def _read_pay_date_location(extracted_data: dict[str, object]) -> dict[str, object]:
+    """The ``pay_date`` field's source location (page + snippet), if present."""
+    field = extracted_data.get("pay_date")
+    if not isinstance(field, dict):
+        return {}
+    loc = field.get("source")
+    if not isinstance(loc, dict):
+        return {}
+    out: dict[str, object] = {}
+    if isinstance(loc.get("page"), int):
+        out["page"] = loc["page"]
+    if isinstance(loc.get("snippet"), str):
+        out["snippet"] = loc["snippet"]
+    return out
 
 
 def _read_pay_date(extracted_data: dict[str, object]) -> date | None:

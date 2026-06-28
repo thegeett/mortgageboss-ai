@@ -414,3 +414,48 @@ async def test_list_search_filters_by_display_id(client: AsyncClient, db: AsyncS
     data = resp.json()
     assert data["total"] == 1
     assert data["items"][0]["display_id"] == first["display_id"]
+
+
+# --------------------------------------------------------------------------- #
+# blocking: ready-to-submit is gated by open in-scope findings (LP-75)
+# --------------------------------------------------------------------------- #
+
+
+async def test_ready_to_submit_blocked_by_open_finding(
+    client: AsyncClient, db: AsyncSession
+) -> None:
+    """PATCH status→ready_to_submit returns 409 while an open in-scope finding exists."""
+    from app.models import Finding, FindingCategory, FindingStatus
+
+    _company, _user, token = await _user_and_token(db, slug="acme", email="u@acme.com")
+    created = (await client.post(LOAN_FILES_URL, json={}, headers=_auth(token))).json()
+    loan_file = await db.scalar(
+        select(LoanFile).where(LoanFile.display_id == created["display_id"])
+    )
+    assert loan_file is not None
+    db.add(
+        Finding(
+            loan_file_id=loan_file.id,
+            rule_id="conv.dti.back_end_max",
+            confidence=1.0,
+            status=FindingStatus.RED,
+            category=FindingCategory.INCOME,
+            message="DTI exceeds the cap.",
+        )
+    )
+    await db.commit()
+
+    blocked = await client.patch(
+        f"{LOAN_FILES_URL}/{created['display_id']}",
+        json={"status": "ready_to_submit"},
+        headers=_auth(token),
+    )
+    assert blocked.status_code == 409
+
+    # A non-submit transition is unaffected.
+    ok = await client.patch(
+        f"{LOAN_FILES_URL}/{created['display_id']}",
+        json={"status": "in_processing"},
+        headers=_auth(token),
+    )
+    assert ok.status_code == 200

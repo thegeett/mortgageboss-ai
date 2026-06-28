@@ -32,6 +32,7 @@ from app.schemas.loan_file import (
 from app.schemas.mismo import MismoImportResponse
 from app.schemas.stated_financials import StatedFinancialsResponse
 from app.services.loan_files import (
+    FileBlockedError,
     create_loan_file_with_setup,
     get_loan_file,
     list_loan_files,
@@ -271,9 +272,13 @@ async def update(
     loan_file = await get_loan_file(db, company_id=current_user.company_id, identifier=identifier)
     if loan_file is None:
         raise _NOT_FOUND
-    await update_loan_file_with_activity(
-        db, loan_file=loan_file, data=payload, actor_user_id=current_user.id
-    )
+    try:
+        await update_loan_file_with_activity(
+            db, loan_file=loan_file, data=payload, actor_user_id=current_user.id
+        )
+    except FileBlockedError as exc:
+        # Open in-scope findings block the ready-to-submit transition (LP-75).
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     await db.commit()
     return LoanFileDetail.from_model(loan_file)
 

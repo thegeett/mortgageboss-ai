@@ -169,3 +169,48 @@ AI cross-source layer (LP-78) feeds the **same** model as `ai_cross_source` — 
 path is **not** engine-exclusive. LP-75 does the fuller findings-model extension (confidence /
 resolution / blocking / source-location — §§3-4, 6); `origin` is the minimal field needed to
 emit in the uniform shape now.
+
+## 9. The findings model extension — implemented (LP-75)
+
+LP-75 turns the shared `Finding` into the full **verification finding** by **extending the
+LP-66 model in place** (not forking it) — the one model both generators feed (LP-74
+deterministic, LP-78 AI) and the human resolves uniformly. It realises §§3-4, 6 as data +
+logic. Code: `backend/app/models/finding.py`, `app/services/finding_resolution.py`,
+`app/services/finding_blocking.py`, `app/verification/confidence.py`. (ADR-189.)
+
+### 9.1 The four extensions
+
+- **Confidence** (`confidence: float` in [0, 1], DB-checked) — the aggression dial's substrate
+  (§4) and the blocking input. Deterministic threshold findings are **certain**
+  (`DETERMINISTIC_CONFIDENCE = 1.0` — the comparison is exact); AI cross-source findings (LP-78)
+  vary. `app/verification/confidence.py` also defines the `AggressionLevel` cutoffs
+  (Conservative 0.8 / Balanced 0.5 / Thorough 0.0) — LP-79's dial picks the level.
+- **Resolution states** — `FindingResolutionStatus` gains **APPLIED** + **OVERRIDDEN** beside
+  the default **OPEN** (the legacy LP-17 states remain for the document flow). APPLIED
+  incorporates the finding into the structured data; OVERRIDDEN dismisses it with a **required
+  recorded reason** (reused `resolution_note`). **No finding is silently ignored**; resolutions
+  are activity-logged (§3).
+- **Blocking** — `is_file_blocked` (`finding_blocking.py`): a file is blocked from ready-to-submit
+  while it has any **open in-scope** finding (actionable, open, confidence ≥ the active cutoff).
+  Green findings (passes) never block. Wired into the ready-to-submit transition (a 409). LP-75
+  owns the computation + a Balanced default; LP-79's dial sets the cutoff (§§3-4).
+- **Source location** — `source_page` + `source_snippet` (page + verbatim snippet): the
+  trust/audit anchor (§6). The LP-74 engine now populates these from the fact's source location.
+
+### 9.2 One uniform shape across three generators
+
+`FindingOrigin` gains `DOCUMENT_ANALYSIS`, so deterministic_rule / ai_cross_source /
+document_analysis findings share **one** shape — type, amount, source document, page, snippet,
+confidence, reasoning, severity (`status`), resolution, and the origin provenance marker. The
+dial, the UI (LP-81), and the resolution flow treat findings uniformly — they don't care *how* a
+finding was generated. The LP-74 engine emits in this full shape (certain confidence + source
+location).
+
+### 9.3 The APPLY → recompute hook
+
+APPLYING a finding **changes the structured data** — `apply_finding` performs the change the
+finding declares (the canonical `add_liability`: an undisclosed obligation is added to
+liabilities), records it on `applied_record`, and calls `mark_recompute_needed` (the explicit
+seam). That structured-data change is the trigger of the **AI↔deterministic interlock**: the
+changed data should drive the deterministic recompute. The **full** loop is LP-78 (cross-source
++ the loop) + the calculators (LP-76/77); LP-75 builds the hook and the observable change.
