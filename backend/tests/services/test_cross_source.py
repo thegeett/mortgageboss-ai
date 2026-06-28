@@ -1,12 +1,13 @@
 """The AI cross-source layer (LP-78) — the general capability + the APPLY loop.
 
 The AI is mocked (a deterministic stub reasoner — no real key): the tests cover
-the one general capability emitting structured findings into LP-75's model
-(origin=ai_cross_source, confidence, source-location), the starter comparisons +
-an unanticipated discrepancy, AI fallibility (findings land OPEN — not
-auto-applied), the APPLY→recompute loop closing end-to-end (income variance → DTI
-higher; undisclosed obligation → liabilities → DTI HIGHER), the manual trigger +
-staleness, tenant scoping, and that PII is never logged.
+emitting structured findings into LP-75's model (origin=ai_cross_source, the
+category derived from the canonical type, confidence, source-location), canonical
+types plus the open "other" bucket preserving a novel discrepancy, AI fallibility
+(findings land OPEN — not auto-applied), the APPLY→recompute loop closing
+end-to-end (income variance → DTI higher; liability discrepancy → liabilities →
+DTI HIGHER), re-run replacing prior open findings, the manual trigger + staleness,
+tenant scoping, and that PII is never logged.
 """
 
 from collections.abc import Sequence
@@ -17,6 +18,7 @@ from app.models import (
     Borrower,
     Company,
     Finding,
+    FindingCategory,
     FindingOrigin,
     FindingResolutionStatus,
     LoanProgram,
@@ -39,13 +41,10 @@ from structlog.testing import capture_logs
 def _raw(**kw) -> CrossSourceRawFinding:
     base: dict = {
         "type": "income_variance",
-        "category": "income",
-        "severity": "yellow",
         "description": "A discrepancy",
         "stated_value": None,
         "document_value": None,
-        "amount": None,
-        "source_document_type": None,
+        "source_document": None,
         "page": None,
         "snippet": None,
         "confidence": 0.8,
@@ -154,8 +153,7 @@ async def test_emits_structured_findings_into_shared_model(db_session: AsyncSess
                 description="Stated income exceeds documents by 8%",
                 stated_value="16400",
                 document_value="15100",
-                amount="1300",
-                source_document_type="pay_stub",
+                source_document="pay_stub",
                 page=1,
                 snippet="Gross pay 3,775.00 biweekly",
                 confidence=0.82,
@@ -169,11 +167,13 @@ async def test_emits_structured_findings_into_shared_model(db_session: AsyncSess
     f = findings[0]
     assert f.origin is FindingOrigin.AI_CROSS_SOURCE
     assert f.rule_id == "cross_source.income_variance"
+    assert f.category is FindingCategory.INCOME  # derived from the type
     assert f.confidence == 0.82
     assert f.source_page == 1
     assert f.source_snippet == "Gross pay 3,775.00 biweekly"
     assert f.resolution_status is FindingResolutionStatus.OPEN  # for human review
     assert f.details["document_value"] == "15100"
+    assert f.details["source_document"] == "pay_stub"
 
 
 async def test_starter_comparisons_and_an_unanticipated_discrepancy(
@@ -188,14 +188,12 @@ async def test_starter_comparisons_and_an_unanticipated_discrepancy(
         loan_file,
         [
             _raw(type="income_variance", description="income off"),
-            _raw(type="employer_mismatch", description="employer differs", category="income"),
-            _raw(type="gift_mismatch", description="gift differs", category="assets"),
-            # Not in the starter set — the capability is general, not limited:
+            _raw(type="employer_mismatch", description="employer differs"),
+            _raw(type="gift_discrepancy", description="gift differs"),
+            # A novel discrepancy with no canonical type → the "other" bucket survives:
             _raw(
-                type="undisclosed_obligation",
-                description="Obligation in a document, absent from stated debts",
-                category="credit",
-                amount="800",
+                type="other",
+                description="Driver's license lists the subject property as the address",
             ),
         ],
     )
@@ -204,8 +202,8 @@ async def test_starter_comparisons_and_an_unanticipated_discrepancy(
     assert rule_ids == {
         "cross_source.income_variance",
         "cross_source.employer_mismatch",
-        "cross_source.gift_mismatch",
-        "cross_source.undisclosed_obligation",  # the novel one — surfaced
+        "cross_source.gift_discrepancy",
+        "cross_source.other",  # the novel one — preserved, not suppressed
     }
 
 
@@ -213,7 +211,7 @@ async def test_findings_are_for_review_not_auto_applied(db_session: AsyncSession
     """AI fallibility acceptable: findings land OPEN, never authoritative/auto-applied."""
     company = await _company(db_session, "acme")
     loan_file = await _file(db_session, company)
-    await _run(db_session, loan_file, [_raw(type="undisclosed_obligation", amount="800")])
+    await _run(db_session, loan_file, [_raw(type="liability_discrepancy", document_value="800")])
 
     findings = await _findings(db_session, loan_file.id)
     assert all(f.resolution_status is FindingResolutionStatus.OPEN for f in findings)
@@ -233,8 +231,8 @@ async def test_findings_are_for_review_not_auto_applied(db_session: AsyncSession
 # --- The APPLY → recompute loop closes end-to-end ----------------------------
 
 
-async def test_apply_undisclosed_obligation_raises_dti(db_session: AsyncSession) -> None:
-    """The classic case: AI finds an obligation → apply → liabilities → DTI HIGHER."""
+async def test_apply_liability_discrepancy_raises_dti(db_session: AsyncSession) -> None:
+    """The classic case: AI finds a documented obligation → apply → liabilities → DTI HIGHER."""
     company = await _company(db_session, "acme")
     user = await _user(db_session, company)
     loan_file = await _file(db_session, company)
@@ -245,17 +243,17 @@ async def test_apply_undisclosed_obligation_raises_dti(db_session: AsyncSession)
         loan_file,
         [
             _raw(
-                type="undisclosed_obligation",
-                description="$800/mo support obligation in the decree, not stated",
-                category="credit",
-                amount="800",
-                source_document_type="divorce_decree",
+                type="liability_discrepancy",
+                description="$800/mo support obligation in the decree, not in stated debts",
+                document_value="$800/month",  # the amount is parsed out of the free text
+                source_document="divorce_decree",
                 confidence=0.7,
             )
         ],
     )
     finding = (await _findings(db_session, loan_file.id))[0]
     assert finding.details["apply"]["action"] == "add_liability"
+    assert finding.details["apply"]["monthly_payment"] == "800"  # parsed from "$800/month"
 
     await apply_finding(db_session, finding=finding, loan_file=loan_file, actor_user_id=user.id)
 
@@ -319,7 +317,7 @@ async def test_applying_a_finding_marks_verification_stale(db_session: AsyncSess
     company = await _company(db_session, "acme")
     user = await _user(db_session, company)
     loan_file = await _file(db_session, company)
-    await _run(db_session, loan_file, [_raw(type="undisclosed_obligation", amount="800")])
+    await _run(db_session, loan_file, [_raw(type="liability_discrepancy", document_value="800")])
     await db_session.refresh(loan_file)
     assert loan_file.verification_stale is False  # the pass cleared it
 
@@ -405,7 +403,7 @@ async def test_rerun_replaces_open_findings(db_session: AsyncSession) -> None:
     company = await _company(db_session, "acme")
     loan_file = await _file(db_session, company)
 
-    await _run(db_session, loan_file, [_raw(type="income_variance"), _raw(type="gift_mismatch")])
+    await _run(db_session, loan_file, [_raw(type="income_variance"), _raw(type="gift_discrepancy")])
     assert len(await _active_findings(db_session, loan_file.id)) == 2
 
     # A second pass returns a different set — the first run's open findings are gone.
@@ -429,20 +427,20 @@ async def test_rerun_preserves_resolved_findings(db_session: AsyncSession) -> No
     await _run(
         db_session,
         loan_file,
-        [_raw(type="undisclosed_obligation", amount="800"), _raw(type="gift_mismatch")],
+        [_raw(type="liability_discrepancy", document_value="800"), _raw(type="gift_discrepancy")],
     )
     obligation = next(
         f
         for f in await _active_findings(db_session, loan_file.id)
-        if f.rule_id == "cross_source.undisclosed_obligation"
+        if f.rule_id == "cross_source.liability_discrepancy"
     )
     await override_finding(
         db_session, finding=obligation, actor_user_id=user.id, reason="Already disclosed elsewhere."
     )
 
-    # Re-run: the resolved obligation is preserved; the open gift_mismatch is gone.
+    # Re-run: the resolved obligation is preserved; the open gift_discrepancy is gone.
     await _run(db_session, loan_file, [_raw(type="income_variance")])
     rule_ids = {f.rule_id for f in await _active_findings(db_session, loan_file.id)}
-    assert "cross_source.undisclosed_obligation" in rule_ids  # resolved → preserved
+    assert "cross_source.liability_discrepancy" in rule_ids  # resolved → preserved
     assert "cross_source.income_variance" in rule_ids  # the fresh pass
-    assert "cross_source.gift_mismatch" not in rule_ids  # open → superseded
+    assert "cross_source.gift_discrepancy" not in rule_ids  # open → superseded

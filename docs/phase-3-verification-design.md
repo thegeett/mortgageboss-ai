@@ -316,3 +316,21 @@ real cost). `LoanFile.verification_stale` is set on any document change (upload 
 replace) and when a finding is applied, and cleared when the pass re-runs — a visible "re-run"
 indicator. Auto-re-run is deferred (the dial re-filters without re-running — LP-79). PII is assembled
 for the AI call and **never logged**.
+
+### 12.4 Consistency refinements (post-LP-78 hardening)
+
+The pass is scoped and stabilized so the same file yields a stable set of findings run to run:
+
+- **Conflicts, not absences.** The AI reports only where *both* sides are present and DISAGREE — not
+  "stated X lacks a document" (that's the needs list's job). A missing document is flagged only when its
+  absence itself conflicts with something documented. **No calculated conclusions** — it surfaces data
+  discrepancies, never DTI/LTV/reserves judgements (the deterministic calculators' job).
+- **One scope per discrepancy** — each reported once, at the most specific scope (no file-level "complete
+  absence" umbrella alongside per-item findings); no splitting one issue or merging distinct ones.
+- **Canonical types + an open `other`.** A fixed set of canonical types (income_variance,
+  employer_mismatch, gift_discrepancy, co_borrower_discrepancy, property_address_discrepancy,
+  liability_discrepancy, asset_discrepancy, identity_discrepancy) stops label churn; a first-class
+  `other` (with a required description) **preserves novel discoveries** — the capability stays general.
+  The finding category is derived from the type; cross-source findings default to yellow (advisory).
+- **Deterministic settings** — `temperature=0`, ordered context queries, an 8192-token budget with a
+  truncation guard (warn on `stop_reason == "max_tokens"`), and raw-vs-parsed drop logging.

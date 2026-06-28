@@ -25,6 +25,7 @@ within the company first).
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Awaitable, Callable
 from decimal import Decimal
 from typing import Any, cast
@@ -59,12 +60,19 @@ logger = get_logger(__name__)
 # Reasoner type — injected so tests can supply a deterministic stub (no real key).
 Reasoner = Callable[[str], Awaitable[CrossSourceResult]]
 
-_CATEGORY_MAP = {
-    "income": FindingCategory.INCOME,
-    "assets": FindingCategory.ASSETS,
-    "credit": FindingCategory.CREDIT,
-    "property": FindingCategory.PROPERTY,
-    "cross_source": FindingCategory.CROSS_SOURCE,
+# The finding category is DERIVED from the canonical type (the AI no longer
+# returns a category) so it is stable and consistent. Unknown / "other" types fall
+# back to CROSS_SOURCE.
+_TYPE_CATEGORY = {
+    "income_variance": FindingCategory.INCOME,
+    "employer_mismatch": FindingCategory.INCOME,
+    "gift_discrepancy": FindingCategory.ASSETS,
+    "asset_discrepancy": FindingCategory.ASSETS,
+    "liability_discrepancy": FindingCategory.CREDIT,
+    "property_address_discrepancy": FindingCategory.PROPERTY,
+    "co_borrower_discrepancy": FindingCategory.CROSS_SOURCE,
+    "identity_discrepancy": FindingCategory.CROSS_SOURCE,
+    "other": FindingCategory.CROSS_SOURCE,
 }
 
 
@@ -177,16 +185,16 @@ def _to_finding(
     Recognized remediable types get an **apply spec** in ``details["apply"]`` so the
     APPLY→recompute loop can fire when a human applies the finding; novel findings
     are surfaced without one (handled manually). The finding lands **OPEN** — the AI
-    surfaces, it does not decide.
+    surfaces, it does not decide. The category is DERIVED from the type; severity
+    defaults to YELLOW (cross-source findings are advisory — the deterministic rules
+    produce the blocking red findings).
     """
-    status = FindingStatus.RED if (raw.severity or "").lower() == "red" else FindingStatus.YELLOW
-    category = _CATEGORY_MAP.get((raw.category or "").lower(), FindingCategory.CROSS_SOURCE)
+    category = _TYPE_CATEGORY.get(raw.type, FindingCategory.CROSS_SOURCE)
     details: dict[str, Any] = {
         "type": raw.type,
         "stated_value": raw.stated_value,
         "document_value": raw.document_value,
-        "amount": raw.amount,
-        "source_document_type": raw.source_document_type,
+        "source_document": raw.source_document,
         "reasoning": raw.reasoning,
     }
     apply_spec = _build_apply_spec(raw, income_target=income_target)
@@ -199,7 +207,7 @@ def _to_finding(
         rule_id=f"cross_source.{raw.type}",
         origin=FindingOrigin.AI_CROSS_SOURCE,
         confidence=raw.confidence,
-        status=status,
+        status=FindingStatus.YELLOW,
         category=category,
         message=raw.description,
         details=details,
@@ -213,32 +221,48 @@ def _build_apply_spec(
 ) -> dict[str, Any] | None:
     """The structured remediation an apply would perform, for recognized types.
 
-    * ``undisclosed_obligation`` → add the obligation to liabilities (LP-75's
-      ``add_liability``) → the DTI recomputes higher.
+    * ``liability_discrepancy`` → add the documented obligation to liabilities
+      (LP-75's ``add_liability``) → the DTI recomputes higher.
     * ``income_variance`` → correct the stated income to the verified figure
       (``correct_income``) → lower income → the DTI recomputes higher.
 
-    Returns ``None`` for types without a deterministic remediation (the AI's
-    perception is still surfaced; a human handles it).
+    The numeric amount is parsed from the (free-text) ``document_value`` — the AI no
+    longer returns a dedicated amount field. Returns ``None`` for types without a
+    deterministic remediation (the AI's perception is still surfaced; a human
+    handles it).
     """
-    if raw.type == "undisclosed_obligation" and raw.amount is not None:
-        return {
-            "action": "add_liability",
-            "liability_type": "Installment",
-            "monthly_payment": raw.amount,
-            "holder_name": raw.source_document_type,
-        }
-    if (
-        raw.type == "income_variance"
-        and income_target is not None
-        and raw.document_value is not None
-    ):
-        return {
-            "action": "correct_income",
-            "income_item_id": income_target,
-            "monthly_amount": raw.document_value,
-        }
+    if raw.type == "liability_discrepancy":
+        amount = _first_amount(raw.document_value)
+        if amount is not None:
+            return {
+                "action": "add_liability",
+                "liability_type": "Installment",
+                "monthly_payment": amount,
+                "holder_name": raw.source_document,
+            }
+    if raw.type == "income_variance" and income_target is not None:
+        amount = _first_amount(raw.document_value)
+        if amount is not None:
+            return {
+                "action": "correct_income",
+                "income_item_id": income_target,
+                "monthly_amount": amount,
+            }
     return None
+
+
+def _first_amount(value: str | None) -> str | None:
+    """The first numeric amount in a free-text value (e.g. ``"$7,000/mo"`` → ``"7000"``).
+
+    The AI's ``document_value`` is human text, not a clean number, so a remediation
+    that needs a money figure parses one out. Returns ``None`` if there is none.
+    """
+    if value is None:
+        return None
+    match = re.search(r"\d[\d,]*(?:\.\d+)?", value)
+    if match is None:
+        return None
+    return match.group(0).replace(",", "")
 
 
 def _resolve_income_target(context: dict[str, Any]) -> str | None:

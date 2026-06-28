@@ -1,30 +1,29 @@
 """The AI cross-source capability (LP-78) — one general read-and-compare pass.
 
 This is the **"AI surfaces"** half of the locked two-layer principle (LP-74 built
-the deterministic *judge*; this is the *perceiver*). It is **ONE GENERAL
-capability, not a rule per check**: the AI reads what the borrower *stated* (the
-MISMO application) against what the *documents prove* (the verified extractions)
-and surfaces whatever **doesn't line up** — as a single open-ended perception
-task. Because it reads and compares (rather than executing pre-written checks), it
-catches **known and novel** discrepancies alike — the undisclosed obligation in a
-divorce decree that no rule was written for.
+the deterministic *judge*; this is the *perceiver*). It reads what the borrower
+*stated* (the MISMO application) against what the *documents prove* (the verified
+extractions) and surfaces **CONFLICTS** — where both sides are present and
+disagree — as structured findings.
 
-The output is **structured findings only** (typed: type, amounts, source document
-+ page + snippet, confidence, reasoning) — never prose the deterministic layer
-interprets. A starter set of high-value comparisons (income variance, employer,
-gift) is **prompt guidance**; the capability stays general (the full ~15-20 is
-LP-86).
+What it is NOT: it does not flag missing documentation (that is the needs list's
+job), it does not compute or judge ratios (DTI/LTV/reserves — the deterministic
+calculators' job), and it does not re-label or re-split the same discrepancy run
+to run. Canonical types keep labels stable; an open ``other`` type with a required
+description **preserves novel discoveries** (the capability stays general — guided,
+not limited).
 
-This module is the AI boundary — it assembles nothing and persists nothing; it
-takes a prepared context string and returns parsed structured findings. The
-service layer (:mod:`app.services.cross_source`) assembles the two sides and emits
-the findings into LP-75's model. PII flows through the call but is **never
-logged** (counts/tokens only).
+The output is **structured findings only** (typed: type, the two conflicting
+values, source document + page + snippet, confidence, reasoning) — never prose the
+deterministic layer interprets. This module is the AI boundary — it assembles
+nothing and persists nothing. PII flows through the call but is **never logged**
+(counts/tokens only).
 """
 
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 from typing import Any
 
@@ -38,86 +37,86 @@ logger = get_logger(__name__)
 _MAX_TOKENS = 8192
 
 CROSS_SOURCE_SYSTEM_PROMPT = """\
-You are reviewing a mortgage loan file for DISCREPANCIES between what the borrower
+You are reviewing a mortgage loan file for CONFLICTS between what the borrower
 STATED (the application / MISMO data) and what the DOCUMENTS prove (verified
 extractions from pay stubs, W-2s, bank statements, gift letters, and other
 documents).
 
-Your job is to COMPARE the two sides and surface anything that DOES NOT LINE UP —
-including issues that no specific rule covers (for example, an obligation that
-appears in a document but is absent from the stated debts, or a property that a
-document references but the stated assets omit). Read and compare; do not run a
-fixed checklist.
+WHAT TO REPORT — CONFLICTS, NOT ABSENCES:
+- Report a discrepancy ONLY when BOTH sides are present and they DISAGREE — a
+  stated value and a documented value that conflict.
+- Do NOT report "stated X but no document to verify it". Missing documentation is a
+  SEPARATE system's job (the needs list), not yours. If the documents needed to
+  verify a stated value are absent, report NOTHING about it — there is nothing to
+  cross-check.
+- Only flag a missing document when its ABSENCE ITSELF conflicts with something that
+  IS documented (e.g. a bank statement shows a large deposit with no gift letter,
+  while the application claims that money as a gift).
 
-High-value things worth checking (but do NOT limit yourself to these — surface ANY
-discrepancy you find, using the "other" type below):
-- Stated monthly income vs. income computed from the pay stubs / W-2s — flag a
-  variance greater than 10%.
-- Stated employer vs. the employer named on the W-2 / pay stub.
-- Stated gift funds vs. the gift letter and the matching bank deposit.
+ONE SCOPE PER DISCREPANCY:
+- Report each discrepancy ONCE, at the most specific accurate scope.
+- Do NOT report the same gap at both an aggregate/file level AND an item level. No
+  "the entire file lacks documentation" umbrella alongside per-item findings — keep
+  the specific item-level findings and drop the umbrella.
+- Do NOT split one issue into several findings; do NOT merge two distinct issues.
 
-You are SURFACING candidates for a human processor to review — you are not making a
-decision. It is acceptable to be uncertain; reflect that in the confidence. Do not
-invent discrepancies; if the stated data and the documents agree, return none.
+NO CALCULATED CONCLUSIONS:
+- Do NOT compute or judge ratios or derived metrics — DTI, LTV, reserves, qualifying
+  income, or any calculated figure. Those are the deterministic calculators' job.
+- Surface DATA discrepancies only, never ratio or metric conclusions. If data that
+  feeds a ratio is wrong, report the DATA discrepancy, not the ratio.
 
-CHOOSE THE TYPE from this fixed list when one fits (use the EXACT string), so the
-same kind of discrepancy is labelled the same way every time:
-- "income_variance"            — stated income vs. income shown by pay stubs / W-2s
-- "employer_mismatch"          — stated employer vs. the employer on the documents
-- "gift_documentation_missing" — a stated gift lacks a gift letter / matching deposit
-- "co_borrower_income_missing" — a co-borrower is on the file but has no income/asset/
-                                 liability data or supporting documents
-- "property_address_mismatch"  — the subject-property address differs across sources
-- "loan_amount_variance"       — the loan amount is inconsistent with price / down payment
-- "asset_undocumented"         — a stated asset (e.g. stocks, account) lacks documentation
-- "undisclosed_obligation"     — an obligation in a document is absent from stated debts
-- "other"                      — ANY OTHER discrepancy, including novel ones no type above
-                                 covers (e.g. an ID address that matches the subject
-                                 property). For "other" the "description" is REQUIRED and
-                                 must clearly state the discrepancy. Never discard a real
-                                 discrepancy just because no named type fits — use "other".
+TYPES — classify with a canonical type when one fits (use the EXACT string) so the
+same kind of discrepancy is labelled the same way every run:
+- "income_variance"              — stated income conflicts with the pay stubs / W-2s
+- "employer_mismatch"            — stated employer conflicts with the documents
+- "gift_discrepancy"             — a stated gift conflicts with the gift letter / deposit
+- "co_borrower_discrepancy"      — a co-borrower's stated data conflicts with documents
+- "property_address_discrepancy" — the subject-property address conflicts across sources
+- "liability_discrepancy"        — a documented debt conflicts with the stated liabilities
+- "asset_discrepancy"            — a stated asset conflicts with the documented asset
+- "identity_discrepancy"         — identity data (name / SSN / DOB / address) conflicts
+- "other"                        — a REAL discrepancy that fits NONE of the above. Give a
+                                   specific "description". Use "other" to PRESERVE novel
+                                   discoveries (e.g. an ID listing the subject property as
+                                   the borrower's own address). NEVER suppress a real
+                                   discrepancy for lacking a canonical type — and do NOT
+                                   invent a new label for an issue that fits a canonical
+                                   type.
 
-GRANULARITY (so the count is stable run to run):
-- Report each DISTINCT discrepancy exactly ONCE.
-- Do NOT split a single issue into multiple findings (e.g. one income variance is ONE
-  finding, not separate pay-stub / W-2 / YTD findings for the same income).
-- Do NOT merge two genuinely different issues into one finding.
-- Prefer a canonical type above; fall back to "other" (with a description) otherwise.
+You are SURFACING candidates for a human to review — you do not decide. Be honest
+about uncertainty in the confidence.
 
-Return ONLY a JSON object of this exact shape (no prose outside the JSON):
-{
-  "findings": [
-    {
-      "type": "<one of the fixed types above, or \\"other\\">",
-      "category": "income" | "assets" | "credit" | "property" | "cross_source",
-      "severity": "red" | "yellow",
-      "description": "<one-line human summary; REQUIRED for the \\"other\\" type>",
-      "stated_value": "<what the application stated, or null>",
-      "document_value": "<what the documents show, or null>",
-      "amount": "<the dollar amount at issue, or null>",
-      "source_document_type": "<the document type that evidences this, or null>",
-      "page": <page number in that document, or null>,
-      "snippet": "<verbatim supporting text from the document, or null>",
-      "confidence": <0.0 - 1.0>,
-      "reasoning": "<why this is a discrepancy>"
-    }
-  ]
-}
+STRICT OUTPUT — return ONLY a JSON ARRAY (no markdown fences, no prose before or
+after):
+[
+  {
+    "type": "<a canonical type above, or \\"other\\">",
+    "description": "<one-line summary of the conflict>",
+    "stated_value": "<what the application stated, or null>",
+    "document_value": "<what the documents show, or null>",
+    "source_document": "<the document type that evidences this, or null>",
+    "page": <page number, or null>,
+    "snippet": "<verbatim supporting text from the document, or null>",
+    "confidence": <0.0 - 1.0>,
+    "reasoning": "<why these two sides conflict>"
+  }
+]
+Every field must be PRESENT (use null where not applicable). An empty array [] is a
+VALID, CORRECT answer when the stated data and the documents agree, or when there is
+nothing to compare.
 """
 
 
 @dataclass(frozen=True)
 class CrossSourceRawFinding:
-    """One structured discrepancy the AI surfaced (pre-persistence)."""
+    """One structured conflict the AI surfaced (pre-persistence)."""
 
     type: str
-    category: str | None
-    severity: str | None
     description: str
     stated_value: str | None
     document_value: str | None
-    amount: str | None
-    source_document_type: str | None
+    source_document: str | None
     page: int | None
     snippet: str | None
     confidence: float
@@ -179,22 +178,14 @@ async def reason_cross_source(context_json: str) -> CrossSourceResult:
 def _parse_findings(text: str) -> list[CrossSourceRawFinding]:
     """Defensively parse the AI response into structured findings (never raises).
 
-    Logs (counts only, never content) whenever the response can't be parsed or
-    individual entries are dropped — so silent losses are observable rather than
-    hidden behind an empty/short list.
+    The prompt asks for a bare JSON array; this also tolerates markdown fences,
+    surrounding prose, and a ``{"findings": [...]}`` wrapper (resilience). Logs
+    (counts only, never content) when the response can't be parsed or individual
+    entries are dropped — so silent losses are observable.
     """
-    snippet = extract_json_object(text)
-    if snippet is None:
-        logger.warning("cross_source_parse_no_json_object")  # no balanced {...} — likely truncated
-        return []
-    try:
-        payload = json.loads(snippet)
-    except (json.JSONDecodeError, ValueError):
-        logger.warning("cross_source_parse_invalid_json")
-        return []
-    raw_list = payload.get("findings") if isinstance(payload, dict) else None
-    if not isinstance(raw_list, list):
-        logger.warning("cross_source_parse_no_findings_list")
+    raw_list = _load_findings_list(text)
+    if raw_list is None:
+        logger.warning("cross_source_parse_no_json_array")  # no parseable array — maybe truncated
         return []
     parsed = [f for item in raw_list if (f := _coerce_finding(item)) is not None]
     if len(parsed) != len(raw_list):
@@ -206,6 +197,54 @@ def _parse_findings(text: str) -> list[CrossSourceRawFinding]:
     return parsed
 
 
+def _load_findings_list(text: str) -> list[Any] | None:
+    """Pull the findings list out of the response (array, fenced, or wrapped)."""
+    for candidate in _json_candidates(text):
+        try:
+            data = json.loads(candidate)
+        except (json.JSONDecodeError, ValueError):
+            continue
+        if isinstance(data, list):
+            return data
+        if isinstance(data, dict):
+            findings = data.get("findings")
+            if isinstance(findings, list):
+                return findings
+    return None
+
+
+def _json_candidates(text: str) -> list[str]:
+    """Ordered candidate JSON substrings, most-likely first (never raises)."""
+    candidates = [text.strip()]
+    fenced = re.search(r"```(?:json)?\s*(.*?)```", text, re.DOTALL)
+    if fenced is not None:
+        candidates.append(fenced.group(1).strip())
+    array = _extract_balanced(text, "[", "]")
+    if array is not None:
+        candidates.append(array)
+    obj = extract_json_object(text)  # the {"findings": [...]} fallback shape
+    if obj is not None:
+        candidates.append(obj)
+    return candidates
+
+
+def _extract_balanced(text: str, opener: str, closer: str) -> str | None:
+    """The first balanced ``opener…closer`` span (depth-aware), or ``None``."""
+    start = text.find(opener)
+    if start == -1:
+        return None
+    depth = 0
+    for i in range(start, len(text)):
+        ch = text[i]
+        if ch == opener:
+            depth += 1
+        elif ch == closer:
+            depth -= 1
+            if depth == 0:
+                return text[start : i + 1]
+    return None
+
+
 def _coerce_finding(item: Any) -> CrossSourceRawFinding | None:
     if not isinstance(item, dict):
         return None
@@ -213,15 +252,16 @@ def _coerce_finding(item: Any) -> CrossSourceRawFinding | None:
     description = item.get("description")
     if not isinstance(type_, str) or not type_ or not isinstance(description, str):
         return None
+    # Accept the canonical field name, falling back to the older key for resilience.
+    source_document = item.get("source_document")
+    if source_document is None:
+        source_document = item.get("source_document_type")
     return CrossSourceRawFinding(
         type=type_,
-        category=_opt_str(item.get("category")),
-        severity=_opt_str(item.get("severity")),
         description=description,
         stated_value=_opt_str(item.get("stated_value")),
         document_value=_opt_str(item.get("document_value")),
-        amount=_opt_str(item.get("amount")),
-        source_document_type=_opt_str(item.get("source_document_type")),
+        source_document=_opt_str(source_document),
         page=_opt_int(item.get("page")),
         snippet=_opt_str(item.get("snippet")),
         confidence=coerce_confidence(item.get("confidence")),
