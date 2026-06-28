@@ -16,8 +16,17 @@ from celery import Celery
 
 from app.core.config import settings
 
-# Modules Celery imports so their @task definitions register.
-_TASK_MODULES = ["app.tasks.health", "app.tasks.document_processing", "app.tasks.needs"]
+# Modules Celery imports so their @task definitions register. EVERY module under
+# app/tasks/ that defines a @celery_app.task MUST be listed here, or the worker
+# never imports it and the task is unregistered — enqueued messages are silently
+# discarded (the LP-78 worker-seam bug). A test guards this invariant
+# (tests/tasks/test_task_registration.py).
+_TASK_MODULES = [
+    "app.tasks.health",
+    "app.tasks.document_processing",
+    "app.tasks.needs",
+    "app.tasks.cross_source",
+]
 
 celery_app = Celery(
     "mortgageboss",

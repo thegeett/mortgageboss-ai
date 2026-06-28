@@ -102,6 +102,25 @@ async def test_post_run_triggers_pass(client: AsyncClient, db: AsyncSession, mon
     assert enqueued["args"][0] == str(loan_file.id)
 
 
+async def test_post_run_marks_failed_when_enqueue_fails(
+    client: AsyncClient, db: AsyncSession, monkeypatch
+) -> None:
+    """A failed enqueue (broker down) surfaces as FAILED, not a stranded RUNNING run."""
+
+    def _boom(loan_file_id: str, run_id: str) -> None:
+        raise RuntimeError("broker unreachable")
+
+    monkeypatch.setattr("app.tasks.cross_source.run_cross_source_pass.delay", _boom, raising=True)
+
+    company, _user, token = await _user_and_token(db, slug="acme", email="u@acme.com")
+    loan_file = await create_loan_file(db, company_id=company.id)
+    await db.commit()
+
+    resp = await client.post(f"{API}/{loan_file.display_id}/verification/run", headers=_auth(token))
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "failed"  # surfaced, not an infinite spinner
+
+
 async def test_get_status_reports_staleness_and_findings(
     client: AsyncClient, db: AsyncSession
 ) -> None:

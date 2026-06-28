@@ -190,11 +190,14 @@ uv run celery -A app.tasks.celery_app worker --loglevel=info
 # macOS/Colima: add --pool=solo if the default prefork pool misbehaves
 ```
 
-Or as a **container** (behind the `worker` Compose profile, so the default
-`docker compose up` stays infra-only):
+Or as a **container** — the `worker` service starts **by default** (LP-73), so a
+plain `docker compose up -d` brings it up alongside the infra (it needs
+`backend/.env` for `ANTHROPIC_API_KEY`). To run just the worker, or to restart it
+after adding a new task module (so Celery re-imports the `include` list):
 
 ```bash
-docker compose --profile worker up worker   # needs backend/.env
+docker compose up -d worker        # starts with the default `docker compose up`
+docker compose restart worker      # after registering a new task in celery_app.py
 ```
 
 Validate the chain (broker → worker → task) from a Python shell while the worker runs:

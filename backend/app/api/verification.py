@@ -15,9 +15,10 @@ from sqlalchemy import select
 
 from app.api.dependencies import CurrentUser
 from app.core.database import DbSession
+from app.models.base import utcnow
 from app.models.finding import Finding, FindingOrigin
 from app.models.helpers import only_active
-from app.models.verification import Verification, VerificationTrigger
+from app.models.verification import Verification, VerificationStatus, VerificationTrigger
 from app.schemas.verification import (
     FindingPublic,
     VerificationRunPublic,
@@ -33,14 +34,21 @@ router = APIRouter(prefix="/loan-files", tags=["verification"])
 _NOT_FOUND = HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Loan file not found")
 
 
-def _enqueue_cross_source(loan_file_id: UUID, run_id: UUID) -> None:
-    """Fire-and-forget enqueue of the cross-source pass (the worker runs it)."""
+def _enqueue_cross_source(loan_file_id: UUID, run_id: UUID) -> bool:
+    """Enqueue the cross-source pass (the worker runs it). Returns success.
+
+    Never raises (an enqueue failure must not 500 the request), but the caller
+    must surface a failure on the run — a swallowed enqueue would otherwise strand
+    the run RUNNING forever (the Phase-2 "surface, don't swallow" principle).
+    """
     try:
         from app.tasks.cross_source import run_cross_source_pass
 
         run_cross_source_pass.delay(str(loan_file_id), str(run_id))
-    except Exception:  # pragma: no cover - enqueue failure must not 500 the request
+        return True
+    except Exception:
         log.warning("cross_source_enqueue_failed", loan_file_id=str(loan_file_id))
+        return False
 
 
 @router.post("/{identifier}/verification/run", response_model=VerificationRunPublic)
@@ -51,7 +59,9 @@ async def run_verification(
 
     Creates a RUNNING run and enqueues the AI pass (the worker assembles the two
     sides, runs the pass, and emits findings). Returns the run immediately; the
-    client polls the status endpoint for completion.
+    client polls the status endpoint for completion. If the enqueue fails (e.g. the
+    broker is unreachable), the run is marked FAILED rather than left RUNNING — a
+    visible failure, not an infinite spinner.
     """
     loan_file = await get_loan_file(db, company_id=current_user.company_id, identifier=identifier)
     if loan_file is None:
@@ -60,7 +70,13 @@ async def run_verification(
         db, loan_file_id=loan_file.id, trigger=VerificationTrigger.MANUAL
     )
     await db.commit()
-    _enqueue_cross_source(loan_file.id, run.id)
+
+    if not _enqueue_cross_source(loan_file.id, run.id):
+        run.status = VerificationStatus.FAILED
+        run.completed_at = utcnow()
+        run.error_detail = "Could not enqueue the verification pass (worker/broker unavailable)."
+        await db.commit()
+
     return VerificationRunPublic.from_model(run)
 
 
