@@ -28,7 +28,7 @@ from app.models import (
 from app.models.verification import VerificationStatus, VerificationTrigger
 from app.services.cross_source import assemble_cross_source_context, run_cross_source
 from app.services.dti import build_dti_calculation
-from app.services.finding_resolution import apply_finding
+from app.services.finding_resolution import apply_finding, override_finding
 from app.services.loan_files import create_loan_file
 from app.services.verifications import create_verification_run, mark_verification_stale
 from sqlalchemy import select
@@ -391,3 +391,58 @@ async def test_pass_is_per_file(db_session: AsyncSession) -> None:
 
     assert len(await _findings(db_session, a.id)) == 1
     assert len(await _findings(db_session, b.id)) == 0  # only file A got findings
+
+
+# --- Re-run replaces the prior open findings (no duplication) -----------------
+
+
+async def _active_findings(db: AsyncSession, loan_file_id) -> list[Finding]:
+    return [f for f in await _findings(db, loan_file_id) if f.deleted_at is None]
+
+
+async def test_rerun_replaces_open_findings(db_session: AsyncSession) -> None:
+    """Re-running supersedes the prior pass's open findings — no accumulation."""
+    company = await _company(db_session, "acme")
+    loan_file = await _file(db_session, company)
+
+    await _run(db_session, loan_file, [_raw(type="income_variance"), _raw(type="gift_mismatch")])
+    assert len(await _active_findings(db_session, loan_file.id)) == 2
+
+    # A second pass returns a different set — the first run's open findings are gone.
+    await _run(
+        db_session, loan_file, [_raw(type="income_variance"), _raw(type="employer_mismatch")]
+    )
+    active = await _active_findings(db_session, loan_file.id)
+    assert len(active) == 2  # not 4 — the prior open findings were superseded
+    assert {f.rule_id for f in active} == {
+        "cross_source.income_variance",
+        "cross_source.employer_mismatch",
+    }
+
+
+async def test_rerun_preserves_resolved_findings(db_session: AsyncSession) -> None:
+    """A resolved (overridden) finding survives a re-run; open ones are replaced."""
+    company = await _company(db_session, "acme")
+    user = await _user(db_session, company)
+    loan_file = await _file(db_session, company)
+
+    await _run(
+        db_session,
+        loan_file,
+        [_raw(type="undisclosed_obligation", amount="800"), _raw(type="gift_mismatch")],
+    )
+    obligation = next(
+        f
+        for f in await _active_findings(db_session, loan_file.id)
+        if f.rule_id == "cross_source.undisclosed_obligation"
+    )
+    await override_finding(
+        db_session, finding=obligation, actor_user_id=user.id, reason="Already disclosed elsewhere."
+    )
+
+    # Re-run: the resolved obligation is preserved; the open gift_mismatch is gone.
+    await _run(db_session, loan_file, [_raw(type="income_variance")])
+    rule_ids = {f.rule_id for f in await _active_findings(db_session, loan_file.id)}
+    assert "cross_source.undisclosed_obligation" in rule_ids  # resolved → preserved
+    assert "cross_source.income_variance" in rule_ids  # the fresh pass
+    assert "cross_source.gift_mismatch" not in rule_ids  # open → superseded

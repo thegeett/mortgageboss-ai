@@ -27,10 +27,10 @@ from __future__ import annotations
 import json
 from collections.abc import Awaitable, Callable
 from decimal import Decimal
-from typing import Any
+from typing import Any, cast
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import CursorResult, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -41,7 +41,13 @@ from app.core.logging import get_logger
 from app.models.base import utcnow
 from app.models.borrower import Borrower
 from app.models.document import Document
-from app.models.finding import Finding, FindingCategory, FindingOrigin, FindingStatus
+from app.models.finding import (
+    Finding,
+    FindingCategory,
+    FindingOrigin,
+    FindingResolutionStatus,
+    FindingStatus,
+)
 from app.models.helpers import only_active
 from app.models.loan_file import LoanFile
 from app.models.stated_financials import StatedAsset, StatedLiability
@@ -77,6 +83,12 @@ async def run_cross_source(
     marks the run COMPLETED + verification current. On an AI failure the run is
     marked FAILED (the findings path degrades gracefully — nothing is invented).
     ``flush`` only; the caller owns the transaction.
+
+    Re-running **replaces** the file's previous *open* cross-source findings with
+    this fresh pass (so re-runs reflect the current state, not an accumulating pile
+    of duplicates that would also inflate blocking + the calculator alerts).
+    **Resolved** findings (applied / overridden) are preserved — the human's
+    decisions persist across runs (ADR-061).
     """
     context = await assemble_cross_source_context(db, loan_file)
     try:
@@ -88,6 +100,10 @@ async def run_cross_source(
         run.error_detail = "AI cross-source pass failed"
         await db.flush()
         return run
+
+    # The AI succeeded → supersede the prior pass's open cross-source findings
+    # before emitting the fresh set (only now, so a failed pass leaves them intact).
+    superseded = await _supersede_open_cross_source_findings(db, loan_file.id)
 
     income_target = _resolve_income_target(context)
     red = yellow = 0
@@ -118,8 +134,30 @@ async def run_cross_source(
         findings=red + yellow,  # counts only — never the findings' content (PII)
         red=red,
         yellow=yellow,
+        superseded=superseded,  # prior open findings replaced by this pass
     )
     return run
+
+
+async def _supersede_open_cross_source_findings(db: AsyncSession, loan_file_id: UUID) -> int:
+    """Soft-delete the file's OPEN cross-source findings (a re-run replaces them).
+
+    Only ``ai_cross_source`` findings that are still OPEN are superseded — resolved
+    ones (applied / overridden) are preserved so the human's decisions persist
+    across runs. Returns how many were superseded. Scoped to the one file.
+    """
+    result = await db.execute(
+        update(Finding)
+        .where(
+            Finding.loan_file_id == loan_file_id,
+            Finding.origin == FindingOrigin.AI_CROSS_SOURCE,
+            Finding.resolution_status == FindingResolutionStatus.OPEN,
+            Finding.deleted_at.is_(None),
+        )
+        .values(deleted_at=utcnow())
+    )
+    await db.flush()
+    return cast("CursorResult[Any]", result).rowcount or 0
 
 
 # --------------------------------------------------------------------------- #

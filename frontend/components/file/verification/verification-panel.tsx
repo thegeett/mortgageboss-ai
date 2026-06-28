@@ -120,17 +120,21 @@ function RunSummary({ data, running }: { data: VerificationStatus; running: bool
   if (!data.latest_run || data.latest_run.status !== "completed") {
     return null;
   }
-  const { red_count, yellow_count } = data.latest_run;
+  // Count from the rendered list (not the run's per-run counts) so the summary
+  // can never disagree with the findings shown below it.
+  const total = data.findings.length;
+  const red = data.findings.filter((f) => f.status === "red").length;
+  const yellow = data.findings.filter((f) => f.status === "yellow").length;
   return (
     <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-gray-500">
       <span className="inline-flex items-center gap-1 font-medium text-gray-700">
         <Sparkles className="h-3.5 w-3.5 text-primary" /> AI cross-source
       </span>
       <span>
-        {red_count + yellow_count} finding{red_count + yellow_count === 1 ? "" : "s"}
+        {total} finding{total === 1 ? "" : "s"}
       </span>
-      {red_count > 0 && <span className="text-destructive">{red_count} red</span>}
-      {yellow_count > 0 && <span className="text-warning">{yellow_count} yellow</span>}
+      {red > 0 && <span className="text-destructive">{red} red</span>}
+      {yellow > 0 && <span className="text-warning">{yellow} yellow</span>}
     </div>
   );
 }
