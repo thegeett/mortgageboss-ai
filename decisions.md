@@ -5771,3 +5771,58 @@ records the active level at submission); LP-81 the findings UI + resolution flow
 cross-source generator (feeding this model) + the full APPLY→recompute loop; LP-76/77 the DTI/LTV
 calculators (recompute on applied changes; the unresolved-findings alert). Bounding-box highlighting is
 deferred (page + snippet is V1).
+
+## ADR-190: DTI calculator — transparent, auto-populated, override-able, deterministic, findings-coupled (LP-76)
+
+- **Date:** 2026-06-28
+- **Status:** Accepted
+
+**Context:** DTI (debt-to-income) is THE mortgage-qualification number and the sister's most acute
+ChatGPT pain — a black box she can't fully trust, with no auto-population (she re-enters everything) and
+no audit trail. LP-76 is the headline "replace ChatGPT" win of Phase 3: it must beat ChatGPT on
+transparency, auto-population, and trustworthiness.
+
+**Decision:**
+
+- **Pure deterministic math, fully broken down.** Front-end DTI = housing ÷ income; back-end DTI =
+  (housing + monthly debts) ÷ income. Computed in a pure module (`app/verification/dti.py`) — **no AI**;
+  the monthly principal+interest is amortized from the loan terms (it is not stored). The response is
+  **fully itemized**: every income line, every housing component (PITI + MI + HOA), and every debt, each
+  with its auto value, any override, the effective value, and a source tag — plus the **explicit
+  formula**. The transparency *is* the feature; a black-box DTI is untrustworthy, one that shows every
+  input and the formula is trustworthy. Money is `Decimal`; ratios round half-up to 2 dp.
+- **Program limits side-by-side, the effective limit.** The computed back-end DTI is shown against the
+  **effective** limit for the file's program + lender — LP-74's investor rule (Conv 50 / FHA 57)
+  patched by any lender overlay (e.g. the sample overlay's 45), via the same registry the rules engine
+  uses — with a pass/over status. The number alone is meaningless; the number against the limit is the
+  answer.
+- **Auto-populated from the structured data.** The calculator opens **already filled** — income from
+  stated income, debts from stated liabilities, P&I computed from the loan terms, taxes / insurance /
+  HOA from the current document extractions. It reads the *same* structured data the rules engine
+  evaluates. Review + adjust, not enter from scratch (the "better than ChatGPT").
+- **Override any field, with an audit log.** A `DtiOverride` row (one per `(file, field_key)`, unique;
+  clearing soft-deletes) holds the override amount; the override **takes precedence** over the auto
+  value and **persists**. Every set/clear is audited (`ActivityType.DTI_OVERRIDDEN`, with the prior
+  value, by whom). The auto values are a trustworthy starting point, not a cage.
+- **Real-time recalculation.** The override endpoints return the **recomputed** calculation in the
+  response, so the UI updates from one round-trip (the mutation primes the query cache).
+- **Coupled to findings (LP-75).** (1) The **unresolved-findings alert**: the calculation queries open
+  in-scope findings (LP-75's `open_in_scope_findings`, Balanced default) and warns when the numbers may
+  be incomplete. (2) **Recompute on applied findings**: because the calculation reads the structured
+  data live, applying a finding (LP-75's hook adds a liability) makes the next calculation recompute
+  higher — LP-76 is a recompute consumer of the apply hook (the AI↔deterministic interlock landing in
+  the calculator).
+
+**Rationale:** the value is transparency (every input + the formula visible) + auto-population (no
+re-entry) + deterministic correctness (correct by construction, not "probably right per the AI"). The
+findings coupling realizes the interlock at the calculator — AI surfaces an obligation → human applies →
+it changes the structured data → the DTI recomputes — and warns when open findings might make the calc
+incomplete. Override-with-audit keeps the human in control and the file defensible.
+
+**Consequences:** LP-77 builds the LTV calculator on the same model (auto-populate → itemize →
+deterministic compute → override-with-audit); LP-79's dial sets the in-scope cutoff the alert (and
+blocking) use; LP-81's verification tab surfaces the calculator prominently (it already lives there);
+LP-82/83 encode the real DTI rules (the calculator computes DTI; the rules judge it — shown as the
+limit); the effective limit reflects overlays today; the other calculators (MI / self-employed income /
+reserves / max loan) are LP-87. Housing taxes/insurance/HOA are read from document extractions when
+present and are override-able otherwise (no dedicated property fields yet).

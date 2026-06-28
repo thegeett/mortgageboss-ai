@@ -214,3 +214,40 @@ liabilities), records it on `applied_record`, and calls `mark_recompute_needed` 
 seam). That structured-data change is the trigger of the **AI↔deterministic interlock**: the
 changed data should drive the deterministic recompute. The **full** loop is LP-78 (cross-source
 + the loop) + the calculators (LP-76/77); LP-75 builds the hook and the observable change.
+
+## 10. The DTI calculator — implemented (LP-76)
+
+LP-76 builds the **DTI calculator** — the headline "replace ChatGPT" surface. It is a *recompute
+consumer* of §9.3's apply hook and a *reader* of the same structured data the rules engine (§8)
+evaluates. Code: `app/verification/dti.py` (pure math), `app/services/dti.py` (auto-populate +
+override + couple), `app/api/dti.py`, `frontend/components/file/dti/`. (ADR-190.)
+
+### 10.1 Transparent, deterministic math
+
+Front-end DTI = housing ÷ income; back-end DTI = (housing + monthly debts) ÷ income — **pure
+deterministic arithmetic, no AI**. The monthly principal+interest is amortized from the loan
+terms (not stored). The response is **fully itemized** — every income line, every housing
+component (PITI + MI + HOA), every debt — each with its auto value, any override, the effective
+value, and a source tag, plus the **explicit formula**. The transparency is the feature (§1's
+"deterministic code judges"; a black-box DTI is untrustworthy). `Decimal` throughout; ratios
+round half-up to 2 dp.
+
+### 10.2 Auto-populated + effective limit side-by-side
+
+Auto-populates from the structured data (stated income, stated liabilities, computed P&I,
+extracted taxes/insurance/HOA) — the calculator opens *already filled* (no re-entry). The
+computed back-end DTI is shown against the **effective** limit — LP-74's investor rule patched by
+any lender overlay, via the same registry — with a pass/over status.
+
+### 10.3 Override-with-audit + real-time recalc
+
+Any field is override-able (a `DtiOverride` row, persisted, taking precedence over the auto
+value); every set/clear is audited (`DTI_OVERRIDDEN`, with the prior value). The override
+endpoints return the **recomputed** calculation, so the UI updates from one round-trip.
+
+### 10.4 Coupled to findings (LP-75)
+
+(1) The **unresolved-findings alert** queries open in-scope findings (Balanced default) and warns
+when the calculation may be incomplete. (2) **Recompute on applied findings** — because the
+calculation reads the structured data live, applying a finding (§9.3 adds a liability) makes the
+next calculation recompute higher. The interlock landing in the calculator.

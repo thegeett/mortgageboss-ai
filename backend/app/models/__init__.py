@@ -33,6 +33,7 @@ from app.models.document_finding import (
     DocumentFindingStatus,
     DocumentFindingType,
 )
+from app.models.dti_override import DtiOverride
 from app.models.encrypted_types import EncryptedString
 from app.models.enums import RecordStatus, str_enum
 from app.models.extraction import Extraction, ExtractionStatus
@@ -90,6 +91,7 @@ __all__ = [
     "DocumentFindingStatus",
     "DocumentFindingType",
     "DocumentStatus",
+    "DtiOverride",
     "EncryptedString",
     "Extraction",
     "ExtractionStatus",

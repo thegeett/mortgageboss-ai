@@ -56,6 +56,7 @@ class ActivityType(StrEnum):
     DOCUMENT_STALENESS_RESOLVED = "document_staleness_resolved"  # processor waived/accepted (LP-71)
     FINDING_RESOLVED = "finding_resolved"
     VERIFICATION_RUN = "verification_run"
+    DTI_OVERRIDDEN = "dti_overridden"  # processor overrode a DTI calculator input (LP-76)
     NEEDS_ITEM_CREATED = "needs_item_created"
     NEEDS_ITEM_SATISFIED = "needs_item_satisfied"
     NEEDS_ITEM_CONFIRMED = "needs_item_confirmed"  # processor confirmed a proposed need (LP-70)
