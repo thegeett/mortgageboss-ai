@@ -27,7 +27,7 @@ from enum import StrEnum
 from typing import TYPE_CHECKING
 from uuid import UUID
 
-from sqlalchemy import Date, ForeignKey, Integer, Numeric, String
+from sqlalchemy import Boolean, Date, ForeignKey, Integer, Numeric, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, SoftDeleteMixin, TimestampMixin, UUIDMixin
@@ -183,6 +183,13 @@ class LoanFile(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     # no AI reasoning triggered (e.g. a manually created file). Never blocks.
     ai_needs_status: Mapped[AiNeedsStatus | None] = mapped_column(
         str_enum(AiNeedsStatus), nullable=True
+    )
+    # Whether the cross-source verification is out of date (LP-78). Set True when
+    # a document changes (upload / type override / replace) or a finding is
+    # applied (the structured data changed); cleared when the cross-source pass
+    # re-runs. A visible "re-run verification" indicator; auto-re-run is deferred.
+    verification_stale: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default="false", nullable=False
     )
 
     # --- Originating loan officer (free-text; the LO is not a system user) --

@@ -35,6 +35,7 @@ from app.models.helpers import only_active
 from app.models.loan_file import LoanFile
 from app.schemas.document import DocumentDetailResponse, DocumentResponse, ExtractionPublic
 from app.services.document_versioning import version_count, version_counts_for_group_ids
+from app.services.verifications import mark_verification_stale
 
 # --------------------------------------------------------------------------- #
 # Upload validation
@@ -141,6 +142,9 @@ async def create_document(
     )
     db.add(document)
     await db.flush()
+    # A document changed → the cross-source verification is out of date (LP-78).
+    # Covers upload and replace (replace creates its new document through here).
+    await mark_verification_stale(db, loan_file_id=loan_file.id)
     return document
 
 

@@ -5877,3 +5877,58 @@ calculator shows the limits; the rules judge); the appraisal may be promoted to 
 feeds LTV); the other calculators (MI / self-employed / reserves / max loan) are LP-87. The sample LTV
 rules carry `reads` paths with no engine fact yet, so the rule engine skips them (the calculator resolves
 the limit directly) — they wire up with the real rules.
+
+## ADR-192: AI cross-source layer — one general capability, structured findings, the APPLY→recompute loop (LP-78)
+
+- **Date:** 2026-06-28
+- **Status:** Accepted
+
+**Context:** LP-74 built the deterministic *judge* (rules evaluate thresholds). The "AI surfaces" half of
+the locked two-layer principle was still missing — the capability that reads the borrower's stated
+claims (MISMO) against what the documents prove and surfaces discrepancies, including ones no
+pre-written rule would catch. LP-78 adds that *perceiver* and closes the APPLY→recompute loop that
+LP-75's hook + LP-76/77's calculators set up.
+
+**Decision:**
+
+- **One general AI capability, not a rule per check.** The cross-source layer (`app/ai/cross_source.py`)
+  is a single open-ended perception task: the AI reads the stated data vs. the verified document
+  extractions and surfaces whatever "doesn't line up" — guided toward high-value comparisons (income
+  variance >10%, employer, gift) but **not limited** to them. Because it reads and compares, it catches
+  **known and novel** discrepancies alike — the undisclosed obligation in a divorce decree that no rule
+  was written for. The starter set is **prompt guidance**; the full ~15-20 is LP-86.
+- **Structured findings only.** The AI emits **typed** findings (type, amounts, source document + page +
+  snippet, confidence, reasoning) — never prose the deterministic layer interprets. They enter LP-75's
+  **shared, uniform** Finding model with `origin=ai_cross_source` — *generator two* of "two generators,
+  one findings model" (LP-74 was generator one). Parsing is defensive (a malformed response yields no
+  findings — nothing invented).
+- **AI fallibility is acceptable.** Findings are **for human review**, confidence-scored — the AI
+  *surfaces candidates*, it does not decide. They land **OPEN**, never auto-applied. A miss is backstopped
+  by the processor; a false flag is overridden with a reason.
+- **The APPLY→recompute loop closes.** For recognized remediable types the emit attaches an **apply
+  spec**; applying a finding (LP-75's hook) changes the structured data → the DTI/LTV calculators
+  (LP-76/77), which read the data live, recompute. The interlock works end-to-end: an undisclosed
+  obligation → apply → added to liabilities → the DTI recomputes **higher**; an income variance → apply →
+  the stated income corrected (lower) → the DTI recomputes **higher**. LP-78 extends the apply hook with
+  `correct_income` and makes `mark_recompute_needed` mark verification stale (applying changed the data).
+- **Manual trigger + staleness.** The pass runs on a **manual trigger** (a "Run verification" button →
+  the worker runs the AI call) — cross-source compares two sides (meaningful only when both are
+  assembled) and is an AI cost, so it runs deliberately. A `verification_stale` flag is set on any
+  document change (upload / type override / replace) and when a finding is applied, and cleared when the
+  pass re-runs — a visible "re-run" indicator. **Auto-re-run is deferred** (the dial re-filters
+  already-computed findings without re-running — LP-79).
+
+**Rationale:** required-document discrepancies are open-ended and unenumerable — a general AI
+read-and-compare catches what pre-written rules can't. Structured-findings-only keeps the AI's fuzzy
+perception contained as typed data the deterministic layer consumes cleanly (the handoff is structure,
+never prose). AI fallibility is acceptable precisely because findings are human-reviewed, not decisions.
+The APPLY→recompute loop is the system's core interlock — AI perception → human confirmation →
+deterministic recomputation. Manual-trigger + staleness matches that cross-source needs both sides
+assembled and is a real AI cost (a Sonnet pass over substantial context).
+
+**Consequences:** LP-79's dial filters these confidence-scored findings by thoroughness (re-filtering
+without re-running); LP-81 builds the rich findings UI + resolution flow (this ships a minimal trigger +
+staleness panel with a read-only findings list); LP-86 adds the full ~15-20 cross-source set (this
+capability, more guidance). The recompute lands in LP-76/77; auto-re-run and bounding-box source
+highlighting are later phases. PII is assembled for the AI call and **never logged** (counts/tokens
+only); the worker must be running for the pass to execute.

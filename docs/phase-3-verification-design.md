@@ -283,3 +283,36 @@ Auto-populates the loan + property inputs; the **appraised value** comes from th
 Every input is override-able with an audit log (`ltv_overridden`); the override endpoints recompute
 in the response. The effective limit (purpose-varying) resolves via LP-74's registry (sample LTV
 rules; overlay-patchable). The unresolved-findings alert + recompute-consumer reuse §9.3 / §10.4.
+
+## 12. The AI cross-source layer + the APPLY→recompute loop — implemented (LP-78)
+
+LP-78 builds the **"AI surfaces"** half of §1 (§8 built the deterministic judge) and **closes the
+APPLY→recompute loop** (§3 / §9.3 / §10.4). Code: `app/ai/cross_source.py` (the AI boundary),
+`app/services/cross_source.py` (assemble + emit), `app/tasks/cross_source.py` (the worker pass),
+`app/api/verification.py`, `frontend/components/file/verification/`. (ADR-192.)
+
+### 12.1 One general capability → structured findings
+
+The cross-source layer is **one general AI capability, not a rule per check**: it reads the stated
+MISMO data against the verified document extractions and surfaces whatever "doesn't line up" — guided
+toward high-value comparisons (income variance, employer, gift) but not limited to them, so it catches
+**known and novel** discrepancies (the undisclosed obligation no rule covers). The full ~15-20 set is
+LP-86. It emits **structured findings only** (typed) into LP-75's shared model
+(`origin=ai_cross_source`, confidence, source-location) — generator two of "two generators, one model"
+(§1). Findings land **OPEN** — the AI surfaces candidates for human review (§2), never auto-applied.
+
+### 12.2 The APPLY→recompute loop closes
+
+For recognized remediable types the emit attaches an **apply spec**; applying a finding (LP-75's hook)
+changes the structured data → the DTI/LTV calculators (which read it live) recompute. End-to-end: an
+**undisclosed obligation** → apply → added to liabilities → DTI **higher**; an **income variance** →
+apply → stated income corrected → DTI **higher**. LP-78 extends the apply hook with `correct_income`
+and makes applying mark verification stale.
+
+### 12.3 Manual trigger + staleness (§5)
+
+The pass runs on a **manual trigger** (the worker runs the AI call — it compares two sides and is a
+real cost). `LoanFile.verification_stale` is set on any document change (upload / type override /
+replace) and when a finding is applied, and cleared when the pass re-runs — a visible "re-run"
+indicator. Auto-re-run is deferred (the dial re-filters without re-running — LP-79). PII is assembled
+for the AI call and **never logged**.

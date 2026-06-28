@@ -52,6 +52,7 @@ from app.services.documents import (
     soft_delete_document,
     validate_upload,
 )
+from app.services.verifications import mark_verification_stale
 from app.storage import get_storage_backend
 from app.tasks.document_processing import (
     process_document,
@@ -262,6 +263,8 @@ async def override_document_type(
         actor_user_id=current_user.id,
         detail={"document_id": str(document.id), "document_type": new_type},
     )
+    # The document's type changed → the cross-source verification is out of date.
+    await mark_verification_stale(db, loan_file_id=document.loan_file_id)
     await db.commit()
 
     # Re-extract in the background (fire-and-forget; the override is already saved).
