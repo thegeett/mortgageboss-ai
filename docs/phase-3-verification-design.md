@@ -356,3 +356,57 @@ deterministic (impossible for an open-ended task) but by not re-asking when noth
 reconciled with staleness (a document change changes the fingerprint *and* marks stale; a cached return
 clears a stale flag whose inputs match). A **"Re-run anyway"** escape hatch (`force=true`) bypasses the
 cache when the processor wants a fresh look. (ADR-193.)
+
+## 13. The aggression dial — implemented (LP-79)
+
+The dial lets a processor control **how thorough** verification is by filtering the already-computed,
+confidence-scored findings (LP-75/78) at three levels — a **confidence cutoff**, not a re-run.
+
+### 13.1 Three levels as confidence cutoffs
+
+`Conservative` (cutoff **0.8** — only high-confidence findings, short and high-signal), `Balanced`
+(**0.5**, the default) and `Thorough` (**0.0** — almost everything, incl. low-confidence hunches; catches
+more, with more false positives). A finding is **in-scope** at/above the active cutoff. The values live in
+`app/verification/confidence.py` (`CONFIDENCE_CUTOFFS`) and are tunable over use. Deterministic findings
+(confidence 1.0, LP-74) are in-scope at every level.
+
+### 13.2 The cutoff gates display AND blocking
+
+The active cutoff is the single knob behind both:
+
+- **Display** — only in-scope findings are shown; below-cutoff ones are hidden (the panel filters the
+  returned set client-side, so the dial re-filters with zero latency).
+- **Blocking** — only open in-scope findings block submission; LP-79 supplies the active cutoff to LP-75's
+  `is_file_blocked` / `open_in_scope_findings` and to the DTI/LTV alert. "Resolve all" = "resolve all **at
+  the chosen thoroughness**" — a more thorough setting surfaces *and requires resolving* more findings.
+
+LP-79 does **not** rebuild blocking; it sets the cutoff that blocking + display use.
+
+### 13.3 Never recolors (confidence ≠ severity)
+
+The dial filters by **confidence**, never **severity**. A finding's red/yellow is intrinsic and unchanged
+by the dial; the dial only changes which findings are in scope. A low-confidence red is *uncertain*, not
+*less severe* — confidence (how-sure) and severity (how-bad) are orthogonal and kept separate.
+
+### 13.4 Instant re-filter, no AI re-run
+
+The dial is a **read-time view filter** over LP-78's stored findings. `PUT …/verification/aggression`
+persists the per-file override and returns the re-filtered status — it **never** enqueues the cross-source
+AI and incurs no cost. One expensive pass; free thoroughness adjustment. (Verified: the dial endpoint does
+not call `run_cross_source_pass.delay`.)
+
+### 13.5 Per-file + user default + recorded at submission
+
+A **user-level default** (`users.default_aggression_level`, set via `PUT /users/me/preferences`) is the
+processor's general preference; a **per-file override** (`loan_files.aggression_level_override`; null =
+use the default) dials a tricky file up/down. The active level = the override if set, else the default. On
+the gated transition into `READY_TO_SUBMIT` the active level is recorded on
+`loan_files.submitted_aggression_level` — "cleared at <level> thoroughness" — so the clearance is honest +
+auditable.
+
+### 13.6 The legible consequence
+
+Moving the dial can flip a file clear↔blocked (Thorough surfaces new findings; Conservative drops borderline
+ones). The panel communicates the change — "Thorough surfaced N more finding(s) to resolve", "now showing N
+(M lower-confidence hidden)", and the new blocked/clear submit status — so the processor reads it as "I asked
+for more/less scrutiny and got it", never as the system randomly changing the file's status. (ADR-194.)

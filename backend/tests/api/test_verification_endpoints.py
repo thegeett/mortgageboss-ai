@@ -27,10 +27,28 @@ from app.models.verification import Verification, VerificationStatus, Verificati
 from app.services.cross_source import assemble_cross_source_context, compute_input_fingerprint
 from app.services.loan_files import create_loan_file
 from app.services.verifications import mark_verification_stale
+from app.verification.confidence import AggressionLevel
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 API = "/api/v1/loan-files"
+PREFS = "/api/v1/users/me/preferences"
+
+
+async def _add_finding(db: AsyncSession, loan_file: LoanFile, *, confidence: float) -> Finding:
+    """An OPEN AI cross-source finding at a given confidence (the dial filters on it)."""
+    f = Finding(
+        loan_file_id=loan_file.id,
+        rule_id="cross_source.income_variance",
+        origin=FindingOrigin.AI_CROSS_SOURCE,
+        confidence=confidence,
+        status=FindingStatus.YELLOW,
+        category=FindingCategory.INCOME,
+        message="A discrepancy.",
+    )
+    db.add(f)
+    await db.flush()
+    return f
 
 
 async def _seed_completed_run(
@@ -275,3 +293,127 @@ async def test_cached_return_reconciles_staleness(
         await client.get(f"{API}/{loan_file.display_id}/verification", headers=_auth(token))
     ).json()
     assert status["stale"] is False  # reconciled — matching inputs means not stale
+
+
+# --- The aggression dial (LP-79) ---------------------------------------------
+
+
+async def test_get_status_includes_the_dial_and_blocking(
+    client: AsyncClient, db: AsyncSession
+) -> None:
+    """GET returns the active level, the cutoffs map, and the authoritative blocking."""
+    company, _user, token = await _user_and_token(db, slug="acme", email="u@acme.com")
+    loan_file = await create_loan_file(db, company_id=company.id)
+    await _add_finding(db, loan_file, confidence=0.9)  # in scope at every level
+    await db.commit()
+
+    body = (
+        await client.get(f"{API}/{loan_file.display_id}/verification", headers=_auth(token))
+    ).json()
+    assert body["aggression"]["level"] == "balanced"  # the user default
+    assert body["aggression"]["default"] == "balanced"
+    assert body["aggression"]["override"] is None
+    assert body["aggression"]["cutoffs"] == {"conservative": 0.8, "balanced": 0.5, "thorough": 0.0}
+    assert body["blocked"] is True  # the 0.9 open finding is in scope at Balanced
+    assert body["in_scope_open_count"] == 1
+
+
+async def test_dial_re_filters_without_calling_the_ai(
+    client: AsyncClient, db: AsyncSession, monkeypatch
+) -> None:
+    """Moving the dial re-filters the STORED findings — it never enqueues the AI."""
+    calls: list = []
+    _spy_delay(monkeypatch, calls)
+    company, _user, token = await _user_and_token(db, slug="acme", email="u@acme.com")
+    loan_file = await create_loan_file(db, company_id=company.id)
+    # A low-confidence finding: in scope only at Thorough.
+    await _add_finding(db, loan_file, confidence=0.3)
+    await db.commit()
+
+    # Balanced (the default): the 0.3 finding is below the cutoff → not blocked.
+    at_balanced = (
+        await client.get(f"{API}/{loan_file.display_id}/verification", headers=_auth(token))
+    ).json()
+    assert at_balanced["blocked"] is False
+    assert at_balanced["in_scope_open_count"] == 0
+
+    # Dial up to Thorough → the SAME stored finding becomes in-scope (blocked).
+    thorough = (
+        await client.put(
+            f"{API}/{loan_file.display_id}/verification/aggression",
+            headers=_auth(token),
+            json={"level": "thorough"},
+        )
+    ).json()
+    assert thorough["aggression"]["level"] == "thorough"
+    assert thorough["aggression"]["override"] == "thorough"
+    assert thorough["blocked"] is True
+    assert thorough["in_scope_open_count"] == 1
+    # Dial back down to Conservative → clear again.
+    conservative = (
+        await client.put(
+            f"{API}/{loan_file.display_id}/verification/aggression",
+            headers=_auth(token),
+            json={"level": "conservative"},
+        )
+    ).json()
+    assert conservative["blocked"] is False
+
+    assert calls == []  # the dial NEVER re-runs the AI — pure read-time re-filter
+
+
+async def test_dial_clear_resets_to_the_user_default(client: AsyncClient, db: AsyncSession) -> None:
+    """level=null clears the per-file override (revert to the user default)."""
+    company, _user, token = await _user_and_token(db, slug="acme", email="u@acme.com")
+    loan_file = await create_loan_file(db, company_id=company.id)
+    loan_file.aggression_level_override = AggressionLevel.THOROUGH
+    await db.commit()
+
+    body = (
+        await client.put(
+            f"{API}/{loan_file.display_id}/verification/aggression",
+            headers=_auth(token),
+            json={"level": None},
+        )
+    ).json()
+    assert body["aggression"]["override"] is None
+    assert body["aggression"]["level"] == "balanced"  # back to the default
+
+
+async def test_dial_is_tenant_scoped(client: AsyncClient, db: AsyncSession) -> None:
+    """Another company's file is a 404 (existence never revealed)."""
+    _company_a, _user_a, _token_a = await _user_and_token(db, slug="acme", email="u@acme.com")
+    company_b, _user_b, _token_b = await _user_and_token(db, slug="beta", email="u@beta.com")
+    other = await create_loan_file(db, company_id=company_b.id)
+    await db.commit()
+
+    resp = await client.put(
+        f"{API}/{other.display_id}/verification/aggression",
+        headers=_auth(_token_a),
+        json={"level": "thorough"},
+    )
+    assert resp.status_code == 404
+
+
+async def test_user_default_preference_applies_to_files(
+    client: AsyncClient, db: AsyncSession
+) -> None:
+    """Changing the user default changes the active level on a file with no override."""
+    company, _user, token = await _user_and_token(db, slug="acme", email="u@acme.com")
+    loan_file = await create_loan_file(db, company_id=company.id)
+    await db.commit()
+
+    # Update the user-level default to Conservative.
+    put = await client.put(
+        PREFS, headers=_auth(token), json={"default_aggression_level": "conservative"}
+    )
+    assert put.status_code == 200
+    assert put.json()["default_aggression_level"] == "conservative"
+
+    # The file (no override) now resolves to the new default.
+    body = (
+        await client.get(f"{API}/{loan_file.display_id}/verification", headers=_auth(token))
+    ).json()
+    assert body["aggression"]["level"] == "conservative"
+    assert body["aggression"]["default"] == "conservative"
+    assert body["aggression"]["override"] is None

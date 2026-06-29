@@ -1,15 +1,27 @@
 // @vitest-environment jsdom
-import type { VerificationStatus } from "@/lib/types/verification";
+import type {
+  AggressionLevel,
+  VerificationFinding,
+  VerificationStatus,
+} from "@/lib/types/verification";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const runMutate = vi.fn();
+const setAggressionMutate = vi.fn();
+const updatePreferencesMutate = vi.fn();
 const useVerificationMock = vi.fn();
 const invalidateQueries = vi.fn();
 
 vi.mock("@/lib/api/verification", () => ({
   useVerification: () => useVerificationMock(),
   useRunVerification: () => ({ mutate: runMutate, isPending: false }),
+  useSetAggression: () => ({ mutate: setAggressionMutate, isPending: false }),
+  verificationQueryKey: (id: string) => ["verification", id],
+}));
+
+vi.mock("@/lib/api/preferences", () => ({
+  useUpdatePreferences: () => ({ mutate: updatePreferencesMutate, isPending: false }),
 }));
 
 vi.mock("@tanstack/react-query", () => ({
@@ -17,6 +29,28 @@ vi.mock("@tanstack/react-query", () => ({
 }));
 
 import { VerificationPanel } from "./verification-panel";
+
+const CUTOFFS: Record<AggressionLevel, number> = {
+  conservative: 0.8,
+  balanced: 0.5,
+  thorough: 0.0,
+};
+
+function finding(over: Partial<VerificationFinding> & { id: string }): VerificationFinding {
+  return {
+    rule_id: "cross_source.income_variance",
+    origin: "ai_cross_source",
+    status: "yellow",
+    category: "income",
+    message: "A discrepancy.",
+    confidence: 0.82,
+    source_page: 1,
+    source_snippet: "Gross pay 3,775.00 biweekly",
+    resolution_status: "open",
+    details: {},
+    ...over,
+  };
+}
 
 const STATUS: VerificationStatus = {
   stale: false,
@@ -32,20 +66,17 @@ const STATUS: VerificationStatus = {
     total_cost_estimate: 0.02,
   },
   findings: [
-    {
-      id: "f-1",
-      rule_id: "cross_source.income_variance",
-      origin: "ai_cross_source",
-      status: "yellow",
-      category: "income",
-      message: "Stated income exceeds the documents by 8%.",
-      confidence: 0.82,
-      source_page: 1,
-      source_snippet: "Gross pay 3,775.00 biweekly",
-      resolution_status: "open",
-      details: {},
-    },
+    finding({ id: "f-1", message: "Stated income exceeds the documents by 8%.", confidence: 0.82 }),
   ],
+  aggression: {
+    level: "balanced",
+    default: "balanced",
+    override: null,
+    cutoff: 0.5,
+    cutoffs: CUTOFFS,
+  },
+  blocked: false,
+  in_scope_open_count: 0,
 };
 
 function mock(overrides: Partial<ReturnType<typeof useVerificationMock>> = {}) {
@@ -66,7 +97,7 @@ function baseRun() {
 
 afterEach(() => {
   cleanup();
-  vi.clearAllMocks();
+  vi.resetAllMocks(); // resets call history AND any per-test mockImplementation
 });
 
 describe("VerificationPanel", () => {
@@ -124,8 +155,8 @@ describe("VerificationPanel", () => {
     expect(refetch).toHaveBeenCalled();
   });
 
-  it("counts findings from the list, not the run's per-run counts", () => {
-    // The run claims 5 yellow, but the list has 1 — the summary follows the list.
+  it("counts in-scope findings (not the run's per-run counts)", () => {
+    // The run claims 5 yellow, but one finding is in scope at Balanced — follow the list.
     mock({ data: { ...STATUS, latest_run: { ...baseRun(), yellow_count: 5 } } });
     render(<VerificationPanel fileId="LF-1" />);
     expect(screen.getByText("1 finding")).toBeDefined();
@@ -143,5 +174,116 @@ describe("VerificationPanel", () => {
 
     expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ["dti", "LF-1"] });
     expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ["ltv", "LF-1"] });
+  });
+
+  // --- The aggression dial (LP-79) ------------------------------------------
+
+  it("renders the dial with the active level pressed", () => {
+    mock();
+    render(<VerificationPanel fileId="LF-1" />);
+    const balanced = screen.getByRole("button", { name: "Balanced" });
+    expect(balanced.getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByRole("button", { name: "Thorough" }).getAttribute("aria-pressed")).toBe(
+      "false",
+    );
+  });
+
+  it("moving the dial sets the per-file override — no AI re-run", () => {
+    mock();
+    render(<VerificationPanel fileId="LF-1" />);
+    fireEvent.click(screen.getByRole("button", { name: "Thorough" }));
+    // The dial calls setAggression (a read-time re-filter), NOT runVerification (the AI).
+    expect(setAggressionMutate).toHaveBeenCalledTimes(1);
+    expect(setAggressionMutate.mock.calls[0]?.[0]).toBe("thorough");
+    expect(runMutate).not.toHaveBeenCalled();
+  });
+
+  it("re-filters instantly: dialing up to Thorough reveals a low-confidence finding", () => {
+    mock({
+      data: {
+        ...STATUS,
+        findings: [
+          finding({ id: "hi", message: "High-confidence discrepancy.", confidence: 0.9 }),
+          finding({ id: "lo", message: "Low-confidence hunch.", confidence: 0.4 }),
+        ],
+      },
+    });
+    render(<VerificationPanel fileId="LF-1" />);
+    // At Balanced (≥0.5) the 0.4 hunch is hidden.
+    expect(screen.queryByText("Low-confidence hunch.")).toBeNull();
+    expect(screen.getByText("High-confidence discrepancy.")).toBeDefined();
+
+    // Dialing up to Thorough (≥0.0) surfaces it instantly — same stored findings.
+    fireEvent.click(screen.getByRole("button", { name: "Thorough" }));
+    expect(screen.getByText("Low-confidence hunch.")).toBeDefined();
+    expect(screen.getByText("High-confidence discrepancy.")).toBeDefined();
+  });
+
+  it("never recolors: a red finding stays red across dial moves", () => {
+    mock({
+      data: {
+        ...STATUS,
+        findings: [finding({ id: "r", status: "red", confidence: 0.9 })],
+        latest_run: { ...baseRun(), red_count: 1, yellow_count: 0 },
+      },
+    });
+    render(<VerificationPanel fileId="LF-1" />);
+    expect(screen.getByText("1 red")).toBeDefined();
+    // Move the dial — the in-scope set may change, but severity is intrinsic.
+    fireEvent.click(screen.getByRole("button", { name: "Conservative" }));
+    expect(screen.getByText("1 red")).toBeDefined();
+  });
+
+  it("shows the legible consequence after moving the dial", () => {
+    const data: VerificationStatus = {
+      ...STATUS,
+      findings: [finding({ id: "hi", confidence: 0.9 }), finding({ id: "lo", confidence: 0.4 })],
+    };
+    // The mock confirms the override by returning the re-filtered status (the API contract).
+    setAggressionMutate.mockImplementation(
+      (level: AggressionLevel, opts?: { onSuccess?: (s: VerificationStatus) => void }) => {
+        opts?.onSuccess?.({
+          ...data,
+          aggression: { ...data.aggression, level, override: level, cutoff: CUTOFFS[level] },
+        });
+      },
+    );
+    mock({ data });
+    render(<VerificationPanel fileId="LF-1" />);
+    fireEvent.click(screen.getByRole("button", { name: "Thorough" }));
+    // Thorough surfaced the 0.4 finding → the consequence is communicated.
+    expect(screen.getByText(/Thorough surfaced 1 more finding/)).toBeDefined();
+  });
+
+  it("reset-to-default clears the per-file override", () => {
+    mock({
+      data: {
+        ...STATUS,
+        aggression: { ...STATUS.aggression, level: "thorough", override: "thorough", cutoff: 0.0 },
+      },
+    });
+    render(<VerificationPanel fileId="LF-1" />);
+    fireEvent.click(screen.getByRole("button", { name: /reset to default/i }));
+    expect(setAggressionMutate.mock.calls[0]?.[0]).toBeNull(); // null = revert to user default
+  });
+
+  it("'set as my default' updates the user-level preference", () => {
+    mock({
+      data: {
+        ...STATUS,
+        aggression: { ...STATUS.aggression, level: "thorough", override: "thorough", cutoff: 0.0 },
+      },
+    });
+    render(<VerificationPanel fileId="LF-1" />);
+    fireEvent.click(screen.getByRole("button", { name: /set thorough as my default/i }));
+    expect(updatePreferencesMutate.mock.calls[0]?.[0]).toBe("thorough");
+  });
+
+  it("shows the blocked submit status with the active thoroughness", () => {
+    mock({ data: { ...STATUS, blocked: true, in_scope_open_count: 2 } });
+    render(<VerificationPanel fileId="LF-1" />);
+    expect(
+      screen.getByText(/must be resolved to submit \(at Balanced thoroughness\)/),
+    ).toBeDefined();
   });
 });

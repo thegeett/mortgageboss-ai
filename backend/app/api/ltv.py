@@ -11,6 +11,7 @@ from fastapi import APIRouter, HTTPException, status
 from app.api.dependencies import CurrentUser
 from app.core.database import DbSession
 from app.schemas.ltv import LtvCalculation, LtvOverrideInput
+from app.services.aggression import active_cutoff
 from app.services.loan_files import get_loan_file
 from app.services.ltv import (
     UnknownLtvFieldError,
@@ -30,7 +31,9 @@ async def get_ltv(identifier: str, db: DbSession, current_user: CurrentUser) -> 
     loan_file = await get_loan_file(db, company_id=current_user.company_id, identifier=identifier)
     if loan_file is None:
         raise _NOT_FOUND
-    return await build_ltv_calculation(db, loan_file=loan_file)
+    return await build_ltv_calculation(
+        db, loan_file=loan_file, confidence_cutoff=active_cutoff(loan_file, current_user)
+    )
 
 
 @router.put("/{identifier}/ltv/overrides/{field_key}", response_model=LtvCalculation)
@@ -52,6 +55,7 @@ async def put_ltv_override(
             field_key=field_key,
             data=payload,
             actor_user_id=current_user.id,
+            confidence_cutoff=active_cutoff(loan_file, current_user),
         )
     except UnknownLtvFieldError as exc:
         raise HTTPException(
@@ -70,7 +74,11 @@ async def delete_ltv_override(
     if loan_file is None:
         raise _NOT_FOUND
     calculation = await clear_ltv_override(
-        db, loan_file=loan_file, field_key=field_key, actor_user_id=current_user.id
+        db,
+        loan_file=loan_file,
+        field_key=field_key,
+        actor_user_id=current_user.id,
+        confidence_cutoff=active_cutoff(loan_file, current_user),
     )
     await db.commit()
     return calculation

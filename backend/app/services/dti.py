@@ -363,13 +363,14 @@ async def set_dti_override(
     field_key: str,
     data: DtiOverrideInput,
     actor_user_id: UUID,
+    confidence_cutoff: float = DEFAULT_CONFIDENCE_CUTOFF,
 ) -> DtiCalculation:
     """Set (or revive) an override on one DTI input field, audited; then recompute.
 
     Validates the field against the current inputs, records the prior value
     (override-or-auto) in the activity log, upserts the override row (precedence +
-    persistence), and returns the recomputed calculation. Raises
-    :class:`UnknownDtiFieldError` for an unknown field.
+    persistence), and returns the recomputed calculation (at the caller's aggression
+    cutoff, LP-79). Raises :class:`UnknownDtiFieldError` for an unknown field.
     """
     prior_auto = await _auto_amount_for(db, loan_file, field_key)  # also validates the key
 
@@ -404,7 +405,7 @@ async def set_dti_override(
             "note": data.note,
         },
     )
-    return await build_dti_calculation(db, loan_file=loan_file)
+    return await build_dti_calculation(db, loan_file=loan_file, confidence_cutoff=confidence_cutoff)
 
 
 async def clear_dti_override(
@@ -413,11 +414,14 @@ async def clear_dti_override(
     loan_file: LoanFile,
     field_key: str,
     actor_user_id: UUID,
+    confidence_cutoff: float = DEFAULT_CONFIDENCE_CUTOFF,
 ) -> DtiCalculation:
     """Clear an override (revert to the auto value), audited; then recompute."""
     existing = await _get_override_row(db, loan_file.id, field_key)
     if existing is None or existing.is_deleted:
-        return await build_dti_calculation(db, loan_file=loan_file)
+        return await build_dti_calculation(
+            db, loan_file=loan_file, confidence_cutoff=confidence_cutoff
+        )
     prior = existing.value
     existing.deleted_at = utcnow()
     await db.flush()
@@ -429,7 +433,7 @@ async def clear_dti_override(
         actor_user_id=actor_user_id,
         detail={"field_key": field_key, "from": _money_str(prior), "to": None, "cleared": True},
     )
-    return await build_dti_calculation(db, loan_file=loan_file)
+    return await build_dti_calculation(db, loan_file=loan_file, confidence_cutoff=confidence_cutoff)
 
 
 async def _get_override_row(

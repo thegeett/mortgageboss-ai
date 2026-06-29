@@ -16,6 +16,18 @@ from pydantic import BaseModel
 
 from app.models.finding import Finding
 from app.models.verification import Verification
+from app.verification.confidence import AggressionLevel
+
+
+class AggressionUpdate(BaseModel):
+    """Set (or clear) a file's per-file aggression override (LP-79).
+
+    ``level = null`` clears the override so the file reverts to the user's default;
+    a level pins this file to that thoroughness. Re-filters the stored findings —
+    it never re-runs the AI.
+    """
+
+    level: AggressionLevel | None
 
 
 class VerificationRunPublic(BaseModel):
@@ -78,9 +90,36 @@ class FindingPublic(BaseModel):
         )
 
 
+class AggressionPublic(BaseModel):
+    """The aggression dial's state for a file (LP-79) — the confidence-cutoff filter.
+
+    ``level`` is the *active* level (the per-file ``override`` if set, else the
+    user's ``default``); ``cutoff`` is the confidence threshold it applies. ``cutoffs``
+    maps every level to its cutoff so the client can re-filter the (already-returned)
+    findings **instantly** when the dial moves — no AI re-run, no round-trip needed
+    to recompute the displayed set.
+    """
+
+    level: str
+    default: str
+    override: str | None
+    cutoff: float
+    cutoffs: dict[str, float]
+
+
 class VerificationStatusPublic(BaseModel):
-    """The file's verification status — staleness + the latest run + the findings."""
+    """The file's verification status — staleness + run + findings + the dial (LP-79).
+
+    ``findings`` is the full stored cross-source set (each carries its confidence);
+    the client shows only those at/above the active cutoff (display gating). ``blocked``
+    and ``in_scope_open_count`` are the **authoritative** server-side blocking computation
+    at the active cutoff (over all findings, deterministic + AI) — "resolve all" means
+    "resolve all in-scope at the chosen thoroughness".
+    """
 
     stale: bool
     latest_run: VerificationRunPublic | None
     findings: list[FindingPublic]
+    aggression: AggressionPublic
+    blocked: bool
+    in_scope_open_count: int

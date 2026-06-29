@@ -50,3 +50,13 @@ CONFIDENCE_CUTOFFS: dict[AggressionLevel, float] = {
 # The standalone default until LP-79's dial supplies the file's chosen level.
 DEFAULT_AGGRESSION = AggressionLevel.BALANCED
 DEFAULT_CONFIDENCE_CUTOFF = CONFIDENCE_CUTOFFS[DEFAULT_AGGRESSION]
+
+
+def cutoff_for_level(level: AggressionLevel) -> float:
+    """The confidence cutoff a given aggression level applies (LP-79's dial picks it).
+
+    A finding is **in-scope** (shown + blocking) at or above this cutoff. The
+    cutoff filters by *confidence* only — it never touches a finding's *severity*
+    (red/yellow is intrinsic); confidence and severity are orthogonal axes.
+    """
+    return CONFIDENCE_CUTOFFS[level]

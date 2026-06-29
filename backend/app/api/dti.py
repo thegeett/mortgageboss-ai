@@ -12,6 +12,7 @@ from fastapi import APIRouter, HTTPException, status
 from app.api.dependencies import CurrentUser
 from app.core.database import DbSession
 from app.schemas.dti import DtiCalculation, DtiOverrideInput
+from app.services.aggression import active_cutoff
 from app.services.dti import (
     UnknownDtiFieldError,
     build_dti_calculation,
@@ -31,7 +32,9 @@ async def get_dti(identifier: str, db: DbSession, current_user: CurrentUser) -> 
     loan_file = await get_loan_file(db, company_id=current_user.company_id, identifier=identifier)
     if loan_file is None:
         raise _NOT_FOUND
-    return await build_dti_calculation(db, loan_file=loan_file)
+    return await build_dti_calculation(
+        db, loan_file=loan_file, confidence_cutoff=active_cutoff(loan_file, current_user)
+    )
 
 
 @router.put("/{identifier}/dti/overrides/{field_key}", response_model=DtiCalculation)
@@ -53,6 +56,7 @@ async def put_dti_override(
             field_key=field_key,
             data=payload,
             actor_user_id=current_user.id,
+            confidence_cutoff=active_cutoff(loan_file, current_user),
         )
     except UnknownDtiFieldError as exc:
         raise HTTPException(
@@ -71,7 +75,11 @@ async def delete_dti_override(
     if loan_file is None:
         raise _NOT_FOUND
     calculation = await clear_dti_override(
-        db, loan_file=loan_file, field_key=field_key, actor_user_id=current_user.id
+        db,
+        loan_file=loan_file,
+        field_key=field_key,
+        actor_user_id=current_user.id,
+        confidence_cutoff=active_cutoff(loan_file, current_user),
     )
     await db.commit()
     return calculation

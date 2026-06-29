@@ -18,19 +18,26 @@ from app.core.database import DbSession
 from app.models.base import utcnow
 from app.models.finding import Finding, FindingOrigin
 from app.models.helpers import only_active
+from app.models.loan_file import LoanFile
+from app.models.user import User
 from app.models.verification import Verification, VerificationStatus, VerificationTrigger
 from app.schemas.verification import (
+    AggressionPublic,
+    AggressionUpdate,
     FindingPublic,
     VerificationRunPublic,
     VerificationStatusPublic,
 )
+from app.services.aggression import active_cutoff, resolve_aggression_level
 from app.services.cross_source import (
     assemble_cross_source_context,
     compute_input_fingerprint,
     latest_completed_run,
 )
+from app.services.finding_blocking import open_in_scope_findings
 from app.services.loan_files import get_loan_file
 from app.services.verifications import create_verification_run, mark_verification_current
+from app.verification.confidence import CONFIDENCE_CUTOFFS
 
 log = structlog.get_logger(__name__)
 
@@ -102,15 +109,17 @@ async def run_verification(
     return VerificationRunPublic.from_model(run)
 
 
-@router.get("/{identifier}/verification", response_model=VerificationStatusPublic)
-async def get_verification(
-    identifier: str, db: DbSession, current_user: CurrentUser
+async def _build_status(
+    db: DbSession, *, loan_file: LoanFile, user: User
 ) -> VerificationStatusPublic:
-    """The file's verification status — staleness, the latest run, and the findings."""
-    loan_file = await get_loan_file(db, company_id=current_user.company_id, identifier=identifier)
-    if loan_file is None:
-        raise _NOT_FOUND
+    """Assemble the file's verification status at the user's active aggression cutoff.
 
+    The dial is a **read-time view filter** over LP-78's already-stored findings — this
+    only reads + filters, it never re-runs the AI. ``findings`` returns the full stored
+    cross-source set (the client hides those below the active cutoff for display);
+    ``blocked`` / ``in_scope_open_count`` are the authoritative blocking computation
+    (LP-75) at the active cutoff over ALL findings (deterministic + AI).
+    """
     latest_stmt = (
         only_active(
             select(Verification).where(Verification.loan_file_id == loan_file.id), Verification
@@ -129,8 +138,57 @@ async def get_verification(
     ).order_by(Finding.created_at.desc())
     findings = (await db.execute(findings_stmt)).scalars().all()
 
+    level = resolve_aggression_level(loan_file, user)
+    cutoff = active_cutoff(loan_file, user)
+    in_scope = await open_in_scope_findings(db, loan_file_id=loan_file.id, confidence_cutoff=cutoff)
+
     return VerificationStatusPublic(
         stale=loan_file.verification_stale,
         latest_run=VerificationRunPublic.from_model(latest) if latest else None,
         findings=[FindingPublic.from_model(f) for f in findings],
+        aggression=AggressionPublic(
+            level=level.value,
+            default=user.default_aggression_level.value,
+            override=(
+                loan_file.aggression_level_override.value
+                if loan_file.aggression_level_override is not None
+                else None
+            ),
+            cutoff=cutoff,
+            cutoffs={lvl.value: c for lvl, c in CONFIDENCE_CUTOFFS.items()},
+        ),
+        blocked=len(in_scope) > 0,
+        in_scope_open_count=len(in_scope),
     )
+
+
+@router.get("/{identifier}/verification", response_model=VerificationStatusPublic)
+async def get_verification(
+    identifier: str, db: DbSession, current_user: CurrentUser
+) -> VerificationStatusPublic:
+    """The file's verification status — staleness, the latest run, the findings + the dial."""
+    loan_file = await get_loan_file(db, company_id=current_user.company_id, identifier=identifier)
+    if loan_file is None:
+        raise _NOT_FOUND
+    return await _build_status(db, loan_file=loan_file, user=current_user)
+
+
+@router.put("/{identifier}/verification/aggression", response_model=VerificationStatusPublic)
+async def set_aggression(
+    identifier: str, payload: AggressionUpdate, db: DbSession, current_user: CurrentUser
+) -> VerificationStatusPublic:
+    """Set (or clear) this file's aggression override and return the re-filtered status.
+
+    A pure read-time re-filter over the **stored** findings (LP-78): it changes which
+    findings are in-scope (shown + blocking) at the new cutoff — it NEVER re-runs the AI
+    and NEVER recolors a finding (confidence ≠ severity). ``level = null`` clears the
+    override (revert to the user default). Tenant-scoped (cross-company → 404).
+    """
+    loan_file = await get_loan_file(db, company_id=current_user.company_id, identifier=identifier)
+    if loan_file is None:
+        raise _NOT_FOUND
+
+    loan_file.aggression_level_override = payload.level
+    await db.commit()
+    await db.refresh(loan_file)
+    return await _build_status(db, loan_file=loan_file, user=current_user)

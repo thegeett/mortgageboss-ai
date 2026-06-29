@@ -5978,3 +5978,57 @@ the findings model are unchanged. A re-run still happens automatically when inpu
 added/changed, stated data edited) or when forced. LP-79's dial still re-filters already-computed
 findings without re-running. The fingerprint hashes a hash, not raw PII beyond what the findings already
 hold; the assembled context is never logged.
+
+## ADR-194: Aggression dial — confidence-threshold gating (display + blocking), instant re-filter, per-file + user default (LP-79)
+
+- **Date:** 2026-06-28
+- **Status:** Accepted
+
+**Context:** LP-78 produces all cross-source findings in one (expensive, non-deterministic) AI pass, each
+carrying a **confidence** (LP-75); the blocking computation already takes a confidence cutoff. Processors
+need to control *how thorough* verification is — a clean refinance wants only high-signal findings, a
+tricky file wants every hunch surfaced — without paying for (or waiting on) another AI run, and without
+the system silently re-deciding what blocks. The cutoff levels (Conservative 0.8 / Balanced 0.5 / Thorough
+0.0) and the cutoff-taking blocking computation shipped with LP-74/75; LP-79 supplies the cutoff via a
+dial and wires it into the read path.
+
+**Decision:**
+
+- **Three levels = confidence cutoffs.** Conservative (0.8, high bar — only findings the system is very
+  sure about), Balanced (0.5, the default), Thorough (0.0, almost everything incl. low-confidence hunches).
+  A finding is **in-scope** at/above the active cutoff. The values are config (`CONFIDENCE_CUTOFFS`), tunable
+  over use. Deterministic findings (confidence 1.0) are in-scope at every level.
+- **The cutoff gates BOTH display AND blocking.** Below the cutoff → hidden *and* non-blocking; at/above →
+  shown *and* (if open) must be resolved to submit. LP-79 supplies the active cutoff to LP-75's blocking
+  computation (`is_file_blocked` / `open_in_scope_findings`) and to the DTI/LTV calculators' unresolved-
+  findings alert. "Resolve all" therefore means "resolve all **at the chosen thoroughness**" — a more
+  thorough setting surfaces *and requires resolving* more findings.
+- **Never recolors.** The dial filters by **confidence**, never **severity**. A finding's red/yellow is
+  intrinsic (set by the rule/generator) and unchanged by the dial; the dial only changes which findings are
+  in scope. Confidence (how-sure) and severity (how-bad) are orthogonal axes, kept separate.
+- **Instant re-filter, no AI re-run.** The dial is a **read-time view filter** over LP-78's already-stored
+  findings. Changing it (`PUT …/verification/aggression`) re-filters instantly — it never enqueues the
+  cross-source AI and incurs no cost. One expensive pass; free thoroughness adjustment.
+- **Per-file + user default + per-file override.** `users.default_aggression_level` is the user's general
+  preference; `loan_files.aggression_level_override` (null = use the default) dials a specific file up/down.
+  The active level = the override if set, else the user default.
+- **Recorded at submission.** On the (gated) transition into `READY_TO_SUBMIT` the active level is recorded
+  on `loan_files.submitted_aggression_level` — "cleared at <level> thoroughness" — so the clearance is
+  honest and auditable (clear is relative to thoroughness).
+- **The legible consequence.** Moving the dial can flip a file clear↔blocked (Thorough surfaces new
+  findings; Conservative drops borderline ones). The UI communicates the change ("Thorough surfaced N more
+  to resolve" / "now clear at Conservative" / the new blocked status) so the processor reads it as "I asked
+  for more/less scrutiny and got it", not a surprise.
+
+**Rationale:** one AI pass produces every confidence-scored finding (LP-78); the dial is the cheap, instant
+way to match scrutiny to a file's risk without re-running (or paying for) the AI. Gating display + blocking
+by the same cutoff keeps "resolve all" meaningful at the chosen thoroughness. Conflating confidence with
+severity would be wrong (a low-confidence red is *uncertain*, not *less severe*), so the dial never
+recolors. Per-file + user-default fits real use; recording the level keeps "clear" honest; the legible
+consequence avoids the jarring "my clear file is suddenly blocked" surprise.
+
+**Consequences:** LP-81 surfaces the dial + the in-scope findings list + the calculators' alert (all using
+the active cutoff). The cutoff values tune over use. The recorded submission-level supports audit. The
+`str_enum` helper gained an optional `name` so the two `AggressionLevel` columns on `loan_files` get
+distinct CHECK-constraint names. The dial is the free thoroughness control over LP-78's single expensive
+pass — it is **not** a trigger to re-run it.

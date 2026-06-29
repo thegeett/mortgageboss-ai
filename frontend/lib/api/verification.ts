@@ -6,7 +6,13 @@
  * (and stops once it settles), surfacing the findings + the staleness flag.
  */
 import { apiClient } from "@/lib/api/client";
-import type { VerificationRun, VerificationStatus } from "@/lib/types/verification";
+import { dtiQueryKey } from "@/lib/api/dti";
+import { ltvQueryKey } from "@/lib/api/ltv";
+import type {
+  AggressionLevel,
+  VerificationRun,
+  VerificationStatus,
+} from "@/lib/types/verification";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { isAxiosError } from "axios";
 
@@ -55,6 +61,36 @@ export function useRunVerification(identifier: string) {
     onSuccess: () => {
       // Refetch the status (now RUNNING, or the cached completed run) so the UI updates.
       void queryClient.invalidateQueries({ queryKey: verificationQueryKey(identifier) });
+    },
+  });
+}
+
+/**
+ * Set (or clear) this file's aggression override (LP-79). A pure read-time re-filter
+ * over the STORED findings — it never re-runs the AI. `level = null` clears the override
+ * (revert to the user default). Returns the re-filtered status (new in-scope + blocking).
+ */
+export async function setAggression(
+  identifier: string,
+  level: AggressionLevel | null,
+): Promise<VerificationStatus> {
+  const res = await apiClient.put<VerificationStatus>(
+    `${API_V1}/loan-files/${identifier}/verification/aggression`,
+    { level },
+  );
+  return res.data;
+}
+
+export function useSetAggression(identifier: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (level: AggressionLevel | null) => setAggression(identifier, level),
+    onSuccess: (status) => {
+      // The cutoff changed → the in-scope set + the finding-coupled calculators' alerts
+      // change too. Seed the new status and refresh DTI/LTV (no AI re-run anywhere).
+      queryClient.setQueryData(verificationQueryKey(identifier), status);
+      void queryClient.invalidateQueries({ queryKey: dtiQueryKey(identifier) });
+      void queryClient.invalidateQueries({ queryKey: ltvQueryKey(identifier) });
     },
   });
 }

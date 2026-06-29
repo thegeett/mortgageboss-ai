@@ -274,7 +274,11 @@ async def update(
         raise _NOT_FOUND
     try:
         await update_loan_file_with_activity(
-            db, loan_file=loan_file, data=payload, actor_user_id=current_user.id
+            db,
+            loan_file=loan_file,
+            data=payload,
+            actor_user_id=current_user.id,
+            actor=current_user,
         )
     except FileBlockedError as exc:
         # Open in-scope findings block the ready-to-submit transition (LP-75).

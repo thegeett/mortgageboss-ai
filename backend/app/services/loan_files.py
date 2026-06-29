@@ -28,8 +28,10 @@ from app.models.helpers import only_active, scope_to_company
 from app.models.lender import LoanProgram
 from app.models.loan_file import LoanFile, LoanFileStatus, LoanPurpose
 from app.models.needs_item import NeedsItem, NeedsItemOrigin
+from app.models.user import User
 from app.schemas.loan_file import LoanFileUpdate
 from app.services.activity_log import log_activity
+from app.services.aggression import resolve_aggression_level
 from app.services.finding_blocking import is_file_blocked
 from app.services.loan_file_ids import (
     generate_inbox_token,
@@ -37,6 +39,7 @@ from app.services.loan_file_ids import (
 )
 from app.services.needs_items import create_needs_item
 from app.services.needs_templates import needs_for_program
+from app.verification.confidence import DEFAULT_AGGRESSION, cutoff_for_level
 
 
 class FileBlockedError(Exception):
@@ -290,6 +293,7 @@ async def update_loan_file_with_activity(
     loan_file: LoanFile,
     data: LoanFileUpdate,
     actor_user_id: UUID,
+    actor: User | None = None,
 ) -> LoanFile:
     """Apply an update and record an activity for it.
 
@@ -297,23 +301,41 @@ async def update_loan_file_with_activity(
     a status change logs ``STATUS_CHANGED`` with ``{from, to}``; any other field
     change logs ``FILE_UPDATED`` with the changed field names; a no-op PATCH logs
     nothing. Uses ``flush``; the endpoint commits.
+
+    The "ready to submit" gate is evaluated **at the file's active aggression level**
+    (LP-79): blocking uses the cutoff for the level resolved from ``actor`` (the
+    per-file override, else the user's default; Balanced when no ``actor`` is given).
+    On a successful transition into ``READY_TO_SUBMIT`` the active level is recorded on
+    the file (``submitted_aggression_level``) — "cleared at <level> thoroughness" — so
+    the clearance is honest + auditable (clear is relative to thoroughness).
     """
     old_status = loan_file.status
     changed_fields = set(data.model_dump(exclude_unset=True).keys())
 
+    active_level = (
+        resolve_aggression_level(loan_file, actor) if actor is not None else DEFAULT_AGGRESSION
+    )
+
     # Findings are blocking (LP-75): a file with open in-scope findings cannot be
-    # marked ready to submit. Check before applying so the transition is gated.
-    if (
+    # marked ready to submit. The check runs at the active aggression cutoff (LP-79)
+    # — a more thorough level surfaces (and requires resolving) more findings.
+    becoming_ready = (
         "status" in changed_fields
         and data.status is LoanFileStatus.READY_TO_SUBMIT
         and old_status is not LoanFileStatus.READY_TO_SUBMIT
-        and await is_file_blocked(db, loan_file_id=loan_file.id)
+    )
+    if becoming_ready and await is_file_blocked(
+        db, loan_file_id=loan_file.id, confidence_cutoff=cutoff_for_level(active_level)
     ):
         raise FileBlockedError(
             "Open in-scope findings must be resolved before the file can submit."
         )
 
     await update_loan_file(db, loan_file=loan_file, data=data)
+
+    # Record the thoroughness the file cleared at (auditability) once it passes the gate.
+    if becoming_ready:
+        loan_file.submitted_aggression_level = active_level
 
     if "status" in changed_fields and loan_file.status != old_status:
         await log_activity(

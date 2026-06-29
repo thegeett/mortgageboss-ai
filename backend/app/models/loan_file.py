@@ -34,6 +34,7 @@ from app.models.base import Base, SoftDeleteMixin, TimestampMixin, UUIDMixin
 from app.models.enums import str_enum
 from app.models.lender import LoanProgram
 from app.models.types import MEDIUM_STRING, SHORT_STRING, Money
+from app.verification.confidence import AggressionLevel
 
 if TYPE_CHECKING:
     from app.models.activity_log import ActivityLog
@@ -190,6 +191,22 @@ class LoanFile(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     # re-runs. A visible "re-run verification" indicator; auto-re-run is deferred.
     verification_stale: Mapped[bool] = mapped_column(
         Boolean, default=False, server_default="false", nullable=False
+    )
+
+    # --- Aggression dial (LP-79) — the verification thoroughness for this file --
+    # A per-file CONFIDENCE CUTOFF over the already-computed findings (LP-78): a
+    # finding is in-scope (shown + blocking) at/above the active cutoff. NULL =
+    # use the user's default (a per-file override dials a tricky file up/down). The
+    # dial NEVER re-runs the AI and NEVER recolors a finding — it only changes
+    # which stored findings are in scope (confidence ≠ severity, orthogonal axes).
+    aggression_level_override: Mapped[AggressionLevel | None] = mapped_column(
+        str_enum(AggressionLevel, name="aggression_level_override"), nullable=True
+    )
+    # The active level recorded when the file was marked ready to submit — "cleared
+    # at <level> thoroughness" (auditability; "clear" is relative to thoroughness).
+    # NULL until the file passes the submit gate.
+    submitted_aggression_level: Mapped[AggressionLevel | None] = mapped_column(
+        str_enum(AggressionLevel, name="submitted_aggression_level"), nullable=True
     )
 
     # --- Originating loan officer (free-text; the LO is not a system user) --

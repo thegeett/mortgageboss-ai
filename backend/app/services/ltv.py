@@ -287,8 +287,12 @@ async def set_ltv_override(
     field_key: str,
     data: LtvOverrideInput,
     actor_user_id: UUID,
+    confidence_cutoff: float = DEFAULT_CONFIDENCE_CUTOFF,
 ) -> LtvCalculation:
-    """Set (or revive) an override on one LTV input, audited; then recompute."""
+    """Set (or revive) an override on one LTV input, audited; then recompute.
+
+    Recomputes at the caller's aggression cutoff (LP-79).
+    """
     prior_auto = await _auto_amount_for(db, loan_file, field_key)  # validates the key
 
     existing = await _get_override_row(db, loan_file.id, field_key)
@@ -322,7 +326,7 @@ async def set_ltv_override(
             "note": data.note,
         },
     )
-    return await build_ltv_calculation(db, loan_file=loan_file)
+    return await build_ltv_calculation(db, loan_file=loan_file, confidence_cutoff=confidence_cutoff)
 
 
 async def clear_ltv_override(
@@ -331,11 +335,14 @@ async def clear_ltv_override(
     loan_file: LoanFile,
     field_key: str,
     actor_user_id: UUID,
+    confidence_cutoff: float = DEFAULT_CONFIDENCE_CUTOFF,
 ) -> LtvCalculation:
     """Clear an override (revert to the auto value), audited; then recompute."""
     existing = await _get_override_row(db, loan_file.id, field_key)
     if existing is None or existing.is_deleted:
-        return await build_ltv_calculation(db, loan_file=loan_file)
+        return await build_ltv_calculation(
+            db, loan_file=loan_file, confidence_cutoff=confidence_cutoff
+        )
     prior = existing.value
     existing.deleted_at = utcnow()
     await db.flush()
@@ -347,7 +354,7 @@ async def clear_ltv_override(
         actor_user_id=actor_user_id,
         detail={"field_key": field_key, "from": _money_str(prior), "to": None, "cleared": True},
     )
-    return await build_ltv_calculation(db, loan_file=loan_file)
+    return await build_ltv_calculation(db, loan_file=loan_file, confidence_cutoff=confidence_cutoff)
 
 
 async def _get_override_row(
