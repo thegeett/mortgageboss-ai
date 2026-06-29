@@ -72,6 +72,7 @@ _TYPE_CATEGORY = {
     "property_address_discrepancy": FindingCategory.PROPERTY,
     "co_borrower_discrepancy": FindingCategory.CROSS_SOURCE,
     "identity_discrepancy": FindingCategory.CROSS_SOURCE,
+    "missing_documentation": FindingCategory.DOCUMENTATION,
     "other": FindingCategory.CROSS_SOURCE,
 }
 

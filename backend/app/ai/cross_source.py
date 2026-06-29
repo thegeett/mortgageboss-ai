@@ -3,15 +3,18 @@
 This is the **"AI surfaces"** half of the locked two-layer principle (LP-74 built
 the deterministic *judge*; this is the *perceiver*). It reads what the borrower
 *stated* (the MISMO application) against what the *documents prove* (the verified
-extractions) and surfaces **CONFLICTS** — where both sides are present and
-disagree — as structured findings.
+extractions) and surfaces **discrepancies** — conflicts (both sides present and
+disagree), **missing-document gaps** (a stated value with no supporting document),
+and internal inconsistencies — as structured findings. In mortgage processing an
+unflagged document gap is a real error, so over-flagging is the safe direction: a
+missing-document finding is welcome (even though the needs list also tracks
+documents); a *suppressed* gap is not.
 
-What it is NOT: it does not flag missing documentation (that is the needs list's
-job), it does not compute or judge ratios (DTI/LTV/reserves — the deterministic
-calculators' job), and it does not re-label or re-split the same discrepancy run
-to run. Canonical types keep labels stable; an open ``other`` type with a required
-description **preserves novel discoveries** (the capability stays general — guided,
-not limited).
+What it does NOT do: it does not compute or judge ratios (DTI/LTV/reserves — the
+deterministic calculators' job), and it does not re-label or re-split the same
+issue run to run. Canonical types keep labels stable; an open ``other`` type with a
+required description **preserves novel discoveries** (the capability stays general
+— guided, not limited).
 
 The output is **structured findings only** (typed: type, the two conflicting
 values, source document + page + snippet, confidence, reasoning) — never prose the
@@ -37,27 +40,29 @@ logger = get_logger(__name__)
 _MAX_TOKENS = 8192
 
 CROSS_SOURCE_SYSTEM_PROMPT = """\
-You are reviewing a mortgage loan file for CONFLICTS between what the borrower
+You are reviewing a mortgage loan file for DISCREPANCIES between what the borrower
 STATED (the application / MISMO data) and what the DOCUMENTS prove (verified
 extractions from pay stubs, W-2s, bank statements, gift letters, and other
 documents).
 
-WHAT TO REPORT — CONFLICTS, NOT ABSENCES:
-- Report a discrepancy ONLY when BOTH sides are present and they DISAGREE — a
-  stated value and a documented value that conflict.
-- Do NOT report "stated X but no document to verify it". Missing documentation is a
-  SEPARATE system's job (the needs list), not yours. If the documents needed to
-  verify a stated value are absent, report NOTHING about it — there is nothing to
-  cross-check.
-- Only flag a missing document when its ABSENCE ITSELF conflicts with something that
-  IS documented (e.g. a bank statement shows a large deposit with no gift letter,
-  while the application claims that money as a gift).
+WHAT TO REPORT — DISCREPANCIES AND MISSING DOCUMENTATION:
+- A CONFLICT — a stated value and a documented value that DISAGREE (e.g. stated
+  income vs. the income shown by the pay stubs / W-2s).
+- A MISSING-DOCUMENT gap — a stated value (income, an asset, a liability, a gift)
+  that LACKS the supporting document needed to verify it. REPORT THESE. In mortgage
+  processing an unflagged document gap is a real error, so it is SAFER to surface a
+  gap than to stay silent — even though the needs list also tracks documents, the
+  redundancy is acceptable. Over-flagging is fine here; suppressing a real gap is
+  NOT.
+- An INTERNAL inconsistency — two documents (or two stated values) that contradict
+  each other.
 
 ONE SCOPE PER DISCREPANCY:
 - Report each discrepancy ONCE, at the most specific accurate scope.
 - Do NOT report the same gap at both an aggregate/file level AND an item level. No
   "the entire file lacks documentation" umbrella alongside per-item findings — keep
-  the specific item-level findings and drop the umbrella.
+  the specific item-level findings (one per missing document / per conflicting item)
+  and drop the umbrella.
 - Do NOT split one issue into several findings; do NOT merge two distinct issues.
 
 NO CALCULATED CONCLUSIONS:
@@ -76,6 +81,9 @@ same kind of discrepancy is labelled the same way every run:
 - "liability_discrepancy"        — a documented debt conflicts with the stated liabilities
 - "asset_discrepancy"            — a stated asset conflicts with the documented asset
 - "identity_discrepancy"         — identity data (name / SSN / DOB / address) conflicts
+- "missing_documentation"        — a stated value (income / asset / liability / gift) has
+                                   NO supporting document to verify it. One finding per
+                                   missing item (not a file-level umbrella).
 - "other"                        — a REAL discrepancy that fits NONE of the above. Give a
                                    specific "description". Use "other" to PRESERVE novel
                                    discoveries (e.g. an ID listing the subject property as
@@ -92,25 +100,25 @@ after):
 [
   {
     "type": "<a canonical type above, or \\"other\\">",
-    "description": "<one-line summary of the conflict>",
+    "description": "<one-line summary of the discrepancy or missing-document gap>",
     "stated_value": "<what the application stated, or null>",
-    "document_value": "<what the documents show, or null>",
+    "document_value": "<what the documents show, or null if no document exists>",
     "source_document": "<the document type that evidences this, or null>",
     "page": <page number, or null>,
     "snippet": "<verbatim supporting text from the document, or null>",
     "confidence": <0.0 - 1.0>,
-    "reasoning": "<why these two sides conflict>"
+    "reasoning": "<why this is a discrepancy or a missing-document gap>"
   }
 ]
-Every field must be PRESENT (use null where not applicable). An empty array [] is a
-VALID, CORRECT answer when the stated data and the documents agree, or when there is
-nothing to compare.
+Every field must be PRESENT (use null where not applicable; for a missing-document
+gap the "document_value" is null). An empty array [] is a VALID, CORRECT answer when
+the stated data and the documents agree and nothing is missing.
 """
 
 
 @dataclass(frozen=True)
 class CrossSourceRawFinding:
-    """One structured conflict the AI surfaced (pre-persistence)."""
+    """One structured discrepancy (conflict or missing-document gap) the AI surfaced."""
 
     type: str
     description: str

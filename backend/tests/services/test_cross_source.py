@@ -176,6 +176,32 @@ async def test_emits_structured_findings_into_shared_model(db_session: AsyncSess
     assert f.details["source_document"] == "pay_stub"
 
 
+async def test_missing_documentation_finding_is_documentation_category(
+    db_session: AsyncSession,
+) -> None:
+    """Missing-document gaps are welcome again (reverted Constraint 1) → DOCUMENTATION."""
+    company = await _company(db_session, "acme")
+    loan_file = await _file(db_session, company)
+
+    await _run(
+        db_session,
+        loan_file,
+        [
+            _raw(
+                type="missing_documentation",
+                description="Stated $56k gift has no supporting gift letter or deposit",
+                stated_value="56000",
+                document_value=None,  # no document exists — the gap itself
+                confidence=0.9,
+            )
+        ],
+    )
+    f = (await _findings(db_session, loan_file.id))[0]
+    assert f.rule_id == "cross_source.missing_documentation"
+    assert f.category is FindingCategory.DOCUMENTATION  # derived from the type
+    assert f.resolution_status is FindingResolutionStatus.OPEN
+
+
 async def test_starter_comparisons_and_an_unanticipated_discrepancy(
     db_session: AsyncSession,
 ) -> None:

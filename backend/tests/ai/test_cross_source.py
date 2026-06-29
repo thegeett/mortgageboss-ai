@@ -28,17 +28,20 @@ _VALID = """
 """
 
 
-def test_prompt_targets_conflicts_not_absences() -> None:
-    """The prompt scopes the AI to conflicts (not missing docs) and human review."""
+def test_prompt_reports_conflicts_and_missing_documentation() -> None:
+    """The AI reports conflicts AND missing-document gaps (over-flagging is safe)."""
     prompt = " ".join(CROSS_SOURCE_SYSTEM_PROMPT.lower().split())
-    assert "conflicts, not absences" in prompt
-    # Missing-documentation is explicitly out of scope (the needs list's job).
-    assert "missing documentation is a separate system's job" in prompt
-    # No calculated conclusions — ratios are the calculators' job.
+    # Missing-document gaps are WELCOME (not suppressed) — the reverted Constraint 1.
+    assert "missing-document gap" in prompt
+    assert "report these" in prompt
+    assert "suppressing a real gap is not" in prompt
+    # ...but NO calculated conclusions — ratios are the calculators' job (kept).
     assert "no calculated conclusions" in prompt
     assert "dti, ltv, reserves" in prompt
-    assert "surfacing candidates" in prompt  # human review, not a decision
-    # An empty result is explicitly valid (don't invent discrepancies).
+    # One scope — drop the file-level umbrella, keep item-level (kept).
+    assert "drop the umbrella" in prompt
+    assert "surfacing candidates" in prompt  # human-review framing retained
+    # An empty result is still valid (don't invent discrepancies).
     assert "empty array [] is a valid" in prompt
 
 
@@ -55,6 +58,7 @@ def test_prompt_has_canonical_types_with_an_open_other_escape_hatch() -> None:
         "liability_discrepancy",
         "asset_discrepancy",
         "identity_discrepancy",
+        "missing_documentation",
     ):
         assert canonical in prompt
     # The enum is NOT closed — "other" preserves novel findings (the key constraint).
