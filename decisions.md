@@ -6487,3 +6487,62 @@ Conventional + ~49 FHA rules. The mechanism is real + tested; the specific conte
 pending Priya's validation (and, for FHA MPRs, the pending modernization). LP-86 and onward consume this rule
 set; the promotion-pending property/appraisal facts (subject-to-repair, the MPR deficiency flags, year built,
 construction status, well/septic) wire up as the Tier-2 appraisal extraction grows.
+
+## ADR-207: Cross-source checks — reliable, enumerable discrepancies PROMOTED from AI-discovery to DETERMINISTIC rules (LP-86)
+
+- **Date:** 2026-06-29
+- **Status:** Accepted
+
+**Context:** The AI cross-source layer (LP-78) is a DISCOVERY engine — it catches novel, unenumerable
+discrepancies, but at the cost of non-determinism (recall variance: a genuine finding appears on one run, not
+the next). The diagnostic signal during the cross-source debugging was the "driver's-license-address-equals-
+subject-property" finding FLICKERING between runs — because it is actually DETERMINISTIC LOGIC the AI merely
+*thought* to apply (compare two addresses), not open-ended perception. The plan's §3.8 locked the structural
+answer: known, enumerable cross-checks GRADUATE from the AI layer into deterministic rules; the AI narrows to
+genuinely novel discovery.
+
+**Decision:** encode ~18 reliable, enumerable cross-source checks as a NEW DETERMINISTIC rule category (a pure
+engine in `app/verification/cross_source/`: `facts.py` / `rules.py` / `engine.py`), distinct from the
+single-source rules (LP-82..85) because a cross-source rule reads MULTIPLE fields ACROSS sources (not one
+threshold against one field). Each `CrossSourceRule` has a stable `rule_id` (`xsrc.*`), the canonical finding
+type it OWNS (the de-dup key), category + severity, TEMPLATED wording (fixed, identical every run), a pure
+`check` over `CrossSourceFacts`, optional threshold-as-data (the income-variance %, overlay-overrideable), and
+is program-agnostic (`program=None` — most cross-source checks apply to both Conventional and FHA). The rules
+emit into LP-75's shared model with `origin=deterministic_rule` + `confidence=DETERMINISTIC_CONFIDENCE`.
+
+- **The rules (~18):** identity (name/SSN[RED]/DOB/current-address consistency), address red-flags
+  (`dl_equals_subject` — THE GRADUATE; employer-equals-subject), income (`stated_vs_documented` variance,
+  employer-name, employer-count-vs-items), liability (`undisclosed_debt` — the deterministic detection
+  counterpart to LP-83's re-underwrite rule; stated-not-on-report), asset (`stated_missing_document` [kept per
+  the over-flagging decision], large-deposit-unsourced, gift-without-letter), terms/property (price-vs-contract,
+  loan-vs-documented, subject-address consistency, occupancy-vs-evidence).
+- **The internal research:** unlike LP-82..85 (external Fannie/HUD guides), the promotion candidates came from
+  THIS system — the canonical finding types the AI layer already emits (`_TYPE_CATEGORY` / the prompt) and the
+  over-flagging decisions. The external mortgage-QC cross-check set was the completeness checklist.
+- **DE-DUPLICATION (the graduation mechanics):** the deterministic pass runs first inside `run_cross_source` and
+  returns the set of canonical types it FIRED this run; the AI layer then DEFERS — drops any raw finding whose
+  type is in that set (run-scoped, so the AI still surfaces a type the deterministic pass was silent on — e.g.
+  when its Tier-2 facts aren't loaded — and always keeps the novel "other" bucket + co_borrower_discrepancy).
+  No double-reporting of a fired discrepancy; the stable, templated deterministic finding is the one shown.
+- **THE CONSISTENCY PAYOFF (option D — the deepest fix):** the promoted checks now run EVERY time, identically,
+  no AI, no recall variance, no flicker — completing the consistency arc with LP-78.1 (caching) + LP-81 (stable
+  identity / merge / templated wording). The driver's-license finding fires on every run as a rule.
+- **Cross-links (wired, not rebuilt):** the undisclosed-debt rule carries the same `add_liability` apply spec as
+  the AI path → applying it feeds the APPLY→recompute interlock (LP-75/76) and parallels LP-83's re-underwrite
+  rule; the missing-document check is kept (it + the needs list both surface it — intentional redundancy); the
+  asset/gift/deposit checks cross-link LP-82's single-source rules (single-source = one field; cross-source =
+  across sources). The cross-source rules surface DATA discrepancies, never computed DTI/LTV (the calculators').
+- **The absent-data guard (honesty):** a set-difference check (stated-not-on-report; undisclosed-debt) only
+  fires when the other side (the credit report) is actually present — an empty side is "not loaded", not a
+  discrepancy. Many facts (credit-report liabilities, contract price, documented income, occupancy evidence)
+  are Tier-2 / promotion-pending; their checks produce nothing until the fact lands (graceful, as LP-83..85).
+
+**Rationale:** the reliable checks were deterministic logic all along — making them rules removes the recall
+variance at its root (option D), and the run-scoped de-dup lets the AI keep its real value (the novel frontier)
+without re-litigating the known checks under a flickering label. The graduation is honest: the rules consume the
+same assembled context the AI reads, the comparison is exact, and absent facts simply do not fire.
+
+**Consequences:** the AI cross-source layer = the discovery frontier; the deterministic `xsrc.*` rules = the
+enumerable known, stable + templated. As the typed/Tier-2 extraction grows (credit-report liabilities, contract
+price, documented income), more checks become live and more of the AI's load shifts to genuinely novel
+discovery. The `starter=True` thresholds + normalization remain a validate-with-Priya item.

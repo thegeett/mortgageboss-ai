@@ -54,6 +54,10 @@ from app.models.helpers import only_active
 from app.models.loan_file import LoanFile
 from app.models.stated_financials import StatedAsset, StatedLiability
 from app.models.verification import Verification, VerificationStatus
+from app.services.cross_source_deterministic import (
+    build_cross_source_facts,
+    run_cross_source_deterministic,
+)
 from app.services.verifications import mark_verification_current
 
 logger = get_logger(__name__)
@@ -115,9 +119,24 @@ async def run_cross_source(
     # before emitting the fresh set (only now, so a failed pass leaves them intact).
     superseded = await _supersede_open_cross_source_findings(db, loan_file.id)
 
+    # LP-86 — THE GRADUATION + DE-DUP: run the DETERMINISTIC cross-source rules first.
+    # They own their canonical types, so the AI DEFERS on any type the deterministic pass
+    # fired this run (no double-reporting the same discrepancy; the deterministic, stable,
+    # templated finding is the one shown). The AI keeps the types it didn't fire + the
+    # novel "other" bucket — narrowed to genuine discovery.
+    det_facts = await build_cross_source_facts(db, loan_file=loan_file, context=context)
+    det_red, det_yellow, fired_types = await run_cross_source_deterministic(
+        db, loan_file=loan_file, run=run, facts=det_facts
+    )
+
     income_target = _resolve_income_target(context)
-    red = yellow = 0
+    red, yellow = det_red, det_yellow
+    deferred = 0
     for raw in result.findings:
+        if raw.type in fired_types:
+            # A deterministic rule already owns + reported this discrepancy — the AI defers.
+            deferred += 1
+            continue
         finding = _to_finding(
             raw, loan_file_id=loan_file.id, run_id=run.id, income_target=income_target
         )
@@ -147,6 +166,8 @@ async def run_cross_source(
         findings=red + yellow,  # counts only — never the findings' content (PII)
         red=red,
         yellow=yellow,
+        deterministic=det_red + det_yellow,  # LP-86 — the graduated deterministic findings
+        ai_deferred=deferred,  # AI findings suppressed because a deterministic rule owns the type
         superseded=superseded,  # prior open findings replaced by this pass
     )
     return run
