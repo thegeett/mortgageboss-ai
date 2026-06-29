@@ -6371,3 +6371,62 @@ automation, the Eligibility Matrix, and lender overlays).
 
 **Consequences:** LP-84/85 the FHA rules; Priya validates + corrects these. The gate mechanism is reusable
 for future applicability-gated rules. The promotion-pending rules wire up as the typed extraction grows.
+
+## ADR-205: FHA income/asset/credit-DTI/MIP rules as GROUNDED STARTERS (LP-84)
+
+- **Date:** 2026-06-29
+- **Status:** Accepted
+
+**Context:** The third Arc B content ticket and the **first FHA** one (LP-82/83 were Conventional). LP-84 adds
+~31 FHA rules across credit/DTI, income, assets, and MIP. FHA is genuinely different from Conventional — a
+separate program (`program=fha`) with its own source (HUD Handbook 4000.1, **not** the Fannie Selling Guide)
+and structures with no Conventional analog: a tiered minimum-decision-credit-score (MDCS), a compensating-
+factors DTI model, and MIP (mortgage insurance premium). It must NOT be a clone of the Conventional rules.
+
+**Decision:** encode ~31 FHA rules into the LP-74 engine as **GROUNDED STARTERS** (same shape + posture as
+LP-82/83: real HUD section citations, `starter=True`, validate-with-Priya — Priya works FHA with Sun-West),
+under a new `rules/fha/` package with its own `fha_rule` / `hud` builders (`_base.py`). Program-gating is the
+existing `registry.investor(program)` filter — no new mechanism. Specifics:
+
+- **MDCS is encoded TIERED to the down payment, NOT a flat min (the FHA headline).** 580+ → 3.5% down (96.5%
+  LTV); 500-579 → 10% down (90% LTV); below 500 → ineligible. Encoded as an eligibility floor
+  (`fha.credit.mdcs_eligibility_floor`, ≥500, RED), the 3.5%-tier threshold (`…mdcs_minimum_down_3_5_tier`,
+  ≥580, YELLOW), and a **gated** low-tier rule (`…mdcs_low_tier_down_payment`, requires 10% down, gate
+  `credit.mdcs < 580`). A hardcoded "min 580 always" would be wrong.
+- **Manual-underwriting triggers (the "conservative flag"):** a score below 620 (and/or DTI above 43%) routes
+  to manual underwriting where compensating factors apply (vs the TOTAL Mortgage Scorecard AUS) — encoded as a
+  YELLOW routing flag, II.A.5, AUS-vs-manual distinction marked.
+- **DTI is the COMPENSATING-FACTORS mitigable model, NOT a hard DU-style ceiling (the plan's FHA requirement).**
+  Baseline 31% front / 43% back is encoded YELLOW (a flag **resolvable by documenting a compensating factor**
+  via LP-75's resolution — OVERRIDDEN-with-reason / APPLIED); the uplifted ceiling 40% front / 50% back is a
+  separate RED rule (hard, compensating factors cannot rescue it). A gated
+  `fha.dti.compensating_factors_required` (applies only when back-end > 43%) makes the "≥1 documented factor"
+  requirement explicit. This contrasts with Conventional's hard DU ceiling. The DTI rules **consume LP-76's
+  computed `dti.front_end_pct` / `dti.back_end_pct`** (read, never recompute). These SUPERSEDE the LP-74 sample
+  `fha.dti.back_end_max` (a 57% placeholder).
+- **MIP (no Conventional analog):** UFMIP 1.75% (175 bps) of the base loan amount + present-check (Appendix
+  1.0); annual MIP rate-as-data table (~15-75 bps, most 55; the ≤75 bps starter upper bound marked to-verify);
+  the **LTV-90% duration rule** — LTV > 90% → annual MIP for life; LTV ≤ 90% → 11 years (132 months) — encoded
+  as two LTV-gated rules **reading LP-77's `ltv.ltv_pct`**; a missing-MIP RED finding (an FHA loan must carry
+  MIP). MIP rules use the `DOCUMENTATION` category: there is **no dedicated `MORTGAGE_INSURANCE` category** and
+  adding one would require a migration (the category column is a CHECK-constrained VARCHAR) — a dedicated MI
+  category is a deferred promotion.
+- **Overlay-overrideable (especially apt for FHA — overlays are common):** an FHA minimum (e.g. the MDCS floor
+  500→620) and the MIP rate are overridden by `rule_id` (LP-80). Most lenders set 580-640 floors over FHA's
+  500/580.
+- **Typed-core reuse + promotion:** the FHA income/asset rules read the SAME promoted paths as LP-82
+  (`assets.gift.total_amount`, `assets.retirement.total_amount`, `income.self_employment.monthly_amount`,
+  `assets.largest_deposit_amount`, `dti.back_end_pct`) — evaluable today on an FHA file (program-gating selects
+  the FHA variant), no new promotion needed. The FHA-specific facts (`credit.mdcs`, `down_payment.pct`,
+  `dti.front_end_pct`, `ltv.ltv_pct`, the MIP fields) are promotion-pending (recorded not-evaluated until they
+  land).
+- **Citations researched, not invented:** uncertain values (derogatory waiting periods, the MIP rate table,
+  the 60% retirement-reserve haircut, FHA document recency, AUS-vs-manual routing) carry `to_verify=True`.
+
+**Rationale:** FHA's tiered MDCS, compensating-factors discretion, and MIP are exactly the structures a
+Conventional clone would get wrong; encoding them FHA-specifically (with HUD citations) and marking them
+starter keeps the engine real while the content stays honestly pending the expert's validation.
+
+**Consequences:** LP-85 the FHA property/doc rules (stricter safety/security/soundness standards) extend
+`FHA_RULES`. The promotion-pending FHA facts (credit/down-payment/LTV/MIP) wire up as the typed extraction
+grows. A dedicated `MORTGAGE_INSURANCE` finding category is a future migration if MIP findings warrant it.

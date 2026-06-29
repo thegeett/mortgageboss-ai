@@ -114,12 +114,15 @@ def default_registry() -> RuleRegistry:
     from app.verification.overlays.samples import SAMPLE_OVERLAYS
     from app.verification.overlays.starter import STARTER_OVERLAYS
     from app.verification.rules.conventional import CONVENTIONAL_RULES
+    from app.verification.rules.fha import FHA_RULES
     from app.verification.rules.samples import SAMPLE_RULES
 
     return RuleRegistry(
         # The LP-74 sample rules (DTI/LTV limits the calculators resolve) + the real
-        # Conventional content: income/asset (LP-82) + credit/DTI/property/doc (LP-83),
-        # grounded starters. FHA is LP-84/85.
-        rules=(*SAMPLE_RULES, *CONVENTIONAL_RULES),
+        # program content: Conventional income/asset (LP-82) + credit/DTI/property/doc
+        # (LP-83) and FHA credit/DTI/income/asset/MIP (LP-84) — grounded starters.
+        # Program-gating (investor(program)) keeps each program's rules to its own files;
+        # FHA property/doc rules are LP-85.
+        rules=(*SAMPLE_RULES, *CONVENTIONAL_RULES, *FHA_RULES),
         overlays={**SAMPLE_OVERLAYS, **STARTER_OVERLAYS},
     )
