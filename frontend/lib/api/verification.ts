@@ -21,9 +21,13 @@ export async function fetchVerification(identifier: string): Promise<Verificatio
   return res.data;
 }
 
-export async function runVerification(identifier: string): Promise<VerificationRun> {
+/**
+ * Trigger the cross-source pass. By default the backend returns the CACHED result
+ * when the inputs are unchanged (no AI re-run); `force` re-runs the AI anyway.
+ */
+export async function runVerification(identifier: string, force = false): Promise<VerificationRun> {
   const res = await apiClient.post<VerificationRun>(
-    `${API_V1}/loan-files/${identifier}/verification/run`,
+    `${API_V1}/loan-files/${identifier}/verification/run${force ? "?force=true" : ""}`,
   );
   return res.data;
 }
@@ -46,9 +50,10 @@ export function useVerification(identifier: string) {
 export function useRunVerification(identifier: string) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: () => runVerification(identifier),
+    // `force` re-runs the AI even when inputs are unchanged (the escape hatch).
+    mutationFn: (force?: boolean) => runVerification(identifier, force ?? false),
     onSuccess: () => {
-      // Refetch the status (now RUNNING) so polling kicks in.
+      // Refetch the status (now RUNNING, or the cached completed run) so the UI updates.
       void queryClient.invalidateQueries({ queryKey: verificationQueryKey(identifier) });
     },
   });

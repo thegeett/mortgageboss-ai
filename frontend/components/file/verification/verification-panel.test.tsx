@@ -80,11 +80,18 @@ describe("VerificationPanel", () => {
     expect(screen.getByText(/p\.1/)).toBeDefined();
   });
 
-  it("triggers the pass on click", () => {
+  it("triggers the pass (cached by default) on click", () => {
     mock();
     render(<VerificationPanel fileId="LF-1" />);
     fireEvent.click(screen.getByRole("button", { name: /run verification/i }));
-    expect(runMutate).toHaveBeenCalled();
+    expect(runMutate).toHaveBeenCalledWith(false); // default: return cached if unchanged
+  });
+
+  it("force-reruns via the 'Re-run anyway' escape hatch", () => {
+    mock(); // the fixture's latest_run is completed → the escape hatch is shown
+    render(<VerificationPanel fileId="LF-1" />);
+    fireEvent.click(screen.getByRole("button", { name: /re-run anyway/i }));
+    expect(runMutate).toHaveBeenCalledWith(true); // force = bypass the cache
   });
 
   it("shows the staleness banner when out of date", () => {

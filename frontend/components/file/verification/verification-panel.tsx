@@ -59,10 +59,28 @@ export function VerificationPanel({ fileId }: { fileId: string }) {
             up.
           </p>
         </div>
-        <Button size="sm" className="gap-1.5" disabled={running} onClick={() => run.mutate()}>
-          {running ? <Spinner className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5" />}
-          {running ? "Running…" : "Run verification"}
-        </Button>
+        <div className="flex flex-col items-end gap-1">
+          <Button
+            size="sm"
+            className="gap-1.5"
+            disabled={running}
+            onClick={() => run.mutate(false)}
+          >
+            {running ? <Spinner className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5" />}
+            {running ? "Running…" : "Run verification"}
+          </Button>
+          {/* Escape hatch: re-run the AI even when inputs are unchanged. The default
+              button returns the cached result instantly when nothing changed. */}
+          {data?.latest_run?.status === "completed" && !running && (
+            <button
+              type="button"
+              onClick={() => run.mutate(true)}
+              className="text-[11px] text-gray-400 underline-offset-2 hover:text-gray-600 hover:underline"
+            >
+              Re-run anyway
+            </button>
+          )}
+        </div>
       </CardHeader>
       <CardContent aria-busy={isPending}>
         {isPending ? (

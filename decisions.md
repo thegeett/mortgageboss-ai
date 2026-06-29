@@ -5932,3 +5932,49 @@ staleness panel with a read-only findings list); LP-86 adds the full ~15-20 cros
 capability, more guidance). The recompute lands in LP-76/77; auto-re-run and bounding-box source
 highlighting are later phases. PII is assembled for the AI call and **never logged** (counts/tokens
 only); the worker must be running for the pass to execute.
+
+## ADR-193: Cross-source result caching by input fingerprint (LP-78.1)
+
+- **Date:** 2026-06-29
+- **Status:** Accepted
+
+**Context:** "Run verification" (LP-78) re-ran the AI cross-source pass every click, even on an
+unchanged file. Because the pass is an open-ended AI task (non-deterministic even at temperature 0), the
+processor saw the *same* discrepancies described and counted slightly differently each run — which erodes
+trust ("the tool can't even agree with itself") and wastes AI cost/latency. This is the back half of the
+staleness model: the front half (LP-78) marks verification STALE when documents change; this adds the
+complement — when *not* changed, don't re-ask the AI.
+
+**Decision:**
+
+- **Input fingerprint.** Compute a stable SHA-256 over the verification *inputs* — the assembled
+  stated-vs-verified context (stated income/assets/liabilities/employers/borrowers + loan/property core,
+  and the current document extractions' values). Canonical serialization: dict keys sorted and **lists
+  sorted by their canonical form**, so row order does not change the hash; the hash is over the compared
+  substance (no timestamps / run ids). Same inputs → same fingerprint; any value change → a new
+  fingerprint.
+- **Store it on the completed run.** `verifications.input_fingerprint` is set when a cross-source pass
+  completes, alongside the findings.
+- **Cache on trigger.** "Run verification" computes the *current* input fingerprint (a cheap DB read, no
+  AI) and compares it to the last completed run's stored fingerprint. **Match** → return that run's
+  cached findings, **no AI call** (instant, free, byte-identical — the same stored rows). **Differ** →
+  create a RUNNING run and enqueue the AI pass (there is genuinely new data to compare), which stores the
+  new findings + the new fingerprint.
+- **Reconciled with staleness.** The fingerprint is the precise mechanism behind "changed": a document
+  change (which marks STALE) changes the fingerprint, so stale ⇔ fingerprint differs. On a cached return
+  with a matching fingerprint the stale flag is cleared (matching inputs ⇒ not stale), so the two never
+  disagree.
+- **Force-rerun escape hatch.** `POST …/verification/run?force=true` (a "Re-run anyway" affordance)
+  bypasses the cache and re-runs the AI even on unchanged inputs — available but not the default.
+
+**Rationale:** the fix is not to make the AI deterministic (impossible for an open-ended perception task)
+but to **stop re-asking it when there is nothing new to compare**. Fingerprinting the exact compared
+substance makes "unchanged" precise and order-independent; returning the stored findings is identical by
+construction. This eliminates the "click repeatedly, get different results" problem at the source and
+removes wasted AI cost/latency on unchanged files.
+
+**Consequences:** this is a caching layer in front of the existing pass — the cross-source capability and
+the findings model are unchanged. A re-run still happens automatically when inputs change (a document
+added/changed, stated data edited) or when forced. LP-79's dial still re-filters already-computed
+findings without re-running. The fingerprint hashes a hash, not raw PII beyond what the findings already
+hold; the assembled context is never logged.

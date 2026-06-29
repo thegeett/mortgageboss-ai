@@ -28,7 +28,12 @@ from app.models import (
     UserRole,
 )
 from app.models.verification import VerificationStatus, VerificationTrigger
-from app.services.cross_source import assemble_cross_source_context, run_cross_source
+from app.services.cross_source import (
+    assemble_cross_source_context,
+    compute_input_fingerprint,
+    latest_completed_run,
+    run_cross_source,
+)
 from app.services.dti import build_dti_calculation
 from app.services.finding_resolution import apply_finding, override_finding
 from app.services.loan_files import create_loan_file
@@ -415,6 +420,40 @@ async def test_pass_is_per_file(db_session: AsyncSession) -> None:
 
     assert len(await _findings(db_session, a.id)) == 1
     assert len(await _findings(db_session, b.id)) == 0  # only file A got findings
+
+
+# --- Input fingerprint (LP-78.1 caching) -------------------------------------
+
+
+def test_fingerprint_is_stable() -> None:
+    """The same inputs hash to the same fingerprint every time (deterministic)."""
+    ctx = {"stated": {"borrowers": [{"name": "Pat", "income_items": [{"id": "1", "v": "10"}]}]}}
+    assert compute_input_fingerprint(ctx) == compute_input_fingerprint(dict(ctx))
+
+
+def test_fingerprint_ignores_row_order() -> None:
+    """Reordering the underlying rows does NOT change the fingerprint."""
+    a = {"liabilities": [{"holder": "A", "pmt": "100"}, {"holder": "B", "pmt": "200"}]}
+    b = {"liabilities": [{"holder": "B", "pmt": "200"}, {"holder": "A", "pmt": "100"}]}
+    assert compute_input_fingerprint(a) == compute_input_fingerprint(b)
+
+
+def test_fingerprint_changes_on_value_change() -> None:
+    """Changing any compared value changes the fingerprint."""
+    base = {"liabilities": [{"holder": "A", "pmt": "100"}]}
+    changed = {"liabilities": [{"holder": "A", "pmt": "150"}]}
+    assert compute_input_fingerprint(base) != compute_input_fingerprint(changed)
+
+
+async def test_run_stores_the_input_fingerprint(db_session: AsyncSession) -> None:
+    """A completed pass stores the fingerprint of the inputs it compared."""
+    company = await _company(db_session, "acme")
+    loan_file = await _file(db_session, company)
+    expected = compute_input_fingerprint(await assemble_cross_source_context(db_session, loan_file))
+
+    run = await _run(db_session, loan_file, [_raw(type="income_variance")])
+    assert run.input_fingerprint == expected
+    assert (await latest_completed_run(db_session, loan_file.id)).input_fingerprint == expected
 
 
 # --- Re-run replaces the prior open findings (no duplication) -----------------

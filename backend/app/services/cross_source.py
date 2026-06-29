@@ -24,6 +24,7 @@ within the company first).
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from collections.abc import Awaitable, Callable
@@ -135,6 +136,9 @@ async def run_cross_source(
     run.total_cost_estimate = estimate_cost(
         model=result.model, input_tokens=result.input_tokens, output_tokens=result.output_tokens
     )
+    # Fingerprint THESE inputs (LP-78.1): a later re-run whose inputs hash to the
+    # same value returns this run's findings without re-calling the AI.
+    run.input_fingerprint = compute_input_fingerprint(context)
     await mark_verification_current(db, loan_file_id=loan_file.id)
     await db.flush()
     logger.info(
@@ -283,6 +287,52 @@ def _resolve_income_target(context: dict[str, Any]) -> str | None:
                 best_amount = amount
                 best_id = item.get("id")
     return best_id
+
+
+# --------------------------------------------------------------------------- #
+# Input fingerprint + cache lookup (LP-78.1)
+# --------------------------------------------------------------------------- #
+
+
+def compute_input_fingerprint(context: dict[str, Any]) -> str:
+    """A stable SHA-256 over the verification inputs (the AI's compared substance).
+
+    Same inputs → same fingerprint; **row order does not matter** (lists are sorted
+    by their canonical form); changing any value changes the hash. The hash is over
+    the assembled context (the stated + verified values that feed the AI) — there is
+    no volatile metadata (timestamps / run ids) in it. Returns a 64-char hex digest.
+    """
+    blob = json.dumps(
+        _canonicalize(context), sort_keys=True, separators=(",", ":"), ensure_ascii=False
+    )
+    return hashlib.sha256(blob.encode("utf-8")).hexdigest()
+
+
+def _canonicalize(obj: Any) -> Any:
+    """Recursively normalize for a stable hash: sort dict keys + order-free lists."""
+    if isinstance(obj, dict):
+        return {k: _canonicalize(obj[k]) for k in sorted(obj)}
+    if isinstance(obj, list):
+        items = [_canonicalize(x) for x in obj]
+        # Order-independent: sort by each element's canonical serialization.
+        return sorted(items, key=lambda x: json.dumps(x, sort_keys=True, ensure_ascii=False))
+    return obj
+
+
+async def latest_completed_run(db: AsyncSession, loan_file_id: UUID) -> Verification | None:
+    """The file's most recent COMPLETED cross-source run (carries the fingerprint)."""
+    stmt = (
+        only_active(
+            select(Verification).where(
+                Verification.loan_file_id == loan_file_id,
+                Verification.status == VerificationStatus.COMPLETED,
+            ),
+            Verification,
+        )
+        .order_by(Verification.created_at.desc())
+        .limit(1)
+    )
+    return (await db.execute(stmt)).scalars().first()
 
 
 # --------------------------------------------------------------------------- #

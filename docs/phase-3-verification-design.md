@@ -339,3 +339,20 @@ The pass is scoped and stabilized so the same file yields a stable set of findin
   to yellow (advisory).
 - **Deterministic settings** — `temperature=0`, ordered context queries, an 8192-token budget with a
   truncation guard (warn on `stop_reason == "max_tokens"`), and raw-vs-parsed drop logging.
+
+### 12.5 Result caching by input fingerprint (LP-78.1)
+
+"Run verification" no longer re-runs the AI on an unchanged file — the back half of the staleness
+model. A stable **input fingerprint** (SHA-256 over the assembled stated-vs-verified context, with
+dict keys sorted and lists sorted by their canonical form so row order is irrelevant) is stored on
+each completed run (`verifications.input_fingerprint`). On the next trigger the endpoint computes the
+*current* fingerprint (a cheap DB read, no AI) and compares it to the last completed run's:
+
+- **Match (inputs unchanged)** → return that run's findings, **no AI call** (instant, free, identical).
+- **Differ (inputs changed) / `force=true`** → a fresh AI pass (it stores the new findings + fingerprint).
+
+This eliminates "click repeatedly, get different results" at the source — not by making the AI
+deterministic (impossible for an open-ended task) but by not re-asking when nothing changed. It is
+reconciled with staleness (a document change changes the fingerprint *and* marks stale; a cached return
+clears a stale flag whose inputs match). A **"Re-run anyway"** escape hatch (`force=true`) bypasses the
+cache when the processor wants a fresh look. (ADR-193.)

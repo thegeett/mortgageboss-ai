@@ -24,8 +24,13 @@ from app.schemas.verification import (
     VerificationRunPublic,
     VerificationStatusPublic,
 )
+from app.services.cross_source import (
+    assemble_cross_source_context,
+    compute_input_fingerprint,
+    latest_completed_run,
+)
 from app.services.loan_files import get_loan_file
-from app.services.verifications import create_verification_run
+from app.services.verifications import create_verification_run, mark_verification_current
 
 log = structlog.get_logger(__name__)
 
@@ -53,19 +58,36 @@ def _enqueue_cross_source(loan_file_id: UUID, run_id: UUID) -> bool:
 
 @router.post("/{identifier}/verification/run", response_model=VerificationRunPublic)
 async def run_verification(
-    identifier: str, db: DbSession, current_user: CurrentUser
+    identifier: str, db: DbSession, current_user: CurrentUser, force: bool = False
 ) -> VerificationRunPublic:
     """Trigger the cross-source verification pass for one of the caller's files.
 
-    Creates a RUNNING run and enqueues the AI pass (the worker assembles the two
-    sides, runs the pass, and emits findings). Returns the run immediately; the
-    client polls the status endpoint for completion. If the enqueue fails (e.g. the
-    broker is unreachable), the run is marked FAILED rather than left RUNNING — a
-    visible failure, not an infinite spinner.
+    **Caching (LP-78.1):** if the verification inputs (the stated + verified data the
+    pass compares) hash to the same fingerprint as the last completed run, this
+    returns that run's **cached** findings WITHOUT re-calling the AI — instant, free,
+    and identical (the cross-source pass is non-deterministic, so re-asking the AI on
+    unchanged inputs would only show the same discrepancies described differently).
+    Pass ``force=true`` to re-run anyway (the escape hatch).
+
+    When the inputs HAVE changed (or ``force``), it creates a RUNNING run and enqueues
+    the AI pass on the worker; the client polls the status endpoint for completion. A
+    failed enqueue marks the run FAILED rather than leaving it RUNNING.
     """
     loan_file = await get_loan_file(db, company_id=current_user.company_id, identifier=identifier)
     if loan_file is None:
         raise _NOT_FOUND
+
+    # Compare the CURRENT inputs to the last completed run's fingerprint.
+    fingerprint = compute_input_fingerprint(await assemble_cross_source_context(db, loan_file))
+    last = await latest_completed_run(db, loan_file.id)
+    if not force and last is not None and last.input_fingerprint == fingerprint:
+        # Inputs unchanged → return the cached run; do NOT call the AI.
+        if loan_file.verification_stale:
+            # Reconcile: matching inputs means it is not actually stale.
+            await mark_verification_current(db, loan_file_id=loan_file.id)
+            await db.commit()
+        return VerificationRunPublic.from_model(last)
+
     run = await create_verification_run(
         db, loan_file_id=loan_file.id, trigger=VerificationTrigger.MANUAL
     )
