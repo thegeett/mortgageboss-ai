@@ -149,8 +149,10 @@ async def test_overlay_run_fails_dti_and_adds_custom_rule(db_session: AsyncSessi
     custom_id = f"{SAMPLE_OVERLAY_LENDER_SLUG}.reserves.min_months"
     assert custom_id in findings
     assert findings[custom_id].status is FindingStatus.YELLOW
-    assert run.red_count == 1
-    assert run.yellow_count == 1
+    assert run.red_count == 1  # the overlay-tightened DTI
+    # ≥1 yellow: the overlay's custom reserves rule + any LP-82 Conventional rules
+    # that fire on this file (e.g. the reserves floor).
+    assert run.yellow_count >= 1
 
 
 async def test_run_is_tenant_scoped(db_session: AsyncSession) -> None:
@@ -209,8 +211,9 @@ async def test_run_links_findings_to_the_verification(db_session: AsyncSession) 
     )
     assert linked
     assert all(f.origin is FindingOrigin.DETERMINISTIC_RULE for f in linked)
-    # Counts on the run match the persisted greens (no overlay → all green here).
-    assert run.green_count == len(linked)
+    # The run's per-status counts sum to the findings it produced (LP-82 adds real
+    # Conventional rules, so the set is no longer all-green).
+    assert run.green_count + run.yellow_count + run.red_count == len(linked)
 
 
 async def test_default_finding_origin_is_deterministic_rule(db_session: AsyncSession) -> None:

@@ -6281,3 +6281,48 @@ needs-first ordering, without blocking a processor who wants to run verification
 
 **Consequences:** the indicator reuses the existing outstanding-needs count; no new backend. A hard gate (if
 ever wanted) is a future policy decision, not this.
+
+## ADR-203: Conventional income & asset rules as GROUNDED STARTERS (LP-82)
+
+- **Date:** 2026-06-29
+- **Status:** Accepted
+
+**Context:** Arc A built + surfaced the verification engine; Arc B fills the rule CONTENT. LP-82 is the first
+content ticket — ~20 Conventional income + asset rules (~10 each). The rules' authoritative source is the
+domain expert (Priya, an active Conventional/FHA processor) and her validation against real files; her
+priority list is not yet available.
+
+**Decision:** encode ~20 Conventional income/asset rules into the LP-74 engine as **GROUNDED STARTERS** —
+researched against the *current* Fannie Mae Selling Guide (retrieved 2026-06) with **real B-section
+citations** + current values, but **clearly marked starter / validate-with-Priya** throughout (every rule
+carries `starter=True` + a `notes` caveat; the module header says so; the docs say so). They are NOT
+presented as authoritative final rules. Specifics:
+
+- **Uniform structure (LP-74):** each rule is a `VerificationRule` — stable `rule_id` (e.g.
+  `conv.income.self_employment_present`, `conv.assets.large_deposit_source`), `layer=investor`,
+  `program=conventional`, the typed field(s) it `reads`, a **threshold-as-data** `Condition` (so an overlay
+  overrides it by `rule_id`, LP-80), `severity`, and a **structured `RuleSource`** (`{type, citation,
+  section, retrieved, to_verify}`). The schema gained `section`/`retrieved`/`to_verify` on `RuleSource` and
+  `starter`/`notes` on `VerificationRule`.
+- **Grounded values that correct folk-knowledge:** document age is **4 months** on the note date (B1-1-03),
+  NOT 30 days; base income is the **most recent W-2 + pay stub** (the chapter B3-3 rewrite of 03/2026), NOT
+  two years of W-2s — explicitly marked recently-changed; self-employment needs a **2-year history**
+  (B3-3.5-01); gift/asset/retirement verification (B3-4.x). The **large-deposit threshold** and **reserves**
+  are marked **DU-message-driven / program-driven STARTER placeholders**, NOT fixed Selling-Guide constants.
+- **Citations are researched, not invented:** where a subsection is uncertain the source carries
+  `to_verify=True` rather than fabricating a number (AI-assisted-but-human-reviewed encoding).
+- **Deterministic evaluation, no AI:** the engine reads the typed field → compares to the threshold → emits
+  a finding into LP-75's model at certain confidence. A few rules are **evaluable today** from stated data
+  (self-employment income, gift, retirement, large deposit, reserves — via **typed-core promotions** in
+  `build_file_facts`); the rest read a canonical typed-field path whose fact isn't produced yet, so they are
+  recorded **not-evaluated** (graceful) until the fact is promoted — the "typed core grows as rules need it"
+  design.
+
+**Rationale:** grounding the starters in current research (not memory) makes them a *useful* first cut and
+corrects stale folk-knowledge, while the starter marking is honest about what they are — content pending the
+expert's validation, subject to Selling-Guide updates, DU automation, and lender overlays. The engine is real
+and tested; the content is grounded-but-starter.
+
+**Consequences:** LP-83 the Conventional credit/DTI/property/doc rules; LP-84/85 FHA; Priya validates +
+extends these against the live guide for her lenders. The promotion-pending rules wire up as the typed
+extraction grows. The `to_verify` flag + `starter` marker can drive a future "rules to validate" view.

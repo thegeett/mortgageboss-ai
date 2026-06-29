@@ -113,6 +113,13 @@ def default_registry() -> RuleRegistry:
     """
     from app.verification.overlays.samples import SAMPLE_OVERLAYS
     from app.verification.overlays.starter import STARTER_OVERLAYS
+    from app.verification.rules.conventional import CONVENTIONAL_INCOME_ASSET_RULES
     from app.verification.rules.samples import SAMPLE_RULES
 
-    return RuleRegistry(rules=SAMPLE_RULES, overlays={**SAMPLE_OVERLAYS, **STARTER_OVERLAYS})
+    return RuleRegistry(
+        # The LP-74 sample rules (DTI/LTV limits the calculators resolve) + the LP-82
+        # Conventional income/asset content (grounded starters). FHA + Conventional
+        # credit/property content is LP-83..85.
+        rules=(*SAMPLE_RULES, *CONVENTIONAL_INCOME_ASSET_RULES),
+        overlays={**SAMPLE_OVERLAYS, **STARTER_OVERLAYS},
+    )

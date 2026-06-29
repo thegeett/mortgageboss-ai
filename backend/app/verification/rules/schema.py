@@ -118,13 +118,22 @@ class Condition(BaseModel):
 
 
 class RuleSource(BaseModel):
-    """A structured, durable citation for a rule (auditability)."""
+    """A structured, durable citation for a rule (auditability).
+
+    Prefer the durable :attr:`section` reference (e.g. ``"B1-1-03"``) over a deep
+    :attr:`url` — Selling Guide URLs rot, section numbers persist. :attr:`retrieved`
+    records when the value was researched (the Guide changes frequently). Set
+    :attr:`to_verify` when the section is uncertain — never fabricate one.
+    """
 
     model_config = ConfigDict(frozen=True)
 
     type: str  # e.g. "investor_guide" / "regulation" / "documentation_standard"
     citation: str  # e.g. "Fannie Mae Selling Guide B3-6-02"
+    section: str | None = None  # the durable section reference, e.g. "B1-1-03"
     url: str | None = None
+    retrieved: str | None = None  # when the value was researched, e.g. "2026-06"
+    to_verify: bool = False  # the section/value is uncertain — verify, don't trust
 
 
 class VerificationRule(BaseModel):
@@ -155,6 +164,12 @@ class VerificationRule(BaseModel):
     description: str
     source: RuleSource
     overlay_applied: str | None = None
+    # STARTER content (LP-82+): grounded in research but pending the domain expert's
+    # validation against the live guide for her lenders/scenarios — NOT authoritative.
+    starter: bool = False
+    # Free-text caveats: "recently changed", "DU-message-driven", "typed-core promotion
+    # pending: <fact>", etc. — the validate-with-Priya / promotion notes.
+    notes: str | None = None
 
     def with_condition(self, condition: Condition, *, overlay: str) -> VerificationRule:
         """Return a copy with the threshold replaced (identity/logic unchanged).

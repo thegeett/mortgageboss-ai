@@ -234,7 +234,81 @@ async def build_file_facts(db: AsyncSession, *, loan_file: LoanFile, as_of: date
     if paystub_fact is not None:
         values["documents.paystub.most_recent_age_days"] = paystub_fact
 
+    # --- Typed-core promotions for the LP-82 Conventional income/asset rules ----
+    # Presence-driven facts derived from the stated structured data: set only when
+    # present (> 0), so a "documentation required" rule fires when the thing exists
+    # and is simply not-evaluated when it doesn't (the engine's graceful absence).
+    gift_total = await _sum_assets_by_type(db, loan_file.id, _GIFT_KEYWORDS)
+    if gift_total > 0:
+        values["assets.gift.total_amount"] = Fact(
+            value=gift_total,
+            source={"type": "stated", "note": "sum of gift-type stated assets (LP-82 promotion)"},
+        )
+
+    retirement_total = await _sum_assets_by_type(db, loan_file.id, _RETIREMENT_KEYWORDS)
+    if retirement_total > 0:
+        values["assets.retirement.total_amount"] = Fact(
+            value=retirement_total,
+            source={"type": "stated", "note": "sum of retirement-type stated assets (LP-82)"},
+        )
+
+    se_income = await _sum_self_employment_income(db, loan_file.id)
+    if se_income > 0:
+        values["income.self_employment.monthly_amount"] = Fact(
+            value=se_income,
+            source={"type": "stated", "note": "sum of self-employment stated income (LP-82)"},
+        )
+
     return FileFacts(values=values)
+
+
+# Type keywords for the LP-82 promotions (matched case-insensitively on the stated
+# asset_type / income_type). Starter heuristics over the stated data — the richer
+# typed extraction is a later promotion.
+_GIFT_KEYWORDS = ("gift",)
+_RETIREMENT_KEYWORDS = ("retirement", "401", "ira", "pension")
+_SELF_EMPLOYMENT_KEYWORDS = ("self", "business")
+
+
+async def _sum_assets_by_type(
+    db: AsyncSession, loan_file_id: UUID, keywords: tuple[str, ...]
+) -> Decimal:
+    """Sum stated assets whose ``asset_type`` matches any keyword (case-insensitive)."""
+    stmt = only_active(
+        select(StatedAsset).where(StatedAsset.loan_file_id == loan_file_id), StatedAsset
+    )
+    rows = (await db.execute(stmt)).scalars().all()
+    return sum(
+        (
+            row.value
+            for row in rows
+            if row.value is not None
+            and row.asset_type is not None
+            and any(k in row.asset_type.lower() for k in keywords)
+        ),
+        Decimal(0),
+    )
+
+
+async def _sum_self_employment_income(db: AsyncSession, loan_file_id: UUID) -> Decimal:
+    """Sum stated income whose ``income_type`` looks like self-employment / business."""
+    stmt = only_active(
+        select(StatedIncomeItem)
+        .join(Borrower, StatedIncomeItem.borrower_id == Borrower.id)
+        .where(Borrower.loan_file_id == loan_file_id),
+        StatedIncomeItem,
+    )
+    rows = (await db.execute(stmt)).scalars().all()
+    return sum(
+        (
+            row.monthly_amount
+            for row in rows
+            if row.monthly_amount is not None
+            and row.income_type is not None
+            and any(k in row.income_type.lower() for k in _SELF_EMPLOYMENT_KEYWORDS)
+        ),
+        Decimal(0),
+    )
 
 
 async def _sum_monthly_liabilities(db: AsyncSession, loan_file_id: UUID) -> Decimal:
