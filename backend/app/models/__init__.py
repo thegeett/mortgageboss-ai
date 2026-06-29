@@ -14,6 +14,7 @@ from app.models.base import (
     utcnow,
 )
 from app.models.borrower import Borrower, MaritalStatus
+from app.models.calculator_override import CalculatorOverride
 from app.models.communication import (
     Communication,
     CommunicationChannel,
@@ -81,6 +82,7 @@ __all__ = [
     "ActivityType",
     "Base",
     "Borrower",
+    "CalculatorOverride",
     "Communication",
     "CommunicationChannel",
     "CommunicationDirection",

@@ -1,7 +1,8 @@
 "use client";
 
 import { useAuthStore } from "@/lib/stores/auth-store";
-import { ShieldCheck } from "lucide-react";
+import { ShieldCheck, SlidersHorizontal } from "lucide-react";
+import Link from "next/link";
 
 /**
  * Administration placeholder (LP-27). The nav item is role-gated to admins, but
@@ -31,6 +32,13 @@ export default function AdminPage() {
               Inviting and managing processors arrives in a later phase. Accounts are seed/admin
               provisioned for now.
             </p>
+            <Link
+              href="/admin/lenders"
+              className="mt-5 inline-flex items-center gap-2 rounded-md border border-primary/30 bg-primary/5 px-3 py-2 text-sm font-medium text-primary hover:bg-primary/10"
+            >
+              <SlidersHorizontal className="h-4 w-4" />
+              Lender overlays
+            </Link>
           </>
         ) : (
           <>

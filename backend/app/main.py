@@ -10,6 +10,7 @@ from fastapi.responses import JSONResponse
 from app.api.activity import router as activity_router
 from app.api.auth import router as auth_router
 from app.api.borrowers import router as borrowers_router
+from app.api.calculators import router as calculators_router
 from app.api.document_findings import router as findings_router
 from app.api.documents import flat_router as documents_flat_router
 from app.api.documents import nested_router as documents_nested_router
@@ -18,6 +19,7 @@ from app.api.lenders import router as lenders_router
 from app.api.loan_files import router as loan_files_router
 from app.api.ltv import router as ltv_router
 from app.api.needs import router as needs_router
+from app.api.overlay_admin import router as overlay_admin_router
 from app.api.preferences import router as preferences_router
 from app.api.property import router as property_router
 from app.api.stated_financials import router as stated_financials_router
@@ -112,6 +114,8 @@ app.include_router(findings_router, prefix=API_V1_PREFIX)
 app.include_router(stated_financials_router, prefix=API_V1_PREFIX)
 app.include_router(dti_router, prefix=API_V1_PREFIX)
 app.include_router(ltv_router, prefix=API_V1_PREFIX)
+app.include_router(calculators_router, prefix=API_V1_PREFIX)
+app.include_router(overlay_admin_router, prefix=API_V1_PREFIX)
 app.include_router(verification_router, prefix=API_V1_PREFIX)
 app.include_router(preferences_router, prefix=API_V1_PREFIX)
 

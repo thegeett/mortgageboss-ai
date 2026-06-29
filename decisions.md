@@ -6546,3 +6546,88 @@ same assembled context the AI reads, the comparison is exact, and absent facts s
 enumerable known, stable + templated. As the typed/Tier-2 extraction grows (credit-report liabilities, contract
 price, documented income), more checks become live and more of the AI's load shifts to genuinely novel
 discovery. The `starter=True` thresholds + normalization remain a validate-with-Priya item.
+
+## ADR-208: Four additional calculators (MI/MIP, self-employed, reserves, max loan) — extend the LP-76/77 pattern (LP-87)
+
+- **Date:** 2026-06-29
+- **Status:** Accepted
+
+**Context:** LP-76/77 shipped the DTI + LTV calculators (transparent / auto-populated / overrideable /
+findings-coupled / deterministic — the "show the math, beat ChatGPT's black box" win). LP-87 adds four more —
+mortgage insurance (MI/MIP), self-employed income, reserves, and max loan — that processors need checked.
+
+**Decision:** build the four as pure deterministic modules (`app/verification/{mortgage_insurance,self_employed,
+reserves,max_loan}.py`) behind ONE shared transparent response shape (`CalculatorView`) and ONE shared,
+calculator-discriminated override table (`calculator_overrides`), reusing the LP-76/77 service/override/audit/API
+pattern exactly. One generic frontend component (`calculator-card.tsx`) renders all four. Specifics:
+
+- **MI/MIP is PROGRAM-AWARE.** Conventional = PMI (required above 80% LTV, terminates at 78% per the HPA — exact;
+  the annual rate is a credit/LTV rate-card, a grounded-starter). FHA = MIP, which **CONSUMES LP-84's MIP rules**
+  (the service reads `fha.mip.ufmip_rate` = 175 bps from the registry) — UFMIP 1.75%, the annual rate (starter
+  0.55%, LP-84's rule is the cap), and the **LTV-90% duration** (≤ 90% → 11 years, > 90% → life). It reads LP-77's
+  LTV. The arithmetic is exact; the rates are passed in, not duplicated.
+- **Self-employed income is Form-1084-grounded + FEEDS DTI.** Net profit + non-cash add-backs (depreciation,
+  depletion, amortization/casualty, business-use-of-home), averaged across two years; a declining trend is
+  flagged (not silently averaged). The derivation is shown line by line; the methodology is a grounded-starter
+  (the exact add-backs + averaging-vs-most-recent judgment is domain expertise). The qualifying monthly figure
+  feeds the DTI income side (the seam is surfaced + documented).
+- **Reserves consume the FHA 60% retirement haircut (LP-84).** Eligible reserves = liquid + (vested retirement ×
+  factor) − down payment − closing costs (gifts/borrowed excluded); months = eligible ÷ PITI (consumed from the
+  DTI calc). Available vs required; the required months are rule/DU/overlay-driven (starter).
+- **Max loan INVERTS the constraints.** The DTI ceiling (income × max-DTI → max payment → invert amortization to
+  max principal), the LTV limit (value × max-LTV), and the program loan limit (FHFA conforming, a grounded-starter
+  — changes annually + county-specific). The binding (lowest) constraint wins and is named. It consumes LP-76's
+  DTI ceiling + LP-77's LTV limit.
+- **Methodology honesty:** the MECHANISM (transparent/overrideable/recompute/findings-coupled/deterministic) is
+  real + tested; the domain-judgment methodology (PMI rate, self-employed add-backs, required reserves, loan
+  limits) is `methodology.starter=True` (grounded in the real source — Form 1084, FHA/FHFA limits — + validate
+  with Priya). The deterministic arithmetic (MIP from LP-84, the max-loan inversion) is solid.
+- **One shared override table** (`calculator_overrides`, calculator-discriminated) instead of four near-identical
+  tables — the LP-76/77 override semantics are unchanged (unique active row per (file, calculator, field);
+  soft-delete to revert; every set/clear audited as `CALCULATOR_OVERRIDDEN` with from→to values).
+
+**Rationale:** the four calculators are the same transparent/deterministic value proposition as DTI/LTV; reusing
+the pattern (and consuming the sibling calculators + the LP-84 rule values rather than duplicating) keeps them
+correct-by-construction, and the starter marking keeps the domain-judgment methodology honest.
+
+**Consequences:** LP-88 surfaces them in the full verification tab (LP-87 places them on the existing tab). The
+starter methodology (PMI rate, loan limits, reserves, add-backs) is Priya's to validate. The shared
+override-table + generic-view + generic-component pattern is reusable for future calculators.
+
+## ADR-209: Overlay admin UI — edit lender overlays without code (LP-87)
+
+- **Date:** 2026-06-29
+- **Status:** Accepted
+
+**Context:** Since LP-80, lender overlays (a lender's deviations from the investor default) were hand-edited JSON
+on the `lenders.lender_overlays` column. LP-87 closes that deferral with an admin UI.
+
+**Decision:** build a thin admin UI + API OVER LP-80's existing storage (not a new mechanism). The backend
+(`services/overlay_admin.py`, `api/overlay_admin.py`) reads/writes the same `lender_overlays` JSON, and the
+frontend (`/admin/lenders` + `/admin/lenders/[id]`) views/edits it. Specifics:
+
+- **ADMIN-gated** — the router carries `Depends(require_role(UserRole.ADMIN))` (overlays are company config, not
+  per-processor); the frontend also role-gates (UX only — the backend is the boundary).
+- **TENANT-scoped** — a lender is fetched within the caller's company (`scope_to_company`); cross-company → 404.
+- **Reason REQUIRED** — the change `reason` is `min_length=1` (rejected otherwise, 422); each override also
+  carries its own reason. Auditable WHY, per LP-80.
+- **AUDITED** — every edit's from→to values are recorded (reusing LP-80.5's `field_changes` / `audit_value`)
+  in the overlay's OWN audit trail (stored in the `lender_overlays` JSON as an `audit` list). This avoids an
+  `activity_logs` schema change (that table is loan-file-scoped; overlay edits are company/lender-scoped).
+- **EFFECT-LEGIBLE** — the view composes each override against the investor base rule (by `rule_id`, from the
+  sample + Conventional + FHA rule index) to show the investor default → the lender's effective threshold. An
+  unknown `rule_id` is rejected (422).
+
+The persisted JSON shape is `{"overrides": [{rule_id, value, reason}], "audit": [{at, actor_user_id, reason,
+changes}]}`. **Seam (honest):** the live verification engine + calculators currently resolve the *in-code*
+STARTER_OVERLAYS (keyed by lender slug); wiring the live engine to prefer a company's DB overlay is a follow-on
+(LP-88+). The admin UI manages + makes legible the per-company overlay store, which is the closing of the LP-80
+hand-edited-JSON deferral.
+
+**Rationale:** editing overlays in a UI (with a required reason + a from→to audit trail + the effect made
+legible) is far safer than hand-editing JSON, and storing the audit in the overlay's own JSON keeps the change
+contained without a schema migration to the loan-file-scoped activity log.
+
+**Consequences:** admins manage overlays without code. LP-88 can wire the live engine to read the DB overlay so a
+company's edits drive enforcement (same file → different findings) end-to-end; the effect-legibility already
+shows what an edit produces. The `LENDER_OVERLAY_UPDATED` activity type is reserved for that wire-up.
