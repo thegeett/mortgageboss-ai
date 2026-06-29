@@ -94,3 +94,40 @@ export function useSetAggression(identifier: string) {
     },
   });
 }
+
+// --- Per-finding resolution (LP-81) — Apply / Override / Add note ----------- //
+
+/** The kind of resolution action + its body. */
+type Resolution =
+  | { kind: "apply"; findingId: string }
+  | { kind: "override"; findingId: string; reason: string }
+  | { kind: "note"; findingId: string; note: string };
+
+async function resolveFinding(identifier: string, action: Resolution): Promise<VerificationStatus> {
+  const base = `${API_V1}/loan-files/${identifier}/findings/${action.findingId}`;
+  const body =
+    action.kind === "override"
+      ? { reason: action.reason }
+      : action.kind === "note"
+        ? { note: action.note }
+        : {};
+  const res = await apiClient.post<VerificationStatus>(`${base}/${action.kind}`, body);
+  return res.data;
+}
+
+/**
+ * Resolve a finding (Apply / Override-with-reason / Add note). The endpoint returns
+ * the re-filtered status (updated findings + blocking); APPLY also changes the
+ * structured data, so refresh the DTI/LTV calculators (the recompute interlock).
+ */
+export function useResolveFinding(identifier: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (action: Resolution) => resolveFinding(identifier, action),
+    onSuccess: (status) => {
+      queryClient.setQueryData(verificationQueryKey(identifier), status);
+      void queryClient.invalidateQueries({ queryKey: dtiQueryKey(identifier) });
+      void queryClient.invalidateQueries({ queryKey: ltvQueryKey(identifier) });
+    },
+  });
+}

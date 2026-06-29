@@ -28,6 +28,8 @@ export interface VerificationFinding {
   source_page: number | null;
   source_snippet: string | null;
   resolution_status: string;
+  /** The recorded reason for an OVERRIDDEN finding (LP-81). */
+  resolution_note: string | null;
   details: Record<string, unknown>;
 }
 

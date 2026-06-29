@@ -1,15 +1,17 @@
 "use client";
 
 /**
- * The verification panel (LP-78) — the minimal trigger + staleness surface.
+ * The verification panel (LP-78/79/81) — the verification tab's control surface.
  *
- * The cross-source pass is a deliberate, manual AI call (it compares the stated
- * data against the documents — meaningful only when both are assembled). This
- * panel runs it and shows whether the result is out of date; it lists the surfaced
- * findings **read-only** (the rich findings UI + resolution flow is LP-81).
+ * The cross-source pass is a deliberate, manual AI call (it compares the stated data
+ * against the documents). This panel runs it, shows whether the result is out of date
+ * (staleness on document AND baseline edits), the needs-completeness guard, the
+ * aggression dial, and the interactive findings list (LP-81: resolve / templated
+ * wording / source location). The DTI/LTV calculators sit alongside it on the tab.
  */
 
-import { Badge } from "@/components/ui/badge";
+import { FindingsList } from "@/components/file/verification/findings-list";
+import { NeedsCompleteness } from "@/components/file/verification/needs-completeness";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { InlineErrorState } from "@/components/ui/error-state";
@@ -24,7 +26,6 @@ import {
   useVerification,
   verificationQueryKey,
 } from "@/lib/api/verification";
-import { formatPercent, humanize } from "@/lib/format";
 import type {
   AggressionLevel,
   VerificationFinding,
@@ -201,6 +202,7 @@ export function VerificationPanel({ fileId }: { fileId: string }) {
           />
         ) : (
           <VerificationBody
+            fileId={fileId}
             data={data}
             running={running}
             activeLevel={activeLevel}
@@ -218,6 +220,7 @@ export function VerificationPanel({ fileId }: { fileId: string }) {
 }
 
 function VerificationBody({
+  fileId,
   data,
   running,
   activeLevel,
@@ -228,6 +231,7 @@ function VerificationBody({
   onSetAsDefault,
   onDismissConsequence,
 }: {
+  fileId: string;
   data: VerificationStatus;
   activeLevel: AggressionLevel;
   dialBusy: boolean;
@@ -238,15 +242,17 @@ function VerificationBody({
   onDismissConsequence: () => void;
   running: boolean;
 }) {
-  // The dial is a read-time view filter: show only findings at/above the active
-  // cutoff. The same stored findings, re-filtered — never re-fetched or re-run.
+  // The dial filters the OPEN findings by the active cutoff (a read-time view filter —
+  // never re-fetched/re-run); resolved findings are kept in their own group below.
   const cutoff = data.aggression.cutoffs[activeLevel];
-  const shown = data.findings.filter((f) => f.confidence >= cutoff);
-  const hidden = data.findings.length - shown.length;
+  const shownOpen = data.findings.filter(
+    (f) => f.resolution_status === "open" && f.confidence >= cutoff,
+  );
 
   return (
     <div className="space-y-4">
       {data.stale && !running && <StaleBanner />}
+      <NeedsCompleteness fileId={fileId} />
       <AggressionDial
         aggression={data.aggression}
         activeLevel={activeLevel}
@@ -258,23 +264,9 @@ function VerificationBody({
       {consequence && (
         <ConsequenceBanner consequence={consequence} onDismiss={onDismissConsequence} />
       )}
-      <RunSummary data={data} shown={shown} running={running} />
+      <RunSummary data={data} shown={shownOpen} running={running} />
       {!running && data.latest_run && <SubmitStatus data={data} activeLevel={activeLevel} />}
-      {shown.length === 0 ? (
-        <p className="text-sm text-gray-400">
-          {!data.latest_run
-            ? "Not run yet — run verification to compare the stated data against the documents."
-            : data.findings.length === 0
-              ? "No cross-source discrepancies surfaced."
-              : `No findings at ${AGGRESSION_META[activeLevel].label} thoroughness — ${hidden} lower-confidence ${hidden === 1 ? "finding is" : "findings are"} hidden. Dial up to Thorough to see ${hidden === 1 ? "it" : "them"}.`}
-        </p>
-      ) : (
-        <ul className="space-y-2">
-          {shown.map((f) => (
-            <FindingRow key={f.id} finding={f} />
-          ))}
-        </ul>
-      )}
+      <FindingsList fileId={fileId} data={data} activeLevel={activeLevel} />
     </div>
   );
 }
@@ -406,40 +398,5 @@ function RunSummary({
       {red > 0 && <span className="text-destructive">{red} red</span>}
       {yellow > 0 && <span className="text-warning">{yellow} yellow</span>}
     </div>
-  );
-}
-
-function FindingRow({ finding }: { finding: VerificationFinding }) {
-  const red = finding.status === "red";
-  return (
-    <li className="rounded-lg border border-gray-200 px-3 py-2">
-      <div className="flex items-start gap-2">
-        <span
-          className={cn(
-            "mt-1.5 h-2 w-2 shrink-0 rounded-full",
-            red ? "bg-destructive" : "bg-warning",
-          )}
-          aria-hidden
-        />
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center justify-between gap-2">
-            <span className="text-sm font-medium text-gray-900">{finding.message}</span>
-            <Badge variant="outline" className="shrink-0 font-normal text-gray-500">
-              {humanize(finding.resolution_status)}
-            </Badge>
-          </div>
-          <div className="mt-0.5 flex flex-wrap items-center gap-x-2 text-[11px] text-gray-400">
-            <span>{humanize(finding.rule_id.replace("cross_source.", ""))}</span>
-            <span>· {formatPercent(String(finding.confidence * 100))} confidence</span>
-            {finding.source_page !== null && <span>· p.{finding.source_page}</span>}
-          </div>
-          {finding.source_snippet && (
-            <p className="mt-1 truncate font-mono text-[11px] text-gray-500">
-              “{finding.source_snippet}”
-            </p>
-          )}
-        </div>
-      </div>
-    </li>
   );
 }

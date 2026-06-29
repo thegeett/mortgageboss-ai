@@ -6204,3 +6204,80 @@ already-open panels.
 **Consequences:** the staleness model is now complete (document changes + finding-apply + baseline edits).
 The LP-78.1 cache + fingerprint are unchanged. Editing a baseline field after a verification run prompts a
 re-run rather than leaving a silently-outdated result.
+
+## ADR-200: Minimal verification tab — the Arc A demo surface (composition; minimal-not-full) (LP-81)
+
+- **Date:** 2026-06-29
+- **Status:** Accepted
+
+**Context:** Every Phase 3 capability (the engine LP-74, findings LP-75, DTI/LTV LP-76/77, AI cross-source
+LP-78/78.1, the dial LP-79, overlays LP-80, editable property/loan + lender LP-80.5) was a capability with no
+single coherent screen. LP-81 is the surface the domain expert (Priya) actually uses — the capstone of Arc A.
+
+**Decision:** the Verification tab composes the existing capabilities into ONE coherent demo-quality screen:
+the **DTI/LTV calculators prominent** at the top (transparent, lender-specific limits via LP-80), then the
+cross-source panel — the **run trigger + staleness banner**, the **needs-completeness indicator**, the
+**aggression dial** filtering the findings, and the **interactive findings list** (severity, type, confidence,
+source location [click → page + verbatim snippet], with the core resolution actions Apply / Override-with-
+reason / Add note; APPLY fires the recompute interlock). It is **MINIMAL by design** — NOT the full Wireframe
+5: the stats row, filter pills, version selector, and the full per-finding action set (Request docs / Accept
+risk) are **LP-88**. The findings list handles deterministic + cross-source findings uniformly (the origin
+distinguishes provenance). The resolution endpoints (`POST …/findings/{id}/{apply,override,note}`) wrap the
+existing LP-75 services; each returns the re-filtered status so the calculators refresh in one round-trip.
+
+**Rationale:** composing the capabilities is what makes the slice DEMONSTRABLE end-to-end (open a file →
+transparent DTI/LTV → run cross-source → resolve findings → tune thoroughness → lender-specific results);
+minimal-not-full keeps the demo focused on the core value rather than the complete tab.
+
+**Consequences:** LP-88 builds the full tab; Arc A is COMPLETE — the demonstrable verification slice is ready
+to show Priya. LP-82–85 supply the real rule content the engine evaluates.
+
+## ADR-201: Re-run stability — stable identity, merge-not-replace, templated wording (LP-81)
+
+- **Date:** 2026-06-29
+- **Status:** Accepted
+
+**Context:** the tab is where re-runs become visible. Without stability, a re-run would churn the displayed
+findings — re-worded (the AI's free-form description varies run to run), re-ordered, and resolutions lost —
+undermining the trust the tab builds.
+
+**Decision:**
+
+- **Stable substance-based identity.** A cross-source finding's identity is its canonical type
+  (`rule_id = cross_source.<type>`), so the same discrepancy is recognized across re-runs.
+- **Merge-not-replace (resolutions survive).** A re-run supersedes only the prior pass's **OPEN** cross-source
+  findings (soft-delete) and emits the fresh set; **RESOLVED** findings (APPLIED / OVERRIDDEN) are never
+  touched — the processor's work survives. The tab keeps resolved findings in a separate **"Resolved"** group
+  (history), so a finding is never silently dropped, and the dial filters only the OPEN list.
+- **Templated wording for known types.** The user-facing headline for a known/canonical type is rendered
+  **deterministically** from its type (reads IDENTICALLY every run); the AI's free-form description shows only
+  as secondary detail. Novel ("other") and deterministic-rule findings keep their own (already deterministic)
+  message.
+
+**Rationale:** stable identity + preserve-resolved + a deterministic headline are the minimum that makes a
+re-run trustworthy — the processor sees the same findings worded the same way, and never loses a resolution.
+
+**Consequences:** the deeper "promote reliable checks to deterministic" consistency work is **LP-86** (beyond
+this near-term stability). Templating is a display concern (a frontend helper over the structured fields), so
+no finding rows change shape.
+
+## ADR-202: Needs-completeness indicator — sparse ≠ clean; indicator not gate (LP-81)
+
+- **Date:** 2026-06-29
+- **Status:** Accepted
+
+**Context:** verification compares documents against the stated application. On an under-documented file a
+**sparse** result could be mistaken for a **clean** file — a false-confidence failure mode. The needs list
+(Phase 2) comes first; verification is meaningful once documents are collected.
+
+**Decision:** the verification tab shows a **needs-completeness indicator** — the outstanding-needs count + a
+non-blocking message ("verification compares documents against the stated application; N outstanding document
+needs — results may be incomplete until they're collected"). It is an **indicator, NOT a gate**: the
+processor can still run verification (needs-first → verification-second is the ordering, not a hard block). It
+hides when nothing is outstanding (a sparse result there is genuinely clean).
+
+**Rationale:** the indicator prevents the false-confidence reading of a sparse result and reflects the
+needs-first ordering, without blocking a processor who wants to run verification early.
+
+**Consequences:** the indicator reuses the existing outstanding-needs count; no new backend. A hard gate (if
+ever wanted) is a future policy decision, not this.

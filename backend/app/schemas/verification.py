@@ -12,11 +12,23 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.models.finding import Finding
 from app.models.verification import Verification
 from app.verification.confidence import AggressionLevel
+
+
+class OverrideRequest(BaseModel):
+    """Dismiss a finding with a **required** recorded reason (LP-81 resolution)."""
+
+    reason: str = Field(min_length=1)
+
+
+class NoteRequest(BaseModel):
+    """Add a free-text note to a finding without changing its resolution (LP-81)."""
+
+    note: str = Field(min_length=1)
 
 
 class AggressionUpdate(BaseModel):
@@ -71,6 +83,7 @@ class FindingPublic(BaseModel):
     source_page: int | None
     source_snippet: str | None
     resolution_status: str
+    resolution_note: str | None  # the recorded reason for an OVERRIDDEN finding (LP-81)
     details: dict[str, Any]
 
     @classmethod
@@ -86,6 +99,7 @@ class FindingPublic(BaseModel):
             source_page=finding.source_page,
             source_snippet=finding.source_snippet,
             resolution_status=finding.resolution_status.value,
+            resolution_note=finding.resolution_note,
             details=finding.details,
         )
 

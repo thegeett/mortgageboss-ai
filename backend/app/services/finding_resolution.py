@@ -116,6 +116,40 @@ async def override_finding(
     return finding
 
 
+async def add_finding_note(
+    db: AsyncSession,
+    *,
+    finding: Finding,
+    actor_user_id: UUID,
+    note: str,
+) -> Finding:
+    """Append a free-text note to a finding **without** changing its resolution (LP-81).
+
+    Notes accumulate on ``details["notes"]`` (each with author + timestamp) and are
+    activity-logged. A note is informational — it neither resolves the finding nor
+    marks verification stale. Raises ``ValueError`` on a blank note. ``flush`` only.
+    """
+    if not note or not note.strip():
+        raise ValueError("a note cannot be empty")
+
+    existing = finding.details.get("notes")
+    notes = list(existing) if isinstance(existing, list) else []
+    notes.append({"note": note, "by": str(actor_user_id), "at": utcnow().isoformat()})
+    # Reassign so SQLAlchemy detects the JSON change (mutating in place would not).
+    finding.details = {**finding.details, "notes": notes}
+
+    await log_activity(
+        db,
+        loan_file_id=finding.loan_file_id,
+        activity_type=ActivityType.NOTE_ADDED,
+        summary=f"Note added to finding {finding.rule_id}",
+        actor_user_id=actor_user_id,
+        detail={"finding_id": str(finding.id), "rule_id": finding.rule_id, "note": note},
+    )
+    await db.flush()
+    return finding
+
+
 async def mark_recompute_needed(db: AsyncSession, *, loan_file: LoanFile) -> None:
     """The APPLY→recompute hook (LP-75 seam, completed in LP-78).
 

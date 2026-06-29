@@ -9,15 +9,22 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 const runMutate = vi.fn();
 const setAggressionMutate = vi.fn();
+const resolveMutate = vi.fn();
 const updatePreferencesMutate = vi.fn();
 const useVerificationMock = vi.fn();
+const useNeedsMock = vi.fn(() => ({ data: [] }));
 const invalidateQueries = vi.fn();
 
 vi.mock("@/lib/api/verification", () => ({
   useVerification: () => useVerificationMock(),
   useRunVerification: () => ({ mutate: runMutate, isPending: false }),
   useSetAggression: () => ({ mutate: setAggressionMutate, isPending: false }),
+  useResolveFinding: () => ({ mutate: resolveMutate, isPending: false }),
   verificationQueryKey: (id: string) => ["verification", id],
+}));
+
+vi.mock("@/lib/api/needs", () => ({
+  useNeeds: () => useNeedsMock(),
 }));
 
 vi.mock("@/lib/api/preferences", () => ({
@@ -47,6 +54,7 @@ function finding(over: Partial<VerificationFinding> & { id: string }): Verificat
     source_page: 1,
     source_snippet: "Gross pay 3,775.00 biweekly",
     resolution_status: "open",
+    resolution_note: null,
     details: {},
     ...over,
   };
