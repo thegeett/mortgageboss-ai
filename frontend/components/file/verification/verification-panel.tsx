@@ -362,8 +362,8 @@ function StaleBanner() {
     >
       <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-warning" />
       <span>
-        <span className="font-medium text-gray-900">Documents changed</span> — this verification is
-        out of date. Re-run it to compare against the current file.
+        <span className="font-medium text-gray-900">The file changed</span> — this verification is
+        out of date. Re-run it to compare against the current data.
       </span>
     </div>
   );

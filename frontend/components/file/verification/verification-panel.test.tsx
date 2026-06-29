@@ -129,7 +129,7 @@ describe("VerificationPanel", () => {
     mock({ data: { ...STATUS, stale: true } });
     render(<VerificationPanel fileId="LF-1" />);
     expect(screen.getByRole("alert")).toBeDefined();
-    expect(screen.getByText(/Documents changed/)).toBeDefined();
+    expect(screen.getByText(/The file changed/)).toBeDefined();
   });
 
   it("shows a running state and disables the trigger while a run is in progress", () => {

@@ -30,7 +30,7 @@ from app.models.loan_file import LoanFile, LoanFileStatus, LoanPurpose
 from app.models.needs_item import NeedsItem, NeedsItemOrigin
 from app.models.user import User
 from app.schemas.loan_file import LoanFileUpdate
-from app.services.activity_log import log_activity
+from app.services.activity_log import field_changes, log_activity
 from app.services.aggression import resolve_aggression_level
 from app.services.finding_blocking import is_file_blocked
 from app.services.loan_file_ids import (
@@ -39,7 +39,28 @@ from app.services.loan_file_ids import (
 )
 from app.services.needs_items import create_needs_item
 from app.services.needs_templates import needs_for_program
+from app.services.verifications import mark_verification_stale
 from app.verification.confidence import DEFAULT_AGGRESSION, cutoff_for_level
+
+# Loan-file fields that feed the verification baseline (DTI/LTV inputs, program/
+# overlay selection). Editing any of these marks the cross-source verification stale
+# (LP-80.5) — a baseline change on the file's side of the comparison, the same as a
+# document change. Lifecycle/contact fields (status, loan_officer_*) do not.
+_VERIFICATION_BASELINE_FIELDS = frozenset(
+    {
+        "lender_id",
+        "loan_program",
+        "loan_purpose",
+        "loan_amount",
+        "refinance_type",
+        "note_amount",
+        "note_rate_percent",
+        "lien_priority",
+        "amortization_type",
+        "amortization_months",
+        "application_received_date",
+    }
+)
 
 
 class FileBlockedError(Exception):
@@ -310,7 +331,10 @@ async def update_loan_file_with_activity(
     the clearance is honest + auditable (clear is relative to thoroughness).
     """
     old_status = loan_file.status
-    changed_fields = set(data.model_dump(exclude_unset=True).keys())
+    provided = data.model_dump(exclude_unset=True)
+    changed_fields = set(provided.keys())
+    # Snapshot the prior values so the audit can record from→to (LP-80.5).
+    before = {field: getattr(loan_file, field) for field in changed_fields}
 
     active_level = (
         resolve_aggression_level(loan_file, actor) if actor is not None else DEFAULT_AGGRESSION
@@ -347,14 +371,26 @@ async def update_loan_file_with_activity(
             detail={"from": old_status.value, "to": loan_file.status.value},
         )
     elif changed_fields:
+        # Record the actual from→to values, not just field names (LP-80.5).
+        after = {field: getattr(loan_file, field) for field in changed_fields}
         await log_activity(
             db,
             loan_file_id=loan_file.id,
             activity_type=ActivityType.FILE_UPDATED,
             summary=f"Loan file {loan_file.display_id} updated",
             actor_user_id=actor_user_id,
-            detail={"changed_fields": sorted(changed_fields)},
+            detail={
+                "section": "loan",
+                "action": "edit",
+                "changed_fields": sorted(changed_fields),
+                "changes": field_changes(before, after),
+            },
         )
+
+    # A change to a verification-baseline field (loan terms, program, lender) marks
+    # the cross-source verification stale (LP-80.5) — a status change does not.
+    if changed_fields & _VERIFICATION_BASELINE_FIELDS:
+        await mark_verification_stale(db, loan_file_id=loan_file.id)
     return loan_file
 
 

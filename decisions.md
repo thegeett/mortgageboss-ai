@@ -6120,3 +6120,87 @@ LP-87 — the starter overlays are universal config keyed by slug, which is the 
 placeholders. LP-82–85 supply the real investor rules these overlays patch. The calculators' effective limit
 is now lender-specific. Precedence: the overlay value wins where specified; un-overridden rules use the
 investor default.
+
+## ADR-197: Editable Subject Property + Loan on the Overview + the target lender (LP-80.5)
+
+- **Date:** 2026-06-29
+- **Status:** Accepted
+
+**Context:** The Overview's Subject Property and Loan sections were display-only, and there was no obvious
+control to set a file's **target lender** — which selects the LP-80 overlay. That blocked LP-80 (overlay
+enforcement needs the lender on the file) and left a real usability gap.
+
+**Decision:**
+
+- **Reuse the stated-financials editing pattern.** The inline `EditableRow` (dirty-tracking, save-only-
+  changed-fields) is extracted to a shared module and given a `select` kind (for the property/loan enums +
+  the lender picker). The Property and Loan cards gain an Edit/Done toggle and render an editor that PATCHes
+  the **existing** endpoints (`PATCH /loan-files/{id}/property`, `PATCH /loan-files/{id}`) — no new editing
+  mechanism.
+- **The target lender** is the file's existing `lender_id` (already on `LoanFileUpdate` + `LoanFileDetail`):
+  processor-editable via a lender picker (the company's `lenders`), displayed on the Loan card, with a "Set
+  lender" affordance when unset. MISMO does **not** carry the target wholesale lender (the 3.4 application
+  export has only a LoanOriginationCompany/broker + LoanOriginator — verified against the real file), so the
+  import leaves it null and it is a processing decision set on the Overview.
+- **Changing the program (Conv ↔ FHA) is confirmed** — it swaps the entire rule set + overlay, so a dialog
+  guards it; other fields save inline.
+
+**Rationale:** one editing mechanism across stated/property/loan keeps the UX consistent and the code small;
+the endpoints already existed. Putting the lender on the file is the concrete LP-80 prerequisite. The
+program confirmation prevents a casual mis-click from silently changing which rules apply.
+
+**Consequences:** LP-80's overlay enforcement is unblocked. Borrower editing remains out of scope (still
+display-only). The note rate / amortization stay in the stated-data editor (not duplicated on the Loan card).
+
+## ADR-198: Audit posture change — record from→to values for stated/loan/property edits (LP-80.5)
+
+- **Date:** 2026-06-29
+- **Status:** Accepted (supersedes the LP-56 value-free posture for these edits)
+
+**Context:** LP-56 audited stated-data edits **value-free** (`detail = {}`, a safe summary only); property
+edits were not audited at all. That gives "who touched what, when" but not "what changed from what to what" —
+no real field-level change history.
+
+**Decision:** edits to **stated financials, loan terms, and the subject property** now record the actual
+**from→to values** in the activity_log `detail` (`{section, action, changes: [{field, from, to}]}`, values
+encoded exactly via a shared `audit_value`/`field_changes` helper). Property edits — previously silent — are
+now audited with values. This is a deliberate change that **supersedes the LP-56 value-free stance** for
+these edits (the DTI/LTV overrides + status changes already recorded from→to, so there is precedent). The
+generic `FILE_UPDATED` type is kept (the `detail.section` distinguishes the kind) — no new enum values, no
+migration.
+
+**Rationale:** a true change history is worth more than a value-free trail for correcting imported data and
+for audit. Reusing one `FILE_UPDATED` type with a structured `detail` keeps it consistent and migration-free.
+
+**Consequences (PII):** the activity_log now holds **financial / PII-adjacent values** (amounts, an address,
+loan terms). It therefore **inherits the stated data's PII posture** — it is exposed only through the same
+auth + tenant-scoped surfaces that already show the stated data, never a less-protected one. SSNs and similar
+high-sensitivity fields are **not** in scope here (borrower editing is excluded), so no raw SSN enters the
+log. Any future surface that renders the activity log must apply the same masking/access control.
+
+## ADR-199: Verification staleness on baseline edits — both sides of the comparison (LP-80.5)
+
+- **Date:** 2026-06-29
+- **Status:** Accepted
+
+**Context:** `mark_verification_stale` fired only on **document** changes (+ finding-apply). Editing the
+**stated** data, loan terms, target lender, or property — the *other* side of the cross-source comparison and
+the DTI/LTV inputs — changed the verification baseline silently: no "out of date — re-run" prompt. LP-78.1's
+input fingerprint already includes the stated/loan/property data, so a manual re-run after such an edit is
+genuinely real (not a stale cache hit) — what was missing was the **prompt**.
+
+**Decision:** stated-financials, loan-baseline (loan terms / program / purpose / lender), and property edits
+now call `mark_verification_stale` — the same as a document change. A baseline change on **either side** of
+the cross-source comparison now sets the staleness flag, so the verification panel shows the "re-run" cue.
+Lifecycle/contact fields (status, loan officer) do **not** mark stale. The frontend mutations for these edits
+also invalidate the `dti` / `ltv` / `verification` query keys, so an open calculator or verification panel
+refreshes after an edit. The stale banner copy is generalized from "Documents changed" to "The file changed".
+
+**Rationale:** the staleness model is only honest if every baseline change triggers it; the LP-78.1
+fingerprint already guarantees the re-run is real, so this purely adds the missing prompt + refresh. DTI/LTV
+are read-time derived, so they are already correct on the next GET — the invalidation just refreshes
+already-open panels.
+
+**Consequences:** the staleness model is now complete (document changes + finding-apply + baseline edits).
+The LP-78.1 cache + fingerprint are unchanged. Editing a baseline field after a verification run prompts a
+re-run rather than leaving a silently-outdated result.

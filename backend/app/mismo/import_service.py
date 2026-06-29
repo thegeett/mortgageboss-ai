@@ -108,6 +108,11 @@ async def create_loan_file_from_mismo(
     loan = parsed.loan
 
     # 1) The LoanFile — reuse Epic 4's creation core (converges with manual).
+    # Target lender (the wholesale lender that selects the LP-80 overlay) is NOT set
+    # here: the MISMO 3.4 application export carries only a LoanOriginationCompany
+    # (the broker/originator) and LoanOriginator party — not the target wholesale
+    # lender — so there is nothing reliable to map (verified against the real file).
+    # The lender is a processing decision, set/changed on the Overview (LP-80.5).
     loan_file = await create_loan_file(
         db,
         company_id=company_id,

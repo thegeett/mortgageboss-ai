@@ -8,6 +8,9 @@
  * (Stated)" display on the opened file.
  */
 import { apiClient } from "@/lib/api/client";
+import { dtiQueryKey } from "@/lib/api/dti";
+import { ltvQueryKey } from "@/lib/api/ltv";
+import { verificationQueryKey } from "@/lib/api/verification";
 import type { MismoImportResult, StatedFinancials } from "@/lib/types/stated-financials";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { isAxiosError } from "axios";
@@ -98,9 +101,14 @@ async function patchLoanTerms(fileId: string, body: Body): Promise<void> {
  */
 export function useStatedFinancialsEdit(fileId: string) {
   const queryClient = useQueryClient();
+  // A stated-data edit changes the verification baseline + the DTI/LTV inputs, so
+  // refresh those too (LP-80.5) — an open calculator/verification panel updates.
   const invalidate = () => {
     void queryClient.invalidateQueries({ queryKey: statedFinancialsQueryKey(fileId) });
     void queryClient.invalidateQueries({ queryKey: ["loan-file", fileId] });
+    void queryClient.invalidateQueries({ queryKey: dtiQueryKey(fileId) });
+    void queryClient.invalidateQueries({ queryKey: ltvQueryKey(fileId) });
+    void queryClient.invalidateQueries({ queryKey: verificationQueryKey(fileId) });
   };
 
   return {
