@@ -6326,3 +6326,48 @@ and tested; the content is grounded-but-starter.
 **Consequences:** LP-83 the Conventional credit/DTI/property/doc rules; LP-84/85 FHA; Priya validates +
 extends these against the live guide for her lenders. The promotion-pending rules wire up as the typed
 extraction grows. The `to_verify` flag + `starter` marker can drive a future "rules to validate" view.
+
+## ADR-204: Conventional credit/DTI + property + documentation rules as grounded starters (LP-83)
+
+- **Date:** 2026-06-29
+- **Status:** Accepted
+
+**Context:** The second Arc B content ticket (LP-82 did income/asset). LP-83 adds ~30 Conventional rules across
+credit/DTI, property/appraisal, and documentation. This category is higher-stakes — credit-score minimums and
+the DTI ceiling are the most-cited Conventional values and the most prone to folk-knowledge error.
+
+**Decision:** encode ~30 Conventional rules into the LP-74 engine as **GROUNDED STARTERS** (same shape +
+posture as LP-82: real B-section citations, `starter=True`, validate-with-Priya), reusing LP-82's `conv_rule`
+/ `sg` builders (extracted to `conventional/_base.py`). Specifics:
+
+- **The credit-score minimum is encoded LAYERED, not flat-620 (the headline correction).** Through DU Version
+  12.0 (11/2025) minimum scores no longer apply (DU decides); manually underwritten loans still require 620
+  (`conv.credit.min_score_manual`, **gated** to manual); a sub-620 representative score is ineligible for
+  delivery (`conv.credit.min_score_delivery_floor`, ungated). B3-5.1-01, marked recently-changed. A hardcoded
+  "min 620 always" would be wrong.
+- **DTI** is DU-50% / manual-36%→45% (B3-6-02): the DU ceiling is the existing `conv.dti.back_end_max` (LE 50);
+  LP-83 adds the **manual-gated** `conv.dti.back_end_max_manual` (LE 45). Both **consume LP-76's computed
+  `dti.back_end_pct`** — they read it, never recompute.
+- **Property/appraisal:** appraisal age > 4 months (B4-1.2-04, parallel to doc age); general eligibility
+  (B2-3-01); value-acceptance/appraisal-waiver marked **DU-driven** (B4-1.4-11); occupancy marked
+  **Eligibility-Matrix-driven** — none of the Matrix/DU logic is hardcoded.
+- **Documentation:** 4-month doc age (B1-1-03); application package (B1-1-01); condo project review
+  (B4-2.1-01, **gated** to condo properties); tax-transcript/4506-C (B3-3.1, cross-links LP-82).
+- **Applicability gating (new mechanism):** a small `RuleGate` (a fact + a `Condition`) added to
+  `VerificationRule`, checked by the engine before evaluation — a manual-only or condo-only rule applies only
+  when its gate fact holds; absent gate → not-applicable (conservative). This is the minimal extension the
+  "manual-vs-DU / property-type" gating requires; the rest reuses LP-82.
+- **Cross-links (not duplicated):** the re-underwrite-on-undisclosed-debt rule is noted as the deterministic
+  counterpart to LP-78's cross-source undisclosed-obligation finding (the interlock exists).
+- **Typed-core promotions:** `build_file_facts` derives `property.present` / `property.is_condo`; credit /
+  appraisal / underwriting-method facts are promotion-pending (recorded not-evaluated until they land).
+- **Citations researched, not invented:** uncertain subsections (derogatory-credit waiting periods, several
+  property/doc sections) carry `to_verify=True` rather than asserting a number.
+
+**Rationale:** grounding the high-stakes values in current research and encoding the *nuanced* credit-score
+state (rather than the stale flat-620) is exactly why grounded-research-then-starter matters; the starter
+marking keeps it honest (content pending the expert's validation, subject to Selling-Guide updates, DU
+automation, the Eligibility Matrix, and lender overlays).
+
+**Consequences:** LP-84/85 the FHA rules; Priya validates + corrects these. The gate mechanism is reusable
+for future applicability-gated rules. The promotion-pending rules wire up as the typed extraction grows.

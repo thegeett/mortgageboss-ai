@@ -117,6 +117,23 @@ class Condition(BaseModel):
     unit: str | None = None
 
 
+class RuleGate(BaseModel):
+    """An APPLICABILITY GATE (LP-83) — the rule applies only when this fact holds.
+
+    Some rules apply only in a sub-case the program/applicability scope can't express
+    — manually underwritten loans (not DU), a condo property, etc. The gate reads one
+    typed fact and a :class:`Condition`: the rule is evaluated only when the gate fact
+    is present AND satisfies the gate; otherwise the rule is **not applicable** (the
+    engine returns it not-evaluated, never a finding). Absent gate fact → not
+    applicable (conservative: don't fire a manual-only rule when the method is unknown).
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    reads: str  # the typed gate fact path, e.g. "underwriting.is_manual"
+    condition: Condition  # when satisfied → the rule applies
+
+
 class RuleSource(BaseModel):
     """A structured, durable citation for a rule (auditability).
 
@@ -170,6 +187,9 @@ class VerificationRule(BaseModel):
     # Free-text caveats: "recently changed", "DU-message-driven", "typed-core promotion
     # pending: <fact>", etc. — the validate-with-Priya / promotion notes.
     notes: str | None = None
+    # Applicability gate (LP-83): the rule applies only when this fact holds (manual-vs-
+    # DU, property-type). ``None`` → always applicable within its scope.
+    gate: RuleGate | None = None
 
     def with_condition(self, condition: Condition, *, overlay: str) -> VerificationRule:
         """Return a copy with the threshold replaced (identity/logic unchanged).

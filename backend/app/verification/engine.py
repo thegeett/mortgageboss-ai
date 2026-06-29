@@ -60,6 +60,15 @@ def evaluate(facts: FileFacts, rules: Sequence[VerificationRule]) -> list[Engine
     """
     results: list[EngineFinding] = []
     for rule in rules:
+        # Applicability gate (LP-83): a manual-only / condo-only rule applies only when
+        # its gate fact holds. Not applicable (or unknown) → not-evaluated, never a finding.
+        if rule.gate is not None and not _gate_open(facts, rule):
+            results.append(
+                EngineFinding(
+                    rule=rule, evaluated=False, passed=False, observed=None, source_location=None
+                )
+            )
+            continue
         fact = facts.read(rule.reads)
         if fact is None or fact.value is None:
             results.append(
@@ -83,3 +92,14 @@ def evaluate(facts: FileFacts, rules: Sequence[VerificationRule]) -> list[Engine
             )
         )
     return results
+
+
+def _gate_open(facts: FileFacts, rule: VerificationRule) -> bool:
+    """True when the rule's applicability gate holds (so the rule should be evaluated)."""
+    gate = rule.gate
+    if gate is None:
+        return True
+    gate_fact = facts.read((gate.reads,))
+    if gate_fact is None or gate_fact.value is None:
+        return False  # gate fact unknown → not applicable (conservative)
+    return satisfies(gate.condition, _to_decimal(gate_fact.value))

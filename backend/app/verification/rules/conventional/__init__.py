@@ -35,58 +35,18 @@ from __future__ import annotations
 from decimal import Decimal
 
 from app.models.finding import FindingCategory
-from app.models.lender import LoanProgram
+from app.verification.rules.conventional._base import conv_rule as _conv_rule
+from app.verification.rules.conventional._base import sg as _sg
+from app.verification.rules.conventional.credit_property_docs import (
+    CONVENTIONAL_CREDIT_PROPERTY_DOC_RULES,
+)
 from app.verification.rules.schema import (
-    Applicability,
-    ApplicabilityScope,
     Condition,
     Operator,
-    RuleLayer,
     RuleSeverity,
     RuleSource,
     VerificationRule,
 )
-
-_CONVENTIONAL = Applicability(scope=ApplicabilityScope.PROGRAM, program=LoanProgram.CONVENTIONAL)
-
-
-def _sg(section: str, *, to_verify: bool = False) -> RuleSource:
-    """A structured Fannie Mae Selling Guide citation (durable section, retrieved date)."""
-    return RuleSource(
-        type="fannie_selling_guide",
-        citation=f"Fannie Mae Selling Guide {section}",
-        section=section,
-        retrieved="2026-06",
-        to_verify=to_verify,
-    )
-
-
-def _conv_rule(
-    rule_id: str,
-    *,
-    reads: tuple[str, ...],
-    condition: Condition,
-    severity: RuleSeverity,
-    category: FindingCategory,
-    description: str,
-    source: RuleSource,
-    notes: str,
-) -> VerificationRule:
-    """A Conventional investor rule, always marked ``starter=True`` (validate with Priya)."""
-    return VerificationRule(
-        rule_id=rule_id,
-        layer=RuleLayer.INVESTOR,
-        applicability=_CONVENTIONAL,
-        reads=reads,
-        condition=condition,
-        severity=severity,
-        category=category,
-        description=description,
-        source=source,
-        starter=True,
-        notes=notes,
-    )
-
 
 # A 0/1 "presence" fact compared with GE 1 ("must be present") or LE 0 ("present →
 # fires a documentation/verification requirement"). The unit labels the datum.
@@ -416,8 +376,15 @@ CONVENTIONAL_ASSET_RULES: tuple[VerificationRule, ...] = (
 )
 
 
-# All ~20 Conventional income + asset rules, for the registry (LP-82 content).
+# All ~20 Conventional income + asset rules (LP-82 content).
 CONVENTIONAL_INCOME_ASSET_RULES: tuple[VerificationRule, ...] = (
     *CONVENTIONAL_INCOME_RULES,
     *CONVENTIONAL_ASSET_RULES,
+)
+
+# The full Conventional rule set for the registry: LP-82 income/asset +
+# LP-83 credit/DTI + property + documentation. FHA is LP-84/85.
+CONVENTIONAL_RULES: tuple[VerificationRule, ...] = (
+    *CONVENTIONAL_INCOME_ASSET_RULES,
+    *CONVENTIONAL_CREDIT_PROPERTY_DOC_RULES,
 )

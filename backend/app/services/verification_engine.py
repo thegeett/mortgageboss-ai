@@ -44,6 +44,7 @@ from app.models.extraction import Extraction
 from app.models.finding import Finding, FindingOrigin, FindingStatus
 from app.models.helpers import only_active
 from app.models.loan_file import LoanFile
+from app.models.property import Property, PropertyType
 from app.models.stated_financials import StatedAsset, StatedIncomeItem, StatedLiability
 from app.models.verification import Verification, VerificationStatus, VerificationTrigger
 from app.services.verifications import create_verification_run
@@ -259,7 +260,24 @@ async def build_file_facts(db: AsyncSession, *, loan_file: LoanFile, as_of: date
             source={"type": "stated", "note": "sum of self-employment stated income (LP-82)"},
         )
 
+    # --- Property facts for the LP-83 property/doc rules (+ the condo gate) ------
+    property_obj = await _subject_property(db, loan_file.id)
+    if property_obj is not None:
+        values["property.present"] = Fact(
+            value=Decimal(1), source={"type": "stated", "note": "subject property on file (LP-83)"}
+        )
+        is_condo = property_obj.property_type is PropertyType.CONDO
+        values["property.is_condo"] = Fact(
+            value=Decimal(1) if is_condo else Decimal(0),
+            source={"type": "stated", "note": "property_type == condo (LP-83 gate)"},
+        )
+
     return FileFacts(values=values)
+
+
+async def _subject_property(db: AsyncSession, loan_file_id: UUID) -> Property | None:
+    stmt = only_active(select(Property).where(Property.loan_file_id == loan_file_id), Property)
+    return (await db.execute(stmt)).scalars().first()
 
 
 # Type keywords for the LP-82 promotions (matched case-insensitively on the stated
