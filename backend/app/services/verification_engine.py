@@ -271,6 +271,15 @@ async def build_file_facts(db: AsyncSession, *, loan_file: LoanFile, as_of: date
             value=Decimal(1) if is_condo else Decimal(0),
             source={"type": "stated", "note": "property_type == condo (LP-83 gate)"},
         )
+        # property.unit_count — the financed unit count, for the FHA 1-4 unit rule (LP-85).
+        # The richer MPR/appraisal facts (subject-to-repair, deficiency flags, year built,
+        # construction status, well/septic) are Tier-2 (appraiser-observed) and promotion-
+        # pending — those rules are recorded not-evaluated until the appraisal datum is captured.
+        if property_obj.financed_unit_count is not None:
+            values["property.unit_count"] = Fact(
+                value=Decimal(property_obj.financed_unit_count),
+                source={"type": "stated", "note": "financed unit count (LP-85)"},
+            )
 
     return FileFacts(values=values)
 

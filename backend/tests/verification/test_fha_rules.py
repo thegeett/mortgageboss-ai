@@ -85,7 +85,16 @@ def test_thirty_one_rules_across_the_categories() -> None:
     assert len(FHA_INCOME_RULES) == 6
     assert len(FHA_ASSET_RULES) == 5
     assert len(FHA_MIP_RULES) == 6
-    assert len(FHA_RULES) == 31
+    # The LP-84 contribution is 31; FHA_RULES also carries the LP-85 property/doc rules (18).
+    lp84 = (
+        len(FHA_CREDIT_RULES)
+        + len(FHA_DTI_RULES)
+        + len(FHA_INCOME_RULES)
+        + len(FHA_ASSET_RULES)
+        + len(FHA_MIP_RULES)
+    )
+    assert lp84 == 31
+    assert len(FHA_RULES) == 49  # 31 (LP-84) + 18 (LP-85)
 
 
 def test_each_rule_has_the_uniform_structure_and_hud_markers() -> None:

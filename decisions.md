@@ -6430,3 +6430,60 @@ starter keeps the engine real while the content stays honestly pending the exper
 **Consequences:** LP-85 the FHA property/doc rules (stricter safety/security/soundness standards) extend
 `FHA_RULES`. The promotion-pending FHA facts (credit/down-payment/LTV/MIP) wire up as the typed extraction
 grows. A dedicated `MORTGAGE_INSURANCE` finding category is a future migration if MIP findings warrant it.
+
+## ADR-206: FHA property + documentation rules as GROUNDED STARTERS; the rule content is complete (LP-85)
+
+- **Date:** 2026-06-29
+- **Status:** Accepted
+
+**Context:** The fourth and LAST Arc B content ticket. LP-85 adds ~18 FHA rules across property (the Minimum
+Property Requirements — safety/security/soundness) and documentation. FHA property is the most distinctively-FHA
+content of all and has **no Conventional analog**: a Conventional appraisal targets market value, while an FHA
+appraisal ALSO verifies the property meets the MPR/MPS for the **three S's** — a failing property needs repairs
+before FHA insures the loan. After this ticket the Conventional + FHA rule content (LP-82..85) is complete.
+
+**Decision:** encode ~18 FHA property/doc rules into the LP-74 engine as **GROUNDED STARTERS** (same shape +
+posture as LP-82/83/84: real HUD II.D / II.A citations, `starter=True`, validate-with-Priya), in
+`rules/fha/property_docs.py`, reusing LP-84's `fha_rule`/`hud` builders, program-gating, and conditional/
+mitigable finding pattern. Specifics:
+
+- **The three S's MPR/MPS framework + the deficiency checklist:** a three-S's umbrella rule plus individual
+  deficiency rules (lead-based paint pre-1978, functional heating/plumbing/electrical, roof, water intrusion,
+  handrails/safe-access, bedroom egress, well/septic, defective structural conditions) + MPR-vs-MPS by
+  construction status (24 CFR 200.926). II.D.
+- **The "subject-to-repair" CONDITIONAL model (reuses LP-84's compensating-factors mitigable pattern):** MPR
+  findings are MITIGABLE — a subject-to-repair YELLOW finding resolvable by documenting the repair/re-inspection
+  via LP-75's resolution (most deficiencies are CORRECTABLE) — NOT silent hard blocks. Only un-correctable issues
+  (a no-egress bedroom, serious structural failure) are RED. Severity = correctable-vs-uncorrectable.
+- **TIER-2 HONESTY (the critical posture, same as LP-77's appraised value):** most MPR conditions are observed by
+  the appraiser and live in the appraisal document (manual / not deterministically extracted). The rules do NOT
+  pretend to detect physical deficiencies — they check (a) the FHA appraisal is present (the RED Tier-2 anchor),
+  (b) whether it is "subject to" repairs, and (c) surface the MPR checklist for human/appraiser confirmation;
+  each deficiency rule reads an appraiser-provided fact and is recorded not-evaluated until that datum is
+  captured. We don't fake what the system can't see.
+- **MPRs are POLICY-IN-FLUX:** FHA's 2026 Request for Information to modernize the MPRs (no comprehensive update
+  in 20+ years) means the content is not only overlay-subject but actively under revision — the rules carry a
+  "subject to the pending MPR modernization" caveat in addition to the starter marker.
+- **Eligibility + condo:** 1-4 unit residential (`property.unit_count`, newly promoted from the financed unit
+  count → evaluable); condo project FHA approval (HRAP/DELRAP — **gated** to condo via the promoted
+  `property.is_condo`); the appraisal validity period (Tier-2, to verify).
+- **Documentation:** the FHA appraisal present (RED), the subject-to-repair completion/re-inspection (gated to
+  subject-to status), the FHA case number + Amendatory Clause, the pre-appraisal sales contract, document
+  recency (FHA's own — to verify).
+- **Applicability-gated:** construction status (new → MPS), property type (condo), well/septic presence,
+  pre-1978 (lead paint), subject-to-repair status. **Overlay-overrideable** (e.g. the appraisal validity window
+  180→120) by `rule_id` (LP-80). **Program-gated** (FHA-only).
+- **Citations researched, not invented:** uncertain values (appraisal validity period, well/septic distances,
+  exact subsection numbers, the handrail/egress standards) carry `to_verify=True`.
+
+**Rationale:** FHA property is exactly where a Conventional clone fails — the three S's, the subject-to-repair
+discretion, and the Tier-2 appraiser-observed nature have no Conventional equivalent. Encoding the conditional
+model honestly (mitigable, correctable-vs-uncorrectable) and refusing to fake deterministic deficiency detection
+keeps the engine trustworthy; the in-flux note keeps it current with the pending MPR modernization.
+
+**Consequences (the content arc is COMPLETE):** with LP-82..85 the engine now holds a full grounded-starter
+Conventional + FHA rule set across income, assets, credit/DTI, property, documentation, and (FHA) MIP — ~50
+Conventional + ~49 FHA rules. The mechanism is real + tested; the specific content is grounded-but-starter,
+pending Priya's validation (and, for FHA MPRs, the pending modernization). LP-86 and onward consume this rule
+set; the promotion-pending property/appraisal facts (subject-to-repair, the MPR deficiency flags, year built,
+construction status, well/septic) wire up as the Tier-2 appraisal extraction grows.
