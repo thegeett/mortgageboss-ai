@@ -266,6 +266,24 @@ async def test_cross_tenant_delete_is_404(client: AsyncClient, db: AsyncSession)
     assert still.status_code == 200
 
 
+async def test_delete_already_deleted_is_404_not_a_crash(
+    client: AsyncClient, db: AsyncSession
+) -> None:
+    """Deleting an already-soft-deleted file is a clean 404 (graceful), not a 500.
+
+    A soft-deleted file is invisible to its owner (``only_active``), so the second
+    DELETE resolves nothing and returns the same 404 as any missing file — idempotent
+    in effect, never an error-crash.
+    """
+    _company, _user, token = await _user_and_token(db, slug="acme", email="u@acme.com")
+    created = (await client.post(LOAN_FILES_URL, json={}, headers=_auth(token))).json()
+
+    first = await client.delete(f"{LOAN_FILES_URL}/{created['id']}", headers=_auth(token))
+    assert first.status_code == 204
+    again = await client.delete(f"{LOAN_FILES_URL}/{created['id']}", headers=_auth(token))
+    assert again.status_code == 404
+
+
 # --------------------------------------------------------------------------- #
 # secrets never leak; auth required
 # --------------------------------------------------------------------------- #

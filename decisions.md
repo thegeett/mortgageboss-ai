@@ -6032,3 +6032,45 @@ the active cutoff). The cutoff values tune over use. The recorded submission-lev
 `str_enum` helper gained an optional `name` so the two `AggressionLevel` columns on `loan_files` get
 distinct CHECK-constraint names. The dial is the free thoroughness control over LP-78's single expensive
 pass — it is **not** a trigger to re-run it.
+
+## ADR-195: Loan-file deletion — soft-delete for processors now, hard-delete (purge) admin-only future (LP-79.5)
+
+- **Date:** 2026-06-29
+- **Status:** Accepted
+
+**Context:** There was no UI affordance to delete a loan file — files (especially test/duplicate ones)
+accumulated with no way to remove the clutter. The backend already supported soft-delete (the
+`SoftDeleteMixin` / `deleted_at`, `DELETE /loan-files/{id}` → `soft_delete_loan_file_with_activity`,
+`only_active` exclusion, `FILE_DELETED` audit); what was missing was the front-end action. The question
+this ADR settles is *what kind* of delete a processor gets.
+
+**Decision:**
+
+- **Processors get soft-delete, not hard-delete.** `DELETE /loan-files/{id}` sets `deleted_at` (it never
+  removes the row or its children), logs `FILE_DELETED` with the actor, and the file drops out of every
+  processor-facing view (dashboard, lists, search, counts) via `only_active`. The data + the audit trail
+  survive and are recoverable. Any processor (or admin) in the **owning** company may do it; a cross-company
+  id is a `404` (existence never revealed). Deleting an already-deleted file is a clean `404` (it's invisible
+  to its owner) — idempotent in effect, never a crash. A soft-deleted file is unreachable through the normal
+  detail route (`GET` → `404`).
+- **Hard-delete (permanent purge) is deferred, admin-only future work.** A processor must not be able to
+  truly destroy a mortgage record — compliance, audit, and "deleted the wrong file" recovery all demand the
+  data survive. Permanent destruction is a deliberate, privileged action; **nothing is built for it now**,
+  and the soft-delete design does not foreclose it.
+- **The UI requires a named confirmation.** The delete action (a dashboard row overflow menu + the
+  file-header menu) opens a confirmation dialog that **names the file** (borrower + display id) and **what's
+  affected** (the file and its documents/data/findings leave the dashboard; recoverable by an admin) — never
+  a silent one-click destroy. On confirm the list query is invalidated so the file disappears, with a toast;
+  cancel is a no-op.
+- **No restore/trash view yet.** Deferred — soft-delete preserves the data, so a restore surface can come
+  later without loss.
+
+**Rationale:** soft-delete fixes the real usability gap (remove clutter) while honoring that mortgage
+records shouldn't be destroyed by a processor. The soft-vs-hard split puts the reversible, everyday action in
+the processor's hands and reserves the irreversible one for a future privileged path. The named confirmation
+makes a list-clearing action deliberate and legible, not accidental.
+
+**Consequences:** the capability was almost entirely backend-complete (LP-79.5 is mostly the UI + a couple
+of hardening tests for the already-deleted and children-preserved cases). A future admin hard-delete +
+restore/trash view can build on the preserved rows. Soft-deleted children remain in their tables, reachable
+only by a future restore or an admin tool — acceptable (they're scoped through the file, which is invisible).

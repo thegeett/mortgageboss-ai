@@ -8,7 +8,7 @@ the derived ``primary_borrower_name``.
 """
 
 from app.models import Borrower, Company
-from app.models.loan_file import LoanFileStatus
+from app.models.loan_file import LoanFile, LoanFileStatus
 from app.schemas.loan_file import LoanFileSummary, LoanFileUpdate
 from app.services.loan_files import (
     create_loan_file,
@@ -110,6 +110,34 @@ async def test_soft_delete_excludes_from_reads(db_session: AsyncSession) -> None
     items, total = await list_loan_files(db_session, company_id=a.id)
     assert total == 0
     assert items == []
+
+
+async def test_soft_delete_preserves_the_row_and_children(db_session: AsyncSession) -> None:
+    """Soft delete sets deleted_at but never removes the row or its children (LP-79.5).
+
+    The data + audit trail survive (recoverable); only the visibility changes. This
+    is the soft-vs-hard distinction — a processor delete must not destroy records.
+    """
+    from sqlalchemy import select
+
+    a = await _company(db_session, "acme")
+    created = await create_loan_file(db_session, company_id=a.id)
+    borrower = Borrower(
+        loan_file_id=created.id, first_name="Dana", last_name="Sample", is_primary=True
+    )
+    db_session.add(borrower)
+    await db_session.flush()
+
+    await soft_delete_loan_file(db_session, loan_file=created)
+
+    # The row still exists in the table (deleted_at set, not physically removed)...
+    row = (await db_session.execute(select(LoanFile).where(LoanFile.id == created.id))).scalar_one()
+    assert row.deleted_at is not None
+    # ...and the child borrower row is untouched (no hard cascade).
+    child = (
+        await db_session.execute(select(Borrower).where(Borrower.id == borrower.id))
+    ).scalar_one()
+    assert child.loan_file_id == created.id
 
 
 async def test_status_filter_and_pagination(db_session: AsyncSession) -> None:

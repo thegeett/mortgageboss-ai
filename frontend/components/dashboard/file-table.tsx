@@ -1,7 +1,14 @@
 "use client";
 
+import { DeleteFileDialog } from "@/components/file/delete-file-dialog";
 import { StatusBadge } from "@/components/status-badge";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Table,
@@ -14,7 +21,8 @@ import {
 import type { LoanFileSummary } from "@/lib/types/loan-file";
 import { cn } from "@/lib/utils";
 import { formatDistanceToNow } from "date-fns";
-import { FolderPlus, SearchX, TriangleAlert } from "lucide-react";
+import { FolderPlus, MoreHorizontal, SearchX, Trash2, TriangleAlert } from "lucide-react";
+import { useState } from "react";
 
 const COLUMNS = ["File ID", "Borrower", "Property", "Status", "Lender", "Last activity"] as const;
 
@@ -38,6 +46,9 @@ function HeaderRow() {
             {col}
           </TableHead>
         ))}
+        <TableHead className="w-12">
+          <span className="sr-only">Actions</span>
+        </TableHead>
       </TableRow>
     </TableHeader>
   );
@@ -57,6 +68,9 @@ function LoadingRows() {
               <Skeleton className={cn("h-4", COLUMN_SKELETON_WIDTHS[i])} />
             </TableCell>
           ))}
+          <TableCell>
+            <Skeleton className="h-4 w-4" />
+          </TableCell>
         </TableRow>
       ))}
     </TableBody>
@@ -87,6 +101,10 @@ export function FileTable({
   onSelect: (file: LoanFileSummary) => void;
   onNewFile: () => void;
 }) {
+  // The file pending deletion drives the confirmation dialog; the mutation invalidates
+  // the list query on success, so the deleted row simply drops out on the next render.
+  const [pendingDelete, setPendingDelete] = useState<LoanFileSummary | null>(null);
+
   if (isError) {
     return (
       <StatePanel>
@@ -138,34 +156,77 @@ export function FileTable({
   }
 
   return (
-    <Table>
-      <HeaderRow />
-      <TableBody>
-        {files.map((file) => (
-          <TableRow
-            key={file.id}
-            onClick={() => onSelect(file)}
-            className="cursor-pointer"
-            tabIndex={0}
-            onKeyDown={(event) => {
-              if (event.key === "Enter") onSelect(file);
-            }}
-          >
-            <TableCell className="font-medium text-gray-900">{file.display_id}</TableCell>
-            <TableCell className="text-gray-700">{file.primary_borrower_name ?? "—"}</TableCell>
-            <TableCell className="max-w-[16rem] truncate text-gray-700">
-              {file.property_address ?? "—"}
-            </TableCell>
-            <TableCell>
-              <StatusBadge status={file.status} />
-            </TableCell>
-            <TableCell className="text-gray-700">{file.lender_name ?? "—"}</TableCell>
-            <TableCell className="whitespace-nowrap text-gray-500">
-              {lastActivity(file.updated_at)}
-            </TableCell>
-          </TableRow>
-        ))}
-      </TableBody>
-    </Table>
+    <>
+      <Table>
+        <HeaderRow />
+        <TableBody>
+          {files.map((file) => (
+            <TableRow
+              key={file.id}
+              onClick={() => onSelect(file)}
+              className="cursor-pointer"
+              tabIndex={0}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") onSelect(file);
+              }}
+            >
+              <TableCell className="font-medium text-gray-900">{file.display_id}</TableCell>
+              <TableCell className="text-gray-700">{file.primary_borrower_name ?? "—"}</TableCell>
+              <TableCell className="max-w-[16rem] truncate text-gray-700">
+                {file.property_address ?? "—"}
+              </TableCell>
+              <TableCell>
+                <StatusBadge status={file.status} />
+              </TableCell>
+              <TableCell className="text-gray-700">{file.lender_name ?? "—"}</TableCell>
+              <TableCell className="whitespace-nowrap text-gray-500">
+                {lastActivity(file.updated_at)}
+              </TableCell>
+              <TableCell
+                className="text-right"
+                // The row navigates on click; the menu must not. Stop propagation for
+                // the trigger click AND any stray click the menu's close dispatches over
+                // this cell, so opening/using the menu never triggers row navigation.
+                onClick={(event) => event.stopPropagation()}
+              >
+                {/* modal={false}: a modal dropdown dispatches a click-through onto the
+                    element beneath it when an item is selected — over the row, that would
+                    navigate. Non-modal avoids the pointer-lock + the stray click. */}
+                <DropdownMenu modal={false}>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      type="button"
+                      size="icon"
+                      variant="ghost"
+                      className="h-8 w-8 text-gray-400 hover:text-gray-700"
+                      aria-label={`Actions for ${file.display_id}`}
+                      onClick={(event) => event.stopPropagation()}
+                    >
+                      <MoreHorizontal className="h-4 w-4" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-40">
+                    <DropdownMenuItem
+                      className="text-destructive focus:text-destructive"
+                      onSelect={() => setPendingDelete(file)}
+                    >
+                      <Trash2 className="mr-2 h-4 w-4" /> Delete file
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+
+      <DeleteFileDialog
+        file={pendingDelete}
+        open={pendingDelete !== null}
+        onOpenChange={(open) => {
+          if (!open) setPendingDelete(null);
+        }}
+      />
+    </>
   );
 }

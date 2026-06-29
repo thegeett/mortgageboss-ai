@@ -1,3 +1,4 @@
+import { FileHeaderActions } from "@/components/file/file-header-actions";
 import { StatusBadge } from "@/components/status-badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { programLabel, purposeLabel } from "@/lib/loan-files/labels";
@@ -72,7 +73,10 @@ export function FileHeader({ file }: { file: LoanFileDetail | undefined }) {
               Created {fmtDate(file.created_at)} · Updated {fmtRelative(file.updated_at)}
             </p>
           </div>
-          <StatusBadge status={file.status} />
+          <div className="flex items-center gap-1.5">
+            <StatusBadge status={file.status} />
+            <FileHeaderActions file={file} />
+          </div>
         </div>
       )}
     </div>
