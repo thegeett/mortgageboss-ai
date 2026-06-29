@@ -410,3 +410,43 @@ Moving the dial can flip a file clear↔blocked (Thorough surfaces new findings;
 ones). The panel communicates the change — "Thorough surfaced N more finding(s) to resolve", "now showing N
 (M lower-confidence hidden)", and the new blocked/clear submit status — so the processor reads it as "I asked
 for more/less scrutiny and got it", never as the system randomly changing the file's status. (ADR-194.)
+
+## 14. Starter lender overlays + enforcement — implemented (LP-80)
+
+The third layer comes to life: **starter UWM + Sun-West overlays** (`app/verification/overlays/starter.py`),
+supplying real content into LP-74's composition mechanism and making overlay enforcement demonstrable.
+
+### 14.1 Overlays are diffs (override-by-id + add-custom + reason)
+
+An overlay is the small set of places a *lender* deviates from the *investor* default — never a full copy.
+UWM = one override (`conv.dti.back_end_max` → 45, tighter than the investor 50) + one custom reserves rule.
+Sun-West = one override (`conv.ltv.purchase_max` → 95) and **no DTI override**. Each `ThresholdOverride` now
+carries a `reason` (auditable + editable). Everything un-mentioned falls through to the investor default; the
+overlay value wins where specified.
+
+### 14.2 The per-file lender binding
+
+Overlays are keyed by lender **slug** (matching the seeded `uwm` / `sun-west`) and merged into
+`default_registry()`. The DTI/LTV calculators and the verification engine already resolve through
+`default_registry().resolve(program, lender_slug)` with the file's lender slug — so a file's target lender
+selects its overlay automatically, no rewiring.
+
+### 14.3 The enforcement proof (the headline)
+
+The SAME file at 48% back-end DTI **flags under UWM** (48 > 45) but **clears under Sun-West** (48 ≤ the
+investor 50) — same data, different lender, different findings. Proven at the engine layer (pure facts → the
+DTI rule fails for UWM, passes for Sun-West) and the calculator layer (`limit.status` over vs pass). The demo
+moment: "this file is fine for Sun-West but flags for UWM, because UWM is stricter on DTI."
+
+### 14.4 The effective-limit connection
+
+The DTI/LTV calculators' effective limit is now lender-specific: a UWM file shows DTI 45 (`source=overlay`,
+`lender_slug=uwm`); a Sun-West file shows DTI 50 (`source=program_default`) and a 95 purchase-LTV cap. Same
+file, retarget the lender → the limit changes.
+
+### 14.5 Honest starter scoping
+
+The UWM / Sun-West thresholds are **STARTER PLACEHOLDERS** for the domain expert (Priya) to validate and
+correct — NOT authoritative lender requirements (marked in the module, every `reason`, and here). The
+MECHANISM is real; the VALUES are starter. The admin UI to edit overlays without code (and per-company
+DB-backed overlays via `lenders.lender_overlays`) is LP-87; for now they are hand-edited config. (ADR-196.)

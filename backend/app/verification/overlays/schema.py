@@ -40,6 +40,10 @@ class ThresholdOverride(BaseModel):
 
     rule_id: str
     condition: Condition
+    # Why this lender deviates from the investor default — auditable and editable
+    # (LP-80 populates it on the real overlays; LP-87's admin UI edits it). Optional
+    # so the LP-74 sample overlay (mechanism-only) stays valid without one.
+    reason: str | None = None
 
 
 class LenderOverlay(BaseModel):

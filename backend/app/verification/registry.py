@@ -102,13 +102,17 @@ class RuleRegistry:
 
 
 def default_registry() -> RuleRegistry:
-    """The registry built from the LP-74 SAMPLE rules + the SAMPLE overlay.
+    """The registry built from the LP-74 SAMPLE rules + the SAMPLE + STARTER overlays.
 
     Imported lazily so the pure composition code above carries no dependency on
-    the sample content. The real rule content is LP-82..85 and the real overlays
-    LP-80 — both slot into this same registry shape.
+    the content. The real rule content is LP-82..85; the **starter** UWM / Sun-West
+    overlays (LP-80) slot in here keyed by lender slug, so a file's target lender
+    selects its overlay automatically (the calculators + engine resolve through
+    here). The overlay VALUES are starter placeholders to validate with Priya; the
+    per-company, hand-edited overlays + the admin editing UI are LP-87.
     """
     from app.verification.overlays.samples import SAMPLE_OVERLAYS
+    from app.verification.overlays.starter import STARTER_OVERLAYS
     from app.verification.rules.samples import SAMPLE_RULES
 
-    return RuleRegistry(rules=SAMPLE_RULES, overlays=SAMPLE_OVERLAYS)
+    return RuleRegistry(rules=SAMPLE_RULES, overlays={**SAMPLE_OVERLAYS, **STARTER_OVERLAYS})

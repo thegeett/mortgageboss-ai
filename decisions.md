@@ -6074,3 +6074,49 @@ makes a list-clearing action deliberate and legible, not accidental.
 of hardening tests for the already-deleted and children-preserved cases). A future admin hard-delete +
 restore/trash view can build on the preserved rows. Soft-deleted children remain in their tables, reachable
 only by a future restore or an admin tool — acceptable (they're scoped through the file, which is invisible).
+
+## ADR-196: Starter lender overlays (UWM + Sun-West) + overlay enforcement (LP-80)
+
+- **Date:** 2026-06-29
+- **Status:** Accepted
+
+**Context:** LP-74 built the rule engine's overlay-application *mechanism* (override an investor rule's
+threshold by `rule_id` + add a custom rule + investor-default fall-through) and proved it with one SAMPLE
+overlay. The third layer had no real content, so lender-specificity was not yet tangible and the DTI/LTV
+calculators' "effective limit" was always the generic program default. LP-80 supplies starter UWM +
+Sun-West overlays and makes enforcement demonstrable.
+
+**Decision:**
+
+- **Starter overlays as code config, keyed by lender slug.** `app/verification/overlays/starter.py` defines
+  `UWM_OVERLAY` (slug `uwm`) and `SUNWEST_OVERLAY` (slug `sun-west`), merged into `default_registry()`
+  alongside the LP-74 sample. Because the calculators **and** the engine already resolve through
+  `default_registry().resolve(program, lender_slug)` with the file's lender slug, a file's target lender now
+  selects its overlay automatically — no call-site rewiring.
+- **Overlays are diffs.** UWM = one override (`conv.dti.back_end_max` → 45, tighter than the investor 50) +
+  one custom rule (a reserves minimum). Sun-West = one override (`conv.ltv.purchase_max` → 95) and
+  deliberately **no DTI override**. Everything un-mentioned falls through to the investor default; the overlay
+  value wins where specified. Each `ThresholdOverride` now carries a `reason` (auditable + editable).
+- **The enforcement proof.** The SAME file at 48%% back-end DTI **flags under UWM** (48 > 45) but **clears
+  under Sun-West** (48 ≤ the investor 50) — same data, different lender, different findings. Proven at the
+  engine layer (pure facts) and the calculator layer (`limit.status` over vs pass; `limit.source` overlay vs
+  program_default). Sun-West still differs (a tighter purchase-LTV cap), so each lender is a genuine diff.
+- **The effective limit is lender-specific.** A UWM Conventional file's DTI calculator shows 45 (source
+  `overlay`, `lender_slug=uwm`); a Sun-West file shows 50 (source `program_default`) and a 95 purchase-LTV cap.
+- **HONEST scoping — the values are starter placeholders.** The thresholds are NOT authoritative UWM /
+  Sun-West requirements (that knowledge isn't available yet). They are a small, plausible set for the domain
+  expert (Priya) to validate and correct — marked `STARTER PLACEHOLDER` in the module, every `reason`, and the
+  docs. The MECHANISM is real; the VALUES are starter.
+
+**Rationale:** LP-74 built the mechanism with a sample; supplying real content makes lender-specificity
+concrete — the same file flagging differently for UWM vs. Sun-West is both the proof the three layers compose
+per-file and a compelling demo (Priya works with both lenders, who differ). Overlays-as-diffs keep them
+small, maintainable, and auditable (the `reason`). Honest placeholder scoping avoids fabricating authoritative
+lender thresholds — she validates and extends them.
+
+**Consequences:** LP-87 adds the admin UI to edit overlays without code; until then they are hand-edited
+config. Per-company *custom* overlays (the `lenders.lender_overlays` JSON column, currently unused) are also
+LP-87 — the starter overlays are universal config keyed by slug, which is the right representation for shared
+placeholders. LP-82–85 supply the real investor rules these overlays patch. The calculators' effective limit
+is now lender-specific. Precedence: the overlay value wins where specified; un-overridden rules use the
+investor default.
