@@ -417,3 +417,98 @@ async def test_user_default_preference_applies_to_files(
     assert body["aggression"]["level"] == "conservative"
     assert body["aggression"]["default"] == "conservative"
     assert body["aggression"]["override"] is None
+
+
+# --- LP-88: the full action set (accept-risk, request-docs) + run history -----
+
+
+async def test_status_includes_the_program(client: AsyncClient, db: AsyncSession) -> None:
+    """The status carries the file's loan program (drives the rule set / the tab header)."""
+    from app.models import LoanProgram
+
+    company, _user, token = await _user_and_token(db, slug="acme", email="u@acme.com")
+    loan_file = await create_loan_file(db, company_id=company.id, loan_program=LoanProgram.FHA)
+    await db.commit()
+    body = (
+        await client.get(f"{API}/{loan_file.display_id}/verification", headers=_auth(token))
+    ).json()
+    assert body["program"] == "fha"
+
+
+async def test_accept_risk_resolves_as_accepted_risk(client: AsyncClient, db: AsyncSession) -> None:
+    """Accept-risk acknowledges a finding (distinct from override) → ACCEPTED_RISK state."""
+    company, _user, token = await _user_and_token(db, slug="acme", email="u@acme.com")
+    loan_file = await create_loan_file(db, company_id=company.id)
+    finding = await _add_finding(db, loan_file, confidence=0.9)
+    await db.commit()
+
+    resp = await client.post(
+        f"{API}/{loan_file.display_id}/findings/{finding.id}/accept-risk",
+        headers=_auth(token),
+        json={"reason": "Compensating factor: 6 months reserves"},
+    )
+    assert resp.status_code == 200
+    await db.refresh(finding)
+    assert finding.resolution_status.value == "accepted_risk"
+    assert finding.resolution_note == "Compensating factor: 6 months reserves"
+
+
+async def test_request_docs_creates_a_needs_item_and_keeps_the_finding_open(
+    client: AsyncClient, db: AsyncSession
+) -> None:
+    """Request-docs creates a FINDING-origin needs item; the finding stays open + is marked."""
+    from app.models.needs_item import NeedsItem, NeedsItemOrigin
+    from sqlalchemy import select
+
+    company, _user, token = await _user_and_token(db, slug="acme", email="u@acme.com")
+    loan_file = await create_loan_file(db, company_id=company.id)
+    finding = await _add_finding(db, loan_file, confidence=0.9)
+    await db.commit()
+
+    resp = await client.post(
+        f"{API}/{loan_file.display_id}/findings/{finding.id}/request-docs",
+        headers=_auth(token),
+        json={"note": "Please provide the 2024 W-2"},
+    )
+    assert resp.status_code == 200
+
+    needs = (
+        (await db.execute(select(NeedsItem).where(NeedsItem.loan_file_id == loan_file.id)))
+        .scalars()
+        .all()
+    )
+    assert len(needs) == 1 and needs[0].origin is NeedsItemOrigin.FINDING
+    await db.refresh(finding)
+    # The finding stays OPEN (request-docs doesn't resolve it) but is marked.
+    assert finding.resolution_status.value == "open"
+    assert "docs_requested" in finding.details
+
+
+async def test_run_history_lists_runs_newest_first(client: AsyncClient, db: AsyncSession) -> None:
+    """The run-history endpoint exposes the versioned runs (newest first) for the selector."""
+    company, _user, token = await _user_and_token(db, slug="acme", email="u@acme.com")
+    loan_file = await create_loan_file(db, company_id=company.id)
+    await _seed_completed_run(db, loan_file, fingerprint="aaa")
+    await _seed_completed_run(db, loan_file, fingerprint="bbb")
+    await db.commit()
+
+    resp = await client.get(f"{API}/{loan_file.display_id}/verification/runs", headers=_auth(token))
+    assert resp.status_code == 200
+    runs = resp.json()
+    assert len(runs) == 2
+    # Newest-first ordering.
+    assert all("id" in r and "status" in r for r in runs)
+
+
+async def test_accept_risk_cross_company_is_404(client: AsyncClient, db: AsyncSession) -> None:
+    company_a, _ua, _ta = await _user_and_token(db, slug="acme", email="a@acme.com")
+    _company_b, _ub, token_b = await _user_and_token(db, slug="other", email="b@other.com")
+    loan_file = await create_loan_file(db, company_id=company_a.id)
+    finding = await _add_finding(db, loan_file, confidence=0.9)
+    await db.commit()
+    resp = await client.post(
+        f"{API}/{loan_file.display_id}/findings/{finding.id}/accept-risk",
+        headers=_auth(token_b),
+        json={},
+    )
+    assert resp.status_code == 404

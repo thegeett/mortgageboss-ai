@@ -20,6 +20,7 @@ vi.mock("@/lib/api/verification", () => ({
   useRunVerification: () => ({ mutate: runMutate, isPending: false }),
   useSetAggression: () => ({ mutate: setAggressionMutate, isPending: false }),
   useResolveFinding: () => ({ mutate: resolveMutate, isPending: false }),
+  useVerificationRuns: () => ({ data: [] }),
   verificationQueryKey: (id: string) => ["verification", id],
 }));
 
@@ -62,6 +63,7 @@ function finding(over: Partial<VerificationFinding> & { id: string }): Verificat
 
 const STATUS: VerificationStatus = {
   stale: false,
+  program: "conventional",
   latest_run: {
     id: "run-1",
     status: "completed",

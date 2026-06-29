@@ -1,14 +1,17 @@
 "use client";
 
 /**
- * One finding in the verification tab (LP-81) — the trust + resolution unit.
+ * One finding in the verification tab (LP-81 + LP-88) — the trust + disposition unit.
  *
- * Shows a **templated headline** for known types (reads identically every run; the
- * AI's free-form wording is secondary detail), the severity / type / confidence, and
- * the **source location** (click → the document page + verbatim snippet — the trust
- * mechanism). Open findings carry the core resolution actions: Apply (incorporate →
- * recompute), Override (with a required reason), Add note. Resolved findings show
- * their resolution + reason/record (history — never silently dropped).
+ * Shows a **templated headline** for known types (reads identically every run; the AI's
+ * free-form wording is secondary detail), the severity / type / confidence, the
+ * **source-origin** (deterministic rule = stable/certain vs AI cross-source = the novel
+ * frontier, LP-86), the lender **overlay** that adjusted it (LP-80), and the **source
+ * location** (click → the document page + verbatim snippet — the trust mechanism). Open
+ * findings carry the full action set: Apply, Override (required reason), Add note, plus
+ * **Accept-risk** (acknowledge a real finding — FHA compensating-factors / subject-to-repair,
+ * LP-84/85) and **Request-docs** (create a needs item). Resolved findings show their
+ * disposition + reason/record (history — never silently dropped).
  */
 
 import { Badge } from "@/components/ui/badge";
@@ -24,7 +27,15 @@ import {
   findingHeadline,
   findingTypeLabel,
 } from "@/lib/verification/finding-display";
-import { Check, ChevronDown, FileText, MessageSquarePlus, X } from "lucide-react";
+import {
+  Check,
+  ChevronDown,
+  FileText,
+  MessageSquarePlus,
+  Send,
+  ShieldCheck,
+  X,
+} from "lucide-react";
 import { useId, useState } from "react";
 
 interface Note {
@@ -32,40 +43,88 @@ interface Note {
   at?: string;
 }
 
+type FormKind = "override" | "note" | "accept" | "request";
+
 export function FindingCard({
   finding,
   busy = false,
   onApply,
   onOverride,
   onNote,
+  onAcceptRisk,
+  onRequestDocs,
 }: {
   finding: VerificationFinding;
   busy?: boolean;
   onApply?: () => void;
   onOverride?: (reason: string) => void;
   onNote?: (note: string) => void;
+  onAcceptRisk?: (reason: string) => void;
+  onRequestDocs?: (note: string) => void;
 }) {
   const fieldId = useId();
   const [expanded, setExpanded] = useState(false);
-  const [form, setForm] = useState<"override" | "note" | null>(null);
+  const [form, setForm] = useState<FormKind | null>(null);
   const [text, setText] = useState("");
 
   const red = finding.status === "red";
   const resolved = finding.resolution_status !== "open";
   const headline = findingHeadline(finding);
   const detail = findingDetail(finding);
-  const reasoning = (finding.details as { reasoning?: string }).reasoning ?? null;
-  const notes = ((finding.details as { notes?: Note[] }).notes ?? []).filter(Boolean);
+  const details = finding.details as {
+    reasoning?: string;
+    notes?: Note[];
+    overlay_applied?: string | null;
+    docs_requested?: { needs_item_id?: string } | null;
+  };
+  const reasoning = details.reasoning ?? null;
+  const notes = (details.notes ?? []).filter(Boolean);
+  const overlay = details.overlay_applied ?? null;
+  const docsRequested = Boolean(details.docs_requested);
+  const deterministic = finding.origin === "deterministic_rule";
   const hasSource = finding.source_page !== null || Boolean(finding.source_snippet);
+
+  function openForm(kind: FormKind) {
+    setForm(kind);
+    setText("");
+  }
 
   function submit() {
     const value = text.trim();
-    if (!value) return;
-    if (form === "override") onOverride?.(value);
-    else if (form === "note") onNote?.(value);
+    // Override requires a reason; accept-risk + request-docs + note allow empty.
+    if (form === "override") {
+      if (!value) return;
+      onOverride?.(value);
+    } else if (form === "note") {
+      if (!value) return;
+      onNote?.(value);
+    } else if (form === "accept") {
+      onAcceptRisk?.(value);
+    } else if (form === "request") {
+      onRequestDocs?.(value);
+    }
     setForm(null);
     setText("");
   }
+
+  const FORM_META: Record<FormKind, { label: string; submit: string; placeholder: string }> = {
+    override: {
+      label: "Reason for dismissing (required)",
+      submit: "Override",
+      placeholder: "e.g. already disclosed on the 1003; documented separately",
+    },
+    note: { label: "Note", submit: "Save note", placeholder: "Add context for the file…" },
+    accept: {
+      label: "Compensating factor / accepted-risk rationale (optional)",
+      submit: "Accept risk",
+      placeholder: "e.g. 6 months reserves; subject-to-repair re-inspection scheduled",
+    },
+    request: {
+      label: "What to request (optional)",
+      submit: "Request docs",
+      placeholder: "e.g. the 2024 W-2; a letter of explanation",
+    },
+  };
 
   return (
     <li className="rounded-lg border border-gray-200 px-3 py-2.5">
@@ -97,7 +156,26 @@ export function FindingCard({
           <div className="mt-1 flex flex-wrap items-center gap-x-2 text-[11px] text-gray-400">
             <span>{findingTypeLabel(finding)}</span>
             <span>· {formatPercent(String(finding.confidence * 100))} confidence</span>
-            <span>· {finding.origin === "deterministic_rule" ? "rule" : "AI cross-source"}</span>
+            {/* Source-origin (LP-86): deterministic = stable/certain; AI = the novel frontier. */}
+            <span
+              className={cn(
+                "rounded px-1 py-px font-medium",
+                deterministic ? "bg-primary/10 text-primary" : "bg-info/10 text-info",
+              )}
+            >
+              {deterministic ? "deterministic" : "AI · novel"}
+            </span>
+            {/* Lender overlay provenance (LP-80) — lender-specific result. */}
+            {overlay && (
+              <span className="rounded bg-gray-100 px-1 py-px font-medium text-gray-500">
+                {overlay} overlay
+              </span>
+            )}
+            {docsRequested && (
+              <span className="inline-flex items-center gap-0.5 rounded bg-info/10 px-1 py-px font-medium text-info">
+                <Send className="h-2.5 w-2.5" /> docs requested
+              </span>
+            )}
             {hasSource && (
               <button
                 type="button"
@@ -121,7 +199,7 @@ export function FindingCard({
                 <p className="text-gray-500">Document page {finding.source_page}</p>
               )}
               {finding.source_snippet && (
-                <p className="font-mono text-gray-600">“{finding.source_snippet}”</p>
+                <p className="font-mono text-gray-600">&ldquo;{finding.source_snippet}&rdquo;</p>
               )}
               {reasoning && <p className="text-gray-500">{reasoning}</p>}
             </div>
@@ -142,8 +220,8 @@ export function FindingCard({
             </ul>
           )}
 
-          {/* Resolution actions (open findings only). */}
-          {!resolved && (onApply || onOverride || onNote) && (
+          {/* The full action set (open findings only). */}
+          {!resolved && (onApply || onOverride || onNote || onAcceptRisk || onRequestDocs) && (
             <div className="mt-2.5">
               {form === null ? (
                 <div className="flex flex-wrap items-center gap-1.5">
@@ -159,6 +237,30 @@ export function FindingCard({
                       Apply
                     </Button>
                   )}
+                  {onAcceptRisk && (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="h-7 gap-1 text-xs"
+                      disabled={busy}
+                      onClick={() => openForm("accept")}
+                    >
+                      <ShieldCheck className="h-3 w-3" /> Accept risk
+                    </Button>
+                  )}
+                  {onRequestDocs && (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="h-7 gap-1 text-xs"
+                      disabled={busy || docsRequested}
+                      onClick={() => openForm("request")}
+                    >
+                      <Send className="h-3 w-3" /> {docsRequested ? "Requested" : "Request docs"}
+                    </Button>
+                  )}
                   {onOverride && (
                     <Button
                       type="button"
@@ -166,10 +268,7 @@ export function FindingCard({
                       variant="outline"
                       className="h-7 text-xs"
                       disabled={busy}
-                      onClick={() => {
-                        setForm("override");
-                        setText("");
-                      }}
+                      onClick={() => openForm("override")}
                     >
                       Override…
                     </Button>
@@ -181,10 +280,7 @@ export function FindingCard({
                       variant="ghost"
                       className="h-7 gap-1 text-xs text-gray-500"
                       disabled={busy}
-                      onClick={() => {
-                        setForm("note");
-                        setText("");
-                      }}
+                      onClick={() => openForm("note")}
                     >
                       <MessageSquarePlus className="h-3 w-3" /> Add note
                     </Button>
@@ -193,7 +289,7 @@ export function FindingCard({
               ) : (
                 <div className="space-y-1.5">
                   <label htmlFor={fieldId} className="text-[11px] font-medium text-gray-500">
-                    {form === "override" ? "Reason for dismissing (required)" : "Note"}
+                    {FORM_META[form].label}
                   </label>
                   <Textarea
                     id={fieldId}
@@ -201,22 +297,18 @@ export function FindingCard({
                     onChange={(e) => setText(e.target.value)}
                     rows={2}
                     className="text-sm"
-                    placeholder={
-                      form === "override"
-                        ? "e.g. already disclosed on the 1003; documented separately"
-                        : "Add context for the file…"
-                    }
+                    placeholder={FORM_META[form].placeholder}
                   />
                   <div className="flex items-center gap-1.5">
                     <Button
                       type="button"
                       size="sm"
                       className="h-7 gap-1 text-xs"
-                      disabled={busy || text.trim() === ""}
+                      disabled={busy || (form === "override" && text.trim() === "")}
                       onClick={submit}
                     >
                       {busy ? <Spinner className="h-3 w-3" /> : <Check className="h-3 w-3" />}
-                      {form === "override" ? "Override" : "Save note"}
+                      {FORM_META[form].submit}
                     </Button>
                     <Button
                       type="button"
@@ -234,13 +326,17 @@ export function FindingCard({
             </div>
           )}
 
-          {/* Resolved: the recorded reason (override) for the audit trail. */}
-          {resolved && finding.resolution_status === "overridden" && (
-            <p className="mt-1.5 text-[11px] text-gray-500">
-              <span className="text-gray-400">Reason: </span>
-              {finding.resolution_note ?? "—"}
-            </p>
-          )}
+          {/* Resolved: the recorded reason (override / accepted-risk) for the audit trail. */}
+          {resolved &&
+            (finding.resolution_status === "overridden" ||
+              finding.resolution_status === "accepted_risk") && (
+              <p className="mt-1.5 text-[11px] text-gray-500">
+                <span className="text-gray-400">
+                  {finding.resolution_status === "accepted_risk" ? "Accepted: " : "Reason: "}
+                </span>
+                {finding.resolution_note ?? "—"}
+              </p>
+            )}
         </div>
       </div>
     </li>

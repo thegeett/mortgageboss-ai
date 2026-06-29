@@ -18,23 +18,33 @@ import type {
   VerificationFinding,
   VerificationStatus,
 } from "@/lib/types/verification";
+import {
+  DEFAULT_FILTERS,
+  type FindingFilters,
+  matchesFilters,
+} from "@/lib/verification/finding-filters";
 import { toast } from "sonner";
 
 export function FindingsList({
   fileId,
   data,
   activeLevel,
+  filters = DEFAULT_FILTERS,
 }: {
   fileId: string;
   data: VerificationStatus;
   activeLevel: AggressionLevel;
+  filters?: FindingFilters;
 }) {
   const resolve = useResolveFinding(fileId);
   const cutoff = data.aggression.cutoffs[activeLevel];
 
   const openAll = data.findings.filter((f) => f.resolution_status === "open");
-  const shownOpen = openAll.filter((f) => f.confidence >= cutoff);
-  const hiddenOpen = openAll.length - shownOpen.length;
+  // The dial sets the confidence floor; the pills filter severity + category WITHIN it.
+  const inScopeOpen = openAll.filter((f) => f.confidence >= cutoff);
+  const shownOpen = inScopeOpen.filter((f) => matchesFilters(f, filters));
+  const hiddenOpen = openAll.length - inScopeOpen.length;
+  const filteredOut = inScopeOpen.length - shownOpen.length;
   const resolved = data.findings.filter((f) => f.resolution_status !== "open");
 
   function act(action: Parameters<typeof resolve.mutate>[0], ok: string) {
@@ -53,7 +63,9 @@ export function FindingsList({
             ? "Not run yet — run verification to compare the stated data against the documents."
             : openAll.length === 0
               ? "No open discrepancies."
-              : `No findings at ${AGGRESSION_META[activeLevel].label} thoroughness — ${hiddenOpen} lower-confidence ${hiddenOpen === 1 ? "finding is" : "findings are"} hidden. Dial up to Thorough to see ${hiddenOpen === 1 ? "it" : "them"}.`}
+              : filteredOut > 0
+                ? `No findings match the active filters (${filteredOut} hidden by the filter${filteredOut === 1 ? "" : "s"}).`
+                : `No findings at ${AGGRESSION_META[activeLevel].label} thoroughness — ${hiddenOpen} lower-confidence ${hiddenOpen === 1 ? "finding is" : "findings are"} hidden. Dial up to Thorough to see ${hiddenOpen === 1 ? "it" : "them"}.`}
         </p>
       ) : (
         <ul className="space-y-2">
@@ -67,6 +79,12 @@ export function FindingsList({
                 act({ kind: "override", findingId: f.id, reason }, "Finding overridden")
               }
               onNote={(note) => act({ kind: "note", findingId: f.id, note }, "Note added")}
+              onAcceptRisk={(reason) =>
+                act({ kind: "accept-risk", findingId: f.id, reason }, "Finding accepted as risk")
+              }
+              onRequestDocs={(note) =>
+                act({ kind: "request-docs", findingId: f.id, note }, "Documents requested")
+              }
             />
           ))}
         </ul>

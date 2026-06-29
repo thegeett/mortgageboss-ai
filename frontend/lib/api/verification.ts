@@ -95,30 +95,34 @@ export function useSetAggression(identifier: string) {
   });
 }
 
-// --- Per-finding resolution (LP-81) — Apply / Override / Add note ----------- //
+// --- Per-finding action set (LP-81 + LP-88) -------------------------------- //
+// LP-81: Apply / Override / Add note. LP-88: Accept-risk (acknowledge, distinct from
+// override) + Request-docs (create a needs item from the finding).
 
 /** The kind of resolution action + its body. */
 type Resolution =
   | { kind: "apply"; findingId: string }
   | { kind: "override"; findingId: string; reason: string }
-  | { kind: "note"; findingId: string; note: string };
+  | { kind: "note"; findingId: string; note: string }
+  | { kind: "accept-risk"; findingId: string; reason: string }
+  | { kind: "request-docs"; findingId: string; note: string };
 
 async function resolveFinding(identifier: string, action: Resolution): Promise<VerificationStatus> {
   const base = `${API_V1}/loan-files/${identifier}/findings/${action.findingId}`;
-  const body =
-    action.kind === "override"
-      ? { reason: action.reason }
-      : action.kind === "note"
-        ? { note: action.note }
-        : {};
+  let body: Record<string, string> = {};
+  if (action.kind === "override") body = { reason: action.reason };
+  else if (action.kind === "note") body = { note: action.note };
+  else if (action.kind === "accept-risk") body = { reason: action.reason };
+  else if (action.kind === "request-docs") body = { note: action.note };
   const res = await apiClient.post<VerificationStatus>(`${base}/${action.kind}`, body);
   return res.data;
 }
 
 /**
- * Resolve a finding (Apply / Override-with-reason / Add note). The endpoint returns
- * the re-filtered status (updated findings + blocking); APPLY also changes the
- * structured data, so refresh the DTI/LTV calculators (the recompute interlock).
+ * Resolve a finding (Apply / Override / Note / Accept-risk / Request-docs). The endpoint
+ * returns the re-filtered status (updated findings + blocking); APPLY also changes the
+ * structured data (refresh DTI/LTV — the recompute interlock); Request-docs creates a
+ * needs item (refresh the needs list).
  */
 export function useResolveFinding(identifier: string) {
   const queryClient = useQueryClient();
@@ -128,6 +132,26 @@ export function useResolveFinding(identifier: string) {
       queryClient.setQueryData(verificationQueryKey(identifier), status);
       void queryClient.invalidateQueries({ queryKey: dtiQueryKey(identifier) });
       void queryClient.invalidateQueries({ queryKey: ltvQueryKey(identifier) });
+      void queryClient.invalidateQueries({ queryKey: ["needs", identifier] });
+      void queryClient.invalidateQueries({ queryKey: ["loan-file-activity", identifier] });
     },
+  });
+}
+
+// --- Run history (LP-88) — the version selector ---------------------------- //
+
+export async function fetchVerificationRuns(identifier: string): Promise<VerificationRun[]> {
+  const res = await apiClient.get<VerificationRun[]>(
+    `${API_V1}/loan-files/${identifier}/verification/runs`,
+  );
+  return res.data;
+}
+
+export function useVerificationRuns(identifier: string, enabled = true) {
+  return useQuery({
+    queryKey: ["verification-runs", identifier],
+    queryFn: () => fetchVerificationRuns(identifier),
+    enabled: Boolean(identifier) && enabled,
+    retry: noRetryOn404,
   });
 }

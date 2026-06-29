@@ -29,10 +29,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.activity_log import ActivityType
 from app.models.base import utcnow
 from app.models.borrower import Borrower
-from app.models.finding import Finding, FindingResolutionStatus
+from app.models.finding import Finding, FindingResolutionStatus, FindingStatus
 from app.models.loan_file import LoanFile
+from app.models.needs_item import (
+    NeedsItem,
+    NeedsItemDisposition,
+    NeedsItemOrigin,
+    NeedsItemPriority,
+)
 from app.models.stated_financials import StatedIncomeItem, StatedLiability
 from app.services.activity_log import log_activity
+from app.services.needs_items import create_needs_item
 from app.services.verifications import mark_verification_stale
 
 
@@ -148,6 +155,99 @@ async def add_finding_note(
     )
     await db.flush()
     return finding
+
+
+async def accept_risk_finding(
+    db: AsyncSession,
+    *,
+    finding: Finding,
+    actor_user_id: UUID,
+    reason: str | None = None,
+) -> Finding:
+    """Resolve a finding as ACCEPTED_RISK — acknowledged as a known/accepted risk (LP-88).
+
+    DISTINCT from OVERRIDDEN (which dismisses the finding as not-applicable): accept-risk
+    acknowledges a REAL finding the processor chooses to proceed with — the FHA
+    compensating-factors (LP-84) + subject-to-repair (LP-85) conditional model, where the
+    finding is mitigable, not a hard block. The optional reason (the compensating factor /
+    the accepted-risk rationale) is recorded; the resolution trail + activity are logged.
+    """
+    finding.resolution_status = FindingResolutionStatus.ACCEPTED_RISK
+    finding.resolution_note = reason
+    finding.resolved_by_user_id = actor_user_id
+    finding.resolved_at = utcnow()
+
+    await log_activity(
+        db,
+        loan_file_id=finding.loan_file_id,
+        activity_type=ActivityType.FINDING_RESOLVED,
+        summary=f"Finding {finding.rule_id} accepted as risk",
+        actor_user_id=actor_user_id,
+        detail={
+            "finding_id": str(finding.id),
+            "rule_id": finding.rule_id,
+            "resolution": FindingResolutionStatus.ACCEPTED_RISK.value,
+            "reason": reason,
+        },
+    )
+    await db.flush()
+    return finding
+
+
+_STATUS_TO_PRIORITY = {
+    FindingStatus.RED: NeedsItemPriority.BLOCKING,
+    FindingStatus.YELLOW: NeedsItemPriority.STANDARD,
+}
+
+
+async def request_docs_for_finding(
+    db: AsyncSession,
+    *,
+    finding: Finding,
+    actor_user_id: UUID,
+    note: str | None = None,
+) -> NeedsItem:
+    """Create a needs-list item FROM a finding (LP-88) — the "request docs" action.
+
+    Generates a ``FINDING``-origin needs item (the doc request the borrower must satisfy)
+    with the priority derived from the finding severity, and records a note on the finding
+    that the docs were requested (so the tab shows the linkage). Does NOT resolve the
+    finding — it stays open until the request is satisfied. The needs item is the artifact
+    the needs list + Phase-4 communication act on. ``flush`` only.
+    """
+    title = f"Documents for: {finding.message}"[:200]
+    item = await create_needs_item(
+        db,
+        loan_file_id=finding.loan_file_id,
+        title=title,
+        origin=NeedsItemOrigin.FINDING,
+        priority=_STATUS_TO_PRIORITY.get(finding.status, NeedsItemPriority.STANDARD),
+        disposition=NeedsItemDisposition.CONFIRMED,  # a processor-requested need is real
+        description=note,
+        reasoning=f"Requested from verification finding {finding.rule_id}",
+    )
+    # Mark the finding so the tab shows docs were requested (without resolving it).
+    requested = {
+        "by": str(actor_user_id),
+        "at": utcnow().isoformat(),
+        "needs_item_id": str(item.id),
+    }
+    finding.details = {**finding.details, "docs_requested": requested}
+
+    await log_activity(
+        db,
+        loan_file_id=finding.loan_file_id,
+        activity_type=ActivityType.NEEDS_ITEM_CREATED,
+        summary=f"Requested docs from finding {finding.rule_id}",
+        actor_user_id=actor_user_id,
+        detail={
+            "finding_id": str(finding.id),
+            "rule_id": finding.rule_id,
+            "needs_item_id": str(item.id),
+        },
+    )
+    await db.flush()
+    return item
 
 
 async def mark_recompute_needed(db: AsyncSession, *, loan_file: LoanFile) -> None:

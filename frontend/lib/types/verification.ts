@@ -52,6 +52,8 @@ export interface Aggression {
 
 export interface VerificationStatus {
   stale: boolean;
+  /** The file's loan program (conventional / fha) — drives the rule set + the tab header. */
+  program: string | null;
   latest_run: VerificationRun | null;
   /** The full stored cross-source set; the client shows only those at/above `aggression.cutoff`. */
   findings: VerificationFinding[];

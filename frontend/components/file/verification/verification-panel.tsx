@@ -10,8 +10,12 @@
  * wording / source location). The DTI/LTV calculators sit alongside it on the tab.
  */
 
+import { FindingFilterPills } from "@/components/file/verification/finding-filters";
 import { FindingsList } from "@/components/file/verification/findings-list";
 import { NeedsCompleteness } from "@/components/file/verification/needs-completeness";
+import { VerificationStats } from "@/components/file/verification/verification-stats";
+import { VersionSelector } from "@/components/file/verification/version-selector";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { InlineErrorState } from "@/components/ui/error-state";
@@ -26,12 +30,14 @@ import {
   useVerification,
   verificationQueryKey,
 } from "@/lib/api/verification";
+import { humanize } from "@/lib/format";
 import type {
   AggressionLevel,
   VerificationFinding,
   VerificationStatus,
 } from "@/lib/types/verification";
 import { cn } from "@/lib/utils";
+import { DEFAULT_FILTERS, type FindingFilters } from "@/lib/verification/finding-filters";
 import { useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, CheckCircle2, Lock, Play, ScanSearch, Sparkles, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -159,12 +165,22 @@ export function VerificationPanel({ fileId }: { fileId: string }) {
             <span className="flex h-7 w-7 items-center justify-center rounded-md bg-primary/10 text-primary">
               <ScanSearch className="h-4 w-4" />
             </span>
-            Cross-source verification
+            Verification
+            {data?.program && (
+              <Badge variant="secondary" className="font-medium">
+                {humanize(data.program)}
+              </Badge>
+            )}
           </CardTitle>
           <p className="pl-9 text-xs text-gray-500">
-            Reads the stated application against the documents and surfaces what doesn&rsquo;t line
-            up.
+            The full rule set + the AI cross-source pass, against the documents — program- and
+            lender-specific.
           </p>
+          {data && (
+            <div className="pl-9 pt-1">
+              <VersionSelector fileId={fileId} currentRunId={data.latest_run?.id ?? null} />
+            </div>
+          )}
         </div>
         <div className="flex flex-col items-end gap-1">
           <Button
@@ -249,10 +265,18 @@ function VerificationBody({
     (f) => f.resolution_status === "open" && f.confidence >= cutoff,
   );
 
+  // The severity + category pills (LP-88) — orthogonal to the dial; they slice the
+  // in-scope set further. Held here so the stats reflect totals + the list reflects the slice.
+  const [filters, setFilters] = useState<FindingFilters>(DEFAULT_FILTERS);
+
   return (
     <div className="space-y-4">
       {data.stale && !running && <StaleBanner />}
       <NeedsCompleteness fileId={fileId} />
+
+      {/* At-a-glance stats (LP-88) — where does this file stand. */}
+      <VerificationStats fileId={fileId} data={data} activeLevel={activeLevel} />
+
       <AggressionDial
         aggression={data.aggression}
         activeLevel={activeLevel}
@@ -266,7 +290,13 @@ function VerificationBody({
       )}
       <RunSummary data={data} shown={shownOpen} running={running} />
       {!running && data.latest_run && <SubmitStatus data={data} activeLevel={activeLevel} />}
-      <FindingsList fileId={fileId} data={data} activeLevel={activeLevel} />
+
+      {/* The filter pills (LP-88) — severity + category, composing with the dial. */}
+      {shownOpen.length > 0 && (
+        <FindingFilterPills findings={shownOpen} filters={filters} onChange={setFilters} />
+      )}
+
+      <FindingsList fileId={fileId} data={data} activeLevel={activeLevel} filters={filters} />
     </div>
   );
 }

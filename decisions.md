@@ -6631,3 +6631,83 @@ contained without a schema migration to the loan-file-scoped activity log.
 **Consequences:** admins manage overlays without code. LP-88 can wire the live engine to read the DB overlay so a
 company's edits drive enforcement (same file → different findings) end-to-end; the effect-legibility already
 shows what an edit produces. The `LENDER_OVERLAY_UPDATED` activity type is reserved for that wire-up.
+
+## ADR-210: The full verification tab — extends LP-81 to the complete Wireframe 5 (LP-88)
+
+- **Date:** 2026-06-29
+- **Status:** Accepted
+
+**Context:** LP-81 built the minimal verification tab (the Arc A demo surface): the composition, the findings
+list (severity/type/confidence/source-location/resolution), the aggression dial, the cross-source trigger +
+staleness, the needs indicator, and re-run stability. Since then the capabilities multiplied — the full
+Conventional + FHA rule set (LP-82..85), the deterministic cross-source rules (LP-86), all six calculators
+(LP-76/77/87), the overlays + admin (LP-80/87). LP-88 builds the PRODUCTION tab Priya uses daily by EXTENDING
+LP-81 (not rebuilding it) with the deferred Wireframe-5 richness + surfacing what landed.
+
+**Decision:** extend the existing tab in place. Added ON TOP of LP-81:
+
+- **Stats row** (`verification-stats.tsx`) — total / blocking (red) / warnings (yellow) / resolved / outstanding
+  needs, at the active dial cutoff (so they agree with the list + blocking).
+- **Filter pills** (`finding-filters.tsx` + `lib/verification/finding-filters.ts`) — severity (all/red/yellow)
+  + category (the categories present), ORTHOGONAL to the dial: the dial sets the confidence floor, the pills
+  slice severity + category within it. Pure client-side, instant.
+- **Version selector** (`version-selector.tsx` + a `GET …/verification/runs` endpoint) — the run history
+  (newest-first, counts + timestamp, current marked). Runs were already versioned in the DB; this exposes the
+  history. Findings live on the file (not a run), so the history compares run summaries; resolutions persist
+  (LP-81 merge semantics).
+- **The full per-finding action set** (`finding-card.tsx`) — LP-81's Apply / Override / Note PLUS **Accept-risk**
+  + **Request-docs** (see ADR-211).
+- **All six calculators with PROGRESSIVE DISCLOSURE** (`calculators-section.tsx`) — a scannable strip of six
+  summary tiles (title + headline + status dot) that expands exactly ONE into its full transparent/overrideable
+  calculator. Replaces the six always-expanded cards (the complexity-management core). Summary hooks share the
+  query cache with the full components (no refetch).
+- **Source-origin distinction (LP-86)** — each finding shows `deterministic` (stable/certain) vs `AI · novel`
+  (the frontier); the **lender overlay** that adjusted it (LP-80, from `details.overlay_applied`) is shown; the
+  tab header shows the **program** (Conv/FHA, a new `program` field on the status).
+
+**Complexity management (the real design work):** the tab stays scannable despite the richness via hierarchy
+(stats → calculators strip → dial → pills → findings), progressive disclosure (one calculator expanded; findings
+filtered; stats summarizing), and reuse of the established card/badge/pill idiom. The frontend-design skill's
+"manage complexity" guidance applied throughout; loading/error/empty preserved (LP-46/47); PII masked.
+
+**Rationale:** extending (not rebuilding) preserves LP-81's hard-won re-run stability + resolution flow while
+adding the Wireframe-5 completeness; progressive disclosure is what lets six calculators + ~120 rules' findings
+coexist on one usable screen.
+
+**Consequences:** this is the daily production tab. LP-89 is the Priya validation/hardening. The version selector
+can grow into a full run-diff; wiring the live engine to a company's DB overlay (LP-87's seam) would make the
+lender-specific results reflect admin edits end-to-end.
+
+## ADR-211: Accept-risk resolution + Request-docs from a finding (LP-88)
+
+- **Date:** 2026-06-29
+- **Status:** Accepted
+
+**Context:** LP-81's per-finding actions were Apply / Override / Note. The FHA conditional findings
+(compensating-factors, LP-84; subject-to-repair, LP-85) need a way to ACKNOWLEDGE a real finding the processor
+proceeds with — distinct from Override (which dismisses a finding as not-applicable). And a finding often needs a
+document request to resolve.
+
+**Decision:**
+
+- **Accept-risk** reuses the EXISTING `FindingResolutionStatus.ACCEPTED_RISK` state (already in the model — no
+  migration). New service `accept_risk_finding` + endpoint `POST …/findings/{id}/accept-risk` (optional reason —
+  the compensating factor / rationale). It is a terminal resolution (like override) but semantically "a real
+  finding, accepted" — for the FHA mitigable conditional model. Activity-logged as `FINDING_RESOLVED` with
+  `resolution=accepted_risk`.
+- **Request-docs** reuses `create_needs_item(origin=FINDING)` (no migration). New service
+  `request_docs_for_finding` + endpoint `POST …/findings/{id}/request-docs` (optional note): creates a needs item
+  (priority from the finding severity — RED→blocking) the borrower must satisfy, and marks the finding
+  (`details.docs_requested`) so the tab shows the linkage. The finding stays OPEN (the request doesn't resolve
+  it). Activity-logged as `NEEDS_ITEM_CREATED`. The needs list + Phase-4 communication act on the needs item.
+
+Both return the re-filtered `VerificationStatusPublic` (one round-trip; the tab + the needs list refresh). The
+needs item carries the finding linkage in its reasoning (no `source_finding_id` FK to verification findings yet —
+that's a future model addition if direct traceability is needed).
+
+**Rationale:** both reuse existing model states/services (no migration), keeping the change to two thin endpoints
++ service wrappers; accept-risk vs override is a real semantic distinction the FHA conditional findings require.
+
+**Consequences:** the full disposition vocabulary is now Apply / Override / Accept-risk / Request-docs / Note.
+A `source_finding_id` FK from needs to verification findings + a live request→communication wire-up are future
+seams.

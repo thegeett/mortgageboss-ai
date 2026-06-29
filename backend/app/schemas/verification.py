@@ -31,6 +31,23 @@ class NoteRequest(BaseModel):
     note: str = Field(min_length=1)
 
 
+class AcceptRiskRequest(BaseModel):
+    """Acknowledge a finding as an accepted risk (LP-88) — an optional rationale.
+
+    DISTINCT from override: accept-risk acknowledges a REAL finding the processor proceeds
+    with (the FHA compensating-factors / subject-to-repair conditional model). The reason
+    (e.g. the documented compensating factor) is optional but recommended.
+    """
+
+    reason: str | None = None
+
+
+class RequestDocsRequest(BaseModel):
+    """Request documents from a finding (LP-88) — create a needs item; optional note."""
+
+    note: str | None = None
+
+
 class AggressionUpdate(BaseModel):
     """Set (or clear) a file's per-file aggression override (LP-79).
 
@@ -132,6 +149,7 @@ class VerificationStatusPublic(BaseModel):
     """
 
     stale: bool
+    program: str | None  # the file's loan program (conventional / fha) — drives the rule set
     latest_run: VerificationRunPublic | None
     findings: list[FindingPublic]
     aggression: AggressionPublic

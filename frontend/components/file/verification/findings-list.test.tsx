@@ -41,6 +41,7 @@ function finding(over: Partial<VerificationFinding> & { id: string }): Verificat
 function status(findings: VerificationFinding[]): VerificationStatus {
   return {
     stale: false,
+    program: "conventional",
     latest_run: {
       id: "r",
       status: "completed",

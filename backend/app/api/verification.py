@@ -22,11 +22,13 @@ from app.models.loan_file import LoanFile
 from app.models.user import User
 from app.models.verification import Verification, VerificationStatus, VerificationTrigger
 from app.schemas.verification import (
+    AcceptRiskRequest,
     AggressionPublic,
     AggressionUpdate,
     FindingPublic,
     NoteRequest,
     OverrideRequest,
+    RequestDocsRequest,
     VerificationRunPublic,
     VerificationStatusPublic,
 )
@@ -37,7 +39,13 @@ from app.services.cross_source import (
     latest_completed_run,
 )
 from app.services.finding_blocking import open_in_scope_findings
-from app.services.finding_resolution import add_finding_note, apply_finding, override_finding
+from app.services.finding_resolution import (
+    accept_risk_finding,
+    add_finding_note,
+    apply_finding,
+    override_finding,
+    request_docs_for_finding,
+)
 from app.services.loan_files import get_loan_file
 from app.services.verifications import create_verification_run, mark_verification_current
 from app.verification.confidence import CONFIDENCE_CUTOFFS
@@ -164,6 +172,7 @@ async def _build_status(
 
     return VerificationStatusPublic(
         stale=loan_file.verification_stale,
+        program=loan_file.loan_program.value if loan_file.loan_program else None,
         latest_run=VerificationRunPublic.from_model(latest) if latest else None,
         findings=[FindingPublic.from_model(f) for f in findings],
         aggression=AggressionPublic(
@@ -295,3 +304,92 @@ async def add_finding_note_endpoint(
     await db.commit()
     await db.refresh(loan_file)
     return await _build_status(db, loan_file=loan_file, user=current_user)
+
+
+# --- The full action set (LP-88) — Accept-risk + Request-docs -----------------
+
+
+@router.post(
+    "/{identifier}/findings/{finding_id}/accept-risk", response_model=VerificationStatusPublic
+)
+async def accept_risk_endpoint(
+    identifier: str,
+    finding_id: UUID,
+    payload: AcceptRiskRequest,
+    db: DbSession,
+    current_user: CurrentUser,
+) -> VerificationStatusPublic:
+    """Resolve a finding as ACCEPTED_RISK — acknowledged, proceed with it (LP-88).
+
+    DISTINCT from override: this acknowledges a REAL finding the processor accepts (the
+    FHA compensating-factors / subject-to-repair conditional model). An optional reason
+    (the compensating factor) is recorded. Tenant-scoped.
+    """
+    loan_file = await get_loan_file(db, company_id=current_user.company_id, identifier=identifier)
+    if loan_file is None:
+        raise _NOT_FOUND
+    finding = await _get_finding(db, loan_file=loan_file, finding_id=finding_id)
+    if finding is None:
+        raise _FINDING_NOT_FOUND
+
+    await accept_risk_finding(
+        db, finding=finding, actor_user_id=current_user.id, reason=payload.reason
+    )
+    await db.commit()
+    await db.refresh(loan_file)
+    return await _build_status(db, loan_file=loan_file, user=current_user)
+
+
+@router.post(
+    "/{identifier}/findings/{finding_id}/request-docs", response_model=VerificationStatusPublic
+)
+async def request_docs_endpoint(
+    identifier: str,
+    finding_id: UUID,
+    payload: RequestDocsRequest,
+    db: DbSession,
+    current_user: CurrentUser,
+) -> VerificationStatusPublic:
+    """Request documents from a finding (LP-88) — create a needs item; the finding stays open.
+
+    Generates a FINDING-origin needs item (priority by severity) the borrower must satisfy,
+    and marks the finding (``details.docs_requested``) so the tab shows the linkage. The
+    finding is not resolved. Tenant-scoped.
+    """
+    loan_file = await get_loan_file(db, company_id=current_user.company_id, identifier=identifier)
+    if loan_file is None:
+        raise _NOT_FOUND
+    finding = await _get_finding(db, loan_file=loan_file, finding_id=finding_id)
+    if finding is None:
+        raise _FINDING_NOT_FOUND
+
+    await request_docs_for_finding(
+        db, finding=finding, actor_user_id=current_user.id, note=payload.note
+    )
+    await db.commit()
+    await db.refresh(loan_file)
+    return await _build_status(db, loan_file=loan_file, user=current_user)
+
+
+@router.get("/{identifier}/verification/runs", response_model=list[VerificationRunPublic])
+async def list_verification_runs(
+    identifier: str, db: DbSession, current_user: CurrentUser, limit: int = 20
+) -> list[VerificationRunPublic]:
+    """The file's verification run history (newest first) — the version selector (LP-88).
+
+    Runs are already versioned (each row is a run); this exposes the history so the tab can
+    show prior runs + their summary counts (and how the file's verification evolved across
+    re-runs / applied findings / new docs). Tenant-scoped.
+    """
+    loan_file = await get_loan_file(db, company_id=current_user.company_id, identifier=identifier)
+    if loan_file is None:
+        raise _NOT_FOUND
+    stmt = (
+        only_active(
+            select(Verification).where(Verification.loan_file_id == loan_file.id), Verification
+        )
+        .order_by(Verification.created_at.desc())
+        .limit(max(1, min(limit, 100)))
+    )
+    runs = (await db.execute(stmt)).scalars().all()
+    return [VerificationRunPublic.from_model(r) for r in runs]

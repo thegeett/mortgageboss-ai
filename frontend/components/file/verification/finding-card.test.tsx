@@ -109,4 +109,53 @@ describe("FindingCard", () => {
     expect(screen.queryByRole("button", { name: /override/i })).toBeNull();
     expect(screen.queryByRole("button", { name: "Apply" })).toBeNull();
   });
+  it("Accept-risk acknowledges a real finding (optional rationale) → onAcceptRisk", () => {
+    const onAcceptRisk = vi.fn();
+    render(
+      <FindingCard
+        finding={finding({ status: "red" })}
+        onAcceptRisk={onAcceptRisk}
+        onOverride={vi.fn()}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /accept risk/i }));
+    // Accept-risk allows an empty rationale (it's optional, distinct from override).
+    fireEvent.click(screen.getByRole("button", { name: "Accept risk" }));
+    expect(onAcceptRisk).toHaveBeenCalledTimes(1);
+  });
+
+  it("Request-docs calls onRequestDocs (creates a needs item)", () => {
+    const onRequestDocs = vi.fn();
+    render(<FindingCard finding={finding({})} onRequestDocs={onRequestDocs} onNote={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: /request docs/i }));
+    fireEvent.change(screen.getByLabelText(/What to request/), {
+      target: { value: "The 2024 W-2" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Request docs" }));
+    expect(onRequestDocs).toHaveBeenCalledWith("The 2024 W-2");
+  });
+
+  it("distinguishes deterministic vs AI source-origin + shows the lender overlay", () => {
+    const { rerender } = render(
+      <FindingCard
+        finding={finding({ origin: "deterministic_rule", details: { overlay_applied: "uwm" } })}
+      />,
+    );
+    expect(screen.getByText("deterministic")).toBeDefined();
+    expect(screen.getByText(/uwm overlay/)).toBeDefined();
+    rerender(<FindingCard finding={finding({ origin: "ai_cross_source" })} />);
+    expect(screen.getByText(/AI · novel/)).toBeDefined();
+  });
+
+  it("marks a finding whose docs were already requested", () => {
+    render(
+      <FindingCard
+        finding={finding({ details: { docs_requested: { needs_item_id: "n-1" } } })}
+        onRequestDocs={vi.fn()}
+      />,
+    );
+    expect(screen.getByText(/docs requested/)).toBeDefined();
+    // The request button is disabled once requested.
+    expect(screen.getByRole("button", { name: /Requested/ })).toHaveProperty("disabled", true);
+  });
 });
