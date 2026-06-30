@@ -209,3 +209,14 @@ on an aria-hidden glyph, no real tooltip primitive in the repo) → added a shad
 The editable PROPERTY VALUE "Appraised value" row now also carries that source label + working tooltip, and its sublabel is
 corrected from "Stated" to the real source (valuation); "Purchase price" stays "Stated". No change to computation/lesser-of/
 main label/bindings; model-collapse + naming still flagged for Priya. Frontend-only; tests green. ADR-215 addendum; docs/tickets/LP-90.1.md.
+
+LP-91 — DTI consumes the LP-87 MI calculator (fix MI omitted from PITI — DTI understated for FHA + low-down Conventional)
+The DTI's mortgage-insurance line was manual-only / default $0 — it silently OMITTED mandatory MI (FHA MIP always;
+Conventional PMI when LTV > 80%), understating the front-end DTI in the qualifying (dangerous) direction. The fix
+extracts ONE shared MI computation (`app/services/mi.py` `compute_loan_mi`) consumed by BOTH the MI calculator view
+(`build_mi_view`) and the DTI's PITI — single source of truth, no import cycle. Program-aware (PMI/MIP inherited),
+auto-populated-but-overrideable (source manual→computed; a DtiOverride still wins), upfront MIP stays financed (only
+the monthly premium enters PITI), recompute on MI change (LTV/program/override; the frontend MI override now also
+invalidates the DTI). The Conventional PMI rate is grounded-starter (validate-with-Priya — the processor overrides
+with the real quote); the FHA MIP (HUD/LP-84) is more deterministic. Backend-primarily; tests green (1380 backend).
+ADR-216; docs/tickets/LP-91.md.

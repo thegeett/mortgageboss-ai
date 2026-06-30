@@ -7,11 +7,28 @@
  * audited override appears there too. (Same shape as the LP-76/77 DTI/LTV data layer.)
  */
 import { apiClient } from "@/lib/api/client";
+import { dtiQueryKey } from "@/lib/api/dti";
 import type { CalcOverrideInput, CalculatorName, CalculatorView } from "@/lib/types/calculators";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { type QueryClient, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { isAxiosError } from "axios";
 
 const API_V1 = "/api/v1";
+
+/**
+ * Side effects shared by the override set/clear mutations. The audited override appears in
+ * the activity feed; and because the DTI's PITI now CONSUMES the MI calculator (LP-91), an
+ * MI override must also refresh the DTI so its housing payment recomputes with the new MI.
+ */
+function invalidateAfterOverride(
+  queryClient: QueryClient,
+  identifier: string,
+  calculator: CalculatorName,
+): void {
+  void queryClient.invalidateQueries({ queryKey: ["loan-file-activity", identifier] });
+  if (calculator === "mortgage_insurance") {
+    void queryClient.invalidateQueries({ queryKey: dtiQueryKey(identifier) });
+  }
+}
 
 export const calcQueryKey = (identifier: string, calculator: CalculatorName) =>
   ["calculator", identifier, calculator] as const;
@@ -73,7 +90,7 @@ export function useSetCalculatorOverride(identifier: string, calculator: Calcula
       setCalculatorOverride(identifier, calculator, fieldKey, input),
     onSuccess: (data) => {
       queryClient.setQueryData(calcQueryKey(identifier, calculator), data);
-      void queryClient.invalidateQueries({ queryKey: ["loan-file-activity", identifier] });
+      invalidateAfterOverride(queryClient, identifier, calculator);
     },
   });
 }
@@ -84,7 +101,7 @@ export function useClearCalculatorOverride(identifier: string, calculator: Calcu
     mutationFn: (fieldKey: string) => clearCalculatorOverride(identifier, calculator, fieldKey),
     onSuccess: (data) => {
       queryClient.setQueryData(calcQueryKey(identifier, calculator), data);
-      void queryClient.invalidateQueries({ queryKey: ["loan-file-activity", identifier] });
+      invalidateAfterOverride(queryClient, identifier, calculator);
     },
   });
 }

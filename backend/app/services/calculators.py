@@ -42,6 +42,7 @@ from app.services.activity_log import log_activity
 from app.services.dti import build_dti_calculation
 from app.services.finding_blocking import open_in_scope_findings
 from app.services.ltv import build_ltv_calculation
+from app.services.mi import compute_loan_mi
 from app.verification.confidence import DEFAULT_CONFIDENCE_CUTOFF
 from app.verification.max_loan import (
     DTI_CONSTRAINT_FORMULA,
@@ -53,8 +54,6 @@ from app.verification.mortgage_insurance import (
     CONVENTIONAL_PMI_FORMULA,
     FHA_ANNUAL_MIP_FORMULA,
     FHA_UFMIP_FORMULA,
-    compute_conventional_pmi,
-    compute_fha_mip,
 )
 from app.verification.registry import default_registry
 from app.verification.reserves import (
@@ -73,9 +72,8 @@ from app.verification.self_employed import (
 CALCULATORS = ("mortgage_insurance", "self_employed", "reserves", "max_loan")
 
 # Grounded-starter methodology constants (validate with Priya — these are domain judgment).
-_PMI_STARTER_RATE_BPS = Decimal("55")  # a starter PMI annual rate; real rate is a credit/LTV card
-_FHA_ANNUAL_MIP_STARTER_BPS = Decimal("55")  # most 30-year FHA borrowers; LP-84's rule is the cap
-_FHA_MIP_DURATION_LTV = Decimal("90")  # LP-84: LTV ≤ 90% → 11yr, > 90% → life
+# The MI starters (PMI rate, FHA annual-MIP rate, FHA duration LTV) live in app.services.mi
+# (LP-91) — the single MI source the DTI also consumes.
 _FHA_RETIREMENT_FACTOR = Decimal("0.60")  # LP-84's FHA 60% retirement-reserve haircut
 _CONFORMING_LOAN_LIMIT = Decimal("806500")  # 2025/26 baseline FHFA conforming (starter — verify)
 _STARTER_REQUIRED_RESERVE_MONTHS = Decimal("2")
@@ -193,46 +191,23 @@ async def _sum_assets_excluding(
 # --------------------------------------------------------------------------- #
 
 
-def _fha_ufmip_rate_bps() -> Decimal:
-    """The FHA UFMIP rate, CONSUMED from LP-84's ``fha.mip.ufmip_rate`` rule (175 bps)."""
-    rules = default_registry().resolve(program=LoanProgram.FHA, lender_slug=None)
-    rule = next((r for r in rules if r.rule_id == "fha.mip.ufmip_rate"), None)
-    return rule.condition.value if rule is not None else Decimal("175")
-
-
 async def build_mi_view(db: AsyncSession, *, loan_file: LoanFile, cutoff: float) -> CalculatorView:
+    # Consume the SHARED MI computation (LP-91) — the same one the DTI's PITI consumes, so the
+    # calculator view and the DTI can never disagree (single source of truth). This view adds
+    # the presentation (steps / headline / methodology); the math lives in ``compute_loan_mi``.
     program = loan_file.loan_program
-    base_loan_default = loan_file.note_amount or loan_file.loan_amount
-    ltv_calc = await build_ltv_calculation(db, loan_file=loan_file, confidence_cutoff=cutoff)
-    ltv_pct = ltv_calc.ltv
+    comp = await compute_loan_mi(db, loan_file=loan_file, confidence_cutoff=cutoff)
+    result = comp.result
+    lines = comp.inputs
 
-    overrides = await _active_overrides(db, loan_file.id, "mortgage_insurance")
     steps: list[CalcStep] = []
-    if ltv_pct is not None:
-        steps.append(CalcStep(label="LTV (from the LTV calculator)", value=f"{ltv_pct}%"))
+    if result.ltv_pct is not None:
+        steps.append(CalcStep(label="LTV (from the LTV calculator)", value=f"{result.ltv_pct}%"))
 
     if program is LoanProgram.FHA:
-        autos = [
-            _Auto("mi.base_loan_amount", "Base loan amount", base_loan_default, "stated"),
-            _Auto(
-                "mi.annual_mip_rate_bps",
-                "Annual MIP rate (bps)",
-                _FHA_ANNUAL_MIP_STARTER_BPS,
-                "manual",
-            ),
-        ]
-        lines, eff = _apply(autos, overrides)
-        ufmip_bps = _fha_ufmip_rate_bps()
-        result = compute_fha_mip(
-            base_loan_amount=eff["mi.base_loan_amount"],
-            ltv_pct=ltv_pct,
-            upfront_rate_bps=ufmip_bps,
-            annual_rate_bps=eff["mi.annual_mip_rate_bps"],
-            duration_threshold_ltv=_FHA_MIP_DURATION_LTV,
-        )
         steps += [
             CalcStep(
-                label=f"Upfront MIP ({ufmip_bps} bps, financed)",
+                label=f"Upfront MIP ({comp.ufmip_bps} bps, financed)",
                 value=_money(result.upfront_premium),
             ),
             CalcStep(label="Monthly MIP", value=_money(result.monthly_premium), emphasis=True),
@@ -250,16 +225,6 @@ async def build_mi_view(db: AsyncSession, *, loan_file: LoanFile, cutoff: float)
         formulas = [FHA_UFMIP_FORMULA, FHA_ANNUAL_MIP_FORMULA]
         status = "required"
     else:
-        autos = [
-            _Auto("mi.base_loan_amount", "Base loan amount", base_loan_default, "stated"),
-            _Auto("mi.pmi_rate_bps", "Annual PMI rate (bps)", _PMI_STARTER_RATE_BPS, "manual"),
-        ]
-        lines, eff = _apply(autos, overrides)
-        result = compute_conventional_pmi(
-            base_loan_amount=eff["mi.base_loan_amount"],
-            ltv_pct=ltv_pct,
-            annual_rate_bps=eff["mi.pmi_rate_bps"],
-        )
         steps += [
             CalcStep(label="PMI required (LTV > 80%)", value="Yes" if result.required else "No"),
             CalcStep(label="Monthly PMI", value=_money(result.monthly_premium), emphasis=True),

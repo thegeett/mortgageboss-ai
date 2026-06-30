@@ -252,6 +252,38 @@ when the calculation may be incomplete. (2) **Recompute on applied findings** �
 calculation reads the structured data live, applying a finding (§9.3 adds a liability) makes the
 next calculation recompute higher. The interlock landing in the calculator.
 
+### 10.5 Mortgage insurance — consumed from the MI calculator (LP-91)
+
+The PITI **mortgage-insurance** line was originally a *manual-only* line (auto `None`, default
+`$0`) — so PITI **silently omitted** mandatory MI: every FHA loan carries MIP, and every
+Conventional loan with LTV > 80% carries PMI. The result understated the front-end DTI in the
+**qualifying (dangerous) direction** — a borrower truly at 44% could show ~41% (missing ~$300/mo
+MI) and appear to pass a lender ceiling they'd actually fail. Visibly wrong on the first real FHA
+file.
+
+LP-91 wires the DTI's `housing.mortgage_insurance` line to **CONSUME** the LP-87 MI calculator's
+`monthly_premium` as its auto value — the **single source of truth**. The shared computation lives
+in `app/services/mi.py` (`compute_loan_mi`), consumed by **both** the MI calculator view
+(`build_mi_view`) and the DTI's `_auto_housing_lines`, so the two can never disagree (and the DTI
+doesn't recompute MI independently — the same lesson as the LP-90 appraised-value binding). It is:
+
+* **Program-aware** (inherited from the MI calculator): Conventional → monthly PMI when LTV > 80%
+  (`$0` / not-required at LTV ≤ 80%); FHA → monthly annual-MIP always.
+* **Auto-populated but overrideable**: the consumed premium is the *auto* value (source `computed`,
+  no longer `manual`); a processor `DtiOverride` on `housing.mortgage_insurance` still wins (enter
+  the real MI quote).
+* **Upfront MIP stays financed** — only `monthly_premium` enters PITI; the FHA UFMIP (1.75%) is
+  financed into the loan, not a monthly DTI item (already correct in the MI calculator).
+* **Recomputes on MI change** — an LTV change (→ PMI on/off), a program change, or an MI override
+  flows through live; the frontend MI-override mutation now also invalidates the DTI query.
+
+**Grounded-starter (validate with Priya):** the Conventional **PMI rate** varies by credit / LTV /
+MI provider (a rate card, not a clean formula) — the auto-computed PMI is a *starting point* the
+processor overrides with the real quote; it is surfaced via the MI calculator's
+`methodology.starter` note (the single source). The FHA MIP rates come from HUD via LP-84 (more
+deterministic). The mechanism — DTI must include mandatory MI — is **not** in question; one rate is
+hers. (ADR-216.)
+
 ## 11. The LTV calculator — implemented (LP-77)
 
 LP-77 builds the **LTV calculator** — the second qualification pillar (equity / risk), the parallel

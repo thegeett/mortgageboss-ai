@@ -52,6 +52,7 @@ from app.schemas.dti import (
 )
 from app.services.activity_log import log_activity
 from app.services.finding_blocking import open_in_scope_findings
+from app.services.mi import compute_loan_mi
 from app.verification.confidence import DEFAULT_CONFIDENCE_CUTOFF
 from app.verification.dti import (
     BACK_END_FORMULA,
@@ -124,8 +125,19 @@ async def _auto_debt_lines(db: AsyncSession, loan_file_id: UUID) -> list[_AutoLi
     return lines
 
 
-async def _auto_housing_lines(db: AsyncSession, loan_file: LoanFile) -> list[_AutoLine]:
-    """The housing payment components: PITI (computed P&I + extracted T&I) + MI + HOA."""
+async def _auto_housing_lines(
+    db: AsyncSession,
+    loan_file: LoanFile,
+    confidence_cutoff: float = DEFAULT_CONFIDENCE_CUTOFF,
+) -> list[_AutoLine]:
+    """The housing payment components: PITI (computed P&I + extracted T&I) + MI + HOA.
+
+    The mortgage-insurance line CONSUMES the LP-87 MI calculator's monthly premium (LP-91) —
+    program-aware (FHA MIP always; Conventional PMI when LTV > 80%) and from the single shared
+    source (:func:`app.services.mi.compute_loan_mi`), so PITI no longer omits mandatory MI.
+    Only the *monthly* premium enters PITI; the FHA UFMIP is financed into the loan (not a
+    monthly DTI item). The auto value is overrideable (a processor DtiOverride still wins).
+    """
     pi = monthly_principal_interest(
         loan_file.note_amount or loan_file.loan_amount,
         loan_file.note_rate_percent,
@@ -138,11 +150,19 @@ async def _auto_housing_lines(db: AsyncSession, loan_file: LoanFile) -> list[_Au
         db, loan_file.id, "homeowners_insurance", "annual_premium", annual=True
     )
     hoa = await _extracted_hoa_monthly(db, loan_file.id)
+    mi = await compute_loan_mi(db, loan_file=loan_file, confidence_cutoff=confidence_cutoff)
     return [
         _AutoLine(HOUSING_PRINCIPAL_INTEREST, "Principal & interest", pi, "computed"),
         _AutoLine(HOUSING_TAXES, "Property taxes", taxes, "extracted"),
         _AutoLine(HOUSING_INSURANCE, "Homeowners insurance", insurance, "extracted"),
-        _AutoLine(HOUSING_MORTGAGE_INSURANCE, "Mortgage insurance (MI)", None, "manual"),
+        # Consumed from the MI calculator (single source of truth) — "computed", no longer the
+        # old manual/$0 line that silently omitted MI and understated the DTI.
+        _AutoLine(
+            HOUSING_MORTGAGE_INSURANCE,
+            "Mortgage insurance (MI)",
+            mi.result.monthly_premium,
+            "computed",
+        ),
         _AutoLine(HOUSING_HOA, "HOA dues", hoa, "extracted"),
     ]
 
@@ -266,7 +286,7 @@ async def build_dti_calculation(
     within the company (tenant scoping).
     """
     income_auto = await _auto_income_lines(db, loan_file.id)
-    housing_auto = await _auto_housing_lines(db, loan_file)
+    housing_auto = await _auto_housing_lines(db, loan_file, confidence_cutoff)
     debt_auto = await _auto_debt_lines(db, loan_file.id)
     overrides = await _active_overrides(db, loan_file.id)
 

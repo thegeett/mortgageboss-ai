@@ -6853,3 +6853,46 @@ A screenshot review of LP-90 found the transparency was only half-wired:
 This is a UI/labeling fix only: the LTV computation, the lesser-of logic, the "Appraised value" **main** label,
 and the field bindings (all set by LP-90/LP-77) are unchanged; the valuation/estimated model-collapse and the
 main-label naming question remain flagged for Priya.
+
+## ADR-216: The DTI consumes the MI calculator — fixing MI omitted from PITI (LP-91)
+
+- **Date:** 2026-06-30
+- **Status:** Accepted
+
+**Context:** the DTI calculator's PITI **mortgage-insurance** line (`housing.mortgage_insurance`) was a
+*manual-only* line — auto value `None`, source `"manual"` — so unless a processor hand-entered it, MI contributed
+`$0`. But MI is **mandatory**: every FHA loan carries monthly MIP, and every Conventional loan with LTV > 80%
+carries PMI. So by default the DTI **omitted a mandatory monthly obligation**, understating the front-end DTI for
+every FHA file and every low-down Conventional file — and understating it in the **qualifying (dangerous)
+direction**: a borrower truly at 44% DTI could show ~41% (missing ~$300/mo MI) and appear to pass a lender ceiling
+they'd actually fail. This is a correctness gap in the headline "transparent DTI that beats ChatGPT" surface, and
+visibly wrong on the first real FHA file. Meanwhile the LP-87 MI calculator already computes the correct,
+program-aware monthly premium — but nothing consumed it (separate namespaces; a two-source-of-truth gap, the same
+shape as the LP-90 appraised-value binding).
+
+**Decision:** wire the DTI's MI line to **consume** the MI calculator's `monthly_premium` as its auto value —
+single source of truth, live.
+
+1. **Extract one shared MI computation** into `app/services/mi.py` (`compute_loan_mi`) — the program-aware
+   dispatch (sources LP-77's LTV, the base loan, the persisted MI overrides, LP-84's FHA UFMIP rule; calls the pure
+   `compute_conventional_pmi` / `compute_fha_mip`). It imports neither `dti` nor `calculators`, so **both** consume
+   it with no import cycle. `build_mi_view` (the MI calculator) is refactored to delegate to it (output unchanged);
+   `dti._auto_housing_lines` consumes its `monthly_premium`.
+2. **Program-aware, inherited:** Conventional → monthly PMI when LTV > 80% (`$0`/not-required at ≤ 80%); FHA →
+   monthly annual-MIP always. No PMI/MIP logic is duplicated in the DTI.
+3. **Auto-populated but overrideable:** the consumed premium is the *auto* value (source `manual` → `computed`); a
+   `DtiOverride` on `housing.mortgage_insurance` still wins (the processor enters the real MI quote).
+4. **Upfront MIP stays financed:** only `monthly_premium` enters PITI; the FHA UFMIP (1.75%) is financed into the
+   loan, never a monthly DTI item.
+5. **Recompute on MI change:** the DTI reads MI live, so an LTV change (→ PMI on/off), a program change, or an MI
+   override flows through; the frontend MI-override mutation now also invalidates the DTI query.
+
+**Grounded-starter (validate with Priya):** the **mechanism** (the DTI must include mandatory MI) is not in
+question — omitting it is wrong regardless. But the Conventional **PMI rate** is a grounded-starter (it varies by
+credit / LTV / MI provider — a rate card, not a clean formula); the auto-computed PMI is a starting point the
+processor overrides with the real quote, surfaced via the MI calculator's `methodology.starter` note. The FHA MIP
+rates (HUD via LP-84) are more deterministic.
+
+**Consequences:** the FHA and low-down-Conventional DTIs are no longer understated; the MI calculator and the DTI
+share one number (no divergence). The two-source-of-truth lesson — calculators must **consume** one source, not
+omit or duplicate — is now applied to MI as it was to the appraised value. The PMI rate is recorded for Priya.
