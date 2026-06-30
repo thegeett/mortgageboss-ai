@@ -103,6 +103,90 @@ async def test_auto_populates_and_uses_lesser_of(db_session: AsyncSession) -> No
     assert price.auto_amount == Decimal("190000")
 
 
+async def test_appraised_value_source_reports_valuation_amount(db_session: AsyncSession) -> None:
+    """LP-90: when valuation_amount is set, the source label is ``valuation_amount``."""
+    company = await _company(db_session, "acme")
+    loan_file = await _purchase_file(db_session, company, valuation=Decimal("200000"))
+
+    calc = await build_ltv_calculation(db_session, loan_file=loan_file)
+    assert calc.appraised_value_source == "valuation_amount"
+
+
+async def test_appraised_value_source_falls_back_to_estimated_value(
+    db_session: AsyncSession,
+) -> None:
+    """LP-90: with no valuation_amount but an estimated_value, the source is the fallback."""
+    company = await _company(db_session, "acme")
+    loan_file = await create_loan_file(
+        db_session,
+        company_id=company.id,
+        loan_program=LoanProgram.CONVENTIONAL,
+        loan_purpose=LoanPurpose.PURCHASE,
+    )
+    loan_file.loan_amount = Decimal("180000")
+    db_session.add(
+        Property(
+            loan_file_id=loan_file.id,
+            purchase_price=Decimal("190000"),
+            valuation_amount=None,
+            estimated_value=Decimal("195000"),
+        )
+    )
+    await db_session.flush()
+
+    calc = await build_ltv_calculation(db_session, loan_file=loan_file)
+    assert calc.appraised_value_source == "estimated_value"
+
+
+async def test_appraised_value_source_none_when_no_value(db_session: AsyncSession) -> None:
+    """LP-90: with neither valuation_amount nor estimated_value, the source is None."""
+    company = await _company(db_session, "acme")
+    loan_file = await _purchase_file(db_session, company, valuation=None)
+
+    calc = await build_ltv_calculation(db_session, loan_file=loan_file)
+    assert calc.appraised_value_source is None
+
+
+async def test_editing_valuation_amount_moves_the_appraised_basis(
+    db_session: AsyncSession,
+) -> None:
+    """LP-90 regression: valuation_amount is the field the LTV reads first — editing it must
+    move the appraised basis (the bug was that it was hidden + couldn't be edited via Overview).
+
+    Here we edit the column directly (the path the Overview PATCH takes) and confirm the LTV
+    recomputes off the new valuation, not the stale estimated_value.
+    """
+    company = await _company(db_session, "acme")
+    loan_file = await create_loan_file(
+        db_session,
+        company_id=company.id,
+        loan_program=LoanProgram.CONVENTIONAL,
+        loan_purpose=LoanPurpose.REFINANCE,
+    )
+    loan_file.loan_amount = Decimal("170000")
+    loan_file.refinance_type = RefinanceType.CASH_OUT
+    prop = Property(
+        loan_file_id=loan_file.id,
+        valuation_amount=Decimal("200000"),
+        estimated_value=Decimal("250000"),
+    )
+    db_session.add(prop)
+    await db_session.flush()
+
+    before = await build_ltv_calculation(db_session, loan_file=loan_file)
+    assert before.value_basis == Decimal("200000")  # valuation_amount wins over estimated_value
+    assert before.appraised_value_source == "valuation_amount"
+
+    # The Overview edit: change valuation_amount → the basis must follow it.
+    prop.valuation_amount = Decimal("210000")
+    await db_session.flush()
+
+    after = await build_ltv_calculation(db_session, loan_file=loan_file)
+    assert after.value_basis == Decimal("210000")
+    assert after.appraised_value_source == "valuation_amount"
+    assert after.ltv == Decimal("80.95")  # 170000 / 210000
+
+
 async def test_appraised_value_graceful_when_absent(db_session: AsyncSession) -> None:
     """No valuation on file → the appraised line is manual/override-able (graceful)."""
     company = await _company(db_session, "acme")

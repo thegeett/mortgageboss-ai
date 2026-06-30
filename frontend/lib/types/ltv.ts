@@ -38,6 +38,9 @@ export interface LtvCalculation {
   hcltv: string | null;
   value_basis: string | null;
   value_basis_label: string;
+  /** Which subject-property field the appraised basis came from (LP-90): "valuation_amount"
+   * (the MISMO valuation) or "estimated_value" (the fallback), else null. */
+  appraised_value_source: string | null;
   loan_items: LtvLineItem[];
   value_items: LtvLineItem[];
   ltv_formula: string;

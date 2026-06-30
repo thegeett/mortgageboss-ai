@@ -22,6 +22,9 @@ const PROPERTY_FIELDS: FieldDef[] = [
   { key: "occupancy_type", label: "Occupancy", kind: "select", options: OCCUPANCY_TYPE_OPTIONS },
   { key: "estimated_value", label: "Est. value", kind: "money" },
   { key: "purchase_price", label: "Purchase price", kind: "money" },
+  // The MISMO valuation (LP-90) — the field the LTV's appraised basis reads first. Exposed
+  // + editable so a processor can change it (previously hidden, silently shadowing est. value).
+  { key: "valuation_amount", label: "Valuation amount", kind: "money" },
 ];
 
 export function PropertyEditor({ fileId, property }: { fileId: string; property: PropertyPublic }) {
@@ -39,6 +42,7 @@ export function PropertyEditor({ fileId, property }: { fileId: string; property:
         occupancy_type: property.occupancy_type ?? "",
         estimated_value: property.estimated_value ?? "",
         purchase_price: property.purchase_price ?? "",
+        valuation_amount: property.valuation_amount ?? "",
       }}
       onSave={(changed) =>
         update.mutate(changed, {

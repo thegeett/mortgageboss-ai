@@ -191,6 +191,50 @@ async def test_property_edit_is_audited_with_values_and_marks_stale(
     assert await _is_stale(db, loan_file.id) is True
 
 
+async def test_valuation_amount_edit_is_exposed_audited_and_marks_stale(
+    client: AsyncClient, db: AsyncSession
+) -> None:
+    """LP-90: valuation_amount (the field the LTV reads first) is now exposed in the property
+    response, and editing it is audited from→to + marks verification stale — no hidden field."""
+    company, token = await _user_and_token(db, slug="acme", email="u@acme.com")
+    loan_file = await create_loan_file(db, company_id=company.id)
+    prop = Property(loan_file_id=loan_file.id, valuation_amount=Decimal("200000"))
+    db.add(prop)
+    await db.flush()
+    await _set_current(db, loan_file.id)
+
+    resp = await client.patch(
+        f"{V1}/loan-files/{loan_file.display_id}/property",
+        json={"valuation_amount": "210000"},
+        headers=_auth(token),
+    )
+    assert resp.status_code == 200
+    # Exposed in the response (previously absent → the Overview couldn't read it).
+    assert resp.json()["valuation_amount"] == "210000"
+
+    entry = await _latest_file_updated(db, loan_file.id)
+    changes = {c["field"]: (c["from"], c["to"]) for c in entry.detail["changes"]}
+    assert changes["valuation_amount"] == ("200000", "210000")
+    assert await _is_stale(db, loan_file.id) is True  # the property drives the LTV baseline
+
+
+async def test_loan_file_detail_exposes_valuation_amount(
+    client: AsyncClient, db: AsyncSession
+) -> None:
+    """LP-90: the loan-file detail (what the Overview reads) now includes valuation_amount."""
+    company, token = await _user_and_token(db, slug="acme", email="u@acme.com")
+    loan_file = await create_loan_file(db, company_id=company.id)
+    db.add(Property(loan_file_id=loan_file.id, valuation_amount=Decimal("345000")))
+    await db.flush()
+
+    resp = await client.get(
+        f"{V1}/loan-files/{loan_file.display_id}",
+        headers=_auth(token),
+    )
+    assert resp.status_code == 200
+    assert resp.json()["property"]["valuation_amount"] == "345000.00"
+
+
 # --- Loan terms / target lender: baseline → stale; contact fields → not -------
 
 

@@ -6787,3 +6787,42 @@ and the full Phase-4 communication (Request-docs is the seam).
 
 **Consequences:** Phase 4 (communication) + the V2 list are the named next work. The boundaries are legible to the
 team + to Priya.
+
+## ADR-215: Expose valuation_amount on the Overview + make the LTV appraised-value source explicit (LP-90)
+
+- **Date:** 2026-06-30
+- **Status:** Accepted
+
+**Context:** the LTV calculator's appraised-value basis reads `appraised = valuation_amount or estimated_value`
+(`valuation_amount` wins). But `valuation_amount` (the MISMO `PropertyValuationAmount`) was NOT in the property
+read schemas (`PropertyResponse`, the loan-file detail's `PropertyPublic`) and NOT in the Overview editor — only
+`PropertyUpdate` accepted it. So it was a **hidden field that silently shadowed** the editable `estimated_value`:
+a processor who edited "Estimated value" on the Overview saw the LTV not move (whenever `valuation_amount` was
+non-null, e.g. on any MISMO-imported file), with no on-screen explanation of why.
+
+**Decision:** a focused fix — expose the field, don't restructure the model.
+
+1. **Expose `valuation_amount` (read).** Add it to `PropertyResponse` and to the loan-file detail's
+   `PropertyPublic` so the Overview can read it. The PATCH/audit/mark-stale path is already generic (LP-80.5), so
+   editing it is recorded from→to and marks verification stale with no new endpoint work.
+2. **Make it editable on the Overview.** Add it to the Subject Property card (displayed read-only) and the inline
+   `PropertyEditor` (an EditableRow `money` field). The existing `useUpdateProperty` mutation already invalidates
+   the `dti`/`ltv`/`verification` query keys, so the edit flows straight through to the LTV — **this is the core
+   fix**: the field the LTV reads is now the field the processor can edit.
+3. **Make the LTV basis source explicit.** Add `appraised_value_source` to `LtvCalculation`
+   (`"valuation_amount"` | `"estimated_value"` | `null`), computed alongside the auto value-lines. The calculator
+   renders a plain-language sub-line under the value basis ("Appraised value *from valuation amount*" /
+   "*from estimated value*") with the literal logic `appraised = valuation_amount or estimated_value` in a tooltip.
+   No hidden field, no mystery about which number drives the basis.
+
+**Explicitly NOT done (flagged for Priya / deferred):**
+- **Did not rename "Appraised value."** Whether `valuation_amount` (an AVM/stated valuation) should be labeled
+  "appraised value" at all is a domain-naming question for Priya — the basis label is unchanged here.
+- **Did not collapse `valuation_amount` + `estimated_value`** into one field. Whether the model should carry two
+  distinct subject-property values, and which is authoritative, is a data-model decision deferred + flagged.
+- **Did not change the LTV computation** (the lesser-of basis, the `valuation_amount or estimated_value`
+  precedence) or touch the MISMO parser (it correctly scopes `valuation_amount` to the subject property).
+
+**Consequences:** editing the subject-property valuation on the Overview now moves the LTV, and the processor can
+see which value the basis came from. The naming + model-collapse questions are recorded for Priya rather than
+silently resolved.

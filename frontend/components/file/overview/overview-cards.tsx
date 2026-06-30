@@ -220,6 +220,8 @@ export function PropertyCard({
           <Row label="Occupancy" value={humanize(property.occupancy_type)} />
           <Row label="Estimated value" value={formatMoney(property.estimated_value)} />
           <Row label="Purchase price" value={formatMoney(property.purchase_price)} />
+          {/* The MISMO valuation (LP-90) — the field the LTV's appraised basis reads first. */}
+          <Row label="Valuation amount" value={formatMoney(property.valuation_amount)} />
         </div>
       )}
     </OverviewCard>

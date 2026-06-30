@@ -71,6 +71,9 @@ export interface PropertyPublic {
   occupancy_type: OccupancyType | null;
   estimated_value: string | null;
   purchase_price: string | null;
+  /** The MISMO valuation amount (LP-90). The LTV's appraised basis reads this first
+   * (`valuation_amount || estimated_value`), so it's exposed + editable on the Overview. */
+  valuation_amount: string | null;
 }
 
 /** The state of LP-69's async AI needs reasoning (LP-71.5). `null` = not triggered. */

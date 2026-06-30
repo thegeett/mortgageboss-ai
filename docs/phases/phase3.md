@@ -192,3 +192,12 @@ Real-stack integration testing (the Phase 2 lesson carried forward — exercise 
 Tenant-isolation pass across all Phase 3 surfaces; polish; seed/fixtures updated to demonstrate verification.
 Phase 3 docs + deferred items explicitly recorded: V2 auto-compensating-factors, V2 auto-re-run of cross-source, bounding-box highlighting, full overlay observed-conditions refinement — plus the ongoing Priya domain-tuning (honest scoping: built/tested/hardened ≠ domain-final).
 Tests (all green incl. integration); docs + ADR; docs/tickets/LP-89.md.
+
+LP-90 — Expose valuation_amount on the Overview (editable) + make the LTV "Appraised value" source explicit
+A focused hidden-field fix. The LTV appraised basis reads `valuation_amount or estimated_value`, but valuation_amount
+was never exposed in the read schemas or the Overview editor — so it silently shadowed the editable estimated_value
+(editing "Estimated value" didn't move the LTV on any MISMO file). Expose it (PropertyResponse + loan-file PropertyPublic),
+make it editable on the Overview (the property PATCH already invalidates dti/ltv/verification — the core fix), and show
+the LTV basis source ("from valuation amount" / "from estimated value") with the literal logic in a tooltip.
+Flagged for Priya (not done): renaming "Appraised value"; collapsing valuation_amount + estimated_value.
+Tests (backend + frontend, all green); ADR-215; docs/tickets/LP-90.md.

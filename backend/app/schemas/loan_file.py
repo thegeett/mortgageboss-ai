@@ -89,6 +89,11 @@ class PropertyPublic(BaseModel):
     occupancy_type: OccupancyType | None
     estimated_value: Decimal | None
     purchase_price: Decimal | None
+    # The MISMO PropertyValuationAmount (LP-90). Exposed on the loan-file detail so the
+    # Overview can display + edit it: the LTV's appraised-value basis reads
+    # ``valuation_amount or estimated_value`` (valuation_amount wins), so it must be visible +
+    # editable — not a hidden field that silently shadows estimated_value edits.
+    valuation_amount: Decimal | None
 
 
 def _primary_borrower_name(loan_file: LoanFile, borrowers: list[Borrower]) -> str | None:

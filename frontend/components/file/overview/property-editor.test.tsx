@@ -21,6 +21,7 @@ const PROPERTY = {
   occupancy_type: "primary_residence",
   estimated_value: "400000",
   purchase_price: "410000",
+  valuation_amount: "1380000",
 } as unknown as PropertyPublic;
 
 afterEach(() => {
@@ -41,5 +42,17 @@ describe("PropertyEditor", () => {
     fireEvent.click(screen.getByRole("button", { name: /save/i }));
     expect(updateMutate).toHaveBeenCalledTimes(1);
     expect(updateMutate.mock.calls[0]?.[0]).toEqual({ estimated_value: "450000" });
+  });
+
+  it("exposes valuation_amount as an editable field (the field the LTV reads — LP-90)", () => {
+    render(<PropertyEditor fileId="LF-1" property={PROPERTY} />);
+    // The previously-hidden valuation amount is now displayed + editable.
+    const valuation = screen.getByLabelText("Valuation amount") as HTMLInputElement;
+    expect(valuation.value).toBe("1380000");
+    // Editing it sends only valuation_amount (the property PATCH invalidates dti/ltv/verification
+    // → the LTV's appraised basis flows through). No more hidden shadowing field.
+    fireEvent.change(valuation, { target: { value: "1480000" } });
+    fireEvent.click(screen.getByRole("button", { name: /save/i }));
+    expect(updateMutate.mock.calls[0]?.[0]).toEqual({ valuation_amount: "1480000" });
   });
 });

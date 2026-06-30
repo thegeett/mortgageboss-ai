@@ -100,14 +100,28 @@ def _auto_loan_lines(loan_file: LoanFile) -> list[_AutoLine]:
     ]
 
 
-async def _auto_value_lines(db: AsyncSession, loan_file_id: UUID) -> list[_AutoLine]:
-    """The property values — purchase price + appraised value (the lesser-of basis)."""
+async def _auto_value_lines(
+    db: AsyncSession, loan_file_id: UUID
+) -> tuple[list[_AutoLine], str | None]:
+    """The property values — purchase price + appraised value (the lesser-of basis).
+
+    Also returns WHICH subject-property field the appraised basis came from (LP-90
+    transparency): ``"valuation_amount"`` (the MISMO valuation — the priority field) or
+    ``"estimated_value"`` (the fallback when valuation_amount is null), else ``None``.
+    """
     prop = await _property(db, loan_file_id)
     purchase_price = prop.purchase_price if prop else None
     # The appraised value: MISMO valuation, else the estimated value. Override-able
     # where neither is present (the appraisal isn't a Tier-1 extraction yet).
     appraised = (prop.valuation_amount or prop.estimated_value) if prop else None
-    return [
+    # The literal logic, made legible: ``appraised = valuation_amount or estimated_value``.
+    appraised_source: str | None = None
+    if prop is not None:
+        if prop.valuation_amount is not None:
+            appraised_source = "valuation_amount"
+        elif prop.estimated_value is not None:
+            appraised_source = "estimated_value"
+    lines = [
         _AutoLine(
             LTV_PURCHASE_PRICE,
             "Purchase price",
@@ -121,6 +135,7 @@ async def _auto_value_lines(db: AsyncSession, loan_file_id: UUID) -> list[_AutoL
             "stated" if appraised is not None else "manual",
         ),
     ]
+    return lines, appraised_source
 
 
 async def _property(db: AsyncSession, loan_file_id: UUID) -> Property | None:
@@ -173,7 +188,7 @@ async def build_ltv_calculation(
     """
     purpose = ltv_purpose_for(loan_file)
     loan_auto = _auto_loan_lines(loan_file)
-    value_auto = await _auto_value_lines(db, loan_file.id)
+    value_auto, appraised_source = await _auto_value_lines(db, loan_file.id)
     overrides = await _active_overrides(db, loan_file.id)
 
     loan_items, loan_eff = _to_items(loan_auto, overrides)
@@ -202,6 +217,7 @@ async def build_ltv_calculation(
         hcltv=result.hcltv_pct,
         value_basis=result.value_basis,
         value_basis_label=result.value_basis_label,
+        appraised_value_source=appraised_source,
         loan_items=loan_items,
         value_items=value_items,
         ltv_formula=ltv_formula(purpose),
@@ -273,7 +289,8 @@ class UnknownLtvFieldError(Exception):
 
 
 async def _auto_amount_for(db: AsyncSession, loan_file: LoanFile, field_key: str) -> Decimal | None:
-    autos = _auto_loan_lines(loan_file) + await _auto_value_lines(db, loan_file.id)
+    value_lines, _appraised_source = await _auto_value_lines(db, loan_file.id)
+    autos = _auto_loan_lines(loan_file) + value_lines
     for auto in autos:
         if auto.key == field_key:
             return auto.auto

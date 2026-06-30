@@ -55,6 +55,11 @@ class LtvCalculation(BaseModel):
     # The denominator made visible (the lesser-of / appraised value).
     value_basis: Decimal | None
     value_basis_label: str
+    # Which subject-property field the appraised-value basis was auto-populated from
+    # (LP-90 transparency): "valuation_amount" (the MISMO valuation — the priority field)
+    # or "estimated_value" (the fallback when valuation_amount is null), else None. The
+    # logic is ``appraised = valuation_amount or estimated_value``.
+    appraised_value_source: str | None
 
     # The itemized inputs.
     loan_items: list[LtvLineItem]  # first / second / HELOC drawn / HELOC limit
