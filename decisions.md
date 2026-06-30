@@ -6826,3 +6826,30 @@ non-null, e.g. on any MISMO-imported file), with no on-screen explanation of why
 **Consequences:** editing the subject-property valuation on the Overview now moves the LTV, and the processor can
 see which value the basis came from. The naming + model-collapse questions are recorded for Priya rather than
 silently resolved.
+
+### ADR-215 addendum (LP-90.1): the source transparency, finished
+
+A screenshot review of LP-90 found the transparency was only half-wired:
+
+1. **The tooltip was dead.** The "(?)" in the Value basis row was an `aria-hidden` glyph with no handler; the
+   literal logic was only in a native HTML `title` attribute on the parent div — unreliable (long delay, never
+   fires on touch, unstyled) and lacking the plain explanation. The codebase had no tooltip primitive.
+2. **The editable row had no source clarity.** The PROPERTY VALUE section's *editable* "Appraised value" row —
+   the one the processor actually interacts with — carried no source label/tooltip at all.
+3. **The "Stated" sublabel was a mislabel.** That row's sublabel read "Stated", but the appraised value is sourced
+   from `valuation_amount`/`estimated_value`, not borrower-stated.
+
+**Decision (a small follow-up, no model/computation change):**
+- Add a real, accessible tooltip primitive (`components/ui/tooltip.tsx`, shadcn/Radix —
+  `@radix-ui/react-tooltip`) and use it in **both** places. The content is the literal logic
+  `appraised = valuation_amount or estimated_value` **plus** a plain explanation ("uses the property valuation
+  amount; if absent, falls back to the estimated value; no appraisal document is on file yet").
+- The PROPERTY VALUE editable "Appraised value" row now shows the same `from valuation amount` / `from estimated
+  value` source label + the working tooltip, mirroring the Value basis row.
+- That row's sublabel is corrected from "Stated" to the real provenance (the source label; falls back to the
+  humanized source — "Manual" — only when neither value is present). The "Purchase price" row stays "Stated" (it
+  *is* stated from `SalesContractAmount`).
+
+This is a UI/labeling fix only: the LTV computation, the lesser-of logic, the "Appraised value" **main** label,
+and the field bindings (all set by LP-90/LP-77) are unchanged; the valuation/estimated model-collapse and the
+main-label naming question remain flagged for Priya.

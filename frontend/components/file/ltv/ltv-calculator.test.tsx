@@ -21,6 +21,7 @@ const CALC: LtvCalculation = {
   hcltv: "100.00",
   value_basis: "190000.00",
   value_basis_label: "lesser of (purchase price, appraised value)",
+  appraised_value_source: "valuation_amount",
   loan_items: [
     {
       key: "ltv.first_loan",
@@ -109,6 +110,59 @@ describe("LtvCalculator", () => {
     expect(
       screen.getByText("HCLTV = (first loan + second loan + HELOC credit limit) ÷ property value"),
     ).toBeDefined();
+  });
+
+  it("shows the appraised-value source label in BOTH the basis row + the editable row (LP-90.1)", () => {
+    // CALC.appraised_value_source is "valuation_amount" → the phrasing appears twice:
+    // once in the Value basis callout, once in the editable PROPERTY VALUE row sublabel.
+    mockLtv();
+    render(<LtvCalculator fileId="LF-1" />);
+    expect(screen.getAllByText("from valuation amount")).toHaveLength(2);
+    // The appraised row's sublabel is now the real source — NOT the old "Stated" mislabel.
+    // The mock has source "stated" on First mortgage + Purchase price (both legitimately
+    // stated) → exactly TWO "Stated" remain; the appraised row no longer reads "Stated".
+    expect(screen.getAllByText("Stated")).toHaveLength(2);
+  });
+
+  it("renders a real, working tooltip with the logic + explanation (LP-90.1)", async () => {
+    // The dead native-`title` is replaced: the (?) is a focusable trigger whose tooltip
+    // shows the literal logic + a plain explanation. Two triggers (basis row + editable row).
+    mockLtv();
+    render(<LtvCalculator fileId="LF-1" />);
+    const triggers = screen.getAllByRole("button", {
+      name: "How the appraised value is determined",
+    });
+    expect(triggers).toHaveLength(2);
+
+    // Focusing the trigger opens the Radix tooltip → the content renders (the literal logic
+    // + the plain explanation), proving the (?) is no longer dead.
+    const [trigger] = triggers;
+    if (!trigger) throw new Error("expected a help trigger");
+    fireEvent.focus(trigger);
+    const logic = await screen.findAllByText("appraised = valuation_amount or estimated_value");
+    expect(logic.length).toBeGreaterThan(0);
+    expect(
+      screen.getAllByText(/uses the property valuation amount; if absent/).length,
+    ).toBeGreaterThan(0);
+  });
+
+  it("shows the fallback source in both rows when the basis came from estimated value (LP-90.1)", () => {
+    mockLtv({ data: { ...CALC, appraised_value_source: "estimated_value" } });
+    render(<LtvCalculator fileId="LF-1" />);
+    expect(screen.getAllByText("from estimated value")).toHaveLength(2);
+  });
+
+  it("omits the source label + tooltip when there is no appraised basis (LP-90.1)", () => {
+    mockLtv({ data: { ...CALC, appraised_value_source: null } });
+    render(<LtvCalculator fileId="LF-1" />);
+    // No source phrasing, and no help trigger renders anywhere.
+    expect(screen.queryByText("from valuation amount")).toBeNull();
+    expect(screen.queryByText("from estimated value")).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: "How the appraised value is determined" }),
+    ).toBeNull();
+    // The appraised row then falls back to its plain humanized source ("Stated" from the mock).
+    expect(screen.getAllByText("Stated").length).toBeGreaterThan(0);
   });
 
   it("shows the refinance purpose and the unresolved alert", () => {

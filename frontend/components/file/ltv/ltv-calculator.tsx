@@ -18,12 +18,25 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { InlineErrorState } from "@/components/ui/error-state";
 import { Input } from "@/components/ui/input";
 import { SkeletonText } from "@/components/ui/skeleton";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useClearLtvOverride, useLtv, useSetLtvOverride } from "@/lib/api/ltv";
 import { formatMoneyPrecise, formatPercent, humanize } from "@/lib/format";
 import type { LtvCalculation, LtvLimit, LtvLineItem } from "@/lib/types/ltv";
 import { cn } from "@/lib/utils";
-import { AlertTriangle, Building2, Check, Pencil, RotateCcw, Scale, X } from "lucide-react";
+import {
+  AlertTriangle,
+  Building2,
+  Check,
+  HelpCircle,
+  Pencil,
+  RotateCcw,
+  Scale,
+  X,
+} from "lucide-react";
 import { useState } from "react";
+
+/** The subject-property line whose basis source we make explicit (LP-90 / LP-90.1). */
+const LTV_APPRAISED_VALUE_KEY = "ltv.appraised_value";
 
 export function LtvCalculator({ fileId }: { fileId: string }) {
   const { data, isPending, isError, refetch } = useLtv(fileId);
@@ -92,22 +105,29 @@ function LtvBody({ fileId, data }: { fileId: string; data: LtvCalculation }) {
   };
 
   return (
-    <div className="space-y-6">
-      {data.findings.unresolved && <UnresolvedAlert count={data.findings.open_in_scope_count} />}
+    <TooltipProvider delayDuration={150}>
+      <div className="space-y-6">
+        {data.findings.unresolved && <UnresolvedAlert count={data.findings.open_in_scope_count} />}
 
-      <div className="grid gap-3 sm:grid-cols-3">
-        <LtvHeroTile ltv={data.ltv} limit={data.limit} />
-        <RatioTile label="CLTV" value={data.cltv} hint="+ second & HELOC drawn" />
-        <RatioTile label="HCLTV" value={data.hcltv} hint="+ full HELOC credit line" />
+        <div className="grid gap-3 sm:grid-cols-3">
+          <LtvHeroTile ltv={data.ltv} limit={data.limit} />
+          <RatioTile label="CLTV" value={data.cltv} hint="+ second & HELOC drawn" />
+          <RatioTile label="HCLTV" value={data.hcltv} hint="+ full HELOC credit line" />
+        </div>
+
+        <ValueBasisCallout data={data} />
+
+        <BreakdownSection title="Loan amounts" items={data.loan_items} {...rowProps} />
+        <BreakdownSection
+          title="Property value"
+          items={data.value_items}
+          appraisedValueSource={data.appraised_value_source}
+          {...rowProps}
+        />
+
+        <FormulaReceipt data={data} />
       </div>
-
-      <ValueBasisCallout data={data} />
-
-      <BreakdownSection title="Loan amounts" items={data.loan_items} {...rowProps} />
-      <BreakdownSection title="Property value" items={data.value_items} {...rowProps} />
-
-      <FormulaReceipt data={data} />
-    </div>
+    </TooltipProvider>
   );
 }
 
@@ -191,15 +211,64 @@ function LtvHeroTile({ ltv, limit }: { ltv: string | null; limit: LtvLimit }) {
   );
 }
 
+/** The plain-language source of the appraised-value basis (LP-90 transparency). */
+function appraisedSourceLabel(source: string | null): string | null {
+  if (source === "valuation_amount") return "from valuation amount";
+  if (source === "estimated_value") return "from estimated value";
+  return null;
+}
+
+/**
+ * The "(?)" help trigger + a real, accessible tooltip (LP-90.1 — the dead native-`title`
+ * tooltip is replaced). The content is the literal logic plus a plain explanation, so the
+ * processor sees WHERE the appraised value comes from + WHY. Used in both the Value basis
+ * callout and the editable Property-value row, so the source is clear in both places.
+ */
+function AppraisedSourceTooltip() {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button
+          type="button"
+          aria-label="How the appraised value is determined"
+          className="inline-flex h-4 w-4 cursor-help items-center justify-center rounded-full text-gray-400 hover:text-gray-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          <HelpCircle className="h-3.5 w-3.5" />
+        </button>
+      </TooltipTrigger>
+      <TooltipContent>
+        <p className="font-mono text-[11px] text-gray-200">
+          appraised = valuation_amount or estimated_value
+        </p>
+        <p className="mt-1 leading-relaxed text-gray-300">
+          The appraised value basis uses the property valuation amount; if absent, it falls back to
+          the estimated value. No appraisal document is on file yet.
+        </p>
+      </TooltipContent>
+    </Tooltip>
+  );
+}
+
 /** The "lesser of" / appraised-value basis, made explicit (the trust subtlety). */
 function ValueBasisCallout({ data }: { data: LtvCalculation }) {
+  // Which subject-property field the "Appraised value" came from — shown so the processor
+  // sees WHICH value drives the basis (no hidden field). The literal logic is in the tooltip.
+  const sourceLabel = appraisedSourceLabel(data.appraised_value_source);
   return (
-    <div className="flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm">
-      <Scale className="h-4 w-4 shrink-0 text-gray-400" />
-      <span className="text-gray-500">Value basis · {data.value_basis_label}</span>
-      <span className="ml-auto font-semibold tabular-nums text-gray-900">
-        {data.value_basis === null ? "—" : formatMoneyPrecise(data.value_basis)}
-      </span>
+    <div className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm">
+      <div className="flex items-center gap-2">
+        <Scale className="h-4 w-4 shrink-0 text-gray-400" />
+        <span className="text-gray-500">Value basis · {data.value_basis_label}</span>
+        <span className="ml-auto font-semibold tabular-nums text-gray-900">
+          {data.value_basis === null ? "—" : formatMoneyPrecise(data.value_basis)}
+        </span>
+      </div>
+      {sourceLabel && (
+        <div className="mt-1 flex items-center gap-1 pl-6 text-[11px] text-gray-400">
+          Appraised value <span className="font-medium text-gray-500">{sourceLabel}</span>
+          <AppraisedSourceTooltip />
+        </div>
+      )}
     </div>
   );
 }
@@ -220,14 +289,24 @@ interface RowControls {
 function BreakdownSection({
   title,
   items,
+  appraisedValueSource = null,
   ...controls
-}: { title: string; items: LtvLineItem[] } & RowControls) {
+}: {
+  title: string;
+  items: LtvLineItem[];
+  appraisedValueSource?: string | null;
+} & RowControls) {
   return (
     <section>
       <h4 className="mb-1 text-xs font-semibold uppercase tracking-wide text-gray-400">{title}</h4>
       <div className="rounded-lg border border-gray-200">
         {items.map((item) => (
-          <LineRow key={item.key} item={item} {...controls} />
+          <LineRow
+            key={item.key}
+            item={item}
+            appraisedValueSource={appraisedValueSource}
+            {...controls}
+          />
         ))}
       </div>
     </section>
@@ -236,15 +315,22 @@ function BreakdownSection({
 
 function LineRow({
   item,
+  appraisedValueSource,
   editingKey,
   onEdit,
   onCancel,
   onSave,
   onClear,
   disabled,
-}: { item: LtvLineItem } & RowControls) {
+}: { item: LtvLineItem; appraisedValueSource: string | null } & RowControls) {
   const editing = editingKey === item.key;
   const [draft, setDraft] = useState<string>(item.amount);
+
+  // The appraised-value row is sourced from valuation_amount / estimated_value — NOT
+  // borrower-stated. Show the real provenance + a working tooltip, correcting the old
+  // "Stated" mislabel (LP-90.1). Other rows keep their plain humanized source.
+  const isAppraised = item.key === LTV_APPRAISED_VALUE_KEY;
+  const sourceLabel = isAppraised ? appraisedSourceLabel(appraisedValueSource) : null;
 
   return (
     <div className="flex items-center justify-between gap-3 border-t border-gray-100 px-3 py-2 text-sm first:border-t-0">
@@ -254,6 +340,11 @@ function LineRow({
           {item.overridden ? (
             <span className="text-primary">
               overridden · auto {formatMoneyPrecise(item.auto_amount)}
+            </span>
+          ) : sourceLabel ? (
+            <span className="inline-flex items-center gap-1">
+              {sourceLabel}
+              <AppraisedSourceTooltip />
             </span>
           ) : (
             humanize(item.source)

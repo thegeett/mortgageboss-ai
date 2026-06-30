@@ -201,3 +201,11 @@ make it editable on the Overview (the property PATCH already invalidates dti/ltv
 the LTV basis source ("from valuation amount" / "from estimated value") with the literal logic in a tooltip.
 Flagged for Priya (not done): renaming "Appraised value"; collapsing valuation_amount + estimated_value.
 Tests (backend + frontend, all green); ADR-215; docs/tickets/LP-90.md.
+
+LP-90.1 — Fix the dead source tooltip + add the source label/tooltip to the PROPERTY VALUE row + correct the "Stated" sublabel
+A small UI/labeling follow-up to LP-90 (screenshot review). The Value basis "(?)" tooltip was dead (a native `title`
+on an aria-hidden glyph, no real tooltip primitive in the repo) → added a shadcn/Radix Tooltip (`components/ui/tooltip.tsx`,
+@radix-ui/react-tooltip) showing the literal logic `appraised = valuation_amount or estimated_value` + a plain explanation.
+The editable PROPERTY VALUE "Appraised value" row now also carries that source label + working tooltip, and its sublabel is
+corrected from "Stated" to the real source (valuation); "Purchase price" stays "Stated". No change to computation/lesser-of/
+main label/bindings; model-collapse + naming still flagged for Priya. Frontend-only; tests green. ADR-215 addendum; docs/tickets/LP-90.1.md.
