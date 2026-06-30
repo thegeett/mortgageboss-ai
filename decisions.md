@@ -6711,3 +6711,79 @@ that's a future model addition if direct traceability is needed).
 **Consequences:** the full disposition vocabulary is now Apply / Override / Accept-risk / Request-docs / Note.
 A `source_finding_id` FK from needs to verification findings + a live request→communication wire-up are future
 seams.
+
+## ADR-212: Phase-3 hardening capstone — the stuck-RUNNING watchdog, real-stack worker testing, performance, error paths (LP-89)
+
+- **Date:** 2026-06-29
+- **Status:** Accepted
+
+**Context:** the verification system is built (LP-74..88) but carries known loose ends from the build history
+that would break a real demo: a run could spin RUNNING forever with no recovery; the worker-seam bugs all passed
+unit tests but failed in the real stack; the engine now evaluates ~120 rules; edge-case files shouldn't crash.
+
+**Decision:** harden (don't rebuild):
+
+- **The stuck-RUNNING watchdog** — a read-time reconcile in `GET …/verification`: a run RUNNING past a 5-minute
+  timeout (above the Celery hard limit of 180s + slack) is marked FAILED with a legible error, so the UI never
+  spins forever and can re-run. No Celery-beat needed; the task already has time-limits + retry→FAILED.
+- **Real-stack worker integration testing** — `tests/integration/test_cross_source_worker.py` invokes the actual
+  task body (`app.tasks.cross_source._run`) end-to-end (the AI stubbed, the session pointed at the test DB) and
+  asserts the run COMPLETED + the findings persisted; paired with the standing task-registration guard. This is
+  the standing answer to the worker-seam lesson (unit tests missed those bugs). (`run_cross_source` now resolves
+  its reasoner at call time so the worker path is stubbable.)
+- **Performance** — a test bounds the deterministic engine under the full rule load (< 3s on a real file); the
+  deterministic pass is sub-second, the AI cross-source pass is the async/expected-slow part.
+- **Error-path robustness** — tests confirm a file with no data / no docs / FHA / partial extraction doesn't
+  crash: the calculators show "—" (cannot compute), the engine records absent-fact rules not-evaluated.
+
+**Consequences:** the demo runs solidly. A periodic beat-sweep watchdog (for never-read files) is a small V2
+follow-up; the read-time reconcile covers the demo + the normal path.
+
+## ADR-213: The validation aid + the grounded_starter → validated state model (LP-89)
+
+- **Date:** 2026-06-29
+- **Status:** Accepted
+
+**Context:** every rule (LP-82..86) + calculator methodology (LP-87) is GROUNDED-STARTER — researched against the
+real sources but NOT validated by the domain expert (Priya). Her session is the validation. Claude Code cannot do
+that validation (it requires her judgment on real files). What's buildable is a tool that captures her verdicts.
+
+**Decision:** build a validation aid (Option B) that CAPTURES verdicts; it does NOT validate:
+
+- **The starter inventory** — a service enumerates every grounded-starter item (Conventional + FHA + cross-source
+  rules + the calculator methodologies) with its program, category, description, value/op/unit, citation, source
+  type, and the `to_verify` marker. ~123 items, grouped/filterable (program / category / status).
+- **The verdict capture** — a new `validation_verdicts` table (company-scoped, self-audited: actor + timestamps +
+  the corrected value ARE the LP-80.5 value-recording trail) records the verdict per item: VALIDATED / CORRECTED
+  (a new value + note) / FLAGGED_REMOVE (+ why) / ADD_NEW (a missing rule's description). Admin-gated, tenant-scoped.
+- **The validation_status state** — each item's status is derived: `grounded_starter` (the DEFAULT — no verdict),
+  `validated`, `corrected`, or `flagged_remove`. The grounded-starter→validated transition is explicit + queryable
+  ("what still needs validation" = the grounded_starter count).
+- **The honesty rule** — a corrected value applies because PRIYA said so (recorded with attribution), not because
+  the system decided. The aid never auto-validates; until a verdict exists, the item is grounded-starter. Nothing
+  is claimed "validated" on the strength of the grounding alone.
+
+**Rationale:** the aid makes her session systematic + lossless without overstepping — it records her judgment, it
+does not fabricate it. The default-grounded_starter state keeps the system honest about what's actually validated.
+
+**Consequences:** after her session, the recorded verdicts drive the follow-up corrections. The verdict store is
+company-scoped (each company validates for its own lenders); a future step applies validated/corrected verdicts
+back into the rule definitions.
+
+## ADR-214: V1 boundaries — the explicit V2 deferrals (LP-89)
+
+- **Date:** 2026-06-29
+- **Status:** Accepted
+
+**Context:** an honest V1 records what it deliberately does NOT do, so the boundaries are explicit rather than
+gaps discovered later.
+
+**Decision:** document the deferrals (`docs/v2-deferrals.md`): the domain validation of the rules/methodologies
+(grounded-starter pending Priya — the aid captures, doesn't validate); auto-detected FHA compensating factors
+(the human documents them); auto-re-run of verification (manual trigger by design); the live engine reading DB
+overlays (the admin UI manages the store; wiring enforcement is V2); bounding boxes (page+snippet, not pixel); a
+needs→finding FK; S3/MinIO validation-before-deploy; the hard-delete admin + restore/trash (LP-79.5 deferral);
+and the full Phase-4 communication (Request-docs is the seam).
+
+**Consequences:** Phase 4 (communication) + the V2 list are the named next work. The boundaries are legible to the
+team + to Priya.

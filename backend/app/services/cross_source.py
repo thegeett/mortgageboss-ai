@@ -88,7 +88,7 @@ async def run_cross_source(
     loan_file: LoanFile,
     run: Verification,
     actor_user_id: UUID | None = None,
-    reason_fn: Reasoner = reason_cross_source,
+    reason_fn: Reasoner | None = None,
 ) -> Verification:
     """Run one cross-source pass into an existing run; emit findings; clear staleness.
 
@@ -104,9 +104,12 @@ async def run_cross_source(
     **Resolved** findings (applied / overridden) are preserved — the human's
     decisions persist across runs (ADR-061).
     """
+    # Resolve the reasoner at call time so the worker-task path (which calls without an
+    # explicit reason_fn) can be stubbed in the real-stack integration test (LP-89).
+    reasoner = reason_fn if reason_fn is not None else reason_cross_source
     context = await assemble_cross_source_context(db, loan_file)
     try:
-        result = await reason_fn(json.dumps(context))
+        result = await reasoner(json.dumps(context))
     except AIClientError:
         logger.warning("cross_source_ai_failed", loan_file_id=str(loan_file.id))
         run.status = VerificationStatus.FAILED

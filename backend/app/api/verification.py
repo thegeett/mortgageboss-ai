@@ -7,6 +7,7 @@ and the findings (the uniform shape). Tenant-scoped (cross-company → 404). The
 rich findings UI + resolution flow is LP-81.
 """
 
+from datetime import timedelta
 from uuid import UUID
 
 import structlog
@@ -62,6 +63,39 @@ _FINDING_NOT_FOUND = HTTPException(
 # Findings surfaced in the tab: cross-source (AI) + deterministic-rule, handled
 # uniformly (the origin distinguishes provenance). Green passes are not findings.
 _SHOWN_ORIGINS = (FindingOrigin.AI_CROSS_SOURCE, FindingOrigin.DETERMINISTIC_RULE)
+
+# The stuck-RUNNING watchdog (LP-89): a run RUNNING longer than this is treated as
+# dead (the worker died mid-run / the broker dropped the task) and reconciled to FAILED
+# on read, so the UI never spins forever with no recovery. Sized above the task hard
+# limit (180s) + queue/start slack — generous, never racing a healthy run.
+_STUCK_RUN_TIMEOUT_SECONDS = 300
+
+
+async def _reconcile_stuck_run(db: DbSession, loan_file: LoanFile) -> None:
+    """Mark a RUNNING run that has exceeded the watchdog timeout as FAILED (LP-89).
+
+    A worker crash / dropped task would otherwise leave the run RUNNING forever with no
+    recovery. On read, if the latest run has been RUNNING past the timeout, fail it (with a
+    legible error) + commit, so ``get_verification`` returns a FAILED run the UI can re-run.
+    """
+    stmt = (
+        only_active(
+            select(Verification).where(Verification.loan_file_id == loan_file.id), Verification
+        )
+        .order_by(Verification.created_at.desc())
+        .limit(1)
+    )
+    latest = (await db.execute(stmt)).scalars().first()
+    if latest is None or latest.status is not VerificationStatus.RUNNING:
+        return
+    started = latest.started_at or latest.created_at
+    if started is None or (utcnow() - started) <= timedelta(seconds=_STUCK_RUN_TIMEOUT_SECONDS):
+        return
+    latest.status = VerificationStatus.FAILED
+    latest.completed_at = utcnow()
+    latest.error_detail = "Verification timed out — the worker did not finish. Re-run it."
+    await db.commit()
+    log.warning("verification_run_watchdog_failed", run_id=str(latest.id))
 
 
 async def _get_finding(db: DbSession, *, loan_file: LoanFile, finding_id: UUID) -> Finding | None:
@@ -199,6 +233,7 @@ async def get_verification(
     loan_file = await get_loan_file(db, company_id=current_user.company_id, identifier=identifier)
     if loan_file is None:
         raise _NOT_FOUND
+    await _reconcile_stuck_run(db, loan_file)  # the stuck-RUNNING watchdog (LP-89)
     return await _build_status(db, loan_file=loan_file, user=current_user)
 
 

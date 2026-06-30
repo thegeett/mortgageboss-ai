@@ -23,6 +23,7 @@ from app.api.overlay_admin import router as overlay_admin_router
 from app.api.preferences import router as preferences_router
 from app.api.property import router as property_router
 from app.api.stated_financials import router as stated_financials_router
+from app.api.validation_aid import router as validation_aid_router
 from app.api.verification import router as verification_router
 from app.core.config import settings
 from app.core.database import (
@@ -116,6 +117,7 @@ app.include_router(dti_router, prefix=API_V1_PREFIX)
 app.include_router(ltv_router, prefix=API_V1_PREFIX)
 app.include_router(calculators_router, prefix=API_V1_PREFIX)
 app.include_router(overlay_admin_router, prefix=API_V1_PREFIX)
+app.include_router(validation_aid_router, prefix=API_V1_PREFIX)
 app.include_router(verification_router, prefix=API_V1_PREFIX)
 app.include_router(preferences_router, prefix=API_V1_PREFIX)
 

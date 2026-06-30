@@ -512,3 +512,54 @@ async def test_accept_risk_cross_company_is_404(client: AsyncClient, db: AsyncSe
         json={},
     )
     assert resp.status_code == 404
+
+
+# --- LP-89: the stuck-RUNNING watchdog -------------------------------------
+
+
+async def test_stuck_running_run_is_reconciled_to_failed_on_read(
+    client: AsyncClient, db: AsyncSession
+) -> None:
+    """A run RUNNING past the watchdog timeout is marked FAILED on read (not stuck forever)."""
+    from datetime import timedelta
+
+    company, _user, token = await _user_and_token(db, slug="acme", email="u@acme.com")
+    loan_file = await create_loan_file(db, company_id=company.id)
+    # A run that started 10 minutes ago and never finished (the worker died).
+    stuck = Verification(
+        loan_file_id=loan_file.id,
+        status=VerificationStatus.RUNNING,
+        trigger=VerificationTrigger.MANUAL,
+        started_at=utcnow() - timedelta(minutes=10),
+    )
+    db.add(stuck)
+    await db.flush()
+    await db.commit()
+
+    body = (
+        await client.get(f"{API}/{loan_file.display_id}/verification", headers=_auth(token))
+    ).json()
+    # The watchdog reconciled it: FAILED with a legible error (the UI can re-run).
+    assert body["latest_run"]["status"] == "failed"
+    await db.refresh(stuck)
+    assert stuck.status is VerificationStatus.FAILED
+    assert "timed out" in (stuck.error_detail or "")
+
+
+async def test_a_recent_running_run_is_left_alone(client: AsyncClient, db: AsyncSession) -> None:
+    """A run RUNNING within the timeout is NOT touched (the watchdog never races a healthy run)."""
+    company, _user, token = await _user_and_token(db, slug="acme", email="u@acme.com")
+    loan_file = await create_loan_file(db, company_id=company.id)
+    fresh = Verification(
+        loan_file_id=loan_file.id,
+        status=VerificationStatus.RUNNING,
+        trigger=VerificationTrigger.MANUAL,
+        started_at=utcnow(),
+    )
+    db.add(fresh)
+    await db.flush()
+    await db.commit()
+    body = (
+        await client.get(f"{API}/{loan_file.display_id}/verification", headers=_auth(token))
+    ).json()
+    assert body["latest_run"]["status"] == "running"

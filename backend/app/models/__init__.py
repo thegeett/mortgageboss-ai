@@ -71,6 +71,7 @@ from app.models.types import (
     ShortStr,
 )
 from app.models.user import User, UserRole
+from app.models.validation_verdict import ValidationVerdict, VerdictKind
 from app.models.verification import (
     Verification,
     VerificationStatus,
@@ -137,6 +138,8 @@ __all__ = [
     "UploadSource",
     "User",
     "UserRole",
+    "ValidationVerdict",
+    "VerdictKind",
     "Verification",
     "VerificationStatus",
     "VerificationTrigger",
