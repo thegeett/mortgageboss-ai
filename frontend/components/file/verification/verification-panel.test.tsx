@@ -56,6 +56,7 @@ function finding(over: Partial<VerificationFinding> & { id: string }): Verificat
     source_snippet: "Gross pay 3,775.00 biweekly",
     resolution_status: "open",
     resolution_note: null,
+    applied_record: null,
     details: {},
     ...over,
   };

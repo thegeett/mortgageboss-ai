@@ -33,6 +33,7 @@ import {
   ChevronDown,
   FileText,
   MessageSquarePlus,
+  RotateCcw,
   Send,
   ShieldCheck,
   Sparkles,
@@ -57,6 +58,7 @@ export function FindingCard({
   onNote,
   onAcceptRisk,
   onRequestDocs,
+  onUndo,
 }: {
   finding: VerificationFinding;
   fileId?: string;
@@ -66,6 +68,7 @@ export function FindingCard({
   onNote?: (note: string) => void;
   onAcceptRisk?: (reason: string) => void;
   onRequestDocs?: (note: string) => void;
+  onUndo?: () => void;
 }) {
   const fieldId = useId();
   const [expanded, setExpanded] = useState(false);
@@ -104,6 +107,18 @@ export function FindingCard({
   const whatWeFound = reasoning ?? detail ?? headline;
   const collapsedWhat = detail ?? (reasoning && reasoning !== headline ? reasoning : null);
   const authority = `${findingTypeLabel(finding)} · ${deterministic ? "deterministic rule" : "AI cross-source"}`;
+  // The applied effect shown in the Resolved section (LP-98) — derived from the recorded change.
+  const appliedRecord = finding.applied_record as {
+    action?: string;
+    monthly_payment?: string;
+    to?: string;
+  } | null;
+  const appliedEffect =
+    appliedRecord?.action === "add_liability" && appliedRecord.monthly_payment
+      ? `Applied · added $${appliedRecord.monthly_payment}/mo obligation`
+      : appliedRecord?.action === "correct_income" && appliedRecord.to
+        ? `Applied · income corrected to $${appliedRecord.to}/mo`
+        : "Applied — incorporated into the file.";
 
   function openForm(kind: FormKind) {
     setForm(kind);
@@ -404,23 +419,35 @@ export function FindingCard({
             </div>
           )}
 
-          {/* Resolved renders COMPACT: the disposition + what was done (the audit trail). */}
+          {/* Resolved renders COMPACT: the disposition + what was done + Undo (LP-98). */}
           {resolved && (
-            <p className="mt-1.5 text-[11px] text-gray-500">
-              {finding.resolution_status === "applied" ? (
-                <span className="text-gray-400">Applied — incorporated into the file.</span>
-              ) : finding.resolution_status === "overridden" ||
-                finding.resolution_status === "accepted_risk" ? (
-                <>
-                  <span className="text-gray-400">
-                    {finding.resolution_status === "accepted_risk" ? "Accepted: " : "Reason: "}
-                  </span>
-                  {finding.resolution_note ?? "—"}
-                </>
-              ) : (
-                <span className="text-gray-400">{humanize(finding.resolution_status)}</span>
+            <div className="mt-1.5 flex items-start justify-between gap-2">
+              <p className="min-w-0 text-[11px] text-gray-500">
+                {finding.resolution_status === "applied" ? (
+                  <span className="text-gray-400">{appliedEffect}</span>
+                ) : finding.resolution_status === "overridden" ||
+                  finding.resolution_status === "accepted_risk" ? (
+                  <>
+                    <span className="text-gray-400">
+                      {finding.resolution_status === "accepted_risk" ? "Accepted: " : "Reason: "}
+                    </span>
+                    {finding.resolution_note ?? "—"}
+                  </>
+                ) : (
+                  <span className="text-gray-400">{humanize(finding.resolution_status)}</span>
+                )}
+              </p>
+              {onUndo && (
+                <button
+                  type="button"
+                  onClick={onUndo}
+                  disabled={busy}
+                  className="inline-flex shrink-0 items-center gap-0.5 text-[11px] text-primary hover:underline disabled:opacity-50"
+                >
+                  <RotateCcw className="h-3 w-3" /> Undo
+                </button>
               )}
-            </p>
+            </div>
           )}
         </div>
       </div>

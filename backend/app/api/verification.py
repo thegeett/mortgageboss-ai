@@ -43,11 +43,13 @@ from app.services.cross_source import (
 from app.services.finding_blocking import open_in_scope_findings
 from app.services.finding_impact import has_apply_spec, preview_finding_apply
 from app.services.finding_resolution import (
+    CannotUndoError,
     accept_risk_finding,
     add_finding_note,
     apply_finding,
     override_finding,
     request_docs_for_finding,
+    undo_finding,
 )
 from app.services.loan_files import get_loan_file
 from app.services.verifications import create_verification_run, mark_verification_current
@@ -311,6 +313,31 @@ async def apply_finding_endpoint(
         raise _FINDING_NOT_FOUND
 
     await apply_finding(db, finding=finding, loan_file=loan_file, actor_user_id=current_user.id)
+    await db.commit()
+    await db.refresh(loan_file)
+    return await _build_status(db, loan_file=loan_file, user=current_user)
+
+
+@router.post("/{identifier}/findings/{finding_id}/undo", response_model=VerificationStatusPublic)
+async def undo_finding_endpoint(
+    identifier: str, finding_id: UUID, db: DbSession, current_user: CurrentUser
+) -> VerificationStatusPublic:
+    """Undo a finding's resolution (LP-98) — reverse Apply / Accept-risk / Override → OPEN.
+
+    Undo-Applied REVERSES the data change (restores the recorded pre-apply state) + recomputes;
+    Undo-Accept/Override just reopens. Audited; tenant-scoped. 400 if the finding isn't resolved.
+    """
+    loan_file = await get_loan_file(db, company_id=current_user.company_id, identifier=identifier)
+    if loan_file is None:
+        raise _NOT_FOUND
+    finding = await _get_finding(db, loan_file=loan_file, finding_id=finding_id)
+    if finding is None:
+        raise _FINDING_NOT_FOUND
+
+    try:
+        await undo_finding(db, finding=finding, loan_file=loan_file, actor_user_id=current_user.id)
+    except CannotUndoError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     await db.commit()
     await db.refresh(loan_file)
     return await _build_status(db, loan_file=loan_file, user=current_user)

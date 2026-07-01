@@ -316,3 +316,62 @@ async def test_apply_preview_is_tenant_scoped(client: AsyncClient, db: AsyncSess
         f"{V1}/{loan_file.display_id}/findings/{finding.id}/apply-preview", headers=_auth(token_a)
     )
     assert resp.status_code == 404  # cross-company → not found
+
+
+# --- Undo (LP-98) — reverse a resolution ------------------------------------
+
+
+async def test_undo_applied_reverses_and_reopens(client: AsyncClient, db: AsyncSession) -> None:
+    company, token = await _user_and_token(db, slug="acme", email="u@acme.com")
+    loan_file = await _file_with_income(db, company)
+    finding = await _finding(
+        db, loan_file.id, apply_spec={"action": "add_liability", "monthly_payment": "500"}
+    )
+    await db.commit()
+
+    # Apply, then Undo.
+    await client.post(
+        f"{V1}/{loan_file.display_id}/findings/{finding.id}/apply", headers=_auth(token)
+    )
+    resp = await client.post(
+        f"{V1}/{loan_file.display_id}/findings/{finding.id}/undo", headers=_auth(token)
+    )
+    assert resp.status_code == 200
+    assert _find(resp.json(), finding.id)["resolution_status"] == "open"  # reopened
+    # The added liability was removed (the data reversed).
+    libs = (
+        (
+            await db.execute(
+                select(StatedLiability).where(
+                    StatedLiability.loan_file_id == loan_file.id,
+                    StatedLiability.deleted_at.is_(None),
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert len(libs) == 0
+
+
+async def test_undo_an_open_finding_is_400(client: AsyncClient, db: AsyncSession) -> None:
+    company, token = await _user_and_token(db, slug="acme", email="u@acme.com")
+    loan_file = await _file_with_income(db, company)
+    finding = await _finding(db, loan_file.id)  # OPEN, never resolved
+    await db.commit()
+    resp = await client.post(
+        f"{V1}/{loan_file.display_id}/findings/{finding.id}/undo", headers=_auth(token)
+    )
+    assert resp.status_code == 400
+
+
+async def test_undo_is_tenant_scoped(client: AsyncClient, db: AsyncSession) -> None:
+    _a, token_a = await _user_and_token(db, slug="company-a", email="a@a.com")
+    company_b, _tb = await _user_and_token(db, slug="company-b", email="b@b.com")
+    loan_file = await _file_with_income(db, company_b)
+    finding = await _finding(db, loan_file.id)
+    await db.commit()
+    resp = await client.post(
+        f"{V1}/{loan_file.display_id}/findings/{finding.id}/undo", headers=_auth(token_a)
+    )
+    assert resp.status_code == 404

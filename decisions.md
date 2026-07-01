@@ -7105,3 +7105,37 @@ computation that could diverge.
 drift from the apply (same code, dry-run vs. commit). Apply-specs are currently rare (~undisclosed-debt); the flow
 is general (any apply-spec). Part of the finding-presentation epic (LP-92..98); LP-98 (Undo + the Resolved-section
 placement) builds on the reversible apply.
+
+## ADR-223: Undo for resolved findings + the Resolved section (LP-98) — the epic's close
+
+- **Date:** 2026-07-01
+- **Status:** Accepted
+
+**Context:** LP-97 made Apply previewable (View fix); a processor's resolutions should also be reversible. Resolved
+findings sit in a **Resolved section** below the open findings (LP-94 retains them across re-runs), each compact
+(what-was-done + effect). This ticket adds **Undo** — and Undo of an APPLIED finding must reverse a *data change*
+and recompute, the epic's highest-risk piece.
+
+**Decision:** a type-specific reversal (`app/services/finding_resolution.py` `undo_finding`), reusing the recorded
+before-state — exact, not approximated.
+
+- **Undo-APPLIED** → reverse the data change by RESTORING the recorded pre-apply state from `applied_record` (LP-97
+  verified it captures enough — the one source of truth): `add_liability` → soft-delete the *exact* liability that
+  was added (by its `liability_id`); `correct_income` → restore the income item to its recorded `from` value. Then
+  `mark_recompute_needed` — the DTI/LTV read live, so they recompute back to their **exact** pre-apply values. The
+  finding returns to OPEN (its `applied_record` cleared). We restore the recorded row/value rather than subtracting
+  an amount, so the reversal is exact even if other things changed.
+- **Undo-OVERRIDDEN / Undo-ACCEPTED_RISK** → just flip to OPEN (they made no data change).
+- **Audited** — `ActivityType.FINDING_UNDONE` (a new activity type + a CHECK-constraint migration), recording who /
+  when / the reversal. Tenant-scoped (the reversal only touches the finding's own file). A non-resolved finding →
+  `CannotUndoError` (400).
+
+**Composition with LP-94:** resolved findings are retained → they populate the Resolved section → undoable. After
+Undo-Applied the data is reversed and the finding is OPEN, so the (now un-applied) issue **re-detects** on the next
+run — correct. After Undo-Accept/Override it's a normal open finding again. No conflict.
+
+**Consequences:** nothing a processor does is one-way — **View fix previews before Apply (LP-97), Undo reverses
+after (LP-98)**. `FindingPublic` now exposes `applied_record` (the Resolved-card effect + the Undo basis). This
+**completes the finding-presentation epic (LP-92..98)**: readable labels (92), normalized-substance identity +
+dedup (93), re-run reconcile (94), the four-part card (95), AI why/fix (96), View fix (97), and Undo + the Resolved
+section (98).

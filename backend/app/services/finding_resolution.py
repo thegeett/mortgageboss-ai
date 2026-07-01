@@ -194,6 +194,128 @@ async def accept_risk_finding(
     return finding
 
 
+class CannotUndoError(Exception):
+    """The finding is not in an undoable (resolved) state."""
+
+
+# The resolutions Undo can reverse. RESOLVED / WAIVED (legacy LP-17 states) are not produced by
+# the verification flow, so Undo does not handle them.
+_UNDOABLE = (
+    FindingResolutionStatus.APPLIED,
+    FindingResolutionStatus.OVERRIDDEN,
+    FindingResolutionStatus.ACCEPTED_RISK,
+)
+
+
+async def undo_finding(
+    db: AsyncSession,
+    *,
+    finding: Finding,
+    loan_file: LoanFile,
+    actor_user_id: UUID,
+) -> Finding:
+    """Reverse a finding's resolution — Undo (LP-98). The reversal DIFFERS by resolution type.
+
+    * **APPLIED** → **reverse the data change** by RESTORING the recorded pre-apply state
+      (:attr:`applied_record` — the one source of truth, LP-97 verified it captures enough): the
+      added liability is removed, or the corrected income restored to its prior value — EXACTLY,
+      not approximated. The DTI/LTV then recompute back (they read the structured data live), and
+      the recompute hook marks verification stale so the (now un-applied) issue re-detects.
+    * **OVERRIDDEN** / **ACCEPTED_RISK** → just flip back to OPEN (they made no data change — an
+      override dismissed it; accept-risk acknowledged it).
+
+    The finding returns to **OPEN** and its resolution trail is cleared. Audited
+    (``FINDING_UNDONE``, who / when / the reversal). ``flush`` only; the caller owns the
+    transaction. Raises :class:`CannotUndoError` if the finding is not resolved.
+    """
+    prior = finding.resolution_status
+    if prior not in _UNDOABLE:
+        raise CannotUndoError(f"finding is {prior.value}, not a resolved state that can be undone")
+
+    reversal: dict[str, Any] = {"undone_from": prior.value}
+    if prior is FindingResolutionStatus.APPLIED:
+        reversal["reversed_change"] = await _reverse_applied_change(
+            db, finding=finding, loan_file=loan_file
+        )
+        # The structured data changed back → the deterministic rules + calculators should
+        # recompute, and the un-applied issue should re-detect on the next run (LP-94 compose).
+        await mark_recompute_needed(db, loan_file=loan_file)
+
+    finding.resolution_status = FindingResolutionStatus.OPEN
+    finding.resolution_note = None
+    finding.resolved_by_user_id = None
+    finding.resolved_at = None
+    finding.applied_record = None  # the pre-apply state has been restored; nothing left to reverse
+
+    await log_activity(
+        db,
+        loan_file_id=finding.loan_file_id,
+        activity_type=ActivityType.FINDING_UNDONE,
+        summary=f"Undid {prior.value} on finding {finding.rule_id}",
+        actor_user_id=actor_user_id,
+        detail={"finding_id": str(finding.id), "rule_id": finding.rule_id, **reversal},
+    )
+    await db.flush()
+    return finding
+
+
+async def _reverse_applied_change(
+    db: AsyncSession, *, finding: Finding, loan_file: LoanFile
+) -> dict[str, Any]:
+    """Undo the structured-data change an APPLIED finding performed — the EXACT inverse.
+
+    Restores from the recorded :attr:`applied_record` (LP-75/97), never an approximation:
+    ``add_liability`` → soft-delete the exact liability that was added; ``correct_income`` →
+    restore the income item to its recorded prior (``from``) value. Tenant-checked. Returns a
+    record of what was reversed (for the audit).
+    """
+    record = finding.applied_record or {}
+    action = record.get("action")
+
+    if action == "add_liability":
+        raw_id = record.get("liability_id")
+        if isinstance(raw_id, str):
+            liability = await db.get(StatedLiability, UUID(raw_id))
+            if (
+                liability is not None
+                and liability.loan_file_id == loan_file.id
+                and liability.deleted_at is None
+            ):
+                liability.deleted_at = utcnow()  # remove the exact row the apply added
+                await db.flush()
+                return {"action": "remove_liability", "liability_id": raw_id}
+        return {"action": "remove_liability", "applied": False}
+
+    if action == "correct_income":
+        return await _restore_income(db, loan_file=loan_file, record=record)
+
+    # Unknown / no-op apply (a novel finding with no deterministic remediation): nothing to reverse.
+    return {"action": action, "reversed": False}
+
+
+async def _restore_income(
+    db: AsyncSession, *, loan_file: LoanFile, record: dict[str, Any]
+) -> dict[str, Any]:
+    """Restore a stated income item to its recorded pre-apply value (tenant-checked)."""
+    raw_id = record.get("income_item_id")
+    prior = _to_money(record.get("from"))
+    if not isinstance(raw_id, str):
+        return {"action": "restore_income", "reversed": False}
+    item = await db.get(StatedIncomeItem, UUID(raw_id))
+    if item is None or item.deleted_at is not None:
+        return {"action": "restore_income", "reversed": False}
+    borrower = await db.get(Borrower, item.borrower_id)
+    if borrower is None or borrower.loan_file_id != loan_file.id:
+        return {"action": "restore_income", "reversed": False}
+    item.monthly_amount = prior  # the exact recorded prior value, not a computed guess
+    await db.flush()
+    return {
+        "action": "restore_income",
+        "income_item_id": raw_id,
+        "restored_to": _stringify_money(prior),
+    }
+
+
 _STATUS_TO_PRIORITY = {
     FindingStatus.RED: NeedsItemPriority.BLOCKING,
     FindingStatus.YELLOW: NeedsItemPriority.STANDARD,

@@ -130,7 +130,8 @@ type Resolution =
   | { kind: "override"; findingId: string; reason: string }
   | { kind: "note"; findingId: string; note: string }
   | { kind: "accept-risk"; findingId: string; reason: string }
-  | { kind: "request-docs"; findingId: string; note: string };
+  | { kind: "request-docs"; findingId: string; note: string }
+  | { kind: "undo"; findingId: string }; // reverse a resolution (LP-98)
 
 async function resolveFinding(identifier: string, action: Resolution): Promise<VerificationStatus> {
   const base = `${API_V1}/loan-files/${identifier}/findings/${action.findingId}`;

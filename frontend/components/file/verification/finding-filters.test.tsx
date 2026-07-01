@@ -17,6 +17,7 @@ function f(over: Partial<VerificationFinding> & { id: string }): VerificationFin
     source_snippet: null,
     resolution_status: "open",
     resolution_note: null,
+    applied_record: null,
     details: {},
     ...over,
   };

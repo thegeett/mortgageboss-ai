@@ -91,13 +91,28 @@ export function FindingsList({
         </ul>
       )}
 
-      {resolved.length > 0 && <ResolvedGroup findings={resolved} />}
+      {resolved.length > 0 && (
+        <ResolvedGroup
+          findings={resolved}
+          busy={resolve.isPending}
+          onUndo={(id) => act({ kind: "undo", findingId: id }, "Resolution undone")}
+        />
+      )}
     </div>
   );
 }
 
-/** The audit trail: findings the processor already resolved (kept across re-runs). */
-function ResolvedGroup({ findings }: { findings: VerificationFinding[] }) {
+/** The audit trail: findings the processor already resolved (kept across re-runs — LP-94). Each
+ * carries an Undo (LP-98) — reversing an Applied one reverses the data change + recomputes. */
+function ResolvedGroup({
+  findings,
+  onUndo,
+  busy,
+}: {
+  findings: VerificationFinding[];
+  onUndo: (id: string) => void;
+  busy: boolean;
+}) {
   return (
     <section>
       <h4 className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-gray-400">
@@ -105,7 +120,7 @@ function ResolvedGroup({ findings }: { findings: VerificationFinding[] }) {
       </h4>
       <ul className="space-y-2 opacity-80">
         {findings.map((f) => (
-          <FindingCard key={f.id} finding={f} />
+          <FindingCard key={f.id} finding={f} busy={busy} onUndo={() => onUndo(f.id)} />
         ))}
       </ul>
     </section>

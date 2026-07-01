@@ -48,6 +48,7 @@ function finding(over: Partial<VerificationFinding> & { id: string }): Verificat
     source_snippet: null,
     resolution_status: "open",
     resolution_note: null,
+    applied_record: null,
     details: { apply: { action: "add_liability" } },
     ...over,
   };
@@ -106,6 +107,16 @@ describe("FindingsList", () => {
     ]);
     render(<FindingsList fileId="LF-1" data={data} activeLevel="balanced" />);
     expect(screen.getByText(/Resolved · 1/)).toBeDefined();
+  });
+
+  it("Undo on a resolved finding fires the resolve mutation with kind 'undo' (LP-98)", () => {
+    const data = status([
+      finding({ id: "done", resolution_status: "applied", message: "Applied one." }),
+    ]);
+    render(<FindingsList fileId="LF-1" data={data} activeLevel="balanced" />);
+    fireEvent.click(screen.getByRole("button", { name: /Undo/ }));
+    expect(resolveMutate).toHaveBeenCalledTimes(1);
+    expect(resolveMutate.mock.calls[0]?.[0]).toEqual({ kind: "undo", findingId: "done" });
   });
 
   it("View fix → Apply fix on an open finding fires the resolve mutation (LP-97)", () => {

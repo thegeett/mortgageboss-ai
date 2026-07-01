@@ -32,6 +32,8 @@ export interface VerificationFinding {
   resolution_status: string;
   /** The recorded reason for an OVERRIDDEN finding (LP-81). */
   resolution_note: string | null;
+  /** What an APPLIED finding changed (the effect shown in Resolved + the Undo basis, LP-98). */
+  applied_record: Record<string, unknown> | null;
   details: Record<string, unknown>;
 }
 

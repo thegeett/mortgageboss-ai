@@ -38,6 +38,7 @@ function finding(over: Partial<VerificationFinding>): VerificationFinding {
     source_snippet: "Gross 3,775.00 biweekly",
     resolution_status: "open",
     resolution_note: null,
+    applied_record: null,
     details: { apply: { action: "correct_income" }, reasoning: "Docs show less." },
     ...over,
   };
@@ -228,6 +229,7 @@ describe("FindingCard", () => {
         finding={finding({
           resolution_status: "overridden",
           resolution_note: "Documented separately",
+          applied_record: null,
         })}
       />,
     );
@@ -241,6 +243,7 @@ describe("FindingCard", () => {
         finding={finding({
           resolution_status: "overridden",
           resolution_note: "Documented separately",
+          applied_record: null,
         })}
       />,
     );
@@ -253,6 +256,23 @@ describe("FindingCard", () => {
   it("an applied resolved finding shows a compact what-was-done line", () => {
     render(<FindingCard finding={finding({ resolution_status: "applied" })} />);
     expect(screen.getByText(/Applied — incorporated into the file/)).toBeDefined();
+  });
+
+  it("a resolved finding shows the applied effect + an Undo button that calls onUndo (LP-98)", () => {
+    const onUndo = vi.fn();
+    render(
+      <FindingCard
+        finding={finding({
+          resolution_status: "applied",
+          applied_record: { action: "add_liability", monthly_payment: "500" },
+        })}
+        onUndo={onUndo}
+      />,
+    );
+    // The effect is derived from applied_record.
+    expect(screen.getByText(/Applied · added \$500\/mo obligation/)).toBeDefined();
+    fireEvent.click(screen.getByRole("button", { name: /Undo/ }));
+    expect(onUndo).toHaveBeenCalledTimes(1);
   });
 
   it("Accept-risk acknowledges a real finding (optional rationale) → onAcceptRisk", () => {

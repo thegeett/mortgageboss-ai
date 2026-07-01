@@ -102,6 +102,9 @@ class FindingPublic(BaseModel):
     source_snippet: str | None
     resolution_status: str
     resolution_note: str | None  # the recorded reason for an OVERRIDDEN finding (LP-81)
+    applied_record: (
+        dict[str, Any] | None
+    )  # what an APPLIED finding changed (the effect + Undo, LP-98)
     details: dict[str, Any]
 
     @classmethod
@@ -123,6 +126,7 @@ class FindingPublic(BaseModel):
             source_snippet=finding.source_snippet,
             resolution_status=finding.resolution_status.value,
             resolution_note=finding.resolution_note,
+            applied_record=finding.applied_record,
             details=details,
         )
 

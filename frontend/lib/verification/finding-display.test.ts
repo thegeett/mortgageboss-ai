@@ -21,6 +21,7 @@ function finding(over: Partial<VerificationFinding>): VerificationFinding {
     source_snippet: "snip",
     resolution_status: "open",
     resolution_note: null,
+    applied_record: null,
     details: {},
     ...over,
   };
