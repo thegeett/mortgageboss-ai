@@ -6896,3 +6896,34 @@ rates (HUD via LP-84) are more deterministic.
 **Consequences:** the FHA and low-down-Conventional DTIs are no longer understated; the MI calculator and the DTI
 share one number (no divergence). The two-source-of-truth lesson — calculators must **consume** one source, not
 omit or duplicate — is now applied to MI as it was to the appraised value. The PMI rate is recorded for Priya.
+
+## ADR-217: Readable finding labels — teach the finding-display layer about the `xsrc.` namespace (LP-92)
+
+- **Date:** 2026-06-30
+- **Status:** Accepted
+
+**Context:** deterministic cross-source findings displayed an ugly raw-rule-id meta-label — e.g. "Xsrc Income
+Employer Count Matches Items" — that means nothing to a processor. Root cause: the LP-81 finding-display layer
+(`frontend/lib/verification/finding-display.ts`) was keyed on the **`cross_source.`** prefix (the LP-78 AI
+cross-source namespace). `findingType` stripped only that prefix, and `findingTypeLabel` fell back to prettifying
+the **raw rule_id** when `findingType` returned null. The LP-86 **deterministic** cross-source rules use the
+**`xsrc.`** prefix, so they never matched → the meta-label degraded to the prettified full rule path. (The
+**headline** was already fine: for `xsrc.*` it falls through to `finding.message`, which the backend renders
+readably, e.g. "Stated employer count (2) does not match the income-item count (3)." So this was the secondary
+gray meta-label only.)
+
+**Decision (frontend-only — the backend message was already readable):**
+- `findingType` now recognizes + strips **both** namespaces (`cross_source.` and `xsrc.`), so an `xsrc.*` finding
+  resolves to a type instead of null (the headline/detail behavior is unchanged — the stripped `xsrc.` remainder
+  is not a TEMPLATES key, so the headline stays `finding.message`).
+- `findingTypeLabel` is now readable and category-based, and **never** returns a raw rule_id:
+  - AI cross-source (`cross_source.*`): the canonical type, e.g. "Income Variance" (unchanged — no regression).
+  - Deterministic cross-source (`xsrc.*`): the finding's **category** + a descriptor, e.g.
+    "Income · Cross-source check".
+  - Anything else (single-source `conv.*` / `fha.*`, document findings): the readable **category** label ("Income"
+    / "Credit" / …), with a generic "Verification check" fallback for an unknown category — never "Conv Dti …".
+
+**Consequences:** no finding shows a raw-rule-id-derived meta-label anywhere; the deterministic cross-source
+findings read as clean category checks; the AI-layer labels and the headline are untouched. This is the first,
+quick-win ticket of the finding-presentation epic (LP-92..98) — later tickets cover dedup/re-run (LP-93/94), the
+card restructure (LP-95), the AI why/fix (LP-96), View-fix (LP-97), and Undo (LP-98).
