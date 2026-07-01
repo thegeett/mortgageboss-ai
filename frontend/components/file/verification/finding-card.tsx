@@ -14,6 +14,7 @@
  * disposition + reason/record (history — never silently dropped).
  */
 
+import { ViewFixDialog } from "@/components/file/verification/view-fix-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
@@ -35,6 +36,7 @@ import {
   Send,
   ShieldCheck,
   Sparkles,
+  Wrench,
   X,
 } from "lucide-react";
 import { type ReactNode, useId, useState } from "react";
@@ -48,6 +50,7 @@ type FormKind = "override" | "note" | "accept" | "request";
 
 export function FindingCard({
   finding,
+  fileId,
   busy = false,
   onApply,
   onOverride,
@@ -56,6 +59,7 @@ export function FindingCard({
   onRequestDocs,
 }: {
   finding: VerificationFinding;
+  fileId?: string;
   busy?: boolean;
   onApply?: () => void;
   onOverride?: (reason: string) => void;
@@ -67,6 +71,7 @@ export function FindingCard({
   const [expanded, setExpanded] = useState(false);
   const [form, setForm] = useState<FormKind | null>(null);
   const [text, setText] = useState("");
+  const [viewFixOpen, setViewFixOpen] = useState(false);
 
   const red = finding.status === "red";
   const resolved = finding.resolution_status !== "open";
@@ -296,16 +301,18 @@ export function FindingCard({
             <div className="mt-2.5">
               {form === null ? (
                 <div className="flex flex-wrap items-center gap-1.5">
-                  {onApply && canApply(finding) && (
+                  {/* Apply-spec findings get "View fix" — a detailed before/after impact preview
+                      (LP-97) — instead of a bare Apply. The dialog's "Apply fix" runs the real
+                      apply (onApply); the preview is a dry-run that matches it. */}
+                  {onApply && canApply(finding) && fileId && (
                     <Button
                       type="button"
                       size="sm"
                       className="h-7 gap-1 text-xs"
                       disabled={busy}
-                      onClick={onApply}
+                      onClick={() => setViewFixOpen(true)}
                     >
-                      {busy ? <Spinner className="h-3 w-3" /> : <Check className="h-3 w-3" />}
-                      Apply
+                      <Wrench className="h-3 w-3" /> View fix
                     </Button>
                   )}
                   {onAcceptRisk && (
@@ -417,6 +424,19 @@ export function FindingCard({
           )}
         </div>
       </div>
+
+      {/* View fix — the itemized before/after impact preview (LP-97). Only for apply-spec
+          findings; "Apply fix" runs the real apply (onApply). */}
+      {fileId && onApply && canApply(finding) && (
+        <ViewFixDialog
+          open={viewFixOpen}
+          onOpenChange={setViewFixOpen}
+          fileId={fileId}
+          finding={finding}
+          onApply={onApply}
+          busy={busy}
+        />
+      )}
     </li>
   );
 }

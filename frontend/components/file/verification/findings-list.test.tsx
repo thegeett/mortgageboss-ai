@@ -10,6 +10,21 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 const resolveMutate = vi.fn();
 vi.mock("@/lib/api/verification", () => ({
   useResolveFinding: () => ({ mutate: resolveMutate, isPending: false }),
+  useApplyPreview: () => ({
+    data: {
+      finding_id: "x",
+      summary: "Add to monthly debts: $500.00/mo",
+      applied_record: {},
+      affects: [],
+      dti_before: null,
+      dti_after: null,
+      ltv_before: null,
+      ltv_after: null,
+    },
+    isPending: false,
+    isError: false,
+    refetch: vi.fn(),
+  }),
 }));
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 
@@ -93,11 +108,14 @@ describe("FindingsList", () => {
     expect(screen.getByText(/Resolved · 1/)).toBeDefined();
   });
 
-  it("Apply on an open finding fires the resolve mutation", () => {
+  it("View fix → Apply fix on an open finding fires the resolve mutation (LP-97)", () => {
     render(
       <FindingsList fileId="LF-1" data={status([finding({ id: "x" })])} activeLevel="balanced" />,
     );
-    fireEvent.click(screen.getByRole("button", { name: "Apply" }));
+    // Apply-spec findings show "View fix" (the impact preview), not a bare Apply.
+    fireEvent.click(screen.getByRole("button", { name: /View fix/ }));
+    // Confirming in the dialog runs the real apply.
+    fireEvent.click(screen.getByRole("button", { name: /Apply fix/ }));
     expect(resolveMutate).toHaveBeenCalledTimes(1);
     expect(resolveMutate.mock.calls[0]?.[0]).toEqual({ kind: "apply", findingId: "x" });
   });

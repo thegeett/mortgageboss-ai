@@ -17,11 +17,13 @@ from app.core.jwt import create_access_token
 from app.core.security import hash_password
 from app.main import app
 from app.models import (
+    Borrower,
     Company,
     Finding,
     FindingCategory,
     FindingOrigin,
     FindingStatus,
+    StatedIncomeItem,
     StatedLiability,
     User,
     UserRole,
@@ -218,3 +220,99 @@ async def test_cross_company_resolution_is_404(client: AsyncClient, db: AsyncSes
     # A's view never resolved B's finding.
     row = await db.get(Finding, finding.id)
     assert row is not None and row.resolution_status is FindingResolutionStatus.OPEN
+
+
+# --- View fix — the apply-impact DRY-RUN preview (LP-97) ----------------------
+
+
+async def _file_with_income(db: AsyncSession, company: Company):
+    loan_file = await create_loan_file(db, company_id=company.id)
+    borrower = Borrower(
+        loan_file_id=loan_file.id, first_name="Mahesh", last_name="C", is_primary=True
+    )
+    db.add(borrower)
+    await db.flush()
+    db.add(
+        StatedIncomeItem(
+            borrower_id=borrower.id,
+            monthly_amount=Decimal("10000"),
+            income_type="Base",
+            employment_income=True,
+        )
+    )
+    await db.flush()
+    return loan_file
+
+
+async def test_apply_preview_returns_itemized_impact_without_persisting(
+    client: AsyncClient, db: AsyncSession
+) -> None:
+    company, token = await _user_and_token(db, slug="acme", email="u@acme.com")
+    loan_file = await _file_with_income(db, company)
+    finding = await _finding(
+        db,
+        loan_file.id,
+        apply_spec={
+            "action": "add_liability",
+            "liability_type": "Installment",
+            "monthly_payment": "500",
+        },
+    )
+    await db.commit()
+
+    resp = await client.get(
+        f"{V1}/{loan_file.display_id}/findings/{finding.id}/apply-preview", headers=_auth(token)
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert "dti" in body["affects"]
+    assert body["dti_before"] is not None and body["dti_after"] is not None
+    # The itemized after carries a new debt line + a higher back-end DTI than the before.
+    assert Decimal(body["dti_after"]["monthly_debts"]) - Decimal(
+        body["dti_before"]["monthly_debts"]
+    ) == Decimal("500")
+    assert "$500" in body["summary"]
+
+    # DRY-RUN: nothing persisted — the finding is still OPEN and no liability was added.
+    row = await db.get(Finding, finding.id)
+    await db.refresh(row)
+    assert row.resolution_status is FindingResolutionStatus.OPEN
+    libs = (
+        (
+            await db.execute(
+                select(StatedLiability).where(StatedLiability.loan_file_id == loan_file.id)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert len(libs) == 0  # the previewed liability was rolled back
+
+
+async def test_apply_preview_rejects_a_finding_without_an_apply_spec(
+    client: AsyncClient, db: AsyncSession
+) -> None:
+    company, token = await _user_and_token(db, slug="acme", email="u@acme.com")
+    loan_file = await _file_with_income(db, company)
+    finding = await _finding(db, loan_file.id)  # no apply_spec
+    await db.commit()
+
+    resp = await client.get(
+        f"{V1}/{loan_file.display_id}/findings/{finding.id}/apply-preview", headers=_auth(token)
+    )
+    assert resp.status_code == 400  # nothing to preview
+
+
+async def test_apply_preview_is_tenant_scoped(client: AsyncClient, db: AsyncSession) -> None:
+    _a, token_a = await _user_and_token(db, slug="company-a", email="a@a.com")
+    company_b, _tb = await _user_and_token(db, slug="company-b", email="b@b.com")
+    loan_file = await _file_with_income(db, company_b)
+    finding = await _finding(
+        db, loan_file.id, apply_spec={"action": "add_liability", "monthly_payment": "500"}
+    )
+    await db.commit()
+
+    resp = await client.get(
+        f"{V1}/{loan_file.display_id}/findings/{finding.id}/apply-preview", headers=_auth(token_a)
+    )
+    assert resp.status_code == 404  # cross-company → not found

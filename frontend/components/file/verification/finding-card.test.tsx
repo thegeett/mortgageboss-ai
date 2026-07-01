@@ -2,6 +2,27 @@
 import type { VerificationFinding } from "@/lib/types/verification";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+
+// The View-fix dialog (LP-97) calls useApplyPreview — stub it so the card renders without a
+// QueryClient (the dialog flow itself is covered in view-fix-dialog.test.tsx).
+vi.mock("@/lib/api/verification", () => ({
+  useApplyPreview: () => ({
+    data: {
+      finding_id: "f-1",
+      summary: "Add to monthly debts: $500.00/mo",
+      applied_record: {},
+      affects: [],
+      dti_before: null,
+      dti_after: null,
+      ltv_before: null,
+      ltv_after: null,
+    },
+    isPending: false,
+    isError: false,
+    refetch: vi.fn(),
+  }),
+}));
+
 import { FindingCard } from "./finding-card";
 
 function finding(over: Partial<VerificationFinding>): VerificationFinding {
@@ -134,13 +155,27 @@ describe("FindingCard", () => {
     expect(screen.getAllByText(/Income · Cross-source check/).length).toBeGreaterThan(0);
   });
 
-  it("Apply calls onApply (the recompute interlock)", () => {
+  it("apply-spec findings show View fix → Apply fix calls onApply (LP-97)", () => {
     const onApply = vi.fn();
     render(
-      <FindingCard finding={finding({})} onApply={onApply} onOverride={vi.fn()} onNote={vi.fn()} />,
+      <FindingCard
+        finding={finding({})}
+        fileId="LF-1"
+        onApply={onApply}
+        onOverride={vi.fn()}
+        onNote={vi.fn()}
+      />,
     );
-    fireEvent.click(screen.getByRole("button", { name: "Apply" }));
+    // No bare Apply — apply-spec findings open the impact preview first.
+    expect(screen.queryByRole("button", { name: "Apply" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /View fix/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Apply fix/ }));
     expect(onApply).toHaveBeenCalledTimes(1);
+  });
+
+  it("without a fileId, an apply-spec finding shows no bare Apply (View fix needs the file)", () => {
+    render(<FindingCard finding={finding({})} onApply={vi.fn()} onOverride={vi.fn()} />);
+    expect(screen.queryByRole("button", { name: /Apply/ })).toBeNull();
   });
 
   it("Override requires a reason, then calls onOverride with it", () => {

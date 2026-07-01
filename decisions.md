@@ -7072,3 +7072,36 @@ content). Generation failure is graceful: no guidance → the card still renders
 without letting the AI decide anything — the deterministic core + human judgment still rule. This is the one
 sanctioned place the AI-boundary is relaxed; the guardrails are what make it safe. Part of the finding-presentation
 epic (LP-92..98); LP-97 (View fix) + LP-98 (Undo) build on it.
+
+## ADR-222: View fix — the dry-run itemized before/after impact preview (LP-97)
+
+- **Date:** 2026-07-01
+- **Status:** Accepted
+
+**Context:** applying a finding changes structured data → the DTI/LTV recompute (LP-75/76/77). Before committing,
+the processor should see EXACTLY what will change — especially a limit crossing — not a bare "Apply". Findings that
+carry an **apply-spec** (`details.apply`; currently ~the undisclosed-debt `add_liability` → DTI-recompute) get a
+"View fix" impact preview; findings without one keep Override / Accept-risk / Request-docs / Add-note (they change
+no numbers — nothing to preview).
+
+**Decision:** a **dry-run** that REUSES the real apply→recompute — one source of truth, never a parallel
+computation that could diverge.
+
+- **The dry-run** (`app/services/finding_impact.py` `preview_finding_apply`): snapshot the DTI/LTV **before**; open a
+  **savepoint**; run the **real** `apply_finding` (which performs the structured-data change + fires the recompute);
+  snapshot the DTI/LTV **after**; **roll the savepoint back** + refresh the objects → nothing persists. So the
+  preview MATCHES what Apply actually does. Served read-only at `GET …/findings/{id}/apply-preview` (never commits;
+  a 400 for a finding with no apply-spec).
+- **The itemized preview** reuses the existing, already-line-itemized calculator schemas (`DtiCalculation` before +
+  after) — so the dialog shows the change, each affected debt line (the **new** one highlighted, `NEW`), the totals
+  with deltas, the qualifying income, the recomputed **back-end DTI** (before → after), and the **limit-status
+  crossing** ("Within limit → Over limit"). Only the calculator(s) the apply moves are returned.
+- **Confirm / cancel:** "Apply fix" runs the EXISTING real apply endpoint (`apply_finding` → APPLIED +
+  `applied_record` + the real recompute) — what was previewed is what happens; Cancel is a no-op.
+- **Reversibility (for LP-98):** the real apply already records enough before-state to reverse — `applied_record`
+  carries the created `liability_id` (add) / the `from`→`to` (income). Verified here; Undo is built in LP-98.
+
+**Consequences:** the processor sees the new math (esp. a limit crossing) before committing, and the preview can't
+drift from the apply (same code, dry-run vs. commit). Apply-specs are currently rare (~undisclosed-debt); the flow
+is general (any apply-spec). Part of the finding-presentation epic (LP-92..98); LP-98 (Undo + the Resolved-section
+placement) builds on the reversible apply.

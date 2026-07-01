@@ -22,6 +22,7 @@ from app.models.helpers import only_active
 from app.models.loan_file import LoanFile
 from app.models.user import User
 from app.models.verification import Verification, VerificationStatus, VerificationTrigger
+from app.schemas.finding_impact import FindingImpactPreview
 from app.schemas.verification import (
     AcceptRiskRequest,
     AggressionPublic,
@@ -40,6 +41,7 @@ from app.services.cross_source import (
     latest_completed_run,
 )
 from app.services.finding_blocking import open_in_scope_findings
+from app.services.finding_impact import has_apply_spec, preview_finding_apply
 from app.services.finding_resolution import (
     accept_risk_finding,
     add_finding_note,
@@ -261,6 +263,35 @@ async def set_aggression(
 # --- Per-finding resolution (LP-81) — Apply / Override / Add note -------------
 # Each returns the re-filtered status so the client gets the updated findings +
 # blocking (and the recompute-coupled calculators refresh) in one round-trip.
+
+
+@router.get(
+    "/{identifier}/findings/{finding_id}/apply-preview", response_model=FindingImpactPreview
+)
+async def preview_finding_apply_endpoint(
+    identifier: str, finding_id: UUID, db: DbSession, current_user: CurrentUser
+) -> FindingImpactPreview:
+    """The "View fix" DRY-RUN (LP-97) — the itemized before/after impact of applying a finding.
+
+    Reuses the REAL apply→recompute in a rolled-back savepoint, so the preview MATCHES what Apply
+    does but persists NOTHING (this endpoint never commits). Only for findings with an apply-spec
+    (a 400 otherwise). Tenant-scoped.
+    """
+    loan_file = await get_loan_file(db, company_id=current_user.company_id, identifier=identifier)
+    if loan_file is None:
+        raise _NOT_FOUND
+    finding = await _get_finding(db, loan_file=loan_file, finding_id=finding_id)
+    if finding is None:
+        raise _FINDING_NOT_FOUND
+    if not has_apply_spec(finding):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="This finding declares no structured change to preview.",
+        )
+    # No commit — the dry-run's savepoint is rolled back inside; nothing persists.
+    return await preview_finding_apply(
+        db, finding=finding, loan_file=loan_file, actor_user_id=current_user.id
+    )
 
 
 @router.post("/{identifier}/findings/{finding_id}/apply", response_model=VerificationStatusPublic)

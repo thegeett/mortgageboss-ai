@@ -4,6 +4,8 @@
  * Mirrors the backend `VerificationStatusPublic`. The minimal shapes the
  * trigger/staleness UI needs; the rich findings UI is LP-81.
  */
+import type { DtiCalculation } from "@/lib/types/dti";
+import type { LtvCalculation } from "@/lib/types/ltv";
 
 export interface VerificationRun {
   id: string;
@@ -61,4 +63,19 @@ export interface VerificationStatus {
   /** Authoritative: any open in-scope finding at the active cutoff blocks submission. */
   blocked: boolean;
   in_scope_open_count: number;
+}
+
+/**
+ * The "View fix" apply-impact preview (LP-97) — the DRY-RUN itemized before/after. Reuses the
+ * calculator types; only the calculator(s) the apply moves are populated (`affects`).
+ */
+export interface FindingImpactPreview {
+  finding_id: string;
+  summary: string;
+  applied_record: Record<string, unknown>;
+  affects: string[]; // "dti" / "ltv"
+  dti_before: DtiCalculation | null;
+  dti_after: DtiCalculation | null;
+  ltv_before: LtvCalculation | null;
+  ltv_after: LtvCalculation | null;
 }

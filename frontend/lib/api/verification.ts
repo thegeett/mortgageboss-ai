@@ -10,6 +10,7 @@ import { dtiQueryKey } from "@/lib/api/dti";
 import { ltvQueryKey } from "@/lib/api/ltv";
 import type {
   AggressionLevel,
+  FindingImpactPreview,
   VerificationRun,
   VerificationStatus,
 } from "@/lib/types/verification";
@@ -40,6 +41,30 @@ export async function runVerification(identifier: string, force = false): Promis
 
 function noRetryOn404(failureCount: number, error: unknown): boolean {
   return !(isAxiosError(error) && error.response?.status === 404) && failureCount < 1;
+}
+
+/**
+ * The "View fix" apply-impact preview (LP-97) — a DRY-RUN GET (nothing persists). Lazy:
+ * `enabled` only when the dialog is open, so it isn't fetched for every card.
+ */
+export async function fetchApplyPreview(
+  identifier: string,
+  findingId: string,
+): Promise<FindingImpactPreview> {
+  const res = await apiClient.get<FindingImpactPreview>(
+    `${API_V1}/loan-files/${identifier}/findings/${findingId}/apply-preview`,
+  );
+  return res.data;
+}
+
+export function useApplyPreview(identifier: string, findingId: string, enabled: boolean) {
+  return useQuery({
+    queryKey: ["apply-preview", identifier, findingId] as const,
+    queryFn: () => fetchApplyPreview(identifier, findingId),
+    enabled: enabled && Boolean(identifier) && Boolean(findingId),
+    retry: noRetryOn404,
+    staleTime: 0, // always a fresh dry-run against current data
+  });
 }
 
 export function useVerification(identifier: string) {

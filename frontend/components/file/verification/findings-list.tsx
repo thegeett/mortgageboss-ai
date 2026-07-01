@@ -73,6 +73,7 @@ export function FindingsList({
             <FindingCard
               key={f.id}
               finding={f}
+              fileId={fileId}
               busy={resolve.isPending}
               onApply={() => act({ kind: "apply", findingId: f.id }, "Finding applied")}
               onOverride={(reason) =>
