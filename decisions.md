@@ -7001,3 +7001,34 @@ and their Undo/audit records persist. Still-detected findings keep their identit
 note-loss are fixed). This subsumes LP-93's emission-time dedup + LP-81's supersede into one coherent reconcile; no
 UI marker was needed (dropped findings simply leave the tab query). Part of the finding-presentation epic
 (LP-92..98); the Resolved-section UI (LP-95) and Undo (LP-98) build on resolved findings being retained here.
+
+## ADR-220: Finding card restructure — four-part layout + progressive disclosure (LP-95)
+
+- **Date:** 2026-07-01
+- **Status:** Accepted
+
+**Context:** a finding communicates four things authored by two sources: **What we found** + **Source** (the
+trustworthy deterministic core — already stored: `message`, `details.reasoning`, `source_page`/`source_snippet`)
+and **Why it matters** + **Suggested fix** (fallible AI help — added/populated in LP-96). The old card mixed the
+description, meta, and a source-gated expander in one block, and the AI help was not yet slotted.
+
+**Decision:** restructure `finding-card.tsx` into the four-part layout with **progressive disclosure**:
+
+- **Collapsed (default):** headline (`finding.message`) + a one-line "what we found" (the AI specifics / a summary,
+  omitted for deterministic findings whose headline already carries the specifics — no duplication) + the readable
+  meta (LP-92's `findingTypeLabel` · confidence · origin badge · overlay · docs-requested) + the action buttons.
+  Understandable + actionable **without expanding** — the list stays scannable.
+- **Expanded (a single "Details" affordance — no longer source-gated):** the four clearly-headed sections —
+  **What we found** (`details.reasoning`), **Why it matters** (slot), **Suggested fix** (slot), and **Source** (the
+  document page + verbatim snippet view-source, plus the authority = the LP-92 label + origin). The fallible AI
+  why/fix live **on expand**, behind a deliberate open — not inline by default.
+- **Graceful degradation (the critical constraint):** the Why-it-matters / Suggested-fix slots render **only when
+  populated**. LP-96 hasn't added them, so today they're absent — no empty boxes, placeholders, or gaps. The card
+  looks complete + intentional with just What-we-found + Source, and LP-96 drops its content into the ready slots
+  with no rework.
+- **Resolved findings render compact** — headline + disposition + a what-was-done line (reason / "Applied …"); no
+  expander, no four-part. (The Resolved-section placement + Undo are LP-98.)
+
+**Consequences:** the card is the display foundation for LP-96 (AI why/fix), LP-97 (View fix), and LP-98 (Undo). It
+reuses existing stored data (no backend/model change) and preserves LP-92's readable labels and LP-93/94's
+identity/re-run. Part of the finding-presentation epic (LP-92..98).

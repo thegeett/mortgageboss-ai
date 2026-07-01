@@ -33,14 +33,77 @@ describe("FindingCard", () => {
     expect(screen.getByText("Stated income is 8% over the pay stubs.")).toBeDefined();
   });
 
-  it("reveals the source location (page + verbatim snippet) on click", () => {
+  it("progressive disclosure: collapsed by default, expands to the four-part detail + source", () => {
     render(
       <FindingCard finding={finding({})} onApply={vi.fn()} onOverride={vi.fn()} onNote={vi.fn()} />,
     );
+    // Collapsed: the source snippet + the section headings are hidden.
     expect(screen.queryByText(/Gross 3,775/)).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: /Source · p\.3/ }));
+    expect(screen.queryByText("What we found")).toBeNull();
+
+    // Expand via the Details affordance (labelled with the source page when present).
+    fireEvent.click(screen.getByRole("button", { name: /Details · source p\.3/ }));
+
+    // The four-part detail: What we found + Source (the deterministic halves) render.
+    expect(screen.getByText("What we found")).toBeDefined();
+    expect(screen.getByText("Source")).toBeDefined();
     expect(screen.getByText(/Document page 3/)).toBeDefined();
-    expect(screen.getByText(/Gross 3,775/)).toBeDefined();
+    expect(screen.getByText(/Gross 3,775/)).toBeDefined(); // the verbatim view-source snippet
+  });
+
+  it("graceful degradation: no empty Why-it-matters / Suggested-fix boxes until LP-96 populates them", () => {
+    render(
+      <FindingCard finding={finding({})} onApply={vi.fn()} onOverride={vi.fn()} onNote={vi.fn()} />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /Details/ }));
+    // The AI slots are absent (details has no why/fix) → their headings are NOT rendered.
+    expect(screen.queryByText("Why it matters")).toBeNull();
+    expect(screen.queryByText("Suggested fix")).toBeNull();
+    // …while the deterministic halves DO render — the card looks complete + intentional.
+    expect(screen.getByText("What we found")).toBeDefined();
+    expect(screen.getByText("Source")).toBeDefined();
+  });
+
+  it("renders the Why-it-matters + Suggested-fix slots when populated (the LP-96 shape)", () => {
+    render(
+      <FindingCard
+        finding={finding({
+          details: {
+            reasoning: "Docs show less.",
+            why_it_matters: "It inflates qualifying income → the DTI is understated.",
+            suggested_fix: "Correct the stated income to the documented figure.",
+          },
+        })}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /Details/ }));
+    expect(screen.getByText("Why it matters")).toBeDefined();
+    expect(screen.getByText(/inflates qualifying income/)).toBeDefined();
+    expect(screen.getByText("Suggested fix")).toBeDefined();
+    expect(screen.getByText(/Correct the stated income/)).toBeDefined();
+  });
+
+  it("a finding with no source still expands (Details, not source-gated) + labels the authority", () => {
+    render(
+      <FindingCard
+        finding={finding({
+          rule_id: "xsrc.income.employer_name_consistency",
+          origin: "deterministic_rule",
+          category: "income",
+          source_page: null,
+          source_snippet: null,
+          message: "Documented employer not among the stated employers: X.",
+          details: { reasoning: "Documented employer not among the stated employers: X." },
+        })}
+        onOverride={vi.fn()}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /^Details/ }));
+    expect(screen.getByText("What we found")).toBeDefined();
+    // Source degrades to the authority (a cross-source check) when there's no document line.
+    expect(screen.getByText(/No single document line/)).toBeDefined();
+    // LP-92's readable label is intact (it appears in the meta + the Source authority line).
+    expect(screen.getAllByText(/Income · Cross-source check/).length).toBeGreaterThan(0);
   });
 
   it("Apply calls onApply (the recompute interlock)", () => {
@@ -109,6 +172,26 @@ describe("FindingCard", () => {
     expect(screen.queryByRole("button", { name: /override/i })).toBeNull();
     expect(screen.queryByRole("button", { name: "Apply" })).toBeNull();
   });
+  it("a resolved finding renders COMPACT — no Details expander, no four-part", () => {
+    render(
+      <FindingCard
+        finding={finding({
+          resolution_status: "overridden",
+          resolution_note: "Documented separately",
+        })}
+      />,
+    );
+    // Compact: no progressive-disclosure affordance, and the section headings never render.
+    expect(screen.queryByRole("button", { name: /Details/ })).toBeNull();
+    expect(screen.queryByText("What we found")).toBeNull();
+    expect(screen.getByText(/Documented separately/)).toBeDefined(); // the disposition line
+  });
+
+  it("an applied resolved finding shows a compact what-was-done line", () => {
+    render(<FindingCard finding={finding({ resolution_status: "applied" })} />);
+    expect(screen.getByText(/Applied — incorporated into the file/)).toBeDefined();
+  });
+
   it("Accept-risk acknowledges a real finding (optional rationale) → onAcceptRisk", () => {
     const onAcceptRisk = vi.fn();
     render(

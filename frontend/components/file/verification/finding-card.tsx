@@ -36,7 +36,7 @@ import {
   ShieldCheck,
   X,
 } from "lucide-react";
-import { useId, useState } from "react";
+import { type ReactNode, useId, useState } from "react";
 
 interface Note {
   note: string;
@@ -76,6 +76,8 @@ export function FindingCard({
     notes?: Note[];
     overlay_applied?: string | null;
     docs_requested?: { needs_item_id?: string } | null;
+    why_it_matters?: string | null;
+    suggested_fix?: string | null;
   };
   const reasoning = details.reasoning ?? null;
   const notes = (details.notes ?? []).filter(Boolean);
@@ -83,6 +85,16 @@ export function FindingCard({
   const docsRequested = Boolean(details.docs_requested);
   const deterministic = finding.origin === "deterministic_rule";
   const hasSource = finding.source_page !== null || Boolean(finding.source_snippet);
+  // The AI why/fix (LP-96) — not populated yet. The slots render ONLY when present, so the card
+  // looks complete + intentional today with just the deterministic What-we-found + Source.
+  const whyItMatters = details.why_it_matters?.trim() || null;
+  const suggestedFix = details.suggested_fix?.trim() || null;
+  // The full "what we found" (the deterministic explanation) + the collapsed one-liner. For a
+  // templated AI finding the one-liner is the AI's specifics (`detail`); for a deterministic
+  // finding the headline already carries the specifics, so the one-liner is omitted (no dup).
+  const whatWeFound = reasoning ?? detail ?? headline;
+  const collapsedWhat = detail ?? (reasoning && reasoning !== headline ? reasoning : null);
+  const authority = `${findingTypeLabel(finding)} · ${deterministic ? "deterministic rule" : "AI cross-source"}`;
 
   function openForm(kind: FormKind) {
     setForm(kind);
@@ -139,21 +151,22 @@ export function FindingCard({
         <div className="min-w-0 flex-1">
           <div className="flex items-start justify-between gap-2">
             <span className="text-sm font-medium text-gray-900">{headline}</span>
-            <Badge
-              variant="outline"
-              className={cn(
-                "shrink-0 font-normal",
-                resolved ? "border-success/40 text-success" : "text-gray-500",
-              )}
-            >
-              {humanize(finding.resolution_status)}
-            </Badge>
+            {resolved && (
+              <Badge
+                variant="outline"
+                className="shrink-0 border-success/40 font-normal text-success"
+              >
+                {humanize(finding.resolution_status)}
+              </Badge>
+            )}
           </div>
 
-          {/* The AI's free-form description, secondary to the templated headline. */}
-          {detail && <p className="mt-0.5 text-xs text-gray-500">{detail}</p>}
+          {/* Collapsed one-line "What we found" — the specifics, kept scannable (single line). */}
+          {collapsedWhat && (
+            <p className="mt-0.5 line-clamp-1 text-xs text-gray-500">{collapsedWhat}</p>
+          )}
 
-          <div className="mt-1 flex flex-wrap items-center gap-x-2 text-[11px] text-gray-400">
+          <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-gray-400">
             <span>{findingTypeLabel(finding)}</span>
             <span>· {formatPercent(String(finding.confidence * 100))} confidence</span>
             {/* Source-origin (LP-86): deterministic = stable/certain; AI = the novel frontier. */}
@@ -176,7 +189,10 @@ export function FindingCard({
                 <Send className="h-2.5 w-2.5" /> docs requested
               </span>
             )}
-            {hasSource && (
+            {/* Progressive disclosure — one "Details" affordance reveals the full four-part
+                (What we found / Why it matters / Suggested fix / Source). Open findings only;
+                resolved findings render compact. */}
+            {!resolved && (
               <button
                 type="button"
                 onClick={() => setExpanded((e) => !e)}
@@ -184,7 +200,9 @@ export function FindingCard({
                 aria-expanded={expanded}
               >
                 <FileText className="h-3 w-3" />
-                {finding.source_page !== null ? `Source · p.${finding.source_page}` : "Source"}
+                {hasSource && finding.source_page !== null
+                  ? `Details · source p.${finding.source_page}`
+                  : "Details"}
                 <ChevronDown
                   className={cn("h-3 w-3 transition-transform", expanded && "rotate-180")}
                 />
@@ -192,16 +210,41 @@ export function FindingCard({
             )}
           </div>
 
-          {/* Source location — the trust mechanism: the verbatim document line. */}
-          {expanded && hasSource && (
-            <div className="mt-2 space-y-1 rounded-md bg-gray-50 px-2.5 py-2 text-[11px]">
-              {finding.source_page !== null && (
-                <p className="text-gray-500">Document page {finding.source_page}</p>
+          {/* The four-part detail on expand. What-we-found + Source are DETERMINISTIC (always
+              shown); Why-it-matters + Suggested-fix are AI slots (LP-96) that render ONLY when
+              populated — so today the card looks complete with just the deterministic content. */}
+          {expanded && !resolved && (
+            <div className="mt-2 space-y-2 rounded-md border border-gray-100 bg-gray-50/70 px-2.5 py-2">
+              <FindingSection title="What we found">
+                <p className="text-gray-600">{whatWeFound}</p>
+              </FindingSection>
+              {whyItMatters && (
+                <FindingSection title="Why it matters">
+                  <p className="text-gray-600">{whyItMatters}</p>
+                </FindingSection>
               )}
-              {finding.source_snippet && (
-                <p className="font-mono text-gray-600">&ldquo;{finding.source_snippet}&rdquo;</p>
+              {suggestedFix && (
+                <FindingSection title="Suggested fix">
+                  <p className="text-gray-600">{suggestedFix}</p>
+                </FindingSection>
               )}
-              {reasoning && <p className="text-gray-500">{reasoning}</p>}
+              <FindingSection title="Source">
+                {hasSource ? (
+                  <div className="space-y-0.5">
+                    {finding.source_page !== null && (
+                      <p className="text-gray-500">Document page {finding.source_page}</p>
+                    )}
+                    {finding.source_snippet && (
+                      <p className="font-mono text-gray-600">
+                        &ldquo;{finding.source_snippet}&rdquo;
+                      </p>
+                    )}
+                    <p className="text-gray-400">{authority}</p>
+                  </div>
+                ) : (
+                  <p className="text-gray-400">No single document line — {authority}.</p>
+                )}
+              </FindingSection>
             </div>
           )}
 
@@ -326,19 +369,37 @@ export function FindingCard({
             </div>
           )}
 
-          {/* Resolved: the recorded reason (override / accepted-risk) for the audit trail. */}
-          {resolved &&
-            (finding.resolution_status === "overridden" ||
-              finding.resolution_status === "accepted_risk") && (
-              <p className="mt-1.5 text-[11px] text-gray-500">
-                <span className="text-gray-400">
-                  {finding.resolution_status === "accepted_risk" ? "Accepted: " : "Reason: "}
-                </span>
-                {finding.resolution_note ?? "—"}
-              </p>
-            )}
+          {/* Resolved renders COMPACT: the disposition + what was done (the audit trail). */}
+          {resolved && (
+            <p className="mt-1.5 text-[11px] text-gray-500">
+              {finding.resolution_status === "applied" ? (
+                <span className="text-gray-400">Applied — incorporated into the file.</span>
+              ) : finding.resolution_status === "overridden" ||
+                finding.resolution_status === "accepted_risk" ? (
+                <>
+                  <span className="text-gray-400">
+                    {finding.resolution_status === "accepted_risk" ? "Accepted: " : "Reason: "}
+                  </span>
+                  {finding.resolution_note ?? "—"}
+                </>
+              ) : (
+                <span className="text-gray-400">{humanize(finding.resolution_status)}</span>
+              )}
+            </p>
+          )}
         </div>
       </div>
     </li>
+  );
+}
+
+/** One labelled section of the expanded four-part card (LP-95). Renders a small heading + body
+ * so LP-96's Why-it-matters / Suggested-fix content drops into a clearly-delineated slot. */
+function FindingSection({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <div>
+      <h5 className="text-[10px] font-semibold uppercase tracking-wide text-gray-400">{title}</h5>
+      <div className="mt-0.5 text-xs">{children}</div>
+    </div>
   );
 }
