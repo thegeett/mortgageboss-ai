@@ -7220,3 +7220,25 @@ validate-with-Priya on each gated rule + the need-set.
 **Consequences:** purchase-specific rules no longer fire on refinances (the spurious purchase-agreement finding is
 gone); the framework can now scope any rule by purpose declaratively; rate-term refis keep the shared LTV limit; DTI
 is unaffected. LP-101 (a real refi MISMO fixture + e2e) will validate this end-to-end.
+
+## ADR-226: The extraction/reasoning AI tier runs on Opus 4.8
+
+- **Date:** 2026-07-01
+- **Status:** Accepted
+
+**Context:** the app uses two Claude tiers (LP-37 wrapper): a cheap high-volume `anthropic_model_classification`
+(Haiku) for document classification/summarization, and a more capable `anthropic_model_extraction` for the work
+where quality matters — document data **extraction**, **cross-source reasoning**, and **needs/guidance** generation.
+The extraction tier had been Sonnet.
+
+**Decision:** move the extraction tier to **Opus 4.8** (`claude-opus-4-8`), the highest-capability model, for better
+extraction accuracy and reasoning. The classification/summarization tier **stays on Haiku** (Opus there would be
+wasteful for little gain). Both remain CONFIGURATION — env-overridable via `ANTHROPIC_MODEL_EXTRACTION` /
+`ANTHROPIC_MODEL_CLASSIFICATION` — so a deployment can dial the tier without a code change. The `app/ai/cost.py`
+`PRICING` table gains a `claude-opus-4-8` row (~$15/$75 per M in/out, ~5× Sonnet) so cost estimates stay meaningful
+(an unpriced model silently estimates $0 + logs a warning).
+
+**Consequences:** higher per-call cost on the extraction tier (~5× Sonnet on its high-token calls — full documents +
+cross-source context), traded for better perception/reasoning quality. This affects **perception only**: the locked
+Phase-3 principle is unchanged — the AI classifies/extracts, and the deterministic engine (LTV/DTI/rules/findings)
+does the judging. Model strings stay TODO(models)/TODO(pricing) to verify against current Anthropic docs.
