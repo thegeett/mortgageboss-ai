@@ -38,6 +38,7 @@ from app.models.helpers import only_active
 from app.models.loan_file import LoanFile
 from app.models.property import Property
 from app.models.verification import Verification
+from app.services.finding_identity import existing_identities, finding_identity
 from app.verification.confidence import DETERMINISTIC_CONFIDENCE
 from app.verification.cross_source import (
     CrossSourceFacts,
@@ -76,13 +77,23 @@ async def run_cross_source_deterministic(
     """
     await _supersede_open_deterministic_findings(db, loan_file.id)
 
+    # Normalized-substance dedup (LP-93): the same discrepancy worded two ways (case /
+    # dash / quote / whitespace) is ONE finding. Seed from the file's live findings so a
+    # re-detected RESOLVED finding is skipped (its resolution preserved), not re-emitted.
+    seen = await existing_identities(db, loan_file.id)
+
     results = evaluate_cross_source(facts, program=loan_file.loan_program)
     red = yellow = 0
     fired: set[str] = set()
     for result in results:
-        finding = _to_finding(result, loan_file_id=loan_file.id, run_id=run.id)
-        db.add(finding)
+        # The rule fired → the AI defers on its canonical type regardless of persist-dedup.
         fired.add(result.rule.canonical_type)
+        finding = _to_finding(result, loan_file_id=loan_file.id, run_id=run.id)
+        identity = finding_identity(finding)
+        if identity in seen:
+            continue  # same normalized substance already present (this run, or a resolved one)
+        seen.add(identity)
+        db.add(finding)
         if finding.status is FindingStatus.RED:
             red += 1
         else:

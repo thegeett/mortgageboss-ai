@@ -6927,3 +6927,39 @@ gray meta-label only.)
 findings read as clean category checks; the AI-layer labels and the headline are untouched. This is the first,
 quick-win ticket of the finding-presentation epic (LP-92..98) — later tickets cover dedup/re-run (LP-93/94), the
 card restructure (LP-95), the AI why/fix (LP-96), View-fix (LP-97), and Undo (LP-98).
+
+## ADR-218: Normalized-substance finding identity + dedup (LP-93)
+
+- **Date:** 2026-06-30
+- **Status:** Accepted
+
+**Context:** the same discrepancy worded two ways showed as **two** Open findings. The live case:
+`xsrc.income.employer_name_consistency` fires once per documented-employer string, and two documents carried the
+SAME employer differing only in case + dash — "Thermofisher Life Science **–** PPD Development LP." vs
+"THERMOFISHER LIFE SCIENCE **—** PPD DEVELOPMENT LP." The rule's own comparison key (`_norm`) folds case +
+whitespace but NOT the en-dash/em-dash, so the two were distinct subjects → two findings for one employer. More
+broadly, both cross-source emission paths (deterministic `xsrc.*` and AI) supersede-open + preserve-resolved and
+re-emit, but had **no normalized-substance dedup at emission** — so within-run wording variants (and a re-detected
+resolved finding) duplicated.
+
+**Decision:** give every finding a **normalized-substance identity** and dedup on it at emission
+(`app/services/finding_identity.py`):
+- **Identity** = `(canonical type/rule, normalized subject)`. The subject is the deterministic rules'
+  `details.subject_key`, else the AI layer's `stated_value`/`document_value`. `normalize_text` is **deterministic
+  textual only**: NFKC, dash variants → `-`, curly quotes → straight, case-fold, whitespace-collapse. **No
+  fuzzy/semantic matching.**
+- **Dedup at emission** (both the deterministic and the AI loops): seed a `seen` set from the file's live findings
+  (`existing_identities`) — which after supersede includes the preserved RESOLVED ones — and skip a fresh finding
+  whose identity is already present. So the same substance is emitted **once** (the first kept, with its wording),
+  and a re-detected resolved finding is skipped → its resolution is **preserved**, not reopened or duplicated.
+- **Uniform** across origins; **conservative** — a genuine textual difference ("Thermofisher" vs "Thermo Fisher
+  Scientific"), a different employer/amount/document, or a different type stays a **separate** finding (the subject
+  disambiguates; normalization never over-collapses).
+
+This **refines** LP-81's stable-identity/preserve-resolved emission — it adds subject normalization + an
+emission-time dedup; it is not a parallel identity system. The deterministic rules still fire (their canonical type
+still marks the AI defer) — only persistence dedups.
+
+**Consequences:** the Thermofisher duplicate collapses to one; distinct subjects stay separate; resolutions survive
+re-detection. Scope boundary: the **drop-when-no-longer-detected** re-run change is LP-94 (next) — the merge/
+supersede behavior is otherwise unchanged. Part of the finding-presentation epic (LP-92..98).

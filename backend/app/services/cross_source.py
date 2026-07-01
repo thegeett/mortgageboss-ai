@@ -58,6 +58,7 @@ from app.services.cross_source_deterministic import (
     build_cross_source_facts,
     run_cross_source_deterministic,
 )
+from app.services.finding_identity import existing_identities, finding_identity
 from app.services.verifications import mark_verification_current
 
 logger = get_logger(__name__)
@@ -135,6 +136,11 @@ async def run_cross_source(
     income_target = _resolve_income_target(context)
     red, yellow = det_red, det_yellow
     deferred = 0
+    deduped = 0
+    # Normalized-substance dedup (LP-93), seeded from the file's live findings — which now
+    # include the deterministic set just emitted + any preserved resolved findings. So an AI
+    # finding that restates an existing discrepancy (case/dash/quote/whitespace only) collapses.
+    seen = await existing_identities(db, loan_file.id)
     for raw in result.findings:
         if raw.type in fired_types:
             # A deterministic rule already owns + reported this discrepancy — the AI defers.
@@ -143,6 +149,11 @@ async def run_cross_source(
         finding = _to_finding(
             raw, loan_file_id=loan_file.id, run_id=run.id, income_target=income_target
         )
+        identity = finding_identity(finding)
+        if identity in seen:
+            deduped += 1  # same normalized substance already present — keep the first
+            continue
+        seen.add(identity)
         db.add(finding)
         if finding.status is FindingStatus.RED:
             red += 1
@@ -171,6 +182,7 @@ async def run_cross_source(
         yellow=yellow,
         deterministic=det_red + det_yellow,  # LP-86 — the graduated deterministic findings
         ai_deferred=deferred,  # AI findings suppressed because a deterministic rule owns the type
+        ai_deduped=deduped,  # AI findings collapsed into an existing same-substance finding (LP-93)
         superseded=superseded,  # prior open findings replaced by this pass
     )
     return run
