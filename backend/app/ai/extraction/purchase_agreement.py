@@ -7,7 +7,7 @@ property, the price, and the closing/earnest-money terms; detailed contingencies
 and other clauses land in the grouped catch-all.
 
 Mirrors the existing extractors (e.g. :mod:`app.ai.extraction.w2`): typed core
-(each a ``TypedField`` with source) + ``additional_sections`` catch-all, Sonnet
+(each a ``TypedField`` with source) + ``additional_sections`` catch-all, Opus
 full-document reading, the shared tolerant parser, honest nulls, graceful
 ``.failed()``, metadata-only logging. Typed core is a **V1 starter — refine with
 Priya**; accuracy is validated as real contracts flow through (no samples were

@@ -8,7 +8,7 @@ penalties), so it is the reserves-relevant number. Holdings, if itemized, land i
 the grouped catch-all.
 
 Mirrors :mod:`app.ai.extraction.bank_statement` (the closest template — masked
-account, period, balances): typed core + ``additional_sections`` catch-all, Sonnet
+account, period, balances): typed core + ``additional_sections`` catch-all, Opus
 full-document reading, the shared tolerant parser, honest nulls, graceful
 ``.failed()``, metadata-only logging.
 

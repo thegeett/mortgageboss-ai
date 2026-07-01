@@ -9,7 +9,7 @@ interest, DIV box 1a ordinary dividends, R box 1 gross distribution, …); every
 specific box lands in the grouped catch-all, so nothing is lost.
 
 Mirrors :mod:`app.ai.extraction.w2`: a typed core (each a ``TypedField`` with
-source) + ``additional_sections`` catch-all, full-document Sonnet reading, the
+source) + ``additional_sections`` catch-all, full-document Opus reading, the
 shared tolerant parser, honest nulls, graceful ``.failed()`` (never raises), and
 **metadata-only logging**.
 
@@ -149,7 +149,7 @@ async def extract_1099(content: bytes, media_type: str) -> Form1099ExtractionRes
 
     Mirrors :func:`app.ai.extraction.w2.extract_w2`: empty/unsupported document →
     ``failed`` without an API call; otherwise loads the prompt, sends the full
-    document to the Sonnet-class model, and parses defensively. The bytes/base64,
+    document to the Opus-class model, and parses defensively. The bytes/base64,
     raw response, and extracted values (including the **recipient TIN**) are never
     logged — only metadata.
     """

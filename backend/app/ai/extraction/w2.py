@@ -7,7 +7,7 @@ shape**", exactly what Phase 2's fan-out needs.
 
 Mirrors :mod:`app.ai.extraction.pay_stub`: a typed core (each a ``TypedField``
 with source) + a grouped catch-all (``additional_sections``), full-document
-Sonnet reading via the LP-37 wrapper, the shared defensive/tolerant parser
+Opus reading via the LP-37 wrapper, the shared defensive/tolerant parser
 (:mod:`app.ai.extraction.parsing`), honest nulls, graceful failure (never
 raises), and **metadata-only logging** (never bytes/values).
 
@@ -164,7 +164,7 @@ async def extract_w2(content: bytes, media_type: str) -> W2ExtractionResult:
 
     Mirrors :func:`app.ai.extraction.pay_stub.extract_pay_stub`: empty/unsupported
     document → ``failed`` without an API call; otherwise loads the file-based
-    prompt, sends the full document to the Sonnet-class model, and parses
+    prompt, sends the full document to the Opus-class model, and parses
     defensively. The document bytes/base64, raw response, and extracted values
     (including the **SSN**) are never logged — only metadata.
     """

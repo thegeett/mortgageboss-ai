@@ -8,7 +8,7 @@ first-class transactions list.
 
 Mirrors :mod:`app.ai.extraction.bank_statement` (the closest template — an asset
 doc with a masked account number, a statement period, and balances): typed core
-(each a ``TypedField`` with source) + ``additional_sections`` catch-all, Sonnet
+(each a ``TypedField`` with source) + ``additional_sections`` catch-all, Opus
 full-document reading, the shared tolerant parser, honest nulls, graceful
 ``.failed()``, metadata-only logging.
 

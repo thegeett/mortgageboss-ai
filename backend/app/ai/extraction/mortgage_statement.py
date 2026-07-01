@@ -8,7 +8,7 @@ Phase 3 can match subject-vs-other — this extractor only captures the address;
 Phase 3 decides which property it is.
 
 Mirrors the existing extractors: typed core + ``additional_sections`` catch-all,
-Sonnet full-document reading, the shared tolerant parser, honest nulls, graceful
+Opus full-document reading, the shared tolerant parser, honest nulls, graceful
 ``.failed()``, metadata-only logging. Typed core is a **V1 starter — refine with
 Priya**; accuracy is validated as real statements flow through (no samples).
 """

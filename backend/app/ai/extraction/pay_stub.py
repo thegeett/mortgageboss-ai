@@ -26,12 +26,12 @@ Core principles:
     extracted *values* are borrower PII and are **never** logged — only metadata
     (status, confidence, and a count of non-null fields).
 
-Input is the **full document** (PDF/image bytes), sent to the Sonnet-class model for
+Input is the **full document** (PDF/image bytes), sent to the Opus-class model for
 **native reading** (no OCR, no pre-extracted text) via the LP-37 document/image
 content block (LP-37 revision, ADR-126; this change ADR-128). Reuses the LP-38
 patterns: the file-based prompt (``load_prompt``), the shared defensive parser
 (``app.ai.parsing``), graceful failure, and metadata-only logging. Uses
-``settings.anthropic_model_extraction`` — a more capable Sonnet-class model, versus
+``settings.anthropic_model_extraction`` — a more capable Opus-class model, versus
 classification's cheaper one.
 """
 
@@ -192,7 +192,7 @@ async def extract_pay_stub(content: bytes, media_type: str) -> PayStubExtraction
 
     An empty or unsupported document fails without an API call. Otherwise it loads
     the file-based prompt (the ``system`` instruction), sends the **full document**
-    to the Sonnet-class model as a document/image content block (LP-37
+    to the Opus-class model as a document/image content block (LP-37
     ``build_document_message``), and parses defensively/tolerantly. Any AI error or
     unparseable output returns ``PayStubExtractionResult.failed(...)``. The document
     bytes/base64, raw response, and extracted values are never logged (PII) — only

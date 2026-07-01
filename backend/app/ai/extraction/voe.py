@@ -7,7 +7,7 @@ income figures; everything else (prior-year earnings, breakdowns, remarks, the
 verifier's signature block) lands in the grouped catch-all.
 
 Mirrors :mod:`app.ai.extraction.w2`: typed core (each a ``TypedField`` with
-source) + ``additional_sections`` catch-all, full-document Sonnet reading, the
+source) + ``additional_sections`` catch-all, full-document Opus reading, the
 shared tolerant parser, honest nulls, graceful ``.failed()``, and metadata-only
 logging. Typed core is a **V1 starter — refine with Priya**; accuracy is validated
 as real VOEs flow through (no samples were available when this was built).

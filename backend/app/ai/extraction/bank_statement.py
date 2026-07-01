@@ -9,7 +9,7 @@ list** (ADR-061 — transactions live in the extraction JSON as structured rows)
 
 Mirrors the pay stub / W-2 modules and reuses the shared parser
 (:mod:`app.ai.extraction.parsing`). Keeps all the shape guarantees: full-document
-Sonnet reading, honest nulls / **no hallucinated transactions**, tolerant coercion
+Opus reading, honest nulls / **no hallucinated transactions**, tolerant coercion
 (a single bad field/row → ``None``, never failing the whole extraction), defensive
 parsing, graceful failure (never raises), metadata-only logging.
 
@@ -205,7 +205,7 @@ async def extract_bank_statement(content: bytes, media_type: str) -> BankStateme
     """Extract a bank statement (incl. its transactions) from bytes. Never raises.
 
     Mirrors the other extractors: empty/unsupported → ``failed`` without an API
-    call; otherwise loads the prompt, sends the full document to the Sonnet-class
+    call; otherwise loads the prompt, sends the full document to the Opus-class
     model, and parses defensively (a truncated long transaction list → ``failed``).
     The bytes/base64, raw response, extracted values, transactions, and the
     **account number** are never logged — only metadata.

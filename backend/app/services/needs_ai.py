@@ -32,7 +32,7 @@ for a situation? — is real loan-processing domain knowledge and is **the
 highest-value Priya input**; it is refined with her ("walk me through a real file:
 what do you chase + why?") and sharpened by the correction signal over time. V1
 proposes *reasoned, explainable, improvable* needs the processor confirms — **not
-perfect out of the gate**. This is a real AI reasoning call (Sonnet, substantial
+perfect out of the gate**. This is a real AI reasoning call (Opus, substantial
 context — cost + latency + eval apply).
 
 **PII.** The assembled context carries borrower PII; it is sent to the model but
@@ -197,7 +197,7 @@ async def assemble_file_context(db: AsyncSession, loan_file: LoanFile) -> FileCo
 
 
 # --------------------------------------------------------------------------- #
-# The AI reasoning (Sonnet) — propose-with-reasoning
+# The AI reasoning (Opus) — propose-with-reasoning
 # --------------------------------------------------------------------------- #
 
 
@@ -265,7 +265,7 @@ def reconcile(proposals: list[ProposedNeed], *, already_covered: set[str]) -> li
 async def propose_needs(db: AsyncSession, loan_file: LoanFile) -> list[ProposedNeed]:
     """Reason over the whole file → proposed needs with reasoning. Never raises ([] on failure).
 
-    Assembles the context, calls the Sonnet reasoner, parses defensively, and
+    Assembles the context, calls the Opus reasoner, parses defensively, and
     reconciles against what's already covered. The assembled context (PII) and the
     raw response are never logged — only counts.
     """
@@ -277,7 +277,7 @@ async def propose_needs(db: AsyncSession, loan_file: LoanFile) -> list[ProposedN
     )
     try:
         result = await complete(
-            model=settings.anthropic_model_extraction,  # Sonnet — real reasoning over context
+            model=settings.anthropic_model_extraction,  # Opus — real reasoning over context
             system=system_prompt,
             messages=[{"role": "user", "content": user_content}],
             max_tokens=_MAX_TOKENS,

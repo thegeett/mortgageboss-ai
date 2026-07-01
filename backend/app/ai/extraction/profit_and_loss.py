@@ -7,7 +7,7 @@ the period, and the revenue/expense/net summary; the individual expense lines la
 in the grouped catch-all (a "Major Expenses" section), so the full statement is
 preserved and a line can be promoted to the typed core later.
 
-Mirrors :mod:`app.ai.extraction.w2`: typed core + ``additional_sections``, Sonnet
+Mirrors :mod:`app.ai.extraction.w2`: typed core + ``additional_sections``, Opus
 full-document reading, the shared tolerant parser, honest nulls, graceful
 ``.failed()``, metadata-only logging. Typed core is a **V1 starter — refine with
 Priya**; accuracy is validated as real P&Ls flow through (no samples were available

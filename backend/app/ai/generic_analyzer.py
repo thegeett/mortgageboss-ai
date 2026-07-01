@@ -16,7 +16,7 @@ ANY document:
   * ``summary`` — a short narrative
   * ``full_text`` — the document's text, stored + indexed for search
 
-One mechanism for all Tier 3 docs (no per-type logic). **Sonnet** (it is
+One mechanism for all Tier 3 docs (no per-type logic). **Opus** (it is
 *understanding*, not a cheap one-liner — but it is *surfacing for a human*, not
 calculation-grade extraction, so accuracy is **moderate-stakes**). Like the other
 AI helpers it **never raises**: any failure returns ``None`` and the pipeline still
@@ -168,7 +168,7 @@ async def analyze_document(content: bytes, media_type: str) -> GenericAnalysis |
     """Generically analyze any document into the structured-but-flexible output. Never raises.
 
     Empty/unsupported → ``None`` without an API call. Otherwise loads the analyzer
-    prompt, sends the full document to the Sonnet-class model (generous budget), and
+    prompt, sends the full document to the Opus-class model (generous budget), and
     parses defensively. Any AI error / unparseable output → ``None`` (the pipeline
     finalizes the document without an analysis). The bytes/base64, raw response, and
     extracted values are never logged — only metadata (counts).
@@ -184,7 +184,7 @@ async def analyze_document(content: bytes, media_type: str) -> GenericAnalysis |
 
     try:
         result = await complete(
-            model=settings.anthropic_model_extraction,  # Sonnet — understanding, not a one-liner
+            model=settings.anthropic_model_extraction,  # Opus — understanding, not a one-liner
             system=system_prompt,
             messages=[message],
             max_tokens=_MAX_TOKENS,

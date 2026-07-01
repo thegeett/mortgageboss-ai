@@ -285,7 +285,7 @@ async def extract_tax_return(content: bytes, media_type: str) -> TaxReturnExtrac
     """Extract a nested tax return (1040 + schedules) from bytes (PDF/image). Never raises.
 
     Mirrors the other extractors: empty/unsupported → ``failed`` without an API
-    call; otherwise loads the prompt, sends the full document to the Sonnet-class
+    call; otherwise loads the prompt, sends the full document to the Opus-class
     model with a **generous** token budget (multi-page bundle), and parses
     defensively (a truncated multi-schedule response → ``failed``). The bytes/base64,
     raw response, extracted values, and the **SSN** are never logged — only metadata.

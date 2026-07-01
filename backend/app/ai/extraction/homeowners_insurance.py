@@ -7,7 +7,7 @@ coverage, premium, and the policy term; endorsements/deductibles/additional
 coverages land in the grouped catch-all.
 
 Mirrors the existing extractors: typed core + ``additional_sections`` catch-all,
-Sonnet full-document reading, the shared tolerant parser, honest nulls, graceful
+Opus full-document reading, the shared tolerant parser, honest nulls, graceful
 ``.failed()``, metadata-only logging. Typed core is a **V1 starter — refine with
 Priya**; accuracy is validated as real binders flow through (no samples available).
 """
