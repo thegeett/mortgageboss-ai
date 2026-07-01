@@ -45,6 +45,7 @@ from app.verification.rules.conventional._base import conv_rule, sg
 from app.verification.rules.schema import (
     Condition,
     Operator,
+    PurposeScope,
     RuleGate,
     RuleSeverity,
     VerificationRule,
@@ -447,7 +448,12 @@ CONV_DOCS_PURCHASE_AGREEMENT = conv_rule(
     category=FindingCategory.DOCUMENTATION,
     description="A purchase agreement is present (purchase transactions).",
     source=sg("B1-1-01", to_verify=True),
-    notes="STARTER — section TO VERIFY. Promotion pending: documents.purchase_agreement_present.",
+    purpose=PurposeScope.PURCHASE,  # LP-100 — purchase-only; a refi legitimately has no purchase agreement
+    notes=(
+        "STARTER — section TO VERIFY. Promotion pending: documents.purchase_agreement_present. "
+        "PURPOSE-GATED to purchase (LP-100): it was firing on refinances → a spurious "
+        "missing-purchase-agreement finding. Grounded-starter — validate-with-Priya."
+    ),
 )
 
 CONV_DOCS_FLOOD_CERT = conv_rule(

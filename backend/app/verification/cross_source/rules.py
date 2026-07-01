@@ -39,7 +39,7 @@ from decimal import Decimal
 from app.models.finding import FindingCategory
 from app.models.lender import LoanProgram
 from app.verification.cross_source.facts import CrossSourceFacts, ObligationRef, SourcedValue
-from app.verification.rules.schema import Condition, Operator, RuleSeverity
+from app.verification.rules.schema import Condition, Operator, PurposeScope, RuleSeverity
 
 # --------------------------------------------------------------------------- #
 # Match + rule structure
@@ -86,6 +86,9 @@ class CrossSourceRule:
     check: CheckFn
     threshold: Condition | None = None
     program: LoanProgram | None = None  # None → program-agnostic (both programs)
+    # The PURPOSE dimension (LP-100) — None → every purpose (default). A purchase-only cross-
+    # source rule (e.g. price-vs-contract) is skipped on a refinance. Composes with program.
+    purpose: PurposeScope | None = None
     starter: bool = True
     notes: str = ""
 
@@ -544,7 +547,12 @@ XSRC_TERMS_PRICE_VS_CONTRACT = CrossSourceRule(
     severity=RuleSeverity.YELLOW,
     template="Stated purchase price ({stated}) differs from the contract price ({documented}).",
     check=_check_price_vs_contract,
-    notes="STARTER — owns the terms_discrepancy canonical type (added to the AI taxonomy for de-dup).",
+    purpose=PurposeScope.PURCHASE,  # LP-100 — purchase-only (a refi has no sales contract to compare)
+    notes=(
+        "STARTER — owns the terms_discrepancy canonical type (added to the AI taxonomy for de-dup). "
+        "PURPOSE-GATED to purchase (LP-100): safe by intent, not just the incidental absence of the "
+        "contract fact on a refi. Grounded-starter — validate-with-Priya."
+    ),
 )
 XSRC_TERMS_LOAN_VS_DOCUMENTED = CrossSourceRule(
     rule_id="xsrc.terms.loan_vs_documented",

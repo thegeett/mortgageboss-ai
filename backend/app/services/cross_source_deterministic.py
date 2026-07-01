@@ -78,7 +78,14 @@ async def run_cross_source_deterministic(
     # no-longer-detected RESOLVED → retain; new → add. Within-run duplicates collapse (LP-93).
     # Scoped to ``xsrc.*`` so the single-source ``conv.*``/``fha.*`` findings are untouched.
     existing = await _live_deterministic_findings(db, loan_file.id)
-    results = evaluate_cross_source(facts, program=loan_file.loan_program)
+    # PURPOSE gate (LP-100): the purchase-only price-vs-contract check is skipped on a refinance
+    # (safe by intent, not just the incidental absence of the contract fact). Reads LP-99's fields.
+    results = evaluate_cross_source(
+        facts,
+        program=loan_file.loan_program,
+        loan_purpose=loan_file.loan_purpose,
+        refinance_type=loan_file.refinance_type,
+    )
     # The rule fired → the AI defers on its canonical type regardless of the reconcile outcome.
     fired = {result.rule.canonical_type for result in results}
     fresh = [_to_finding(result, loan_file_id=loan_file.id, run_id=run.id) for result in results]

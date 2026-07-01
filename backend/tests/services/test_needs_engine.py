@@ -220,10 +220,32 @@ async def test_floor_is_idempotent(db_session: AsyncSession) -> None:
     assert second == []  # already seeded — no duplicates
 
 
-async def test_floor_thin_when_no_stated_data(db_session: AsyncSession) -> None:
-    # No borrower, no income/assets/purchase → nothing to seed (the universal ID rule
-    # is per-borrower, so a borrower-less file has no ID need).
+async def test_refi_floor_swaps_purchase_agreement_for_the_refi_need_set(
+    db_session: AsyncSession,
+) -> None:
+    """LP-100 — a REFINANCE gets the existing-mortgage-statement + payoff need-set (the refi
+    analog of the purchase agreement), and NOT the purchase agreement itself."""
     lf = await _loan_file(db_session, purpose=LoanPurpose.REFINANCE)
+    created = await seed_floor_needs(db_session, lf)
+    types = {n.needs_type for n in created}
+    assert types == {"existing_mortgage_statement", "payoff_statement"}
+    assert "purchase_agreement" not in types
+    assert all(n.origin is NeedsItemOrigin.FLOOR for n in created)
+
+
+async def test_purchase_floor_has_no_refi_needs(db_session: AsyncSession) -> None:
+    """The purchase floor is unchanged: the purchase agreement, never the refi need-set."""
+    lf = await _loan_file(db_session, purpose=LoanPurpose.PURCHASE)
+    created = await seed_floor_needs(db_session, lf)
+    types = {n.needs_type for n in created}
+    assert types == {"purchase_agreement"}
+
+
+async def test_floor_thin_when_no_stated_data(db_session: AsyncSession) -> None:
+    # No borrower, no income/assets, and no known purpose → nothing to seed (the universal ID
+    # rule is per-borrower, so a borrower-less file has no ID need; an unknown purpose triggers
+    # neither the purchase nor the refi doc need-set — LP-100).
+    lf = await _loan_file(db_session, purpose=None)
     assert await seed_floor_needs(db_session, lf) == []
 
 

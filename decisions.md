@@ -7177,3 +7177,46 @@ structurally, not against a real refi export.
 **Consequences:** cash-out refis now get their stricter LTV limit automatically; an ambiguous refi is caught and
 corrected instead of silently mis-limited. `LoanFileDetail`/`LoanFileUpdate` gain `refinance_type`; editing it marks
 cross-source verification stale (a baseline change, same as any LTV input).
+
+## ADR-225: A PURPOSE dimension in the rules applicability framework (LP-100)
+
+- **Date:** 2026-07-01
+- **Status:** Accepted
+
+**Context:** the rules applicability framework had no PURPOSE dimension — `ApplicabilityScope` is
+`ALL_LOANS | PROGRAM | LENDER` only, and `RuleGate` keys on typed numeric facts (is_manual, property type), not
+`loan_purpose`. So a rule could not be declaratively scoped purchase-only / refi-only. The visible consequence: the
+purchase-agreement doc rule (`conv.docs.purchase_agreement_present`) — whose description says "(purchase
+transactions)" but nothing ENFORCED it — **fired on refinances**, flagging a missing purchase agreement a refi
+legitimately doesn't have → a spurious YELLOW finding. Second ticket of the refinance epic (LP-99/100/101);
+consumes LP-99's parsed `refinance_type`.
+
+**Decision:** add a PURPOSE dimension to the applicability framework — don't special-case one rule.
+
+- **`PurposeScope`** (`purchase` / `refinance` / `cash_out` / `rate_term`) is a new field on `Applicability`,
+  ORTHOGONAL to `scope` — it COMPOSES with the program/lender scope + `RuleGate` (a rule can be "Conventional AND
+  purchase-only"). `None` = every purpose (the default — the ~110 existing rules are unchanged).
+- **Enforced per-rule in the engine**, parallel to `RuleGate` (not at `registry.resolve`, so the LTV/DTI calculators
+  that resolve through the registry are untouched). `engine.evaluate` + `cross_source.engine.evaluate_cross_source`
+  take `loan_purpose` + `refinance_type` (from the `LoanFile`, LP-99) and SKIP a purpose-mismatched rule
+  (`evaluated=False`, never a finding) via the pure `purpose_applies`.
+- **UNDER-GATE, not over-gate (the safe direction):** `purpose_applies` skips a rule ONLY on a *known* mismatch; an
+  unknown purpose (or unknown `refinance_type`) errs toward APPLYING the rule. Wrongly gating a rule OFF could HIDE a
+  real finding (dangerous); an extra over-flag is safe. Only CLEARLY purpose-specific rules were gated:
+  `conv.docs.purchase_agreement_present`, `fha.doc.pre_appraisal_sales_contract`, and the cross-source
+  `xsrc.terms.price_vs_contract` → PURCHASE-only. Ambiguous rules stay ALL-purpose + flagged: e.g.
+  `fha.doc.case_number_and_amendatory_clause` keys on the case number (which ALL FHA loans, incl. refis, need) —
+  only its amendatory-clause sub-part is purchase-specific, so it stays ungated (splitting it is a Priya follow-up).
+- **`conv.ltv.purchase_max` / `fha.ltv.purchase_max` deliberately NOT gated** — they are the "purchase / rate-term"
+  maximum a rate-term refi SHARES (LP-99); gating them purchase-only would wrongly drop the limit for rate/term refis.
+- **DTI stays program-based** — refinance doesn't change DTI limits; DTI rules are never purpose-gated.
+- **Refi need-set:** the needs floor gained the refi analog of the purchase-agreement need — a REFINANCE seeds the
+  **existing mortgage statement** + **payoff statement** (grounded starter; subordination for a 2nd lien flagged,
+  not built).
+
+**Grounded-starter:** which rules are purpose-scoped + the refi need-set are domain judgments — flagged
+validate-with-Priya on each gated rule + the need-set.
+
+**Consequences:** purchase-specific rules no longer fire on refinances (the spurious purchase-agreement finding is
+gone); the framework can now scope any rule by purpose declaratively; rate-term refis keep the shared LTV limit; DTI
+is unaffected. LP-101 (a real refi MISMO fixture + e2e) will validate this end-to-end.

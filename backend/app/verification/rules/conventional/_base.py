@@ -15,6 +15,7 @@ from app.verification.rules.schema import (
     Applicability,
     ApplicabilityScope,
     Condition,
+    PurposeScope,
     RuleGate,
     RuleLayer,
     RuleSeverity,
@@ -47,12 +48,19 @@ def conv_rule(
     source: RuleSource,
     notes: str,
     gate: RuleGate | None = None,
+    purpose: PurposeScope | None = None,
 ) -> VerificationRule:
-    """A Conventional investor rule, always marked ``starter=True`` (validate with Priya)."""
+    """A Conventional investor rule, always marked ``starter=True`` (validate with Priya).
+
+    ``purpose`` (LP-100) scopes the rule by loan purpose (e.g. purchase-only), composing with
+    the Conventional program scope; ``None`` → applies to every purpose (the default)."""
+    applicability = (
+        CONVENTIONAL if purpose is None else CONVENTIONAL.model_copy(update={"purpose": purpose})
+    )
     return VerificationRule(
         rule_id=rule_id,
         layer=RuleLayer.INVESTOR,
-        applicability=CONVENTIONAL,
+        applicability=applicability,
         reads=reads,
         condition=condition,
         severity=severity,

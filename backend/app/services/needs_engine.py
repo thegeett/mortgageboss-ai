@@ -368,6 +368,19 @@ async def seed_floor_needs(db: AsyncSession, loan_file: LoanFile) -> list[NeedsI
         specs.append(("w2", "W-2 (most recent year)", DocumentCategory.INCOME_EMPLOYMENT))
     if loan_file.loan_purpose is LoanPurpose.PURCHASE:
         specs.append(("purchase_agreement", "Purchase agreement", DocumentCategory.PROPERTY))
+    elif loan_file.loan_purpose is LoanPurpose.REFINANCE:
+        # The refi analog of the purchase agreement (LP-100): a refinance needs the existing
+        # mortgage statement + a payoff statement (the current lien being refinanced). GROUNDED
+        # STARTER — validate-with-Priya (the exact refi need-set; subordination for a 2nd lien is
+        # a possible add, flagged not built here).
+        specs.append(
+            (
+                "existing_mortgage_statement",
+                "Existing mortgage statement",
+                DocumentCategory.PROPERTY,
+            )
+        )
+        specs.append(("payoff_statement", "Payoff statement", DocumentCategory.PROPERTY))
     if await _has_stated_assets(db, loan_file.id):
         specs.append(("bank_statement", "Bank statements", DocumentCategory.ASSETS))
 

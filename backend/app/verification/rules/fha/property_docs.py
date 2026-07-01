@@ -60,6 +60,7 @@ from app.verification.rules.fha._base import fha_rule, hud
 from app.verification.rules.schema import (
     Condition,
     Operator,
+    PurposeScope,
     RuleGate,
     RuleSeverity,
     VerificationRule,
@@ -356,7 +357,11 @@ FHA_DOC_CASE_NUMBER_AMENDATORY = fha_rule(
     source=hud("II.A", to_verify=True),
     notes=(
         "STARTER — an FHA case number must be assigned; purchase files need the FHA Amendatory Clause + "
-        "real estate certification. Section TO VERIFY. Promotion pending: documents.fha_case_number_present."
+        "real estate certification. Section TO VERIFY. Promotion pending: documents.fha_case_number_present. "
+        "LP-100: deliberately NOT purpose-gated — it keys on documents.fha_case_number_present, which ALL "
+        "FHA loans (incl. refinances) require; only the amendatory-clause sub-part is purchase-specific. "
+        "Under-gate: leaving it ALL-purpose over-flags on a refi at worst, vs. hiding the case-number check. "
+        "Splitting the amendatory clause into its own purchase-only rule is a validate-with-Priya follow-up."
     ),
 )
 
@@ -368,10 +373,12 @@ FHA_DOC_PRE_APPRAISAL_SALES_CONTRACT = fha_rule(
     category=FindingCategory.DOCUMENTATION,
     description="The appraiser is provided the executed sales contract (purchase) before appraising.",
     source=hud("II.D", to_verify=True),
+    purpose=PurposeScope.PURCHASE,  # LP-100 — purchase-only; a refi has no sales contract to provide
     notes=(
         "STARTER — before appraising, the appraiser must obtain the executed sales contract (purchase) + "
         "any land lease / surveys / legal descriptions. Section TO VERIFY. Promotion pending: "
-        "documents.sales_contract_present."
+        "documents.sales_contract_present. PURPOSE-GATED to purchase (LP-100): a refinance has no sales "
+        "contract, so this must not fire on a refi. Grounded-starter — validate-with-Priya."
     ),
 )
 

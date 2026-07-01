@@ -23,6 +23,7 @@ from app.verification.rules.schema import (
     Applicability,
     ApplicabilityScope,
     Condition,
+    PurposeScope,
     RuleGate,
     RuleLayer,
     RuleSeverity,
@@ -62,12 +63,17 @@ def fha_rule(
     source: RuleSource,
     notes: str,
     gate: RuleGate | None = None,
+    purpose: PurposeScope | None = None,
 ) -> VerificationRule:
-    """An FHA investor rule, always ``program=fha`` + ``starter=True`` (validate with Priya)."""
+    """An FHA investor rule, always ``program=fha`` + ``starter=True`` (validate with Priya).
+
+    ``purpose`` (LP-100) scopes the rule by loan purpose (e.g. purchase-only), composing with
+    the FHA program scope; ``None`` → applies to every purpose (the default)."""
+    applicability = FHA if purpose is None else FHA.model_copy(update={"purpose": purpose})
     return VerificationRule(
         rule_id=rule_id,
         layer=RuleLayer.INVESTOR,
-        applicability=FHA,
+        applicability=applicability,
         reads=reads,
         condition=condition,
         severity=severity,

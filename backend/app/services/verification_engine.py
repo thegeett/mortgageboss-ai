@@ -92,7 +92,15 @@ async def run_verification(
     facts = await build_file_facts(db, loan_file=loan_file, as_of=as_of_date)
     lender_slug = await _lender_slug(db, loan_file)
     rules = reg.resolve(program=loan_file.loan_program, lender_slug=lender_slug)
-    results = evaluate(facts, rules)
+    # PURPOSE gate (LP-100): purchase-only rules (e.g. the purchase-agreement doc rule) are
+    # skipped on a refinance; cash-out-only rules apply only to a cash-out refi. Reads the
+    # file's loan_purpose + refinance_type (LP-99).
+    results = evaluate(
+        facts,
+        rules,
+        loan_purpose=loan_file.loan_purpose,
+        refinance_type=loan_file.refinance_type,
+    )
 
     red = yellow = green = 0
     for result in results:

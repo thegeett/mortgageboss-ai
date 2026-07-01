@@ -35,6 +35,7 @@ from pydantic import BaseModel, ConfigDict, model_validator
 
 from app.models.finding import FindingCategory
 from app.models.lender import LoanProgram
+from app.models.loan_file import LoanPurpose, RefinanceType
 
 
 class RuleLayer(StrEnum):
@@ -80,6 +81,26 @@ class ApplicabilityScope(StrEnum):
     LENDER = "lender"  # overlay custom rule — one lender
 
 
+class PurposeScope(StrEnum):
+    """The PURPOSE dimension of applicability (LP-100) — loan-purpose scoping.
+
+    A SECOND, orthogonal dimension to :class:`ApplicabilityScope`: it COMPOSES with the
+    scope (a rule can be program-scoped Conventional AND purpose-scoped purchase-only) and
+    with :class:`RuleGate`. A rule declares it on its :class:`Applicability`; the engine
+    reads the file's ``loan_purpose`` (+ ``refinance_type``, LP-99) and SKIPS a rule whose
+    purpose doesn't match (no finding). ``None`` on the applicability = applies to every
+    purpose (the default — unchanged behavior for the ~110 existing rules).
+
+    The four values: ``PURCHASE`` / ``REFINANCE`` gate on ``loan_purpose``; the finer
+    ``CASH_OUT`` / ``RATE_TERM`` additionally require the matching ``refinance_type``.
+    """
+
+    PURCHASE = "purchase"
+    REFINANCE = "refinance"
+    CASH_OUT = "cash_out"  # a refinance whose refinance_type is CASH_OUT
+    RATE_TERM = "rate_term"  # a refinance whose refinance_type is RATE_TERM
+
+
 class Applicability(BaseModel):
     """Which files a rule applies to (drives composition / rule selection)."""
 
@@ -90,6 +111,9 @@ class Applicability(BaseModel):
     program: LoanProgram | None = None
     # Set when scope is LENDER — the lender slug a custom overlay rule targets.
     lender: str | None = None
+    # The PURPOSE dimension (LP-100) — orthogonal to scope, composes with it. None = every
+    # purpose (default). A purchase-only rule is skipped on a refinance; etc. (purpose_applies).
+    purpose: PurposeScope | None = None
 
     @model_validator(mode="after")
     def _check_scope(self) -> Applicability:
@@ -98,6 +122,35 @@ class Applicability(BaseModel):
         if self.scope is ApplicabilityScope.LENDER and self.lender is None:
             raise ValueError("lender applicability requires a lender slug")
         return self
+
+
+def purpose_applies(
+    purpose: PurposeScope | None,
+    *,
+    loan_purpose: LoanPurpose | None,
+    refinance_type: RefinanceType | None,
+) -> bool:
+    """Whether a purpose-scoped rule applies to a file (LP-100). Pure.
+
+    **UNDER-GATE (the safe direction):** skip a rule ONLY when the file's purpose DEFINITELY
+    doesn't match. An UNKNOWN purpose (or unknown refinance_type) errs toward APPLYING the
+    rule — a spurious over-flag is safe; wrongly gating a rule OFF could HIDE a real finding,
+    the dangerous direction. So each branch returns ``False`` only on a *known* mismatch.
+    """
+    if purpose is None:
+        return True  # no purpose scope → applies to every purpose
+    if purpose is PurposeScope.PURCHASE:
+        return loan_purpose is not LoanPurpose.REFINANCE  # skip only on a known refi
+    if purpose is PurposeScope.REFINANCE:
+        return loan_purpose is not LoanPurpose.PURCHASE  # skip only on a known purchase
+    if purpose is PurposeScope.CASH_OUT:
+        # A cash-out-only rule: skip on a known purchase or a known rate/term refi.
+        return (
+            loan_purpose is not LoanPurpose.PURCHASE
+            and refinance_type is not RefinanceType.RATE_TERM
+        )
+    # RATE_TERM: skip on a known purchase or a known cash-out refi.
+    return loan_purpose is not LoanPurpose.PURCHASE and refinance_type is not RefinanceType.CASH_OUT
 
 
 class Condition(BaseModel):

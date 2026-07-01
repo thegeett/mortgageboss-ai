@@ -20,8 +20,10 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 
 from app.models.lender import LoanProgram
+from app.models.loan_file import LoanPurpose, RefinanceType
 from app.verification.cross_source.facts import CrossSourceFacts
 from app.verification.cross_source.rules import CROSS_SOURCE_RULES, CrossSourceRule
+from app.verification.rules.schema import purpose_applies
 
 
 @dataclass(frozen=True)
@@ -41,27 +43,37 @@ class CrossSourceFinding:
     document_value: str | None
 
 
-def _applies_to(rule: CrossSourceRule, program: LoanProgram | None) -> bool:
-    """A program-agnostic rule (``program is None``) applies to any file; else it must match."""
-    return rule.program is None or rule.program is program
+def _applies_to(
+    rule: CrossSourceRule,
+    program: LoanProgram | None,
+    loan_purpose: LoanPurpose | None,
+    refinance_type: RefinanceType | None,
+) -> bool:
+    """Whether a cross-source rule applies: its program must match (``None`` → any) AND its
+    PURPOSE dimension (LP-100) must match the file (a purchase-only rule is skipped on a refi)."""
+    if rule.program is not None and rule.program is not program:
+        return False
+    return purpose_applies(rule.purpose, loan_purpose=loan_purpose, refinance_type=refinance_type)
 
 
 def evaluate_cross_source(
     facts: CrossSourceFacts,
     *,
     program: LoanProgram | None = None,
+    loan_purpose: LoanPurpose | None = None,
+    refinance_type: RefinanceType | None = None,
     rules: Sequence[CrossSourceRule] = CROSS_SOURCE_RULES,
 ) -> list[CrossSourceFinding]:
     """Evaluate every applicable cross-source rule against the facts. Pure, no AI.
 
-    Runs each rule's ``check`` (skipping rules gated to a different program), fills the
-    rule's template with each match's fields, and returns one :class:`CrossSourceFinding`
-    per match. A rule whose inputs are absent simply yields no matches (graceful absence —
-    the engine never invents a discrepancy). Deterministic: same facts → same findings.
+    Runs each rule's ``check`` (skipping rules gated to a different program OR a different
+    PURPOSE — LP-100), fills the rule's template with each match's fields, and returns one
+    :class:`CrossSourceFinding` per match. A rule whose inputs are absent simply yields no
+    matches (graceful absence — the engine never invents a discrepancy). Deterministic.
     """
     results: list[CrossSourceFinding] = []
     for rule in rules:
-        if not _applies_to(rule, program):
+        if not _applies_to(rule, program, loan_purpose, refinance_type):
             continue
         for match in rule.check(facts, rule.threshold):
             results.append(
