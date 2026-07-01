@@ -24,21 +24,19 @@ from decimal import Decimal
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import select, update
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.base import utcnow
 from app.models.finding import (
     Finding,
     FindingOrigin,
-    FindingResolutionStatus,
     FindingStatus,
 )
 from app.models.helpers import only_active
 from app.models.loan_file import LoanFile
 from app.models.property import Property
 from app.models.verification import Verification
-from app.services.finding_identity import existing_identities, finding_identity
+from app.services.finding_reconcile import reconcile_findings
 from app.verification.confidence import DETERMINISTIC_CONFIDENCE
 from app.verification.cross_source import (
     CrossSourceFacts,
@@ -75,52 +73,42 @@ async def run_cross_source_deterministic(
     the counts and the set of canonical types that fired (so the AI layer defers on them).
     ``flush`` only; the caller owns the transaction.
     """
-    await _supersede_open_deterministic_findings(db, loan_file.id)
-
-    # Normalized-substance dedup (LP-93): the same discrepancy worded two ways (case /
-    # dash / quote / whitespace) is ONE finding. Seed from the file's live findings so a
-    # re-detected RESOLVED finding is skipped (its resolution preserved), not re-emitted.
-    seen = await existing_identities(db, loan_file.id)
-
+    # Reconcile the fresh detections against the file's existing deterministic findings (LP-94):
+    # still-detected → keep the existing row (merge, LP-81); no-longer-detected OPEN → DROP;
+    # no-longer-detected RESOLVED → retain; new → add. Within-run duplicates collapse (LP-93).
+    # Scoped to ``xsrc.*`` so the single-source ``conv.*``/``fha.*`` findings are untouched.
+    existing = await _live_deterministic_findings(db, loan_file.id)
     results = evaluate_cross_source(facts, program=loan_file.loan_program)
-    red = yellow = 0
-    fired: set[str] = set()
-    for result in results:
-        # The rule fired → the AI defers on its canonical type regardless of persist-dedup.
-        fired.add(result.rule.canonical_type)
-        finding = _to_finding(result, loan_file_id=loan_file.id, run_id=run.id)
-        identity = finding_identity(finding)
-        if identity in seen:
-            continue  # same normalized substance already present (this run, or a resolved one)
-        seen.add(identity)
-        db.add(finding)
-        if finding.status is FindingStatus.RED:
-            red += 1
-        else:
-            yellow += 1
+    # The rule fired → the AI defers on its canonical type regardless of the reconcile outcome.
+    fired = {result.rule.canonical_type for result in results}
+    fresh = [_to_finding(result, loan_file_id=loan_file.id, run_id=run.id) for result in results]
+
+    outcome = reconcile_findings(db, existing=existing, fresh=fresh)
     await db.flush()
-    return red, yellow, frozenset(fired)
+    return outcome.red, outcome.yellow, frozenset(fired)
 
 
-async def _supersede_open_deterministic_findings(db: AsyncSession, loan_file_id: UUID) -> int:
-    """Soft-delete the file's OPEN deterministic cross-source findings (a re-run replaces them).
-
-    Scoped to ``xsrc.*`` rule ids so the single-source engine's ``conv.*``/``fha.*``
-    findings are left intact. Resolved (applied / overridden) findings are preserved.
-    """
-    result = await db.execute(
-        update(Finding)
-        .where(
-            Finding.loan_file_id == loan_file_id,
-            Finding.origin == FindingOrigin.DETERMINISTIC_RULE,
-            Finding.rule_id.like("xsrc.%"),
-            Finding.resolution_status == FindingResolutionStatus.OPEN,
-            Finding.deleted_at.is_(None),
+async def _live_deterministic_findings(db: AsyncSession, loan_file_id: UUID) -> list[Finding]:
+    """The file's live (non-deleted) deterministic cross-source findings — the reconcile's owned
+    set. Scoped to ``xsrc.*`` so the single-source ``conv.*``/``fha.*`` findings are untouched.
+    Includes RESOLVED findings so re-detection keeps their resolution (LP-93/94)."""
+    rows = (
+        (
+            await db.execute(
+                only_active(
+                    select(Finding).where(
+                        Finding.loan_file_id == loan_file_id,
+                        Finding.origin == FindingOrigin.DETERMINISTIC_RULE,
+                        Finding.rule_id.like("xsrc.%"),
+                    ),
+                    Finding,
+                )
+            )
         )
-        .values(deleted_at=utcnow())
+        .scalars()
+        .all()
     )
-    await db.flush()
-    return getattr(result, "rowcount", 0) or 0
+    return list(rows)
 
 
 def _to_finding(result: CrossSourceFinding, *, loan_file_id: UUID, run_id: UUID) -> Finding:

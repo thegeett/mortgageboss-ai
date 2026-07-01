@@ -29,10 +29,10 @@ import json
 import re
 from collections.abc import Awaitable, Callable
 from decimal import Decimal
-from typing import Any, cast
+from typing import Any
 from uuid import UUID
 
-from sqlalchemy import CursorResult, select, update
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -47,7 +47,6 @@ from app.models.finding import (
     Finding,
     FindingCategory,
     FindingOrigin,
-    FindingResolutionStatus,
     FindingStatus,
 )
 from app.models.helpers import only_active
@@ -58,7 +57,8 @@ from app.services.cross_source_deterministic import (
     build_cross_source_facts,
     run_cross_source_deterministic,
 )
-from app.services.finding_identity import existing_identities, finding_identity
+from app.services.finding_identity import FindingIdentity, finding_identity
+from app.services.finding_reconcile import reconcile_findings
 from app.services.verifications import mark_verification_current
 
 logger = get_logger(__name__)
@@ -99,11 +99,12 @@ async def run_cross_source(
     marked FAILED (the findings path degrades gracefully — nothing is invented).
     ``flush`` only; the caller owns the transaction.
 
-    Re-running **replaces** the file's previous *open* cross-source findings with
-    this fresh pass (so re-runs reflect the current state, not an accumulating pile
-    of duplicates that would also inflate blocking + the calculator alerts).
-    **Resolved** findings (applied / overridden) are preserved — the human's
-    decisions persist across runs (ADR-061).
+    Re-running **reconciles** against the file's existing findings by normalized identity
+    (LP-93/94): a still-detected finding is KEPT (merged — its wording/notes/resolution
+    preserved), a no-longer-detected OPEN finding is DROPPED (the list stays honest to the
+    current state), a genuinely-new one is ADDED, and a RESOLVED finding is RETAINED even when
+    no longer detected (a completed processor action — the applied data change, the audit trail,
+    and Undo depend on the record; ADR-061).
     """
     # Resolve the reasoner at call time so the worker-task path (which calls without an
     # explicit reason_fn) can be stubbed in the real-stack integration test (LP-89).
@@ -119,46 +120,39 @@ async def run_cross_source(
         await db.flush()
         return run
 
-    # The AI succeeded → supersede the prior pass's open cross-source findings
-    # before emitting the fresh set (only now, so a failed pass leaves them intact).
-    superseded = await _supersede_open_cross_source_findings(db, loan_file.id)
-
-    # LP-86 — THE GRADUATION + DE-DUP: run the DETERMINISTIC cross-source rules first.
-    # They own their canonical types, so the AI DEFERS on any type the deterministic pass
-    # fired this run (no double-reporting the same discrepancy; the deterministic, stable,
-    # templated finding is the one shown). The AI keeps the types it didn't fire + the
-    # novel "other" bucket — narrowed to genuine discovery.
+    # LP-86 — THE GRADUATION + DE-DUP: run the DETERMINISTIC cross-source rules first. They
+    # reconcile their own findings (LP-94). They own their canonical types, so the AI DEFERS on
+    # any type the deterministic pass fired this run (no double-reporting the same discrepancy;
+    # the deterministic, stable, templated finding is the one shown). The AI keeps the types it
+    # didn't fire + the novel "other" bucket — narrowed to genuine discovery.
     det_facts = await build_cross_source_facts(db, loan_file=loan_file, context=context)
     det_red, det_yellow, fired_types = await run_cross_source_deterministic(
         db, loan_file=loan_file, run=run, facts=det_facts
     )
 
     income_target = _resolve_income_target(context)
-    red, yellow = det_red, det_yellow
     deferred = 0
-    deduped = 0
-    # Normalized-substance dedup (LP-93), seeded from the file's live findings — which now
-    # include the deterministic set just emitted + any preserved resolved findings. So an AI
-    # finding that restates an existing discrepancy (case/dash/quote/whitespace only) collapses.
-    seen = await existing_identities(db, loan_file.id)
+    fresh_ai: list[Finding] = []
     for raw in result.findings:
         if raw.type in fired_types:
             # A deterministic rule already owns + reported this discrepancy — the AI defers.
             deferred += 1
             continue
-        finding = _to_finding(
-            raw, loan_file_id=loan_file.id, run_id=run.id, income_target=income_target
+        fresh_ai.append(
+            _to_finding(raw, loan_file_id=loan_file.id, run_id=run.id, income_target=income_target)
         )
-        identity = finding_identity(finding)
-        if identity in seen:
-            deduped += 1  # same normalized substance already present — keep the first
-            continue
-        seen.add(identity)
-        db.add(finding)
-        if finding.status is FindingStatus.RED:
-            red += 1
-        else:
-            yellow += 1
+
+    # Reconcile the AI findings against the file's live AI findings (LP-94): still-detected →
+    # keep the existing row (merge, preserving notes/resolution); no-longer-detected OPEN → DROP;
+    # no-longer-detected RESOLVED → retain; new → add. Compared by LP-93 normalized identity, and
+    # deduped against the deterministic set just emitted (external — never dropped here).
+    existing_ai = await _live_ai_findings(db, loan_file.id)
+    external = await _non_ai_identities(db, loan_file.id)
+    outcome = reconcile_findings(
+        db, existing=existing_ai, fresh=fresh_ai, external_identities=external
+    )
+    red = det_red + outcome.red
+    yellow = det_yellow + outcome.yellow
 
     run.status = VerificationStatus.COMPLETED
     run.completed_at = utcnow()
@@ -182,31 +176,56 @@ async def run_cross_source(
         yellow=yellow,
         deterministic=det_red + det_yellow,  # LP-86 — the graduated deterministic findings
         ai_deferred=deferred,  # AI findings suppressed because a deterministic rule owns the type
-        ai_deduped=deduped,  # AI findings collapsed into an existing same-substance finding (LP-93)
-        superseded=superseded,  # prior open findings replaced by this pass
+        ai_added=len(outcome.added),  # newly-detected AI findings persisted this run (LP-94)
+        ai_dropped=outcome.dropped,  # no-longer-detected OPEN AI findings removed (LP-94)
     )
     return run
 
 
-async def _supersede_open_cross_source_findings(db: AsyncSession, loan_file_id: UUID) -> int:
-    """Soft-delete the file's OPEN cross-source findings (a re-run replaces them).
+async def _live_ai_findings(db: AsyncSession, loan_file_id: UUID) -> list[Finding]:
+    """The file's live (non-deleted) AI cross-source findings — the AI reconcile's owned set.
 
-    Only ``ai_cross_source`` findings that are still OPEN are superseded — resolved
-    ones (applied / overridden) are preserved so the human's decisions persist
-    across runs. Returns how many were superseded. Scoped to the one file.
+    Includes RESOLVED findings so a re-detection keeps their resolution and a
+    no-longer-detected resolved finding is retained, not dropped (LP-94). Scoped to the file.
     """
-    result = await db.execute(
-        update(Finding)
-        .where(
-            Finding.loan_file_id == loan_file_id,
-            Finding.origin == FindingOrigin.AI_CROSS_SOURCE,
-            Finding.resolution_status == FindingResolutionStatus.OPEN,
-            Finding.deleted_at.is_(None),
+    rows = (
+        (
+            await db.execute(
+                only_active(
+                    select(Finding).where(
+                        Finding.loan_file_id == loan_file_id,
+                        Finding.origin == FindingOrigin.AI_CROSS_SOURCE,
+                    ),
+                    Finding,
+                )
+            )
         )
-        .values(deleted_at=utcnow())
+        .scalars()
+        .all()
     )
-    await db.flush()
-    return cast("CursorResult[Any]", result).rowcount or 0
+    return list(rows)
+
+
+async def _non_ai_identities(db: AsyncSession, loan_file_id: UUID) -> set[FindingIdentity]:
+    """Normalized identities of the file's live non-AI findings (the deterministic set + any
+    others). The AI reconcile dedups against these so it doesn't restate a deterministic
+    finding — but it never DROPS them (they belong to another pass)."""
+    rows = (
+        (
+            await db.execute(
+                only_active(
+                    select(Finding).where(
+                        Finding.loan_file_id == loan_file_id,
+                        Finding.origin != FindingOrigin.AI_CROSS_SOURCE,
+                    ),
+                    Finding,
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    return {finding_identity(f) for f in rows}
 
 
 # --------------------------------------------------------------------------- #

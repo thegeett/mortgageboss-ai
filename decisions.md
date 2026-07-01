@@ -6963,3 +6963,41 @@ still marks the AI defer) — only persistence dedups.
 **Consequences:** the Thermofisher duplicate collapses to one; distinct subjects stay separate; resolutions survive
 re-detection. Scope boundary: the **drop-when-no-longer-detected** re-run change is LP-94 (next) — the merge/
 supersede behavior is otherwise unchanged. Part of the finding-presentation epic (LP-92..98).
+
+## ADR-219: Re-run reconciliation — merge currently-detected, DROP no-longer-detected (open) (LP-94)
+
+- **Date:** 2026-07-01
+- **Status:** Accepted
+
+**Context (a trace correction):** the plan framed this as "reverse LP-81's *mark as no-longer-detected*." The trace
+found there was **no mark mechanism** — the live re-run (`run_cross_source`) *superseded* (soft-deleted) every OPEN
+cross-source finding and re-emitted the fresh set. That already *dropped* no-longer-detected open findings and
+*retained* resolved ones (supersede was open-only), and the LP-78.1 input-fingerprint cache short-circuits the pass
+entirely on unchanged inputs, so a no-op re-run touched nothing. The real gap vs the locked Q4 design was the
+opposite: supersede+recreate **churned still-detected OPEN findings** — each run deleted and re-created them as NEW
+rows, losing their id and any `details["notes"]`/history. So "merge keeps history" (LP-81's stated intent) was not
+actually true.
+
+**Decision:** replace supersede+recreate with an explicit **reconcile-in-place** (`app/services/finding_reconcile.py`,
+`reconcile_findings`), compared by LP-93's normalized identity, used by both cross-source emission paths:
+
+1. **still-detected OPEN → MERGE:** keep the *existing row* (id, notes/history, resolution preserved); the fresh
+   duplicate is discarded. (Now a true merge — previously churned.)
+2. **no-longer-detected OPEN → DROP** (soft-delete): the issue is gone, so the finding is gone — the list stays
+   honest to the current state (the Q4 decision, made explicit and intentional rather than an incidental effect of
+   supersede).
+3. **still-detected RESOLVED → resolution preserved** (kept, not reopened, not duplicated — LP-93).
+4. **no-longer-detected RESOLVED → RETAINED** (the careful case): a resolved finding is a *completed processor
+   action*, not clutter. Its `resolution_status` + `applied_record` + audit trail survive — an APPLIED finding's
+   data change and LP-98's Undo depend on the record. "Drop" targets OPEN findings only.
+5. **genuinely-new → ADD.**
+
+Within-run duplicates collapse (LP-93). The AI pass reconciles its own AI-origin findings and dedups against the
+deterministic set via `external_identities` (never dropping findings another pass owns). An unchanged re-run drops
+nothing (the LP-78.1 cache returns the prior run without a pass).
+
+**Consequences:** the findings list reflects the current state (stale open findings drop), while completed actions
+and their Undo/audit records persist. Still-detected findings keep their identity + notes across runs (the churn +
+note-loss are fixed). This subsumes LP-93's emission-time dedup + LP-81's supersede into one coherent reconcile; no
+UI marker was needed (dropped findings simply leave the tab query). Part of the finding-presentation epic
+(LP-92..98); the Resolved-section UI (LP-95) and Undo (LP-98) build on resolved findings being retained here.
