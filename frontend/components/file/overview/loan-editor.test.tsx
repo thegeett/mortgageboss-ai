@@ -68,4 +68,22 @@ describe("LoanEditor", () => {
     fireEvent.click(screen.getByRole("button", { name: /cancel/i }));
     expect(updateMutate).not.toHaveBeenCalled();
   });
+
+  // LP-99 — the refinance cash-out kind is only meaningful for a refinance.
+  it("hides the refinance-type field for a purchase", () => {
+    render(<LoanEditor file={FILE} />);
+    expect(screen.queryByLabelText("Refinance type")).toBeNull();
+  });
+
+  it("corrects an undetermined refinance type on the Overview", () => {
+    const refi = {
+      ...FILE,
+      loan_purpose: "refinance",
+      refinance_type: null, // undetermined by the MISMO import
+    } as unknown as LoanFileDetail;
+    render(<LoanEditor file={refi} />);
+    fireEvent.change(screen.getByLabelText("Refinance type"), { target: { value: "cash_out" } });
+    fireEvent.click(screen.getByRole("button", { name: /save/i }));
+    expect(updateMutate.mock.calls[0]?.[0]).toEqual({ refinance_type: "cash_out" });
+  });
 });

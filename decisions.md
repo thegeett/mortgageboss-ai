@@ -7139,3 +7139,41 @@ after (LP-98)**. `FindingPublic` now exposes `applied_record` (the Resolved-card
 **completes the finding-presentation epic (LP-92..98)**: readable labels (92), normalized-substance identity +
 dedup (93), re-run reconcile (94), the four-part card (95), AI why/fix (96), View fix (97), and Undo + the Resolved
 section (98).
+
+## ADR-224: Populate `refinance_type` from MISMO + surface the undetermined refi (LP-99)
+
+- **Date:** 2026-07-01
+- **Status:** Accepted
+
+**Context:** `refinance_type` (`rate_term` | `cash_out`) exists on `LoanFile` and the LTV engine already resolves the
+cash-out limit from it correctly — but **nothing populated it**. A cash-out refi imported from MISMO landed
+`refinance_type = NULL`, and the LTV treats null-as-rate/term → the **looser** limit. So a cash-out refi (whose max
+is *stricter*) silently got the rate/term max — a permissive-direction safety bug. First ticket of the refinance
+epic (LP-99..101).
+
+**Decision:** parse the MISMO cash-out determination at import and fill `refinance_type`, so the LTV's *existing
+correct* path auto-triggers — the engine is untouched.
+
+- **Source:** `LOAN/REFINANCE/RefinanceCashOutDeterminationType` (`CashOut` → `CASH_OUT`; `NoCashOut` /
+  `LimitedCashOut` → `RATE_TERM`), with `RefinanceCashOutAmount` as a fallback (positive ⇒ cash-out, zero ⇒
+  rate/term). `LimitedCashOut → RATE_TERM` (agency LCOR carries rate/term limits) is a **grounded starter, pending
+  expert review**, alongside the LP-74 LTV thresholds it feeds.
+- **Undetermined ⇒ SURFACE, never silently looser.** A refi with no cash-out signal keeps `refinance_type = NULL`
+  and is surfaced two ways: a **parse warning** on the `MismoImport` and a **FLOOR needs item** ("Confirm refinance
+  type"). It is never defaulted to the looser limit behind the processor's back. (The LTV still reads
+  null-as-rate/term for a not-yet-corrected file — we don't block the calculator — but the ambiguity is now visible
+  and actionable.)
+- **Correction path made real.** The needs item directs the processor to "set it on the Overview," but
+  `refinance_type` was in `_VERIFICATION_BASELINE_FIELDS` (editing marks verification stale) yet **absent from
+  `LoanFileUpdate`** — unsettable. LP-99 adds it to `LoanFileUpdate` (PATCH) and `LoanFileDetail` (read), and the
+  Overview loan editor shows a **Refinance type** select **only for refinances**.
+- **Only refinances.** Purchases are entirely unaffected — no field set, no needs item, no warning, no UI control.
+
+**Scope boundary:** the LTV engine is deliberately unchanged (it was already correct — the bug was an unfilled
+field). Purpose-gating rules (LP-100) and a real refi MISMO fixture + e2e (LP-101) are the rest of the epic; LP-99's
+refi variant is *constructed* from the one real (purchase) fixture, so the cash-out mapping is validated
+structurally, not against a real refi export.
+
+**Consequences:** cash-out refis now get their stricter LTV limit automatically; an ambiguous refi is caught and
+corrected instead of silently mis-limited. `LoanFileDetail`/`LoanFileUpdate` gain `refinance_type`; editing it marks
+cross-source verification stale (a baseline change, same as any LTV input).

@@ -23,7 +23,11 @@ import { useUpdateLoanFile } from "@/lib/api/overview-edit";
 import { getErrorMessage } from "@/lib/errors/api-error";
 import { programLabel } from "@/lib/loan-files/labels";
 import type { LoanFileDetail, LoanProgram } from "@/lib/types/loan-file";
-import { LOAN_PROGRAM_OPTIONS, LOAN_PURPOSE_OPTIONS } from "@/lib/validation/intake";
+import {
+  LOAN_PROGRAM_OPTIONS,
+  LOAN_PURPOSE_OPTIONS,
+  REFINANCE_TYPE_OPTIONS,
+} from "@/lib/validation/intake";
 import { useState } from "react";
 import { toast } from "sonner";
 
@@ -33,9 +37,23 @@ export function LoanEditor({ file }: { file: LoanFileDetail }) {
   // A program change is held here until the processor confirms it.
   const [pending, setPending] = useState<Record<string, unknown> | null>(null);
 
+  // The cash-out kind is meaningful only for a refinance; show it (and let it be corrected
+  // when the MISMO import left it undetermined) only when the purpose is refinance (LP-99).
+  const isRefinance = file.loan_purpose === "refinance";
+
   const fields: FieldDef[] = [
     { key: "loan_amount", label: "Amount", kind: "money" },
     { key: "loan_purpose", label: "Purpose", kind: "select", options: LOAN_PURPOSE_OPTIONS },
+    ...(isRefinance
+      ? [
+          {
+            key: "refinance_type",
+            label: "Refinance type",
+            kind: "select" as const,
+            options: REFINANCE_TYPE_OPTIONS,
+          },
+        ]
+      : []),
     { key: "loan_program", label: "Program", kind: "select", options: LOAN_PROGRAM_OPTIONS },
     {
       key: "lender_id",
@@ -72,6 +90,7 @@ export function LoanEditor({ file }: { file: LoanFileDetail }) {
         initial={{
           loan_amount: file.loan_amount ?? "",
           loan_purpose: file.loan_purpose ?? "",
+          ...(isRefinance ? { refinance_type: file.refinance_type ?? "" } : {}),
           loan_program: file.loan_program ?? "",
           lender_id: file.lender_id ?? "",
           loan_officer_name: file.loan_officer_name ?? "",

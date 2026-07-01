@@ -252,6 +252,14 @@ def _parse_loan(deal: etree._Element, ctx: _Ctx) -> ParsedLoan | None:
         note_amount=_to_decimal(ctx.text(loan, ".//m:TERMS_OF_LOAN/m:NoteAmount")),
         note_rate_percent=_to_decimal(ctx.text(loan, ".//m:TERMS_OF_LOAN/m:NoteRatePercent")),
         loan_purpose=ctx.text(loan, ".//m:TERMS_OF_LOAN/m:LoanPurposeType"),
+        # The refinance cash-out determination (LP-99) — MISMO ``REFINANCE`` container under LOAN.
+        # Only present on refinances; drives ``refinance_type`` → the (stricter) cash-out LTV limit.
+        refinance_cash_out_type=ctx.text(
+            loan, ".//m:REFINANCE/m:RefinanceCashOutDeterminationType"
+        ),
+        refinance_cash_out_amount=_to_decimal(
+            ctx.text(loan, ".//m:REFINANCE/m:RefinanceCashOutAmount")
+        ),
         mortgage_type=ctx.text(loan, ".//m:TERMS_OF_LOAN/m:MortgageType"),
         lien_priority=ctx.text(loan, ".//m:TERMS_OF_LOAN/m:LienPriorityType"),
         amortization_type=ctx.text(
