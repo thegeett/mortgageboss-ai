@@ -7032,3 +7032,43 @@ description, meta, and a source-gated expander in one block, and the AI help was
 **Consequences:** the card is the display foundation for LP-96 (AI why/fix), LP-97 (View fix), and LP-98 (Undo). It
 reuses existing stored data (no backend/model change) and preserves LP-92's readable labels and LP-93/94's
 identity/re-run. Part of the finding-presentation epic (LP-92..98).
+
+## ADR-221: AI-generated "why it matters" + "suggested fix" — the guard-railed AI-boundary relaxation (LP-96)
+
+- **Date:** 2026-07-01
+- **Status:** Accepted
+
+**Context:** a finding already explains WHAT fired + WHY-it-fired deterministically. LP-96 adds an AI-authored
+**why it matters** (the consequence) + **suggested fix** (the remediation) to fill LP-95's slots. This is the ONE
+deliberate relaxation of the project's "AI never touches authoritative output" principle — AI-generated prose enters
+the finding — so it is decision-SUPPORT, not automation, made safe by guardrails.
+
+**Decision (implement ALL the guardrails):**
+
+1. **Generated once, stored, NEVER per-run.** Guidance is keyed **per canonical finding type** (the key both the
+   deterministic `xsrc.*` rules and the AI findings share), in a grounded-starter store
+   (`app/verification/finding_guidance.py` `GUIDANCE_BY_TYPE`), resolved by a **plain dict lookup at read time**
+   (`FindingPublic.from_model` → merged into `details` for LP-95's slots). Novel AI findings generate their guidance
+   **once at discovery** (best-effort, stored on the finding); LP-94's reconcile keeps the row on re-run, so it is
+   never regenerated. Rendering a card / re-running verification makes **no model call** and yields identical text
+   (no flicker, no per-view cost) — the A+C combination (AI writes it once; it's stored + shown deterministically).
+2. **Grounded in the rule's facts.** The generator (`generate_guidance`, reusing the app's `complete()` at
+   temperature 0.0) is given the type + category + description + threshold and asked to EXPLAIN them — not to invent
+   facts or cite regulations it wasn't given.
+3. **Grounded-starter, validate-with-Priya.** `starter=True` — researched-and-grounded, NOT authoritative; the
+   domain expert confirms/corrects it, exactly like the rule thresholds.
+4. **Warned** — the block carries a clear-but-calm "AI-generated — verify before relying on this; it may be wrong."
+5. **Visually distinct** — the why/fix block is tinted + bordered + iconned (a `Sparkles` amber block), set apart
+   from the deterministic core (What we found + Source), so the processor always knows fact from AI explanation.
+6. **Overrideable** — the existing Override action still wins; the guidance is advisory.
+
+**Honesty note:** the committed `GUIDANCE_BY_TYPE` is the **grounded-starter** content (authored deterministically
+from each type's meaning). The AI-authoring *mechanism* — `generate_guidance` + the one-time idempotent pass
+(`app/scripts/generate_finding_guidance.py`) — produces the richer, lender-specific prose when run with an API key;
+its output is reviewed + validated by Priya before it lands (same grounded-starter → validated posture as the rule
+content). Generation failure is graceful: no guidance → the card still renders (LP-95).
+
+**Consequences:** findings now explain why-it-matters + how-to-fix, without any per-run AI cost or flicker, and
+without letting the AI decide anything — the deterministic core + human judgment still rule. This is the one
+sanctioned place the AI-boundary is relaxed; the guardrails are what make it safe. Part of the finding-presentation
+epic (LP-92..98); LP-97 (View fix) + LP-98 (Undo) build on it.

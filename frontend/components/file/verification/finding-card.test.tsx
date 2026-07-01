@@ -83,6 +83,34 @@ describe("FindingCard", () => {
     expect(screen.getByText(/Correct the stated income/)).toBeDefined();
   });
 
+  it("the AI why/fix block carries the 'AI-generated — verify' warning + the grounded-starter marker (LP-96)", () => {
+    render(
+      <FindingCard
+        finding={finding({
+          details: {
+            reasoning: "Docs show less.",
+            why_it_matters: "It inflates qualifying income.",
+            suggested_fix: "Correct the stated income.",
+          },
+        })}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /Details/ }));
+    // The clear-but-calm warning is unmissable on the AI block.
+    expect(screen.getByText(/AI-generated — verify before relying on this/)).toBeDefined();
+    // The grounded-starter (pending expert review) marker.
+    expect(screen.getByText(/Grounded starter — pending expert review/)).toBeDefined();
+  });
+
+  it("no AI warning when the why/fix is absent — the deterministic core stands alone (LP-96 graceful)", () => {
+    render(<FindingCard finding={finding({ details: { reasoning: "Docs show less." } })} />);
+    fireEvent.click(screen.getByRole("button", { name: /Details/ }));
+    // No AI content → no warning, no slots — the card is complete with What-we-found + Source.
+    expect(screen.queryByText(/AI-generated — verify/)).toBeNull();
+    expect(screen.queryByText("Why it matters")).toBeNull();
+    expect(screen.getByText("What we found")).toBeDefined();
+  });
+
   it("a finding with no source still expands (Details, not source-gated) + labels the authority", () => {
     render(
       <FindingCard

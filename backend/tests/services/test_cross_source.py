@@ -72,6 +72,11 @@ def _stub(findings: Sequence[CrossSourceRawFinding]):
     return _fn
 
 
+async def _no_guidance(**_kw: object) -> None:
+    """A no-op novel-guidance generator — keeps tests hermetic (no real AI call, LP-96)."""
+    return None
+
+
 async def _company(db: AsyncSession, slug: str) -> Company:
     company = Company(name=slug.title(), slug=slug)
     db.add(company)
@@ -128,7 +133,12 @@ async def _run(db, loan_file, findings, *, actor=None):
         db, loan_file_id=loan_file.id, trigger=VerificationTrigger.MANUAL
     )
     return await run_cross_source(
-        db, loan_file=loan_file, run=run, actor_user_id=actor, reason_fn=_stub(findings)
+        db,
+        loan_file=loan_file,
+        run=run,
+        actor_user_id=actor,
+        reason_fn=_stub(findings),
+        guidance_fn=_no_guidance,
     )
 
 
@@ -509,3 +519,53 @@ async def test_rerun_preserves_resolved_findings(db_session: AsyncSession) -> No
     assert "cross_source.liability_discrepancy" in rule_ids  # resolved → preserved
     assert "cross_source.income_variance" in rule_ids  # the fresh pass
     assert "cross_source.gift_discrepancy" not in rule_ids  # open → superseded
+
+
+# --- LP-96: novel findings get AI why/fix at discovery (once), stored on the finding ---
+
+
+async def test_novel_finding_gets_guidance_at_discovery(db_session: AsyncSession) -> None:
+    """A novel ('other') AI finding gets its why/fix generated ONCE at discovery, stored on it."""
+    from app.verification.finding_guidance import FIX_KEY, STARTER_KEY, WHY_KEY, RuleGuidance
+
+    calls = {"n": 0}
+
+    async def _guidance(**_kw: object) -> RuleGuidance:
+        calls["n"] += 1
+        return RuleGuidance(why_it_matters="novel why", remediation="novel fix")
+
+    company = await _company(db_session, "acme")
+    loan_file = await _file(db_session, company)
+    run = await create_verification_run(
+        db_session, loan_file_id=loan_file.id, trigger=VerificationTrigger.MANUAL
+    )
+    await run_cross_source(
+        db_session,
+        loan_file=loan_file,
+        run=run,
+        reason_fn=_stub([_raw(type="other", description="A novel discrepancy")]),
+        guidance_fn=_guidance,
+    )
+
+    novel = next(
+        f
+        for f in await _active_findings(db_session, loan_file.id)
+        if f.rule_id == "cross_source.other"
+    )
+    assert novel.details[WHY_KEY] == "novel why"
+    assert novel.details[FIX_KEY] == "novel fix"
+    assert novel.details[STARTER_KEY] is True
+    assert calls["n"] == 1  # generated once at discovery
+
+    # Re-run with the SAME novel finding → LP-94 keeps the existing row → NOT regenerated.
+    run2 = await create_verification_run(
+        db_session, loan_file_id=loan_file.id, trigger=VerificationTrigger.MANUAL
+    )
+    await run_cross_source(
+        db_session,
+        loan_file=loan_file,
+        run=run2,
+        reason_fn=_stub([_raw(type="other", description="A novel discrepancy")]),
+        guidance_fn=_guidance,
+    )
+    assert calls["n"] == 1  # NOT called again — generate-once, never per-run

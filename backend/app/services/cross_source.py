@@ -60,11 +60,21 @@ from app.services.cross_source_deterministic import (
 from app.services.finding_identity import FindingIdentity, finding_identity
 from app.services.finding_reconcile import reconcile_findings
 from app.services.verifications import mark_verification_current
+from app.verification.finding_guidance import (
+    FIX_KEY,
+    GUIDANCE_BY_TYPE,
+    STARTER_KEY,
+    WHY_KEY,
+    RuleGuidance,
+    generate_guidance,
+)
 
 logger = get_logger(__name__)
 
 # Reasoner type — injected so tests can supply a deterministic stub (no real key).
 Reasoner = Callable[[str], Awaitable[CrossSourceResult]]
+# The novel-finding guidance generator (LP-96) — injected so tests can stub it (no real key).
+GuidanceFn = Callable[..., Awaitable[RuleGuidance | None]]
 
 # The finding category is DERIVED from the canonical type (the AI no longer
 # returns a category) so it is stable and consistent. Unknown / "other" types fall
@@ -90,6 +100,7 @@ async def run_cross_source(
     run: Verification,
     actor_user_id: UUID | None = None,
     reason_fn: Reasoner | None = None,
+    guidance_fn: GuidanceFn = generate_guidance,
 ) -> Verification:
     """Run one cross-source pass into an existing run; emit findings; clear staleness.
 
@@ -154,6 +165,12 @@ async def run_cross_source(
     red = det_red + outcome.red
     yellow = det_yellow + outcome.yellow
 
+    # Novel findings (LP-96): generate the why/fix ONCE at discovery — only for the genuinely-new
+    # findings this run (LP-94 keeps still-detected rows, so it never re-generates). Best-effort:
+    # a failure leaves no guidance and the card degrades gracefully (LP-95). Known types resolve
+    # their guidance from the stored grounded-starter set at read time (no model call).
+    await _generate_novel_guidance(outcome.added, guidance_fn)
+
     run.status = VerificationStatus.COMPLETED
     run.completed_at = utcnow()
     run.red_count = red
@@ -180,6 +197,32 @@ async def run_cross_source(
         ai_dropped=outcome.dropped,  # no-longer-detected OPEN AI findings removed (LP-94)
     )
     return run
+
+
+async def _generate_novel_guidance(added: list[Finding], guidance_fn: GuidanceFn) -> None:
+    """Generate the why/fix for genuinely-novel AI findings at discovery (LP-96) — best-effort.
+
+    Only findings whose canonical type is NOT in the grounded-starter store need it (known types
+    resolve from the store at read). Stores the guidance on the finding's ``details`` (a novel
+    finding's guidance is finding-specific), so read-time resolution prefers it. A generation
+    failure leaves the finding without guidance — it still renders (LP-95).
+    """
+    for finding in added:
+        finding_type = str(finding.details.get("type") or "")
+        if finding_type in GUIDANCE_BY_TYPE and finding_type != "other":
+            continue  # a known type — guidance comes from the store, no generation needed
+        guidance = await guidance_fn(
+            finding_type=finding_type or "other",
+            category=finding.category.value,
+            description=finding.message,
+        )
+        if guidance is not None:
+            finding.details = {
+                **finding.details,
+                WHY_KEY: guidance.why_it_matters,
+                FIX_KEY: guidance.remediation,
+                STARTER_KEY: guidance.starter,
+            }
 
 
 async def _live_ai_findings(db: AsyncSession, loan_file_id: UUID) -> list[Finding]:

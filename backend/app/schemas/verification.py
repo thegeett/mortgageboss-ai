@@ -17,6 +17,7 @@ from pydantic import BaseModel, Field
 from app.models.finding import Finding
 from app.models.verification import Verification
 from app.verification.confidence import AggressionLevel
+from app.verification.finding_guidance import resolve_guidance
 
 
 class OverrideRequest(BaseModel):
@@ -105,6 +106,11 @@ class FindingPublic(BaseModel):
 
     @classmethod
     def from_model(cls, finding: Finding) -> FindingPublic:
+        # AI-generated why/fix (LP-96) — resolved deterministically (a dict lookup, NO model call)
+        # and merged into details so the card's LP-95 slots render it. Grounded-starter; absent →
+        # the card degrades gracefully. Guidance stored on a novel finding takes precedence.
+        guidance = resolve_guidance(finding.details, category=finding.category.value)
+        details = {**finding.details, **guidance} if guidance else finding.details
         return cls(
             id=finding.id,
             rule_id=finding.rule_id,
@@ -117,7 +123,7 @@ class FindingPublic(BaseModel):
             source_snippet=finding.source_snippet,
             resolution_status=finding.resolution_status.value,
             resolution_note=finding.resolution_note,
-            details=finding.details,
+            details=details,
         )
 
 

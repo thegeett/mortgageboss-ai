@@ -34,6 +34,7 @@ import {
   MessageSquarePlus,
   Send,
   ShieldCheck,
+  Sparkles,
   X,
 } from "lucide-react";
 import { type ReactNode, useId, useState } from "react";
@@ -78,6 +79,7 @@ export function FindingCard({
     docs_requested?: { needs_item_id?: string } | null;
     why_it_matters?: string | null;
     suggested_fix?: string | null;
+    guidance_starter?: boolean;
   };
   const reasoning = details.reasoning ?? null;
   const notes = (details.notes ?? []).filter(Boolean);
@@ -85,10 +87,12 @@ export function FindingCard({
   const docsRequested = Boolean(details.docs_requested);
   const deterministic = finding.origin === "deterministic_rule";
   const hasSource = finding.source_page !== null || Boolean(finding.source_snippet);
-  // The AI why/fix (LP-96) — not populated yet. The slots render ONLY when present, so the card
-  // looks complete + intentional today with just the deterministic What-we-found + Source.
+  // The AI-generated why/fix (LP-96). The block renders ONLY when populated, so the card still
+  // looks complete + intentional when it's absent (LP-95 graceful degradation). It is visually
+  // distinct + warned because it's the AI's fallible explanation, not the deterministic core.
   const whyItMatters = details.why_it_matters?.trim() || null;
   const suggestedFix = details.suggested_fix?.trim() || null;
+  const guidanceStarter = details.guidance_starter !== false; // grounded-starter by default
   // The full "what we found" (the deterministic explanation) + the collapsed one-liner. For a
   // templated AI finding the one-liner is the AI's specifics (`detail`); for a deterministic
   // finding the headline already carries the specifics, so the one-liner is omitted (no dup).
@@ -218,16 +222,40 @@ export function FindingCard({
               <FindingSection title="What we found">
                 <p className="text-gray-600">{whatWeFound}</p>
               </FindingSection>
-              {whyItMatters && (
-                <FindingSection title="Why it matters">
-                  <p className="text-gray-600">{whyItMatters}</p>
-                </FindingSection>
+
+              {/* The AI-generated Why-it-matters + Suggested-fix (LP-96) — VISUALLY DISTINCT from
+                  the deterministic core (tinted + bordered + iconned) and WARNED, because it's the
+                  AI's fallible explanation. Renders only when populated (graceful — LP-95). */}
+              {(whyItMatters || suggestedFix) && (
+                <div className="rounded-md border border-warning/40 bg-warning/5 px-2.5 py-2">
+                  <div className="flex items-center gap-1 text-[10px] font-medium text-warning">
+                    <Sparkles className="h-3 w-3 shrink-0" />
+                    AI-generated — verify before relying on this; it may be wrong.
+                  </div>
+                  {whyItMatters && (
+                    <div className="mt-1.5">
+                      <h5 className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">
+                        Why it matters
+                      </h5>
+                      <p className="mt-0.5 text-xs text-gray-700">{whyItMatters}</p>
+                    </div>
+                  )}
+                  {suggestedFix && (
+                    <div className="mt-1.5">
+                      <h5 className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">
+                        Suggested fix
+                      </h5>
+                      <p className="mt-0.5 text-xs text-gray-700">{suggestedFix}</p>
+                    </div>
+                  )}
+                  {guidanceStarter && (
+                    <p className="mt-1.5 text-[10px] text-gray-400">
+                      Grounded starter — pending expert review.
+                    </p>
+                  )}
+                </div>
               )}
-              {suggestedFix && (
-                <FindingSection title="Suggested fix">
-                  <p className="text-gray-600">{suggestedFix}</p>
-                </FindingSection>
-              )}
+
               <FindingSection title="Source">
                 {hasSource ? (
                   <div className="space-y-0.5">
