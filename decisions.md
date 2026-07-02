@@ -7242,3 +7242,45 @@ wasteful for little gain). Both remain CONFIGURATION — env-overridable via `AN
 cross-source context), traded for better perception/reasoning quality. This affects **perception only**: the locked
 Phase-3 principle is unchanged — the AI classifies/extracts, and the deterministic engine (LTV/DTI/rules/findings)
 does the judging. Model strings stay TODO(models)/TODO(pricing) to verify against current Anthropic docs.
+
+## ADR-227: Refi MISMO fixtures + an end-to-end refinance correctness SWEEP (LP-101)
+
+- **Date:** 2026-07-01
+- **Status:** Accepted
+
+**Context:** the refi path (import → LTV → rules → findings → calculators) had NEVER run end-to-end through a real
+import — only unit tests constructed `loan_purpose=REFINANCE` directly, and the one real MISMO fixture is a
+Conventional PURCHASE (Mahesh). The project's recurring bug class is SEAMS between the import/model and the
+calculators (the appraised-value, MI-in-DTI, and refinance_type binding bugs were all this shape, all biased
+permissive), and the refi path had more such seams untested. Final ticket of the refinance epic (LP-99/100/101).
+
+**Decision:** create two SYNTHETIC/de-identified refi MISMO fixtures + an end-to-end test that is a deliberate
+**correctness sweep**, not a happy-path smoke test — its job is partly to FIND what's still broken on the refi path.
+
+- **Fixtures** (`scripts/generate_refi_fixtures.py` → `tests/fixtures/mismo/refi_{rate_term,cash_out}.xml`): derived
+  from the purchase fixture with all personal PII scrubbed to obviously-synthetic values, purpose flipped to
+  Refinance, `SalesContractAmount` dropped (a refi has none), and a `REFINANCE` cash-out determination added (what
+  LP-99 parses). Loan amounts chosen so each exercises its LTV limit: rate/term at 80% (passes the 97% cap), cash-out
+  at 85% (**over** the stricter 80% cash-out cap — proving LP-99's populated `refinance_type` makes the stricter
+  limit bind; it would pass the 97% cap). Grounded-starter test artifacts — a real refi export may differ.
+- **Asserts LP-99** (refinance_type parsed → correct stricter cash-out limit; appraised-value-only basis) and
+  **LP-100** (the purchase-agreement rule is skipped on a refi even with the doc fact present; the refi need-set
+  seeds; DTI fires regardless of purpose), then **probes DTI / MI / reserves / max-loan** for refi-correctness.
+- **Two seams surfaced, both CONSERVATIVE direction** (they over-state risk — never make a file look more qualified;
+  handled honestly, never asserting a wrong value as correct):
+  - **GAP-2 (reserves) — FIXED inline (small/safe/obvious):** the reserves down-payment default was `value − loan`
+    (home equity), wrongly subtracted from a refi's eligible reserves. A refi has no down payment → now `0` for a
+    refinance (purchase path unchanged). Direction of the old bug: conservative (understated reserves → spurious
+    "insufficient").
+  - **GAP-1 (DTI) — documented + `xfail(strict)`, follow-up LP-102:** the back-end DTI counts the existing first
+    mortgage being paid off by the refi (we don't parse the MISMO payoff indicator), double-counting it against the
+    new PITI. Direction: conservative (DTI over-stated → possible spurious over-DTI). NOT a safe inline fix — it needs
+    payoff-indicator parsing + purpose-aware debt exclusion (a borrower's OTHER mortgages must still count). The
+    xfail asserts the DESIRED behavior so the bug is never baked in as "correct".
+- **MI ✓** computed on the refi (appraised-only) LTV, program-aware; **max-loan ✓** uses the appraised basis
+  (inherits GAP-1 via its DTI ceiling); **LTV ✓** appraised-only + stricter cash-out limit.
+
+**Consequences:** the refinance epic (LP-99/100/101) is COMPLETE. Refinance is proven end-to-end for what the
+fixtures exercise; the reserves refi down-payment is fixed; and the ONE remaining gap (GAP-1, DTI double-count) is
+KNOWN and tracked (xfail + LP-102), not hidden behind a falsely-green suite. The fixtures + refi need-set + cash-out
+thresholds remain grounded-starters (validate-with-Priya).

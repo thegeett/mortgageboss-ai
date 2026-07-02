@@ -24,7 +24,7 @@ Tests: a refi does NOT get the purchase-agreement finding; purchase-specific rul
 Doc: docs/tickets/LP-100.md + ADR
 
 
-LP-101 — Refi MISMO fixture + end-to-end refinance test
+LP-101 — Refi MISMO fixture + end-to-end refinance test — DONE
 Medium · testing · depends on LP-99 + LP-100
 
 No refi MISMO fixture exists (only Mahesh — a Conventional purchase); refi is only unit-tested, never through an actual import
@@ -34,3 +34,16 @@ End-to-end test: import → LTV (appraised-only basis, correct limit) → rules 
 Asserts the LP-99 fix (cash-out → stricter limit) and the LP-100 fix (no purchase-agreement finding on refi)
 Surfaces whatever else the refi path breaks that LP-99/100 didn't cover
 Doc: docs/tickets/LP-101.md + ADR
+
+OUTCOME (2026-07-01): two synthetic/de-identified fixtures (rate_term 80% LTV, cash_out 85% LTV) + a
+correctness sweep (tests/integration/test_refinance_e2e.py). Asserted LP-99 (cash-out → stricter 80%
+cash-out limit binds; appraised-only basis) + LP-100 (purchase-agreement skipped on refi; refi
+need-set). Probed all calculators. TWO seams surfaced, both CONSERVATIVE direction:
+  - GAP-2 (reserves) FIXED inline: a refi has no down payment (was value − loan / home equity).
+  - GAP-1 (DTI) documented + xfail(strict), follow-up LP-102: the existing mortgage being paid off
+    is double-counted in the back-end DTI (no MISMO payoff-indicator parsing). Not baked in as correct.
+The refinance epic (LP-99/100/101) is COMPLETE — refi proven e2e for what the fixtures exercise; the
+one remaining gap is tracked, not hidden. See docs/tickets/LP-101.md + ADR-227.
+
+PROPOSED FOLLOW-UP — LP-102: parse the MISMO payoff indicator + exclude the paid-off subject mortgage
+from the refi back-end DTI (fixes GAP-1; the xfail flips to a hard pass).

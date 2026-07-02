@@ -28,7 +28,7 @@ from app.models.base import utcnow
 from app.models.calculator_override import CalculatorOverride
 from app.models.helpers import only_active
 from app.models.lender import Lender, LoanProgram
-from app.models.loan_file import LoanFile
+from app.models.loan_file import LoanFile, LoanPurpose
 from app.models.stated_financials import StatedAsset
 from app.schemas.calculators import (
     CalcFindings,
@@ -360,9 +360,18 @@ async def build_reserves_view(
     ltv_calc = await build_ltv_calculation(db, loan_file=loan_file, confidence_cutoff=cutoff)
     value_basis = ltv_calc.value_basis
     first_loan = loan_file.note_amount or loan_file.loan_amount
-    down_default = (
-        value_basis - first_loan if value_basis is not None and first_loan is not None else None
-    )
+    # A REFINANCE has NO down payment (LP-101 surfaced this): the old default ``value - loan`` is
+    # the borrower's home EQUITY, which is not cash out of pocket — subtracting it wrongly gutted
+    # eligible reserves (conservative direction: understated reserves → spurious "insufficient").
+    # A purchase keeps the equity-injection proxy (down = value - loan) until true purchase-price
+    # capture. Grounded-starter — validate-with-Priya (esp. cash-out, where the borrower RECEIVES
+    # funds at closing). The processor can still override the line.
+    if loan_file.loan_purpose is LoanPurpose.REFINANCE:
+        down_default = Decimal(0)
+    elif value_basis is not None and first_loan is not None:
+        down_default = value_basis - first_loan
+    else:
+        down_default = None
 
     factor = _FHA_RETIREMENT_FACTOR if program is LoanProgram.FHA else Decimal("1.00")
     required_months = _resolve_required_reserve_months(program, await _lender_slug(db, loan_file))
