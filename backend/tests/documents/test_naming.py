@@ -80,8 +80,16 @@ def test_recognized_type_without_a_rule_falls_back_to_type_and_upload_date() -> 
     assert name == "Credit-Report_2026-06-24"
 
 
-def test_untyped_or_pending_falls_back_to_document_and_upload_date() -> None:
-    name = standard_name(_doc(None), None)
+def test_untyped_or_pending_falls_back_to_the_original_filename() -> None:
+    # LP-107: an untyped/pending document uses its original filename (the best identifier it has),
+    # not a non-distinguishing "Document_{date}".
+    name = standard_name(_doc(None, filename="IMG_0042.pdf"), None)
+    assert name == "IMG_0042.pdf"
+
+
+def test_document_with_no_type_and_no_filename_last_resorts_to_document_label() -> None:
+    # Defensive last resort only when there's no filename at all (original_filename is normally set).
+    name = standard_name(_doc(None, filename=""), None)
     assert name == "Document_2026-06-24"
 
 
@@ -162,3 +170,29 @@ def test_newly_ruled_type_still_falls_back_to_upload_date_when_period_absent() -
 def test_property_tax_bill_stays_on_upload_fallback_out_of_scope() -> None:
     name = standard_name(_doc("property_tax_bill"), _ext({"due_dates": "Nov 1 and Feb 1"}))
     assert name == "Property-Tax-Bill_2026-06-24"
+
+
+# --- LP-107: an UNCLASSIFIED document falls back to its original filename, not Unknown_{date} ---
+
+
+def test_unknown_type_uses_the_original_filename_not_unknown_date() -> None:
+    name = standard_name(_doc("unknown", filename="Akash W2 Wells 2024.pdf"), None)
+    assert name == "Akash W2 Wells 2024.pdf"  # the real filename, not "Unknown_2026-06-24"
+
+
+def test_pending_none_type_uses_the_original_filename() -> None:
+    name = standard_name(_doc(None, filename="IMG_0042.pdf"), None)
+    assert name == "IMG_0042.pdf"
+
+
+def test_two_unknown_documents_are_distinguishable_by_filename() -> None:
+    a = standard_name(_doc("unknown", filename="EMD wire receipt.pdf"), None)
+    b = standard_name(_doc("unknown", filename="Home Value estimate.pdf"), None)
+    assert a != b and a == "EMD wire receipt.pdf" and b == "Home Value estimate.pdf"
+
+
+def test_classified_type_without_a_rule_still_uses_the_type_label_not_filename() -> None:
+    # A CLASSIFIED type (a real type, just no naming rule) keeps its meaningful {Type}_{date} name —
+    # the original-filename fallback is only for the UNKNOWN/unclassified case.
+    name = standard_name(_doc("credit_report", filename="scan1.pdf"), None)
+    assert name == "Credit-Report_2026-06-24"
