@@ -7282,5 +7282,44 @@ permissive), and the refi path had more such seams untested. Final ticket of the
 
 **Consequences:** the refinance epic (LP-99/100/101) is COMPLETE. Refinance is proven end-to-end for what the
 fixtures exercise; the reserves refi down-payment is fixed; and the ONE remaining gap (GAP-1, DTI double-count) is
-KNOWN and tracked (xfail + LP-102), not hidden behind a falsely-green suite. The fixtures + refi need-set + cash-out
-thresholds remain grounded-starters (validate-with-Priya).
+KNOWN and tracked (xfail + a follow-up ticket), not hidden behind a falsely-green suite. The fixtures + refi
+need-set + cash-out thresholds remain grounded-starters (validate-with-Priya).
+
+## ADR-228: Silent extraction truncation → right-size the budget + a shared truncation guard (LP-102)
+
+- **Date:** 2026-07-02
+- **Status:** Accepted
+
+**Context:** documents classified "Pay stub" extracted EMPTY (all fields blank → NEEDS_REVIEW) while W-2 / investment
+succeeded on the same file. Root cause (confirmed against LF-6T3N: all 4 pay-stub extractions stored
+`error_detail = "could not parse extraction"`, `tokens_used = None`): pay-stub extraction OVERFLOWED its 4096
+`max_tokens`. A pay stub enumerates many earnings/deduction/tax line items (current + YTD), each emitted with a
+verbatim snippet → the JSON response exceeded 4096 output tokens → the model TRUNCATED it mid-object
+(`stop_reason == "max_tokens"`). No extractor checked `stop_reason`, so the cut-off body flowed into
+`extract_json_object` (which needs a *balanced* `{…}`) → `None` → the extractor returned `failed("could not parse
+extraction")` — misreporting a self-inflicted truncation as an unreadable document. It failed on both 9 KB and 204 KB
+stubs (output verbosity, not input size). `investment_account` (also 4096) truncated on its densest doc too — the gap
+was already systemic; Opus 4.8's more-thorough transcription makes any verbose type more likely to hit it.
+
+**Decision:** two fixes.
+
+- **Fix A — right-size the budget:** `pay_stub._MAX_TOKENS` 4096 → **8192** (matching `bank_statement`, the same
+  "capture every line item" verbosity). The other verbose types were already bumped (bank_statement 8192, tax_return
+  16384, divorce_decree 6144); pay stub had been left at the LP-39 scaffold value.
+- **Fix B — a SHARED truncation guard (the primary, systemic fix):** a single
+  `app.ai.extraction.model_call.run_extraction_completion` that every extractor now calls instead of `complete()`
+  directly. It detects `stop_reason == "max_tokens"`, logs it **distinctly** (`extraction_truncated`, not a parse
+  failure), retries **exactly once** at a high ceiling (16384 — one decisive jump), and if it STILL truncates surfaces
+  an **honest** status/`error_detail` — `"response truncated - document too dense to extract in full"`, never the
+  misleading "could not parse extraction". The retry fires **only** on truncation (never on other stop reasons, parse
+  failures, or AI errors — more budget can't fix those); at most 2 attempts. A successful retry is transparent (the
+  fields populate). This covers ALL ~18 extractors via the one shared path — pay stub was just the first to hit it.
+
+**Rejected (Fix C):** dropping the per-field verbatim snippets to shrink the response — they are source provenance
+for verification / the LP-43 drawer. We fixed the budget, not the provenance.
+
+**Consequences:** pay-stub extraction succeeds on the previously-failing docs; a genuinely too-dense document
+(overflowing even 16384) now fails HONESTLY (truncation labeled as truncation) and lands in NEEDS_REVIEW with an
+accurate reason — the same honest-failure-mode principle the project applies everywhere. All extractors now benefit
+from the guard; none silently mis-parse a truncated body. Each extractor's model call moved from a direct
+`complete()` to the shared runner (no per-type behavior change otherwise).

@@ -17,7 +17,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 from app.ai.client import AIClientError
-from app.ai.extraction import hoa_statement as hoa_module
+from app.ai.extraction import model_call
 from app.ai.extraction.hoa_statement import (
     HOAStatementExtraction,
     HOAStatementExtractionResult,
@@ -58,9 +58,11 @@ def _mock_complete(
         mock = AsyncMock(side_effect=exc)
     else:
         mock = AsyncMock(
-            return_value=SimpleNamespace(text=text, input_tokens=130, output_tokens=50, model="m")
+            return_value=SimpleNamespace(
+                text=text, input_tokens=130, output_tokens=50, model="m", stop_reason="end_turn"
+            )
         )
-    monkeypatch.setattr(hoa_module, "complete", mock)
+    monkeypatch.setattr(model_call, "complete", mock)
     return mock
 
 

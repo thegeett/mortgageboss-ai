@@ -22,7 +22,7 @@ from unittest.mock import AsyncMock
 import pytest
 import structlog
 from app.ai.client import AIClientError
-from app.ai.extraction import tax_return as tr_module
+from app.ai.extraction import model_call
 from app.ai.extraction.tax_return import (
     TaxReturnExtraction,
     TaxReturnExtractionResult,
@@ -88,9 +88,11 @@ def _mock_complete(
         mock = AsyncMock(side_effect=exc)
     else:
         mock = AsyncMock(
-            return_value=SimpleNamespace(text=text, input_tokens=900, output_tokens=600, model="m")
+            return_value=SimpleNamespace(
+                text=text, input_tokens=900, output_tokens=600, model="m", stop_reason="end_turn"
+            )
         )
-    monkeypatch.setattr(tr_module, "complete", mock)
+    monkeypatch.setattr(model_call, "complete", mock)
     return mock
 
 

@@ -19,7 +19,7 @@ from unittest.mock import AsyncMock
 import pytest
 import structlog
 from app.ai.client import AIClientError
-from app.ai.extraction import profit_and_loss as pnl_module
+from app.ai.extraction import model_call
 from app.ai.extraction.profit_and_loss import (
     ProfitAndLossExtraction,
     ProfitAndLossExtractionResult,
@@ -66,9 +66,11 @@ def _mock_complete(
         mock = AsyncMock(side_effect=exc)
     else:
         mock = AsyncMock(
-            return_value=SimpleNamespace(text=text, input_tokens=170, output_tokens=80, model="m")
+            return_value=SimpleNamespace(
+                text=text, input_tokens=170, output_tokens=80, model="m", stop_reason="end_turn"
+            )
         )
-    monkeypatch.setattr(pnl_module, "complete", mock)
+    monkeypatch.setattr(model_call, "complete", mock)
     return mock
 
 

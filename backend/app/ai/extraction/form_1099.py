@@ -33,7 +33,8 @@ from typing import Any
 import structlog
 from pydantic import BaseModel, Field, ValidationError
 
-from app.ai.client import AIClientError, build_document_message, complete
+from app.ai.client import build_document_message
+from app.ai.extraction.model_call import run_extraction_completion
 from app.ai.extraction.parsing import (
     CoreSpec,
     coerce_decimal,
@@ -46,7 +47,6 @@ from app.ai.extraction.parsing import (
 from app.ai.extraction.shape import CatchAllSection, TypedField
 from app.ai.parsing import coerce_confidence, extract_json_object
 from app.ai.prompt_loader import load_prompt
-from app.core.config import settings
 from app.models.extraction import ExtractionStatus
 
 logger = structlog.get_logger(__name__)
@@ -162,24 +162,22 @@ async def extract_1099(content: bytes, media_type: str) -> Form1099ExtractionRes
     except ValueError:
         return Form1099ExtractionResult.failed("unsupported document media type")
 
-    try:
-        resp = await complete(
-            model=settings.anthropic_model_extraction,
-            system=system_prompt,
-            messages=[message],
-            max_tokens=_MAX_TOKENS,
-        )
-    except AIClientError:
-        logger.warning("form_1099_extraction_ai_failed")  # metadata only — no bytes/content
-        return Form1099ExtractionResult.failed("AI call failed")
+    call = await run_extraction_completion(
+        system=system_prompt,
+        message=message,
+        max_tokens=_MAX_TOKENS,
+        log_label="form_1099",
+    )
+    if call.text is None:
+        return Form1099ExtractionResult.failed(call.failure_reason or "AI call failed")
 
-    result = _parse_1099_json(resp.text)
+    result = _parse_1099_json(call.text)
     if result is None:
         logger.warning("form_1099_extraction_parse_failed")  # no raw response logged
         return Form1099ExtractionResult.failed("could not parse extraction")
 
-    result.input_tokens = resp.input_tokens
-    result.output_tokens = resp.output_tokens
+    result.input_tokens = call.input_tokens
+    result.output_tokens = call.output_tokens
 
     # Metadata only: status, confidence, COUNTS — NEVER the values (and never the
     # recipient TIN). The subtype is a non-PII category and is safe/useful to log.

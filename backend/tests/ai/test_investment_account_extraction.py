@@ -19,7 +19,7 @@ from unittest.mock import AsyncMock
 import pytest
 import structlog
 from app.ai.client import AIClientError
-from app.ai.extraction import investment_account as inv_module
+from app.ai.extraction import model_call
 from app.ai.extraction.investment_account import (
     InvestmentAccountExtraction,
     InvestmentAccountExtractionResult,
@@ -65,9 +65,11 @@ def _mock_complete(
         mock = AsyncMock(side_effect=exc)
     else:
         mock = AsyncMock(
-            return_value=SimpleNamespace(text=text, input_tokens=150, output_tokens=60, model="m")
+            return_value=SimpleNamespace(
+                text=text, input_tokens=150, output_tokens=60, model="m", stop_reason="end_turn"
+            )
         )
-    monkeypatch.setattr(inv_module, "complete", mock)
+    monkeypatch.setattr(model_call, "complete", mock)
     return mock
 
 
