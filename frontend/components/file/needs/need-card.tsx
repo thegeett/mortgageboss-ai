@@ -97,22 +97,42 @@ export function NeedCard({ fileId, need }: { fileId: string; need: NeedsItemPubl
         </div>
       )}
 
-      {/* The matched document (evidence). LP-108: a graded received need shows "Attached: {doc}";
-          a verified need shows "Satisfied by {doc}". */}
-      {need.satisfied_by_document_filename && (
-        <div className="mt-2 ml-4 flex items-center gap-1.5 text-xs text-gray-500">
-          <FileCheck2
-            className={cn(
-              "h-3.5 w-3.5 shrink-0",
-              need.status === "verified" ? "text-success" : "text-info",
-            )}
-            aria-hidden
-          />
-          <span className="truncate">
-            {need.status === "verified" ? "Satisfied by " : "Attached: "}
-            <span className="font-medium text-gray-700">{need.satisfied_by_document_filename}</span>
-          </span>
+      {/* The matched documents (evidence). LP-109: a graded need shows ALL matching documents
+          (derive-on-read) so the processor confirms coverage against the full set; a simple-presence
+          need shows its single satisfying document. */}
+      {need.matching_documents.length > 0 ? (
+        <div className="mt-2 ml-4">
+          <p className="text-[11px] font-medium uppercase tracking-wide text-gray-400">
+            {need.matching_documents.length} matching document
+            {need.matching_documents.length === 1 ? "" : "s"}
+          </p>
+          <ul className="mt-1 space-y-0.5">
+            {need.matching_documents.map((doc) => (
+              <li key={doc.id} className="flex items-center gap-1.5 text-xs text-gray-600">
+                <FileCheck2 className="h-3.5 w-3.5 shrink-0 text-info" aria-hidden />
+                <span className="truncate font-medium text-gray-700">{doc.filename}</span>
+              </li>
+            ))}
+          </ul>
         </div>
+      ) : (
+        need.satisfied_by_document_filename && (
+          <div className="mt-2 ml-4 flex items-center gap-1.5 text-xs text-gray-500">
+            <FileCheck2
+              className={cn(
+                "h-3.5 w-3.5 shrink-0",
+                need.status === "verified" ? "text-success" : "text-info",
+              )}
+              aria-hidden
+            />
+            <span className="truncate">
+              {need.status === "verified" ? "Satisfied by " : "Attached: "}
+              <span className="font-medium text-gray-700">
+                {need.satisfied_by_document_filename}
+              </span>
+            </span>
+          </div>
+        )
       )}
 
       {/* The reason a need was waived or rejected. */}

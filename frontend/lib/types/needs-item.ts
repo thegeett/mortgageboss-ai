@@ -60,4 +60,14 @@ export interface NeedsItemPublic {
    * (status `received`), not auto-verified, because one document can't prove the full requirement
    * (all accounts/months/years). Drives the honest note + the "Confirm coverage" action. */
   requires_coverage_confirmation: boolean;
+  /** LP-109 (derive-on-read): ALL completed documents matching this need's criteria, so the
+   * processor confirms coverage against the full evidence set (not just the single trigger doc).
+   * Intentionally coarse for umbrella needs; empty for simple-presence needs. */
+  matching_documents: MatchedDocument[];
+}
+
+/** One document matching a need (LP-109) — id (for a link) + display filename. */
+export interface MatchedDocument {
+  id: string;
+  filename: string;
 }

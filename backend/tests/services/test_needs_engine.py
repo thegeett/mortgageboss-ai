@@ -232,6 +232,58 @@ async def test_confirm_coverage_verifies_a_graded_need(db_session: AsyncSession)
     assert need.satisfied_at is not None
 
 
+# --------------------------------------------------------------------------- #
+# DERIVE-ON-READ (LP-109) — show ALL matching documents, not just the trigger
+# --------------------------------------------------------------------------- #
+
+
+async def test_derive_on_read_shows_all_matching_documents(db_session: AsyncSession) -> None:
+    from app.services.needs_engine import documents_matching_need
+
+    lf = await _loan_file(db_session)
+    need = await _pending_need(db_session, lf, needs_type="bank_statement")
+    docs = [
+        await _document(
+            db_session, lf, document_type="bank_statement", status=DocumentStatus.COMPLETED
+        )
+        for _ in range(3)
+    ]
+    # A non-matching completed doc + a non-completed one must be excluded.
+    await _document(db_session, lf, document_type="w2", status=DocumentStatus.COMPLETED)
+    await _document(
+        db_session, lf, document_type="bank_statement", status=DocumentStatus.NEEDS_REVIEW
+    )
+
+    extra = await _document(db_session, lf, document_type="w2", status=DocumentStatus.COMPLETED)
+    matched = documents_matching_need(need, [*docs, extra])
+    assert {d.id for d in matched} == {d.id for d in docs}  # all 3 bank statements, only those
+
+
+async def test_derive_on_read_umbrella_is_coarse_and_over_inclusive(
+    db_session: AsyncSession,
+) -> None:
+    # The asset umbrella need matches EVERY ASSETS-category doc (bank + investment + brokerage) —
+    # intentionally coarse (the "confirm coverage" honesty level), NOT narrowed.
+    from app.services.needs_engine import documents_matching_need
+
+    lf = await _loan_file(db_session)
+    need = await _pending_need(db_session, lf, needs_type="asset_statement")
+    bank = await _document(
+        db_session, lf, document_type="bank_statement", status=DocumentStatus.COMPLETED
+    )
+    inv = await _document(
+        db_session, lf, document_type="investment_account", status=DocumentStatus.COMPLETED
+    )
+    income = await _document(
+        db_session, lf, document_type="pay_stub", status=DocumentStatus.COMPLETED
+    )
+
+    matched = documents_matching_need(need, [bank, inv, income])
+    ids = {d.id for d in matched}
+    assert bank.id in ids and inv.id in ids  # both ASSETS-category docs (coarse, over-inclusive)
+    assert income.id not in ids  # a non-ASSETS doc is not included
+
+
 async def test_umbrella_asset_need_matches_asset_document_by_category(
     db_session: AsyncSession,
 ) -> None:

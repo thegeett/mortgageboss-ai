@@ -20,6 +20,7 @@ from fastapi import APIRouter, HTTPException, status
 from app.api.dependencies import CurrentUser, ScopedLoanFile
 from app.core.database import DbSession
 from app.models.activity_log import ActivityType
+from app.models.document import Document, DocumentStatus
 from app.models.needs_item import NeedsItem, NeedsItemDisposition, NeedsItemOrigin
 from app.schemas.needs_item import (
     NeedsItemAdjust,
@@ -28,8 +29,11 @@ from app.schemas.needs_item import (
     NeedsItemReason,
 )
 from app.services.activity_log import log_activity
+from app.services.documents import list_documents
 from app.services.needs_engine import (
     confirm_need_coverage,
+    documents_matching_need,
+    needs_coverage_confirmation,
     record_need_correction,
     waive_need,
 )
@@ -39,6 +43,27 @@ from app.services.needs_items import (
     get_needs_item,
     list_needs_items,
 )
+
+
+async def _completed_documents(db: DbSession, loan_file_id: UUID) -> list[Document]:
+    """The file's COMPLETED documents — the source for the LP-109 derive-on-read matching set."""
+    docs = await list_documents(db, loan_file_id=loan_file_id)
+    return [d for d in docs if d.status is DocumentStatus.COMPLETED]
+
+
+def _public(need: NeedsItem, completed: list[Document]) -> NeedsItemPublic:
+    """Build the response with the derived matching-document set (LP-109) — the FULL set for a
+    graded need (so the processor confirms coverage against all the evidence); a simple-presence
+    need keeps its single satisfying document."""
+    matches = (
+        documents_matching_need(need, completed) if needs_coverage_confirmation(need) else None
+    )
+    return NeedsItemPublic.from_model(need, matching_documents=matches)
+
+
+async def _public_one(db: DbSession, loan_file_id: UUID, need: NeedsItem) -> NeedsItemPublic:
+    return _public(need, await _completed_documents(db, loan_file_id))
+
 
 router = APIRouter(prefix="/loan-files/{file_identifier}/needs", tags=["needs"])
 
@@ -59,7 +84,8 @@ async def _scoped_need(db: DbSession, loan_file_id: UUID, needs_item_id: UUID) -
 async def list_(loan_file: ScopedLoanFile, db: DbSession) -> list[NeedsItemPublic]:
     """List the file's needs items (blocking-first). File gate via the dependency."""
     items = await list_needs_items(db, loan_file_id=loan_file.id)
-    return [NeedsItemPublic.from_model(item) for item in items]
+    completed = await _completed_documents(db, loan_file.id)  # loaded once (LP-109, no N+1)
+    return [_public(item, completed) for item in items]
 
 
 @router.post("", response_model=NeedsItemPublic, status_code=status.HTTP_201_CREATED)
@@ -97,7 +123,7 @@ async def add(
     )
     await db.commit()
     created = await _scoped_need(db, loan_file.id, item.id)
-    return NeedsItemPublic.from_model(created)
+    return await _public_one(db, loan_file.id, created)
 
 
 @router.post("/{needs_item_id}/confirm", response_model=NeedsItemPublic)
@@ -119,7 +145,7 @@ async def confirm(
         detail={"needs_item_id": str(need.id)},
     )
     await db.commit()
-    return NeedsItemPublic.from_model(need)
+    return await _public_one(db, loan_file.id, need)
 
 
 @router.post("/{needs_item_id}/confirm-coverage", response_model=NeedsItemPublic)
@@ -146,7 +172,7 @@ async def confirm_coverage(
         detail={"needs_item_id": str(need.id)},
     )
     await db.commit()
-    return NeedsItemPublic.from_model(need)
+    return await _public_one(db, loan_file.id, need)
 
 
 @router.patch("/{needs_item_id}", response_model=NeedsItemPublic)
@@ -176,7 +202,7 @@ async def adjust(
         detail={"needs_item_id": str(need.id)},
     )
     await db.commit()
-    return NeedsItemPublic.from_model(need)
+    return await _public_one(db, loan_file.id, need)
 
 
 @router.post("/{needs_item_id}/dismiss", response_model=NeedsItemPublic)
@@ -199,7 +225,7 @@ async def dismiss(
         detail={"needs_item_id": str(need.id)},
     )
     await db.commit()
-    return NeedsItemPublic.from_model(need)
+    return await _public_one(db, loan_file.id, need)
 
 
 @router.post("/{needs_item_id}/waive", response_model=NeedsItemPublic)
@@ -222,4 +248,4 @@ async def waive(
         detail={"needs_item_id": str(need.id)},
     )
     await db.commit()
-    return NeedsItemPublic.from_model(need)
+    return await _public_one(db, loan_file.id, need)

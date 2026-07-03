@@ -15,7 +15,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.models.document import DocumentCategory
+from app.models.document import Document, DocumentCategory
 from app.models.needs_item import (
     NeedsItem,
     NeedsItemDisposition,
@@ -23,6 +23,13 @@ from app.models.needs_item import (
     NeedsItemPriority,
     NeedsItemStatus,
 )
+
+
+class MatchedDocument(BaseModel):
+    """One document matching a need (LP-109) — its id (for a link) + its display filename."""
+
+    id: UUID
+    filename: str
 
 
 class NeedsItemPublic(BaseModel):
@@ -50,13 +57,27 @@ class NeedsItemPublic(BaseModel):
     # confirm coverage" (RECEIVED), NOT auto-verified, because one document can't prove the full
     # requirement (all accounts / months / years). Drives the "confirm coverage" affordance.
     requires_coverage_confirmation: bool = False
+    # LP-109 (derive-on-read): ALL completed documents matching the need's criteria (not just the
+    # single stored trigger), so the processor sees the full evidence set to confirm coverage
+    # against. Computed at read time; intentionally coarse for umbrella needs (see documents_matching_need).
+    matching_documents: list[MatchedDocument] = Field(default_factory=list)
 
     @classmethod
-    def from_model(cls, item: NeedsItem) -> "NeedsItemPublic":
-        """Build the public view. Expects ``satisfied_by_document`` eager-loaded."""
+    def from_model(
+        cls, item: NeedsItem, *, matching_documents: list[Document] | None = None
+    ) -> "NeedsItemPublic":
+        """Build the public view. Expects ``satisfied_by_document`` eager-loaded.
+
+        ``matching_documents`` (LP-109) is the derive-on-read full set of matching documents,
+        supplied by the caller (which loads the file's documents once); ``None`` → empty.
+        """
         from app.services.needs_engine import needs_coverage_confirmation
 
         doc = item.satisfied_by_document
+        matches = [
+            MatchedDocument(id=d.id, filename=d.original_filename)
+            for d in (matching_documents or [])
+        ]
         return cls(
             id=item.id,
             title=item.title,
@@ -75,6 +96,7 @@ class NeedsItemPublic(BaseModel):
             satisfied_at=item.satisfied_at,
             created_at=item.created_at,
             requires_coverage_confirmation=needs_coverage_confirmation(item),
+            matching_documents=matches,
         )
 
 

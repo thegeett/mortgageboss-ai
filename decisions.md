@@ -7463,3 +7463,36 @@ honest "attached — confirm coverage" (or stays Pending) — never a false-gree
 processor makes the coverage judgment the system can't, with the evidence assembled and the gap stated honestly
 ("AI proposes, processor disposes", applied to satisfaction). Same honest-failure-mode principle as the rest of the
 project — never claim more verification than performed. Account-level coverage verification is deferred to V2.
+
+## ADR-233: Derive-on-read the full matching-document set for a need (LP-109)
+
+- **Date:** 2026-07-03
+- **Status:** Accepted
+
+**Context:** LP-108 made graded needs show "documents attached — confirm coverage", but the data model stores a
+single `satisfied_by_document_id` (one FK per need), so a graded need like "2 months of bank statements" displayed
+only ONE of several matching documents — undercutting "confirm coverage" (the processor can't confirm coverage
+against evidence that's mostly hidden). An investigation established the mitigating fact: the matcher's criteria is
+**trivial deterministic equality** (`document_type == needs_type`, or the umbrella need's category == the document's
+category) over fields **already stored** on every document — so the full matching set is a cheap display-time query.
+
+**Decision:** **derive-on-read** — at response-build time, `documents_matching_need(need, documents)` returns ALL of
+the file's completed documents matching the need's criteria (reusing the matcher's equality), and the response
+carries that full `matching_documents` list. **No schema change, no matcher change, no migration.** The single
+`satisfied_by_document_id` is KEPT as the "trigger" (the document that moved the need to RECEIVED); the derived list
+is computed on read. The card shows all matching documents by name for a graded need (a simple-presence need keeps
+its single satisfying document).
+
+- **The over-inclusiveness is intentional.** For an umbrella need the derived set is coarse — the `asset_statement`
+  need includes every ASSETS-category document (even an earnest-money withdrawal). That coarseness IS the
+  "confirm coverage" honesty level: the system surfaces every candidate; the processor curates which count. We do
+  NOT add narrowing/precision — precise, curated, per-need coverage (N accounts × M months) is the V2 coverage grid.
+- **Known limitation (noted, not fixed):** derive-on-read shows the LIVE matching set, not a PERSISTED "processor
+  confirmed these specific documents" decision. A persisted, curated, editable per-need document set (an explicit
+  needs↔documents join + matcher accumulation) is the foundation for V2's Option A, built when its shape is known —
+  NOT now.
+
+**Consequences:** graded needs now show their full evidence set (LF-6T3N's asset need shows all 9 matching ASSETS
+documents instead of 1), delivering LP-108's intent that the single-FK model couldn't. LP-108's false-green STATUS is
+untouched and independent. No new storage, no migration, no matcher change — the cheapest correct delivery, with the
+explicit one-to-many storage deferred to V2/Option A.

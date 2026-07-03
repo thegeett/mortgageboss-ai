@@ -216,6 +216,33 @@ def needs_coverage_confirmation(need: NeedsItem) -> bool:
     return not is_simple_presence_need(need)
 
 
+def documents_matching_need(need: NeedsItem, documents: list[Document]) -> list[Document]:
+    """All COMPLETED documents on the file that match a need's criteria (LP-109, derive-on-read).
+
+    Reuses the SAME trivial-equality criteria the matcher uses (``document_type == needs_type``, or
+    the umbrella need's category == the document's category) — computed at DISPLAY time over the
+    documents already stored, with NO schema/matcher change. Delivers LP-108's "show the matched
+    documents": a graded need shows the full evidence set (not just the single stored trigger), so
+    the processor can confirm coverage against it.
+
+    The set is intentionally COARSE / over-inclusive for umbrella needs (e.g. an ``asset_statement``
+    need includes every ASSETS-category document, even an earnest-money withdrawal) — that is exactly
+    the "confirm coverage" honesty level: the system surfaces every candidate; the processor curates
+    which actually count. Precise, curated, persisted per-need sets are the V2 coverage grid (Option A).
+    """
+    needs_type = need.needs_type or ""
+    umbrella_category = _UMBRELLA_NEED_CATEGORY.get(needs_type)
+    return [
+        d
+        for d in documents
+        if d.status is DocumentStatus.COMPLETED
+        and (
+            d.document_type == needs_type
+            or (umbrella_category is not None and d.category is umbrella_category)
+        )
+    ]
+
+
 async def apply_document_to_needs(db: AsyncSession, document: Document) -> NeedsItem | None:
     """Advance the matching pending need for a just-processed document (LP-68).
 

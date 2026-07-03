@@ -52,6 +52,7 @@ function need(overrides: Partial<NeedsItemPublic> = {}): NeedsItemPublic {
     satisfied_by_document_filename: null,
     satisfied_at: null,
     requires_coverage_confirmation: false,
+    matching_documents: [],
     created_at: "2026-06-19T12:00:00Z",
     ...overrides,
   };
@@ -153,6 +154,31 @@ describe("NeedsDashboard", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /confirm coverage/i }));
     expect(coverageMutate).toHaveBeenCalledWith("n1", expect.anything());
+  });
+
+  // LP-109 — derive-on-read: a graded need shows ALL matching documents (name each), including the
+  // intentionally coarse/over-inclusive match, so the processor confirms coverage against the full set.
+  it("shows ALL matching documents for a graded need (derive-on-read)", () => {
+    setDocuments(false);
+    setNeeds({
+      data: [
+        need({
+          status: "received",
+          requires_coverage_confirmation: true,
+          satisfied_by_document_filename: "BofA checking April.pdf", // the trigger
+          matching_documents: [
+            { id: "d1", filename: "BofA checking April.pdf" },
+            { id: "d2", filename: "BofA savings May.pdf" },
+            { id: "d3", filename: "EMD Withdrawal.pdf" }, // intentionally over-inclusive, shown as-is
+          ],
+        }),
+      ],
+    });
+    render(<NeedsDashboard fileId="f1" />);
+    expect(screen.getByText("3 matching documents")).toBeDefined(); // the full set, not just one
+    expect(screen.getByText("BofA savings May.pdf")).toBeDefined();
+    expect(screen.getByText("EMD Withdrawal.pdf")).toBeDefined(); // coarse match shown as-is (not narrowed)
+    expect(screen.queryByText("Verified")).toBeNull(); // LP-108 status untouched — not a false-green
   });
 
   it("shows 'satisfied by' the document for a verified simple-presence need", () => {
