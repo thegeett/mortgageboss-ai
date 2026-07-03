@@ -5,7 +5,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // The dashboard fetches via hooks; mock the two data layers it depends on so the
 // test drives the data and asserts the rendered checklist + the disposition wiring.
-const { confirmMutate } = vi.hoisted(() => ({ confirmMutate: vi.fn() }));
+const { confirmMutate, coverageMutate } = vi.hoisted(() => ({
+  confirmMutate: vi.fn(),
+  coverageMutate: vi.fn(),
+}));
 
 const useNeeds = vi.fn();
 const useLoanFileDocuments = vi.fn();
@@ -14,6 +17,7 @@ const useLoanFile = vi.fn();
 vi.mock("@/lib/api/needs", () => ({
   useNeeds: (...args: unknown[]) => useNeeds(...args),
   useConfirmNeed: () => ({ mutate: confirmMutate, isPending: false }),
+  useConfirmCoverage: () => ({ mutate: coverageMutate, isPending: false }),
   useAdjustNeed: () => ({ mutate: vi.fn(), isPending: false }),
   useDismissNeed: () => ({ mutate: vi.fn(), isPending: false }),
   useWaiveNeed: () => ({ mutate: vi.fn(), isPending: false }),
@@ -47,6 +51,7 @@ function need(overrides: Partial<NeedsItemPublic> = {}): NeedsItemPublic {
     satisfied_by_document_id: null,
     satisfied_by_document_filename: null,
     satisfied_at: null,
+    requires_coverage_confirmation: false,
     created_at: "2026-06-19T12:00:00Z",
     ...overrides,
   };
@@ -125,6 +130,46 @@ describe("NeedsDashboard", () => {
     const confirm = screen.getByRole("button", { name: "Confirm" });
     fireEvent.click(confirm);
     expect(confirmMutate).toHaveBeenCalledWith("n1", expect.anything());
+  });
+
+  // LP-108 — honest satisfaction: a graded need with a document attached (received) shows
+  // "Confirm coverage" (not a false "satisfied"), the honest coverage note, and the matched doc.
+  it("shows 'confirm coverage' + the attached document for a graded received need", () => {
+    setDocuments(false);
+    setNeeds({
+      data: [
+        need({
+          status: "received",
+          requires_coverage_confirmation: true,
+          satisfied_by_document_filename: "BofA checking April.pdf",
+        }),
+      ],
+    });
+    render(<NeedsDashboard fileId="f1" />);
+    expect(screen.getByText("Documents attached")).toBeDefined(); // honest status pill, not "Verified"
+    expect(screen.queryByText("Verified")).toBeNull(); // never a false-green
+    expect(screen.getByText(/confirm this covers the full requirement/i)).toBeDefined(); // honest note
+    expect(screen.getByText("BofA checking April.pdf")).toBeDefined(); // the matched document shown
+
+    fireEvent.click(screen.getByRole("button", { name: /confirm coverage/i }));
+    expect(coverageMutate).toHaveBeenCalledWith("n1", expect.anything());
+  });
+
+  it("shows 'satisfied by' the document for a verified simple-presence need", () => {
+    setDocuments(false);
+    setNeeds({
+      data: [
+        need({
+          status: "verified",
+          needs_type: "drivers_license",
+          requires_coverage_confirmation: false,
+          satisfied_by_document_filename: "license.pdf",
+        }),
+      ],
+    });
+    render(<NeedsDashboard fileId="f1" />);
+    expect(screen.getByText("Verified")).toBeDefined();
+    expect(screen.getByText("license.pdf")).toBeDefined(); // the matched document is shown
   });
 
   it("does not offer Confirm once a need is confirmed", () => {

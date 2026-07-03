@@ -51,7 +51,11 @@ export const STATE_META: Record<NeedsItemStatus, StateMeta> = {
     pillClass: "bg-destructive/10 text-destructive border-destructive/20",
   },
   received: {
-    label: "In review",
+    // LP-108: a persisting `received` means a graded need has documents attached but the full
+    // coverage (all accounts/months/years) is unverified — the processor confirms it (the card
+    // shows the honest note + a "Confirm coverage" action). A simple-presence need never lingers
+    // here; it auto-verifies.
+    label: "Documents attached",
     group: "in_review",
     dotClass: "bg-info",
     pillClass: "bg-info/10 text-info border-info/20",

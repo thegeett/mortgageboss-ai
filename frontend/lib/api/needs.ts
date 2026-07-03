@@ -96,6 +96,18 @@ export function useConfirmNeed(fileId: string) {
   });
 }
 
+/** LP-108: confirm a graded need's COVERAGE (documents attached → verified). Distinct from
+ * useConfirmNeed (which confirms an AI proposal's disposition). */
+export function useConfirmCoverage(fileId: string) {
+  const invalidate = useNeedsInvalidation(fileId);
+  return useMutation({
+    mutationFn: async (needId: string) =>
+      (await apiClient.post<NeedsItemPublic>(`${needsPath(fileId)}/${needId}/confirm-coverage`))
+        .data,
+    onSuccess: invalidate,
+  });
+}
+
 /** Adjust a need's content (a correction signal). */
 export function useAdjustNeed(fileId: string) {
   const invalidate = useNeedsInvalidation(fileId);

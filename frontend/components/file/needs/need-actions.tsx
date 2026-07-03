@@ -24,6 +24,7 @@ import { Textarea } from "@/components/ui/textarea";
 import {
   type AdjustNeedInput,
   useAdjustNeed,
+  useConfirmCoverage,
   useConfirmNeed,
   useDismissNeed,
   useWaiveNeed,
@@ -45,12 +46,36 @@ export function NeedActions({ fileId, need }: { fileId: string; need: NeedsItemP
   const [dialog, setDialog] = useState<"adjust" | "dismiss" | "waive" | null>(null);
 
   const confirm = useConfirmNeed(fileId);
+  const coverage = useConfirmCoverage(fileId);
   const proposed = isProposed(need);
   const isSettled = need.status === "verified" || need.status === "waived";
+  // LP-108: a graded need with documents attached (received) awaits the processor's coverage
+  // confirmation — the primary action, shown instead of the proposal-Confirm.
+  const attachedGraded = need.status === "received";
 
   return (
     <div className="flex shrink-0 items-center gap-1.5">
-      {proposed && (
+      {attachedGraded && (
+        <Button
+          size="sm"
+          className="h-8 gap-1.5"
+          disabled={coverage.isPending}
+          onClick={() =>
+            coverage.mutate(need.id, {
+              onSuccess: () => toast.success("Coverage confirmed"),
+              onError: (error) => toast.error(getErrorMessage(error)),
+            })
+          }
+        >
+          {coverage.isPending ? (
+            <Spinner className="h-3.5 w-3.5" />
+          ) : (
+            <Check className="h-3.5 w-3.5" />
+          )}
+          Confirm coverage
+        </Button>
+      )}
+      {proposed && !attachedGraded && (
         <Button
           size="sm"
           className="h-8 gap-1.5"

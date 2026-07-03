@@ -170,6 +170,51 @@ async def record_need_correction(
 # A need awaiting a document is in one of these (the orthogonal REQUESTED counts).
 _OPEN_STATES = (NeedsItemStatus.PENDING, NeedsItemStatus.REQUESTED)
 
+# HONEST SATISFACTION (LP-108). The matcher can only verify "a document of the right kind is
+# present" — NOT that a graded requirement (N accounts / M months / M years) is fully met. So a
+# matched document auto-VERIFIES a need ONLY when the need is genuinely satisfied by ONE document
+# (SIMPLE-PRESENCE); a GRADED need instead stops at RECEIVED = "documents attached — confirm
+# coverage", and the processor confirms the coverage the system cannot yet verify. This prevents a
+# DANGEROUS FALSE-GREEN (a 2-month / all-accounts need reading "satisfied" on a single statement).
+#
+# SIMPLE-PRESENCE = the deliverable is inherently ONE document. GROUNDED STARTER — validate with
+# Priya (she confirms which needs are truly one-document-satisfiable). SAFE DEFAULT: anything NOT on
+# this list (incl. every AI-proposed need and any unknown type) is treated as GRADED — under-claiming
+# (an extra confirm click) is a mild annoyance; over-claiming (a false-green) is the dangerous failure.
+_SIMPLE_PRESENCE_NEEDS_TYPES: frozenset[str] = frozenset(
+    {
+        "drivers_license",
+        "purchase_agreement",
+        "gift_letter",
+        "letter_of_explanation",
+        "homeowners_insurance",
+        "title_commitment",
+        "appraisal",
+        "verification_of_employment",
+        "payoff_statement",
+        "existing_mortgage_statement",
+    }
+)
+
+# Umbrella / semantic need types (typically AI-proposed) that name a CATEGORY of documents rather
+# than one concrete document type — so they can't match a document by ``needs_type == document_type``.
+# They match any document in the mapped category instead (a coarse, category-level match — NOT the
+# account-level coverage matching of the V2 "Option A"). GROUNDED STARTER — validate with Priya.
+_UMBRELLA_NEED_CATEGORY: dict[str, DocumentCategory] = {
+    "asset_statement": DocumentCategory.ASSETS,
+    "income_document": DocumentCategory.INCOME_EMPLOYMENT,
+}
+
+
+def is_simple_presence_need(need: NeedsItem) -> bool:
+    """Whether ONE document is the whole requirement (LP-108). Safe default: graded (False)."""
+    return (need.needs_type or "") in _SIMPLE_PRESENCE_NEEDS_TYPES
+
+
+def needs_coverage_confirmation(need: NeedsItem) -> bool:
+    """Whether the need is GRADED — a matched document is "attached, confirm coverage", not verified."""
+    return not is_simple_presence_need(need)
+
 
 async def apply_document_to_needs(db: AsyncSession, document: Document) -> NeedsItem | None:
     """Advance the matching pending need for a just-processed document (LP-68).
@@ -183,11 +228,15 @@ async def apply_document_to_needs(db: AsyncSession, document: Document) -> Needs
     """
     if not document.document_type:
         return None
+    # Match by needs_type == document_type (the concrete case), OR — for an umbrella need naming a
+    # CATEGORY of documents (e.g. "asset_statement") — by the document's category. Coarse, not
+    # account-level (LP-108).
+    umbrella_types = [t for t, c in _UMBRELLA_NEED_CATEGORY.items() if c == document.category]
     stmt = (
         select(NeedsItem)
         .where(
             NeedsItem.loan_file_id == document.loan_file_id,
-            NeedsItem.needs_type == document.document_type,
+            NeedsItem.needs_type.in_([document.document_type, *umbrella_types]),
             NeedsItem.status.in_(_OPEN_STATES),
         )
         .order_by(NeedsItem.created_at)
@@ -198,15 +247,22 @@ async def apply_document_to_needs(db: AsyncSession, document: Document) -> Needs
         return None
 
     await transition_need(db, need=need, to_state=NeedsItemStatus.RECEIVED, document_id=document.id)
-    if document.status is DocumentStatus.COMPLETED:
-        await transition_need(db, need=need, to_state=NeedsItemStatus.VERIFIED)
-    else:  # NEEDS_REVIEW / FAILED — a document arrived but did not pass
+    if document.status is not DocumentStatus.COMPLETED:
+        # NEEDS_REVIEW / FAILED — a document arrived but did not pass.
         await transition_need(
             db,
             need=need,
             to_state=NeedsItemStatus.REJECTED,
             reason=f"A document arrived but did not pass processing ({document.status.value}).",
         )
+    elif is_simple_presence_need(need):
+        # SIMPLE-PRESENCE (LP-108): one document IS the requirement → the match is the verification.
+        await transition_need(db, need=need, to_state=NeedsItemStatus.VERIFIED)
+    else:
+        # GRADED (LP-108): stop at RECEIVED = "documents attached — confirm coverage". The system
+        # verified a document is present, NOT that the full requirement (all accounts/months/years)
+        # is met — the processor confirms that coverage (never a false-green). Stays RECEIVED.
+        logger.info("needs_item_attached_confirm_coverage", need_id=str(need.id))
     logger.info(
         "needs_item_advanced",
         need_id=str(need.id),
@@ -214,6 +270,17 @@ async def apply_document_to_needs(db: AsyncSession, document: Document) -> Needs
         new_status=need.status,
     )
     return need
+
+
+async def confirm_need_coverage(db: AsyncSession, *, need: NeedsItem) -> NeedsItem:
+    """The processor confirms a graded need's coverage (LP-108): RECEIVED → VERIFIED.
+
+    The honest counterpart to auto-verify: a matched document put the need in RECEIVED ("documents
+    attached — confirm coverage"); the processor, having judged the full coverage the system cannot
+    (all accounts / months / years present), confirms it. Uses the guarded transition (a no-op-safe
+    move only from RECEIVED). Uses ``flush``; the caller owns the transaction.
+    """
+    return await transition_need(db, need=need, to_state=NeedsItemStatus.VERIFIED)
 
 
 async def reopen_needs_satisfied_by(db: AsyncSession, *, document_id: UUID) -> list[NeedsItem]:

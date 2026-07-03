@@ -84,11 +84,34 @@ export function NeedCard({ fileId, need }: { fileId: string; need: NeedsItemPubl
         </div>
       )}
 
-      {/* The satisfying document, once a need is received/verified. */}
+      {/* HONEST SATISFACTION (LP-108): a graded need with documents attached (received) says so —
+          the system verified a document is PRESENT, not that the full requirement (all accounts /
+          months / years) is met. The processor confirms that coverage; never a false "satisfied". */}
+      {need.status === "received" && (
+        <div className="mt-2.5 ml-4 flex gap-2 rounded-md border border-info/20 bg-info/[0.06] px-3 py-2">
+          <FileCheck2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-info" aria-hidden />
+          <p className="text-xs leading-relaxed text-gray-600">
+            Documents attached — confirm this covers the full requirement (all accounts / months /
+            years). The system verified a document is present, not the complete coverage.
+          </p>
+        </div>
+      )}
+
+      {/* The matched document (evidence). LP-108: a graded received need shows "Attached: {doc}";
+          a verified need shows "Satisfied by {doc}". */}
       {need.satisfied_by_document_filename && (
         <div className="mt-2 ml-4 flex items-center gap-1.5 text-xs text-gray-500">
-          <FileCheck2 className="h-3.5 w-3.5 shrink-0 text-success" aria-hidden />
-          <span className="truncate">Satisfied by {need.satisfied_by_document_filename}</span>
+          <FileCheck2
+            className={cn(
+              "h-3.5 w-3.5 shrink-0",
+              need.status === "verified" ? "text-success" : "text-info",
+            )}
+            aria-hidden
+          />
+          <span className="truncate">
+            {need.status === "verified" ? "Satisfied by " : "Attached: "}
+            <span className="font-medium text-gray-700">{need.satisfied_by_document_filename}</span>
+          </span>
         </div>
       )}
 

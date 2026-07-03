@@ -7422,3 +7422,44 @@ and is flagged as a **fast-follow (LP-107)** — not silently left.
 **Consequences:** a stale investment/retirement (asset) statement and an old P&L now flag "May be stale" and become
 package-unfit, from the date already extracted; no new extraction, no parallel path, no frontend change (the badge is
 type-agnostic). The FHA/Conventional recency rules remain inert until LP-107 builds their facts.
+
+## ADR-232: Honest needs satisfaction — graded needs "attach, confirm coverage" (never a false-green) (LP-108)
+
+- **Date:** 2026-07-03
+- **Status:** Accepted
+
+**Context:** the needs engine matched a document to a need at TYPE granularity (`needs_type == document_type`) and, on
+a completed match, auto-advanced the need RECEIVED → VERIFIED. For a GRADED need — one whose requirement is inherently
+more than "one document exists" (2 years of tax returns, 2 months of bank statements, "all asset accounts covering two
+months") — this is a **dangerous FALSE-GREEN**: the first matching statement flips the whole requirement to
+"satisfied", telling the processor asset/income documentation is COMPLETE when most of it is missing. Unlike the
+project's other bugs (which fail loud/safe), this claims MORE verification than performed — the dangerous direction.
+On LF-6T3N it was masked only by an unrelated pay-stub truncation (LP-102); fixing/reprocessing that would have
+UNMASKED it, so the display and honesty fixes had to ship together.
+
+**Decision (Option B — honest satisfaction, NOT Option A account-level coverage):**
+
+- **Classify simple-presence vs graded.** A curated allowlist (`_SIMPLE_PRESENCE_NEEDS_TYPES`: drivers_license,
+  purchase_agreement, gift_letter, letter_of_explanation, homeowners_insurance, title_commitment, appraisal,
+  verification_of_employment, payoff_statement, existing_mortgage_statement) names the needs where ONE document IS the
+  requirement. **Safe default: everything else — including every AI-proposed need and any unknown/None type — is
+  GRADED.** Under-claiming (an extra confirm click) is a mild annoyance; over-claiming (a false-green) is the danger.
+  Grounded starter — validate-with-Priya.
+- **Honest transition.** A matched completed document → RECEIVED. Simple-presence → auto VERIFIED (the match IS the
+  verification). Graded → **stops at RECEIVED = "documents attached — confirm coverage"** (no false-green); the
+  processor confirms the coverage the system can't (all accounts / months / years) via a new
+  `POST /needs/{id}/confirm-coverage` (RECEIVED → VERIFIED). RECEIVED was already a transient "arrived, not verified"
+  state, so this needs NO new status/migration — a *persisting* RECEIVED now means "confirm coverage".
+- **Always show the matched document.** Every matched need (attached or verified) surfaces the document by name (the
+  card reads "Attached: X" for received, "Satisfied by X" for verified) plus the honest coverage note.
+- **Umbrella needs match by category.** An AI umbrella need naming a category (`asset_statement`) matched no concrete
+  document type, so it never attached. It now matches any document in the mapped category
+  (`asset_statement → ASSETS`) — a coarse, category-level match that lands in the same honest RECEIVED state. This is
+  NOT the account-level coverage matching (parse which account, N accounts × M months, a coverage grid) — that is
+  **Option A / V2**.
+
+**Consequences:** a graded need can no longer read "satisfied" on a single document; the LF-6T3N asset need shows the
+honest "attached — confirm coverage" (or stays Pending) — never a false-green — even after reprocessing. The
+processor makes the coverage judgment the system can't, with the evidence assembled and the gap stated honestly
+("AI proposes, processor disposes", applied to satisfaction). Same honest-failure-mode principle as the rest of the
+project — never claim more verification than performed. Account-level coverage verification is deferred to V2.

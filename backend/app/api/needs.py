@@ -28,7 +28,11 @@ from app.schemas.needs_item import (
     NeedsItemReason,
 )
 from app.services.activity_log import log_activity
-from app.services.needs_engine import record_need_correction, waive_need
+from app.services.needs_engine import (
+    confirm_need_coverage,
+    record_need_correction,
+    waive_need,
+)
 from app.services.needs_items import (
     adjust_needs_item,
     create_needs_item,
@@ -111,6 +115,33 @@ async def confirm(
         loan_file_id=loan_file.id,
         activity_type=ActivityType.NEEDS_ITEM_CONFIRMED,
         summary=f"Confirmed need: {need.title}",
+        actor_user_id=current_user.id,
+        detail={"needs_item_id": str(need.id)},
+    )
+    await db.commit()
+    return NeedsItemPublic.from_model(need)
+
+
+@router.post("/{needs_item_id}/confirm-coverage", response_model=NeedsItemPublic)
+async def confirm_coverage(
+    loan_file: ScopedLoanFile,
+    needs_item_id: UUID,
+    db: DbSession,
+    current_user: CurrentUser,
+) -> NeedsItemPublic:
+    """Confirm a graded need's COVERAGE (LP-108): RECEIVED → VERIFIED.
+
+    A matched document put the need in RECEIVED ("documents attached — confirm coverage"); the
+    processor, having judged the full coverage the system can't (all accounts / months / years),
+    confirms it. Distinct from ``/confirm`` (which confirms an AI PROPOSAL's disposition).
+    """
+    need = await _scoped_need(db, loan_file.id, needs_item_id)
+    await confirm_need_coverage(db, need=need)
+    await log_activity(
+        db,
+        loan_file_id=loan_file.id,
+        activity_type=ActivityType.NEEDS_ITEM_SATISFIED,
+        summary=f"Confirmed coverage: {need.title}",
         actor_user_id=current_user.id,
         detail={"needs_item_id": str(need.id)},
     )

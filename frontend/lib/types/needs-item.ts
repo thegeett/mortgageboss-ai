@@ -56,4 +56,8 @@ export interface NeedsItemPublic {
   satisfied_by_document_filename: string | null;
   satisfied_at: string | null;
   created_at: string;
+  /** LP-108: true when the need is GRADED — a matched document is "attached, confirm coverage"
+   * (status `received`), not auto-verified, because one document can't prove the full requirement
+   * (all accounts/months/years). Drives the honest note + the "Confirm coverage" action. */
+  requires_coverage_confirmation: boolean;
 }

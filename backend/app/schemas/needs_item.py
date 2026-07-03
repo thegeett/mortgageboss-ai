@@ -46,10 +46,16 @@ class NeedsItemPublic(BaseModel):
     satisfied_by_document_filename: str | None  # the doc that fulfilled it, for display
     satisfied_at: datetime | None
     created_at: datetime
+    # HONEST SATISFACTION (LP-108): True when the need is GRADED — a matched document is "attached,
+    # confirm coverage" (RECEIVED), NOT auto-verified, because one document can't prove the full
+    # requirement (all accounts / months / years). Drives the "confirm coverage" affordance.
+    requires_coverage_confirmation: bool = False
 
     @classmethod
     def from_model(cls, item: NeedsItem) -> "NeedsItemPublic":
         """Build the public view. Expects ``satisfied_by_document`` eager-loaded."""
+        from app.services.needs_engine import needs_coverage_confirmation
+
         doc = item.satisfied_by_document
         return cls(
             id=item.id,
@@ -68,6 +74,7 @@ class NeedsItemPublic(BaseModel):
             satisfied_by_document_filename=doc.original_filename if doc else None,
             satisfied_at=item.satisfied_at,
             created_at=item.created_at,
+            requires_coverage_confirmation=needs_coverage_confirmation(item),
         )
 
 
