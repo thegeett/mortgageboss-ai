@@ -85,6 +85,69 @@ def test_pay_stub_falls_back_to_period_end_when_no_pay_date() -> None:
     assert info.is_stale is True and info.kind == "aged"
 
 
+# --- LP-106: asset/income statements now staleness-checked via their extracted period ---------
+
+
+def test_stale_investment_statement_is_flagged() -> None:
+    # An asset statement 100 days old — past the ~90-day window → flagged (reserves may be stale).
+    doc = _doc("investment_account")
+    ext = _extraction({"statement_period_end": (date(2026, 3, 16)).isoformat()})  # 100 days ago
+    info = evaluate_staleness(doc, ext, today=TODAY)
+    assert info.is_stale is True and info.kind == "aged"
+    assert info.as_of_date == date(2026, 3, 16)  # the extracted date drives the badge
+
+
+def test_fresh_investment_statement_is_not_flagged() -> None:
+    doc = _doc("investment_account")
+    ext = _extraction({"statement_period_end": (date(2026, 5, 31)).isoformat()})  # 24 days ago
+    assert evaluate_staleness(doc, ext, today=TODAY).is_stale is False
+
+
+def test_quarterly_asset_statement_within_90d_is_not_false_flagged() -> None:
+    # A normal current quarterly statement (~2 months old) must NOT be flagged (why 90 > bank's 60).
+    doc = _doc("retirement_account")
+    ext = _extraction({"statement_period_end": (date(2026, 4, 30)).isoformat()})  # 55 days ago
+    assert evaluate_staleness(doc, ext, today=TODAY).is_stale is False
+
+
+def test_stale_retirement_statement_is_flagged() -> None:
+    doc = _doc("retirement_account")
+    ext = _extraction({"statement_period_end": (date(2026, 3, 1)).isoformat()})  # 115 days ago
+    assert evaluate_staleness(doc, ext, today=TODAY).is_stale is True
+
+
+def test_stale_profit_and_loss_is_flagged() -> None:
+    doc = _doc("profit_and_loss")
+    ext = _extraction({"period_end": (date(2026, 1, 31)).isoformat()})  # 144 days ago (> 120)
+    info = evaluate_staleness(doc, ext, today=TODAY)
+    assert info.is_stale is True and info.kind == "aged"
+
+
+def test_recent_profit_and_loss_is_not_flagged() -> None:
+    doc = _doc("profit_and_loss")
+    ext = _extraction({"period_end": (date(2026, 3, 31)).isoformat()})  # 85 days ago (< 120)
+    assert evaluate_staleness(doc, ext, today=TODAY).is_stale is False
+
+
+# --- LP-106: deliberately NOT wired (under-vs-over) — no meaningful recency signal ------------
+
+
+def test_voe_is_not_recency_checked_no_clean_date() -> None:
+    # voe.end_date is the employment TERMINATION date (null for a current employee), not an
+    # issue/verification date — so voe is intentionally not in RECENCY_WINDOWS.
+    doc = _doc("voe")
+    ext = _extraction(
+        {"end_date": (date(2020, 1, 1)).isoformat()}
+    )  # very old, but not a recency signal
+    assert evaluate_staleness(doc, ext, today=TODAY).is_stale is False
+
+
+def test_mortgage_statement_is_not_recency_checked_due_date_is_future_obligation() -> None:
+    doc = _doc("mortgage_statement")
+    ext = _extraction({"due_date": (date(2020, 1, 1)).isoformat()})
+    assert evaluate_staleness(doc, ext, today=TODAY).is_stale is False
+
+
 # --------------------------------------------------------------------------- #
 # Expiration
 # --------------------------------------------------------------------------- #

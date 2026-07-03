@@ -7389,3 +7389,36 @@ separate follow-up (LP-106).
 period is one consistent, server-tested string everywhere; the drawer keeps full provenance. Why server-side (not a
 frontend formatter): the card is a lean list item without the raw extracted_data, and a single Python formatter is
 unit-testable per concept and shared by card + drawer.
+
+## ADR-231: Expand document staleness to types that already extract a period (LP-106)
+
+- **Date:** 2026-07-03
+- **Status:** Accepted
+
+**Context:** the LP-71 staleness badge judges freshness from a document's extracted date against a per-type window
+(`RECENCY_WINDOWS`), but was wired for only 4 types. `investment_account` / `retirement_account` already extract
+`statement_period_end` (the same field bank_statement uses), yet a **stale asset statement was never flagged** — the
+date existed but wasn't checked. Asset statements verify reserves / down-payment availability and must be recent, so
+this is a correctness gap.
+
+**Decision:** reuse the existing mechanism — add entries to `RECENCY_WINDOWS` (no parallel path). `investment_account`
++ `retirement_account` at **90 days** on `statement_period_end` (a bit wider than bank's 60 d because those statements
+are often **quarterly** — 60 d would false-flag a normal current one); `profit_and_loss` at **120 days** on
+`period_end` (a self-employed P&L should be reasonably current). The badge, `as_of_date`, and package-fitness pick
+these up automatically. Windows are **grounded starters — validate-with-Priya**; the mechanism is the fix, the exact
+day counts are hers.
+
+**Under-vs-over (deliberately NOT wired):** `voe` (`end_date` is the employment *termination* date, null for a current
+employee — not a verification/issue date, so no clean recency signal) and `mortgage_statement` (`due_date` is a
+*future* obligation, not an as-of date). Forcing a window on either would produce a meaningless/false signal.
+
+**Separate concern, flagged (not built here):** the verification engine's file-level recency FACTS —
+`documents.income.most_recent_age_months` + `documents.asset_statement.most_recent_age_months` — are **read** by
+Conventional + FHA rules but **never built** in `build_file_facts` (only the pay-stub age fact is), so those recency
+rules are **inert**. That is a different code path; wiring the staleness badge does not build them. It needs a new
+fact-builder (aggregate the newest income/asset-statement extraction date → months, like `_most_recent_paystub_age`)
+and is flagged as a **fast-follow (LP-107)** — not silently left.
+
+**Consequences:** a stale investment/retirement (asset) statement and an old P&L now flag "May be stale" and become
+package-unfit, from the date already extracted; no new extraction, no parallel path, no frontend change (the badge is
+type-agnostic). The FHA/Conventional recency rules remain inert until LP-107 builds their facts.
