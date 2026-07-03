@@ -39,9 +39,26 @@ NAME_RULES: dict[str, NameRule] = {
     "bank_statement": NameRule("Bank-Statement", ("bank_name",), "statement_period_end"),
     "tax_return": NameRule("Tax-Return-1040", ("taxpayer_names",), "tax_year"),
     "form_1099": NameRule("1099", ("payer_name",), "tax_year"),
-    "drivers_license": NameRule("Drivers-License", ("full_name",), None),
+    "drivers_license": NameRule("Drivers-License", ("full_name",), "expiration_date"),
     "mortgage_statement": NameRule("Mortgage-Statement", ("lender_name",), "due_date"),
     "homeowners_insurance": NameRule("Homeowners-Insurance", ("carrier_name",), "expiration_date"),
+    # LP-105 — the remaining types that extract a date now feed it into the name (instead of
+    # falling back to the upload date), so same-type documents are distinguishable. The
+    # graceful {Type}_{UploadDate} fallback still applies when the date isn't extracted yet.
+    "investment_account": NameRule(
+        "Investment-Account", ("institution_name",), "statement_period_end"
+    ),
+    "retirement_account": NameRule(
+        "Retirement-Account", ("institution_name",), "statement_period_end"
+    ),
+    "profit_and_loss": NameRule("Profit-And-Loss", ("business_name",), "period_end"),
+    "voe": NameRule("VOE", ("employer_name",), "end_date"),
+    "hoa_statement": NameRule("HOA-Statement", ("association_name",), "due_date"),
+    "purchase_agreement": NameRule("Purchase-Agreement", ("property_address",), "closing_date"),
+    "divorce_decree": NameRule("Divorce-Decree", (), "effective_date"),
+    "letter_of_explanation": NameRule("Letter-Of-Explanation", ("subject",), "referenced_date"),
+    # OUT OF SCOPE (kept on the {Type}_{UploadDate} fallback): property_tax_bill (due_dates is a
+    # verbatim string, not a clean date — normalization is separate) and gift_letter (no date).
 }
 
 

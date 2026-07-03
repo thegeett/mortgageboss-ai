@@ -98,3 +98,67 @@ def test_name_never_contains_spaces() -> None:
     )
     assert " " not in name
     assert name == "Bank-Statement_Wells-Fargo-Bank_2026-01-31"
+
+
+# --- LP-105: the newly-ruled types now use their extracted period in the name ------------------
+
+
+def test_investment_account_name_uses_statement_period() -> None:
+    name = standard_name(
+        _doc("investment_account"),
+        _ext({"institution_name": "Vanguard", "statement_period_end": "2026-05-31"}),
+    )
+    assert name == "Investment-Account_Vanguard_2026-05-31"
+
+
+def test_retirement_account_name_uses_statement_period() -> None:
+    name = standard_name(
+        _doc("retirement_account"),
+        _ext({"institution_name": "Fidelity", "statement_period_end": "2026-05-31"}),
+    )
+    assert name == "Retirement-Account_Fidelity_2026-05-31"
+
+
+def test_profit_and_loss_name_uses_period_end() -> None:
+    name = standard_name(
+        _doc("profit_and_loss"),
+        _ext({"business_name": "Swad Mania LLC", "period_end": "2025-12-31"}),
+    )
+    assert name == "Profit-And-Loss_Swad-Mania-LLC_2025-12-31"
+
+
+def test_voe_name_uses_end_date() -> None:
+    name = standard_name(_doc("voe"), _ext({"employer_name": "Acme", "end_date": "2026-06-30"}))
+    assert name == "VOE_Acme_2026-06-30"
+
+
+def test_purchase_agreement_name_uses_closing_date() -> None:
+    name = standard_name(
+        _doc("purchase_agreement"),
+        _ext({"property_address": "123 Main St", "closing_date": "2026-08-15"}),
+    )
+    assert name == "Purchase-Agreement_123-Main-St_2026-08-15"
+
+
+def test_divorce_decree_name_uses_effective_date_no_identifier() -> None:
+    name = standard_name(_doc("divorce_decree"), _ext({"effective_date": "2024-02-10"}))
+    assert name == "Divorce-Decree_2024-02-10"
+
+
+def test_drivers_license_name_now_includes_expiration() -> None:
+    name = standard_name(
+        _doc("drivers_license"),
+        _ext({"full_name": "Robin Sample", "expiration_date": "2028-03-01"}),
+    )
+    assert name == "Drivers-License_Robin-Sample_2028-03-01"
+
+
+def test_newly_ruled_type_still_falls_back_to_upload_date_when_period_absent() -> None:
+    # investment_account with no statement period extracted → graceful {Type}_{UploadDate}.
+    name = standard_name(_doc("investment_account"), _ext({"institution_name": None}))
+    assert name == "Investment-Account_2026-06-24"
+
+
+def test_property_tax_bill_stays_on_upload_fallback_out_of_scope() -> None:
+    name = standard_name(_doc("property_tax_bill"), _ext({"due_dates": "Nov 1 and Feb 1"}))
+    assert name == "Property-Tax-Bill_2026-06-24"

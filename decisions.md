@@ -7354,3 +7354,38 @@ from the start.
 **Consequences:** the confirmed investment-account asset-understatement bug is fixed and its three same-shape peers
 are pre-empted; the bounded tail stays lean (no wasted budget, signal preserved), covered by the guard. No change to
 the guard or the pay-stub fix. This is truncation/budget only — plausibility/misread checks are a separate concern.
+
+## ADR-230: Surface document periods — server-derived, type-aware period + period in the name (LP-105)
+
+- **Date:** 2026-07-03
+- **Status:** Accepted
+
+**Context:** 17 of 18 document types already extract a date/period, but it was poorly surfaced — only as
+individual raw rows in the drawer, and reaching the card indirectly via `standard_name`, which only 8 types had a
+naming rule for (the other ~10 fell back to `{Type}_{upload_date}` → undifferentiated names, the "8 identical
+Pay-Stub cards" pain). This is a display/naming gap over already-extracted data, not an extraction gap.
+
+**Decision:** two parts, both surfacing what's already extracted.
+
+- **Consolidated period display, derived server-side.** A new `app/documents/period.py::document_period` maps each
+  type to its period CONCEPT (range / tax year / single labeled date / expiry / verbatim) and returns one
+  `{label, value}` (e.g. `Period: Jun 1 - Jun 15, 2026`, `Closes: Aug 15, 2026`). It is computed in the response
+  builder (`_enrich`, alongside `standard_name`/staleness) and exposed as `DocumentResponse.period`, so BOTH the
+  card and the drawer render ONE tested formatter rather than duplicating type-aware logic on the client. The card
+  gets an at-a-glance distinguishing line; the drawer gets a consolidated line ABOVE the existing per-field raw rows
+  (source snippets preserved — the period consolidates in addition, never replaces provenance). Graceful: `None`
+  when the type has no period concept or the date isn't extracted yet.
+- **Period in `standard_name` for all types.** Extended the LP-72 `NAME_RULES` (an existing config-dict pattern)
+  with the ~10 missing types so the name uses the extracted date (investment/retirement→statement_period_end,
+  P&L→period_end, voe→end_date, hoa→due_date, purchase_agreement→closing_date, divorce_decree→effective_date,
+  LOE→referenced_date, drivers_license→expiration_date). The graceful `{Type}_{upload_date}` fallback is unchanged
+  when the date isn't extracted.
+
+**Boundaries:** display + naming only — NO new extraction (gift_letter's missing date and property_tax_bill's
+verbatim-string normalization stay out; the tax bill's string is shown as-is in the display). Staleness/recency is a
+separate follow-up (LP-106).
+
+**Consequences:** same-type documents are now distinguishable by both the card's period line and their name; the
+period is one consistent, server-tested string everywhere; the drawer keeps full provenance. Why server-side (not a
+frontend formatter): the card is a lean list item without the raw extracted_data, and a single Python formatter is
+unit-testable per concept and shared by card + drawer.

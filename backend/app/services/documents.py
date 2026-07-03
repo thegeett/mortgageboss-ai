@@ -27,6 +27,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.documents.naming import standard_name
+from app.documents.period import document_period
 from app.documents.staleness import evaluate_staleness, package_fitness, package_qualification
 from app.models.base import utcnow
 from app.models.document import Document, DocumentStatus, StalenessResolution, UploadSource
@@ -260,6 +261,7 @@ def _enrich(
         package_fit=package_fitness(document, staleness),
         standard_name=standard_name(document, extraction),
         package_qualification=package_qualification(document, staleness),
+        period=document_period(document, extraction),
     )
 
 

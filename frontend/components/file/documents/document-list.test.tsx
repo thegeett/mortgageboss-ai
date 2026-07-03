@@ -32,6 +32,7 @@ function doc(overrides: Partial<DocumentResponse> = {}): DocumentResponse {
     staleness: { is_stale: false, kind: null, reason: null, resolution: null, as_of_date: null },
     package_fit: { fit: true, reason: null },
     standard_name: "",
+    period: null,
     package_qualification: { qualified: false, reason: "not_extracted" },
     ...overrides,
   };
@@ -205,5 +206,46 @@ describe("DocumentList — standard naming + package-ready (LP-72)", () => {
       />,
     );
     expect(screen.queryByLabelText("Package-ready")).toBeNull();
+  });
+
+  // LP-105 — the consolidated period line makes same-type documents distinguishable at a glance.
+  it("shows the consolidated period line on the card", () => {
+    render(
+      <DocumentList
+        documents={[doc({ period: { label: "Period", value: "Jun 1 - Jun 15, 2026" } })]}
+        isPending={false}
+        isError={false}
+        onSelect={vi.fn()}
+      />,
+    );
+    expect(screen.getByText("Period: Jun 1 - Jun 15, 2026")).toBeDefined();
+  });
+
+  it("shows no period line when the period is absent (graceful)", () => {
+    const { container } = render(
+      <DocumentList
+        documents={[doc({ period: null })]}
+        isPending={false}
+        isError={false}
+        onSelect={vi.fn()}
+      />,
+    );
+    expect(container.textContent).not.toContain("Period:");
+  });
+
+  it("distinguishes two same-type documents by their period", () => {
+    render(
+      <DocumentList
+        documents={[
+          doc({ id: "a", period: { label: "Period", value: "Jun 1 - Jun 15, 2026" } }),
+          doc({ id: "b", period: { label: "Period", value: "Jun 16 - Jun 30, 2026" } }),
+        ]}
+        isPending={false}
+        isError={false}
+        onSelect={vi.fn()}
+      />,
+    );
+    expect(screen.getByText("Period: Jun 1 - Jun 15, 2026")).toBeDefined();
+    expect(screen.getByText("Period: Jun 16 - Jun 30, 2026")).toBeDefined();
   });
 });
