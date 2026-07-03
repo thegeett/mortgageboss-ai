@@ -45,7 +45,10 @@ logger = structlog.get_logger(__name__)
 
 _PROMPT_PATH = "extraction/retirement_account.txt"
 _SUPPORTED_MEDIA_TYPES = frozenset({"application/pdf", "image/jpeg", "image/png", "image/jpg"})
-_MAX_TOKENS = 4096
+# A 401(k)/IRA statement itemizes an UNBOUNDED holdings list (same shape as investment_account),
+# each with a verbatim snippet → a long list = long JSON. 8192 like bank_statement so a dense fund
+# list isn't truncated (LP-103). The LP-102 shared guard (model_call) is the backstop for overflow.
+_MAX_TOKENS = 8192
 
 
 class RetirementAccountExtraction(BaseModel):

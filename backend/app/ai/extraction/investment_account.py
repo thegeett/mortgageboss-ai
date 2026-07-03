@@ -46,7 +46,11 @@ logger = structlog.get_logger(__name__)
 
 _PROMPT_PATH = "extraction/investment_account.txt"
 _SUPPORTED_MEDIA_TYPES = frozenset({"application/pdf", "image/jpeg", "image/png", "image/jpg"})
-_MAX_TOKENS = 4096
+# A brokerage statement itemizes an UNBOUNDED holdings list (each position: ticker, shares, value),
+# each with a verbatim snippet → a long list = long JSON. 4096 truncated on a dense portfolio
+# (observed on LF-6T3N — a silently-empty ASSET doc that understates reserves), so 8192 like
+# bank_statement (LP-103). The LP-102 shared guard (model_call) is the backstop if one still overflows.
+_MAX_TOKENS = 8192
 
 
 class InvestmentAccountExtraction(BaseModel):

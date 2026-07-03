@@ -7323,3 +7323,34 @@ for verification / the LP-43 drawer. We fixed the budget, not the provenance.
 accurate reason — the same honest-failure-mode principle the project applies everywhere. All extractors now benefit
 from the guard; none silently mis-parse a truncated body. Each extractor's model call moved from a direct
 `complete()` to the shared runner (no per-type behavior change otherwise).
+
+## ADR-229: Right-size extraction budgets by output shape (LP-103) — not a blanket raise
+
+- **Date:** 2026-07-03
+- **Status:** Accepted
+
+**Context:** LP-102's pay-stub truncation was one instance of a class — an UNBOUNDED "capture every X" catch-all
+output still at the 4096 LP-39 scaffold budget. An audit across all ~18 extractors found the same shape on more
+types. Most consequentially, **`investment_account` (4096) was already truncating on LF-6T3N** — a silently-empty
+ASSET document. Assets feed reserves / down-payment verification, so a truncated brokerage statement UNDERSTATES a
+borrower's assets: a live "wrong in a way that matters" bug, not just cleanup.
+
+**Decision:** right-size by OUTPUT SHAPE, raising only the unbounded-catch-all-at-4096 types to **8192**:
+`investment_account` (confirmed live failure — itemized holdings), `retirement_account` (same holdings shape),
+`profit_and_loss` (revenue + each-expense lines), `purchase_agreement` (contingencies/concessions/addenda). The
+already-right-sized types are left ALONE (tax_return 16384, bank_statement 8192, pay_stub 8192, divorce_decree 6144),
+as are the bounded/semi-bounded fixed-form types (w2, voe, drivers_license 2048, letter_of_explanation,
+homeowners_insurance, mortgage_statement, hoa_statement, property_tax_bill, form_1099 — all at their current budgets).
+
+**Why NOT blanket-raise everything to a high ceiling:** a right-sized per-type budget encodes a useful size
+EXPECTATION, so a truncation against it is a meaningful ANOMALY signal — that signal is exactly how the pay-stub and
+investment-account bugs were found. A uniform high ceiling would blind the system to output size and let a runaway
+output generate expensively before anything stopped it. The LP-102 shared guard is the backstop that makes
+right-sizing (vs. over-provisioning) safe: a mis-sized type still fails HONESTLY (retry once at 16384, then an honest
+truncated status), never silently. The per-type **sizing rule** (unbounded → generous 8192/16384; fixed-form →
+small; guard as backstop) is documented in `app/ai/extraction/model_call.py` so the next extractor is right-sized
+from the start.
+
+**Consequences:** the confirmed investment-account asset-understatement bug is fixed and its three same-shape peers
+are pre-empted; the bounded tail stays lean (no wasted budget, signal preserved), covered by the guard. No change to
+the guard or the pay-stub fix. This is truncation/budget only — plausibility/misread checks are a separate concern.

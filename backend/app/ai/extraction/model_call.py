@@ -20,6 +20,23 @@ the logic. The guard:
   document, and a doc overflowing 16k output tokens genuinely warrants a human look.
 * Retries fire **only** on truncation — never on other stop reasons, parse failures, or AI errors
   (more budget can't fix those). At most two attempts total.
+
+Per-type ``_MAX_TOKENS`` SIZING RULE (LP-102/LP-103) — right-size by OUTPUT SHAPE, do NOT blanket-raise:
+
+* **Unbounded catch-all output** — the prompt says "capture every X" (a variable-length list of line
+  items each with a verbatim snippet: holdings, transactions, expense lines, schedule rows, contract
+  terms) → give a **generous** budget: **8192** (e.g. pay_stub, bank_statement, investment_account,
+  retirement_account, profit_and_loss, purchase_agreement), or **16384** for the densest (tax_return's
+  nested 1040 + schedules).
+* **Bounded fixed-form output** — a fixed set of fields, no unbounded list (W-2 boxes, a VOE, a
+  driver's license) → a **small** budget (2048 to 4096) is correct and *intentional*.
+
+Why not just set everything high: a right-sized budget encodes a useful size EXPECTATION, so a
+truncation against it is a meaningful ANOMALY signal (it's how the pay-stub and investment-account
+bugs were found). A uniform high ceiling would blind the system to output size and let a runaway
+output generate expensively before anything stopped it. The guard above is the backstop that makes
+right-sizing (vs. over-provisioning) safe — a mis-sized type still fails HONESTLY, never silently.
+When adding a new extractor, size its budget by this rule from the start.
 """
 
 from __future__ import annotations

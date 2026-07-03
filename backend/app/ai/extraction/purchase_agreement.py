@@ -42,7 +42,10 @@ logger = structlog.get_logger(__name__)
 
 _PROMPT_PATH = "extraction/purchase_agreement.txt"
 _SUPPORTED_MEDIA_TYPES = frozenset({"application/pdf", "image/jpeg", "image/png", "image/jpg"})
-_MAX_TOKENS = 4096
+# A purchase contract carries a SEMI-UNBOUNDED set of terms (contingencies, concessions, addenda,
+# dates), each with a verbatim snippet → a long list = long JSON on a heavily-amended deal. 8192 so
+# it isn't truncated (LP-103). The LP-102 shared guard (model_call) is the backstop for any overflow.
+_MAX_TOKENS = 8192
 
 
 class PurchaseAgreementExtraction(BaseModel):
