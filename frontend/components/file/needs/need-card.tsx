@@ -25,9 +25,15 @@ export function NeedCard({ fileId, need }: { fileId: string; need: NeedsItemPubl
     >
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2">
-            <span className={cn("h-2 w-2 shrink-0 rounded-full", state.dotClass)} aria-hidden />
-            <p className="truncate text-sm font-semibold text-gray-900">{need.title}</p>
+          <div className="flex items-start gap-2">
+            {/* Dot nudged down to sit on the first line now that the title can wrap. */}
+            <span
+              className={cn("mt-1.5 h-2 w-2 shrink-0 rounded-full", state.dotClass)}
+              aria-hidden
+            />
+            {/* AI-generated titles are long descriptive sentences — wrap in full (no truncate),
+                so the processor reads the whole need. The Confirm button + menu stay top-aligned. */}
+            <p className="min-w-0 text-sm font-semibold text-gray-900">{need.title}</p>
           </div>
 
           {need.description && (
