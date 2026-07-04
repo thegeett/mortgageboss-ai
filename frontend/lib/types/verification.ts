@@ -29,6 +29,11 @@ export interface VerificationFinding {
   confidence: number;
   source_page: number | null;
   source_snippet: string | null;
+  /** LP-114: WHICH document grounds the finding — its id (to open it) + readable filename (to name
+   * it), so the processor can verify the judgment against the actual document. Null when there's no
+   * single source document (a file-level/computed rule, or an AI finding whose type didn't resolve). */
+  source_document_id: string | null;
+  source_document_filename: string | null;
   resolution_status: string;
   /** The recorded reason for an OVERRIDDEN finding (LP-81). */
   resolution_note: string | null;

@@ -94,6 +94,7 @@ export function FindingsList({
       {resolved.length > 0 && (
         <ResolvedGroup
           findings={resolved}
+          fileId={fileId}
           busy={resolve.isPending}
           onUndo={(id) => act({ kind: "undo", findingId: id }, "Resolution undone")}
         />
@@ -106,10 +107,12 @@ export function FindingsList({
  * carries an Undo (LP-98) — reversing an Applied one reverses the data change + recomputes. */
 function ResolvedGroup({
   findings,
+  fileId,
   onUndo,
   busy,
 }: {
   findings: VerificationFinding[];
+  fileId?: string;
   onUndo: (id: string) => void;
   busy: boolean;
 }) {
@@ -120,7 +123,13 @@ function ResolvedGroup({
       </h4>
       <ul className="space-y-2 opacity-80">
         {findings.map((f) => (
-          <FindingCard key={f.id} finding={f} busy={busy} onUndo={() => onUndo(f.id)} />
+          <FindingCard
+            key={f.id}
+            finding={f}
+            fileId={fileId}
+            busy={busy}
+            onUndo={() => onUndo(f.id)}
+          />
         ))}
       </ul>
     </section>

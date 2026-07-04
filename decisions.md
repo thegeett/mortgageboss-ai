@@ -7593,3 +7593,47 @@ a prompt-quality fix, deferred to **LP-112** (different mechanism). Need generat
 certain; AI-flagged where reworded; processor-confirmed) — not over-merged into one, not left at 3-4. Two columns +
 one service + a small flag UI; no change to matching/satisfaction/generation. Persisted "these are the same" learning
 and a stronger free-form subject key are future refinements.
+
+## ADR-236: Findings name their SOURCE DOCUMENT — capture the id we already compute, expose + display (LP-114)
+
+- **Date:** 2026-07-04
+- **Status:** Accepted
+
+**Context:** A finding showed "source p.N" + a snippet but not WHICH document — so a processor couldn't easily verify the
+AI/rule judgment against the actual document (the findings analog of LP-110's gap for needs). The `Finding` model already
+had a `source_document_id` FK (+ a `source_document` relationship), but it was **hidden AND empty**: not exposed in
+`FindingPublic`, and never populated at creation — worse than needs' `source_finding_id`, which was populated-but-hidden.
+Crucially, the id was **already computed and thrown away**: deterministic findings' `source_location` often carries a
+`document_id` (a fact read from a document's extraction), but `_source_location_fields()` extracted only page + snippet
+and dropped it. AI cross-source findings only carry a document TYPE string ("W2"), not an id.
+
+**Decision:** capture + expose + display the source document, mirroring LP-110.
+- **Capture = stop dropping what we compute.** `_source_location_fields()` now also forwards the `document_id` →
+  `source_document_id` on deterministic findings (null for file-level/computed rules). AI cross-source findings resolve
+  their type string to a concrete id **only when it maps to exactly ONE document** on the file
+  (`_unique_type_document_map`, normalized); 0 or 2+ → NULL. Never guess a wrong document — a null source is honest, a
+  wrong link is not.
+- **Expose.** `FindingPublic` gains `source_document_id` + `source_document_filename` (the readable `original_filename`,
+  eager-loaded — no N+1); the frontend `VerificationFinding` type mirrors it.
+- **Display.** The finding card NAMES its source document ("Source: {filename}, p.{N}") at a glance and in the Details
+  "Source" section, replacing the bare "source p.N". Graceful when null (keep page/snippet; never a broken empty
+  "Source:").
+- **Clickable — the lightweight nav was cheap, so it's built.** Verification and Documents are separate routes, and the
+  Documents page already opens a drawer from local state; so the source-doc name links to `/loan-files/[id]/documents?doc=<id>`
+  and the Documents tab reads `?doc` to open that document's existing drawer (then strips the param). No new store, no
+  viewer — a `<Link>` + a small `useSearchParams` effect.
+
+**Coverage is partial by design.** Naming populates mostly for deterministic findings that read a specific document
+field; file-level/computed rules and multi-doc-type AI findings stay null (graceful). No heavier snippet-search fallback
+— honest over exhaustive.
+
+**No migration.** The `source_document_id` column already existed. Existing findings stay null until re-verified (no
+backfill).
+
+**Deferred to V2 (documented in the plan):** an in-app document VIEWER (PDF.js / embedded PDF), PAGE deep-linking ("open
+to page N"), and TRANSACTION HIGHLIGHTING (needs the bbox/position data deferred in LP-75). V1 is name + link-to-open;
+the viewer/page/highlight staircase is V2.
+
+**Consequences:** a finding now names (and opens) the document that grounds it — verifiable, mirroring LP-110 for needs.
+Small surface: two schema fields, a capture tweak in each generator, a card display + a `?doc=` param; no finding
+generation change; composes with LP-110/LP-113.

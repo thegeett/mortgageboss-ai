@@ -36,6 +36,8 @@ function finding(over: Partial<VerificationFinding>): VerificationFinding {
     confidence: 0.82,
     source_page: 3,
     source_snippet: "Gross 3,775.00 biweekly",
+    source_document_id: null,
+    source_document_filename: null,
     resolution_status: "open",
     resolution_note: null,
     applied_record: null,
@@ -323,5 +325,42 @@ describe("FindingCard", () => {
     expect(screen.getByText(/docs requested/)).toBeDefined();
     // The request button is disabled once requested.
     expect(screen.getByRole("button", { name: /Requested/ })).toHaveProperty("disabled", true);
+  });
+
+  // LP-114 — the finding names its SOURCE DOCUMENT (which document + page grounds it), clickable to
+  // open it when the file id is known.
+  it("names the source document (with page) and links to open it when fileId is known", () => {
+    render(
+      <FindingCard
+        fileId="file-1"
+        finding={finding({
+          source_document_id: "doc-9",
+          source_document_filename: "KASHS BANK statement.pdf",
+        })}
+        onApply={vi.fn()}
+      />,
+    );
+    const link = screen.getByRole("link", { name: /KASHS BANK statement\.pdf, p\.3/ });
+    expect(link).toBeDefined();
+    expect(link.getAttribute("href")).toBe("/loan-files/file-1/documents?doc=doc-9");
+  });
+
+  it("shows the source document as text (no link) when fileId is absent", () => {
+    render(
+      <FindingCard
+        finding={finding({
+          source_document_id: "doc-9",
+          source_document_filename: "KASHS BANK statement.pdf",
+        })}
+        onApply={vi.fn()}
+      />,
+    );
+    expect(screen.getByText(/KASHS BANK statement\.pdf, p\.3/)).toBeDefined();
+    expect(screen.queryByRole("link", { name: /KASHS BANK/ })).toBeNull();
+  });
+
+  it("gracefully shows no source-document name when it wasn't resolved", () => {
+    render(<FindingCard finding={finding({ source_document_filename: null })} onApply={vi.fn()} />);
+    expect(screen.queryByText(/Source:/)).toBeNull(); // no broken empty "Source:"
   });
 });

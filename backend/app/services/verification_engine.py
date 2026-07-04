@@ -163,7 +163,9 @@ def _to_finding(result: EngineFinding, *, loan_file_id: UUID, verification_id: U
         "reasoning": reasoning,
     }
 
-    source_page, source_snippet = _source_location_fields(result.source_location)
+    source_document_id, source_page, source_snippet = _source_location_fields(
+        result.source_location
+    )
 
     return Finding(
         loan_file_id=loan_file_id,
@@ -175,6 +177,10 @@ def _to_finding(result: EngineFinding, *, loan_file_id: UUID, verification_id: U
         category=rule.category,
         message=message,
         details=details,
+        # LP-114: the source document the fact was read from — the id is already in the fact's
+        # source_location (it was previously computed and DROPPED here); forward it so the finding
+        # names WHICH document grounds it. Null for a file-level / computed rule (no single source).
+        source_document_id=source_document_id,
         source_page=source_page,
         source_snippet=source_snippet,
     )
@@ -182,15 +188,28 @@ def _to_finding(result: EngineFinding, *, loan_file_id: UUID, verification_id: U
 
 def _source_location_fields(
     source_location: dict[str, object] | None,
-) -> tuple[int | None, str | None]:
-    """Pull the page + verbatim snippet (if any) off a fact's source location."""
+) -> tuple[UUID | None, int | None, str | None]:
+    """Pull the source document id + page + verbatim snippet (if any) off a fact's source location.
+
+    LP-114: the ``document_id`` is often already present (a fact read from a specific document's
+    extraction carries it) — forward it rather than discarding it. Parsed defensively (a malformed /
+    absent id → ``None``, graceful — never a wrong link)."""
     if not source_location:
-        return None, None
+        return None, None, None
+    document_id: UUID | None = None
+    raw_doc_id = source_location.get("document_id")
+    if isinstance(raw_doc_id, str):
+        try:
+            document_id = UUID(raw_doc_id)
+        except ValueError:
+            document_id = None
+    elif isinstance(raw_doc_id, UUID):
+        document_id = raw_doc_id
     raw_page = source_location.get("page")
     page = raw_page if isinstance(raw_page, int) else None
     raw_snippet = source_location.get("snippet")
     snippet = raw_snippet if isinstance(raw_snippet, str) else None
-    return page, snippet
+    return document_id, page, snippet
 
 
 def _stringify(value: Decimal | int | None) -> str:

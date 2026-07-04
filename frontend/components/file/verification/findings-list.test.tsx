@@ -46,6 +46,8 @@ function finding(over: Partial<VerificationFinding> & { id: string }): Verificat
     confidence: 0.9,
     source_page: null,
     source_snippet: null,
+    source_document_id: null,
+    source_document_filename: null,
     resolution_status: "open",
     resolution_note: null,
     applied_record: null,

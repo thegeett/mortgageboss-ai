@@ -100,6 +100,11 @@ class FindingPublic(BaseModel):
     confidence: float
     source_page: int | None
     source_snippet: str | None
+    # LP-114: WHICH document grounds the finding — the id (for a link) + its readable filename, so
+    # the processor can verify the judgment against the actual document. Null when no single source
+    # document (a file-level / computed rule, or an AI finding whose type didn't resolve unambiguously).
+    source_document_id: UUID | None
+    source_document_filename: str | None
     resolution_status: str
     resolution_note: str | None  # the recorded reason for an OVERRIDDEN finding (LP-81)
     applied_record: (
@@ -124,6 +129,13 @@ class FindingPublic(BaseModel):
             confidence=finding.confidence,
             source_page=finding.source_page,
             source_snippet=finding.source_snippet,
+            source_document_id=finding.source_document_id,
+            # The readable filename (LP-105-style name), from the eager-loaded source_document.
+            source_document_filename=(
+                finding.source_document.original_filename
+                if finding.source_document is not None
+                else None
+            ),
             resolution_status=finding.resolution_status.value,
             resolution_note=finding.resolution_note,
             applied_record=finding.applied_record,

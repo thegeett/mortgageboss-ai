@@ -54,6 +54,8 @@ function finding(over: Partial<VerificationFinding> & { id: string }): Verificat
     confidence: 0.82,
     source_page: 1,
     source_snippet: "Gross pay 3,775.00 biweekly",
+    source_document_id: null,
+    source_document_filename: null,
     resolution_status: "open",
     resolution_note: null,
     applied_record: null,

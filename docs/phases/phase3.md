@@ -240,3 +240,10 @@ are collapsed by a deterministic safe floor (collapse-by-source + the findings' 
 the semantic residue is only FLAGGED by the AI for the processor to confirm — NEVER a silent delete (a wrongly-dropped
 need is worse than a duplicate; under-merge when unsure). Source RELEVANCE — the AI attaching a tangential fact as a
 need's source — is a separate prompt-quality follow-up (LP-112). ADR-235; docs/tickets/LP-111.md.
+
+Findings carry the same source-provenance discipline (LP-114): a finding NAMES the document that grounds it (capture
+the source_document_id deterministic findings already compute; resolve AI findings' type→document unambiguously or
+NULL), exposes + displays it, and links to open that document (a lightweight ?doc=<id> nav — no viewer). **V2 (deferred,
+documented):** an in-app document VIEWER (PDF.js / embedded PDF), PAGE deep-linking ("open to page N"), and TRANSACTION
+HIGHLIGHTING — the last needs the bbox/position data deferred in LP-75 (source location is page + snippet text only in
+V1). The V1 slice is name + link-to-open; the viewer/page/highlight staircase is V2. ADR-236; docs/tickets/LP-114.md.

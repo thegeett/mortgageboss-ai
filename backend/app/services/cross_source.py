@@ -142,6 +142,8 @@ async def run_cross_source(
     )
 
     income_target = _resolve_income_target(context)
+    # LP-114: resolve each AI finding's source-document TYPE to a concrete id where unambiguous.
+    source_doc_by_type = await _unique_type_document_map(db, loan_file.id)
     deferred = 0
     fresh_ai: list[Finding] = []
     for raw in result.findings:
@@ -150,7 +152,13 @@ async def run_cross_source(
             deferred += 1
             continue
         fresh_ai.append(
-            _to_finding(raw, loan_file_id=loan_file.id, run_id=run.id, income_target=income_target)
+            _to_finding(
+                raw,
+                loan_file_id=loan_file.id,
+                run_id=run.id,
+                income_target=income_target,
+                source_doc_by_type=source_doc_by_type,
+            )
         )
 
     # Reconcile the AI findings against the file's live AI findings (LP-94): still-detected →
@@ -282,6 +290,7 @@ def _to_finding(
     loan_file_id: UUID,
     run_id: UUID,
     income_target: str | None,
+    source_doc_by_type: dict[str, UUID],
 ) -> Finding:
     """Map one AI discrepancy onto a Finding (origin=ai_cross_source, uniform shape).
 
@@ -291,6 +300,11 @@ def _to_finding(
     surfaces, it does not decide. The category is DERIVED from the type; severity
     defaults to YELLOW (cross-source findings are advisory — the deterministic rules
     produce the blocking red findings).
+
+    LP-114: ``details["source_document"]`` is a document TYPE string (e.g. "W2"), not an id.
+    Resolve it to a concrete ``source_document_id`` ONLY when the type maps to exactly one
+    document on the file (``source_doc_by_type``); ambiguous / absent → NULL (never guess a wrong
+    document — a null source is honest, a wrong link is not).
     """
     category = _TYPE_CATEGORY.get(raw.type, FindingCategory.CROSS_SOURCE)
     details: dict[str, Any] = {
@@ -304,6 +318,12 @@ def _to_finding(
     if apply_spec is not None:
         details["apply"] = apply_spec
 
+    source_document_id = (
+        source_doc_by_type.get(_normalize_doc_type(raw.source_document))
+        if raw.source_document
+        else None
+    )
+
     return Finding(
         loan_file_id=loan_file_id,
         verification_id=run_id,
@@ -314,9 +334,28 @@ def _to_finding(
         category=category,
         message=raw.description,
         details=details,
+        source_document_id=source_document_id,
         source_page=raw.page,
         source_snippet=raw.snippet,
     )
+
+
+def _normalize_doc_type(value: str) -> str:
+    """Canonicalize a document-type string for matching (lower, spaces/hyphens → underscore)."""
+    return re.sub(r"[\s\-]+", "_", value.strip().lower())
+
+
+async def _unique_type_document_map(db: AsyncSession, loan_file_id: UUID) -> dict[str, UUID]:
+    """Map a normalized document type → its document id, ONLY for types with exactly ONE document
+    on the file (LP-114). An ambiguous type (0 or 2+ documents) is omitted, so an AI finding citing
+    it resolves to NULL rather than a wrongly-guessed document."""
+    stmt = only_active(select(Document).where(Document.loan_file_id == loan_file_id), Document)
+    docs = (await db.execute(stmt)).scalars().all()
+    by_type: dict[str, list[UUID]] = {}
+    for doc in docs:
+        if doc.document_type:
+            by_type.setdefault(_normalize_doc_type(doc.document_type), []).append(doc.id)
+    return {doc_type: ids[0] for doc_type, ids in by_type.items() if len(ids) == 1}
 
 
 def _build_apply_spec(

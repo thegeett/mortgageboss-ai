@@ -40,7 +40,39 @@ import {
   Wrench,
   X,
 } from "lucide-react";
+import Link from "next/link";
 import { type ReactNode, useId, useState } from "react";
+
+/**
+ * The finding's SOURCE DOCUMENT (LP-114) — names WHICH document (+ page) grounds the finding, so a
+ * processor can verify the judgment against the actual document (the findings analog of LP-110). The
+ * name links to open that document (its drawer, via the Documents tab's ?doc= param) when the file
+ * id is known; otherwise it's shown as text. Renders nothing when no source document was resolved
+ * (a file-level/computed rule, or an AI finding whose type was ambiguous) — graceful, never a broken
+ * "Source:" or a guessed-wrong link.
+ */
+function SourceDocLink({ fileId, finding }: { fileId?: string; finding: VerificationFinding }) {
+  const name = finding.source_document_filename;
+  if (!name) return null;
+  const label = finding.source_page !== null ? `${name}, p.${finding.source_page}` : name;
+  const canLink = Boolean(fileId && finding.source_document_id);
+  return (
+    <span className="inline-flex items-center gap-1 text-gray-500">
+      <FileText className="h-3 w-3 shrink-0 text-gray-400" aria-hidden />
+      Source:{" "}
+      {canLink ? (
+        <Link
+          href={`/loan-files/${fileId}/documents?doc=${finding.source_document_id}`}
+          className="font-medium text-primary hover:underline"
+        >
+          {label}
+        </Link>
+      ) : (
+        <span className="font-medium text-gray-600">{label}</span>
+      )}
+    </span>
+  );
+}
 
 interface Note {
   note: string;
@@ -94,7 +126,10 @@ export function FindingCard({
   const overlay = details.overlay_applied ?? null;
   const docsRequested = Boolean(details.docs_requested);
   const deterministic = finding.origin === "deterministic_rule";
-  const hasSource = finding.source_page !== null || Boolean(finding.source_snippet);
+  const hasSource =
+    finding.source_page !== null ||
+    Boolean(finding.source_snippet) ||
+    Boolean(finding.source_document_filename); // LP-114: a named source doc counts as source
   // The AI-generated why/fix (LP-96). The block renders ONLY when populated, so the card still
   // looks complete + intentional when it's absent (LP-95 graceful degradation). It is visually
   // distinct + warned because it's the AI's fallible explanation, not the deterministic core.
@@ -193,6 +228,14 @@ export function FindingCard({
             <p className="mt-0.5 line-clamp-3 text-xs text-gray-500">{collapsedWhat}</p>
           )}
 
+          {/* LP-114: name the source document at a glance (no need to expand Details) — which
+              document + page grounds the finding, clickable to open it. Hidden when unresolved. */}
+          {finding.source_document_filename && (
+            <p className="mt-1 text-xs">
+              <SourceDocLink fileId={fileId} finding={finding} />
+            </p>
+          )}
+
           <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-gray-400">
             <span>{findingTypeLabel(finding)}</span>
             <span>· {formatPercent(String(finding.confidence * 100))} confidence</span>
@@ -282,8 +325,15 @@ export function FindingCard({
               <FindingSection title="Source">
                 {hasSource ? (
                   <div className="space-y-0.5">
-                    {finding.source_page !== null && (
-                      <p className="text-gray-500">Document page {finding.source_page}</p>
+                    {/* LP-114: name the source document (+ page), clickable to open it — replacing
+                        the bare "Document page N" when we know which document; falls back to the
+                        page-only line when the source document couldn't be resolved. */}
+                    {finding.source_document_filename ? (
+                      <SourceDocLink fileId={fileId} finding={finding} />
+                    ) : (
+                      finding.source_page !== null && (
+                        <p className="text-gray-500">Document page {finding.source_page}</p>
+                      )
                     )}
                     {finding.source_snippet && (
                       <p className="font-mono text-gray-600">

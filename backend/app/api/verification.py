@@ -13,6 +13,7 @@ from uuid import UUID
 import structlog
 from fastapi import APIRouter, HTTPException, status
 from sqlalchemy import select
+from sqlalchemy.orm import selectinload
 
 from app.api.dependencies import CurrentUser
 from app.core.database import DbSession
@@ -194,14 +195,18 @@ async def _build_status(
     )
     latest = (await db.execute(latest_stmt)).scalars().first()
 
-    findings_stmt = only_active(
-        select(Finding).where(
-            Finding.loan_file_id == loan_file.id,
-            Finding.origin.in_(_SHOWN_ORIGINS),
-            Finding.status.in_((FindingStatus.RED, FindingStatus.YELLOW)),
-        ),
-        Finding,
-    ).order_by(Finding.created_at.desc())
+    findings_stmt = (
+        only_active(
+            select(Finding).where(
+                Finding.loan_file_id == loan_file.id,
+                Finding.origin.in_(_SHOWN_ORIGINS),
+                Finding.status.in_((FindingStatus.RED, FindingStatus.YELLOW)),
+            ),
+            Finding,
+        )
+        .options(selectinload(Finding.source_document))  # LP-114: name the source doc (no N+1)
+        .order_by(Finding.created_at.desc())
+    )
     findings = (await db.execute(findings_stmt)).scalars().all()
 
     level = resolve_aggression_level(loan_file, user)
