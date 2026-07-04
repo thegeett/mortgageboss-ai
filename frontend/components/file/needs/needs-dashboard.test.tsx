@@ -53,6 +53,7 @@ function need(overrides: Partial<NeedsItemPublic> = {}): NeedsItemPublic {
     satisfied_at: null,
     requires_coverage_confirmation: false,
     matching_documents: [],
+    source: null,
     created_at: "2026-06-19T12:00:00Z",
     ...overrides,
   };
@@ -179,6 +180,92 @@ describe("NeedsDashboard", () => {
     expect(screen.getByText("BofA savings May.pdf")).toBeDefined();
     expect(screen.getByText("EMD Withdrawal.pdf")).toBeDefined(); // coarse match shown as-is (not narrowed)
     expect(screen.queryByText("Verified")).toBeNull(); // LP-108 status untouched — not a false-green
+  });
+
+  // LP-110 — every need shows its SOURCE, honestly attributed by origin. A deterministic floor
+  // source reads as certain; an AI-identified source is marked "verify" and grounds to the fact(s)
+  // the AI cited. The two are visually/semantically distinct — an AI reading is never shown as fact.
+  it("shows a deterministic floor need's source as a certain rule", () => {
+    setDocuments(false);
+    setNeeds({
+      data: [
+        need({
+          origin: "floor",
+          disposition: "confirmed",
+          needs_type: "pay_stub",
+          source: {
+            attribution: "deterministic",
+            facts: [
+              {
+                kind: "income",
+                label: "Employment income is stated on the application",
+                ref: null,
+                document_id: null,
+                document_filename: null,
+              },
+            ],
+          },
+        }),
+      ],
+    });
+    render(<NeedsDashboard fileId="f1" />);
+    expect(screen.getByText("deterministic rule")).toBeDefined(); // certain — a rule
+    expect(screen.getByText("Employment income is stated on the application")).toBeDefined();
+    expect(screen.queryByText(/AI-identified — verify/i)).toBeNull(); // not the AI's reading
+  });
+
+  it("marks an AI-reasoned need's source as AI-identified (verify), grounded to the cited fact", () => {
+    setDocuments(false);
+    setNeeds({
+      data: [
+        need({
+          origin: "ai_reasoning",
+          source: {
+            attribution: "ai_identified",
+            facts: [
+              {
+                kind: "employer",
+                label: "Self-employment income from Chhotala Realty LLC",
+                ref: null,
+                document_id: null,
+                document_filename: null,
+              },
+            ],
+          },
+        }),
+      ],
+    });
+    render(<NeedsDashboard fileId="f1" />);
+    expect(screen.getByText("AI-identified")).toBeDefined(); // the trust pill — the AI's reading
+    expect(screen.getByText("Self-employment income from Chhotala Realty LLC")).toBeDefined();
+    expect(screen.getByText(/verify this is the right triggering fact/i)).toBeDefined(); // verify note
+  });
+
+  it("surfaces a suggestion need's finding chain, linking the source document", () => {
+    setDocuments(false);
+    setNeeds({
+      data: [
+        need({
+          origin: "suggestion",
+          source: {
+            attribution: "finding",
+            facts: [
+              {
+                kind: "finding",
+                label: "Monthly child support obligation of $1,200",
+                ref: "finding-1",
+                document_id: "doc-1",
+                document_filename: "Divorce Decree.pdf",
+              },
+            ],
+          },
+        }),
+      ],
+    });
+    render(<NeedsDashboard fileId="f1" />);
+    expect(screen.getByText("finding")).toBeDefined(); // the finding attribution pill
+    expect(screen.getByText("Monthly child support obligation of $1,200")).toBeDefined();
+    expect(screen.getByText("Divorce Decree.pdf")).toBeDefined(); // grounded to the source document
   });
 
   it("shows 'satisfied by' the document for a verified simple-presence need", () => {

@@ -440,6 +440,13 @@ async def seed_floor_needs(db: AsyncSession, loan_file: LoanFile) -> list[NeedsI
                     borrower_id=borrower.id,
                     origin=NeedsItemOrigin.FLOOR,
                     disposition=NeedsItemDisposition.CONFIRMED,
+                    # LP-110: the deterministic source — the rule + the borrower it fired on.
+                    source_facts=[
+                        {
+                            "kind": "rule",
+                            "label": f"Every borrower must provide a government ID — {name}",
+                        }
+                    ],
                 )
             )
     for needs_type, title, category in _PER_FILE_UNIVERSAL:
@@ -452,33 +459,57 @@ async def seed_floor_needs(db: AsyncSession, loan_file: LoanFile) -> list[NeedsI
                 category=category,
                 origin=NeedsItemOrigin.FLOOR,
                 disposition=NeedsItemDisposition.CONFIRMED,
+                source_facts=[{"kind": "rule", "label": "Required on every loan file"}],
             )
         )
 
     # --- CONDITIONAL FLOOR RULES (situation-dependent, but still deterministic) ---
-    specs: list[tuple[str, str, DocumentCategory]] = []
+    # Each spec carries its DETERMINISTIC source (LP-110): the exact stated data the rule fired on,
+    # so the need reads "Required because — {data}" (certain), grounded to the imported record.
+    specs: list[tuple[str, str, DocumentCategory, list[dict[str, str]]]] = []
     if await _has_stated_employment_income(db, loan_file.id):
-        specs.append(("pay_stub", "Recent pay stubs", DocumentCategory.INCOME_EMPLOYMENT))
-        specs.append(("w2", "W-2 (most recent year)", DocumentCategory.INCOME_EMPLOYMENT))
+        income_src = [{"kind": "income", "label": "Employment income is stated on the application"}]
+        specs.append(
+            ("pay_stub", "Recent pay stubs", DocumentCategory.INCOME_EMPLOYMENT, income_src)
+        )
+        specs.append(
+            ("w2", "W-2 (most recent year)", DocumentCategory.INCOME_EMPLOYMENT, income_src)
+        )
     if loan_file.loan_purpose is LoanPurpose.PURCHASE:
-        specs.append(("purchase_agreement", "Purchase agreement", DocumentCategory.PROPERTY))
+        specs.append(
+            (
+                "purchase_agreement",
+                "Purchase agreement",
+                DocumentCategory.PROPERTY,
+                [{"kind": "mismo_field", "label": "Loan purpose is Purchase"}],
+            )
+        )
     elif loan_file.loan_purpose is LoanPurpose.REFINANCE:
         # The refi analog of the purchase agreement (LP-100): a refinance needs the existing
         # mortgage statement + a payoff statement (the current lien being refinanced). GROUNDED
         # STARTER — validate-with-Priya (the exact refi need-set; subordination for a 2nd lien is
         # a possible add, flagged not built here).
+        refi_src = [{"kind": "mismo_field", "label": "Loan purpose is Refinance"}]
         specs.append(
             (
                 "existing_mortgage_statement",
                 "Existing mortgage statement",
                 DocumentCategory.PROPERTY,
+                refi_src,
             )
         )
-        specs.append(("payoff_statement", "Payoff statement", DocumentCategory.PROPERTY))
+        specs.append(("payoff_statement", "Payoff statement", DocumentCategory.PROPERTY, refi_src))
     if await _has_stated_assets(db, loan_file.id):
-        specs.append(("bank_statement", "Bank statements", DocumentCategory.ASSETS))
+        specs.append(
+            (
+                "bank_statement",
+                "Bank statements",
+                DocumentCategory.ASSETS,
+                [{"kind": "asset", "label": "Assets are stated on the application"}],
+            )
+        )
 
-    for needs_type, title, category in specs:
+    for needs_type, title, category, source_facts in specs:
         created.append(
             await create_needs_item(
                 db,
@@ -488,6 +519,7 @@ async def seed_floor_needs(db: AsyncSession, loan_file: LoanFile) -> list[NeedsI
                 category=category,
                 origin=NeedsItemOrigin.FLOOR,
                 disposition=NeedsItemDisposition.CONFIRMED,
+                source_facts=list(source_facts),
             )
         )
 

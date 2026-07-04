@@ -220,3 +220,17 @@ the monthly premium enters PITI), recompute on MI change (LTV/program/override; 
 invalidates the DTI). The Conventional PMI rate is grounded-starter (validate-with-Priya — the processor overrides
 with the real quote); the FHA MIP (HUD/LP-84) is more deterministic. Backend-primarily; tests green (1380 backend).
 ADR-216; docs/tickets/LP-91.md.
+
+§2.7 — The trust principle: a need shows its SOURCE, not just its reasoning (LP-110)
+Explainability gives each need its REASONING (the AI's argument for why it's here). Provenance adds its SOURCE — the
+concrete, verifiable fact the reasoning stands on — so a processor can click through and confirm the AI read it
+correctly, not merely trust the argument. This matters MOST for needs because they are the most AI-driven, least
+deterministic part of the system: a need proposed on a MISREAD would carry plausible-but-wrong reasoning, and the
+source is what makes that reasoning FALSIFIABLE by the human (click the source → "that's a rental, not self-employment
+income — the AI misread"). The guiding rule: a need's source must ground out in something DETERMINISTIC AND VERIFIABLE
+(the imported field, the document, the finding) wherever possible — never merely restate the AI's conclusion, because
+a source that is only more AI text gives the processor nothing to check against. Captured per origin (AI cites its
+FileContext facts + a ref, marked AI-identified; floor derives the deterministic rule + data; suggestion exposes the
+existing source_finding chain) and displayed with HONEST ATTRIBUTION (a deterministic rule reads as certain; an
+AI-identified source reads as "verify") — the same discipline findings already carry. Recorded here; built in LP-110
+(ADR-234; docs/tickets/LP-110.md).

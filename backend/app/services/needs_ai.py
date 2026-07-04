@@ -75,12 +75,38 @@ _PROMPT_PATH = "needs/needs_reasoning.txt"
 _MAX_TOKENS = 3072
 
 
+# The fact kinds the AI may cite as a need's SOURCE (LP-110) — each maps to a real context record
+# the model was shown, so the citation grounds to verifiable data (not more AI prose).
+_TRIGGERED_BY_KINDS = frozenset(
+    {"employer", "income", "asset", "liability", "finding", "mismo_field"}
+)
+
+
+class TriggeredByFact(BaseModel):
+    """One fact the AI CITES as having triggered a need (LP-110) — its SOURCE, grounded.
+
+    ``kind`` names which context record it came from (employer/income/asset/liability/finding/
+    mismo_field); ``label`` is the specific fact ("self-employment income from Chhotala Realty LLC");
+    ``ref`` links the underlying record where one exists (a finding id) so the processor can verify.
+    """
+
+    kind: str
+    label: str
+    ref: str | None = None
+
+
 class ProposedNeed(BaseModel):
-    """One AI-proposed need (LP-69) — ``reasoning`` is FILE-SPECIFIC (guardrail 1)."""
+    """One AI-proposed need (LP-69) — ``reasoning`` is FILE-SPECIFIC (guardrail 1).
+
+    ``triggered_by`` (LP-110) is the SOURCE: the specific FileContext fact(s) the model reasoned
+    over, so its reasoning is FALSIFIABLE (the processor verifies the AI didn't misread). It may be
+    empty (older/degraded responses) — a need is never dropped for lacking a source.
+    """
 
     need_description: str
     need_type: str | None = None
     reasoning: str
+    triggered_by: list[TriggeredByFact] = Field(default_factory=list)
 
 
 # --------------------------------------------------------------------------- #
@@ -187,7 +213,10 @@ async def assemble_file_context(db: AsyncSession, loan_file: LoanFile) -> FileCo
             {"document_type": d.document_type, "status": d.status.value} for d in documents
         ],
         findings=[
-            {"finding_type": f.finding_type.value, "description": f.description} for f in findings
+            # LP-110: carry the finding id so the AI can REF a finding it cites as a need's source
+            # (a linkable, verifiable record), not just restate the finding's text.
+            {"id": str(f.id), "finding_type": f.finding_type.value, "description": f.description}
+            for f in findings
         ],
         suggestions=[
             {"need_type": s.need_type, "need_description": s.need_description} for s in suggestions
@@ -233,9 +262,40 @@ def _parse_proposals(text: str) -> list[ProposedNeed]:
                 need_description=desc.strip(),
                 need_type=nt.strip() if isinstance(nt, str) and nt.strip() else None,
                 reasoning=reasoning.strip(),
+                triggered_by=_parse_triggered_by(row.get("triggered_by")),
             )
         )
     return proposals
+
+
+def _parse_triggered_by(raw: Any) -> list[TriggeredByFact]:
+    """Parse a proposal's ``triggered_by`` (LP-110) defensively. Never raises ([] on junk).
+
+    Keeps only facts with a known ``kind`` and a non-empty ``label`` — a garbled or hallucinated
+    source shape is dropped, not admitted. A missing source is fine (the need still proposes); the
+    absence just means no verifiable citation to click through.
+    """
+    if not isinstance(raw, list):
+        return []
+    facts: list[TriggeredByFact] = []
+    for entry in raw:
+        if not isinstance(entry, dict):
+            continue
+        kind = entry.get("kind")
+        label = entry.get("label")
+        if not isinstance(kind, str) or kind.strip() not in _TRIGGERED_BY_KINDS:
+            continue
+        if not isinstance(label, str) or not label.strip():
+            continue
+        ref = entry.get("ref")
+        facts.append(
+            TriggeredByFact(
+                kind=kind.strip(),
+                label=label.strip(),
+                ref=ref.strip() if isinstance(ref, str) and ref.strip() else None,
+            )
+        )
+    return facts
 
 
 def reconcile(proposals: list[ProposedNeed], *, already_covered: set[str]) -> list[ProposedNeed]:
@@ -339,6 +399,10 @@ async def apply_ai_needs(db: AsyncSession, loan_file: LoanFile) -> list[NeedsIte
             origin=NeedsItemOrigin.AI_REASONING,
             disposition=NeedsItemDisposition.PROPOSED,  # the processor confirms (LP-70)
             reasoning=p.reasoning,
+            # LP-110: persist the AI's cited source facts (grounded, AI-identified) so the need's
+            # reasoning is falsifiable. None (not []) when the model cited nothing, to leave the
+            # column NULL for a genuinely source-less proposal.
+            source_facts=[f.model_dump() for f in p.triggered_by] or None,
         )
         created.append(need)
         if p.need_type:

@@ -7,6 +7,7 @@ auto-matching a document to a need are later phases; these helpers just record
 the state.
 """
 
+from typing import Any
 from uuid import UUID
 
 from sqlalchemy import case, select
@@ -15,6 +16,7 @@ from sqlalchemy.orm import selectinload
 
 from app.models.base import utcnow
 from app.models.document import DocumentCategory
+from app.models.document_finding import DocumentFinding
 from app.models.helpers import only_active
 from app.models.needs_item import (
     NeedsItem,
@@ -38,6 +40,7 @@ async def create_needs_item(
     description: str | None = None,
     disposition: NeedsItemDisposition = NeedsItemDisposition.PROPOSED,
     reasoning: str | None = None,
+    source_facts: list[dict[str, Any]] | None = None,
     source_finding_id: UUID | None = None,
 ) -> NeedsItem:
     """Create a ``PENDING`` needs item on a loan file (LP-68).
@@ -45,8 +48,10 @@ async def create_needs_item(
     ``origin`` is the source-agnostic provenance (floor / suggestion / ai_reasoning /
     manual); ``disposition`` is the human-confirmation lifecycle (default PROPOSED;
     the floor passes CONFIRMED); ``reasoning`` + ``source_finding_id`` carry the
-    explainability for a suggestion-derived need. Uses ``flush`` so the caller
-    controls the transaction.
+    explainability for a suggestion-derived need. ``source_facts`` (LP-110) is the
+    per-origin structured SOURCE — the specific triggering data (a floor rule's
+    derived fact(s), or an AI need's cited FileContext facts) — grounding the need to
+    verifiable data. Uses ``flush`` so the caller controls the transaction.
     """
     item = NeedsItem(
         loan_file_id=loan_file_id,
@@ -60,6 +65,7 @@ async def create_needs_item(
         status=NeedsItemStatus.PENDING,
         disposition=disposition,
         reasoning=reasoning,
+        source_facts=source_facts,
         source_finding_id=source_finding_id,
     )
     db.add(item)
@@ -111,7 +117,11 @@ async def list_needs_items(db: AsyncSession, *, loan_file_id: UUID) -> list[Need
     """
     stmt = select(NeedsItem).where(NeedsItem.loan_file_id == loan_file_id)
     stmt = only_active(stmt, NeedsItem)
-    stmt = stmt.options(selectinload(NeedsItem.satisfied_by_document))
+    stmt = stmt.options(
+        selectinload(NeedsItem.satisfied_by_document),
+        # LP-110: the suggestion chain (finding → its source document) for the need's source.
+        selectinload(NeedsItem.source_finding).selectinload(DocumentFinding.document),
+    )
     stmt = stmt.order_by(_PRIORITY_ORDER, NeedsItem.created_at)
     result = await db.execute(stmt)
     return list(result.scalars().all())
@@ -129,7 +139,10 @@ async def get_needs_item(
     stmt = (
         select(NeedsItem)
         .where(NeedsItem.id == needs_item_id, NeedsItem.loan_file_id == loan_file_id)
-        .options(selectinload(NeedsItem.satisfied_by_document))
+        .options(
+            selectinload(NeedsItem.satisfied_by_document),
+            selectinload(NeedsItem.source_finding).selectinload(DocumentFinding.document),
+        )
     )
     stmt = only_active(stmt, NeedsItem)
     item: NeedsItem | None = await db.scalar(stmt)

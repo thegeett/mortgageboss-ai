@@ -64,10 +64,35 @@ export interface NeedsItemPublic {
    * processor confirms coverage against the full evidence set (not just the single trigger doc).
    * Intentionally coarse for umbrella needs; empty for simple-presence needs. */
   matching_documents: MatchedDocument[];
+  /** LP-110: the SOURCE — the specific data that TRIGGERED the need, honestly attributed by origin,
+   * so the reasoning is FALSIFIABLE (the processor can verify the AI didn't misread). Null when the
+   * origin carries no structured source (e.g. a processor-added manual need). */
+  source: NeedSource | null;
 }
 
 /** One document matching a need (LP-109) — id (for a link) + display filename. */
 export interface MatchedDocument {
   id: string;
   filename: string;
+}
+
+/** How much to trust a need's source (LP-110) — deterministic rule (certain) vs AI-identified
+ * (the AI's reading — verify) vs finding (triggered by a finding on a document). */
+export type NeedSourceAttribution = "deterministic" | "ai_identified" | "finding" | "manual";
+
+/** One fact that triggered a need (LP-110) — grounds the reasoning to verifiable data. */
+export interface NeedSourceFact {
+  kind: string;
+  label: string;
+  /** A reference to the underlying record (e.g. a finding id) where one exists. */
+  ref: string | null;
+  /** A linkable source document (e.g. the finding's document). */
+  document_id: string | null;
+  document_filename: string | null;
+}
+
+/** The SOURCE of a need (LP-110) — the triggering data, honestly attributed by origin. */
+export interface NeedSource {
+  attribution: NeedSourceAttribution;
+  facts: NeedSourceFact[];
 }

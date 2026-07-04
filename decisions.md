@@ -7496,3 +7496,49 @@ its single satisfying document).
 documents instead of 1), delivering LP-108's intent that the single-FK model couldn't. LP-108's false-green STATUS is
 untouched and independent. No new storage, no migration, no matcher change — the cheapest correct delivery, with the
 explicit one-to-many storage deferred to V2/Option A.
+
+## ADR-234: Every need shows its SOURCE — per-origin provenance, honestly attributed (LP-110)
+
+- **Date:** 2026-07-03
+- **Status:** Accepted
+
+**Context:** A need carried its REASONING (the AI's argument, LP-67/69) but NOT its SOURCE — the specific data that
+triggered it. Extractions and findings are provenance-backed (source page + snippet; click → see the document line),
+but needs — **the most AI-driven, least-deterministic part of the system** — were not: a processor could not verify
+the AI hadn't hallucinated or MISREAD. A need proposed on a misread carries plausible-but-wrong reasoning; without the
+source the human has nothing to check it against. One structured link existed (`source_finding_id`, LP-67) but was
+populated only for suggestion needs AND was not exposed in the API (`NeedsItemPublic` omitted it), so even it never
+reached the UI.
+
+**Decision:** capture and display a **per-origin source** on every need, GROUNDED to verifiable data wherever possible
+and HONESTLY ATTRIBUTED so the processor knows how much to trust it — making a need's reasoning **FALSIFIABLE**.
+
+- **AI-reasoned (`ai_reasoning`) — capture at generation.** Extend the model's output (`ProposedNeed.triggered_by`, a
+  list of `{kind, label, ref?}`) so the AI CITES the specific FileContext fact(s) it reasoned over — it already sees
+  them, so this is a low-risk output-schema + prompt extension. Finding ids are added to the context so a citation can
+  `ref` a real, linkable record. Parsed defensively (unknown-kind / empty-label facts dropped; a need is never dropped
+  for lacking a source), persisted to the new `needs_items.source_facts` (JSON). Attributed **ai_identified** (the AI's
+  reading — verify) and marked as such in the UI.
+- **Floor (`floor`) — derive from the rule.** The rule already evaluates the data, so the source is derived
+  DETERMINISTICALLY at seed time (pay_stub/w2 ← "Employment income is stated"; bank_statement ← "Assets are stated";
+  purchase_agreement ← "Loan purpose is Purchase"; refi statements ← "Loan purpose is Refinance"; drivers_license ←
+  per borrower) and stored in `source_facts`. Attributed **deterministic** (certain).
+- **Suggestion (`suggestion`) — expose the existing chain.** Surface `source_finding_id → the finding → its source
+  document` through the API (`source_finding` relationship, eager-loaded). Attributed **finding**, linked to the
+  finding + document (previously captured but hidden).
+- **Manual** — no structured source (the origin "Added" is the source) → `source` is null.
+- **Unified display.** `NeedsItemPublic.source` (a `NeedSource` = attribution + facts) renders one "Source" affordance
+  per need, mirroring the finding "Source" section + the extraction Quote provenance vocabulary so it looks native. The
+  deterministic pill (primary/certain) is visually distinct from the AI-identified pill (info/verify) — an AI reading
+  is NEVER presented as certain fact. Composes with LP-108 (status) + LP-109 (matching documents) — purely additive; no
+  change to need GENERATION logic.
+
+**Grounded-starter (validate-with-Priya):** the AI-cited sources are AI-generated (as reliable as the AI's reading), so
+they are marked AI-identified and linked to verifiable data — the open quality question ("does the AI cite the RIGHT
+triggering fact?") is flagged for Priya. Floor + finding sources are deterministic.
+
+**Consequences:** every need now grounds its reasoning to a checkable fact, closing the gap where extractions/findings
+were provenance-backed but needs weren't — the human can verify a misread on the most AI-driven surface. One nullable
+JSON column + one relationship; no change to matching, satisfaction, or generation. A persisted "the processor
+confirmed this source" record and clickable deep-links into the underlying records are natural future refinements, not
+built here.

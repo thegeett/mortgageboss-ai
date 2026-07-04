@@ -249,6 +249,87 @@ async def test_apply_ai_needs_ingests_as_proposed_with_reasoning(
     assert need.reasoning and "Self-employment" in need.reasoning  # explainability carried through
 
 
+# --------------------------------------------------------------------------- #
+# SOURCE capture (LP-110) — the AI cites the fact(s) it reasoned over
+# --------------------------------------------------------------------------- #
+
+
+async def test_context_carries_finding_ids_so_the_ai_can_ref_them(
+    db_session: AsyncSession,
+) -> None:
+    """LP-110: findings in the context carry their id, so the AI can REF one as a need's source."""
+    lf = await _self_employed_file(db_session)
+    doc = Document(
+        id=uuid4(),
+        loan_file_id=lf.id,
+        original_filename="decree.pdf",
+        mime_type="application/pdf",
+        file_size_bytes=10,
+        storage_path="x",
+        document_type="divorce_decree",
+        status=DocumentStatus.COMPLETED,
+        upload_source="user_upload",
+    )
+    db_session.add(doc)
+    await db_session.flush()
+    finding = await create_document_finding(
+        db_session,
+        document=doc,
+        finding_type=DocumentFindingType.OBLIGATION,
+        description="child support obligation",
+    )
+
+    ctx = await assemble_file_context(db_session, lf)
+    assert any(f.get("id") == str(finding.id) for f in ctx.findings)  # the linkable ref
+
+
+async def test_apply_ai_needs_persists_the_cited_source(
+    db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """LP-110: the AI's triggered_by facts are parsed + persisted as the need's source_facts."""
+    lf = await _self_employed_file(db_session)
+    _mock_ai(
+        monkeypatch,
+        [
+            {
+                "need_description": "Two years of tax returns",
+                "need_type": "tax_return",
+                "reasoning": "Self-employment income requires tax returns.",
+                "triggered_by": [
+                    {
+                        "kind": "employer",
+                        "label": "Self-employment income from Chhotala Realty LLC",
+                        "ref": None,
+                    },
+                    {"kind": "bogus_kind", "label": "dropped — unknown kind", "ref": None},
+                    {"kind": "asset", "label": "", "ref": None},  # dropped — empty label
+                ],
+            }
+        ],
+    )
+    created = await apply_ai_needs(db_session, lf)
+
+    assert len(created) == 1
+    facts = created[0].source_facts
+    assert facts is not None and len(facts) == 1  # only the valid fact survives
+    assert facts[0]["kind"] == "employer"
+    assert "Chhotala Realty LLC" in facts[0]["label"]
+
+
+async def test_apply_ai_needs_without_a_cited_source_leaves_source_facts_null(
+    db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """LP-110: a need is never dropped for lacking a source; source_facts stays NULL (not [])."""
+    lf = await _self_employed_file(db_session)
+    _mock_ai(
+        monkeypatch,
+        [{"need_description": "Tax returns", "need_type": "tax_return", "reasoning": "self-emp"}],
+    )
+    created = await apply_ai_needs(db_session, lf)
+    assert len(created) == 1
+    assert created[0].source_facts is None
+
+
 async def test_reconciliation_does_not_duplicate_the_floor(
     db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:

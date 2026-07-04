@@ -1,8 +1,62 @@
 import { NeedActions } from "@/components/file/needs/need-actions";
-import { PRIORITY_META, STATE_META, isProposed, sourceLabel } from "@/lib/loan-files/needs";
-import type { NeedsItemPublic } from "@/lib/types/needs-item";
+import {
+  PRIORITY_META,
+  SOURCE_ATTRIBUTION_META,
+  STATE_META,
+  isProposed,
+  sourceLabel,
+} from "@/lib/loan-files/needs";
+import type { NeedSource, NeedsItemPublic } from "@/lib/types/needs-item";
 import { cn } from "@/lib/utils";
-import { FileCheck2, Sparkles } from "lucide-react";
+import { FileCheck2, FileSearch, Sparkles } from "lucide-react";
+
+/**
+ * The need's SOURCE (LP-110) — the specific data that TRIGGERED it, honestly attributed by origin
+ * so the reasoning is FALSIFIABLE: the processor can verify the AI didn't misread. Mirrors the
+ * finding "Source" section (a bordered inset + a trust pill). A deterministic rule reads as certain;
+ * an AI-identified source is marked "verify" and links to the underlying record where one exists.
+ */
+function NeedSourceNote({ source }: { source: NeedSource }) {
+  const meta = SOURCE_ATTRIBUTION_META[source.attribution];
+  return (
+    <div className="mt-2 ml-4 rounded-md border border-gray-100 bg-gray-50/70 px-3 py-2">
+      <div className="flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wide text-gray-400">
+        <FileSearch className="h-3.5 w-3.5 shrink-0" aria-hidden />
+        Source
+        <span
+          className={cn(
+            "rounded px-1 py-px text-[10px] font-medium normal-case tracking-normal",
+            meta.pillClass,
+          )}
+        >
+          {meta.pill}
+        </span>
+      </div>
+      <ul className="mt-1 space-y-1">
+        {source.facts.map((fact) => (
+          <li key={fact.ref ?? `${fact.kind}:${fact.label}`} className="text-xs text-gray-600">
+            <span className="text-gray-400">{meta.lead}: </span>
+            <span className="font-medium text-gray-700">{fact.label}</span>
+            {/* Ground to the verifiable record — name the finding's source document (LP-105). */}
+            {fact.document_filename && (
+              <span className="mt-0.5 flex items-center gap-1.5 text-gray-500">
+                <FileCheck2 className="h-3 w-3 shrink-0 text-info" aria-hidden />
+                <span className="truncate">{fact.document_filename}</span>
+              </span>
+            )}
+          </li>
+        ))}
+      </ul>
+      {/* GROUNDED-STARTER (validate-with-Priya): the AI's cited source is its own reading — mark it
+          so the processor checks the AI cited the RIGHT triggering fact. */}
+      {meta.aiIdentified && (
+        <p className="mt-1 text-[10px] text-gray-400">
+          AI-identified — verify this is the right triggering fact; the AI may have misread.
+        </p>
+      )}
+    </div>
+  );
+}
 
 /**
  * One need on the dashboard (LP-70). Shows its state (a colored dot + pill), its
@@ -83,6 +137,10 @@ export function NeedCard({ fileId, need }: { fileId: string; need: NeedsItemPubl
           </p>
         </div>
       )}
+
+      {/* The SOURCE (LP-110) — the specific data the reasoning stands on, so it's FALSIFIABLE. Sits
+          with the "why": the reasoning is the argument, the source is the checkable fact under it. */}
+      {need.source && <NeedSourceNote source={need.source} />}
 
       {/* HONEST SATISFACTION (LP-108): a graded need with documents attached (received) says so —
           the system verified a document is PRESENT, not that the full requirement (all accounts /

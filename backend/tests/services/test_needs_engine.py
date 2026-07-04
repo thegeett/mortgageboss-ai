@@ -27,6 +27,7 @@ from app.models.needs_item import (
     NeedsItemStatus,
 )
 from app.models.stated_financials import StatedAsset, StatedIncomeItem
+from app.schemas.needs_item import NeedsItemPublic
 from app.services.document_findings import create_document_finding
 from app.services.implications import SuggestedNeed
 from app.services.loan_files import create_loan_file
@@ -42,7 +43,7 @@ from app.services.needs_engine import (
     transition_need,
     waive_need,
 )
-from app.services.needs_items import create_needs_item
+from app.services.needs_items import create_needs_item, list_needs_items
 from sqlalchemy.ext.asyncio import AsyncSession
 
 # --------------------------------------------------------------------------- #
@@ -563,3 +564,113 @@ async def test_matching_is_scoped_to_the_documents_file(db_session: AsyncSession
 
     await apply_document_to_needs(db_session, doc_a)
     assert need_b.status is NeedsItemStatus.PENDING  # file B's need untouched
+
+
+# --------------------------------------------------------------------------- #
+# NEED SOURCE (LP-110) — every need shows its triggering data, honestly attributed
+# --------------------------------------------------------------------------- #
+
+
+async def test_floor_need_derives_a_deterministic_source(db_session: AsyncSession) -> None:
+    # A floor need cites the DETERMINISTIC rule + the data it fired on, attributed "deterministic".
+    lf = await _loan_file(db_session, purpose=LoanPurpose.PURCHASE)
+    borrower = Borrower(loan_file_id=lf.id, first_name="Mahesh", last_name="Chhotala")
+    db_session.add(borrower)
+    await db_session.flush()
+    db_session.add(
+        StatedIncomeItem(borrower_id=borrower.id, income_type="W2", employment_income=True)
+    )
+    await db_session.flush()
+
+    floor = await seed_floor_needs(db_session, lf)
+    pay_stub = next(n for n in floor if n.needs_type == "pay_stub")
+    assert pay_stub.source_facts is not None
+    assert "Employment income is stated" in pay_stub.source_facts[0]["label"]
+
+    source = NeedsItemPublic.from_model(pay_stub).source
+    assert source is not None
+    assert source.attribution == "deterministic"  # certain — a rule, not the AI's reading
+    assert "Employment income is stated" in source.facts[0].label
+
+
+async def test_ai_need_source_is_ai_identified(db_session: AsyncSession) -> None:
+    # An AI need's cited facts surface as an "ai_identified" source (the AI's reading — verify).
+    lf = await _loan_file(db_session)
+    need = await create_needs_item(
+        db_session,
+        loan_file_id=lf.id,
+        title="Two years of tax returns",
+        needs_type="tax_return",
+        origin=NeedsItemOrigin.AI_REASONING,
+        reasoning="Self-employed → returns.",
+        source_facts=[{"kind": "employer", "label": "Self-employment from Chhotala Realty LLC"}],
+    )
+    source = NeedsItemPublic.from_model(need).source
+    assert source is not None
+    assert source.attribution == "ai_identified"  # distinct from deterministic
+    assert "Chhotala Realty LLC" in source.facts[0].label
+
+
+async def test_suggestion_need_source_surfaces_the_finding_chain(db_session: AsyncSession) -> None:
+    # A suggestion need exposes source_finding_id → the finding + its source document, LINKED,
+    # attributed "finding" (previously captured but hidden from the API).
+    lf = await _loan_file(db_session)
+    doc = await _document(
+        db_session, lf, document_type="divorce_decree", status=DocumentStatus.COMPLETED
+    )
+    finding = await create_document_finding(
+        db_session,
+        document=doc,
+        finding_type=DocumentFindingType.OBLIGATION,
+        description="Monthly child support obligation of $1,200",
+    )
+    suggested = SuggestedNeed(
+        need_description="Document the support obligation",
+        need_type="obligation_documentation",
+        reasoning="Because the decree asserts a $1,200/mo obligation, document it.",
+        source_finding_id=finding.id,
+        source_document_id=doc.id,
+    )
+    await ingest_suggested_need(db_session, loan_file_id=lf.id, suggested=suggested)
+
+    # Read back through the eager-loading list query (loads source_finding + its document).
+    items = await list_needs_items(db_session, loan_file_id=lf.id)
+    need = next(n for n in items if n.origin is NeedsItemOrigin.SUGGESTION)
+    source = NeedsItemPublic.from_model(need).source
+    assert source is not None
+    assert source.attribution == "finding"
+    fact = source.facts[0]
+    assert "child support" in fact.label  # the finding's own description
+    assert fact.ref == str(finding.id)  # linked to the finding
+    assert fact.document_filename == doc.original_filename  # grounded to the source document
+
+
+async def test_manual_need_has_no_structured_source(db_session: AsyncSession) -> None:
+    # A processor-added need has no captured source — the origin ("Added") is the source.
+    lf = await _loan_file(db_session)
+    need = await create_needs_item(
+        db_session, loan_file_id=lf.id, title="Something I need", origin=NeedsItemOrigin.MANUAL
+    )
+    assert NeedsItemPublic.from_model(need).source is None
+
+
+async def test_source_composes_with_lp108_and_lp109(db_session: AsyncSession) -> None:
+    # LP-110 source is ADDITIVE — it doesn't disturb LP-108 (coverage) / LP-109 (matching docs).
+    lf = await _loan_file(db_session)
+    need = await create_needs_item(
+        db_session,
+        loan_file_id=lf.id,
+        title="Bank statements",
+        needs_type="bank_statement",
+        origin=NeedsItemOrigin.FLOOR,
+        source_facts=[{"kind": "asset", "label": "Assets are stated on the application"}],
+    )
+    doc = await _document(
+        db_session, lf, document_type="bank_statement", status=DocumentStatus.COMPLETED
+    )
+    public = NeedsItemPublic.from_model(need, matching_documents=[doc])
+    assert public.source is not None and public.source.attribution == "deterministic"  # LP-110
+    assert public.requires_coverage_confirmation is True  # LP-108 (graded) intact
+    assert [d.filename for d in public.matching_documents] == [
+        doc.original_filename
+    ]  # LP-109 intact
