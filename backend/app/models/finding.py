@@ -149,6 +149,12 @@ class Finding(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
         index=True,
         nullable=True,
     )
+    # ALL documents this finding was derived from (LP-114.1) — a cross-source finding compares
+    # across documents, so its provenance is a SET, not one. A JSON array of document-id strings
+    # (mirrors needs' source_facts), derived by value-matching the finding's cited value(s) to every
+    # document whose extraction contains them (honest by construction — a doc is included only if it
+    # genuinely contains the value). ``source_document_id`` above stays as the primary/trigger.
+    source_document_ids: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
 
     # --- What the rule found -----------------------------------------------
     # Flexible dotted-namespace string (e.g. "income.paystub_recency"), NOT an

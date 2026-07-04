@@ -44,32 +44,47 @@ import Link from "next/link";
 import { type ReactNode, useId, useState } from "react";
 
 /**
- * The finding's SOURCE DOCUMENT (LP-114) — names WHICH document (+ page) grounds the finding, so a
- * processor can verify the judgment against the actual document (the findings analog of LP-110). The
- * name links to open that document (its drawer, via the Documents tab's ?doc= param) when the file
- * id is known; otherwise it's shown as text. Renders nothing when no source document was resolved
- * (a file-level/computed rule, or an AI finding whose type was ambiguous) — graceful, never a broken
- * "Source:" or a guessed-wrong link.
+ * The finding's SOURCE DOCUMENTS (LP-114 → LP-114.1) — names ALL the documents that derived the
+ * finding (a cross-source finding spans several: a pay stub AND a W-2 for one employer), so a
+ * processor can verify the judgment against every one. Each name links to open that document (its
+ * drawer, via the Documents tab's ?doc= param) when the file id is known; otherwise it's text.
+ * Renders nothing when no source could be attributed (a file-level/computed rule, or no distinctive
+ * value to match) — graceful, never a broken "Source:" or a guessed-wrong link.
  */
 function SourceDocLink({ fileId, finding }: { fileId?: string; finding: VerificationFinding }) {
-  const name = finding.source_document_filename;
-  if (!name) return null;
-  const label = finding.source_page !== null ? `${name}, p.${finding.source_page}` : name;
-  const canLink = Boolean(fileId && finding.source_document_id);
+  // Prefer the full set (LP-114.1); fall back to the single primary (LP-114) for un-re-run findings.
+  const docs =
+    finding.source_documents.length > 0
+      ? finding.source_documents
+      : finding.source_document_filename
+        ? [{ id: finding.source_document_id ?? "", filename: finding.source_document_filename }]
+        : [];
+  if (docs.length === 0) return null;
+  const single = docs.length === 1;
+  const pageSuffix = single && finding.source_page !== null ? `, p.${finding.source_page}` : "";
   return (
-    <span className="inline-flex items-center gap-1 text-gray-500">
+    <span className="inline-flex flex-wrap items-center gap-x-1 gap-y-0.5 text-gray-500">
       <FileText className="h-3 w-3 shrink-0 text-gray-400" aria-hidden />
-      Source:{" "}
-      {canLink ? (
-        <Link
-          href={`/loan-files/${fileId}/documents?doc=${finding.source_document_id}`}
-          className="font-medium text-primary hover:underline"
-        >
-          {label}
-        </Link>
-      ) : (
-        <span className="font-medium text-gray-600">{label}</span>
-      )}
+      {single ? "Source:" : "Sources:"}{" "}
+      {docs.map((doc, index) => {
+        const label = `${doc.filename}${pageSuffix}`;
+        const canLink = Boolean(fileId && doc.id);
+        return (
+          <span key={doc.id || doc.filename}>
+            {canLink ? (
+              <Link
+                href={`/loan-files/${fileId}/documents?doc=${doc.id}`}
+                className="font-medium text-primary hover:underline"
+              >
+                {label}
+              </Link>
+            ) : (
+              <span className="font-medium text-gray-600">{label}</span>
+            )}
+            {index < docs.length - 1 ? "," : ""}
+          </span>
+        );
+      })}
     </span>
   );
 }
@@ -126,10 +141,9 @@ export function FindingCard({
   const overlay = details.overlay_applied ?? null;
   const docsRequested = Boolean(details.docs_requested);
   const deterministic = finding.origin === "deterministic_rule";
-  const hasSource =
-    finding.source_page !== null ||
-    Boolean(finding.source_snippet) ||
-    Boolean(finding.source_document_filename); // LP-114: a named source doc counts as source
+  const hasSourceDoc =
+    finding.source_documents.length > 0 || Boolean(finding.source_document_filename);
+  const hasSource = finding.source_page !== null || Boolean(finding.source_snippet) || hasSourceDoc; // LP-114/.1
   // The AI-generated why/fix (LP-96). The block renders ONLY when populated, so the card still
   // looks complete + intentional when it's absent (LP-95 graceful degradation). It is visually
   // distinct + warned because it's the AI's fallible explanation, not the deterministic core.
@@ -228,9 +242,9 @@ export function FindingCard({
             <p className="mt-0.5 line-clamp-3 text-xs text-gray-500">{collapsedWhat}</p>
           )}
 
-          {/* LP-114: name the source document at a glance (no need to expand Details) — which
-              document + page grounds the finding, clickable to open it. Hidden when unresolved. */}
-          {finding.source_document_filename && (
+          {/* LP-114.1: name ALL the source documents at a glance (no need to expand Details) — every
+              document that derived the finding, each clickable to open it. Hidden when unresolved. */}
+          {hasSourceDoc && (
             <p className="mt-1 text-xs">
               <SourceDocLink fileId={fileId} finding={finding} />
             </p>
@@ -325,10 +339,10 @@ export function FindingCard({
               <FindingSection title="Source">
                 {hasSource ? (
                   <div className="space-y-0.5">
-                    {/* LP-114: name the source document (+ page), clickable to open it — replacing
-                        the bare "Document page N" when we know which document; falls back to the
-                        page-only line when the source document couldn't be resolved. */}
-                    {finding.source_document_filename ? (
+                    {/* LP-114.1: name ALL source documents (+ page), each clickable — replacing the
+                        bare "Document page N" when we know which documents; falls back to the
+                        page-only line when no source document could be resolved. */}
+                    {hasSourceDoc ? (
                       <SourceDocLink fileId={fileId} finding={finding} />
                     ) : (
                       finding.source_page !== null && (

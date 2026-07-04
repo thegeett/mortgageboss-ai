@@ -18,6 +18,7 @@ from sqlalchemy.orm import selectinload
 from app.api.dependencies import CurrentUser
 from app.core.database import DbSession
 from app.models.base import utcnow
+from app.models.document import Document
 from app.models.finding import Finding, FindingOrigin, FindingStatus
 from app.models.helpers import only_active
 from app.models.loan_file import LoanFile
@@ -209,6 +210,20 @@ async def _build_status(
     )
     findings = (await db.execute(findings_stmt)).scalars().all()
 
+    # LP-114.1: the file's document names, loaded ONCE, to name every finding's source-document set
+    # (no N+1). Keyed by id → readable filename.
+    doc_rows = (
+        await db.execute(
+            only_active(
+                select(Document.id, Document.original_filename).where(
+                    Document.loan_file_id == loan_file.id
+                ),
+                Document,
+            )
+        )
+    ).all()
+    document_names = dict(doc_rows)
+
     level = resolve_aggression_level(loan_file, user)
     cutoff = active_cutoff(loan_file, user)
     in_scope = await open_in_scope_findings(db, loan_file_id=loan_file.id, confidence_cutoff=cutoff)
@@ -217,7 +232,7 @@ async def _build_status(
         stale=loan_file.verification_stale,
         program=loan_file.loan_program.value if loan_file.loan_program else None,
         latest_run=VerificationRunPublic.from_model(latest) if latest else None,
-        findings=[FindingPublic.from_model(f) for f in findings],
+        findings=[FindingPublic.from_model(f, document_names=document_names) for f in findings],
         aggression=AggressionPublic(
             level=level.value,
             default=user.default_aggression_level.value,

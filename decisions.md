@@ -7637,3 +7637,38 @@ the viewer/page/highlight staircase is V2.
 **Consequences:** a finding now names (and opens) the document that grounds it — verifiable, mirroring LP-110 for needs.
 Small surface: two schema fields, a capture tweak in each generator, a card display + a `?doc=` param; no finding
 generation change; composes with LP-110/LP-113.
+
+## ADR-237: Findings show ALL their source documents — multi-document provenance, honest by construction (LP-114.1)
+
+- **Date:** 2026-07-04
+- **Status:** Accepted
+
+**Context:** LP-114 gave a finding a single ``source_document_id`` and nulled out whenever a cited value spanned several
+same-type documents. But a cross-source finding is inherently derived from MULTIPLE documents — an employer appears on a
+pay stub AND a W-2; a discrepancy compares stated data against one-or-more documents. The single-FK shape is both
+incomplete (a partial story) and the source of most nulls (it refused to pick one among several). Showing ALL the source
+documents completes the provenance AND dissolves the ambiguity — show every document that genuinely contains the value,
+no wrong pick.
+
+**Decision:** represent a finding's source as a SET (the LP-109 analog for findings). A new ``findings.source_document_ids``
+JSON array (Option A — mirrors needs' ``source_facts``, no join table); ``source_document_id`` stays as the
+primary/trigger (back-compat). ``FindingPublic.source_documents: [{id, filename}]`` names the whole set (the file's
+document names loaded once — no N+1); the finding card lists all of them ("Sources: doc1, doc2"), each clickable to open
+via LP-114's ``?doc=<id>`` nav.
+
+- **Derived by value-matching (uniform, exact enough).** A ``populate_finding_source_documents`` pass at the end of a run
+  (and re-derived on the backfill) matches each finding's cited value(s) to every document that contains them. This is
+  uniform across all three generators (deterministic engine, deterministic cross-source, AI) without wiring each.
+- **Honest by construction — the precision discipline.** The match keys on the finding's SPECIFIC distinctive cited value
+  (its ``document_value``; an amount / address / account-fragment in the snippet) — NOT generic tokens (a lone common
+  word is dropped). AND a document is eligible only if its CATEGORY is compatible with the finding's (an INCOME/employer
+  finding matches only INCOME_EMPLOYMENT documents, not a savings statement that merely repeats the bank name).
+  Cross-cutting finding categories (cross-source / documentation / regulatory) are unconstrained. So a common institution
+  name in an off-category document does NOT over-include it — the exact over-inclusion the single-value match risked.
+  The category compatibility is a **grounded starter — validate-with-Priya**.
+
+**Consequences:** on LF-6T3N the named findings jumped from a handful to 16/19 — the employer-mismatch findings now show
+their pay-stub + W-2 sources (precisely — no coincidental savings statements), and the balance/license findings show
+their one document. Empty when no distinctive locatable value (graceful). One JSON column + a matching service + a card
+list; no migration on the primary FK; ``source_document_id`` kept. Composes with LP-114 (generalizes single → set) /
+LP-109 / LP-110 / LP-113. The viewer + page deep-link + transaction highlight remain V2 (no viewer, no bbox data).

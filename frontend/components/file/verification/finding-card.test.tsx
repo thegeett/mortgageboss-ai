@@ -38,6 +38,7 @@ function finding(over: Partial<VerificationFinding>): VerificationFinding {
     source_snippet: "Gross 3,775.00 biweekly",
     source_document_id: null,
     source_document_filename: null,
+    source_documents: [],
     resolution_status: "open",
     resolution_note: null,
     applied_record: null,
@@ -362,5 +363,38 @@ describe("FindingCard", () => {
   it("gracefully shows no source-document name when it wasn't resolved", () => {
     render(<FindingCard finding={finding({ source_document_filename: null })} onApply={vi.fn()} />);
     expect(screen.queryByText(/Source:/)).toBeNull(); // no broken empty "Source:"
+  });
+
+  // LP-114.1 — a cross-source finding names ALL the documents it derived from, each clickable.
+  it("names ALL source documents (Sources:) and links each to open it", () => {
+    render(
+      <FindingCard
+        fileId="file-1"
+        finding={finding({
+          source_documents: [
+            { id: "doc-a", filename: "Akash paystub.pdf" },
+            { id: "doc-b", filename: "Akash W2 2025.pdf" },
+          ],
+        })}
+        onApply={vi.fn()}
+      />,
+    );
+    expect(screen.getByText("Sources:")).toBeDefined(); // plural — multiple sources
+    const a = screen.getByRole("link", { name: /Akash paystub\.pdf/ });
+    const b = screen.getByRole("link", { name: /Akash W2 2025\.pdf/ });
+    expect(a.getAttribute("href")).toBe("/loan-files/file-1/documents?doc=doc-a");
+    expect(b.getAttribute("href")).toBe("/loan-files/file-1/documents?doc=doc-b");
+  });
+
+  it("uses the singular 'Source:' for a single derived document", () => {
+    render(
+      <FindingCard
+        fileId="file-1"
+        finding={finding({ source_documents: [{ id: "doc-a", filename: "BofA savings.pdf" }] })}
+        onApply={vi.fn()}
+      />,
+    );
+    expect(screen.getByText("Source:")).toBeDefined();
+    expect(screen.getByRole("link", { name: /BofA savings\.pdf/ })).toBeDefined();
   });
 });

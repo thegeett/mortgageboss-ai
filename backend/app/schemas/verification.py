@@ -20,6 +20,21 @@ from app.verification.confidence import AggressionLevel
 from app.verification.finding_guidance import resolve_guidance
 
 
+def _as_uuid(value: str) -> UUID | None:
+    """Parse a stored source-document-id string to UUID, or None (graceful)."""
+    try:
+        return UUID(value)
+    except (ValueError, TypeError):
+        return None
+
+
+class SourceDocument(BaseModel):
+    """One document a finding was derived from (LP-114.1) — id (to open it) + readable filename."""
+
+    id: UUID
+    filename: str
+
+
 class OverrideRequest(BaseModel):
     """Dismiss a finding with a **required** recorded reason (LP-81 resolution)."""
 
@@ -105,6 +120,9 @@ class FindingPublic(BaseModel):
     # document (a file-level / computed rule, or an AI finding whose type didn't resolve unambiguously).
     source_document_id: UUID | None
     source_document_filename: str | None
+    # LP-114.1: ALL documents this finding was derived from (a cross-source finding spans several) —
+    # the primary above is one of these. Empty when no source could be attributed (graceful).
+    source_documents: list[SourceDocument] = Field(default_factory=list)
     resolution_status: str
     resolution_note: str | None  # the recorded reason for an OVERRIDDEN finding (LP-81)
     applied_record: (
@@ -113,12 +131,22 @@ class FindingPublic(BaseModel):
     details: dict[str, Any]
 
     @classmethod
-    def from_model(cls, finding: Finding) -> FindingPublic:
+    def from_model(
+        cls, finding: Finding, *, document_names: dict[UUID, str] | None = None
+    ) -> FindingPublic:
         # AI-generated why/fix (LP-96) — resolved deterministically (a dict lookup, NO model call)
         # and merged into details so the card's LP-95 slots render it. Grounded-starter; absent →
         # the card degrades gracefully. Guidance stored on a novel finding takes precedence.
         guidance = resolve_guidance(finding.details, category=finding.category.value)
         details = {**finding.details, **guidance} if guidance else finding.details
+        # LP-114.1: name ALL the finding's source documents from its stored id set + the file's
+        # document names (loaded once by the caller — no N+1). Skips ids whose document is gone.
+        names = document_names or {}
+        source_documents = [
+            SourceDocument(id=doc_id, filename=names[doc_id])
+            for raw_id in (finding.source_document_ids or [])
+            if (doc_id := _as_uuid(raw_id)) is not None and doc_id in names
+        ]
         return cls(
             id=finding.id,
             rule_id=finding.rule_id,
@@ -136,6 +164,7 @@ class FindingPublic(BaseModel):
                 if finding.source_document is not None
                 else None
             ),
+            source_documents=source_documents,
             resolution_status=finding.resolution_status.value,
             resolution_note=finding.resolution_note,
             applied_record=finding.applied_record,

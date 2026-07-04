@@ -59,6 +59,7 @@ from app.services.cross_source_deterministic import (
 )
 from app.services.finding_identity import FindingIdentity, finding_identity
 from app.services.finding_reconcile import reconcile_findings
+from app.services.finding_source_matching import populate_finding_source_documents
 from app.services.verifications import mark_verification_current
 from app.verification.finding_guidance import (
     FIX_KEY,
@@ -191,6 +192,10 @@ async def run_cross_source(
     # Fingerprint THESE inputs (LP-78.1): a later re-run whose inputs hash to the
     # same value returns this run's findings without re-calling the AI.
     run.input_fingerprint = compute_input_fingerprint(context)
+    # LP-114.1: derive each finding's full source-document SET (deterministic + AI + engine) by
+    # value-matching its cited value(s) to the documents that contain them — the terminal pass, so
+    # all this file's findings are present.
+    await populate_finding_source_documents(db, loan_file_id=loan_file.id)
     await mark_verification_current(db, loan_file_id=loan_file.id)
     await db.flush()
     logger.info(

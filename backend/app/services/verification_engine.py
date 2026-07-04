@@ -47,6 +47,7 @@ from app.models.loan_file import LoanFile
 from app.models.property import Property, PropertyType
 from app.models.stated_financials import StatedAsset, StatedIncomeItem, StatedLiability
 from app.models.verification import Verification, VerificationStatus, VerificationTrigger
+from app.services.finding_source_matching import populate_finding_source_documents
 from app.services.verifications import create_verification_run
 from app.verification.confidence import DETERMINISTIC_CONFIDENCE
 from app.verification.engine import EngineFinding, evaluate
@@ -123,6 +124,9 @@ async def run_verification(
     run.yellow_count = yellow
     run.green_count = green
     await db.flush()
+    # LP-114.1: derive the engine findings' source-document set now too (the cross-source pass
+    # re-derives over all findings later; this keeps them populated even if it doesn't run).
+    await populate_finding_source_documents(db, loan_file_id=loan_file.id)
     return run
 
 

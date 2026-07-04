@@ -247,3 +247,10 @@ NULL), exposes + displays it, and links to open that document (a lightweight ?do
 documented):** an in-app document VIEWER (PDF.js / embedded PDF), PAGE deep-linking ("open to page N"), and TRANSACTION
 HIGHLIGHTING — the last needs the bbox/position data deferred in LP-75 (source location is page + snippet text only in
 V1). The V1 slice is name + link-to-open; the viewer/page/highlight staircase is V2. ADR-236; docs/tickets/LP-114.md.
+
+LP-114.1 generalizes that single source document to the full SET (a cross-source finding derives from several — an
+employer on a pay stub AND a W-2): a JSON ``source_document_ids`` array, derived by value-matching the finding's
+distinctive cited value(s) to every document that contains them, HONEST BY CONSTRUCTION (keys on the specific value, not
+common tokens; and a category-compatibility guard keeps an INCOME/employer finding from over-including an ASSETS savings
+statement that merely repeats the bank name). The card lists all source documents, each clickable. The viewer/page/
+highlight staircase is still V2. ADR-237; docs/tickets/LP-114.1.md.

@@ -34,12 +34,22 @@ export interface VerificationFinding {
    * single source document (a file-level/computed rule, or an AI finding whose type didn't resolve). */
   source_document_id: string | null;
   source_document_filename: string | null;
+  /** LP-114.1: ALL documents this finding was derived from (a cross-source finding spans several —
+   * a pay stub AND a W-2 for one employer). The single fields above are the primary/trigger; this
+   * is the full set. Empty when no source could be attributed (graceful). */
+  source_documents: FindingSourceDocument[];
   resolution_status: string;
   /** The recorded reason for an OVERRIDDEN finding (LP-81). */
   resolution_note: string | null;
   /** What an APPLIED finding changed (the effect shown in Resolved + the Undo basis, LP-98). */
   applied_record: Record<string, unknown> | null;
   details: Record<string, unknown>;
+}
+
+/** One document a finding was derived from (LP-114.1) — id (to open it) + readable filename. */
+export interface FindingSourceDocument {
+  id: string;
+  filename: string;
 }
 
 /** The three aggression levels (LP-79) — confidence cutoffs, Conservative highest. */
