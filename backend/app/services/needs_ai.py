@@ -129,6 +129,10 @@ class FileContext(BaseModel):
     already_covered: list[str] = Field(
         default_factory=list
     )  # need types/doc types not to re-propose
+    # LP-111: the needs ALREADY on the list (title + type), so the model doesn't RESTATE/REWORD an
+    # existing free-form need each run — the accumulation that spawned duplicate LOEs. Reconciliation
+    # at generation, complementing the deterministic dedup after.
+    existing_needs: list[dict[str, Any]] = Field(default_factory=list)
 
 
 async def assemble_file_context(db: AsyncSession, loan_file: LoanFile) -> FileContext:
@@ -222,6 +226,8 @@ async def assemble_file_context(db: AsyncSession, loan_file: LoanFile) -> FileCo
             {"need_type": s.need_type, "need_description": s.need_description} for s in suggestions
         ],
         already_covered=sorted(c for c in covered if c),
+        # LP-111: the needs already on the list, so the model doesn't reword them into duplicates.
+        existing_needs=[{"needs_type": n.needs_type, "title": n.title} for n in needs],
     )
 
 

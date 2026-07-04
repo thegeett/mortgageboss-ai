@@ -27,14 +27,71 @@ import {
   useConfirmCoverage,
   useConfirmNeed,
   useDismissNeed,
+  useMergeDuplicate,
+  useNotDuplicate,
   useWaiveNeed,
 } from "@/lib/api/needs";
 import { getErrorMessage } from "@/lib/errors/api-error";
 import { isProposed } from "@/lib/loan-files/needs";
 import type { NeedsItemPriority, NeedsItemPublic } from "@/lib/types/needs-item";
-import { Check, MoreHorizontal, Pencil, SlashSquare, XCircle } from "lucide-react";
+import { Check, Copy, MoreHorizontal, Pencil, SlashSquare, XCircle } from "lucide-react";
 import { useId, useState } from "react";
 import { toast } from "sonner";
+
+/**
+ * The possible-duplicate flag (LP-111). When the AI FLAGGED this proposed need as a likely
+ * duplicate of another (it never silently merges), the processor disposes: **Merge** folds it into
+ * the twin, **Keep both** dismisses the flag (never re-flagged). Under-merge by default — a
+ * wrongly-dropped need is worse than a duplicate, so nothing merges without this confirmation.
+ */
+export function NeedDuplicateFlag({ fileId, need }: { fileId: string; need: NeedsItemPublic }) {
+  const merge = useMergeDuplicate(fileId);
+  const keepBoth = useNotDuplicate(fileId);
+  const pending = merge.isPending || keepBoth.isPending;
+
+  return (
+    <div className="mt-2.5 ml-4 rounded-md border border-warning/30 bg-warning/[0.06] px-3 py-2">
+      <div className="flex items-start gap-2">
+        <Copy className="mt-0.5 h-3.5 w-3.5 shrink-0 text-warning" aria-hidden />
+        <p className="text-xs leading-relaxed text-gray-600">
+          Possible duplicate — the AI thinks this may already be requested by another need. Merge
+          them, or keep both if they're different.
+        </p>
+      </div>
+      <div className="mt-2 flex gap-1.5 pl-5">
+        <Button
+          size="sm"
+          variant="outline"
+          className="h-7 gap-1.5 text-xs"
+          disabled={pending}
+          onClick={() =>
+            merge.mutate(need.id, {
+              onSuccess: () => toast.success("Merged duplicate"),
+              onError: (error) => toast.error(getErrorMessage(error)),
+            })
+          }
+        >
+          {merge.isPending ? <Spinner className="h-3 w-3" /> : <Check className="h-3 w-3" />}
+          Merge
+        </Button>
+        <Button
+          size="sm"
+          variant="ghost"
+          className="h-7 text-xs text-gray-500"
+          disabled={pending}
+          onClick={() =>
+            keepBoth.mutate(need.id, {
+              onSuccess: () => toast.success("Kept both"),
+              onError: (error) => toast.error(getErrorMessage(error)),
+            })
+          }
+        >
+          Keep both
+        </Button>
+      </div>
+    </div>
+  );
+}
 
 /**
  * The disposition controls for one need (LP-70) — the human disposes. A proposed

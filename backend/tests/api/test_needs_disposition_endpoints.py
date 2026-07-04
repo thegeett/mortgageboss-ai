@@ -240,3 +240,72 @@ async def test_missing_need_is_404(client: AsyncClient, db_session: AsyncSession
     lf = await create_loan_file(db_session, company_id=company.id)
     res = await client.post(f"{_needs_url(lf.display_id)}/{uuid4()}/confirm", headers=_auth(token))
     assert res.status_code == 404
+
+
+# --------------------------------------------------------------------------- #
+# LP-111 — possible-duplicate flag: confirm-merge / keep-both (never silent delete)
+# --------------------------------------------------------------------------- #
+
+
+async def _flagged_pair(db: AsyncSession, loan_file_id):
+    """A survivor + a proposed need flagged as its possible duplicate."""
+    survivor = await create_needs_item(
+        db,
+        loan_file_id=loan_file_id,
+        title="Explain the $20,000 wire",
+        origin=NeedsItemOrigin.AI_REASONING,
+    )
+    dup = await create_needs_item(
+        db,
+        loan_file_id=loan_file_id,
+        title="Explanation letter for the $20,000 fee",
+        origin=NeedsItemOrigin.AI_REASONING,
+    )
+    dup.duplicate_of_id = survivor.id
+    await db.flush()
+    return survivor, dup
+
+
+async def test_read_exposes_possible_duplicate_flag(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    company, _u, token = await _make_user(db_session, slug="acme", email="u@acme.com")
+    lf = await create_loan_file(db_session, company_id=company.id)
+    survivor, dup = await _flagged_pair(db_session, lf.id)
+
+    rows = (await client.get(_needs_url(lf.display_id), headers=_auth(token))).json()
+    by_id = {r["id"]: r for r in rows}
+    assert by_id[str(dup.id)]["possible_duplicate_of"] == str(survivor.id)
+    assert by_id[str(survivor.id)]["possible_duplicate_of"] is None
+
+
+async def test_merge_duplicate_folds_the_need_away_and_audits(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    company, _u, token = await _make_user(db_session, slug="acme", email="u@acme.com")
+    lf = await create_loan_file(db_session, company_id=company.id)
+    survivor, dup = await _flagged_pair(db_session, lf.id)
+
+    res = await client.post(
+        f"{_needs_url(lf.display_id)}/{dup.id}/merge-duplicate", headers=_auth(token)
+    )
+    assert res.status_code == 200
+    assert res.json()["id"] == str(survivor.id)  # returns the survivor
+    rows = (await client.get(_needs_url(lf.display_id), headers=_auth(token))).json()
+    ids = {r["id"] for r in rows}
+    assert str(dup.id) not in ids and str(survivor.id) in ids  # the duplicate is gone
+    assert "needs_item_dismissed" in await _activity_types(client, lf.display_id, token)
+
+
+async def test_not_duplicate_keeps_both(client: AsyncClient, db_session: AsyncSession) -> None:
+    company, _u, token = await _make_user(db_session, slug="acme", email="u@acme.com")
+    lf = await create_loan_file(db_session, company_id=company.id)
+    survivor, dup = await _flagged_pair(db_session, lf.id)
+
+    res = await client.post(
+        f"{_needs_url(lf.display_id)}/{dup.id}/not-duplicate", headers=_auth(token)
+    )
+    assert res.status_code == 200
+    assert res.json()["possible_duplicate_of"] is None  # flag cleared
+    rows = (await client.get(_needs_url(lf.display_id), headers=_auth(token))).json()
+    assert {str(survivor.id), str(dup.id)} <= {r["id"] for r in rows}  # both survive

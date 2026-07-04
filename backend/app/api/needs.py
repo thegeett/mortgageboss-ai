@@ -30,6 +30,7 @@ from app.schemas.needs_item import (
 )
 from app.services.activity_log import log_activity
 from app.services.documents import list_documents
+from app.services.needs_dedup import confirm_duplicate_merge, dismiss_duplicate_flag
 from app.services.needs_engine import (
     confirm_need_coverage,
     documents_matching_need,
@@ -171,6 +172,53 @@ async def confirm_coverage(
         actor_user_id=current_user.id,
         detail={"needs_item_id": str(need.id)},
     )
+    await db.commit()
+    return await _public_one(db, loan_file.id, need)
+
+
+@router.post("/{needs_item_id}/merge-duplicate", response_model=NeedsItemPublic)
+async def merge_duplicate(
+    loan_file: ScopedLoanFile,
+    needs_item_id: UUID,
+    db: DbSession,
+    current_user: CurrentUser,
+) -> NeedsItemPublic:
+    """Confirm an AI-flagged possible-duplicate (LP-111): merge this need into its flagged twin.
+
+    The processor agrees the two are the same ask; this need is folded into its ``possible_duplicate_of``
+    twin (provenance unioned) and set aside. Returns the surviving need. If the twin is gone, the
+    stale flag is cleared and this need kept (never a silent drop).
+    """
+    need = await _scoped_need(db, loan_file.id, needs_item_id)
+    survivor = await confirm_duplicate_merge(db, need=need)
+    kept = survivor if survivor is not None else need
+    if survivor is not None:
+        await log_activity(
+            db,
+            loan_file_id=loan_file.id,
+            activity_type=ActivityType.NEEDS_ITEM_DISMISSED,
+            summary=f"Merged duplicate need: {need.title}",
+            actor_user_id=current_user.id,
+            detail={"needs_item_id": str(need.id), "merged_into": str(survivor.id)},
+        )
+    await db.commit()
+    return await _public_one(db, loan_file.id, kept)
+
+
+@router.post("/{needs_item_id}/not-duplicate", response_model=NeedsItemPublic)
+async def not_duplicate(
+    loan_file: ScopedLoanFile,
+    needs_item_id: UUID,
+    db: DbSession,
+    current_user: CurrentUser,
+) -> NeedsItemPublic:
+    """Dismiss an AI duplicate flag (LP-111): "not a duplicate — keep both".
+
+    Clears the ``possible_duplicate_of`` flag and marks it reviewed so the AI pass never re-flags
+    this pair. Both needs survive (the under-merge safety — never a wrongly-dropped need).
+    """
+    need = await _scoped_need(db, loan_file.id, needs_item_id)
+    await dismiss_duplicate_flag(db, need=need)
     await db.commit()
     return await _public_one(db, loan_file.id, need)
 

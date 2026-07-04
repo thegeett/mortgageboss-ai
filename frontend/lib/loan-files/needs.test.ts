@@ -35,6 +35,7 @@ function need(status: NeedsItemStatus, overrides: Partial<NeedsItemPublic> = {})
     requires_coverage_confirmation: false,
     matching_documents: [],
     source: null,
+    possible_duplicate_of: null,
     created_at: "2026-06-19T12:00:00Z",
     ...overrides,
   };

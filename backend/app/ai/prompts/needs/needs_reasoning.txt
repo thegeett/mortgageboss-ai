@@ -46,6 +46,10 @@ CRITICAL RULES:
   - RECONCILE: do NOT propose anything already covered. The "already_covered" list
     holds need types + document types that already exist on the file — skip those.
     Don't re-propose a document that is already present.
+  - DO NOT DUPLICATE THE EXISTING LIST: the "existing_needs" list holds the needs
+    ALREADY on the file (their title + type). Do NOT restate or REWORD any of them —
+    if a need you would propose is already there (even worded differently), skip it.
+    Only propose genuinely NEW needs not already represented.
   - EXPLAINABILITY: every need MUST carry file-specific reasoning. If you can't ground
     a need in this file's data, don't propose it.
   - You PROPOSE; you do not decide. A human processor will confirm, adjust, or dismiss

@@ -61,6 +61,10 @@ class Settings(BaseSettings):
     # exponential backoff + jitter, capped at this many attempts.
     ai_max_retries: int = 3
     ai_base_retry_delay_seconds: float = 1.0
+    # Needs consolidation (LP-111): after the deterministic collapse, an AI pass FLAGS the
+    # semantic-duplicate residue for the processor to confirm (never a silent delete). Gated so the
+    # extra per-run classification call can be turned off; the deterministic layers run regardless.
+    needs_duplicate_flagging_enabled: bool = True
 
     # JWT / Auth
     jwt_secret_key: str = Field(

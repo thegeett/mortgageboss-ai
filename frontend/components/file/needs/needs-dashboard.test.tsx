@@ -5,9 +5,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // The dashboard fetches via hooks; mock the two data layers it depends on so the
 // test drives the data and asserts the rendered checklist + the disposition wiring.
-const { confirmMutate, coverageMutate } = vi.hoisted(() => ({
+const { confirmMutate, coverageMutate, mergeMutate, keepBothMutate } = vi.hoisted(() => ({
   confirmMutate: vi.fn(),
   coverageMutate: vi.fn(),
+  mergeMutate: vi.fn(),
+  keepBothMutate: vi.fn(),
 }));
 
 const useNeeds = vi.fn();
@@ -22,6 +24,8 @@ vi.mock("@/lib/api/needs", () => ({
   useDismissNeed: () => ({ mutate: vi.fn(), isPending: false }),
   useWaiveNeed: () => ({ mutate: vi.fn(), isPending: false }),
   useAddNeed: () => ({ mutate: vi.fn(), isPending: false }),
+  useMergeDuplicate: () => ({ mutate: mergeMutate, isPending: false }),
+  useNotDuplicate: () => ({ mutate: keepBothMutate, isPending: false }),
 }));
 
 vi.mock("@/lib/api/documents", () => ({
@@ -54,6 +58,7 @@ function need(overrides: Partial<NeedsItemPublic> = {}): NeedsItemPublic {
     requires_coverage_confirmation: false,
     matching_documents: [],
     source: null,
+    possible_duplicate_of: null,
     created_at: "2026-06-19T12:00:00Z",
     ...overrides,
   };
@@ -266,6 +271,28 @@ describe("NeedsDashboard", () => {
     expect(screen.getByText("finding")).toBeDefined(); // the finding attribution pill
     expect(screen.getByText("Monthly child support obligation of $1,200")).toBeDefined();
     expect(screen.getByText("Divorce Decree.pdf")).toBeDefined(); // grounded to the source document
+  });
+
+  // LP-111 — the AI-flagged possible-duplicate surfaces a Merge / Keep-both prompt (never a silent
+  // merge); the processor disposes.
+  it("shows a possible-duplicate flag with merge / keep-both actions", () => {
+    setDocuments(false);
+    setNeeds({ data: [need({ possible_duplicate_of: "other-need-id" })] });
+    render(<NeedsDashboard fileId="f1" />);
+    expect(screen.getByText(/possible duplicate/i)).toBeDefined();
+
+    fireEvent.click(screen.getByRole("button", { name: "Merge" }));
+    expect(mergeMutate).toHaveBeenCalledWith("n1", expect.anything());
+
+    fireEvent.click(screen.getByRole("button", { name: /keep both/i }));
+    expect(keepBothMutate).toHaveBeenCalledWith("n1", expect.anything());
+  });
+
+  it("shows no duplicate flag when the need isn't flagged", () => {
+    setDocuments(false);
+    setNeeds({ data: [need()] });
+    render(<NeedsDashboard fileId="f1" />);
+    expect(screen.queryByText(/possible duplicate/i)).toBeNull();
   });
 
   it("shows 'satisfied by' the document for a verified simple-presence need", () => {

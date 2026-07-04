@@ -126,6 +126,8 @@ async def test_assemble_file_context_gathers_the_whole_picture(db_session: Async
     # "already covered" folds in existing-need types + present document types.
     assert "pay_stub" in ctx.already_covered  # the existing need
     assert "bank_statement" in ctx.already_covered  # the present document
+    # LP-111: the existing needs (title + type) are in context so the model doesn't reword them.
+    assert any(n["title"] == "Pay stubs" for n in ctx.existing_needs)
 
 
 # --------------------------------------------------------------------------- #

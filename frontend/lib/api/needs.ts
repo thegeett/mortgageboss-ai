@@ -108,6 +108,27 @@ export function useConfirmCoverage(fileId: string) {
   });
 }
 
+/** LP-111: confirm an AI-flagged possible-duplicate — merge this need into its twin. */
+export function useMergeDuplicate(fileId: string) {
+  const invalidate = useNeedsInvalidation(fileId);
+  return useMutation({
+    mutationFn: async (needId: string) =>
+      (await apiClient.post<NeedsItemPublic>(`${needsPath(fileId)}/${needId}/merge-duplicate`))
+        .data,
+    onSuccess: invalidate,
+  });
+}
+
+/** LP-111: dismiss a duplicate flag — "not a duplicate, keep both" (clears the flag). */
+export function useNotDuplicate(fileId: string) {
+  const invalidate = useNeedsInvalidation(fileId);
+  return useMutation({
+    mutationFn: async (needId: string) =>
+      (await apiClient.post<NeedsItemPublic>(`${needsPath(fileId)}/${needId}/not-duplicate`)).data,
+    onSuccess: invalidate,
+  });
+}
+
 /** Adjust a need's content (a correction signal). */
 export function useAdjustNeed(fileId: string) {
   const invalidate = useNeedsInvalidation(fileId);

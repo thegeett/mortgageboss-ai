@@ -153,6 +153,10 @@ class NeedsItemPublic(BaseModel):
     # (deterministic rule / AI-identified / finding), so the reasoning is FALSIFIABLE. None when the
     # origin carries no structured source (e.g. a processor-added manual need).
     source: NeedSource | None = None
+    # LP-111: set when the AI FLAGGED this proposed need as a POSSIBLE duplicate of another (by id) —
+    # a "possible duplicate of …" indicator the processor confirms (merge) or dismisses (keep both).
+    # Never a silent merge; the deterministic-certain duplicates were already merged before this.
+    possible_duplicate_of: UUID | None = None
 
     @classmethod
     def from_model(
@@ -190,6 +194,7 @@ class NeedsItemPublic(BaseModel):
             requires_coverage_confirmation=needs_coverage_confirmation(item),
             matching_documents=matches,
             source=build_need_source(item),
+            possible_duplicate_of=item.duplicate_of_id,
         )
 
 

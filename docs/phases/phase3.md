@@ -234,3 +234,9 @@ FileContext facts + a ref, marked AI-identified; floor derives the deterministic
 existing source_finding chain) and displayed with HONEST ATTRIBUTION (a deterministic rule reads as certain; an
 AI-identified source reads as "verify") — the same discipline findings already carry. Recorded here; built in LP-110
 (ADR-234; docs/tickets/LP-110.md).
+
+The same "AI surfaces, deterministic/human disposes" discipline governs needs CONSOLIDATION (LP-111): duplicate needs
+are collapsed by a deterministic safe floor (collapse-by-source + the findings' LP-93 substance-identity, reused), and
+the semantic residue is only FLAGGED by the AI for the processor to confirm — NEVER a silent delete (a wrongly-dropped
+need is worse than a duplicate; under-merge when unsure). Source RELEVANCE — the AI attaching a tangential fact as a
+need's source — is a separate prompt-quality follow-up (LP-112). ADR-235; docs/tickets/LP-111.md.

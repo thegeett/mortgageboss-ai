@@ -7542,3 +7542,54 @@ were provenance-backed but needs weren't — the human can verify a misread on t
 JSON column + one relationship; no change to matching, satisfaction, or generation. A persisted "the processor
 confirmed this source" record and clickable deep-links into the underlying records are natural future refinements, not
 built here.
+
+## ADR-235: Needs consolidation — deterministic collapse (source + substance) + AI flags the residue (LP-111)
+
+- **Date:** 2026-07-04
+- **Status:** Accepted
+
+**Context:** One real situation multiplied into 3-4 needs. A single fact (a $20,000 "due diligence fee" wire) became
+TWO findings (an ``obligation`` + a ``discrepancy_candidate``); each finding implied an LP-67 suggestion; and the LP-69
+AI reasoner independently free-formed more needs citing the same fact — with ``needs_type=null`` and reworded wording
+every run. Nothing merged by shared source, and the only dedup (``reconcile`` / ``apply_ai_needs``) matched on exact
+``needs_type`` or exact ``.lower()`` title — so reworded free-form variants slipped through and ACCUMULATED across the
+per-document-arrival re-runs. Meanwhile the findings subsystem already had the missing mechanism: a normalized-substance
+identity (LP-93, ``finding_identity``).
+
+**Decision:** consolidate needs with a **deterministic safe floor + an AI layer that only FLAGS**, under one discipline:
+**never silently delete a need.** A duplicate is a minor annoyance; a wrongly-dropped need is a major failure (a
+required document never gets collected → the file goes to the lender incomplete). These are asymmetric, so we
+**UNDER-merge** — when unsure, keep both.
+
+- **Layer 1 — collapse-by-source (certain).** Two PROPOSED needs of the SAME ``needs_type`` that share a source finding
+  (via ``source_finding_id`` or the ``source_facts`` finding ref, LP-110) are the same ask (the suggestion + the AI
+  proposal for one finding) → merged deterministically. Same idea as ``ingest_suggested_need``'s per-finding idempotency.
+- **Layer 2 — substance-identity (certain).** REUSE LP-93's ``normalize_text`` (NFKC + case-fold + dash/quote +
+  whitespace) for a ``(intent, title)`` identity — REPLACING the exact ``.lower()`` match that let cosmetic variants
+  through. Textual only, no fuzzy matching (conservative).
+- **Layer 3 — AI flag (never deletes).** The genuinely-reworded residue the deterministic layers can't be SURE of
+  (different words, ``needs_type=null``) is only FLAGGED (``duplicate_of_id``) for the processor to confirm (merge) or
+  dismiss (keep both, ``duplicate_reviewed`` so it's never re-flagged). Conservative, high-confidence only, cheap
+  classification model, gated by a setting. This is the safe version of "AI dedup" — its semantic strength used, its
+  silent-delete danger contained.
+- **Generation-time reconciliation.** The existing needs (title + type) are fed into the reasoner's context so it stops
+  REWORDING them into new duplicates — attacking the accumulation at the source, not just post-hoc.
+- **Safety boundary.** Only a ``PROPOSED`` + ``PENDING`` need may be merged AWAY; a confirmed / waived / adjusted /
+  received need is a fixed point (a proposed duplicate merges INTO it). Merges preserve provenance (the survivor keeps
+  the UNION of both ``source_facts``), composing with LP-108/109/110.
+
+**Upstream finding-multiplication — investigated, NOT collapsed.** One fact → an ``obligation`` + a
+``discrepancy_candidate`` finding maps (``implications.py``) to genuinely distinct purposes: the obligation feeds
+recurring-debt/DTI ("request payment history"); the discrepancy is a "reconcile this mismatch" flag (Phase 3). Collapsing
+them upstream would lose that signal, so we **consolidate at the needs layer** (default) and preserve the findings.
+Noted separately: typing a one-time wire as ``OBLIGATION`` (a recurring type) is an extraction misclassification — a
+follow-up, not fixed here.
+
+**Scope.** Consolidation only. The separate NOISY-SOURCE problem (the AI attaching a tangential fact as a source — e.g.
+the homeowner's-insurance need citing the wire when its real trigger is "Loan purpose = Purchase") is source RELEVANCE,
+a prompt-quality fix, deferred to **LP-112** (different mechanism). Need generation (what's proposed) is unchanged.
+
+**Consequences:** the wire cluster collapses toward ~1 LOE + the distinct sales-contract need (deterministic where
+certain; AI-flagged where reworded; processor-confirmed) — not over-merged into one, not left at 3-4. Two columns +
+one service + a small flag UI; no change to matching/satisfaction/generation. Persisted "these are the same" learning
+and a stronger free-form subject key are future refinements.

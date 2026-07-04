@@ -1,4 +1,4 @@
-import { NeedActions } from "@/components/file/needs/need-actions";
+import { NeedActions, NeedDuplicateFlag } from "@/components/file/needs/need-actions";
 import {
   PRIORITY_META,
   SOURCE_ATTRIBUTION_META,
@@ -141,6 +141,10 @@ export function NeedCard({ fileId, need }: { fileId: string; need: NeedsItemPubl
       {/* The SOURCE (LP-110) — the specific data the reasoning stands on, so it's FALSIFIABLE. Sits
           with the "why": the reasoning is the argument, the source is the checkable fact under it. */}
       {need.source && <NeedSourceNote source={need.source} />}
+
+      {/* The possible-duplicate flag (LP-111) — the AI SURFACES a likely duplicate; the processor
+          disposes (merge / keep both). Never a silent merge. */}
+      {need.possible_duplicate_of && <NeedDuplicateFlag fileId={fileId} need={need} />}
 
       {/* HONEST SATISFACTION (LP-108): a graded need with documents attached (received) says so —
           the system verified a document is PRESENT, not that the full requirement (all accounts /

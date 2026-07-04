@@ -208,6 +208,21 @@ class NeedsItem(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
 
+    # --- Consolidation (LP-111) --------------------------------------------
+    # A POSSIBLE-DUPLICATE flag the AI layer sets (never a silent delete): this proposed need looks
+    # like a duplicate of ``duplicate_of_id`` — the processor confirms the merge or keeps both. The
+    # deterministic layers (collapse-by-source / substance-identity) merge certain duplicates
+    # outright; this is only the SEMANTIC residue they can't be sure of. SET NULL so the survivor
+    # can be removed without stranding the flag.
+    duplicate_of_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("needs_items.id", ondelete="SET NULL"),
+        index=True,
+        nullable=True,
+    )
+    # True once the processor has DISPOSED of a duplicate flag (confirmed the merge or said "keep
+    # both") — so the AI flag pass never re-flags a pair the human already judged.
+    duplicate_reviewed: Mapped[bool] = mapped_column(default=False, nullable=False)
+
     # --- Relationships -----------------------------------------------------
     loan_file: Mapped["LoanFile"] = relationship(back_populates="needs_items")
     borrower: Mapped["Borrower | None"] = relationship()

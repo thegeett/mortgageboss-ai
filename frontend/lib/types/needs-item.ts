@@ -68,6 +68,10 @@ export interface NeedsItemPublic {
    * so the reasoning is FALSIFIABLE (the processor can verify the AI didn't misread). Null when the
    * origin carries no structured source (e.g. a processor-added manual need). */
   source: NeedSource | null;
+  /** LP-111: set when the AI FLAGGED this proposed need as a possible duplicate of another (by id) —
+   * the processor confirms the merge or keeps both. Never a silent merge (the deterministic-certain
+   * duplicates were already merged before this). */
+  possible_duplicate_of: string | null;
 }
 
 /** One document matching a need (LP-109) — id (for a link) + display filename. */
