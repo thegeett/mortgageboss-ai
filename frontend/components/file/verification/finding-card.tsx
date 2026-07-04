@@ -186,8 +186,11 @@ export function FindingCard({
           </div>
 
           {/* Collapsed one-line "What we found" — the specifics, kept scannable (single line). */}
+          {/* A USEFUL multi-line preview (LP-113), not a one-line mid-word cut — these descriptions
+              are long, so a single clamped line reads as broken. ``line-clamp-3`` keeps the list
+              scannable while giving real context; the FULL text is in the Details expansion below. */}
           {collapsedWhat && (
-            <p className="mt-0.5 line-clamp-1 text-xs text-gray-500">{collapsedWhat}</p>
+            <p className="mt-0.5 line-clamp-3 text-xs text-gray-500">{collapsedWhat}</p>
           )}
 
           <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-gray-400">
