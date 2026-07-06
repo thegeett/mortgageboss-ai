@@ -257,4 +257,4 @@ coverage + dates are feedable now; mortgagee-clause + deductible are blocked pen
 | Tier routing + no-extractor fallback | `app/tasks/document_processing.py:195-207, 227, 388-399` |
 | Deterministic stated side (MISMO) | `app/mismo/{parser,schema,import_service}.py`, `app/models/{borrower,stated_financials,property,loan_file}.py` |
 | Fact-builder wiring (doc fields → CrossSourceFacts) | `app/services/cross_source.py` (`_verified_documents`, `_typed_fields`), `app/services/cross_source_deterministic.py:181-262` |
-| Plan / blocker references | `docs/phases/phase3_5_1.md` |
+| Plan / blocker references | `docs/phases/phase3_5_1.md` | 
