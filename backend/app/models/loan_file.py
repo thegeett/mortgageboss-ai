@@ -27,13 +27,14 @@ from enum import StrEnum
 from typing import TYPE_CHECKING
 from uuid import UUID
 
-from sqlalchemy import Date, ForeignKey, Integer, Numeric, String
+from sqlalchemy import Boolean, Date, ForeignKey, Integer, Numeric, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, SoftDeleteMixin, TimestampMixin, UUIDMixin
 from app.models.enums import str_enum
 from app.models.lender import LoanProgram
 from app.models.types import MEDIUM_STRING, SHORT_STRING, Money
+from app.verification.confidence import AggressionLevel
 
 if TYPE_CHECKING:
     from app.models.activity_log import ActivityLog
@@ -79,6 +80,19 @@ class LoanPurpose(StrEnum):
 
     PURCHASE = "purchase"
     REFINANCE = "refinance"
+
+
+class RefinanceType(StrEnum):
+    """The kind of refinance (LP-77) — drives the LTV denominator + limit.
+
+    A **rate/term** refinance changes the rate/term only and uses LTV limits close
+    to a purchase; a **cash-out** refinance pulls equity out and carries a
+    **stricter** LTV limit. Null when the loan is a purchase (or the refinance type
+    is not yet stated).
+    """
+
+    RATE_TERM = "rate_term"
+    CASH_OUT = "cash_out"
 
 
 class AiNeedsStatus(StrEnum):
@@ -140,6 +154,11 @@ class LoanFile(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     # --- Loan attributes (all nullable; may arrive via MISMO/processor) -----
     loan_program: Mapped[LoanProgram | None] = mapped_column(str_enum(LoanProgram), nullable=True)
     loan_purpose: Mapped[LoanPurpose | None] = mapped_column(str_enum(LoanPurpose), nullable=True)
+    # The refinance kind (LP-77) — drives the LTV denominator + limit. Null for a
+    # purchase (or an as-yet-unstated refinance).
+    refinance_type: Mapped[RefinanceType | None] = mapped_column(
+        str_enum(RefinanceType), nullable=True
+    )
     loan_amount: Mapped[Money | None] = mapped_column(nullable=True)
 
     # --- MISMO core loan terms (LP-52) — nullable; manual creation leaves empty.
@@ -165,6 +184,29 @@ class LoanFile(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     # no AI reasoning triggered (e.g. a manually created file). Never blocks.
     ai_needs_status: Mapped[AiNeedsStatus | None] = mapped_column(
         str_enum(AiNeedsStatus), nullable=True
+    )
+    # Whether the cross-source verification is out of date (LP-78). Set True when
+    # a document changes (upload / type override / replace) or a finding is
+    # applied (the structured data changed); cleared when the cross-source pass
+    # re-runs. A visible "re-run verification" indicator; auto-re-run is deferred.
+    verification_stale: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default="false", nullable=False
+    )
+
+    # --- Aggression dial (LP-79) — the verification thoroughness for this file --
+    # A per-file CONFIDENCE CUTOFF over the already-computed findings (LP-78): a
+    # finding is in-scope (shown + blocking) at/above the active cutoff. NULL =
+    # use the user's default (a per-file override dials a tricky file up/down). The
+    # dial NEVER re-runs the AI and NEVER recolors a finding — it only changes
+    # which stored findings are in scope (confidence ≠ severity, orthogonal axes).
+    aggression_level_override: Mapped[AggressionLevel | None] = mapped_column(
+        str_enum(AggressionLevel, name="aggression_level_override"), nullable=True
+    )
+    # The active level recorded when the file was marked ready to submit — "cleared
+    # at <level> thoroughness" (auditability; "clear" is relative to thoroughness).
+    # NULL until the file passes the submit gate.
+    submitted_aggression_level: Mapped[AggressionLevel | None] = mapped_column(
+        str_enum(AggressionLevel, name="submitted_aggression_level"), nullable=True
     )
 
     # --- Originating loan officer (free-text; the LO is not a system user) --

@@ -160,10 +160,12 @@ async def test_tier1_real_upload_processes_and_satisfies_need(
     extraction = await _current_extraction(db_session, doc.id)
     assert extraction is not None and extraction.extraction_status is ExtractionStatus.SUCCEEDED
 
-    # The needs-satisfaction seam: the matching need verifies against the document.
+    # The needs-satisfaction seam: the matching document attaches to the need. A pay-stub need is
+    # GRADED (recent pay stubs), so honest satisfaction (LP-108) stops at RECEIVED = "documents
+    # attached — confirm coverage" (NOT a false "verified" on one statement); the doc is shown.
     matched = await apply_document_to_needs(db_session, doc)
     assert matched is not None and matched.id == need.id
-    assert need.status is NeedsItemStatus.VERIFIED
+    assert need.status is NeedsItemStatus.RECEIVED
     assert need.satisfied_by_document_id == doc.id
 
 

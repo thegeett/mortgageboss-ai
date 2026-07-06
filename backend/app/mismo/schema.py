@@ -65,6 +65,12 @@ class ParsedLoan(BaseModel):
     note_amount: Decimal | None = None
     note_rate_percent: Decimal | None = None
     loan_purpose: str | None = None  # Purchase / Refinance
+    # The refinance cash-out determination (LP-99) — only meaningful when loan_purpose=Refinance.
+    # MISMO ``REFINANCE/RefinanceCashOutDeterminationType`` (CashOut / LimitedCashOut / NoCashOut),
+    # with ``RefinanceCashOutAmount`` as a corroborating signal. Drives ``refinance_type`` → the
+    # LTV limit (cash-out is stricter). Absent for a purchase.
+    refinance_cash_out_type: str | None = None
+    refinance_cash_out_amount: Decimal | None = None
     mortgage_type: str | None = None  # Conventional / FHA / …
     lien_priority: str | None = None
     amortization_type: str | None = None  # Fixed / …

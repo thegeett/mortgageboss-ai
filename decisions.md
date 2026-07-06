@@ -5645,3 +5645,2030 @@ storage footgun's root.
 **Consequences:** the seams are now under test; future seam regressions (storage, loop, flush, silent
 failure) are far more likely to be caught in CI. The S3 backend + its MinIO validation are honestly
 deferred to Phase 7.
+
+## ADR-188: Verification rule engine — uniform structure, three-layer composition, deterministic evaluation (LP-74)
+
+- **Date:** 2026-06-27
+- **Status:** Accepted
+
+**Context:** Phase 3 builds the verification engine. The *first* ticket is the engine itself — the
+mechanism before the ~60 Conventional + ~50 FHA rule content (LP-82..85), mirroring LP-68's
+"engine before content". The structural decisions here determine whether the rest of Phase 3
+(overlays, calculators, the aggression dial, the findings) compose cleanly or require an impossible
+retrofit. Verification rules come from three sources that must **compose**: regulatory (Layer 1, all
+loans), investor (Layer 2, per program — Fannie for Conventional, HUD for FHA), and lender overlay
+(Layer 3, per lender).
+
+**Decision:**
+
+- **One uniform rule structure for all three layers**, carrying a **stable `rule_id`** (e.g.
+  `conv.dti.back_end_max`), a `layer`, an `applicability` (all_loans / program / lender), the typed
+  `reads` field path(s), a **threshold-as-data** `condition` (`{op, value, unit}`), a `severity`
+  (red/yellow), a finding `category`, a `description`, and a structured `source` citation. Rules are
+  **definitions** (config-like, declared in code, seedable), not per-file rows.
+- **The two linchpins are airtight.** (1) Every rule has a **stable `rule_id`** — overlays reference
+  rules *by id*. (2) The **threshold is data** the fixed logic reads, never hardcoded — so an overlay
+  can supply a different value and the *same* `satisfies()` evaluates against it. Rule **logic is
+  fixed; thresholds are data**.
+- **Three-layer composition resolves a flat effective set per file.** Base = all regulatory rules +
+  the investor rules for the file's program (Conventional **or** FHA, never both). Patch with the
+  lender's overlay applied as a **diff**: an override replaces the base rule's threshold *by `rule_id`*
+  (identity/logic unchanged — only the `condition`); a custom rule is appended. **The investor rule is
+  the default** — un-overridden rules fall through; no overlay → all investor defaults. Overlays are
+  **diffs, not full per-lender copies** (small, maintainable, auditable).
+- **Evaluation is deterministic.** For each rule in the effective set: read the file's typed field →
+  compare to the (possibly overlay-patched) threshold → emit a pass/fail finding. **No AI** (the AI's
+  role is upstream extraction); the handoff is **structured data** — rules read typed fields, never
+  prose. A datum the file does not carry yet → the rule is *not evaluated* (the engine never invents a
+  verdict). The pure engine takes a `FileFacts` snapshot; the DB-facing service builds facts, resolves
+  rules, evaluates, and persists — per file, **tenant-scoped** (loan_file → company).
+- **Two generators, one findings model.** The engine emits into the shared LP-66 `Finding` model in a
+  **uniform shape** (rule_id, observed value, severity-derived status, the condition, structured
+  source, source-location placeholder, reasoning), marked with a new minimal `origin` field
+  (`deterministic_rule`). The Phase-3 AI cross-source layer (LP-78) feeds the **same** model as
+  `ai_cross_source`. The findings path is **not** engine-exclusive. LP-75 does the fuller findings-model
+  extension (confidence / resolution / blocking / source-location); `origin` is the minimal field
+  needed to emit in the uniform shape now.
+- **Built and proven with SAMPLE rules + a SAMPLE overlay.** A regulatory AML rule, Conventional/FHA
+  DTI caps, a pay-stub-recency rule, and a sample lender overlay (overriding the Conventional DTI to 45
+  and adding a reserves custom rule). The overlay-patched threshold (45) produces a finding where the
+  investor default (50) would not — proving the patch reaches evaluation. The real content is LP-82..85;
+  the real overlays LP-80.
+
+**Rationale:** the rule structure determines whether all of Phase 3 composes. Stable ids let overlays
+*reference* rules; thresholds-as-data let overlays *override* them — so an overlay is a clean patch, not
+a retrofit. Investor-default + overlay-as-diff keeps overlays small, visible, and maintainable.
+Deterministic evaluation is what makes verification **auditable and defensible** — a threshold check is
+correct by construction, not "probably right per the AI" (the locked "AI surfaces, deterministic code
+judges" principle). The two-generator accommodation lets LP-78's AI findings share the model without a
+later migration of the engine's emit path. Engine-before-content (sample rules) mirrors LP-68: a solid,
+tested mechanism first; the domain content later.
+
+**Consequences:** LP-75 extends the findings model (confidence / resolution / blocking /
+source-location); LP-76/77 add the transparent DTI/LTV calculators (and the real fact computations the
+engine's `build_file_facts` currently stubs as sample calcs); LP-78 adds the AI cross-source layer
+(feeding the shared model) + the APPLY → recompute loop; LP-79 the aggression dial; LP-80 the real UWM /
+Sun-West overlays (via this mechanism); LP-82..85 the real rule content (via this engine, promoting
+typed-core fields as rules need them). The engine is per-file (shared definitions, per-file runs).
+
+## ADR-189: Findings model extension — confidence, resolution, blocking, source location (the uniform verification finding) (LP-75)
+
+- **Date:** 2026-06-27
+- **Status:** Accepted
+
+**Context:** LP-74 built the deterministic rule engine, emitting into the LP-66 `Finding` model. The
+locked Phase-3 architecture rests on **one** findings model that *both* generators (LP-74
+deterministic, LP-78 AI cross-source) feed and the human resolves *uniformly* — plus the Phase-2
+document findings (LP-66). LP-75 turns that model into the full verification finding by adding the four
+dimensions verification needs, **extending** the existing model rather than forking it.
+
+**Decision:**
+
+- **Extend the LP-66 `Finding`, do not build a new model.** Add four dimensions in place:
+  - **Confidence** (`confidence: float` in [0, 1], DB CHECK) — how sure the system is the finding is
+    real; the **aggression dial**'s substrate (LP-79) and the blocking input. Deterministic threshold
+    findings are **certain** (`DETERMINISTIC_CONFIDENCE = 1.0` — the math is exact); AI cross-source
+    findings (LP-78) **vary**. Defaults to 1.0 so a finding without an explicit value reads as trusted.
+  - **Resolution states** — extend the existing `FindingResolutionStatus` with **APPLIED** and
+    **OVERRIDDEN** (the two verification resolutions) alongside the default **OPEN**. APPLIED
+    *incorporates the finding into the structured data*; OVERRIDDEN *dismisses it with a recorded
+    reason* (reused `resolution_note`, required, enforced in the service). The legacy LP-17 states
+    (RESOLVED / ACCEPTED_RISK / WAIVED) remain for the document-finding flow; any non-OPEN state is
+    *resolved* for blocking. **No finding is silently ignored** — every one is applied or
+    overridden-with-reason, and the resolution is activity-logged.
+  - **Blocking** — a computation (`is_file_blocked`): a file is blocked from *ready to submit* while it
+    has any **open in-scope** finding, where *in-scope* = an actionable (red/yellow) open finding whose
+    **confidence ≥ the active cutoff**. LP-75 owns the computation and a standalone Balanced default;
+    **LP-79's dial sets the cutoff**. Wired into the ready-to-submit transition (a 409 at the endpoint);
+    green findings (passes) never block.
+  - **Source location** — `source_page` + `source_snippet` (a page number + a **verbatim** snippet):
+    the trust/audit anchor (click a finding → the exact document line), building on extraction's
+    per-field source. Bounding-box highlighting deferred; page + snippet is V1.
+- **One uniform shape across all three generators.** `FindingOrigin` gains `DOCUMENT_ANALYSIS`, so
+  deterministic_rule / ai_cross_source / document_analysis findings share **one** shape — type,
+  amount, source document, page, snippet, confidence, reasoning, severity (`status`), resolution, and
+  the origin provenance marker. The dial, the UI (LP-81), and the resolution flow treat findings
+  **uniformly** — they don't care *how* a finding was generated. "Two generators, one findings model"
+  made concrete in the data. The LP-74 engine now emits in this full shape (certain confidence + source
+  location).
+- **APPLY → recompute hook.** APPLYING a finding *changes the structured data* (e.g. an undisclosed
+  obligation is **added to liabilities**) — the trigger point of the AI↔deterministic interlock. LP-75
+  builds the hook: `apply_finding` performs the structured-data change (the canonical `add_liability`
+  case), records it on `applied_record`, and calls `mark_recompute_needed` (the explicit seam). The
+  **full** recompute loop is LP-78 (cross-source + the loop) + the calculators (LP-76/77); the
+  observable signal today is the structured-data change itself.
+
+**Rationale:** the locked architecture is one findings model both generators feed and the human
+resolves uniformly — so *extend* the uniform-feedstock model, never fork it. Confidence is the dial's
+substrate; the two resolutions + no-silent-ignore make findings blocking and auditable;
+APPLIED-incorporates-into-structured-data is the interlock that lets an AI-surfaced correction feed the
+deterministic recompute (the human-in-the-loop loop); source location is the trust mechanism. Reusing
+`resolution_note` for the override reason and the existing `resolution_status` enum (rather than a
+parallel resolution field) honours "extend, don't duplicate".
+
+**Consequences:** LP-79 builds the aggression dial (filters on confidence; gates display + blocking;
+records the active level at submission); LP-81 the findings UI + resolution flow; LP-78 the AI
+cross-source generator (feeding this model) + the full APPLY→recompute loop; LP-76/77 the DTI/LTV
+calculators (recompute on applied changes; the unresolved-findings alert). Bounding-box highlighting is
+deferred (page + snippet is V1).
+
+## ADR-190: DTI calculator — transparent, auto-populated, override-able, deterministic, findings-coupled (LP-76)
+
+- **Date:** 2026-06-28
+- **Status:** Accepted
+
+**Context:** DTI (debt-to-income) is THE mortgage-qualification number and the sister's most acute
+ChatGPT pain — a black box she can't fully trust, with no auto-population (she re-enters everything) and
+no audit trail. LP-76 is the headline "replace ChatGPT" win of Phase 3: it must beat ChatGPT on
+transparency, auto-population, and trustworthiness.
+
+**Decision:**
+
+- **Pure deterministic math, fully broken down.** Front-end DTI = housing ÷ income; back-end DTI =
+  (housing + monthly debts) ÷ income. Computed in a pure module (`app/verification/dti.py`) — **no AI**;
+  the monthly principal+interest is amortized from the loan terms (it is not stored). The response is
+  **fully itemized**: every income line, every housing component (PITI + MI + HOA), and every debt, each
+  with its auto value, any override, the effective value, and a source tag — plus the **explicit
+  formula**. The transparency *is* the feature; a black-box DTI is untrustworthy, one that shows every
+  input and the formula is trustworthy. Money is `Decimal`; ratios round half-up to 2 dp.
+- **Program limits side-by-side, the effective limit.** The computed back-end DTI is shown against the
+  **effective** limit for the file's program + lender — LP-74's investor rule (Conv 50 / FHA 57)
+  patched by any lender overlay (e.g. the sample overlay's 45), via the same registry the rules engine
+  uses — with a pass/over status. The number alone is meaningless; the number against the limit is the
+  answer.
+- **Auto-populated from the structured data.** The calculator opens **already filled** — income from
+  stated income, debts from stated liabilities, P&I computed from the loan terms, taxes / insurance /
+  HOA from the current document extractions. It reads the *same* structured data the rules engine
+  evaluates. Review + adjust, not enter from scratch (the "better than ChatGPT").
+- **Override any field, with an audit log.** A `DtiOverride` row (one per `(file, field_key)`, unique;
+  clearing soft-deletes) holds the override amount; the override **takes precedence** over the auto
+  value and **persists**. Every set/clear is audited (`ActivityType.DTI_OVERRIDDEN`, with the prior
+  value, by whom). The auto values are a trustworthy starting point, not a cage.
+- **Real-time recalculation.** The override endpoints return the **recomputed** calculation in the
+  response, so the UI updates from one round-trip (the mutation primes the query cache).
+- **Coupled to findings (LP-75).** (1) The **unresolved-findings alert**: the calculation queries open
+  in-scope findings (LP-75's `open_in_scope_findings`, Balanced default) and warns when the numbers may
+  be incomplete. (2) **Recompute on applied findings**: because the calculation reads the structured
+  data live, applying a finding (LP-75's hook adds a liability) makes the next calculation recompute
+  higher — LP-76 is a recompute consumer of the apply hook (the AI↔deterministic interlock landing in
+  the calculator).
+
+**Rationale:** the value is transparency (every input + the formula visible) + auto-population (no
+re-entry) + deterministic correctness (correct by construction, not "probably right per the AI"). The
+findings coupling realizes the interlock at the calculator — AI surfaces an obligation → human applies →
+it changes the structured data → the DTI recomputes — and warns when open findings might make the calc
+incomplete. Override-with-audit keeps the human in control and the file defensible.
+
+**Consequences:** LP-77 builds the LTV calculator on the same model (auto-populate → itemize →
+deterministic compute → override-with-audit); LP-79's dial sets the in-scope cutoff the alert (and
+blocking) use; LP-81's verification tab surfaces the calculator prominently (it already lives there);
+LP-82/83 encode the real DTI rules (the calculator computes DTI; the rules judge it — shown as the
+limit); the effective limit reflects overlays today; the other calculators (MI / self-employed income /
+reserves / max loan) are LP-87. Housing taxes/insurance/HOA are read from document extractions when
+present and are override-able otherwise (no dedicated property fields yet).
+
+## ADR-191: LTV calculator — LTV/CLTV/HCLTV, refinance-aware, reusing the DTI calculator model (LP-77)
+
+- **Date:** 2026-06-28
+- **Status:** Accepted
+
+**Context:** LTV (loan-to-value) is the second qualification pillar — where DTI asks "can the borrower
+afford the payment?", LTV asks "how much equity is in the deal?" (the lender's risk exposure). The
+vertical slice needs both. LP-76 proved a transparent / auto-populated / override-able / findings-coupled
+/ deterministic calculator; LP-77 applies that model to LTV, with the LTV-specific substance done
+correctly.
+
+**Decision:**
+
+- **Reuse LP-76's calculator model, applied to LTV.** Same transparent itemized breakdown + explicit
+  formulas, auto-population from the structured data, per-field override with an audit log, real-time
+  recalc (the override endpoints return the recomputed result), the findings coupling (unresolved-findings
+  alert + recompute-consumer), and pure deterministic math. The framework is reuse; the new substance is
+  the three ratios + refinance handling. A parallel `LtvOverride` table + `ltv_overridden` activity type
+  mirror the DTI ones (rather than disturbing LP-76).
+- **Three deterministic ratios, the subtleties correct + made visible.**
+  - **LTV = first loan ÷ the LESSER OF** purchase price and appraised value (for a purchase) — the lender
+    won't lend against a price above the appraisal. The basis (and which value won) is shown explicitly.
+  - **CLTV = (first + second + HELOC drawn balance) ÷ value.**
+  - **HCLTV = (first + second + HELOC CREDIT LIMIT) ÷ value** — the most conservative measure: a $0-balance
+    HELOC with a $100k line could be drawn tomorrow, so the full line counts. These two subtleties
+    (lesser-of, credit-limit-not-balance) are the trust mechanism — exactly what a processor wants verified
+    and what ChatGPT fumbles.
+- **Refinance-aware.** The loan purpose drives the denominator **and** the limit: a purchase uses the
+  lesser-of; a rate/term refinance uses the appraised value (no purchase price); a cash-out refinance uses
+  the appraised value with a **stricter** limit. A nullable `refinance_type` (rate_term / cash_out) on the
+  loan file carries the cash-out distinction.
+- **Program limits side-by-side, the effective + purpose-varying limit.** Sample LTV rules
+  (`conv/fha.ltv.purchase_max`, `conv/fha.ltv.cash_out_max`) are added to LP-74's registry; the calculator
+  selects the rule matching the program + purpose and reads the effective threshold (overlay-patchable),
+  with a pass/over status. (Real limits are LP-82/83; these are samples like LP-74's.)
+- **The appraised value is graceful.** It auto-populates from the MISMO valuation (else the estimated
+  value) and is **override-able** where neither is present — the appraisal isn't a Tier-1 extraction yet,
+  so the override is the graceful fallback. The appraisal is **not** promoted to Tier 1 here.
+
+**Rationale:** LTV's correctness subtleties (lesser-of, credit-limit) are precisely what a deterministic
+tool should nail; refinance-awareness is required because the denominator and limit depend on the loan
+purpose. Reusing LP-76's model keeps the two calculators consistent and trustworthy rather than
+reinventing — the processor learns one interaction and trusts both.
+
+**Consequences:** LP-79's dial sets the in-scope cutoff the alert uses; LP-81's verification tab surfaces
+both calculators (they already live there, side-by-side); LP-82/83 encode the real LTV rules (the
+calculator shows the limits; the rules judge); the appraisal may be promoted to Tier 1 later (its value
+feeds LTV); the other calculators (MI / self-employed / reserves / max loan) are LP-87. The sample LTV
+rules carry `reads` paths with no engine fact yet, so the rule engine skips them (the calculator resolves
+the limit directly) — they wire up with the real rules.
+
+## ADR-192: AI cross-source layer — one general capability, structured findings, the APPLY→recompute loop (LP-78)
+
+- **Date:** 2026-06-28
+- **Status:** Accepted
+
+**Context:** LP-74 built the deterministic *judge* (rules evaluate thresholds). The "AI surfaces" half of
+the locked two-layer principle was still missing — the capability that reads the borrower's stated
+claims (MISMO) against what the documents prove and surfaces discrepancies, including ones no
+pre-written rule would catch. LP-78 adds that *perceiver* and closes the APPLY→recompute loop that
+LP-75's hook + LP-76/77's calculators set up.
+
+**Decision:**
+
+- **One general AI capability, not a rule per check.** The cross-source layer (`app/ai/cross_source.py`)
+  is a single open-ended perception task: the AI reads the stated data vs. the verified document
+  extractions and surfaces whatever "doesn't line up" — guided toward high-value comparisons (income
+  variance >10%, employer, gift) but **not limited** to them. Because it reads and compares, it catches
+  **known and novel** discrepancies alike — the undisclosed obligation in a divorce decree that no rule
+  was written for. The starter set is **prompt guidance**; the full ~15-20 is LP-86.
+- **Structured findings only.** The AI emits **typed** findings (type, amounts, source document + page +
+  snippet, confidence, reasoning) — never prose the deterministic layer interprets. They enter LP-75's
+  **shared, uniform** Finding model with `origin=ai_cross_source` — *generator two* of "two generators,
+  one findings model" (LP-74 was generator one). Parsing is defensive (a malformed response yields no
+  findings — nothing invented).
+- **AI fallibility is acceptable.** Findings are **for human review**, confidence-scored — the AI
+  *surfaces candidates*, it does not decide. They land **OPEN**, never auto-applied. A miss is backstopped
+  by the processor; a false flag is overridden with a reason.
+- **The APPLY→recompute loop closes.** For recognized remediable types the emit attaches an **apply
+  spec**; applying a finding (LP-75's hook) changes the structured data → the DTI/LTV calculators
+  (LP-76/77), which read the data live, recompute. The interlock works end-to-end: an undisclosed
+  obligation → apply → added to liabilities → the DTI recomputes **higher**; an income variance → apply →
+  the stated income corrected (lower) → the DTI recomputes **higher**. LP-78 extends the apply hook with
+  `correct_income` and makes `mark_recompute_needed` mark verification stale (applying changed the data).
+- **Manual trigger + staleness.** The pass runs on a **manual trigger** (a "Run verification" button →
+  the worker runs the AI call) — cross-source compares two sides (meaningful only when both are
+  assembled) and is an AI cost, so it runs deliberately. A `verification_stale` flag is set on any
+  document change (upload / type override / replace) and when a finding is applied, and cleared when the
+  pass re-runs — a visible "re-run" indicator. **Auto-re-run is deferred** (the dial re-filters
+  already-computed findings without re-running — LP-79).
+
+**Rationale:** required-document discrepancies are open-ended and unenumerable — a general AI
+read-and-compare catches what pre-written rules can't. Structured-findings-only keeps the AI's fuzzy
+perception contained as typed data the deterministic layer consumes cleanly (the handoff is structure,
+never prose). AI fallibility is acceptable precisely because findings are human-reviewed, not decisions.
+The APPLY→recompute loop is the system's core interlock — AI perception → human confirmation →
+deterministic recomputation. Manual-trigger + staleness matches that cross-source needs both sides
+assembled and is a real AI cost (a Sonnet pass over substantial context).
+
+**Consequences:** LP-79's dial filters these confidence-scored findings by thoroughness (re-filtering
+without re-running); LP-81 builds the rich findings UI + resolution flow (this ships a minimal trigger +
+staleness panel with a read-only findings list); LP-86 adds the full ~15-20 cross-source set (this
+capability, more guidance). The recompute lands in LP-76/77; auto-re-run and bounding-box source
+highlighting are later phases. PII is assembled for the AI call and **never logged** (counts/tokens
+only); the worker must be running for the pass to execute.
+
+## ADR-193: Cross-source result caching by input fingerprint (LP-78.1)
+
+- **Date:** 2026-06-29
+- **Status:** Accepted
+
+**Context:** "Run verification" (LP-78) re-ran the AI cross-source pass every click, even on an
+unchanged file. Because the pass is an open-ended AI task (non-deterministic even at temperature 0), the
+processor saw the *same* discrepancies described and counted slightly differently each run — which erodes
+trust ("the tool can't even agree with itself") and wastes AI cost/latency. This is the back half of the
+staleness model: the front half (LP-78) marks verification STALE when documents change; this adds the
+complement — when *not* changed, don't re-ask the AI.
+
+**Decision:**
+
+- **Input fingerprint.** Compute a stable SHA-256 over the verification *inputs* — the assembled
+  stated-vs-verified context (stated income/assets/liabilities/employers/borrowers + loan/property core,
+  and the current document extractions' values). Canonical serialization: dict keys sorted and **lists
+  sorted by their canonical form**, so row order does not change the hash; the hash is over the compared
+  substance (no timestamps / run ids). Same inputs → same fingerprint; any value change → a new
+  fingerprint.
+- **Store it on the completed run.** `verifications.input_fingerprint` is set when a cross-source pass
+  completes, alongside the findings.
+- **Cache on trigger.** "Run verification" computes the *current* input fingerprint (a cheap DB read, no
+  AI) and compares it to the last completed run's stored fingerprint. **Match** → return that run's
+  cached findings, **no AI call** (instant, free, byte-identical — the same stored rows). **Differ** →
+  create a RUNNING run and enqueue the AI pass (there is genuinely new data to compare), which stores the
+  new findings + the new fingerprint.
+- **Reconciled with staleness.** The fingerprint is the precise mechanism behind "changed": a document
+  change (which marks STALE) changes the fingerprint, so stale ⇔ fingerprint differs. On a cached return
+  with a matching fingerprint the stale flag is cleared (matching inputs ⇒ not stale), so the two never
+  disagree.
+- **Force-rerun escape hatch.** `POST …/verification/run?force=true` (a "Re-run anyway" affordance)
+  bypasses the cache and re-runs the AI even on unchanged inputs — available but not the default.
+
+**Rationale:** the fix is not to make the AI deterministic (impossible for an open-ended perception task)
+but to **stop re-asking it when there is nothing new to compare**. Fingerprinting the exact compared
+substance makes "unchanged" precise and order-independent; returning the stored findings is identical by
+construction. This eliminates the "click repeatedly, get different results" problem at the source and
+removes wasted AI cost/latency on unchanged files.
+
+**Consequences:** this is a caching layer in front of the existing pass — the cross-source capability and
+the findings model are unchanged. A re-run still happens automatically when inputs change (a document
+added/changed, stated data edited) or when forced. LP-79's dial still re-filters already-computed
+findings without re-running. The fingerprint hashes a hash, not raw PII beyond what the findings already
+hold; the assembled context is never logged.
+
+## ADR-194: Aggression dial — confidence-threshold gating (display + blocking), instant re-filter, per-file + user default (LP-79)
+
+- **Date:** 2026-06-28
+- **Status:** Accepted
+
+**Context:** LP-78 produces all cross-source findings in one (expensive, non-deterministic) AI pass, each
+carrying a **confidence** (LP-75); the blocking computation already takes a confidence cutoff. Processors
+need to control *how thorough* verification is — a clean refinance wants only high-signal findings, a
+tricky file wants every hunch surfaced — without paying for (or waiting on) another AI run, and without
+the system silently re-deciding what blocks. The cutoff levels (Conservative 0.8 / Balanced 0.5 / Thorough
+0.0) and the cutoff-taking blocking computation shipped with LP-74/75; LP-79 supplies the cutoff via a
+dial and wires it into the read path.
+
+**Decision:**
+
+- **Three levels = confidence cutoffs.** Conservative (0.8, high bar — only findings the system is very
+  sure about), Balanced (0.5, the default), Thorough (0.0, almost everything incl. low-confidence hunches).
+  A finding is **in-scope** at/above the active cutoff. The values are config (`CONFIDENCE_CUTOFFS`), tunable
+  over use. Deterministic findings (confidence 1.0) are in-scope at every level.
+- **The cutoff gates BOTH display AND blocking.** Below the cutoff → hidden *and* non-blocking; at/above →
+  shown *and* (if open) must be resolved to submit. LP-79 supplies the active cutoff to LP-75's blocking
+  computation (`is_file_blocked` / `open_in_scope_findings`) and to the DTI/LTV calculators' unresolved-
+  findings alert. "Resolve all" therefore means "resolve all **at the chosen thoroughness**" — a more
+  thorough setting surfaces *and requires resolving* more findings.
+- **Never recolors.** The dial filters by **confidence**, never **severity**. A finding's red/yellow is
+  intrinsic (set by the rule/generator) and unchanged by the dial; the dial only changes which findings are
+  in scope. Confidence (how-sure) and severity (how-bad) are orthogonal axes, kept separate.
+- **Instant re-filter, no AI re-run.** The dial is a **read-time view filter** over LP-78's already-stored
+  findings. Changing it (`PUT …/verification/aggression`) re-filters instantly — it never enqueues the
+  cross-source AI and incurs no cost. One expensive pass; free thoroughness adjustment.
+- **Per-file + user default + per-file override.** `users.default_aggression_level` is the user's general
+  preference; `loan_files.aggression_level_override` (null = use the default) dials a specific file up/down.
+  The active level = the override if set, else the user default.
+- **Recorded at submission.** On the (gated) transition into `READY_TO_SUBMIT` the active level is recorded
+  on `loan_files.submitted_aggression_level` — "cleared at <level> thoroughness" — so the clearance is
+  honest and auditable (clear is relative to thoroughness).
+- **The legible consequence.** Moving the dial can flip a file clear↔blocked (Thorough surfaces new
+  findings; Conservative drops borderline ones). The UI communicates the change ("Thorough surfaced N more
+  to resolve" / "now clear at Conservative" / the new blocked status) so the processor reads it as "I asked
+  for more/less scrutiny and got it", not a surprise.
+
+**Rationale:** one AI pass produces every confidence-scored finding (LP-78); the dial is the cheap, instant
+way to match scrutiny to a file's risk without re-running (or paying for) the AI. Gating display + blocking
+by the same cutoff keeps "resolve all" meaningful at the chosen thoroughness. Conflating confidence with
+severity would be wrong (a low-confidence red is *uncertain*, not *less severe*), so the dial never
+recolors. Per-file + user-default fits real use; recording the level keeps "clear" honest; the legible
+consequence avoids the jarring "my clear file is suddenly blocked" surprise.
+
+**Consequences:** LP-81 surfaces the dial + the in-scope findings list + the calculators' alert (all using
+the active cutoff). The cutoff values tune over use. The recorded submission-level supports audit. The
+`str_enum` helper gained an optional `name` so the two `AggressionLevel` columns on `loan_files` get
+distinct CHECK-constraint names. The dial is the free thoroughness control over LP-78's single expensive
+pass — it is **not** a trigger to re-run it.
+
+## ADR-195: Loan-file deletion — soft-delete for processors now, hard-delete (purge) admin-only future (LP-79.5)
+
+- **Date:** 2026-06-29
+- **Status:** Accepted
+
+**Context:** There was no UI affordance to delete a loan file — files (especially test/duplicate ones)
+accumulated with no way to remove the clutter. The backend already supported soft-delete (the
+`SoftDeleteMixin` / `deleted_at`, `DELETE /loan-files/{id}` → `soft_delete_loan_file_with_activity`,
+`only_active` exclusion, `FILE_DELETED` audit); what was missing was the front-end action. The question
+this ADR settles is *what kind* of delete a processor gets.
+
+**Decision:**
+
+- **Processors get soft-delete, not hard-delete.** `DELETE /loan-files/{id}` sets `deleted_at` (it never
+  removes the row or its children), logs `FILE_DELETED` with the actor, and the file drops out of every
+  processor-facing view (dashboard, lists, search, counts) via `only_active`. The data + the audit trail
+  survive and are recoverable. Any processor (or admin) in the **owning** company may do it; a cross-company
+  id is a `404` (existence never revealed). Deleting an already-deleted file is a clean `404` (it's invisible
+  to its owner) — idempotent in effect, never a crash. A soft-deleted file is unreachable through the normal
+  detail route (`GET` → `404`).
+- **Hard-delete (permanent purge) is deferred, admin-only future work.** A processor must not be able to
+  truly destroy a mortgage record — compliance, audit, and "deleted the wrong file" recovery all demand the
+  data survive. Permanent destruction is a deliberate, privileged action; **nothing is built for it now**,
+  and the soft-delete design does not foreclose it.
+- **The UI requires a named confirmation.** The delete action (a dashboard row overflow menu + the
+  file-header menu) opens a confirmation dialog that **names the file** (borrower + display id) and **what's
+  affected** (the file and its documents/data/findings leave the dashboard; recoverable by an admin) — never
+  a silent one-click destroy. On confirm the list query is invalidated so the file disappears, with a toast;
+  cancel is a no-op.
+- **No restore/trash view yet.** Deferred — soft-delete preserves the data, so a restore surface can come
+  later without loss.
+
+**Rationale:** soft-delete fixes the real usability gap (remove clutter) while honoring that mortgage
+records shouldn't be destroyed by a processor. The soft-vs-hard split puts the reversible, everyday action in
+the processor's hands and reserves the irreversible one for a future privileged path. The named confirmation
+makes a list-clearing action deliberate and legible, not accidental.
+
+**Consequences:** the capability was almost entirely backend-complete (LP-79.5 is mostly the UI + a couple
+of hardening tests for the already-deleted and children-preserved cases). A future admin hard-delete +
+restore/trash view can build on the preserved rows. Soft-deleted children remain in their tables, reachable
+only by a future restore or an admin tool — acceptable (they're scoped through the file, which is invisible).
+
+## ADR-196: Starter lender overlays (UWM + Sun-West) + overlay enforcement (LP-80)
+
+- **Date:** 2026-06-29
+- **Status:** Accepted
+
+**Context:** LP-74 built the rule engine's overlay-application *mechanism* (override an investor rule's
+threshold by `rule_id` + add a custom rule + investor-default fall-through) and proved it with one SAMPLE
+overlay. The third layer had no real content, so lender-specificity was not yet tangible and the DTI/LTV
+calculators' "effective limit" was always the generic program default. LP-80 supplies starter UWM +
+Sun-West overlays and makes enforcement demonstrable.
+
+**Decision:**
+
+- **Starter overlays as code config, keyed by lender slug.** `app/verification/overlays/starter.py` defines
+  `UWM_OVERLAY` (slug `uwm`) and `SUNWEST_OVERLAY` (slug `sun-west`), merged into `default_registry()`
+  alongside the LP-74 sample. Because the calculators **and** the engine already resolve through
+  `default_registry().resolve(program, lender_slug)` with the file's lender slug, a file's target lender now
+  selects its overlay automatically — no call-site rewiring.
+- **Overlays are diffs.** UWM = one override (`conv.dti.back_end_max` → 45, tighter than the investor 50) +
+  one custom rule (a reserves minimum). Sun-West = one override (`conv.ltv.purchase_max` → 95) and
+  deliberately **no DTI override**. Everything un-mentioned falls through to the investor default; the overlay
+  value wins where specified. Each `ThresholdOverride` now carries a `reason` (auditable + editable).
+- **The enforcement proof.** The SAME file at 48%% back-end DTI **flags under UWM** (48 > 45) but **clears
+  under Sun-West** (48 ≤ the investor 50) — same data, different lender, different findings. Proven at the
+  engine layer (pure facts) and the calculator layer (`limit.status` over vs pass; `limit.source` overlay vs
+  program_default). Sun-West still differs (a tighter purchase-LTV cap), so each lender is a genuine diff.
+- **The effective limit is lender-specific.** A UWM Conventional file's DTI calculator shows 45 (source
+  `overlay`, `lender_slug=uwm`); a Sun-West file shows 50 (source `program_default`) and a 95 purchase-LTV cap.
+- **HONEST scoping — the values are starter placeholders.** The thresholds are NOT authoritative UWM /
+  Sun-West requirements (that knowledge isn't available yet). They are a small, plausible set for the domain
+  expert (Priya) to validate and correct — marked `STARTER PLACEHOLDER` in the module, every `reason`, and the
+  docs. The MECHANISM is real; the VALUES are starter.
+
+**Rationale:** LP-74 built the mechanism with a sample; supplying real content makes lender-specificity
+concrete — the same file flagging differently for UWM vs. Sun-West is both the proof the three layers compose
+per-file and a compelling demo (Priya works with both lenders, who differ). Overlays-as-diffs keep them
+small, maintainable, and auditable (the `reason`). Honest placeholder scoping avoids fabricating authoritative
+lender thresholds — she validates and extends them.
+
+**Consequences:** LP-87 adds the admin UI to edit overlays without code; until then they are hand-edited
+config. Per-company *custom* overlays (the `lenders.lender_overlays` JSON column, currently unused) are also
+LP-87 — the starter overlays are universal config keyed by slug, which is the right representation for shared
+placeholders. LP-82–85 supply the real investor rules these overlays patch. The calculators' effective limit
+is now lender-specific. Precedence: the overlay value wins where specified; un-overridden rules use the
+investor default.
+
+## ADR-197: Editable Subject Property + Loan on the Overview + the target lender (LP-80.5)
+
+- **Date:** 2026-06-29
+- **Status:** Accepted
+
+**Context:** The Overview's Subject Property and Loan sections were display-only, and there was no obvious
+control to set a file's **target lender** — which selects the LP-80 overlay. That blocked LP-80 (overlay
+enforcement needs the lender on the file) and left a real usability gap.
+
+**Decision:**
+
+- **Reuse the stated-financials editing pattern.** The inline `EditableRow` (dirty-tracking, save-only-
+  changed-fields) is extracted to a shared module and given a `select` kind (for the property/loan enums +
+  the lender picker). The Property and Loan cards gain an Edit/Done toggle and render an editor that PATCHes
+  the **existing** endpoints (`PATCH /loan-files/{id}/property`, `PATCH /loan-files/{id}`) — no new editing
+  mechanism.
+- **The target lender** is the file's existing `lender_id` (already on `LoanFileUpdate` + `LoanFileDetail`):
+  processor-editable via a lender picker (the company's `lenders`), displayed on the Loan card, with a "Set
+  lender" affordance when unset. MISMO does **not** carry the target wholesale lender (the 3.4 application
+  export has only a LoanOriginationCompany/broker + LoanOriginator — verified against the real file), so the
+  import leaves it null and it is a processing decision set on the Overview.
+- **Changing the program (Conv ↔ FHA) is confirmed** — it swaps the entire rule set + overlay, so a dialog
+  guards it; other fields save inline.
+
+**Rationale:** one editing mechanism across stated/property/loan keeps the UX consistent and the code small;
+the endpoints already existed. Putting the lender on the file is the concrete LP-80 prerequisite. The
+program confirmation prevents a casual mis-click from silently changing which rules apply.
+
+**Consequences:** LP-80's overlay enforcement is unblocked. Borrower editing remains out of scope (still
+display-only). The note rate / amortization stay in the stated-data editor (not duplicated on the Loan card).
+
+## ADR-198: Audit posture change — record from→to values for stated/loan/property edits (LP-80.5)
+
+- **Date:** 2026-06-29
+- **Status:** Accepted (supersedes the LP-56 value-free posture for these edits)
+
+**Context:** LP-56 audited stated-data edits **value-free** (`detail = {}`, a safe summary only); property
+edits were not audited at all. That gives "who touched what, when" but not "what changed from what to what" —
+no real field-level change history.
+
+**Decision:** edits to **stated financials, loan terms, and the subject property** now record the actual
+**from→to values** in the activity_log `detail` (`{section, action, changes: [{field, from, to}]}`, values
+encoded exactly via a shared `audit_value`/`field_changes` helper). Property edits — previously silent — are
+now audited with values. This is a deliberate change that **supersedes the LP-56 value-free stance** for
+these edits (the DTI/LTV overrides + status changes already recorded from→to, so there is precedent). The
+generic `FILE_UPDATED` type is kept (the `detail.section` distinguishes the kind) — no new enum values, no
+migration.
+
+**Rationale:** a true change history is worth more than a value-free trail for correcting imported data and
+for audit. Reusing one `FILE_UPDATED` type with a structured `detail` keeps it consistent and migration-free.
+
+**Consequences (PII):** the activity_log now holds **financial / PII-adjacent values** (amounts, an address,
+loan terms). It therefore **inherits the stated data's PII posture** — it is exposed only through the same
+auth + tenant-scoped surfaces that already show the stated data, never a less-protected one. SSNs and similar
+high-sensitivity fields are **not** in scope here (borrower editing is excluded), so no raw SSN enters the
+log. Any future surface that renders the activity log must apply the same masking/access control.
+
+## ADR-199: Verification staleness on baseline edits — both sides of the comparison (LP-80.5)
+
+- **Date:** 2026-06-29
+- **Status:** Accepted
+
+**Context:** `mark_verification_stale` fired only on **document** changes (+ finding-apply). Editing the
+**stated** data, loan terms, target lender, or property — the *other* side of the cross-source comparison and
+the DTI/LTV inputs — changed the verification baseline silently: no "out of date — re-run" prompt. LP-78.1's
+input fingerprint already includes the stated/loan/property data, so a manual re-run after such an edit is
+genuinely real (not a stale cache hit) — what was missing was the **prompt**.
+
+**Decision:** stated-financials, loan-baseline (loan terms / program / purpose / lender), and property edits
+now call `mark_verification_stale` — the same as a document change. A baseline change on **either side** of
+the cross-source comparison now sets the staleness flag, so the verification panel shows the "re-run" cue.
+Lifecycle/contact fields (status, loan officer) do **not** mark stale. The frontend mutations for these edits
+also invalidate the `dti` / `ltv` / `verification` query keys, so an open calculator or verification panel
+refreshes after an edit. The stale banner copy is generalized from "Documents changed" to "The file changed".
+
+**Rationale:** the staleness model is only honest if every baseline change triggers it; the LP-78.1
+fingerprint already guarantees the re-run is real, so this purely adds the missing prompt + refresh. DTI/LTV
+are read-time derived, so they are already correct on the next GET — the invalidation just refreshes
+already-open panels.
+
+**Consequences:** the staleness model is now complete (document changes + finding-apply + baseline edits).
+The LP-78.1 cache + fingerprint are unchanged. Editing a baseline field after a verification run prompts a
+re-run rather than leaving a silently-outdated result.
+
+## ADR-200: Minimal verification tab — the Arc A demo surface (composition; minimal-not-full) (LP-81)
+
+- **Date:** 2026-06-29
+- **Status:** Accepted
+
+**Context:** Every Phase 3 capability (the engine LP-74, findings LP-75, DTI/LTV LP-76/77, AI cross-source
+LP-78/78.1, the dial LP-79, overlays LP-80, editable property/loan + lender LP-80.5) was a capability with no
+single coherent screen. LP-81 is the surface the domain expert (Priya) actually uses — the capstone of Arc A.
+
+**Decision:** the Verification tab composes the existing capabilities into ONE coherent demo-quality screen:
+the **DTI/LTV calculators prominent** at the top (transparent, lender-specific limits via LP-80), then the
+cross-source panel — the **run trigger + staleness banner**, the **needs-completeness indicator**, the
+**aggression dial** filtering the findings, and the **interactive findings list** (severity, type, confidence,
+source location [click → page + verbatim snippet], with the core resolution actions Apply / Override-with-
+reason / Add note; APPLY fires the recompute interlock). It is **MINIMAL by design** — NOT the full Wireframe
+5: the stats row, filter pills, version selector, and the full per-finding action set (Request docs / Accept
+risk) are **LP-88**. The findings list handles deterministic + cross-source findings uniformly (the origin
+distinguishes provenance). The resolution endpoints (`POST …/findings/{id}/{apply,override,note}`) wrap the
+existing LP-75 services; each returns the re-filtered status so the calculators refresh in one round-trip.
+
+**Rationale:** composing the capabilities is what makes the slice DEMONSTRABLE end-to-end (open a file →
+transparent DTI/LTV → run cross-source → resolve findings → tune thoroughness → lender-specific results);
+minimal-not-full keeps the demo focused on the core value rather than the complete tab.
+
+**Consequences:** LP-88 builds the full tab; Arc A is COMPLETE — the demonstrable verification slice is ready
+to show Priya. LP-82–85 supply the real rule content the engine evaluates.
+
+## ADR-201: Re-run stability — stable identity, merge-not-replace, templated wording (LP-81)
+
+- **Date:** 2026-06-29
+- **Status:** Accepted
+
+**Context:** the tab is where re-runs become visible. Without stability, a re-run would churn the displayed
+findings — re-worded (the AI's free-form description varies run to run), re-ordered, and resolutions lost —
+undermining the trust the tab builds.
+
+**Decision:**
+
+- **Stable substance-based identity.** A cross-source finding's identity is its canonical type
+  (`rule_id = cross_source.<type>`), so the same discrepancy is recognized across re-runs.
+- **Merge-not-replace (resolutions survive).** A re-run supersedes only the prior pass's **OPEN** cross-source
+  findings (soft-delete) and emits the fresh set; **RESOLVED** findings (APPLIED / OVERRIDDEN) are never
+  touched — the processor's work survives. The tab keeps resolved findings in a separate **"Resolved"** group
+  (history), so a finding is never silently dropped, and the dial filters only the OPEN list.
+- **Templated wording for known types.** The user-facing headline for a known/canonical type is rendered
+  **deterministically** from its type (reads IDENTICALLY every run); the AI's free-form description shows only
+  as secondary detail. Novel ("other") and deterministic-rule findings keep their own (already deterministic)
+  message.
+
+**Rationale:** stable identity + preserve-resolved + a deterministic headline are the minimum that makes a
+re-run trustworthy — the processor sees the same findings worded the same way, and never loses a resolution.
+
+**Consequences:** the deeper "promote reliable checks to deterministic" consistency work is **LP-86** (beyond
+this near-term stability). Templating is a display concern (a frontend helper over the structured fields), so
+no finding rows change shape.
+
+## ADR-202: Needs-completeness indicator — sparse ≠ clean; indicator not gate (LP-81)
+
+- **Date:** 2026-06-29
+- **Status:** Accepted
+
+**Context:** verification compares documents against the stated application. On an under-documented file a
+**sparse** result could be mistaken for a **clean** file — a false-confidence failure mode. The needs list
+(Phase 2) comes first; verification is meaningful once documents are collected.
+
+**Decision:** the verification tab shows a **needs-completeness indicator** — the outstanding-needs count + a
+non-blocking message ("verification compares documents against the stated application; N outstanding document
+needs — results may be incomplete until they're collected"). It is an **indicator, NOT a gate**: the
+processor can still run verification (needs-first → verification-second is the ordering, not a hard block). It
+hides when nothing is outstanding (a sparse result there is genuinely clean).
+
+**Rationale:** the indicator prevents the false-confidence reading of a sparse result and reflects the
+needs-first ordering, without blocking a processor who wants to run verification early.
+
+**Consequences:** the indicator reuses the existing outstanding-needs count; no new backend. A hard gate (if
+ever wanted) is a future policy decision, not this.
+
+## ADR-203: Conventional income & asset rules as GROUNDED STARTERS (LP-82)
+
+- **Date:** 2026-06-29
+- **Status:** Accepted
+
+**Context:** Arc A built + surfaced the verification engine; Arc B fills the rule CONTENT. LP-82 is the first
+content ticket — ~20 Conventional income + asset rules (~10 each). The rules' authoritative source is the
+domain expert (Priya, an active Conventional/FHA processor) and her validation against real files; her
+priority list is not yet available.
+
+**Decision:** encode ~20 Conventional income/asset rules into the LP-74 engine as **GROUNDED STARTERS** —
+researched against the *current* Fannie Mae Selling Guide (retrieved 2026-06) with **real B-section
+citations** + current values, but **clearly marked starter / validate-with-Priya** throughout (every rule
+carries `starter=True` + a `notes` caveat; the module header says so; the docs say so). They are NOT
+presented as authoritative final rules. Specifics:
+
+- **Uniform structure (LP-74):** each rule is a `VerificationRule` — stable `rule_id` (e.g.
+  `conv.income.self_employment_present`, `conv.assets.large_deposit_source`), `layer=investor`,
+  `program=conventional`, the typed field(s) it `reads`, a **threshold-as-data** `Condition` (so an overlay
+  overrides it by `rule_id`, LP-80), `severity`, and a **structured `RuleSource`** (`{type, citation,
+  section, retrieved, to_verify}`). The schema gained `section`/`retrieved`/`to_verify` on `RuleSource` and
+  `starter`/`notes` on `VerificationRule`.
+- **Grounded values that correct folk-knowledge:** document age is **4 months** on the note date (B1-1-03),
+  NOT 30 days; base income is the **most recent W-2 + pay stub** (the chapter B3-3 rewrite of 03/2026), NOT
+  two years of W-2s — explicitly marked recently-changed; self-employment needs a **2-year history**
+  (B3-3.5-01); gift/asset/retirement verification (B3-4.x). The **large-deposit threshold** and **reserves**
+  are marked **DU-message-driven / program-driven STARTER placeholders**, NOT fixed Selling-Guide constants.
+- **Citations are researched, not invented:** where a subsection is uncertain the source carries
+  `to_verify=True` rather than fabricating a number (AI-assisted-but-human-reviewed encoding).
+- **Deterministic evaluation, no AI:** the engine reads the typed field → compares to the threshold → emits
+  a finding into LP-75's model at certain confidence. A few rules are **evaluable today** from stated data
+  (self-employment income, gift, retirement, large deposit, reserves — via **typed-core promotions** in
+  `build_file_facts`); the rest read a canonical typed-field path whose fact isn't produced yet, so they are
+  recorded **not-evaluated** (graceful) until the fact is promoted — the "typed core grows as rules need it"
+  design.
+
+**Rationale:** grounding the starters in current research (not memory) makes them a *useful* first cut and
+corrects stale folk-knowledge, while the starter marking is honest about what they are — content pending the
+expert's validation, subject to Selling-Guide updates, DU automation, and lender overlays. The engine is real
+and tested; the content is grounded-but-starter.
+
+**Consequences:** LP-83 the Conventional credit/DTI/property/doc rules; LP-84/85 FHA; Priya validates +
+extends these against the live guide for her lenders. The promotion-pending rules wire up as the typed
+extraction grows. The `to_verify` flag + `starter` marker can drive a future "rules to validate" view.
+
+## ADR-204: Conventional credit/DTI + property + documentation rules as grounded starters (LP-83)
+
+- **Date:** 2026-06-29
+- **Status:** Accepted
+
+**Context:** The second Arc B content ticket (LP-82 did income/asset). LP-83 adds ~30 Conventional rules across
+credit/DTI, property/appraisal, and documentation. This category is higher-stakes — credit-score minimums and
+the DTI ceiling are the most-cited Conventional values and the most prone to folk-knowledge error.
+
+**Decision:** encode ~30 Conventional rules into the LP-74 engine as **GROUNDED STARTERS** (same shape +
+posture as LP-82: real B-section citations, `starter=True`, validate-with-Priya), reusing LP-82's `conv_rule`
+/ `sg` builders (extracted to `conventional/_base.py`). Specifics:
+
+- **The credit-score minimum is encoded LAYERED, not flat-620 (the headline correction).** Through DU Version
+  12.0 (11/2025) minimum scores no longer apply (DU decides); manually underwritten loans still require 620
+  (`conv.credit.min_score_manual`, **gated** to manual); a sub-620 representative score is ineligible for
+  delivery (`conv.credit.min_score_delivery_floor`, ungated). B3-5.1-01, marked recently-changed. A hardcoded
+  "min 620 always" would be wrong.
+- **DTI** is DU-50% / manual-36%→45% (B3-6-02): the DU ceiling is the existing `conv.dti.back_end_max` (LE 50);
+  LP-83 adds the **manual-gated** `conv.dti.back_end_max_manual` (LE 45). Both **consume LP-76's computed
+  `dti.back_end_pct`** — they read it, never recompute.
+- **Property/appraisal:** appraisal age > 4 months (B4-1.2-04, parallel to doc age); general eligibility
+  (B2-3-01); value-acceptance/appraisal-waiver marked **DU-driven** (B4-1.4-11); occupancy marked
+  **Eligibility-Matrix-driven** — none of the Matrix/DU logic is hardcoded.
+- **Documentation:** 4-month doc age (B1-1-03); application package (B1-1-01); condo project review
+  (B4-2.1-01, **gated** to condo properties); tax-transcript/4506-C (B3-3.1, cross-links LP-82).
+- **Applicability gating (new mechanism):** a small `RuleGate` (a fact + a `Condition`) added to
+  `VerificationRule`, checked by the engine before evaluation — a manual-only or condo-only rule applies only
+  when its gate fact holds; absent gate → not-applicable (conservative). This is the minimal extension the
+  "manual-vs-DU / property-type" gating requires; the rest reuses LP-82.
+- **Cross-links (not duplicated):** the re-underwrite-on-undisclosed-debt rule is noted as the deterministic
+  counterpart to LP-78's cross-source undisclosed-obligation finding (the interlock exists).
+- **Typed-core promotions:** `build_file_facts` derives `property.present` / `property.is_condo`; credit /
+  appraisal / underwriting-method facts are promotion-pending (recorded not-evaluated until they land).
+- **Citations researched, not invented:** uncertain subsections (derogatory-credit waiting periods, several
+  property/doc sections) carry `to_verify=True` rather than asserting a number.
+
+**Rationale:** grounding the high-stakes values in current research and encoding the *nuanced* credit-score
+state (rather than the stale flat-620) is exactly why grounded-research-then-starter matters; the starter
+marking keeps it honest (content pending the expert's validation, subject to Selling-Guide updates, DU
+automation, the Eligibility Matrix, and lender overlays).
+
+**Consequences:** LP-84/85 the FHA rules; Priya validates + corrects these. The gate mechanism is reusable
+for future applicability-gated rules. The promotion-pending rules wire up as the typed extraction grows.
+
+## ADR-205: FHA income/asset/credit-DTI/MIP rules as GROUNDED STARTERS (LP-84)
+
+- **Date:** 2026-06-29
+- **Status:** Accepted
+
+**Context:** The third Arc B content ticket and the **first FHA** one (LP-82/83 were Conventional). LP-84 adds
+~31 FHA rules across credit/DTI, income, assets, and MIP. FHA is genuinely different from Conventional — a
+separate program (`program=fha`) with its own source (HUD Handbook 4000.1, **not** the Fannie Selling Guide)
+and structures with no Conventional analog: a tiered minimum-decision-credit-score (MDCS), a compensating-
+factors DTI model, and MIP (mortgage insurance premium). It must NOT be a clone of the Conventional rules.
+
+**Decision:** encode ~31 FHA rules into the LP-74 engine as **GROUNDED STARTERS** (same shape + posture as
+LP-82/83: real HUD section citations, `starter=True`, validate-with-Priya — Priya works FHA with Sun-West),
+under a new `rules/fha/` package with its own `fha_rule` / `hud` builders (`_base.py`). Program-gating is the
+existing `registry.investor(program)` filter — no new mechanism. Specifics:
+
+- **MDCS is encoded TIERED to the down payment, NOT a flat min (the FHA headline).** 580+ → 3.5% down (96.5%
+  LTV); 500-579 → 10% down (90% LTV); below 500 → ineligible. Encoded as an eligibility floor
+  (`fha.credit.mdcs_eligibility_floor`, ≥500, RED), the 3.5%-tier threshold (`…mdcs_minimum_down_3_5_tier`,
+  ≥580, YELLOW), and a **gated** low-tier rule (`…mdcs_low_tier_down_payment`, requires 10% down, gate
+  `credit.mdcs < 580`). A hardcoded "min 580 always" would be wrong.
+- **Manual-underwriting triggers (the "conservative flag"):** a score below 620 (and/or DTI above 43%) routes
+  to manual underwriting where compensating factors apply (vs the TOTAL Mortgage Scorecard AUS) — encoded as a
+  YELLOW routing flag, II.A.5, AUS-vs-manual distinction marked.
+- **DTI is the COMPENSATING-FACTORS mitigable model, NOT a hard DU-style ceiling (the plan's FHA requirement).**
+  Baseline 31% front / 43% back is encoded YELLOW (a flag **resolvable by documenting a compensating factor**
+  via LP-75's resolution — OVERRIDDEN-with-reason / APPLIED); the uplifted ceiling 40% front / 50% back is a
+  separate RED rule (hard, compensating factors cannot rescue it). A gated
+  `fha.dti.compensating_factors_required` (applies only when back-end > 43%) makes the "≥1 documented factor"
+  requirement explicit. This contrasts with Conventional's hard DU ceiling. The DTI rules **consume LP-76's
+  computed `dti.front_end_pct` / `dti.back_end_pct`** (read, never recompute). These SUPERSEDE the LP-74 sample
+  `fha.dti.back_end_max` (a 57% placeholder).
+- **MIP (no Conventional analog):** UFMIP 1.75% (175 bps) of the base loan amount + present-check (Appendix
+  1.0); annual MIP rate-as-data table (~15-75 bps, most 55; the ≤75 bps starter upper bound marked to-verify);
+  the **LTV-90% duration rule** — LTV > 90% → annual MIP for life; LTV ≤ 90% → 11 years (132 months) — encoded
+  as two LTV-gated rules **reading LP-77's `ltv.ltv_pct`**; a missing-MIP RED finding (an FHA loan must carry
+  MIP). MIP rules use the `DOCUMENTATION` category: there is **no dedicated `MORTGAGE_INSURANCE` category** and
+  adding one would require a migration (the category column is a CHECK-constrained VARCHAR) — a dedicated MI
+  category is a deferred promotion.
+- **Overlay-overrideable (especially apt for FHA — overlays are common):** an FHA minimum (e.g. the MDCS floor
+  500→620) and the MIP rate are overridden by `rule_id` (LP-80). Most lenders set 580-640 floors over FHA's
+  500/580.
+- **Typed-core reuse + promotion:** the FHA income/asset rules read the SAME promoted paths as LP-82
+  (`assets.gift.total_amount`, `assets.retirement.total_amount`, `income.self_employment.monthly_amount`,
+  `assets.largest_deposit_amount`, `dti.back_end_pct`) — evaluable today on an FHA file (program-gating selects
+  the FHA variant), no new promotion needed. The FHA-specific facts (`credit.mdcs`, `down_payment.pct`,
+  `dti.front_end_pct`, `ltv.ltv_pct`, the MIP fields) are promotion-pending (recorded not-evaluated until they
+  land).
+- **Citations researched, not invented:** uncertain values (derogatory waiting periods, the MIP rate table,
+  the 60% retirement-reserve haircut, FHA document recency, AUS-vs-manual routing) carry `to_verify=True`.
+
+**Rationale:** FHA's tiered MDCS, compensating-factors discretion, and MIP are exactly the structures a
+Conventional clone would get wrong; encoding them FHA-specifically (with HUD citations) and marking them
+starter keeps the engine real while the content stays honestly pending the expert's validation.
+
+**Consequences:** LP-85 the FHA property/doc rules (stricter safety/security/soundness standards) extend
+`FHA_RULES`. The promotion-pending FHA facts (credit/down-payment/LTV/MIP) wire up as the typed extraction
+grows. A dedicated `MORTGAGE_INSURANCE` finding category is a future migration if MIP findings warrant it.
+
+## ADR-206: FHA property + documentation rules as GROUNDED STARTERS; the rule content is complete (LP-85)
+
+- **Date:** 2026-06-29
+- **Status:** Accepted
+
+**Context:** The fourth and LAST Arc B content ticket. LP-85 adds ~18 FHA rules across property (the Minimum
+Property Requirements — safety/security/soundness) and documentation. FHA property is the most distinctively-FHA
+content of all and has **no Conventional analog**: a Conventional appraisal targets market value, while an FHA
+appraisal ALSO verifies the property meets the MPR/MPS for the **three S's** — a failing property needs repairs
+before FHA insures the loan. After this ticket the Conventional + FHA rule content (LP-82..85) is complete.
+
+**Decision:** encode ~18 FHA property/doc rules into the LP-74 engine as **GROUNDED STARTERS** (same shape +
+posture as LP-82/83/84: real HUD II.D / II.A citations, `starter=True`, validate-with-Priya), in
+`rules/fha/property_docs.py`, reusing LP-84's `fha_rule`/`hud` builders, program-gating, and conditional/
+mitigable finding pattern. Specifics:
+
+- **The three S's MPR/MPS framework + the deficiency checklist:** a three-S's umbrella rule plus individual
+  deficiency rules (lead-based paint pre-1978, functional heating/plumbing/electrical, roof, water intrusion,
+  handrails/safe-access, bedroom egress, well/septic, defective structural conditions) + MPR-vs-MPS by
+  construction status (24 CFR 200.926). II.D.
+- **The "subject-to-repair" CONDITIONAL model (reuses LP-84's compensating-factors mitigable pattern):** MPR
+  findings are MITIGABLE — a subject-to-repair YELLOW finding resolvable by documenting the repair/re-inspection
+  via LP-75's resolution (most deficiencies are CORRECTABLE) — NOT silent hard blocks. Only un-correctable issues
+  (a no-egress bedroom, serious structural failure) are RED. Severity = correctable-vs-uncorrectable.
+- **TIER-2 HONESTY (the critical posture, same as LP-77's appraised value):** most MPR conditions are observed by
+  the appraiser and live in the appraisal document (manual / not deterministically extracted). The rules do NOT
+  pretend to detect physical deficiencies — they check (a) the FHA appraisal is present (the RED Tier-2 anchor),
+  (b) whether it is "subject to" repairs, and (c) surface the MPR checklist for human/appraiser confirmation;
+  each deficiency rule reads an appraiser-provided fact and is recorded not-evaluated until that datum is
+  captured. We don't fake what the system can't see.
+- **MPRs are POLICY-IN-FLUX:** FHA's 2026 Request for Information to modernize the MPRs (no comprehensive update
+  in 20+ years) means the content is not only overlay-subject but actively under revision — the rules carry a
+  "subject to the pending MPR modernization" caveat in addition to the starter marker.
+- **Eligibility + condo:** 1-4 unit residential (`property.unit_count`, newly promoted from the financed unit
+  count → evaluable); condo project FHA approval (HRAP/DELRAP — **gated** to condo via the promoted
+  `property.is_condo`); the appraisal validity period (Tier-2, to verify).
+- **Documentation:** the FHA appraisal present (RED), the subject-to-repair completion/re-inspection (gated to
+  subject-to status), the FHA case number + Amendatory Clause, the pre-appraisal sales contract, document
+  recency (FHA's own — to verify).
+- **Applicability-gated:** construction status (new → MPS), property type (condo), well/septic presence,
+  pre-1978 (lead paint), subject-to-repair status. **Overlay-overrideable** (e.g. the appraisal validity window
+  180→120) by `rule_id` (LP-80). **Program-gated** (FHA-only).
+- **Citations researched, not invented:** uncertain values (appraisal validity period, well/septic distances,
+  exact subsection numbers, the handrail/egress standards) carry `to_verify=True`.
+
+**Rationale:** FHA property is exactly where a Conventional clone fails — the three S's, the subject-to-repair
+discretion, and the Tier-2 appraiser-observed nature have no Conventional equivalent. Encoding the conditional
+model honestly (mitigable, correctable-vs-uncorrectable) and refusing to fake deterministic deficiency detection
+keeps the engine trustworthy; the in-flux note keeps it current with the pending MPR modernization.
+
+**Consequences (the content arc is COMPLETE):** with LP-82..85 the engine now holds a full grounded-starter
+Conventional + FHA rule set across income, assets, credit/DTI, property, documentation, and (FHA) MIP — ~50
+Conventional + ~49 FHA rules. The mechanism is real + tested; the specific content is grounded-but-starter,
+pending Priya's validation (and, for FHA MPRs, the pending modernization). LP-86 and onward consume this rule
+set; the promotion-pending property/appraisal facts (subject-to-repair, the MPR deficiency flags, year built,
+construction status, well/septic) wire up as the Tier-2 appraisal extraction grows.
+
+## ADR-207: Cross-source checks — reliable, enumerable discrepancies PROMOTED from AI-discovery to DETERMINISTIC rules (LP-86)
+
+- **Date:** 2026-06-29
+- **Status:** Accepted
+
+**Context:** The AI cross-source layer (LP-78) is a DISCOVERY engine — it catches novel, unenumerable
+discrepancies, but at the cost of non-determinism (recall variance: a genuine finding appears on one run, not
+the next). The diagnostic signal during the cross-source debugging was the "driver's-license-address-equals-
+subject-property" finding FLICKERING between runs — because it is actually DETERMINISTIC LOGIC the AI merely
+*thought* to apply (compare two addresses), not open-ended perception. The plan's §3.8 locked the structural
+answer: known, enumerable cross-checks GRADUATE from the AI layer into deterministic rules; the AI narrows to
+genuinely novel discovery.
+
+**Decision:** encode ~18 reliable, enumerable cross-source checks as a NEW DETERMINISTIC rule category (a pure
+engine in `app/verification/cross_source/`: `facts.py` / `rules.py` / `engine.py`), distinct from the
+single-source rules (LP-82..85) because a cross-source rule reads MULTIPLE fields ACROSS sources (not one
+threshold against one field). Each `CrossSourceRule` has a stable `rule_id` (`xsrc.*`), the canonical finding
+type it OWNS (the de-dup key), category + severity, TEMPLATED wording (fixed, identical every run), a pure
+`check` over `CrossSourceFacts`, optional threshold-as-data (the income-variance %, overlay-overrideable), and
+is program-agnostic (`program=None` — most cross-source checks apply to both Conventional and FHA). The rules
+emit into LP-75's shared model with `origin=deterministic_rule` + `confidence=DETERMINISTIC_CONFIDENCE`.
+
+- **The rules (~18):** identity (name/SSN[RED]/DOB/current-address consistency), address red-flags
+  (`dl_equals_subject` — THE GRADUATE; employer-equals-subject), income (`stated_vs_documented` variance,
+  employer-name, employer-count-vs-items), liability (`undisclosed_debt` — the deterministic detection
+  counterpart to LP-83's re-underwrite rule; stated-not-on-report), asset (`stated_missing_document` [kept per
+  the over-flagging decision], large-deposit-unsourced, gift-without-letter), terms/property (price-vs-contract,
+  loan-vs-documented, subject-address consistency, occupancy-vs-evidence).
+- **The internal research:** unlike LP-82..85 (external Fannie/HUD guides), the promotion candidates came from
+  THIS system — the canonical finding types the AI layer already emits (`_TYPE_CATEGORY` / the prompt) and the
+  over-flagging decisions. The external mortgage-QC cross-check set was the completeness checklist.
+- **DE-DUPLICATION (the graduation mechanics):** the deterministic pass runs first inside `run_cross_source` and
+  returns the set of canonical types it FIRED this run; the AI layer then DEFERS — drops any raw finding whose
+  type is in that set (run-scoped, so the AI still surfaces a type the deterministic pass was silent on — e.g.
+  when its Tier-2 facts aren't loaded — and always keeps the novel "other" bucket + co_borrower_discrepancy).
+  No double-reporting of a fired discrepancy; the stable, templated deterministic finding is the one shown.
+- **THE CONSISTENCY PAYOFF (option D — the deepest fix):** the promoted checks now run EVERY time, identically,
+  no AI, no recall variance, no flicker — completing the consistency arc with LP-78.1 (caching) + LP-81 (stable
+  identity / merge / templated wording). The driver's-license finding fires on every run as a rule.
+- **Cross-links (wired, not rebuilt):** the undisclosed-debt rule carries the same `add_liability` apply spec as
+  the AI path → applying it feeds the APPLY→recompute interlock (LP-75/76) and parallels LP-83's re-underwrite
+  rule; the missing-document check is kept (it + the needs list both surface it — intentional redundancy); the
+  asset/gift/deposit checks cross-link LP-82's single-source rules (single-source = one field; cross-source =
+  across sources). The cross-source rules surface DATA discrepancies, never computed DTI/LTV (the calculators').
+- **The absent-data guard (honesty):** a set-difference check (stated-not-on-report; undisclosed-debt) only
+  fires when the other side (the credit report) is actually present — an empty side is "not loaded", not a
+  discrepancy. Many facts (credit-report liabilities, contract price, documented income, occupancy evidence)
+  are Tier-2 / promotion-pending; their checks produce nothing until the fact lands (graceful, as LP-83..85).
+
+**Rationale:** the reliable checks were deterministic logic all along — making them rules removes the recall
+variance at its root (option D), and the run-scoped de-dup lets the AI keep its real value (the novel frontier)
+without re-litigating the known checks under a flickering label. The graduation is honest: the rules consume the
+same assembled context the AI reads, the comparison is exact, and absent facts simply do not fire.
+
+**Consequences:** the AI cross-source layer = the discovery frontier; the deterministic `xsrc.*` rules = the
+enumerable known, stable + templated. As the typed/Tier-2 extraction grows (credit-report liabilities, contract
+price, documented income), more checks become live and more of the AI's load shifts to genuinely novel
+discovery. The `starter=True` thresholds + normalization remain a validate-with-Priya item.
+
+## ADR-208: Four additional calculators (MI/MIP, self-employed, reserves, max loan) — extend the LP-76/77 pattern (LP-87)
+
+- **Date:** 2026-06-29
+- **Status:** Accepted
+
+**Context:** LP-76/77 shipped the DTI + LTV calculators (transparent / auto-populated / overrideable /
+findings-coupled / deterministic — the "show the math, beat ChatGPT's black box" win). LP-87 adds four more —
+mortgage insurance (MI/MIP), self-employed income, reserves, and max loan — that processors need checked.
+
+**Decision:** build the four as pure deterministic modules (`app/verification/{mortgage_insurance,self_employed,
+reserves,max_loan}.py`) behind ONE shared transparent response shape (`CalculatorView`) and ONE shared,
+calculator-discriminated override table (`calculator_overrides`), reusing the LP-76/77 service/override/audit/API
+pattern exactly. One generic frontend component (`calculator-card.tsx`) renders all four. Specifics:
+
+- **MI/MIP is PROGRAM-AWARE.** Conventional = PMI (required above 80% LTV, terminates at 78% per the HPA — exact;
+  the annual rate is a credit/LTV rate-card, a grounded-starter). FHA = MIP, which **CONSUMES LP-84's MIP rules**
+  (the service reads `fha.mip.ufmip_rate` = 175 bps from the registry) — UFMIP 1.75%, the annual rate (starter
+  0.55%, LP-84's rule is the cap), and the **LTV-90% duration** (≤ 90% → 11 years, > 90% → life). It reads LP-77's
+  LTV. The arithmetic is exact; the rates are passed in, not duplicated.
+- **Self-employed income is Form-1084-grounded + FEEDS DTI.** Net profit + non-cash add-backs (depreciation,
+  depletion, amortization/casualty, business-use-of-home), averaged across two years; a declining trend is
+  flagged (not silently averaged). The derivation is shown line by line; the methodology is a grounded-starter
+  (the exact add-backs + averaging-vs-most-recent judgment is domain expertise). The qualifying monthly figure
+  feeds the DTI income side (the seam is surfaced + documented).
+- **Reserves consume the FHA 60% retirement haircut (LP-84).** Eligible reserves = liquid + (vested retirement ×
+  factor) − down payment − closing costs (gifts/borrowed excluded); months = eligible ÷ PITI (consumed from the
+  DTI calc). Available vs required; the required months are rule/DU/overlay-driven (starter).
+- **Max loan INVERTS the constraints.** The DTI ceiling (income × max-DTI → max payment → invert amortization to
+  max principal), the LTV limit (value × max-LTV), and the program loan limit (FHFA conforming, a grounded-starter
+  — changes annually + county-specific). The binding (lowest) constraint wins and is named. It consumes LP-76's
+  DTI ceiling + LP-77's LTV limit.
+- **Methodology honesty:** the MECHANISM (transparent/overrideable/recompute/findings-coupled/deterministic) is
+  real + tested; the domain-judgment methodology (PMI rate, self-employed add-backs, required reserves, loan
+  limits) is `methodology.starter=True` (grounded in the real source — Form 1084, FHA/FHFA limits — + validate
+  with Priya). The deterministic arithmetic (MIP from LP-84, the max-loan inversion) is solid.
+- **One shared override table** (`calculator_overrides`, calculator-discriminated) instead of four near-identical
+  tables — the LP-76/77 override semantics are unchanged (unique active row per (file, calculator, field);
+  soft-delete to revert; every set/clear audited as `CALCULATOR_OVERRIDDEN` with from→to values).
+
+**Rationale:** the four calculators are the same transparent/deterministic value proposition as DTI/LTV; reusing
+the pattern (and consuming the sibling calculators + the LP-84 rule values rather than duplicating) keeps them
+correct-by-construction, and the starter marking keeps the domain-judgment methodology honest.
+
+**Consequences:** LP-88 surfaces them in the full verification tab (LP-87 places them on the existing tab). The
+starter methodology (PMI rate, loan limits, reserves, add-backs) is Priya's to validate. The shared
+override-table + generic-view + generic-component pattern is reusable for future calculators.
+
+## ADR-209: Overlay admin UI — edit lender overlays without code (LP-87)
+
+- **Date:** 2026-06-29
+- **Status:** Accepted
+
+**Context:** Since LP-80, lender overlays (a lender's deviations from the investor default) were hand-edited JSON
+on the `lenders.lender_overlays` column. LP-87 closes that deferral with an admin UI.
+
+**Decision:** build a thin admin UI + API OVER LP-80's existing storage (not a new mechanism). The backend
+(`services/overlay_admin.py`, `api/overlay_admin.py`) reads/writes the same `lender_overlays` JSON, and the
+frontend (`/admin/lenders` + `/admin/lenders/[id]`) views/edits it. Specifics:
+
+- **ADMIN-gated** — the router carries `Depends(require_role(UserRole.ADMIN))` (overlays are company config, not
+  per-processor); the frontend also role-gates (UX only — the backend is the boundary).
+- **TENANT-scoped** — a lender is fetched within the caller's company (`scope_to_company`); cross-company → 404.
+- **Reason REQUIRED** — the change `reason` is `min_length=1` (rejected otherwise, 422); each override also
+  carries its own reason. Auditable WHY, per LP-80.
+- **AUDITED** — every edit's from→to values are recorded (reusing LP-80.5's `field_changes` / `audit_value`)
+  in the overlay's OWN audit trail (stored in the `lender_overlays` JSON as an `audit` list). This avoids an
+  `activity_logs` schema change (that table is loan-file-scoped; overlay edits are company/lender-scoped).
+- **EFFECT-LEGIBLE** — the view composes each override against the investor base rule (by `rule_id`, from the
+  sample + Conventional + FHA rule index) to show the investor default → the lender's effective threshold. An
+  unknown `rule_id` is rejected (422).
+
+The persisted JSON shape is `{"overrides": [{rule_id, value, reason}], "audit": [{at, actor_user_id, reason,
+changes}]}`. **Seam (honest):** the live verification engine + calculators currently resolve the *in-code*
+STARTER_OVERLAYS (keyed by lender slug); wiring the live engine to prefer a company's DB overlay is a follow-on
+(LP-88+). The admin UI manages + makes legible the per-company overlay store, which is the closing of the LP-80
+hand-edited-JSON deferral.
+
+**Rationale:** editing overlays in a UI (with a required reason + a from→to audit trail + the effect made
+legible) is far safer than hand-editing JSON, and storing the audit in the overlay's own JSON keeps the change
+contained without a schema migration to the loan-file-scoped activity log.
+
+**Consequences:** admins manage overlays without code. LP-88 can wire the live engine to read the DB overlay so a
+company's edits drive enforcement (same file → different findings) end-to-end; the effect-legibility already
+shows what an edit produces. The `LENDER_OVERLAY_UPDATED` activity type is reserved for that wire-up.
+
+## ADR-210: The full verification tab — extends LP-81 to the complete Wireframe 5 (LP-88)
+
+- **Date:** 2026-06-29
+- **Status:** Accepted
+
+**Context:** LP-81 built the minimal verification tab (the Arc A demo surface): the composition, the findings
+list (severity/type/confidence/source-location/resolution), the aggression dial, the cross-source trigger +
+staleness, the needs indicator, and re-run stability. Since then the capabilities multiplied — the full
+Conventional + FHA rule set (LP-82..85), the deterministic cross-source rules (LP-86), all six calculators
+(LP-76/77/87), the overlays + admin (LP-80/87). LP-88 builds the PRODUCTION tab Priya uses daily by EXTENDING
+LP-81 (not rebuilding it) with the deferred Wireframe-5 richness + surfacing what landed.
+
+**Decision:** extend the existing tab in place. Added ON TOP of LP-81:
+
+- **Stats row** (`verification-stats.tsx`) — total / blocking (red) / warnings (yellow) / resolved / outstanding
+  needs, at the active dial cutoff (so they agree with the list + blocking).
+- **Filter pills** (`finding-filters.tsx` + `lib/verification/finding-filters.ts`) — severity (all/red/yellow)
+  + category (the categories present), ORTHOGONAL to the dial: the dial sets the confidence floor, the pills
+  slice severity + category within it. Pure client-side, instant.
+- **Version selector** (`version-selector.tsx` + a `GET …/verification/runs` endpoint) — the run history
+  (newest-first, counts + timestamp, current marked). Runs were already versioned in the DB; this exposes the
+  history. Findings live on the file (not a run), so the history compares run summaries; resolutions persist
+  (LP-81 merge semantics).
+- **The full per-finding action set** (`finding-card.tsx`) — LP-81's Apply / Override / Note PLUS **Accept-risk**
+  + **Request-docs** (see ADR-211).
+- **All six calculators with PROGRESSIVE DISCLOSURE** (`calculators-section.tsx`) — a scannable strip of six
+  summary tiles (title + headline + status dot) that expands exactly ONE into its full transparent/overrideable
+  calculator. Replaces the six always-expanded cards (the complexity-management core). Summary hooks share the
+  query cache with the full components (no refetch).
+- **Source-origin distinction (LP-86)** — each finding shows `deterministic` (stable/certain) vs `AI · novel`
+  (the frontier); the **lender overlay** that adjusted it (LP-80, from `details.overlay_applied`) is shown; the
+  tab header shows the **program** (Conv/FHA, a new `program` field on the status).
+
+**Complexity management (the real design work):** the tab stays scannable despite the richness via hierarchy
+(stats → calculators strip → dial → pills → findings), progressive disclosure (one calculator expanded; findings
+filtered; stats summarizing), and reuse of the established card/badge/pill idiom. The frontend-design skill's
+"manage complexity" guidance applied throughout; loading/error/empty preserved (LP-46/47); PII masked.
+
+**Rationale:** extending (not rebuilding) preserves LP-81's hard-won re-run stability + resolution flow while
+adding the Wireframe-5 completeness; progressive disclosure is what lets six calculators + ~120 rules' findings
+coexist on one usable screen.
+
+**Consequences:** this is the daily production tab. LP-89 is the Priya validation/hardening. The version selector
+can grow into a full run-diff; wiring the live engine to a company's DB overlay (LP-87's seam) would make the
+lender-specific results reflect admin edits end-to-end.
+
+## ADR-211: Accept-risk resolution + Request-docs from a finding (LP-88)
+
+- **Date:** 2026-06-29
+- **Status:** Accepted
+
+**Context:** LP-81's per-finding actions were Apply / Override / Note. The FHA conditional findings
+(compensating-factors, LP-84; subject-to-repair, LP-85) need a way to ACKNOWLEDGE a real finding the processor
+proceeds with — distinct from Override (which dismisses a finding as not-applicable). And a finding often needs a
+document request to resolve.
+
+**Decision:**
+
+- **Accept-risk** reuses the EXISTING `FindingResolutionStatus.ACCEPTED_RISK` state (already in the model — no
+  migration). New service `accept_risk_finding` + endpoint `POST …/findings/{id}/accept-risk` (optional reason —
+  the compensating factor / rationale). It is a terminal resolution (like override) but semantically "a real
+  finding, accepted" — for the FHA mitigable conditional model. Activity-logged as `FINDING_RESOLVED` with
+  `resolution=accepted_risk`.
+- **Request-docs** reuses `create_needs_item(origin=FINDING)` (no migration). New service
+  `request_docs_for_finding` + endpoint `POST …/findings/{id}/request-docs` (optional note): creates a needs item
+  (priority from the finding severity — RED→blocking) the borrower must satisfy, and marks the finding
+  (`details.docs_requested`) so the tab shows the linkage. The finding stays OPEN (the request doesn't resolve
+  it). Activity-logged as `NEEDS_ITEM_CREATED`. The needs list + Phase-4 communication act on the needs item.
+
+Both return the re-filtered `VerificationStatusPublic` (one round-trip; the tab + the needs list refresh). The
+needs item carries the finding linkage in its reasoning (no `source_finding_id` FK to verification findings yet —
+that's a future model addition if direct traceability is needed).
+
+**Rationale:** both reuse existing model states/services (no migration), keeping the change to two thin endpoints
++ service wrappers; accept-risk vs override is a real semantic distinction the FHA conditional findings require.
+
+**Consequences:** the full disposition vocabulary is now Apply / Override / Accept-risk / Request-docs / Note.
+A `source_finding_id` FK from needs to verification findings + a live request→communication wire-up are future
+seams.
+
+## ADR-212: Phase-3 hardening capstone — the stuck-RUNNING watchdog, real-stack worker testing, performance, error paths (LP-89)
+
+- **Date:** 2026-06-29
+- **Status:** Accepted
+
+**Context:** the verification system is built (LP-74..88) but carries known loose ends from the build history
+that would break a real demo: a run could spin RUNNING forever with no recovery; the worker-seam bugs all passed
+unit tests but failed in the real stack; the engine now evaluates ~120 rules; edge-case files shouldn't crash.
+
+**Decision:** harden (don't rebuild):
+
+- **The stuck-RUNNING watchdog** — a read-time reconcile in `GET …/verification`: a run RUNNING past a 5-minute
+  timeout (above the Celery hard limit of 180s + slack) is marked FAILED with a legible error, so the UI never
+  spins forever and can re-run. No Celery-beat needed; the task already has time-limits + retry→FAILED.
+- **Real-stack worker integration testing** — `tests/integration/test_cross_source_worker.py` invokes the actual
+  task body (`app.tasks.cross_source._run`) end-to-end (the AI stubbed, the session pointed at the test DB) and
+  asserts the run COMPLETED + the findings persisted; paired with the standing task-registration guard. This is
+  the standing answer to the worker-seam lesson (unit tests missed those bugs). (`run_cross_source` now resolves
+  its reasoner at call time so the worker path is stubbable.)
+- **Performance** — a test bounds the deterministic engine under the full rule load (< 3s on a real file); the
+  deterministic pass is sub-second, the AI cross-source pass is the async/expected-slow part.
+- **Error-path robustness** — tests confirm a file with no data / no docs / FHA / partial extraction doesn't
+  crash: the calculators show "—" (cannot compute), the engine records absent-fact rules not-evaluated.
+
+**Consequences:** the demo runs solidly. A periodic beat-sweep watchdog (for never-read files) is a small V2
+follow-up; the read-time reconcile covers the demo + the normal path.
+
+## ADR-213: The validation aid + the grounded_starter → validated state model (LP-89)
+
+- **Date:** 2026-06-29
+- **Status:** Accepted
+
+**Context:** every rule (LP-82..86) + calculator methodology (LP-87) is GROUNDED-STARTER — researched against the
+real sources but NOT validated by the domain expert (Priya). Her session is the validation. Claude Code cannot do
+that validation (it requires her judgment on real files). What's buildable is a tool that captures her verdicts.
+
+**Decision:** build a validation aid (Option B) that CAPTURES verdicts; it does NOT validate:
+
+- **The starter inventory** — a service enumerates every grounded-starter item (Conventional + FHA + cross-source
+  rules + the calculator methodologies) with its program, category, description, value/op/unit, citation, source
+  type, and the `to_verify` marker. ~123 items, grouped/filterable (program / category / status).
+- **The verdict capture** — a new `validation_verdicts` table (company-scoped, self-audited: actor + timestamps +
+  the corrected value ARE the LP-80.5 value-recording trail) records the verdict per item: VALIDATED / CORRECTED
+  (a new value + note) / FLAGGED_REMOVE (+ why) / ADD_NEW (a missing rule's description). Admin-gated, tenant-scoped.
+- **The validation_status state** — each item's status is derived: `grounded_starter` (the DEFAULT — no verdict),
+  `validated`, `corrected`, or `flagged_remove`. The grounded-starter→validated transition is explicit + queryable
+  ("what still needs validation" = the grounded_starter count).
+- **The honesty rule** — a corrected value applies because PRIYA said so (recorded with attribution), not because
+  the system decided. The aid never auto-validates; until a verdict exists, the item is grounded-starter. Nothing
+  is claimed "validated" on the strength of the grounding alone.
+
+**Rationale:** the aid makes her session systematic + lossless without overstepping — it records her judgment, it
+does not fabricate it. The default-grounded_starter state keeps the system honest about what's actually validated.
+
+**Consequences:** after her session, the recorded verdicts drive the follow-up corrections. The verdict store is
+company-scoped (each company validates for its own lenders); a future step applies validated/corrected verdicts
+back into the rule definitions.
+
+## ADR-214: V1 boundaries — the explicit V2 deferrals (LP-89)
+
+- **Date:** 2026-06-29
+- **Status:** Accepted
+
+**Context:** an honest V1 records what it deliberately does NOT do, so the boundaries are explicit rather than
+gaps discovered later.
+
+**Decision:** document the deferrals (`docs/v2-deferrals.md`): the domain validation of the rules/methodologies
+(grounded-starter pending Priya — the aid captures, doesn't validate); auto-detected FHA compensating factors
+(the human documents them); auto-re-run of verification (manual trigger by design); the live engine reading DB
+overlays (the admin UI manages the store; wiring enforcement is V2); bounding boxes (page+snippet, not pixel); a
+needs→finding FK; S3/MinIO validation-before-deploy; the hard-delete admin + restore/trash (LP-79.5 deferral);
+and the full Phase-4 communication (Request-docs is the seam).
+
+**Consequences:** Phase 4 (communication) + the V2 list are the named next work. The boundaries are legible to the
+team + to Priya.
+
+## ADR-215: Expose valuation_amount on the Overview + make the LTV appraised-value source explicit (LP-90)
+
+- **Date:** 2026-06-30
+- **Status:** Accepted
+
+**Context:** the LTV calculator's appraised-value basis reads `appraised = valuation_amount or estimated_value`
+(`valuation_amount` wins). But `valuation_amount` (the MISMO `PropertyValuationAmount`) was NOT in the property
+read schemas (`PropertyResponse`, the loan-file detail's `PropertyPublic`) and NOT in the Overview editor — only
+`PropertyUpdate` accepted it. So it was a **hidden field that silently shadowed** the editable `estimated_value`:
+a processor who edited "Estimated value" on the Overview saw the LTV not move (whenever `valuation_amount` was
+non-null, e.g. on any MISMO-imported file), with no on-screen explanation of why.
+
+**Decision:** a focused fix — expose the field, don't restructure the model.
+
+1. **Expose `valuation_amount` (read).** Add it to `PropertyResponse` and to the loan-file detail's
+   `PropertyPublic` so the Overview can read it. The PATCH/audit/mark-stale path is already generic (LP-80.5), so
+   editing it is recorded from→to and marks verification stale with no new endpoint work.
+2. **Make it editable on the Overview.** Add it to the Subject Property card (displayed read-only) and the inline
+   `PropertyEditor` (an EditableRow `money` field). The existing `useUpdateProperty` mutation already invalidates
+   the `dti`/`ltv`/`verification` query keys, so the edit flows straight through to the LTV — **this is the core
+   fix**: the field the LTV reads is now the field the processor can edit.
+3. **Make the LTV basis source explicit.** Add `appraised_value_source` to `LtvCalculation`
+   (`"valuation_amount"` | `"estimated_value"` | `null`), computed alongside the auto value-lines. The calculator
+   renders a plain-language sub-line under the value basis ("Appraised value *from valuation amount*" /
+   "*from estimated value*") with the literal logic `appraised = valuation_amount or estimated_value` in a tooltip.
+   No hidden field, no mystery about which number drives the basis.
+
+**Explicitly NOT done (flagged for Priya / deferred):**
+- **Did not rename "Appraised value."** Whether `valuation_amount` (an AVM/stated valuation) should be labeled
+  "appraised value" at all is a domain-naming question for Priya — the basis label is unchanged here.
+- **Did not collapse `valuation_amount` + `estimated_value`** into one field. Whether the model should carry two
+  distinct subject-property values, and which is authoritative, is a data-model decision deferred + flagged.
+- **Did not change the LTV computation** (the lesser-of basis, the `valuation_amount or estimated_value`
+  precedence) or touch the MISMO parser (it correctly scopes `valuation_amount` to the subject property).
+
+**Consequences:** editing the subject-property valuation on the Overview now moves the LTV, and the processor can
+see which value the basis came from. The naming + model-collapse questions are recorded for Priya rather than
+silently resolved.
+
+### ADR-215 addendum (LP-90.1): the source transparency, finished
+
+A screenshot review of LP-90 found the transparency was only half-wired:
+
+1. **The tooltip was dead.** The "(?)" in the Value basis row was an `aria-hidden` glyph with no handler; the
+   literal logic was only in a native HTML `title` attribute on the parent div — unreliable (long delay, never
+   fires on touch, unstyled) and lacking the plain explanation. The codebase had no tooltip primitive.
+2. **The editable row had no source clarity.** The PROPERTY VALUE section's *editable* "Appraised value" row —
+   the one the processor actually interacts with — carried no source label/tooltip at all.
+3. **The "Stated" sublabel was a mislabel.** That row's sublabel read "Stated", but the appraised value is sourced
+   from `valuation_amount`/`estimated_value`, not borrower-stated.
+
+**Decision (a small follow-up, no model/computation change):**
+- Add a real, accessible tooltip primitive (`components/ui/tooltip.tsx`, shadcn/Radix —
+  `@radix-ui/react-tooltip`) and use it in **both** places. The content is the literal logic
+  `appraised = valuation_amount or estimated_value` **plus** a plain explanation ("uses the property valuation
+  amount; if absent, falls back to the estimated value; no appraisal document is on file yet").
+- The PROPERTY VALUE editable "Appraised value" row now shows the same `from valuation amount` / `from estimated
+  value` source label + the working tooltip, mirroring the Value basis row.
+- That row's sublabel is corrected from "Stated" to the real provenance (the source label; falls back to the
+  humanized source — "Manual" — only when neither value is present). The "Purchase price" row stays "Stated" (it
+  *is* stated from `SalesContractAmount`).
+
+This is a UI/labeling fix only: the LTV computation, the lesser-of logic, the "Appraised value" **main** label,
+and the field bindings (all set by LP-90/LP-77) are unchanged; the valuation/estimated model-collapse and the
+main-label naming question remain flagged for Priya.
+
+## ADR-216: The DTI consumes the MI calculator — fixing MI omitted from PITI (LP-91)
+
+- **Date:** 2026-06-30
+- **Status:** Accepted
+
+**Context:** the DTI calculator's PITI **mortgage-insurance** line (`housing.mortgage_insurance`) was a
+*manual-only* line — auto value `None`, source `"manual"` — so unless a processor hand-entered it, MI contributed
+`$0`. But MI is **mandatory**: every FHA loan carries monthly MIP, and every Conventional loan with LTV > 80%
+carries PMI. So by default the DTI **omitted a mandatory monthly obligation**, understating the front-end DTI for
+every FHA file and every low-down Conventional file — and understating it in the **qualifying (dangerous)
+direction**: a borrower truly at 44% DTI could show ~41% (missing ~$300/mo MI) and appear to pass a lender ceiling
+they'd actually fail. This is a correctness gap in the headline "transparent DTI that beats ChatGPT" surface, and
+visibly wrong on the first real FHA file. Meanwhile the LP-87 MI calculator already computes the correct,
+program-aware monthly premium — but nothing consumed it (separate namespaces; a two-source-of-truth gap, the same
+shape as the LP-90 appraised-value binding).
+
+**Decision:** wire the DTI's MI line to **consume** the MI calculator's `monthly_premium` as its auto value —
+single source of truth, live.
+
+1. **Extract one shared MI computation** into `app/services/mi.py` (`compute_loan_mi`) — the program-aware
+   dispatch (sources LP-77's LTV, the base loan, the persisted MI overrides, LP-84's FHA UFMIP rule; calls the pure
+   `compute_conventional_pmi` / `compute_fha_mip`). It imports neither `dti` nor `calculators`, so **both** consume
+   it with no import cycle. `build_mi_view` (the MI calculator) is refactored to delegate to it (output unchanged);
+   `dti._auto_housing_lines` consumes its `monthly_premium`.
+2. **Program-aware, inherited:** Conventional → monthly PMI when LTV > 80% (`$0`/not-required at ≤ 80%); FHA →
+   monthly annual-MIP always. No PMI/MIP logic is duplicated in the DTI.
+3. **Auto-populated but overrideable:** the consumed premium is the *auto* value (source `manual` → `computed`); a
+   `DtiOverride` on `housing.mortgage_insurance` still wins (the processor enters the real MI quote).
+4. **Upfront MIP stays financed:** only `monthly_premium` enters PITI; the FHA UFMIP (1.75%) is financed into the
+   loan, never a monthly DTI item.
+5. **Recompute on MI change:** the DTI reads MI live, so an LTV change (→ PMI on/off), a program change, or an MI
+   override flows through; the frontend MI-override mutation now also invalidates the DTI query.
+
+**Grounded-starter (validate with Priya):** the **mechanism** (the DTI must include mandatory MI) is not in
+question — omitting it is wrong regardless. But the Conventional **PMI rate** is a grounded-starter (it varies by
+credit / LTV / MI provider — a rate card, not a clean formula); the auto-computed PMI is a starting point the
+processor overrides with the real quote, surfaced via the MI calculator's `methodology.starter` note. The FHA MIP
+rates (HUD via LP-84) are more deterministic.
+
+**Consequences:** the FHA and low-down-Conventional DTIs are no longer understated; the MI calculator and the DTI
+share one number (no divergence). The two-source-of-truth lesson — calculators must **consume** one source, not
+omit or duplicate — is now applied to MI as it was to the appraised value. The PMI rate is recorded for Priya.
+
+## ADR-217: Readable finding labels — teach the finding-display layer about the `xsrc.` namespace (LP-92)
+
+- **Date:** 2026-06-30
+- **Status:** Accepted
+
+**Context:** deterministic cross-source findings displayed an ugly raw-rule-id meta-label — e.g. "Xsrc Income
+Employer Count Matches Items" — that means nothing to a processor. Root cause: the LP-81 finding-display layer
+(`frontend/lib/verification/finding-display.ts`) was keyed on the **`cross_source.`** prefix (the LP-78 AI
+cross-source namespace). `findingType` stripped only that prefix, and `findingTypeLabel` fell back to prettifying
+the **raw rule_id** when `findingType` returned null. The LP-86 **deterministic** cross-source rules use the
+**`xsrc.`** prefix, so they never matched → the meta-label degraded to the prettified full rule path. (The
+**headline** was already fine: for `xsrc.*` it falls through to `finding.message`, which the backend renders
+readably, e.g. "Stated employer count (2) does not match the income-item count (3)." So this was the secondary
+gray meta-label only.)
+
+**Decision (frontend-only — the backend message was already readable):**
+- `findingType` now recognizes + strips **both** namespaces (`cross_source.` and `xsrc.`), so an `xsrc.*` finding
+  resolves to a type instead of null (the headline/detail behavior is unchanged — the stripped `xsrc.` remainder
+  is not a TEMPLATES key, so the headline stays `finding.message`).
+- `findingTypeLabel` is now readable and category-based, and **never** returns a raw rule_id:
+  - AI cross-source (`cross_source.*`): the canonical type, e.g. "Income Variance" (unchanged — no regression).
+  - Deterministic cross-source (`xsrc.*`): the finding's **category** + a descriptor, e.g.
+    "Income · Cross-source check".
+  - Anything else (single-source `conv.*` / `fha.*`, document findings): the readable **category** label ("Income"
+    / "Credit" / …), with a generic "Verification check" fallback for an unknown category — never "Conv Dti …".
+
+**Consequences:** no finding shows a raw-rule-id-derived meta-label anywhere; the deterministic cross-source
+findings read as clean category checks; the AI-layer labels and the headline are untouched. This is the first,
+quick-win ticket of the finding-presentation epic (LP-92..98) — later tickets cover dedup/re-run (LP-93/94), the
+card restructure (LP-95), the AI why/fix (LP-96), View-fix (LP-97), and Undo (LP-98).
+
+## ADR-218: Normalized-substance finding identity + dedup (LP-93)
+
+- **Date:** 2026-06-30
+- **Status:** Accepted
+
+**Context:** the same discrepancy worded two ways showed as **two** Open findings. The live case:
+`xsrc.income.employer_name_consistency` fires once per documented-employer string, and two documents carried the
+SAME employer differing only in case + dash — "Thermofisher Life Science **–** PPD Development LP." vs
+"THERMOFISHER LIFE SCIENCE **—** PPD DEVELOPMENT LP." The rule's own comparison key (`_norm`) folds case +
+whitespace but NOT the en-dash/em-dash, so the two were distinct subjects → two findings for one employer. More
+broadly, both cross-source emission paths (deterministic `xsrc.*` and AI) supersede-open + preserve-resolved and
+re-emit, but had **no normalized-substance dedup at emission** — so within-run wording variants (and a re-detected
+resolved finding) duplicated.
+
+**Decision:** give every finding a **normalized-substance identity** and dedup on it at emission
+(`app/services/finding_identity.py`):
+- **Identity** = `(canonical type/rule, normalized subject)`. The subject is the deterministic rules'
+  `details.subject_key`, else the AI layer's `stated_value`/`document_value`. `normalize_text` is **deterministic
+  textual only**: NFKC, dash variants → `-`, curly quotes → straight, case-fold, whitespace-collapse. **No
+  fuzzy/semantic matching.**
+- **Dedup at emission** (both the deterministic and the AI loops): seed a `seen` set from the file's live findings
+  (`existing_identities`) — which after supersede includes the preserved RESOLVED ones — and skip a fresh finding
+  whose identity is already present. So the same substance is emitted **once** (the first kept, with its wording),
+  and a re-detected resolved finding is skipped → its resolution is **preserved**, not reopened or duplicated.
+- **Uniform** across origins; **conservative** — a genuine textual difference ("Thermofisher" vs "Thermo Fisher
+  Scientific"), a different employer/amount/document, or a different type stays a **separate** finding (the subject
+  disambiguates; normalization never over-collapses).
+
+This **refines** LP-81's stable-identity/preserve-resolved emission — it adds subject normalization + an
+emission-time dedup; it is not a parallel identity system. The deterministic rules still fire (their canonical type
+still marks the AI defer) — only persistence dedups.
+
+**Consequences:** the Thermofisher duplicate collapses to one; distinct subjects stay separate; resolutions survive
+re-detection. Scope boundary: the **drop-when-no-longer-detected** re-run change is LP-94 (next) — the merge/
+supersede behavior is otherwise unchanged. Part of the finding-presentation epic (LP-92..98).
+
+## ADR-219: Re-run reconciliation — merge currently-detected, DROP no-longer-detected (open) (LP-94)
+
+- **Date:** 2026-07-01
+- **Status:** Accepted
+
+**Context (a trace correction):** the plan framed this as "reverse LP-81's *mark as no-longer-detected*." The trace
+found there was **no mark mechanism** — the live re-run (`run_cross_source`) *superseded* (soft-deleted) every OPEN
+cross-source finding and re-emitted the fresh set. That already *dropped* no-longer-detected open findings and
+*retained* resolved ones (supersede was open-only), and the LP-78.1 input-fingerprint cache short-circuits the pass
+entirely on unchanged inputs, so a no-op re-run touched nothing. The real gap vs the locked Q4 design was the
+opposite: supersede+recreate **churned still-detected OPEN findings** — each run deleted and re-created them as NEW
+rows, losing their id and any `details["notes"]`/history. So "merge keeps history" (LP-81's stated intent) was not
+actually true.
+
+**Decision:** replace supersede+recreate with an explicit **reconcile-in-place** (`app/services/finding_reconcile.py`,
+`reconcile_findings`), compared by LP-93's normalized identity, used by both cross-source emission paths:
+
+1. **still-detected OPEN → MERGE:** keep the *existing row* (id, notes/history, resolution preserved); the fresh
+   duplicate is discarded. (Now a true merge — previously churned.)
+2. **no-longer-detected OPEN → DROP** (soft-delete): the issue is gone, so the finding is gone — the list stays
+   honest to the current state (the Q4 decision, made explicit and intentional rather than an incidental effect of
+   supersede).
+3. **still-detected RESOLVED → resolution preserved** (kept, not reopened, not duplicated — LP-93).
+4. **no-longer-detected RESOLVED → RETAINED** (the careful case): a resolved finding is a *completed processor
+   action*, not clutter. Its `resolution_status` + `applied_record` + audit trail survive — an APPLIED finding's
+   data change and LP-98's Undo depend on the record. "Drop" targets OPEN findings only.
+5. **genuinely-new → ADD.**
+
+Within-run duplicates collapse (LP-93). The AI pass reconciles its own AI-origin findings and dedups against the
+deterministic set via `external_identities` (never dropping findings another pass owns). An unchanged re-run drops
+nothing (the LP-78.1 cache returns the prior run without a pass).
+
+**Consequences:** the findings list reflects the current state (stale open findings drop), while completed actions
+and their Undo/audit records persist. Still-detected findings keep their identity + notes across runs (the churn +
+note-loss are fixed). This subsumes LP-93's emission-time dedup + LP-81's supersede into one coherent reconcile; no
+UI marker was needed (dropped findings simply leave the tab query). Part of the finding-presentation epic
+(LP-92..98); the Resolved-section UI (LP-95) and Undo (LP-98) build on resolved findings being retained here.
+
+## ADR-220: Finding card restructure — four-part layout + progressive disclosure (LP-95)
+
+- **Date:** 2026-07-01
+- **Status:** Accepted
+
+**Context:** a finding communicates four things authored by two sources: **What we found** + **Source** (the
+trustworthy deterministic core — already stored: `message`, `details.reasoning`, `source_page`/`source_snippet`)
+and **Why it matters** + **Suggested fix** (fallible AI help — added/populated in LP-96). The old card mixed the
+description, meta, and a source-gated expander in one block, and the AI help was not yet slotted.
+
+**Decision:** restructure `finding-card.tsx` into the four-part layout with **progressive disclosure**:
+
+- **Collapsed (default):** headline (`finding.message`) + a one-line "what we found" (the AI specifics / a summary,
+  omitted for deterministic findings whose headline already carries the specifics — no duplication) + the readable
+  meta (LP-92's `findingTypeLabel` · confidence · origin badge · overlay · docs-requested) + the action buttons.
+  Understandable + actionable **without expanding** — the list stays scannable.
+- **Expanded (a single "Details" affordance — no longer source-gated):** the four clearly-headed sections —
+  **What we found** (`details.reasoning`), **Why it matters** (slot), **Suggested fix** (slot), and **Source** (the
+  document page + verbatim snippet view-source, plus the authority = the LP-92 label + origin). The fallible AI
+  why/fix live **on expand**, behind a deliberate open — not inline by default.
+- **Graceful degradation (the critical constraint):** the Why-it-matters / Suggested-fix slots render **only when
+  populated**. LP-96 hasn't added them, so today they're absent — no empty boxes, placeholders, or gaps. The card
+  looks complete + intentional with just What-we-found + Source, and LP-96 drops its content into the ready slots
+  with no rework.
+- **Resolved findings render compact** — headline + disposition + a what-was-done line (reason / "Applied …"); no
+  expander, no four-part. (The Resolved-section placement + Undo are LP-98.)
+
+**Consequences:** the card is the display foundation for LP-96 (AI why/fix), LP-97 (View fix), and LP-98 (Undo). It
+reuses existing stored data (no backend/model change) and preserves LP-92's readable labels and LP-93/94's
+identity/re-run. Part of the finding-presentation epic (LP-92..98).
+
+## ADR-221: AI-generated "why it matters" + "suggested fix" — the guard-railed AI-boundary relaxation (LP-96)
+
+- **Date:** 2026-07-01
+- **Status:** Accepted
+
+**Context:** a finding already explains WHAT fired + WHY-it-fired deterministically. LP-96 adds an AI-authored
+**why it matters** (the consequence) + **suggested fix** (the remediation) to fill LP-95's slots. This is the ONE
+deliberate relaxation of the project's "AI never touches authoritative output" principle — AI-generated prose enters
+the finding — so it is decision-SUPPORT, not automation, made safe by guardrails.
+
+**Decision (implement ALL the guardrails):**
+
+1. **Generated once, stored, NEVER per-run.** Guidance is keyed **per canonical finding type** (the key both the
+   deterministic `xsrc.*` rules and the AI findings share), in a grounded-starter store
+   (`app/verification/finding_guidance.py` `GUIDANCE_BY_TYPE`), resolved by a **plain dict lookup at read time**
+   (`FindingPublic.from_model` → merged into `details` for LP-95's slots). Novel AI findings generate their guidance
+   **once at discovery** (best-effort, stored on the finding); LP-94's reconcile keeps the row on re-run, so it is
+   never regenerated. Rendering a card / re-running verification makes **no model call** and yields identical text
+   (no flicker, no per-view cost) — the A+C combination (AI writes it once; it's stored + shown deterministically).
+2. **Grounded in the rule's facts.** The generator (`generate_guidance`, reusing the app's `complete()` at
+   temperature 0.0) is given the type + category + description + threshold and asked to EXPLAIN them — not to invent
+   facts or cite regulations it wasn't given.
+3. **Grounded-starter, validate-with-Priya.** `starter=True` — researched-and-grounded, NOT authoritative; the
+   domain expert confirms/corrects it, exactly like the rule thresholds.
+4. **Warned** — the block carries a clear-but-calm "AI-generated — verify before relying on this; it may be wrong."
+5. **Visually distinct** — the why/fix block is tinted + bordered + iconned (a `Sparkles` amber block), set apart
+   from the deterministic core (What we found + Source), so the processor always knows fact from AI explanation.
+6. **Overrideable** — the existing Override action still wins; the guidance is advisory.
+
+**Honesty note:** the committed `GUIDANCE_BY_TYPE` is the **grounded-starter** content (authored deterministically
+from each type's meaning). The AI-authoring *mechanism* — `generate_guidance` + the one-time idempotent pass
+(`app/scripts/generate_finding_guidance.py`) — produces the richer, lender-specific prose when run with an API key;
+its output is reviewed + validated by Priya before it lands (same grounded-starter → validated posture as the rule
+content). Generation failure is graceful: no guidance → the card still renders (LP-95).
+
+**Consequences:** findings now explain why-it-matters + how-to-fix, without any per-run AI cost or flicker, and
+without letting the AI decide anything — the deterministic core + human judgment still rule. This is the one
+sanctioned place the AI-boundary is relaxed; the guardrails are what make it safe. Part of the finding-presentation
+epic (LP-92..98); LP-97 (View fix) + LP-98 (Undo) build on it.
+
+## ADR-222: View fix — the dry-run itemized before/after impact preview (LP-97)
+
+- **Date:** 2026-07-01
+- **Status:** Accepted
+
+**Context:** applying a finding changes structured data → the DTI/LTV recompute (LP-75/76/77). Before committing,
+the processor should see EXACTLY what will change — especially a limit crossing — not a bare "Apply". Findings that
+carry an **apply-spec** (`details.apply`; currently ~the undisclosed-debt `add_liability` → DTI-recompute) get a
+"View fix" impact preview; findings without one keep Override / Accept-risk / Request-docs / Add-note (they change
+no numbers — nothing to preview).
+
+**Decision:** a **dry-run** that REUSES the real apply→recompute — one source of truth, never a parallel
+computation that could diverge.
+
+- **The dry-run** (`app/services/finding_impact.py` `preview_finding_apply`): snapshot the DTI/LTV **before**; open a
+  **savepoint**; run the **real** `apply_finding` (which performs the structured-data change + fires the recompute);
+  snapshot the DTI/LTV **after**; **roll the savepoint back** + refresh the objects → nothing persists. So the
+  preview MATCHES what Apply actually does. Served read-only at `GET …/findings/{id}/apply-preview` (never commits;
+  a 400 for a finding with no apply-spec).
+- **The itemized preview** reuses the existing, already-line-itemized calculator schemas (`DtiCalculation` before +
+  after) — so the dialog shows the change, each affected debt line (the **new** one highlighted, `NEW`), the totals
+  with deltas, the qualifying income, the recomputed **back-end DTI** (before → after), and the **limit-status
+  crossing** ("Within limit → Over limit"). Only the calculator(s) the apply moves are returned.
+- **Confirm / cancel:** "Apply fix" runs the EXISTING real apply endpoint (`apply_finding` → APPLIED +
+  `applied_record` + the real recompute) — what was previewed is what happens; Cancel is a no-op.
+- **Reversibility (for LP-98):** the real apply already records enough before-state to reverse — `applied_record`
+  carries the created `liability_id` (add) / the `from`→`to` (income). Verified here; Undo is built in LP-98.
+
+**Consequences:** the processor sees the new math (esp. a limit crossing) before committing, and the preview can't
+drift from the apply (same code, dry-run vs. commit). Apply-specs are currently rare (~undisclosed-debt); the flow
+is general (any apply-spec). Part of the finding-presentation epic (LP-92..98); LP-98 (Undo + the Resolved-section
+placement) builds on the reversible apply.
+
+## ADR-223: Undo for resolved findings + the Resolved section (LP-98) — the epic's close
+
+- **Date:** 2026-07-01
+- **Status:** Accepted
+
+**Context:** LP-97 made Apply previewable (View fix); a processor's resolutions should also be reversible. Resolved
+findings sit in a **Resolved section** below the open findings (LP-94 retains them across re-runs), each compact
+(what-was-done + effect). This ticket adds **Undo** — and Undo of an APPLIED finding must reverse a *data change*
+and recompute, the epic's highest-risk piece.
+
+**Decision:** a type-specific reversal (`app/services/finding_resolution.py` `undo_finding`), reusing the recorded
+before-state — exact, not approximated.
+
+- **Undo-APPLIED** → reverse the data change by RESTORING the recorded pre-apply state from `applied_record` (LP-97
+  verified it captures enough — the one source of truth): `add_liability` → soft-delete the *exact* liability that
+  was added (by its `liability_id`); `correct_income` → restore the income item to its recorded `from` value. Then
+  `mark_recompute_needed` — the DTI/LTV read live, so they recompute back to their **exact** pre-apply values. The
+  finding returns to OPEN (its `applied_record` cleared). We restore the recorded row/value rather than subtracting
+  an amount, so the reversal is exact even if other things changed.
+- **Undo-OVERRIDDEN / Undo-ACCEPTED_RISK** → just flip to OPEN (they made no data change).
+- **Audited** — `ActivityType.FINDING_UNDONE` (a new activity type + a CHECK-constraint migration), recording who /
+  when / the reversal. Tenant-scoped (the reversal only touches the finding's own file). A non-resolved finding →
+  `CannotUndoError` (400).
+
+**Composition with LP-94:** resolved findings are retained → they populate the Resolved section → undoable. After
+Undo-Applied the data is reversed and the finding is OPEN, so the (now un-applied) issue **re-detects** on the next
+run — correct. After Undo-Accept/Override it's a normal open finding again. No conflict.
+
+**Consequences:** nothing a processor does is one-way — **View fix previews before Apply (LP-97), Undo reverses
+after (LP-98)**. `FindingPublic` now exposes `applied_record` (the Resolved-card effect + the Undo basis). This
+**completes the finding-presentation epic (LP-92..98)**: readable labels (92), normalized-substance identity +
+dedup (93), re-run reconcile (94), the four-part card (95), AI why/fix (96), View fix (97), and Undo + the Resolved
+section (98).
+
+## ADR-224: Populate `refinance_type` from MISMO + surface the undetermined refi (LP-99)
+
+- **Date:** 2026-07-01
+- **Status:** Accepted
+
+**Context:** `refinance_type` (`rate_term` | `cash_out`) exists on `LoanFile` and the LTV engine already resolves the
+cash-out limit from it correctly — but **nothing populated it**. A cash-out refi imported from MISMO landed
+`refinance_type = NULL`, and the LTV treats null-as-rate/term → the **looser** limit. So a cash-out refi (whose max
+is *stricter*) silently got the rate/term max — a permissive-direction safety bug. First ticket of the refinance
+epic (LP-99..101).
+
+**Decision:** parse the MISMO cash-out determination at import and fill `refinance_type`, so the LTV's *existing
+correct* path auto-triggers — the engine is untouched.
+
+- **Source:** `LOAN/REFINANCE/RefinanceCashOutDeterminationType` (`CashOut` → `CASH_OUT`; `NoCashOut` /
+  `LimitedCashOut` → `RATE_TERM`), with `RefinanceCashOutAmount` as a fallback (positive ⇒ cash-out, zero ⇒
+  rate/term). `LimitedCashOut → RATE_TERM` (agency LCOR carries rate/term limits) is a **grounded starter, pending
+  expert review**, alongside the LP-74 LTV thresholds it feeds.
+- **Undetermined ⇒ SURFACE, never silently looser.** A refi with no cash-out signal keeps `refinance_type = NULL`
+  and is surfaced two ways: a **parse warning** on the `MismoImport` and a **FLOOR needs item** ("Confirm refinance
+  type"). It is never defaulted to the looser limit behind the processor's back. (The LTV still reads
+  null-as-rate/term for a not-yet-corrected file — we don't block the calculator — but the ambiguity is now visible
+  and actionable.)
+- **Correction path made real.** The needs item directs the processor to "set it on the Overview," but
+  `refinance_type` was in `_VERIFICATION_BASELINE_FIELDS` (editing marks verification stale) yet **absent from
+  `LoanFileUpdate`** — unsettable. LP-99 adds it to `LoanFileUpdate` (PATCH) and `LoanFileDetail` (read), and the
+  Overview loan editor shows a **Refinance type** select **only for refinances**.
+- **Only refinances.** Purchases are entirely unaffected — no field set, no needs item, no warning, no UI control.
+
+**Scope boundary:** the LTV engine is deliberately unchanged (it was already correct — the bug was an unfilled
+field). Purpose-gating rules (LP-100) and a real refi MISMO fixture + e2e (LP-101) are the rest of the epic; LP-99's
+refi variant is *constructed* from the one real (purchase) fixture, so the cash-out mapping is validated
+structurally, not against a real refi export.
+
+**Consequences:** cash-out refis now get their stricter LTV limit automatically; an ambiguous refi is caught and
+corrected instead of silently mis-limited. `LoanFileDetail`/`LoanFileUpdate` gain `refinance_type`; editing it marks
+cross-source verification stale (a baseline change, same as any LTV input).
+
+## ADR-225: A PURPOSE dimension in the rules applicability framework (LP-100)
+
+- **Date:** 2026-07-01
+- **Status:** Accepted
+
+**Context:** the rules applicability framework had no PURPOSE dimension — `ApplicabilityScope` is
+`ALL_LOANS | PROGRAM | LENDER` only, and `RuleGate` keys on typed numeric facts (is_manual, property type), not
+`loan_purpose`. So a rule could not be declaratively scoped purchase-only / refi-only. The visible consequence: the
+purchase-agreement doc rule (`conv.docs.purchase_agreement_present`) — whose description says "(purchase
+transactions)" but nothing ENFORCED it — **fired on refinances**, flagging a missing purchase agreement a refi
+legitimately doesn't have → a spurious YELLOW finding. Second ticket of the refinance epic (LP-99/100/101);
+consumes LP-99's parsed `refinance_type`.
+
+**Decision:** add a PURPOSE dimension to the applicability framework — don't special-case one rule.
+
+- **`PurposeScope`** (`purchase` / `refinance` / `cash_out` / `rate_term`) is a new field on `Applicability`,
+  ORTHOGONAL to `scope` — it COMPOSES with the program/lender scope + `RuleGate` (a rule can be "Conventional AND
+  purchase-only"). `None` = every purpose (the default — the ~110 existing rules are unchanged).
+- **Enforced per-rule in the engine**, parallel to `RuleGate` (not at `registry.resolve`, so the LTV/DTI calculators
+  that resolve through the registry are untouched). `engine.evaluate` + `cross_source.engine.evaluate_cross_source`
+  take `loan_purpose` + `refinance_type` (from the `LoanFile`, LP-99) and SKIP a purpose-mismatched rule
+  (`evaluated=False`, never a finding) via the pure `purpose_applies`.
+- **UNDER-GATE, not over-gate (the safe direction):** `purpose_applies` skips a rule ONLY on a *known* mismatch; an
+  unknown purpose (or unknown `refinance_type`) errs toward APPLYING the rule. Wrongly gating a rule OFF could HIDE a
+  real finding (dangerous); an extra over-flag is safe. Only CLEARLY purpose-specific rules were gated:
+  `conv.docs.purchase_agreement_present`, `fha.doc.pre_appraisal_sales_contract`, and the cross-source
+  `xsrc.terms.price_vs_contract` → PURCHASE-only. Ambiguous rules stay ALL-purpose + flagged: e.g.
+  `fha.doc.case_number_and_amendatory_clause` keys on the case number (which ALL FHA loans, incl. refis, need) —
+  only its amendatory-clause sub-part is purchase-specific, so it stays ungated (splitting it is a Priya follow-up).
+- **`conv.ltv.purchase_max` / `fha.ltv.purchase_max` deliberately NOT gated** — they are the "purchase / rate-term"
+  maximum a rate-term refi SHARES (LP-99); gating them purchase-only would wrongly drop the limit for rate/term refis.
+- **DTI stays program-based** — refinance doesn't change DTI limits; DTI rules are never purpose-gated.
+- **Refi need-set:** the needs floor gained the refi analog of the purchase-agreement need — a REFINANCE seeds the
+  **existing mortgage statement** + **payoff statement** (grounded starter; subordination for a 2nd lien flagged,
+  not built).
+
+**Grounded-starter:** which rules are purpose-scoped + the refi need-set are domain judgments — flagged
+validate-with-Priya on each gated rule + the need-set.
+
+**Consequences:** purchase-specific rules no longer fire on refinances (the spurious purchase-agreement finding is
+gone); the framework can now scope any rule by purpose declaratively; rate-term refis keep the shared LTV limit; DTI
+is unaffected. LP-101 (a real refi MISMO fixture + e2e) will validate this end-to-end.
+
+## ADR-226: The extraction/reasoning AI tier runs on Opus 4.8
+
+- **Date:** 2026-07-01
+- **Status:** Accepted
+
+**Context:** the app uses two Claude tiers (LP-37 wrapper): a cheap high-volume `anthropic_model_classification`
+(Haiku) for document classification/summarization, and a more capable `anthropic_model_extraction` for the work
+where quality matters — document data **extraction**, **cross-source reasoning**, and **needs/guidance** generation.
+The extraction tier had been Sonnet.
+
+**Decision:** move the extraction tier to **Opus 4.8** (`claude-opus-4-8`), the highest-capability model, for better
+extraction accuracy and reasoning. The classification/summarization tier **stays on Haiku** (Opus there would be
+wasteful for little gain). Both remain CONFIGURATION — env-overridable via `ANTHROPIC_MODEL_EXTRACTION` /
+`ANTHROPIC_MODEL_CLASSIFICATION` — so a deployment can dial the tier without a code change. The `app/ai/cost.py`
+`PRICING` table gains a `claude-opus-4-8` row (~$15/$75 per M in/out, ~5× Sonnet) so cost estimates stay meaningful
+(an unpriced model silently estimates $0 + logs a warning).
+
+**Consequences:** higher per-call cost on the extraction tier (~5× Sonnet on its high-token calls — full documents +
+cross-source context), traded for better perception/reasoning quality. This affects **perception only**: the locked
+Phase-3 principle is unchanged — the AI classifies/extracts, and the deterministic engine (LTV/DTI/rules/findings)
+does the judging. Model strings stay TODO(models)/TODO(pricing) to verify against current Anthropic docs.
+
+## ADR-227: Refi MISMO fixtures + an end-to-end refinance correctness SWEEP (LP-101)
+
+- **Date:** 2026-07-01
+- **Status:** Accepted
+
+**Context:** the refi path (import → LTV → rules → findings → calculators) had NEVER run end-to-end through a real
+import — only unit tests constructed `loan_purpose=REFINANCE` directly, and the one real MISMO fixture is a
+Conventional PURCHASE (Mahesh). The project's recurring bug class is SEAMS between the import/model and the
+calculators (the appraised-value, MI-in-DTI, and refinance_type binding bugs were all this shape, all biased
+permissive), and the refi path had more such seams untested. Final ticket of the refinance epic (LP-99/100/101).
+
+**Decision:** create two SYNTHETIC/de-identified refi MISMO fixtures + an end-to-end test that is a deliberate
+**correctness sweep**, not a happy-path smoke test — its job is partly to FIND what's still broken on the refi path.
+
+- **Fixtures** (`scripts/generate_refi_fixtures.py` → `tests/fixtures/mismo/refi_{rate_term,cash_out}.xml`): derived
+  from the purchase fixture with all personal PII scrubbed to obviously-synthetic values, purpose flipped to
+  Refinance, `SalesContractAmount` dropped (a refi has none), and a `REFINANCE` cash-out determination added (what
+  LP-99 parses). Loan amounts chosen so each exercises its LTV limit: rate/term at 80% (passes the 97% cap), cash-out
+  at 85% (**over** the stricter 80% cash-out cap — proving LP-99's populated `refinance_type` makes the stricter
+  limit bind; it would pass the 97% cap). Grounded-starter test artifacts — a real refi export may differ.
+- **Asserts LP-99** (refinance_type parsed → correct stricter cash-out limit; appraised-value-only basis) and
+  **LP-100** (the purchase-agreement rule is skipped on a refi even with the doc fact present; the refi need-set
+  seeds; DTI fires regardless of purpose), then **probes DTI / MI / reserves / max-loan** for refi-correctness.
+- **Two seams surfaced, both CONSERVATIVE direction** (they over-state risk — never make a file look more qualified;
+  handled honestly, never asserting a wrong value as correct):
+  - **GAP-2 (reserves) — FIXED inline (small/safe/obvious):** the reserves down-payment default was `value − loan`
+    (home equity), wrongly subtracted from a refi's eligible reserves. A refi has no down payment → now `0` for a
+    refinance (purchase path unchanged). Direction of the old bug: conservative (understated reserves → spurious
+    "insufficient").
+  - **GAP-1 (DTI) — documented + `xfail(strict)`, follow-up LP-102:** the back-end DTI counts the existing first
+    mortgage being paid off by the refi (we don't parse the MISMO payoff indicator), double-counting it against the
+    new PITI. Direction: conservative (DTI over-stated → possible spurious over-DTI). NOT a safe inline fix — it needs
+    payoff-indicator parsing + purpose-aware debt exclusion (a borrower's OTHER mortgages must still count). The
+    xfail asserts the DESIRED behavior so the bug is never baked in as "correct".
+- **MI ✓** computed on the refi (appraised-only) LTV, program-aware; **max-loan ✓** uses the appraised basis
+  (inherits GAP-1 via its DTI ceiling); **LTV ✓** appraised-only + stricter cash-out limit.
+
+**Consequences:** the refinance epic (LP-99/100/101) is COMPLETE. Refinance is proven end-to-end for what the
+fixtures exercise; the reserves refi down-payment is fixed; and the ONE remaining gap (GAP-1, DTI double-count) is
+KNOWN and tracked (xfail + a follow-up ticket), not hidden behind a falsely-green suite. The fixtures + refi
+need-set + cash-out thresholds remain grounded-starters (validate-with-Priya).
+
+## ADR-228: Silent extraction truncation → right-size the budget + a shared truncation guard (LP-102)
+
+- **Date:** 2026-07-02
+- **Status:** Accepted
+
+**Context:** documents classified "Pay stub" extracted EMPTY (all fields blank → NEEDS_REVIEW) while W-2 / investment
+succeeded on the same file. Root cause (confirmed against LF-6T3N: all 4 pay-stub extractions stored
+`error_detail = "could not parse extraction"`, `tokens_used = None`): pay-stub extraction OVERFLOWED its 4096
+`max_tokens`. A pay stub enumerates many earnings/deduction/tax line items (current + YTD), each emitted with a
+verbatim snippet → the JSON response exceeded 4096 output tokens → the model TRUNCATED it mid-object
+(`stop_reason == "max_tokens"`). No extractor checked `stop_reason`, so the cut-off body flowed into
+`extract_json_object` (which needs a *balanced* `{…}`) → `None` → the extractor returned `failed("could not parse
+extraction")` — misreporting a self-inflicted truncation as an unreadable document. It failed on both 9 KB and 204 KB
+stubs (output verbosity, not input size). `investment_account` (also 4096) truncated on its densest doc too — the gap
+was already systemic; Opus 4.8's more-thorough transcription makes any verbose type more likely to hit it.
+
+**Decision:** two fixes.
+
+- **Fix A — right-size the budget:** `pay_stub._MAX_TOKENS` 4096 → **8192** (matching `bank_statement`, the same
+  "capture every line item" verbosity). The other verbose types were already bumped (bank_statement 8192, tax_return
+  16384, divorce_decree 6144); pay stub had been left at the LP-39 scaffold value.
+- **Fix B — a SHARED truncation guard (the primary, systemic fix):** a single
+  `app.ai.extraction.model_call.run_extraction_completion` that every extractor now calls instead of `complete()`
+  directly. It detects `stop_reason == "max_tokens"`, logs it **distinctly** (`extraction_truncated`, not a parse
+  failure), retries **exactly once** at a high ceiling (16384 — one decisive jump), and if it STILL truncates surfaces
+  an **honest** status/`error_detail` — `"response truncated - document too dense to extract in full"`, never the
+  misleading "could not parse extraction". The retry fires **only** on truncation (never on other stop reasons, parse
+  failures, or AI errors — more budget can't fix those); at most 2 attempts. A successful retry is transparent (the
+  fields populate). This covers ALL ~18 extractors via the one shared path — pay stub was just the first to hit it.
+
+**Rejected (Fix C):** dropping the per-field verbatim snippets to shrink the response — they are source provenance
+for verification / the LP-43 drawer. We fixed the budget, not the provenance.
+
+**Consequences:** pay-stub extraction succeeds on the previously-failing docs; a genuinely too-dense document
+(overflowing even 16384) now fails HONESTLY (truncation labeled as truncation) and lands in NEEDS_REVIEW with an
+accurate reason — the same honest-failure-mode principle the project applies everywhere. All extractors now benefit
+from the guard; none silently mis-parse a truncated body. Each extractor's model call moved from a direct
+`complete()` to the shared runner (no per-type behavior change otherwise).
+
+## ADR-229: Right-size extraction budgets by output shape (LP-103) — not a blanket raise
+
+- **Date:** 2026-07-03
+- **Status:** Accepted
+
+**Context:** LP-102's pay-stub truncation was one instance of a class — an UNBOUNDED "capture every X" catch-all
+output still at the 4096 LP-39 scaffold budget. An audit across all ~18 extractors found the same shape on more
+types. Most consequentially, **`investment_account` (4096) was already truncating on LF-6T3N** — a silently-empty
+ASSET document. Assets feed reserves / down-payment verification, so a truncated brokerage statement UNDERSTATES a
+borrower's assets: a live "wrong in a way that matters" bug, not just cleanup.
+
+**Decision:** right-size by OUTPUT SHAPE, raising only the unbounded-catch-all-at-4096 types to **8192**:
+`investment_account` (confirmed live failure — itemized holdings), `retirement_account` (same holdings shape),
+`profit_and_loss` (revenue + each-expense lines), `purchase_agreement` (contingencies/concessions/addenda). The
+already-right-sized types are left ALONE (tax_return 16384, bank_statement 8192, pay_stub 8192, divorce_decree 6144),
+as are the bounded/semi-bounded fixed-form types (w2, voe, drivers_license 2048, letter_of_explanation,
+homeowners_insurance, mortgage_statement, hoa_statement, property_tax_bill, form_1099 — all at their current budgets).
+
+**Why NOT blanket-raise everything to a high ceiling:** a right-sized per-type budget encodes a useful size
+EXPECTATION, so a truncation against it is a meaningful ANOMALY signal — that signal is exactly how the pay-stub and
+investment-account bugs were found. A uniform high ceiling would blind the system to output size and let a runaway
+output generate expensively before anything stopped it. The LP-102 shared guard is the backstop that makes
+right-sizing (vs. over-provisioning) safe: a mis-sized type still fails HONESTLY (retry once at 16384, then an honest
+truncated status), never silently. The per-type **sizing rule** (unbounded → generous 8192/16384; fixed-form →
+small; guard as backstop) is documented in `app/ai/extraction/model_call.py` so the next extractor is right-sized
+from the start.
+
+**Consequences:** the confirmed investment-account asset-understatement bug is fixed and its three same-shape peers
+are pre-empted; the bounded tail stays lean (no wasted budget, signal preserved), covered by the guard. No change to
+the guard or the pay-stub fix. This is truncation/budget only — plausibility/misread checks are a separate concern.
+
+## ADR-230: Surface document periods — server-derived, type-aware period + period in the name (LP-105)
+
+- **Date:** 2026-07-03
+- **Status:** Accepted
+
+**Context:** 17 of 18 document types already extract a date/period, but it was poorly surfaced — only as
+individual raw rows in the drawer, and reaching the card indirectly via `standard_name`, which only 8 types had a
+naming rule for (the other ~10 fell back to `{Type}_{upload_date}` → undifferentiated names, the "8 identical
+Pay-Stub cards" pain). This is a display/naming gap over already-extracted data, not an extraction gap.
+
+**Decision:** two parts, both surfacing what's already extracted.
+
+- **Consolidated period display, derived server-side.** A new `app/documents/period.py::document_period` maps each
+  type to its period CONCEPT (range / tax year / single labeled date / expiry / verbatim) and returns one
+  `{label, value}` (e.g. `Period: Jun 1 - Jun 15, 2026`, `Closes: Aug 15, 2026`). It is computed in the response
+  builder (`_enrich`, alongside `standard_name`/staleness) and exposed as `DocumentResponse.period`, so BOTH the
+  card and the drawer render ONE tested formatter rather than duplicating type-aware logic on the client. The card
+  gets an at-a-glance distinguishing line; the drawer gets a consolidated line ABOVE the existing per-field raw rows
+  (source snippets preserved — the period consolidates in addition, never replaces provenance). Graceful: `None`
+  when the type has no period concept or the date isn't extracted yet.
+- **Period in `standard_name` for all types.** Extended the LP-72 `NAME_RULES` (an existing config-dict pattern)
+  with the ~10 missing types so the name uses the extracted date (investment/retirement→statement_period_end,
+  P&L→period_end, voe→end_date, hoa→due_date, purchase_agreement→closing_date, divorce_decree→effective_date,
+  LOE→referenced_date, drivers_license→expiration_date). The graceful `{Type}_{upload_date}` fallback is unchanged
+  when the date isn't extracted.
+
+**Boundaries:** display + naming only — NO new extraction (gift_letter's missing date and property_tax_bill's
+verbatim-string normalization stay out; the tax bill's string is shown as-is in the display). Staleness/recency is a
+separate follow-up (LP-106).
+
+**Consequences:** same-type documents are now distinguishable by both the card's period line and their name; the
+period is one consistent, server-tested string everywhere; the drawer keeps full provenance. Why server-side (not a
+frontend formatter): the card is a lean list item without the raw extracted_data, and a single Python formatter is
+unit-testable per concept and shared by card + drawer.
+
+## ADR-231: Expand document staleness to types that already extract a period (LP-106)
+
+- **Date:** 2026-07-03
+- **Status:** Accepted
+
+**Context:** the LP-71 staleness badge judges freshness from a document's extracted date against a per-type window
+(`RECENCY_WINDOWS`), but was wired for only 4 types. `investment_account` / `retirement_account` already extract
+`statement_period_end` (the same field bank_statement uses), yet a **stale asset statement was never flagged** — the
+date existed but wasn't checked. Asset statements verify reserves / down-payment availability and must be recent, so
+this is a correctness gap.
+
+**Decision:** reuse the existing mechanism — add entries to `RECENCY_WINDOWS` (no parallel path). `investment_account`
++ `retirement_account` at **90 days** on `statement_period_end` (a bit wider than bank's 60 d because those statements
+are often **quarterly** — 60 d would false-flag a normal current one); `profit_and_loss` at **120 days** on
+`period_end` (a self-employed P&L should be reasonably current). The badge, `as_of_date`, and package-fitness pick
+these up automatically. Windows are **grounded starters — validate-with-Priya**; the mechanism is the fix, the exact
+day counts are hers.
+
+**Under-vs-over (deliberately NOT wired):** `voe` (`end_date` is the employment *termination* date, null for a current
+employee — not a verification/issue date, so no clean recency signal) and `mortgage_statement` (`due_date` is a
+*future* obligation, not an as-of date). Forcing a window on either would produce a meaningless/false signal.
+
+**Separate concern, flagged (not built here):** the verification engine's file-level recency FACTS —
+`documents.income.most_recent_age_months` + `documents.asset_statement.most_recent_age_months` — are **read** by
+Conventional + FHA rules but **never built** in `build_file_facts` (only the pay-stub age fact is), so those recency
+rules are **inert**. That is a different code path; wiring the staleness badge does not build them. It needs a new
+fact-builder (aggregate the newest income/asset-statement extraction date → months, like `_most_recent_paystub_age`)
+and is flagged as a **fast-follow (LP-107)** — not silently left.
+
+**Consequences:** a stale investment/retirement (asset) statement and an old P&L now flag "May be stale" and become
+package-unfit, from the date already extracted; no new extraction, no parallel path, no frontend change (the badge is
+type-agnostic). The FHA/Conventional recency rules remain inert until LP-107 builds their facts.
+
+## ADR-232: Honest needs satisfaction — graded needs "attach, confirm coverage" (never a false-green) (LP-108)
+
+- **Date:** 2026-07-03
+- **Status:** Accepted
+
+**Context:** the needs engine matched a document to a need at TYPE granularity (`needs_type == document_type`) and, on
+a completed match, auto-advanced the need RECEIVED → VERIFIED. For a GRADED need — one whose requirement is inherently
+more than "one document exists" (2 years of tax returns, 2 months of bank statements, "all asset accounts covering two
+months") — this is a **dangerous FALSE-GREEN**: the first matching statement flips the whole requirement to
+"satisfied", telling the processor asset/income documentation is COMPLETE when most of it is missing. Unlike the
+project's other bugs (which fail loud/safe), this claims MORE verification than performed — the dangerous direction.
+On LF-6T3N it was masked only by an unrelated pay-stub truncation (LP-102); fixing/reprocessing that would have
+UNMASKED it, so the display and honesty fixes had to ship together.
+
+**Decision (Option B — honest satisfaction, NOT Option A account-level coverage):**
+
+- **Classify simple-presence vs graded.** A curated allowlist (`_SIMPLE_PRESENCE_NEEDS_TYPES`: drivers_license,
+  purchase_agreement, gift_letter, letter_of_explanation, homeowners_insurance, title_commitment, appraisal,
+  verification_of_employment, payoff_statement, existing_mortgage_statement) names the needs where ONE document IS the
+  requirement. **Safe default: everything else — including every AI-proposed need and any unknown/None type — is
+  GRADED.** Under-claiming (an extra confirm click) is a mild annoyance; over-claiming (a false-green) is the danger.
+  Grounded starter — validate-with-Priya.
+- **Honest transition.** A matched completed document → RECEIVED. Simple-presence → auto VERIFIED (the match IS the
+  verification). Graded → **stops at RECEIVED = "documents attached — confirm coverage"** (no false-green); the
+  processor confirms the coverage the system can't (all accounts / months / years) via a new
+  `POST /needs/{id}/confirm-coverage` (RECEIVED → VERIFIED). RECEIVED was already a transient "arrived, not verified"
+  state, so this needs NO new status/migration — a *persisting* RECEIVED now means "confirm coverage".
+- **Always show the matched document.** Every matched need (attached or verified) surfaces the document by name (the
+  card reads "Attached: X" for received, "Satisfied by X" for verified) plus the honest coverage note.
+- **Umbrella needs match by category.** An AI umbrella need naming a category (`asset_statement`) matched no concrete
+  document type, so it never attached. It now matches any document in the mapped category
+  (`asset_statement → ASSETS`) — a coarse, category-level match that lands in the same honest RECEIVED state. This is
+  NOT the account-level coverage matching (parse which account, N accounts × M months, a coverage grid) — that is
+  **Option A / V2**.
+
+**Consequences:** a graded need can no longer read "satisfied" on a single document; the LF-6T3N asset need shows the
+honest "attached — confirm coverage" (or stays Pending) — never a false-green — even after reprocessing. The
+processor makes the coverage judgment the system can't, with the evidence assembled and the gap stated honestly
+("AI proposes, processor disposes", applied to satisfaction). Same honest-failure-mode principle as the rest of the
+project — never claim more verification than performed. Account-level coverage verification is deferred to V2.
+
+## ADR-233: Derive-on-read the full matching-document set for a need (LP-109)
+
+- **Date:** 2026-07-03
+- **Status:** Accepted
+
+**Context:** LP-108 made graded needs show "documents attached — confirm coverage", but the data model stores a
+single `satisfied_by_document_id` (one FK per need), so a graded need like "2 months of bank statements" displayed
+only ONE of several matching documents — undercutting "confirm coverage" (the processor can't confirm coverage
+against evidence that's mostly hidden). An investigation established the mitigating fact: the matcher's criteria is
+**trivial deterministic equality** (`document_type == needs_type`, or the umbrella need's category == the document's
+category) over fields **already stored** on every document — so the full matching set is a cheap display-time query.
+
+**Decision:** **derive-on-read** — at response-build time, `documents_matching_need(need, documents)` returns ALL of
+the file's completed documents matching the need's criteria (reusing the matcher's equality), and the response
+carries that full `matching_documents` list. **No schema change, no matcher change, no migration.** The single
+`satisfied_by_document_id` is KEPT as the "trigger" (the document that moved the need to RECEIVED); the derived list
+is computed on read. The card shows all matching documents by name for a graded need (a simple-presence need keeps
+its single satisfying document).
+
+- **The over-inclusiveness is intentional.** For an umbrella need the derived set is coarse — the `asset_statement`
+  need includes every ASSETS-category document (even an earnest-money withdrawal). That coarseness IS the
+  "confirm coverage" honesty level: the system surfaces every candidate; the processor curates which count. We do
+  NOT add narrowing/precision — precise, curated, per-need coverage (N accounts × M months) is the V2 coverage grid.
+- **Known limitation (noted, not fixed):** derive-on-read shows the LIVE matching set, not a PERSISTED "processor
+  confirmed these specific documents" decision. A persisted, curated, editable per-need document set (an explicit
+  needs↔documents join + matcher accumulation) is the foundation for V2's Option A, built when its shape is known —
+  NOT now.
+
+**Consequences:** graded needs now show their full evidence set (LF-6T3N's asset need shows all 9 matching ASSETS
+documents instead of 1), delivering LP-108's intent that the single-FK model couldn't. LP-108's false-green STATUS is
+untouched and independent. No new storage, no migration, no matcher change — the cheapest correct delivery, with the
+explicit one-to-many storage deferred to V2/Option A.
+
+## ADR-234: Every need shows its SOURCE — per-origin provenance, honestly attributed (LP-110)
+
+- **Date:** 2026-07-03
+- **Status:** Accepted
+
+**Context:** A need carried its REASONING (the AI's argument, LP-67/69) but NOT its SOURCE — the specific data that
+triggered it. Extractions and findings are provenance-backed (source page + snippet; click → see the document line),
+but needs — **the most AI-driven, least-deterministic part of the system** — were not: a processor could not verify
+the AI hadn't hallucinated or MISREAD. A need proposed on a misread carries plausible-but-wrong reasoning; without the
+source the human has nothing to check it against. One structured link existed (`source_finding_id`, LP-67) but was
+populated only for suggestion needs AND was not exposed in the API (`NeedsItemPublic` omitted it), so even it never
+reached the UI.
+
+**Decision:** capture and display a **per-origin source** on every need, GROUNDED to verifiable data wherever possible
+and HONESTLY ATTRIBUTED so the processor knows how much to trust it — making a need's reasoning **FALSIFIABLE**.
+
+- **AI-reasoned (`ai_reasoning`) — capture at generation.** Extend the model's output (`ProposedNeed.triggered_by`, a
+  list of `{kind, label, ref?}`) so the AI CITES the specific FileContext fact(s) it reasoned over — it already sees
+  them, so this is a low-risk output-schema + prompt extension. Finding ids are added to the context so a citation can
+  `ref` a real, linkable record. Parsed defensively (unknown-kind / empty-label facts dropped; a need is never dropped
+  for lacking a source), persisted to the new `needs_items.source_facts` (JSON). Attributed **ai_identified** (the AI's
+  reading — verify) and marked as such in the UI.
+- **Floor (`floor`) — derive from the rule.** The rule already evaluates the data, so the source is derived
+  DETERMINISTICALLY at seed time (pay_stub/w2 ← "Employment income is stated"; bank_statement ← "Assets are stated";
+  purchase_agreement ← "Loan purpose is Purchase"; refi statements ← "Loan purpose is Refinance"; drivers_license ←
+  per borrower) and stored in `source_facts`. Attributed **deterministic** (certain).
+- **Suggestion (`suggestion`) — expose the existing chain.** Surface `source_finding_id → the finding → its source
+  document` through the API (`source_finding` relationship, eager-loaded). Attributed **finding**, linked to the
+  finding + document (previously captured but hidden).
+- **Manual** — no structured source (the origin "Added" is the source) → `source` is null.
+- **Unified display.** `NeedsItemPublic.source` (a `NeedSource` = attribution + facts) renders one "Source" affordance
+  per need, mirroring the finding "Source" section + the extraction Quote provenance vocabulary so it looks native. The
+  deterministic pill (primary/certain) is visually distinct from the AI-identified pill (info/verify) — an AI reading
+  is NEVER presented as certain fact. Composes with LP-108 (status) + LP-109 (matching documents) — purely additive; no
+  change to need GENERATION logic.
+
+**Grounded-starter (validate-with-Priya):** the AI-cited sources are AI-generated (as reliable as the AI's reading), so
+they are marked AI-identified and linked to verifiable data — the open quality question ("does the AI cite the RIGHT
+triggering fact?") is flagged for Priya. Floor + finding sources are deterministic.
+
+**Consequences:** every need now grounds its reasoning to a checkable fact, closing the gap where extractions/findings
+were provenance-backed but needs weren't — the human can verify a misread on the most AI-driven surface. One nullable
+JSON column + one relationship; no change to matching, satisfaction, or generation. A persisted "the processor
+confirmed this source" record and clickable deep-links into the underlying records are natural future refinements, not
+built here.
+
+## ADR-235: Needs consolidation — deterministic collapse (source + substance) + AI flags the residue (LP-111)
+
+- **Date:** 2026-07-04
+- **Status:** Accepted
+
+**Context:** One real situation multiplied into 3-4 needs. A single fact (a $20,000 "due diligence fee" wire) became
+TWO findings (an ``obligation`` + a ``discrepancy_candidate``); each finding implied an LP-67 suggestion; and the LP-69
+AI reasoner independently free-formed more needs citing the same fact — with ``needs_type=null`` and reworded wording
+every run. Nothing merged by shared source, and the only dedup (``reconcile`` / ``apply_ai_needs``) matched on exact
+``needs_type`` or exact ``.lower()`` title — so reworded free-form variants slipped through and ACCUMULATED across the
+per-document-arrival re-runs. Meanwhile the findings subsystem already had the missing mechanism: a normalized-substance
+identity (LP-93, ``finding_identity``).
+
+**Decision:** consolidate needs with a **deterministic safe floor + an AI layer that only FLAGS**, under one discipline:
+**never silently delete a need.** A duplicate is a minor annoyance; a wrongly-dropped need is a major failure (a
+required document never gets collected → the file goes to the lender incomplete). These are asymmetric, so we
+**UNDER-merge** — when unsure, keep both.
+
+- **Layer 1 — collapse-by-source (certain).** Two PROPOSED needs of the SAME ``needs_type`` that share a source finding
+  (via ``source_finding_id`` or the ``source_facts`` finding ref, LP-110) are the same ask (the suggestion + the AI
+  proposal for one finding) → merged deterministically. Same idea as ``ingest_suggested_need``'s per-finding idempotency.
+- **Layer 2 — substance-identity (certain).** REUSE LP-93's ``normalize_text`` (NFKC + case-fold + dash/quote +
+  whitespace) for a ``(intent, title)`` identity — REPLACING the exact ``.lower()`` match that let cosmetic variants
+  through. Textual only, no fuzzy matching (conservative).
+- **Layer 3 — AI flag (never deletes).** The genuinely-reworded residue the deterministic layers can't be SURE of
+  (different words, ``needs_type=null``) is only FLAGGED (``duplicate_of_id``) for the processor to confirm (merge) or
+  dismiss (keep both, ``duplicate_reviewed`` so it's never re-flagged). Conservative, high-confidence only, cheap
+  classification model, gated by a setting. This is the safe version of "AI dedup" — its semantic strength used, its
+  silent-delete danger contained.
+- **Generation-time reconciliation.** The existing needs (title + type) are fed into the reasoner's context so it stops
+  REWORDING them into new duplicates — attacking the accumulation at the source, not just post-hoc.
+- **Safety boundary.** Only a ``PROPOSED`` + ``PENDING`` need may be merged AWAY; a confirmed / waived / adjusted /
+  received need is a fixed point (a proposed duplicate merges INTO it). Merges preserve provenance (the survivor keeps
+  the UNION of both ``source_facts``), composing with LP-108/109/110.
+
+**Upstream finding-multiplication — investigated, NOT collapsed.** One fact → an ``obligation`` + a
+``discrepancy_candidate`` finding maps (``implications.py``) to genuinely distinct purposes: the obligation feeds
+recurring-debt/DTI ("request payment history"); the discrepancy is a "reconcile this mismatch" flag (Phase 3). Collapsing
+them upstream would lose that signal, so we **consolidate at the needs layer** (default) and preserve the findings.
+Noted separately: typing a one-time wire as ``OBLIGATION`` (a recurring type) is an extraction misclassification — a
+follow-up, not fixed here.
+
+**Scope.** Consolidation only. The separate NOISY-SOURCE problem (the AI attaching a tangential fact as a source — e.g.
+the homeowner's-insurance need citing the wire when its real trigger is "Loan purpose = Purchase") is source RELEVANCE,
+a prompt-quality fix, deferred to **LP-112** (different mechanism). Need generation (what's proposed) is unchanged.
+
+**Consequences:** the wire cluster collapses toward ~1 LOE + the distinct sales-contract need (deterministic where
+certain; AI-flagged where reworded; processor-confirmed) — not over-merged into one, not left at 3-4. Two columns +
+one service + a small flag UI; no change to matching/satisfaction/generation. Persisted "these are the same" learning
+and a stronger free-form subject key are future refinements.
+
+## ADR-236: Findings name their SOURCE DOCUMENT — capture the id we already compute, expose + display (LP-114)
+
+- **Date:** 2026-07-04
+- **Status:** Accepted
+
+**Context:** A finding showed "source p.N" + a snippet but not WHICH document — so a processor couldn't easily verify the
+AI/rule judgment against the actual document (the findings analog of LP-110's gap for needs). The `Finding` model already
+had a `source_document_id` FK (+ a `source_document` relationship), but it was **hidden AND empty**: not exposed in
+`FindingPublic`, and never populated at creation — worse than needs' `source_finding_id`, which was populated-but-hidden.
+Crucially, the id was **already computed and thrown away**: deterministic findings' `source_location` often carries a
+`document_id` (a fact read from a document's extraction), but `_source_location_fields()` extracted only page + snippet
+and dropped it. AI cross-source findings only carry a document TYPE string ("W2"), not an id.
+
+**Decision:** capture + expose + display the source document, mirroring LP-110.
+- **Capture = stop dropping what we compute.** `_source_location_fields()` now also forwards the `document_id` →
+  `source_document_id` on deterministic findings (null for file-level/computed rules). AI cross-source findings resolve
+  their type string to a concrete id **only when it maps to exactly ONE document** on the file
+  (`_unique_type_document_map`, normalized); 0 or 2+ → NULL. Never guess a wrong document — a null source is honest, a
+  wrong link is not.
+- **Expose.** `FindingPublic` gains `source_document_id` + `source_document_filename` (the readable `original_filename`,
+  eager-loaded — no N+1); the frontend `VerificationFinding` type mirrors it.
+- **Display.** The finding card NAMES its source document ("Source: {filename}, p.{N}") at a glance and in the Details
+  "Source" section, replacing the bare "source p.N". Graceful when null (keep page/snippet; never a broken empty
+  "Source:").
+- **Clickable — the lightweight nav was cheap, so it's built.** Verification and Documents are separate routes, and the
+  Documents page already opens a drawer from local state; so the source-doc name links to `/loan-files/[id]/documents?doc=<id>`
+  and the Documents tab reads `?doc` to open that document's existing drawer (then strips the param). No new store, no
+  viewer — a `<Link>` + a small `useSearchParams` effect.
+
+**Coverage is partial by design.** Naming populates mostly for deterministic findings that read a specific document
+field; file-level/computed rules and multi-doc-type AI findings stay null (graceful). No heavier snippet-search fallback
+— honest over exhaustive.
+
+**No migration.** The `source_document_id` column already existed. Existing findings stay null until re-verified (no
+backfill).
+
+**Deferred to V2 (documented in the plan):** an in-app document VIEWER (PDF.js / embedded PDF), PAGE deep-linking ("open
+to page N"), and TRANSACTION HIGHLIGHTING (needs the bbox/position data deferred in LP-75). V1 is name + link-to-open;
+the viewer/page/highlight staircase is V2.
+
+**Consequences:** a finding now names (and opens) the document that grounds it — verifiable, mirroring LP-110 for needs.
+Small surface: two schema fields, a capture tweak in each generator, a card display + a `?doc=` param; no finding
+generation change; composes with LP-110/LP-113.
+
+## ADR-237: Findings show ALL their source documents — multi-document provenance, honest by construction (LP-114.1)
+
+- **Date:** 2026-07-04
+- **Status:** Accepted
+
+**Context:** LP-114 gave a finding a single ``source_document_id`` and nulled out whenever a cited value spanned several
+same-type documents. But a cross-source finding is inherently derived from MULTIPLE documents — an employer appears on a
+pay stub AND a W-2; a discrepancy compares stated data against one-or-more documents. The single-FK shape is both
+incomplete (a partial story) and the source of most nulls (it refused to pick one among several). Showing ALL the source
+documents completes the provenance AND dissolves the ambiguity — show every document that genuinely contains the value,
+no wrong pick.
+
+**Decision:** represent a finding's source as a SET (the LP-109 analog for findings). A new ``findings.source_document_ids``
+JSON array (Option A — mirrors needs' ``source_facts``, no join table); ``source_document_id`` stays as the
+primary/trigger (back-compat). ``FindingPublic.source_documents: [{id, filename}]`` names the whole set (the file's
+document names loaded once — no N+1); the finding card lists all of them ("Sources: doc1, doc2"), each clickable to open
+via LP-114's ``?doc=<id>`` nav.
+
+- **Derived by value-matching (uniform, exact enough).** A ``populate_finding_source_documents`` pass at the end of a run
+  (and re-derived on the backfill) matches each finding's cited value(s) to every document that contains them. This is
+  uniform across all three generators (deterministic engine, deterministic cross-source, AI) without wiring each.
+- **Honest by construction — the precision discipline.** The match keys on the finding's SPECIFIC distinctive cited value
+  (its ``document_value``; an amount / address / account-fragment in the snippet) — NOT generic tokens (a lone common
+  word is dropped). AND a document is eligible only if its CATEGORY is compatible with the finding's (an INCOME/employer
+  finding matches only INCOME_EMPLOYMENT documents, not a savings statement that merely repeats the bank name).
+  Cross-cutting finding categories (cross-source / documentation / regulatory) are unconstrained. So a common institution
+  name in an off-category document does NOT over-include it — the exact over-inclusion the single-value match risked.
+  The category compatibility is a **grounded starter — validate-with-Priya**.
+
+**Consequences:** on LF-6T3N the named findings jumped from a handful to 16/19 — the employer-mismatch findings now show
+their pay-stub + W-2 sources (precisely — no coincidental savings statements), and the balance/license findings show
+their one document. Empty when no distinctive locatable value (graceful). One JSON column + a matching service + a card
+list; no migration on the primary FK; ``source_document_id`` kept. Composes with LP-114 (generalizes single → set) /
+LP-109 / LP-110 / LP-113. The viewer + page deep-link + transaction highlight remain V2 (no viewer, no bbox data).

@@ -21,7 +21,13 @@ from pydantic import BaseModel, ConfigDict, EmailStr
 
 from app.models.borrower import Borrower
 from app.models.lender import LoanProgram
-from app.models.loan_file import AiNeedsStatus, LoanFile, LoanFileStatus, LoanPurpose
+from app.models.loan_file import (
+    AiNeedsStatus,
+    LoanFile,
+    LoanFileStatus,
+    LoanPurpose,
+    RefinanceType,
+)
 from app.models.property import OccupancyType, PropertyType
 
 
@@ -48,6 +54,10 @@ class LoanFileUpdate(BaseModel):
     lender_id: UUID | None = None
     loan_program: LoanProgram | None = None
     loan_purpose: LoanPurpose | None = None
+    # The refinance cash-out determination (LP-99). Normally populated at MISMO import,
+    # but exposed here so a processor can CORRECT an undetermined refi on the Overview —
+    # the LTV limit depends on it (cash-out is stricter), so it must never stay ambiguous.
+    refinance_type: RefinanceType | None = None
     loan_amount: Decimal | None = None
     status: LoanFileStatus | None = None
     loan_officer_name: str | None = None
@@ -89,6 +99,11 @@ class PropertyPublic(BaseModel):
     occupancy_type: OccupancyType | None
     estimated_value: Decimal | None
     purchase_price: Decimal | None
+    # The MISMO PropertyValuationAmount (LP-90). Exposed on the loan-file detail so the
+    # Overview can display + edit it: the LTV's appraised-value basis reads
+    # ``valuation_amount or estimated_value`` (valuation_amount wins), so it must be visible +
+    # editable — not a hidden field that silently shadows estimated_value edits.
+    valuation_amount: Decimal | None
 
 
 def _primary_borrower_name(loan_file: LoanFile, borrowers: list[Borrower]) -> str | None:
@@ -147,6 +162,10 @@ class LoanFileDetail(LoanFileSummary):
 
     loan_officer_name: str | None
     loan_officer_email: str | None
+    # The refinance cash-out determination (LP-99). Null for a purchase, or for a refi whose
+    # cash-out kind the MISMO import couldn't determine — the Overview surfaces that so it's
+    # corrected (the LTV limit depends on it; cash-out is stricter).
+    refinance_type: RefinanceType | None
     # The async AI-needs reasoning state (LP-71.5) — pending/completed/failed, or null
     # if no reasoning was triggered. Lets the needs dashboard say "more may be coming"
     # or "reasoning didn't complete" instead of presenting a floor-only list as final.
@@ -176,6 +195,7 @@ class LoanFileDetail(LoanFileSummary):
             updated_at=loan_file.updated_at,
             loan_officer_name=loan_file.loan_officer_name,
             loan_officer_email=loan_file.loan_officer_email,
+            refinance_type=loan_file.refinance_type,
             ai_needs_status=loan_file.ai_needs_status,
             borrowers=[BorrowerPublic.model_validate(b) for b in borrowers],
             property=(

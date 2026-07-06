@@ -8,8 +8,11 @@ unprofessional in a lender package. This derives a consistent name from the docu
 
 It is a **display / derived** name — the stored file is untouched (presentation +
 package concern). The identifier + date come from the typed-core extraction (per type);
-a sparse document (Tier 2/3, or extraction pending) falls back to ``{Type}_{UploadDate}``.
-Only non-sensitive fields feed the name — never an SSN, account number, or DOB.
+a CLASSIFIED document whose extraction is sparse (a known type with no rule, or extraction
+pending) falls back to ``{Type}_{UploadDate}``. An UNCLASSIFIED document (type ``"unknown"``)
+falls back to its **original uploaded filename** (LP-107) — the best identifier it has — while
+the card still shows the "Unknown" type separately (the signal isn't hidden). Only non-sensitive
+fields feed the name — never an SSN, account number, or DOB.
 
 The per-type rules below are sensible starters; they refine with use / Priya.
 """
@@ -39,9 +42,26 @@ NAME_RULES: dict[str, NameRule] = {
     "bank_statement": NameRule("Bank-Statement", ("bank_name",), "statement_period_end"),
     "tax_return": NameRule("Tax-Return-1040", ("taxpayer_names",), "tax_year"),
     "form_1099": NameRule("1099", ("payer_name",), "tax_year"),
-    "drivers_license": NameRule("Drivers-License", ("full_name",), None),
+    "drivers_license": NameRule("Drivers-License", ("full_name",), "expiration_date"),
     "mortgage_statement": NameRule("Mortgage-Statement", ("lender_name",), "due_date"),
     "homeowners_insurance": NameRule("Homeowners-Insurance", ("carrier_name",), "expiration_date"),
+    # LP-105 — the remaining types that extract a date now feed it into the name (instead of
+    # falling back to the upload date), so same-type documents are distinguishable. The
+    # graceful {Type}_{UploadDate} fallback still applies when the date isn't extracted yet.
+    "investment_account": NameRule(
+        "Investment-Account", ("institution_name",), "statement_period_end"
+    ),
+    "retirement_account": NameRule(
+        "Retirement-Account", ("institution_name",), "statement_period_end"
+    ),
+    "profit_and_loss": NameRule("Profit-And-Loss", ("business_name",), "period_end"),
+    "voe": NameRule("VOE", ("employer_name",), "end_date"),
+    "hoa_statement": NameRule("HOA-Statement", ("association_name",), "due_date"),
+    "purchase_agreement": NameRule("Purchase-Agreement", ("property_address",), "closing_date"),
+    "divorce_decree": NameRule("Divorce-Decree", (), "effective_date"),
+    "letter_of_explanation": NameRule("Letter-Of-Explanation", ("subject",), "referenced_date"),
+    # OUT OF SCOPE (kept on the {Type}_{UploadDate} fallback): property_tax_bill (due_dates is a
+    # verbatim string, not a clean date — normalization is separate) and gift_letter (no date).
 }
 
 
@@ -122,6 +142,16 @@ def standard_name(document: Document, extraction: Extraction | None) -> str:
         if len(parts) > 1:
             return "_".join(parts)
         return f"{rule.label}_{upload_date}"
+
+    # UNCLASSIFIED (LP-107): the classifier couldn't type it (``"unknown"``) or hasn't yet
+    # (``None``). The ORIGINAL uploaded filename is the best available identifier — far better than
+    # a non-distinguishing ``Unknown_{UploadDate}`` (four "Unknown" docs looked identical, and the
+    # name discarded the real filename). The card still shows the "Unknown" TYPE separately, so the
+    # unclassified signal is NOT hidden — only the name recovers the filename. This is distinct from
+    # a CLASSIFIED type that merely lacks a naming rule (below), whose ``{Type}_{UploadDate}`` name is
+    # meaningful (it states the type).
+    if (document.document_type or "unknown") == "unknown" and document.original_filename:
+        return document.original_filename
 
     label = _humanized_label(document.document_type) if document.document_type else "Document"
     return f"{label}_{upload_date}"

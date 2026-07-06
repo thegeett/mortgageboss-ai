@@ -912,7 +912,10 @@ async def seed(*, reset: bool) -> None:
             company_id=company.id,
             name="Sun-West",
             slug="sun-west",
-            programs=["fha"],
+            # Conventional too, so the same Conventional file can be assigned to UWM
+            # vs Sun-West for the LP-80 overlay-enforcement demo (flags for UWM, not
+            # Sun-West). The starter overlays live in app/verification/overlays/starter.py.
+            programs=["conventional", "fha"],
         )
         files_created = await _seed_loan_files(
             db, company=company, processor=processor, uwm=uwm, sunwest=sunwest

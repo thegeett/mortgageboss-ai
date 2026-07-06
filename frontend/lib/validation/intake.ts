@@ -136,3 +136,10 @@ export const LOAN_PURPOSE_OPTIONS: SelectOption[] = [
   { value: "purchase", label: "Purchase" },
   { value: "refinance", label: "Refinance" },
 ];
+
+// The refinance cash-out kind (LP-99) — drives the LTV limit (cash-out is stricter). Only
+// meaningful for a refinance; the Overview shows it only when the purpose is refinance.
+export const REFINANCE_TYPE_OPTIONS: SelectOption[] = [
+  { value: "rate_term", label: "Rate/term" },
+  { value: "cash_out", label: "Cash-out" },
+];

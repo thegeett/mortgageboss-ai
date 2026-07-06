@@ -19,7 +19,7 @@ from unittest.mock import AsyncMock
 import pytest
 import structlog
 from app.ai.client import AIClientError
-from app.ai.extraction import pay_stub as pay_stub_module
+from app.ai.extraction import model_call
 from app.ai.extraction.pay_stub import (
     PayStubExtraction,
     PayStubExtractionResult,
@@ -78,9 +78,11 @@ def _mock_complete(
         mock = AsyncMock(side_effect=exc)
     else:
         mock = AsyncMock(
-            return_value=SimpleNamespace(text=text, input_tokens=200, output_tokens=80, model="m")
+            return_value=SimpleNamespace(
+                text=text, input_tokens=200, output_tokens=80, model="m", stop_reason="end_turn"
+            )
         )
-    monkeypatch.setattr(pay_stub_module, "complete", mock)
+    monkeypatch.setattr(model_call, "complete", mock)
     return mock
 
 
@@ -253,7 +255,7 @@ async def test_extract_success(monkeypatch: pytest.MonkeyPatch) -> None:
     assert result.data.gross_pay.value == Decimal("4200.00")
     assert len(result.data.additional_sections) == 2
     kwargs = mock.await_args.kwargs
-    assert kwargs["model"] == pay_stub_module.settings.anthropic_model_extraction
+    assert kwargs["model"] == model_call.settings.anthropic_model_extraction
     block = kwargs["messages"][0]["content"][0]
     assert block["type"] == "document"
     assert base64.standard_b64decode(block["source"]["data"]) == PDF_BYTES

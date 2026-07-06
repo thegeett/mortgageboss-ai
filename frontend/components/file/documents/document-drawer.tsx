@@ -421,6 +421,16 @@ function TierBody({
     }
     return (
       <div className="mt-3">
+        {/* Consolidated, type-aware period (LP-105) — a single readable line above the raw
+            per-field rows (which keep their own values + source snippets, unchanged). */}
+        {summary.period && (
+          <div className="mb-3 flex items-baseline gap-2 rounded-lg border border-gray-100 bg-gray-50/60 px-3 py-2">
+            <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">
+              {summary.period.label}
+            </span>
+            <span className="text-sm font-medium text-gray-900">{summary.period.value}</span>
+          </div>
+        )}
         <ExtractionView data={extraction.extracted_data} />
         {extraction.model_used && (
           <p className="mt-2 text-[11px] text-gray-400">

@@ -1,0 +1,276 @@
+"""The uniform verification-rule structure (LP-74) — the two linchpins.
+
+Every verification rule, whatever layer it comes from (regulatory / investor /
+overlay), shares **one** structure. Two properties of that structure are the
+linchpins that make the three-layer composition possible:
+
+1. **A stable ``rule_id``** (e.g. ``"conv.dti.back_end_max"``). It is the rule's
+   identity. A lender overlay overrides a rule *by this id*; without a stable id
+   an overlay would have nothing to reference and overlays would be impossible to
+   bolt on.
+
+2. **The threshold is DATA, not code** (:class:`Condition` — an operator plus a
+   value). The rule *logic* (:func:`satisfies`) is fixed; the *threshold* lives
+   in the rule record as data the logic reads. Because the threshold is data, an
+   overlay can supply a different value and the **same** logic evaluates against
+   it. This is what lets an overlay deviate from an investor default without
+   re-implementing the check.
+
+Rules are **definitions**, not per-file rows: config-like, declared in code
+(:mod:`app.verification.rules.samples`) and seedable. A verification *run* is
+per-file (it reads one file's typed values); the rule *definitions* are shared.
+
+This module is pure (no DB, no AI). It is the structure plus the deterministic
+comparison primitive. The real ~60 Conventional + ~50 FHA rules are LP-82..85;
+LP-74 ships a few SAMPLE rules to exercise the engine.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Callable
+from decimal import Decimal
+from enum import StrEnum
+
+from pydantic import BaseModel, ConfigDict, model_validator
+
+from app.models.finding import FindingCategory
+from app.models.lender import LoanProgram
+from app.models.loan_file import LoanPurpose, RefinanceType
+
+
+class RuleLayer(StrEnum):
+    """Which of the three composing layers a rule belongs to.
+
+    ``REGULATORY`` applies to all loans (TRID / AML / fair-lending);
+    ``INVESTOR`` is per-program (Fannie for Conventional, HUD for FHA) and is the
+    **default**; ``OVERLAY`` is a per-lender custom rule added on top.
+    """
+
+    REGULATORY = "regulatory"
+    INVESTOR = "investor"
+    OVERLAY = "overlay"
+
+
+class RuleSeverity(StrEnum):
+    """The finding severity a rule emits *on failure* (maps to FindingStatus).
+
+    A passing rule emits a green finding regardless; this is the colour used when
+    the condition is **not** satisfied.
+    """
+
+    RED = "red"  # blocking
+    YELLOW = "yellow"  # review / compensating factor
+
+
+class Operator(StrEnum):
+    """The comparison a rule's condition applies (observed ``op`` threshold)."""
+
+    LE = "<="
+    LT = "<"
+    GE = ">="
+    GT = ">"
+    EQ = "=="
+    NE = "!="
+
+
+class ApplicabilityScope(StrEnum):
+    """How a rule's applicability is decided when resolving a file's rule set."""
+
+    ALL_LOANS = "all_loans"  # regulatory — every file
+    PROGRAM = "program"  # investor — Conventional OR FHA
+    LENDER = "lender"  # overlay custom rule — one lender
+
+
+class PurposeScope(StrEnum):
+    """The PURPOSE dimension of applicability (LP-100) — loan-purpose scoping.
+
+    A SECOND, orthogonal dimension to :class:`ApplicabilityScope`: it COMPOSES with the
+    scope (a rule can be program-scoped Conventional AND purpose-scoped purchase-only) and
+    with :class:`RuleGate`. A rule declares it on its :class:`Applicability`; the engine
+    reads the file's ``loan_purpose`` (+ ``refinance_type``, LP-99) and SKIPS a rule whose
+    purpose doesn't match (no finding). ``None`` on the applicability = applies to every
+    purpose (the default — unchanged behavior for the ~110 existing rules).
+
+    The four values: ``PURCHASE`` / ``REFINANCE`` gate on ``loan_purpose``; the finer
+    ``CASH_OUT`` / ``RATE_TERM`` additionally require the matching ``refinance_type``.
+    """
+
+    PURCHASE = "purchase"
+    REFINANCE = "refinance"
+    CASH_OUT = "cash_out"  # a refinance whose refinance_type is CASH_OUT
+    RATE_TERM = "rate_term"  # a refinance whose refinance_type is RATE_TERM
+
+
+class Applicability(BaseModel):
+    """Which files a rule applies to (drives composition / rule selection)."""
+
+    model_config = ConfigDict(frozen=True)
+
+    scope: ApplicabilityScope
+    # Set when scope is PROGRAM — the investor program this rule belongs to.
+    program: LoanProgram | None = None
+    # Set when scope is LENDER — the lender slug a custom overlay rule targets.
+    lender: str | None = None
+    # The PURPOSE dimension (LP-100) — orthogonal to scope, composes with it. None = every
+    # purpose (default). A purchase-only rule is skipped on a refinance; etc. (purpose_applies).
+    purpose: PurposeScope | None = None
+
+    @model_validator(mode="after")
+    def _check_scope(self) -> Applicability:
+        if self.scope is ApplicabilityScope.PROGRAM and self.program is None:
+            raise ValueError("program applicability requires a program")
+        if self.scope is ApplicabilityScope.LENDER and self.lender is None:
+            raise ValueError("lender applicability requires a lender slug")
+        return self
+
+
+def purpose_applies(
+    purpose: PurposeScope | None,
+    *,
+    loan_purpose: LoanPurpose | None,
+    refinance_type: RefinanceType | None,
+) -> bool:
+    """Whether a purpose-scoped rule applies to a file (LP-100). Pure.
+
+    **UNDER-GATE (the safe direction):** skip a rule ONLY when the file's purpose DEFINITELY
+    doesn't match. An UNKNOWN purpose (or unknown refinance_type) errs toward APPLYING the
+    rule — a spurious over-flag is safe; wrongly gating a rule OFF could HIDE a real finding,
+    the dangerous direction. So each branch returns ``False`` only on a *known* mismatch.
+    """
+    if purpose is None:
+        return True  # no purpose scope → applies to every purpose
+    if purpose is PurposeScope.PURCHASE:
+        return loan_purpose is not LoanPurpose.REFINANCE  # skip only on a known refi
+    if purpose is PurposeScope.REFINANCE:
+        return loan_purpose is not LoanPurpose.PURCHASE  # skip only on a known purchase
+    if purpose is PurposeScope.CASH_OUT:
+        # A cash-out-only rule: skip on a known purchase or a known rate/term refi.
+        return (
+            loan_purpose is not LoanPurpose.PURCHASE
+            and refinance_type is not RefinanceType.RATE_TERM
+        )
+    # RATE_TERM: skip on a known purchase or a known cash-out refi.
+    return loan_purpose is not LoanPurpose.PURCHASE and refinance_type is not RefinanceType.CASH_OUT
+
+
+class Condition(BaseModel):
+    """THE THRESHOLD-AS-DATA — an operator plus a value the rule logic reads.
+
+    The rule *logic* (:func:`satisfies`) is fixed; the *threshold* is this data.
+    An overlay overrides a rule by swapping this :class:`Condition` for a
+    different value, and the same :func:`satisfies` evaluates against the new
+    threshold. ``unit`` is descriptive metadata (``"percent"`` / ``"days"`` /
+    ``"usd"``), not part of the comparison.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    op: Operator
+    value: Decimal
+    unit: str | None = None
+
+
+class RuleGate(BaseModel):
+    """An APPLICABILITY GATE (LP-83) — the rule applies only when this fact holds.
+
+    Some rules apply only in a sub-case the program/applicability scope can't express
+    — manually underwritten loans (not DU), a condo property, etc. The gate reads one
+    typed fact and a :class:`Condition`: the rule is evaluated only when the gate fact
+    is present AND satisfies the gate; otherwise the rule is **not applicable** (the
+    engine returns it not-evaluated, never a finding). Absent gate fact → not
+    applicable (conservative: don't fire a manual-only rule when the method is unknown).
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    reads: str  # the typed gate fact path, e.g. "underwriting.is_manual"
+    condition: Condition  # when satisfied → the rule applies
+
+
+class RuleSource(BaseModel):
+    """A structured, durable citation for a rule (auditability).
+
+    Prefer the durable :attr:`section` reference (e.g. ``"B1-1-03"``) over a deep
+    :attr:`url` — Selling Guide URLs rot, section numbers persist. :attr:`retrieved`
+    records when the value was researched (the Guide changes frequently). Set
+    :attr:`to_verify` when the section is uncertain — never fabricate one.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    type: str  # e.g. "investor_guide" / "regulation" / "documentation_standard"
+    citation: str  # e.g. "Fannie Mae Selling Guide B3-6-02"
+    section: str | None = None  # the durable section reference, e.g. "B1-1-03"
+    url: str | None = None
+    retrieved: str | None = None  # when the value was researched, e.g. "2026-06"
+    to_verify: bool = False  # the section/value is uncertain — verify, don't trust
+
+
+class VerificationRule(BaseModel):
+    """One verification rule — the uniform structure shared by all three layers.
+
+    Carries a **stable** :attr:`rule_id`, the :attr:`layer`, its
+    :attr:`applicability`, the typed field(s) it :attr:`reads`, the
+    :attr:`condition` (threshold-as-data), the :attr:`severity` it emits on
+    failure, the finding :attr:`category`, a human :attr:`description`, and a
+    structured :attr:`source` citation.
+
+    :attr:`overlay_applied` is *provenance*: ``None`` for a base rule, and the
+    lender slug when an overlay has patched this rule's threshold during
+    composition. The rule's identity (``rule_id``) and logic are unchanged — only
+    the threshold differs — so this records *that* a patch happened for the audit
+    trail without changing what the rule *is*.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    rule_id: str
+    layer: RuleLayer
+    applicability: Applicability
+    reads: tuple[str, ...]  # typed field path(s) — never prose
+    condition: Condition  # threshold-as-data
+    severity: RuleSeverity
+    category: FindingCategory
+    description: str
+    source: RuleSource
+    overlay_applied: str | None = None
+    # STARTER content (LP-82+): grounded in research but pending the domain expert's
+    # validation against the live guide for her lenders/scenarios — NOT authoritative.
+    starter: bool = False
+    # Free-text caveats: "recently changed", "DU-message-driven", "typed-core promotion
+    # pending: <fact>", etc. — the validate-with-Priya / promotion notes.
+    notes: str | None = None
+    # Applicability gate (LP-83): the rule applies only when this fact holds (manual-vs-
+    # DU, property-type). ``None`` → always applicable within its scope.
+    gate: RuleGate | None = None
+
+    def with_condition(self, condition: Condition, *, overlay: str) -> VerificationRule:
+        """Return a copy with the threshold replaced (identity/logic unchanged).
+
+        Used by overlay application: only :attr:`condition` changes and
+        :attr:`overlay_applied` records which lender patched it. ``rule_id``,
+        ``reads``, ``layer`` and the comparison logic are all preserved.
+        """
+        return self.model_copy(update={"condition": condition, "overlay_applied": overlay})
+
+
+# --- The deterministic comparison primitive (the rule LOGIC, fixed) ----------
+
+_COMPARATORS: dict[Operator, Callable[[Decimal, Decimal], bool]] = {
+    Operator.LE: lambda observed, threshold: observed <= threshold,
+    Operator.LT: lambda observed, threshold: observed < threshold,
+    Operator.GE: lambda observed, threshold: observed >= threshold,
+    Operator.GT: lambda observed, threshold: observed > threshold,
+    Operator.EQ: lambda observed, threshold: observed == threshold,
+    Operator.NE: lambda observed, threshold: observed != threshold,
+}
+
+
+def satisfies(condition: Condition, observed: Decimal) -> bool:
+    """Evaluate ``observed <op> condition.value`` — the fixed rule logic.
+
+    This is the *only* place a threshold comparison happens. It reads the
+    threshold from the :class:`Condition` data, so the identical call evaluates a
+    base rule and an overlay-patched rule alike. Pure and deterministic.
+    """
+    return _COMPARATORS[condition.op](observed, condition.value)

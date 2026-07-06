@@ -15,6 +15,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.documents.period import DocumentPeriod
 from app.documents.staleness import PackageFitness, PackageQualification, StalenessInfo
 from app.models.document import Document, DocumentCategory, DocumentStatus, Tier, UploadSource
 from app.models.extraction import ExtractionStatus
@@ -81,6 +82,10 @@ class DocumentResponse(BaseModel):
     # A consistent ``{Type}_{Identifier}_{Date}`` name derived from the extracted data
     # (a display name — the stored file is untouched). Defaults to the raw filename.
     standard_name: str = ""
+    # LP-105 — a consolidated, type-aware period line (range / tax year / single labeled date /
+    # verbatim), derived from the already-extracted fields. ``None`` when the type has no period
+    # concept or the date isn't extracted yet (the card/drawer then show no period line).
+    period: DocumentPeriod | None = None
     # Package-ready = current + fresh + typed + extracted (consumes LP-71 + extraction).
     package_qualification: PackageQualification = Field(
         default_factory=lambda: PackageQualification(qualified=False, reason="not_extracted")
@@ -96,6 +101,7 @@ class DocumentResponse(BaseModel):
         package_fit: PackageFitness,
         standard_name: str,
         package_qualification: PackageQualification,
+        period: DocumentPeriod | None = None,
     ) -> Self:
         """Build the response, attaching the computed versioning/staleness/naming/fitness."""
         return cls.model_validate(document).model_copy(
@@ -105,6 +111,7 @@ class DocumentResponse(BaseModel):
                 "package_fit": package_fit,
                 "standard_name": standard_name,
                 "package_qualification": package_qualification,
+                "period": period,
             }
         )
 

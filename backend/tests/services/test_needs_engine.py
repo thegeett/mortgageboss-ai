@@ -14,6 +14,7 @@ from uuid import uuid4
 import pytest
 import pytest_asyncio
 from app.core.security import hash_password
+from app.documents.catalog import get_category
 from app.models import Company, User, UserRole
 from app.models.borrower import Borrower
 from app.models.document import Document, DocumentCategory, DocumentStatus
@@ -26,19 +27,23 @@ from app.models.needs_item import (
     NeedsItemStatus,
 )
 from app.models.stated_financials import StatedAsset, StatedIncomeItem
+from app.schemas.needs_item import NeedsItemPublic
 from app.services.document_findings import create_document_finding
 from app.services.implications import SuggestedNeed
 from app.services.loan_files import create_loan_file
 from app.services.needs_engine import (
     InvalidNeedTransition,
     apply_document_to_needs,
+    confirm_need_coverage,
     ingest_suggested_need,
+    is_simple_presence_need,
     loan_file_needs_lock,
+    needs_coverage_confirmation,
     seed_floor_needs,
     transition_need,
     waive_need,
 )
-from app.services.needs_items import create_needs_item
+from app.services.needs_items import create_needs_item, list_needs_items
 from sqlalchemy.ext.asyncio import AsyncSession
 
 # --------------------------------------------------------------------------- #
@@ -77,6 +82,9 @@ async def _document(
         file_size_bytes=10,
         storage_path=f"{loan_file.company_id}/{loan_file.id}/x.pdf",
         document_type=document_type,
+        # The pipeline sets category from the catalog at classification — mirror that so
+        # category-level (umbrella) matching behaves as in production.
+        category=get_category(document_type),
         status=status,
         upload_source="user_upload",
     )
@@ -132,15 +140,18 @@ async def test_waive_from_any_state(db_session: AsyncSession) -> None:
 # --------------------------------------------------------------------------- #
 
 
-async def test_passing_document_verifies_matching_need(db_session: AsyncSession) -> None:
+async def test_simple_presence_document_verifies_matching_need(db_session: AsyncSession) -> None:
+    # LP-108: a SIMPLE-PRESENCE need (one doc IS the requirement) auto-verifies on a completed doc.
     lf = await _loan_file(db_session)
-    need = await _pending_need(db_session, lf, needs_type="pay_stub")
-    doc = await _document(db_session, lf, document_type="pay_stub", status=DocumentStatus.COMPLETED)
+    need = await _pending_need(db_session, lf, needs_type="drivers_license")
+    doc = await _document(
+        db_session, lf, document_type="drivers_license", status=DocumentStatus.COMPLETED
+    )
 
     matched = await apply_document_to_needs(db_session, doc)
     assert matched is not None and matched.id == need.id
-    assert need.status is NeedsItemStatus.VERIFIED
-    assert need.satisfied_by_document_id == doc.id
+    assert need.status is NeedsItemStatus.VERIFIED  # one doc = verified
+    assert need.satisfied_by_document_id == doc.id  # the matched document is shown
 
 
 async def test_failed_document_rejects_matching_need(db_session: AsyncSession) -> None:
@@ -164,6 +175,133 @@ async def test_non_matching_type_is_no_false_satisfaction(db_session: AsyncSessi
     matched = await apply_document_to_needs(db_session, doc)
     assert matched is None
     assert need.status is NeedsItemStatus.PENDING  # untouched
+
+
+# --------------------------------------------------------------------------- #
+# HONEST SATISFACTION (LP-108) — graded needs don't false-green
+# --------------------------------------------------------------------------- #
+
+
+def _need(needs_type: str | None) -> NeedsItem:
+    return NeedsItem(loan_file_id=uuid4(), title="t", needs_type=needs_type)
+
+
+def test_simple_vs_graded_classification() -> None:
+    assert is_simple_presence_need(_need("drivers_license")) is True
+    assert is_simple_presence_need(_need("purchase_agreement")) is True
+    # Graded: quantity/coverage/recency.
+    for nt in ("pay_stub", "bank_statement", "tax_return", "w2", "asset_statement"):
+        assert is_simple_presence_need(_need(nt)) is False
+        assert needs_coverage_confirmation(_need(nt)) is True
+
+
+def test_safe_default_unknown_type_is_graded() -> None:
+    # SAFE DEFAULT: an unrecognized / None need type is treated as graded (never a false-green).
+    assert is_simple_presence_need(_need("some_new_ai_umbrella")) is False
+    assert is_simple_presence_need(_need(None)) is False
+
+
+async def test_graded_need_attaches_confirm_coverage_not_verified(
+    db_session: AsyncSession,
+) -> None:
+    # LP-108: a GRADED need (bank statements — 2 months) with ONE completed doc must NOT show
+    # verified — it stops at RECEIVED ("documents attached — confirm coverage").
+    lf = await _loan_file(db_session)
+    need = await _pending_need(db_session, lf, needs_type="bank_statement")
+    doc = await _document(
+        db_session, lf, document_type="bank_statement", status=DocumentStatus.COMPLETED
+    )
+
+    matched = await apply_document_to_needs(db_session, doc)
+    assert matched is not None and matched.id == need.id
+    assert need.status is NeedsItemStatus.RECEIVED  # NOT verified — no false-green
+    assert need.status is not NeedsItemStatus.VERIFIED
+    assert need.satisfied_by_document_id == doc.id  # the matched document is shown
+
+
+async def test_confirm_coverage_verifies_a_graded_need(db_session: AsyncSession) -> None:
+    lf = await _loan_file(db_session)
+    need = await _pending_need(db_session, lf, needs_type="bank_statement")
+    doc = await _document(
+        db_session, lf, document_type="bank_statement", status=DocumentStatus.COMPLETED
+    )
+    await apply_document_to_needs(db_session, doc)
+    assert need.status is NeedsItemStatus.RECEIVED
+
+    await confirm_need_coverage(db_session, need=need)  # the processor confirms the coverage
+    assert need.status is NeedsItemStatus.VERIFIED
+    assert need.satisfied_at is not None
+
+
+# --------------------------------------------------------------------------- #
+# DERIVE-ON-READ (LP-109) — show ALL matching documents, not just the trigger
+# --------------------------------------------------------------------------- #
+
+
+async def test_derive_on_read_shows_all_matching_documents(db_session: AsyncSession) -> None:
+    from app.services.needs_engine import documents_matching_need
+
+    lf = await _loan_file(db_session)
+    need = await _pending_need(db_session, lf, needs_type="bank_statement")
+    docs = [
+        await _document(
+            db_session, lf, document_type="bank_statement", status=DocumentStatus.COMPLETED
+        )
+        for _ in range(3)
+    ]
+    # A non-matching completed doc + a non-completed one must be excluded.
+    await _document(db_session, lf, document_type="w2", status=DocumentStatus.COMPLETED)
+    await _document(
+        db_session, lf, document_type="bank_statement", status=DocumentStatus.NEEDS_REVIEW
+    )
+
+    extra = await _document(db_session, lf, document_type="w2", status=DocumentStatus.COMPLETED)
+    matched = documents_matching_need(need, [*docs, extra])
+    assert {d.id for d in matched} == {d.id for d in docs}  # all 3 bank statements, only those
+
+
+async def test_derive_on_read_umbrella_is_coarse_and_over_inclusive(
+    db_session: AsyncSession,
+) -> None:
+    # The asset umbrella need matches EVERY ASSETS-category doc (bank + investment + brokerage) —
+    # intentionally coarse (the "confirm coverage" honesty level), NOT narrowed.
+    from app.services.needs_engine import documents_matching_need
+
+    lf = await _loan_file(db_session)
+    need = await _pending_need(db_session, lf, needs_type="asset_statement")
+    bank = await _document(
+        db_session, lf, document_type="bank_statement", status=DocumentStatus.COMPLETED
+    )
+    inv = await _document(
+        db_session, lf, document_type="investment_account", status=DocumentStatus.COMPLETED
+    )
+    income = await _document(
+        db_session, lf, document_type="pay_stub", status=DocumentStatus.COMPLETED
+    )
+
+    matched = documents_matching_need(need, [bank, inv, income])
+    ids = {d.id for d in matched}
+    assert bank.id in ids and inv.id in ids  # both ASSETS-category docs (coarse, over-inclusive)
+    assert income.id not in ids  # a non-ASSETS doc is not included
+
+
+async def test_umbrella_asset_need_matches_asset_document_by_category(
+    db_session: AsyncSession,
+) -> None:
+    # The LF-6T3N scenario: an AI umbrella need ("asset_statement") matches an ASSETS-category
+    # document (a bank statement) by CATEGORY, and stops at RECEIVED (graded — confirm coverage),
+    # never a false "satisfied".
+    lf = await _loan_file(db_session)
+    need = await _pending_need(db_session, lf, needs_type="asset_statement")
+    doc = await _document(
+        db_session, lf, document_type="investment_account", status=DocumentStatus.COMPLETED
+    )
+    assert doc.category is DocumentCategory.ASSETS  # the coarse category match key
+
+    matched = await apply_document_to_needs(db_session, doc)
+    assert matched is not None and matched.id == need.id
+    assert need.status is NeedsItemStatus.RECEIVED  # attached — confirm coverage (NOT verified)
+    assert need.satisfied_by_document_id == doc.id
 
 
 async def test_untyped_document_is_a_noop(db_session: AsyncSession) -> None:
@@ -220,10 +358,32 @@ async def test_floor_is_idempotent(db_session: AsyncSession) -> None:
     assert second == []  # already seeded — no duplicates
 
 
-async def test_floor_thin_when_no_stated_data(db_session: AsyncSession) -> None:
-    # No borrower, no income/assets/purchase → nothing to seed (the universal ID rule
-    # is per-borrower, so a borrower-less file has no ID need).
+async def test_refi_floor_swaps_purchase_agreement_for_the_refi_need_set(
+    db_session: AsyncSession,
+) -> None:
+    """LP-100 — a REFINANCE gets the existing-mortgage-statement + payoff need-set (the refi
+    analog of the purchase agreement), and NOT the purchase agreement itself."""
     lf = await _loan_file(db_session, purpose=LoanPurpose.REFINANCE)
+    created = await seed_floor_needs(db_session, lf)
+    types = {n.needs_type for n in created}
+    assert types == {"existing_mortgage_statement", "payoff_statement"}
+    assert "purchase_agreement" not in types
+    assert all(n.origin is NeedsItemOrigin.FLOOR for n in created)
+
+
+async def test_purchase_floor_has_no_refi_needs(db_session: AsyncSession) -> None:
+    """The purchase floor is unchanged: the purchase agreement, never the refi need-set."""
+    lf = await _loan_file(db_session, purpose=LoanPurpose.PURCHASE)
+    created = await seed_floor_needs(db_session, lf)
+    types = {n.needs_type for n in created}
+    assert types == {"purchase_agreement"}
+
+
+async def test_floor_thin_when_no_stated_data(db_session: AsyncSession) -> None:
+    # No borrower, no income/assets, and no known purpose → nothing to seed (the universal ID
+    # rule is per-borrower, so a borrower-less file has no ID need; an unknown purpose triggers
+    # neither the purchase nor the refi doc need-set — LP-100).
+    lf = await _loan_file(db_session, purpose=None)
     assert await seed_floor_needs(db_session, lf) == []
 
 
@@ -368,20 +528,22 @@ async def test_per_file_lock_serializes_same_file_parallelizes_different(
 async def test_serialized_application_no_double_satisfy(db_session: AsyncSession) -> None:
     """Under serialized order (what the lock guarantees), two matching documents do
     not double-satisfy / clobber: the first verifies the need; the second no-ops."""
+    # A simple-presence type so the first match VERIFIES (a graded type would stop at RECEIVED,
+    # also non-open — the no-double-satisfy invariant holds either way).
     lf = await _loan_file(db_session)
-    need = await _pending_need(db_session, lf, needs_type="pay_stub")
+    need = await _pending_need(db_session, lf, needs_type="drivers_license")
     doc1 = await _document(
-        db_session, lf, document_type="pay_stub", status=DocumentStatus.COMPLETED
+        db_session, lf, document_type="drivers_license", status=DocumentStatus.COMPLETED
     )
     doc2 = await _document(
-        db_session, lf, document_type="pay_stub", status=DocumentStatus.COMPLETED
+        db_session, lf, document_type="drivers_license", status=DocumentStatus.COMPLETED
     )
 
     first = await apply_document_to_needs(db_session, doc1)  # serialized: applies first
     second = await apply_document_to_needs(db_session, doc2)  # then this one
 
     assert first is not None and first.id == need.id
-    assert second is None  # no open pay_stub need left — no double-satisfy / lost update
+    assert second is None  # no open need left — no double-satisfy / lost update
     assert need.status is NeedsItemStatus.VERIFIED
     assert need.satisfied_by_document_id == doc1.id  # the first document, not clobbered
 
@@ -402,3 +564,113 @@ async def test_matching_is_scoped_to_the_documents_file(db_session: AsyncSession
 
     await apply_document_to_needs(db_session, doc_a)
     assert need_b.status is NeedsItemStatus.PENDING  # file B's need untouched
+
+
+# --------------------------------------------------------------------------- #
+# NEED SOURCE (LP-110) — every need shows its triggering data, honestly attributed
+# --------------------------------------------------------------------------- #
+
+
+async def test_floor_need_derives_a_deterministic_source(db_session: AsyncSession) -> None:
+    # A floor need cites the DETERMINISTIC rule + the data it fired on, attributed "deterministic".
+    lf = await _loan_file(db_session, purpose=LoanPurpose.PURCHASE)
+    borrower = Borrower(loan_file_id=lf.id, first_name="Mahesh", last_name="Chhotala")
+    db_session.add(borrower)
+    await db_session.flush()
+    db_session.add(
+        StatedIncomeItem(borrower_id=borrower.id, income_type="W2", employment_income=True)
+    )
+    await db_session.flush()
+
+    floor = await seed_floor_needs(db_session, lf)
+    pay_stub = next(n for n in floor if n.needs_type == "pay_stub")
+    assert pay_stub.source_facts is not None
+    assert "Employment income is stated" in pay_stub.source_facts[0]["label"]
+
+    source = NeedsItemPublic.from_model(pay_stub).source
+    assert source is not None
+    assert source.attribution == "deterministic"  # certain — a rule, not the AI's reading
+    assert "Employment income is stated" in source.facts[0].label
+
+
+async def test_ai_need_source_is_ai_identified(db_session: AsyncSession) -> None:
+    # An AI need's cited facts surface as an "ai_identified" source (the AI's reading — verify).
+    lf = await _loan_file(db_session)
+    need = await create_needs_item(
+        db_session,
+        loan_file_id=lf.id,
+        title="Two years of tax returns",
+        needs_type="tax_return",
+        origin=NeedsItemOrigin.AI_REASONING,
+        reasoning="Self-employed → returns.",
+        source_facts=[{"kind": "employer", "label": "Self-employment from Chhotala Realty LLC"}],
+    )
+    source = NeedsItemPublic.from_model(need).source
+    assert source is not None
+    assert source.attribution == "ai_identified"  # distinct from deterministic
+    assert "Chhotala Realty LLC" in source.facts[0].label
+
+
+async def test_suggestion_need_source_surfaces_the_finding_chain(db_session: AsyncSession) -> None:
+    # A suggestion need exposes source_finding_id → the finding + its source document, LINKED,
+    # attributed "finding" (previously captured but hidden from the API).
+    lf = await _loan_file(db_session)
+    doc = await _document(
+        db_session, lf, document_type="divorce_decree", status=DocumentStatus.COMPLETED
+    )
+    finding = await create_document_finding(
+        db_session,
+        document=doc,
+        finding_type=DocumentFindingType.OBLIGATION,
+        description="Monthly child support obligation of $1,200",
+    )
+    suggested = SuggestedNeed(
+        need_description="Document the support obligation",
+        need_type="obligation_documentation",
+        reasoning="Because the decree asserts a $1,200/mo obligation, document it.",
+        source_finding_id=finding.id,
+        source_document_id=doc.id,
+    )
+    await ingest_suggested_need(db_session, loan_file_id=lf.id, suggested=suggested)
+
+    # Read back through the eager-loading list query (loads source_finding + its document).
+    items = await list_needs_items(db_session, loan_file_id=lf.id)
+    need = next(n for n in items if n.origin is NeedsItemOrigin.SUGGESTION)
+    source = NeedsItemPublic.from_model(need).source
+    assert source is not None
+    assert source.attribution == "finding"
+    fact = source.facts[0]
+    assert "child support" in fact.label  # the finding's own description
+    assert fact.ref == str(finding.id)  # linked to the finding
+    assert fact.document_filename == doc.original_filename  # grounded to the source document
+
+
+async def test_manual_need_has_no_structured_source(db_session: AsyncSession) -> None:
+    # A processor-added need has no captured source — the origin ("Added") is the source.
+    lf = await _loan_file(db_session)
+    need = await create_needs_item(
+        db_session, loan_file_id=lf.id, title="Something I need", origin=NeedsItemOrigin.MANUAL
+    )
+    assert NeedsItemPublic.from_model(need).source is None
+
+
+async def test_source_composes_with_lp108_and_lp109(db_session: AsyncSession) -> None:
+    # LP-110 source is ADDITIVE — it doesn't disturb LP-108 (coverage) / LP-109 (matching docs).
+    lf = await _loan_file(db_session)
+    need = await create_needs_item(
+        db_session,
+        loan_file_id=lf.id,
+        title="Bank statements",
+        needs_type="bank_statement",
+        origin=NeedsItemOrigin.FLOOR,
+        source_facts=[{"kind": "asset", "label": "Assets are stated on the application"}],
+    )
+    doc = await _document(
+        db_session, lf, document_type="bank_statement", status=DocumentStatus.COMPLETED
+    )
+    public = NeedsItemPublic.from_model(need, matching_documents=[doc])
+    assert public.source is not None and public.source.attribution == "deterministic"  # LP-110
+    assert public.requires_coverage_confirmation is True  # LP-108 (graded) intact
+    assert [d.filename for d in public.matching_documents] == [
+        doc.original_filename
+    ]  # LP-109 intact

@@ -36,12 +36,13 @@ from uuid import UUID, uuid4
 import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.mismo.schema import ParsedBorrower, ParsedMismo
+from app.mismo.schema import ParsedBorrower, ParsedLoan, ParsedMismo
 from app.models.activity_log import ActivityType
 from app.models.borrower import Borrower, MaritalStatus
 from app.models.lender import LoanProgram
-from app.models.loan_file import AiNeedsStatus, LoanFile, LoanPurpose
+from app.models.loan_file import AiNeedsStatus, LoanFile, LoanPurpose, RefinanceType
 from app.models.mismo_import import MismoImport, MismoImportStatus
+from app.models.needs_item import NeedsItemDisposition, NeedsItemOrigin, NeedsItemPriority
 from app.models.property import OccupancyType
 from app.models.stated_financials import (
     StatedAsset,
@@ -53,6 +54,7 @@ from app.schemas.property import PropertyCreate
 from app.services.activity_log import log_activity
 from app.services.loan_files import create_loan_file
 from app.services.needs_engine import seed_floor_needs
+from app.services.needs_items import create_needs_item
 from app.services.properties import create_property
 from app.storage import get_storage_backend
 
@@ -74,6 +76,37 @@ _PURPOSE: dict[str, LoanPurpose] = {
     "Purchase": LoanPurpose.PURCHASE,
     "Refinance": LoanPurpose.REFINANCE,
 }
+# MISMO ``RefinanceCashOutDeterminationType`` → our RefinanceType (LP-99). This mapping is a
+# GROUNDED STARTER — validate with Priya: MISMO's ``LimitedCashOut`` is the agency "limited
+# cash-out" (Fannie LCOR), which carries the SAME (higher) LTV limits as a rate/term refi, so we
+# map it to RATE_TERM — but confirm that agency framing. ``CashOut`` → the STRICTER cash-out limit;
+# ``NoCashOut`` → rate/term. Keys are lower-cased + stripped for tolerance. (The LTV-max thresholds
+# themselves are LP-74 starter rules already flagged for Priya.)
+_CASH_OUT_DETERMINATION: dict[str, RefinanceType] = {
+    "cashout": RefinanceType.CASH_OUT,
+    "nocashout": RefinanceType.RATE_TERM,
+    "limitedcashout": RefinanceType.RATE_TERM,  # Fannie LCOR = rate/term limits — validate w/ Priya
+}
+
+
+def _refinance_type_for(loan: ParsedLoan | None) -> RefinanceType | None:
+    """The refinance kind (LP-99), from the MISMO cash-out determination. ``None`` = undetermined.
+
+    Prefers the explicit ``RefinanceCashOutDeterminationType``; falls back to the cash-out AMOUNT
+    (a positive amount ⇒ cash-out; an explicit zero ⇒ rate/term). Returns ``None`` when neither is
+    present/recognized — the caller SURFACES that (it never silently defaults to the looser limit).
+    """
+    if loan is None:
+        return None
+    raw = (loan.refinance_cash_out_type or "").strip().lower().replace(" ", "").replace("_", "")
+    if raw in _CASH_OUT_DETERMINATION:
+        return _CASH_OUT_DETERMINATION[raw]
+    amount = loan.refinance_cash_out_amount
+    if amount is not None:
+        return RefinanceType.CASH_OUT if amount > 0 else RefinanceType.RATE_TERM
+    return None  # undetermined — the caller surfaces it, does not guess the looser limit
+
+
 _OCCUPANCY: dict[str, OccupancyType] = {
     "PrimaryResidence": OccupancyType.PRIMARY_RESIDENCE,
     "SecondHome": OccupancyType.SECOND_HOME,
@@ -108,6 +141,11 @@ async def create_loan_file_from_mismo(
     loan = parsed.loan
 
     # 1) The LoanFile — reuse Epic 4's creation core (converges with manual).
+    # Target lender (the wholesale lender that selects the LP-80 overlay) is NOT set
+    # here: the MISMO 3.4 application export carries only a LoanOriginationCompany
+    # (the broker/originator) and LoanOriginator party — not the target wholesale
+    # lender — so there is nothing reliable to map (verified against the real file).
+    # The lender is a processing decision, set/changed on the Overview (LP-80.5).
     loan_file = await create_loan_file(
         db,
         company_id=company_id,
@@ -122,6 +160,22 @@ async def create_loan_file_from_mismo(
         loan_file.amortization_type = loan.amortization_type
         loan_file.amortization_months = loan.amortization_months
         loan_file.application_received_date = loan.application_received_date
+
+    # The refinance kind (LP-99) — populate ``refinance_type`` so a cash-out refi automatically
+    # gets the STRICTER cash-out LTV limit (the LTV consumes it; previously null → the LTV silently
+    # defaulted to the looser rate/term limit, the dangerous permissive direction). Only for
+    # refinances; purchases leave it null (NA). When the MISMO can't determine it, we SURFACE that
+    # (a needs item + a parse warning) rather than guess the looser limit.
+    refinance_undetermined = False
+    if loan_file.loan_purpose is LoanPurpose.REFINANCE:
+        refinance_type = _refinance_type_for(loan)
+        loan_file.refinance_type = refinance_type
+        refinance_undetermined = refinance_type is None
+        if refinance_undetermined:
+            parsed.parse_warnings.append(
+                "Refinance type (cash-out vs. rate/term) could not be determined from the MISMO — "
+                "the LTV limit depends on it; confirm it on the Overview."
+            )
     await db.flush()
 
     # 2) The subject property — reuse Epic 4's create_property, then the MISMO-only fields.
@@ -210,6 +264,24 @@ async def create_loan_file_from_mismo(
     # → purchase agreement; stated assets → a bank statement). ``seed_floor_needs``
     # flushes first so it sees the rows added above (LP-71.5). LP-69 augments this.
     await seed_floor_needs(db, loan_file)
+
+    # LP-99 — when the refinance kind couldn't be determined, surface a needs item so the processor
+    # confirms cash-out vs. rate/term (the LTV limit depends on it). We never silently default an
+    # undetermined refi to the looser rate/term limit; this makes the ambiguity explicit + actionable.
+    if refinance_undetermined:
+        await create_needs_item(
+            db,
+            loan_file_id=loan_file.id,
+            title="Confirm refinance type: cash-out vs. rate/term",
+            origin=NeedsItemOrigin.FLOOR,
+            priority=NeedsItemPriority.STANDARD,
+            disposition=NeedsItemDisposition.CONFIRMED,
+            description=(
+                "The MISMO import did not state the refinance cash-out determination. The LTV limit "
+                "differs (cash-out is stricter), so set the refinance type on the Overview."
+            ),
+            reasoning="MISMO REFINANCE/RefinanceCashOutDeterminationType was absent or unrecognized.",
+        )
 
     # The import enqueues LP-69's async AI reasoning (the endpoint dispatches it after
     # commit). Mark it PENDING so a floor-only list isn't silently shown as complete —

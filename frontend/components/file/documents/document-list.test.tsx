@@ -32,6 +32,7 @@ function doc(overrides: Partial<DocumentResponse> = {}): DocumentResponse {
     staleness: { is_stale: false, kind: null, reason: null, resolution: null, as_of_date: null },
     package_fit: { fit: true, reason: null },
     standard_name: "",
+    period: null,
     package_qualification: { qualified: false, reason: "not_extracted" },
     ...overrides,
   };
@@ -205,5 +206,83 @@ describe("DocumentList — standard naming + package-ready (LP-72)", () => {
       />,
     );
     expect(screen.queryByLabelText("Package-ready")).toBeNull();
+  });
+
+  // LP-105 — the consolidated period line makes same-type documents distinguishable at a glance.
+  it("shows the consolidated period line on the card", () => {
+    render(
+      <DocumentList
+        documents={[doc({ period: { label: "Period", value: "Jun 1 - Jun 15, 2026" } })]}
+        isPending={false}
+        isError={false}
+        onSelect={vi.fn()}
+      />,
+    );
+    expect(screen.getByText("Period: Jun 1 - Jun 15, 2026")).toBeDefined();
+  });
+
+  it("shows no period line when the period is absent (graceful)", () => {
+    const { container } = render(
+      <DocumentList
+        documents={[doc({ period: null })]}
+        isPending={false}
+        isError={false}
+        onSelect={vi.fn()}
+      />,
+    );
+    expect(container.textContent).not.toContain("Period:");
+  });
+
+  it("distinguishes two same-type documents by their period", () => {
+    render(
+      <DocumentList
+        documents={[
+          doc({ id: "a", period: { label: "Period", value: "Jun 1 - Jun 15, 2026" } }),
+          doc({ id: "b", period: { label: "Period", value: "Jun 16 - Jun 30, 2026" } }),
+        ]}
+        isPending={false}
+        isError={false}
+        onSelect={vi.fn()}
+      />,
+    );
+    expect(screen.getByText("Period: Jun 1 - Jun 15, 2026")).toBeDefined();
+    expect(screen.getByText("Period: Jun 16 - Jun 30, 2026")).toBeDefined();
+  });
+
+  // LP-107 — an unclassified document shows its original filename as the name, while the type
+  // indicator still honestly reads "Unknown" (the signal isn't hidden).
+  it("shows an unknown document's original filename as the name, and 'Unknown' as the type", () => {
+    render(
+      <DocumentList
+        documents={[
+          doc({
+            document_type: "unknown",
+            standard_name: "Akash W2 Wells 2024.pdf", // backend falls the name back to the filename
+            original_filename: "Akash W2 Wells 2024.pdf",
+          }),
+        ]}
+        isPending={false}
+        isError={false}
+        onSelect={vi.fn()}
+      />,
+    );
+    expect(screen.getByText("Akash W2 Wells 2024.pdf")).toBeDefined(); // the real, identifiable name
+    expect(screen.getByText(/Unknown/)).toBeDefined(); // the type signal is kept
+  });
+
+  it("distinguishes two unknown documents by their real filenames", () => {
+    render(
+      <DocumentList
+        documents={[
+          doc({ id: "a", document_type: "unknown", standard_name: "EMD wire receipt.pdf" }),
+          doc({ id: "b", document_type: "unknown", standard_name: "Home Value estimate.pdf" }),
+        ]}
+        isPending={false}
+        isError={false}
+        onSelect={vi.fn()}
+      />,
+    );
+    expect(screen.getByText("EMD wire receipt.pdf")).toBeDefined();
+    expect(screen.getByText("Home Value estimate.pdf")).toBeDefined();
   });
 });

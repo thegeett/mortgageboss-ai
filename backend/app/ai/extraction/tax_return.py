@@ -44,7 +44,8 @@ from typing import Any
 import structlog
 from pydantic import BaseModel, Field, ValidationError
 
-from app.ai.client import AIClientError, build_document_message, complete
+from app.ai.client import build_document_message
+from app.ai.extraction.model_call import run_extraction_completion
 from app.ai.extraction.parsing import (
     CoreSpec,
     coerce_decimal,
@@ -57,7 +58,6 @@ from app.ai.extraction.parsing import (
 from app.ai.extraction.shape import CatchAllSection, TypedField
 from app.ai.parsing import coerce_confidence, extract_json_object
 from app.ai.prompt_loader import load_prompt
-from app.core.config import settings
 from app.models.extraction import ExtractionStatus
 
 logger = structlog.get_logger(__name__)
@@ -285,7 +285,7 @@ async def extract_tax_return(content: bytes, media_type: str) -> TaxReturnExtrac
     """Extract a nested tax return (1040 + schedules) from bytes (PDF/image). Never raises.
 
     Mirrors the other extractors: empty/unsupported → ``failed`` without an API
-    call; otherwise loads the prompt, sends the full document to the Sonnet-class
+    call; otherwise loads the prompt, sends the full document to the Opus-class
     model with a **generous** token budget (multi-page bundle), and parses
     defensively (a truncated multi-schedule response → ``failed``). The bytes/base64,
     raw response, extracted values, and the **SSN** are never logged — only metadata.
@@ -299,24 +299,22 @@ async def extract_tax_return(content: bytes, media_type: str) -> TaxReturnExtrac
     except ValueError:
         return TaxReturnExtractionResult.failed("unsupported document media type")
 
-    try:
-        resp = await complete(
-            model=settings.anthropic_model_extraction,
-            system=system_prompt,
-            messages=[message],
-            max_tokens=_MAX_TOKENS,
-        )
-    except AIClientError:
-        logger.warning("tax_return_extraction_ai_failed")  # metadata only
-        return TaxReturnExtractionResult.failed("AI call failed")
+    call = await run_extraction_completion(
+        system=system_prompt,
+        message=message,
+        max_tokens=_MAX_TOKENS,
+        log_label="tax_return",
+    )
+    if call.text is None:
+        return TaxReturnExtractionResult.failed(call.failure_reason or "AI call failed")
 
-    result = _parse_tax_return_json(resp.text)
+    result = _parse_tax_return_json(call.text)
     if result is None:
         logger.warning("tax_return_extraction_parse_failed")  # truncated/malformed
         return TaxReturnExtractionResult.failed("could not parse extraction")
 
-    result.input_tokens = resp.input_tokens
-    result.output_tokens = resp.output_tokens
+    result.input_tokens = call.input_tokens
+    result.output_tokens = call.output_tokens
 
     # Metadata ONLY: status, confidence, COUNTS (which schedules, how many) — never
     # any value and never the SSN.

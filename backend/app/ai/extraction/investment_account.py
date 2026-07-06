@@ -8,7 +8,7 @@ first-class transactions list.
 
 Mirrors :mod:`app.ai.extraction.bank_statement` (the closest template — an asset
 doc with a masked account number, a statement period, and balances): typed core
-(each a ``TypedField`` with source) + ``additional_sections`` catch-all, Sonnet
+(each a ``TypedField`` with source) + ``additional_sections`` catch-all, Opus
 full-document reading, the shared tolerant parser, honest nulls, graceful
 ``.failed()``, metadata-only logging.
 
@@ -26,7 +26,8 @@ from typing import Any
 import structlog
 from pydantic import BaseModel, Field, ValidationError
 
-from app.ai.client import AIClientError, build_document_message, complete
+from app.ai.client import build_document_message
+from app.ai.extraction.model_call import run_extraction_completion
 from app.ai.extraction.parsing import (
     CoreSpec,
     coerce_date,
@@ -39,14 +40,17 @@ from app.ai.extraction.parsing import (
 from app.ai.extraction.shape import CatchAllSection, TypedField
 from app.ai.parsing import coerce_confidence, extract_json_object
 from app.ai.prompt_loader import load_prompt
-from app.core.config import settings
 from app.models.extraction import ExtractionStatus
 
 logger = structlog.get_logger(__name__)
 
 _PROMPT_PATH = "extraction/investment_account.txt"
 _SUPPORTED_MEDIA_TYPES = frozenset({"application/pdf", "image/jpeg", "image/png", "image/jpg"})
-_MAX_TOKENS = 4096
+# A brokerage statement itemizes an UNBOUNDED holdings list (each position: ticker, shares, value),
+# each with a verbatim snippet → a long list = long JSON. 4096 truncated on a dense portfolio
+# (observed on LF-6T3N — a silently-empty ASSET doc that understates reserves), so 8192 like
+# bank_statement (LP-103). The LP-102 shared guard (model_call) is the backstop if one still overflows.
+_MAX_TOKENS = 8192
 
 
 class InvestmentAccountExtraction(BaseModel):
@@ -155,24 +159,22 @@ async def extract_investment_account(
     except ValueError:
         return InvestmentAccountExtractionResult.failed("unsupported document media type")
 
-    try:
-        resp = await complete(
-            model=settings.anthropic_model_extraction,
-            system=system_prompt,
-            messages=[message],
-            max_tokens=_MAX_TOKENS,
-        )
-    except AIClientError:
-        logger.warning("investment_account_extraction_ai_failed")  # metadata only
-        return InvestmentAccountExtractionResult.failed("AI call failed")
+    call = await run_extraction_completion(
+        system=system_prompt,
+        message=message,
+        max_tokens=_MAX_TOKENS,
+        log_label="investment_account",
+    )
+    if call.text is None:
+        return InvestmentAccountExtractionResult.failed(call.failure_reason or "AI call failed")
 
-    result = _parse_investment_json(resp.text)
+    result = _parse_investment_json(call.text)
     if result is None:
         logger.warning("investment_account_extraction_parse_failed")  # no raw response logged
         return InvestmentAccountExtractionResult.failed("could not parse extraction")
 
-    result.input_tokens = resp.input_tokens
-    result.output_tokens = resp.output_tokens
+    result.input_tokens = call.input_tokens
+    result.output_tokens = call.output_tokens
 
     # Metadata only: status, confidence, COUNTS — never values/account number.
     core_present = sum(1 for key, _ in _CORE_SPEC if getattr(result.data, key).value is not None)

@@ -61,6 +61,17 @@ soft delete).
 | PATCH | `/loan-files/{id_or_display_id}` | yes | `LoanFileUpdate` | `200` `LoanFileDetail` | partial; immutable fields protected |
 | DELETE | `/loan-files/{id_or_display_id}` | yes | — | `204` | soft delete; `404` if out-of-company |
 
+**Delete is a soft delete (LP-79.5).** Any processor (or admin) in the owning company
+can `DELETE` a file: it sets `deleted_at`, logs `FILE_DELETED`, and the file drops out
+of every processor view (`only_active`), but the row + its children + the audit trail
+are **preserved and recoverable**. Deleting an already-deleted file is a clean `404`
+(it's invisible to its owner), never a crash. The UI surfaces this behind a **named
+confirmation dialog** (dashboard row overflow menu + the file-header menu) — never a
+silent one-click destroy — and the file disappears from the dashboard on success.
+**Hard-delete (permanent purge) is future admin-only work** (deferred — built nothing
+for it now); there is no restore/trash view yet (the data is preserved for a future
+restore). See **ADR-195**.
+
 ### Create
 
 `LoanFileCreate` carries only optional, settable fields (`lender_id`,

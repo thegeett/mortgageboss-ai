@@ -21,7 +21,8 @@ from typing import Any
 import structlog
 from pydantic import BaseModel, Field, ValidationError
 
-from app.ai.client import AIClientError, build_document_message, complete
+from app.ai.client import build_document_message
+from app.ai.extraction.model_call import run_extraction_completion
 from app.ai.extraction.parsing import (
     CoreSpec,
     coerce_decimal,
@@ -33,7 +34,6 @@ from app.ai.extraction.parsing import (
 from app.ai.extraction.shape import CatchAllSection, TypedField
 from app.ai.parsing import coerce_confidence, extract_json_object
 from app.ai.prompt_loader import load_prompt
-from app.core.config import settings
 from app.models.extraction import ExtractionStatus
 
 logger = structlog.get_logger(__name__)
@@ -144,24 +144,22 @@ async def extract_property_tax_bill(
     except ValueError:
         return PropertyTaxBillExtractionResult.failed("unsupported document media type")
 
-    try:
-        resp = await complete(
-            model=settings.anthropic_model_extraction,
-            system=system_prompt,
-            messages=[message],
-            max_tokens=_MAX_TOKENS,
-        )
-    except AIClientError:
-        logger.warning("property_tax_bill_extraction_ai_failed")  # metadata only
-        return PropertyTaxBillExtractionResult.failed("AI call failed")
+    call = await run_extraction_completion(
+        system=system_prompt,
+        message=message,
+        max_tokens=_MAX_TOKENS,
+        log_label="property_tax_bill",
+    )
+    if call.text is None:
+        return PropertyTaxBillExtractionResult.failed(call.failure_reason or "AI call failed")
 
-    result = _parse_property_tax_bill_json(resp.text)
+    result = _parse_property_tax_bill_json(call.text)
     if result is None:
         logger.warning("property_tax_bill_extraction_parse_failed")  # no raw response logged
         return PropertyTaxBillExtractionResult.failed("could not parse extraction")
 
-    result.input_tokens = resp.input_tokens
-    result.output_tokens = resp.output_tokens
+    result.input_tokens = call.input_tokens
+    result.output_tokens = call.output_tokens
 
     # Metadata only: status, confidence, COUNTS — never values.
     core_present = sum(1 for key, _ in _CORE_SPEC if getattr(result.data, key).value is not None)

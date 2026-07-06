@@ -16,6 +16,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.models.base import Base, SoftDeleteMixin, TimestampMixin, UUIDMixin
 from app.models.enums import str_enum
 from app.models.types import MediumStr, ShortStr
+from app.verification.confidence import DEFAULT_AGGRESSION, AggressionLevel
 
 if TYPE_CHECKING:
     from app.models.company import Company
@@ -52,6 +53,15 @@ class User(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
         nullable=False,
     )
     is_active: Mapped[bool] = mapped_column(default=True, nullable=False)
+    # The user's default verification thoroughness (LP-79's aggression dial). A
+    # per-file override can dial a specific file up/down; absent an override this
+    # default applies. Balanced unless the user changes it.
+    default_aggression_level: Mapped[AggressionLevel] = mapped_column(
+        str_enum(AggressionLevel),
+        default=DEFAULT_AGGRESSION,
+        server_default=DEFAULT_AGGRESSION.value,
+        nullable=False,
+    )
 
     # Relationships
     company: Mapped["Company"] = relationship(back_populates="users")

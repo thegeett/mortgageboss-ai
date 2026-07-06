@@ -61,6 +61,42 @@ def fha_variant(raw: bytes) -> bytes:
     return with_mortgage_type(raw, "FHA")
 
 
+_MISMO_NS = NS["m"]
+
+
+def refinance_variant(
+    raw: bytes,
+    *,
+    cash_out_type: str | None = None,
+    cash_out_amount: str | None = None,
+) -> bytes:
+    """A refinance variant (LP-99) — flip ``LoanPurposeType`` to ``Refinance`` + add a MISMO
+    ``REFINANCE`` container under ``LOAN`` with the cash-out determination / amount.
+
+    ``cash_out_type`` maps to ``RefinanceCashOutDeterminationType`` (``CashOut`` / ``LimitedCashOut``
+    / ``NoCashOut``); ``cash_out_amount`` to ``RefinanceCashOutAmount``. Pass neither for the
+    **undetermined** case (a refi with no cash-out signal).
+    """
+    root = _root(raw)
+    purpose = root.find(".//m:TERMS_OF_LOAN/m:LoanPurposeType", NS)
+    assert purpose is not None
+    purpose.text = "Refinance"
+
+    if cash_out_type is not None or cash_out_amount is not None:
+        loan = root.find(".//m:LOANS/m:LOAN", NS)
+        assert loan is not None
+        refinance = etree.SubElement(loan, f"{{{_MISMO_NS}}}REFINANCE")
+        if cash_out_type is not None:
+            etree.SubElement(
+                refinance, f"{{{_MISMO_NS}}}RefinanceCashOutDeterminationType"
+            ).text = cash_out_type
+        if cash_out_amount is not None:
+            etree.SubElement(
+                refinance, f"{{{_MISMO_NS}}}RefinanceCashOutAmount"
+            ).text = cash_out_amount
+    return etree.tostring(root)
+
+
 def multi_borrower_variant(raw: bytes) -> bytes:
     """Add a genuine SECOND borrower — distinct name, income, and classification.
 

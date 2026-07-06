@@ -32,7 +32,7 @@ for a situation? — is real loan-processing domain knowledge and is **the
 highest-value Priya input**; it is refined with her ("walk me through a real file:
 what do you chase + why?") and sharpened by the correction signal over time. V1
 proposes *reasoned, explainable, improvable* needs the processor confirms — **not
-perfect out of the gate**. This is a real AI reasoning call (Sonnet, substantial
+perfect out of the gate**. This is a real AI reasoning call (Opus, substantial
 context — cost + latency + eval apply).
 
 **PII.** The assembled context carries borrower PII; it is sent to the model but
@@ -75,12 +75,38 @@ _PROMPT_PATH = "needs/needs_reasoning.txt"
 _MAX_TOKENS = 3072
 
 
+# The fact kinds the AI may cite as a need's SOURCE (LP-110) — each maps to a real context record
+# the model was shown, so the citation grounds to verifiable data (not more AI prose).
+_TRIGGERED_BY_KINDS = frozenset(
+    {"employer", "income", "asset", "liability", "finding", "mismo_field"}
+)
+
+
+class TriggeredByFact(BaseModel):
+    """One fact the AI CITES as having triggered a need (LP-110) — its SOURCE, grounded.
+
+    ``kind`` names which context record it came from (employer/income/asset/liability/finding/
+    mismo_field); ``label`` is the specific fact ("self-employment income from Chhotala Realty LLC");
+    ``ref`` links the underlying record where one exists (a finding id) so the processor can verify.
+    """
+
+    kind: str
+    label: str
+    ref: str | None = None
+
+
 class ProposedNeed(BaseModel):
-    """One AI-proposed need (LP-69) — ``reasoning`` is FILE-SPECIFIC (guardrail 1)."""
+    """One AI-proposed need (LP-69) — ``reasoning`` is FILE-SPECIFIC (guardrail 1).
+
+    ``triggered_by`` (LP-110) is the SOURCE: the specific FileContext fact(s) the model reasoned
+    over, so its reasoning is FALSIFIABLE (the processor verifies the AI didn't misread). It may be
+    empty (older/degraded responses) — a need is never dropped for lacking a source.
+    """
 
     need_description: str
     need_type: str | None = None
     reasoning: str
+    triggered_by: list[TriggeredByFact] = Field(default_factory=list)
 
 
 # --------------------------------------------------------------------------- #
@@ -103,6 +129,10 @@ class FileContext(BaseModel):
     already_covered: list[str] = Field(
         default_factory=list
     )  # need types/doc types not to re-propose
+    # LP-111: the needs ALREADY on the list (title + type), so the model doesn't RESTATE/REWORD an
+    # existing free-form need each run — the accumulation that spawned duplicate LOEs. Reconciliation
+    # at generation, complementing the deterministic dedup after.
+    existing_needs: list[dict[str, Any]] = Field(default_factory=list)
 
 
 async def assemble_file_context(db: AsyncSession, loan_file: LoanFile) -> FileContext:
@@ -187,17 +217,22 @@ async def assemble_file_context(db: AsyncSession, loan_file: LoanFile) -> FileCo
             {"document_type": d.document_type, "status": d.status.value} for d in documents
         ],
         findings=[
-            {"finding_type": f.finding_type.value, "description": f.description} for f in findings
+            # LP-110: carry the finding id so the AI can REF a finding it cites as a need's source
+            # (a linkable, verifiable record), not just restate the finding's text.
+            {"id": str(f.id), "finding_type": f.finding_type.value, "description": f.description}
+            for f in findings
         ],
         suggestions=[
             {"need_type": s.need_type, "need_description": s.need_description} for s in suggestions
         ],
         already_covered=sorted(c for c in covered if c),
+        # LP-111: the needs already on the list, so the model doesn't reword them into duplicates.
+        existing_needs=[{"needs_type": n.needs_type, "title": n.title} for n in needs],
     )
 
 
 # --------------------------------------------------------------------------- #
-# The AI reasoning (Sonnet) — propose-with-reasoning
+# The AI reasoning (Opus) — propose-with-reasoning
 # --------------------------------------------------------------------------- #
 
 
@@ -233,9 +268,40 @@ def _parse_proposals(text: str) -> list[ProposedNeed]:
                 need_description=desc.strip(),
                 need_type=nt.strip() if isinstance(nt, str) and nt.strip() else None,
                 reasoning=reasoning.strip(),
+                triggered_by=_parse_triggered_by(row.get("triggered_by")),
             )
         )
     return proposals
+
+
+def _parse_triggered_by(raw: Any) -> list[TriggeredByFact]:
+    """Parse a proposal's ``triggered_by`` (LP-110) defensively. Never raises ([] on junk).
+
+    Keeps only facts with a known ``kind`` and a non-empty ``label`` — a garbled or hallucinated
+    source shape is dropped, not admitted. A missing source is fine (the need still proposes); the
+    absence just means no verifiable citation to click through.
+    """
+    if not isinstance(raw, list):
+        return []
+    facts: list[TriggeredByFact] = []
+    for entry in raw:
+        if not isinstance(entry, dict):
+            continue
+        kind = entry.get("kind")
+        label = entry.get("label")
+        if not isinstance(kind, str) or kind.strip() not in _TRIGGERED_BY_KINDS:
+            continue
+        if not isinstance(label, str) or not label.strip():
+            continue
+        ref = entry.get("ref")
+        facts.append(
+            TriggeredByFact(
+                kind=kind.strip(),
+                label=label.strip(),
+                ref=ref.strip() if isinstance(ref, str) and ref.strip() else None,
+            )
+        )
+    return facts
 
 
 def reconcile(proposals: list[ProposedNeed], *, already_covered: set[str]) -> list[ProposedNeed]:
@@ -265,7 +331,7 @@ def reconcile(proposals: list[ProposedNeed], *, already_covered: set[str]) -> li
 async def propose_needs(db: AsyncSession, loan_file: LoanFile) -> list[ProposedNeed]:
     """Reason over the whole file → proposed needs with reasoning. Never raises ([] on failure).
 
-    Assembles the context, calls the Sonnet reasoner, parses defensively, and
+    Assembles the context, calls the Opus reasoner, parses defensively, and
     reconciles against what's already covered. The assembled context (PII) and the
     raw response are never logged — only counts.
     """
@@ -277,7 +343,7 @@ async def propose_needs(db: AsyncSession, loan_file: LoanFile) -> list[ProposedN
     )
     try:
         result = await complete(
-            model=settings.anthropic_model_extraction,  # Sonnet — real reasoning over context
+            model=settings.anthropic_model_extraction,  # Opus — real reasoning over context
             system=system_prompt,
             messages=[{"role": "user", "content": user_content}],
             max_tokens=_MAX_TOKENS,
@@ -339,6 +405,10 @@ async def apply_ai_needs(db: AsyncSession, loan_file: LoanFile) -> list[NeedsIte
             origin=NeedsItemOrigin.AI_REASONING,
             disposition=NeedsItemDisposition.PROPOSED,  # the processor confirms (LP-70)
             reasoning=p.reasoning,
+            # LP-110: persist the AI's cited source facts (grounded, AI-identified) so the need's
+            # reasoning is falsifiable. None (not []) when the model cited nothing, to leave the
+            # column NULL for a genuinely source-less proposal.
+            source_facts=[f.model_dump() for f in p.triggered_by] or None,
         )
         created.append(need)
         if p.need_type:

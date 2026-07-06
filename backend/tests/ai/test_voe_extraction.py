@@ -18,7 +18,7 @@ from unittest.mock import AsyncMock
 import pytest
 import structlog
 from app.ai.client import AIClientError
-from app.ai.extraction import voe as voe_module
+from app.ai.extraction import model_call
 from app.ai.extraction.voe import VOEExtraction, VOEExtractionResult, _parse_voe_json, extract_voe
 from app.models.extraction import ExtractionStatus
 
@@ -62,9 +62,11 @@ def _mock_complete(
         mock = AsyncMock(side_effect=exc)
     else:
         mock = AsyncMock(
-            return_value=SimpleNamespace(text=text, input_tokens=160, output_tokens=70, model="m")
+            return_value=SimpleNamespace(
+                text=text, input_tokens=160, output_tokens=70, model="m", stop_reason="end_turn"
+            )
         )
-    monkeypatch.setattr(voe_module, "complete", mock)
+    monkeypatch.setattr(model_call, "complete", mock)
     return mock
 
 

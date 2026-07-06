@@ -65,6 +65,13 @@ function DocumentRow({
             />
           )}
         </span>
+        {/* The consolidated period (LP-105) — the at-a-glance distinguisher for same-type
+            documents (two pay stubs read "Jun 1 - 15" vs "Jun 16 - 30"). Omitted when absent. */}
+        {document.period && (
+          <span className="mt-0.5 block truncate text-xs font-medium text-gray-600">
+            {document.period.label}: {document.period.value}
+          </span>
+        )}
         <span className="mt-0.5 block truncate text-xs text-gray-500">
           {document.document_type ? humanize(document.document_type) : "—"}
           <span className="text-gray-300"> · </span>

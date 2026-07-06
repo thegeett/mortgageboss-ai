@@ -29,23 +29,32 @@ from enum import StrEnum
 from sqlalchemy import Enum as SAEnum
 
 
-def str_enum(enum_cls: type[StrEnum], *, length: int = 32) -> SAEnum:
+def str_enum(enum_cls: type[StrEnum], *, length: int = 32, name: str | None = None) -> SAEnum:
     """Build a SQLAlchemy ``Enum`` for a ``StrEnum``, stored as its value.
 
     Persists the enum's string value (not its member name) in a bounded
     ``VARCHAR`` with a CHECK constraint. Use for every enum column so storage
     is consistent across the schema.
+
+    The CHECK constraint is named after the enum (``ck_<table>_<enumname>``).
+    Pass ``name`` when the **same** enum backs two columns on one table (which
+    would otherwise collide on the constraint name) to give each a distinct name.
     """
 
     def values(cls: type[StrEnum]) -> list[str]:
         return [member.value for member in cls]
 
+    # Only pass ``name`` when given: an explicit ``name=None`` suppresses SAEnum's
+    # auto-derived constraint name (from the enum class) and breaks the naming
+    # convention, so omit the kwarg entirely for the default case.
+    extra = {"name": name} if name is not None else {}
     return SAEnum(
         enum_cls,
         native_enum=False,
         create_constraint=True,
         length=length,
         values_callable=values,
+        **extra,
     )
 
 

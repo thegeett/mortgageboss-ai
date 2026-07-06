@@ -26,12 +26,12 @@ Core principles:
     extracted *values* are borrower PII and are **never** logged — only metadata
     (status, confidence, and a count of non-null fields).
 
-Input is the **full document** (PDF/image bytes), sent to the Sonnet-class model for
+Input is the **full document** (PDF/image bytes), sent to the Opus-class model for
 **native reading** (no OCR, no pre-extracted text) via the LP-37 document/image
 content block (LP-37 revision, ADR-126; this change ADR-128). Reuses the LP-38
 patterns: the file-based prompt (``load_prompt``), the shared defensive parser
 (``app.ai.parsing``), graceful failure, and metadata-only logging. Uses
-``settings.anthropic_model_extraction`` — a more capable Sonnet-class model, versus
+``settings.anthropic_model_extraction`` — a more capable Opus-class model, versus
 classification's cheaper one.
 """
 
@@ -43,7 +43,8 @@ from typing import Any
 import structlog
 from pydantic import BaseModel, Field, ValidationError
 
-from app.ai.client import AIClientError, build_document_message, complete
+from app.ai.client import build_document_message
+from app.ai.extraction.model_call import run_extraction_completion
 from app.ai.extraction.parsing import (
     CoreSpec,
     coerce_date,
@@ -56,7 +57,6 @@ from app.ai.extraction.parsing import (
 from app.ai.extraction.shape import CatchAllSection, TypedField
 from app.ai.parsing import coerce_confidence, extract_json_object
 from app.ai.prompt_loader import load_prompt
-from app.core.config import settings
 from app.models.extraction import ExtractionStatus
 
 logger = structlog.get_logger(__name__)
@@ -65,9 +65,11 @@ _PROMPT_PATH = "extraction/pay_stub.txt"
 # Media types we can send to the model (matches the LP-36 upload allowlist and the
 # LP-37 document-block support); ``image/jpg`` is normalized to image/jpeg.
 _SUPPORTED_MEDIA_TYPES = frozenset({"application/pdf", "image/jpeg", "image/png", "image/jpg"})
-# The response now captures EVERYTHING on the stub (typed core + grouped catch-all
-# with per-field source), so it can be sizeable — give the model room.
-_MAX_TOKENS = 4096
+# A pay stub enumerates MANY line items (current + YTD for every earning/deduction/tax), each
+# emitted with a verbatim snippet — a long list = long JSON (as with bank_statement). 4096 was too
+# small: the response truncated mid-JSON → silently failed to parse → empty NEEDS_REVIEW (LP-102).
+# Right-sized to 8192; the shared truncation guard (app.ai.extraction.model_call) covers overflow.
+_MAX_TOKENS = 8192
 
 
 class PayStubExtraction(BaseModel):
@@ -192,7 +194,7 @@ async def extract_pay_stub(content: bytes, media_type: str) -> PayStubExtraction
 
     An empty or unsupported document fails without an API call. Otherwise it loads
     the file-based prompt (the ``system`` instruction), sends the **full document**
-    to the Sonnet-class model as a document/image content block (LP-37
+    to the Opus-class model as a document/image content block (LP-37
     ``build_document_message``), and parses defensively/tolerantly. Any AI error or
     unparseable output returns ``PayStubExtractionResult.failed(...)``. The document
     bytes/base64, raw response, and extracted values are never logged (PII) — only
@@ -209,25 +211,23 @@ async def extract_pay_stub(content: bytes, media_type: str) -> PayStubExtraction
     except ValueError:
         return PayStubExtractionResult.failed("unsupported document media type")
 
-    try:
-        resp = await complete(
-            model=settings.anthropic_model_extraction,
-            system=system_prompt,
-            messages=[message],
-            max_tokens=_MAX_TOKENS,
-        )
-    except AIClientError:
-        logger.warning("paystub_extraction_ai_failed")  # metadata only — no bytes/content
-        return PayStubExtractionResult.failed("AI call failed")
+    call = await run_extraction_completion(
+        system=system_prompt,
+        message=message,
+        max_tokens=_MAX_TOKENS,
+        log_label="pay_stub",
+    )
+    if call.text is None:
+        return PayStubExtractionResult.failed(call.failure_reason or "AI call failed")
 
-    result = _parse_pay_stub_json(resp.text)
+    result = _parse_pay_stub_json(call.text)
     if result is None:
         logger.warning("paystub_extraction_parse_failed")  # no raw response logged
         return PayStubExtractionResult.failed("could not parse extraction")
 
     # Surface the call's token usage so the pipeline (LP-42) can record cost.
-    result.input_tokens = resp.input_tokens
-    result.output_tokens = resp.output_tokens
+    result.input_tokens = call.input_tokens
+    result.output_tokens = call.output_tokens
 
     # Metadata only: status, confidence, and COUNTS — never the extracted values
     # (income, employer, names are all PII). Counts: typed-core fields populated,

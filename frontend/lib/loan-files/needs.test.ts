@@ -32,6 +32,10 @@ function need(status: NeedsItemStatus, overrides: Partial<NeedsItemPublic> = {})
     satisfied_by_document_id: null,
     satisfied_by_document_filename: null,
     satisfied_at: null,
+    requires_coverage_confirmation: false,
+    matching_documents: [],
+    source: null,
+    possible_duplicate_of: null,
     created_at: "2026-06-19T12:00:00Z",
     ...overrides,
   };

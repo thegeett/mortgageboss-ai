@@ -55,7 +55,12 @@ class ActivityType(StrEnum):
     )
     DOCUMENT_STALENESS_RESOLVED = "document_staleness_resolved"  # processor waived/accepted (LP-71)
     FINDING_RESOLVED = "finding_resolved"
+    FINDING_UNDONE = "finding_undone"  # processor reversed a resolution — Undo (LP-98)
     VERIFICATION_RUN = "verification_run"
+    DTI_OVERRIDDEN = "dti_overridden"  # processor overrode a DTI calculator input (LP-76)
+    LTV_OVERRIDDEN = "ltv_overridden"  # processor overrode an LTV calculator input (LP-77)
+    CALCULATOR_OVERRIDDEN = "calculator_overridden"  # overrode an LP-87 calculator input
+    LENDER_OVERLAY_UPDATED = "lender_overlay_updated"  # admin edited a lender overlay (LP-87)
     NEEDS_ITEM_CREATED = "needs_item_created"
     NEEDS_ITEM_SATISFIED = "needs_item_satisfied"
     NEEDS_ITEM_CONFIRMED = "needs_item_confirmed"  # processor confirmed a proposed need (LP-70)

@@ -31,10 +31,10 @@ the referenced row is removed (ADR-069).
 
 from datetime import datetime
 from enum import StrEnum
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
-from sqlalchemy import DateTime, ForeignKey, String, Text
+from sqlalchemy import JSON, DateTime, ForeignKey, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, SoftDeleteMixin, TimestampMixin, UUIDMixin
@@ -45,6 +45,7 @@ from app.models.types import SHORT_STRING, MediumStr
 if TYPE_CHECKING:
     from app.models.borrower import Borrower
     from app.models.document import Document
+    from app.models.document_finding import DocumentFinding
     from app.models.loan_file import LoanFile
 
 
@@ -177,6 +178,14 @@ class NeedsItem(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     )
     # The "why" — explainability for a suggestion- / AI-derived need (LP-67/69).
     reasoning: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # The SOURCE — the specific data that TRIGGERED the need (LP-110), so the reasoning is
+    # FALSIFIABLE (the processor can verify the AI didn't misread). A list of structured facts
+    # ``[{"kind", "label", "ref"?}]`` grounding to verifiable data, captured per origin: a FLOOR
+    # need derives them DETERMINISTICALLY from the rule ("employment income is stated"); an
+    # AI_REASONING need carries the FileContext fact(s) the model CITED (AI-identified — verify);
+    # a SUGGESTION need instead uses ``source_finding_id`` (the finding chain below). ``ref`` links
+    # to the underlying record (e.g. a finding id) where one exists. NULL = no captured source.
+    source_facts: Mapped[list[dict[str, Any]] | None] = mapped_column(JSON, nullable=True)
     # The source finding for an ingested suggestion (LP-67) → the document-finding
     # it derives from. SET NULL: the durable need survives if the finding is removed.
     source_finding_id: Mapped[UUID | None] = mapped_column(
@@ -199,10 +208,28 @@ class NeedsItem(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
 
+    # --- Consolidation (LP-111) --------------------------------------------
+    # A POSSIBLE-DUPLICATE flag the AI layer sets (never a silent delete): this proposed need looks
+    # like a duplicate of ``duplicate_of_id`` — the processor confirms the merge or keeps both. The
+    # deterministic layers (collapse-by-source / substance-identity) merge certain duplicates
+    # outright; this is only the SEMANTIC residue they can't be sure of. SET NULL so the survivor
+    # can be removed without stranding the flag.
+    duplicate_of_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("needs_items.id", ondelete="SET NULL"),
+        index=True,
+        nullable=True,
+    )
+    # True once the processor has DISPOSED of a duplicate flag (confirmed the merge or said "keep
+    # both") — so the AI flag pass never re-flags a pair the human already judged.
+    duplicate_reviewed: Mapped[bool] = mapped_column(default=False, nullable=False)
+
     # --- Relationships -----------------------------------------------------
     loan_file: Mapped["LoanFile"] = relationship(back_populates="needs_items")
     borrower: Mapped["Borrower | None"] = relationship()
     satisfied_by_document: Mapped["Document | None"] = relationship()
+    # The finding a SUGGESTION need derives from (LP-67) — LP-110 exposes its provenance
+    # (the finding's description + its source document) as the need's source.
+    source_finding: Mapped["DocumentFinding | None"] = relationship()
 
     def __repr__(self) -> str:
         return f"<NeedsItem {self.title!r} {self.status} loan_file_id={self.loan_file_id}>"

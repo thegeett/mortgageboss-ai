@@ -169,7 +169,7 @@ async def test_update_logs_status_changed_with_from_to(db_session: AsyncSession)
 
 
 async def test_update_non_status_logs_file_updated(db_session: AsyncSession) -> None:
-    """A non-status update logs FILE_UPDATED with the changed field names."""
+    """A non-status update logs FILE_UPDATED with the changed fields + from→to values."""
     company = await _company(db_session)
     user = await _user(db_session, company)
     loan_file = await create_loan_file_with_setup(
@@ -189,7 +189,13 @@ async def test_update_non_status_logs_file_updated(db_session: AsyncSession) -> 
         if a.activity_type is ActivityType.FILE_UPDATED
     ]
     assert len(updates) == 1
-    assert updates[0].detail == {"changed_fields": ["loan_officer_name"]}
+    # LP-80.5: the detail now records the actual from→to values, not just field names.
+    assert updates[0].detail == {
+        "section": "loan",
+        "action": "edit",
+        "changed_fields": ["loan_officer_name"],
+        "changes": [{"field": "loan_officer_name", "from": None, "to": "Jordan LO"}],
+    }
 
 
 async def test_soft_delete_logs_file_deleted(db_session: AsyncSession) -> None:

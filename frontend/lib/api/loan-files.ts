@@ -10,7 +10,7 @@ import { apiClient } from "@/lib/api/client";
 import type { ActivityPublic } from "@/lib/types/activity";
 import type { BorrowerDetail } from "@/lib/types/borrower";
 import type { LoanFileDetail, LoanFileStatus, PaginatedLoanFiles } from "@/lib/types/loan-file";
-import { keepPreviousData, useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { isAxiosError } from "axios";
 
 export const LOAN_FILES_PATH = "/api/v1/loan-files";
@@ -77,6 +77,29 @@ export function useLoanFile(identifier: string) {
     queryFn: () => fetchLoanFile(identifier),
     enabled: Boolean(identifier),
     retry: noRetryOn404,
+  });
+}
+
+// --- Soft-delete (LP-79.5) -------------------------------------------------- //
+
+/**
+ * Soft-delete a loan file (`DELETE /loan-files/{id}` → 204). The backend sets
+ * `deleted_at` (the row + its children + the audit trail are preserved and an admin
+ * can restore it); the file simply disappears from the processor's views. Tenant-safe
+ * (a cross-company id 404s, like every file op). Hard-delete is future admin-only work.
+ */
+export async function deleteLoanFile(identifier: string): Promise<void> {
+  await apiClient.delete(`${LOAN_FILES_PATH}/${identifier}`);
+}
+
+export function useDeleteLoanFile() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (identifier: string) => deleteLoanFile(identifier),
+    onSuccess: () => {
+      // Refetch every list query so the deleted file drops out of the dashboard.
+      void queryClient.invalidateQueries({ queryKey: ["loan-files"] });
+    },
   });
 }
 

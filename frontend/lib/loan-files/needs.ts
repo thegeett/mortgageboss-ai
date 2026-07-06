@@ -11,6 +11,7 @@
  */
 import type {
   DocumentCategory,
+  NeedSourceAttribution,
   NeedsItemOrigin,
   NeedsItemPriority,
   NeedsItemPublic,
@@ -51,7 +52,11 @@ export const STATE_META: Record<NeedsItemStatus, StateMeta> = {
     pillClass: "bg-destructive/10 text-destructive border-destructive/20",
   },
   received: {
-    label: "In review",
+    // LP-108: a persisting `received` means a graded need has documents attached but the full
+    // coverage (all accounts/months/years) is unverified — the processor confirms it (the card
+    // shows the honest note + a "Confirm coverage" action). A simple-presence need never lingers
+    // here; it auto-verifies.
+    label: "Documents attached",
     group: "in_review",
     dotClass: "bg-info",
     pillClass: "bg-info/10 text-info border-info/20",
@@ -108,6 +113,47 @@ const SOURCE_LABELS: Record<NeedsItemOrigin, string> = {
 export function sourceLabel(origin: NeedsItemOrigin): string {
   return SOURCE_LABELS[origin];
 }
+
+/** HONEST ATTRIBUTION (LP-110) — how a need's SOURCE is presented per origin, making clear how
+ * much to trust it: a deterministic rule (certain) reads differently from the AI's reading
+ * (verify), same discipline as the finding provenance pills. */
+export interface SourceAttributionMeta {
+  /** The lead-in before each fact ("Required because", "AI identified", "Triggered by"). */
+  lead: string;
+  /** Short pill text conveying the trust level. */
+  pill: string;
+  /** Pill Tailwind classes (primary = deterministic/certain; info = AI/finding). */
+  pillClass: string;
+  /** True when the source is the AI's (fallible) reading — drives the "verify" note. */
+  aiIdentified: boolean;
+}
+
+export const SOURCE_ATTRIBUTION_META: Record<NeedSourceAttribution, SourceAttributionMeta> = {
+  deterministic: {
+    lead: "Required because",
+    pill: "deterministic rule",
+    pillClass: "bg-primary/10 text-primary",
+    aiIdentified: false,
+  },
+  ai_identified: {
+    lead: "AI identified",
+    pill: "AI-identified",
+    pillClass: "bg-info/10 text-info",
+    aiIdentified: true,
+  },
+  finding: {
+    lead: "Triggered by",
+    pill: "finding",
+    pillClass: "bg-info/10 text-info",
+    aiIdentified: false,
+  },
+  manual: {
+    lead: "Added by you",
+    pill: "manual",
+    pillClass: "bg-gray-100 text-gray-500",
+    aiIdentified: false,
+  },
+};
 
 /** A PROPOSED need still awaits the processor's confirm/dismiss (the AI's suggestion). */
 export function isProposed(need: NeedsItemPublic): boolean {

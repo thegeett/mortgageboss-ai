@@ -28,6 +28,7 @@ function doc(status: DocumentStatus): DocumentResponse {
     staleness: { is_stale: false, kind: null, reason: null, resolution: null, as_of_date: null },
     package_fit: { fit: true, reason: null },
     standard_name: "",
+    period: null,
     package_qualification: { qualified: false, reason: "not_extracted" },
   };
 }

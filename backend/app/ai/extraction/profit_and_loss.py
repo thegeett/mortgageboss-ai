@@ -7,7 +7,7 @@ the period, and the revenue/expense/net summary; the individual expense lines la
 in the grouped catch-all (a "Major Expenses" section), so the full statement is
 preserved and a line can be promoted to the typed core later.
 
-Mirrors :mod:`app.ai.extraction.w2`: typed core + ``additional_sections``, Sonnet
+Mirrors :mod:`app.ai.extraction.w2`: typed core + ``additional_sections``, Opus
 full-document reading, the shared tolerant parser, honest nulls, graceful
 ``.failed()``, metadata-only logging. Typed core is a **V1 starter — refine with
 Priya**; accuracy is validated as real P&Ls flow through (no samples were available
@@ -22,7 +22,8 @@ from typing import Any
 import structlog
 from pydantic import BaseModel, Field, ValidationError
 
-from app.ai.client import AIClientError, build_document_message, complete
+from app.ai.client import build_document_message
+from app.ai.extraction.model_call import run_extraction_completion
 from app.ai.extraction.parsing import (
     CoreSpec,
     coerce_date,
@@ -35,14 +36,16 @@ from app.ai.extraction.parsing import (
 from app.ai.extraction.shape import CatchAllSection, TypedField
 from app.ai.parsing import coerce_confidence, extract_json_object
 from app.ai.prompt_loader import load_prompt
-from app.core.config import settings
 from app.models.extraction import ExtractionStatus
 
 logger = structlog.get_logger(__name__)
 
 _PROMPT_PATH = "extraction/profit_and_loss.txt"
 _SUPPORTED_MEDIA_TYPES = frozenset({"application/pdf", "image/jpeg", "image/png", "image/jpg"})
-_MAX_TOKENS = 4096
+# A P&L itemizes an UNBOUNDED list of revenue + expense lines (each expense line item), each with a
+# verbatim snippet → a long list = long JSON. 8192 like bank_statement so a detailed statement isn't
+# truncated (LP-103). The LP-102 shared guard (model_call) is the backstop for any overflow.
+_MAX_TOKENS = 8192
 
 
 class ProfitAndLossExtraction(BaseModel):
@@ -145,24 +148,22 @@ async def extract_profit_and_loss(content: bytes, media_type: str) -> ProfitAndL
     except ValueError:
         return ProfitAndLossExtractionResult.failed("unsupported document media type")
 
-    try:
-        resp = await complete(
-            model=settings.anthropic_model_extraction,
-            system=system_prompt,
-            messages=[message],
-            max_tokens=_MAX_TOKENS,
-        )
-    except AIClientError:
-        logger.warning("pnl_extraction_ai_failed")  # metadata only — no bytes/content
-        return ProfitAndLossExtractionResult.failed("AI call failed")
+    call = await run_extraction_completion(
+        system=system_prompt,
+        message=message,
+        max_tokens=_MAX_TOKENS,
+        log_label="profit_and_loss",
+    )
+    if call.text is None:
+        return ProfitAndLossExtractionResult.failed(call.failure_reason or "AI call failed")
 
-    result = _parse_pnl_json(resp.text)
+    result = _parse_pnl_json(call.text)
     if result is None:
         logger.warning("pnl_extraction_parse_failed")  # no raw response logged
         return ProfitAndLossExtractionResult.failed("could not parse extraction")
 
-    result.input_tokens = resp.input_tokens
-    result.output_tokens = resp.output_tokens
+    result.input_tokens = call.input_tokens
+    result.output_tokens = call.output_tokens
 
     # Metadata only: status, confidence, COUNTS — NEVER the values.
     core_present = sum(1 for key, _ in _CORE_SPEC if getattr(result.data, key).value is not None)

@@ -27,6 +27,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.documents.naming import standard_name
+from app.documents.period import document_period
 from app.documents.staleness import evaluate_staleness, package_fitness, package_qualification
 from app.models.base import utcnow
 from app.models.document import Document, DocumentStatus, StalenessResolution, UploadSource
@@ -35,6 +36,7 @@ from app.models.helpers import only_active
 from app.models.loan_file import LoanFile
 from app.schemas.document import DocumentDetailResponse, DocumentResponse, ExtractionPublic
 from app.services.document_versioning import version_count, version_counts_for_group_ids
+from app.services.verifications import mark_verification_stale
 
 # --------------------------------------------------------------------------- #
 # Upload validation
@@ -141,6 +143,9 @@ async def create_document(
     )
     db.add(document)
     await db.flush()
+    # A document changed → the cross-source verification is out of date (LP-78).
+    # Covers upload and replace (replace creates its new document through here).
+    await mark_verification_stale(db, loan_file_id=loan_file.id)
     return document
 
 
@@ -256,6 +261,7 @@ def _enrich(
         package_fit=package_fitness(document, staleness),
         standard_name=standard_name(document, extraction),
         package_qualification=package_qualification(document, staleness),
+        period=document_period(document, extraction),
     )
 
 

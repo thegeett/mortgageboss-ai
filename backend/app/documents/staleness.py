@@ -57,6 +57,19 @@ class ExpirationRule:
 RECENCY_WINDOWS: dict[str, RecencyRule] = {
     "pay_stub": RecencyRule(max_age_days=30, fields=("pay_date", "pay_period_end")),
     "bank_statement": RecencyRule(max_age_days=60, fields=("statement_period_end",)),
+    # LP-106 — ASSET statements (verify reserves / down-payment availability; lenders require a
+    # recent one). They already extract ``statement_period_end`` (same field as bank_statement),
+    # so the date to judge them existed but wasn't checked → a stale asset statement wasn't flagged.
+    # Window is a bit longer than a bank statement's 60d because brokerage/retirement statements are
+    # often QUARTERLY — a 60d window would false-flag a normal current quarterly statement.
+    "investment_account": RecencyRule(max_age_days=90, fields=("statement_period_end",)),
+    "retirement_account": RecencyRule(max_age_days=90, fields=("statement_period_end",)),
+    # LP-106 — a self-employed P&L should be reasonably current (its ``period_end`` is the "through"
+    # date). A lenient starter; the FHA YTD-P&L recency requirement is program-specific.
+    "profit_and_loss": RecencyRule(max_age_days=120, fields=("period_end",)),
+    # NOT wired (LP-106, under-vs-over): voe (``end_date`` is the employment TERMINATION date — null
+    # for a current employee — not a verification/issue date, so no clean recency signal) and
+    # mortgage_statement (``due_date`` is a FUTURE payment obligation, not an as-of/recency date).
 }
 EXPIRATION_RULES: dict[str, ExpirationRule] = {
     "drivers_license": ExpirationRule(fields=("expiration_date",)),

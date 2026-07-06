@@ -22,6 +22,9 @@ PRICING: dict[str, tuple[float, float]] = {
     # --- placeholders to verify --------------------------------------------
     "claude-haiku-4-5": (1.00 / 1_000_000, 5.00 / 1_000_000),
     "claude-sonnet-4-5": (3.00 / 1_000_000, 15.00 / 1_000_000),
+    # Opus 4.8 — the extraction/reasoning tier. ~5x Sonnet; kept so the cost estimate
+    # stays meaningful (an absent model falls back to $0 + a warning).
+    "claude-opus-4-8": (15.00 / 1_000_000, 75.00 / 1_000_000),
 }
 
 # Documented fallback for a model absent from PRICING: contribute 0.0 so an

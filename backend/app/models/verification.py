@@ -24,7 +24,7 @@ from enum import StrEnum
 from typing import TYPE_CHECKING
 from uuid import UUID
 
-from sqlalchemy import DateTime, Float, ForeignKey, Integer, Text
+from sqlalchemy import DateTime, Float, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, SoftDeleteMixin, TimestampMixin, UUIDMixin
@@ -88,6 +88,13 @@ class Verification(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     # --- AI cost tracking (if the run used AI-assisted checks) --------------
     total_tokens_used: Mapped[int | None] = mapped_column(Integer, nullable=True)
     total_cost_estimate: Mapped[float | None] = mapped_column(Float, nullable=True)
+
+    # A stable hash of the verification INPUTS (the stated + verified data the
+    # cross-source pass compared), set when a pass completes (LP-78.1). A later
+    # "Run verification" whose current inputs hash to the same value returns this
+    # run's cached findings WITHOUT re-calling the AI — the back half of the
+    # staleness model (don't re-ask the AI when nothing changed). 64-hex SHA-256.
+    input_fingerprint: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
     error_detail: Mapped[str | None] = mapped_column(Text, nullable=True)
 

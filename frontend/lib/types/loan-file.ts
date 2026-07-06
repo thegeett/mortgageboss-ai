@@ -16,6 +16,7 @@ export type LoanFileStatus =
 
 export type LoanProgram = "conventional" | "fha";
 export type LoanPurpose = "purchase" | "refinance";
+export type RefinanceType = "rate_term" | "cash_out";
 
 export interface LoanFileSummary {
   id: string;
@@ -71,6 +72,9 @@ export interface PropertyPublic {
   occupancy_type: OccupancyType | null;
   estimated_value: string | null;
   purchase_price: string | null;
+  /** The MISMO valuation amount (LP-90). The LTV's appraised basis reads this first
+   * (`valuation_amount || estimated_value`), so it's exposed + editable on the Overview. */
+  valuation_amount: string | null;
 }
 
 /** The state of LP-69's async AI needs reasoning (LP-71.5). `null` = not triggered. */
@@ -79,6 +83,10 @@ export type AiNeedsStatus = "pending" | "completed" | "failed";
 export interface LoanFileDetail extends LoanFileSummary {
   loan_officer_name: string | null;
   loan_officer_email: string | null;
+  /** The refinance cash-out kind (LP-99). Null for a purchase, or for a refi whose kind the
+   * MISMO import couldn't determine — the Overview surfaces that so it's corrected (the LTV
+   * limit depends on it; cash-out is stricter). Editable only when the purpose is refinance. */
+  refinance_type: RefinanceType | null;
   ai_needs_status: AiNeedsStatus | null;
   borrowers: BorrowerPublic[];
   property: PropertyPublic | null;

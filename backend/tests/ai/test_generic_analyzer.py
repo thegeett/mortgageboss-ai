@@ -2,7 +2,7 @@
 
 The analyzer is the flexible "understand anything" fallback, so the focus is the
 structured-but-flexible parse (generic slots; bad/empty entries dropped; amounts
-coerced; honest nulls), the Sonnet model + generous budget, graceful failure
+coerced; honest nulls), the Opus model + generous budget, graceful failure
 (``None`` on any failure), and that the document bytes / full text / values are
 never logged.
 
@@ -89,7 +89,7 @@ async def test_analyze_success_uses_sonnet_and_generous_budget(
     a = await analyze_document(PDF_BYTES, "application/pdf")
     assert a is not None and a.document_type_guess == "civil court judgment"
     kwargs = mock.await_args.kwargs
-    assert kwargs["model"] == analyzer_module.settings.anthropic_model_extraction  # Sonnet
+    assert kwargs["model"] == analyzer_module.settings.anthropic_model_extraction  # Opus
     assert kwargs["max_tokens"] >= 8000  # generous (the analysis incl. full text)
     block = kwargs["messages"][0]["content"][0]
     assert block["type"] == "document"  # reads the doc natively

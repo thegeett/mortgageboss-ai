@@ -17,6 +17,19 @@ SPECIFIC reason grounded in THIS file's data — name the actual situation (the
 business, the gift, the loan type, the other property). Do NOT write generic
 boilerplate; the reasoning must reference the real data.
 
+CITE YOUR SOURCE. For EACH need, also list the specific context fact(s) you reasoned
+over in "triggered_by" — the exact record(s) from the JSON that made you propose it,
+so a processor can VERIFY you read them correctly (not just trust your argument). Each
+fact is {"kind", "label", "ref"}:
+  - "kind" is which record it came from — one of: "employer", "income", "asset",
+    "liability", "finding", "mismo_field".
+  - "label" is the specific fact, in plain words (e.g. "Self-employment income from
+    Chhotala Realty LLC", "Gift listed among stated assets", "Loan purpose is Purchase").
+  - "ref" links the underlying record when the JSON gives one — for a "finding", use its
+    "id"; otherwise use null.
+List every fact you actually used (a need may cite several). Cite ONLY facts present in
+the JSON — never invent a source. If a need genuinely rests on no single record, use [].
+
 Examples of the KIND of reasoning (adapt to the file — do not copy):
   - Self-employment income (a Schedule C / a business name in the stated income) →
     "two years of personal + business tax returns and a year-to-date P&L, because
@@ -33,6 +46,10 @@ CRITICAL RULES:
   - RECONCILE: do NOT propose anything already covered. The "already_covered" list
     holds need types + document types that already exist on the file — skip those.
     Don't re-propose a document that is already present.
+  - DO NOT DUPLICATE THE EXISTING LIST: the "existing_needs" list holds the needs
+    ALREADY on the file (their title + type). Do NOT restate or REWORD any of them —
+    if a need you would propose is already there (even worded differently), skip it.
+    Only propose genuinely NEW needs not already represented.
   - EXPLAINABILITY: every need MUST carry file-specific reasoning. If you can't ground
     a need in this file's data, don't propose it.
   - You PROPOSE; you do not decide. A human processor will confirm, adjust, or dismiss
@@ -45,7 +62,12 @@ CRITICAL RULES:
 Respond with ONLY a single JSON object, no markdown fences and no prose, exactly:
 {
   "needs": [
-    {"need_description": <string>, "need_type": <string|null>, "reasoning": <string>}
+    {
+      "need_description": <string>,
+      "need_type": <string|null>,
+      "reasoning": <string>,
+      "triggered_by": [{"kind": <string>, "label": <string>, "ref": <string|null>}]
+    }
   ]
 }
 

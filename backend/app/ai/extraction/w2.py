@@ -7,7 +7,7 @@ shape**", exactly what Phase 2's fan-out needs.
 
 Mirrors :mod:`app.ai.extraction.pay_stub`: a typed core (each a ``TypedField``
 with source) + a grouped catch-all (``additional_sections``), full-document
-Sonnet reading via the LP-37 wrapper, the shared defensive/tolerant parser
+Opus reading via the LP-37 wrapper, the shared defensive/tolerant parser
 (:mod:`app.ai.extraction.parsing`), honest nulls, graceful failure (never
 raises), and **metadata-only logging** (never bytes/values).
 
@@ -28,7 +28,8 @@ from typing import Any
 import structlog
 from pydantic import BaseModel, Field, ValidationError
 
-from app.ai.client import AIClientError, build_document_message, complete
+from app.ai.client import build_document_message
+from app.ai.extraction.model_call import run_extraction_completion
 from app.ai.extraction.parsing import (
     CoreSpec,
     coerce_decimal,
@@ -41,7 +42,6 @@ from app.ai.extraction.parsing import (
 from app.ai.extraction.shape import CatchAllSection, TypedField
 from app.ai.parsing import coerce_confidence, extract_json_object
 from app.ai.prompt_loader import load_prompt
-from app.core.config import settings
 from app.models.extraction import ExtractionStatus
 
 logger = structlog.get_logger(__name__)
@@ -164,7 +164,7 @@ async def extract_w2(content: bytes, media_type: str) -> W2ExtractionResult:
 
     Mirrors :func:`app.ai.extraction.pay_stub.extract_pay_stub`: empty/unsupported
     document → ``failed`` without an API call; otherwise loads the file-based
-    prompt, sends the full document to the Sonnet-class model, and parses
+    prompt, sends the full document to the Opus-class model, and parses
     defensively. The document bytes/base64, raw response, and extracted values
     (including the **SSN**) are never logged — only metadata.
     """
@@ -177,24 +177,22 @@ async def extract_w2(content: bytes, media_type: str) -> W2ExtractionResult:
     except ValueError:
         return W2ExtractionResult.failed("unsupported document media type")
 
-    try:
-        resp = await complete(
-            model=settings.anthropic_model_extraction,
-            system=system_prompt,
-            messages=[message],
-            max_tokens=_MAX_TOKENS,
-        )
-    except AIClientError:
-        logger.warning("w2_extraction_ai_failed")  # metadata only — no bytes/content
-        return W2ExtractionResult.failed("AI call failed")
+    call = await run_extraction_completion(
+        system=system_prompt,
+        message=message,
+        max_tokens=_MAX_TOKENS,
+        log_label="w2",
+    )
+    if call.text is None:
+        return W2ExtractionResult.failed(call.failure_reason or "AI call failed")
 
-    result = _parse_w2_json(resp.text)
+    result = _parse_w2_json(call.text)
     if result is None:
         logger.warning("w2_extraction_parse_failed")  # no raw response logged
         return W2ExtractionResult.failed("could not parse extraction")
 
-    result.input_tokens = resp.input_tokens
-    result.output_tokens = resp.output_tokens
+    result.input_tokens = call.input_tokens
+    result.output_tokens = call.output_tokens
 
     # Metadata only: status, confidence, COUNTS — NEVER the values (and never the
     # SSN). Counts: typed-core fields populated + catch-all sections captured.

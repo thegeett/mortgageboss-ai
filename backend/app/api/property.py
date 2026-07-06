@@ -8,11 +8,15 @@ The property is a **per-file singleton**: ``GET``/``PATCH``/``DELETE`` operate o
 the single property (``404`` when none), and a second ``POST`` returns ``409``.
 """
 
+from typing import Any
+
 from fastapi import APIRouter, HTTPException, status
 
-from app.api.dependencies import ScopedLoanFile
+from app.api.dependencies import CurrentUser, ScopedLoanFile
 from app.core.database import DbSession
+from app.models.activity_log import ActivityType
 from app.schemas.property import PropertyCreate, PropertyResponse, PropertyUpdate
+from app.services.activity_log import field_changes, log_activity
 from app.services.properties import (
     PropertyExistsError,
     create_property,
@@ -20,6 +24,7 @@ from app.services.properties import (
     soft_delete_property,
     update_property,
 )
+from app.services.verifications import mark_verification_stale
 
 router = APIRouter(prefix="/loan-files/{file_identifier}/property", tags=["property"])
 
@@ -53,13 +58,33 @@ async def create(
 
 @router.patch("", response_model=PropertyResponse)
 async def update(
-    payload: PropertyUpdate, loan_file: ScopedLoanFile, db: DbSession
+    payload: PropertyUpdate, loan_file: ScopedLoanFile, current_user: CurrentUser, db: DbSession
 ) -> PropertyResponse:
-    """Update the file's property; 404 if it has none."""
+    """Update the file's property; 404 if it has none.
+
+    Audited with the actual **from→to values** and **marks verification stale**
+    (LP-80.5) — the property is a verification baseline input (it drives LTV), so a
+    change moves the baseline, the same as a document change. Property edits were
+    previously silent; they are now audited.
+    """
     property_obj = await get_property(db, loan_file_id=loan_file.id)
     if property_obj is None:
         raise _NOT_FOUND
+
+    provided = payload.model_dump(exclude_unset=True)
+    before: dict[str, Any] = {field: getattr(property_obj, field) for field in provided}
     await update_property(db, property_obj=property_obj, data=payload)
+    changes = field_changes(before, provided)
+    if changes:
+        await log_activity(
+            db,
+            loan_file_id=loan_file.id,
+            activity_type=ActivityType.FILE_UPDATED,
+            summary="Edited the subject property",
+            actor_user_id=current_user.id,
+            detail={"section": "property", "action": "edit", "changes": changes},
+        )
+        await mark_verification_stale(db, loan_file_id=loan_file.id)
     await db.commit()
     return PropertyResponse.model_validate(property_obj)
 

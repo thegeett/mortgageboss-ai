@@ -17,6 +17,15 @@ def test_estimate_cost_zero_tokens_is_zero() -> None:
     assert cost == 0.0
 
 
+def test_opus_extraction_tier_is_priced() -> None:
+    # The extraction/reasoning tier runs on Opus 4.8, so its pricing must be present (an
+    # absent model would silently estimate $0). Opus is priced above Sonnet (~5x).
+    assert "claude-opus-4-8" in PRICING
+    opus = estimate_cost(model="claude-opus-4-8", input_tokens=1000, output_tokens=1000)
+    sonnet = estimate_cost(model="claude-sonnet-4-5", input_tokens=1000, output_tokens=1000)
+    assert opus > sonnet > 0
+
+
 def test_estimate_cost_unknown_model_falls_back_and_warns() -> None:
     with structlog.testing.capture_logs() as logs:
         cost = estimate_cost(model="not-a-real-model", input_tokens=1000, output_tokens=1000)

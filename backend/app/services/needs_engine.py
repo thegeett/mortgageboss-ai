@@ -170,6 +170,78 @@ async def record_need_correction(
 # A need awaiting a document is in one of these (the orthogonal REQUESTED counts).
 _OPEN_STATES = (NeedsItemStatus.PENDING, NeedsItemStatus.REQUESTED)
 
+# HONEST SATISFACTION (LP-108). The matcher can only verify "a document of the right kind is
+# present" — NOT that a graded requirement (N accounts / M months / M years) is fully met. So a
+# matched document auto-VERIFIES a need ONLY when the need is genuinely satisfied by ONE document
+# (SIMPLE-PRESENCE); a GRADED need instead stops at RECEIVED = "documents attached — confirm
+# coverage", and the processor confirms the coverage the system cannot yet verify. This prevents a
+# DANGEROUS FALSE-GREEN (a 2-month / all-accounts need reading "satisfied" on a single statement).
+#
+# SIMPLE-PRESENCE = the deliverable is inherently ONE document. GROUNDED STARTER — validate with
+# Priya (she confirms which needs are truly one-document-satisfiable). SAFE DEFAULT: anything NOT on
+# this list (incl. every AI-proposed need and any unknown type) is treated as GRADED — under-claiming
+# (an extra confirm click) is a mild annoyance; over-claiming (a false-green) is the dangerous failure.
+_SIMPLE_PRESENCE_NEEDS_TYPES: frozenset[str] = frozenset(
+    {
+        "drivers_license",
+        "purchase_agreement",
+        "gift_letter",
+        "letter_of_explanation",
+        "homeowners_insurance",
+        "title_commitment",
+        "appraisal",
+        "verification_of_employment",
+        "payoff_statement",
+        "existing_mortgage_statement",
+    }
+)
+
+# Umbrella / semantic need types (typically AI-proposed) that name a CATEGORY of documents rather
+# than one concrete document type — so they can't match a document by ``needs_type == document_type``.
+# They match any document in the mapped category instead (a coarse, category-level match — NOT the
+# account-level coverage matching of the V2 "Option A"). GROUNDED STARTER — validate with Priya.
+_UMBRELLA_NEED_CATEGORY: dict[str, DocumentCategory] = {
+    "asset_statement": DocumentCategory.ASSETS,
+    "income_document": DocumentCategory.INCOME_EMPLOYMENT,
+}
+
+
+def is_simple_presence_need(need: NeedsItem) -> bool:
+    """Whether ONE document is the whole requirement (LP-108). Safe default: graded (False)."""
+    return (need.needs_type or "") in _SIMPLE_PRESENCE_NEEDS_TYPES
+
+
+def needs_coverage_confirmation(need: NeedsItem) -> bool:
+    """Whether the need is GRADED — a matched document is "attached, confirm coverage", not verified."""
+    return not is_simple_presence_need(need)
+
+
+def documents_matching_need(need: NeedsItem, documents: list[Document]) -> list[Document]:
+    """All COMPLETED documents on the file that match a need's criteria (LP-109, derive-on-read).
+
+    Reuses the SAME trivial-equality criteria the matcher uses (``document_type == needs_type``, or
+    the umbrella need's category == the document's category) — computed at DISPLAY time over the
+    documents already stored, with NO schema/matcher change. Delivers LP-108's "show the matched
+    documents": a graded need shows the full evidence set (not just the single stored trigger), so
+    the processor can confirm coverage against it.
+
+    The set is intentionally COARSE / over-inclusive for umbrella needs (e.g. an ``asset_statement``
+    need includes every ASSETS-category document, even an earnest-money withdrawal) — that is exactly
+    the "confirm coverage" honesty level: the system surfaces every candidate; the processor curates
+    which actually count. Precise, curated, persisted per-need sets are the V2 coverage grid (Option A).
+    """
+    needs_type = need.needs_type or ""
+    umbrella_category = _UMBRELLA_NEED_CATEGORY.get(needs_type)
+    return [
+        d
+        for d in documents
+        if d.status is DocumentStatus.COMPLETED
+        and (
+            d.document_type == needs_type
+            or (umbrella_category is not None and d.category is umbrella_category)
+        )
+    ]
+
 
 async def apply_document_to_needs(db: AsyncSession, document: Document) -> NeedsItem | None:
     """Advance the matching pending need for a just-processed document (LP-68).
@@ -183,11 +255,15 @@ async def apply_document_to_needs(db: AsyncSession, document: Document) -> Needs
     """
     if not document.document_type:
         return None
+    # Match by needs_type == document_type (the concrete case), OR — for an umbrella need naming a
+    # CATEGORY of documents (e.g. "asset_statement") — by the document's category. Coarse, not
+    # account-level (LP-108).
+    umbrella_types = [t for t, c in _UMBRELLA_NEED_CATEGORY.items() if c == document.category]
     stmt = (
         select(NeedsItem)
         .where(
             NeedsItem.loan_file_id == document.loan_file_id,
-            NeedsItem.needs_type == document.document_type,
+            NeedsItem.needs_type.in_([document.document_type, *umbrella_types]),
             NeedsItem.status.in_(_OPEN_STATES),
         )
         .order_by(NeedsItem.created_at)
@@ -198,15 +274,22 @@ async def apply_document_to_needs(db: AsyncSession, document: Document) -> Needs
         return None
 
     await transition_need(db, need=need, to_state=NeedsItemStatus.RECEIVED, document_id=document.id)
-    if document.status is DocumentStatus.COMPLETED:
-        await transition_need(db, need=need, to_state=NeedsItemStatus.VERIFIED)
-    else:  # NEEDS_REVIEW / FAILED — a document arrived but did not pass
+    if document.status is not DocumentStatus.COMPLETED:
+        # NEEDS_REVIEW / FAILED — a document arrived but did not pass.
         await transition_need(
             db,
             need=need,
             to_state=NeedsItemStatus.REJECTED,
             reason=f"A document arrived but did not pass processing ({document.status.value}).",
         )
+    elif is_simple_presence_need(need):
+        # SIMPLE-PRESENCE (LP-108): one document IS the requirement → the match is the verification.
+        await transition_need(db, need=need, to_state=NeedsItemStatus.VERIFIED)
+    else:
+        # GRADED (LP-108): stop at RECEIVED = "documents attached — confirm coverage". The system
+        # verified a document is present, NOT that the full requirement (all accounts/months/years)
+        # is met — the processor confirms that coverage (never a false-green). Stays RECEIVED.
+        logger.info("needs_item_attached_confirm_coverage", need_id=str(need.id))
     logger.info(
         "needs_item_advanced",
         need_id=str(need.id),
@@ -214,6 +297,17 @@ async def apply_document_to_needs(db: AsyncSession, document: Document) -> Needs
         new_status=need.status,
     )
     return need
+
+
+async def confirm_need_coverage(db: AsyncSession, *, need: NeedsItem) -> NeedsItem:
+    """The processor confirms a graded need's coverage (LP-108): RECEIVED → VERIFIED.
+
+    The honest counterpart to auto-verify: a matched document put the need in RECEIVED ("documents
+    attached — confirm coverage"); the processor, having judged the full coverage the system cannot
+    (all accounts / months / years present), confirms it. Uses the guarded transition (a no-op-safe
+    move only from RECEIVED). Uses ``flush``; the caller owns the transaction.
+    """
+    return await transition_need(db, need=need, to_state=NeedsItemStatus.VERIFIED)
 
 
 async def reopen_needs_satisfied_by(db: AsyncSession, *, document_id: UUID) -> list[NeedsItem]:
@@ -346,6 +440,13 @@ async def seed_floor_needs(db: AsyncSession, loan_file: LoanFile) -> list[NeedsI
                     borrower_id=borrower.id,
                     origin=NeedsItemOrigin.FLOOR,
                     disposition=NeedsItemDisposition.CONFIRMED,
+                    # LP-110: the deterministic source — the rule + the borrower it fired on.
+                    source_facts=[
+                        {
+                            "kind": "rule",
+                            "label": f"Every borrower must provide a government ID — {name}",
+                        }
+                    ],
                 )
             )
     for needs_type, title, category in _PER_FILE_UNIVERSAL:
@@ -358,20 +459,57 @@ async def seed_floor_needs(db: AsyncSession, loan_file: LoanFile) -> list[NeedsI
                 category=category,
                 origin=NeedsItemOrigin.FLOOR,
                 disposition=NeedsItemDisposition.CONFIRMED,
+                source_facts=[{"kind": "rule", "label": "Required on every loan file"}],
             )
         )
 
     # --- CONDITIONAL FLOOR RULES (situation-dependent, but still deterministic) ---
-    specs: list[tuple[str, str, DocumentCategory]] = []
+    # Each spec carries its DETERMINISTIC source (LP-110): the exact stated data the rule fired on,
+    # so the need reads "Required because — {data}" (certain), grounded to the imported record.
+    specs: list[tuple[str, str, DocumentCategory, list[dict[str, str]]]] = []
     if await _has_stated_employment_income(db, loan_file.id):
-        specs.append(("pay_stub", "Recent pay stubs", DocumentCategory.INCOME_EMPLOYMENT))
-        specs.append(("w2", "W-2 (most recent year)", DocumentCategory.INCOME_EMPLOYMENT))
+        income_src = [{"kind": "income", "label": "Employment income is stated on the application"}]
+        specs.append(
+            ("pay_stub", "Recent pay stubs", DocumentCategory.INCOME_EMPLOYMENT, income_src)
+        )
+        specs.append(
+            ("w2", "W-2 (most recent year)", DocumentCategory.INCOME_EMPLOYMENT, income_src)
+        )
     if loan_file.loan_purpose is LoanPurpose.PURCHASE:
-        specs.append(("purchase_agreement", "Purchase agreement", DocumentCategory.PROPERTY))
+        specs.append(
+            (
+                "purchase_agreement",
+                "Purchase agreement",
+                DocumentCategory.PROPERTY,
+                [{"kind": "mismo_field", "label": "Loan purpose is Purchase"}],
+            )
+        )
+    elif loan_file.loan_purpose is LoanPurpose.REFINANCE:
+        # The refi analog of the purchase agreement (LP-100): a refinance needs the existing
+        # mortgage statement + a payoff statement (the current lien being refinanced). GROUNDED
+        # STARTER — validate-with-Priya (the exact refi need-set; subordination for a 2nd lien is
+        # a possible add, flagged not built here).
+        refi_src = [{"kind": "mismo_field", "label": "Loan purpose is Refinance"}]
+        specs.append(
+            (
+                "existing_mortgage_statement",
+                "Existing mortgage statement",
+                DocumentCategory.PROPERTY,
+                refi_src,
+            )
+        )
+        specs.append(("payoff_statement", "Payoff statement", DocumentCategory.PROPERTY, refi_src))
     if await _has_stated_assets(db, loan_file.id):
-        specs.append(("bank_statement", "Bank statements", DocumentCategory.ASSETS))
+        specs.append(
+            (
+                "bank_statement",
+                "Bank statements",
+                DocumentCategory.ASSETS,
+                [{"kind": "asset", "label": "Assets are stated on the application"}],
+            )
+        )
 
-    for needs_type, title, category in specs:
+    for needs_type, title, category, source_facts in specs:
         created.append(
             await create_needs_item(
                 db,
@@ -381,6 +519,7 @@ async def seed_floor_needs(db: AsyncSession, loan_file: LoanFile) -> list[NeedsI
                 category=category,
                 origin=NeedsItemOrigin.FLOOR,
                 disposition=NeedsItemDisposition.CONFIRMED,
+                source_facts=list(source_facts),
             )
         )
 

@@ -3,7 +3,7 @@
 On upload, :func:`process_document` chains, for one document, independently:
 
     read bytes → classify (Haiku) → look up the type's tier in the catalog →
-    route by tier → (Tier 1) extract via the registry (Sonnet) → persist a
+    route by tier → (Tier 1) extract via the registry (Opus) → persist a
     versioned Extraction (+ cost) → set a TERMINAL status → enqueue the per-file
     needs update (LP-68, serialized) → log activity.
 

@@ -16,7 +16,7 @@ from unittest.mock import AsyncMock
 import pytest
 import structlog
 from app.ai.client import AIClientError
-from app.ai.extraction import w2 as w2_module
+from app.ai.extraction import model_call
 from app.ai.extraction.w2 import W2Extraction, W2ExtractionResult, _parse_w2_json, extract_w2
 from app.models.extraction import ExtractionStatus
 
@@ -69,9 +69,11 @@ def _mock_complete(
         mock = AsyncMock(side_effect=exc)
     else:
         mock = AsyncMock(
-            return_value=SimpleNamespace(text=text, input_tokens=180, output_tokens=70, model="m")
+            return_value=SimpleNamespace(
+                text=text, input_tokens=180, output_tokens=70, model="m", stop_reason="end_turn"
+            )
         )
-    monkeypatch.setattr(w2_module, "complete", mock)
+    monkeypatch.setattr(model_call, "complete", mock)
     return mock
 
 
@@ -177,7 +179,7 @@ async def test_extract_success(monkeypatch: pytest.MonkeyPatch) -> None:
     assert result.data.tax_year.value == 2024
     assert len(result.data.additional_sections) == 2
     kwargs = mock.await_args.kwargs
-    assert kwargs["model"] == w2_module.settings.anthropic_model_extraction
+    assert kwargs["model"] == model_call.settings.anthropic_model_extraction
     block = kwargs["messages"][0]["content"][0]
     assert block["type"] == "document"
     assert base64.standard_b64decode(block["source"]["data"]) == PDF_BYTES

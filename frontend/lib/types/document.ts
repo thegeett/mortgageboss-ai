@@ -99,6 +99,16 @@ export interface DocumentResponse {
   /** A consistent {Type}_{Identifier}_{Date} display name (the stored file is untouched). */
   standard_name: string;
   package_qualification: PackageQualification;
+  // --- LP-105: a consolidated, type-aware period line (derived from the extracted date/period) ---
+  /** e.g. `{ label: "Period", value: "Jun 1 - Jun 15, 2026" }`, or `null` when the type has no
+   * period concept or the date isn't extracted yet. */
+  period: DocumentPeriod | null;
+}
+
+/** A document's consolidated period line for display (LP-105). */
+export interface DocumentPeriod {
+  label: string;
+  value: string;
 }
 
 /**
