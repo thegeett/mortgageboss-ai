@@ -76,6 +76,13 @@ class CrossSourceRule:
     optional ``threshold`` is threshold-as-data (e.g. the income-variance %), overlay-
     overrideable by ``rule_id``. ``program`` is ``None`` for the program-agnostic checks
     (most cross-source checks apply to both Conventional and FHA).
+
+    ``playbook_id`` (LP-117.5) is additive, nullable metadata linking this live rule to
+    its row in the verification rule playbook (``docs/rules/verification_rule_playbook.xlsx`` /
+    ``rule_seed.csv``) — e.g. the employer rule → ``IN-5``. It is traceability only (no
+    behavior); left ``None`` where no confident mapping exists yet. LP-118's
+    ``verification_rules`` table carries the same field as PK-adjacent metadata so every
+    runtime rule traces to the playbook.
     """
 
     rule_id: str
@@ -91,6 +98,8 @@ class CrossSourceRule:
     purpose: PurposeScope | None = None
     starter: bool = True
     notes: str = ""
+    # LP-117.5 — additive, nullable playbook cross-reference (traceability only, no behavior).
+    playbook_id: str | None = None
 
     def with_threshold(self, threshold: Condition) -> CrossSourceRule:
         """Return a copy with the threshold replaced (identity/logic unchanged) — overlays."""
@@ -396,6 +405,7 @@ XSRC_IDENTITY_NAME = CrossSourceRule(
     severity=RuleSeverity.YELLOW,
     template="Borrower name differs across sources: {values}.",
     check=_consistency_check("names", "name"),
+    playbook_id="ID-1",  # Borrower name consistency
     notes="STARTER — name normalization (suffix/middle-name) is a validate-with-Priya item.",
 )
 XSRC_IDENTITY_SSN = CrossSourceRule(
@@ -405,6 +415,7 @@ XSRC_IDENTITY_SSN = CrossSourceRule(
     severity=RuleSeverity.RED,
     template="SSN differs across documents: {values}.",
     check=_consistency_check("ssns", "ssn"),
+    playbook_id="ID-2",  # SSN consistency
     notes="STARTER — an SSN mismatch is a serious identity/fraud red flag (RED).",
 )
 XSRC_IDENTITY_DOB = CrossSourceRule(
@@ -414,6 +425,7 @@ XSRC_IDENTITY_DOB = CrossSourceRule(
     severity=RuleSeverity.YELLOW,
     template="Date of birth differs across documents: {values}.",
     check=_consistency_check("dobs", "dob"),
+    playbook_id="ID-3",  # DOB consistency
     notes="STARTER — date-format normalization to verify.",
 )
 
@@ -447,6 +459,7 @@ XSRC_ADDRESS_CURRENT_CONSISTENCY = CrossSourceRule(
     severity=RuleSeverity.YELLOW,
     template="Current/mailing address differs across documents: {values}.",
     check=_consistency_check("current_addresses", "current_address"),
+    playbook_id="ID-4",  # Current address consistency
     notes="STARTER — a recent move can explain this; surfaced for review, not a block.",
 )
 
@@ -459,6 +472,7 @@ XSRC_INCOME_STATED_VS_DOCUMENTED = CrossSourceRule(
     template="Stated income ({stated}) differs from documented income ({documented}) by {variance}% (> {threshold}%).",
     check=_check_income_variance,
     threshold=_VARIANCE_10,
+    playbook_id="IN-1",  # Stated vs documented income variance
     notes=(
         "STARTER — threshold-as-data (the 10% variance is overlay-overrideable by rule_id, LP-80). "
         "CONSUMES the stated + documented income; feeds the APPLY→recompute correct_income path (LP-76)."
@@ -471,6 +485,7 @@ XSRC_INCOME_EMPLOYER_NAME = CrossSourceRule(
     severity=RuleSeverity.YELLOW,
     template="Documented employer not among the stated employers: {employer}.",
     check=_check_employer_name_consistency,
+    playbook_id="IN-5",  # Employer name consistency (the LP-120 DET-FUZZY reference case)
     notes="STARTER — employer-name normalization (DBA/legal name) to verify.",
 )
 XSRC_INCOME_EMPLOYER_COUNT = CrossSourceRule(
@@ -491,6 +506,7 @@ XSRC_LIABILITY_UNDISCLOSED = CrossSourceRule(
     severity=RuleSeverity.YELLOW,
     template="Liability on the credit report not disclosed on the application: {holder} ({amount}).",
     check=_check_undisclosed_debt,
+    playbook_id="CR-1",  # Undisclosed liability (credit report vs application)
     notes=(
         "STARTER — the undisclosed-debt graduate: the DETERMINISTIC detection counterpart to LP-78's "
         "AI undisclosed-obligation finding + LP-83's conv.dti.reunderwrite_undisclosed_debt rule. Applying "
@@ -527,6 +543,7 @@ XSRC_ASSET_LARGE_DEPOSIT = CrossSourceRule(
     severity=RuleSeverity.YELLOW,
     template="Large deposit not reflected / unsourced: {amount}.",
     check=_check_large_deposit_unsourced,
+    playbook_id="AS-1",  # Large-deposit sourcing sweep
     notes="STARTER — cross-links LP-82's single-source large-deposit rule (this compares across sources).",
 )
 XSRC_ASSET_GIFT_WITHOUT_LETTER = CrossSourceRule(
@@ -536,6 +553,7 @@ XSRC_ASSET_GIFT_WITHOUT_LETTER = CrossSourceRule(
     severity=RuleSeverity.YELLOW,
     template="A gift of {amount} is stated but no gift letter / transfer documentation is present.",
     check=_check_gift_without_letter,
+    playbook_id="AS-5",  # Gift-fund documentation chain
     notes="STARTER — cross-links LP-82's single-source gift rule (this compares stated gift vs the doc).",
 )
 
@@ -548,6 +566,7 @@ XSRC_TERMS_PRICE_VS_CONTRACT = CrossSourceRule(
     template="Stated purchase price ({stated}) differs from the contract price ({documented}).",
     check=_check_price_vs_contract,
     purpose=PurposeScope.PURCHASE,  # LP-100 — purchase-only (a refi has no sales contract to compare)
+    playbook_id="PC-2",  # Purchase price matches loan terms (contract vs stated)
     notes=(
         "STARTER — owns the terms_discrepancy canonical type (added to the AI taxonomy for de-dup). "
         "PURPOSE-GATED to purchase (LP-100): safe by intent, not just the incidental absence of the "
@@ -579,6 +598,7 @@ XSRC_PROPERTY_OCCUPANCY = CrossSourceRule(
     severity=RuleSeverity.YELLOW,
     template="Stated occupancy ({stated}) conflicts with the evidence ({evidence}).",
     check=_check_occupancy_vs_evidence,
+    playbook_id="OC-1",  # Occupancy consistency
     notes="STARTER — owns occupancy_discrepancy; e.g. investment stated but the ID is at the subject.",
 )
 

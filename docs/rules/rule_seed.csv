@@ -1,0 +1,134 @@
+playbook_id,category,name,layer,source,status,scope,required_documents
+ID-1,Application/Identity,Borrower name consistency,DET-FUZZY,Both,NOW,IN,"Application/1003 (MISMO), Driver's license/ID, Pay stub, W-2, Bank statement"
+ID-2,Application/Identity,SSN consistency,DET,Both,EXTRACT,IN,"Application (MISMO), W-2, Credit report, any doc with SSN"
+ID-3,Application/Identity,DOB consistency,DET,Both,EXTRACT,IN,"Driver's license/ID, Application (MISMO)"
+ID-4,Application/Identity,Current address consistency,DET-FUZZY,ChatGPT,EXTRACT,IN,"Application (MISMO), Credit report, Bank statement, Pay stub"
+ID-5,Application/Identity,ID expiration,DET,Both,NOW,IN,Driver's license / State ID / Passport
+ID-6,Application/Identity,Application completeness (1003),DET,ChatGPT,EXTRACT,IN,Application / 1003 (MISMO)
+ID-7,Application/Identity,Marital status / title consistency,DET,ChatGPT,EXTRACT,?,"Application (MISMO), Title commitment"
+ID-8,Application/Identity,Citizenship / residency eligibility,DET+AI,ChatGPT,EXTRACT,?,"Application (MISMO), Green card / Visa / Immigration documents"
+ID-9,Application/Identity,Power of attorney acceptability,AI,ChatGPT,BLOCKED,?,Power of attorney document
+ID-10,Application/Identity,OFAC / fraud / sanctions check,DET,ChatGPT,BLOCKED,OUT,Fraud/sanctions service report (external)
+CR-1,Credit/Liabilities,Undisclosed liability (MISMO vs app),DET,Claude,NOW,IN,"Application (MISMO liabilities), (DTI is computed from these)"
+CR-2,Credit/Liabilities,HELOC in HCLTV,DET,Claude,NOW,IN,Application (MISMO - HELOC liability with credit limit)
+CR-3,Credit/Liabilities,Paid-to-qualify verification,DET,Claude,NOW,IN,"Application (MISMO exclusion flags), Payoff statement / paid-in-full letter"
+CR-4,Credit/Liabilities,Undisclosed tradeline (report vs app),DET-FUZZY,Both,BLOCKED,IN,"Credit report (tradelines), Application (stated liabilities)"
+CR-5,Credit/Liabilities,Credit inquiry LOE,DET,Both,BLOCKED,IN,"Credit report (inquiries), Letters of explanation on file"
+CR-6,Credit/Liabilities,Derogatory seasoning,DET,Both,BLOCKED,IN,"Credit report (public records), (Loan program)"
+CR-7,Credit/Liabilities,Minimum credit score,DET,Both,BLOCKED,IN,Credit report (scores)
+CR-8,Credit/Liabilities,Mortgage payment history,DET,ChatGPT,BLOCKED,IN,Credit report (mortgage tradelines)
+CR-9,Credit/Liabilities,Student loan payment calculation,DET,ChatGPT,BLOCKED,IN,"Credit report (student loans), (Loan program)"
+CR-10,Credit/Liabilities,Collections / charge-offs treatment,DET+AI,ChatGPT,BLOCKED,IN,"Credit report (collections/charge-offs), (Loan program)"
+CR-11,Credit/Liabilities,Judgments / liens resolution,DET,ChatGPT,BLOCKED,IN,"Credit report (public records), Title commitment"
+CR-12,Credit/Liabilities,Disputed accounts,DET+AI,ChatGPT,BLOCKED,IN,Credit report (dispute flags)
+CR-13,Credit/Liabilities,Credit report validity at closing,DET,Claude,BLOCKED,IN,"Credit report (date), Purchase agreement (closing date)"
+IN-1,Income/Employment,Stated vs documented income variance,DET,Claude,EXISTS?,IN,"Application (stated income), Pay stub, W-2"
+IN-2,Income/Employment,Pay stub recency,DET,Both,NOW,IN,Pay stub
+IN-3,Income/Employment,YTD income consistency,DET,Claude,NOW,IN,Pay stub (YTD + pay date)
+IN-4,Income/Employment,Employment gap,DET,Both,EXTRACT,IN,"Application (employment history), VOE, Pay stub"
+IN-5,Income/Employment,Employer name consistency (LP-115),DET-FUZZY,Both,IN PROGRESS,IN,"Application (stated employer), Pay stub, W-2"
+IN-6,Income/Employment,Pay-stub <-> W-2 employer coverage,DET-FUZZY,Claude,NOW,IN,"Pay stub, W-2"
+IN-7,Income/Employment,Same line of work (job change),AI,ChatGPT,EXTRACT,IN,"Pay stub, VOE, Offer letter, Application (employment history)"
+IN-8,Income/Employment,VOE present,DET,Both,EXTRACT,IN,Written VOE or Verbal VOE
+IN-9,Income/Employment,Future employment (offer letter),DET,ChatGPT,EXTRACT,IN,"Offer letter, First pay stub"
+IN-10,Income/Employment,Declining income,DEFERRED-DET,Both,NOW*,IN,"W-2 (2 years), Pay stub (YTD)"
+IN-11,Income/Employment,Variable income averaging / history,DEFERRED-DET,Both,NOW*,IN,"Pay stub (YTD variable), W-2 (2 years)"
+IN-12,Income/Employment,Self-employment income analysis,DEFERRED-DET,Both,EXTRACT,IN,"Personal tax returns (1-2 yrs), Business tax returns, K-1, P&L, Balance sheet, CPA letter, Business license"
+IN-13,Income/Employment,Other income continuance,DET+AI,ChatGPT,EXTRACT,?,"Award letter, Court order, 1099-R, Bank statements (deposit proof)"
+IN-14,Income/Employment,Rental income support,DET+AI,ChatGPT,EXTRACT,?,"Lease agreement, Tax returns (Schedule E), Appraisal rent schedule (1007/1025)"
+AS-1,Assets,Large-deposit sourcing sweep,DET+AI,Both,NOW,IN,"Bank/asset statements, plus any Gift letter / sale documents / transfer evidence that sources a deposit"
+AS-2,Assets,Earnest money deposit sourcing,DET+AI,Both,NOW,IN,"Purchase agreement (EMD amount), Bank statement (showing the debit), Cancelled check/wire"
+AS-3,Assets,Cash-to-close sufficiency,DET,Claude,NOW,IN,"Bank/asset statements, Loan Estimate/CD (costs), (reserves from the calculator)"
+AS-4,Assets,Reserves adequacy,DET,Both,EXISTS?,IN,Bank/asset/retirement statements
+AS-5,Assets,Gift-fund documentation chain,DET+AI,Both,NOW,IN,"Gift letter, Donor bank statement, Bank statement (showing the gift deposit), Transfer/wire evidence"
+AS-6,Assets,Account ownership,DET-FUZZY,Both,EXTRACT,IN,Bank/asset statement (account holder name)
+AS-7,Assets,NSF / overdraft flag,DET+AI,Both,NOW,IN,Bank statement
+AS-8,Assets,Statement chaining (continuity),DET,Claude,NOW,IN,Bank/asset statements (2+ for the account)
+AS-9,Assets,Missing pages,DET,Claude,EXTRACT,IN,Bank/asset statement (with declared page count)
+AS-10,Assets,Statement recency completeness (enough months),DET,Claude,NOW,IN,Bank/asset statements
+AS-11,Assets,Retirement/stock liquidation terms,DET+AI,ChatGPT,EXTRACT,?,"Retirement/investment account statement, Plan terms"
+AS-12,Assets,Borrowed funds detection,AI,ChatGPT,NOW,IN,"Bank statements, (any loan documents)"
+DT-1,DTI/ATR,DTI ratio vs limit,CALC,Both,EXISTS,IN,(Computed from income + liabilities - the calculator)
+DT-2,DTI/ATR,HOA dues in DTI,DET,ChatGPT,EXISTS?,IN,"Purchase agreement / HOA statement / Condo docs, (DTI inputs)"
+DT-3,DTI/ATR,Mortgage insurance in DTI,DET,ChatGPT,EXISTS?,IN,"(MI factor / certificate), (DTI inputs)"
+DT-4,DTI/ATR,Property taxes estimate,DET+AI,ChatGPT,EXTRACT,IN,"Tax bill / assessment, Purchase agreement, Title"
+DT-5,DTI/ATR,Insurance premium in DTI,DET,Both,NOW,IN,"Insurance binder/quote, (DTI inputs)"
+DT-6,DTI/ATR,Retained-property PITIA,DET,ChatGPT,EXTRACT,IN,"Application (REO), Mortgage statements, Lease (for rental offset)"
+DT-7,DTI/ATR,ATR documentation completeness,DET+AI,ChatGPT,EXTRACT,?,"Income docs, Asset docs, Credit report, (DTI computation)"
+PR-1,Property,LTV / CLTV / HCLTV limits,CALC,Both,EXISTS?,IN,(Computed from loan amount + value - the calculator)
+PR-2,Property,Appraised value vs purchase price,DET,Both,NOW,IN,"Purchase agreement, Appraisal report"
+PR-3,Property,Property type eligibility,DET+AI,Both,EXTRACT,IN,"Appraisal (property type), Application"
+PR-4,Property,Appraisal completeness,DET+AI,ChatGPT,BLOCKED,IN,Appraisal report
+PR-5,Property,Appraisal condition rating,AI,ChatGPT,BLOCKED,IN,Appraisal report
+PR-6,Property,Appraisal validity at closing,DET,Both,EXTRACT,IN,"Appraisal report (date), Purchase agreement (closing date)"
+PR-7,Property,Appraisal address matches,DET-FUZZY,ChatGPT,BLOCKED,IN,"Appraisal, Purchase agreement, Application (MISMO), Title"
+PR-8,Property,Disaster-area reinspection,DET+AI,ChatGPT,BLOCKED,?,"Appraisal, Disaster declaration data, Reinspection (1004D)"
+OC-1,Occupancy,Occupancy consistency,DET+AI,Both,EXTRACT,IN,"Application (occupancy), Driver's license, Bank/paystub (address)"
+OC-2,Occupancy,Occupancy reasonableness,AI,Both,EXTRACT,IN,"Application, Existing REO, Employer address"
+OC-3,Occupancy,Investment rental support,DET+AI,ChatGPT,EXTRACT,?,"Lease, Appraisal rent schedule, Tax returns (Schedule E)"
+TI-1,Title,Title commitment parties,DET-FUZZY,Both,BLOCKED,IN,"Title commitment, Purchase agreement, Application (MISMO)"
+TI-2,Title,Legal description match,DET+AI,ChatGPT,BLOCKED,IN,"Title commitment, Appraisal, Purchase agreement"
+TI-3,Title,Existing liens / unreleased mortgage,DET+AI,Both,BLOCKED,IN,"Title commitment, Payoff statements"
+TI-4,Title,Judgments / tax liens on title,DET,ChatGPT,BLOCKED,IN,Title commitment
+TI-5,Title,Vesting,DET+AI,ChatGPT,BLOCKED,IN,"Title commitment, Application"
+TI-6,Title,Chain of title / rapid transfer,AI,ChatGPT,BLOCKED,IN,Title commitment (chain of title)
+IH-1,Insurance/Flood,Insurance adequacy,DET,Both,NOW,IN,Homeowners insurance binder/policy
+IH-2,Insurance/Flood,Mortgagee clause,DET+AI,Both,NOW,IN,Homeowners insurance binder/policy
+IH-3,Insurance/Flood,Insurance effective date,DET,Both,EXTRACT,IN,Homeowners insurance binder
+IH-4,Insurance/Flood,Premium matches DTI,DET,Both,NOW,IN,"Insurance binder, (DTI inputs)"
+IH-5,Insurance/Flood,Flood zone determination,DET,Both,BLOCKED,IN,Flood certification/determination
+IH-6,Insurance/Flood,Flood insurance required/present,DET,Both,BLOCKED,IN,"Flood determination, Flood insurance policy"
+IH-7,Insurance/Flood,Condo master policy,DET,Both,BLOCKED,?,"Condo master insurance policy, Condo questionnaire"
+IH-8,Insurance/Flood,Wind/hail coverage,DET+AI,ChatGPT,BLOCKED,?,"Insurance policy, (state requirements)"
+CO-1,Condo/HOA,Condo questionnaire present,DET,Both,BLOCKED,?,Condo questionnaire
+CO-2,Condo/HOA,HOA dues in DTI,DET,Both,EXTRACT,?,"Condo docs / HOA statement, (DTI inputs)"
+CO-3,Condo/HOA,Master insurance / fidelity,DET+AI,ChatGPT,BLOCKED,?,"Condo questionnaire, Master policy"
+CO-4,Condo/HOA,HOA budget / reserves,DET+AI,ChatGPT,BLOCKED,?,"HOA budget, Condo questionnaire"
+CO-5,Condo/HOA,Litigation / delinquency / concentration,AI,Both,BLOCKED,?,Condo questionnaire
+PC-1,Contract,Contract parties match,DET-FUZZY,Both,NOW,IN,"Purchase agreement, Application (MISMO), Title"
+PC-2,Contract,Purchase price matches loan terms,DET,Both,NOW,IN,"Purchase agreement, Application (MISMO)"
+PC-3,Contract,Property address matches,DET-FUZZY,Both,NOW,IN,"Purchase agreement, Application (MISMO), Appraisal, Title"
+PC-4,Contract,Seller credit / IPC limit,DET,Both,EXTRACT,IN,"Purchase agreement (seller credit), (program IPC limit)"
+PC-5,Contract,EMD amount & source,DET+AI,Both,NOW,IN,"Purchase agreement, Bank statement, Cancelled check/wire"
+PC-6,Contract,Addenda signed,HYBRID,ChatGPT,EXTRACT,IN,Purchase agreement + all addenda
+PC-7,Contract,Closing date realistic/current,DET,Both,NOW,IN,Purchase agreement (closing date)
+PC-8,Contract,Personal property not inflating value,AI,ChatGPT,EXTRACT,IN,Purchase agreement
+PC-9,Contract,Financing contingency dates,DET,ChatGPT,EXTRACT,?,Purchase agreement (contingency terms)
+MI-1,MI/Fees,PMI required (Conv >80% LTV),DET,Both,NOW,IN,"(LTV from the calculator), MI certificate"
+MI-2,MI/Fees,MI factor correct,DET,Both,EXTRACT,IN,"MI certificate, (DTI inputs)"
+MI-3,MI/Fees,MI certificate present,DET,Both,EXTRACT,IN,MI certificate
+MI-4,MI/Fees,FHA MIP (upfront + monthly),DET,Both,NOW,IN,"(FHA program), (loan/payment inputs)"
+MI-5,MI/Fees,Borrower-paid vs lender-paid MI,DET,ChatGPT,EXTRACT,IN,"MI certificate, Rate/pricing sheet"
+PE-1,Program,Conventional eligibility,DET,Both,EXISTS?,IN,"Application, Credit report, Appraisal, (calculators)"
+PE-2,Program,FHA case number,DET,ChatGPT,EXTRACT,IN,FHA case number assignment
+PE-3,Program,FHA minimum required investment,DET,ChatGPT,NOW,IN,"(Loan amount + price), Asset docs"
+PE-4,Program,FHA property condition,AI,ChatGPT,BLOCKED,IN,FHA appraisal report
+PE-5,Program,VA / USDA / Jumbo / Non-QM eligibility,DET,ChatGPT,—,OUT,(program-specific)
+AU-1,AUS,AUS data matches documents,DET,Both,BLOCKED,IN,"AUS findings (DU/LP), Income/asset/debt docs"
+AU-2,AUS,AUS required conditions collected,DET+AI,Both,BLOCKED,IN,"AUS findings (DU/LP), the collected documents"
+AU-3,AUS,AUS recommendation status,DET,Both,BLOCKED,IN,AUS findings (DU/LP)
+AU-4,AUS,AUS rerun needed,DET,Both,NOW,IN,(Change tracking on loan data)
+DC-1,Compliance,Loan Estimate timely,DET,ChatGPT,SCOPE?,?,"Loan Estimate, Application date"
+DC-2,Compliance,Intent to proceed,DET,ChatGPT,SCOPE?,?,Intent-to-proceed record
+DC-3,Compliance,Closing Disclosure 3-day timing,DET,ChatGPT,SCOPE?,?,"Closing Disclosure, Closing date"
+DC-4,Compliance,Fee tolerance (0% / 10%),DET,ChatGPT,SCOPE?,?,"Loan Estimate, Closing Disclosure"
+DC-5,Compliance,APR change threshold,DET,ChatGPT,SCOPE?,?,Loan Estimate/CD (APR)
+DC-6,Compliance,Appraisal delivery (ECOA),DET,ChatGPT,SCOPE?,?,Appraisal delivery record
+DC-7,Compliance,Changed-circumstance validity,DET+AI,ChatGPT,SCOPE?,?,"Loan Estimate (original + revised), Changed-circumstance documentation"
+RE-1,REO,REO reconciliation,DET-FUZZY,Both,BLOCKED,IN,"Application (REO), Credit report, Mortgage statements, Title"
+RE-2,REO,Retained-property tax & insurance,DET,ChatGPT,EXTRACT,IN,"Mortgage statements, Tax/insurance docs for retained REO"
+CL-1,Closing,Rate lock expiration,DET,Both,EXTRACT,IN,"Rate lock confirmation, Closing date"
+CL-2,Closing,Clear-to-close conditions,DET+AI,ChatGPT,BLOCKED,OUT,Underwriting conditions list
+CL-3,Closing,Final CD accuracy,DET,ChatGPT,BLOCKED,OUT,Final Closing Disclosure
+CL-4,Closing,Final VOE,DET,ChatGPT,BLOCKED,OUT,Final VOE
+CL-5,Closing,Final credit refresh,DET,ChatGPT,BLOCKED,OUT,Final credit refresh
+CL-6,Closing,Signed docs / notarization / recording,DET+AI,ChatGPT,BLOCKED,OUT,"Note, Deed of trust/mortgage, CD, notary records"
+CL-7,Closing,Right of rescission (refi),DET,ChatGPT,EXTRACT,OUT,Closing docs (rescission notice)
+FR-1,Fraud/QC,Altered-document appearance,AI,Both,NOW,IN,"Pay stub, Bank statement, W-2"
+FR-2,Fraud/QC,Non-arm's-length / flip,AI,ChatGPT,BLOCKED,IN,"Purchase agreement, Title (chain), Appraisal"
+FR-3,Fraud/QC,Unusual seller credits / side agreements,DET+AI,ChatGPT,EXTRACT,IN,Purchase agreement + addenda
+FR-4,Fraud/QC,Garnishment on paystub,AI,Claude,NOW,IN,Pay stub (deduction lines)
+FR-5,Fraud/QC,Recurring undisclosed debit,AI,Claude,NOW,IN,Bank statements
+FR-6,Fraud/QC,Novel cross-source discrepancy,AI,Claude,EXISTS,IN,All documents in the file
+LO-1,LOE,LOE required-and-present,DET+AI,Both,EXTRACT,IN,"The triggering finding/condition, Letters of explanation"
+LO-2,LOE,LOE completeness,HYBRID,ChatGPT,EXTRACT,IN,Letter of explanation

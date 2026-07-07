@@ -1,0 +1,46 @@
+# Verification Rule Reference Docs (`docs/rules/`)
+
+Version-controlled **authoring sources** for the Phase 3.5 data-driven verification rule
+engine. Committed by **LP-117.5** so downstream tickets (esp. **LP-118**, which builds the
+`verification_rules` table) rely on repo files, not external artifacts.
+
+## Files
+
+| File | What it is | Role |
+|---|---|---|
+| `verification_rule_playbook.xlsx` | The **133-rule playbook** — one row per candidate verification rule, with `ID, Category, Rule Name, Layer, Source, Status, Scope, Full Description, Why It Matters, Example, Required Documents, How the Engine Checks It, How to Fix`. Two sheets: `Rule Playbook` + `Legend & Notes`. | **AUTHORING SOURCE** (the canonical, human-edited rule catalog) |
+| `rule_seed.csv` | Machine-readable seed **derived from the playbook** (LP-117.5): `playbook_id, category, name, layer, source, status, scope, required_documents` — 133 rows. | **Loadable seed** — what LP-118 ingests into the `verification_rules` table |
+| `consolidated_rule_master_list.md` | The 133-rule consolidated master list (merged Claude + ChatGPT catalogs), with `What it checks` / `Layer` / `Source` / `Status` / `Scope` per rule. Converted from the source `.docx` to markdown for version control. | **AUTHORING SOURCE** (reviewable narrative form of the playbook) |
+| `blocker_extraction_schemas.md` | The 7-blocker extraction schema spec (credit report, AUS/DU, appraisal, flood, insurance, title, …): fields to extract, proposed schema shapes, rules unlocked, open questions. Converted from `.docx`. | Reference spec for Epic D (blocker schemas) |
+| `work_breakdown_130_rules.md` | The 6-epic work breakdown for the engine scale-up, blocker extraction, and newly-scoped rules. | Planning reference |
+
+## Authoring source vs. runtime table
+
+- **Authoring source** = `verification_rule_playbook.xlsx` (+ the `consolidated_rule_master_list.md`
+  narrative). Rules are edited **here**, by humans, during review/prioritization.
+- **Loadable seed** = `rule_seed.csv`, mechanically regenerated from the playbook (do **not**
+  hand-edit it — regenerate from the xlsx when the playbook changes).
+- **Runtime table** = the `verification_rules` table built in **LP-118**, populated **from the
+  seed** — never hand-edited row-by-row. The runtime table is downstream of these files.
+
+Regenerate the seed from the playbook with `openpyxl` (see LP-117.5 for the exact script);
+the mapping is: `playbook_id←ID, category←Category, name←Rule Name, layer←Layer,
+source←Source, status←Status, scope←Scope, required_documents←Required Documents`.
+
+## `playbook_id` — the traceability key (forward reference to LP-118)
+
+Every rule carries a stable **`playbook_id`** (`ID-1`, `CR-4`, `IN-5`, …). LP-117.5 reserved it
+as additive, nullable metadata on the current live-rule layer (the deterministic cross-source
+rules, `app/verification/cross_source/rules.py` — populated where a confident mapping exists,
+e.g. the employer rule → `IN-5`, name → `ID-1`, SSN → `ID-2`; left `None` otherwise).
+
+**LP-118 requirement:** the `verification_rules` table **must include a `playbook_id` column**
+as PK-adjacent metadata, populated from `rule_seed.csv`, so every runtime rule traces back to
+its playbook row (and thence to its full description, required documents, and fix guidance). A
+rule with no confident playbook mapping keeps `playbook_id` null — a wrong mapping is worse than
+a null one.
+
+> **Status-value note:** the playbook's `Status`/`Scope`/`Layer` columns use richer vocabularies
+> than early plans assumed — e.g. `Status ∈ {NOW, EXTRACT, BLOCKED, EXISTS?, SCOPE?, IN PROGRESS, …}`,
+> `Scope ∈ {IN, ?, OUT}`, `Layer ∈ {DET, DET-FUZZY, DET+AI, AI, CALC, HYBRID, DEFERRED-DET}`. The
+> seed preserves these verbatim; LP-118 should treat them as data, not a fixed enum.
