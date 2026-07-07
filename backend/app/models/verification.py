@@ -21,10 +21,10 @@ entirely separate from a finding's red/yellow/green **status** (ADR-060).
 
 from datetime import datetime
 from enum import StrEnum
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
-from sqlalchemy import DateTime, Float, ForeignKey, Integer, String, Text
+from sqlalchemy import JSON, DateTime, Float, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, SoftDeleteMixin, TimestampMixin, UUIDMixin
@@ -95,6 +95,12 @@ class Verification(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     # run's cached findings WITHOUT re-calling the AI — the back half of the
     # staleness model (don't re-ask the AI when nothing changed). 64-hex SHA-256.
     input_fingerprint: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
+    # The assembled per-run fact namespace (LP-118.6) — the immutable, typed "what the engine saw"
+    # snapshot (entity-addressable facts + compute-once calculators + canonicalized categories),
+    # stored as JSON. NOT a live KV/EAV table: one frozen record per run. Nullable — populated when
+    # the fact-builder runs (the registry runner, LP-121); the current LP-86 path does not set it.
+    fact_snapshot: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
 
     error_detail: Mapped[str | None] = mapped_column(Text, nullable=True)
 
