@@ -35,8 +35,19 @@ A rule-table completeness view would over-count live coverage 3.6×. See docs/au
 - [ ] Dormant threshold engine's fate flagged (wire vs. retire — decided in Epic B).
 - [ ] Read-only — no code changed.
 
-## LP-116 — Audit the extractor / schema registry (read-only)
-**Type:** Spike · **Epic:** A · **Blocks:** Epic D, Epic E
+## LP-116 — Audit the extractor / schema registry (read-only) ✅ DONE
+**Type:** Spike · **Epic:** A · **Blocks:** Epic D, Epic E · **Status:** COMPLETE
+**Key findings (reframe Epics C & D):** There is NO per-type schema registry — extraction is ONE
+monolithic AI prompt returning a single flat `ExtractedData` shape (everything hangs off one
+`financial_data` dict). Crucially: **the fields are mostly ALREADY EXTRACTED** (14 of 16 spot-checked
+present — SSN, DOB, address, employer, YTD, pay dates, deposits, balances, W-2), but
+`build_cross_source_facts` maps only **~5 of 22 available fields** into CrossSourceFacts. So the 13
+fact-starved rules are a **FACT-BUILDER-GAP (wiring), not an extractor gap.** Only TWO genuine
+extractor gaps: page-count (AS-9) and NSF/overdraft flags (AS-7). Insurance = PARTIAL (coverage/carrier
+as generic fields; NO mortgagee, no typed structure → extend with a typed sub-model). Tax returns =
+EXCLUDED entirely (IN-12 is a real build). All 6 blockers lack typed structure → add typed sub-models,
+don't bloat the monolith. Flat extraction has no per-field plausibility check → silent-misread risk
+(strengthens the eval-set case). See docs/audits/LP-116-extractor-schema-registry.md.
 **Summary:** Establish which document types have extraction schemas and what fields each produces.
 **Description:** Determines which "blocked" rules are truly blocked vs. already feedable; prevents rebuilding existing schemas (insurance suspected; tax returns possibly).
 **Work:**
@@ -189,21 +200,40 @@ values available to the calculators even after retiring the finding-emitter path
 
 ---
 
-# EPIC C — Seed Rules (LP-124..128) — fact-population + registry rows, no new extraction
+# EPIC C — Seed Rules (LP-123.5, LP-124..128) — mostly fact-WIRING, not extraction
 
-> **Reframed by the LP-115 audit.** Several seed rules are NOT new rules — they map to the
-> 13 FACT-STARVED dormant cross-source rules (wired shells whose `CrossSourceFacts` fields
-> `build_cross_source_facts` never populates). For these, the work is largely POPULATING THE
-> MISSING FACTS in `build_cross_source_facts`, not writing rule logic — the rule already exists,
-> inert. **Fast first win: light up the existing dormant rules by populating their facts before
-> building genuinely new rules.** Migrate these shells into the registry (LP-118) as they're lit.
+> **Reframed by the LP-116 audit — Epic C is far cheaper than originally planned.** The fields the
+> 13 fact-starved rules need are ALREADY EXTRACTED; they're just not wired through. `build_cross_source_facts`
+> maps only ~5 of 22 available extracted fields into `CrossSourceFacts`. So most "seed rules" are a
+> MAPPING-LAYER FIX (wire an already-extracted field into CrossSourceFacts), NOT extraction work and
+> NOT new rule logic — the rule shell already exists, inert. Only TWO seed rules need genuine
+> extraction additions: AS-7 (NSF/overdraft flags) and AS-9 (page-count) — both confirmed non-extracted.
+> **Fast first win = LP-123.5 below: extend the fact-builder 5→22 mappings, lighting up ~13 dormant
+> rules at once.** Migrate lit shells into the registry (LP-118). Every threshold → Priya-validate.
+
+## LP-123.5 — Extend build_cross_source_facts (5→22 field mappings) — the fast first win
+**Type:** Story · **Epic:** C · **Depends:** LP-116 · **Can precede full registry** (targeted fix)
+**Summary:** Wire the ~17 already-extracted-but-unmapped fields into CrossSourceFacts, lighting up the 13 fact-starved dormant rules.
+**Description:** Per LP-116, the extraction already produces SSN, DOB, address, employer, YTD, deposits, balances, W-2 fields, etc., but `build_cross_source_facts` maps only ~5 of the 22 available fields. Extending the mapping lights up the dormant cross-source rules with no extractor or rule-logic changes.
+**Work:**
+- Map the ~17 unwired extracted fields into `CrossSourceFacts` (SSN, DOB, current address, employer, YTD, pay date, deposits, statement balances, account holder, W-2 fields, etc. — the exact list from LP-116).
+- Verify each newly-wired fact reaches its dormant rule and the rule now fires on LF-6T3N where expected.
+- Do NOT change rule logic or the employer rule (that's LP-120); this is purely the mapping layer.
+  **Acceptance criteria:**
+- [ ] `build_cross_source_facts` maps the full set of available extracted fields (per LP-116's list).
+- [ ] The 13 fact-starved rules now receive their inputs; those that should fire on LF-6T3N do.
+- [ ] No extractor changes, no rule-logic changes — mapping layer only.
+- [ ] ⚠️ Any rule that fires with a threshold ships that threshold as config; Priya-validate before full-confidence.
+
 > Registry rows reusing Epic B evaluators. Every threshold → Priya-validate.
 
 ## LP-124 — Seed: asset rules
-**Type:** Story · **Epic:** C · **Depends:** LP-120, LP-121
-**Rules:** AS-1 large-deposit sweep, AS-2 EMD sourcing, AS-3 cash-to-close, AS-7 NSF/overdraft, AS-8 chaining, AS-10 recency completeness.
+**Type:** Story · **Epic:** C · **Depends:** LP-120, LP-121, LP-123.5
+**Rules:** AS-1 large-deposit sweep, AS-2 EMD sourcing, AS-3 cash-to-close, AS-7 NSF/overdraft, AS-8 chaining, AS-9 missing pages, AS-10 recency completeness.
+**Note (LP-116):** AS-1/AS-2/AS-3/AS-8/AS-10 are wire-the-fact rules (LP-123.5 supplies deposits, balances, periods). AS-7 (NSF/overdraft flags) and AS-9 (page-count) are the TWO genuine EXTRACTION-GAP rules — they need new fields added to the extraction before they can fire.
 **Acceptance criteria:**
-- [ ] Each a registry row using threshold_compare / continuity_check / reconcile_list.
+- [ ] Fact-wired rules (AS-1/2/3/8/10) built as registry rows using threshold_compare / continuity_check / reconcile_list on the LP-123.5 facts.
+- [ ] AS-7 and AS-9 include the extraction addition (NSF/overdraft flags; declared page-count) — the only two seed rules needing extractor work.
 - [ ] AS-10's month-count comes from DU findings (when available) or config, SHARED with the needs list (LP-108).
 - [ ] AS-8 (chaining) and AS-10 (enough months) are distinct — chaining only when 2+ statements exist.
 - [ ] ⚠️ **Priya-validate:** large-deposit % (AS-1), recency window (AS-10), NSF tolerance (AS-7).
@@ -224,26 +254,35 @@ values available to the calculators even after retiring the finding-emitter path
 - [ ] CR-3 flags excluded-paid-off liabilities lacking payoff evidence.
 
 ## LP-127 — Seed: property / insurance / MI rules
-**Type:** Story · **Epic:** C · **Depends:** LP-120, LP-116 (insurance schema)
+**Type:** Story · **Epic:** C · **Depends:** LP-120, LP-133 (typed insurance sub-model)
 **Rules:** PR-2 appraised-vs-price, DT-5 insurance premium in DTI, IH-1 insurance adequacy, IH-2 mortgagee clause, MI-1 PMI-required, MI-4 FHA MIP, PE-3 FHA MRI.
+**Note (LP-116):** Insurance is PARTIAL — coverage amount and carrier come through as generic financial fields (IH-1/DT-5 close), but there is NO mortgagee and no typed structure, so IH-2 (mortgagee clause) is blocked until the typed insurance sub-model lands (LP-133, extend-not-build).
 **Acceptance criteria:**
-- [ ] IH-1/IH-2/DT-5 depend on the insurance schema (per LP-116 — extend or build).
+- [ ] IH-1/DT-5 use the already-captured coverage/premium fields (wire if needed).
+- [ ] IH-2 (mortgagee) depends on the typed insurance sub-model (LP-133).
 - [ ] MI-1 fires only Conv + LTV>80%; MI-4 fires only FHA.
 - [ ] ⚠️ **Priya-validate:** coverage/threshold values.
 
 ## LP-128 — Seed: contract & identity rules
-**Type:** Story · **Epic:** C · **Depends:** LP-120, LP-116 (SSN/DOB extraction)
+**Type:** Story · **Epic:** C · **Depends:** LP-120, LP-123.5
 **Rules:** PC-2 price match, PC-3 address match, PC-7 closing date, ID-1 name consistency, ID-2 SSN, ID-4 address consistency, G6 co-borrower.
+**Note (LP-116):** SSN, DOB, and address are ALREADY EXTRACTED — these are fact-WIRING rules (LP-123.5 supplies the facts), not extraction work.
 **Acceptance criteria:**
 - [ ] Fuzzy matches (name/address) use DET-FUZZY confidence; SSN is exact-match.
-- [ ] ID-2/ID-3 depend on SSN/DOB extraction (confirm via LP-116).
+- [ ] ID-2 (SSN) / ID-4 (address) consume the LP-123.5-wired facts (no extractor change needed).
 - [ ] Over-loosening guarded (identity false-negative is the danger).
 
 ---
 
-# EPIC D — Blocker Document Schemas (LP-129..135) — *format-gated by LP-117*
+# EPIC D — Blocker Document Typed Sub-Models (LP-129..135) — *format-gated by LP-117*
 
-> Schema-first; validate against real de-identified samples; hold un-schema'd rules in awaiting-data. Field-lists in blocker_extraction_schemas.md.
+> **Reframed by the LP-116 audit.** There is NO per-type schema registry to add to — extraction is
+> one monolithic AI prompt returning a flat `ExtractedData` shape. The audit's recommendation
+> (adopted here): for each blocker, add a TYPED SUB-MODEL (a structured, typed extracted shape for
+> that document type) rather than bloating the monolithic prompt with more flat fields. Typed
+> sub-models give deterministic rules the reliable structure they need and keep the extraction
+> maintainable. Schema-first; validate against real de-identified samples; hold un-modeled rules in
+> awaiting-data. Field-lists in docs/rules/blocker_extraction_schemas.md.
 
 ## LP-129 — Credit report extraction schema *(biggest unlock)*
 **Type:** Story · **Epic:** D · **Depends:** LP-117 (format), LP-116
@@ -277,12 +316,16 @@ values available to the calculators even after retiring the finding-emitter path
 - [ ] `in_sfha` + `flood_zone` extracted reliably.
 - [ ] Unblocks IH-5, IH-6.
 
-## LP-133 — Insurance schema (extend or build)
+## LP-133 — Insurance typed sub-model (EXTEND — mortgagee is the gap)
 **Type:** Story · **Epic:** D · **Depends:** LP-116
-**Summary:** Dwelling coverage, mortgagee, dates, premium — extend if partial else build.
-**Acceptance criteria:**
-- [ ] dwelling_a, mortgagee, effective/expiration, premium extracted.
-- [ ] Completes IH-1..4, DT-5 (feeds LP-127).
+**Summary:** Add a typed insurance sub-model. Per LP-116, coverage amount and carrier already come through as generic fields; the real gaps are MORTGAGEE and typed structure.
+**Work:**
+- Add a typed insurance sub-model (dwelling coverage, mortgagee {lender, loan #}, effective/expiration dates, premium, doc_type dec/binder).
+- Wire it so IH-1/IH-2/IH-3/IH-4/DT-5 read typed fields, not generic financial fields.
+  **Acceptance criteria:**
+- [ ] Typed insurance sub-model captures dwelling coverage, MORTGAGEE (the gap), dates, premium.
+- [ ] Completes IH-1..4, DT-5 (feeds LP-127; IH-2 mortgagee unblocked).
+- [ ] Validated against a real de-identified dec page + binder.
 
 ## LP-134 — Title commitment (ALTA) schema
 **Type:** Story · **Epic:** D · **Depends:** LP-117
@@ -315,9 +358,11 @@ values available to the calculators even after retiring the finding-emitter path
 
 ## LP-137 — Uncommon income types
 **Type:** Story · **Epic:** E · **Depends:** LP-117 (mix)
-**Rules:** IN-13 continuance, IN-14 rental support, OC-3 investment rental, AS-11 retirement/stock liquidation.
+**Rules:** IN-13 continuance, IN-14 rental support, OC-3 investment rental, AS-11 retirement/stock liquidation. *(IN-12 self-employment noted below.)*
+**Note (LP-116):** TAX RETURNS are EXCLUDED from extraction entirely (confirmed carve-out) — so IN-12 (self-employment) and IN-14's Schedule-E path are GENUINE BUILDS (new typed sub-models + the self-employed calculator), not extends. Award letters / retirement statements: confirm extraction status before building IN-13/AS-11.
 **Acceptance criteria:**
-- [ ] Some need Schedule E / award-letter / retirement-statement extraction (confirm via LP-116).
+- [ ] IN-12 self-employment = a real build (tax-return typed sub-model + self-employed calculator) — scope separately if pursued.
+- [ ] IN-14 rental via Schedule E depends on tax-return extraction (excluded today).
 - [ ] Priority set by borrower mix (LP-117).
 - [ ] ⚠️ **Priya-validate:** continuance window (typically 3 yrs).
 
@@ -379,6 +424,24 @@ values available to the calculators even after retiring the finding-emitter path
 - [ ] Selecting a run loads its findings + satisfied + not-yet-checkable together.
 - [ ] Current/latest run clearly marked.
 - [ ] Viewing history is non-destructive (never re-runs).
+
+---
+
+# EPIC G — Hardening (LP-143)
+
+## LP-143 — Golden-file eval set (guards the flat-extraction silent-misread risk)
+**Type:** Story · **Epic:** G · **Depends:** LP-123.5 (facts wired)
+**Summary:** A durable measurement layer — real de-identified files with known-correct findings — to catch regressions and silent extraction misreads as the rule set grows.
+**Description:** The LP-116 audit escalated a real risk: the flat monolithic extraction has NO per-field plausibility check and no per-field confidence, so a field can extract WRONGLY and produce a confidently-wrong finding with no signal. As rules multiply, this is the main way trust silently erodes. A golden-file eval set is the guard — not gold-plating.
+**Work:**
+- Assemble a small set of real de-identified files (start with LF-6T3N) with known-correct expected findings / satisfied / not-checkable lists.
+- A harness that runs verification and diffs actual vs. expected, flagging regressions and extraction misreads.
+- Run it as a check when rules or the fact-builder change.
+  **Acceptance criteria:**
+- [ ] ≥1 golden file with a known-correct expected three-list outcome.
+- [ ] The harness diffs actual vs. expected and reports regressions.
+- [ ] Catches a deliberately-introduced wrong extracted value (proves the silent-misread guard works).
+- [ ] Documented as the measurement backbone for all future rule additions.
 
 ---
 

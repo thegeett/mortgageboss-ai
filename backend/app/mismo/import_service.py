@@ -24,9 +24,11 @@ Design:
   column and is **never logged**; logging is metadata-only (ids + counts); the
   raw MISMO file is stored access-controlled (tenant-scoped) and never logged.
 
-Known gap: the MISMO *borrower* address has no typed column on ``Borrower`` (the
-model carries only the subject-property address); it is parsed but not persisted
-to a typed field. Adding a borrower address is a later model change.
+LP-118.7 (store-everything): the borrower's current residential address and the property
+``county`` — parsed all along but previously dropped for lack of a column — are now persisted
+(``Borrower.current_address_*``, ``Property.county``). Genuinely-unmapped parsed leaves survive
+to the ``catch_all`` (the parser no longer consumes a value it does not persist), so no parsed
+leaf is silently lost.
 """
 
 from __future__ import annotations
@@ -198,6 +200,7 @@ async def create_loan_file_from_mismo(
         prop.attachment_type = prop_in.attachment_type
         prop.construction_method = prop_in.construction_method
         prop.financed_unit_count = prop_in.financed_unit_count
+        prop.county = prop_in.county  # LP-118.7 — parsed all along; now persisted
 
     # 3) Borrowers + their stated income / employers.
     for index, pb in enumerate(parsed.borrowers):
@@ -343,5 +346,12 @@ def _build_borrower(loan_file_id: UUID, pb: ParsedBorrower, index: int) -> Borro
         borrower_position=index + 1,
         dependent_count=pb.dependent_count,
         citizenship=pb.citizenship,
+        # LP-118.7 — the current residential address the parser already reads; now persisted
+        # (structured, mirroring Property) instead of being dropped.
+        current_address_line=pb.address_line,
+        current_city=pb.city,
+        current_state=pb.state,
+        current_postal_code=pb.postal_code,
+        current_address_type=pb.address_type,
         declarations=pb.declarations or None,
     )

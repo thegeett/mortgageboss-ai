@@ -115,6 +115,16 @@ class Borrower(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     # already exist above; these are the genuinely-missing ones.)
     dependent_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
     citizenship: Mapped[str | None] = mapped_column(String(SHORT_STRING), nullable=True)
+    # Current residential address (MISMO ``ADDRESSES/ADDRESS``) — stored STRUCTURED to mirror
+    # Property's address columns (LP-118.7 store-everything). The parser already reads these; they
+    # simply had no home before, so they were dropped at import. Feeds the current-address-
+    # consistency rule (DL address vs stated residence). ``current_address_type`` is the MISMO
+    # ``AddressType`` (Current / Mailing / Prior) so the address's kind is not lost.
+    current_address_line: Mapped[str | None] = mapped_column(String(MEDIUM_STRING), nullable=True)
+    current_city: Mapped[str | None] = mapped_column(String(MEDIUM_STRING), nullable=True)
+    current_state: Mapped[str | None] = mapped_column(String(2), nullable=True)
+    current_postal_code: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    current_address_type: Mapped[str | None] = mapped_column(String(SHORT_STRING), nullable=True)
     # The 1003 declaration indicators (BankruptcyIndicator, IntentToOccupyType, …)
     # as raw string values — a large/evolving set, kept as flexible JSON; feeds
     # Phase-3 cross-source verification.

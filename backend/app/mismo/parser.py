@@ -127,6 +127,19 @@ class _Ctx:
         self.consume(found)
         return found.text.strip() if found.text else None
 
+    def peek(self, el: etree._Element, xpath: str) -> str | None:
+        """Read a leaf WITHOUT consuming it (LP-118.7 store-everything).
+
+        Use for a value the parser reads (for a warning/derivation) but does NOT persist to its
+        own column — leaving it unconsumed means the catch-all captures it, so no parsed leaf is
+        silently lost. (A value that IS persisted must use :meth:`text` so it stays out of the
+        catch-all — no double-storage.)
+        """
+        found = el.find(xpath, NS)
+        if found is None:
+            return None
+        return found.text.strip() if found.text else None
+
 
 # --------------------------------------------------------------------------- #
 # HTML-wrapped extraction
@@ -207,7 +220,10 @@ def _parse_borrower(party: etree._Element, ctx: _Ctx) -> ParsedBorrower:
     return ParsedBorrower(
         first_name=ctx.text(party, ".//m:INDIVIDUAL/m:NAME/m:FirstName"),
         last_name=ctx.text(party, ".//m:INDIVIDUAL/m:NAME/m:LastName"),
-        full_name=ctx.text(party, ".//m:INDIVIDUAL/m:NAME/m:FullName"),
+        # FullName is read for the name-presence warning but NOT persisted (Borrower.full_name is a
+        # computed property of first+last). ``peek`` (not ``text``) so it is not consumed — it
+        # survives to the catch-all instead of being silently dropped (LP-118.7 store-everything).
+        full_name=ctx.peek(party, ".//m:INDIVIDUAL/m:NAME/m:FullName"),
         ssn=ssn,
         birth_date=_to_date(ctx.text(party, f"{detail}/m:BorrowerBirthDate")),
         marital_status=ctx.text(party, f"{detail}/m:MaritalStatusType"),

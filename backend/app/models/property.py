@@ -75,6 +75,9 @@ class Property(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     # layer (LP-29), not the DB.
     state: Mapped[str | None] = mapped_column(String(2), nullable=True)
     postal_code: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    # County (MISMO ``ADDRESS/CountyName``) — parsed but previously dropped at import
+    # (LP-118.7 store-everything). Feeds jurisdiction / flood rules.
+    county: Mapped[str | None] = mapped_column(String(SHORT_STRING), nullable=True)
 
     # --- Classification ----------------------------------------------------
     property_type: Mapped[PropertyType | None] = mapped_column(
