@@ -7717,3 +7717,79 @@ the runner iterate this table; LP-122 will surface the tunable fields in the ove
 (5%) while the live code rule still uses its LP-80 grounded-starter (10%); nothing reads the table yet, so this is not a
 behavior change — LP-121 reconciles when it wires the table into the runner. The calculators' dependency on the existing
 rule-registry threshold DATA (LP-115 §7) is untouched.
+
+## ADR-239: Phase 3.5 verification engine architecture (fact namespace, canonicalization, applicability, honesty contract)
+
+- **Date:** 2026-07-07
+- **Status:** Accepted
+
+**Context:** Phase 3.5 scales verification from a handful of hand-coded rules toward the ~130-rule playbook
+(`docs/rules/`). The audits that gate it — [LP-115](audits/LP-115-live-rule-inventory.md) (5 live rules; the
+threshold engine is dormant), [LP-116](audits/LP-116-extractor-schema-registry.md) (18 extraction schemas; 6
+blockers), and [fact-namespace-foundation](audits/fact-namespace-foundation.md) (how data is stored) — surfaced a set
+of cross-cutting design choices that are now settled. This ADR RECORDS them so the "why" lives in the repo; depth is in
+`docs/rules/` and the plan's §3.9/§3.11. These decisions are settled — this is a record, not a re-litigation.
+
+**Decision:** the Phase 3.5 engine is built on seven settled choices.
+
+1. **Hybrid rule storage** (detail in **ADR-238**, LP-118). Rules are DATA: a `verification_rules` table (runtime
+   read-source, `rule_id` PK, `playbook_id`) populated from a version-controlled **seed** (authoring source), plus a
+   `rule_change_audit` table. STRUCTURAL fields (evaluator, applicability, canonical_type, message_template) change via
+   seed + migration (compliance wants rule-logic changes in git); TUNABLE fields (params, severity, enabled) are
+   editable live via the admin UI and audited (the domain expert tunes thresholds without a deploy).
+
+2. **Fact namespace = an assembled per-run typed JSON SNAPSHOT**, not a live key-value/EAV table. Each verification run
+   assembles one **entity-addressable, frozen** snapshot (`borrowers[]`, `property`, `documents[]`, `liabilities[]`,
+   `assets[]`, `transactions[]`, computed values) and stores it ON the run. It is the evolution of the `CrossSourceFacts`
+   pattern (built once, pure rules read it) re-shaped from flat comparison-pairs to an addressable graph
+   (fact-namespace-foundation §3). Source facts stay in their typed homes (Borrower/Property/Stated*/Extraction); the
+   snapshot is a **derived, frozen, auditable view** — "what the engine saw" this run. Rationale: a live KV table would
+   lose types, duplicate the source of truth, and go stale; a per-run snapshot avoids all three and gives run history.
+
+3. **Fact sourcing has three kinds.** (a) **Enum facts** — program/purpose/occupancy/property_type are already
+   normalized at MISMO import (fact-namespace-foundation §1); cash-out is a **separate `refinance_type` axis**, not a
+   purpose value; **unset/None is first-class** and maps to applicability `UNKNOWN`. (b) **Materialized facts** — the
+   documented side (extraction JSON, transactions, credit-report fields) is buried per-document JSON (§2); the
+   fact-builder shapes it into the snapshot. (c) **Computed facts** — LTV/DTI/MI/reserves are computed on-demand and
+   never stored (§5). **Decision: compute-once-per-run into the snapshot**, not lazy — one calculator pass per run,
+   frozen into the fact object, so evaluation is consistent and re-reads are free.
+
+4. **Canonicalization of raw-string category fields** (`income_type`, `asset_type`, `liability_type`) — one general
+   mechanism: **map-first** (a deterministic table for common cases) → **cheap-AI-fallback** for map misses (so an
+   unknown string is never silently ignored — the §4 risk) → **learn** (the AI answer is recorded back into the map).
+   It runs at **fact-build time** and the result is **frozen into the snapshot**, so rule evaluation stays fully
+   deterministic. `document_type` already has this shape via the existing classifier (LP-116 §2). This is a cousin of
+   the DET-FUZZY name/employer matching (LP-120) but kept **distinct** (category canonicalization vs. entity matching).
+
+5. **Store-everything principle.** The MISMO parser must not silently drop parsed-but-unmapped leaves. Today it
+   *consumes* leaves as it parses, so unmapped fields are fully lost — borrower current address and property `county`
+   are parsed but never persisted (fact-namespace-foundation §7). Decision: **persist what we parse** — add the missing
+   typed columns (borrower current address, property county) and route genuinely-unmapped leaves to the catch-all
+   rather than dropping them. Applicability cannot reference data that isn't stored.
+
+6. **Per-borrower documents.** Documents attach to the file with **no borrower link** today (`Document.loan_file_id`
+   only; fact-namespace-foundation §6). The fact namespace is shaped for `borrowers[].documents[]`, and the
+   borrower↔document association (a fuzzy "whose document is this" match) is **its own ticket** — the snapshot shape is
+   decided now; the linking work is scoped separately.
+
+7. **Applicability = a uniform three-layer object with three-valued logic.** Every rule carries
+   `{scope, triggers, required_inputs}` evaluated to **TRUE / FALSE / UNKNOWN**. `UNKNOWN` → **AWAITING-DATA** (the
+   false-green guard — a rule blocked on missing data is never shown as passing). **Relevance-thresholds are triggers**
+   (does this rule apply?); **pass/fail-thresholds are evaluation logic** (does it pass?) — the two are not conflated.
+   The thing a rule **CHECKS is never a `required_input`** — its absence IS the finding, not an awaiting-data skip.
+   Applicability is **AI-drafted then human-reviewed**; its metadata (including a `source_rule_text_hash` for drift
+   detection) is authoring-time only — **the engine reads only the applicability, never the metadata**.
+
+8. **The honesty contract** — the four outcomes are exhaustive and each has one honest disposition:
+   `FALSE → not-applicable` (silent); `UNKNOWN → awaiting-data` (surfaced, never passed or dropped);
+   `FAILED → finding`; `PASSED → satisfied`.
+
+**Consequences:** the engine reads a frozen per-run fact snapshot rather than querying live tables mid-evaluation, so a
+run is reproducible and auditable ("what the engine saw"). The canonicalization + compute-once passes concentrate all
+non-determinism (AI category fallback, calculator math) into fact-build time, leaving rule evaluation pure. The
+store-everything and per-borrower-document decisions create follow-on model/import work before the rules that need
+those facts can run. Concretely this ADR gates: **LP-118** (hybrid storage — done), **LP-118.6** (build the fact
+namespace snapshot + the fact-builder + canonicalization), **LP-118.7** (store-everything: persist borrower current
+address + property county), **LP-118.8** (borrower↔document linking), and **LP-119** (applicability three-valued
+filter). It does not change any live rule behavior; the current cross-source path (LP-86) keeps running until the
+registry runner (LP-121) supersedes it.
