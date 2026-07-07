@@ -77,6 +77,7 @@ from app.models.verification import (
     VerificationStatus,
     VerificationTrigger,
 )
+from app.models.verification_rule import RuleChangeAudit, VerificationRule
 
 __all__ = [
     "ActivityLog",
@@ -126,6 +127,7 @@ __all__ = [
     "PropertyType",
     "RecordStatus",
     "RefinanceType",
+    "RuleChangeAudit",
     "ShortStr",
     "SoftDeleteMixin",
     "StatedAsset",
@@ -141,6 +143,7 @@ __all__ = [
     "ValidationVerdict",
     "VerdictKind",
     "Verification",
+    "VerificationRule",
     "VerificationStatus",
     "VerificationTrigger",
     "only_active",

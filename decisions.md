@@ -7672,3 +7672,48 @@ their pay-stub + W-2 sources (precisely — no coincidental savings statements),
 their one document. Empty when no distinctive locatable value (graceful). One JSON column + a matching service + a card
 list; no migration on the primary FK; ``source_document_id`` kept. Composes with LP-114 (generalizes single → set) /
 LP-109 / LP-110 / LP-113. The viewer + page deep-link + transaction highlight remain V2 (no viewer, no bbox data).
+
+## ADR-238: Hybrid rule storage — verification_rules table + version-controlled seed + rule_change_audit (LP-118)
+
+- **Date:** 2026-07-07
+- **Status:** Accepted
+
+**Context:** Phase 3.5 scales verification from a handful of hand-coded rules toward the ~130-rule playbook. Two
+constraints pull in opposite directions. Compliance wants rule LOGIC changes to live in **git** (reviewable,
+version-controlled, diffable) — a rule's evaluator / applicability / canonical type is code-shaped and must not drift
+silently. Priya wants to tune PARAMS (thresholds, windows, severities, on/off) **live, without a deploy** — an
+unvalidated threshold is the main over-flagging risk, and iterating it should not need an engineer. Hand-coded rule
+classes satisfy the first and fail the second; a pure DB table satisfies the second and fails the first.
+
+**Decision:** store rules as DATA in a **hybrid** shape that mirrors the existing lender-overlay pattern (config
+defaults + DB overrides + audit). Three pieces:
+
+- **`verification_rules` table** — the runtime read-source, keyed by the stable ``rule_id`` (the same string findings /
+  monitoring / activity_log already reference; live rule_ids are never renamed). Carries ``playbook_id`` (traceability
+  to the playbook, LP-117.5) and a deliberate field split: **STRUCTURAL** (``evaluator``, ``applicability``,
+  ``canonical_type``, ``message_template``) — the LOGIC, changed only via the seed + a migration; and **TUNABLE**
+  (``params``, ``severity``, ``enabled``, ``confidence_mode``) — the dials Priya edits live (LP-122), each edit audited.
+  ``validated`` defaults **false** — the Priya-validation gate (only Priya-confirmed thresholds, e.g. large-deposit
+  >50% and income-variance >5%, seed true).
+- **Version-controlled seed** (``docs/rules/rule_seed.json``) — the **authoring source of truth**, generated from the
+  playbook xlsx + the live code rules (never hand-typed). The table is populated FROM it by the LP-118 migration; the
+  seed, not the table, is what a human edits, so logic changes flow through git.
+- **`rule_change_audit` table** — every change to a rule row (seed inserts now, LP-122 live edits later) recorded as
+  ``{rule_id, changed_field, old_value, new_value, change_source, changed_by, changed_at}``. Rules retire via
+  ``enabled=false``, never deletion, so the audit trail is never orphaned.
+
+**Scope (LP-118 is storage only):** this ticket builds the two tables, the seed, the seed-load (auditing each insert),
+and a **read-only loader** (``load_enabled_rules`` / ``get_rule``). It does NOT build the applicability filter (LP-119),
+evaluators (LP-120), the runner wiring (LP-121), or the admin UI (LP-122), and it does NOT touch the live verification
+path — nothing executes a rule yet. Seeded-but-not-yet-built playbook rows carry a null ``evaluator`` and
+``enabled=false``; they simply will not run until LP-120 fills them.
+
+**Consequences:** the rule set now scales as data — a new rule is a seed row + a migration, not a new class. The 18 live
+cross-source rules are seeded with their real rule_ids (5 firing today, employer → ``IN-5``) alongside 122 not-yet-built
+playbook rows, so the table both matches reality and holds the full playbook. LP-120 will fill ``evaluator`` +
+``confidence_mode`` and replace the global ``DETERMINISTIC_CONFIDENCE = 1.0`` with per-rule confidence; LP-121 will make
+the runner iterate this table; LP-122 will surface the tunable fields in the overlay-admin UI, writing to
+``rule_change_audit``. One reconciliation is deferred: the seed records the Priya-confirmed income-variance threshold
+(5%) while the live code rule still uses its LP-80 grounded-starter (10%); nothing reads the table yet, so this is not a
+behavior change — LP-121 reconciles when it wires the table into the runner. The calculators' dependency on the existing
+rule-registry threshold DATA (LP-115 §7) is untouched.
