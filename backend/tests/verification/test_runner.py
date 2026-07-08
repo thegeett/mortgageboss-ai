@@ -14,7 +14,7 @@ from app.services.cross_source import assemble_cross_source_context
 from app.services.cross_source_deterministic import build_cross_source_facts
 from app.verification.cross_source.engine import evaluate_cross_source
 from app.verification.evaluators import ConfidenceMode
-from app.verification.runner import run_rule_engine
+from app.verification.runner import OutcomeSource, run_rule_engine
 from sqlalchemy.ext.asyncio import AsyncSession
 from tests.integration.factories import (
     make_borrower,
@@ -181,18 +181,16 @@ async def test_evaluators_dispatch_only_for_ready_to_run(
     )
     await _insert_as5_rule(db_session)  # no gift → AS-5 is doesn't-apply → must NOT be dispatched
 
-    dispatched: list[str] = []
+    looked_up: list[str] = []
     import app.verification.runner as runner_mod
 
-    real = runner_mod.evaluate_rule
-    monkeypatch.setattr(
-        runner_mod,
-        "evaluate_rule",
-        lambda rid, snap, params: dispatched.append(rid) or real(rid, snap, params),
-    )
+    real = runner_mod.get_evaluator
+    monkeypatch.setattr(runner_mod, "get_evaluator", lambda rid: looked_up.append(rid) or real(rid))
 
     await run_rule_engine(db_session, lf)
-    assert _AS5_RULE_ID not in dispatched  # doesn't-apply → evaluator never dispatched
+    # Round-3 FIX 7 — the runner does a SINGLE registry lookup per ready-to-run rule; a doesn't-apply
+    # rule is never looked up (never dispatched).
+    assert _AS5_RULE_ID not in looked_up
 
 
 async def test_snapshot_built_once(
@@ -377,3 +375,85 @@ async def test_fix6_confidence_mode_is_enum_matching_seed_vocab(db_session: Asyn
     outcome = next(o for o in result.findings if o.rule_id == _AS5_RULE_ID)
     assert outcome.confidence_mode is ConfidenceMode.DETERMINISTIC
     assert outcome.confidence_mode.value == "deterministic"  # seed vocab, no translation layer
+
+
+# --------------------------------------------------------------------------- #
+# Round-3 fixes
+# --------------------------------------------------------------------------- #
+
+
+async def test_r3fix5_couldnt_check_kinds_are_distinguishable_by_source(
+    db_session: AsyncSession,
+) -> None:
+    # The trust surface (LP-162) needs to tell the two couldn't-check kinds apart. Both land in the same
+    # bucket but carry a different `source`: "applicability" (missing inputs → fix/upload the file) vs
+    # "evaluator" (had the data, couldn't reach a verdict).
+    # (1) applicability couldn't-check: AS-5 on a file with NO asset data (can't tell if a gift exists).
+    _, lf_a = await _file(db_session, "run15a")
+    await _insert_as5_rule(db_session)
+    res_a = await run_rule_engine(db_session, lf_a)
+    cc_a = next(o for o in res_a.couldnt_check if o.rule_id == _AS5_RULE_ID)
+    assert cc_a.source is OutcomeSource.APPLICABILITY
+
+    # (2) evaluator couldn't-check: a gift asset exists (ready-to-run) but its amount wasn't extracted →
+    # the evaluator ran and returned couldn't-check.
+    _, lf_b = await _file(db_session, "run15b")
+    db_session.add(
+        StatedAsset(loan_file_id=lf_b.id, asset_type="Gift of Cash", value=None, holder_name="Mom")
+    )
+    await db_session.flush()
+    res_b = await run_rule_engine(db_session, lf_b)
+    cc_b = next(o for o in res_b.couldnt_check if o.rule_id == _AS5_RULE_ID)
+    assert cc_b.source is OutcomeSource.EVALUATOR
+    assert cc_a.source is not cc_b.source  # same bucket, distinguishable next-action
+
+
+async def test_r3fix10_only_verdict_outcomes_are_provisional(db_session: AsyncSession) -> None:
+    # provisional = "verdict pending validation" → legal ONLY on finding/satisfied. A doesn't-apply or a
+    # couldn't-check made NO verdict, so it must never be badged provisional (even from an unvalidated rule).
+    await _insert_as5_rule(
+        db_session
+    )  # ONE global AS-5 row (validated defaults False), reused below
+
+    # doesn't-apply (no gift) — unvalidated, but no verdict → not provisional.
+    _, lf_da = await _file(db_session, "run16a")
+    db_session.add(
+        StatedAsset(
+            loan_file_id=lf_da.id, asset_type="Checking", value=Decimal("25000"), holder_name="B"
+        )
+    )
+    await db_session.flush()
+    res_da = await run_rule_engine(db_session, lf_da)
+    assert next(o for o in res_da.doesnt_apply if o.rule_id == _AS5_RULE_ID).provisional is False
+
+    # couldn't-check (no asset data) — also not provisional.
+    _, lf_cc = await _file(db_session, "run16b")
+    res_cc = await run_rule_engine(db_session, lf_cc)
+    assert next(o for o in res_cc.couldnt_check if o.rule_id == _AS5_RULE_ID).provisional is False
+
+    # a FINDING from the same unvalidated rule IS provisional (the verdict-bearing case).
+    _, lf_f = await _file(db_session, "run16c")
+    db_session.add(
+        StatedAsset(
+            loan_file_id=lf_f.id,
+            asset_type="Gift of Cash",
+            value=Decimal("10000"),
+            holder_name="Mom",
+        )
+    )
+    await db_session.flush()
+    res_f = await run_rule_engine(db_session, lf_f)
+    assert next(o for o in res_f.findings if o.rule_id == _AS5_RULE_ID).provisional is True
+
+
+def test_r3fix7_run_rule_engine_uses_no_assert() -> None:
+    # The None-guard is STRUCTURAL (get_evaluator None-check), not an `assert` (which `python -O` strips,
+    # leaving an AttributeError on the hot path). Guard the invariant directly: the runner's main function
+    # carries no assert statement.
+    import ast
+    import inspect
+
+    import app.verification.runner as runner_mod
+
+    tree = ast.parse(inspect.getsource(runner_mod.run_rule_engine))
+    assert not [n for n in ast.walk(tree) if isinstance(n, ast.Assert)]

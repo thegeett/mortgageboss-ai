@@ -409,18 +409,29 @@ def test_fix2_present_none_unmapped_is_not_known() -> None:
     assert classify_from_json(rule, snap).state is ApplicabilityState.COULDNT_CHECK
 
 
-def test_fix7_ragged_multi_borrower_any_present_is_ready() -> None:
-    # 2 borrowers; the required nested field is present on ONE of them. FIX 7's `any` semantics: a
-    # relevant element satisfies the input — a co-borrower missing the field must NOT sink the rule
-    # into couldn't-check (that was the `all(...)` overshoot).
+def test_r3fix1_nested_required_input_relevant_element_both_directions() -> None:
+    # Round-3 FIX 1 — the RELEVANT elements must carry the data: neither `all` (too strict) nor `any`
+    # (too loose). Tested BOTH directions (the meta-lesson: an honesty-layer fix must close its target
+    # failure WITHOUT opening the opposite one — this is the third swing on this exact line).
     rule = {
         "required_inputs": [
             {"kind": "data_field", "path": "borrowers[].income_items[].monthly_amount"}
         ]
     }
-    present_b = _borrower([_income_item(Fact.present(Decimal("8000"), source=FactSource.STATED))])
-    absent_b = _borrower(
+    primary = _borrower([_income_item(Fact.present(Decimal("8000"), source=FactSource.STATED))])
+
+    # (a) too-strict direction: a co-borrower with NO income items has nothing to check → skipped; the
+    # rule is still runnable on the primary's data → READY (must NOT revert to the `all` couldn't-check).
+    co_no_income = _borrower([]).model_copy(
+        update={"borrower_id": "b2", "position": 2, "is_primary": False}
+    )
+    snap_a = _snapshot().model_copy(update={"borrowers": [primary, co_no_income]})
+    assert classify_from_json(rule, snap_a).state is ApplicabilityState.READY_TO_RUN
+
+    # (b) too-loose direction: a co-borrower who HAS income items whose monthly_amount wasn't extracted
+    # is INCOMPLETE household data → COULDN'T-CHECK (the primary's match must NOT mask it — the `any` hole).
+    co_unextracted = _borrower(
         [_income_item(Fact.missing(source=FactSource.ABSENT_UNCOMPUTABLE))]
     ).model_copy(update={"borrower_id": "b2", "position": 2, "is_primary": False})
-    snap = _snapshot().model_copy(update={"borrowers": [present_b, absent_b]})
-    assert classify_from_json(rule, snap).state is ApplicabilityState.READY_TO_RUN
+    snap_b = _snapshot().model_copy(update={"borrowers": [primary, co_unextracted]})
+    assert classify_from_json(rule, snap_b).state is ApplicabilityState.COULDNT_CHECK

@@ -1,9 +1,10 @@
 """Evaluator contract (LP-120) — the shared shape EVERY rule evaluator follows.
 
 Where LP-119 answers "should this rule run?" (doesn't-apply / couldn't-check / ready-to-run), the
-EVALUATOR answers "what's the verdict?" — for a READY-TO-RUN rule only, it produces **FINDING** or
-**SATISFIED**. This module is the contract the ~125 rule evaluators inherit; getting it right here
-means rules #2..N just fill in the check.
+EVALUATOR answers "what's the verdict?" — for a READY-TO-RUN rule, it produces **FINDING** or
+**SATISFIED**, or, when the data it was handed turns out undeterminable, **COULDN'T-CHECK** (the escape
+hatch added in the LP-121 hardening — see below). This module is the contract the ~125 rule evaluators
+inherit; getting it right here means rules #2..N just fill in the check.
 
 The invariants (read these before writing an evaluator):
 
@@ -20,9 +21,13 @@ The invariants (read these before writing an evaluator):
 * **Provenance.** Every result records WHICH snapshot facts it read + what it observed, so the trust
   surface (LP-140) can show why the verdict was reached.
 
-This produces finding/satisfied ONLY — never couldn't-check/doesn't-apply (those are LP-119). It
-does not persist anything or build a ``Finding`` model (the runner, LP-121, maps the result +
-the rule row's severity/category onto a finding).
+An evaluator produces **finding / satisfied**, and MAY return **couldn't-check** when the data it was
+handed is present but undeterminable — e.g. a gift flagged but its amount unextracted, where asserting
+either "satisfied" or a "$0 gift" finding would be a lie (use :func:`deterministic_couldnt_check`). It
+never returns *doesn't-apply* (that is applicability's job, LP-119) — reach couldn't-check only for the
+genuine "I have the data but can't reach a verdict" case, not to skip a check you simply haven't written.
+It does not persist anything or build a ``Finding`` model (the runner, LP-121, maps the result + the
+rule row's severity/category onto a finding).
 """
 
 from __future__ import annotations

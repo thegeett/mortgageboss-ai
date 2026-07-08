@@ -22,6 +22,7 @@ conservative reading ADR-239 mandates ("unset enum → None → applicability un
 
 from __future__ import annotations
 
+from enum import Enum
 from typing import Any
 
 from app.verification.applicability.schema import (
@@ -54,11 +55,15 @@ _SCOPE_DIMENSIONS: dict[str, str] = {
 }
 
 # Fact sources for which a value of ``None`` is NOT a determination → treat as UNKNOWN (post-review
-# FIX 2). ``UNMAPPED`` (the canonicalizer couldn't classify a raw type) + the ``absent_*`` sources
-# belong with unknown; a value-None from a real determination source (``computed`` = "no MI") stays
-# KNOWN.
+# FIX 2). ``UNMAPPED`` (the canonicalizer couldn't classify a raw type) is the LOAD-BEARING member: a
+# value-None from a real determination source (``computed`` = "no MI") stays KNOWN, but an UNMAPPED
+# value-None must not. The ``ABSENT_*`` members are belt-and-suspenders (round-3 FIX 9): by convention
+# an ``absent_*`` source comes with ``absent=True`` (via ``Fact.missing``), so ``_known_value`` already
+# catches it in the ``node.absent`` branch above — they are listed here only so a directly-constructed
+# non-absent ``absent_*`` fact (unconventional) still fails closed. Do NOT trim the ``node.absent``
+# branch on the assumption this set is the sole authority.
 _NON_DETERMINATION_SOURCES = {
-    FactSource.UNMAPPED,
+    FactSource.UNMAPPED,  # the only one that reaches here in practice (non-absent value-None)
     FactSource.ABSENT_NO_SCHEMA,
     FactSource.ABSENT_NOT_PERSISTED,
     FactSource.ABSENT_UNCOMPUTABLE,
@@ -253,9 +258,12 @@ def _eval_scope(snapshot: FactNamespace, scope: dict[str, list[str]]) -> tuple[T
             results.append(Ternary.FALSE)
             reasons.append(f"scope '{dim}'={value!r} not in {allowed}")
     return _and(results), reasons
-    # NOTE (post-review FIX 10): the refinance_type-on-purchase case needs NO special branch — a
-    # refi rule is seeded with BOTH dims (scope {loan_purpose:[refinance], refinance_type:[…]}), so
-    # on a purchase the loan_purpose mismatch → FALSE → doesn't-apply via the generic path above.
+    # NOTE (post-review FIX 10 / round-3 FIX 6A): the refinance_type-on-purchase case needs NO special
+    # branch here — a refi rule ALWAYS carries BOTH dims (scope {loan_purpose:[refinance],
+    # refinance_type:[…]}), so on a purchase the loan_purpose mismatch → FALSE → doesn't-apply via the
+    # generic path above. That co-emission is enforced STRUCTURALLY at construction (the seed generator /
+    # any applicability builder adds loan_purpose:[refinance] whenever a refinance_type scope is present),
+    # NOT by a guard in this engine — a refi scope cannot exist without its loan_purpose.
 
 
 # --------------------------------------------------------------------------- #
@@ -274,22 +282,45 @@ def _resolve_from(node: Any, path: str) -> Any:
     return node
 
 
-def _nested_field_present(node: Any, segments: list[str]) -> bool:
-    """Whether the (possibly nested) leaf field is present on the RELEVANT element(s) (FIX 1 + 7).
+class _Leaf(Enum):
+    """The status of a nested required-input leaf on ONE branch (round-3 FIX 1)."""
 
-    ``segments`` are the "[]"-delimited parts AFTER the outer collection, e.g.
-    ``["income_items", "monthly_amount"]``. The named leaf must be a KNOWN value. For a NESTED
-    collection the rule is runnable when **at least one** element carries the field (post-review
-    FIX 7 — a ragged file, e.g. a co-borrower with no income items while the primary has data, is
-    still runnable). Still fail-closed for the genuine "no element has it" case.
+    PRESENT = "present"  # a relevant element exists and carries the leaf → data to run on
+    ABSENT = "absent"  # a relevant element exists but the leaf is missing/unextracted → fail-closed
+    SKIP = (
+        "skip"  # nothing relevant to check on this branch (an empty sub-collection along the way)
+    )
+
+
+def _nested_leaf_status(node: Any, segments: list[str]) -> _Leaf:
+    """The RELEVANT-ELEMENT status of a (possibly nested) leaf field (round-3 FIX 1 — the precise
+    condition, neither ``all`` nor ``any``).
+
+    ``segments`` are the ``"[]"``-delimited parts AFTER the outer collection, e.g.
+    ``[".income_items", ".monthly_amount"]``. The distinction that matters for the honesty contract:
+
+    * An element with an **empty** sub-collection has nothing to check → :attr:`_Leaf.SKIP` (it must
+      NOT sink the rule — a co-borrower with no income items while the primary has full data is still
+      runnable; that was the "too strict" ``all`` failure).
+    * An element with a **non-empty** sub-collection whose leaf is absent → :attr:`_Leaf.ABSENT`
+      (fail-closed — a borrower who HAS income whose amount wasn't extracted means incomplete
+      household data; that was the "too loose" ``any`` failure).
+
+    So the rule is runnable only when every element that HAS the sub-collection carries the leaf.
     """
     seg = segments[0].lstrip(".")
+    if len(segments) == 1:  # the leaf field itself, on this element
+        child = _resolve_from(node, seg) if seg else node
+        return _Leaf.PRESENT if _known_value(child)[0] else _Leaf.ABSENT
     child = _resolve_from(node, seg) if seg else node
-    if len(segments) == 1:  # leaf field
-        return _known_value(child)[0]
-    if not isinstance(child, list) or not child:  # nested collection missing/empty → not present
-        return False
-    return any(_nested_field_present(element, segments[1:]) for element in child)
+    if not isinstance(child, list) or not child:
+        return _Leaf.SKIP  # empty/absent sub-collection → nothing relevant here
+    statuses = [_nested_leaf_status(element, segments[1:]) for element in child]
+    if any(s is _Leaf.ABSENT for s in statuses):
+        return _Leaf.ABSENT  # a relevant element is missing the leaf → fail-closed
+    if any(s is _Leaf.PRESENT for s in statuses):
+        return _Leaf.PRESENT
+    return _Leaf.SKIP  # every element skipped (all sub-collections empty)
 
 
 def _required_input_satisfied(
@@ -300,14 +331,17 @@ def _required_input_satisfied(
     # DataField / DerivedField — a snapshot path that must carry usable data.
     path = req.path
     if "[]" in path:
-        # FIX 1 — inspect the NAMED (nested) leaf field, not just the outer collection. FIX 7 —
-        # satisfied when the collection is non-empty AND at least one element carries the named field
-        # PRESENT (the relevant element, not every element). Otherwise couldn't-check.
+        # Round-3 FIX 1 — the RELEVANT elements must have the data: satisfied only when at least one
+        # element carries the leaf AND no element that HAS the sub-collection is missing it. An empty
+        # sub-collection is skipped (not a failure); a non-empty one with an absent leaf → couldn't-check.
         parts = path.split("[]")
         collection = _resolve(snapshot, parts[0])
         if not isinstance(collection, list) or not collection:
             return False
-        return any(_nested_field_present(element, parts[1:]) for element in collection)
+        statuses = [_nested_leaf_status(element, parts[1:]) for element in collection]
+        if any(s is _Leaf.ABSENT for s in statuses):
+            return False  # a relevant element is missing the leaf → couldn't-check
+        return any(s is _Leaf.PRESENT for s in statuses)  # else ready iff some element had data
     known, _ = _known_value(_resolve(snapshot, path))
     return known
 

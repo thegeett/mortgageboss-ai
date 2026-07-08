@@ -73,7 +73,8 @@ async def test_live_rules_present_with_real_ids(db_session: AsyncSession) -> Non
 async def test_structural_tunable_and_validated_gate(db_session: AsyncSession) -> None:
     await _seed(db_session)
 
-    # validated defaults FALSE — only the two Priya-confirmed thresholds seed true.
+    # validated defaults FALSE — the two Priya-confirmed thresholds, plus AS-5 (LP-122R: no threshold +
+    # reproduces the live verdict → validated by the LP-122R criterion).
     validated = set(
         (
             await db_session.execute(
@@ -86,6 +87,7 @@ async def test_structural_tunable_and_validated_gate(db_session: AsyncSession) -
     assert validated == {
         "xsrc.income.stated_vs_documented",
         "xsrc.asset.large_deposit_unsourced",
+        "xsrc.asset.gift_without_letter",
     }
 
     # enabled=True only for the 18 live code rules; the playbook-only rows are disabled.

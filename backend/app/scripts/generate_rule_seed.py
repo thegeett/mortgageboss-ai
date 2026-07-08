@@ -17,6 +17,13 @@ the playbook:
 Nothing here executes a rule. Re-run after changing the live rules or the playbook CSV::
 
     uv run python -m app.scripts.generate_rule_seed
+
+DISCIPLINE (round-3 FIX 3/4): seeding is INSERT-ONLY (``rule_registry.seed_verification_rules`` skips
+existing rule_ids). Regenerating this file changes only what a FRESH DB gets — it does NOT touch an
+already-seeded DB. So any change to an EXISTING row's value or shape here (a column like
+``confidence_mode``, an ``applicability`` shape) MUST be paired with an Alembic DATA MIGRATION that
+updates existing rows (mirror the LP-122R validated migration ``b6f2d9c4e1a8``). Regenerate seed ⇒ write
+the matching data migration.
 """
 
 from __future__ import annotations
@@ -42,6 +49,16 @@ _OUT_JSON = _RULES_DIR / "rule_seed.json"
 _VALIDATED_PARAMS: dict[str, dict[str, Any]] = {
     "xsrc.income.stated_vs_documented": {"variance_pct": 5},  # IN-1, Priya-confirmed >5%
     "xsrc.asset.large_deposit_unsourced": {"large_deposit_pct": 50},  # AS-1, Priya-confirmed >50%
+}
+
+# NON-THRESHOLD rules certified validated (LP-122R). The criterion — applied ~123 times, so it must
+# be strict: a rule seeds validated=True ONLY if it has NO tunable numeric threshold (nothing for Priya
+# to confirm) AND it reproduces known-correct behaviour (the live rule's verdict). AS-5's trigger is a
+# boolean ``is_gift``, not a Priya-threshold, and its evaluator matches the live gift-without-letter
+# rule — so it qualifies. Threshold-bearing rules (AS-1, DT-1, PR-1, MI-1, …) stay validated=False
+# until Priya confirms the number, even after they are built.
+_VALIDATED_NO_THRESHOLD: set[str] = {
+    "xsrc.asset.gift_without_letter",  # AS-5 — LP-122R certified (no threshold, live-verdict parity)
 }
 
 # Authored applicability (LP-119) in the scope/triggers/required_inputs shape. Seeded per rule as
@@ -82,6 +99,35 @@ def _load_playbook() -> dict[str, dict[str, str]]:
         return {row["playbook_id"]: row for row in csv.DictReader(f)}
 
 
+def _enforce_refi_scope_invariant(scope: dict[str, list[str]]) -> dict[str, list[str]]:
+    """Structural invariant (round-3 FIX 6A): a ``refinance_type`` scope can NEVER exist without its
+    ``loan_purpose``.
+
+    Whenever a scope constrains ``refinance_type``, ``loan_purpose:["refinance"]`` is co-emitted — so a
+    refi-type-scoped rule resolves DOESN'T-APPLY on a purchase (loan_purpose mismatch) via the generic
+    FALSE-precedence path, NEVER a false couldn't-check. This is enforced at CONSTRUCTION (here, and any
+    other applicability builder should call it), not by a special-case in the engine — a refi scope
+    cannot exist without its loan_purpose. A contradictory explicit loan_purpose fails LOUD.
+    """
+    if not scope.get("refinance_type"):
+        return scope
+    loan_purpose = scope.get("loan_purpose")
+    if loan_purpose and loan_purpose != ["refinance"]:
+        raise ValueError(
+            f"refinance_type scope requires loan_purpose=['refinance'], got {loan_purpose!r}"
+        )
+    # loan_purpose FIRST for readability; refinance_type (+ any other dims) follow.
+    return {"loan_purpose": ["refinance"], **scope}
+
+
+def _finalize_applicability(app: dict[str, Any]) -> dict[str, Any]:
+    """Apply the structural invariants every emitted applicability must satisfy (round-3 FIX 6A)."""
+    scope = app.get("scope")
+    if isinstance(scope, dict):
+        app = {**app, "scope": _enforce_refi_scope_invariant(scope)}
+    return app
+
+
 def _default_applicability(rule: Any) -> dict[str, Any]:
     """The valid scope/triggers/required_inputs shape for a rule not yet AUTHORED (FIX 3b).
 
@@ -93,16 +139,24 @@ def _default_applicability(rule: Any) -> dict[str, Any]:
     scope: dict[str, list[str]] = {}
     if rule.program is not None:
         scope["program"] = [rule.program.value]
-    if rule.purpose is PurposeScope.PURCHASE:
+    if rule.purpose is None:
+        pass  # None = applies to every purpose — no loan_purpose constraint (the default)
+    elif rule.purpose is PurposeScope.PURCHASE:
         scope["loan_purpose"] = ["purchase"]
     elif rule.purpose is PurposeScope.REFINANCE:
         scope["loan_purpose"] = ["refinance"]
     elif rule.purpose in (PurposeScope.CASH_OUT, PurposeScope.RATE_TERM):
-        # Post-review FIX 10 — emit BOTH dims: a refi-type-scoped rule is a REFINANCE with that
-        # cash-out type. This lets the generic FALSE-precedence path handle purchase files (loan_purpose
-        # mismatch → doesn't-apply) with NO refinance_type-on-purchase special case in the engine.
-        scope["loan_purpose"] = ["refinance"]
+        # Emit refinance_type; loan_purpose:[refinance] is co-emitted by the structural invariant
+        # (round-3 FIX 6A) so the generic FALSE-precedence path handles purchase files.
         scope["refinance_type"] = [rule.purpose.value]
+    else:
+        # Round-3 FIX 2 — an unhandled PurposeScope member must break seeding LOUD, never silently
+        # degrade to a purpose-less scope (which _eval_scope reads as "no constraint → applies to all"
+        # → false-green nationwide, the exact failure the FIX 3/4 whitelist prevents at the engine layer).
+        raise ValueError(
+            f"unhandled PurposeScope member {rule.purpose!r} in _default_applicability — a new purpose "
+            "must map to a scope explicitly, not degrade to no-constraint"
+        )
     return {"scope": scope, "triggers": {}, "required_inputs": []}
 
 
@@ -115,11 +169,21 @@ def _live_rows(playbook: dict[str, dict[str, str]]) -> list[dict[str, Any]]:
         authored = _AUTHORED_APPLICABILITY.get(rule.rule_id)
 
         params: dict[str, Any] = {}
-        validated = rule.rule_id in _VALIDATED_PARAMS
-        if validated:
+        if rule.rule_id in _VALIDATED_PARAMS:
             params = dict(_VALIDATED_PARAMS[rule.rule_id])
         elif rule.threshold is not None:
             params = {"threshold": str(rule.threshold.value), "unit": rule.threshold.unit}
+        # Validated by the LP-122R criterion: a Priya-confirmed threshold, OR a non-threshold rule
+        # certified to reproduce known-correct behaviour (AS-5). Everything else stays provisional.
+        validated = rule.rule_id in _VALIDATED_PARAMS or rule.rule_id in _VALIDATED_NO_THRESHOLD
+        # Round-3 FIX 6B — ENFORCE the criterion in code: _VALIDATED_NO_THRESHOLD is only legal for
+        # genuinely threshold-free rules. A threshold-bearing rule_id added to it (→ non-empty params)
+        # must break seeding LOUD, never seed validated=true beside an unconfirmed threshold.
+        if rule.rule_id in _VALIDATED_NO_THRESHOLD and params:
+            raise ValueError(
+                f"{rule.rule_id} is in _VALIDATED_NO_THRESHOLD but carries params {params} — "
+                "validated=true is only legal for threshold-free rules (LP-122R criterion)"
+            )
 
         layer = pb["layer"] if pb else None
         rows.append(
@@ -132,7 +196,7 @@ def _live_rows(playbook: dict[str, dict[str, str]]) -> list[dict[str, Any]]:
                 # STRUCTURAL — evaluator/applicability filled/refined by LP-119/120; the
                 # canonical_type + template we already know from the live rule.
                 "evaluator": None,
-                "applicability": authored or _default_applicability(rule),
+                "applicability": _finalize_applicability(authored or _default_applicability(rule)),
                 "canonical_type": rule.canonical_type,
                 "message_template": rule.template,
                 # TUNABLE.

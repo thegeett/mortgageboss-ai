@@ -324,7 +324,7 @@
     "enabled": true,
     "status": "NOW",
     "scope": "IN",
-    "validated": false
+    "validated": true
   },
   {
     "rule_id": "xsrc.terms.price_vs_contract",

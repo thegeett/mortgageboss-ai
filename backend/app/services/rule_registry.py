@@ -62,6 +62,15 @@ def seed_verification_rules(
     present are skipped (so a re-run never duplicates). Each fresh insert writes a
     ``rule_change_audits`` row (``changed_field="__insert__"``, the row JSON in
     ``new_value``). Inserts only — it never runs a rule. Returns the number inserted.
+
+    DISCIPLINE — SEED-DATA CHANGE ⇒ DATA MIGRATION (round-3 FIX 3/4). Because this is
+    INSERT-ONLY (existing rule_ids are skipped), changing an EXISTING row's value or shape in
+    ``rule_seed.json`` NEVER reaches an already-seeded DB by re-seeding alone. Any such change
+    (a column value like ``confidence_mode``, or an ``applicability`` shape) MUST ship with a
+    matching Alembic DATA MIGRATION that updates existing rows — mirror the LP-122R validated
+    migration (``b6f2d9c4e1a8``): idempotent, reversible, one ``UPDATE``. Re-seeding only helps a
+    fresh DB. Skipping the migration is exactly how the confidence_mode / flat-applicability drift
+    happened.
     """
     seed = json.loads(seed_path.read_text(encoding="utf-8"))
     now = datetime.now(UTC)

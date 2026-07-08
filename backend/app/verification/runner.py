@@ -22,6 +22,7 @@ with the live ``run_verification`` route / ``run_cross_source`` service.
 from __future__ import annotations
 
 from collections.abc import Sequence
+from enum import StrEnum
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
@@ -37,12 +38,27 @@ from app.verification.evaluators import (
     Provenance,
     Verdict,
     ensure_registered,
-    evaluate_rule,
     get_evaluator,
 )
 from app.verification.fact_namespace import assemble_fact_namespace
 
 Bucket = Literal["finding", "satisfied", "couldnt_check", "doesnt_apply"]
+
+# The verdict-bearing buckets — only these may be PROVISIONAL (round-3 FIX 10). Doesn't-apply and
+# couldn't-check made no verdict, so "pending validation" would be a misleading badge on them.
+_VERDICT_BUCKETS: frozenset[Bucket] = frozenset({"finding", "satisfied"})
+
+
+class OutcomeSource(StrEnum):
+    """WHICH stage produced this outcome (round-3 FIX 5) — so the trust surface (LP-162) can tell the
+    two couldn't-check kinds apart: they share a bucket but need different next-actions."""
+
+    APPLICABILITY = (
+        "applicability"  # the filter decided it (missing inputs → "fix/upload the file")
+    )
+    EVALUATOR = (
+        "evaluator"  # the evaluator stage (a verdict, or "have the data, couldn't run the check")
+    )
 
 
 class RuleOutcome(BaseModel):
@@ -52,10 +68,14 @@ class RuleOutcome(BaseModel):
 
     rule_id: str
     bucket: Bucket
+    # WHICH stage produced this (round-3 FIX 5): applicability vs evaluator. For a couldn't-check this
+    # is the difference between "waiting on an upload" (applicability: missing inputs) and "have it,
+    # couldn't read it" (evaluator: undeterminable, or the rule isn't built yet).
+    source: OutcomeSource
     # PROVISIONAL (post-review FIX 5): the rule's threshold isn't Priya-validated
     # (``VerificationRule.validated`` is False), so its verdict is shown as provisional / pending
-    # validation, NOT asserted as authoritative — "an unvalidated threshold must not go live at full
-    # confidence".
+    # validation, NOT asserted as authoritative. Stamped ONLY on verdict outcomes (finding/satisfied) —
+    # never on doesn't-apply / couldn't-check, which carry no verdict (round-3 FIX 10).
     provisional: bool = False
     message: str | None = None
     reasons: list[str] = []
@@ -95,23 +115,26 @@ _EVALUATOR_BUCKET: dict[Verdict, Bucket] = {
 }
 
 
-def _from_classification(
-    rc: RuleClassification, bucket: Bucket, *, provisional: bool
-) -> RuleOutcome:
+def _from_classification(rc: RuleClassification, bucket: Bucket) -> RuleOutcome:
+    # Applicability-stage outcome (doesn't-apply / couldn't-check). Never a verdict → never provisional.
     return RuleOutcome(
         rule_id=rc.rule_id,
         bucket=bucket,
-        provisional=provisional,
+        source=OutcomeSource.APPLICABILITY,
         reasons=list(rc.classification.reasons),
         missing_inputs=list(rc.classification.missing_inputs),
     )
 
 
 def _from_evaluation(result: EvaluationResult, *, provisional: bool) -> RuleOutcome:
+    bucket = _EVALUATOR_BUCKET[result.verdict]
     return RuleOutcome(
         rule_id=result.rule_id,
-        bucket=_EVALUATOR_BUCKET[result.verdict],
-        provisional=provisional,
+        bucket=bucket,
+        source=OutcomeSource.EVALUATOR,
+        # Round-3 FIX 10 — provisional only on a real verdict (finding/satisfied), never on an
+        # evaluator couldn't-check (it made no judgement to be pending validation).
+        provisional=provisional and bucket in _VERDICT_BUCKETS,
         message=result.message,
         confidence=result.confidence,
         confidence_mode=result.confidence_mode,
@@ -167,32 +190,30 @@ async def run_rule_engine(
     for rc in classified.ready_to_run:
         rule = rule_by_id.get(rc.rule_id)
         params = rule.params if rule is not None else {}
-        provisional = _provisional(rc.rule_id)
-        if get_evaluator(rc.rule_id) is None:
+        # Round-3 FIX 7 — bind the evaluator ONCE (single registry lookup) and guard structurally, not
+        # with an ``assert`` (stripped under ``python -O``).
+        evaluator = get_evaluator(rc.rule_id)
+        if evaluator is None:
             # Applicable + data present, but no evaluator is built yet → couldn't check it (honest,
-            # surfaced, never a silent pass). Does NOT crash the runner.
+            # surfaced, never a silent pass). Does NOT crash the runner. Evaluator-stage source: we have
+            # the data, the check just isn't built (round-3 FIX 5) — never provisional (round-3 FIX 10).
             couldnt_check.append(
                 RuleOutcome(
                     rule_id=rc.rule_id,
                     bucket="couldnt_check",
-                    provisional=provisional,
+                    source=OutcomeSource.EVALUATOR,
                     reasons=["no evaluator registered (rule not yet built)"],
                 )
             )
             continue
-        result = evaluate_rule(rc.rule_id, snapshot, params)  # LP-120
-        assert result is not None  # get_evaluator confirmed one is registered
-        outcome = _from_evaluation(result, provisional=provisional)
+        result = evaluator.evaluate(snapshot, params)  # LP-120 — direct, no second lookup
+        outcome = _from_evaluation(result, provisional=_provisional(rc.rule_id))
         by_bucket[outcome.bucket].append(outcome)  # finding / satisfied / couldnt_check (FIX 8)
 
     couldnt_check.extend(
-        _from_classification(rc, "couldnt_check", provisional=_provisional(rc.rule_id))
-        for rc in classified.couldnt_check
+        _from_classification(rc, "couldnt_check") for rc in classified.couldnt_check
     )
-    doesnt_apply = [
-        _from_classification(rc, "doesnt_apply", provisional=_provisional(rc.rule_id))
-        for rc in classified.doesnt_apply
-    ]
+    doesnt_apply = [_from_classification(rc, "doesnt_apply") for rc in classified.doesnt_apply]
 
     return VerificationRunResult(
         loan_file_id=str(loan_file.id),
