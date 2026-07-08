@@ -43,6 +43,28 @@ _VALIDATED_PARAMS: dict[str, dict[str, Any]] = {
     "xsrc.asset.large_deposit_unsourced": {"large_deposit_pct": 50},  # AS-1, Priya-confirmed >50%
 }
 
+# Authored applicability (LP-119) in the scope/triggers/required_inputs shape. Seeded per rule as
+# each is built; AS-5 (gift-letter) is the LP-119 thin-slice proof. Overrides the default
+# program/purpose applicability. The gift LETTER is the check-target (evaluated in LP-120), NOT a
+# required input — its absence is the finding, so it does not appear here.
+_AUTHORED_APPLICABILITY: dict[str, dict[str, Any]] = {
+    "xsrc.asset.gift_without_letter": {  # AS-5
+        "scope": {},  # applies to all files
+        "triggers": {
+            "all": [
+                {
+                    "kind": "entity_exists",
+                    "collection": "assets",
+                    "field": "is_gift",
+                    "op": "eq",
+                    "value": True,
+                }
+            ]
+        },
+        "required_inputs": [{"kind": "data_field", "path": "assets[].is_gift"}],
+    },
+}
+
 
 def _confidence_mode(layer: str | None) -> str | None:
     """certain (pure-DET) vs computed (DET-FUZZY) — a best-effort seed; LP-120 finalizes."""
@@ -67,6 +89,8 @@ def _live_rows(playbook: dict[str, dict[str, str]]) -> list[dict[str, Any]]:
             applicability["program"] = rule.program.value
         if rule.purpose is not None:
             applicability["purpose"] = rule.purpose.value
+        # An authored LP-119 applicability (scope/triggers/required_inputs) overrides the default.
+        authored = _AUTHORED_APPLICABILITY.get(rule.rule_id)
 
         params: dict[str, Any] = {}
         validated = rule.rule_id in _VALIDATED_PARAMS
@@ -86,7 +110,7 @@ def _live_rows(playbook: dict[str, dict[str, str]]) -> list[dict[str, Any]]:
                 # STRUCTURAL — evaluator/applicability filled/refined by LP-119/120; the
                 # canonical_type + template we already know from the live rule.
                 "evaluator": None,
-                "applicability": applicability or None,
+                "applicability": authored or (applicability or None),
                 "canonical_type": rule.canonical_type,
                 "message_template": rule.template,
                 # TUNABLE.

@@ -244,7 +244,26 @@
     "category": "Assets",
     "layer": "DET+AI",
     "evaluator": null,
-    "applicability": null,
+    "applicability": {
+      "scope": {},
+      "triggers": {
+        "all": [
+          {
+            "kind": "entity_exists",
+            "collection": "assets",
+            "field": "is_gift",
+            "op": "eq",
+            "value": true
+          }
+        ]
+      },
+      "required_inputs": [
+        {
+          "kind": "data_field",
+          "path": "assets[].is_gift"
+        }
+      ]
+    },
     "canonical_type": "gift_discrepancy",
     "message_template": "A gift of {amount} is stated but no gift letter / transfer documentation is present.",
     "params": {},
