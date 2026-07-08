@@ -1,10 +1,15 @@
-"""Applicability AUTHORING invariants (LP-119 FIX 6A, shared — review FIX 7).
+"""Applicability AUTHORING invariants (LP-119 FIX 6A; shared helper).
 
-The single canonical home for the structural invariants EVERY applicability author must satisfy —
-whether the author is the seed generator (``generate_rule_seed``) OR an Alembic data migration that
-writes an ``applicability`` dict directly. Previously the refi-scope invariant lived only in the seed
-generator, so the "a refi scope can't exist without loan_purpose" guarantee was false for the migration
-path. Import + call these wherever applicability JSON is authored so the guarantee holds everywhere.
+The canonical home for the structural invariants an applicability author must satisfy — most importantly
+"a ``refinance_type`` scope can never exist without ``loan_purpose``".
+
+SCOPE OF ENFORCEMENT (honest — round-5 FIX 5): the **seed generator** (``generate_rule_seed``) routes
+EVERY emitted applicability through :func:`finalize_applicability`, so the invariant is guaranteed there.
+It is NOT automatically applied to Alembic data migrations that hand-author an ``applicability`` dict — a
+migration authoring a ``refinance_type`` scope MUST call :func:`enforce_refi_scope_invariant` itself (it
+raises on a missing/contradictory ``loan_purpose``). No current migration authors a refi-type scope; if
+one does, call the helper. (This docstring previously claimed migrations were covered automatically — they
+are not.)
 """
 
 from __future__ import annotations

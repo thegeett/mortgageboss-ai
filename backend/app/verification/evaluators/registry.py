@@ -37,10 +37,14 @@ def ensure_registered() -> None:
     from app.verification.evaluators.bank_statement_continuity import (
         BankStatementContinuityEvaluator,
     )
+    from app.verification.evaluators.employer_count import EmployerCountEvaluator
     from app.verification.evaluators.gift_letter import GiftLetterEvaluator
 
     register(GiftLetterEvaluator())
     register(BankStatementContinuityEvaluator())  # AS-8 (LP-123R)
+    register(
+        EmployerCountEvaluator()
+    )  # xsrc.income.employer_count_matches_items (LP-124R, reproduces live)
 
 
 def get_evaluator(rule_id: str) -> Evaluator | None:

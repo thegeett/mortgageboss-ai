@@ -16,6 +16,7 @@ from decimal import Decimal
 from typing import Any
 
 from app.verification.evaluators.contract import (
+    ConfidenceMode,
     EvaluationResult,
     Provenance,
     deterministic_couldnt_check,
@@ -30,6 +31,9 @@ class GiftLetterEvaluator:
     """Gift funds present but no gift letter/transfer documentation → finding (AS-5)."""
 
     rule_id = "xsrc.asset.gift_without_letter"
+    confidence_mode = (
+        ConfidenceMode.DETERMINISTIC
+    )  # exact check — the seed's source of truth (FIX 7)
 
     def evaluate(self, snapshot: FactNamespace, params: dict[str, Any]) -> EvaluationResult:
         # Reads only the frozen snapshot. ``is_gift`` was derived at fact-build time (same predicate

@@ -96,3 +96,15 @@ def test_r3fix4_seed_has_no_flat_applicability() -> None:
         assert set(app.keys()) <= _WIRE_KEYS, (
             f"{row['rule_id']} holds a non-wire applicability: {app}"
         )
+
+
+def test_r5fix7_confidence_mode_sourced_from_evaluator() -> None:
+    # FIX 7 — the seeded confidence_mode of a BUILT rule is exactly its evaluator's declared mode (the
+    # single source of truth), never a playbook-layer guess that could drift.
+    from app.verification.evaluators import get_evaluator, registered_rule_ids
+
+    rows = {r["rule_id"]: r for r in _seed_rows()}
+    for rule_id in registered_rule_ids():
+        evaluator = get_evaluator(rule_id)
+        assert evaluator is not None
+        assert rows[rule_id]["confidence_mode"] == evaluator.confidence_mode.value

@@ -279,3 +279,17 @@ async def test_cross_source_projection_matches_legacy(db_session: AsyncSession) 
     projected = project_cross_source_facts(ns)
 
     assert projected == legacy
+
+
+async def test_r5fix8_v1_snapshot_loads_without_bank_statements(db_session: AsyncSession) -> None:
+    # Round-5 FIX 8: a persisted v1 snapshot (before bank_statements existed) must still load — the field
+    # defaults to [] so the schema bump 1→2 is round-trip-safe, not a ValidationError.
+    from app.verification.fact_namespace.snapshot import FactNamespace
+
+    loan_file = await _build_full_file(db_session)
+    ns = await assemble_fact_namespace(db_session, loan_file)
+    v1 = ns.model_dump(mode="json")
+    v1.pop("bank_statements")  # simulate the v1 shape
+    v1["schema_version"] = 1
+    reloaded = FactNamespace.model_validate(v1)  # must not raise
+    assert reloaded.bank_statements == []

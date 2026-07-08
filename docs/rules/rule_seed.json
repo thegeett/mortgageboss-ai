@@ -193,11 +193,11 @@
     "message_template": "Stated employer count ({employers}) does not match the income-item count ({items}).",
     "params": {},
     "severity": "YELLOW",
-    "confidence_mode": null,
+    "confidence_mode": "deterministic",
     "enabled": true,
     "status": "NOW",
     "scope": "IN",
-    "validated": false
+    "validated": true
   },
   {
     "rule_id": "xsrc.liability.undisclosed_debt",

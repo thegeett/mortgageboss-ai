@@ -35,9 +35,10 @@ from app.verification.fact_namespace.snapshot import Fact, FactSource
 _MAP_PATH = Path(__file__).with_name("canonicalization_map.json")
 
 
-def _normalize(raw: str) -> str:
-    """Lowercase, strip, collapse internal whitespace — the map lookup key."""
-    return re.sub(r"\s+", " ", raw.strip().lower())
+def normalize_text(raw: str | None) -> str:
+    """Lowercase, strip, collapse internal whitespace — the map lookup key + the shared text-key
+    normalizer (reused by the AS-8 grouping token, round-5 FIX 4). ``None`` → ``""``."""
+    return re.sub(r"\s+", " ", (raw or "").strip().lower())
 
 
 @dataclass(frozen=True)
@@ -97,7 +98,7 @@ class Canonicalizer:
         """
         if raw is None or not raw.strip():
             return Fact[str](value=None, source=None)
-        key = _normalize(raw)
+        key = normalize_text(raw)
 
         mapped = self._lookup(field_name, key)
         if mapped is not None:

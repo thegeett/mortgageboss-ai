@@ -707,3 +707,194 @@ async def test_end_to_end_break_lands_in_findings_provisional(db_session: AsyncS
     result = await run_rule_engine(db_session, lf)
     outcome = next(o for o in result.findings if o.rule_id == RULE_ID)
     assert outcome.provisional is True and outcome.provenance
+
+
+# --------------------------------------------------------------------------- #
+# Round-5 grouping/gap fixes (pin these so the core stops needing re-passes)
+# --------------------------------------------------------------------------- #
+
+
+def test_r5fix1_blank_account_type_still_groups() -> None:
+    # FIX 1 — account_type is a fallback disambiguator, not a hard requirement: 3 Chase ****6789 with
+    # BLANK account_type still GROUP (bank+masked# is a sufficient identity) → satisfied, NOT couldn't-check.
+    stmts = [
+        _bs(
+            "d1",
+            bank="Chase",
+            acct_type=None,
+            masked="****6789",
+            start="2026-01-01",
+            end="2026-01-31",
+            beginning="100",
+            ending="200",
+        ),
+        _bs(
+            "d2",
+            bank="Chase",
+            acct_type=None,
+            masked="****6789",
+            start="2026-02-01",
+            end="2026-02-28",
+            beginning="200",
+            ending="300",
+        ),
+        _bs(
+            "d3",
+            bank="Chase",
+            acct_type=None,
+            masked="****6789",
+            start="2026-03-01",
+            end="2026-03-31",
+            beginning="300",
+            ending="400",
+        ),
+    ]
+    assert _evaluate(stmts).verdict is Verdict.SATISFIED
+
+
+def test_r5fix1_differing_account_type_splits() -> None:
+    # FIX 1 — same bank+masked# but DIFFERENT populated account_types → SPLIT (checking ≠ savings). Each
+    # internally continuous (with balances that would clash if merged) → satisfied, never cross-compared.
+    stmts = [
+        _bs(
+            "c1",
+            bank="Chase",
+            acct_type="checking",
+            masked="****6789",
+            start="2026-01-01",
+            end="2026-01-31",
+            beginning="100",
+            ending="200",
+        ),
+        _bs(
+            "c2",
+            bank="Chase",
+            acct_type="checking",
+            masked="****6789",
+            start="2026-02-01",
+            end="2026-02-28",
+            beginning="200",
+            ending="300",
+        ),
+        _bs(
+            "s1",
+            bank="Chase",
+            acct_type="savings",
+            masked="****6789",
+            start="2026-01-01",
+            end="2026-01-31",
+            beginning="9000",
+            ending="9100",
+        ),
+        _bs(
+            "s2",
+            bank="Chase",
+            acct_type="savings",
+            masked="****6789",
+            start="2026-02-01",
+            end="2026-02-28",
+            beginning="9100",
+            ending="9200",
+        ),
+    ]
+    assert _evaluate(stmts).verdict is Verdict.SATISFIED
+
+
+def test_r5fix2_overlapping_periods_not_satisfied() -> None:
+    # FIX 2 — a quarterly statement overlapping a monthly one is NOT a continuity chain even if balances
+    # happen to chain; must be a FINDING (false-green closed), never satisfied.
+    stmts = [
+        _bs(
+            "q",
+            masked="****1",
+            start="2026-01-01",
+            end="2026-03-31",
+            beginning="1000",
+            ending="4000",
+        ),
+        _bs(
+            "m",
+            masked="****1",
+            start="2026-02-01",
+            end="2026-02-28",
+            beginning="4000",
+            ending="4000",
+        ),
+    ]
+    result = _evaluate(stmts)
+    assert result.verdict is Verdict.FINDING
+    assert "overlapping" in _observed(result)
+
+
+def test_r5fix3_same_start_different_end_are_retained_not_collapsed() -> None:
+    # FIX 3 — dedup keys on (start, end). Two statements sharing a start but with different ends are
+    # DISTINCT (both retained) — a collapse would drop one to a single statement (couldn't-check). Both
+    # retained → the shared start makes them overlap → FINDING (retained + surfaced, not silently dropped).
+    stmts = [
+        _bs(
+            "s1",
+            masked="****1",
+            start="2026-01-01",
+            end="2026-01-31",
+            beginning="1000",
+            ending="1500",
+        ),
+        _bs(
+            "s2",
+            masked="****1",
+            start="2026-01-01",
+            end="2026-02-15",
+            beginning="1500",
+            ending="2000",
+        ),
+    ]
+    assert _evaluate(stmts).verdict is Verdict.FINDING
+
+
+def test_r5fix3_same_period_different_balances_still_conflict() -> None:
+    stmts = [
+        _bs(
+            "s1",
+            masked="****1",
+            start="2026-01-01",
+            end="2026-01-31",
+            beginning="1000",
+            ending="1500",
+        ),
+        _bs(
+            "s2",
+            masked="****1",
+            start="2026-01-01",
+            end="2026-01-31",
+            beginning="1000",
+            ending="9999",
+        ),
+    ]
+    result = _evaluate(stmts)
+    assert result.verdict is Verdict.COULDNT_CHECK and "conflicting" in _observed(result)
+
+
+def test_r5fix4_whitespace_normalized_bank_groups_one_account() -> None:
+    # FIX 4 — the shared whitespace-collapsing normalizer: "Wells Fargo" and "Wells  Fargo" are ONE
+    # account (not split into two single-statement groups → couldn't-check).
+    stmts = [
+        _bs(
+            "s1",
+            bank="Wells Fargo",
+            masked="****1",
+            start="2026-01-01",
+            end="2026-01-31",
+            beginning="1000",
+            ending="1500",
+        ),
+        _bs(
+            "s2",
+            bank="Wells  Fargo",
+            masked="****1",
+            start="2026-02-01",
+            end="2026-02-28",
+            beginning="1500",
+            ending="1800",
+        ),
+    ]
+    assert _evaluate(stmts).verdict is Verdict.SATISFIED

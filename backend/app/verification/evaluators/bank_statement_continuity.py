@@ -7,12 +7,14 @@ the domain choices are flagged for Priya.
 THE SPEC (as implemented, with the review fixes):
 
 * **Group by ACCOUNT first (the core constraint).** Continuity is only meaningful WITHIN one account —
-  two different accounts must NEVER chain together. The grouping key must UNIQUELY identify an account:
-  ``(bank, account_type, masked#)`` when the masked number is present, else ``(bank, account_type,
-  holder)``. Both REQUIRE bank + account_type (so ``****6789`` at Chase ≠ at Wells, and checking ≠
-  savings). If those disambiguators are missing → the statement is **ungroupable** → couldn't-check
-  (never a blind comparison). The grouping key is an OPAQUE, PII-free token (ADR-149); the outcome
-  labels accounts ordinally ("account 1"), never leaking the real name / masked number.
+  two different accounts must NEVER chain together. The grouping key uniquely identifies an account:
+  ``bank + masked#`` (a sufficient identity; so ``****6789`` at Chase ≠ at Wells), else ``bank +
+  account_type + holder`` when the masked number is absent. ``account_type`` is a best-effort AI field, so
+  it is a FALLBACK DISAMBIGUATOR (splits two statements that share bank+masked# but have different
+  populated types), NOT a hard requirement — a blank type never blocks grouping (round-5 FIX 1). Missing
+  the bank (or, in the fallback, the holder) → **ungroupable** → couldn't-check (never a blind comparison).
+  The grouping key is an OPAQUE, PII-free token (ADR-150); the outcome labels accounts ordinally
+  ("account 1"), never leaking the real name / masked number.
 * **Dedup by period within an account.** A re-uploaded statement (same account + period + balances) is
   the SAME statement — collapsed, never chained against itself (which would be a false "break"). Two
   statements claiming the same period with DIFFERENT balances are a genuine conflict → couldn't-check.
@@ -44,6 +46,7 @@ from itertools import pairwise
 from typing import Any, NamedTuple
 
 from app.verification.evaluators.contract import (
+    ConfidenceMode,
     EvaluationResult,
     Provenance,
     Verdict,
@@ -51,6 +54,7 @@ from app.verification.evaluators.contract import (
     deterministic_finding,
     deterministic_satisfied,
 )
+from app.verification.fact_namespace.canonicalize import normalize_text
 from app.verification.fact_namespace.snapshot import BankStatementFacts, FactNamespace
 
 RULE_ID = "pb.as-8"
@@ -61,30 +65,37 @@ RULE_ID = "pb.as-8"
 _MAX_ADJACENCY_GAP_DAYS = 20
 
 
-def _norm(value: str | None) -> str:
-    return (value or "").strip().lower()
-
-
 def _grouping_token(statement: BankStatementFacts) -> str | None:
     """An OPAQUE, PII-free token that UNIQUELY identifies the account, or ``None`` if the statement
     can't be disambiguated (→ couldn't-check, never a blind chain across accounts).
 
-    Requires bank + account_type always (so a shared last-4 across banks, and checking vs savings, never
-    merge), plus the masked number or the holder. ADR-149: the token is a hash — no raw masked account /
-    name flows into the (loggable) outcome.
+    Account IDENTITY (round-5 FIX 1 — a complete key is not a rigid key):
+    * ``bank + masked#`` is a sufficient identity when both are present. ``account_type`` is a best-effort
+      AI field (often blank) — it is a FALLBACK DISAMBIGUATOR, not a hard requirement: it is folded into
+      the key so two statements sharing bank+masked# but with DIFFERENT populated types split, but a BLANK
+      type never blocks grouping.
+    * When the masked number is absent, fall back to ``bank + account_type + holder``.
+    * Missing the bank (or, in the fallback, the holder) → ``None`` (ungroupable → couldn't-check).
+
+    ADR-150: the token is a hash — no raw masked account / name flows into the (loggable) outcome.
     """
-    bank = _norm(statement.bank_name)
-    account_type = _norm(statement.account_type)
-    if not (bank and account_type):
-        return None  # cannot disambiguate accounts without the bank AND the account type
-    masked = _norm(statement.account_number_masked)
-    holder = _norm(statement.account_holder_name)
-    if masked:
-        components = ("m", bank, account_type, masked)
-    elif holder:
+    bank = normalize_text(statement.bank_name)
+    account_type = normalize_text(
+        statement.account_type
+    )  # may be "" — a fallback disambiguator only
+    masked = normalize_text(statement.account_number_masked)
+    holder = normalize_text(statement.account_holder_name)
+    if bank and masked:
+        components = (
+            "m",
+            bank,
+            masked,
+            account_type,
+        )  # account_type only splits when present+differing
+    elif bank and account_type and holder:
         components = ("h", bank, account_type, holder)
     else:
-        return None
+        return None  # cannot disambiguate accounts (no bank+masked#, and no bank+type+holder)
     digest = hashlib.sha256("|".join(components).encode("utf-8")).hexdigest()[:12]
     return f"acct:{digest}"
 
@@ -125,23 +136,25 @@ def _assess_account(group: list[BankStatementFacts]) -> tuple[Verdict, str]:
             f"{len(group)} statements but period/balances not extracted for 2+ — cannot verify continuity",
         )
 
-    # Dedup by period: same period + same balances = the same (re-uploaded) statement; same period +
-    # DIFFERENT balances = a genuine conflict.
-    balances_by_period: dict[date, set[tuple[Decimal, Decimal]]] = defaultdict(set)
-    representative: dict[date, _Row] = {}
+    # Dedup by the FULL period (start, end) — round-5 FIX 3. Two rows are the "same statement" only when
+    # BOTH match; a shared start with a different end is a DISTINCT statement (both retained). Same
+    # (start,end) with different balances = a genuine conflict.
+    balances_by_period: dict[tuple[date, date], set[tuple[Decimal, Decimal]]] = defaultdict(set)
+    representative: dict[tuple[date, date], _Row] = {}
     for row in usable:
-        balances_by_period[row.period_start].add((row.beginning, row.ending))
-        representative.setdefault(row.period_start, row)
+        key = (row.period_start, row.period_end)
+        balances_by_period[key].add((row.beginning, row.ending))
+        representative.setdefault(key, row)
 
-    conflicts = sorted(p for p, balances in balances_by_period.items() if len(balances) > 1)
+    conflicts = sorted(k for k, balances in balances_by_period.items() if len(balances) > 1)
     if conflicts:
         return (
             Verdict.COULDNT_CHECK,
-            f"conflicting statements for the same period ({conflicts[0]}) with different balances "
-            "— cannot verify continuity",
+            f"conflicting statements for the same period ({conflicts[0][0]}-{conflicts[0][1]}) with "
+            "different balances — cannot verify continuity",
         )
 
-    ordered = [representative[period] for period in sorted(representative)]
+    ordered = [representative[key] for key in sorted(representative)]
     if len(ordered) < 2:
         return (
             Verdict.COULDNT_CHECK,
@@ -150,7 +163,14 @@ def _assess_account(group: list[BankStatementFacts]) -> tuple[Verdict, str]:
 
     breaks: list[str] = []
     for prev, nxt in pairwise(ordered):
-        if prev.ending != nxt.beginning:
+        # Round-5 FIX 2 — an overlapping/backwards pair (nested quarterly+monthly, or an out-of-order
+        # period) is NOT a continuity chain; the balance chain across it is meaningless → never SATISFIED.
+        if nxt.period_start < prev.period_end:
+            breaks.append(
+                f"overlapping/nested statement periods ({prev.period_start}-{prev.period_end} and "
+                f"{nxt.period_start}-{nxt.period_end}) — not a continuity chain"
+            )
+        elif prev.ending != nxt.beginning:
             breaks.append(
                 f"ending {prev.ending} (period ending {prev.period_end}) != next "
                 f"beginning {nxt.beginning} (period starting {nxt.period_start})"
@@ -173,6 +193,9 @@ class BankStatementContinuityEvaluator:
     """AS-8 — bank-statement continuity, grouped by account (LP-123R)."""
 
     rule_id = RULE_ID
+    confidence_mode = (
+        ConfidenceMode.DETERMINISTIC
+    )  # exact arithmetic — the seed's source of truth (FIX 7)
 
     def evaluate(self, snapshot: FactNamespace, params: dict[str, Any]) -> EvaluationResult:
         statements = list(snapshot.bank_statements)
@@ -195,7 +218,7 @@ class BankStatementContinuityEvaluator:
             else:
                 grouped[token].append(statement)
 
-        # Ordinal, PII-free labels for the outcome (ADR-149) — stable within a run by sorted token.
+        # Ordinal, PII-free labels for the outcome (ADR-150) — stable within a run by sorted token.
         label_by_token = {token: f"account {i + 1}" for i, token in enumerate(sorted(grouped))}
 
         finding_prov: list[Provenance] = []

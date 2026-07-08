@@ -241,11 +241,13 @@ async def test_runner_ensures_registration(
 
 async def test_rule_without_evaluator_does_not_crash(db_session: AsyncSession) -> None:
     _, lf = await _file(db_session, "run9")
-    # An enabled rule with a valid empty applicability (→ ready-to-run) but NO registered evaluator.
+    # An enabled rule with a valid empty applicability (→ ready-to-run) but NO registered evaluator
+    # (a not-yet-built playbook rule).
+    unbuilt_id = "pb.dt-1"
     db_session.add(
         VerificationRule(
-            rule_id="xsrc.income.employer_count_matches_items",
-            name="Employer count",
+            rule_id=unbuilt_id,
+            name="DTI ratio vs limit (not built)",
             applicability={"scope": {}, "triggers": {}, "required_inputs": []},
             params={},
             enabled=True,
@@ -254,9 +256,7 @@ async def test_rule_without_evaluator_does_not_crash(db_session: AsyncSession) -
     await db_session.flush()
 
     result = await run_rule_engine(db_session, lf)  # must not raise
-    outcome = next(
-        o for o in result.couldnt_check if o.rule_id == "xsrc.income.employer_count_matches_items"
-    )
+    outcome = next(o for o in result.couldnt_check if o.rule_id == unbuilt_id)
     assert "no evaluator" in outcome.reasons[0]
 
 

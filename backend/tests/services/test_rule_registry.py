@@ -73,8 +73,8 @@ async def test_live_rules_present_with_real_ids(db_session: AsyncSession) -> Non
 async def test_structural_tunable_and_validated_gate(db_session: AsyncSession) -> None:
     await _seed(db_session)
 
-    # validated defaults FALSE — the two Priya-confirmed thresholds, plus AS-5 (LP-122R: no threshold +
-    # reproduces the live verdict → validated by the LP-122R criterion).
+    # validated defaults FALSE — the two Priya-confirmed thresholds, plus the no-threshold live-parity
+    # rules certified true (AS-5 LP-122R; employer-count LP-124R) per the LP-122R criterion.
     validated = set(
         (
             await db_session.execute(
@@ -84,11 +84,15 @@ async def test_structural_tunable_and_validated_gate(db_session: AsyncSession) -
         .scalars()
         .all()
     )
-    assert validated == {
-        "xsrc.income.stated_vs_documented",
-        "xsrc.asset.large_deposit_unsourced",
-        "xsrc.asset.gift_without_letter",
-    }
+    assert (
+        validated
+        == {
+            "xsrc.income.stated_vs_documented",
+            "xsrc.asset.large_deposit_unsourced",
+            "xsrc.asset.gift_without_letter",
+            "xsrc.income.employer_count_matches_items",  # LP-124R (reproduces live; exact count, no threshold)
+        }
+    )
 
     # enabled=True for the 18 live code rules + AS-8 (built playbook rule, LP-123R); others disabled.
     enabled_count = (

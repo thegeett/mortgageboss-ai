@@ -71,11 +71,13 @@ def test_as5_is_validated_by_the_criterion() -> None:
 
 
 def test_validated_criterion_is_narrow() -> None:
-    # The criterion is applied ~123 times, so guard it: ONLY the two Priya-confirmed threshold rules
-    # and AS-5 are validated. A new validated=true row must be a deliberate, documented certification.
+    # The criterion is applied ~123 times, so guard it: only Priya-confirmed thresholds + certified
+    # no-threshold live-parity rules are validated. A new validated=true row must be a deliberate,
+    # documented certification.
     validated = {r["rule_id"] for r in _seed_rows() if r["validated"]}
     assert validated == {
         "xsrc.income.stated_vs_documented",  # IN-1 (Priya-confirmed 5%)
         "xsrc.asset.large_deposit_unsourced",  # AS-1 (Priya-confirmed 50%)
         _AS5_RULE_ID,  # AS-5 (no threshold, live-verdict parity — LP-122R)
+        "xsrc.income.employer_count_matches_items",  # LP-124R (no threshold, reproduces live)
     }

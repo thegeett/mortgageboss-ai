@@ -32,7 +32,7 @@ from datetime import date
 from decimal import Decimal
 from enum import StrEnum
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 SNAPSHOT_SCHEMA_VERSION = 2  # v2 (LP-123R): + bank_statements[] typed materialized facts
 
@@ -196,7 +196,7 @@ class BankStatementFacts(BaseModel):
     the builder coerces once (via the shared coercers) and freezes typed values; the evaluator READS
     these frozen values with NO eval-time coercion (the contract). Account fields stay raw here (this is
     persisted fact data, like ``DocumentRef.fields``); an evaluator must not leak them into a loggable
-    outcome (ADR-149) — it groups on an opaque token instead."""
+    outcome (ADR-150) — it groups on an opaque token instead."""
 
     model_config = ConfigDict(frozen=True)
 
@@ -273,6 +273,8 @@ class FactNamespace(BaseModel):
     assets: list[AssetFacts]
     documents: list[DocumentRef]  # file-level; borrower link is LP-118.8
     transactions: list[TransactionFacts]
-    bank_statements: list[BankStatementFacts]  # typed statement-level facts (LP-123R)
+    # v2 (LP-123R). Defaulted so a persisted v1 snapshot (no bank_statements) upgrades gracefully on load
+    # instead of raising ValidationError (round-5 FIX 8) — the schema bump is round-trip-safe.
+    bank_statements: list[BankStatementFacts] = Field(default_factory=list)
     computed: ComputedFacts
     documented: DocumentedFacts

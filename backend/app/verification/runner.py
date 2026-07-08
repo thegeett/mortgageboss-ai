@@ -48,6 +48,17 @@ Bucket = Literal["finding", "satisfied", "couldnt_check", "doesnt_apply"]
 # couldn't-check made no verdict, so "pending validation" would be a misleading badge on them.
 _VERDICT_BUCKETS: frozenset[Bucket] = frozenset({"finding", "satisfied"})
 
+# Rules the LIVE deterministic cross-source path STILL OWNS + fires. The new engine REPRODUCES these
+# (LP-122R / LP-124R), so a persist layer (LP-140/162) MUST NOT persist a duplicate finding for them
+# while the live path runs — skip these until LP-161 retires the live path (round-5 FIX 6). Latent today
+# (this runner computes but does not persist), declared here so wiring can't miss the double-firing gate.
+LIVE_PATH_OWNED_RULE_IDS: frozenset[str] = frozenset(
+    {
+        "xsrc.asset.gift_without_letter",  # AS-5 (LP-122R) — live cross-source rule, reproduced
+        "xsrc.income.employer_count_matches_items",  # LP-124R — live cross-source rule, reproduced
+    }
+)
+
 
 class OutcomeSource(StrEnum):
     """WHICH stage produced this outcome (round-3 FIX 5) — so the trust surface (LP-162) can tell the

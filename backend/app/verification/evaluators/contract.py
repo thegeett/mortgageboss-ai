@@ -94,9 +94,13 @@ class Evaluator(Protocol):
     """The interface every rule evaluator implements (dispatched by ``rule_id``, LP-120 registry).
 
     ``evaluate`` is a PURE, synchronous reader of the frozen snapshot — no DB, no AI, no recompute.
+    ``confidence_mode`` is the evaluator's DECLARED mode — the single source of truth for the seeded
+    ``verification_rules.confidence_mode`` (round-5 FIX 7), so the column can't drift from what the
+    evaluator actually emits. It must equal the mode of the results ``evaluate`` returns.
     """
 
     rule_id: str
+    confidence_mode: ConfidenceMode
 
     def evaluate(self, snapshot: FactNamespace, params: dict[str, Any]) -> EvaluationResult: ...
 

@@ -35,6 +35,7 @@ from typing import Any
 
 from app.verification.applicability.authoring import finalize_applicability
 from app.verification.cross_source.rules import CROSS_SOURCE_RULES
+from app.verification.evaluators import get_evaluator
 from app.verification.rules.schema import PurposeScope
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -60,6 +61,8 @@ _VALIDATED_PARAMS: dict[str, dict[str, Any]] = {
 # until Priya confirms the number, even after they are built.
 _VALIDATED_NO_THRESHOLD: set[str] = {
     "xsrc.asset.gift_without_letter",  # AS-5 — LP-122R certified (no threshold, live-verdict parity)
+    # LP-124R — reproduces the live rule; exact count equality, no threshold → validated.
+    "xsrc.income.employer_count_matches_items",
 }
 
 # Authored applicability (LP-119) in the scope/triggers/required_inputs shape. Seeded per rule as
@@ -125,6 +128,15 @@ def _confidence_mode(layer: str | None) -> str | None:
     if not layer:
         return None
     return "computed" if "FUZZY" in layer.upper() else "deterministic"
+
+
+def _declared_confidence_mode(rule_id: str) -> str | None:
+    """The rule's EVALUATOR-declared confidence_mode — the single source of truth (round-5 FIX 7).
+
+    A built rule's seeded mode must equal what its evaluator emits, so it can't drift from a playbook-layer
+    guess. ``None`` when no evaluator is registered (the caller falls back to the layer a-priori)."""
+    evaluator = get_evaluator(rule_id)
+    return evaluator.confidence_mode.value if evaluator is not None else None
 
 
 def _load_playbook() -> dict[str, dict[str, str]]:
@@ -207,7 +219,11 @@ def _live_rows(playbook: dict[str, dict[str, str]]) -> list[dict[str, Any]]:
                 # TUNABLE.
                 "params": params,
                 "severity": rule.severity.value.upper(),
-                "confidence_mode": _confidence_mode(layer),
+                # The EVALUATOR's declared mode is the source of truth (FIX 7); else the playbook-layer
+                # a-priori; else, for a validated off-list rule with no layer (LP-124R), deterministic.
+                "confidence_mode": _declared_confidence_mode(rule.rule_id)
+                or _confidence_mode(layer)
+                or ("deterministic" if validated else None),
                 "enabled": True,  # the 18 live cross-source rules exist in code
                 # Routing / scope (playbook vocab where mapped; live default otherwise).
                 "status": pb["status"] if pb else "NOW",
@@ -242,7 +258,10 @@ def _playbook_only_rows(
                 "message_template": built["message_template"] if built else None,
                 "params": {},
                 "severity": built["severity"] if built else None,
-                "confidence_mode": _confidence_mode(pb["layer"]),
+                # A built playbook rule's mode is its evaluator's declared mode (FIX 7); an unbuilt
+                # placeholder uses the playbook-layer a-priori.
+                "confidence_mode": _declared_confidence_mode(f"pb.{pid.lower()}")
+                or _confidence_mode(pb["layer"]),
                 "enabled": bool(
                     built
                 ),  # a built playbook rule is enabled; placeholders stay disabled

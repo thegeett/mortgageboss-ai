@@ -146,6 +146,14 @@ snapshot carries what its evaluator would read. "Domain gap?" = a threshold/limi
 
 ## 6. Recommended clean rule #2 — `xsrc.income.employer_count_matches_items`
 
+> **Status (off-list tracking): REPRODUCED / BUILT in the new engine — LP-124R (2026-07-08).** The live
+> rule was reproduced (file-level count parity; `validated=true`, no threshold). Round-5 made the zero-on-
+> one-side case an intentional stricter-than-live FINDING (Geet's decision). This rule is off the 124
+> authored list; recording it here is its coverage tracking.
+> **Double-firing gate:** it fires in BOTH the live path and the new engine, so it is listed in
+> `runner.LIVE_PATH_OWNED_RULE_IDS` (with `gift_without_letter`) — a persist layer must skip these until
+> LP-161 retires the live path.
+
 **Why it's the right #2 (and the anchor AS-8 wasn't):**
 
 1. **It actually fires today** — one of the 5 live rules, so there is a REAL live verdict to match

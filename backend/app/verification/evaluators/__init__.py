@@ -24,6 +24,7 @@ from app.verification.evaluators.contract import (
     deterministic_finding,
     deterministic_satisfied,
 )
+from app.verification.evaluators.employer_count import EmployerCountEvaluator
 from app.verification.evaluators.gift_letter import GiftLetterEvaluator
 from app.verification.evaluators.registry import (
     ensure_registered,
@@ -41,6 +42,7 @@ ensure_registered()
 __all__ = [
     "BankStatementContinuityEvaluator",
     "ConfidenceMode",
+    "EmployerCountEvaluator",
     "EvaluationResult",
     "Evaluator",
     "GiftLetterEvaluator",
