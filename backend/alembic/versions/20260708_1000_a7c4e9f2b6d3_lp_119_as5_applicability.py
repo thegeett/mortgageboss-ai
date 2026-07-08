@@ -58,6 +58,12 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    """Restore AS-5's applicability to NULL (its LP-118 seeded value)."""
-    rules = _rules_table()
-    op.execute(rules.update().where(rules.c.rule_id == _RULE_ID).values(applicability=None))
+    """Intentionally a NO-OP (FIX 7).
+
+    The LP-118 seed (``d4b8f1a63c27``) now carries AS-5's authored applicability in
+    ``rule_seed.json``, so on a fresh DB the row is already authored BEFORE this migration runs and
+    this ``upgrade`` is an idempotent re-assert. Setting the applicability back to NULL on downgrade
+    would leave AS-5 with no trigger → universally READY_TO_RUN (a silent over-apply) — a state
+    matching neither the pre-migration DB nor the seeded value. So downgrade leaves the seeded
+    (authored) applicability in place; there is nothing to revert to that is safe.
+    """

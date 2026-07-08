@@ -6,7 +6,11 @@
     "category": "Application/Identity",
     "layer": "DET-FUZZY",
     "evaluator": null,
-    "applicability": null,
+    "applicability": {
+      "scope": {},
+      "triggers": {},
+      "required_inputs": []
+    },
     "canonical_type": "identity_discrepancy",
     "message_template": "Borrower name differs across sources: {values}.",
     "params": {},
@@ -24,7 +28,11 @@
     "category": "Application/Identity",
     "layer": "DET",
     "evaluator": null,
-    "applicability": null,
+    "applicability": {
+      "scope": {},
+      "triggers": {},
+      "required_inputs": []
+    },
     "canonical_type": "identity_discrepancy",
     "message_template": "SSN differs across documents: {values}.",
     "params": {},
@@ -42,7 +50,11 @@
     "category": "Application/Identity",
     "layer": "DET",
     "evaluator": null,
-    "applicability": null,
+    "applicability": {
+      "scope": {},
+      "triggers": {},
+      "required_inputs": []
+    },
     "canonical_type": "identity_discrepancy",
     "message_template": "Date of birth differs across documents: {values}.",
     "params": {},
@@ -60,7 +72,11 @@
     "category": "property",
     "layer": null,
     "evaluator": null,
-    "applicability": null,
+    "applicability": {
+      "scope": {},
+      "triggers": {},
+      "required_inputs": []
+    },
     "canonical_type": "property_address_discrepancy",
     "message_template": "Driver's license address equals the subject property ({address}) — occupancy/identity red flag.",
     "params": {},
@@ -78,7 +94,11 @@
     "category": "income",
     "layer": null,
     "evaluator": null,
-    "applicability": null,
+    "applicability": {
+      "scope": {},
+      "triggers": {},
+      "required_inputs": []
+    },
     "canonical_type": "property_address_discrepancy",
     "message_template": "Employer address ({source}) equals the subject property ({address}) — employment red flag.",
     "params": {},
@@ -96,7 +116,11 @@
     "category": "Application/Identity",
     "layer": "DET-FUZZY",
     "evaluator": null,
-    "applicability": null,
+    "applicability": {
+      "scope": {},
+      "triggers": {},
+      "required_inputs": []
+    },
     "canonical_type": "identity_discrepancy",
     "message_template": "Current/mailing address differs across documents: {values}.",
     "params": {},
@@ -114,7 +138,11 @@
     "category": "Income/Employment",
     "layer": "DET",
     "evaluator": null,
-    "applicability": null,
+    "applicability": {
+      "scope": {},
+      "triggers": {},
+      "required_inputs": []
+    },
     "canonical_type": "income_variance",
     "message_template": "Stated income ({stated}) differs from documented income ({documented}) by {variance}% (> {threshold}%).",
     "params": {
@@ -134,7 +162,11 @@
     "category": "Income/Employment",
     "layer": "DET-FUZZY",
     "evaluator": null,
-    "applicability": null,
+    "applicability": {
+      "scope": {},
+      "triggers": {},
+      "required_inputs": []
+    },
     "canonical_type": "employer_mismatch",
     "message_template": "Documented employer not among the stated employers: {employer}.",
     "params": {},
@@ -152,7 +184,11 @@
     "category": "income",
     "layer": null,
     "evaluator": null,
-    "applicability": null,
+    "applicability": {
+      "scope": {},
+      "triggers": {},
+      "required_inputs": []
+    },
     "canonical_type": "employer_mismatch",
     "message_template": "Stated employer count ({employers}) does not match the income-item count ({items}).",
     "params": {},
@@ -170,7 +206,11 @@
     "category": "Credit/Liabilities",
     "layer": "DET",
     "evaluator": null,
-    "applicability": null,
+    "applicability": {
+      "scope": {},
+      "triggers": {},
+      "required_inputs": []
+    },
     "canonical_type": "liability_discrepancy",
     "message_template": "Liability on the credit report not disclosed on the application: {holder} ({amount}).",
     "params": {},
@@ -188,7 +228,11 @@
     "category": "credit",
     "layer": null,
     "evaluator": null,
-    "applicability": null,
+    "applicability": {
+      "scope": {},
+      "triggers": {},
+      "required_inputs": []
+    },
     "canonical_type": "liability_discrepancy",
     "message_template": "Stated liability not found on the credit report: {holder}.",
     "params": {},
@@ -206,7 +250,11 @@
     "category": "documentation",
     "layer": null,
     "evaluator": null,
-    "applicability": null,
+    "applicability": {
+      "scope": {},
+      "triggers": {},
+      "required_inputs": []
+    },
     "canonical_type": "missing_documentation",
     "message_template": "Stated asset lacks a supporting document: {asset}.",
     "params": {},
@@ -224,7 +272,11 @@
     "category": "Assets",
     "layer": "DET+AI",
     "evaluator": null,
-    "applicability": null,
+    "applicability": {
+      "scope": {},
+      "triggers": {},
+      "required_inputs": []
+    },
     "canonical_type": "asset_discrepancy",
     "message_template": "Large deposit not reflected / unsourced: {amount}.",
     "params": {
@@ -282,7 +334,13 @@
     "layer": "DET",
     "evaluator": null,
     "applicability": {
-      "purpose": "purchase"
+      "scope": {
+        "loan_purpose": [
+          "purchase"
+        ]
+      },
+      "triggers": {},
+      "required_inputs": []
     },
     "canonical_type": "terms_discrepancy",
     "message_template": "Stated purchase price ({stated}) differs from the contract price ({documented}).",
@@ -301,7 +359,11 @@
     "category": "property",
     "layer": null,
     "evaluator": null,
-    "applicability": null,
+    "applicability": {
+      "scope": {},
+      "triggers": {},
+      "required_inputs": []
+    },
     "canonical_type": "terms_discrepancy",
     "message_template": "Stated loan amount ({stated}) differs from the documented loan terms ({documented}).",
     "params": {},
@@ -319,7 +381,11 @@
     "category": "property",
     "layer": null,
     "evaluator": null,
-    "applicability": null,
+    "applicability": {
+      "scope": {},
+      "triggers": {},
+      "required_inputs": []
+    },
     "canonical_type": "property_address_discrepancy",
     "message_template": "Subject-property address differs across documents: {values}.",
     "params": {},
@@ -337,7 +403,11 @@
     "category": "Occupancy",
     "layer": "DET+AI",
     "evaluator": null,
-    "applicability": null,
+    "applicability": {
+      "scope": {},
+      "triggers": {},
+      "required_inputs": []
+    },
     "canonical_type": "occupancy_discrepancy",
     "message_template": "Stated occupancy ({stated}) conflicts with the evidence ({evidence}).",
     "params": {},

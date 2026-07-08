@@ -26,7 +26,10 @@ from app.verification.fact_namespace.snapshot import FactNamespace
 _NAME_KEYS = ("full_name", "employee_name", "borrower_name", "name")
 _ADDRESS_KEYS = ("address", "current_address", "residence_address")
 _EMPLOYER_KEYS = ("employer_name", "employer")
-_GIFT_LETTER_TYPES = ("gift_letter", "gift_funds")
+# The document types that evidence a gift (the single source of truth; the live rule + the LP-120
+# evaluator both use this so they can't silently diverge — FIX 9).
+GIFT_LETTER_DOCUMENT_TYPES = ("gift_letter", "gift_funds")
+_GIFT_LETTER_TYPES = GIFT_LETTER_DOCUMENT_TYPES  # back-compat alias within this module
 
 
 def _to_decimal(value: Any) -> Decimal | None:

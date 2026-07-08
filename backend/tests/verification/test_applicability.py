@@ -254,3 +254,139 @@ async def test_classify_rules_reads_applicability_from_table(db_session: AsyncSe
 
     assert [rc.rule_id for rc in grouped.ready_to_run] == ["xsrc.asset.gift_without_letter"]
     assert grouped.doesnt_apply == [] and grouped.couldnt_check == []
+
+
+# --------------------------------------------------------------------------- #
+# Review fixes (LP-119 hardening)
+# --------------------------------------------------------------------------- #
+
+import pytest  # noqa: E402
+from app.verification.fact_namespace.snapshot import (  # noqa: E402
+    BorrowerFacts,
+    IncomeItemFacts,
+)
+from pydantic import ValidationError  # noqa: E402
+
+
+def _income_item(amount: Fact[Decimal]) -> IncomeItemFacts:
+    return IncomeItemFacts(
+        monthly_amount=amount,
+        income_type_raw="Base Pay",
+        income_type_canonical=Fact[str](value=None),
+        employment_income=True,
+    )
+
+
+def _borrower(income_items: list[IncomeItemFacts]) -> BorrowerFacts:
+    return BorrowerFacts(
+        borrower_id="b1",
+        position=1,
+        is_primary=True,
+        first_name="B",
+        last_name="P",
+        full_name="B P",
+        ssn_masked=Fact[str](value=None),
+        date_of_birth=Fact(value=None),
+        current_address=Fact.missing(source=FactSource.ABSENT_NOT_PERSISTED),
+        income_items=income_items,
+        employers=[],
+        documents=[],
+    )
+
+
+def test_fix1_required_input_inspects_named_field() -> None:
+    # assets[].value with the value ABSENT → couldn't-check (named), not a false READY_TO_RUN.
+    absent_val = AssetFacts(
+        asset_type_raw="Gift of Cash",
+        asset_type_canonical=Fact[str](value=None),
+        is_gift=True,
+        value=Fact.missing(source=FactSource.ABSENT_UNCOMPUTABLE),
+        holder_name="Mom",
+    )
+    rule = {
+        "triggers": {
+            "all": [
+                {
+                    "kind": "entity_exists",
+                    "collection": "assets",
+                    "field": "is_gift",
+                    "op": "eq",
+                    "value": True,
+                }
+            ]
+        },
+        "required_inputs": [{"kind": "data_field", "path": "assets[].value"}],
+    }
+    r = classify_from_json(rule, _snapshot(assets=[absent_val]))
+    assert r.state is ApplicabilityState.COULDNT_CHECK
+    assert "data_field:assets[].value" in r.missing_inputs
+    # present value → ready.
+    assert (
+        classify_from_json(rule, _snapshot(assets=[_asset(True)])).state
+        is ApplicabilityState.READY_TO_RUN
+    )
+
+
+def test_fix1_nested_required_input_field() -> None:
+    rule = {
+        "required_inputs": [
+            {"kind": "data_field", "path": "borrowers[].income_items[].monthly_amount"}
+        ]
+    }
+    absent = _snapshot().model_copy(
+        update={
+            "borrowers": [
+                _borrower([_income_item(Fact.missing(source=FactSource.ABSENT_UNCOMPUTABLE))])
+            ]
+        }
+    )
+    assert classify_from_json(rule, absent).state is ApplicabilityState.COULDNT_CHECK
+    present = _snapshot().model_copy(
+        update={
+            "borrowers": [
+                _borrower([_income_item(Fact.present(Decimal("8000"), source=FactSource.STATED))])
+            ]
+        }
+    )
+    assert classify_from_json(rule, present).state is ApplicabilityState.READY_TO_RUN
+
+
+def test_fix3_flat_applicability_shape_raises() -> None:
+    # The old flat {program, purpose} shape must now FAIL LOUDLY (extra="forbid"), not silently degrade.
+    with pytest.raises(ValidationError):
+        classify_from_json({"program": "fha", "purpose": "purchase"}, _snapshot())
+
+
+def test_fix4_unknown_scope_dimension_fails_closed() -> None:
+    # An unrecognized dimension must NOT become "no constraint → applies everywhere".
+    r = classify_from_json({"scope": {"state": ["TX"]}}, _snapshot())
+    assert r.state is ApplicabilityState.COULDNT_CHECK
+
+
+def test_fix5_refinance_type_scope_on_purchase_doesnt_apply() -> None:
+    snap = _snapshot().model_copy(
+        update={
+            "file": _snapshot().file.model_copy(
+                update={"loan_purpose": Fact.present("purchase", source=FactSource.ENUM)}
+            )
+        }
+    )
+    r = classify_from_json({"scope": {"refinance_type": ["cash_out"]}}, snap)
+    assert (
+        r.state is ApplicabilityState.DOESNT_APPLY
+    )  # not couldn't-check (a purchase has no refi type)
+
+
+def test_fix6_present_none_computed_is_known() -> None:
+    # computed.mi_monthly None with source=COMPUTED = "MI not required" = a real answer (known) → ready.
+    snap = _snapshot().model_copy(
+        update={
+            "computed": _snapshot().computed.model_copy(
+                update={"mi_monthly": Fact[Decimal](value=None, source=FactSource.COMPUTED)}
+            )
+        }
+    )
+    rule = {"required_inputs": [{"kind": "derived_field", "path": "computed.mi_monthly"}]}
+    assert classify_from_json(rule, snap).state is ApplicabilityState.READY_TO_RUN
+    # An unset scalar (source None) stays UNKNOWN → couldn't-check (the false-green guard preserved).
+    assert classify_from_json(rule, _snapshot()).state is ApplicabilityState.COULDNT_CHECK

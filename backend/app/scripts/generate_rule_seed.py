@@ -27,6 +27,7 @@ from pathlib import Path
 from typing import Any
 
 from app.verification.cross_source.rules import CROSS_SOURCE_RULES
+from app.verification.rules.schema import PurposeScope
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _RULES_DIR = _REPO_ROOT / "docs" / "rules"
@@ -79,17 +80,34 @@ def _load_playbook() -> dict[str, dict[str, str]]:
         return {row["playbook_id"]: row for row in csv.DictReader(f)}
 
 
+def _default_applicability(rule: Any) -> dict[str, Any]:
+    """The valid scope/triggers/required_inputs shape for a rule not yet AUTHORED (FIX 3b).
+
+    Translates the CrossSourceRule's program/purpose into a real ``scope`` (with the engine's keys —
+    ``loan_purpose``/``refinance_type``, NOT the flat ``purpose``) and leaves triggers/required_inputs
+    empty (unauthored). Never emits the flat ``{program, purpose}`` shape that ``extra="forbid"``
+    now rejects and that the engine silently ignored.
+    """
+    scope: dict[str, list[str]] = {}
+    if rule.program is not None:
+        scope["program"] = [rule.program.value]
+    if rule.purpose is not None:
+        # PurposeScope.PURCHASE/REFINANCE gate on loan_purpose; CASH_OUT/RATE_TERM on refinance_type.
+        dim = (
+            "refinance_type"
+            if rule.purpose in (PurposeScope.CASH_OUT, PurposeScope.RATE_TERM)
+            else "loan_purpose"
+        )
+        scope[dim] = [rule.purpose.value]
+    return {"scope": scope, "triggers": {}, "required_inputs": []}
+
+
 def _live_rows(playbook: dict[str, dict[str, str]]) -> list[dict[str, Any]]:
     """One seed row per live CrossSourceRule — real rule_id + known structural facts."""
     rows: list[dict[str, Any]] = []
     for rule in CROSS_SOURCE_RULES:
         pb = playbook.get(rule.playbook_id) if rule.playbook_id else None
-        applicability: dict[str, Any] = {}
-        if rule.program is not None:
-            applicability["program"] = rule.program.value
-        if rule.purpose is not None:
-            applicability["purpose"] = rule.purpose.value
-        # An authored LP-119 applicability (scope/triggers/required_inputs) overrides the default.
+        # An authored LP-119 applicability overrides the default; otherwise the valid empty shape.
         authored = _AUTHORED_APPLICABILITY.get(rule.rule_id)
 
         params: dict[str, Any] = {}
@@ -110,7 +128,7 @@ def _live_rows(playbook: dict[str, dict[str, str]]) -> list[dict[str, Any]]:
                 # STRUCTURAL — evaluator/applicability filled/refined by LP-119/120; the
                 # canonical_type + template we already know from the live rule.
                 "evaluator": None,
-                "applicability": authored or (applicability or None),
+                "applicability": authored or _default_applicability(rule),
                 "canonical_type": rule.canonical_type,
                 "message_template": rule.template,
                 # TUNABLE.

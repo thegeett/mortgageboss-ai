@@ -24,6 +24,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from app.models.loan_file import LoanPurpose
 from app.verification.applicability.schema import (
     Applicability,
     ApplicabilityState,
@@ -37,18 +38,25 @@ from app.verification.applicability.schema import (
     Ternary,
     TriggerGroup,
 )
-from app.verification.fact_namespace.snapshot import Fact, FactNamespace
-
-# Scope dimension → the snapshot fact path it constrains.
-_SCOPE_PATHS = {
-    "program": "file.program",
-    "loan_purpose": "file.loan_purpose",
-    "refinance_type": "file.refinance_type",
-    "occupancy": "property.occupancy",
-    "property_type": "property.property_type",
-}
+from app.verification.fact_namespace.snapshot import (
+    Fact,
+    FactNamespace,
+    FileFacts,
+    PropertyFacts,
+)
 
 _MISSING = object()  # sentinel: a path did not resolve at all
+
+
+def _scope_path(dim: str) -> str | None:
+    """The snapshot fact path a scope dimension constrains, DERIVED from the snapshot model fields
+    (FIX 4) so it can't rot out of sync as fields are added. An unrecognized dimension → ``None`` →
+    the caller fails CLOSED (couldn't-check), never "no constraint → applies everywhere"."""
+    if dim in FileFacts.model_fields:
+        return f"file.{dim}"
+    if dim in PropertyFacts.model_fields:
+        return f"property.{dim}"
+    return None
 
 
 # --------------------------------------------------------------------------- #
@@ -72,14 +80,23 @@ def _resolve(snapshot: FactNamespace, path: str) -> Any:
 
 
 def _known_value(node: Any) -> tuple[bool, Any]:
-    """(known, value) for a resolved decision input. Both ``absent`` and empty (value None) → NOT
-    known (→ UNKNOWN); a concrete value → known."""
+    """(known, value) for a resolved decision input.
+
+    - ``absent`` → NOT known (no answer → UNKNOWN → couldn't-check).
+    - a concrete value → known.
+    - **value None but NOT absent (FIX 6):** a *real* ``None`` answer iff it carries a ``source``
+      (a deliberate determination, e.g. ``computed.mi_monthly`` = None = "MI not required") → known.
+      An unset scalar (built via ``_scalar`` → ``source is None``) is empty/unset → NOT known.
+    """
     if node is _MISSING:
         return False, None
     if isinstance(node, Fact):
-        if node.absent or node.value is None:
+        if node.absent:
             return False, None
-        return True, node.value
+        if node.value is not None:
+            return True, node.value
+        # value is None, not absent: a determined answer only if it has a source.
+        return (True, None) if node.source is not None else (False, None)
     if node is None:
         return False, None
     return True, node
@@ -164,7 +181,11 @@ def _eval_entity_exists(snapshot: FactNamespace, cond: EntityExists) -> Ternary:
     if any(r is Ternary.TRUE for r in per_element):
         return Ternary.TRUE
     if not collection:
-        return Ternary.UNKNOWN  # empty collection — can't confirm the entity is absent
+        # FIX 8 (accepted + documented): the plain-list collections (assets/liabilities/…) can't
+        # distinguish "reviewed, zero rows" from "not loaded", so an EMPTY collection → UNKNOWN
+        # (couldn't-check), not FALSE. This errs SAFE (no false-green) — a no-asset file carries a
+        # gift-rule couldn't-check until these collections become Fact-wrapped (a future ticket).
+        return Ternary.UNKNOWN
     if any(r is Ternary.UNKNOWN for r in per_element):
         return Ternary.UNKNOWN
     return Ternary.FALSE
@@ -196,14 +217,26 @@ def _eval_scope(snapshot: FactNamespace, scope: dict[str, list[str]]) -> tuple[T
     for dim, allowed in scope.items():
         if not allowed:  # empty constraint → applies to all
             continue
-        path = _SCOPE_PATHS.get(dim)
-        if path is None:  # unknown dimension — ignore (forward-compatible), note it
-            reasons.append(f"scope dimension '{dim}' not recognized (ignored)")
+        path = _scope_path(dim)
+        if path is None:
+            # FIX 4 — an unrecognized dimension FAILS CLOSED (UNKNOWN → couldn't-check), never
+            # "no constraint → applies everywhere" (e.g. scope {"state":["TX"]} must NOT fire
+            # nationwide).
+            results.append(Ternary.UNKNOWN)
+            reasons.append(
+                f"scope dimension '{dim}' not recognized → cannot evaluate (fail closed)"
+            )
             continue
         known, value = _known_value(_resolve(snapshot, path))
         if not known:
-            results.append(Ternary.UNKNOWN)
-            reasons.append(f"scope '{dim}' unknown (file value absent)")
+            # FIX 5 — absent-because-IRRELEVANT (a purchase has no refinance_type) → DOESN'T-APPLY,
+            # not couldn't-check (mirrors purpose_applies). Distinguish it from absent-because-missing.
+            if dim == "refinance_type" and _is_known_purchase(snapshot):
+                results.append(Ternary.FALSE)
+                reasons.append("refinance_type-scoped rule on a known purchase → doesn't apply")
+            else:
+                results.append(Ternary.UNKNOWN)
+                reasons.append(f"scope '{dim}' unknown (file value absent)")
         elif value in allowed:
             results.append(Ternary.TRUE)
         else:
@@ -212,9 +245,43 @@ def _eval_scope(snapshot: FactNamespace, scope: dict[str, list[str]]) -> tuple[T
     return _and(results), reasons
 
 
+def _is_known_purchase(snapshot: FactNamespace) -> bool:
+    """The file's loan_purpose is a KNOWN purchase (so refinance_type is definitively irrelevant)."""
+    known, value = _known_value(_resolve(snapshot, "file.loan_purpose"))
+    return known and value == LoanPurpose.PURCHASE.value
+
+
 # --------------------------------------------------------------------------- #
 # Required inputs
 # --------------------------------------------------------------------------- #
+
+
+def _resolve_from(node: Any, path: str) -> Any:
+    """Navigate a dotted path FROM ``node`` (like :func:`_resolve` but not rooted at the snapshot)."""
+    for part in path.split("."):
+        if node is None or node is _MISSING:
+            return _MISSING
+        node = getattr(node, part, _MISSING)
+        if node is _MISSING:
+            return _MISSING
+    return node
+
+
+def _nested_field_present(node: Any, segments: list[str]) -> bool:
+    """Whether the (possibly nested) leaf field is PRESENT on ``node`` (FIX 1).
+
+    ``segments`` are the "[]"-delimited parts AFTER the outer collection, e.g.
+    ``["income_items", "monthly_amount"]``. A non-leaf segment must be a NON-EMPTY collection whose
+    EVERY element carries the field (fail closed — incomplete data → not present). The leaf must be
+    a KNOWN value.
+    """
+    seg = segments[0].lstrip(".")
+    child = _resolve_from(node, seg) if seg else node
+    if len(segments) == 1:  # leaf field
+        return _known_value(child)[0]
+    if not isinstance(child, list) or not child:  # nested collection missing/empty → not present
+        return False
+    return all(_nested_field_present(element, segments[1:]) for element in child)
 
 
 def _required_input_satisfied(
@@ -224,9 +291,16 @@ def _required_input_satisfied(
         return any(d.document_type == req.document_type and d.present for d in snapshot.documents)
     # DataField / DerivedField — a snapshot path that must carry usable data.
     path = req.path
-    if "[]" in path:  # a collection field ("assets[].is_gift") → the collection must have data
-        collection = _resolve(snapshot, path.split("[]")[0].rstrip("."))
-        return isinstance(collection, list) and len(collection) > 0
+    if "[]" in path:
+        # FIX 1 — inspect the NAMED (nested) leaf field, not just the outer collection. A
+        # collection path ("assets[].value", "borrowers[].income_items[].monthly_amount") is
+        # satisfied only when the collection is non-empty AND every element has the named field
+        # PRESENT (not absent). Otherwise couldn't-check — the false-green guard.
+        parts = path.split("[]")
+        collection = _resolve(snapshot, parts[0])
+        if not isinstance(collection, list) or not collection:
+            return False
+        return all(_nested_field_present(element, parts[1:]) for element in collection)
     known, _ = _known_value(_resolve(snapshot, path))
     return known
 

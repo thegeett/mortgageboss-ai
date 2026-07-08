@@ -47,7 +47,7 @@ class ApplicabilityState(StrEnum):
 class EntityExists(BaseModel):
     """ "Does any element of ``collection`` satisfy ``field <op> value``?" — e.g. a gift asset."""
 
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(frozen=True, extra="forbid")
     kind: Literal["entity_exists"] = "entity_exists"
     collection: str  # a snapshot collection path, e.g. "assets", "liabilities"
     field: str  # the element field to test, e.g. "is_gift"
@@ -58,7 +58,7 @@ class EntityExists(BaseModel):
 class FieldCondition(BaseModel):
     """ "Does the fact at ``path`` satisfy ``<op> value``?" — e.g. file.program in [fha]."""
 
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(frozen=True, extra="forbid")
     kind: Literal["field_condition"] = "field_condition"
     path: str  # a snapshot fact path, e.g. "file.program"
     op: str  # eq | ne | in | not_in | gt | lt | gte | lte
@@ -74,7 +74,7 @@ class TriggerGroup(BaseModel):
     An empty group (no conditions anywhere) → the rule has no triggers → always relevant.
     """
 
-    model_config = ConfigDict(frozen=True, populate_by_name=True)
+    model_config = ConfigDict(frozen=True, populate_by_name=True, extra="forbid")
     all_: list[Condition] = Field(default_factory=list, alias="all")
     any_: list[Condition] = Field(default_factory=list, alias="any")
     none_: list[Condition] = Field(default_factory=list, alias="none")
@@ -88,7 +88,7 @@ class TriggerGroup(BaseModel):
 class DataField(BaseModel):
     """A snapshot fact/collection that must be present to run — e.g. ``assets[].is_gift``."""
 
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(frozen=True, extra="forbid")
     kind: Literal["data_field"] = "data_field"
     path: str
 
@@ -96,7 +96,7 @@ class DataField(BaseModel):
 class DocumentPresent(BaseModel):
     """A document of ``document_type`` must be present on the file — e.g. ``credit_report``."""
 
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(frozen=True, extra="forbid")
     kind: Literal["document"] = "document"
     document_type: str
 
@@ -104,7 +104,7 @@ class DocumentPresent(BaseModel):
 class DerivedField(BaseModel):
     """A computed fact that must be computable — e.g. ``computed.ltv`` (absent → couldn't-check)."""
 
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(frozen=True, extra="forbid")
     kind: Literal["derived_field"] = "derived_field"
     path: str
 
@@ -119,7 +119,7 @@ class Applicability(BaseModel):
     universally relevant and runnable → READY_TO_RUN.
     """
 
-    model_config = ConfigDict(frozen=True, populate_by_name=True)
+    model_config = ConfigDict(frozen=True, populate_by_name=True, extra="forbid")
     scope: dict[str, list[str]] = Field(default_factory=dict)
     triggers: TriggerGroup = Field(default_factory=TriggerGroup)
     required_inputs: list[RequiredInput] = Field(default_factory=list)
