@@ -26,6 +26,7 @@ from app.verification.evaluators.contract import (
 )
 from app.verification.evaluators.employer_count import EmployerCountEvaluator
 from app.verification.evaluators.gift_letter import GiftLetterEvaluator
+from app.verification.evaluators.large_deposit import LargeDepositEvaluator
 from app.verification.evaluators.registry import (
     ensure_registered,
     evaluate_rule,
@@ -46,6 +47,7 @@ __all__ = [
     "EvaluationResult",
     "Evaluator",
     "GiftLetterEvaluator",
+    "LargeDepositEvaluator",
     "Provenance",
     "Verdict",
     "computed_confidence",

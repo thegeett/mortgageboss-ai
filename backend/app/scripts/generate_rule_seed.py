@@ -85,6 +85,26 @@ _AUTHORED_APPLICABILITY: dict[str, dict[str, Any]] = {
         },
         "required_inputs": [{"kind": "data_field", "path": "assets[].is_gift"}],
     },
+    "xsrc.asset.large_deposit_unsourced": {  # AS-1 (LP-125R) — large-deposit sourcing
+        "scope": {},  # any file with bank statements
+        "triggers": {
+            "all": [
+                {
+                    "kind": "entity_exists",
+                    "collection": "documents",
+                    "field": "document_type",
+                    "op": "eq",
+                    "value": "bank_statement",
+                }
+            ]
+        },
+        # Needs the deposits AND the income basis; both absent → couldn't-check. Threshold + sourcing are
+        # evaluator logic. (The sourcing DOCUMENTS are the check-target, not a required input.)
+        "required_inputs": [
+            {"kind": "data_field", "path": "transactions[].amount"},
+            {"kind": "data_field", "path": "borrowers[].income_items[].monthly_amount"},
+        ],
+    },
 }
 
 # BUILT playbook rules — a playbook-only rule that has been BUILT (its evaluator exists) but has NO live

@@ -274,8 +274,27 @@
     "evaluator": null,
     "applicability": {
       "scope": {},
-      "triggers": {},
-      "required_inputs": []
+      "triggers": {
+        "all": [
+          {
+            "kind": "entity_exists",
+            "collection": "documents",
+            "field": "document_type",
+            "op": "eq",
+            "value": "bank_statement"
+          }
+        ]
+      },
+      "required_inputs": [
+        {
+          "kind": "data_field",
+          "path": "transactions[].amount"
+        },
+        {
+          "kind": "data_field",
+          "path": "borrowers[].income_items[].monthly_amount"
+        }
+      ]
     },
     "canonical_type": "asset_discrepancy",
     "message_template": "Large deposit not reflected / unsourced: {amount}.",
