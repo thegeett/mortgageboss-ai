@@ -285,16 +285,7 @@
           }
         ]
       },
-      "required_inputs": [
-        {
-          "kind": "data_field",
-          "path": "transactions[].amount"
-        },
-        {
-          "kind": "data_field",
-          "path": "borrowers[].income_items[].monthly_amount"
-        }
-      ]
+      "required_inputs": []
     },
     "canonical_type": "asset_discrepancy",
     "message_template": "Large deposit not reflected / unsourced: {amount}.",

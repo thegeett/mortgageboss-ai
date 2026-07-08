@@ -43,10 +43,10 @@ _APPLICABILITY = {
             }
         ]
     },
-    "required_inputs": [
-        {"kind": "data_field", "path": "transactions[].amount"},
-        {"kind": "data_field", "path": "borrowers[].income_items[].monthly_amount"},
-    ],
+    # No required_inputs (LP-125R FIX 3+7): the evaluator self-guards (absent income → couldn't-check;
+    # a deposit with no amount → per-deposit couldn't-check). A single fee-line missing its amount must
+    # not gate the whole rule. Only the bank-statement-exists trigger gates AS-1.
+    "required_inputs": [],
 }
 
 

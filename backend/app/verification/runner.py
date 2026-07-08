@@ -56,6 +56,10 @@ LIVE_PATH_OWNED_RULE_IDS: frozenset[str] = frozenset(
     {
         "xsrc.asset.gift_without_letter",  # AS-5 (LP-122R) — live cross-source rule, reproduced
         "xsrc.income.employer_count_matches_items",  # LP-124R — live cross-source rule, reproduced
+        # AS-1 (LP-125R): the live rule is DORMANT (its fact ``unsourced_large_deposits`` is never
+        # populated today) — but it's a live-owned rule_id, so gate it now to prevent a double-fire the
+        # moment that fact is wired.
+        "xsrc.asset.large_deposit_unsourced",
     }
 )
 

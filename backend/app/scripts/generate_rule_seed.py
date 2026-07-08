@@ -98,12 +98,12 @@ _AUTHORED_APPLICABILITY: dict[str, dict[str, Any]] = {
                 }
             ]
         },
-        # Needs the deposits AND the income basis; both absent → couldn't-check. Threshold + sourcing are
-        # evaluator logic. (The sourcing DOCUMENTS are the check-target, not a required input.)
-        "required_inputs": [
-            {"kind": "data_field", "path": "transactions[].amount"},
-            {"kind": "data_field", "path": "borrowers[].income_items[].monthly_amount"},
-        ],
+        # No required_inputs (LP-125R FIX 3+7): the evaluator SELF-GUARDS — absent employment income →
+        # couldn't-check, a deposit with no amount → per-deposit couldn't-check. A single fee/interest
+        # line missing its amount must NOT gate the whole rule (the single-level ``transactions[].amount``
+        # ALL-semantics would have suppressed a real finding). The bank-statement-exists trigger is the
+        # only gate; the deposits + income basis are the evaluator's job.
+        "required_inputs": [],
     },
 }
 

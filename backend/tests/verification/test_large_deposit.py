@@ -9,6 +9,7 @@ couldn't-check, per-account (ungroupable account)→couldn't-check, empty-docs�
 from datetime import date
 from decimal import Decimal
 
+import pytest
 from app.models.verification_rule import VerificationRule
 from app.verification.applicability import ApplicabilityState, classify_from_json
 from app.verification.evaluators import Verdict, evaluate_rule
@@ -19,6 +20,7 @@ from app.verification.fact_namespace.snapshot import (
     ComputedFacts,
     DocumentedFacts,
     DocumentRef,
+    EmployerFacts,
     Fact,
     FactNamespace,
     FactSource,
@@ -26,10 +28,12 @@ from app.verification.fact_namespace.snapshot import (
     IncomeItemFacts,
     TransactionFacts,
 )
+from app.verification.fact_namespace.transaction_kind import classify_transaction_kind
 from app.verification.runner import run_rule_engine
 from sqlalchemy.ext.asyncio import AsyncSession
 from tests.integration.factories import make_borrower, make_company, make_loan_file
 
+# No required_inputs (LP-125R FIX 3+7): the evaluator self-guards; the bank-statement trigger is the gate.
 _APPLICABILITY = {
     "scope": {},
     "triggers": {
@@ -43,10 +47,7 @@ _APPLICABILITY = {
             }
         ]
     },
-    "required_inputs": [
-        {"kind": "data_field", "path": "transactions[].amount"},
-        {"kind": "data_field", "path": "borrowers[].income_items[].monthly_amount"},
-    ],
+    "required_inputs": [],
 }
 
 
@@ -97,24 +98,37 @@ def _bank_stmt(
 
 
 def _txn(
-    amount: str, *, ttype: str = "deposit", desc: str | None = "Check deposit", doc_id: str = "bs1"
+    amount: str | None = "3000",
+    *,
+    ttype: str | None = "deposit",
+    desc: str | None = "Check deposit",
+    doc_id: str = "bs1",
 ) -> TransactionFacts:
+    # transaction_kind is computed by the REAL classifier (as the builder does), so tests exercise the
+    # deterministic deposit-detection, not a hardcoded kind.
+    amt = Decimal(amount) if amount is not None else None
     return TransactionFacts(
         source_document_id=doc_id,
         date=Fact[date](value=None),
-        amount=Fact.present(Decimal(amount), source=FactSource.EXTRACTION),
+        amount=Fact.present(amt, source=FactSource.EXTRACTION)
+        if amt is not None
+        else Fact[Decimal](value=None),
         description=desc,
         transaction_type=ttype,
+        transaction_kind=classify_transaction_kind(ttype, amt),
     )
 
 
-def _doc(document_type: str, *, present: bool = True) -> DocumentRef:
+def _doc(
+    document_type: str, *, present: bool = True, fields: dict[str, str] | None = None
+) -> DocumentRef:
+    # A sourcing doc counts only when present AND has extracted fields (FIX 4) — default a non-empty map.
     return DocumentRef(
         document_id=f"d-{document_type}",
         document_type=document_type,
         present=present,
         current_extraction_id="x",
-        fields={},
+        fields=fields if fields is not None else {"x": "1"},
     )
 
 
@@ -165,6 +179,10 @@ def _evaluate(**kw):
     result = evaluate_rule(RULE_ID, _snapshot(**kw), {"large_deposit_pct": 50})
     assert result is not None
     return result
+
+
+def _snapshot_with_borrower(borrower: BorrowerFacts, **kw) -> FactNamespace:
+    return _snapshot(**kw).model_copy(update={"borrowers": [borrower]})
 
 
 def _obs(result) -> str:
@@ -249,6 +267,133 @@ def test_outcome_carries_no_masked_account() -> None:  # ADR-150
     result = _evaluate(transactions=[_txn("3000")], bank_statements=[_bank_stmt(masked="****9876")])
     blob = _obs(result) + " " + " ".join(p.path for p in result.provenance)
     assert "****9876" not in blob and any(p.path.startswith("account ") for p in result.provenance)
+
+
+# --------------------------------------------------------------------------- #
+# FIX 1 — deposit detection by the deterministic transaction_kind (not exact "deposit" text)
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.parametrize("ttype", ["credit", "ACH credit", "mobile deposit", "DEP", "wire"])
+def test_fix1_free_text_deposit_types_are_detected(ttype: str) -> None:
+    # A large money-in typed anything-but-literal-"deposit" is still assessed → FINDING (no sourcing).
+    result = _evaluate(transactions=[_txn("3000", ttype=ttype, desc="Incoming funds")])
+    assert result.verdict is Verdict.FINDING, ttype
+
+
+def test_fix1_unrecognized_credit_is_treated_as_deposit() -> None:
+    # A novel credit phrasing with a positive amount is conservatively a deposit → assessed (FINDING).
+    result = _evaluate(transactions=[_txn("3000", ttype="remote capture xyz", desc="Funds in")])
+    assert result.verdict is Verdict.FINDING
+
+
+@pytest.mark.parametrize("ttype", ["withdrawal", "fee", "ATM withdrawal", "service charge"])
+def test_fix1_debits_are_not_deposits(ttype: str) -> None:
+    result = _evaluate(transactions=[_txn("3000", ttype=ttype)])
+    assert result.verdict is Verdict.SATISFIED, ttype
+
+
+def test_fix1_deposit_with_no_amount_is_couldnt_check() -> None:
+    result = _evaluate(transactions=[_txn(None, ttype="deposit")])
+    assert result.verdict is Verdict.COULDNT_CHECK and "no amount" in _obs(result)
+
+
+def test_fix1_unclassifiable_no_amount_line_is_not_a_deposit() -> None:
+    # An unrecognized line with no amount (e.g. "balance forward") can't be a large deposit → not flagged.
+    result = _evaluate(transactions=[_txn(None, ttype="balance forward", desc="carryover")])
+    assert result.verdict is Verdict.SATISFIED
+
+
+# --------------------------------------------------------------------------- #
+# FIX 2 — word-boundary payroll; employer name does NOT falsely exclude
+# --------------------------------------------------------------------------- #
+
+
+def test_fix2_employer_name_does_not_falsely_exclude() -> None:
+    # An employer named "Ally" must NOT exclude "transfer to ally savings" (that would hide a real deposit).
+    borrower = _borrower([_income("5000")])
+    borrower = borrower.model_copy(
+        update={"employers": [EmployerFacts(name="Ally", is_current=True)]}
+    )
+    snap = _snapshot_with_borrower(
+        borrower, transactions=[_txn("3000", desc="transfer to ally savings")]
+    )
+    result = evaluate_rule(RULE_ID, snap, {"large_deposit_pct": 50})
+    assert result is not None and result.verdict is Verdict.FINDING
+
+
+def test_fix2_real_payroll_keyword_is_excluded() -> None:
+    result = _evaluate(transactions=[_txn("3000", desc="ACME PAYROLL")])
+    assert result.verdict is Verdict.SATISFIED
+
+
+# --------------------------------------------------------------------------- #
+# FIX 4 — sourcing needs present AND fields (verified doc)
+# --------------------------------------------------------------------------- #
+
+
+def test_fix4_unextracted_sourcing_doc_does_not_count() -> None:
+    # A gift letter present but with NO extracted fields is not verified sourcing → the deposit is a FINDING.
+    result = _evaluate(
+        transactions=[_txn("3000")],
+        documents=[_doc("bank_statement"), _doc("gift_letter", fields={})],
+    )
+    assert result.verdict is Verdict.FINDING
+
+
+# --------------------------------------------------------------------------- #
+# FIX 3+7 — no over-gating: a missing fee-line amount still RUNS the rule
+# --------------------------------------------------------------------------- #
+
+
+def test_fix37_missing_fee_amount_does_not_suppress_the_rule() -> None:
+    txns = [_txn(None, ttype="fee", desc="Monthly fee"), _txn("3000", ttype="deposit")]
+    snap = _snapshot(transactions=txns)
+    # Applicability no longer gates on transactions[].amount → still READY_TO_RUN.
+    assert classify_from_json(_APPLICABILITY, snap).state is ApplicabilityState.READY_TO_RUN
+    # And the real large deposit is still flagged (not suppressed to couldn't-check).
+    assert _evaluate(transactions=txns).verdict is Verdict.FINDING
+
+
+# --------------------------------------------------------------------------- #
+# FIX 5 — sourcing matched PER ACCOUNT (one account's doc can't source another's deposit)
+# --------------------------------------------------------------------------- #
+
+
+def test_fix5_sourcing_is_per_account() -> None:
+    acct1 = _bank_stmt("bs1", masked="****1")  # has a sourcing doc
+    acct2 = _bank_stmt("bs2", masked="****2")  # the unsourced deposit lands here
+    vod_for_acct1 = _doc(
+        "verification_of_deposit",
+        fields={"bank_name": "Chase", "account_number_masked": "****1", "account_type": "checking"},
+    )
+    result = _evaluate(
+        transactions=[_txn("60000", doc_id="bs2", desc="Incoming funds")],
+        bank_statements=[acct1, acct2],
+        documents=[_doc("bank_statement"), vod_for_acct1],
+    )
+    # The VOD sources account 1; account 2's large deposit has no applicable sourcing → FINDING.
+    assert result.verdict is Verdict.FINDING
+
+
+# --------------------------------------------------------------------------- #
+# FIX 8 / FIX 10 — dedup-set membership + defensive param parse
+# --------------------------------------------------------------------------- #
+
+
+def test_fix8_as1_in_live_path_owned_set() -> None:
+    from app.verification.runner import LIVE_PATH_OWNED_RULE_IDS
+
+    assert RULE_ID in LIVE_PATH_OWNED_RULE_IDS
+
+
+@pytest.mark.parametrize("bad", ["50%", "", "abc", None])
+def test_fix10_bad_threshold_param_does_not_crash(bad) -> None:
+    # A mis-entered param falls back to the documented default (50%) — never an uncaught raise.
+    result = evaluate_rule(
+        RULE_ID, _snapshot(transactions=[_txn("3000")]), {"large_deposit_pct": bad}
+    )
+    assert result is not None and result.verdict is Verdict.FINDING  # 3000 > 50% of 5000
 
 
 # --------------------------------------------------------------------------- #

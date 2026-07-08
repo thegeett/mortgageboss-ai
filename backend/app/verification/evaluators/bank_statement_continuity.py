@@ -38,7 +38,6 @@ PRIYA-FLAGGED (validated=false until confirmed): (a) exact balance match (no tol
 
 from __future__ import annotations
 
-import hashlib
 from collections import defaultdict
 from datetime import date
 from decimal import Decimal
@@ -54,7 +53,7 @@ from app.verification.evaluators.contract import (
     deterministic_finding,
     deterministic_satisfied,
 )
-from app.verification.fact_namespace.canonicalize import normalize_text
+from app.verification.evaluators.grouping import account_grouping_token, label_accounts
 from app.verification.fact_namespace.snapshot import BankStatementFacts, FactNamespace
 
 RULE_ID = "pb.as-8"
@@ -63,41 +62,6 @@ RULE_ID = "pb.as-8"
 # start is ~a few days; a missing month shows a ~29-day gap. 20 days cleanly separates the two while
 # tolerating cadence variance. A quarterly/irregular cadence would need a different value — confirm.
 _MAX_ADJACENCY_GAP_DAYS = 20
-
-
-def _grouping_token(statement: BankStatementFacts) -> str | None:
-    """An OPAQUE, PII-free token that UNIQUELY identifies the account, or ``None`` if the statement
-    can't be disambiguated (→ couldn't-check, never a blind chain across accounts).
-
-    Account IDENTITY (round-5 FIX 1 — a complete key is not a rigid key):
-    * ``bank + masked#`` is a sufficient identity when both are present. ``account_type`` is a best-effort
-      AI field (often blank) — it is a FALLBACK DISAMBIGUATOR, not a hard requirement: it is folded into
-      the key so two statements sharing bank+masked# but with DIFFERENT populated types split, but a BLANK
-      type never blocks grouping.
-    * When the masked number is absent, fall back to ``bank + account_type + holder``.
-    * Missing the bank (or, in the fallback, the holder) → ``None`` (ungroupable → couldn't-check).
-
-    ADR-150: the token is a hash — no raw masked account / name flows into the (loggable) outcome.
-    """
-    bank = normalize_text(statement.bank_name)
-    account_type = normalize_text(
-        statement.account_type
-    )  # may be "" — a fallback disambiguator only
-    masked = normalize_text(statement.account_number_masked)
-    holder = normalize_text(statement.account_holder_name)
-    if bank and masked:
-        components = (
-            "m",
-            bank,
-            masked,
-            account_type,
-        )  # account_type only splits when present+differing
-    elif bank and account_type and holder:
-        components = ("h", bank, account_type, holder)
-    else:
-        return None  # cannot disambiguate accounts (no bank+masked#, and no bank+type+holder)
-    digest = hashlib.sha256("|".join(components).encode("utf-8")).hexdigest()[:12]
-    return f"acct:{digest}"
 
 
 class _Row(NamedTuple):
@@ -212,14 +176,15 @@ class BankStatementContinuityEvaluator:
         grouped: dict[str, list[BankStatementFacts]] = defaultdict(list)
         ungroupable = 0
         for statement in statements:
-            token = _grouping_token(statement)
+            token = account_grouping_token(statement)
             if token is None:
                 ungroupable += 1
             else:
                 grouped[token].append(statement)
 
-        # Ordinal, PII-free labels for the outcome (ADR-150) — stable within a run by sorted token.
-        label_by_token = {token: f"account {i + 1}" for i, token in enumerate(sorted(grouped))}
+        # Ordinal, PII-free labels for the outcome (ADR-150) — the SHARED scheme (FIX 9), so "account N"
+        # matches AS-1's labels for the same accounts.
+        label_by_token = label_accounts(statements)
 
         finding_prov: list[Provenance] = []
         couldnt_prov: list[Provenance] = []

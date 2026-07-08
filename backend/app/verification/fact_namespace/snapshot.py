@@ -34,7 +34,7 @@ from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, Field
 
-SNAPSHOT_SCHEMA_VERSION = 2  # v2 (LP-123R): + bank_statements[] typed materialized facts
+SNAPSHOT_SCHEMA_VERSION = 3  # v3 (LP-125R): + TransactionFacts.transaction_kind (deterministic)
 
 
 class FactSource(StrEnum):
@@ -178,6 +178,21 @@ class AssetFacts(BaseModel):
     holder_name: str | None
 
 
+class TransactionKind(StrEnum):
+    """The DETERMINISTIC normalized kind of a transaction (LP-125R FIX 1) — the shared primitive every
+    transaction rule (AS-1/2/3/7/8/10) reads instead of re-matching the raw free-text ``transaction_type``.
+    Computed once by the builder via ``transaction_kind.classify_transaction_kind`` (never an AI call)."""
+
+    DEPOSIT = "deposit"  # money-in to source/verify (the AS-1 candidate)
+    PAYROLL = "payroll"  # money-in already accounted for as income → not something to source
+    INTEREST = "interest"  # money-in, de-minimis / not a sourcing concern
+    TRANSFER_IN = "transfer_in"  # money-in from another account (internal)
+    WITHDRAWAL = "withdrawal"  # money-out
+    FEE = "fee"  # money-out (bank fee / charge)
+    TRANSFER_OUT = "transfer_out"  # money-out to another account
+    UNKNOWN = "unknown"  # unrecognized text AND no usable amount → undeterminable
+
+
 class TransactionFacts(BaseModel):
     """A bank-statement transaction, MATERIALIZED from the extraction JSON (buried → addressable)."""
 
@@ -187,7 +202,9 @@ class TransactionFacts(BaseModel):
     date: Fact[date]
     amount: Fact[Decimal]
     description: str | None
-    transaction_type: str | None
+    transaction_type: str | None  # raw extracted text (kept for provenance/audit)
+    # v3 (LP-125R). Defaulted so a persisted v2 snapshot (no transaction_kind) upgrades on load.
+    transaction_kind: TransactionKind = TransactionKind.UNKNOWN
 
 
 class BankStatementFacts(BaseModel):

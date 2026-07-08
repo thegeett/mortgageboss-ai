@@ -56,6 +56,7 @@ from app.verification.fact_namespace.snapshot import (
     PropertyFacts,
     TransactionFacts,
 )
+from app.verification.fact_namespace.transaction_kind import classify_transaction_kind
 
 # Document typed-field keys carrying an employer name (matches the legacy cross-source builder).
 _EMPLOYER_KEYS = ("employer_name", "employer")
@@ -309,17 +310,20 @@ def _build_documents_and_transactions(
                 for txn in raw_txns:
                     if not isinstance(txn, dict):
                         continue
+                    amount = _to_decimal(txn.get("amount"))
+                    transaction_type = txn.get("transaction_type")
                     transactions.append(
                         TransactionFacts(
                             source_document_id=str(doc.id),
                             date=_scalar(
                                 _parse_iso_date(txn.get("date")), source=FactSource.EXTRACTION
                             ),
-                            amount=_scalar(
-                                _to_decimal(txn.get("amount")), source=FactSource.EXTRACTION
-                            ),
+                            amount=_scalar(amount, source=FactSource.EXTRACTION),
                             description=txn.get("description"),
-                            transaction_type=txn.get("transaction_type"),
+                            transaction_type=transaction_type,
+                            # Deterministic normalized kind (LP-125R FIX 1) — computed ONCE here so every
+                            # transaction rule reads the typed kind, never re-matches free-text.
+                            transaction_kind=classify_transaction_kind(transaction_type, amount),
                         )
                     )
     return doc_refs, transactions, bank_statements, documented_employers, ref_by_id
