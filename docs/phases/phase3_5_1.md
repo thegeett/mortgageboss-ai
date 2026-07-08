@@ -469,3 +469,6 @@ EPIC B (LP-118..123)  registry + evaluators + runner
 - D/E estimates firm up after LP-117 (Priya formats/volume).
 - Every ⚠️ **Priya-validate** criterion is a hard gate: rule ships as config, goes live at full confidence only after Priya confirms the number.
 ```
+
+
+Lets create a claude code prompt for LP-118.6 — The fact namespace.. Before prompting provide detail on the ticket. Once prompt finish give info on what to watch for after running the prompt. Remember For each ticket after implementation document in markdown file about what is that ticket what are acceptance criteria and what we worked, with all assumption or decision we made. If this work is related to frontend design, use claude frontend skill or any other necessary skill. Also all stages can run sequential with auto approval to move forward in implementation. Later commit the change with proper commit message but do not push to github, I will do it manually.
