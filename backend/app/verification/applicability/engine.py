@@ -69,6 +69,11 @@ _NON_DETERMINATION_SOURCES = {
     FactSource.ABSENT_UNCOMPUTABLE,
 }
 
+# Collections that are RELIABLY fully loaded, so an EMPTY one is a determinate "none exist" → FALSE
+# (round-3 review FIX 5). ``documents`` is always loaded from the file. Everything else is a plain-list
+# fact that can't distinguish "zero rows" from "not loaded" → empty stays UNKNOWN (the FIX-8 default).
+_RELIABLY_LOADED_COLLECTIONS = {"documents"}
+
 
 def _scope_path(dim: str) -> str | None:
     """The snapshot path a categorical scope dimension constrains, or ``None`` for an unrecognized
@@ -202,11 +207,13 @@ def _eval_entity_exists(snapshot: FactNamespace, cond: EntityExists) -> Ternary:
     if any(r is Ternary.TRUE for r in per_element):
         return Ternary.TRUE
     if not collection:
-        # FIX 8 (accepted + documented): the plain-list collections (assets/liabilities/…) can't
-        # distinguish "reviewed, zero rows" from "not loaded", so an EMPTY collection → UNKNOWN
-        # (couldn't-check), not FALSE. This errs SAFE (no false-green) — a no-asset file carries a
-        # gift-rule couldn't-check until these collections become Fact-wrapped (a future ticket).
-        return Ternary.UNKNOWN
+        # An empty RELIABLY-LOADED collection is a determinate "none exist" → FALSE (doesn't-apply).
+        # ``documents`` is always fully loaded, so a zero-document (or zero-bank-statement) file
+        # correctly DOESN'T-APPLY a document-triggered rule (round-3 review FIX 5). The plain-list facts
+        # (assets/liabilities/…) still can't tell "reviewed, zero rows" from "not loaded", so they stay
+        # UNKNOWN (couldn't-check) — the FIX-8 conservative default (no false-green) until they become
+        # Fact-wrapped.
+        return Ternary.FALSE if cond.collection in _RELIABLY_LOADED_COLLECTIONS else Ternary.UNKNOWN
     if any(r is Ternary.UNKNOWN for r in per_element):
         return Ternary.UNKNOWN
     return Ternary.FALSE
@@ -331,9 +338,15 @@ def _required_input_satisfied(
     # DataField / DerivedField — a snapshot path that must carry usable data.
     path = req.path
     if "[]" in path:
-        # Round-3 FIX 1 — the RELEVANT elements must have the data: satisfied only when at least one
-        # element carries the leaf AND no element that HAS the sub-collection is missing it. An empty
-        # sub-collection is skipped (not a failure); a non-empty one with an absent leaf → couldn't-check.
+        # The RELEVANT-ELEMENT rule (round-3 FIX 1 / review FIX 6), applied CONSISTENTLY to single-level
+        # and nested ``[]`` paths via the same ``_nested_leaf_status``:
+        #   * single-level (``assets[].value``): the leaf is a scalar directly on each element, so EVERY
+        #     element is relevant — any element missing it → not satisfied (couldn't-check).
+        #   * nested (``borrowers[].income_items[].monthly_amount``): an element whose sub-collection is
+        #     empty is SKIPPED (nothing to check); an element that HAS the sub-collection but is missing
+        #     the leaf → not satisfied.
+        # Satisfied iff at least one relevant element carries the leaf AND no relevant element is missing
+        # it. (A multi-element test pins this — it has silently drifted four times.)
         parts = path.split("[]")
         collection = _resolve(snapshot, parts[0])
         if not isinstance(collection, list) or not collection:
@@ -341,7 +354,9 @@ def _required_input_satisfied(
         statuses = [_nested_leaf_status(element, parts[1:]) for element in collection]
         if any(s is _Leaf.ABSENT for s in statuses):
             return False  # a relevant element is missing the leaf → couldn't-check
-        return any(s is _Leaf.PRESENT for s in statuses)  # else ready iff some element had data
+        return any(
+            s is _Leaf.PRESENT for s in statuses
+        )  # else ready iff some relevant element had it
     known, _ = _known_value(_resolve(snapshot, path))
     return known
 

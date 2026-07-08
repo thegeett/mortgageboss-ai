@@ -34,9 +34,13 @@ def ensure_registered() -> None:
     if _bootstrapped:
         return
     _bootstrapped = True
+    from app.verification.evaluators.bank_statement_continuity import (
+        BankStatementContinuityEvaluator,
+    )
     from app.verification.evaluators.gift_letter import GiftLetterEvaluator
 
     register(GiftLetterEvaluator())
+    register(BankStatementContinuityEvaluator())  # AS-8 (LP-123R)
 
 
 def get_evaluator(rule_id: str) -> Evaluator | None:

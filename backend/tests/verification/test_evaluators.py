@@ -85,6 +85,7 @@ def _snapshot(assets: list[AssetFacts], documents: list[DocumentRef]) -> FactNam
         assets=assets,
         documents=documents,
         transactions=[],
+        bank_statements=[],
         computed=ComputedFacts(
             ltv=_empty(),
             cltv=_empty(),

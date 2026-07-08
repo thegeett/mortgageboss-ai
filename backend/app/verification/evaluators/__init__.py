@@ -5,9 +5,13 @@ The evaluator FRAMEWORK (the contract every rule follows) is :mod:`.contract`; d
 this package registers the built-in evaluators, so the runner (LP-121) can dispatch by ``rule_id``.
 
 Evaluators are pure readers of the frozen fact snapshot — no DB, no AI, no recompute at eval time.
-This produces finding/satisfied only (couldn't-check / doesn't-apply are LP-119).
+They produce finding / satisfied, and MAY return couldn't-check when the data is present but
+undeterminable (doesn't-apply stays LP-119's job). See :mod:`.contract`.
 """
 
+from app.verification.evaluators.bank_statement_continuity import (
+    BankStatementContinuityEvaluator,
+)
 from app.verification.evaluators.contract import (
     ConfidenceMode,
     EvaluationResult,
@@ -35,6 +39,7 @@ from app.verification.evaluators.registry import (
 ensure_registered()
 
 __all__ = [
+    "BankStatementContinuityEvaluator",
     "ConfidenceMode",
     "EvaluationResult",
     "Evaluator",

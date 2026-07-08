@@ -1055,13 +1055,32 @@
     "category": "Assets",
     "layer": "DET",
     "evaluator": null,
-    "applicability": null,
-    "canonical_type": null,
-    "message_template": null,
+    "applicability": {
+      "scope": {},
+      "triggers": {
+        "all": [
+          {
+            "kind": "entity_exists",
+            "collection": "documents",
+            "field": "document_type",
+            "op": "eq",
+            "value": "bank_statement"
+          }
+        ]
+      },
+      "required_inputs": [
+        {
+          "kind": "document",
+          "document_type": "bank_statement"
+        }
+      ]
+    },
+    "canonical_type": "bank_statement_discontinuity",
+    "message_template": "Bank-statement continuity is broken or unverified for one or more accounts.",
     "params": {},
-    "severity": null,
+    "severity": "YELLOW",
     "confidence_mode": "deterministic",
-    "enabled": false,
+    "enabled": true,
     "status": "NOW",
     "scope": "IN",
     "validated": false

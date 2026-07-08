@@ -37,7 +37,7 @@ async def _seed(db: AsyncSession) -> int:
 
 async def test_seed_populates_table_and_audit(db_session: AsyncSession) -> None:
     inserted = await _seed(db_session)
-    assert inserted == 140  # 18 live rules + 122 not-yet-built playbook rows
+    assert inserted == 140  # 19 enabled (18 live + AS-8 built) + 121 not-yet-built playbook rows
 
     rule_count = (
         await db_session.execute(select(func.count()).select_from(VerificationRule))
@@ -90,7 +90,7 @@ async def test_structural_tunable_and_validated_gate(db_session: AsyncSession) -
         "xsrc.asset.gift_without_letter",
     }
 
-    # enabled=True only for the 18 live code rules; the playbook-only rows are disabled.
+    # enabled=True for the 18 live code rules + AS-8 (built playbook rule, LP-123R); others disabled.
     enabled_count = (
         await db_session.execute(
             select(func.count())
@@ -98,7 +98,7 @@ async def test_structural_tunable_and_validated_gate(db_session: AsyncSession) -
             .where(VerificationRule.enabled.is_(True))
         )
     ).scalar()
-    assert enabled_count == 18
+    assert enabled_count == 19
 
     # A not-yet-built playbook row: structural fields null (it will not run until LP-120).
     not_built = await db_session.get(VerificationRule, "pb.id-5")
@@ -113,7 +113,7 @@ async def test_loader_returns_enabled_and_fetch_by_id(db_session: AsyncSession) 
     await _seed(db_session)
 
     enabled = await load_enabled_rules(db_session)
-    assert len(enabled) == 18
+    assert len(enabled) == 19  # 18 live + AS-8 (built playbook rule, LP-123R)
     assert all(rule.enabled for rule in enabled)
     # The loader returns INERT data snapshots — evaluator is a string-or-None, never callable.
     assert all(rule.evaluator is None or isinstance(rule.evaluator, str) for rule in enabled)

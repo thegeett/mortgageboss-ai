@@ -34,7 +34,7 @@ from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict
 
-SNAPSHOT_SCHEMA_VERSION = 1
+SNAPSHOT_SCHEMA_VERSION = 2  # v2 (LP-123R): + bank_statements[] typed materialized facts
 
 
 class FactSource(StrEnum):
@@ -190,6 +190,27 @@ class TransactionFacts(BaseModel):
     transaction_type: str | None
 
 
+class BankStatementFacts(BaseModel):
+    """A bank statement's account + period + balance fields, MATERIALIZED and TYPED from the extraction
+    (LP-123R). The FIRST document-field fact set — the pattern every future document-field rule follows:
+    the builder coerces once (via the shared coercers) and freezes typed values; the evaluator READS
+    these frozen values with NO eval-time coercion (the contract). Account fields stay raw here (this is
+    persisted fact data, like ``DocumentRef.fields``); an evaluator must not leak them into a loggable
+    outcome (ADR-149) — it groups on an opaque token instead."""
+
+    model_config = ConfigDict(frozen=True)
+
+    source_document_id: str
+    bank_name: str | None
+    account_number_masked: str | None
+    account_type: str | None  # checking / savings — part of account identity (a distinct account)
+    account_holder_name: str | None
+    period_start: Fact[date]
+    period_end: Fact[date]
+    beginning_balance: Fact[Decimal]
+    ending_balance: Fact[Decimal]
+
+
 class ComputedFacts(BaseModel):
     """Derived values computed ONCE per run via the existing calculators (compute-once). Each is
     ABSENT when its calculator could not produce a value (missing inputs) — never zero."""
@@ -252,5 +273,6 @@ class FactNamespace(BaseModel):
     assets: list[AssetFacts]
     documents: list[DocumentRef]  # file-level; borrower link is LP-118.8
     transactions: list[TransactionFacts]
+    bank_statements: list[BankStatementFacts]  # typed statement-level facts (LP-123R)
     computed: ComputedFacts
     documented: DocumentedFacts

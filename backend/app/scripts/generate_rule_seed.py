@@ -33,6 +33,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+from app.verification.applicability.authoring import finalize_applicability
 from app.verification.cross_source.rules import CROSS_SOURCE_RULES
 from app.verification.rules.schema import PurposeScope
 
@@ -83,6 +84,39 @@ _AUTHORED_APPLICABILITY: dict[str, dict[str, Any]] = {
     },
 }
 
+# BUILT playbook rules — a playbook-only rule that has been BUILT (its evaluator exists) but has NO live
+# ``CrossSourceRule`` counterpart. It keeps its ``pb.<id>`` rule_id (the evaluator's registry dispatch
+# key, LP-120 "fills it when built") and becomes ``enabled=True`` with a real applicability. Round-3
+# discipline: because seeding is insert-only, this seed change ships with a data migration that updates
+# existing DBs (the same pattern as LP-122R's validated flip).
+_BUILT_PLAYBOOK: dict[str, dict[str, Any]] = {
+    "AS-8": {  # bank-statement continuity (LP-123R) — NEW rule, self-defined spec, provisional
+        "applicability": {
+            "scope": {},  # applies to any file with bank statements
+            "triggers": {
+                "all": [
+                    {
+                        "kind": "entity_exists",
+                        "collection": "documents",
+                        "field": "document_type",
+                        "op": "eq",
+                        "value": "bank_statement",  # the exact classifier string (catalog.py)
+                    }
+                ]
+            },
+            # A bank statement must be present; the 2+/grouping/continuity logic is evaluator-side
+            # (the schema can't express counts or account grouping).
+            "required_inputs": [{"kind": "document", "document_type": "bank_statement"}],
+        },
+        "canonical_type": "bank_statement_discontinuity",
+        "message_template": "Bank-statement continuity is broken or unverified for one or more accounts.",
+        "severity": "YELLOW",
+        # validated=False (provisional): self-defined spec; exact-match tolerance + one-statement handling
+        # are Priya decisions (there is no live rule to reproduce).
+        "validated": False,
+    },
+}
+
 
 def _confidence_mode(layer: str | None) -> str | None:
     """deterministic (pure-DET) vs computed (DET-FUZZY). ONE vocabulary end-to-end (post-review
@@ -97,35 +131,6 @@ def _load_playbook() -> dict[str, dict[str, str]]:
     """The playbook rows keyed by playbook_id (from LP-117.5's rule_seed.csv)."""
     with _PLAYBOOK_CSV.open(encoding="utf-8") as f:
         return {row["playbook_id"]: row for row in csv.DictReader(f)}
-
-
-def _enforce_refi_scope_invariant(scope: dict[str, list[str]]) -> dict[str, list[str]]:
-    """Structural invariant (round-3 FIX 6A): a ``refinance_type`` scope can NEVER exist without its
-    ``loan_purpose``.
-
-    Whenever a scope constrains ``refinance_type``, ``loan_purpose:["refinance"]`` is co-emitted — so a
-    refi-type-scoped rule resolves DOESN'T-APPLY on a purchase (loan_purpose mismatch) via the generic
-    FALSE-precedence path, NEVER a false couldn't-check. This is enforced at CONSTRUCTION (here, and any
-    other applicability builder should call it), not by a special-case in the engine — a refi scope
-    cannot exist without its loan_purpose. A contradictory explicit loan_purpose fails LOUD.
-    """
-    if not scope.get("refinance_type"):
-        return scope
-    loan_purpose = scope.get("loan_purpose")
-    if loan_purpose and loan_purpose != ["refinance"]:
-        raise ValueError(
-            f"refinance_type scope requires loan_purpose=['refinance'], got {loan_purpose!r}"
-        )
-    # loan_purpose FIRST for readability; refinance_type (+ any other dims) follow.
-    return {"loan_purpose": ["refinance"], **scope}
-
-
-def _finalize_applicability(app: dict[str, Any]) -> dict[str, Any]:
-    """Apply the structural invariants every emitted applicability must satisfy (round-3 FIX 6A)."""
-    scope = app.get("scope")
-    if isinstance(scope, dict):
-        app = {**app, "scope": _enforce_refi_scope_invariant(scope)}
-    return app
 
 
 def _default_applicability(rule: Any) -> dict[str, Any]:
@@ -196,7 +201,7 @@ def _live_rows(playbook: dict[str, dict[str, str]]) -> list[dict[str, Any]]:
                 # STRUCTURAL — evaluator/applicability filled/refined by LP-119/120; the
                 # canonical_type + template we already know from the live rule.
                 "evaluator": None,
-                "applicability": _finalize_applicability(authored or _default_applicability(rule)),
+                "applicability": finalize_applicability(authored or _default_applicability(rule)),
                 "canonical_type": rule.canonical_type,
                 "message_template": rule.template,
                 # TUNABLE.
@@ -221,24 +226,29 @@ def _playbook_only_rows(
     for pid, pb in playbook.items():
         if pid in covered:
             continue
+        built = _BUILT_PLAYBOOK.get(
+            pid
+        )  # a BUILT playbook rule (evaluator exists) vs a placeholder
         rows.append(
             {
-                "rule_id": f"pb.{pid.lower()}",  # derived placeholder id (LP-120 may replace)
+                "rule_id": f"pb.{pid.lower()}",  # the evaluator's registry dispatch key (kept when built)
                 "playbook_id": pid,
                 "name": pb["name"],
                 "category": pb["category"],
                 "layer": pb["layer"],
-                "evaluator": None,  # not built yet — will not run until LP-120 fills it
-                "applicability": None,
-                "canonical_type": None,
-                "message_template": None,
+                "evaluator": None,  # dispatch is by rule_id via the code registry (as for AS-5)
+                "applicability": finalize_applicability(built["applicability"]) if built else None,
+                "canonical_type": built["canonical_type"] if built else None,
+                "message_template": built["message_template"] if built else None,
                 "params": {},
-                "severity": None,
+                "severity": built["severity"] if built else None,
                 "confidence_mode": _confidence_mode(pb["layer"]),
-                "enabled": False,
+                "enabled": bool(
+                    built
+                ),  # a built playbook rule is enabled; placeholders stay disabled
                 "status": pb["status"],
                 "scope": pb["scope"],
-                "validated": False,
+                "validated": built["validated"] if built else False,
             }
         )
     return rows

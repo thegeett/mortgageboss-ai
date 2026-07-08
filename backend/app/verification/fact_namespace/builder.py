@@ -26,6 +26,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.ai.extraction.parsing import coerce_date, coerce_decimal
 from app.models.borrower import Borrower
 from app.models.document import Document
 from app.models.document_borrower_link import DocumentBorrowerLink
@@ -40,6 +41,7 @@ from app.verification.confidence import DEFAULT_CONFIDENCE_CUTOFF
 from app.verification.fact_namespace.canonicalize import Canonicalizer
 from app.verification.fact_namespace.snapshot import (
     AssetFacts,
+    BankStatementFacts,
     BorrowerFacts,
     ComputedFacts,
     DocumentedFacts,
@@ -82,6 +84,15 @@ def _field_value(extracted_data: dict[str, Any], key: str) -> str | None:
         return None
     value = node.get("value")
     return str(value) if value not in (None, "") else None
+
+
+def _field_raw(extracted_data: dict[str, Any], key: str) -> Any:
+    """One typed-core field's RAW value (uncoerced) — for materializing typed facts via the shared
+    coercers (LP-123R), instead of the str-flattened :func:`_field_value`."""
+    node = extracted_data.get(key)
+    if not isinstance(node, dict):
+        return None
+    return node.get("value")
 
 
 def _typed_field_values(extracted_data: dict[str, Any]) -> dict[str, str]:
@@ -222,9 +233,15 @@ def _build_assets(rows: list[StatedAsset], canon: Canonicalizer) -> list[AssetFa
 def _build_documents_and_transactions(
     documents: list[Document],
     links_by_doc: dict[str, list[str]],
-) -> tuple[list[DocumentRef], list[TransactionFacts], list[str], dict[str, DocumentRef]]:
-    """File-level document refs, materialized bank-statement transactions, documented employer
-    names, and a ``document_id → DocumentRef`` map (for the per-borrower nesting).
+) -> tuple[
+    list[DocumentRef],
+    list[TransactionFacts],
+    list[BankStatementFacts],
+    list[str],
+    dict[str, DocumentRef],
+]:
+    """File-level document refs, materialized bank-statement transactions + statement facts, documented
+    employer names, and a ``document_id → DocumentRef`` map (for the per-borrower nesting).
 
     ``links_by_doc`` (LP-118.8) is ``document_id → [borrower_id]``. The file-level ref's
     ``borrower_id`` is set only when EXACTLY ONE borrower owns it; a joint (multi-borrower) or
@@ -233,6 +250,7 @@ def _build_documents_and_transactions(
     doc_refs: list[DocumentRef] = []
     ref_by_id: dict[str, DocumentRef] = {}
     transactions: list[TransactionFacts] = []
+    bank_statements: list[BankStatementFacts] = []
     documented_employers: list[str] = []
 
     for doc in documents:
@@ -259,6 +277,33 @@ def _build_documents_and_transactions(
                 break
 
         if doc.document_type == "bank_statement":
+            # Materialize the statement-level fields as TYPED, frozen facts (LP-123R) — coerced ONCE
+            # here with the SHARED coercers, so the evaluator reads typed values and never re-coerces.
+            bank_statements.append(
+                BankStatementFacts(
+                    source_document_id=str(doc.id),
+                    bank_name=_field_value(data, "bank_name"),
+                    account_number_masked=_field_value(data, "account_number_masked"),
+                    account_type=_field_value(data, "account_type"),
+                    account_holder_name=_field_value(data, "account_holder_name"),
+                    period_start=_scalar(
+                        coerce_date(_field_raw(data, "statement_period_start")),
+                        source=FactSource.EXTRACTION,
+                    ),
+                    period_end=_scalar(
+                        coerce_date(_field_raw(data, "statement_period_end")),
+                        source=FactSource.EXTRACTION,
+                    ),
+                    beginning_balance=_scalar(
+                        coerce_decimal(_field_raw(data, "beginning_balance")),
+                        source=FactSource.EXTRACTION,
+                    ),
+                    ending_balance=_scalar(
+                        coerce_decimal(_field_raw(data, "ending_balance")),
+                        source=FactSource.EXTRACTION,
+                    ),
+                )
+            )
             raw_txns = data.get("transactions")
             if isinstance(raw_txns, list):
                 for txn in raw_txns:
@@ -277,7 +322,7 @@ def _build_documents_and_transactions(
                             transaction_type=txn.get("transaction_type"),
                         )
                     )
-    return doc_refs, transactions, documented_employers, ref_by_id
+    return doc_refs, transactions, bank_statements, documented_employers, ref_by_id
 
 
 async def _load_document_links(
@@ -483,8 +528,8 @@ async def assemble_fact_namespace(
     )
 
     links_by_doc, docs_by_borrower = await _load_document_links(db, [doc.id for doc in documents])
-    doc_refs, transactions, documented_employers, ref_by_id = _build_documents_and_transactions(
-        list(documents), links_by_doc
+    doc_refs, transactions, bank_statements, documented_employers, ref_by_id = (
+        _build_documents_and_transactions(list(documents), links_by_doc)
     )
 
     return FactNamespace(
@@ -496,6 +541,7 @@ async def assemble_fact_namespace(
         assets=_build_assets(list(assets), canon),
         documents=doc_refs,
         transactions=transactions,
+        bank_statements=bank_statements,
         computed=await _build_computed(db, loan_file, confidence_cutoff),
         documented=_build_documented(documented_employers),
     )

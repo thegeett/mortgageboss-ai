@@ -82,6 +82,7 @@ def _snapshot(
         assets=assets or [],
         documents=documents or [],
         transactions=[],
+        bank_statements=[],
         computed=ComputedFacts(
             ltv=Fact.missing(source=FactSource.ABSENT_UNCOMPUTABLE),
             cltv=_empty(),
@@ -323,6 +324,31 @@ def test_fix1_required_input_inspects_named_field() -> None:
     # present value → ready.
     assert (
         classify_from_json(rule, _snapshot(assets=[_asset(True)])).state
+        is ApplicabilityState.READY_TO_RUN
+    )
+
+
+def test_r3fix6_single_level_multi_element_relevant_semantics() -> None:
+    # Review FIX 6 — PIN the single-level [] semantics (this line has drifted 4x). A scalar leaf on each
+    # element makes EVERY element relevant (there is no sub-collection to skip), so single-level behaves
+    # consistently with the nested relevant-element rule.
+    rule = {"required_inputs": [{"kind": "data_field", "path": "assets[].value"}]}
+    present = _asset(True)  # value present
+    absent = AssetFacts(
+        asset_type_raw="Checking",
+        asset_type_canonical=Fact[str](value=None),
+        is_gift=False,
+        value=Fact.missing(source=FactSource.ABSENT_UNCOMPUTABLE),
+        holder_name="B",
+    )
+    # 2 assets, one value present one absent → a relevant element is missing the leaf → COULDN'T-CHECK.
+    assert (
+        classify_from_json(rule, _snapshot(assets=[present, absent])).state
+        is ApplicabilityState.COULDNT_CHECK
+    )
+    # both present → READY.
+    assert (
+        classify_from_json(rule, _snapshot(assets=[present, _asset(True)])).state
         is ApplicabilityState.READY_TO_RUN
     )
 

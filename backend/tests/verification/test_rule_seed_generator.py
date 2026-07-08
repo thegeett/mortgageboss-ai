@@ -12,10 +12,10 @@ from types import SimpleNamespace
 import pytest
 from app.scripts.generate_rule_seed import (
     _default_applicability,
-    _enforce_refi_scope_invariant,
     build_seed,
 )
 from app.services.rule_registry import DEFAULT_SEED_PATH
+from app.verification.applicability.authoring import enforce_refi_scope_invariant
 
 _WIRE_KEYS = {"scope", "triggers", "required_inputs"}
 
@@ -45,18 +45,16 @@ def test_r3fix2_unhandled_purpose_raises() -> None:
 def test_r3fix6a_refi_type_scope_coemits_loan_purpose() -> None:
     # A refinance_type scope can NEVER exist without loan_purpose:[refinance] — enforced at construction,
     # so a purchase file resolves DOESN'T-APPLY (loan_purpose mismatch), never a false couldn't-check.
-    out = _enforce_refi_scope_invariant({"refinance_type": ["cash_out"]})
+    out = enforce_refi_scope_invariant({"refinance_type": ["cash_out"]})
     assert out == {"loan_purpose": ["refinance"], "refinance_type": ["cash_out"]}
     # Idempotent when loan_purpose is already correct.
     already = {"loan_purpose": ["refinance"], "refinance_type": ["rate_term"]}
-    assert _enforce_refi_scope_invariant(already) == already
+    assert enforce_refi_scope_invariant(already) == already
 
 
 def test_r3fix6a_contradictory_loan_purpose_raises() -> None:
     with pytest.raises(ValueError, match="requires loan_purpose"):
-        _enforce_refi_scope_invariant(
-            {"refinance_type": ["cash_out"], "loan_purpose": ["purchase"]}
-        )
+        enforce_refi_scope_invariant({"refinance_type": ["cash_out"], "loan_purpose": ["purchase"]})
 
 
 # --------------------------------------------------------------------------- #
