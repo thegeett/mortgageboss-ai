@@ -46,6 +46,10 @@ class Verdict(StrEnum):
 
     FINDING = "finding"  # a problem was found (e.g. gift funds present but no gift letter)
     SATISFIED = "satisfied"  # checked, all good
+    # The evaluator RAN but the data left it undeterminable (data present but not enough to reach a
+    # verdict — e.g. a gift whose amount wasn't extracted). Honest: NEVER assert "satisfied" for a
+    # check the live rule never made. The runner buckets this into couldn't-check (post-review FIX 8).
+    COULDNT_CHECK = "couldnt_check"
 
 
 class ConfidenceMode(StrEnum):
@@ -123,6 +127,21 @@ def deterministic_satisfied(
     return EvaluationResult(
         rule_id=rule_id,
         verdict=Verdict.SATISFIED,
+        message=message,
+        confidence=DETERMINISTIC_CONFIDENCE,
+        confidence_mode=ConfidenceMode.DETERMINISTIC,
+        provenance=provenance,
+    )
+
+
+def deterministic_couldnt_check(
+    rule_id: str, message: str, *, provenance: list[Provenance]
+) -> EvaluationResult:
+    """A COULDN'T-CHECK verdict — the evaluator ran but the data left it undeterminable (post-review
+    FIX 8). Never asserts a verdict the data can't support; the runner buckets it as couldn't-check."""
+    return EvaluationResult(
+        rule_id=rule_id,
+        verdict=Verdict.COULDNT_CHECK,
         message=message,
         confidence=DETERMINISTIC_CONFIDENCE,
         confidence_mode=ConfidenceMode.DETERMINISTIC,

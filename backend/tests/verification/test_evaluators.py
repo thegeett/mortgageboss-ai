@@ -237,9 +237,10 @@ async def test_matches_live_rule_with_letter(db_session: AsyncSession) -> None:
 # --------------------------------------------------------------------------- #
 
 
-def test_fix2_gift_with_no_value_is_not_a_finding() -> None:
-    # An is_gift asset with value None → gift_total 0 → SATISFIED (matches the live rule's silence),
-    # NOT a nonsense "gift of 0, no letter" FINDING.
+def test_fix8_gift_with_no_value_is_couldnt_check() -> None:
+    # An is_gift asset with value None → gift_total 0. The live rule makes NO verdict (its gift facts
+    # are (None, None) → no check). So the evaluator must NOT emit a nonsense "gift of 0" FINDING (FIX 2)
+    # AND must NOT assert SATISFIED for a check that never ran (FIX 8) — it is COULDN'T-CHECK, honestly.
     zero_gift = AssetFacts(
         asset_type_raw="Gift of Cash",
         asset_type_canonical=Fact[str](value=None),
@@ -248,7 +249,7 @@ def test_fix2_gift_with_no_value_is_not_a_finding() -> None:
         holder_name="Mom",
     )
     result = evaluate_rule(_RULE_ID, _snapshot([zero_gift], []))
-    assert result is not None and result.verdict is Verdict.SATISFIED
+    assert result is not None and result.verdict is Verdict.COULDNT_CHECK
 
 
 async def test_fix2_matches_live_rule_gift_value_none(db_session: AsyncSession) -> None:

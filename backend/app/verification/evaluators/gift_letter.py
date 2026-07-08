@@ -18,6 +18,7 @@ from typing import Any
 from app.verification.evaluators.contract import (
     EvaluationResult,
     Provenance,
+    deterministic_couldnt_check,
     deterministic_finding,
     deterministic_satisfied,
 )
@@ -57,14 +58,14 @@ class GiftLetterEvaluator:
             ),
         ]
 
-        # FIX 2 — gate on the gift TOTAL, matching the live rule exactly: ``_gift_facts`` returns
-        # (None, None) when the gift total is <= 0 and ``_check_gift_without_letter`` fires only when
-        # the amount is present. An ``is_gift`` asset with a None/0 value is therefore NOT a finding
-        # (no "$0 gift" nonsense) — it's SATISFIED (nothing of value to document).
+        # A gift is flagged (is_gift) but its amount is undeterminable (None/0). The live rule makes
+        # NO verdict here (``_gift_facts`` → (None, None) → ``_check_gift_without_letter`` → []). So
+        # do NOT emit a false "$0 gift" FINDING (FIX 2) AND do NOT assert SATISFIED — the live rule
+        # never checked it (post-review FIX 8). Surface it as COULDN'T-CHECK, honestly.
         if gift_total <= 0:
-            return deterministic_satisfied(
+            return deterministic_couldnt_check(
                 self.rule_id,
-                "No gift funds with a stated value to document.",
+                "A gift is stated but its amount was not extracted — cannot verify the documentation.",
                 provenance=provenance,
             )
         if has_letter:

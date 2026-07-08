@@ -24,7 +24,6 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.models.loan_file import LoanPurpose
 from app.verification.applicability.schema import (
     Applicability,
     ApplicabilityState,
@@ -38,25 +37,38 @@ from app.verification.applicability.schema import (
     Ternary,
     TriggerGroup,
 )
-from app.verification.fact_namespace.snapshot import (
-    Fact,
-    FactNamespace,
-    FileFacts,
-    PropertyFacts,
-)
+from app.verification.fact_namespace.snapshot import Fact, FactNamespace, FactSource
 
 _MISSING = object()  # sentinel: a path did not resolve at all
 
+# The ONLY scope dimensions — the CATEGORICAL (enumerable) fields (post-review FIX 3). Restricting
+# to this fixed set (not every FileFacts/PropertyFacts field) means a numeric field or an unknown
+# name can never masquerade as a scope dimension: ``{"loan_amount":["500000"]}`` would resolve a
+# Decimal, always compare False, and SILENTLY HIDE the rule. Anything not here fails CLOSED.
+_SCOPE_DIMENSIONS: dict[str, str] = {
+    "program": "file.program",
+    "loan_purpose": "file.loan_purpose",
+    "refinance_type": "file.refinance_type",
+    "occupancy": "property.occupancy",
+    "property_type": "property.property_type",
+}
+
+# Fact sources for which a value of ``None`` is NOT a determination → treat as UNKNOWN (post-review
+# FIX 2). ``UNMAPPED`` (the canonicalizer couldn't classify a raw type) + the ``absent_*`` sources
+# belong with unknown; a value-None from a real determination source (``computed`` = "no MI") stays
+# KNOWN.
+_NON_DETERMINATION_SOURCES = {
+    FactSource.UNMAPPED,
+    FactSource.ABSENT_NO_SCHEMA,
+    FactSource.ABSENT_NOT_PERSISTED,
+    FactSource.ABSENT_UNCOMPUTABLE,
+}
+
 
 def _scope_path(dim: str) -> str | None:
-    """The snapshot fact path a scope dimension constrains, DERIVED from the snapshot model fields
-    (FIX 4) so it can't rot out of sync as fields are added. An unrecognized dimension → ``None`` →
-    the caller fails CLOSED (couldn't-check), never "no constraint → applies everywhere"."""
-    if dim in FileFacts.model_fields:
-        return f"file.{dim}"
-    if dim in PropertyFacts.model_fields:
-        return f"property.{dim}"
-    return None
+    """The snapshot path a categorical scope dimension constrains, or ``None`` for an unrecognized
+    dimension (→ the caller fails CLOSED: couldn't-check, never a silent doesn't-apply)."""
+    return _SCOPE_DIMENSIONS.get(dim)
 
 
 # --------------------------------------------------------------------------- #
@@ -80,13 +92,15 @@ def _resolve(snapshot: FactNamespace, path: str) -> Any:
 
 
 def _known_value(node: Any) -> tuple[bool, Any]:
-    """(known, value) for a resolved decision input.
+    """(known, value) for a resolved decision input — THREE-way (post-review FIX 2).
 
     - ``absent`` → NOT known (no answer → UNKNOWN → couldn't-check).
     - a concrete value → known.
-    - **value None but NOT absent (FIX 6):** a *real* ``None`` answer iff it carries a ``source``
-      (a deliberate determination, e.g. ``computed.mi_monthly`` = None = "MI not required") → known.
-      An unset scalar (built via ``_scalar`` → ``source is None``) is empty/unset → NOT known.
+    - **value None but NOT absent:** known ONLY for a genuine determination — a real ``None`` answer
+      from a determination source (``computed.mi_monthly`` = None = "MI not required"). An
+      **UNMAPPED** value (the canonicalizer couldn't classify the raw type), an ``absent_*`` source,
+      or an unset scalar (``source is None``) is UNDETERMINABLE → NOT known → couldn't-check. UNMAPPED
+      belongs with unknown, never "known None".
     """
     if node is _MISSING:
         return False, None
@@ -95,8 +109,10 @@ def _known_value(node: Any) -> tuple[bool, Any]:
             return False, None
         if node.value is not None:
             return True, node.value
-        # value is None, not absent: a determined answer only if it has a source.
-        return (True, None) if node.source is not None else (False, None)
+        # value None, not absent: a determined answer only from a positive-determination source.
+        if node.source is None or node.source in _NON_DETERMINATION_SOURCES:
+            return False, None
+        return True, None
     if node is None:
         return False, None
     return True, node
@@ -229,26 +245,17 @@ def _eval_scope(snapshot: FactNamespace, scope: dict[str, list[str]]) -> tuple[T
             continue
         known, value = _known_value(_resolve(snapshot, path))
         if not known:
-            # FIX 5 — absent-because-IRRELEVANT (a purchase has no refinance_type) → DOESN'T-APPLY,
-            # not couldn't-check (mirrors purpose_applies). Distinguish it from absent-because-missing.
-            if dim == "refinance_type" and _is_known_purchase(snapshot):
-                results.append(Ternary.FALSE)
-                reasons.append("refinance_type-scoped rule on a known purchase → doesn't apply")
-            else:
-                results.append(Ternary.UNKNOWN)
-                reasons.append(f"scope '{dim}' unknown (file value absent)")
+            results.append(Ternary.UNKNOWN)
+            reasons.append(f"scope '{dim}' unknown (file value absent)")
         elif value in allowed:
             results.append(Ternary.TRUE)
         else:
             results.append(Ternary.FALSE)
             reasons.append(f"scope '{dim}'={value!r} not in {allowed}")
     return _and(results), reasons
-
-
-def _is_known_purchase(snapshot: FactNamespace) -> bool:
-    """The file's loan_purpose is a KNOWN purchase (so refinance_type is definitively irrelevant)."""
-    known, value = _known_value(_resolve(snapshot, "file.loan_purpose"))
-    return known and value == LoanPurpose.PURCHASE.value
+    # NOTE (post-review FIX 10): the refinance_type-on-purchase case needs NO special branch — a
+    # refi rule is seeded with BOTH dims (scope {loan_purpose:[refinance], refinance_type:[…]}), so
+    # on a purchase the loan_purpose mismatch → FALSE → doesn't-apply via the generic path above.
 
 
 # --------------------------------------------------------------------------- #
@@ -268,12 +275,13 @@ def _resolve_from(node: Any, path: str) -> Any:
 
 
 def _nested_field_present(node: Any, segments: list[str]) -> bool:
-    """Whether the (possibly nested) leaf field is PRESENT on ``node`` (FIX 1).
+    """Whether the (possibly nested) leaf field is present on the RELEVANT element(s) (FIX 1 + 7).
 
     ``segments`` are the "[]"-delimited parts AFTER the outer collection, e.g.
-    ``["income_items", "monthly_amount"]``. A non-leaf segment must be a NON-EMPTY collection whose
-    EVERY element carries the field (fail closed — incomplete data → not present). The leaf must be
-    a KNOWN value.
+    ``["income_items", "monthly_amount"]``. The named leaf must be a KNOWN value. For a NESTED
+    collection the rule is runnable when **at least one** element carries the field (post-review
+    FIX 7 — a ragged file, e.g. a co-borrower with no income items while the primary has data, is
+    still runnable). Still fail-closed for the genuine "no element has it" case.
     """
     seg = segments[0].lstrip(".")
     child = _resolve_from(node, seg) if seg else node
@@ -281,7 +289,7 @@ def _nested_field_present(node: Any, segments: list[str]) -> bool:
         return _known_value(child)[0]
     if not isinstance(child, list) or not child:  # nested collection missing/empty → not present
         return False
-    return all(_nested_field_present(element, segments[1:]) for element in child)
+    return any(_nested_field_present(element, segments[1:]) for element in child)
 
 
 def _required_input_satisfied(
@@ -292,15 +300,14 @@ def _required_input_satisfied(
     # DataField / DerivedField — a snapshot path that must carry usable data.
     path = req.path
     if "[]" in path:
-        # FIX 1 — inspect the NAMED (nested) leaf field, not just the outer collection. A
-        # collection path ("assets[].value", "borrowers[].income_items[].monthly_amount") is
-        # satisfied only when the collection is non-empty AND every element has the named field
-        # PRESENT (not absent). Otherwise couldn't-check — the false-green guard.
+        # FIX 1 — inspect the NAMED (nested) leaf field, not just the outer collection. FIX 7 —
+        # satisfied when the collection is non-empty AND at least one element carries the named field
+        # PRESENT (the relevant element, not every element). Otherwise couldn't-check.
         parts = path.split("[]")
         collection = _resolve(snapshot, parts[0])
         if not isinstance(collection, list) or not collection:
             return False
-        return all(_nested_field_present(element, parts[1:]) for element in collection)
+        return any(_nested_field_present(element, parts[1:]) for element in collection)
     known, _ = _known_value(_resolve(snapshot, path))
     return known
 

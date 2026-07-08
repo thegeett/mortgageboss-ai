@@ -16,6 +16,7 @@ from app.verification.evaluators.contract import (
     Verdict,
     computed_confidence,
     computed_result,
+    deterministic_couldnt_check,
     deterministic_finding,
     deterministic_satisfied,
 )
@@ -42,6 +43,7 @@ __all__ = [
     "Verdict",
     "computed_confidence",
     "computed_result",
+    "deterministic_couldnt_check",
     "deterministic_finding",
     "deterministic_satisfied",
     "ensure_registered",

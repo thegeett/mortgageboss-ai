@@ -68,10 +68,12 @@ _AUTHORED_APPLICABILITY: dict[str, dict[str, Any]] = {
 
 
 def _confidence_mode(layer: str | None) -> str | None:
-    """certain (pure-DET) vs computed (DET-FUZZY) — a best-effort seed; LP-120 finalizes."""
+    """deterministic (pure-DET) vs computed (DET-FUZZY). ONE vocabulary end-to-end (post-review
+    FIX 6) — the same values the runner emits via ``ConfidenceMode`` ({deterministic, computed}), so
+    a downstream trust surface can join the rule row and the run outcome with no translation."""
     if not layer:
         return None
-    return "computed" if "FUZZY" in layer.upper() else "certain"
+    return "computed" if "FUZZY" in layer.upper() else "deterministic"
 
 
 def _load_playbook() -> dict[str, dict[str, str]]:
@@ -91,14 +93,16 @@ def _default_applicability(rule: Any) -> dict[str, Any]:
     scope: dict[str, list[str]] = {}
     if rule.program is not None:
         scope["program"] = [rule.program.value]
-    if rule.purpose is not None:
-        # PurposeScope.PURCHASE/REFINANCE gate on loan_purpose; CASH_OUT/RATE_TERM on refinance_type.
-        dim = (
-            "refinance_type"
-            if rule.purpose in (PurposeScope.CASH_OUT, PurposeScope.RATE_TERM)
-            else "loan_purpose"
-        )
-        scope[dim] = [rule.purpose.value]
+    if rule.purpose is PurposeScope.PURCHASE:
+        scope["loan_purpose"] = ["purchase"]
+    elif rule.purpose is PurposeScope.REFINANCE:
+        scope["loan_purpose"] = ["refinance"]
+    elif rule.purpose in (PurposeScope.CASH_OUT, PurposeScope.RATE_TERM):
+        # Post-review FIX 10 — emit BOTH dims: a refi-type-scoped rule is a REFINANCE with that
+        # cash-out type. This lets the generic FALSE-precedence path handle purchase files (loan_purpose
+        # mismatch → doesn't-apply) with NO refinance_type-on-purchase special case in the engine.
+        scope["loan_purpose"] = ["refinance"]
+        scope["refinance_type"] = [rule.purpose.value]
     return {"scope": scope, "triggers": {}, "required_inputs": []}
 
 

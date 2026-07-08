@@ -363,7 +363,9 @@ def test_fix4_unknown_scope_dimension_fails_closed() -> None:
     assert r.state is ApplicabilityState.COULDNT_CHECK
 
 
-def test_fix5_refinance_type_scope_on_purchase_doesnt_apply() -> None:
+def test_fix10_refi_scoped_rule_on_purchase_doesnt_apply_via_generic_path() -> None:
+    # A refi-type-scoped rule is seeded with BOTH dims (FIX 10); on a purchase the loan_purpose
+    # mismatch → FALSE → doesn't-apply via the generic FALSE-precedence path (no engine special case).
     snap = _snapshot().model_copy(
         update={
             "file": _snapshot().file.model_copy(
@@ -371,10 +373,10 @@ def test_fix5_refinance_type_scope_on_purchase_doesnt_apply() -> None:
             )
         }
     )
-    r = classify_from_json({"scope": {"refinance_type": ["cash_out"]}}, snap)
-    assert (
-        r.state is ApplicabilityState.DOESNT_APPLY
-    )  # not couldn't-check (a purchase has no refi type)
+    r = classify_from_json(
+        {"scope": {"loan_purpose": ["refinance"], "refinance_type": ["cash_out"]}}, snap
+    )
+    assert r.state is ApplicabilityState.DOESNT_APPLY
 
 
 def test_fix6_present_none_computed_is_known() -> None:
@@ -390,3 +392,35 @@ def test_fix6_present_none_computed_is_known() -> None:
     assert classify_from_json(rule, snap).state is ApplicabilityState.READY_TO_RUN
     # An unset scalar (source None) stays UNKNOWN → couldn't-check (the false-green guard preserved).
     assert classify_from_json(rule, _snapshot()).state is ApplicabilityState.COULDNT_CHECK
+
+
+def test_fix2_present_none_unmapped_is_not_known() -> None:
+    # SAME None value as FIX 6 — but here it came from UNMAPPED (a canonicalization miss), NOT a
+    # computed "not required" answer. UNMAPPED / non-determination sources are NOT a known value →
+    # couldn't-check, never a false pass (the honesty contract's other half from FIX 6).
+    snap = _snapshot().model_copy(
+        update={
+            "computed": _snapshot().computed.model_copy(
+                update={"mi_monthly": Fact[Decimal](value=None, source=FactSource.UNMAPPED)}
+            )
+        }
+    )
+    rule = {"required_inputs": [{"kind": "derived_field", "path": "computed.mi_monthly"}]}
+    assert classify_from_json(rule, snap).state is ApplicabilityState.COULDNT_CHECK
+
+
+def test_fix7_ragged_multi_borrower_any_present_is_ready() -> None:
+    # 2 borrowers; the required nested field is present on ONE of them. FIX 7's `any` semantics: a
+    # relevant element satisfies the input — a co-borrower missing the field must NOT sink the rule
+    # into couldn't-check (that was the `all(...)` overshoot).
+    rule = {
+        "required_inputs": [
+            {"kind": "data_field", "path": "borrowers[].income_items[].monthly_amount"}
+        ]
+    }
+    present_b = _borrower([_income_item(Fact.present(Decimal("8000"), source=FactSource.STATED))])
+    absent_b = _borrower(
+        [_income_item(Fact.missing(source=FactSource.ABSENT_UNCOMPUTABLE))]
+    ).model_copy(update={"borrower_id": "b2", "position": 2, "is_primary": False})
+    snap = _snapshot().model_copy(update={"borrowers": [present_b, absent_b]})
+    assert classify_from_json(rule, snap).state is ApplicabilityState.READY_TO_RUN

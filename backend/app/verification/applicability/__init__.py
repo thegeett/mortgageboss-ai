@@ -9,6 +9,8 @@ and produces no finding (LP-120/121).
 
 from dataclasses import dataclass, field
 
+from pydantic import ValidationError
+
 from app.models.verification_rule import VerificationRule
 from app.verification.applicability.engine import classify, classify_from_json
 from app.verification.applicability.schema import (
@@ -52,9 +54,24 @@ def classify_rules(rules: list[VerificationRule], snapshot: FactNamespace) -> Cl
     """
     out = ClassifiedRules()
     for rule in rules:
-        result = classify_from_json(rule.applicability, snapshot)
+        try:
+            result = classify_from_json(rule.applicability, snapshot)
+        except ValidationError as exc:
+            # Post-review FIX 1 — a malformed/legacy applicability row must NOT abort the batch.
+            # extra="forbid" makes bad config loud PER RULE: route THIS rule to couldn't-check and
+            # keep classifying the rest (mirrors the evaluator's per-rule graceful degradation).
+            result = Classification(
+                state=ApplicabilityState.COULDNT_CHECK,
+                reasons=[f"malformed applicability config: {_short_error(exc)}"],
+            )
         getattr(out, _GROUP[result.state]).append(RuleClassification(rule.rule_id, result))
     return out
+
+
+def _short_error(exc: ValidationError) -> str:
+    """A compact, non-PII summary of a validation failure (the offending keys/locations)."""
+    locs = [".".join(str(p) for p in e.get("loc", ())) or e.get("type", "?") for e in exc.errors()]
+    return ", ".join(dict.fromkeys(locs)) or "invalid shape"
 
 
 __all__ = [
