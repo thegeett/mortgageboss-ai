@@ -92,7 +92,7 @@ FactNamespace                                    (snapshot.py:236)
 │   ├─ borrowers[].employers[]: EmployerFacts     :140  (PER-BORROWER)
 │   │   ├─ …employers[].name:        str|None     :107
 │   │   └─ …employers[].is_current:  bool|None    :108
-│   └─ borrowers[].documents[]: DocumentRef       :142  ⚠ ALWAYS EMPTY today (LP-118.8; shape only)
+│   └─ borrowers[].documents[]: DocumentRef       :142  the borrower's matched documents (LP-118.8)
 ├─ property: PropertyFacts | None                :250   (SINGLE; None if no property)
 │   ├─ property.address:          Fact[str]       :148
 │   ├─ property.county:           Fact[str]       :149   ⚠ ALWAYS ABSENT today (see §6)
@@ -119,7 +119,7 @@ FactNamespace                                    (snapshot.py:236)
 │   ├─ documents[].present:                bool         :119   (a current extraction exists)
 │   ├─ documents[].current_extraction_id:  str|None     :120
 │   ├─ documents[].fields:                 dict[str,str] :123  (typed-core extraction values, value-only)
-│   └─ documents[].borrower_id:            str|None      :124   ⚠ ALWAYS None today (LP-118.8)
+│   └─ documents[].borrower_id:            str|None      :124   single owner if exactly one, else None (joint/unassigned) (LP-118.8)
 ├─ transactions[]: TransactionFacts               :254   (FILE-LEVEL list; materialized from bank statements)
 │   ├─ transactions[].source_document_id:  str          :186
 │   ├─ transactions[].date:                Fact[date]   :187
@@ -174,7 +174,7 @@ Legend: **W** = wrapped `Fact[...]`; **P** = plain value. "Absent/source" = what
 | current_address | `borrowers[].current_address` | Fact[str] | W | **⚠ always ABSENT** | `Fact.missing(absent_not_persisted)` (`builder.py:150`) |
 | income_items | `borrowers[].income_items[]` | list[IncomeItemFacts] | P(list) | per-borrower | empty list if none |
 | employers | `borrowers[].employers[]` | list[EmployerFacts] | P(list) | per-borrower | empty list if none |
-| documents | `borrowers[].documents[]` | list[DocumentRef] | P(list) | **⚠ always `[]`** (LP-118.8) | `builder.py:153` sets `[]` |
+| documents | `borrowers[].documents[]` | list[DocumentRef] | P(list) | the borrower's matched docs (LP-118.8) | populated from `document_borrower_links`; a joint doc appears under each borrower; each ref's `borrower_id` = that borrower |
 
 ### `IncomeItemFacts` — path prefix `borrowers[].income_items[].` (`snapshot.py:92-101`, built `builder.py:123-129`)
 
@@ -235,7 +235,7 @@ Legend: **W** = wrapped `Fact[...]`; **P** = plain value. "Absent/source" = what
 | present | `documents[].present` | bool | P | a current extraction exists |
 | current_extraction_id | `documents[].current_extraction_id` | str\|None | P | |
 | fields | `documents[].fields` | dict[str,str] | P | typed-core extraction values, value-only (`{}` if none) |
-| borrower_id | `documents[].borrower_id` | str\|None | P | **⚠ always None** (LP-118.8) |
+| borrower_id | `documents[].borrower_id` | str\|None | P | file-level: set to the single owner when exactly one borrower is linked; None for a joint (multi-borrower) or unassigned doc (LP-118.8) |
 
 ### `TransactionFacts` — path prefix `transactions[].` (FILE-LEVEL; materialized from `bank_statement`) (`snapshot.py:181-190`, built `builder.py:243-254`)
 
@@ -331,11 +331,11 @@ Sample: `auto loan`/`student loan`/`personal loan`→`installment`; `credit card
 | borrowers | `borrowers[]` | 0..N | per-file | ordered by `position` (`borrower_position`) |
 | income items | `borrowers[].income_items[]` | 0..N | **per-borrower** | nested under each borrower |
 | employers | `borrowers[].employers[]` | 0..N | **per-borrower** | nested under each borrower |
-| borrower documents | `borrowers[].documents[]` | 0 | per-borrower (shape) | **always empty** until LP-118.8 |
+| borrower documents | `borrowers[].documents[]` | 0..N | **per-borrower** | the docs matched to that borrower (LP-118.8); a joint doc appears under each |
 | property | `property` | 0..1 | **single** | `PropertyFacts \| None` (`uselist=False`) |
 | liabilities | `liabilities[]` | 0..N | **FILE-level** | NOT attributable to a borrower |
 | assets | `assets[]` | 0..N | **FILE-level** | includes gift assets (`is_gift`) |
-| documents | `documents[]` | 0..N | **FILE-level** | `borrower_id` always None (LP-118.8) |
+| documents | `documents[]` | 0..N | **FILE-level** | `borrower_id` = single owner or None (joint/unassigned), per LP-118.8 |
 | transactions | `transactions[]` | 0..N | **FILE-level** | each carries `source_document_id`; only `bank_statement` docs contribute |
 | computed | `computed` | 1 | file | single object |
 | documented | `documented` | 1 | file | single object |
@@ -373,8 +373,7 @@ These paths **exist structurally** but currently carry no data on any run — an
 when the calculator lacks inputs (e.g. no appraised value → LTV absent). `computed.mi_monthly` is
 **never absent**: a `None` value with `absent=False` means "MI not required".
 
-**Always EMPTY (not absent):** `borrowers[].documents[]` = `[]` (LP-118.8); `documents[].borrower_id`
-= None (LP-118.8).
+**Populated by LP-118.8 (was empty in LP-118.6):** `borrowers[].documents[]` now holds the docs the borrower↔document matcher linked to that borrower; `documents[].borrower_id` is the single owner where exactly one borrower is linked (None for joint/unassigned). These reflect the **persisted** `document_borrower_links` at build time — run `assign_documents_to_borrowers` first (the runner does).
 
 **Canonical misses:** any `*_canonical` field can be `value=None, source=unmapped` when the raw
 string isn't in the map and no AI seam is wired — distinct from absent (the raw exists; only the

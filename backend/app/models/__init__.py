@@ -29,6 +29,7 @@ from app.models.document import (
     Tier,
     UploadSource,
 )
+from app.models.document_borrower_link import DocumentBorrowerLink
 from app.models.document_finding import (
     DocumentFinding,
     DocumentFindingStatus,
@@ -91,6 +92,7 @@ __all__ = [
     "CommunicationStatus",
     "Company",
     "Document",
+    "DocumentBorrowerLink",
     "DocumentCategory",
     "DocumentFinding",
     "DocumentFindingStatus",

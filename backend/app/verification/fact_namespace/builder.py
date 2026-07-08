@@ -20,6 +20,7 @@ from __future__ import annotations
 
 from decimal import Decimal, InvalidOperation
 from typing import Any
+from uuid import UUID
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -27,6 +28,7 @@ from sqlalchemy.orm import selectinload
 
 from app.models.borrower import Borrower
 from app.models.document import Document
+from app.models.document_borrower_link import DocumentBorrowerLink
 from app.models.helpers import only_active
 from app.models.loan_file import LoanFile
 from app.models.property import Property
@@ -116,10 +118,22 @@ def _build_file(loan_file: LoanFile) -> FileFacts:
     )
 
 
-def _build_borrowers(borrowers: list[Borrower], canon: Canonicalizer) -> list[BorrowerFacts]:
+def _build_borrowers(
+    borrowers: list[Borrower],
+    canon: Canonicalizer,
+    docs_by_borrower: dict[str, list[str]],
+    ref_by_id: dict[str, DocumentRef],
+) -> list[BorrowerFacts]:
     s = FactSource.STATED
     out: list[BorrowerFacts] = []
     for b in borrowers:
+        # The documents matched to THIS borrower (LP-118.8); each ref carries its borrower_id
+        # in the per-borrower context (a joint doc appears under each of its borrowers).
+        borrower_docs = [
+            ref_by_id[did].model_copy(update={"borrower_id": str(b.id)})
+            for did in docs_by_borrower.get(str(b.id), [])
+            if did in ref_by_id
+        ]
         income_items = [
             IncomeItemFacts(
                 monthly_amount=_scalar(item.monthly_amount, source=s),
@@ -150,7 +164,7 @@ def _build_borrowers(borrowers: list[Borrower], canon: Canonicalizer) -> list[Bo
                 current_address=Fact.missing(source=FactSource.ABSENT_NOT_PERSISTED),
                 income_items=income_items,
                 employers=employers,
-                documents=[],  # shaped for borrowers[].documents[]; linking is LP-118.8
+                documents=borrower_docs,  # LP-118.8 — the borrower's matched documents
             )
         )
     return out
@@ -207,25 +221,34 @@ def _build_assets(rows: list[StatedAsset], canon: Canonicalizer) -> list[AssetFa
 
 def _build_documents_and_transactions(
     documents: list[Document],
-) -> tuple[list[DocumentRef], list[TransactionFacts], list[str]]:
-    """Document refs (file-level), materialized bank-statement transactions, and the documented
-    employer names (for the documented-side facts)."""
+    links_by_doc: dict[str, list[str]],
+) -> tuple[list[DocumentRef], list[TransactionFacts], list[str], dict[str, DocumentRef]]:
+    """File-level document refs, materialized bank-statement transactions, documented employer
+    names, and a ``document_id → DocumentRef`` map (for the per-borrower nesting).
+
+    ``links_by_doc`` (LP-118.8) is ``document_id → [borrower_id]``. The file-level ref's
+    ``borrower_id`` is set only when EXACTLY ONE borrower owns it; a joint (multi-borrower) or
+    unassigned document keeps ``borrower_id=None`` at the file level (the per-borrower nesting
+    carries the joint linkage)."""
     doc_refs: list[DocumentRef] = []
+    ref_by_id: dict[str, DocumentRef] = {}
     transactions: list[TransactionFacts] = []
     documented_employers: list[str] = []
 
     for doc in documents:
         extraction = doc.current_extraction
         data = extraction.extracted_data if extraction is not None else {}
-        doc_refs.append(
-            DocumentRef(
-                document_id=str(doc.id),
-                document_type=doc.document_type,
-                present=extraction is not None,
-                current_extraction_id=str(extraction.id) if extraction is not None else None,
-                fields=_typed_field_values(data),
-            )
+        owners = links_by_doc.get(str(doc.id), [])
+        ref = DocumentRef(
+            document_id=str(doc.id),
+            document_type=doc.document_type,
+            present=extraction is not None,
+            current_extraction_id=str(extraction.id) if extraction is not None else None,
+            fields=_typed_field_values(data),
+            borrower_id=owners[0] if len(owners) == 1 else None,  # single owner only
         )
+        doc_refs.append(ref)
+        ref_by_id[str(doc.id)] = ref
         if extraction is None:
             continue
 
@@ -254,7 +277,38 @@ def _build_documents_and_transactions(
                             transaction_type=txn.get("transaction_type"),
                         )
                     )
-    return doc_refs, transactions, documented_employers
+    return doc_refs, transactions, documented_employers, ref_by_id
+
+
+async def _load_document_links(
+    db: AsyncSession, document_ids: list[UUID]
+) -> tuple[dict[str, list[str]], dict[str, list[str]]]:
+    """Read the persisted borrower↔document links (LP-118.8) for the file's documents.
+
+    Returns ``(links_by_doc, docs_by_borrower)`` — ``document_id → [borrower_id]`` and
+    ``borrower_id → [document_id]`` (both keyed by str), ordered deterministically by the link's
+    ``created_at``/``id`` so a joint doc lists its borrowers stably.
+    """
+    links_by_doc: dict[str, list[str]] = {}
+    docs_by_borrower: dict[str, list[str]] = {}
+    if not document_ids:
+        return links_by_doc, docs_by_borrower
+    rows = (
+        (
+            await db.execute(
+                select(DocumentBorrowerLink)
+                .where(DocumentBorrowerLink.document_id.in_(document_ids))
+                .order_by(DocumentBorrowerLink.created_at, DocumentBorrowerLink.id)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    for link in rows:
+        did, bid = str(link.document_id), str(link.borrower_id)
+        links_by_doc.setdefault(did, []).append(bid)
+        docs_by_borrower.setdefault(bid, []).append(did)
+    return links_by_doc, docs_by_borrower
 
 
 def _parse_iso_date(value: Any) -> Any:
@@ -428,14 +482,15 @@ async def assemble_fact_namespace(
         .all()
     )
 
-    doc_refs, transactions, documented_employers = _build_documents_and_transactions(
-        list(documents)
+    links_by_doc, docs_by_borrower = await _load_document_links(db, [doc.id for doc in documents])
+    doc_refs, transactions, documented_employers, ref_by_id = _build_documents_and_transactions(
+        list(documents), links_by_doc
     )
 
     return FactNamespace(
         loan_file_id=str(loan_file.id),
         file=_build_file(loan_file),
-        borrowers=_build_borrowers(list(borrowers), canon),
+        borrowers=_build_borrowers(list(borrowers), canon, docs_by_borrower, ref_by_id),
         property=_build_property(prop),
         liabilities=_build_liabilities(list(liabilities), canon),
         assets=_build_assets(list(assets), canon),

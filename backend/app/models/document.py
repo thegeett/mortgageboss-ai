@@ -172,6 +172,12 @@ class Document(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     # processor reference. NOT structured data (that is the Tier 1 extraction). Null
     # for Tier 1 docs and when summarization fails (forgiving — low stakes).
     summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Why the borrower↔document matching (LP-118.8) left this document UNASSIGNED — "no_name"
+    # (no borrower identity, e.g. a contract/appraisal — correct + expected), "no_match" (names
+    # present but none matched a borrower confidently), or "ambiguous" (a name matched 2+ borrowers
+    # too closely to pick). Null when the document IS confidently assigned (its borrower links live
+    # in ``document_borrower_links``). Recorded for review + the eval set; never a forced guess.
+    borrower_match_note: Mapped[str | None] = mapped_column(String(SHORT_STRING), nullable=True)
     # The Tier 3 generic-analyzer output (LP-66) — a structured-but-flexible JSON
     # blob (type guess, parties, dates, amounts, findings, summary) for an
     # *unrecognized* document. Null for Tier 1/2 and on analyzer failure.
