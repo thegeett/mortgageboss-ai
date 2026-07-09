@@ -14,7 +14,7 @@ from uuid import UUID
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.extraction import Extraction, ExtractionStatus
+from app.models.extraction import ConfidenceSource, Extraction, ExtractionStatus
 
 
 async def create_extraction_version(
@@ -27,6 +27,8 @@ async def create_extraction_version(
     tokens_used: int | None = None,
     cost_estimate: float | None = None,
     error_detail: str | None = None,
+    confidence: float | None = None,
+    confidence_source: ConfidenceSource | None = None,
 ) -> Extraction:
     """Create the next extraction version for a document, made current.
 
@@ -74,6 +76,8 @@ async def create_extraction_version(
         tokens_used=tokens_used,
         cost_estimate=cost_estimate,
         error_detail=error_detail,
+        confidence=confidence,
+        confidence_source=confidence_source,
     )
     db.add(new_extraction)
     await db.flush()

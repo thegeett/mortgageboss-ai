@@ -46,6 +46,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.ai.classification import classify_document
 from app.ai.cost import estimate_cost
 from app.ai.extraction import EXTRACTORS, Extractor
+from app.ai.extraction.parsing import document_confidence_provenance
 from app.ai.generic_analyzer import analyze_document
 from app.ai.summarization import summarize_document
 from app.core.config import settings
@@ -318,6 +319,9 @@ async def _extract_branch(
             output_tokens=result.output_tokens,
         )
 
+    # LP-201: persist the document-level confidence honestly — a failed/defaulted
+    # 0.0 is stored as NULL / not_provided, never mislabelled model_self_reported.
+    reported_confidence, confidence_source = document_confidence_provenance(result.confidence)
     await create_extraction_version(
         db,
         document_id=document.id,
@@ -327,6 +331,8 @@ async def _extract_branch(
         tokens_used=tokens_used,
         cost_estimate=cost_estimate,
         error_detail=result.reasoning if result.status == ExtractionStatus.FAILED else None,
+        confidence=reported_confidence,
+        confidence_source=confidence_source,
     )
 
     if result.status == ExtractionStatus.FAILED or result.confidence < _CONFIDENCE_THRESHOLD:

@@ -7672,3 +7672,58 @@ their pay-stub + W-2 sources (precisely — no coincidental savings statements),
 their one document. Empty when no distinctive locatable value (graceful). One JSON column + a matching service + a card
 list; no migration on the primary FK; ``source_document_id`` kept. Composes with LP-114 (generalizes single → set) /
 LP-109 / LP-110 / LP-113. The viewer + page deep-link + transaction highlight remain V2 (no viewer, no bbox data).
+
+## ADR-238: Extraction confidence — honest, never fabricated; per-field number in JSON, doc-level in a CHECK-constrained column (LP-201)
+
+- **Date:** 2026-07-09
+- **Status:** Accepted
+
+**Context:** LP-201 threads a confidence signal from the document extractors to storage as a prerequisite for the Stage-1
+snapshot work (nothing consumes it yet). Two questions had to be answered honestly, because a *fabricated* confidence is
+worse than none — a downstream trust gate that reads a made-up ``1.0`` or a defaulted ``0.0`` mislabelled as a real model
+rating makes exactly the wrong call. (a) **Per-field**: the LP-39a extraction shape (``TypedField`` = ``{value, source}``,
+governed by ADR-144/145) carried no per-field confidence, and the only honest source of a per-field number is the model
+self-rating each field. (b) **Document-level**: the model already returns one overall ``confidence`` used for the review
+gate (LP-42), but it was dropped at storage; the ``coerce_confidence`` coercer collapses a *missing/garbage/failed* value
+to ``0.0``, so a persisted ``0.0`` cannot be distinguished from a genuine model ``0.0``.
+
+**Decision:**
+
+- **Per-field confidence: extend the extraction prompts (overrides the ticket's "no prompt redesign" default).** Each of
+  the 18 extraction prompt files now asks the model for one top-level ``field_confidence`` map (``field name → 0.0–1.0 |
+  null``) — a single uniform per-prompt edit, robust to the heterogeneous (some nested) prompt shapes, rather than
+  interleaving a key into every field object. ``parse_typed_core`` reads that map and stores a nullable ``confidence``
+  number **inside ``extracted_data``** (additive JSON key — no column; consumers still read ``value``). This deliberately
+  overrides the ticket's "no prompt redesign" guidance (explicitly approved), because the model self-rating is the only
+  genuine per-field signal available today.
+- **Honesty over completeness — never fabricate.** ``coerce_optional_confidence`` returns ``None`` (not ``0.0``) for a
+  missing / non-numeric / boolean / non-finite (``NaN``/``Infinity``) / out-of-range value — a field the model did not
+  honestly rate in ``[0, 1]`` is "no confidence", never a fake number. This is distinct from the document-level
+  ``coerce_confidence`` (the review gate), which keeps its legacy behavior — default to ``0.0`` and **clamp** an
+  out-of-range number — because classification, cross-source, and the gate all depend on a plain clamped float. Both share
+  one private ``_parse_confidence`` primitive; the only fix to the gate coercer is that ``NaN``/``Infinity`` now collapse
+  to ``0.0`` instead of a fabricated ``1.0``.
+- **The provenance tag is DERIVED, never stored beside the number.** A ``confidence_source`` is
+  ``model_self_reported`` iff a number is present, else ``not_provided`` — a pure function of the number. Storing both
+  invites a contradictory ``confidence=0.9 / source=not_provided`` record with no source of truth, so per-field storage
+  keeps only the number and readers derive the tag via ``ConfidenceSource.for_confidence``. The enum has exactly the two
+  states that exist; no speculative ``structural`` / ``field_presence`` values are reserved until the ticket that first
+  emits them.
+- **Document-level: rescue the signal into a CHECK-constrained column, honestly.** Nullable ``extractions.confidence``
+  (Float) + ``confidence_source`` (a ``str_enum(ConfidenceSource)`` VARCHAR+CHECK, ADR-037 — not a free string, so the
+  vocabulary can't drift and a bad literal can't persist). ``ConfidenceSource`` lives next to the model that owns the
+  column (``app/models/extraction.py``, beside ``ExtractionStatus``); the AI layer imports it (an already-permitted
+  ``ai → models`` direction). The pipeline stores the value through ``document_confidence_provenance``: only a **positive**
+  confidence is a genuine self-report — a failed extraction or a defaulted/garbled ``0.0`` is stored as ``NULL`` /
+  ``not_provided``, so a defaulted 0.0 is never mislabelled ``model_self_reported``.
+
+**Consequences:** additive & non-breaking — the extraction shape stays backward-compatible (consumers read ``value``); old
+rows and failed/low-signal extractions carry honest ``NULL`` / ``not_provided``. Because the prompts changed, extracted
+*values* are no longer guaranteed byte-identical going forward (LLM output isn't deterministic once the contract changes);
+the regression guarantee is shape-compat + no fabrication, not identical values. Trade-off: the document-level path cannot
+distinguish a genuine model ``0.0`` from a defaulted ``0.0`` (``coerce_confidence`` is lossy for the gate), so a
+non-positive doc-level confidence is conservatively stored as ``not_provided`` — the safe, never-fabricate direction; the
+per-field path *does* distinguish them (explicit ``0.0`` kept, absence → ``None``). Extends ADR-144/145 (the extraction
+shape) and reuses ADR-037 (str_enum) / ADR-057 (JSON storage). Deferred: consuming the confidence (Stage-1 snapshot),
+prompt calibration, and any structural/field-presence signal; the 18 identical prompt blocks → a shared injected partial is
+a follow-up refactor.
