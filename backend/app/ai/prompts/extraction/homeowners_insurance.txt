@@ -11,6 +11,7 @@ and the annual premium is part of the borrower's housing expense.
 CAPTURE EVERYTHING ON THE DOCUMENT — lose nothing. There are two buckets:
 
 1. TYPED CORE — put these into their named slots:
+     named_insured     (string)  the named insured / policyholder (the homeowner-borrower)
      carrier_name      (string)  the insurance carrier / company
      policy_number     (string)  the policy number
      property_address  (string)  the insured property address
@@ -41,6 +42,7 @@ never inflate. Example: "field_confidence": {"<field_a>": 0.95, "<field_b>": 0.7
 Respond with ONLY a single JSON object, no markdown fences and no prose, exactly:
 {
   "typed_core": {
+    "named_insured":    {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
     "carrier_name":     {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
     "policy_number":    {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
     "property_address": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},

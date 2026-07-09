@@ -54,6 +54,7 @@ class PropertyTaxBillExtraction(BaseModel):
     """
 
     # --- Typed core (value + source) ---------------------------------------- #
+    owner_name: TypedField[str] = Field(default_factory=TypedField)  # assessed owner (LP-202)
     property_address: TypedField[str] = Field(default_factory=TypedField)  # subject-vs-other: P3
     assessed_value: TypedField[Decimal] = Field(default_factory=TypedField)
     annual_tax_amount: TypedField[Decimal] = Field(default_factory=TypedField)  # housing/DTI
@@ -86,6 +87,7 @@ class PropertyTaxBillExtractionResult(BaseModel):
 
 
 _CORE_SPEC: CoreSpec = (
+    ("owner_name", coerce_str),
     ("property_address", coerce_str),
     ("assessed_value", coerce_decimal),
     ("annual_tax_amount", coerce_decimal),

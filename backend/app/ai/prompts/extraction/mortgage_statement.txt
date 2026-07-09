@@ -13,6 +13,7 @@ the address so it can be matched later (do NOT decide which property it is).
 CAPTURE EVERYTHING ON THE STATEMENT — lose nothing. There are two buckets:
 
 1. TYPED CORE — put these into their named slots:
+     borrower_name     (string)  the borrower(s) / account holder named on the statement
      lender_name       (string)  the lender / servicer name
      property_address  (string)  the mortgaged property's address (capture it!)
      monthly_payment   (number)  the total monthly payment (principal+interest+escrow)
@@ -42,6 +43,7 @@ never inflate. Example: "field_confidence": {"<field_a>": 0.95, "<field_b>": 0.7
 Respond with ONLY a single JSON object, no markdown fences and no prose, exactly:
 {
   "typed_core": {
+    "borrower_name":    {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
     "lender_name":      {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
     "property_address": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
     "monthly_payment":  {"value": <number|null>, "page": <int|null>, "snippet": <string|null>},

@@ -13,6 +13,7 @@ address so it can be matched later (do NOT decide which property it is).
 CAPTURE EVERYTHING ON THE STATEMENT — lose nothing. There are two buckets:
 
 1. TYPED CORE — put these into their named slots:
+     owner_name        (string)  the homeowner(s) / member named on the statement
      association_name  (string)  the HOA / association name
      property_address  (string)  the property the dues are for (capture it!)
      dues_amount       (number)  the regular dues / assessment amount
@@ -41,6 +42,7 @@ never inflate. Example: "field_confidence": {"<field_a>": 0.95, "<field_b>": 0.7
 Respond with ONLY a single JSON object, no markdown fences and no prose, exactly:
 {
   "typed_core": {
+    "owner_name":       {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
     "association_name": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
     "property_address": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
     "dues_amount":      {"value": <number|null>, "page": <int|null>, "snippet": <string|null>},

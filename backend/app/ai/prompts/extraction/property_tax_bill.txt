@@ -13,6 +13,7 @@ later (do NOT decide which property it is).
 CAPTURE EVERYTHING ON THE BILL — lose nothing. There are two buckets:
 
 1. TYPED CORE — put these into their named slots:
+     owner_name         (string)  the assessed owner(s) named on the bill
      property_address   (string)  the taxed property's address (capture it!)
      assessed_value     (number)  the assessed / taxable value
      annual_tax_amount  (number)  the total annual property tax
@@ -43,6 +44,7 @@ never inflate. Example: "field_confidence": {"<field_a>": 0.95, "<field_b>": 0.7
 Respond with ONLY a single JSON object, no markdown fences and no prose, exactly:
 {
   "typed_core": {
+    "owner_name":        {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
     "property_address":  {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
     "assessed_value":    {"value": <number|null>, "page": <int|null>, "snippet": <string|null>},
     "annual_tax_amount": {"value": <number|null>, "page": <int|null>, "snippet": <string|null>},

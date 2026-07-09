@@ -52,6 +52,9 @@ class HOAStatementExtraction(BaseModel):
     """
 
     # --- Typed core (value + source) ---------------------------------------- #
+    owner_name: TypedField[str] = Field(
+        default_factory=TypedField
+    )  # the homeowner-borrower (LP-202)
     association_name: TypedField[str] = Field(default_factory=TypedField)
     property_address: TypedField[str] = Field(default_factory=TypedField)  # subject-vs-other: P3
     dues_amount: TypedField[Decimal] = Field(default_factory=TypedField)  # obligation
@@ -85,6 +88,7 @@ class HOAStatementExtractionResult(BaseModel):
 
 
 _CORE_SPEC: CoreSpec = (
+    ("owner_name", coerce_str),
     ("association_name", coerce_str),
     ("property_address", coerce_str),
     ("dues_amount", coerce_decimal),

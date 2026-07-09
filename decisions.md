@@ -7727,3 +7727,51 @@ per-field path *does* distinguish them (explicit ``0.0`` kept, absence → ``Non
 shape) and reuses ADR-037 (str_enum) / ADR-057 (JSON storage). Deferred: consuming the confidence (Stage-1 snapshot),
 prompt calibration, and any structural/field-presence signal; the 18 identical prompt blocks → a shared injected partial is
 a follow-up refactor.
+
+## ADR-239: Document→borrower link — deterministic (not AI) name matching into a separate one-to-many table (LP-202)
+
+- **Date:** 2026-07-09
+- **Status:** Accepted
+
+**Context:** The Stage-1 snapshot (and later ``belongsTo``, LP-206) needs to know which borrower(s) a document is about.
+On this branch a ``Document`` has no borrower link at all (the equivalent ``document_borrower_links`` built on
+``phase3_5_1`` is deliberately not in use here). Documents already assert a person's name — a pay stub's ``employee_name``,
+a bank statement's ``account_holder_name``, etc. Resolving that asserted name to a file's borrowers is **enumerable,
+reproducible logic**, exactly the kind of thing that must NOT be AI: a flickering, non-deterministic link is worse than
+none (the same lesson as the cross-source "graduation", ADR — known cross-checks belong in deterministic code).
+
+**Decision:**
+
+- **Deterministic, not AI.** A pure ``normalize + score`` matcher (``app/services/borrower_name_matching.py``): accents
+  stripped, ``"Last, First"`` reordered, suffixes/connectors dropped, tokenized; the **last name is the anchor** (no
+  surname match → no link, a shared first name is never enough), then the first name matches by exact / nickname (a small,
+  high-precision common-nickname map) / initial / fuzzy (stdlib ``difflib``). Same inputs → same links, every run.
+- **A configurable no-match threshold.** ``NAME_MATCH_THRESHOLD = 0.80``, a named, documented constant. Below it **zero
+  links** are emitted — a low-similarity near-miss (a one-letter surname typo, a same-surname different person) is a
+  correct no-match, never forced to the "closest" borrower. Precision over recall by design.
+- **One-to-many via a link table, not a ``Document.borrower_id`` column.** ``document_borrower_links`` with
+  ``UNIQUE (document_id, borrower_id)`` + a ``[0,1]`` CHECK on ``confidence`` (cf. the findings confidence guard). A joint
+  document (joint bank statement, joint tax return) links **both** borrowers — the asserted string is scored against each
+  borrower independently.
+- **Raw name on the document, resolved link in a separate table.** The asserted name stays inside the document's
+  extraction (``extracted_data``); the *correlation* — borrower id + ``confidence`` + ``method`` (``exact`` /
+  ``normalized`` / ``fuzzy``) — lives ONLY in ``document_borrower_links``. This keeps the document facts raw and
+  uncorrelated (the snapshot's document section stays honest); the resolved link is a separate, recomputable artifact.
+- **Honest no-match = zero rows**, never an error and never a null-borrower row. Re-matching replaces a document's links
+  wholesale (idempotent).
+- **Name extraction added only where a document clearly asserts a borrower name but didn't capture it:**
+  ``homeowners_insurance.named_insured``, ``mortgage_statement.borrower_name``, ``property_tax_bill.owner_name``,
+  ``hoa_statement.owner_name`` — ordinary extracted fields carrying LP-201's nullable per-field confidence. The 10 types
+  that already extract a usable name are untouched. Counterparties (a gift letter's ``donor_name``, a purchase
+  agreement's ``seller_name``) are **excluded** from the borrower-name registry so they never mislink.
+
+**Consequences:** additive & non-breaking; nothing consumes the link yet (LP-206). Deterministic + thresholded means
+precision over recall — the honest cost is that a genuine borrower whose name is badly mangled on a document yields no
+link rather than a guessed one. Known limits (documented in the ticket): the nickname map is small and high-precision (not
+exhaustive); a compound/hyphenated surname anchors on its last token (a simplification); ``property_tax_bill`` /
+``hoa_statement`` name the current *owner*, who on a purchase is the seller — the threshold simply won't link a seller to
+a borrower, so extracting the owner name stays honest. No pipeline trigger is wired — links are recomputed on demand via
+``assign_document_borrower_links``; auto-invocation on document processing is deferred to the consuming ticket. Reuses
+ADR-052 (transitive company scope via document → loan file) and ADR-057; ``method`` is a free short string for now (the
+exact/normalized/fuzzy set is small and could be tightened to a ``str_enum`` CHECK later, ADR-037). Implemented fresh on
+this branch, mirroring the concept on ``phase3_5_1`` but not depending on it.
