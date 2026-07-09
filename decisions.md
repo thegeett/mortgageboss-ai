@@ -7816,3 +7816,54 @@ Deferred (recorded in the ticket): compound/hyphenated surnames still anchor onl
 until precision is proven); three small helper duplications (typed-cell accessor, current-extraction query dropping
 ``only_active``, active-borrowers query) route through existing helpers as a follow-up; per-borrower normalization is
 recomputed in the inner loop (hoist as a follow-up).
+
+## ADR-240: Snapshot field primitives — absent≠empty marker + an app-secret-keyed PII match-hash (LP-203)
+
+- **Date:** 2026-07-09
+- **Status:** Accepted
+
+**Context:** The Stage-1 snapshot needs a shared field shape for every fact plus a way to carry PII (SSNs, account
+numbers) without ever storing the raw value, while still letting deterministic rules match same-value fields (a bank
+statement's account == a MISMO asset's account). Two decisions are load-bearing and must be made here: (a) how to
+distinguish a fact *no source supplied* (absent) from a fact a source supplied as null/empty (present-but-empty), and
+(b) the match-hash construction — because SSNs (~10^9) and account numbers are **low-entropy**, a naive hash of a
+low-entropy value keyed only by the non-secret ``loan_file_id`` is trivially brute-forced by anyone holding the hash.
+
+**Decision:**
+
+- **Two frozen, closed Pydantic v2 models** (``model_config = {"frozen": True, "extra": "forbid"}``), in
+  ``app/verification/snapshot/``. ``Field`` = ``{value, confidence, source}``; ``PiiField`` = ``{display, match_hash,
+  confidence, source}`` with **no raw-value field** — ``extra="forbid"`` structurally prevents attaching one, and the
+  ``PiiField.from_raw(...)`` factory masks + hashes internally so a caller never hand-stores the raw value.
+- **Reuse LP-201's confidence model exactly (ADR-238).** ``confidence: float | None`` (never a fabricated default;
+  ``None`` is the honest state) and the provenance tag is **derived, not stored** — a ``confidence_source`` property over
+  ``ConfidenceSource.for_confidence`` — so the number and its tag can never disagree.
+- **Absent ≠ empty via an explicit ``absent`` marker**, not a null value. ``Field.missing()`` (absent: no source, no
+  value, no confidence) is structurally distinct from ``Field.present(None, source=…)`` (a source supplied an explicit
+  null/empty). A model validator enforces the two states never blur (an absent field carries nothing; a present field
+  must carry a source). Chosen over a sentinel object (awkward to JSON-serialize) and over "absence = key omitted"
+  (can't record an *explicit* "we looked, nothing there"); the boolean serializes cleanly and is unambiguous.
+- **``source`` (``FieldSource`` = parsed | extracted)** is the fact's DATA ORIGIN — distinct from ``confidence_source``
+  (the LP-201 confidence provenance). Two different "source" concepts, deliberately kept separate.
+- **PII display: last-4 masking only**, honest on every edge — ``mask(value, kind)`` returns ``***-**-1234`` (SSN) /
+  ``****3312`` (account); a null / empty / malformed / too-short value returns a fully-masked placeholder
+  (``***-**-****`` / ``****``), never the raw value, never a crash.
+- **Match-hash construction (the security crux):**
+  ``match_hash = HMAC-SHA256(key=K, msg=f"{loan_file_id}:{normalized_value}")`` where
+  ``K = SHA256(b"snapshot-pii-match-hash-v1:" + settings.encryption_key)`` and ``normalized_value`` is the value's
+  lowercased alphanumerics (so ``123-45-6789`` == ``123456789``). Properties: **per-loan-file salt** — ``loan_file_id``
+  in the message means the same SSN in two files hashes differently (no cross-file correlation), while it stays
+  consistent within a file so matching works; **application secret** — keying the HMAC with a secret derived from the
+  existing Fernet ``encryption_key`` (ADR-051) makes the hash reproducible only by the system, so a low-entropy input
+  can't be brute-forced by a party holding the hash + the (non-secret) ``loan_file_id``; **key separation** — ``K`` is a
+  purpose-derived subkey (``SHA256(purpose ‖ encryption_key)``), not the raw Fernet key, so the HMAC key is
+  cryptographically distinct from the encryption key and reuses no new secret store.
+
+**Consequences:** pure primitives; nothing consumes them yet (the snapshot model is LP-204, assemblers later). The
+match-hash is a **keyed pseudonym**, not encryption — it is one-way and un-reversible even by the system (there is no
+"unhash"); its sole purpose is equality-matching within a loan file. Rotating ``encryption_key`` (or bumping the
+``v1`` purpose label) changes all match-hashes — acceptable because nothing persists them yet and a snapshot is rebuilt
+per run; a future ticket that persists snapshots must treat a key rotation as a rebuild trigger. The key is derived per
+call (not cached) so rotation and tests both see the current secret. Reuses ADR-051 (Fernet ``encryption_key`` / secret
+management) and ADR-238 (the LP-201 nullable-confidence model + derived source); no new secret store is introduced.
+Deferred: which fields *are* PII (per-assembler, later tickets), the snapshot model + persistence, and any UI.
