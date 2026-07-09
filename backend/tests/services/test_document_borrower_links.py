@@ -5,6 +5,7 @@ links BOTH; a document that asserts no borrower name produces zero rows; links
 read back; and re-matching replaces prior links.
 """
 
+from datetime import UTC, datetime
 from uuid import UUID
 
 from app.models import (
@@ -137,3 +138,18 @@ async def test_links_persist_and_read_back_and_rematch_replaces(db_session: Asyn
     # Re-matching is idempotent — still exactly one link, not duplicated.
     await assign_document_borrower_links(db_session, doc)
     assert len(await get_document_borrower_links(db_session, doc.id)) == 1
+
+
+async def test_soft_deleted_borrower_link_is_not_returned(db_session: AsyncSession) -> None:
+    """A link to a soft-deleted borrower must not be returned (CASCADE never fires on soft delete)."""
+    lf = await _loan_file_with_borrowers(db_session, "softdel", [("Akash", "Patel")])
+    borrower = (await db_session.scalars(_borrowers_stmt(lf))).one()
+    doc = await _document(db_session, lf, "pay_stub", {"employee_name": _name_field("Akash Patel")})
+
+    await assign_document_borrower_links(db_session, doc)
+    assert len(await get_document_borrower_links(db_session, doc.id)) == 1
+
+    # Remove the borrower from the file (soft delete) → their link must vanish from reads.
+    borrower.deleted_at = datetime.now(UTC)
+    await db_session.flush()
+    assert await get_document_borrower_links(db_session, doc.id) == []

@@ -7745,7 +7745,9 @@ none (the same lesson as the cross-source "graduation", ADR — known cross-chec
 - **Deterministic, not AI.** A pure ``normalize + score`` matcher (``app/services/borrower_name_matching.py``): accents
   stripped, ``"Last, First"`` reordered, suffixes/connectors dropped, tokenized; the **last name is the anchor** (no
   surname match → no link, a shared first name is never enough), then the first name matches by exact / nickname (a small,
-  high-precision common-nickname map) / initial / fuzzy (stdlib ``difflib``). Same inputs → same links, every run.
+  high-precision common-nickname map) / fuzzy (stdlib ``difflib``). Same inputs → same links, every run. (See the
+  post-review amendment below: bare initials no longer match, short names require exact match, and a failed component
+  scores zero.)
 - **A configurable no-match threshold.** ``NAME_MATCH_THRESHOLD = 0.80``, a named, documented constant. Below it **zero
   links** are emitted — a low-similarity near-miss (a one-letter surname typo, a same-surname different person) is a
   correct no-match, never forced to the "closest" borrower. Precision over recall by design.
@@ -7772,6 +7774,45 @@ exhaustive); a compound/hyphenated surname anchors on its last token (a simplifi
 ``hoa_statement`` name the current *owner*, who on a purchase is the seller — the threshold simply won't link a seller to
 a borrower, so extracting the owner name stays honest. No pipeline trigger is wired — links are recomputed on demand via
 ``assign_document_borrower_links``; auto-invocation on document processing is deferred to the consuming ticket. Reuses
-ADR-052 (transitive company scope via document → loan file) and ADR-057; ``method`` is a free short string for now (the
-exact/normalized/fuzzy set is small and could be tightened to a ``str_enum`` CHECK later, ADR-037). Implemented fresh on
-this branch, mirroring the concept on ``phase3_5_1`` but not depending on it.
+ADR-052 (transitive company scope via document → loan file) and ADR-057. Implemented fresh on this branch, mirroring the
+concept on ``phase3_5_1`` but not depending on it.
+
+**Amendment (2026-07-09, post code-review — precision hardening before LP-206 wires this up).** A review found the matcher
+produced FALSE links between same-surname family members (the common mortgage case); a wrong link is a fabricated fact
+that would propagate into ``belongsTo``. Precision fixes applied:
+
+- **A non-matching name component now contributes ZERO, not a partial score.** Previously a component that failed its own
+  bar still fed its raw ``difflib`` ratio into ``0.5·last + 0.5·first``, so a strong surname dragged a failed first name
+  over the threshold. ``_best_token_match`` now returns ``0.0`` / ``"none"`` for a non-match, so a failed component can
+  neither clear the surname anchor nor pad the combined score. Concretely: ``John Smith`` no longer links to a document
+  asserting ``"Johnson Smith"``.
+- **A bare initial confers no match.** The single-letter "initial" branch (score 0.8) was removed: a stray middle initial
+  (``"Robert A. Smith"``) no longer links co-borrower ``Andrew Smith``, and a first name given only as an initial
+  (``"A. Patel"``) no longer links ``Akash Patel``. An initial is not evidence that two full names are the same person.
+- **Short surnames must match exactly, not fuzzily** (``_FUZZY_MIN_LEN``). ``difflib`` inflates the ratio of short
+  near-misses (Han/Hahn, Lee/Li) above the anchor on a single edit, so fuzzy only counts when both tokens are ≥ 5 chars.
+- **Nicknames map to a SET of canonicals.** A nickname shared by two canonicals (``steve`` → {steven, stephen}; ``kate`` →
+  {katherine, catherine}) previously dropped the second (a ``setdefault`` collision), so ``Stephen``/``Catherine`` never
+  matched ``Steve``/``Kate``. Two names now nickname-match iff their canonical sets intersect.
+- **The honest cost is recall, in the safe direction.** These all trade recall for precision — a genuinely ambiguous or
+  badly-mangled document now yields no link (``belongsTo: null``, a safe miss) rather than a fabricated one.
+- **``method`` is now a CHECK-constrained ``str_enum`` (``MatchMethod``: exact/normalized/fuzzy), mirroring LP-201's
+  ``confidence_source`` and ADR-037** — the value LP-206 branches on can't drift or typo silently. ``MatchResult.method``
+  is typed ``Literal["exact","normalized","fuzzy"]`` so mypy enforces the three literals at every assignment.
+- **Soft-deleted parents no longer leak links.** ``DocumentBorrowerLink`` has no soft-delete of its own and its
+  ``ondelete=CASCADE`` FKs never fire on a soft delete, so a borrower removed from a file after matching would strand a
+  link. ``get_document_borrower_links`` now joins the (soft-delete-aware) document + borrower via ``only_active``, so a
+  link to a soft-deleted parent is never returned. (Read-filter chosen over adding ``SoftDeleteMixin`` because the link
+  table is hard-delete-and-replace by design.)
+- **``BORROWER_NAME_FIELDS`` is a deliberate parallel list — and a known fragility root cause.** It had already drifted:
+  the 1099 mapping was keyed ``"form_1099"`` while ``Document.document_type`` holds the ``EXTRACTORS``/catalog slug
+  ``"1099"``, so **every 1099 silently produced zero links**. Fixed the key, and added a test asserting
+  ``set(BORROWER_NAME_FIELDS) ⊆ set(EXTRACTORS)`` so the drift can't recur. The map stays explicit (rather than derived
+  from the registry) because it also encodes the counterparty-exclusion knowledge the registry doesn't have, and keeping
+  the matcher import-pure (no AI dependency) is worth more than eliminating the parallel list; the drift-guard test is the
+  chosen safety net.
+
+Deferred (recorded in the ticket): compound/hyphenated surnames still anchor only on the last token (a safe miss, left
+until precision is proven); three small helper duplications (typed-cell accessor, current-extraction query dropping
+``only_active``, active-borrowers query) route through existing helpers as a follow-up; per-borrower normalization is
+recomputed in the inner loop (hoist as a follow-up).

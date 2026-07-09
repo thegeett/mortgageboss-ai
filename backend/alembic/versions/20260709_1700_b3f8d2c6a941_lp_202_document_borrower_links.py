@@ -30,7 +30,21 @@ def upgrade() -> None:
         sa.Column("document_id", sa.Uuid(), nullable=False),
         sa.Column("borrower_id", sa.Uuid(), nullable=False),
         sa.Column("confidence", sa.Float(), nullable=False),
-        sa.Column("method", sa.String(length=64), nullable=False),
+        sa.Column(
+            # CHECK-constrained VARCHAR (native_enum=False, ADR-037) matching the
+            # MatchMethod StrEnum, so a drifted/typo'd method can't persist.
+            "method",
+            sa.Enum(
+                "exact",
+                "normalized",
+                "fuzzy",
+                name="matchmethod",
+                native_enum=False,
+                create_constraint=True,
+                length=64,
+            ),
+            nullable=False,
+        ),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
         sa.ForeignKeyConstraint(["document_id"], ["documents.id"], ondelete="CASCADE"),

@@ -18,18 +18,34 @@ via the document → loan file (ADR-052). No soft-delete: links are derived and
 replaced wholesale when a document is re-matched.
 """
 
+from enum import StrEnum
 from typing import TYPE_CHECKING
 from uuid import UUID
 
-from sqlalchemy import CheckConstraint, Float, ForeignKey, String, UniqueConstraint
+from sqlalchemy import CheckConstraint, Float, ForeignKey, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, TimestampMixin, UUIDMixin
+from app.models.enums import str_enum
 from app.models.types import SHORT_STRING
 
 if TYPE_CHECKING:
     from app.models.borrower import Borrower
     from app.models.document import Document
+
+
+class MatchMethod(StrEnum):
+    """How the deterministic matcher resolved a document→borrower link (LP-202).
+
+    Lives next to the model that owns the ``method`` column so one CHECK-constrained
+    vocabulary governs both storage and the matcher's :class:`MatchResult.method`.
+    LP-206 branches on this, so a typo'd/drifted literal must fail at write time,
+    not surface downstream.
+    """
+
+    EXACT = "exact"  # every borrower token present verbatim on the document
+    NORMALIZED = "normalized"  # matched after normalization / nickname resolution
+    FUZZY = "fuzzy"  # matched via edit-distance similarity (a typo)
 
 
 class DocumentBorrowerLink(Base, UUIDMixin, TimestampMixin):
@@ -55,8 +71,11 @@ class DocumentBorrowerLink(Base, UUIDMixin, TimestampMixin):
     )
     # The matcher's similarity score in [0, 1] for this pair.
     confidence: Mapped[float] = mapped_column(Float, nullable=False)
-    # How the match was made: "exact" | "normalized" | "fuzzy".
-    method: Mapped[str] = mapped_column(String(SHORT_STRING), nullable=False)
+    # How the match was made — CHECK-constrained to the MatchMethod vocabulary so a
+    # drifted/typo'd value can't persist (LP-206 branches on it).
+    method: Mapped[MatchMethod] = mapped_column(
+        str_enum(MatchMethod, length=SHORT_STRING), nullable=False
+    )
 
     document: Mapped["Document"] = relationship()
     borrower: Mapped["Borrower"] = relationship()

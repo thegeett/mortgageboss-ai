@@ -30,7 +30,7 @@ import re
 import unicodedata
 from dataclasses import dataclass
 from difflib import SequenceMatcher
-from typing import Any
+from typing import Any, Literal
 from uuid import UUID
 
 # The similarity at/above which a (document, borrower) pair becomes a link. Tuned
@@ -45,6 +45,12 @@ _LAST_NAME_MIN = 0.85
 
 # Minimum token similarity for a first/last token to count as a fuzzy match.
 _FUZZY_MIN = 0.85
+
+# Fuzzy needs enough characters for an edit to be meaningful: a single edit on a
+# 3-4 char name (Han/Hahn, Lee/Li, Ng/Ngo) sits ABOVE _FUZZY_MIN, so short tokens
+# must match exactly or by nickname — never fuzzily — or distinct short surnames
+# would falsely clear the anchor and link different families.
+_FUZZY_MIN_LEN = 5
 
 # Trailing generational suffixes dropped during normalization (not name content).
 _SUFFIXES = frozenset({"jr", "sr", "ii", "iii", "iv", "v"})
@@ -99,11 +105,16 @@ _NICKNAMES: dict[str, set[str]] = {
     "priyanka": {"priya"},
 }
 
-_NICK_TO_CANON: dict[str, str] = {}
+# A nickname → the SET of canonical names it can stand for. A nickname shared by
+# two canonicals (``steve`` → steven AND stephen; ``kate`` → katherine AND
+# catherine) maps to BOTH, so neither canonical silently loses the nickname (a
+# plain dict with setdefault dropped the second one — Stephen/Catherine never
+# matched ``Steve``/``Kate``). Two names nickname-match iff their canonical sets
+# intersect.
+_NICK_TO_CANONS: dict[str, set[str]] = {}
 for _canon_name, _nicks in _NICKNAMES.items():
-    _NICK_TO_CANON[_canon_name] = _canon_name
     for _n in _nicks:
-        _NICK_TO_CANON.setdefault(_n, _canon_name)
+        _NICK_TO_CANONS.setdefault(_n, set()).add(_canon_name)
 
 
 # The borrower-name field(s) each document type asserts, most authoritative first.
@@ -117,9 +128,9 @@ BORROWER_NAME_FIELDS: dict[str, tuple[str, ...]] = {
     "investment_account": ("account_holder",),
     "retirement_account": ("account_holder",),
     "drivers_license": ("full_name",),
-    "form_1099": ("recipient_name",),
     "gift_letter": ("recipient_name",),  # NOT donor_name (the counterparty)
     "purchase_agreement": ("buyer_name",),  # NOT seller_name (the counterparty)
+    "1099": ("recipient_name",),  # the EXTRACTORS/catalog slug is "1099", not "form_1099"
     "tax_return": ("taxpayer_names",),
     "homeowners_insurance": ("named_insured",),  # added in LP-202 Phase 1
     "mortgage_statement": ("borrower_name",),  # added in LP-202 Phase 1
@@ -144,11 +155,12 @@ class MatchResult:
 
     borrower_id: UUID
     confidence: float
-    method: str  # "exact" | "normalized" | "fuzzy"
+    method: Literal["exact", "normalized", "fuzzy"]
 
 
-def _canon(token: str) -> str:
-    return _NICK_TO_CANON.get(token, token)
+def _canons(token: str) -> set[str]:
+    """Every canonical name a token could stand for (itself + any it nicknames)."""
+    return _NICK_TO_CANONS.get(token, set()) | {token}
 
 
 def _strip_accents(text: str) -> str:
@@ -172,19 +184,34 @@ def normalize_name(raw: str | None) -> list[str]:
 
 
 def _best_token_match(borrower_tok: str, doc_tokens: list[str]) -> tuple[float, str]:
-    """Best (score, kind) of a borrower token against any document token."""
+    """Best ``(score, kind)`` of a borrower token against any document token.
+
+    A token that does not clear a *real* match test scores ``0.0`` / ``"none"`` —
+    a non-matching component must contribute **nothing** to the combined score, so
+    a strong surname can never drag a failed first name over the threshold (and a
+    weak surname can never clear the anchor on a raw ratio). Two rules make this
+    precision-safe against the same-surname family case:
+
+    * **A bare initial confers no match.** A single-letter token (a stray middle
+      initial, or a first name given only as an initial) is not evidence that two
+      full names are the same person, so it never scores as a match.
+    * **Short names must match exactly, not fuzzily.** ``difflib`` inflates the
+      ratio of short near-misses (Han/Hahn), so fuzzy only counts when both tokens
+      are at least ``_FUZZY_MIN_LEN`` characters (:data:`_FUZZY_MIN_LEN`).
+    """
     if borrower_tok in doc_tokens:
         return 1.0, "exact"
-    bc = _canon(borrower_tok)
-    if any(_canon(t) == bc for t in doc_tokens):
+    bc = _canons(borrower_tok)
+    if any(bc & _canons(t) for t in doc_tokens):
         return 0.95, "nickname"
+    best_ratio, best_tok = 0.0, ""
     for t in doc_tokens:
-        if len(borrower_tok) == 1 and t.startswith(borrower_tok):
-            return 0.8, "initial"
-        if len(t) == 1 and borrower_tok.startswith(t):
-            return 0.8, "initial"
-    best = max((SequenceMatcher(None, borrower_tok, t).ratio() for t in doc_tokens), default=0.0)
-    return (best, "fuzzy") if best >= _FUZZY_MIN else (best, "none")
+        ratio = SequenceMatcher(None, borrower_tok, t).ratio()
+        if ratio > best_ratio:
+            best_ratio, best_tok = ratio, t
+    if best_ratio >= _FUZZY_MIN and min(len(borrower_tok), len(best_tok)) >= _FUZZY_MIN_LEN:
+        return best_ratio, "fuzzy"
+    return 0.0, "none"  # below the bar / too short / bare initial → not a match
 
 
 def _score_one(borrower: BorrowerName, doc_tokens: list[str]) -> MatchResult | None:
@@ -214,13 +241,10 @@ def _score_one(borrower: BorrowerName, doc_tokens: list[str]) -> MatchResult | N
     full_tokens = normalize_name(
         " ".join(p for p in (borrower.first_name, borrower.middle_name, borrower.last_name) if p)
     )
+    method: Literal["exact", "normalized", "fuzzy"]
     if full_tokens and set(full_tokens) == set(doc_tokens):
         method = "exact"
-    elif last_kind in {"exact", "nickname", "initial"} and first_kind in {
-        "exact",
-        "nickname",
-        "initial",
-    }:
+    elif last_kind in {"exact", "nickname"} and first_kind in {"exact", "nickname"}:
         method = "normalized"
     else:
         method = "fuzzy"

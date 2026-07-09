@@ -21,7 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.borrower import Borrower
 from app.models.document import Document
-from app.models.document_borrower_link import DocumentBorrowerLink
+from app.models.document_borrower_link import DocumentBorrowerLink, MatchMethod
 from app.models.extraction import Extraction
 from app.models.helpers import only_active
 from app.services.borrower_name_matching import (
@@ -92,7 +92,7 @@ async def assign_document_borrower_links(
             document_id=document.id,
             borrower_id=m.borrower_id,
             confidence=m.confidence,
-            method=m.method,
+            method=MatchMethod(m.method),
         )
         for m in matches
     ]
@@ -104,10 +104,22 @@ async def assign_document_borrower_links(
 async def get_document_borrower_links(
     db: AsyncSession, document_id: UUID
 ) -> list[DocumentBorrowerLink]:
-    """Fetch a document's borrower links (empty when there are none)."""
-    result = await db.execute(
+    """Fetch a document's borrower links (empty when there are none).
+
+    Excludes links whose document OR borrower has been soft-deleted: the link table
+    has no soft-delete of its own and its ``ondelete=CASCADE`` FKs never fire on a
+    soft delete (deleted_at is set, the row survives), so a borrower removed from
+    the file after matching would otherwise leak back a link to a borrower the file
+    no longer has. Joining the (soft-delete-aware) parents keeps reads honest.
+    """
+    stmt = (
         select(DocumentBorrowerLink)
+        .join(Document, Document.id == DocumentBorrowerLink.document_id)
+        .join(Borrower, Borrower.id == DocumentBorrowerLink.borrower_id)
         .where(DocumentBorrowerLink.document_id == document_id)
         .order_by(DocumentBorrowerLink.confidence.desc())
     )
+    stmt = only_active(stmt, Document)
+    stmt = only_active(stmt, Borrower)
+    result = await db.execute(stmt)
     return list(result.scalars().all())
