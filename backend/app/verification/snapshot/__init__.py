@@ -6,6 +6,7 @@ yet — assemblers (LP-205/206/207), the builder (LP-208), and persistence (LP-2
 come later.
 """
 
+from app.verification.snapshot.builder import LoanFileNotFound, build_snapshot
 from app.verification.snapshot.calculations_section import build_calculations_section
 from app.verification.snapshot.documents_section import (
     build_document_fields,
@@ -38,6 +39,7 @@ __all__ = [
     "Field",
     "FieldSource",
     "JsonScalar",
+    "LoanFileNotFound",
     "MismoSection",
     "PiiField",
     "PiiKind",
@@ -47,6 +49,7 @@ __all__ = [
     "build_document_fields",
     "build_documents_section",
     "build_mismo_section",
+    "build_snapshot",
     "load_mismo_section",
     "mask",
     "match_hash",

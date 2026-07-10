@@ -274,3 +274,22 @@ def test_calculation_breakdown_source_tags_round_trip() -> None:
     assert tags == {"stated", "extracted", "computed"}
     assert dti.value["back_end_dti"] == "43.10"
     assert dti.value["front_end_dti"] is None
+
+
+# --------------------------------------------------------------------------- #
+# Section failed(reason) invariant (LP-208 amendment)
+# --------------------------------------------------------------------------- #
+
+
+def test_section_failed_carries_reason_present_never_does() -> None:
+    failed = MismoSection.failed("mismo assembler raised RuntimeError")
+    assert failed.absent is True and not failed.is_present
+    assert failed.reason == "mismo assembler raised RuntimeError"
+    # missing() is absent without a reason; present() never carries one.
+    assert MismoSection.missing().reason is None
+    assert MismoSection.present({}).reason is None
+    with pytest.raises(ValidationError):
+        MismoSection(absent=False, reason="not allowed on a present section")
+    # round-trips
+    back = MismoSection.model_validate_json(failed.model_dump_json())
+    assert back == failed

@@ -8172,3 +8172,47 @@ schemas (a parity test would guard it).
 
 DB-backed suite is the schema-correct coverage. Deferred: cash-to-close; the stated-vs-extracted reconciliation (a
 downstream finding, by design); exposing reserves' raw months number if a future need arises.
+
+## ADR-245: Snapshot builder — resilient + honest partial-failure policy; run_id received, not minted (LP-208)
+
+- **Date:** 2026-07-10
+- **Status:** Accepted
+
+**Context:** LP-208 stitches the three Stage-1 assemblers (LP-205 MISMO, LP-206 documents, LP-207 calculations) into one
+frozen LP-204 ``Snapshot``, stamping metadata. The real decision is how to behave when a section can't be fully built —
+the snapshot must be resilient (one section failing can't lose the whole thing) yet honest (a failure is never swallowed
+or faked), consistent with the absent≠empty invariant that governs the whole snapshot.
+
+**Decision:**
+
+- **Three-state, honest section outcome:**
+  - **present + populated** — the assembler built it;
+  - **present + empty** — a genuinely empty section (e.g. a file with no documents) is a *valid, present* empty section
+    (empty ``entries`` tuple), NOT an error and NOT absent;
+  - **absent + reason** — an assembler that **raises** yields ``Section.failed(reason)``: the section is absent and
+    carries a PII-safe explanation, never a fabricated empty section and never a whole-snapshot failure.
+- **Minimal LP-204 amendment (recorded here):** each section model (``MismoSection`` / ``DocumentsSection`` /
+  ``CalculationsSection``) gains ``reason: str | None`` + a ``failed(reason)`` factory; a validator enforces that a
+  *present* section never carries a reason (reason is failure metadata, only valid alongside ``absent``). ``missing()``
+  (absent, no reason) and ``failed(reason)`` (absent, with reason) are distinct — "not built" vs "couldn't build".
+- **The reason is PII-safe by construction** — the exception's *class name only* (``"documents assembler raised
+  ProgrammingError"``), never ``str(exc)`` (which could carry borrower data). The failure is also ``logger.warning``-ed
+  with metadata only.
+- **Resilience is broad but bounded:** each of the three sections is built in its own ``try/except Exception`` (so
+  ``KeyboardInterrupt`` / ``SystemExit`` still propagate). A missing *loan file* (precondition) is a hard
+  ``LoanFileNotFound`` — that is not a section failure, it's "there is nothing to snapshot".
+- **``run_id`` is RECEIVED, not minted.** ``build_snapshot(db, *, loan_file_id, run_id)`` stamps the ``run_id`` it is
+  given; the builder never creates run identity (a verification run supplies it later — the ``Verification`` model exists
+  but is not touched here). ``created_at`` is a tz-aware UTC ``utcnow()``; ``snapshot_version = SNAPSHOT_VERSION`` (the
+  real constant name; the ticket's ``SNAPSHOT_SCHEMA_VERSION`` does not exist).
+- **Stateless, no side effects.** Rebuilt from scratch each call — no caching, no mutation of source data, no DB writes
+  (persistence is LP-209). Verified deterministic (two builds of the same state produce equal sections, modulo
+  ``created_at``).
+
+**Consequences:** the builder is a thin, resilient orchestrator; the assemblers own all logic (not reimplemented). The
+policy shows itself on the real file: the ``snapshot_smoke`` on the dev DB (which lacks LP-201's ``extractions.confidence``
+columns) builds a snapshot with **MISMO present (122 facts)** and **documents + calculations absent-with-reason** — an
+honest partial snapshot instead of a crash. The COMPLETE all-three-present case is covered by the DB-backed happy-path
+test (test DB via ``create_all``). Reuses ADR-241 (the container) and ADR-242/243/244 (the assemblers). Deferred: the
+``belongs_to=None`` "matched-then-removed vs never-resolved" ambiguity (still open, an LP-206 note); persistence (LP-209);
+and triggering / run-creation. Amends LP-204 (ADR-241) with the section ``reason``/``failed`` addition.

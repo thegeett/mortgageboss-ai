@@ -76,20 +76,24 @@ class MismoSection(BaseModel):
     """The parsed-MISMO facts: a flat ``key → Field|PiiField`` map.
 
     ``absent`` marks the section as not-built/failed (distinct from a present-empty
-    map — no MISMO facts). Keys are free strings (e.g.
-    ``"borrower.1.income.base_monthly"``) — deliberately unconstrained so new facts
-    never need a schema change.
+    map — no MISMO facts). When a build FAILED, ``reason`` carries a PII-safe
+    explanation (LP-208): ``absent + reason`` = couldn't build; ``absent`` alone =
+    simply not built. Keys are free strings (e.g. ``"borrower.1.income.base_monthly"``)
+    — deliberately unconstrained so new facts never need a schema change.
     """
 
     model_config = {"frozen": True}
 
     facts: dict[str, SnapshotField] = PydField(default_factory=dict)
     absent: bool = False
+    reason: str | None = None  # PII-safe failure explanation (only when absent)
 
     @model_validator(mode="after")
     def _absent_is_empty(self) -> MismoSection:
         if self.absent and self.facts:
             raise ValueError("an absent MismoSection carries no facts")
+        if not self.absent and self.reason is not None:
+            raise ValueError("a present MismoSection carries no reason")
         return self
 
     @classmethod
@@ -99,6 +103,11 @@ class MismoSection(BaseModel):
     @classmethod
     def missing(cls) -> MismoSection:
         return cls(absent=True)
+
+    @classmethod
+    def failed(cls, reason: str) -> MismoSection:
+        """An absent section because its assembler could not build it (with a reason)."""
+        return cls(absent=True, reason=reason)
 
     @property
     def is_present(self) -> bool:
@@ -147,11 +156,14 @@ class DocumentsSection(BaseModel):
 
     entries: list[DocumentEntry] = PydField(default_factory=list)
     absent: bool = False
+    reason: str | None = None  # PII-safe failure explanation (only when absent)
 
     @model_validator(mode="after")
     def _absent_is_empty(self) -> DocumentsSection:
         if self.absent and self.entries:
             raise ValueError("an absent DocumentsSection carries no entries")
+        if not self.absent and self.reason is not None:
+            raise ValueError("a present DocumentsSection carries no reason")
         return self
 
     @classmethod
@@ -161,6 +173,11 @@ class DocumentsSection(BaseModel):
     @classmethod
     def missing(cls) -> DocumentsSection:
         return cls(absent=True)
+
+    @classmethod
+    def failed(cls, reason: str) -> DocumentsSection:
+        """An absent section because its assembler could not build it (with a reason)."""
+        return cls(absent=True, reason=reason)
 
     @property
     def is_present(self) -> bool:
@@ -232,6 +249,7 @@ class CalculationsSection(BaseModel):
     mi: CalculationEntry | None = None
     reserves: CalculationEntry | None = None
     absent: bool = False
+    reason: str | None = None  # PII-safe failure explanation (only when absent)
 
     @classmethod
     def present(
@@ -248,10 +266,17 @@ class CalculationsSection(BaseModel):
     def missing(cls) -> CalculationsSection:
         return cls(absent=True)
 
+    @classmethod
+    def failed(cls, reason: str) -> CalculationsSection:
+        """An absent section because its assembler could not build it (with a reason)."""
+        return cls(absent=True, reason=reason)
+
     @model_validator(mode="after")
     def _absent_is_empty(self) -> CalculationsSection:
         if self.absent and any((self.dti, self.ltv, self.mi, self.reserves)):
             raise ValueError("an absent CalculationsSection carries no calculators")
+        if not self.absent and self.reason is not None:
+            raise ValueError("a present CalculationsSection carries no reason")
         return self
 
     @property
