@@ -1,9 +1,16 @@
 """The frozen three-section snapshot model (LP-204, ADR-241).
 
-The immutable container for a per-run snapshot, built on LP-203's ``Field`` /
-``PiiField`` primitives. Nothing populates it yet — the assemblers (LP-205/206/207)
-and the builder (LP-208) come later; this is the schema they code against and the
-shape persisted as JSON (LP-209).
+The container for a per-run snapshot, built on LP-203's ``Field`` / ``PiiField``
+primitives. Nothing populates it yet — the assemblers (LP-205/206/207) and the
+builder (LP-208) come later; this is the schema they code against and the shape
+persisted as JSON (LP-209).
+
+**Immutability is shallow (by design of pydantic ``frozen``).** Re-assigning any
+model attribute raises; but ``frozen`` does *not* deep-freeze the contained
+collections (``facts`` / ``entries`` / ``breakdown`` / ``value``) — a caller could
+still ``snapshot.mismo.facts[k] = ...`` in place. The contract is therefore:
+assemblers build each section's collection ONCE and never mutate a built snapshot;
+the snapshot is treated as immutable by convention, not deep-enforced.
 
 Three independent sections, **deliberately un-linkable**:
 
@@ -31,7 +38,7 @@ from __future__ import annotations
 from datetime import datetime
 from uuid import UUID
 
-from pydantic import BaseModel, model_validator
+from pydantic import BaseModel, field_validator, model_validator
 from pydantic import Field as PydField
 
 from app.models.document_borrower_link import MatchMethod
@@ -60,7 +67,9 @@ class BorrowerLink(BaseModel):
     model_config = {"frozen": True}
 
     borrower_id: UUID
-    confidence: float
+    # A similarity in [0, 1], mirroring the DocumentBorrowerLink DB CHECK — the
+    # snapshot must not carry a link confidence the source row could never hold.
+    confidence: float = PydField(ge=0.0, le=1.0)
     method: MatchMethod
 
 
@@ -115,8 +124,15 @@ class DocumentEntry(BaseModel):
     def _belongs_to_null_or_nonempty(self) -> DocumentEntry:
         # None = unresolved; a list must carry at least one link (use None for none),
         # so "resolved to nobody" can't masquerade as an empty list.
-        if self.belongs_to is not None and len(self.belongs_to) == 0:
+        if self.belongs_to is None:
+            return self
+        if len(self.belongs_to) == 0:
             raise ValueError("belongs_to is None (unresolved) or a non-empty list — never []")
+        # One link per borrower — the DB enforces UNIQUE(document_id, borrower_id),
+        # so a document must not claim the same borrower twice.
+        ids = [link.borrower_id for link in self.belongs_to]
+        if len(ids) != len(set(ids)):
+            raise ValueError("belongs_to must not repeat a borrower_id (one link per borrower)")
         return self
 
 
@@ -180,6 +196,25 @@ class CalculationEntry(BaseModel):
     value: dict[str, str | bool | None] = PydField(default_factory=dict)
     breakdown: list[CalcBreakdownLine] = PydField(default_factory=list)
 
+    @field_validator("value", mode="before")
+    @classmethod
+    def _values_are_str_bool_or_none(cls, v: object) -> object:
+        """Reject a raw number instead of coercing it — pydantic would silently turn
+        an unstringified ``int`` (a count, a 0/1 flag) into ``bool`` (``1`` → ``True``).
+
+        Headline numbers must be stringified by the calculator (``"43.10"``); ``bool``
+        stays allowed (a genuine flag), but a real ``int``/``float``/``Decimal`` fails
+        loudly here rather than corrupting the blob (mirrors ``Field.value``).
+        """
+        if isinstance(v, dict):
+            for key, item in v.items():
+                if item is not None and not isinstance(item, (str, bool)):
+                    raise ValueError(
+                        f"CalculationEntry.value[{key!r}] must be str/bool/None, not "
+                        f"{type(item).__name__} — the calculator must stringify numbers"
+                    )
+        return v
+
 
 class CalculationsSection(BaseModel):
     """The four calculators (DTI / LTV / MI / reserves). Cash-to-close is NOT here.
@@ -223,11 +258,13 @@ class CalculationsSection(BaseModel):
 
 
 class Snapshot(BaseModel):
-    """The immutable per-run snapshot — three independent sections + metadata.
+    """The per-run snapshot — three independent sections + metadata.
 
-    Frozen: a constructed snapshot cannot be mutated (mutation raises). ``mismo`` /
-    ``documents`` / ``calculations`` default to present-empty sections. There is no
-    field correlating sections — a cross-section link cannot be expressed.
+    Frozen: re-assigning an attribute raises (the contained collections are
+    immutable by convention — see the module docstring). ``mismo`` / ``documents`` /
+    ``calculations`` default to present-empty sections. No field correlates sections
+    — a cross-section link cannot be expressed as a *field* (equal-value matching via
+    ``PiiField.match_hash`` is a deliberate downstream capability, not a field here).
     """
 
     model_config = {"frozen": True}
@@ -240,3 +277,26 @@ class Snapshot(BaseModel):
     mismo: MismoSection = PydField(default_factory=MismoSection)
     documents: DocumentsSection = PydField(default_factory=DocumentsSection)
     calculations: CalculationsSection = PydField(default_factory=CalculationsSection)
+
+    @field_validator("created_at")
+    @classmethod
+    def _created_at_is_tz_aware(cls, v: datetime) -> datetime:
+        """A per-run timestamp must be timezone-aware, so runs order unambiguously."""
+        if v.tzinfo is None:
+            raise ValueError("created_at must be timezone-aware (e.g. datetime.now(UTC))")
+        return v
+
+    @model_validator(mode="after")
+    def _known_snapshot_version(self) -> Snapshot:
+        """Reject a snapshot whose version this reader doesn't understand.
+
+        The version travels with the artifact so a reader knows the shape it holds;
+        an unrecognized version is a hard failure, not a silent mis-read (extra
+        fields of a future shape would otherwise be dropped and the blob accepted).
+        """
+        if self.snapshot_version != SNAPSHOT_VERSION:
+            raise ValueError(
+                f"unsupported snapshot_version {self.snapshot_version} "
+                f"(this reader supports {SNAPSHOT_VERSION})"
+            )
+        return self

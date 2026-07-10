@@ -229,6 +229,52 @@ def test_belongs_to_empty_list_is_rejected_use_none() -> None:
         DocumentEntry(document_type="pay_stub", belongs_to=[])
 
 
+def test_belongs_to_rejects_duplicate_borrower() -> None:
+    """A document must not claim the same borrower twice (DB UNIQUE(doc, borrower))."""
+    with pytest.raises(ValidationError):
+        DocumentEntry(
+            document_type="bank_statement",
+            belongs_to=[
+                BorrowerLink(borrower_id=_B1, confidence=1.0, method=MatchMethod.EXACT),
+                BorrowerLink(borrower_id=_B1, confidence=0.9, method=MatchMethod.FUZZY),
+            ],
+        )
+
+
+@pytest.mark.parametrize("bad", [1.5, -0.1, 99.0])
+def test_borrower_link_confidence_must_be_in_unit_interval(bad: float) -> None:
+    """Confidence mirrors the DB CHECK [0, 1]; the snapshot can't hold what the row can't."""
+    with pytest.raises(ValidationError):
+        BorrowerLink(borrower_id=_B1, confidence=bad, method=MatchMethod.EXACT)
+
+
+# --------------------------------------------------------------------------- #
+# Value/metadata guards
+# --------------------------------------------------------------------------- #
+
+
+def test_calculation_value_rejects_unstringified_number() -> None:
+    """A raw int must NOT silently become a bool (1 → True); the calculator stringifies."""
+    with pytest.raises(ValidationError):
+        CalculationEntry(value={"reserve_months": 6})
+    # A genuine bool flag and a stringified number are both fine.
+    ok = CalculationEntry(value={"is_arm": True, "back_end_dti": "43.10", "front_end_dti": None})
+    assert ok.value == {"is_arm": True, "back_end_dti": "43.10", "front_end_dti": None}
+
+
+def test_created_at_must_be_timezone_aware() -> None:
+    with pytest.raises(ValidationError):
+        Snapshot(loan_file_id=_LF, run_id=_RUN, created_at=datetime(2026, 7, 9, 12, 0))  # naive
+
+
+def test_unknown_snapshot_version_is_rejected() -> None:
+    """A blob whose version this reader doesn't understand fails loudly, not silently."""
+    good = _sample().model_dump()
+    good["snapshot_version"] = 999
+    with pytest.raises(ValidationError):
+        Snapshot.model_validate(good)
+
+
 # --------------------------------------------------------------------------- #
 # Calculations: source tags survive
 # --------------------------------------------------------------------------- #

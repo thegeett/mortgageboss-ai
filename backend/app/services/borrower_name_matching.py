@@ -30,8 +30,10 @@ import re
 import unicodedata
 from dataclasses import dataclass
 from difflib import SequenceMatcher
-from typing import Any, Literal
+from typing import Any
 from uuid import UUID
+
+from app.models.document_borrower_link import MatchMethod
 
 # The similarity at/above which a (document, borrower) pair becomes a link. Tuned
 # so exact/nickname/initial matches clear it and genuine near-misses (a one-letter
@@ -155,7 +157,7 @@ class MatchResult:
 
     borrower_id: UUID
     confidence: float
-    method: Literal["exact", "normalized", "fuzzy"]
+    method: MatchMethod  # the one CHECK-constrained vocabulary, shared with the DB row
 
 
 def _canons(token: str) -> set[str]:
@@ -241,13 +243,13 @@ def _score_one(borrower: BorrowerName, doc_tokens: list[str]) -> MatchResult | N
     full_tokens = normalize_name(
         " ".join(p for p in (borrower.first_name, borrower.middle_name, borrower.last_name) if p)
     )
-    method: Literal["exact", "normalized", "fuzzy"]
+    method: MatchMethod
     if full_tokens and set(full_tokens) == set(doc_tokens):
-        method = "exact"
+        method = MatchMethod.EXACT
     elif last_kind in {"exact", "nickname"} and first_kind in {"exact", "nickname"}:
-        method = "normalized"
+        method = MatchMethod.NORMALIZED
     else:
-        method = "fuzzy"
+        method = MatchMethod.FUZZY
 
     return MatchResult(
         borrower_id=borrower.borrower_id, confidence=round(combined, 2), method=method

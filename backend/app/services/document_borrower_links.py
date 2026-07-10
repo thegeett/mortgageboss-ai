@@ -21,7 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.borrower import Borrower
 from app.models.document import Document
-from app.models.document_borrower_link import DocumentBorrowerLink, MatchMethod
+from app.models.document_borrower_link import DocumentBorrowerLink
 from app.models.extraction import Extraction
 from app.models.helpers import only_active
 from app.services.borrower_name_matching import (
@@ -92,7 +92,7 @@ async def assign_document_borrower_links(
             document_id=document.id,
             borrower_id=m.borrower_id,
             confidence=m.confidence,
-            method=MatchMethod(m.method),
+            method=m.method,
         )
         for m in matches
     ]
