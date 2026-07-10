@@ -120,15 +120,25 @@ class TransactionRecord(BaseModel):
     per-transaction rule (AS-1 large-deposit, later NSF/chaining/recurring) reads
     FROM THE SNAPSHOT.
 
-    Each attribute is an ordinary :class:`Field` (``source=extracted``, nullable
-    confidence, absent≠empty) — so a row the extractor read without a date carries
-    ``date`` = an absent Field, distinct from a present-null one. ``direction`` is
-    ``credit`` / ``debit``, derived from the extraction's transaction_type / amount
-    sign. There is **no account here** — the statement's (pre-masked) account lives
-    on the parent :class:`DocumentEntry`'s ``fields`` (a per-loan-file account has no
-    raw form to hash on this branch; see ADR-248). ``description`` has any 9+-digit
-    run / SSN pattern redacted so it is PII-safe at rest (never a raw account/id in
-    the blob), while keeping the sourcing signal (PAYROLL / TRANSFER / VENMO).
+    ``date`` / ``amount`` / ``direction`` / ``description`` are ordinary
+    :class:`Field`\\s (``source=extracted``, nullable confidence, absent≠empty) — so a
+    row the extractor read without a date carries ``date`` = an absent Field, distinct
+    from a present-null one. ``direction`` is ``credit`` / ``debit``, derived from the
+    extraction's transaction_type / amount sign. ``description`` has any 9+-digit run /
+    SSN pattern redacted so it is PII-safe at rest (never a raw account/id in the blob),
+    while keeping the sourcing signal (PAYROLL / TRANSFER / VENMO).
+
+    ``account`` is the parent statement's account as a **pre-masked** :class:`PiiField`
+    (``display`` = the statement's masked account e.g. ``****5667``, ``match_hash=None``)
+    — carried for **display/context only, never for matching**. On this branch extraction
+    only ever holds a pre-masked account (no raw value), so there is nothing to hash: a
+    real ``match_hash`` is impossible AND must not be faked (hashing the masked ``****5667``
+    would collide with every same-last-4 account — the LP-203 colliding-hash bug).
+    ``match_hash=None`` is the honest value, and it is **structurally non-matchable**
+    (:meth:`PiiField.matches` never treats two ``None`` hashes as equal — the
+    absent-is-not-matchable invariant). The deposit↔MISMO-asset account cross-section
+    match is therefore unavailable on this branch; see ADR-248 / LP-302a for the gap and
+    its unblock condition.
     """
 
     model_config = {"frozen": True}
@@ -137,6 +147,7 @@ class TransactionRecord(BaseModel):
     amount: Field
     direction: Field
     description: Field
+    account: PiiField
 
 
 class DocumentEntry(BaseModel):

@@ -8401,14 +8401,31 @@ the evaluator read raw extraction (which would break "evaluator reads only the s
 - **Absent ≠ empty for the list:** ``None`` = not surfaced/absent (a non-bank document, or a bank statement whose
   extraction carried no transaction list); an **empty tuple** = a statement present with **zero** transactions. The two
   are deliberately distinct and both round-trip.
-- **No ``account`` on the record (deviation from the ticket draft, evidence-driven).** The recon assumed the account could
-  be a hashable ``PiiField.from_raw`` so a deposit could cross-section-match the MISMO asset account. Reality on this
-  branch: the extractor stores the account **pre-masked** (``account_number_masked`` = ``****NNNN``, no raw form to hash →
-  ``match_hash=None``), and MISMO ``StatedAsset`` has **no account column** (no ``asset.N.account`` fact to match). So a
-  real transaction-account↔asset-account hash match is impossible here (the same account-PII gap ADR-243/LP-302 flagged).
-  Rather than hash a mask string (a meaningless, non-matchable value) or fabricate one, the account is **not** duplicated
-  on each record — the statement's (pre-masked) account already lives on the parent ``DocumentEntry.fields``. The
-  account-hash cross-section match is a documented follow-up (needs a raw account + a MISMO asset-account column).
+- **``account`` on the record as a PRE-MASKED, non-matchable ``PiiField`` — display/context only (amended 2026-07-10;
+  supersedes the original "no account on the record" decision).** Each ``TransactionRecord`` now carries ``account:
+  PiiField`` = the parent statement's masked account (``display`` = ``****NNNN`` from ``account_number_masked``,
+  ``match_hash=None``), resolved once per statement (every row shares it). It is built with ``PiiField.pre_masked`` — **not**
+  ``from_raw``: on this branch the extractor only ever has a pre-masked account (no raw form), so there is nothing to hash,
+  and the mask **must not** be hashed. Hashing ``****5667`` would produce a value that collides with **every** same-last-4
+  account — the LP-203 colliding-hash bug — a false match worse than no match. ``match_hash=None`` is the **honest** value
+  and it is **structurally non-matchable**: a new ``PiiField.matches()`` (added here) treats a ``None`` hash as
+  never-equal, so two ``None``-hash accounts NEVER match each other (a bare ``==`` would wrongly return ``True`` for
+  ``None == None``) and a ``None``-hash never matches a real hash — the absent-is-not-matchable invariant from LP-203, now
+  enforced in one place instead of by every caller. The account is carried for **display/context only** (which account a
+  deposit landed in), never as a cross-section match key.
+  - *Why reversed from "no account":* the account is genuinely useful per-row context for AS-1's finding output ("a
+    $8,076 deposit into ****5667"), and carrying it **honestly** (pre-masked, non-matchable) costs nothing and papers over
+    nothing — the impossibility of the hash match is made explicit in the type (``match_hash=None`` + ``is_matchable``),
+    not hidden by omission.
+  - **KNOWN GAP — the deposit↔MISMO-asset account cross-section match is NOT achievable on this branch, and is not faked.**
+    Two independent reasons: (a) extraction only ever holds a **pre-masked** account (no raw value to hash), and (b) MISMO
+    ``StatedAsset`` has **no account column** (no ``asset.N.account`` fact to match against). Consequence: the
+    deposit↔asset **sourcing-corroboration** path is unavailable — AS-1 still works (it evaluates deposit amount vs a
+    threshold + the AI sourcing judgment; the account match was *corroboration*, not a core input). **Unblock condition:** a
+    future ticket that (1) surfaces a RAW account in extraction and (2) adds a MISMO asset-account column can then produce a
+    real ``match_hash`` (via ``from_raw``) and enable the match — **additive**: the ``PiiField`` shape already supports it and
+    the None-is-unmatchable invariant is already enforced. We deliberately did **not** build speculative raw-account plumbing
+    now (no synthetic-raw hash, no unused code path) — there is no consumer on this branch; that is the unblock ticket's job.
 - **``description`` is redacted, not raw (deviation, forced by a hard constraint).** Real bank descriptions carry payroll
   IDs / confirmation #s / transfer IDs — on LF-6T3N **37 of 50** descriptions contain a 9+-digit run, exactly what the
   LP-209 PII-at-rest guard rejects. So "raw and faithful" (surface the description) and "persist/load round-trips" are
@@ -8424,11 +8441,16 @@ the evaluator read raw extraction (which would break "evaluator reads only the s
   are unaffected; non-bank documents simply carry ``transactions=None``.
 
 **Consequences:** a pure read + reshape (``build_transactions`` is pure; the assembler surfaces transactions when
-``document_type == "bank_statement"`` and the extraction carried a transaction list). Verified on real LF-6T3N: 50
-transactions surfaced across 5 statements, descriptions redacted, the LP-209 at-rest guard passes, and persist→load ==
-built (lossless v2 round-trip). Reuses ADR-240 (Field), ADR-241 (the container + version discipline), ADR-243/246 (the
-documents assembler + PII-at-rest guard). **Scope note:** only bank-statement transactions are surfaced (the only nested
-list AS-1 + near-term per-transaction rules need); other nested extraction structures are not surfaced (none seen beyond
-transactions). **Deferred:** the account-hash cross-section match (needs a raw account + a MISMO asset-account column);
-surfacing any future nested list; and (should a real deployment ever hold v1 snapshots) a v1→v2 migration/back-compat
-reader.
+``document_type == "bank_statement"`` and the extraction carried a transaction list, attaching the once-resolved pre-masked
+statement account to each row). A small **additive** helper landed on the LP-203 primitive — ``PiiField.is_matchable`` /
+``PiiField.matches()`` — enforcing absent-is-not-matchable structurally so no caller re-implements a ``None``-safe hash
+compare. Verified on real LF-6T3N: 50 transactions surfaced across 5 statements, each carrying the statement's ``****NNNN``
+account (``match_hash=None``), descriptions redacted, the LP-209 at-rest guard passes, and persist→load == built (lossless
+v2 round-trip). Reuses ADR-240 (Field), ADR-241 (the container + version discipline), ADR-243/246 (the documents assembler
++ PII-at-rest guard). **Scope note:** only bank-statement transactions are surfaced (the only nested list AS-1 + near-term
+per-transaction rules need); other nested extraction structures are not surfaced (none seen beyond transactions).
+**Deferred / KNOWN GAP:** the deposit↔MISMO-asset account-hash cross-section match — NOT achievable on this branch (needs
+both a RAW account in extraction and a MISMO asset-account column; see the amended account bullet above), so the
+sourcing-corroboration path is unavailable while AS-1's core (amount-vs-threshold + AI sourcing judgment) is unaffected.
+Also deferred: surfacing any future nested list; and (should a real deployment ever hold v1 snapshots) a v1→v2
+migration/back-compat reader.

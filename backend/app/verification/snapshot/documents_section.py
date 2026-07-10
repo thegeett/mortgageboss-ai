@@ -210,6 +210,24 @@ def _txn_field(value: Any) -> Field:
     return Field.present(scalar, source=_EXTRACTED)
 
 
+def _statement_account(extracted: dict[str, Any]) -> PiiField:
+    """The statement's account for the transactions to carry as DISPLAY/CONTEXT (LP-302a).
+
+    A **pre-masked** :class:`PiiField` (``display`` = ``****NNNN``, ``match_hash=None``):
+    extraction only ever holds ``account_number_masked`` — the raw account never reached
+    us, so there is nothing to hash and the mask must NOT be hashed (hashing ``****5667``
+    would collide with every same-last-4 account — the LP-203 colliding-hash bug).
+    ``match_hash=None`` is honest and structurally non-matchable. Absent (no account on
+    the statement) → ``PiiField.missing()``. This is context, not a cross-section match key.
+    """
+    entry = extracted.get("account_number_masked")
+    value = entry.get("value") if isinstance(entry, dict) else None
+    if value is None:
+        return PiiField.missing()
+    # pre_masked, NOT from_raw: the value is already masked and has no raw form to hash.
+    return PiiField.pre_masked(value, kind=PiiKind.ACCOUNT, source=_EXTRACTED)
+
+
 def build_transactions(
     extracted: dict[str, Any], document_type: str | None
 ) -> tuple[TransactionRecord, ...] | None:
@@ -225,6 +243,9 @@ def build_transactions(
     raw = extracted.get(_TRANSACTIONS_KEY)
     if not isinstance(raw, list):
         return None  # statement present but no transaction list → absent, not empty
+    # The account is a per-STATEMENT fact — resolve it once and every row carries the
+    # same pre-masked, non-matchable PiiField (display/context only).
+    account = _statement_account(extracted)
     records: list[TransactionRecord] = []
     for txn in raw:
         if not isinstance(txn, dict):
@@ -235,6 +256,7 @@ def build_transactions(
                 amount=_txn_field(txn.get("amount")),
                 direction=_txn_field(_direction(txn)),
                 description=_txn_field(_redact_description(txn.get("description"))),
+                account=account,
             )
         )
     return tuple(records)

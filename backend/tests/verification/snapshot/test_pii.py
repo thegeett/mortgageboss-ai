@@ -172,6 +172,31 @@ def test_pii_field_missing_is_absent_and_distinct_from_a_blank() -> None:
     assert absent != blank
 
 
+def test_matches_requires_two_real_equal_hashes_none_never_matches() -> None:
+    """matches() enforces absent-is-not-matchable: a None hash never matches (a bare
+    ``==`` on match_hash would wrongly return True for None == None — LP-302a accounts)."""
+    lf = uuid4()
+    a = PiiField.from_raw(_ACCT, kind=PiiKind.ACCOUNT, loan_file_id=lf, source=FieldSource.PARSED)
+    same = PiiField.from_raw(
+        _ACCT, kind=PiiKind.ACCOUNT, loan_file_id=lf, source=FieldSource.PARSED
+    )
+    other = PiiField.from_raw(
+        "9999888877776666", kind=PiiKind.ACCOUNT, loan_file_id=lf, source=FieldSource.PARSED
+    )
+    # Positive: same raw value + same per-file salt → same real hash → match.
+    assert a.is_matchable is True and a.matches(same) is True
+    # Negative: a different value must NOT match.
+    assert a.matches(other) is False
+    # Non-matchable: two pre-masked accounts (match_hash=None) NEVER match — not each
+    # other (no same-last-4 false collision), not a real-hash field.
+    m1 = PiiField.pre_masked("****5667", kind=PiiKind.ACCOUNT, source=FieldSource.EXTRACTED)
+    m2 = PiiField.pre_masked("****5667", kind=PiiKind.ACCOUNT, source=FieldSource.EXTRACTED)
+    assert m1.is_matchable is False
+    assert m1.matches(m2) is False and m2.matches(m1) is False  # identical display, still no match
+    assert m1.matches(a) is False and a.matches(m1) is False
+    assert PiiField.missing().matches(PiiField.missing()) is False  # absent never matches
+
+
 def test_pii_field_confidence_nullable_and_derived_source() -> None:
     from app.models.extraction import ConfidenceSource
 

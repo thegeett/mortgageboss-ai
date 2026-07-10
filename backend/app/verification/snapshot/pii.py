@@ -243,6 +243,27 @@ class PiiField(BaseModel):
         return not self.absent
 
     @property
+    def is_matchable(self) -> bool:
+        """True only when this field carries a REAL match_hash.
+
+        A ``None`` hash (empty/too-short value, or a pre-masked value whose raw form
+        never reached us — LP-302a transaction accounts) is **non-matchable**: there is
+        no hash to compare, so it must never be treated as equal to anything.
+        """
+        return self.match_hash is not None
+
+    def matches(self, other: PiiField) -> bool:
+        """Two PII facts match iff BOTH carry the SAME real hash.
+
+        Enforces the absent-is-not-matchable invariant (LP-203) structurally: a
+        ``None`` hash never matches — in particular two ``None``-hash fields are NOT a
+        match (a plain ``==`` on ``match_hash`` would wrongly return ``True`` for
+        ``None == None``). Callers that correlate PII across the snapshot must use this,
+        not a bare hash comparison.
+        """
+        return self.match_hash is not None and self.match_hash == other.match_hash
+
+    @property
     def confidence_source(self) -> ConfidenceSource:
         """The derived confidence provenance (LP-201's single derivation rule)."""
         return ConfidenceSource.for_confidence(self.confidence)
