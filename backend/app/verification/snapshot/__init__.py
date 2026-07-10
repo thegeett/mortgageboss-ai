@@ -6,11 +6,15 @@ yet — assemblers (LP-205/206/207), the builder (LP-208), and persistence (LP-2
 come later.
 """
 
+from app.verification.snapshot.documents_section import (
+    build_document_fields,
+    build_documents_section,
+)
 from app.verification.snapshot.fields import Field, FieldSource, JsonScalar
 from app.verification.snapshot.mismo_section import build_mismo_section, load_mismo_section
 from app.verification.snapshot.model import (
     SNAPSHOT_VERSION,
-    BorrowerLink,
+    BorrowerRef,
     CalcBreakdownLine,
     CalculationEntry,
     CalculationsSection,
@@ -24,7 +28,7 @@ from app.verification.snapshot.pii import PiiField, PiiKind, mask, match_hash
 
 __all__ = [
     "SNAPSHOT_VERSION",
-    "BorrowerLink",
+    "BorrowerRef",
     "CalcBreakdownLine",
     "CalculationEntry",
     "CalculationsSection",
@@ -38,6 +42,8 @@ __all__ = [
     "PiiKind",
     "Snapshot",
     "SnapshotField",
+    "build_document_fields",
+    "build_documents_section",
     "build_mismo_section",
     "load_mismo_section",
     "mask",

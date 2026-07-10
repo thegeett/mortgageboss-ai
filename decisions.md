@@ -8026,3 +8026,56 @@ calculations LP-207), the builder (LP-208), and persistence (LP-209).
 Deferred follow-ups: ``_slug`` declaration-name collisions (two names → one key, last wins) — left as-is; and extracting
 the cross-module duplicates (``_slug`` vs ``documents.naming._slug``, ``_scalar`` money vs ``cross_source._money``) into
 shared helpers.
+
+## ADR-243: Documents section assembler — option-2 belongsTo (resolved id+name) + LP-204 amendment (LP-206)
+
+- **Date:** 2026-07-10
+- **Status:** Accepted
+
+**Context:** The second Stage-1 assembler (LP-206) reads each ACTIVE document's already-extracted facts (LP-201
+confidence) and its already-stored borrower links (LP-202) into the ``documents`` section. It does not extract and does
+not run matching. The load-bearing decision is the ``belongsTo`` shape; reality also forced two corrections to the
+ticket's premises (recorded below).
+
+**Decision:**
+
+- **belongsTo = option-2: a resolved-reference list of ``{borrower_id, name}``, read from the stored links.** Amends
+  LP-204: ``DocumentEntry.belongs_to`` changes from ``list[BorrowerLink]`` (``{borrower_id, confidence, method}``, the
+  LP-204 shape) to ``tuple[BorrowerRef, ...] | None`` where ``BorrowerRef = {borrower_id, name}``. A ``tuple`` so a
+  built entry's resolved list is itself immutable (LP-204's nested-freeze lesson). ``None`` = no borrower resolved
+  (appraisal / no-match / unprocessable); a non-empty tuple = one (or many, joint). A validator still rejects an empty
+  tuple and a repeated ``borrower_id``. The **match provenance (confidence/method) is dropped** from the snapshot
+  reference — it stays in the ``document_borrower_links`` row; the snapshot carries the resolved *identity*. The RAW
+  asserted name the document printed stays as an ordinary ``fields["asserted_name"]`` entry — resolved reference and raw
+  claim are kept separate (mirrors ADR-239/241).
+- **Soft-delete honesty:** only active, current documents are assembled; ``belongsTo`` reads via LP-202's
+  ``get_document_borrower_links`` (which already excludes a link to a soft-deleted document/borrower), and a ref is
+  emitted only for a borrower still active on the file — a borrower removed after matching drops out of ``belongsTo``.
+- **Confidence surfaced FAITHFULLY:** each extracted field carries LP-201's nullable ``confidence`` exactly — a genuine
+  number stays, ``None`` stays ``None``; the assembler never fabricates one (a non-numeric confidence coerces to
+  ``None``, not a default). This is the first place confidence reaches the snapshot; it stays honest end to end.
+- **Absent ≠ empty:** an extracted field whose ``value`` is null (or absent) is omitted; a present empty string is kept.
+  Nested/non-scalar extracted values (e.g. bank-statement transaction lists) are not surfaced as fields here (deferred).
+
+**Corrections to the ticket's premises (reality, flagged in Phase 0):**
+
+- **belongsTo was NOT ``str|None``.** LP-204 (post its own review) already typed it ``list[BorrowerLink] | None``; the
+  amendment is a *reshape* to ``BorrowerRef`` id+name, not a widening from a string.
+- **Extraction PII is already masked — there is no raw account/SSN to route through ``PiiField.from_raw``.** Extractors
+  capture ``account_number_masked`` / ``taxpayer_ssn_masked`` (never raw); ``social_security_wages`` / ``_tax_withheld``
+  are dollar amounts, not SSNs. So a pre-masked PII field becomes a ``PiiField`` with a canonical last-4 display and
+  ``match_hash=None`` (non-matchable — only the masked form ever existed), rendered from the value's last-4 rather than
+  re-masking. Never double-masks, never exposes raw, never fabricates a hash.
+
+**Consequences:** a pure read + reshape (``build_documents_section(db, loan_file)``; ``build_document_fields`` pure).
+Covered by a DB-backed pytest suite (test DB via ``create_all`` = this branch's schema) exercising single / joint /
+no-match belongsTo, soft-deleted document + soft-deleted borrower exclusion, honest confidence, PII masking, and
+absent≠empty. Reuses ADR-238 (confidence), ADR-239 (LP-202 links), ADR-240 (Field/PiiField), ADR-241 (the container).
+**Known limitations / divergences (documented, not resolved here):** (a) **JSON key casing** — the target example is
+camelCase (``documentType`` / ``borrowerId`` / ``matchHash``) but the committed snapshot (LP-203/204/205) is
+snake_case; a wholesale camelCase pass touches the LP-203 primitives + serialization config, so LP-206 stays snake_case
+for consistency and the pass is deferred to its own cross-cutting change (the *structure* matches the target). (b)
+**Real-file smoke** — LF-6T3N has zero stored links (the LP-202 matcher was never run — out of scope) and the dev DB is
+stamped at a ``phase3_5_1`` Alembic revision lacking LP-201's ``extractions.confidence`` columns, so
+``documents_section_smoke`` can't run there; the schema-correct coverage is the DB-backed test suite. Deferred:
+nested/non-scalar extracted values, catch-all fields, and the camelCase pass.

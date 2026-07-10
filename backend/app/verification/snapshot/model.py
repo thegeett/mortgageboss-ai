@@ -41,7 +41,6 @@ from uuid import UUID
 from pydantic import BaseModel, field_validator, model_validator
 from pydantic import Field as PydField
 
-from app.models.document_borrower_link import MatchMethod
 from app.verification.snapshot.fields import Field
 from app.verification.snapshot.pii import PiiField
 
@@ -55,22 +54,22 @@ SNAPSHOT_VERSION = 1
 SnapshotField = Field | PiiField
 
 
-class BorrowerLink(BaseModel):
-    """A resolved document→borrower reference (LP-202), self-describing in the blob.
+class BorrowerRef(BaseModel):
+    """A resolved document→borrower reference (LP-202, option-2): id + name.
 
-    Carries the borrower id plus the match provenance (confidence + method) so a
-    reader needs no DB join. This references a borrower *entity*, not another
-    snapshot section — the one allowed correlation, and the deliberate opposite of
-    matching raw names across sections at read time.
+    Carries the borrower id plus the borrower's resolved *name* so a reader needs
+    no DB join. This references a borrower *entity*, not another snapshot section —
+    the one allowed correlation, and the deliberate opposite of matching raw names
+    across sections at read time. The match provenance (confidence/method) is NOT
+    surfaced here — it lives in the ``document_borrower_links`` row; the snapshot
+    carries the resolved identity. Distinct from the RAW asserted name a document
+    printed, which stays as an ordinary ``fields`` entry (``asserted_name``).
     """
 
     model_config = {"frozen": True}
 
     borrower_id: UUID
-    # A similarity in [0, 1], mirroring the DocumentBorrowerLink DB CHECK — the
-    # snapshot must not carry a link confidence the source row could never hold.
-    confidence: float = PydField(ge=0.0, le=1.0)
-    method: MatchMethod
+    name: str
 
 
 class MismoSection(BaseModel):
@@ -109,30 +108,33 @@ class MismoSection(BaseModel):
 class DocumentEntry(BaseModel):
     """One document's contribution: type + resolved borrower(s) + extracted fields.
 
-    ``belongs_to`` is ``None`` when no borrower resolved, or a **non-empty** list of
-    :class:`BorrowerLink` (one, or many for a joint document). The document's raw
-    asserted name is NOT here — it stays as an ordinary entry in ``fields``.
+    ``belongs_to`` is ``None`` when no borrower resolved, or a **non-empty** tuple of
+    :class:`BorrowerRef` (one, or many for a joint document). It is a ``tuple`` so a
+    built entry's resolved-borrower list is itself immutable (not just the attribute
+    reassignment). The document's raw asserted name is NOT here — it stays as an
+    ordinary entry in ``fields`` (``asserted_name``).
     """
 
     model_config = {"frozen": True}
 
     document_type: str | None = None
-    belongs_to: list[BorrowerLink] | None = None
+    belongs_to: tuple[BorrowerRef, ...] | None = None
     fields: dict[str, SnapshotField] = PydField(default_factory=dict)
 
     @model_validator(mode="after")
     def _belongs_to_null_or_nonempty(self) -> DocumentEntry:
-        # None = unresolved; a list must carry at least one link (use None for none),
-        # so "resolved to nobody" can't masquerade as an empty list.
+        # None = no borrower resolved (unresolved / no-match / unprocessable); a tuple
+        # must carry at least one ref (use None for none), so "resolved to nobody"
+        # can't masquerade as an empty list.
         if self.belongs_to is None:
             return self
         if len(self.belongs_to) == 0:
-            raise ValueError("belongs_to is None (unresolved) or a non-empty list — never []")
-        # One link per borrower — the DB enforces UNIQUE(document_id, borrower_id),
+            raise ValueError("belongs_to is None (no borrower) or a non-empty tuple — never ()")
+        # One ref per borrower — the DB enforces UNIQUE(document_id, borrower_id),
         # so a document must not claim the same borrower twice.
-        ids = [link.borrower_id for link in self.belongs_to]
+        ids = [ref.borrower_id for ref in self.belongs_to]
         if len(ids) != len(set(ids)):
-            raise ValueError("belongs_to must not repeat a borrower_id (one link per borrower)")
+            raise ValueError("belongs_to must not repeat a borrower_id (one ref per borrower)")
         return self
 
 

@@ -7,11 +7,10 @@ from datetime import UTC, datetime
 from uuid import uuid4
 
 import pytest
-from app.models.document_borrower_link import MatchMethod
 from app.verification.snapshot.fields import Field, FieldSource
 from app.verification.snapshot.model import (
     SNAPSHOT_VERSION,
-    BorrowerLink,
+    BorrowerRef,
     CalcBreakdownLine,
     CalculationEntry,
     CalculationsSection,
@@ -54,23 +53,17 @@ def _sample() -> Snapshot:
             [
                 DocumentEntry(
                     document_type="pay_stub",
-                    belongs_to=[
-                        BorrowerLink(borrower_id=_B1, confidence=1.0, method=MatchMethod.EXACT)
-                    ],
+                    belongs_to=(BorrowerRef(borrower_id=_B1, name="Akash Patel"),),
                     fields={
                         "employee_name": Field.present("Akash Patel", source=FieldSource.EXTRACTED)
                     },
                 ),
                 DocumentEntry(
                     document_type="bank_statement",
-                    belongs_to=[
-                        BorrowerLink(
-                            borrower_id=_B1, confidence=0.97, method=MatchMethod.NORMALIZED
-                        ),
-                        BorrowerLink(
-                            borrower_id=_B2, confidence=0.97, method=MatchMethod.NORMALIZED
-                        ),
-                    ],
+                    belongs_to=(
+                        BorrowerRef(borrower_id=_B1, name="Akash Patel"),
+                        BorrowerRef(borrower_id=_B2, name="Priya Patel"),
+                    ),
                     fields={
                         "account_number": PiiField.from_raw(
                             "000123456789",
@@ -115,7 +108,7 @@ def test_snapshot_is_immutable_at_every_level() -> None:
     with pytest.raises(ValidationError):
         snap.documents.entries[0].document_type = "w2"
     with pytest.raises(ValidationError):
-        snap.documents.entries[0].belongs_to[0].confidence = 0.1
+        snap.documents.entries[0].belongs_to[0].name = "x"
     with pytest.raises(ValidationError):
         snap.mismo.facts["borrower.1.income.base_monthly"].value = "9999"
 
@@ -209,14 +202,14 @@ def test_belongs_to_null_single_and_joint_all_representable() -> None:
     null = DocumentEntry(document_type="appraisal", belongs_to=None)
     single = DocumentEntry(
         document_type="pay_stub",
-        belongs_to=[BorrowerLink(borrower_id=_B1, confidence=1.0, method=MatchMethod.EXACT)],
+        belongs_to=(BorrowerRef(borrower_id=_B1, name="Akash Patel"),),
     )
     joint = DocumentEntry(
         document_type="bank_statement",
-        belongs_to=[
-            BorrowerLink(borrower_id=_B1, confidence=0.9, method=MatchMethod.NORMALIZED),
-            BorrowerLink(borrower_id=_B2, confidence=0.9, method=MatchMethod.NORMALIZED),
-        ],
+        belongs_to=(
+            BorrowerRef(borrower_id=_B1, name="Akash Patel"),
+            BorrowerRef(borrower_id=_B2, name="Priya Patel"),
+        ),
     )
     assert null.belongs_to is None
     assert len(single.belongs_to) == 1
@@ -234,18 +227,11 @@ def test_belongs_to_rejects_duplicate_borrower() -> None:
     with pytest.raises(ValidationError):
         DocumentEntry(
             document_type="bank_statement",
-            belongs_to=[
-                BorrowerLink(borrower_id=_B1, confidence=1.0, method=MatchMethod.EXACT),
-                BorrowerLink(borrower_id=_B1, confidence=0.9, method=MatchMethod.FUZZY),
-            ],
+            belongs_to=(
+                BorrowerRef(borrower_id=_B1, name="Akash Patel"),
+                BorrowerRef(borrower_id=_B1, name="Akash P"),
+            ),
         )
-
-
-@pytest.mark.parametrize("bad", [1.5, -0.1, 99.0])
-def test_borrower_link_confidence_must_be_in_unit_interval(bad: float) -> None:
-    """Confidence mirrors the DB CHECK [0, 1]; the snapshot can't hold what the row can't."""
-    with pytest.raises(ValidationError):
-        BorrowerLink(borrower_id=_B1, confidence=bad, method=MatchMethod.EXACT)
 
 
 # --------------------------------------------------------------------------- #
