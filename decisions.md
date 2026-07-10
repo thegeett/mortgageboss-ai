@@ -8470,3 +8470,71 @@ both a RAW account in extraction and a MISMO asset-account column; see the amend
 sourcing-corroboration path is unavailable while AS-1's core (amount-vs-threshold + AI sourcing judgment) is unaffected.
 Also deferred: surfacing any future nested list; and (should a real deployment ever hold v1 snapshots) a v1→v2
 migration/back-compat reader.
+
+## ADR-249: AS-1 rule spec + load_rule_spec interface — the first Stage-2 rule artifact (LP-303)
+
+- **Date:** 2026-07-10
+- **Status:** Accepted
+
+**Context:** Stage 2 evaluates each rule by injecting rule-specific DATA into a shared evaluator prompt (the *spine*, with
+slots ``rule.criteria`` / ``rule.applicability`` / ``rule.required_inputs`` / ``rule.reference_values`` /
+``rule.evidence_required`` / ``rule.guideline_reference`` — ``docs/stage2-evaluator-prompts.md``). That data has to live
+*somewhere* the evaluator can load, versioned and reviewable, separate from prompt-assembly code (architecture v2 §3C:
+"rules live as files"). LP-303 writes the FIRST such artifact — AS-1 (large-deposit sourcing sweep) — and the
+``load_rule_spec(rule_id)`` interface. Nothing consumes it yet (the evaluator is LP-304); this is the spec + loader only.
+
+**Decision:**
+
+- **The spec is a version-controlled YAML file** (``app/verification/rules/specs/AS-1.yaml``), one file per ``rule_id``,
+  co-located with the LP-301 kinds table and diffable in review. YAML (pyyaml already a dep) over JSON for comments —
+  the file self-documents the provisional-format caveat inline.
+- **The spec shape was DISCOVERED from this one real rule, and is explicitly PROVISIONAL.** Fields: ``rule_id`` / ``name`` /
+  ``category`` / ``kind`` / ``numeric_check`` / ``criteria`` / ``applicability`` {scope, trigger} / ``required_inputs`` (a
+  structured list of {name, snapshot_path, description}) / ``reference_values`` {large_deposit_threshold, priya_validated,
+  threshold_needs_signoff} / ``subject_enumeration`` / ``subject_key_fields`` / ``evidence_required`` /
+  ``guideline_reference`` / ``spec_version``. It maps 1:1 to the spine slots plus the calculative-body needs (a threshold to
+  surface as operand Y) and the LP-306 finding-identity needs (per-deposit subject key). We did **not** design a general
+  multi-rule schema now — that is LP-308's job (the caveat is stated in the file header, the module docstring, and the
+  ``RuleSpec`` docstring).
+- **RESOLVED input source = the frozen SNAPSHOT, never raw extraction (LP-302 Option A).** Every ``required_inputs`` entry
+  points at a snapshot path: deposits at ``documents.entries[document_type=="bank_statement"].transactions[…]`` (LP-302a
+  ``TransactionRecord`` — amount/date/direction/description), the statement's pre-masked account at
+  ``documents.entries[].fields["account_number_masked"]``, and monthly qualifying income at the mismo per-item fact
+  ``mismo.facts["borrower.<n>.income.<m>.monthly_amount"]`` (computed aggregate available at
+  ``calculations.dti.value["gross_monthly_income"]``). This keeps the LP-302 §3C invariant "the evaluator reads only the
+  snapshot" — a test asserts no path names ``extracted_data``/``extraction``.
+- **``load_rule_spec(rule_id) -> RuleSpec`` is the evaluator's ONLY entry point, and is swappable.** It reads the YAML
+  today, but the signature promises nothing about a file — a DB-backed source later is a drop-in. Returns a frozen,
+  ``extra="forbid"`` pydantic ``RuleSpec`` so a missing slot or an unknown/typo'd key **fails loud at LOAD time**, not deep
+  in an evaluation. A four-exception hierarchy (``RuleSpecNotFound`` / ``RuleSpecInvalid`` / ``RuleSpecInconsistent`` under
+  ``RuleSpecError``) makes each failure mode distinguishable. Cached (``functools.cache``) — specs are immutable artifacts;
+  a private, directory-parameterized ``_load_spec_from(dir, rule_id)`` stays uncached so tests point it at a temp dir.
+- **The spec must AGREE with ``rule_kinds.csv`` (LP-301) — the CSV stays the single gate of record.** ``load_rule_spec``
+  cross-checks ``kind`` and ``numeric_check`` **and** the validation gate (``reference_values.priya_validated`` /
+  ``threshold_needs_signoff``) against the rule's CSV row and raises ``RuleSpecInconsistent`` on any divergence. A spec can
+  never mark a threshold "validated" while the CSV says it is not.
+- **The threshold is recorded as DATA, honestly.** ``reference_values.large_deposit_threshold = "50% of total monthly
+  qualifying income"`` lives in the spec (not in the AI's memory, not hardcoded in code — a test greps ``app/verification``
+  to prove no ``.py`` carries the threshold prose). Its validation status is recorded **as it truly is**: the ticket draft
+  suggested ``priya_validated: true``, but ``rule_kinds.csv`` has AS-1 ``priya_validated=false`` +
+  ``threshold_needs_signoff=true`` — so the spec records ``false`` (the CSV cross-check would reject ``true`` anyway). The
+  50% threshold is honest *proposed* data pending Priya sign-off, not a confirmed value.
+
+**Contradictions resolved (flagged in Phase 0 before building):**
+
+- **Account is no longer on ``TransactionRecord``.** A prior review (commit ``70fac7c`` "LP-302a review: remove per-row
+  account") reverted the account-on-record change; the ticket's sketch (``subject_key_fields: [account, date, amount]`` and
+  transactions "with account") assumed it was there. Resolution: ``required_inputs`` references the account at its ACTUAL
+  location — the parent ``DocumentEntry.fields["account_number_masked"]`` (pre-masked, non-matchable) — and
+  ``subject_key_fields``'s ``account`` resolves from the parent entry, not the transaction. The deposit↔MISMO-asset match
+  remains unavailable (the LP-302a KNOWN GAP), which AS-1's core does not need.
+- **``priya_validated`` true-vs-false.** Resolved in favor of the CSV (``false``) per the ticket's own "record honestly"
+  instruction and the cross-check — see the threshold-as-data decision above.
+
+**Consequences:** ``app/verification/rules/specs/AS-1.yaml`` + ``app/verification/rules/specs.py``
+(``RuleSpec``/``Applicability``/``RequiredInput``/``ReferenceValues`` models, the exception hierarchy, ``load_rule_spec`` +
+``_load_spec_from`` + ``_check_consistency``); 17 tests in ``tests/verification/rules/test_specs.py``. Reuses ADR-247
+(kinds table + gate), ADR-248 (the snapshot transaction/account input path), and the §3C spine-slot contract. **Deferred to
+LP-308:** generalizing the spec format across all ~133 rules (the AS-1 shape is provisional). **Out of scope (later
+tickets):** the evaluator / AI call + prompt assembly (LP-304), the numeric bookend (LP-305), finding output + the four
+states + per-deposit identity (LP-306), other rules' specs, and a DB-backed spec store.
