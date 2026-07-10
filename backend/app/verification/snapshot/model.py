@@ -46,7 +46,8 @@ from app.verification.snapshot.pii import PiiField
 
 # The on-disk snapshot shape version. Bump when the structure changes so a reader
 # always knows which shape it holds (readers branch on this; see ADR-241).
-SNAPSHOT_VERSION = 1
+# v2 (LP-302a) — DocumentEntry gains a nested ``transactions`` list (bank statements).
+SNAPSHOT_VERSION = 2
 
 # A snapshot cell is either a plain fact or a masked PII fact. The two are
 # mutually exclusive under LP-203's ``extra="forbid"`` (``value`` vs
@@ -114,6 +115,30 @@ class MismoSection(BaseModel):
         return not self.absent
 
 
+class TransactionRecord(BaseModel):
+    """One bank-statement transaction row (LP-302a) — the per-deposit facts a
+    per-transaction rule (AS-1 large-deposit, later NSF/chaining/recurring) reads
+    FROM THE SNAPSHOT.
+
+    Each attribute is an ordinary :class:`Field` (``source=extracted``, nullable
+    confidence, absent≠empty) — so a row the extractor read without a date carries
+    ``date`` = an absent Field, distinct from a present-null one. ``direction`` is
+    ``credit`` / ``debit``, derived from the extraction's transaction_type / amount
+    sign. There is **no account here** — the statement's (pre-masked) account lives
+    on the parent :class:`DocumentEntry`'s ``fields`` (a per-loan-file account has no
+    raw form to hash on this branch; see ADR-248). ``description`` has any 9+-digit
+    run / SSN pattern redacted so it is PII-safe at rest (never a raw account/id in
+    the blob), while keeping the sourcing signal (PAYROLL / TRANSFER / VENMO).
+    """
+
+    model_config = {"frozen": True}
+
+    date: Field
+    amount: Field
+    direction: Field
+    description: Field
+
+
 class DocumentEntry(BaseModel):
     """One document's contribution: type + resolved borrower(s) + extracted fields.
 
@@ -122,6 +147,12 @@ class DocumentEntry(BaseModel):
     built entry's resolved-borrower list is itself immutable (not just the attribute
     reassignment). The document's raw asserted name is NOT here — it stays as an
     ordinary entry in ``fields`` (``asserted_name``).
+
+    ``transactions`` (LP-302a) is a nested list for bank statements — a ``tuple`` for
+    immutability (the LP-204 frozen-nested lesson). **``None`` = not surfaced/absent**
+    (a non-bank document, or a statement whose extraction carried no transaction
+    list); **an empty tuple = a statement present with zero transactions**
+    (present-empty). The two are deliberately distinct (absent≠empty).
     """
 
     model_config = {"frozen": True}
@@ -129,6 +160,7 @@ class DocumentEntry(BaseModel):
     document_type: str | None = None
     belongs_to: tuple[BorrowerRef, ...] | None = None
     fields: dict[str, SnapshotField] = PydField(default_factory=dict)
+    transactions: tuple[TransactionRecord, ...] | None = None
 
     @model_validator(mode="after")
     def _belongs_to_null_or_nonempty(self) -> DocumentEntry:

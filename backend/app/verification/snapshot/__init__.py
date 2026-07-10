@@ -11,6 +11,7 @@ from app.verification.snapshot.calculations_section import build_calculations_se
 from app.verification.snapshot.documents_section import (
     build_document_fields,
     build_documents_section,
+    build_transactions,
 )
 from app.verification.snapshot.fields import Field, FieldSource, JsonScalar
 from app.verification.snapshot.mismo_section import build_mismo_section, load_mismo_section
@@ -25,6 +26,7 @@ from app.verification.snapshot.model import (
     MismoSection,
     Snapshot,
     SnapshotField,
+    TransactionRecord,
 )
 from app.verification.snapshot.persistence import (
     RawPiiAtRestError,
@@ -54,11 +56,13 @@ __all__ = [
     "Snapshot",
     "SnapshotAlreadyPersisted",
     "SnapshotField",
+    "TransactionRecord",
     "build_calculations_section",
     "build_document_fields",
     "build_documents_section",
     "build_mismo_section",
     "build_snapshot",
+    "build_transactions",
     "load_mismo_section",
     "load_snapshot",
     "load_snapshots_for_loan_file",

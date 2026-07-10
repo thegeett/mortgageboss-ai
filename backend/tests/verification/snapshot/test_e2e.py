@@ -42,6 +42,7 @@ from app.models.stated_financials import StatedAsset, StatedIncomeItem, StatedLi
 from app.services.extractions import create_extraction_version
 from app.services.loan_files import create_loan_file
 from app.verification.snapshot.builder import build_snapshot
+from app.verification.snapshot.model import SNAPSHOT_VERSION
 from app.verification.snapshot.persistence import load_snapshot, persist_snapshot
 from app.verification.snapshot.pii import PiiField
 from sqlalchemy import select
@@ -187,7 +188,7 @@ async def test_stage1_end_to_end_build_persist_load(db_session: AsyncSession) ->
 
     # All three sections present + populated + metadata.
     assert loaded.loan_file_id == lf.id and loaded.run_id == run_id
-    assert loaded.created_at.tzinfo is not None and loaded.snapshot_version == 1
+    assert loaded.created_at.tzinfo is not None and loaded.snapshot_version == SNAPSHOT_VERSION
     assert loaded.mismo.is_present and loaded.mismo.facts
     assert loaded.documents.is_present and loaded.documents.entries
     assert loaded.calculations.is_present

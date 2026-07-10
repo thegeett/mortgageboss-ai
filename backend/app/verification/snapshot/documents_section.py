@@ -44,6 +44,7 @@ omitted — distinct from a present empty string. Nothing is fabricated.
 
 from __future__ import annotations
 
+import re
 from collections import defaultdict
 from typing import Any
 from uuid import UUID
@@ -61,10 +62,31 @@ from app.models.helpers import only_active
 from app.models.loan_file import LoanFile
 from app.services.borrower_name_matching import BORROWER_NAME_FIELDS
 from app.verification.snapshot.fields import Field, FieldSource
-from app.verification.snapshot.model import BorrowerRef, DocumentEntry, SnapshotField
+from app.verification.snapshot.model import (
+    BorrowerRef,
+    DocumentEntry,
+    SnapshotField,
+    TransactionRecord,
+)
 from app.verification.snapshot.pii import PiiField, PiiKind
 
 _EXTRACTED = FieldSource.EXTRACTED
+
+# Document types that carry a nested transaction list (only bank statements today).
+_TRANSACTION_DOC_TYPES = frozenset({"bank_statement"})
+_TRANSACTIONS_KEY = "transactions"
+
+# Extraction transaction_type values → credit (money in) / debit (money out).
+_CREDIT_TYPES = frozenset({"deposit", "credit", "interest", "refund", "transfer_in"})
+_DEBIT_TYPES = frozenset({"withdrawal", "debit", "fee", "payment", "transfer_out", "check"})
+
+# The exact patterns the LP-209 at-rest guard rejects — redacted OUT of a
+# transaction description so a surfaced description is never a raw account/SSN/id at
+# rest (real descriptions carry payroll/confirmation/transfer ids that would trip the
+# guard). The sourcing signal (PAYROLL / TRANSFER / VENMO) and short ids (SAV 5683,
+# dates) are kept. See ADR-248.
+_DESC_REDACT = re.compile(r"\d{3}-\d{2}-\d{4}|\d{9,}")
+_REDACTED = "[redacted]"
 
 # The catch-all list key inside extracted_data (not a typed field).
 _CATCH_ALL_KEY = "additional_sections"
@@ -149,6 +171,75 @@ def build_document_fields(
     return fields
 
 
+def _direction(txn: dict[str, Any]) -> str | None:
+    """credit (money in) / debit (money out) from transaction_type, else amount sign."""
+    ttype = txn.get("transaction_type")
+    if isinstance(ttype, str):
+        key = ttype.strip().lower().replace(" ", "_")
+        if key in _CREDIT_TYPES:
+            return "credit"
+        if key in _DEBIT_TYPES:
+            return "debit"
+    amount = txn.get("amount")
+    if isinstance(amount, (int, float)):
+        return "credit" if amount >= 0 else "debit"
+    if isinstance(amount, str):
+        stripped = amount.strip().replace(",", "").replace("$", "")
+        if stripped.startswith("-"):
+            return "debit"
+        if stripped[:1].isdigit():
+            return "credit"
+    return None
+
+
+def _redact_description(value: Any) -> str | None:
+    """The description with any 9+-digit run / SSN pattern redacted (PII-safe at rest)."""
+    if not isinstance(value, str):
+        return None
+    text = value.strip()
+    return _DESC_REDACT.sub(_REDACTED, text) if text else None
+
+
+def _txn_field(value: Any) -> Field:
+    """A transaction attribute as a Field (extracted, no confidence), absent when null."""
+    if value is None:
+        return Field.missing()
+    scalar = _scalar(value)  # date/amount/etc. already stringified by the extractor's JSON dump
+    if scalar is None:
+        return Field.missing()
+    return Field.present(scalar, source=_EXTRACTED)
+
+
+def build_transactions(
+    extracted: dict[str, Any], document_type: str | None
+) -> tuple[TransactionRecord, ...] | None:
+    """The bank-statement transaction rows (LP-302a), or ``None`` when not surfaced.
+
+    ``None`` = absent (a non-bank document, or a statement whose extraction carried no
+    transaction list); an empty tuple = a statement present with zero transactions
+    (present-empty). Pure read + reshape; no correlation. ``description`` is redacted
+    so a raw account/id never lands at rest.
+    """
+    if document_type not in _TRANSACTION_DOC_TYPES:
+        return None
+    raw = extracted.get(_TRANSACTIONS_KEY)
+    if not isinstance(raw, list):
+        return None  # statement present but no transaction list → absent, not empty
+    records: list[TransactionRecord] = []
+    for txn in raw:
+        if not isinstance(txn, dict):
+            continue
+        records.append(
+            TransactionRecord(
+                date=_txn_field(txn.get("date")),
+                amount=_txn_field(txn.get("amount")),
+                direction=_txn_field(_direction(txn)),
+                description=_txn_field(_redact_description(txn.get("description"))),
+            )
+        )
+    return tuple(records)
+
+
 async def build_documents_section(db: AsyncSession, loan_file: LoanFile) -> list[DocumentEntry]:
     """Assemble the ``documents`` section for a loan file (active documents only).
 
@@ -194,6 +285,7 @@ async def build_documents_section(db: AsyncSession, loan_file: LoanFile) -> list
                 document_type=document.document_type,
                 belongs_to=refs or None,  # None when no borrower resolved
                 fields=fields,
+                transactions=build_transactions(extracted, document.document_type),
             )
         )
     return entries

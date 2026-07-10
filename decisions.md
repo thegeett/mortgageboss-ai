@@ -8379,3 +8379,56 @@ counts, structural exact_match explicit, calc⟺numeric, out-of-scope never AI, 
 table (rules-as-data-in-repo, mirroring the existing ``app/verification/rules/`` package). **Deferred:** rule specs
 (LP-303+), the evaluator (LP-304), prompts, the orchestrator, and the actual Priya sign-offs (only the tracking exists).
 The flagged re-tags/dup await Priya's validation pass.
+
+## ADR-248: Surface bank-statement transactions in the snapshot (Option A) — a nested TransactionRecord list (LP-302a)
+
+- **Date:** 2026-07-10
+- **Status:** Accepted
+
+**Context:** The LP-302 recon found a real Stage-1 completeness gap: bank-statement **transactions** (the per-deposit
+inputs AS-1 large-deposit and later NSF/chaining/recurring-debit rules need) live only in the raw
+``extraction.extracted_data`` JSON — the documents assembler skips nested lists (``documents_section.py`` ``_scalar``
+returns ``None`` for a list). So a Stage-2 evaluator that reads *only the snapshot* (the §3C invariant) could not evaluate
+a per-transaction rule. This ticket is **Option A** from that recon: surface transactions IN the snapshot rather than let
+the evaluator read raw extraction (which would break "evaluator reads only the snapshot").
+
+**Decision:**
+
+- **Add a nested ``TransactionRecord`` list to ``DocumentEntry``.** ``DocumentEntry.transactions: tuple[TransactionRecord,
+  ...] | None`` — a ``tuple`` for immutability (the LP-204 frozen-nested lesson). ``TransactionRecord`` is a frozen model
+  whose four attributes are each an ordinary LP-203 ``Field`` (``source=extracted``, nullable confidence, absent≠empty):
+  ``date``, ``amount``, ``direction`` (``credit``/``debit``), ``description``.
+- **Absent ≠ empty for the list:** ``None`` = not surfaced/absent (a non-bank document, or a bank statement whose
+  extraction carried no transaction list); an **empty tuple** = a statement present with **zero** transactions. The two
+  are deliberately distinct and both round-trip.
+- **No ``account`` on the record (deviation from the ticket draft, evidence-driven).** The recon assumed the account could
+  be a hashable ``PiiField.from_raw`` so a deposit could cross-section-match the MISMO asset account. Reality on this
+  branch: the extractor stores the account **pre-masked** (``account_number_masked`` = ``****NNNN``, no raw form to hash →
+  ``match_hash=None``), and MISMO ``StatedAsset`` has **no account column** (no ``asset.N.account`` fact to match). So a
+  real transaction-account↔asset-account hash match is impossible here (the same account-PII gap ADR-243/LP-302 flagged).
+  Rather than hash a mask string (a meaningless, non-matchable value) or fabricate one, the account is **not** duplicated
+  on each record — the statement's (pre-masked) account already lives on the parent ``DocumentEntry.fields``. The
+  account-hash cross-section match is a documented follow-up (needs a raw account + a MISMO asset-account column).
+- **``description`` is redacted, not raw (deviation, forced by a hard constraint).** Real bank descriptions carry payroll
+  IDs / confirmation #s / transfer IDs — on LF-6T3N **37 of 50** descriptions contain a 9+-digit run, exactly what the
+  LP-209 PII-at-rest guard rejects. So "raw and faithful" (surface the description) and "persist/load round-trips" are
+  *incompatible* on real data — a raw description makes the snapshot **unpersistable**. Resolution: surface the
+  description with any ``\d{9,}`` run or ``\d{3}-\d{2}-\d{4}`` SSN pattern (the exact patterns the guard flags) redacted to
+  ``[redacted]``, keeping the **sourcing signal** AS-1 needs (PAYROLL / TRANSFER / VENMO) and short identifiers (SAV 5683,
+  dates, alnum codes). This is the PII-safe-at-rest invariant applied at the assembler (the right layer) rather than
+  weakening the guard. ``direction`` is derived from ``transaction_type`` (deposit/interest → credit; withdrawal/fee →
+  debit) with an amount-sign fallback.
+- **``snapshot_version`` bumped 1 → 2** — the shape genuinely changed. The reader's strict version check (ADR-241) means a
+  persisted **v1** blob no longer loads under the v2 reader; acceptable because nothing in production persists snapshots
+  yet (the only v1 rows are dev/test artifacts). The change is otherwise **additive**: other sections and the round-trip
+  are unaffected; non-bank documents simply carry ``transactions=None``.
+
+**Consequences:** a pure read + reshape (``build_transactions`` is pure; the assembler surfaces transactions when
+``document_type == "bank_statement"`` and the extraction carried a transaction list). Verified on real LF-6T3N: 50
+transactions surfaced across 5 statements, descriptions redacted, the LP-209 at-rest guard passes, and persist→load ==
+built (lossless v2 round-trip). Reuses ADR-240 (Field), ADR-241 (the container + version discipline), ADR-243/246 (the
+documents assembler + PII-at-rest guard). **Scope note:** only bank-statement transactions are surfaced (the only nested
+list AS-1 + near-term per-transaction rules need); other nested extraction structures are not surfaced (none seen beyond
+transactions). **Deferred:** the account-hash cross-section match (needs a raw account + a MISMO asset-account column);
+surfacing any future nested list; and (should a real deployment ever hold v1 snapshots) a v1→v2 migration/back-compat
+reader.
