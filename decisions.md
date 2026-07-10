@@ -8101,6 +8101,10 @@ snapshot blob. Fixes:
   (``date_of_birth`` excluded — a date, surfaced as an ordinary field as MISMO does); a new raw-SSN/account field can no
   longer be missed silently. The PII test now seeds a raw ``employee_ssn`` / ``recipient_tin`` and asserts no raw value
   (dashed or undashed) appears; the smoke/test tripwire regex now also catches an SSN-shaped ``\d{3}-\d{2}-\d{4}``.
+  **(Amended 2026-07-10 — see the EIN/TIN follow-up below: the guard originally scraped ``# SENSITIVE`` + ``TypedField``
+  on ONE line, so a ruff-wrapped multi-line field (``employer_ein`` / ``payer_tin``) slipped it silently. It now
+  attributes the comment to the nearest preceding ``<name>: TypedField`` declaration, and self-checks that those fields
+  are detected — a comment-scrape guard, still deferring the structural fix of a typed ``PiiKind`` marker on the field.)**
 - **Confidence honesty.** ``_confidence`` was replaced by ``coerce_optional_confidence`` (LP-201), restoring the ``[0,1]``
   guard the hand-rolled copy dropped.
 - **N+1 fixed.** Borrower links are loaded in ONE ``document_id IN (…)`` query and grouped, replacing a per-document call.
@@ -8128,6 +8132,13 @@ ids not routed"): route both through ``PiiField.from_raw`` (``PiiKind.ACCOUNT`` 
 ``_PII_FIELDS`` and mark them ``# SENSITIVE`` in the extractors so the drift-guard keeps them synced. A 9-digit tax id is
 indistinguishable from a bare SSN to the guard, so masking preserves the strong guard rather than exempting it. Verified
 on real LF-6T3N (``employer_ein`` → ``****NNNN``; whole snapshot builds + persists + loads with no raw PII at rest).
+**(Follow-up review, 2026-07-10 — the drift guard did NOT actually keep them synced at first: ruff wrapped both fields
+across lines, putting ``# SENSITIVE`` on the closing ``)`` where the same-line scrape couldn't see it, so the guard was
+silently blind to the two fields this decision added. Fixed the guard to attribute the comment to the nearest preceding
+``TypedField`` declaration + self-check those fields; the module docstring was reconciled; the EIN/TIN test now strips
+``match_hash`` and checks the dashed form too. Held for a later decision: whether match-hashing a shared institution id
+under ``ACCOUNT`` kind is meaningful, and whether the LP-209 at-rest guard should learn to tell an EIN from an SSN rather
+than have this layer mask a non-borrower id.)**
 
 ## ADR-244: Calculations section assembler — invoke-and-map, source-tags passed through, not-computed=None (LP-207)
 

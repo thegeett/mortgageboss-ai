@@ -20,17 +20,21 @@ For each active, current document → a :class:`DocumentEntry`:
 
 ## PII
 
-Sensitive borrower numbers are routed through ``PiiField`` (never a plain ``Field``)
-per an explicit :data:`_PII_FIELDS` registry, so a raw value can't land as plaintext
+Sensitive numbers are routed through ``PiiField`` (never a plain ``Field``) per an
+explicit :data:`_PII_FIELDS` registry, so a raw value can't land as plaintext
 ``Field.value``. Two cases: a field the extractor stored **already masked**
 (``account_number_masked`` / ``taxpayer_ssn_masked`` / ``id_number_masked``) →
 ``PiiField.pre_masked`` (canonical last-4 display, ``match_hash=None``); a field the
-extractor stored **raw** ("as written" — W-2 ``employee_ssn``, 1099 ``recipient_tin``)
-→ ``PiiField.from_raw`` (masked here + a per-file match-hash; the raw is discarded).
-``social_security_wages`` / ``_tax_withheld`` are dollar amounts, not SSNs, and stay
-ordinary fields; institution tax ids (``payer_tin`` / ``employer_ein``) are not
-borrower PII. The registry is drift-guarded by a test (any SENSITIVE extractor field
-must be routed here).
+extractor stored **raw** ("as written" — W-2 ``employee_ssn`` / ``employer_ein``, 1099
+``recipient_tin`` / ``payer_tin``) → ``PiiField.from_raw`` (masked here + a per-file
+match-hash; the raw is discarded). ``social_security_wages`` / ``_tax_withheld`` are
+dollar amounts, not ids, and stay ordinary fields. The institution tax ids
+(``employer_ein`` / ``payer_tin``) are the employer/payer's id, not borrower PII, but
+are masked anyway: a bare 9-digit tax id is exactly what the LP-209 at-rest guard flags
+as a possible unmasked SSN, so masking keeps that guard strong (see the ``_PII_FIELDS``
+note). The registry is drift-guarded by a test (any ``# SENSITIVE`` extractor field must
+be routed here — the guard attributes the comment to its field even when ruff wraps the
+field across lines).
 
 ## Absent ≠ empty
 

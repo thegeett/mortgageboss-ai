@@ -222,14 +222,27 @@ def test_business_tax_ids_are_masked_not_plaintext() -> None:
     w2 = build_document_fields({"employer_ein": _field("12-3456789", None)}, "w2", loan_file_id=lf)
     ein = w2["employer_ein"]
     assert isinstance(ein, PiiField)
-    assert ein.display == "****6789" and "123456789" not in repr(ein.model_dump())
+    assert ein.display == "****6789"
 
     f1099 = build_document_fields(
         {"payer_tin": _field("98-7654321", None)}, "1099", loan_file_id=lf
     )
     tin = f1099["payer_tin"]
     assert isinstance(tin, PiiField)
-    assert tin.display == "****4321" and "987654321" not in repr(tin.model_dump())
+    assert tin.display == "****4321"
+
+    # Neither the dashed as-written form nor the collapsed digits appear anywhere in the
+    # produced fields. Exclude match_hash (a keyed hex digest legitimately contains digit
+    # runs), matching test_raw_ssn_and_tin_are_masked's stricter sweep.
+    def _no_raw(field: PiiField) -> str:
+        dumped = field.model_dump()
+        dumped.pop("match_hash", None)
+        return repr(dumped)
+
+    for field, raws in ((ein, ("12-3456789", "123456789")), (tin, ("98-7654321", "987654321"))):
+        blob = _no_raw(field)
+        for raw in raws:
+            assert raw not in blob
 
 
 async def test_pii_account_is_masked_piifield_no_raw(db_session: AsyncSession) -> None:
@@ -283,14 +296,25 @@ def test_pii_registry_covers_every_sensitive_extractor_field() -> None:
 
     _EXCLUDED = {"date_of_birth"}  # PII, but a date — no last-4 masking applies
     ext_dir = Path(__file__).resolve().parents[3] / "app" / "ai" / "extraction"
+    # Attribute a ``# SENSITIVE`` comment to the nearest preceding ``<name>: TypedField``
+    # declaration — NOT the same line only. ruff wraps a long field across lines and puts
+    # the comment on the closing ``)``, so a same-line scrape silently misses those fields
+    # (the exact way employer_ein/payer_tin slipped the guard). Tracking the current field
+    # keeps a multi-line SENSITIVE field detected.
     sensitive: set[str] = set()
+    decl_re = re.compile(r"\s*([a-z0-9_]+)\s*:\s*TypedField")
     for path in ext_dir.glob("*.py"):
+        current_field: str | None = None
         for line in path.read_text().splitlines():
-            if "# SENSITIVE" in line and "TypedField" in line:
-                m = re.match(r"\s*([a-z0-9_]+)\s*:", line)
-                if m:
-                    sensitive.add(m.group(1))
+            decl = decl_re.match(line)
+            if decl:
+                current_field = decl.group(1)
+            if "# SENSITIVE" in line and current_field is not None:
+                sensitive.add(current_field)
     assert sensitive, "expected to find # SENSITIVE typed fields in the extractors"
+    # Self-check the detector: the multi-line-formatted fields it previously missed MUST
+    # now be seen, or the guard is silently blind again.
+    assert {"employee_ssn", "employer_ein", "payer_tin"} <= sensitive
     missing = sensitive - set(_PII_FIELDS) - _EXCLUDED
     assert not missing, f"SENSITIVE extractor fields not PII-routed: {sorted(missing)}"
 
