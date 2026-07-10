@@ -15,6 +15,11 @@ from app.verification.rules.kinds import RuleKindName, load_rule_kinds
 _OUT = Path(__file__).resolve().parents[3] / "docs" / "stage2-rule-classification.md"
 
 
+def _cell(text: str) -> str:
+    """Make free-text safe for a markdown table cell (escape ``|``, flatten newlines)."""
+    return text.replace("|", r"\|").replace("\n", " ").replace("\r", " ")
+
+
 def render() -> str:
     rules = load_rule_kinds()
     kinds = Counter(rk.kind.value for rk in rules.values())
@@ -58,12 +63,14 @@ def render() -> str:
         for rk in group:
             em = "—" if rk.exact_match is None else str(rk.exact_match).lower()
             lines.append(
-                f"| {rk.rule_id} | {rk.name} | {rk.category} | {rk.kind.value} | "
+                f"| {rk.rule_id} | {_cell(rk.name)} | {_cell(rk.category)} | {rk.kind.value} | "
                 f"{rk.evaluation_path.value} | {str(rk.numeric_check).lower()} | {em} | "
                 f"{str(rk.priya_validated).lower()} | {str(rk.threshold_needs_signoff).lower()} |"
             )
         lines.append("")
-    return "\n".join(lines) + "\n"
+    # Exactly one trailing newline so regenerate-and-commit is idempotent (pre-commit's
+    # end-of-file fixer strips a trailing blank line, which would otherwise cause drift).
+    return "\n".join(lines).rstrip("\n") + "\n"
 
 
 def main() -> None:

@@ -33,9 +33,25 @@ from dataclasses import dataclass
 from enum import StrEnum
 from functools import lru_cache
 from pathlib import Path
+from types import MappingProxyType
 
 # The canonical artifact — plain-text, git-diffable, co-located with the rules.
 _CSV_PATH = Path(__file__).with_name("rule_kinds.csv")
+
+# The exact CSV columns (header is validated against this — a renamed/missing column
+# fails loud with the file+line, not a bare KeyError deep in a request).
+_COLUMNS = (
+    "rule_id",
+    "name",
+    "category",
+    "kind",
+    "evaluation_path",
+    "numeric_check",
+    "exact_match",
+    "priya_validated",
+    "threshold_needs_signoff",
+    "rationale",
+)
 
 
 class RuleKindName(StrEnum):
@@ -74,37 +90,118 @@ class RuleKind:
     rationale: str
 
 
-def _to_bool(value: str) -> bool:
-    return value.strip().lower() == "true"
+def _to_bool(value: str, *, column: str, rule_id: str) -> bool:
+    """Strictly ``true``/``false`` — anything else (``1``/``yes``/a typo) raises.
 
-
-def _to_opt_bool(value: str) -> bool | None:
+    A routing/sign-off table must not silently coerce a malformed cell to ``False``
+    (a threshold rule losing its sign-off gate is invisible), so an unrecognized
+    token fails loud at load, like the ``StrEnum`` columns already do.
+    """
     v = value.strip().lower()
-    return None if v == "" else v == "true"
+    if v not in ("true", "false"):
+        raise ValueError(f"rule_kinds.csv {rule_id}: {column} must be true/false, got {value!r}")
+    return v == "true"
+
+
+def _to_opt_bool(value: str, *, column: str, rule_id: str) -> bool | None:
+    """``true``/``false`` or ``None`` (empty); any other token raises (see :func:`_to_bool`)."""
+    if value.strip() == "":
+        return None
+    return _to_bool(value, column=column, rule_id=rule_id)
+
+
+def _validate(rk: RuleKind) -> None:
+    """Enforce the documented kind⇔path⇔flags contract — a bad row is UNLOADABLE.
+
+    The routing table's whole job is "never send a regulatory/out-of-scope rule to
+    AI", so the invariants are checked HERE (the choke point every consumer reads
+    through), not only in the test suite — a CSV edit that slips CI still fails
+    closed in prod instead of silently mis-routing.
+    """
+
+    def bad(msg: str) -> ValueError:
+        return ValueError(f"rule_kinds.csv {rk.rule_id}: {msg}")
+
+    if rk.kind is RuleKindName.CALCULATIVE:
+        if not rk.numeric_check:
+            raise bad("calculative rule must have numeric_check=true")
+        if rk.evaluation_path not in (
+            EvaluationPath.DETERMINISTIC_BOOKEND,
+            EvaluationPath.DETERMINISTIC_BOOKEND_AI,
+        ):
+            raise bad(f"calculative path must be a deterministic bookend, got {rk.evaluation_path}")
+        if rk.exact_match is not None:
+            raise bad("exact_match applies to structural rules only")
+    elif rk.kind is RuleKindName.STRUCTURAL:
+        if rk.numeric_check:
+            raise bad("numeric_check is calculative-only")
+        if rk.exact_match is None:
+            raise bad("structural rule must set exact_match (exact vs fuzzy)")
+        expected = (
+            EvaluationPath.DETERMINISTIC_ONLY if rk.exact_match else EvaluationPath.AI_FUZZY_MATCH
+        )
+        if rk.evaluation_path is not expected:
+            raise bad(f"structural exact_match={rk.exact_match} → path must be {expected}")
+    else:  # judgmental / out_of_scope: no numeric_check, no exact_match, one fixed path
+        if rk.numeric_check:
+            raise bad("numeric_check is calculative-only")
+        if rk.exact_match is not None:
+            raise bad("exact_match applies to structural rules only")
+        expected = (
+            EvaluationPath.AI_JUDGMENT
+            if rk.kind is RuleKindName.JUDGMENTAL
+            else EvaluationPath.STATIC_FILTER
+        )
+        if rk.evaluation_path is not expected:
+            raise bad(f"{rk.kind} path must be {expected}, got {rk.evaluation_path}")
+
+    if rk.threshold_needs_signoff and rk.kind is not RuleKindName.CALCULATIVE:
+        raise bad("threshold_needs_signoff is calculative-only")
 
 
 @lru_cache(maxsize=1)
-def load_rule_kinds() -> dict[str, RuleKind]:
-    """Load the routing table → ``{rule_id: RuleKind}`` (cached; the CSV is source of truth)."""
+def load_rule_kinds() -> MappingProxyType[str, RuleKind]:
+    """Load the routing table → read-only ``{rule_id: RuleKind}`` (cached; CSV is truth).
+
+    Read-only (``MappingProxyType``) so a consumer can't mutate the shared cached
+    table. Fails loud on a malformed header, a short/None row, a duplicate id, an
+    unparseable boolean, or any cross-field invariant violation (:func:`_validate`).
+    """
     out: dict[str, RuleKind] = {}
     with _CSV_PATH.open(newline="") as f:
-        for row in csv.DictReader(f):
+        reader = csv.DictReader(f)
+        if reader.fieldnames is None or tuple(reader.fieldnames) != _COLUMNS:
+            raise ValueError(f"rule_kinds.csv header must be {_COLUMNS}, got {reader.fieldnames}")
+        for row in reader:
+            missing = [c for c in _COLUMNS if row.get(c) is None]
+            if missing:  # a short row → DictReader fills trailing fields with None
+                raise ValueError(f"rule_kinds.csv line {reader.line_num}: missing/short {missing}")
+            rule_id = row["rule_id"].strip()
             rk = RuleKind(
-                rule_id=row["rule_id"].strip(),
+                rule_id=rule_id,
                 name=row["name"].strip(),
                 category=row["category"].strip(),
                 kind=RuleKindName(row["kind"].strip()),
                 evaluation_path=EvaluationPath(row["evaluation_path"].strip()),
-                numeric_check=_to_bool(row["numeric_check"]),
-                exact_match=_to_opt_bool(row["exact_match"]),
-                priya_validated=_to_bool(row["priya_validated"]),
-                threshold_needs_signoff=_to_bool(row["threshold_needs_signoff"]),
+                numeric_check=_to_bool(
+                    row["numeric_check"], column="numeric_check", rule_id=rule_id
+                ),
+                exact_match=_to_opt_bool(row["exact_match"], column="exact_match", rule_id=rule_id),
+                priya_validated=_to_bool(
+                    row["priya_validated"], column="priya_validated", rule_id=rule_id
+                ),
+                threshold_needs_signoff=_to_bool(
+                    row["threshold_needs_signoff"],
+                    column="threshold_needs_signoff",
+                    rule_id=rule_id,
+                ),
                 rationale=row["rationale"].strip(),
             )
             if rk.rule_id in out:
                 raise ValueError(f"duplicate rule_id in rule_kinds.csv: {rk.rule_id}")
+            _validate(rk)
             out[rk.rule_id] = rk
-    return out
+    return MappingProxyType(out)
 
 
 def kind_for(rule_id: str) -> RuleKind | None:

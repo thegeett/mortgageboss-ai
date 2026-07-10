@@ -6,9 +6,13 @@ calculative ⟺ numeric_check, out-of-scope is static_filter (never AI), the loa
 round-trips, and the validation helpers report the pending/needs-signoff sets.
 """
 
+import pytest
 from app.verification.rules.kinds import (
     EvaluationPath,
+    RuleKind,
     RuleKindName,
+    _to_bool,
+    _validate,
     kind_for,
     load_rule_kinds,
     numeric_check_rules,
@@ -115,3 +119,76 @@ def test_ids_are_unique_and_categories_present() -> None:
     rules = load_rule_kinds()
     assert len(rules) == len({rk.rule_id for rk in rules.values()})
     assert all(rk.category for rk in rules.values())
+
+
+# --------------------------------------------------------------------------- #
+# Loader hardening (review): read-only cache, strict bools, fail-loud invariants
+# --------------------------------------------------------------------------- #
+
+
+def test_loaded_table_is_read_only() -> None:
+    """The cached routing table is immutable — a caller can't corrupt it in place."""
+    rules = load_rule_kinds()
+    with pytest.raises(TypeError):
+        rules["ID-1"] = rules["ID-2"]  # type: ignore[index]
+
+
+def test_bool_parsing_is_strict() -> None:
+    assert _to_bool("true", column="c", rule_id="R") is True
+    assert _to_bool("FALSE", column="c", rule_id="R") is False
+    for bad in ("ture", "yes", "1", "y", "t"):  # a typo/alias must NOT silently become False
+        with pytest.raises(ValueError, match="true/false"):
+            _to_bool(bad, column="numeric_check", rule_id="R")
+
+
+def _rk(**over: object) -> RuleKind:
+    base: dict[str, object] = {
+        "rule_id": "X-1",
+        "name": "n",
+        "category": "c",
+        "kind": RuleKindName.STRUCTURAL,
+        "evaluation_path": EvaluationPath.DETERMINISTIC_ONLY,
+        "numeric_check": False,
+        "exact_match": True,
+        "priya_validated": False,
+        "threshold_needs_signoff": False,
+        "rationale": "r",
+    }
+    base.update(over)
+    return RuleKind(**base)  # type: ignore[arg-type]
+
+
+def test_validate_rejects_cross_field_violations() -> None:
+    """A row whose enum values are each legal but whose combination misroutes must raise."""
+    # structural exact_match=True but routed to AI → would send a deterministic check to AI
+    with pytest.raises(ValueError, match="path must be"):
+        _validate(_rk(exact_match=True, evaluation_path=EvaluationPath.AI_FUZZY_MATCH))
+    # calculative without the numeric bookend
+    with pytest.raises(ValueError, match="numeric_check"):
+        _validate(
+            _rk(
+                kind=RuleKindName.CALCULATIVE,
+                exact_match=None,
+                numeric_check=False,
+                evaluation_path=EvaluationPath.DETERMINISTIC_BOOKEND,
+            )
+        )
+    # out_of_scope routed anywhere but static_filter → could reach AI
+    with pytest.raises(ValueError, match="static_filter"):
+        _validate(
+            _rk(
+                kind=RuleKindName.OUT_OF_SCOPE,
+                exact_match=None,
+                evaluation_path=EvaluationPath.AI_JUDGMENT,
+            )
+        )
+    # threshold sign-off on a non-calculative rule
+    with pytest.raises(ValueError, match="threshold_needs_signoff"):
+        _validate(_rk(threshold_needs_signoff=True))
+
+
+def test_generated_markdown_is_in_sync_with_the_csv() -> None:
+    """The committed companion doc must equal the generator output — no silent drift."""
+    from app.scripts.generate_rule_kinds_md import _OUT, render
+
+    assert _OUT.read_text() == render(), "run `python -m app.scripts.generate_rule_kinds_md`"
