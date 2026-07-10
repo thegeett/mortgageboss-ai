@@ -98,7 +98,9 @@ async def _complete_loan_file(db: AsyncSession, *, with_documents: bool = True) 
 async def test_happy_path_all_sections_present_and_metadata(db_session: AsyncSession) -> None:
     lf = await _complete_loan_file(db_session)
     run_id = uuid4()
-    snap = await build_snapshot(db_session, loan_file_id=lf.id, run_id=run_id)
+    snap = await build_snapshot(
+        db_session, loan_file_id=lf.id, run_id=run_id, company_id=lf.company_id
+    )
 
     assert isinstance(snap, Snapshot)
     assert snap.loan_file_id == lf.id
@@ -115,7 +117,9 @@ async def test_happy_path_all_sections_present_and_metadata(db_session: AsyncSes
 
 async def test_empty_documents_is_present_not_absent(db_session: AsyncSession) -> None:
     lf = await _complete_loan_file(db_session, with_documents=False)
-    snap = await build_snapshot(db_session, loan_file_id=lf.id, run_id=uuid4())
+    snap = await build_snapshot(
+        db_session, loan_file_id=lf.id, run_id=uuid4(), company_id=lf.company_id
+    )
     # No documents → a present, empty documents section (NOT absent, NOT an error).
     assert snap.documents.is_present
     assert snap.documents.entries == []
@@ -131,7 +135,9 @@ async def test_section_failure_is_absent_with_reason_others_intact(
     lf = await _complete_loan_file(db_session)
     # Force the MISMO assembler to raise; the snapshot must still build.
     with patch.object(bld, "load_mismo_section", AsyncMock(side_effect=RuntimeError("boom"))):
-        snap = await build_snapshot(db_session, loan_file_id=lf.id, run_id=uuid4())
+        snap = await build_snapshot(
+            db_session, loan_file_id=lf.id, run_id=uuid4(), company_id=lf.company_id
+        )
 
     assert snap.mismo.absent is True
     assert snap.mismo.reason == "mismo assembler raised RuntimeError"  # PII-safe, class only
@@ -144,8 +150,12 @@ async def test_section_failure_is_absent_with_reason_others_intact(
 async def test_build_is_stateless_and_deterministic(db_session: AsyncSession) -> None:
     lf = await _complete_loan_file(db_session)
     run_id = uuid4()
-    a = await build_snapshot(db_session, loan_file_id=lf.id, run_id=run_id)
-    b = await build_snapshot(db_session, loan_file_id=lf.id, run_id=run_id)
+    a = await build_snapshot(
+        db_session, loan_file_id=lf.id, run_id=run_id, company_id=lf.company_id
+    )
+    b = await build_snapshot(
+        db_session, loan_file_id=lf.id, run_id=run_id, company_id=lf.company_id
+    )
     # Equivalent modulo created_at — sections rebuild identically (no caching, no mutation).
     assert a.mismo == b.mismo
     assert a.documents == b.documents
@@ -156,17 +166,44 @@ async def test_build_is_stateless_and_deterministic(db_session: AsyncSession) ->
 async def test_run_id_is_received_not_minted(db_session: AsyncSession) -> None:
     lf = await _complete_loan_file(db_session, with_documents=False)
     run_id = uuid4()
-    snap = await build_snapshot(db_session, loan_file_id=lf.id, run_id=run_id)
+    snap = await build_snapshot(
+        db_session, loan_file_id=lf.id, run_id=run_id, company_id=lf.company_id
+    )
     assert snap.run_id == run_id  # stamped exactly as received
 
 
 async def test_snapshot_is_frozen(db_session: AsyncSession) -> None:
     lf = await _complete_loan_file(db_session, with_documents=False)
-    snap = await build_snapshot(db_session, loan_file_id=lf.id, run_id=uuid4())
+    snap = await build_snapshot(
+        db_session, loan_file_id=lf.id, run_id=uuid4(), company_id=lf.company_id
+    )
     with pytest.raises(ValidationError):
         snap.run_id = uuid4()
 
 
 async def test_unknown_loan_file_raises(db_session: AsyncSession) -> None:
     with pytest.raises(LoanFileNotFound):
-        await build_snapshot(db_session, loan_file_id=uuid4(), run_id=uuid4())
+        await build_snapshot(db_session, loan_file_id=uuid4(), run_id=uuid4(), company_id=uuid4())
+
+
+async def test_loan_file_of_another_company_is_not_found(db_session: AsyncSession) -> None:
+    """The builder is company-scoped: a file from another tenant does not resolve."""
+    lf = await _complete_loan_file(db_session, with_documents=False)
+    with pytest.raises(LoanFileNotFound):
+        await build_snapshot(
+            db_session,
+            loan_file_id=lf.id,
+            run_id=uuid4(),
+            company_id=uuid4(),  # wrong company
+        )
+
+
+async def test_nil_run_id_is_rejected(db_session: AsyncSession) -> None:
+    """A nil UUID run_id (the 'forgot to set it' sentinel) is a caller error."""
+    from uuid import UUID
+
+    lf = await _complete_loan_file(db_session, with_documents=False)
+    with pytest.raises(ValueError, match="run_id"):
+        await build_snapshot(
+            db_session, loan_file_id=lf.id, run_id=UUID(int=0), company_id=lf.company_id
+        )

@@ -40,7 +40,9 @@ async def main(display_id: str = "LF-6T3N") -> None:
         ).scalar_one_or_none()
         if loan_file is None:
             raise SystemExit(f"no active loan file {display_id!r}")
-        snap = await build_snapshot(db, loan_file_id=loan_file.id, run_id=uuid4())
+        snap = await build_snapshot(
+            db, loan_file_id=loan_file.id, run_id=uuid4(), company_id=loan_file.company_id
+        )
 
     print(f"snapshot v{snap.snapshot_version}  loan_file={snap.loan_file_id}  run={snap.run_id}")
     print(f"created_at={snap.created_at.isoformat()}")

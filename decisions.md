@@ -8216,3 +8216,27 @@ honest partial snapshot instead of a crash. The COMPLETE all-three-present case 
 test (test DB via ``create_all``). Reuses ADR-241 (the container) and ADR-242/243/244 (the assemblers). Deferred: the
 ``belongs_to=None`` "matched-then-removed vs never-resolved" ambiguity (still open, an LP-206 note); persistence (LP-209);
 and triggering / run-creation. Amends LP-204 (ADR-241) with the section ``reason``/``failed`` addition.
+
+**Amendment (2026-07-10, post code-review).** The partial-failure policy was correct for pure failures but broke for DB
+errors — the three sections shared one ``AsyncSession`` with no rollback, so a DB error in one section poisoned the
+transaction and cascade-failed the later ones with misleading reasons. (The real-file run above likely exhibited this:
+``calculations absent (DBAPIError)`` was probably collateral from documents' ``ProgrammingError`` poisoning the session,
+not an independent failure.) Fixes:
+
+- **Savepoint per section.** Each section now builds inside ``async with db.begin_nested()`` (a shared ``_build_section``
+  helper that collapsed the three copy-pasted wrappers). A DB error rolls back to that section's savepoint only, so the
+  outer transaction and the loaded ``loan_file`` stay valid and the next section runs cleanly and fails (or succeeds) on
+  its own merits. (A full ``db.rollback()`` was avoided — it would expire ``loan_file`` and break the next section's
+  attribute reads.) Failures now log at **ERROR** (a degraded section is alert-worthy), not WARNING.
+- **Company-scoped load.** ``build_snapshot`` now requires ``company_id`` and ``_load_loan_file`` filters by it — the
+  builder is the tenant boundary (it resolves the id itself, so the "caller passes a scoped loan_file" precondition the
+  assemblers assume is now enforced here), closing a cross-tenant leak before LP-209 wires it up.
+- **Dead eager-loads removed.** ``selectinload(borrowers/property/lender)`` were never read (the assemblers re-query;
+  the calculators reach the lender via ``db.get``), so ``_load_loan_file`` is now a bare scoped row fetch.
+- **Nil ``run_id`` rejected** (an un-attributable run is a caller error); the redundant ``snapshot_version=`` kwarg was
+  dropped (the model defaults it).
+
+Deferred: whether a *non-DB* assembler exception (a code bug) should propagate (fail loud) rather than degrade to
+absent-with-reason — kept the broad ``except Exception`` (the tested resilience contract) plus ERROR logging; narrowing
+to fail-loud-on-bugs is a design decision. Also deferred: a shared ``_AbsentableSection`` base for the now-4× absent/
+present/missing/failed pattern (LP-204's deferral, stronger now).
