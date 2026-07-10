@@ -8109,3 +8109,66 @@ Deferred: ``belongs_to=None`` still can't distinguish "matched borrowers later r
 is an LP-208 concern); schema-declared PII (annotate ``PiiKind`` on the extraction ``TypedField`` so the assembler reads
 it instead of a parallel registry) — the drift-guard test is the interim; and the ``_scalar`` naming/dedup across the two
 assemblers.
+
+## ADR-244: Calculations section assembler — invoke-and-map, source-tags passed through, not-computed=None (LP-207)
+
+- **Date:** 2026-07-10
+- **Status:** Accepted
+
+**Context:** The third Stage-1 assembler (LP-207) fills the ``calculations`` section by CALLING the four existing
+calculators (DTI/LTV/MI/reserves) and mapping each native return shape into LP-204's uniform ``CalculationEntry
+{value, breakdown}``. Lighter than the prior assemblers (it's a mapping), but three choices are worth recording.
+
+**Decision:**
+
+- **Invoke, don't reimplement.** ``build_calculations_section`` awaits ``build_dti_calculation`` /
+  ``build_ltv_calculation`` / ``compute_loan_mi`` / ``build_reserves_view`` and maps their results — **zero calculation
+  math is duplicated** (the calculators are the source of truth; a re-derivation would be a divergence bug). A test mocks
+  the four entry points and asserts they are invoked.
+- **Source tags are passed through verbatim, never re-derived.** Each breakdown line copies the calculator's own
+  ``source`` (``stated`` / ``computed`` / ``extracted`` / ``manual`` / ``override``) straight onto
+  ``CalcBreakdownLine.source``. Because that field is a **free string** (LP-204), the calculator's ``override`` tag — a
+  5th value beyond the four the ticket named — survives losslessly with no enum coercion. (The ticket's premise of a
+  ``CalcSource`` enum / a ``CalculationLine`` type does not match the committed model, which is ``CalcBreakdownLine`` with
+  a string ``source``; reused as-is.)
+- **Not-computed = ``None``, never a fabricated 0.0.** When a calculator can't produce its headline it maps to ``None``
+  (LP-204: ``CalculationEntry | None``): DTI when ``back_end_dti`` is ``None`` (no income); LTV when ``ltv`` is ``None``
+  (no value basis — the refi/no-valuation case); reserves when the view's ``computed`` flag is ``False``
+  (``months_available`` ``None`` — no PITI divisor; see the post-review amendment — this was originally a fragile
+  ``headline == "—"`` display-string match). **MI is always present** — ``required`` is always determined, and a
+  "not required / premium ``None``" answer is *computed*, not missing.
+- **DTI uses STATED (MISMO) income — surfaced transparently.** The calculators compute DTI from stated income; the income
+  breakdown line carries ``source=stated``, making the input visible. LP-207 does NOT pick a different income or reconcile
+  a stated-vs-extracted disagreement — that is a downstream finding; the snapshot shows the calc + its source tag.
+- **Money is stringified exactly** (``Decimal`` → string) for both ``value`` headline numbers and breakdown ``amount``,
+  honoring LP-204's guard against a silent float. Reserves' ``value`` is the calculator's formatted ``headline`` string
+  (the ``CalculatorView`` doesn't expose the raw months number).
+
+**Consequences:** a pure invoke + map (``build_calculations_section(db, loan_file) -> CalculationsSection``; ``map_dti`` /
+``map_ltv`` / ``map_mi`` / ``map_reserves`` pure). Covered by mapper unit tests (source pass-through, no line dropped,
+not-computed=None, money precision), an invoke-mock test (entry points called), and DB-backed tests running the real
+calculators (all-four map; LTV=None on a refi with no valuation). Reuses ADR-241 (the container) and the LP-76/77/87/91
+calculators. Cash-to-close is deliberately **out** (not a field). **Limitations (documented):** the real-file smoke
+can't run on the dev DB (DTI reads extractions; the dev DB lacks LP-201's ``extractions.confidence`` columns) — the
+**Amendment (2026-07-10, post code-review).** The reserves not-computed detection was fragile — it string-matched the
+view's display placeholder (``headline == "—"``) to recover ``months_available is None``, coupling across a module
+boundary with no shared constant and no real test (the unit test hardcoded the same ``"—"``). Fixes:
+
+- **Structured not-computed signal.** ``CalculatorView`` gains ``computed: bool`` (default ``True``); ``build_reserves_view``
+  sets ``computed = result.months_available is not None``. ``map_reserves`` now branches on ``not view.computed`` — a
+  placeholder/format change can no longer turn a not-computed reserves into a fabricated present entry, and a ``None``
+  headline no longer slips through the old ``== "—"`` check.
+- **Typed reserves mapper.** ``map_reserves(view: CalculatorView)`` replaces ``view: object`` + ``getattr`` + a
+  ``# type: ignore``, restoring the mypy coverage its three sibling mappers already had.
+- **Real coverage.** A DB-backed test seeds a no-loan-terms loan (no P&I → no PITI divisor) and asserts
+  ``section.reserves is None`` through the REAL ``build_reserves_view``, so the coupling is exercised end-to-end.
+- **Cleanup:** ``_CalcLineItem`` is now a ``Protocol`` (drops the 3-schema union import).
+
+Deferred: the four calculators transitively recompute each other (per snapshot: LTV ×5, MI ×3, DTI ×2 — an existing
+calculator-layer coupling; the fix is threading precomputed inputs, not the assembler); ``map_dti`` returns ``None`` for
+the whole entry when there is no income (drops the visible housing/debt obligations too — a design choice per this ADR);
+``_money`` is a 5th copy of the Decimal→str helper; and the hand-listed ``value`` dicts can drift from the calculator
+schemas (a parity test would guard it).
+
+DB-backed suite is the schema-correct coverage. Deferred: cash-to-close; the stated-vs-extracted reconciliation (a
+downstream finding, by design); exposing reserves' raw months number if a future need arises.
