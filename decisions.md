@@ -7954,3 +7954,47 @@ JSON round-trip is lossless (the acceptance bar for LP-209), preserving PII as `
 distinction at field and section level. Reuses ADR-240 (LP-203 primitives), ADR-239 (LP-202 links + raw-vs-resolved
 split), and ADR-238 (LP-201 confidence). Deferred: the collection deep-immutability caveat above; populating any section;
 and everything downstream (assemblers/builder/persistence/UI).
+
+## ADR-242: MISMO section assembler — stable dotted-key flattening + null-omits-absent (LP-205)
+
+- **Date:** 2026-07-09
+- **Status:** Accepted
+
+**Context:** The first Stage-1 assembler (LP-205) reads the already-parsed, persisted 1003/MISMO data and reshapes it
+into LP-204's flat ``mismo`` section (``dict[str, Field | PiiField]``). It does not parse MISMO. Two real decisions:
+the flat-key convention (and its *stable* index basis — the same fact must land at the same key across runs) and which
+MISMO fields are PII.
+
+**Decision:**
+
+- **Stable dotted-key convention:** ``loan.<field>``, ``property.<field>``, ``borrower.<n>.<field>``,
+  ``borrower.<n>.income.<m>.<field>``, ``borrower.<n>.employer.<m>.<field>``, ``borrower.<n>.declaration.<slug>``,
+  ``liability.<k>.<field>``, ``asset.<k>.<field>`` — a flat map (no nesting) as LP-204 requires.
+- **Indices derive from a STABLE, immutable ordering, never list position:** borrowers by ``borrower_position``
+  (tie-break on id); nested (income/employer) and file-level (liability/asset) collections by ascending row ``id``
+  (immutable). So the same fact lands at the same key on every run. The order is deterministic, not semantic
+  (``income.1`` is the lowest-id item, not "the base income") — snapshots are compared/persisted by key, and a rule
+  reads a *set* of ``borrower.N.income.*`` keys, not "the first" one.
+- **``NULL`` → absent → OMIT the key.** A value the MISMO didn't carry (a null column or a missing sub-entity) is
+  absent: its key simply doesn't appear. A non-null value is present, *including an empty string* (present-but-empty).
+  So "not in MISMO" (key absent) is structurally distinct from "carried as blank" (key present, value ``""``), honoring
+  LP-203's absent≠empty without emitting a present-null placeholder. An index gap is legitimate and stable — e.g. an
+  all-null asset row (LF-6T3N's known silently-empty asset) yields no ``asset.3.*`` keys, an honest absence.
+- **``source = parsed``; ``confidence = null`` on every field.** The MISMO parse is deterministic — ``source=parsed``
+  conveys the certainty and confidence stays ``None`` (never a fabricated ``1.0``), reusing LP-201/ADR-238's rule.
+- **PII = borrower SSN only, via ``PiiField.from_raw(kind=ssn, loan_file_id=…)``** — masked display + per-file
+  match-hash, raw never stored. On this branch the Stated asset/liability tables carry **no account-number column**, so
+  there is no account PII to route (a documented completeness gap — a fuller MISMO would). Contact PII (email/phone) is
+  deliberately **not surfaced** (not a verification fact; avoids unnecessary PII surface); DOB *is* surfaced (identity
+  cross-checks; already plaintext at rest).
+- **Values are stringified to JSON scalars** (``Decimal`` → exact string, ``date`` → ISO, ``StrEnum`` → its value)
+  because LP-204 hardened ``Field.value`` to reject ``Decimal``/``date`` (no silent precision loss).
+
+**Consequences:** a pure read + reshape (``build_mismo_section`` over loaded ORM rows; ``load_mismo_section`` queries
+with ``only_active``); no mutation, no correlation with other sections. Verified on the real file LF-6T3N (122 keys, both
+SSNs masked, all ``parsed``/null-confidence, the empty asset correctly absent). Reuses ADR-240 (Field/PiiField), ADR-238
+(confidence). **Documented completeness gaps (not backfilled here):** account-number PII, borrower ``current_address_*``
+and property ``county`` (parsed-but-dropped store-everything fields that live only on ``phase3_5_1``), and any raw
+MISMO catch-all; there is also no transaction data in persisted typed MISMO (transactions live in bank-statement
+extractions), so no ``transaction.*`` keys. Deferred: those gaps, and the other sections (documents LP-206,
+calculations LP-207), the builder (LP-208), and persistence (LP-209).

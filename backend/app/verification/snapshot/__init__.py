@@ -7,6 +7,7 @@ come later.
 """
 
 from app.verification.snapshot.fields import Field, FieldSource, JsonScalar
+from app.verification.snapshot.mismo_section import build_mismo_section, load_mismo_section
 from app.verification.snapshot.model import (
     SNAPSHOT_VERSION,
     BorrowerLink,
@@ -37,6 +38,8 @@ __all__ = [
     "PiiKind",
     "Snapshot",
     "SnapshotField",
+    "build_mismo_section",
+    "load_mismo_section",
     "mask",
     "match_hash",
 ]
