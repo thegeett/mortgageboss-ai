@@ -7970,11 +7970,14 @@ MISMO fields are PII.
 - **Stable dotted-key convention:** ``loan.<field>``, ``property.<field>``, ``borrower.<n>.<field>``,
   ``borrower.<n>.income.<m>.<field>``, ``borrower.<n>.employer.<m>.<field>``, ``borrower.<n>.declaration.<slug>``,
   ``liability.<k>.<field>``, ``asset.<k>.<field>`` — a flat map (no nesting) as LP-204 requires.
-- **Indices derive from a STABLE, immutable ordering, never list position:** borrowers by ``borrower_position``
-  (tie-break on id); nested (income/employer) and file-level (liability/asset) collections by ascending row ``id``
-  (immutable). So the same fact lands at the same key on every run. The order is deterministic, not semantic
-  (``income.1`` is the lowest-id item, not "the base income") — snapshots are compared/persisted by key, and a rule
-  reads a *set* of ``borrower.N.income.*`` keys, not "the first" one.
+- **Indices derive from a deterministic ordering, never raw list position:** borrowers by ``borrower_position``
+  (tie-break on id); nested (income/employer) and file-level (liability/asset) collections by ascending row ``id``.
+  The same *input rows* always produce the same keys — deterministic **within** a run. The order is deterministic, not
+  semantic (``income.1`` is the lowest-id item, not "the base income") — a rule reads a *set* of ``borrower.N.income.*``
+  keys, not "the first" one. **Correction (post-review):** the positional index is NOT a durable per-row identity across
+  runs — soft-deleting or inserting a lower-ordered sibling shifts every later index (``income.3`` → ``income.2``), so a
+  cross-run key diff would misattribute. A per-run snapshot doesn't rely on cross-run key identity today; if that need
+  arises, key by the immutable row id. (The original "same fact → same key on every run" overstated this.)
 - **``NULL`` → absent → OMIT the key.** A value the MISMO didn't carry (a null column or a missing sub-entity) is
   absent: its key simply doesn't appear. A non-null value is present, *including an empty string* (present-but-empty).
   So "not in MISMO" (key absent) is structurally distinct from "carried as blank" (key present, value ``""``), honoring
@@ -7998,3 +8001,28 @@ and property ``county`` (parsed-but-dropped store-everything fields that live on
 MISMO catch-all; there is also no transaction data in persisted typed MISMO (transactions live in bank-statement
 extractions), so no ``transaction.*`` keys. Deferred: those gaps, and the other sections (documents LP-206,
 calculations LP-207), the builder (LP-208), and persistence (LP-209).
+
+**Amendment (2026-07-10, post code-review).** Fixes applied to the assembler:
+
+- **Cross-run key stability was overstated** — corrected to "deterministic within a run" (see the indices bullet above);
+  positional indices shift on a sibling soft-delete/insert.
+- **Uniform soft-delete filtering.** ``build_mismo_section`` is pure + public, but only filtered income/employers via
+  ``_active()`` while trusting the caller's SQL ``only_active`` for borrowers/liabilities/assets — a leak if a caller
+  built from unfiltered rows. It now applies ``_active()`` to *every* child collection, and ``_active`` uses the shared
+  ``SoftDeleteMixin.is_deleted`` (not a hand-rolled ``getattr(deleted_at)``).
+- **Absent ≠ empty for the SSN.** The SSN was gated by truthiness (``if borrower.ssn:``), dropping a present-but-empty
+  SSN as absent. It now routes through the ``put`` PII path, whose absent test is ``value is None`` — a blank SSN stays
+  present-but-empty (masked placeholder, non-matchable hash).
+- **PII is declared per key.** PII routing moved from a bespoke ``if borrower.ssn`` branch into ``put(key, value,
+  pii=PiiKind.…)``, so a future sensitive column (an account number) is one ``pii=`` argument away and can't be emitted
+  as a plaintext ``Field`` by pattern-matching.
+- **Unhandled types fail loud.** ``_scalar`` now *raises* on an unanticipated type instead of ``str()``-fabricating a
+  Python repr (which defeated ``Field.value``'s guard).
+- **Malformed declarations degrade gracefully.** A non-dict ``declarations`` JSON value is skipped (no declarations)
+  rather than raising ``AttributeError`` on ``.items()`` and failing the whole section.
+- **Cleanup:** the four child loaders collapse to a ``_by_loan_file`` helper; ``load_mismo_section`` documents that the
+  caller must pass a company-scoped ``loan_file`` (transitive scope, ADR-052).
+
+Deferred follow-ups: ``_slug`` declaration-name collisions (two names → one key, last wins) — left as-is; and extracting
+the cross-module duplicates (``_slug`` vs ``documents.naming._slug``, ``_scalar`` money vs ``cross_source._money``) into
+shared helpers.

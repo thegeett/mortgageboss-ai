@@ -3,9 +3,11 @@
 Uses in-memory (transient) ORM objects — no DB, no session.
 """
 
+from datetime import UTC, datetime
 from decimal import Decimal
 from uuid import UUID, uuid4
 
+import pytest
 from app.models.borrower import Borrower
 from app.models.lender import LoanProgram
 from app.models.loan_file import LoanFile, LoanPurpose
@@ -17,7 +19,7 @@ from app.models.stated_financials import (
     StatedLiability,
 )
 from app.verification.snapshot.fields import Field, FieldSource
-from app.verification.snapshot.mismo_section import build_mismo_section
+from app.verification.snapshot.mismo_section import _scalar, build_mismo_section
 from app.verification.snapshot.pii import PiiField
 
 _RAW_SSN = "123-45-6789"
@@ -240,3 +242,66 @@ def test_empty_loan_file_yields_only_present_loan_terms() -> None:
     section = _build(loan_file=lf)
     assert section  # loan.* present
     assert all(k.startswith("loan.") for k in section)
+
+
+# --------------------------------------------------------------------------- #
+# Soft-delete filtering (uniform in build, not just income/employers)
+# --------------------------------------------------------------------------- #
+
+
+def test_build_filters_soft_deleted_borrowers_liabilities_and_assets() -> None:
+    """build_mismo_section is pure/public — it must drop soft-deleted rows itself."""
+    lf = _loan_file()
+    live = _borrower(1, "Akash", "Patel", bid=1)
+    gone = _borrower(2, "Ghost", "Patel", bid=2)
+    gone.deleted_at = datetime(2026, 7, 9, tzinfo=UTC)
+    live_liab = _liab("Installment", Decimal("300"), "Chase", lid=1)
+    gone_liab = _liab("Revolving", Decimal("50"), "Amex", lid=2)
+    gone_liab.deleted_at = datetime(2026, 7, 9, tzinfo=UTC)
+    live_asset = _asset("CheckingAccount", Decimal("40000"), "Wells Fargo", aid=1)
+    gone_asset = _asset("Savings", Decimal("10000"), "Chase", aid=2)
+    gone_asset.deleted_at = datetime(2026, 7, 9, tzinfo=UTC)
+
+    section = _build(
+        loan_file=lf,
+        borrowers=[live, gone],
+        liabilities=[live_liab, gone_liab],
+        assets=[live_asset, gone_asset],
+    )
+    assert section["borrower.1.first_name"].value == "Akash"
+    assert not any(k.startswith("borrower.2.") for k in section)  # 'Ghost' filtered
+    assert section["liability.1.holder_name"].value == "Chase"
+    assert not any(k.startswith("liability.2.") for k in section)
+    assert section["asset.1.holder_name"].value == "Wells Fargo"
+    assert not any(k.startswith("asset.2.") for k in section)
+
+
+# --------------------------------------------------------------------------- #
+# PII absent ≠ empty; unhandled types; malformed declarations
+# --------------------------------------------------------------------------- #
+
+
+def test_present_empty_ssn_is_masked_placeholder_null_ssn_is_absent() -> None:
+    lf = _loan_file()
+    blank = _borrower(1, "Akash", "Patel", ssn="", bid=1)  # present-but-empty SSN
+    null_ssn = _borrower(2, "Priya", "Patel", ssn=None, bid=2)  # NULL SSN → absent
+    section = _build(loan_file=lf, borrowers=[blank, null_ssn])
+
+    ssn = section["borrower.1.ssn"]
+    assert isinstance(ssn, PiiField)
+    assert ssn.display == "***-**-****"  # present, masked placeholder
+    assert ssn.match_hash is None  # empty → non-matchable, not fabricated
+    assert "borrower.2.ssn" not in section  # NULL SSN omitted (absent)
+
+
+def test_scalar_raises_on_an_unhandled_type_never_fabricates_a_repr() -> None:
+    with pytest.raises(TypeError):
+        _scalar(object())
+
+
+def test_non_dict_declarations_degrade_to_no_declarations_no_crash() -> None:
+    lf = _loan_file()
+    b = _borrower(1, "Akash", "Patel", bid=1)
+    b.declarations = ["not", "a", "dict"]  # type: ignore[assignment]  # malformed JSON shape
+    section = _build(loan_file=lf, borrowers=[b])  # must not raise
+    assert not any(".declaration." in k for k in section)

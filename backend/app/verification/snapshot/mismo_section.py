@@ -17,12 +17,15 @@ parse MISMO (the importer already did) and touches no other section.
     liability.<k>.<field>               e.g. liability.3.monthly_payment
     asset.<k>.<field>                   e.g. asset.2.value
 
-**Stable ordering (the indices).** Indices are 1-based and derive from a STABLE,
-immutable ordering — never volatile list position — so the same fact lands at the
-same key across runs: borrowers by ``borrower_position`` (tie-break on id); nested
+**Deterministic ordering (the indices).** Indices are 1-based over a deterministic
+ordering: borrowers by ``borrower_position`` (tie-break on id); nested
 (income/employer) and file-level (liability/asset) collections by ascending row
-``id`` (immutable). The order is deterministic, not semantic (``income.1`` is the
-lowest-id item, not "the base income").
+``id``. The same input rows always produce the same keys — deterministic *within* a
+run. The indices are **NOT stable across a change to the underlying rows**: soft-
+deleting or adding a lower-ordered sibling shifts every subsequent index
+(``income.3`` becomes ``income.2``), so a positional key is not a durable
+identifier for a row across runs. The order is deterministic, not semantic
+(``income.1`` is the lowest-id item, not "the base income").
 
 ## Absent ≠ empty
 
@@ -64,7 +67,13 @@ _PARSED = FieldSource.PARSED
 
 
 def _scalar(value: Any) -> str | int | float | bool | None:
-    """Coerce a persisted value to a JSON scalar (Field.value rejects Decimal/date)."""
+    """Coerce a persisted value to a JSON scalar (Field.value rejects Decimal/date).
+
+    An unhandled type **raises** rather than being stringified into a Python repr —
+    a lossy ``str()`` catch-all would defeat ``Field.value``'s loud-fail guard and
+    fabricate a value MISMO never carried. A new column of an unanticipated shape
+    should surface here, not silently corrupt the snapshot.
+    """
     if value is None:
         return None
     if isinstance(value, bool):
@@ -77,7 +86,7 @@ def _scalar(value: Any) -> str | int | float | bool | None:
         return str(value)  # exact money as a string
     if isinstance(value, date):  # date or datetime
         return value.isoformat()
-    return str(value)
+    raise TypeError(f"MISMO assembler cannot coerce {type(value).__name__} to a JSON scalar")
 
 
 def _slug(text: str) -> str:
@@ -86,8 +95,8 @@ def _slug(text: str) -> str:
 
 
 def _active(rows: list[Any]) -> list[Any]:
-    """Non-soft-deleted rows from an already-loaded child collection."""
-    return [r for r in rows if getattr(r, "deleted_at", None) is None]
+    """Non-soft-deleted rows from an already-loaded collection (``SoftDeleteMixin``)."""
+    return [r for r in rows if not r.is_deleted]
 
 
 def build_mismo_section(
@@ -107,7 +116,21 @@ def build_mismo_section(
     """
     out: dict[str, SnapshotField] = {}
 
-    def put(key: str, value: Any) -> None:
+    def put(key: str, value: Any, *, pii: PiiKind | None = None) -> None:
+        """Emit one fact. ``pii`` routes sensitive values through ``PiiField`` (masked
+        display + match-hash, raw never stored); everything else is a plain ``Field``.
+
+        Absent (``NULL``) is omitted either way; a present-but-empty value is kept —
+        for PII as a masked placeholder (``value is None`` is the absent test, never
+        truthiness, so a blank SSN stays present-but-empty and doesn't masquerade as
+        absent). Declaring PII per key means a new sensitive column can't be routed as
+        a plain ``Field`` by accident.
+        """
+        if pii is not None:
+            if value is None:  # absent — omit
+                return
+            out[key] = PiiField.from_raw(value, kind=pii, loan_file_id=loan_file.id, source=_PARSED)
+            return
         scalar = _scalar(value)
         if scalar is None:  # absent — omit the key
             return
@@ -139,9 +162,9 @@ def build_mismo_section(
         put("property.construction_method", property_.construction_method)
         put("property.financed_unit_count", property_.financed_unit_count)
 
-    # --- Borrowers (stable order: position, then id) ----------------------
+    # --- Borrowers (deterministic order: position, then id) ---------------
     for n, borrower in enumerate(
-        sorted(borrowers, key=lambda b: (b.borrower_position, str(b.id))), start=1
+        sorted(_active(borrowers), key=lambda b: (b.borrower_position, str(b.id))), start=1
     ):
         base = f"borrower.{n}"
         put(f"{base}.first_name", borrower.first_name)
@@ -153,11 +176,10 @@ def build_mismo_section(
         put(f"{base}.dependent_count", borrower.dependent_count)
         put(f"{base}.citizenship", borrower.citizenship)
 
-        # SSN — the only MISMO PII: masked display + per-file match-hash, raw never stored.
-        if borrower.ssn:
-            out[f"{base}.ssn"] = PiiField.from_raw(
-                borrower.ssn, kind=PiiKind.SSN, loan_file_id=loan_file.id, source=_PARSED
-            )
+        # SSN — the only MISMO PII: routed through put's PII path (masked display +
+        # per-file match-hash, raw never stored). A NULL SSN is absent (omitted); a
+        # present blank stays present-but-empty (a masked placeholder), not absent.
+        put(f"{base}.ssn", borrower.ssn, pii=PiiKind.SSN)
 
         for m, income in enumerate(
             sorted(_active(borrower.stated_income_items), key=lambda i: str(i.id)), start=1
@@ -174,18 +196,23 @@ def build_mismo_section(
             put(f"{ekey}.name", employer.employer_name)
             put(f"{ekey}.is_current", employer.is_current)
 
-        for name, value in sorted((borrower.declarations or {}).items()):
-            put(f"{base}.declaration.{_slug(name)}", value)
+        # declarations is a JSON column typed dict[str, str], but JSON can hold any
+        # shape — guard against a non-dict value so a malformed row degrades to "no
+        # declarations", never an AttributeError that fails the whole section.
+        declarations = borrower.declarations
+        if isinstance(declarations, dict):
+            for name, value in sorted(declarations.items()):
+                put(f"{base}.declaration.{_slug(name)}", value)
 
-    # --- File-level liabilities / assets (stable order: id) ---------------
-    for k, liability in enumerate(sorted(liabilities, key=lambda x: str(x.id)), start=1):
+    # --- File-level liabilities / assets (deterministic order: id) --------
+    for k, liability in enumerate(sorted(_active(liabilities), key=lambda x: str(x.id)), start=1):
         lkey = f"liability.{k}"
         put(f"{lkey}.type", liability.liability_type)
         put(f"{lkey}.monthly_payment", liability.monthly_payment)
         put(f"{lkey}.unpaid_balance", liability.unpaid_balance)
         put(f"{lkey}.holder_name", liability.holder_name)
 
-    for k, asset in enumerate(sorted(assets, key=lambda x: str(x.id)), start=1):
+    for k, asset in enumerate(sorted(_active(assets), key=lambda x: str(x.id)), start=1):
         akey = f"asset.{k}"
         put(f"{akey}.type", asset.asset_type)
         put(f"{akey}.value", asset.value)
@@ -195,54 +222,35 @@ def build_mismo_section(
 
 
 async def load_mismo_section(db: AsyncSession, loan_file: LoanFile) -> dict[str, SnapshotField]:
-    """Load the persisted MISMO rows for a loan file and assemble the ``mismo`` section."""
-    borrowers = (
-        (
-            await db.execute(
-                only_active(
-                    select(Borrower).where(Borrower.loan_file_id == loan_file.id), Borrower
-                ).options(
-                    selectinload(Borrower.stated_income_items),
-                    selectinload(Borrower.stated_employers),
-                )
-            )
-        )
-        .scalars()
-        .all()
+    """Load the persisted MISMO rows for a loan file and assemble the ``mismo`` section.
+
+    The caller must pass a **company-scoped** ``loan_file`` (resolved through the
+    tenant boundary): these queries scope only by ``loan_file_id`` (transitive
+    company scope, ADR-052) and do no company check of their own.
+    """
+
+    async def _by_loan_file(model: type[Any], *options: Any) -> list[Any]:
+        stmt = only_active(select(model).where(model.loan_file_id == loan_file.id), model)
+        if options:
+            stmt = stmt.options(*options)
+        return list((await db.execute(stmt)).scalars().all())
+
+    borrowers = await _by_loan_file(
+        Borrower,
+        selectinload(Borrower.stated_income_items),
+        selectinload(Borrower.stated_employers),
     )
     property_ = (
         await db.execute(
             only_active(select(Property).where(Property.loan_file_id == loan_file.id), Property)
         )
     ).scalar_one_or_none()
-    liabilities = (
-        (
-            await db.execute(
-                only_active(
-                    select(StatedLiability).where(StatedLiability.loan_file_id == loan_file.id),
-                    StatedLiability,
-                )
-            )
-        )
-        .scalars()
-        .all()
-    )
-    assets = (
-        (
-            await db.execute(
-                only_active(
-                    select(StatedAsset).where(StatedAsset.loan_file_id == loan_file.id),
-                    StatedAsset,
-                )
-            )
-        )
-        .scalars()
-        .all()
-    )
+    liabilities = await _by_loan_file(StatedLiability)
+    assets = await _by_loan_file(StatedAsset)
     return build_mismo_section(
         loan_file=loan_file,
-        borrowers=list(borrowers),
+        borrowers=borrowers,
         property_=property_,
-        liabilities=list(liabilities),
-        assets=list(assets),
+        liabilities=liabilities,
+        assets=assets,
     )
