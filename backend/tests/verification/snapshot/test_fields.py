@@ -1,5 +1,8 @@
 """Snapshot Field primitive (LP-203) — absent≠empty + nullable confidence."""
 
+from datetime import date
+from decimal import Decimal
+
 import pytest
 from app.models.extraction import ConfidenceSource
 from app.verification.snapshot.fields import Field, FieldSource
@@ -54,6 +57,13 @@ def test_absent_field_may_not_carry_value_source_or_confidence() -> None:
         Field(absent=True, source=FieldSource.PARSED)
     with pytest.raises(ValidationError):
         Field(absent=True, confidence=0.5)
+
+
+@pytest.mark.parametrize("bad", [Decimal("1234.56"), date(2026, 1, 1)])
+def test_non_json_scalar_value_is_rejected_never_silently_coerced(bad: object) -> None:
+    """A Decimal (money) must NOT be silently floated; a date must not slip through either."""
+    with pytest.raises(ValidationError):
+        Field.present(bad, source=FieldSource.PARSED)  # type: ignore[arg-type]
 
 
 def test_field_is_frozen_and_closed() -> None:

@@ -24,7 +24,7 @@ from __future__ import annotations
 
 from enum import StrEnum
 
-from pydantic import BaseModel, model_validator
+from pydantic import BaseModel, field_validator, model_validator
 
 from app.models.extraction import ConfidenceSource
 
@@ -56,6 +56,24 @@ class Field(BaseModel):
     source: FieldSource | None = None
     # Explicit "no source supplied this" marker — distinct from a present null value.
     absent: bool = False
+
+    @field_validator("value", mode="before")
+    @classmethod
+    def _value_must_be_a_json_scalar(cls, v: object) -> object:
+        """Reject non-JSON-scalar inputs (e.g. Decimal, date) instead of lossy-coercing.
+
+        Pydantic would silently coerce a ``Decimal`` (money) to ``float`` and lose
+        precision. The contract is that assemblers stringify ``Decimal``/``date``
+        first; enforce it here so a violation fails loudly at the primitive rather
+        than corrupting a value that only surfaces downstream. (``bool`` is allowed —
+        it is a ``JsonScalar`` member and an ``int`` subclass.)
+        """
+        if v is not None and not isinstance(v, (str, int, float, bool)):
+            raise ValueError(
+                f"Field.value must be a JSON scalar (str/int/float/bool) or None, not "
+                f"{type(v).__name__} — assemblers must stringify Decimal/date first"
+            )
+        return v
 
     @model_validator(mode="after")
     def _absent_and_present_never_blur(self) -> Field:

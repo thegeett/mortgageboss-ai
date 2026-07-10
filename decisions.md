@@ -7867,3 +7867,37 @@ per run; a future ticket that persists snapshots must treat a key rotation as a 
 call (not cached) so rotation and tests both see the current secret. Reuses ADR-051 (Fernet ``encryption_key`` / secret
 management) and ADR-238 (the LP-201 nullable-confidence model + derived source); no new secret store is introduced.
 Deferred: which fields *are* PII (per-assembler, later tickets), the snapshot model + persistence, and any UI.
+
+**Amendment (2026-07-09, post code-review — the match-hash fabricated "these two values match" facts).** A review
+found the primitive minted a real, matchable hash for empty/absent inputs and collided values across kinds — the same
+fabricated-fact / absent≠empty class of bug as LP-201/LP-202. Fixes:
+
+- **Empty/absent → NON-matchable.** ``match_hash`` returns ``None`` when the value normalizes to fewer than
+  ``_MIN_MATCH_LEN`` (4) characters (``""`` / whitespace / punctuation / ``None`` — and ``None`` now normalizes to ``""``,
+  not the token ``"none"``). Two blank/absent PII values can never "match". ``PiiField.match_hash`` is now ``str | None``.
+- **Kind-bound.** The ``PiiKind`` is folded into the HMAC message (``f"{kind}:{loan_file_id}:{value}"``), so an SSN and
+  an account that share a digit-string (``123-45-6789`` / ``123456789``) no longer collide into a cross-kind match.
+- **``loan_file_id`` canonicalized + empty rejected.** Parsed to canonical UUID form (so ``str(uuid)`` and an upper-cased
+  rendering of the same id match), and an empty/falsy id raises — it would collapse the per-file salt and reintroduce the
+  cross-file correlation the salt exists to prevent.
+- **Versioned output.** The hash carries its version (``v1:<hex>``), so once snapshots persist (LP-204) a construction
+  bump is an incremental, detectable migration rather than a silent global match failure. Supersedes the original
+  "rotation = full rebuild" deferral.
+- **``PiiField.missing()`` — absent PII, first-class.** No display, no hash — distinct from a source-supplied blank
+  (present-but-empty: a masked placeholder display + ``None`` hash). PII now honors the absent≠empty distinction ``Field``
+  already enforced, via an ``absent`` marker + validator mirroring ``Field``.
+- **Raw value structurally rejected.** A validator rejects an unmasked ``display`` (must start with a mask shape), so
+  ``PiiField(display=raw_ssn, …)`` fails — the "never stores the raw value even by accident" guarantee is now enforced,
+  not just documented. This also corrects the earlier "un-reversible even by the system" overstatement: the hash is
+  un-computable by any party *without* the secret, but a holder of the snapshot AND the secret could still brute-force a
+  low-entropy input — no weaker than the encryption-at-rest boundary, but not absolutely irreversible.
+- **Key access centralized (ADR-051).** The purpose-separated subkey is derived via a new
+  ``app.core.encryption.derive_key(purpose)`` — all ``encryption_key`` access stays in ``encryption.py``.
+- **``Field.value`` rejects non-JSON-scalars.** A ``Decimal`` (money) or ``date`` now raises at the primitive instead of
+  silently coercing to ``float`` (precision loss); assemblers must stringify first, and a violation fails loudly here.
+- **Also:** ``mask()`` masks an exactly-4-character value (``> 4`` to reveal last-4, was ``>= 4``), and its kind→shape
+  dispatch uses ``assert_never`` so a new ``PiiKind`` is a hard failure, not a silent account-shape fallthrough.
+
+Deferred (follow-ups, in the ticket): a shared ``mask_last4``/``mask_ssn`` helper (``mask()``'s SSN branch duplicates
+``Borrower.masked_ssn``); a shared ``ConfidenceCarrier`` base (the confidence + derived ``confidence_source`` is
+copy-pasted across ``Field`` / ``PiiField`` / ``TypedField`` — relates to ADR-238).

@@ -40,6 +40,12 @@ def test_mask_short_malformed_or_null_is_safe_never_raw(value: object, kind: Pii
         assert str(value) not in out
 
 
+def test_mask_does_not_reveal_an_exactly_four_char_value() -> None:
+    """A value with exactly four significant chars is masked, not shown whole."""
+    assert mask("3312", PiiKind.ACCOUNT) == "****"  # not "****3312"
+    assert mask("6789", PiiKind.SSN) == "***-**-****"  # not "***-**-6789"
+
+
 # --------------------------------------------------------------------------- #
 # match_hash() — the security-critical properties
 # --------------------------------------------------------------------------- #
@@ -47,32 +53,67 @@ def test_mask_short_malformed_or_null_is_safe_never_raw(value: object, kind: Pii
 
 def test_same_value_same_file_hashes_equal_matching_works() -> None:
     lf = uuid4()
-    assert match_hash("123-45-6789", loan_file_id=lf) == match_hash("123456789", loan_file_id=lf)
+    assert match_hash("123-45-6789", kind=PiiKind.SSN, loan_file_id=lf) == match_hash(
+        "123456789", kind=PiiKind.SSN, loan_file_id=lf
+    )
 
 
 def test_same_value_different_file_hashes_differ_no_cross_file_correlation() -> None:
     lf1, lf2 = uuid4(), uuid4()
-    assert match_hash(_SSN, loan_file_id=lf1) != match_hash(_SSN, loan_file_id=lf2)
+    assert match_hash(_SSN, kind=PiiKind.SSN, loan_file_id=lf1) != match_hash(
+        _SSN, kind=PiiKind.SSN, loan_file_id=lf2
+    )
+
+
+def test_empty_or_absent_value_is_non_matchable() -> None:
+    """Empty / whitespace / punctuation / None → None (never a colliding hash)."""
+    lf = uuid4()
+    for value in ("", "   ", "--", None):
+        assert match_hash(value, kind=PiiKind.ACCOUNT, loan_file_id=lf) is None
+    # Two absent/blank values must NOT match (both None, not one shared token).
+    a = match_hash("", kind=PiiKind.ACCOUNT, loan_file_id=lf)
+    b = match_hash("   ", kind=PiiKind.ACCOUNT, loan_file_id=lf)
+    assert a is None and b is None
+
+
+def test_different_kinds_with_equal_digits_do_not_collide() -> None:
+    """An SSN and an account sharing a digit-string must NOT produce the same hash."""
+    lf = uuid4()
+    assert match_hash("123-45-6789", kind=PiiKind.SSN, loan_file_id=lf) != match_hash(
+        "123456789", kind=PiiKind.ACCOUNT, loan_file_id=lf
+    )
+
+
+def test_loan_file_id_is_canonicalized_and_empty_is_rejected() -> None:
+    lf = uuid4()
+    # str(uuid) vs an upper-cased rendering of the same id → the SAME hash.
+    assert match_hash(_ACCT, kind=PiiKind.ACCOUNT, loan_file_id=str(lf)) == match_hash(
+        _ACCT, kind=PiiKind.ACCOUNT, loan_file_id=str(lf).upper()
+    )
+    # An empty loan_file_id is rejected, never silently hashed against a collapsed salt.
+    with pytest.raises(ValueError):
+        match_hash(_ACCT, kind=PiiKind.ACCOUNT, loan_file_id="")
+
+
+def test_hash_is_versioned() -> None:
+    lf = uuid4()
+    h = match_hash(_SSN, kind=PiiKind.SSN, loan_file_id=lf)
+    assert h is not None and h.startswith("v1:")
 
 
 def test_hash_depends_on_the_app_secret_not_brute_forceable(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The construction folds in settings.encryption_key — a party without it can't reproduce it.
-
-    (a) The hash is NOT the naive ``sha256(loan_file_id:value)`` a party holding only the
-        (non-secret) loan_file_id could compute — proving the secret is in the mix.
-    (b) Changing the app secret changes the hash — proving the secret is load-bearing.
-    """
+    """The construction folds in settings.encryption_key — a party without it can't reproduce it."""
     lf = uuid4()
     normalized = "123456789"
     naive = hashlib.sha256(f"{lf}:{normalized}".encode()).hexdigest()
-    real = match_hash(_SSN, loan_file_id=lf)
-    assert real != naive  # (a) not the secret-free construction
+    real = match_hash(_SSN, kind=PiiKind.SSN, loan_file_id=lf)
+    assert real is not None and naive not in real  # (a) not the secret-free construction
 
-    before = match_hash(_SSN, loan_file_id=lf)
+    before = match_hash(_SSN, kind=PiiKind.SSN, loan_file_id=lf)
     monkeypatch.setattr(settings, "encryption_key", "a-different-application-secret-value")
-    after = match_hash(_SSN, loan_file_id=lf)
+    after = match_hash(_SSN, kind=PiiKind.SSN, loan_file_id=lf)
     assert before != after  # (b) secret-dependent
 
 
@@ -87,14 +128,22 @@ def test_pii_field_never_carries_the_raw_value() -> None:
     dumped = pf.model_dump()
 
     assert pf.display == "***-**-6789"
-    assert pf.match_hash == match_hash(_SSN, loan_file_id=lf)
+    assert pf.match_hash == match_hash(_SSN, kind=PiiKind.SSN, loan_file_id=lf)
     # The raw value is nowhere on the model.
     assert "value" not in dumped
     assert "123456789" not in str(dumped)
     assert _SSN not in str(dumped)
 
 
-def test_pii_field_is_frozen_and_rejects_a_raw_value_field() -> None:
+def test_pii_field_rejects_an_unmasked_display() -> None:
+    """The raw value cannot be smuggled into `display` — the validator rejects it."""
+    with pytest.raises(ValidationError):
+        PiiField(display=_SSN, match_hash="v1:abc", source=FieldSource.PARSED)
+    with pytest.raises(ValidationError):
+        PiiField(display="123456789", match_hash="v1:abc", source=FieldSource.EXTRACTED)
+
+
+def test_pii_field_is_frozen_and_closed() -> None:
     lf = uuid4()
     pf = PiiField.from_raw(
         "acct-3312", kind=PiiKind.ACCOUNT, loan_file_id=lf, source=FieldSource.EXTRACTED
@@ -102,8 +151,25 @@ def test_pii_field_is_frozen_and_rejects_a_raw_value_field() -> None:
     with pytest.raises(ValidationError):
         pf.display = "oops"  # frozen
     with pytest.raises(ValidationError):
-        # extra="forbid" structurally prevents attaching a raw value.
-        PiiField(display="x", match_hash="y", source=FieldSource.PARSED, value="123456789")
+        # extra="forbid" structurally prevents attaching a raw value under a new key.
+        PiiField(
+            display="****3312", match_hash="v1:y", source=FieldSource.PARSED, value="123456789"
+        )
+
+
+def test_pii_field_missing_is_absent_and_distinct_from_a_blank() -> None:
+    """missing() carries no display and no hash — distinct from a source-supplied blank."""
+    lf = uuid4()
+    absent = PiiField.missing()
+    assert absent.absent is True and absent.is_present is False
+    assert absent.display is None and absent.match_hash is None
+
+    # A source that supplied a BLANK account: present-but-empty → masked placeholder,
+    # non-matchable hash (None), but NOT absent.
+    blank = PiiField.from_raw("", kind=PiiKind.ACCOUNT, loan_file_id=lf, source=FieldSource.PARSED)
+    assert blank.absent is False and blank.is_present is True
+    assert blank.display == "****" and blank.match_hash is None
+    assert absent != blank
 
 
 def test_pii_field_confidence_nullable_and_derived_source() -> None:

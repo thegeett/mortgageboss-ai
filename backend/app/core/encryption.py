@@ -24,11 +24,27 @@ Security invariants:
     (Phase 7); a single active key is used.
 """
 
+import hashlib
 from functools import lru_cache
 
 from cryptography.fernet import Fernet, InvalidToken
 
 from app.core.config import settings
+
+
+def derive_key(purpose: bytes) -> bytes:
+    """Derive a purpose-separated 32-byte key from the app encryption key (ADR-051).
+
+    ``SHA256(purpose || b":" || encryption_key)`` — a distinct, cryptographically
+    independent key per purpose, so a subkey (e.g. the HMAC key for PII
+    match-hashing, LP-203) can never be confused with the Fernet key or with another
+    purpose's subkey. Reads the same configured secret as :func:`get_cipher`, so all
+    ``encryption_key`` access stays in this one module (the single home for the key).
+
+    Deliberately NOT cached: a rotated ``encryption_key`` must take effect
+    immediately, and the derivation is a single SHA-256 block (negligible).
+    """
+    return hashlib.sha256(purpose + b":" + settings.encryption_key.encode()).digest()
 
 
 @lru_cache(maxsize=1)
