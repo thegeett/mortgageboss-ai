@@ -7901,3 +7901,40 @@ fabricated-fact / absent≠empty class of bug as LP-201/LP-202. Fixes:
 Deferred (follow-ups, in the ticket): a shared ``mask_last4``/``mask_ssn`` helper (``mask()``'s SSN branch duplicates
 ``Borrower.masked_ssn``); a shared ``ConfidenceCarrier`` base (the confidence + derived ``confidence_source`` is
 copy-pasted across ``Field`` / ``PiiField`` / ``TypedField`` — relates to ADR-238).
+
+
+## ADR-241: Frozen three-section snapshot model — raw, un-correlated, snake_case, smart-union round-trip (LP-204)
+
+- **Date:** 2026-07-09
+- **Status:** Accepted
+
+**Context:** Stage 1 needs the concrete model for the per-run snapshot the assemblers (LP-205/206/207) fill and the
+AI evaluator reads. LP-203 gave the field primitives (`Field`, `PiiField`); this is the container. The V2 architecture
+requires it be immutable, per-run, provenance-carrying, and — per the finalized three-section refinement — **raw and
+un-correlated**: it records facts but never links them across sections.
+
+**Decision:**
+
+- **Three raw sections, no correlation.** `mismo` (`dict[str, Field | PiiField]`), `documents`
+  (`tuple[DocumentSnapshot, ...]` of `{document_type, belongs_to, fields}`), `calculations` (`{dti, ltv, mi, reserves}`).
+  `belongs_to` is a raw `str | None` (a name or nothing), **never a borrower foreign key** — the model is structurally
+  incapable of expressing a cross-section match. Resolving a document to a borrower entity stays a separate, recomputable
+  LP-202 artifact the evaluator may consult, not a snapshot fact.
+- **Frozen via `frozen=True` + tuples.** Pydantic `frozen` blocks attribute reassignment but not mutation of a nested
+  `dict`/`list`, so every sequence is a `tuple`. The section dicts are shallow-frozen (accepted: this is a build-time
+  artifact; a deep-immutable mapping buys nothing and complicates JSON). `extra="forbid"` everywhere.
+- **`Field | PiiField` smart union, no discriminator.** The two shapes have disjoint keys (`value` vs
+  `display`/`match_hash`) and both forbid extras, so Pydantic smart union round-trips each back as its original type —
+  including absent-Field vs absent-PiiField. Verified empirically. The LP-203 primitives are left untouched (adding a
+  discriminator tag would have changed their serialized shape and their tests).
+- **snake_case attributes AND snake_case JSON keys.** No camelCase aliasing exists anywhere in the codebase (the phase
+  plan's `documentType`/`belongsTo` were illustrative). Introducing an alias layer would fabricate a convention; the
+  model follows the repo-wide snake_case instead.
+- **Calculations kept light.** `Calculation{value, breakdown}` + `CalculationLine{label, value, source}` with a
+  `CalcSource` (`stated|extracted|computed|manual`) do not reimplement the existing calculator schemas; LP-207 maps them
+  in, preserving source tags. A not-computed calculation is `None`, not an empty object.
+
+**Consequences:** additive & non-breaking; nothing populates or persists the model yet (LP-205-209). The raw/uncorrelated
+shape keeps the snapshot honest — the evaluator, not the snapshot, owns correlation. Extends ADR-240 (LP-203 primitives)
+and serves the Stage-1 boundary in the V2 verification architecture. Reuses the codebase snake_case + `extra="forbid"`
+conventions.
