@@ -87,8 +87,25 @@ async def _seed(db: AsyncSession) -> tuple[UUID, dict[str, Borrower], dict[str, 
     )
     await _doc("appraisal", {"appraised_value": _field("485000.00", 0.96)})
 
+    # W-2 stores the SSN RAW ("as written") + a 1099 stores the TIN RAW — both must be
+    # routed through PiiField (masked, raw discarded), never a plaintext Field.
+    await _doc(
+        "w2",
+        {
+            "employee_name": _field("Akash Patel", 0.9),
+            "employee_ssn": _field("123-45-6789", 0.95),  # RAW SSN
+        },
+    )
+    await _doc(
+        "1099",
+        {
+            "recipient_name": _field("Akash Patel", 0.9),
+            "recipient_tin": _field("987-65-4321", 0.9),  # RAW TIN/SSN
+        },
+    )
+
     # A soft-deleted document — must be excluded from the section.
-    gone = await _doc("w2", {"employee_name": _field("Akash Patel", 0.9)})
+    gone = await _doc("voe", {"employee_name": _field("Akash Patel", 0.9)})
     gone.deleted_at = utcnow()
 
     # Links: pay_stub → Akash; bank_statement → both (joint).
@@ -163,7 +180,7 @@ async def test_no_match_document_belongs_to_is_none(db_session: AsyncSession) ->
 
 async def test_soft_deleted_document_excluded(db_session: AsyncSession) -> None:
     entries, _ = await _section(db_session)
-    assert all(e.document_type != "w2" for e in entries)
+    assert all(e.document_type != "voe" for e in entries)
 
 
 async def test_link_to_soft_deleted_borrower_excluded(db_session: AsyncSession) -> None:
@@ -199,12 +216,60 @@ async def test_pii_account_is_masked_piifield_no_raw(db_session: AsyncSession) -
     assert isinstance(acct, PiiField)
     assert acct.display == "****3312"
     assert acct.match_hash is None  # only the masked form was ever captured
-    blob = repr({k: v.model_dump() for e in entries for k, v in e.fields.items()})
-    assert "3312" in bank.fields["account_number_masked"].display  # last-4 shown
-    # no long raw digit-run anywhere
+    assert "3312" in acct.display  # last-4 shown
+
+
+async def test_raw_ssn_and_tin_are_masked_piifields_never_plaintext(
+    db_session: AsyncSession,
+) -> None:
+    """W-2 employee_ssn / 1099 recipient_tin are stored RAW — must not leak as Field."""
     import re
 
-    assert not re.search(r"\d{9,}", blob)
+    entries, _ = await _section(db_session)
+    ssn = _by_type(entries, "w2").fields["employee_ssn"]
+    assert isinstance(ssn, PiiField)
+    assert ssn.display == "***-**-6789"
+    assert ssn.match_hash is not None and ssn.match_hash.startswith("v1:")  # raw → matchable
+    tin = _by_type(entries, "1099").fields["recipient_tin"]
+    assert isinstance(tin, PiiField) and tin.display == "***-**-4321"
+
+    # The raw SSN/TIN appears NOWHERE in the section's displayed/valued content — dashed
+    # OR undashed. (Exclude match_hash: a keyed hex hash legitimately contains digit
+    # runs and is not a raw value.)
+    dumps = []
+    for e in entries:
+        for v in e.fields.values():
+            d = v.model_dump()
+            d.pop("match_hash", None)
+            dumps.append(d)
+    blob = repr(dumps)
+    for raw in ("123-45-6789", "123456789", "987-65-4321", "987654321"):
+        assert raw not in blob
+    assert not re.search(r"\d{3}-\d{2}-\d{4}|\d{9,}", blob)  # no SSN-shaped or long digit run
+
+
+def test_pii_registry_covers_every_sensitive_extractor_field() -> None:
+    """Drift guard: any extractor field annotated ``# SENSITIVE`` must be PII-routed
+    here — this is what stops a new raw-SSN/account field from silently leaking as a
+    plain Field. ``date_of_birth`` is excluded: it is a date, not a maskable last-4
+    number, and is surfaced as an ordinary field (as the MISMO section also does)."""
+    import re
+    from pathlib import Path
+
+    from app.verification.snapshot.documents_section import _PII_FIELDS
+
+    _EXCLUDED = {"date_of_birth"}  # PII, but a date — no last-4 masking applies
+    ext_dir = Path(__file__).resolve().parents[3] / "app" / "ai" / "extraction"
+    sensitive: set[str] = set()
+    for path in ext_dir.glob("*.py"):
+        for line in path.read_text().splitlines():
+            if "# SENSITIVE" in line and "TypedField" in line:
+                m = re.match(r"\s*([a-z0-9_]+)\s*:", line)
+                if m:
+                    sensitive.add(m.group(1))
+    assert sensitive, "expected to find # SENSITIVE typed fields in the extractors"
+    missing = sensitive - set(_PII_FIELDS) - _EXCLUDED
+    assert not missing, f"SENSITIVE extractor fields not PII-routed: {sorted(missing)}"
 
 
 async def test_absent_field_omitted_present_empty_kept(db_session: AsyncSession) -> None:

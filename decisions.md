@@ -8061,11 +8061,15 @@ ticket's premises (recorded below).
 
 - **belongsTo was NOT ``str|None``.** LP-204 (post its own review) already typed it ``list[BorrowerLink] | None``; the
   amendment is a *reshape* to ``BorrowerRef`` id+name, not a widening from a string.
-- **Extraction PII is already masked — there is no raw account/SSN to route through ``PiiField.from_raw``.** Extractors
-  capture ``account_number_masked`` / ``taxpayer_ssn_masked`` (never raw); ``social_security_wages`` / ``_tax_withheld``
-  are dollar amounts, not SSNs. So a pre-masked PII field becomes a ``PiiField`` with a canonical last-4 display and
-  ``match_hash=None`` (non-matchable — only the masked form ever existed), rendered from the value's last-4 rather than
-  re-masking. Never double-masks, never exposes raw, never fabricates a hash.
+- **PII is routed through ``PiiField`` per an explicit ``_PII_FIELDS`` registry — never a plain ``Field``.** Two cases:
+  a field the extractor stored **already masked** (``account_number_masked`` / ``id_number_masked`` /
+  ``taxpayer_ssn_masked``) → ``PiiField.pre_masked`` (canonical last-4 display, ``match_hash=None``); a field the
+  extractor stored **RAW** ("as written" — W-2 ``employee_ssn``, 1099 ``recipient_tin``) → ``PiiField.from_raw`` (masked
+  here + a per-file match-hash; the raw is discarded). ``social_security_wages`` / ``_tax_withheld`` are dollar amounts,
+  not SSNs; institution tax ids (``payer_tin`` / ``employer_ein``) are not borrower PII. The registry is drift-guarded
+  by a test (any ``# SENSITIVE`` extractor field must be routed, except the date-typed ``date_of_birth``).
+  **[Corrected post-review — see the amendment; the original claim "extraction PII is already masked, no raw to route"
+  was FALSE for W-2/1099, which store the SSN/TIN raw.]**
 
 **Consequences:** a pure read + reshape (``build_documents_section(db, loan_file)``; ``build_document_fields`` pure).
 Covered by a DB-backed pytest suite (test DB via ``create_all`` = this branch's schema) exercising single / joint /
@@ -8079,3 +8083,29 @@ for consistency and the pass is deferred to its own cross-cutting change (the *s
 stamped at a ``phase3_5_1`` Alembic revision lacking LP-201's ``extractions.confidence`` columns, so
 ``documents_section_smoke`` can't run there; the schema-correct coverage is the DB-backed test suite. Deferred:
 nested/non-scalar extracted values, catch-all fields, and the camelCase pass.
+
+**Amendment (2026-07-10, post code-review).** The review found a **raw-PII leak**: the PII allowlist was
+``{account_number_masked, taxpayer_ssn_masked}``, but W-2 stores ``employee_ssn`` and 1099 stores ``recipient_tin`` RAW
+("as written" per the prompts), so those fell through to ``Field.present(raw_ssn)`` — a plaintext SSN/TIN in the
+snapshot blob. Fixes:
+
+- **Complete, typed PII routing.** ``_PII_FIELDS`` now maps each sensitive field to ``(PiiKind, pre_masked)``: raw fields
+  (``employee_ssn`` / ``recipient_tin``) go through ``PiiField.from_raw`` (masked + per-file hash, raw discarded);
+  pre-masked fields (incl. ``id_number_masked``, previously mis-typed as a plain ``Field``) through the new
+  ``PiiField.pre_masked`` classmethod (which owns the last-4 display shape + ``assert_never`` on kind, replacing the
+  assembler's hand-rolled copy). ``build_document_fields`` now takes ``loan_file_id`` to salt the raw-PII hash.
+- **Drift guard.** A test scans the extractors for ``# SENSITIVE`` typed fields and asserts each is PII-routed
+  (``date_of_birth`` excluded — a date, surfaced as an ordinary field as MISMO does); a new raw-SSN/account field can no
+  longer be missed silently. The PII test now seeds a raw ``employee_ssn`` / ``recipient_tin`` and asserts no raw value
+  (dashed or undashed) appears; the smoke/test tripwire regex now also catches an SSN-shaped ``\d{3}-\d{2}-\d{4}``.
+- **Confidence honesty.** ``_confidence`` was replaced by ``coerce_optional_confidence`` (LP-201), restoring the ``[0,1]``
+  guard the hand-rolled copy dropped.
+- **N+1 fixed.** Borrower links are loaded in ONE ``document_id IN (…)`` query and grouped, replacing a per-document call.
+  The eager extraction load is filtered to the current version (``selectinload(...).and_(Extraction.is_current)``).
+- **``asserted_name`` de-duplicated.** It now aliases the SAME already-built name Field (a pointer, not a second copy
+  re-normalized with ``.strip()`` — the two could disagree on whitespace) and never clobbers a real extracted field.
+
+Deferred: ``belongs_to=None`` still can't distinguish "matched borrowers later removed" from "never resolved" (a marker
+is an LP-208 concern); schema-declared PII (annotate ``PiiKind`` on the extraction ``TypedField`` so the assembler reads
+it instead of a parallel registry) — the drift-guard test is the interim; and the ``_scalar`` naming/dedup across the two
+assemblers.

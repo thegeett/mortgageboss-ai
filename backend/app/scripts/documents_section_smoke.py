@@ -25,7 +25,9 @@ from app.models.loan_file import LoanFile
 from app.verification.snapshot.documents_section import build_documents_section
 from app.verification.snapshot.pii import PiiField
 
-_RAW_RUN = re.compile(r"\d{9,}")  # a 9+ digit run — a raw account/SSN must never appear
+# A raw account/SSN must never appear: a 9+ digit run OR an SSN-shaped 3-2-4 (dashed
+# SSNs like "123-45-6789" have a max run of 4 and would slip a bare \d{9,} check).
+_RAW_RUN = re.compile(r"\d{3}-\d{2}-\d{4}|\d{9,}")
 
 
 async def main(display_id: str = "LF-6T3N") -> None:

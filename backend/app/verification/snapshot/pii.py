@@ -208,6 +208,31 @@ class PiiField(BaseModel):
         )
 
     @classmethod
+    def pre_masked(
+        cls,
+        value: object,
+        *,
+        kind: PiiKind,
+        source: FieldSource,
+        confidence: float | None = None,
+    ) -> PiiField:
+        """Build a PiiField from an ALREADY-MASKED value (its raw form never reached us).
+
+        ``match_hash`` is ``None`` (non-matchable — only the masked form was ever
+        captured). The display is the canonical last-4 shape rendered from the value's
+        last four alphanumerics, so even a badly-masked or over-masked input reveals at
+        most four characters. Use :meth:`from_raw` for a value that is still raw.
+        """
+        last4 = _alnum(str(value))[-4:]
+        if kind is PiiKind.SSN:
+            display = f"***-**-{last4}" if len(last4) == 4 else "***-**-****"
+        elif kind is PiiKind.ACCOUNT:
+            display = f"****{last4}" if len(last4) == 4 else "****"
+        else:
+            assert_never(kind)  # a new PiiKind must declare its masked-display shape
+        return cls(display=display, match_hash=None, source=source, confidence=confidence)
+
+    @classmethod
     def missing(cls) -> PiiField:
         """A sensitive fact NO source supplied — absent, no display, no hash."""
         return cls(absent=True)

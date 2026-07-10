@@ -20,13 +20,17 @@ For each active, current document → a :class:`DocumentEntry`:
 
 ## PII
 
-Extractors already MASK sensitive numbers at extraction time — a document's
-``extracted_data`` holds ``account_number_masked`` / ``taxpayer_ssn_masked``, never
-a raw account number or SSN. So there is no raw value to route through
-``PiiField.from_raw``; those pre-masked fields become a ``PiiField`` carrying a
-canonical last-4 display and ``match_hash=None`` (non-matchable — only the masked
-form was ever captured). ``social_security_wages`` / ``_tax_withheld`` are dollar
-amounts, not SSNs, and stay ordinary fields.
+Sensitive borrower numbers are routed through ``PiiField`` (never a plain ``Field``)
+per an explicit :data:`_PII_FIELDS` registry, so a raw value can't land as plaintext
+``Field.value``. Two cases: a field the extractor stored **already masked**
+(``account_number_masked`` / ``taxpayer_ssn_masked`` / ``id_number_masked``) →
+``PiiField.pre_masked`` (canonical last-4 display, ``match_hash=None``); a field the
+extractor stored **raw** ("as written" — W-2 ``employee_ssn``, 1099 ``recipient_tin``)
+→ ``PiiField.from_raw`` (masked here + a per-file match-hash; the raw is discarded).
+``social_security_wages`` / ``_tax_withheld`` are dollar amounts, not SSNs, and stay
+ordinary fields; institution tax ids (``payer_tin`` / ``employer_ein``) are not
+borrower PII. The registry is drift-guarded by a test (any SENSITIVE extractor field
+must be routed here).
 
 ## Absent ≠ empty
 
@@ -36,6 +40,7 @@ omitted — distinct from a present empty string. Nothing is fabricated.
 
 from __future__ import annotations
 
+from collections import defaultdict
 from typing import Any
 from uuid import UUID
 
@@ -43,12 +48,14 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.ai.parsing import coerce_optional_confidence
 from app.models.borrower import Borrower
 from app.models.document import Document
+from app.models.document_borrower_link import DocumentBorrowerLink
+from app.models.extraction import Extraction
 from app.models.helpers import only_active
 from app.models.loan_file import LoanFile
 from app.services.borrower_name_matching import BORROWER_NAME_FIELDS
-from app.services.document_borrower_links import get_document_borrower_links
 from app.verification.snapshot.fields import Field, FieldSource
 from app.verification.snapshot.model import BorrowerRef, DocumentEntry, SnapshotField
 from app.verification.snapshot.pii import PiiField, PiiKind
@@ -58,20 +65,22 @@ _EXTRACTED = FieldSource.EXTRACTED
 # The catch-all list key inside extracted_data (not a typed field).
 _CATCH_ALL_KEY = "additional_sections"
 
-# Typed fields whose extracted value is ALREADY MASKED at extraction time → route
-# to a PiiField (canonical display, non-matchable hash). Explicit, not
-# pattern-matched, so ``social_security_wages`` (a dollar amount) is never caught.
-_MASKED_PII_FIELDS: dict[str, PiiKind] = {
-    "account_number_masked": PiiKind.ACCOUNT,
-    "taxpayer_ssn_masked": PiiKind.SSN,
+# Extracted typed fields carrying borrower PII, and how to route each:
+#   pre_masked=True  → the extractor already masked the value (display last-4, no hash);
+#   pre_masked=False → the extractor stored it RAW ("as written") → mask + a per-file
+#                      match-hash here so the raw never lands in the snapshot.
+# Explicit (not pattern-matched) so a dollar amount like ``social_security_wages`` is
+# never caught. Guarded against drift by test_documents_section: any extractor field
+# annotated SENSITIVE must appear here (or be an intentionally-excluded institution id).
+# Institution tax ids (``payer_tin`` / ``employer_ein``) are deliberately NOT routed —
+# they are not borrower PII (the 1099/W-2 prompts flag only the *recipient*/employee).
+_PII_FIELDS: dict[str, tuple[PiiKind, bool]] = {
+    "account_number_masked": (PiiKind.ACCOUNT, True),  # bank / investment / retirement
+    "id_number_masked": (PiiKind.ACCOUNT, True),  # driver's-license number
+    "taxpayer_ssn_masked": (PiiKind.SSN, True),  # tax return
+    "employee_ssn": (PiiKind.SSN, False),  # W-2 — stored RAW ("SSN as written")
+    "recipient_tin": (PiiKind.SSN, False),  # 1099 — stored RAW ("TIN/SSN as written")
 }
-
-
-def _confidence(raw: Any) -> float | None:
-    """LP-201's confidence, surfaced faithfully — only a genuine number, else None."""
-    if isinstance(raw, bool) or not isinstance(raw, (int, float)):
-        return None
-    return float(raw)
 
 
 def _scalar(value: Any) -> str | int | float | bool | None:
@@ -83,41 +92,15 @@ def _scalar(value: Any) -> str | int | float | bool | None:
     return None  # nested structures (e.g. bank-statement transactions) not surfaced here
 
 
-def _masked_pii(value: Any, kind: PiiKind, confidence: float | None) -> PiiField:
-    """A PiiField for an ALREADY-MASKED extracted value (canonical last-4 display).
-
-    The raw value never existed in the extraction, so ``match_hash`` is ``None``
-    (non-matchable). We render the display from the value's last four alphanumerics
-    rather than re-masking (LP-203's ``mask`` would placeholder a value that already
-    has only four significant chars), so even a badly-masked input shows only 4.
-    """
-    last4 = "".join(c for c in str(value) if c.isalnum())[-4:]
-    if kind is PiiKind.SSN:
-        display = f"***-**-{last4}" if len(last4) == 4 else "***-**-****"
-    else:
-        display = f"****{last4}" if len(last4) == 4 else "****"
-    return PiiField(display=display, match_hash=None, source=_EXTRACTED, confidence=confidence)
-
-
-def _asserted_name(extracted: dict[str, Any], document_type: str | None) -> Field | None:
-    """The raw borrower name the document printed (its LP-202 borrower-name field)."""
-    for key in BORROWER_NAME_FIELDS.get(document_type or "", ()):
-        entry = extracted.get(key)
-        if isinstance(entry, dict):
-            value = entry.get("value")
-            if isinstance(value, str) and value.strip():
-                return Field.present(
-                    value.strip(),
-                    source=_EXTRACTED,
-                    confidence=_confidence(entry.get("confidence")),
-                )
-    return None
-
-
 def build_document_fields(
-    extracted: dict[str, Any], document_type: str | None
+    extracted: dict[str, Any], document_type: str | None, *, loan_file_id: UUID
 ) -> dict[str, SnapshotField]:
-    """Reshape one document's ``extracted_data`` into snapshot fields (pure)."""
+    """Reshape one document's ``extracted_data`` into snapshot fields (pure).
+
+    A field registered in :data:`_PII_FIELDS` is routed through ``PiiField`` — never a
+    plain ``Field`` — so a raw SSN/TIN cannot land as plaintext ``Field.value``.
+    ``loan_file_id`` salts the per-file match-hash for raw PII.
+    """
     fields: dict[str, SnapshotField] = {}
     for key, entry in extracted.items():
         if key == _CATCH_ALL_KEY or not isinstance(entry, dict) or "value" not in entry:
@@ -125,19 +108,37 @@ def build_document_fields(
         value = entry.get("value")
         if value is None:  # absent — omit
             continue
-        confidence = _confidence(entry.get("confidence"))
-        kind = _MASKED_PII_FIELDS.get(key)
-        if kind is not None:
-            fields[key] = _masked_pii(value, kind, confidence)
+        confidence = coerce_optional_confidence(entry.get("confidence"))
+        routing = _PII_FIELDS.get(key)
+        if routing is not None:
+            kind, pre_masked = routing
+            if pre_masked:
+                fields[key] = PiiField.pre_masked(
+                    value, kind=kind, source=_EXTRACTED, confidence=confidence
+                )
+            else:  # raw value → mask + per-file match-hash; raw is discarded
+                fields[key] = PiiField.from_raw(
+                    value,
+                    kind=kind,
+                    loan_file_id=loan_file_id,
+                    source=_EXTRACTED,
+                    confidence=confidence,
+                )
             continue
         scalar = _scalar(value)
         if scalar is None:  # nested/non-scalar — not surfaced here
             continue
         fields[key] = Field.present(scalar, source=_EXTRACTED, confidence=confidence)
 
-    asserted = _asserted_name(extracted, document_type)
-    if asserted is not None:
-        fields["asserted_name"] = asserted
+    # ``asserted_name`` — a stable, doc-type-agnostic alias of the RAW borrower-name
+    # field the document printed. Point it at the SAME already-built field (never a
+    # re-parsed second copy that could normalize differently); don't clobber a real
+    # extracted ``asserted_name``.
+    if "asserted_name" not in fields:
+        for name_key in BORROWER_NAME_FIELDS.get(document_type or "", ()):
+            if name_key in fields:
+                fields["asserted_name"] = fields[name_key]
+                break
     return fields
 
 
@@ -157,7 +158,9 @@ async def build_documents_section(db: AsyncSession, loan_file: LoanFile) -> list
                     ),
                     Document,
                 )
-                .options(selectinload(Document.extractions))
+                # Only the CURRENT extraction is used (current_extraction); don't
+                # over-fetch every historical version and its extracted_data JSON.
+                .options(selectinload(Document.extractions.and_(Extraction.is_current.is_(True))))
                 .order_by(Document.document_type, Document.created_at, Document.id)
             )
         )
@@ -166,18 +169,18 @@ async def build_documents_section(db: AsyncSession, loan_file: LoanFile) -> list
     )
 
     borrower_names = await _active_borrower_names(db, loan_file.id)
+    links_by_doc = await _links_by_document(db, [d.id for d in documents])
 
     entries: list[DocumentEntry] = []
     for document in documents:
         extraction = document.current_extraction
         extracted = extraction.extracted_data if extraction and extraction.extracted_data else {}
-        fields = build_document_fields(extracted, document.document_type)
+        fields = build_document_fields(extracted, document.document_type, loan_file_id=loan_file.id)
 
-        links = await get_document_borrower_links(db, document.id)
         refs = tuple(
             BorrowerRef(borrower_id=link.borrower_id, name=borrower_names[link.borrower_id])
-            for link in links
-            if link.borrower_id in borrower_names
+            for link in links_by_doc.get(document.id, ())
+            if link.borrower_id in borrower_names  # excludes links to soft-deleted borrowers
         )
         entries.append(
             DocumentEntry(
@@ -187,6 +190,33 @@ async def build_documents_section(db: AsyncSession, loan_file: LoanFile) -> list
             )
         )
     return entries
+
+
+async def _links_by_document(
+    db: AsyncSession, document_ids: list[UUID]
+) -> dict[UUID, list[DocumentBorrowerLink]]:
+    """All borrower links for the given documents, grouped by document (ONE query).
+
+    Replaces a per-document call (an N+1). No soft-delete joins are needed here: the
+    caller passes only active documents and filters refs to active borrowers.
+    """
+    if not document_ids:
+        return {}
+    rows = (
+        (
+            await db.execute(
+                select(DocumentBorrowerLink)
+                .where(DocumentBorrowerLink.document_id.in_(document_ids))
+                .order_by(DocumentBorrowerLink.confidence.desc())
+            )
+        )
+        .scalars()
+        .all()
+    )
+    by_doc: dict[UUID, list[DocumentBorrowerLink]] = defaultdict(list)
+    for link in rows:
+        by_doc[link.document_id].append(link)
+    return by_doc
 
 
 async def _active_borrower_names(db: AsyncSession, loan_file_id: UUID) -> dict[UUID, str]:
