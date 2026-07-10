@@ -7901,3 +7901,56 @@ fabricated-fact / absent≠empty class of bug as LP-201/LP-202. Fixes:
 Deferred (follow-ups, in the ticket): a shared ``mask_last4``/``mask_ssn`` helper (``mask()``'s SSN branch duplicates
 ``Borrower.masked_ssn``); a shared ``ConfidenceCarrier`` base (the confidence + derived ``confidence_source`` is
 copy-pasted across ``Field`` / ``PiiField`` / ``TypedField`` — relates to ADR-238).
+
+## ADR-241: Snapshot container — frozen three-section model, un-linkable by construction, resolved belongsTo (LP-204)
+
+- **Date:** 2026-07-09
+- **Status:** Accepted
+
+**Context:** The Stage-1 snapshot needs a container the assemblers code against and that persists as a JSON blob
+(LP-209). It must hold the three sections (MISMO facts, extracted documents, the four calculators' output) built on
+LP-203's ``Field``/``PiiField`` primitives, reference LP-202's resolved document→borrower links, and — the load-bearing
+constraint — keep the sections **independent** so no cross-section correlation can be baked in (that is a deliberate
+downstream job; a snapshot must present raw, uncorrelated facts).
+
+**Decision:**
+
+- **Frozen Pydantic v2 models, top to leaf** (``model_config = {"frozen": True}``): ``Snapshot`` →
+  ``MismoSection`` / ``DocumentsSection`` / ``CalculationsSection`` → ``DocumentEntry`` / ``CalculationEntry`` /
+  ``CalcBreakdownLine`` / ``BorrowerLink``, over LP-203 ``Field``/``PiiField``. Attribute reassignment at any level
+  raises. (Caveat, documented: ``frozen`` does not deep-freeze a contained ``dict``/``list`` — Pydantic can't; the maps
+  are immutable by construction, built once by the builder and never mutated. A ``frozendict`` would fight JSON
+  round-trip and is not worth it.)
+- **The ``Field | PiiField`` union needs no discriminator.** LP-203's ``extra="forbid"`` makes the two structurally
+  mutually exclusive (``value`` only on ``Field``; ``display``/``match_hash`` only on ``PiiField``), so a dumped cell
+  validates back to exactly one — round-trip is lossless without adding a ``kind`` tag to the primitives (which would
+  have meant re-touching LP-203).
+- **``belongsTo`` = the RESOLVED link, list-capable, ``None`` when unresolved; the raw name stays in ``fields``.** A
+  ``DocumentEntry`` carries ``belongs_to: list[BorrowerLink] | None`` where ``BorrowerLink`` = ``(borrower_id,
+  confidence, method)`` from LP-202 (self-describing, no DB join at read time); ``None`` = no borrower resolved, a
+  **non-empty** list = one (or many, for a joint document). A validator rejects ``[]`` so "resolved to nobody" can't
+  masquerade as empty. The document's raw asserted name is an ordinary ``Field`` in ``fields`` — the resolved reference
+  and the raw claim are kept separate (mirrors ADR-239's raw-name-vs-resolved-link split). ``belongs_to`` references a
+  borrower *entity*, not another snapshot section, so it is not a cross-section link.
+- **No cross-section correlation — enforced structurally, not by convention.** There is simply no field anywhere that
+  references another section's keys/entries, so a MISMO↔document correlation cannot even be *expressed* in the type. The
+  MISMO map's keys are free strings, not anchors anything else can point at.
+- **Absent ≠ empty at the section level too.** Each section carries an ``absent`` marker with ``present()`` / ``missing()``
+  factories and a validator (mirroring LP-203's ``Field``), so "no documents yet" (present, empty ``entries``) is
+  distinct from "documents section not built/failed" (``absent``). Both survive JSON round-trip.
+- **Calculations shaped to FIT, not call.** Each of dti/ltv/mi/reserves is a ``CalculationEntry`` = ``{value:
+  dict[str, str|bool|None], breakdown: list[CalcBreakdownLine]}`` where ``CalcBreakdownLine.source`` is a **free string**
+  (the calculator vocabulary ``stated``/``computed``/``extracted``/``manual``/``override`` — distinct from
+  ``FieldSource``), so any calculator line round-trips with its tag. Money is stringified for exact JSON. Cash-to-close
+  is deliberately absent (not a field).
+- **Versioned + extensible.** ``snapshot_version`` (an int; ``SNAPSHOT_VERSION = 1``) is stored so a reader always knows
+  the shape. The field maps are open ``dict[str, …]`` (new keys need no schema change) and container models keep
+  Pydantic's default ``extra`` (not ``forbid``) so a future field is forward-compatible for an older reader — only the
+  ``Field``/``PiiField`` primitives forbid extras (needed for the union).
+
+**Consequences:** pure schema — nothing populates it yet (assemblers LP-205/206/207, builder LP-208, persistence LP-209).
+JSON round-trip is lossless (the acceptance bar for LP-209), preserving PII as ``display`` + versioned ``match_hash``
+(``str | None``, no raw value), nullable confidence + derived source, calculator source tags, and the absent≠empty
+distinction at field and section level. Reuses ADR-240 (LP-203 primitives), ADR-239 (LP-202 links + raw-vs-resolved
+split), and ADR-238 (LP-201 confidence). Deferred: the collection deep-immutability caveat above; populating any section;
+and everything downstream (assemblers/builder/persistence/UI).

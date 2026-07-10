@@ -1,19 +1,42 @@
-"""Per-run snapshot primitives (LP-203).
+"""Per-run snapshot (LP-203 primitives + LP-204 container model).
 
-The shared field shapes and PII handling every snapshot fact is built from. Pure
-primitives — the snapshot model (LP-204) and the assemblers come later; nothing
-consumes these yet.
+The shared field shapes + PII handling (LP-203) and the frozen three-section
+container (LP-204) that assemblers code against. Nothing populates the container
+yet — assemblers (LP-205/206/207), the builder (LP-208), and persistence (LP-209)
+come later.
 """
 
 from app.verification.snapshot.fields import Field, FieldSource, JsonScalar
+from app.verification.snapshot.model import (
+    SNAPSHOT_VERSION,
+    BorrowerLink,
+    CalcBreakdownLine,
+    CalculationEntry,
+    CalculationsSection,
+    DocumentEntry,
+    DocumentsSection,
+    MismoSection,
+    Snapshot,
+    SnapshotField,
+)
 from app.verification.snapshot.pii import PiiField, PiiKind, mask, match_hash
 
 __all__ = [
+    "SNAPSHOT_VERSION",
+    "BorrowerLink",
+    "CalcBreakdownLine",
+    "CalculationEntry",
+    "CalculationsSection",
+    "DocumentEntry",
+    "DocumentsSection",
     "Field",
     "FieldSource",
     "JsonScalar",
+    "MismoSection",
     "PiiField",
     "PiiKind",
+    "Snapshot",
+    "SnapshotField",
     "mask",
     "match_hash",
 ]
