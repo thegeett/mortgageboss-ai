@@ -7,6 +7,7 @@ no-correlation guarantee.
 """
 
 from datetime import UTC, datetime
+from decimal import Decimal
 from uuid import uuid4
 
 import pytest
@@ -162,6 +163,14 @@ def test_json_keys_are_snake_case() -> None:
     assert "loan_file_id" in dumped and "snapshot_version" in dumped
     assert "document_type" in dumped["documents"][0]
     assert "belongs_to" in dumped["documents"][0]
+
+
+@pytest.mark.parametrize("model", [Calculation, CalculationLine])
+def test_calculation_value_rejects_non_json_scalar(model: type) -> None:
+    """A Decimal (money) must not be silently floated — same guard as Field (ADR-240)."""
+    kwargs = {"label": "x"} if model is CalculationLine else {}
+    with pytest.raises(ValidationError):
+        model(value=Decimal("1234.56"), **kwargs)
 
 
 def test_belongs_to_is_a_raw_string_not_a_borrower_id() -> None:

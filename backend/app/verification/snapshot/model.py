@@ -45,7 +45,7 @@ from datetime import datetime
 from enum import StrEnum
 from uuid import UUID
 
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from pydantic import Field as PydanticField
 
 from app.verification.snapshot.fields import Field, JsonScalar
@@ -62,6 +62,24 @@ SNAPSHOT_SCHEMA_VERSION = 1
 SnapshotField = Field | PiiField
 
 _FROZEN = {"frozen": True, "extra": "forbid"}
+
+
+def _json_scalar_or_raise(v: object) -> object:
+    """Reject a non-JSON-scalar value instead of lossy-coercing it.
+
+    Mirrors :class:`app.verification.snapshot.fields.Field`'s guard (ADR-240): a
+    ``Decimal`` (money — DTI/LTV/reserves figures) would otherwise be silently
+    floated and lose precision. The contract is that the LP-207 assembler stringifies
+    ``Decimal``/``date`` first; enforce it here so a violation fails loudly at the
+    calculation value rather than corrupting a figure downstream. (``bool`` is a
+    ``JsonScalar`` member and an ``int`` subclass, so it is allowed.)
+    """
+    if v is not None and not isinstance(v, (str, int, float, bool)):
+        raise ValueError(
+            f"calculation value must be a JSON scalar (str/int/float/bool) or None, not "
+            f"{type(v).__name__} — the assembler must stringify Decimal/date first"
+        )
+    return v
 
 
 class CalcSource(StrEnum):
@@ -88,6 +106,11 @@ class CalculationLine(BaseModel):
     value: JsonScalar | None = None
     source: CalcSource | None = None
 
+    @field_validator("value", mode="before")
+    @classmethod
+    def _value_is_json_scalar(cls, v: object) -> object:
+        return _json_scalar_or_raise(v)
+
 
 class Calculation(BaseModel):
     """A single computed figure plus the breakdown that produced it.
@@ -102,6 +125,11 @@ class Calculation(BaseModel):
 
     value: JsonScalar | None = None
     breakdown: tuple[CalculationLine, ...] = ()
+
+    @field_validator("value", mode="before")
+    @classmethod
+    def _value_is_json_scalar(cls, v: object) -> object:
+        return _json_scalar_or_raise(v)
 
 
 class Calculations(BaseModel):
