@@ -8322,3 +8322,60 @@ Reuses ADR-203 (PII), ADR-241 (the model), ADR-245 (the builder), ADR-052 (owned
 revision, so the DB-backed suite (test DB via ``create_all``) is the schema-correct coverage. **Deferred (future, only
 if storage hurts):** dedup / diffing / delta-encoding across a file's runs — a full blob per run is the V1 decision;
 and a DB-level append-only guard (trigger/REVOKE) if code-level enforcement ever proves insufficient.
+
+## ADR-247: Rule-kind classification — the canonical Stage-2 routing table + Priya-validation gate (LP-301)
+
+- **Date:** 2026-07-10
+- **Status:** Accepted
+
+**Context:** Stage 2 evaluates ~130 verification rules along three paths (architecture v2 §3C). Which path each rule
+takes — and whether it gets the deterministic numeric bookend — must be *machine-readable* and *version-controlled*, not
+locked in a human-facing spreadsheet. LP-301 formalizes the first-pass classification (``docs/stage2-rule-classification.xlsx``)
+into that canonical artifact and stands up the Priya-validation gate. It is data + tracking; no engine logic (the
+evaluator is LP-304+).
+
+**Decision:**
+
+- **Four kinds → routing (architecture v2 §3C):** ``calculative`` (deterministic pre-compute → AI selects inputs →
+  deterministic re-verify — the *bookend*), ``structural`` (deterministic check; AI ONLY for fuzzy entity matches),
+  ``judgmental`` (pure AI + human ratification), ``out_of_scope`` (not evaluated — external/LOS/post-submission/
+  unsupported). Six ``evaluation_path`` values: ``deterministic_bookend+ai`` / ``deterministic_bookend`` (calc, with vs
+  without AI input-selection) / ``deterministic_only`` (structural exact) / ``ai_fuzzy_match`` (structural fuzzy) /
+  ``ai_judgment`` / ``static_filter``.
+- **The structural exact-vs-fuzzy split is made EXPLICIT** — the xlsx prose didn't cleanly separate them. Rule:
+  a structural rule whose eval-path mentions "AI" is **fuzzy** (``exact_match=False`` → ``ai_fuzzy_match``); otherwise it
+  is **exact** (``exact_match=True`` → ``deterministic_only``, NO AI call). This encodes the design principle "AI is spent
+  on judgment and fuzzy matching, not on exact checks (SSN/DOB/price)". Result: 60 structural = 32 exact + 28 fuzzy.
+  ``exact_match`` is ``None`` for non-structural rules.
+- **``calculative`` ⟺ ``numeric_check``.** Every calculative rule (29) gets the deterministic bookend; no other kind
+  does. (Confirmed against the xlsx: 29 numeric-check = 29 calculative.)
+- **Plain-text CSV artifact + thin loader, CSV is source of truth.** ``app/verification/rules/rule_kinds.csv`` (one row
+  per rule, git-diffable line-by-line) is authoritative; ``app/verification/rules/kinds.py`` is a thin cached reader
+  (``load_rule_kinds`` / ``kind_for`` / ``rules_by_kind`` / ``numeric_check_rules`` + gate helpers). **CSV, not YAML**:
+  the schema is a flat 10-column table, stdlib ``csv`` needs no dependency (PyYAML is only transitive here), and a flat
+  CSV diffs cleanly. ``docs/stage2-rule-classification.md`` is a companion table *generated from the CSV*
+  (``app.scripts.generate_rule_kinds_md``), so future tickets read rule_id→kind→path without the xlsx, and it can't drift.
+- **Priya-validation gate (tracking only — LP-301 signs off nothing):** every rule ships ``priya_validated=False``.
+  A calculative rule carrying a **regulatory** threshold/window/limit/factor is ``threshold_needs_signoff=True`` and is a
+  ship-blocker until validated (22 of 29 — DTI limit, conforming limit PE-1, seasoning CR-6, IPC PC-4, large-deposit
+  AS-1, income-variance IN-1, …). Helpers ``unvalidated_rules`` / ``rules_needing_threshold_signoff`` /
+  ``pending_threshold_signoff`` let a later ticket *block* shipping; here they only report.
+
+**Formalization notes / re-tags (flagged for Priya, not silently chosen):**
+
+- **Count is 133, not "130".** The xlsx is titled "130 Rules" but has 133 data rows (29+60+29+15). All 133 are
+  formalized — dropping rows would be worse; the title mismatch is noted.
+- **``threshold_needs_signoff`` defaulted FALSE for 7 self-consistency calculative rules** — CR-2 (HCLTV compute),
+  AS-3 (cash-to-close sufficiency), DT-4 (tax vs assessed), DT-5 (premium vs binder), IH-4 (dup of DT-5), MI-2 (factor
+  vs certificate), PR-2 (appraised vs price lesser-of): they are arithmetic but embed no *regulatory constant* to sign
+  off (they compare two documented values / a min()). Flagged — flip to True if any hides an investor-specific value.
+- **MI-1 kept Calculative** (xlsx tag) though it is a presence-gated-by-LTV check — borderline Structural/Calculative;
+  flagged for Priya.
+- **IH-4 is a literal duplicate of DT-5** (the xlsx "why" says "dup DT-5"); both kept in the 133, dup flagged.
+
+**Consequences:** the CSV is the single source the Stage-2 orchestrator (later) routes from; the ``.md`` companion and the
+loader read it, nothing re-derives from the xlsx at runtime (no openpyxl dependency). Covered by tests (all 133 present,
+counts, structural exact_match explicit, calc⟺numeric, out-of-scope never AI, loader round-trip, gate helpers). No DB
+table (rules-as-data-in-repo, mirroring the existing ``app/verification/rules/`` package). **Deferred:** rule specs
+(LP-303+), the evaluator (LP-304), prompts, the orchestrator, and the actual Priya sign-offs (only the tracking exists).
+The flagged re-tags/dup await Priya's validation pass.
