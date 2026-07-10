@@ -6,7 +6,7 @@ absent≠empty. Seeds an LF-6T3N-like file.
 """
 
 from typing import Any
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from app.models import (
     Borrower,
@@ -19,7 +19,10 @@ from app.models.base import utcnow
 from app.models.document_borrower_link import DocumentBorrowerLink, MatchMethod
 from app.services.extractions import create_extraction_version
 from app.services.loan_files import create_loan_file
-from app.verification.snapshot.documents_section import build_documents_section
+from app.verification.snapshot.documents_section import (
+    build_document_fields,
+    build_documents_section,
+)
 from app.verification.snapshot.fields import Field, FieldSource
 from app.verification.snapshot.pii import PiiField
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -207,6 +210,26 @@ async def test_confidence_surfaced_faithfully_never_fabricated(db_session: Async
     assert pay.fields["employee_name"].confidence == 0.98
     # every field is source=extracted
     assert all(f.source is FieldSource.EXTRACTED for f in pay.fields.values())
+
+
+def test_business_tax_ids_are_masked_not_plaintext() -> None:
+    """employer_ein (W-2) and payer_tin (1099) are 9-digit tax ids → masked, no raw run.
+
+    Surfaced by the LP-209 at-rest guard on real data: a raw EIN is a bare 9-digit run.
+    Masking them upstream keeps the guard strong instead of exempting a tax id.
+    """
+    lf = uuid4()
+    w2 = build_document_fields({"employer_ein": _field("12-3456789", None)}, "w2", loan_file_id=lf)
+    ein = w2["employer_ein"]
+    assert isinstance(ein, PiiField)
+    assert ein.display == "****6789" and "123456789" not in repr(ein.model_dump())
+
+    f1099 = build_document_fields(
+        {"payer_tin": _field("98-7654321", None)}, "1099", loan_file_id=lf
+    )
+    tin = f1099["payer_tin"]
+    assert isinstance(tin, PiiField)
+    assert tin.display == "****4321" and "987654321" not in repr(tin.model_dump())
 
 
 async def test_pii_account_is_masked_piifield_no_raw(db_session: AsyncSession) -> None:

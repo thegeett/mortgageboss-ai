@@ -8066,8 +8066,11 @@ ticket's premises (recorded below).
   ``taxpayer_ssn_masked``) → ``PiiField.pre_masked`` (canonical last-4 display, ``match_hash=None``); a field the
   extractor stored **RAW** ("as written" — W-2 ``employee_ssn``, 1099 ``recipient_tin``) → ``PiiField.from_raw`` (masked
   here + a per-file match-hash; the raw is discarded). ``social_security_wages`` / ``_tax_withheld`` are dollar amounts,
-  not SSNs; institution tax ids (``payer_tin`` / ``employer_ein``) are not borrower PII. The registry is drift-guarded
-  by a test (any ``# SENSITIVE`` extractor field must be routed, except the date-typed ``date_of_birth``).
+  not SSNs. Institution tax ids (W-2 ``employer_ein`` / 1099 ``payer_tin``) — an employer/payer id, not borrower PII —
+  ARE routed too (``PiiKind.ACCOUNT`` → ``****NNNN`` + per-file hash): a 9-digit tax id is exactly what the LP-209
+  at-rest guard treats as a possible unmasked SSN, so masking them keeps that guard strong instead of exempting a tax
+  id (see the 2026-07-10 amendment). The registry is drift-guarded by a test (any ``# SENSITIVE`` extractor field must
+  be routed, except the date-typed ``date_of_birth``).
   **[Corrected post-review — see the amendment; the original claim "extraction PII is already masked, no raw to route"
   was FALSE for W-2/1099, which store the SSN/TIN raw.]**
 
@@ -8105,10 +8108,26 @@ snapshot blob. Fixes:
 - **``asserted_name`` de-duplicated.** It now aliases the SAME already-built name Field (a pointer, not a second copy
   re-normalized with ``.strip()`` — the two could disagree on whitespace) and never clobbers a real extracted field.
 
-Deferred: ``belongs_to=None`` still can't distinguish "matched borrowers later removed" from "never resolved" (a marker
-is an LP-208 concern); schema-declared PII (annotate ``PiiKind`` on the extraction ``TypedField`` so the assembler reads
+**Resolved (2026-07-10): keep ``belongs_to=None``.** The earlier deferral — that ``None`` can't distinguish
+"matched borrowers later removed" from "never resolved" (nor no-match from never-attempted) — is decided as
+**keep-``None``, accepted lossy-by-design**. ``None`` means "no borrower attached"; ``fields.asserted_name`` already lets
+a consumer split "named someone but unresolved" from "named no one," which is the only distinction any consumer needs
+today. The finer reasons (no-match / not-attempted / removed) are intentionally NOT represented — the root cause is
+LP-202 storing positive links only (zero rows = both "no match" and "never ran"), so surfacing the distinction would
+need an upstream match-attempt record. No consumer requires it, so no marker is added; revisit only if a verification
+rule concretely needs it (YAGNI).
+
+Deferred: schema-declared PII (annotate ``PiiKind`` on the extraction ``TypedField`` so the assembler reads
 it instead of a parallel registry) — the drift-guard test is the interim; and the ``_scalar`` naming/dedup across the two
 assemblers.
+
+**Amendment (2026-07-10): mask employer EIN / payer TIN (surfaced by real-file smokes).** Reconciling the dev DB let the
+Stage-1 smokes run on real LF-6T3N, which caught W-2 ``employer_ein`` and 1099 ``payer_tin`` (9-digit business tax ids)
+landing as plaintext ``Field``s and tripping the LP-209 PII-at-rest guard. Decision (overriding the original "institution
+ids not routed"): route both through ``PiiField.from_raw`` (``PiiKind.ACCOUNT`` → ``****NNNN`` + per-file hash) in
+``_PII_FIELDS`` and mark them ``# SENSITIVE`` in the extractors so the drift-guard keeps them synced. A 9-digit tax id is
+indistinguishable from a bare SSN to the guard, so masking preserves the strong guard rather than exempting it. Verified
+on real LF-6T3N (``employer_ein`` → ``****NNNN``; whole snapshot builds + persists + loads with no raw PII at rest).
 
 ## ADR-244: Calculations section assembler — invoke-and-map, source-tags passed through, not-computed=None (LP-207)
 
@@ -8213,9 +8232,11 @@ or faked), consistent with the absent≠empty invariant that governs the whole s
 policy shows itself on the real file: the ``snapshot_smoke`` on the dev DB (which lacks LP-201's ``extractions.confidence``
 columns) builds a snapshot with **MISMO present (122 facts)** and **documents + calculations absent-with-reason** — an
 honest partial snapshot instead of a crash. The COMPLETE all-three-present case is covered by the DB-backed happy-path
-test (test DB via ``create_all``). Reuses ADR-241 (the container) and ADR-242/243/244 (the assemblers). Deferred: the
-``belongs_to=None`` "matched-then-removed vs never-resolved" ambiguity (still open, an LP-206 note); persistence (LP-209);
-and triggering / run-creation. Amends LP-204 (ADR-241) with the section ``reason``/``failed`` addition.
+test (test DB via ``create_all``). Reuses ADR-241 (the container) and ADR-242/243/244 (the assemblers). The
+``belongs_to=None`` "matched-then-removed vs never-resolved" ambiguity is **resolved: keep ``None``, lossy-by-design**
+(see the ADR-243 resolution note — no consumer needs the finer reasons; revisit only if a rule does). Deferred:
+persistence (LP-209); and triggering / run-creation. Amends LP-204 (ADR-241) with the section ``reason``/``failed``
+addition.
 
 **Amendment (2026-07-10, post code-review).** The partial-failure policy was correct for pure failures but broke for DB
 errors — the three sections shared one ``AsyncSession`` with no rollback, so a DB error in one section poisoned the

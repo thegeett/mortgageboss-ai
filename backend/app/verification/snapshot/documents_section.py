@@ -71,15 +71,18 @@ _CATCH_ALL_KEY = "additional_sections"
 #                      match-hash here so the raw never lands in the snapshot.
 # Explicit (not pattern-matched) so a dollar amount like ``social_security_wages`` is
 # never caught. Guarded against drift by test_documents_section: any extractor field
-# annotated SENSITIVE must appear here (or be an intentionally-excluded institution id).
-# Institution tax ids (``payer_tin`` / ``employer_ein``) are deliberately NOT routed —
-# they are not borrower PII (the 1099/W-2 prompts flag only the *recipient*/employee).
+# annotated SENSITIVE must appear here. Institution tax ids (``employer_ein`` /
+# ``payer_tin``) ARE routed too: though they are the employer/payer's id (not borrower
+# PII), a 9-digit tax id is exactly what the LP-209 at-rest guard treats as a possible
+# unmasked SSN — masking them keeps the strong guard intact rather than exempting them.
 _PII_FIELDS: dict[str, tuple[PiiKind, bool]] = {
     "account_number_masked": (PiiKind.ACCOUNT, True),  # bank / investment / retirement
     "id_number_masked": (PiiKind.ACCOUNT, True),  # driver's-license number
     "taxpayer_ssn_masked": (PiiKind.SSN, True),  # tax return
     "employee_ssn": (PiiKind.SSN, False),  # W-2 — stored RAW ("SSN as written")
-    "recipient_tin": (PiiKind.SSN, False),  # 1099 — stored RAW ("TIN/SSN as written")
+    "recipient_tin": (PiiKind.SSN, False),  # 1099 recipient — stored RAW ("TIN/SSN as written")
+    "employer_ein": (PiiKind.ACCOUNT, False),  # W-2 employer tax id — masked ****NNNN
+    "payer_tin": (PiiKind.ACCOUNT, False),  # 1099 payer tax id — masked ****NNNN
 }
 
 
