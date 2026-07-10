@@ -174,10 +174,16 @@ async def test_stage1_end_to_end_build_persist_load(db_session: AsyncSession) ->
         db_session, loan_file_id=lf.id, run_id=run_id, company_id=lf.company_id
     )
     await persist_snapshot(db_session, built)
+    # Force a REAL DB round-trip, not an identity-map hit: expunge the in-session
+    # instances so load_snapshot must re-SELECT and deserialize the JSONB column from
+    # Postgres (otherwise `loaded` is the same Python object, and the serialize/
+    # deserialize path — the thing persistence exists for — is never exercised).
+    db_session.expunge_all()
     loaded = await load_snapshot(db_session, run_id)
 
-    # Lossless through build + DB.
+    # Lossless through build + DB serialize/deserialize.
     assert loaded == built
+    assert loaded is not built  # proves it came back through the JSONB column, not the map
 
     # All three sections present + populated + metadata.
     assert loaded.loan_file_id == lf.id and loaded.run_id == run_id
@@ -194,6 +200,11 @@ async def test_stage1_end_to_end_build_persist_load(db_session: AsyncSession) ->
     assert ssn_mismo.match_hash is not None
     assert ssn_mismo.match_hash == ssn_doc.match_hash  # same raw SSN → same hash (cross-source)
     assert ssn_mismo.display == ssn_doc.display == "***-**-6789"
+    # Negative control: a DIFFERENT borrower's SSN must NOT hash to the same value
+    # (else the hash ignores the value and cross-source matching is meaningless).
+    ssn_priya = loaded.mismo.facts["borrower.2.ssn"]
+    assert isinstance(ssn_priya, PiiField)
+    assert ssn_priya.match_hash is not None and ssn_priya.match_hash != ssn_mismo.match_hash
 
     # --- belongsTo resolution (single + joint) + raw asserted name distinct --
     pay = next(e for e in loaded.documents.entries if e.document_type == "pay_stub")
@@ -221,9 +232,15 @@ async def test_stage1_end_to_end_build_persist_load(db_session: AsyncSession) ->
     assert mi is not None and mi.value["required"] is False
     assert mi.value["monthly_premium"] is None  # not required → honest null, not 0
 
-    # --- NO raw PII at rest -------------------------------------------------
+    # --- NO raw SSN/account NUMBER at rest ---------------------------------
+    # Reads the reloaded-from-Postgres row (post-expunge), so this is the genuine
+    # at-rest JSONB — an independent check, not just re-running persist's guard.
+    # (Scope: raw SSN / long-account NUMBERS. Names + DOB are stored in the clear by
+    # design — see ADR-240/243 — so this is a masking-failure backstop, not "no PII".)
     row = await db_session.scalar(select(SnapshotRecord).where(SnapshotRecord.run_id == run_id))
     assert row is not None
-    blob = json.dumps(row.snapshot_json)
+    # Strip the keyed match-hash (v1:<hex>) — it legitimately contains digit runs — before
+    # the raw-number sweep, matching the script's precise strip (not a broad hex strip).
+    blob = re.sub(r"v1:[0-9a-f]+", "", json.dumps(row.snapshot_json))
     assert "123456789" not in blob and _AKASH_SSN not in blob
     assert not re.search(r"\d{3}-\d{2}-\d{4}|\b\d{9,}\b", blob)  # no SSN-shaped or long bare run
