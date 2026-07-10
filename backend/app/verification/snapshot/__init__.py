@@ -26,6 +26,13 @@ from app.verification.snapshot.model import (
     Snapshot,
     SnapshotField,
 )
+from app.verification.snapshot.persistence import (
+    RawPiiAtRestError,
+    SnapshotAlreadyPersisted,
+    load_snapshot,
+    load_snapshots_for_loan_file,
+    persist_snapshot,
+)
 from app.verification.snapshot.pii import PiiField, PiiKind, mask, match_hash
 
 __all__ = [
@@ -43,7 +50,9 @@ __all__ = [
     "MismoSection",
     "PiiField",
     "PiiKind",
+    "RawPiiAtRestError",
     "Snapshot",
+    "SnapshotAlreadyPersisted",
     "SnapshotField",
     "build_calculations_section",
     "build_document_fields",
@@ -51,6 +60,9 @@ __all__ = [
     "build_mismo_section",
     "build_snapshot",
     "load_mismo_section",
+    "load_snapshot",
+    "load_snapshots_for_loan_file",
     "mask",
     "match_hash",
+    "persist_snapshot",
 ]

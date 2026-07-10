@@ -59,6 +59,7 @@ from app.models.needs_item import (
     NeedsItemStatus,
 )
 from app.models.property import OccupancyType, Property, PropertyType
+from app.models.snapshot_record import SnapshotRecord
 from app.models.stated_financials import (
     StatedAsset,
     StatedEmployer,
@@ -129,6 +130,7 @@ __all__ = [
     "RecordStatus",
     "RefinanceType",
     "ShortStr",
+    "SnapshotRecord",
     "SoftDeleteMixin",
     "StatedAsset",
     "StatedEmployer",

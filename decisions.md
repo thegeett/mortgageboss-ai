@@ -8240,3 +8240,53 @@ Deferred: whether a *non-DB* assembler exception (a code bug) should propagate (
 absent-with-reason — kept the broad ``except Exception`` (the tested resilience contract) plus ERROR logging; narrowing
 to fail-loud-on-bugs is a design decision. Also deferred: a shared ``_AbsentableSection`` base for the now-4× absent/
 present/missing/failed pattern (LP-204's deferral, stronger now).
+
+## ADR-246: Snapshot persistence — one immutable JSONB blob per run; write-once; PII-clean-at-rest guard (LP-209)
+
+- **Date:** 2026-07-10
+- **Status:** Accepted
+
+**Context:** The final core Stage-1 ticket persists a built LP-204 ``Snapshot`` (LP-208) as a durable per-run artifact and
+reads it back. Four decisions matter: the storage shape, immutability enforcement, the duplicate-run policy, and — because
+this is the moment the snapshot lands at rest — a PII-clean-at-rest guard.
+
+**Decision:**
+
+- **One full JSONB blob per run, NOT shredded.** A ``snapshot_records`` row stores the whole snapshot verbatim in a single
+  ``snapshot_json`` JSONB column (via ``Snapshot.model_dump(mode="json")``; load reconstructs with
+  ``Snapshot.model_validate`` — proven lossless, preserving PII display+hash, null confidence, source tags, and
+  absent≠empty through the DB). Shredding into per-fact columns / dedup / diffing is explicitly rejected for V1: the blob
+  is simple, the round-trip is guaranteed, and a snapshot is small. **JSONB (not the app's usual ``JSON``)** is chosen
+  deliberately — it validates real JSON at write and stays queryable if a future need arises; the divergence from the
+  ``JSON`` convention (ADR-057) is intentional for this queryable artifact.
+- **Immutable, append-only — enforced in code.** The row has **no ``updated_at`` and no soft-delete** (a ``TimestampMixin``
+  would add ``updated_at``; a ``SoftDeleteMixin`` would allow a mutating delete) — the shape itself is append-only. There
+  is **no update method**; the write path is insert-only. The repo has no DB-level append-only trigger/REVOKE pattern to
+  reuse, so enforcement is in code (documented). Append-only history is the point: a NEW ``run_id`` → a NEW row, prior
+  rows untouched — this is what lets a processor jump back to a previous run's state.
+- **``run_id`` UNIQUE, and a bare UUID — not a FK to ``verifications``.** One snapshot per run (the UNIQUE constraint). It
+  is not a FK because the builder (LP-208) *receives* ``run_id`` and never mints it from a verification row, so no matching
+  row is guaranteed (mirrors how ``findings.verification_id`` began as a bare UUID, ADR-063). ``loan_file_id`` is an
+  indexed FK to the owning loan file (CASCADE, ADR-052) — many runs per file.
+- **Duplicate ``run_id`` → RAISE (``SnapshotAlreadyPersisted``), never overwrite.** Re-persisting a run is a programming
+  error; the DB UNIQUE is the real guard, the raise is the clear signal. Chosen over a silent no-op so a double-write is
+  surfaced, not hidden.
+- **PII-clean-at-rest write guard (the last line of defense).** Before the insert, the serialized snapshot is scanned for
+  RAW PII — a dashed SSN (``\b\d{3}-\d{2}-\d{4}\b``; a masked ``***-**-1234`` never matches) and a bare 9+-digit run
+  (``\b\d{9,}\b`` — an unmasked SSN-without-dashes or account number). The word-boundary anchoring means it does **not**
+  false-positive on a hex ``match_hash`` (digit runs there are surrounded by hex letters — no boundary) nor on money like
+  ``"1160000.00"`` (a decimal breaks the run at 7 digits) — verified against a real built snapshot carrying a masked SSN,
+  a hash, and money. If raw PII is found the write **fails loudly** (``RawPiiAtRestError``) and nothing is inserted: a raw
+  SSN at rest is the worst outcome, so a leaking snapshot is never stored. The guard catches an upstream assembler bug; it
+  does not re-mask (masking is the assemblers' job, LP-203/205/206).
+
+**Consequences:** ``persist_snapshot(db, snapshot)`` (insert-only, flush-only, guard + dup-check) and ``load_snapshot(db,
+run_id)`` / ``load_snapshots_for_loan_file`` reconstruct the frozen snapshot. New table + migration
+(``c4e9a7f2b8d3``, single head; offline DDL verified). Covered by DB-backed tests: lossless round-trip, write-once
+(dup raises, one row), append-only history (two runs → two rows, both loadable), PII-at-rest (masked snapshot stores
+clean; a raw-SSN and a raw-account snapshot are both rejected), and a build→persist→load end-to-end through LP-208.
+Reuses ADR-203 (PII), ADR-241 (the model), ADR-245 (the builder), ADR-052 (owned-child scoping). The real-file smoke
+(``snapshot_persist_smoke``) needs this branch's migrations on the target DB; the dev DB is stamped at a ``phase3_5_1``
+revision, so the DB-backed suite (test DB via ``create_all``) is the schema-correct coverage. **Deferred (future, only
+if storage hurts):** dedup / diffing / delta-encoding across a file's runs — a full blob per run is the V1 decision;
+and a DB-level append-only guard (trigger/REVOKE) if code-level enforcement ever proves insufficient.
