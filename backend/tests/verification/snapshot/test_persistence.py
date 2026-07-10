@@ -183,6 +183,26 @@ async def test_raw_account_number_run_is_rejected(db_session: AsyncSession) -> N
         await persist_snapshot(db_session, leaking)
 
 
+def test_guard_allows_large_decimal_money_but_still_catches_bare_ids() -> None:
+    """A large money amount ('123456789.00') must NOT trip the guard; a bare id must.
+
+    Finding (c): a 9+-integer-digit amount was aborting the whole snapshot persist. The
+    guard now excludes the integer part of a decimal number (money) while still flagging a
+    bare-integer run (an unmasked account/SSN-without-dashes).
+    """
+    from app.verification.snapshot.persistence import _assert_no_raw_pii
+
+    # $123M+ amount serialized as a JSON string — money, not an id → allowed.
+    _assert_no_raw_pii('{"loan.amount": "123456789.00"}')
+    _assert_no_raw_pii('{"amount": "1234567890.55"}')  # 10-int-digit money → allowed
+    # A bare-integer id (no decimal) is still caught.
+    with pytest.raises(RawPiiAtRestError):
+        _assert_no_raw_pii('{"asset.account": "123456789"}')
+    # A dashed SSN is still caught (unrelated alternative).
+    with pytest.raises(RawPiiAtRestError):
+        _assert_no_raw_pii('{"ssn": "123-45-6789"}')
+
+
 async def test_build_persist_load_end_to_end(db_session: AsyncSession) -> None:
     """The durable Stage-1 artifact: LP-208 build → persist → load == built (incl. a masked SSN)."""
     from decimal import Decimal

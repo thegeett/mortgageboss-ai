@@ -259,9 +259,14 @@ class PiiField(BaseModel):
         ``None`` hash never matches — in particular two ``None``-hash fields are NOT a
         match (a plain ``==`` on ``match_hash`` would wrongly return ``True`` for
         ``None == None``). Callers that correlate PII across the snapshot must use this,
-        not a bare hash comparison.
+        not a bare hash comparison. A non-``PiiField`` ``other`` (e.g. a plain ``Field``,
+        which has no ``match_hash``) returns ``False`` rather than raising ``AttributeError``.
         """
-        return self.match_hash is not None and self.match_hash == other.match_hash
+        return (
+            isinstance(other, PiiField)
+            and self.match_hash is not None
+            and self.match_hash == other.match_hash
+        )
 
     @property
     def confidence_source(self) -> ConfidenceSource:

@@ -8440,9 +8440,25 @@ the evaluator read raw extraction (which would break "evaluator reads only the s
   yet (the only v1 rows are dev/test artifacts). The change is otherwise **additive**: other sections and the round-trip
   are unaffected; non-bank documents simply carry ``transactions=None``.
 
+- **Review amendment (2026-07-10, post-`150ce66`) — the per-row ``account`` was REMOVED (re-reversing back to the original
+  "no account on the record").** A ``/code-review`` found the amended per-row account net-negative: the masked account is a
+  **per-statement** fact already carried **once** on the parent ``DocumentEntry.fields["account_number_masked"]``, so a copy
+  on every ``TransactionRecord`` duplicated it N× in ``snapshot_json`` (LF-6T3N: 50×) for a field **no consumer reads** (the
+  cross-section match is the KNOWN GAP — impossible on this branch). A per-transaction rule reads the account from the entry
+  it iterates; ``_statement_account`` was deleted. This also **removed a version-shape hazard**: the amendment had added a
+  *required* field without bumping ``snapshot_version`` (still 2), which made a pre-``150ce66`` v2 blob fail to load; the
+  shape now reverts to the transactions-only v2. ``PiiField.is_matchable`` / ``matches()`` are **kept** (general primitives)
+  and ``matches()`` was hardened to return ``False`` (not ``AttributeError``) for a non-``PiiField`` argument. Also fixed in
+  the same review pass: **direction** is now classified from ``transaction_type`` **only** — the old positive-amount →
+  ``credit`` fallback forged a deposit on every unlabelled/ambiguous withdrawal (the extractor stores ``amount`` positive), a
+  false AS-1 large-deposit; an unknown/ambiguous type now yields an **absent** direction (never a guess), tagged with a new
+  ``FieldSource.DERIVED`` (not mislabelled ``extracted``). **Redaction** was broadened to also scrub space/dash-grouped
+  accounts/cards (``1234 5678 9012 3456``). The **at-rest guard** now excludes decimal-money (``123456789.00`` no longer
+  aborts a persist) while still flagging a bare-integer id. Supersedes the amended-account bullet and the ``direction …
+  amount-sign fallback`` clause above.
+
 **Consequences:** a pure read + reshape (``build_transactions`` is pure; the assembler surfaces transactions when
-``document_type == "bank_statement"`` and the extraction carried a transaction list, attaching the once-resolved pre-masked
-statement account to each row). A small **additive** helper landed on the LP-203 primitive — ``PiiField.is_matchable`` /
+``document_type == "bank_statement"`` and the extraction carried a transaction list). A small **additive** helper landed on the LP-203 primitive — ``PiiField.is_matchable`` /
 ``PiiField.matches()`` — enforcing absent-is-not-matchable structurally so no caller re-implements a ``None``-safe hash
 compare. Verified on real LF-6T3N: 50 transactions surfaced across 5 statements, each carrying the statement's ``****NNNN``
 account (``match_hash=None``), descriptions redacted, the LP-209 at-rest guard passes, and persist→load == built (lossless

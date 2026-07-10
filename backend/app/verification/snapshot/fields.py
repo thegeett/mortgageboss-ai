@@ -38,6 +38,7 @@ class FieldSource(StrEnum):
 
     PARSED = "parsed"  # deterministic MISMO / 1003 parse
     EXTRACTED = "extracted"  # an AI document extraction
+    DERIVED = "derived"  # COMPUTED from other fields (e.g. transaction direction), not read as-is
 
 
 class Field(BaseModel):

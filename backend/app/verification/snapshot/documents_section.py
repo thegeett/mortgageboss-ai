@@ -76,16 +76,53 @@ _EXTRACTED = FieldSource.EXTRACTED
 _TRANSACTION_DOC_TYPES = frozenset({"bank_statement"})
 _TRANSACTIONS_KEY = "transactions"
 
-# Extraction transaction_type values → credit (money in) / debit (money out).
-_CREDIT_TYPES = frozenset({"deposit", "credit", "interest", "refund", "transfer_in"})
-_DEBIT_TYPES = frozenset({"withdrawal", "debit", "fee", "payment", "transfer_out", "check"})
+# Extraction transaction_type values → credit (money in) / debit (money out). The
+# extractor's vocabulary is "deposit / withdrawal / fee / interest / transfer / ..."
+# (bank_statement prompt) — open-ended, so an UNKNOWN or genuinely AMBIGUOUS type (bare
+# ``transfer`` / ``ach`` / ``wire`` — could be either direction) is DELIBERATELY absent
+# from both sets → :func:`_direction` returns None (unclassifiable), never a guessed
+# direction. Only unambiguous types are listed.
+_CREDIT_TYPES = frozenset(
+    {
+        "deposit",
+        "credit",
+        "interest",
+        "refund",
+        "transfer_in",
+        "direct_deposit",
+        "dividend",
+        "ach_credit",
+        "mobile_deposit",
+        "reversal",
+    }
+)
+_DEBIT_TYPES = frozenset(
+    {
+        "withdrawal",
+        "debit",
+        "fee",
+        "payment",
+        "transfer_out",
+        "check",
+        "ach_debit",
+        "purchase",
+        "pos",
+        "atm_withdrawal",
+        "service_charge",
+        "wire_out",
+        "bill_pay",
+    }
+)
 
-# The exact patterns the LP-209 at-rest guard rejects — redacted OUT of a
-# transaction description so a surfaced description is never a raw account/SSN/id at
-# rest (real descriptions carry payroll/confirmation/transfer ids that would trip the
-# guard). The sourcing signal (PAYROLL / TRANSFER / VENMO) and short ids (SAV 5683,
-# dates) are kept. See ADR-248.
-_DESC_REDACT = re.compile(r"\d{3}-\d{2}-\d{4}|\d{9,}")
+# Redacted OUT of a transaction description so a surfaced description is never a raw
+# account/SSN/id at rest (real descriptions carry payroll/confirmation/account ids that
+# would trip the LP-209 at-rest guard). Catches a dashed SSN AND any 9+-digit identifier,
+# INCLUDING accounts/cards written in space- or dash-separated groups
+# ("1234 5678 9012 3456", "1234-5678-9012") that a bare ``\d{9,}`` misses. Kept: dates
+# (≤8 digits — "2026-05-05"), short ids ("SAV 5683"), the sourcing signal (PAYROLL /
+# TRANSFER / VENMO). See ADR-248. (Broader than the persistence guard by design — this
+# scrubs adversarial free text; a shared PII-pattern module is a deferred follow-up.)
+_DESC_REDACT = re.compile(r"\d(?:[\s-]?\d){8,}")
 _REDACTED = "[redacted]"
 
 # The catch-all list key inside extracted_data (not a typed field).
@@ -172,7 +209,16 @@ def build_document_fields(
 
 
 def _direction(txn: dict[str, Any]) -> str | None:
-    """credit (money in) / debit (money out) from transaction_type, else amount sign."""
+    """credit (money in) / debit (money out) from transaction_type; None if unclassifiable.
+
+    Classification is by ``transaction_type`` ONLY. The extractor stores ``amount``
+    positive ("use transaction_type for direction", bank_statement prompt), so a positive
+    amount carries NO direction signal — inferring "credit" from it would forge a deposit
+    on every unlabelled withdrawal (a false AS-1 large-deposit). An unknown/ambiguous type
+    therefore returns ``None`` (→ an absent ``direction`` Field), never a guess. Only an
+    explicitly NEGATIVE / parenthesized amount (a signed export the prompt doesn't ask for,
+    handled defensively) is read as a debit.
+    """
     ttype = txn.get("transaction_type")
     if isinstance(ttype, str):
         key = ttype.strip().lower().replace(" ", "_")
@@ -181,51 +227,36 @@ def _direction(txn: dict[str, Any]) -> str | None:
         if key in _DEBIT_TYPES:
             return "debit"
     amount = txn.get("amount")
-    if isinstance(amount, (int, float)):
-        return "credit" if amount >= 0 else "debit"
+    if isinstance(amount, (int, float)) and amount < 0:
+        return "debit"
     if isinstance(amount, str):
-        stripped = amount.strip().replace(",", "").replace("$", "")
-        if stripped.startswith("-"):
+        stripped = amount.strip().replace(",", "").replace("$", "").replace(" ", "")
+        if stripped.startswith("-") or (stripped.startswith("(") and stripped.endswith(")")):
             return "debit"
-        if stripped[:1].isdigit():
-            return "credit"
-    return None
+    return None  # unclassifiable — absent direction, never a fabricated "credit"
 
 
 def _redact_description(value: Any) -> str | None:
-    """The description with any 9+-digit run / SSN pattern redacted (PII-safe at rest)."""
+    """The description with any 9+-digit identifier (bare or space/dash-grouped) redacted."""
     if not isinstance(value, str):
         return None
     text = value.strip()
     return _DESC_REDACT.sub(_REDACTED, text) if text else None
 
 
-def _txn_field(value: Any) -> Field:
-    """A transaction attribute as a Field (extracted, no confidence), absent when null."""
+def _txn_field(value: Any, *, source: FieldSource = _EXTRACTED) -> Field:
+    """A transaction attribute as a Field (no confidence), absent when null.
+
+    ``source`` defaults to ``extracted`` (the value was read from the document); pass
+    ``FieldSource.DERIVED`` for a COMPUTED attribute (``direction``) so its provenance is
+    honest — a derived value is never tagged as if the extractor read it verbatim.
+    """
     if value is None:
         return Field.missing()
     scalar = _scalar(value)  # date/amount/etc. already stringified by the extractor's JSON dump
     if scalar is None:
         return Field.missing()
-    return Field.present(scalar, source=_EXTRACTED)
-
-
-def _statement_account(extracted: dict[str, Any]) -> PiiField:
-    """The statement's account for the transactions to carry as DISPLAY/CONTEXT (LP-302a).
-
-    A **pre-masked** :class:`PiiField` (``display`` = ``****NNNN``, ``match_hash=None``):
-    extraction only ever holds ``account_number_masked`` — the raw account never reached
-    us, so there is nothing to hash and the mask must NOT be hashed (hashing ``****5667``
-    would collide with every same-last-4 account — the LP-203 colliding-hash bug).
-    ``match_hash=None`` is honest and structurally non-matchable. Absent (no account on
-    the statement) → ``PiiField.missing()``. This is context, not a cross-section match key.
-    """
-    entry = extracted.get("account_number_masked")
-    value = entry.get("value") if isinstance(entry, dict) else None
-    if value is None:
-        return PiiField.missing()
-    # pre_masked, NOT from_raw: the value is already masked and has no raw form to hash.
-    return PiiField.pre_masked(value, kind=PiiKind.ACCOUNT, source=_EXTRACTED)
+    return Field.present(scalar, source=source)
 
 
 def build_transactions(
@@ -243,9 +274,8 @@ def build_transactions(
     raw = extracted.get(_TRANSACTIONS_KEY)
     if not isinstance(raw, list):
         return None  # statement present but no transaction list → absent, not empty
-    # The account is a per-STATEMENT fact — resolve it once and every row carries the
-    # same pre-masked, non-matchable PiiField (display/context only).
-    account = _statement_account(extracted)
+    # The statement's masked account is NOT copied onto every row — it lives once on the
+    # DocumentEntry's ``fields["account_number_masked"]`` (built by build_document_fields).
     records: list[TransactionRecord] = []
     for txn in raw:
         if not isinstance(txn, dict):
@@ -254,9 +284,8 @@ def build_transactions(
             TransactionRecord(
                 date=_txn_field(txn.get("date")),
                 amount=_txn_field(txn.get("amount")),
-                direction=_txn_field(_direction(txn)),
+                direction=_txn_field(_direction(txn), source=FieldSource.DERIVED),
                 description=_txn_field(_redact_description(txn.get("description"))),
-                account=account,
             )
         )
     return tuple(records)

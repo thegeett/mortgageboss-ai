@@ -195,6 +195,10 @@ def test_matches_requires_two_real_equal_hashes_none_never_matches() -> None:
     assert m1.matches(m2) is False and m2.matches(m1) is False  # identical display, still no match
     assert m1.matches(a) is False and a.matches(m1) is False
     assert PiiField.missing().matches(PiiField.missing()) is False  # absent never matches
+    # A non-PiiField other (e.g. a plain Field, no match_hash) returns False, not raises.
+    from app.verification.snapshot.fields import Field
+
+    assert a.matches(Field.present("x", source=FieldSource.PARSED)) is False  # type: ignore[arg-type]
 
 
 def test_pii_field_confidence_nullable_and_derived_source() -> None:

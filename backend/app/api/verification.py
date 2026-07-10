@@ -222,7 +222,7 @@ async def _build_status(
             )
         )
     ).all()
-    document_names = dict(doc_rows)
+    document_names: dict[UUID, str] = {row.id: row.original_filename for row in doc_rows}
 
     level = resolve_aggression_level(loan_file, user)
     cutoff = active_cutoff(loan_file, user)

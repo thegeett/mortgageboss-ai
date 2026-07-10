@@ -35,8 +35,12 @@ _RAW_SSN = re.compile(r"\b\d{3}-\d{2}-\d{4}\b")
 # A bare run of 9+ digits as a standalone JSON token — an unmasked SSN-without-
 # dashes or an account number. ``\b`` bounds it to a token, so it does NOT match a
 # hex ``match_hash`` (digit runs there are surrounded by hex letters, no word
-# boundary) nor money like ``"1160000.00"`` (a decimal breaks the run at 7 digits).
-_LONG_DIGITS = re.compile(r"\b\d{9,}\b")
+# boundary). The trailing ``(?!\.\d)`` excludes the integer part of a decimal number,
+# so a legitimate large money amount (``"123456789.00"`` — a $123M+ value) does NOT
+# trip the guard and abort the whole persist; a bare-integer id ("123456789", no
+# decimal) is still caught. Residual: a whole-dollar amount ≥ 9 digits with no cents
+# ("123456789") would still trip — rare, and safer to over-flag than to leak.
+_LONG_DIGITS = re.compile(r"\b\d{9,}\b(?!\.\d)")
 
 
 class SnapshotAlreadyPersisted(Exception):
