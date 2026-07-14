@@ -19,7 +19,7 @@ from enum import StrEnum
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
-from sqlalchemy import DateTime, ForeignKey
+from sqlalchemy import DateTime, ForeignKey, Index
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -44,10 +44,16 @@ class FindingEvent(Base, UUIDMixin):
     """One immutable state-transition of a finding — the append-only lifecycle history."""
 
     __tablename__ = "finding_events"
+    __table_args__ = (
+        # One finding's events, in time order — the shape a lifecycle-history read wants (LP-322).
+        # A composite (finding_id, occurred_at) also serves plain finding_id lookups (prefix), so no
+        # separate single-column index is needed.
+        Index("ix_finding_events_finding_occurred", "finding_id", "occurred_at"),
+    )
 
     # The finding this event belongs to (CASCADE — events die with a hard-deleted finding).
     finding_id: Mapped[UUID] = mapped_column(
-        ForeignKey("findings.id", ondelete="CASCADE"), index=True, nullable=False
+        ForeignKey("findings.id", ondelete="CASCADE"), nullable=False
     )
     event_type: Mapped[FindingEventType] = mapped_column(str_enum(FindingEventType), nullable=False)
     # The outcome transition this event records (both null for a non-outcome event). Distinct

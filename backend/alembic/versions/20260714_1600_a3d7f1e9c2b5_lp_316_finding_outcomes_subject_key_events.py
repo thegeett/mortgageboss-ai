@@ -97,14 +97,19 @@ def upgrade() -> None:
         ),
         sa.PrimaryKeyConstraint("id", name=op.f("pk_finding_events")),
     )
+    # Composite (finding_id, occurred_at): time-ordered per-finding history reads (LP-322); also
+    # serves plain finding_id lookups by prefix, so no separate single-column index is needed.
     op.create_index(
-        op.f("ix_finding_events_finding_id"), "finding_events", ["finding_id"], unique=False
+        "ix_finding_events_finding_occurred",
+        "finding_events",
+        ["finding_id", "occurred_at"],
+        unique=False,
     )
 
 
 def downgrade() -> None:
     """Drop the finding_events log + the findings columns/constraints/indexes."""
-    op.drop_index(op.f("ix_finding_events_finding_id"), table_name="finding_events")
+    op.drop_index("ix_finding_events_finding_occurred", table_name="finding_events")
     op.drop_table("finding_events")
 
     op.drop_index("uq_findings_loan_file_rule_subject", table_name="findings")

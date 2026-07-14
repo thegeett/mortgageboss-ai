@@ -71,8 +71,10 @@ def _details(result: RuleEvaluation) -> dict[str, object]:
         "gated_pending_signoff": result.gated_pending_signoff,
         "how_to_fix": result.how_to_fix,
         "source_strength": _source_strength(result),
-        # Kept in details too so LP-93's finding_identity() (which reads details.subject_key)
-        # keeps working alongside the new column.
+        # Duplicated into details ONLY so LP-93's finding_identity() (which reads details.subject_key)
+        # keeps working alongside the new indexed column. Both are written from the SAME
+        # result.subject_id here, so they cannot diverge; this copy is transitional — drop it once
+        # finding_identity() reads Finding.subject_key directly. Do NOT set one without the other.
         "subject_key": result.subject_id,
     }
 
@@ -92,20 +94,25 @@ async def persist_evaluation_findings(
     which previously left no record. Refuses to persist a finding with empty reasoning (§3D: a
     verdict must say WHY).
     """
-    outcomes: list[tuple[Finding, EvaluationOutcome]] = []
+    # Pre-pass: resolve each persistable subject and validate its reasoning BEFORE any db.add, so a
+    # single empty-reasoning verdict (§3D: a verdict must say WHY) refuses the whole batch cleanly
+    # rather than after partially populating the session.
+    persistable: list[tuple[RuleEvaluation, EvaluationOutcome, FindingStatus, str]] = []
     for result in results:
         mapping = _OUTCOME_BY_VERDICT.get(result.verdict)
         if mapping is None:
             continue  # not_applicable — this subject is outside the rule's scope; no finding
         outcome, severity = mapping
-
         message = (result.reasoning or "").strip()
         if not message:
             raise ValueError(
                 f"refusing to persist a finding with empty reasoning "
                 f"(rule {result.rule_id}, subject {result.subject_id})"
             )
+        persistable.append((result, outcome, severity, message))
 
+    outcomes: list[tuple[Finding, EvaluationOutcome]] = []
+    for result, outcome, severity, message in persistable:
         finding = Finding(
             loan_file_id=loan_file_id,
             verification_id=verification_id,
@@ -115,6 +122,10 @@ async def persist_evaluation_findings(
             category=category,
             message=message,
             details=_details(result),
+            # None for a deterministic pass (all-parsed tags) AND for a couldnt_check with an absent
+            # tag; default to 1.0 so a fail-closed outcome is never HIDDEN by a confidence cutoff
+            # (open / needs_review / couldnt_check must stay visible). This coarse column is for
+            # visibility; evaluation_outcome carries the precise signal.
             confidence=result.verdict_confidence if result.verdict_confidence is not None else 1.0,
             evaluation_outcome=outcome,
             subject_key=result.subject_id,  # the deposit's stable content_id (LP-312)
