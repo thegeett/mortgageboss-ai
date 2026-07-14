@@ -8747,3 +8747,48 @@ the candidate-then-judge PATTERN is established for all future correlation tags.
 candidate-then-judge pattern, the honesty rules), LP-312 (content_ids + the Tag model + tags layer), LP-313 (Stage A +
 the fail-closed/cache/index-hardening pattern this reuses). **Out of scope:** AS-1 rule evaluation / findings
 (LP-315/316), other correlation tags, other entities, the discovery lane, ``from_tag`` population.
+
+## ADR-254: Thin deterministic rule engine + fail-closed gate — AS-1 (LP-315)
+
+- **Date:** 2026-07-14
+- **Status:** Accepted
+
+**Context:** The whole fact-tag pivot exists so a rule can be a THIN deterministic query over clean tags —
+no AI in the rule, no ``direction==`` label matching, no drift. This is the payoff: AS-1 finally READS the tags
+(LP-313/314) and produces a verdict. It also introduces the safety core — the fail-closed gate — that keeps a degraded
+input from ever becoming a confident "satisfied". Engine + gate + AS-1 only; the result is in-memory (persistence is
+LP-316).
+
+**Decision:**
+
+- **The generic fail-closed gate (``rule_engine/gate.py``).** Every rule runs it BEFORE its logic. Fixed decision
+  order: (1) a required load-bearing tag ABSENT → ``couldnt_check`` (names the tag); (2) a load-bearing tag value
+  ``"unknown"`` → ``couldnt_check`` (a DISTINCT reason — absent ≠ unknown); (3) a flagged contradiction → ``needs_review``;
+  (4) min load-bearing confidence below the floor → ``needs_review``; (5) else PASS. A degraded input can NEVER reach a
+  confident satisfied/fired. ``verdict_confidence = min`` of the load-bearing tags' NON-None confidences; parsed
+  passthroughs carry ``confidence=None`` (effectively certain, §3D) and are ignored in the min and the floor check.
+- **The thin AS-1 rule (``rule_engine/as1.py``) — query + arithmetic, no AI, no label filter.** Per transaction
+  subject: applicability is decided from the ``txn.is_money_in`` TAG (absent/unknown → ``couldnt_check``; ``!= "in"`` →
+  ``not_applicable``; ``"in"`` → proceed) — a TAG QUERY, never a raw ``direction==`` label, so the original bug cannot
+  recur (a "transfer"/"ACH"/unlabelled deposit the AI judged money-in IS evaluated). After the gate passes, it fires iff
+  ``amount > threshold AND has_identified_source != "yes"``. The comparison REUSES ``satisfies(Condition(GT, threshold),
+  amount)`` — the one place a ``>`` lives (the calculators' re-implement-the-compare drift is not repeated). An
+  ``has_identified_source == "unknown"`` never reaches the fire logic — the gate already routed it to ``couldnt_check``.
+- **Threshold from the spec; income from the calculator.** The multiplier is extracted from the spec's prose
+  ``reference_values.large_deposit_threshold`` ("50% of …" → 0.5) via ``load_rule_spec("AS-1")`` (file-backed, no DB);
+  qualifying income comes from the DTI calculator (``calculations.dti.value["gross_monthly_income"]``). Missing income →
+  ``couldnt_check`` (never a fabricated threshold). The prose threshold is a known spec-shape gap — a structured field
+  would be cleaner (future).
+- **Priya-pending handling.** AS-1's threshold is ``priya_validated=false``, so every AS-1 result is flagged
+  ``gated_pending_signoff=true`` — a later orchestrator withholds it from "shipped"; the engine never silently ships an
+  unvalidated threshold.
+- **The result carries its load-bearing tags inline** (``RuleEvaluation.load_bearing_tags`` — tag id + value +
+  confidence + reasoning), so a verdict never cites a bare number (§3D provenance move) and LP-316 can persist it.
+- **Confidence floor default 0.5** (the spec has no floor field yet) — PRIYA-CONFIRMABLE, like the threshold.
+
+**Consequences:** AS-1 is now a ~arithmetic rule over honest tags, guarded by a reusable fail-closed gate — the
+architecture's payoff realized, and the direction bug made structurally impossible at the rule layer too. The gate +
+result shape generalize to every future rule. Cross-refs: §3D (the thin rule + the armor/gate), LP-311 (the spec +
+declared tags), LP-312/313/314 (the tags the rule reads), ``rules/schema.py`` (the reused ``satisfies``). **Out of
+scope:** finding PERSISTENCE / four-state model / subject_key column / event log (LP-316), any AI, other rules, the
+orchestrator (LP-321).
