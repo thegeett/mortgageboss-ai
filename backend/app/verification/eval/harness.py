@@ -21,7 +21,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
 
-from app.models.finding import EvaluationOutcome
+from app.services.rule_findings import outcome_for_verdict
 from app.verification.eval.cases import EvalCase, FixtureTxn
 from app.verification.eval.stubs import StubStageAReasoner, StubStageBReasoner
 from app.verification.rule_engine.engine import evaluate_as1_rule
@@ -47,15 +47,9 @@ _TAG_CATEGORY = "txn.apparent_category"
 _TAG_HAS_SOURCE = "txn.has_identified_source"
 _TAG_STRENGTH = "txn.source_strength"
 
-# The verdict → persisted evaluation-outcome mapping the harness scores against (mirrors LP-316's
-# rule_findings persistence). NOT_APPLICABLE persists no finding → None.
-_VERDICT_OUTCOME: dict[Verdict, EvaluationOutcome | None] = {
-    Verdict.FIRED: EvaluationOutcome.OPEN,
-    Verdict.SATISFIED: EvaluationOutcome.SATISFIED,
-    Verdict.NEEDS_REVIEW: EvaluationOutcome.NEEDS_REVIEW,
-    Verdict.COULDNT_CHECK: EvaluationOutcome.COULDNT_CHECK,
-    Verdict.NOT_APPLICABLE: None,
-}
+# The harness scores the FINDING level against production's ACTUAL verdict→outcome mapping
+# (rule_findings.outcome_for_verdict), never a local copy — so a persistence-mapping change can
+# never diverge unnoticed from what the eval validates. NOT_APPLICABLE → None (no finding).
 
 
 @dataclass(frozen=True)
@@ -97,7 +91,20 @@ class CaseResult:
 
 
 def _build_snapshot(case: EvalCase) -> Snapshot:
-    """A one-document bank-statement snapshot from the case's labeled transactions + DTI income."""
+    """A one-document bank-statement snapshot from the case's labeled transactions + DTI income.
+
+    Enforces the two fixture invariants the description→label keying relies on (documented in
+    cases.py): descriptions are UNIQUE within a case, and they survive snapshot redaction unchanged
+    (no 9+-digit runs). A violation raises here with a clear message rather than a later cryptic
+    KeyError / silent mis-score.
+    """
+    keys = [t.key for t in case.txns]
+    dupes = sorted({k for k in keys if keys.count(k) > 1})
+    if dupes:
+        raise ValueError(
+            f"case {case.case_id}: duplicate fixture description(s) {dupes} — the eval keys labels "
+            f"on description, so they must be UNIQUE within a case"
+        )
     raw = [
         {
             "date": t.date,
@@ -110,6 +117,13 @@ def _build_snapshot(case: EvalCase) -> Snapshot:
     field_sets = transaction_field_sets({"transactions": raw}, "bank_statement")
     txns = build_transactions(field_sets, document_content_id=_DOC)
     assert txns is not None
+    for fx, built in zip(case.txns, txns, strict=True):
+        if str(built.description.value) != fx.key:
+            raise ValueError(
+                f"case {case.case_id}: fixture description {fx.key!r} was rewritten by snapshot "
+                f"redaction to {built.description.value!r} — the eval keys labels on description, "
+                f"so avoid 9+-digit runs (LP-302a redaction)"
+            )
     entry = DocumentEntry(content_id=_DOC, document_type="bank_statement", transactions=txns)
     calculations = (
         CalculationsSection.present(
@@ -175,7 +189,7 @@ def _score_case(case: EvalCase, snapshot: Snapshot, results: list[RuleEvaluation
         desc = cid_to_desc.get(evaluation.subject_id, evaluation.subject_id)
         matched = by_key.get(desc)
         expected = matched.expect_outcome if matched is not None else None
-        actual_outcome = _VERDICT_OUTCOME[evaluation.verdict]
+        actual_outcome = outcome_for_verdict(evaluation.verdict)
         actual = None if actual_outcome is None else actual_outcome.value
         if expected != actual:
             result.finding_mismatches.append(Mismatch(desc, "outcome", str(expected), actual))

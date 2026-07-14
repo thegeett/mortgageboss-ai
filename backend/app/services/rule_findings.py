@@ -42,6 +42,15 @@ _OUTCOME_BY_VERDICT: dict[Verdict, tuple[EvaluationOutcome, FindingStatus]] = {
 }
 
 
+def outcome_for_verdict(verdict: Verdict) -> EvaluationOutcome | None:
+    """The persisted evaluation-outcome for a verdict, or ``None`` when no finding is persisted
+    (``not_applicable``). The SINGLE source of truth for the verdict→outcome mapping — the eval
+    harness scores against this, so a change here can never silently diverge from what persists.
+    """
+    mapping = _OUTCOME_BY_VERDICT.get(verdict)
+    return mapping[0] if mapping is not None else None
+
+
 def _tag_dict(tag: LoadBearingTag) -> dict[str, object]:
     """One load-bearing tag as inline provenance JSON (id + value + confidence + reasoning + facts)."""
     return {
@@ -151,4 +160,4 @@ async def persist_evaluation_findings(
     return [finding for finding, _ in outcomes]
 
 
-__all__ = ["persist_evaluation_findings"]
+__all__ = ["outcome_for_verdict", "persist_evaluation_findings"]

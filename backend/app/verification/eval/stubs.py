@@ -27,6 +27,9 @@ from app.verification.eval.cases import FixtureTxn
 # unknown, not low confidence).
 _STUB_CONFIDENCE = 0.9
 _STUB_MODEL = "stub"
+# The candidate kind that constitutes a matched paper-trail debit (SourceCandidate.kind in
+# services.tag_correlation) — cited to yield strength=verified.
+_TRANSFER_KIND = "own_account_transfer"
 
 
 class StubStageAReasoner:
@@ -87,7 +90,14 @@ class StubStageBReasoner:
                 f"stage-B stub was asked to judge {fx.key!r} but the fixture set has_source=None "
                 f"(only money-in subjects are judged - check the fixture label)"
             )
-        source_index = 1 if (fx.cite_candidate and candidates) else None
+        # Cite the matched own-account-transfer candidate by KIND (not a hardcoded index 1):
+        # find_source_candidates lists a payroll self-candidate FIRST when present, so index 1 is
+        # not always the debit. A real model cites the genuine paper-trail debit; replay that.
+        source_index = None
+        if fx.cite_candidate:
+            source_index = next(
+                (c["index"] for c in candidates if c.get("kind") == _TRANSFER_KIND), None
+            )
         reasoning = _judge_reasoning(fx, cited=source_index is not None)
         return SourcingResult(
             judgment=SourcingJudgment(

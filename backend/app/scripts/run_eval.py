@@ -41,14 +41,21 @@ async def _main(live: bool) -> int:
     print()
     print(format_calibration(summarize(results), live=live))
 
-    must_fire = [r for r in results if r.case_id in {"1", "5", "7"}]
-    covered_fire = any(r.passed for r in must_fire)
-    real = next((r for r in results if r.level == "real"), None)
-    covered_no_fire = real is not None and real.passed
+    # Coverage is driven by the cases' declarative flags (never hardcoded ids): the suite must
+    # contain a passing must-fire case AND a passing no-false-fire case, so both directions are
+    # actually exercised even as cases are added/renumbered.
+    must_fire_ids = {c.case_id for c in CASES if c.must_fire}
+    no_false_fire_ids = {c.case_id for c in CASES if c.no_false_fire}
+    covered_fire = bool(must_fire_ids) and any(
+        r.passed for r in results if r.case_id in must_fire_ids
+    )
+    covered_no_fire = bool(no_false_fire_ids) and any(
+        r.passed for r in results if r.case_id in no_false_fire_ids
+    )
     print("-" * 78)
     print(
         f"both-directions coverage: must-fire={'ok' if covered_fire else 'MISSING'}  "
-        f"no-false-fire(real)={'ok' if covered_no_fire else 'MISSING'}"
+        f"no-false-fire={'ok' if covered_no_fire else 'MISSING'}"
     )
 
     all_pass = all(r.passed for r in results) and covered_fire and covered_no_fire
