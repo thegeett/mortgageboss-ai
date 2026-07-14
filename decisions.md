@@ -8653,3 +8653,52 @@ a dependent tag's cache key changes, §3D). Cross-refs: §3D (the tag contract +
 (frozen snapshot model), ADR-248 (transactions in the snapshot). **Out of scope (later tickets):** tag PRODUCTION / any
 AI call (LP-313/314), rule evaluation, populating the tags layer or ``from_tag`` (LP-318), findings/subject_key (LP-316),
 field-cell content-ids.
+
+## ADR-252: Stage-A tag production for transactions — structure-not-conclude, passthrough vs judged, fail-closed (LP-313)
+
+- **Date:** 2026-07-14
+- **Status:** Accepted
+
+**Context:** LP-312 built the tags layer + the Tag object; this is the FIRST ticket where the AI actually produces
+fact-tags. Stage A (§3D) turns a SINGLE transaction's raw facts into clean atomic tags — the pattern every later
+production pass (Stage B, other entities) will follow. The original AS-1 bug (a hardcoded ``direction=="credit"`` filter
+that silently dropped ambiguously-labelled deposits) is exactly what the tag architecture exists to prevent, so the
+design must make that class of bug structurally impossible.
+
+**Decision:**
+
+- **Clone the cross-source two-file pattern.** ``ai/tag_production.py`` is the AI boundary (system prompt +
+  ``reason_stage_a_transactions`` — the "perceiver"); ``services/tag_production.py`` is the deterministic orchestrator
+  (context assembly, batching, caching, writing the tags layer — the "wiring"). Reuses ``complete()`` and the defensive
+  array-parser shape (``extract_json_object`` / balanced-span / fenced / wrapped). Does NOT import the stale
+  ``verification/evaluators/``.
+- **"Structure, don't conclude."** The system prompt casts the model as a senior processor STRUCTURING raw facts into
+  tags who does NOT evaluate rules or reach conclusions — north star accuracy + honesty, ``"unknown"`` always available,
+  a wrong tag silently corrupts downstream. It asks only for facts (``txn.is_money_in`` resolved from MEANING tolerating
+  any label; ``txn.apparent_category`` from the vocabulary), each with confidence + reasoning.
+- **Passthrough vs AI-judged.** ``txn.amount`` / ``txn.date`` are already-parsed facts — carried through VERBATIM
+  (``produced_by="parsed"``, ``confidence=None``); the AI never re-reads a number (that invites hallucinated digits).
+  ``txn.is_money_in`` / ``txn.apparent_category`` are AI-judged (``produced_by="ai"``, the model's confidence,
+  ``tag_role="structural_fact"``, ``stage="A"``). Every tag's ``source_facts`` = the transaction's stable ``content_id``
+  (LP-312), never a position; content_ids never reach the AI (the batch addresses transactions by a 1-based index and
+  the id is reattached deterministically).
+- **The direction bug is structurally impossible.** The pass tags EVERY transaction — there is no ``direction=="credit"``
+  filter anywhere; ``is_money_in`` is an AI judgment over meaning, so a "transfer"/"ACH"/unlabelled deposit still gets a
+  proper tag (pinned by a test).
+- **Bounded batches** (15 transactions/call) so position-degradation can't creep in on a long statement.
+- **Honest, fail-closed parse.** An AI failure/timeout, a truncated response (``stop_reason=="max_tokens"``), an omitted
+  transaction, or an off-vocabulary value all yield ``value="unknown"`` WITH a reason — NEVER a defaulted/fabricated
+  value. A genuine AI ``"unknown"`` is preserved as-is (with its confidence + reasoning), distinct from the fallback.
+  The passthroughs still succeed even when the AI call fails.
+- **Timeout added.** ``complete()`` has no timeout; the reasoner wraps it in ``asyncio.wait_for`` (new
+  ``settings.ai_request_timeout_seconds = 60``) → a hung call raises ``AIClientError`` → unknown-with-reason.
+- **Cache-by-content-fingerprint.** AI judgments are keyed by a fingerprint of the transaction's four raw fields, so
+  identical transactions share one call and an unchanged transaction reuses its judgment on a re-run. Only COMPLETE
+  successes are cached (a failed/truncated/partial transaction retries next run). Cost + tokens are logged (metadata
+  only, never content).
+
+**Consequences:** the tags layer is now populated for transactions with honest, provenance-carrying atomic tags; the
+production PATTERN (prompt → bounded batches → honest parse → cache → write-by-content_id) is established for LP-314 and
+beyond. Cross-refs: §3D (staged production + the honesty rules), LP-310 (the cross-source clone target + the direction
+bug), LP-312 (the Tag model + content_ids + the tags layer). **Out of scope:** Stage B / correlation tags
+(``has_identified_source`` — LP-314), other entities, rules, findings, ``from_tag`` population, the discovery lane.

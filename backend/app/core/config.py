@@ -61,6 +61,10 @@ class Settings(BaseSettings):
     # exponential backoff + jitter, capped at this many attempts.
     ai_max_retries: int = 3
     ai_base_retry_delay_seconds: float = 1.0
+    # Wall-clock ceiling for one AI reasoning call (LP-313). ``complete()`` itself has no
+    # timeout; tag production wraps its call so a hung request fails closed (the affected
+    # tags become unknown-with-reason) instead of blocking a run indefinitely.
+    ai_request_timeout_seconds: float = 60.0
     # Needs consolidation (LP-111): after the deterministic collapse, an AI pass FLAGS the
     # semantic-duplicate residue for the processor to confirm (never a silent delete). Gated so the
     # extra per-run classification call can be turned off; the deterministic layers run regardless.
