@@ -68,6 +68,8 @@ _TAG_VERSION = 1
 _REASON_FAILED = "tag production failed"
 _REASON_TRUNCATED = "structuring response truncated"
 _REASON_NOT_RETURNED = "not returned by structuring pass"
+_REASON_MALFORMED = "tag value missing or malformed in structuring response"
+_REASON_BAD_INDEX = "structuring pass returned unrecognized transaction indices"
 _REASON_OFF_VOCAB = "model returned an out-of-vocabulary value; coerced to unknown"
 
 # The AI-judged tags and their allowed value sets (from the fact-tag vocabulary).
@@ -164,12 +166,17 @@ async def produce_stage_a_transaction_tags(
         # Present-empty tags layer — there is nothing to structure (not absent/failed).
         return snapshot.model_copy(update={"tags": TagsSection.present({})})
 
+    # Fingerprint each transaction ONCE (json.dumps + sha256); reused for batching AND final
+    # assembly, so a row's raw facts are never hashed twice per run.
+    fingerprinted: list[tuple[str, TransactionRecord]] = [
+        (_fingerprint(txn), txn) for txn in transactions
+    ]
+
     # Unique content fingerprints not already cached — one representative each, sorted for a
     # deterministic batch composition (reproducibility is load-bearing).
     representatives: list[tuple[str, TransactionRecord]] = []
     seen: set[str] = set()
-    for txn in transactions:
-        fp = _fingerprint(txn)
+    for fp, txn in fingerprinted:
         if fp in persistent or fp in seen:
             continue
         seen.add(fp)
@@ -195,6 +202,20 @@ async def produce_stage_a_transaction_tags(
         input_tokens += result.input_tokens
         output_tokens += result.output_tokens
         by_index = {j.index: j for j in result.judgments}
+        # The batch addresses transactions by 1-based index (1..len(batch)); the model must
+        # echo those. A returned index OUTSIDE that set (e.g. a 0-based echo) means the model
+        # did not honor the mapping — its index→transaction correspondence is untrustworthy,
+        # so trust NONE of it and fail closed. A tag mis-attributed to the wrong transaction is
+        # far worse than an honest unknown. A partial (truncated) response is still a SUBSET of
+        # the expected set and is handled normally below.
+        expected = set(range(1, len(batch) + 1))
+        if not set(by_index) <= expected:
+            logger.warning(
+                "stage_a_batch_bad_indices", size=len(batch), returned=len(result.judgments)
+            )
+            for fp, _ in batch:
+                resolved[fp] = _Judged(None, None, _REASON_BAD_INDEX)
+            continue
         for index, (fp, _) in enumerate(batch, start=1):
             judgment = by_index.get(index)
             if judgment is None:
@@ -202,7 +223,9 @@ async def produce_stage_a_transaction_tags(
                 reason = _REASON_TRUNCATED if result.truncated else _REASON_NOT_RETURNED
                 resolved[fp] = _Judged(None, None, reason)
                 continue
-            entry = _Judged(judgment.is_money_in, judgment.apparent_category, _REASON_NOT_RETURNED)
+            # Returned, but a tag value may still be missing/malformed — record that (not
+            # "not returned"), so a human triaging the unknown tag sees the accurate cause.
+            entry = _Judged(judgment.is_money_in, judgment.apparent_category, _REASON_MALFORMED)
             resolved[fp] = entry
             # Cache only a COMPLETE judgment, so a partial retries next run.
             if entry.is_money_in is not None and entry.apparent_category is not None:
@@ -221,8 +244,7 @@ async def produce_stage_a_transaction_tags(
         )
 
     by_subject = {
-        txn.content_id: _build_transaction_tags(txn, resolved[_fingerprint(txn)])
-        for txn in transactions
+        txn.content_id: _build_transaction_tags(txn, resolved[fp]) for fp, txn in fingerprinted
     }
     return snapshot.model_copy(update={"tags": TagsSection.present(by_subject)})
 
@@ -245,6 +267,14 @@ def _passthrough_tag(field: Field, content_id: str) -> Tag:
     """A parsed passthrough tag — the raw value carried verbatim; the AI never re-typed it.
 
     An absent raw field → ``value="unknown"`` (honest); a present-but-null value stays null.
+
+    The value is carried EXACTLY as the snapshot holds it, which for money (``txn.amount``) is
+    the exact decimal STRING (e.g. ``"50.00"``), never a JSON float — the whole system stores
+    money as strings to avoid float precision loss (``Field.value`` rejects ``Decimal`` for this
+    reason). The fact-tag vocabulary's ``number`` type is the SEMANTIC type; a numeric consumer
+    coerces the string to ``Decimal`` (as everywhere money is handled), rather than us emitting a
+    lossy float here. Re-typing the value would be the exact hallucination-of-digits risk the
+    passthrough exists to avoid.
     """
     value = field.value if field.is_present else "unknown"
     return Tag(

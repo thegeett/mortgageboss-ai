@@ -221,14 +221,31 @@ def _json_candidates(text: str) -> list[str]:
 
 
 def _extract_balanced(text: str, opener: str, closer: str) -> str | None:
-    """The first balanced ``opener…closer`` span (depth-aware), or ``None``."""
+    """The first balanced ``opener…closer`` span (depth-aware, string-literal-safe), or ``None``.
+
+    Brackets that appear INSIDE a JSON string — a description or reasoning containing ``[`` /
+    ``]`` — are ignored, so an unbalanced bracket in free text can't skew the depth count and
+    mis-slice the span. Standard JSON string rules (double quotes, backslash escapes) apply.
+    """
     start = text.find(opener)
     if start == -1:
         return None
     depth = 0
+    in_string = False
+    escaped = False
     for i in range(start, len(text)):
         ch = text[i]
-        if ch == opener:
+        if in_string:
+            if escaped:
+                escaped = False
+            elif ch == "\\":
+                escaped = True
+            elif ch == '"':
+                in_string = False
+            continue
+        if ch == '"':
+            in_string = True
+        elif ch == opener:
             depth += 1
         elif ch == closer:
             depth -= 1

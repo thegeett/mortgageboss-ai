@@ -264,3 +264,65 @@ async def test_no_transactions_yields_present_empty_tags_layer() -> None:
     snap = Snapshot(loan_file_id=uuid4(), run_id=uuid4(), created_at=_WHEN)
     out = await produce_stage_a_transaction_tags(snap, reasoner=StubReasoner())
     assert out.tags.is_present and out.tags.by_subject == {}
+
+
+async def test_out_of_range_indices_fail_closed_never_misattribute() -> None:
+    """A model that ignores the 1-based indices it was given (e.g. echoes 0-based) must NOT
+    have its judgments trusted — the whole batch fails closed to unknown-with-reason, because a
+    tag bound to the WRONG transaction is worse than an honest unknown."""
+
+    async def zero_based(context_json: str) -> StageAResult:
+        ctx = json.loads(context_json)
+        # Echo each transaction's index MINUS ONE — an out-of-range (0-based) mapping.
+        judgments = [
+            TransactionJudgment(
+                index=t["index"] - 1,
+                is_money_in=TagJudgment("in", 0.9, "shifted"),
+                apparent_category=TagJudgment("payroll", 0.9, "shifted"),
+            )
+            for t in ctx["transactions"]
+        ]
+        return StageAResult(
+            judgments=judgments, input_tokens=10, output_tokens=5, model="stub", truncated=False
+        )
+
+    snap = _snapshot([_txn(), _txn(amount="9.00")])
+    out = await produce_stage_a_transaction_tags(snap, reasoner=zero_based)
+    for i in range(2):
+        tags = _tags_for(out, i)
+        assert tags["txn.is_money_in"].value == "unknown"  # not the mis-mapped "in"
+        assert (
+            tags["txn.is_money_in"].reasoning
+            == "structuring pass returned unrecognized transaction indices"
+        )
+        assert tags["txn.amount"].value in {"50.00", "9.00"}  # passthroughs unaffected
+
+
+async def test_returned_but_malformed_tag_uses_the_accurate_reason() -> None:
+    """A transaction that IS returned but with one tag value missing gets a 'malformed' reason,
+    not the 'not returned' reason reserved for a wholly-omitted transaction."""
+
+    async def half_returned(context_json: str) -> StageAResult:
+        ctx = json.loads(context_json)
+        idx = ctx["transactions"][0]["index"]
+        return StageAResult(
+            judgments=[
+                TransactionJudgment(
+                    index=idx,
+                    is_money_in=TagJudgment("in", 0.9, "ok"),
+                    apparent_category=None,  # this tag came back malformed / missing
+                )
+            ],
+            input_tokens=10,
+            output_tokens=5,
+            model="stub",
+            truncated=False,
+        )
+
+    snap = _snapshot([_txn()])
+    out = await produce_stage_a_transaction_tags(snap, reasoner=half_returned)
+    tags = _tags_for(out, 0)
+    assert tags["txn.is_money_in"].value == "in"  # the returned tag survives
+    cat = tags["txn.apparent_category"]
+    assert cat.value == "unknown"
+    assert cat.reasoning == "tag value missing or malformed in structuring response"
