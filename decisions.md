@@ -8839,3 +8839,54 @@ by luck" (a believable label). Cross-refs: §3D (the armor — provenance + hone
 LP-315 (the gate/rule). **Follow-up (documented, out of scope here):** register ``txn.source_strength`` in the fact-tag
 vocabulary source of truth (``docs/snapshot-fact-tags.xlsx`` → ``fact_tags.csv``); it is produced but not yet in the
 vocabulary registry.
+
+## ADR-256: Finding output — evaluation-outcome axis + subject_key + provenance + event log (LP-316)
+
+- **Date:** 2026-07-14
+- **Status:** Accepted
+
+**Context:** LP-315 (+ LP-314a) produces in-memory ``RuleEvaluation`` results; they must become durable findings. The
+LP-310 Area-4 recon found the persisted ``Finding`` model has ``open`` but no ``satisfied`` / ``couldnt_check`` /
+``no_longer_applies`` as states, no ``subject_key`` column (only ``details`` JSON), no ``(loan_file, rule, subject)``
+uniqueness, and no per-finding event log; and the current ``reconcile_findings`` mutates-in-place / soft-deletes. This
+persists the results by EXTENDING that model, single-run — cross-run reconciliation is LP-322.
+
+**Decision:**
+
+- **A NEW evaluation-OUTCOME axis, orthogonal to the two existing enums.** ``EvaluationOutcome`` (``open`` / ``satisfied``
+  / ``needs_review`` / ``couldnt_check`` / ``no_longer_applies``) records what the CHECK CONCLUDED — distinct from
+  ``FindingStatus`` (severity red/yellow/green) and ``FindingResolutionStatus`` (the human resolution lifecycle). FIVE
+  states, not the originally-planned four: LP-314a's ``needs_review`` (a self-asserted large transfer) is a real outcome.
+  Verdicts map fired→open, satisfied→satisfied, needs_review→needs_review, couldnt_check→couldnt_check;
+  ``not_applicable`` subjects are NOT persisted. A new nullable column (existing cross-source/document findings leave it
+  null). **``couldnt_check`` now PERSISTS a record** — "we looked and could not check this, here is why" — where before
+  it left none. Severity is a coarse triage color DERIVED from the outcome (open→red, needs_review/couldnt_check→yellow,
+  satisfied→green); the outcome axis carries the precise signal.
+- **``subject_key`` as a first-class column, keyed on the stable content_id.** Promoted from ``details.subject_key`` to a
+  column; for a per-deposit rule it is the deposit's ``content_id`` (LP-312) — NOT re-extracted amount/date, which drift
+  across runs (§3D: subject_key from stable tag values). A PARTIAL unique index ``(loan_file_id, rule_id, subject_key)
+  WHERE deleted_at IS NULL AND subject_key IS NOT NULL`` makes a subject ONE live finding, while leaving soft-deleted
+  rows and legacy null-subject_key findings out of the constraint. ``details.subject_key`` is still written so LP-93's
+  ``finding_identity`` substrate keeps working.
+- **Provenance inline (§3D Move 1).** ``load_bearing_tags`` (JSONB) persists each tag the verdict rested on — ``{tag_id,
+  value, confidence, reasoning, source_facts}`` (``LoadBearingTag`` was extended with ``source_facts`` — the cited LP-312
+  content_ids). A human reading the finding sees WHY (e.g. the sourcing tag's "no matching debit, description-only"
+  reasoning), never a bare number. Refuses to persist a finding with empty reasoning. The evaluation metadata
+  (verdict_confidence, threshold_used, priya_validated, gated_pending_signoff, how_to_fix, and LP-314a's source_strength)
+  lands in ``details``; ``confidence`` = the verdict confidence. Origin is ``deterministic_rule`` (AS-1's rule is
+  deterministic; its tags were ai/derived — recorded faithfully in the inline tags).
+- **An append-only per-finding event log.** New ``finding_events`` table (insert-only, no soft-delete: ``event_type`` in
+  created / outcome_changed / resolved / retired, ``from_outcome`` / ``to_outcome``, ``detail``, ``occurred_at``). It is
+  the substrate for the four-tab lifecycle + retirement + immortality (§3D). SINGLE-RUN: only the ``created`` event (with
+  the initial outcome) is emitted here.
+- **Coexistence with the current reconcile.** LP-316 persists via a direct INSERT service
+  (``persist_evaluation_findings``), reusing ``FindingOrigin`` and keeping ``details.subject_key`` so ``finding_identity``
+  still works; the partial-unique index tolerates soft-delete. It does NOT touch ``reconcile_findings``.
+
+**Consequences:** AS-1's verdicts are now durable, identity-stable, provenance-carrying findings — including the
+previously-recordless ``couldnt_check`` and LP-314a's ``needs_review``. **Deferred to LP-322:** cross-run reconciliation
+(carry-forward / retire → ``no_longer_applies`` / outcome-change), which will drive persistence through
+``reconcile_findings`` using the outcome axis + ``subject_key`` + the event log (this ticket lays all three). Cross-refs:
+§3D (finding states + provenance + subject_key), LP-310 Area 4, LP-312 (content_ids), LP-314a (source strength +
+needs_review), LP-315 (the evaluation result). Migration mirrors the LP-74 add-column+CHECK+index pattern; ``str_enum`` is
+VARCHAR+CHECK so no ``ALTER TYPE``.

@@ -71,7 +71,7 @@ def _tag_value(subject_tags: Mapping[str, Tag], tag_id: str) -> object:
 def _load_bearing(subject_tags: Mapping[str, Tag]) -> tuple[LoadBearingTag, ...]:
     """The present load-bearing tags, inline, in a stable order (provenance on the verdict)."""
     return tuple(
-        LoadBearingTag(tag_id, tag.value, tag.confidence, tag.reasoning)
+        LoadBearingTag(tag_id, tag.value, tag.confidence, tag.reasoning, tag.source_facts)
         for tag_id in LOAD_BEARING_TAGS
         if (tag := subject_tags.get(tag_id)) is not None
     )

@@ -32,6 +32,8 @@ class LoadBearingTag:
     value: object
     confidence: float | None
     reasoning: str | None
+    # The raw facts the tag cited (LP-312 content_ids) — the provenance trail LP-316 persists.
+    source_facts: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)

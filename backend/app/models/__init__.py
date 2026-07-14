@@ -40,12 +40,14 @@ from app.models.encrypted_types import EncryptedString
 from app.models.enums import RecordStatus, str_enum
 from app.models.extraction import Extraction, ExtractionStatus
 from app.models.finding import (
+    EvaluationOutcome,
     Finding,
     FindingCategory,
     FindingOrigin,
     FindingResolutionStatus,
     FindingStatus,
 )
+from app.models.finding_event import FindingEvent, FindingEventType
 from app.models.helpers import only_active, scope_to_company
 from app.models.lender import Lender, LoanProgram
 from app.models.loan_file import LoanFile, LoanFileStatus, LoanPurpose, RefinanceType
@@ -102,10 +104,13 @@ __all__ = [
     "DocumentStatus",
     "DtiOverride",
     "EncryptedString",
+    "EvaluationOutcome",
     "Extraction",
     "ExtractionStatus",
     "Finding",
     "FindingCategory",
+    "FindingEvent",
+    "FindingEventType",
     "FindingOrigin",
     "FindingResolutionStatus",
     "FindingStatus",
