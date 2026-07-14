@@ -8702,3 +8702,48 @@ production PATTERN (prompt → bounded batches → honest parse → cache → wr
 beyond. Cross-refs: §3D (staged production + the honesty rules), LP-310 (the cross-source clone target + the direction
 bug), LP-312 (the Tag model + content_ids + the tags layer). **Out of scope:** Stage B / correlation tags
 (``has_identified_source`` — LP-314), other entities, rules, findings, ``from_tag`` population, the discovery lane.
+
+## ADR-253: Stage-B correlation tags via candidate-then-judge — the sourcing tag (LP-314)
+
+- **Date:** 2026-07-14
+- **Status:** Accepted
+
+**Context:** Stage B (§3D) produces CROSS-ENTITY correlation tags — the ones that catch fraud, starting with
+``txn.has_identified_source`` (is a deposit sourced, or an unexplained inflow?). Correlation is where the naive approach
+breaks: asking the AI to search the whole file for a matching source does not scale and degrades on long files. This is
+also the pattern every future correlation tag (undisclosed liability, retained REO) will follow, so the shape matters.
+
+**Decision:**
+
+- **Candidate-then-judge (the scaling split).** Deterministic code does the whole-file SEARCH; the AI only JUDGES a small
+  set. ``services/tag_correlation.py`` (pure code) finds, for each money-in deposit, candidate sources across ALL
+  transactions in ALL accounts; ``ai/tag_correlation.py`` (the judge, cloned from cross-source) sees ONE deposit + its few
+  candidates and returns yes/no/unknown — it NEVER searches and NEVER sees the whole file. Candidate search is
+  O(deposits×transactions) pure code (scales to any file size); AI calls scale with deposits, not (deposit×candidate)
+  pairs and not with a whole-file AI scan.
+- **Candidate-match criteria (PRIYA-CONFIRMABLE).** An own-account transfer = a money-out debit of EXACT amount
+  (tolerance param, default \$0.00 — transfers move exact amounts) within a ±5-day window (param); plus a payroll
+  self-source when the deposit's own Stage-A ``apparent_category == "payroll"`` (its own line is the evidence). The net is
+  deliberately tight because the AI judges genuineness; the thresholds are parameters flagged for Priya. The candidate
+  structure is typed + extensible (gift / liquidation / other-account kinds slot in later).
+- **"No candidate → no, NOT unknown" (the fraud signal).** A money-in deposit with no candidate and no income signal is
+  handed to the judge with an empty candidate set and returns a real ``"no"`` — "looked, found nothing", the
+  unexplained-deposit signal AS-1 fires on. ``"unknown"`` is reserved for genuine can't-determine and is produced by DAG
+  propagation, not by the judge softening a "no". This distinction is load-bearing and pinned by a test.
+- **DAG ordering + confidence propagation.** Stage B runs AFTER Stage A and CONSUMES ``txn.is_money_in`` from the tags
+  layer. ``"in"`` → judged; ``"unknown"`` → an ``"unknown"`` sourcing tag produced DETERMINISTICALLY (``produced_by="derived"``,
+  no AI call — can't source what isn't confirmed money-in); ``"out"`` → not a sourcing subject (no tag). The sourcing
+  confidence is capped at the ``is_money_in`` confidence (a tag is never more confident than its shakiest input).
+- **content-id cross-provenance.** ``source_facts`` cite the deposit's ``content_id`` AND, when sourced by a transfer, the
+  matched debit's ``content_id`` (LP-312 stable ids). content_ids never reach the AI: candidates are numbered 1..N, the
+  model returns a ``source_index``, and the id is reattached here; an out-of-range index fails CLOSED (a "yes" citing a
+  nonexistent candidate is untrustworthy → unknown), reusing the LP-313 index-mismapping hardening.
+- **Fail-closed + cache.** AI failure/timeout/truncation/malformed → ``unknown``-with-reason, never a defaulted ``"yes"``
+  (``complete()`` wrapped in the LP-313 timeout). Judgments are cached by (deposit + candidate-set) content, so an
+  unchanged deposit reuses its verdict across runs; only successes are cached (a failure retries).
+
+**Consequences:** the AS-1-critical sourcing tag now exists, with the fraud signal (unsourced = a real "no") intact, and
+the candidate-then-judge PATTERN is established for all future correlation tags. Cross-refs: §3D (staged production, the
+candidate-then-judge pattern, the honesty rules), LP-312 (content_ids + the Tag model + tags layer), LP-313 (Stage A +
+the fail-closed/cache/index-hardening pattern this reuses). **Out of scope:** AS-1 rule evaluation / findings
+(LP-315/316), other correlation tags, other entities, the discovery lane, ``from_tag`` population.
