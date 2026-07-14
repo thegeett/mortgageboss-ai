@@ -8972,3 +8972,40 @@ LF-6T3N eval fixture re-stamped; new optional fields default, so old blobs stay 
 required housing input now yields a gated DTI (couldnt_check) instead of a confident too-low ratio — a deliberate,
 honest behavior change (the DB-backed calculators test now asserts the gated path on the incomplete seed). Cross-refs:
 §3D (calculators as structured tags), LP-310 Area 3, LP-312 (from_tag), LP-315 (the gate + confidence convention).
+
+## ADR-259: AI-at-rule-time judgment rules — procedural armor, proven with OC-2 (LP-319)
+
+**Status:** Accepted. **Context:** ~36 of the rule set are JUDGMENT rules — their verdict cannot reduce to a
+deterministic query over structural-fact tags; the AI IS the evaluator (e.g. OC-2 "is the stated occupancy
+plausible?"). These are the highest-stakes AND least-structurally-armored rules: there is no arithmetic to check the
+AI against. Left naive they would auto-ship an AI opinion as a verdict.
+
+**Decision — give the judgment rules PROCEDURAL armor, enforced in the evaluator (not the prompt).**
+1. **Two tag ROLES, made real.** A `structural_fact` tag is produced once (Stage A/B), shared/cached, read by many
+   rules. A `rule_judgment` tag (`tag_role=rule_judgment`) is produced at rule-time for ONE rule, IS that rule's
+   verdict in tag shape, carries the AI's value + confidence + reasoning + the structural subjects it reasoned over
+   (`source_facts`), and NEVER auto-ships. OC-2 produces `occupancy.reasonable` as a `rule_judgment` tag.
+2. **Reason over TAGS, not raw docs.** The judgment context is assembled ONLY from the loan's structural-fact tags
+   (`occupancy.stated`, `occupancy.consistent_with_signals`, address signals) — no document is read — so the
+   judgment is grounded in the same clean facts everything else uses and is reviewable. This is the discipline that
+   keeps a judgment rule from becoming an opaque "ask the LLM about the PDF" call.
+3. **MANDATORY human ratification.** A judgment rule's verdict is ALWAYS ratification-pending: its only terminal
+   verdicts are `needs_review` (a judgment was reached — a human must confirm) and `couldnt_check` (couldn't judge).
+   It NEVER reaches a confident `satisfied`/`fired`, regardless of the AI's yes/no or its confidence. Represented by
+   reusing LP-316's `needs_review` + a new `RuleEvaluation.ratification_pending` flag (deterministic rules leave it
+   False). This is the core armor: for the least-checkable rules, a human is always in the loop.
+4. **Confidence-gated + fail-closed on the inputs (LP-315).** The generic gate runs over the load-bearing structural
+   tags BEFORE the AI is called — absent/unknown → `couldnt_check` (we don't ask the AI to judge over a hole), shaky
+   → needs_review. The AI's own low confidence folds into the needs_review reasoning. AIClientError / truncation →
+   the judgment tag is absent-with-reason + `couldnt_check`; a malformed / off-vocabulary response → `unknown` →
+   needs_review — never a defaulted verdict.
+5. **Provenance for the ratifier.** The result carries the structural-fact tags it reasoned over inline, so the human
+   sees WHY the AI judged as it did.
+
+**Consequences.** OC-2 is the reference implementation; the other ~36 judgment rules follow the same shape — assemble
+tag context → gate → AI judge (the reused Stage-A/B clone: injected Reasoner seam, truncation guard, honest parse) →
+ratification-pending verdict + a `rule_judgment` tag. Only the prompt and the tag set change per rule. The occupancy
+structural-fact tags OC-2 reads (`occupancy.stated`, etc.) are produced by OC-1/ID-4 (out of scope here) and land
+under a loan-level subject (`by_subject["loan"]`) — a documented convention this ticket introduces; keyless tests
+inject them. Cross-refs: §3D (rule_judgment role + the judgment-rule armor), LP-313/314 (the AI-call clone), LP-315
+(the gate + result), LP-316 (needs_review as the ratification-pending outcome).

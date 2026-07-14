@@ -52,3 +52,8 @@ class RuleEvaluation:
     )
     reasoning: str
     how_to_fix: str | None
+    # LP-319: an AI-at-rule-time JUDGMENT rule (e.g. OC-2) NEVER auto-ships — its verdict is always
+    # ratification-pending until a human confirms. True marks that mandatory-ratification armor; a
+    # deterministic rule (AS-1) leaves it False. A ratification-pending rule only ever reaches
+    # needs_review / couldnt_check — never a confident satisfied/fired.
+    ratification_pending: bool = False
