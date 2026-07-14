@@ -52,6 +52,7 @@ def _sample() -> Snapshot:
         documents=DocumentsSection.present(
             [
                 DocumentEntry(
+                    content_id="docpaystub0000000",
                     document_type="pay_stub",
                     belongs_to=(BorrowerRef(borrower_id=_B1, name="Akash Patel"),),
                     fields={
@@ -59,6 +60,7 @@ def _sample() -> Snapshot:
                     },
                 ),
                 DocumentEntry(
+                    content_id="docbankstmt000000",
                     document_type="bank_statement",
                     belongs_to=(
                         BorrowerRef(borrower_id=_B1, name="Akash Patel"),
@@ -73,7 +75,12 @@ def _sample() -> Snapshot:
                         )
                     },
                 ),
-                DocumentEntry(document_type="appraisal", belongs_to=None, fields={}),  # unresolved
+                DocumentEntry(
+                    content_id="docappraisal00000",
+                    document_type="appraisal",
+                    belongs_to=None,
+                    fields={},
+                ),  # unresolved
             ]
         ),
         calculations=CalculationsSection.present(
@@ -188,7 +195,7 @@ def test_absent_section_may_not_carry_payload() -> None:
     with pytest.raises(ValidationError):
         MismoSection(absent=True, facts={"x": Field.missing()})
     with pytest.raises(ValidationError):
-        DocumentsSection(absent=True, entries=[DocumentEntry()])
+        DocumentsSection(absent=True, entries=[DocumentEntry(content_id="docx000000000000")])
     with pytest.raises(ValidationError):
         CalculationsSection(absent=True, dti=CalculationEntry())
 
@@ -199,12 +206,14 @@ def test_absent_section_may_not_carry_payload() -> None:
 
 
 def test_belongs_to_null_single_and_joint_all_representable() -> None:
-    null = DocumentEntry(document_type="appraisal", belongs_to=None)
+    null = DocumentEntry(content_id="docnull0000000000", document_type="appraisal", belongs_to=None)
     single = DocumentEntry(
+        content_id="docsingle00000000",
         document_type="pay_stub",
         belongs_to=(BorrowerRef(borrower_id=_B1, name="Akash Patel"),),
     )
     joint = DocumentEntry(
+        content_id="docjoint000000000",
         document_type="bank_statement",
         belongs_to=(
             BorrowerRef(borrower_id=_B1, name="Akash Patel"),
@@ -219,13 +228,14 @@ def test_belongs_to_null_single_and_joint_all_representable() -> None:
 def test_belongs_to_empty_list_is_rejected_use_none() -> None:
     """'Resolved to nobody' must be None, never an empty list."""
     with pytest.raises(ValidationError):
-        DocumentEntry(document_type="pay_stub", belongs_to=[])
+        DocumentEntry(content_id="docx000000000000", document_type="pay_stub", belongs_to=[])
 
 
 def test_belongs_to_rejects_duplicate_borrower() -> None:
     """A document must not claim the same borrower twice (DB UNIQUE(doc, borrower))."""
     with pytest.raises(ValidationError):
         DocumentEntry(
+            content_id="docdup00000000000",
             document_type="bank_statement",
             belongs_to=(
                 BorrowerRef(borrower_id=_B1, name="Akash Patel"),

@@ -65,6 +65,7 @@ def _snapshot(loan_file_id, run_id):
         documents=DocumentsSection.present(
             [
                 DocumentEntry(
+                    content_id="docpaystub0000000",
                     document_type="pay_stub",
                     fields={
                         "gross_pay": Field.present(

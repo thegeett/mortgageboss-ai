@@ -1,4 +1,4 @@
-"""Bank-statement transactions in the snapshot (LP-302a).
+"""Bank-statement transactions in the snapshot (LP-302a; content_ids LP-312).
 
 Covers: a bank statement's transactions surface as TransactionRecords (date/amount/
 direction/description); direction is DERIVED from transaction_type only (an unknown/
@@ -13,7 +13,11 @@ from datetime import UTC, datetime
 from uuid import uuid4
 
 import pytest
-from app.verification.snapshot.documents_section import build_document_fields, build_transactions
+from app.verification.snapshot.documents_section import (
+    build_document_fields,
+    build_transactions,
+    transaction_field_sets,
+)
 from app.verification.snapshot.fields import Field, FieldSource
 from app.verification.snapshot.model import (
     SNAPSHOT_VERSION,
@@ -24,6 +28,21 @@ from app.verification.snapshot.model import (
 )
 from app.verification.snapshot.persistence import _assert_no_raw_pii
 from app.verification.snapshot.pii import PiiField
+
+_DOC_ID = "doctest0000000000"
+
+
+def _txns(
+    extracted: dict[str, object],
+    document_type: str = "bank_statement",
+    *,
+    document_content_id: str = _DOC_ID,
+) -> tuple[TransactionRecord, ...] | None:
+    """Reshape + build transactions for a document (LP-312 two-step API)."""
+    return build_transactions(
+        transaction_field_sets(extracted, document_type),
+        document_content_id=document_content_id,
+    )
 
 
 def _txn(**kw: object) -> dict[str, object]:
@@ -49,10 +68,11 @@ def _extracted(
 
 def test_bank_statement_transactions_surface_as_records() -> None:
     extracted = _extracted([_txn(), _txn(amount="-40.00", transaction_type="fee")])
-    txns = build_transactions(extracted, "bank_statement")
+    txns = _txns(extracted)
     assert txns is not None and len(txns) == 2
     first = txns[0]
     assert isinstance(first, TransactionRecord)
+    assert first.content_id.startswith("txn")  # stable content-id stamped
     assert first.date.value == "2026-05-05"
     assert first.amount.value == "8076.93"
     assert first.direction.value == "credit"  # deposit → credit
@@ -65,15 +85,14 @@ def test_bank_statement_transactions_surface_as_records() -> None:
 def test_ambiguous_or_unknown_type_has_no_fabricated_direction() -> None:
     """The core AS-1 fix: a positive amount (the extractor's contract) with an unknown or
     ambiguous type must NOT be guessed as 'credit' — that would forge a deposit."""
-    txns = build_transactions(
+    txns = _txns(
         {
             "transactions": [
                 _txn(transaction_type="transfer", amount="9500.00"),  # bare transfer — ambiguous
                 _txn(transaction_type=None, amount="500.00"),  # no type
                 _txn(transaction_type="ach", amount="1200.00"),  # bare ACH — ambiguous
             ]
-        },
-        "bank_statement",
+        }
     )
     assert txns is not None and len(txns) == 3
     for t in txns:
@@ -82,15 +101,14 @@ def test_ambiguous_or_unknown_type_has_no_fabricated_direction() -> None:
 
 def test_direction_from_negative_amount_is_debit() -> None:
     """A signed export (negative amount) with no type → debit; a positive one stays absent."""
-    txns = build_transactions(
+    txns = _txns(
         {
             "transactions": [
                 _txn(transaction_type=None, amount="-25.00"),  # negative → debit
                 _txn(transaction_type=None, amount="(30.00)"),  # accounting-negative → debit
                 _txn(transaction_type=None, amount="42.00"),  # positive, no type → absent
             ]
-        },
-        "bank_statement",
+        }
     )
     assert txns is not None
     assert txns[0].direction.value == "debit"
@@ -99,7 +117,7 @@ def test_direction_from_negative_amount_is_debit() -> None:
 
 
 def test_description_pii_is_redacted() -> None:
-    txns = build_transactions({"transactions": [_txn()]}, "bank_statement")
+    txns = _txns({"transactions": [_txn()]})
     assert txns is not None
     desc = txns[0].description.value
     assert isinstance(desc, str)
@@ -112,27 +130,20 @@ def test_description_pii_is_redacted() -> None:
 def test_separated_account_in_description_is_redacted() -> None:
     """Finding (b): space/dash-grouped accounts/cards a bare \\d{9,} misses are scrubbed,
     while dates (≤8 digits) and short ids survive."""
-    spaced = build_transactions(
-        {"transactions": [_txn(description="ACH TRANSFER 1234 5678 9012 3456 CHASE")]},
-        "bank_statement",
-    )
+    spaced = _txns({"transactions": [_txn(description="ACH TRANSFER 1234 5678 9012 3456 CHASE")]})
     assert spaced is not None
     d0 = spaced[0].description.value
     assert isinstance(d0, str)
     assert "1234 5678 9012 3456" not in d0 and "9012" not in d0
     assert "[redacted]" in d0 and "CHASE" in d0  # sourcing signal kept
 
-    dashed = build_transactions(
-        {"transactions": [_txn(description="CHECK 1234-5678-9012 CLEARED")]}, "bank_statement"
-    )
+    dashed = _txns({"transactions": [_txn(description="CHECK 1234-5678-9012 CLEARED")]})
     assert dashed is not None
     d1 = dashed[0].description.value or ""
     assert "1234-5678-9012" not in d1 and "[redacted]" in d1
 
     # A date (8 digits, "2026-05-05") and a short id are NOT redacted.
-    dated = build_transactions(
-        {"transactions": [_txn(description="POS 2026-05-05 SAV 5683 COFFEE")]}, "bank_statement"
-    )
+    dated = _txns({"transactions": [_txn(description="POS 2026-05-05 SAV 5683 COFFEE")]})
     assert dated is not None
     d2 = dated[0].description.value or ""
     assert "2026-05-05" in d2 and "SAV 5683" in d2 and "[redacted]" not in d2
@@ -147,42 +158,42 @@ def test_statement_account_lives_on_entry_fields_not_on_each_row() -> None:
     assert isinstance(acct, PiiField)
     assert acct.display == "****5667" and acct.match_hash is None  # pre-masked, non-matchable
     # The rows carry no per-row account copy (the field was removed).
-    txns = build_transactions(extracted, "bank_statement")
+    txns = _txns(extracted)
     assert txns is not None
     assert not hasattr(txns[0], "account")
 
 
 def test_absent_transaction_field_is_missing_not_present_null() -> None:
-    txns = build_transactions(
-        {"transactions": [_txn(date=None, amount="100.00")]}, "bank_statement"
-    )
+    txns = _txns({"transactions": [_txn(date=None, amount="100.00")]})
     assert txns is not None
     assert txns[0].date.absent is True  # extractor gave no date → absent
     assert txns[0].amount.value == "100.00"
 
 
 def test_zero_transactions_is_present_empty_not_absent() -> None:
-    empty = build_transactions({"transactions": []}, "bank_statement")
+    empty = _txns({"transactions": []})
     assert empty == ()  # present-empty (a statement with no transactions)
     # ... distinct from absent:
-    absent = build_transactions({}, "bank_statement")  # no transactions key
+    absent = _txns({})  # no transactions key
     assert absent is None
     assert empty != absent
 
 
 def test_non_bank_document_has_no_transactions() -> None:
-    assert build_transactions({"employee_name": {"value": "x"}}, "pay_stub") is None
-    assert build_transactions({"transactions": [_txn()]}, "w2") is None  # only bank_statement
+    assert _txns({"employee_name": {"value": "x"}}, "pay_stub") is None
+    assert _txns({"transactions": [_txn()]}, "w2") is None  # only bank_statement
 
 
 def test_transactions_round_trip_losslessly_and_pass_persist_guard() -> None:
     lf = uuid4()
+    doc_id = "docroundtrip00000"
     entry = DocumentEntry(
+        content_id=doc_id,
         document_type="bank_statement",
         fields={"account_number_masked": Field.present("****3312", source=FieldSource.EXTRACTED)},
-        transactions=build_transactions(
+        transactions=_txns(
             _extracted([_txn(), _txn(amount="-9.99", transaction_type="fee")], account="****3312"),
-            "bank_statement",
+            document_content_id=doc_id,
         ),
     )
     snap = Snapshot(
@@ -191,7 +202,7 @@ def test_transactions_round_trip_losslessly_and_pass_persist_guard() -> None:
         created_at=datetime(2026, 7, 10, 12, 0, tzinfo=UTC),
         documents=DocumentsSection.present([entry]),
     )
-    assert snap.snapshot_version == SNAPSHOT_VERSION == 2
+    assert snap.snapshot_version == SNAPSHOT_VERSION == 3
 
     # Lossless JSON round-trip (the LP-209 acceptance bar), transactions preserved.
     back = Snapshot.model_validate_json(snap.model_dump_json())
@@ -199,14 +210,18 @@ def test_transactions_round_trip_losslessly_and_pass_persist_guard() -> None:
     rt = back.documents.entries[0].transactions
     assert rt is not None and len(rt) == 2 and rt[0].direction.value == "credit"
     assert rt[0].direction.source is FieldSource.DERIVED  # derived provenance survives
+    assert rt[0].content_id.startswith("txn")  # content_id survives round-trip
 
-    # The at-rest guard must NOT reject it — the redaction removed the 9+-digit id.
+    # The at-rest guard must NOT reject it — the redaction removed the 9+-digit id, and the
+    # content_ids (letter-prefixed hex) never trip the long-digit-run rule.
     _assert_no_raw_pii(snap.model_dump_json())  # raises if a raw SSN/9-digit run survived
 
 
 def test_present_empty_transactions_survive_round_trip() -> None:
     lf = uuid4()
-    entry = DocumentEntry(document_type="bank_statement", transactions=())  # present-empty
+    entry = DocumentEntry(
+        content_id="docempty000000000", document_type="bank_statement", transactions=()
+    )  # present-empty
     snap = Snapshot(
         loan_file_id=lf,
         run_id=uuid4(),
@@ -220,6 +235,7 @@ def test_present_empty_transactions_survive_round_trip() -> None:
 
 def test_transaction_record_is_frozen() -> None:
     rec = TransactionRecord(
+        content_id="txnfrozen00000000",
         date=Field.missing(),
         amount=Field.missing(),
         direction=Field.missing(),

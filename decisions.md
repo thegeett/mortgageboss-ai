@@ -8602,3 +8602,54 @@ the table + cycle check exist so the DAG is a drop-in once authored. Cross-refs:
 the orphan table), ADR-238 (LP-118's drift warning — now resolved by single-source-of-truth), ADR-247/248/249 (kinds table,
 snapshot transactions, AS-1 spec). **Out of scope (later tickets):** tag PRODUCTION (Stage A/B), rule EVALUATION, the stable
 content-id snapshot change (LP-312), per-tenant overrides, any hand-edit path to the DB, and a UI.
+
+## ADR-251: The tag object model + two-layer snapshot + stable content-ids (LP-312)
+
+- **Date:** 2026-07-14
+- **Status:** Accepted
+
+**Context:** The fact-tag architecture (§3D) structures raw facts into clean tags that deterministic code queries; a
+tag cites the raw facts it relied on (``source_facts``) and a finding's identity (``subject_key``) is built from stable
+tag values. All of that needs raw facts to be REFERENCEABLE by a stable id. The LP-310 recon flagged this as gap #1: the
+snapshot's only ids were ``borrower_id`` / ``loan_file_id`` / ``run_id`` — transactions and documents were addressable
+only by ARRAY POSITION, which is not stable because the snapshot is rebuilt from scratch each run (a document inserted or
+removed shifts every later index). LP-312 is the load-bearing prerequisite for the whole tag layer: it adds stable
+content-ids AND defines the tag object model + the tags layer — MODEL + SHAPE ONLY (no production, no evaluation).
+
+**Decision:**
+
+- **Stable, content-derived ids on raw facts.** ``TransactionRecord`` and ``DocumentEntry`` gain a required
+  ``content_id`` derived by :mod:`app.verification.snapshot.content_id`: ``"doc"/"txn" + sha256(canonical-content)[:16]``.
+  - *Content-derived, run-independent, position-independent:* the hash input is the fact's own content (a document's
+    type + resolved borrowers + fields + an ORDER-INDEPENDENT fingerprint of its transactions; a transaction's four
+    Fields scoped under its parent document's id), never its array index — so extraction order or an inserted/removed
+    sibling elsewhere does not change another fact's id. Same content → same id, every run.
+  - *Unique per real fact:* genuinely-duplicated content (two identical deposits) would collide, so a deterministic
+    OCCURRENCE TIEBREAK (``#0``, ``#1`` … among byte-identical siblings) is mixed into the hash → distinct ids. Because
+    identical siblings are indistinguishable, which one receives ``#0`` is immaterial — the *set* of ids is stable.
+  - *PII-at-rest safe by construction:* the id is a letter-prefixed hex token with no internal separator, so in the
+    serialized blob it is one ``\w`` run beginning with letters and can NEVER present a ``\b\d{9,}\b`` match to the
+    persistence guard (deterministically, not probabilistically). Ids are hashes — they expose none of the content.
+  - Field-cell ids are DEFERRED (scoped to transactions + documents, the recon's priority).
+- **The tag object model (§3D).** A frozen ``Tag`` (``app/verification/snapshot/tag.py``):
+  ``value`` (``JsonValue`` — any JSON value; its domain always includes ``"unknown"``; never fabricated),
+  ``confidence`` (``float | None`` in [0,1] — null for parsed, a real number for AI, never invented), ``reasoning``,
+  ``source_facts`` (``tuple[str, …]`` of content_ids — never array positions), ``produced_by`` (parsed|ai|derived|spec),
+  ``tag_role`` (structural_fact|rule_judgment), ``tag_version``, ``stage`` (A|B). Type only — no production logic.
+- **Two-layer snapshot, additively.** The existing three sections (``mismo`` / ``documents`` / ``calculations``) are the
+  RAW layer and are UNCHANGED; a new top-level ``tags: TagsSection`` (present-empty, ``by_subject`` keyed by a raw fact's
+  content_id) is the TAGS layer, produced over the raw layer by LP-313/314. Chosen additive (a new sibling section)
+  rather than nesting the raw sections under a ``raw`` key: nesting would move every existing JSON path and ripple
+  through every calculator/consumer, violating "existing content unchanged." ``CalcBreakdownLine`` gains
+  ``from_tag: str | None`` (null now; LP-318 populates it) so a calculator line can trace to the tag behind it.
+- **One version bump, 2 → 3.** Ids + the tags layer + ``from_tag`` ship under a single ``SNAPSHOT_VERSION`` bump (2 → 3)
+  to avoid churn. **v2 is SUPERSEDED, not supported:** no production snapshot was ever persisted (LP-310), so the reader
+  supports only v3; a stray dev-only v2 blob is rejected on load (``_known_snapshot_version``) and simply rebuilt.
+
+**Consequences:** tags and findings can now reference raw facts by a stable id that survives a rebuild — the load-bearing
+gap is closed. The tags layer is present-empty and round-trips losslessly at v3, ready for LP-313/314 to populate;
+``from_tag`` is null, ready for LP-318. The content-id doubles as a content fingerprint (a changed fact → a changed id →
+a dependent tag's cache key changes, §3D). Cross-refs: §3D (the tag contract + two-layer shape), LP-310 (gap #1), LP-204
+(frozen snapshot model), ADR-248 (transactions in the snapshot). **Out of scope (later tickets):** tag PRODUCTION / any
+AI call (LP-313/314), rule evaluation, populating the tags layer or ``from_tag`` (LP-318), findings/subject_key (LP-316),
+field-cell content-ids.

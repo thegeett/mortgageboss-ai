@@ -207,3 +207,58 @@ async def test_nil_run_id_is_rejected(db_session: AsyncSession) -> None:
         await build_snapshot(
             db_session, loan_file_id=lf.id, run_id=UUID(int=0), company_id=lf.company_id
         )
+
+
+async def test_content_ids_are_stable_across_rebuilds(db_session: AsyncSession) -> None:
+    """LP-312: building the SAME file twice (different runs) yields identical content_ids —
+    they are content-derived and run-independent, not fresh per build."""
+    lf = await _complete_loan_file(db_session)
+    first = await build_snapshot(
+        db_session, loan_file_id=lf.id, run_id=uuid4(), company_id=lf.company_id
+    )
+    second = await build_snapshot(
+        db_session, loan_file_id=lf.id, run_id=uuid4(), company_id=lf.company_id
+    )
+    first_ids = [e.content_id for e in first.documents.entries]
+    second_ids = [e.content_id for e in second.documents.entries]
+    assert first_ids and first_ids == second_ids
+    assert all(cid.startswith("doc") for cid in first_ids)
+
+
+async def test_document_content_id_is_independent_of_other_documents(
+    db_session: AsyncSession,
+) -> None:
+    """LP-312: adding another document must NOT change an existing document's content_id
+    (position-independence through the real DB build path)."""
+    lf = await _complete_loan_file(db_session)
+    before = await build_snapshot(
+        db_session, loan_file_id=lf.id, run_id=uuid4(), company_id=lf.company_id
+    )
+    original_id = before.documents.entries[0].content_id
+
+    # Add a second, different document, then rebuild.
+    doc = Document(
+        loan_file_id=lf.id,
+        original_filename="w2.pdf",
+        mime_type="application/pdf",
+        file_size_bytes=1,
+        storage_path="lf/w2.pdf",
+        upload_source=UploadSource.USER_UPLOAD,
+        document_type="w2",
+    )
+    db_session.add(doc)
+    await db_session.flush()
+    await create_extraction_version(
+        db_session,
+        document_id=doc.id,
+        extracted_data={"employer_name": {"value": "Acme", "source": None, "confidence": 0.9}},
+        extraction_status=ExtractionStatus.SUCCEEDED,
+    )
+    await db_session.flush()
+
+    after = await build_snapshot(
+        db_session, loan_file_id=lf.id, run_id=uuid4(), company_id=lf.company_id
+    )
+    surviving = {e.content_id for e in after.documents.entries}
+    assert original_id in surviving  # the original document's id is unchanged
+    assert len(after.documents.entries) == 2

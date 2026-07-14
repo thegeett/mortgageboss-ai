@@ -43,11 +43,15 @@ from pydantic import Field as PydField
 
 from app.verification.snapshot.fields import Field
 from app.verification.snapshot.pii import PiiField
+from app.verification.snapshot.tag import Tag
 
 # The on-disk snapshot shape version. Bump when the structure changes so a reader
 # always knows which shape it holds (readers branch on this; see ADR-241).
 # v2 (LP-302a) — DocumentEntry gains a nested ``transactions`` list (bank statements).
-SNAPSHOT_VERSION = 2
+# v3 (LP-312) — raw facts gain a stable ``content_id``; a ``tags`` layer is added alongside
+#   the raw sections; ``CalcBreakdownLine`` gains ``from_tag``. v2 is superseded, not
+#   supported — no production snapshot was ever persisted (LP-310), so a clean bump is safe.
+SNAPSHOT_VERSION = 3
 
 # A snapshot cell is either a plain fact or a masked PII fact. The two are
 # mutually exclusive under LP-203's ``extra="forbid"`` (``value`` vs
@@ -137,10 +141,16 @@ class TransactionRecord(BaseModel):
     non-matchable :class:`PiiField`); a per-transaction rule reads it from the entry it is
     already iterating. The deposit↔MISMO-asset account cross-section match is unavailable
     on this branch (extraction holds no raw account to hash); see ADR-248 / LP-302a.
+
+    ``content_id`` (LP-312) is a STABLE, run-independent id derived from the transaction's
+    content (scoped under its parent document's id, with a duplicate tiebreak) — what a tag's
+    ``source_facts`` / a finding's ``subject_key`` reference. Built by
+    :mod:`app.verification.snapshot.content_id`; see ADR-251.
     """
 
     model_config = {"frozen": True}
 
+    content_id: str = PydField(min_length=1)
     date: Field
     amount: Field
     direction: Field
@@ -161,10 +171,16 @@ class DocumentEntry(BaseModel):
     (a non-bank document, or a statement whose extraction carried no transaction
     list); **an empty tuple = a statement present with zero transactions**
     (present-empty). The two are deliberately distinct (absent≠empty).
+
+    ``content_id`` (LP-312) is a STABLE, run-independent id derived from the document's
+    content (type + resolved borrowers + fields + an order-independent fingerprint of its
+    transactions, with a duplicate tiebreak) — what a tag's ``source_facts`` / a finding's
+    ``subject_key`` reference. Built by :mod:`app.verification.snapshot.content_id`; see ADR-251.
     """
 
     model_config = {"frozen": True}
 
+    content_id: str = PydField(min_length=1)
     document_type: str | None = None
     belongs_to: tuple[BorrowerRef, ...] | None = None
     fields: dict[str, SnapshotField] = PydField(default_factory=dict)
@@ -231,6 +247,11 @@ class CalcBreakdownLine(BaseModel):
     ``extracted`` / ``manual`` / ``override``) — a free string, NOT the
     ``FieldSource`` used elsewhere, and deliberately unconstrained so a new tag
     round-trips.
+
+    ``from_tag`` (LP-312) is the fact-tag ``content_id`` / vocabulary id that produced this
+    line's value, so a calculator line traces to the tag behind it (§3D). ``None`` for now —
+    the calculator-tag wrapping (LP-318) populates it; shipped in this version bump to avoid
+    a second one.
     """
 
     model_config = {"frozen": True}
@@ -240,6 +261,7 @@ class CalcBreakdownLine(BaseModel):
     amount: str | None = None  # money serialized as an exact string
     source: str
     overridden: bool = False
+    from_tag: str | None = None
 
 
 class CalculationEntry(BaseModel):
@@ -324,14 +346,63 @@ class CalculationsSection(BaseModel):
         return not self.absent
 
 
+class TagsSection(BaseModel):
+    """The tags layer (LP-312, §3D) — AI-structured fact-tags OVER the raw layer.
+
+    The snapshot is one artifact with two layers: the RAW layer (``mismo`` / ``documents`` /
+    ``calculations`` — exactly what Stage 1 builds, unchanged, now the substrate) and this
+    TAGS layer produced over it, every tag citing raw facts by their stable ``content_id``.
+
+    ``by_subject`` maps a raw fact's ``content_id`` (a transaction / document) to the tags
+    ABOUT that fact, keyed by vocabulary tag id (e.g. ``"txn.is_money_in"``). It is
+    **present-empty** today — this ticket ships the shape; LP-313/314 produce the tags. As
+    with the raw sections, ``absent`` (not-built/failed) is distinct from present-empty
+    (built, no tags yet).
+    """
+
+    model_config = {"frozen": True}
+
+    # raw-fact content_id → { vocabulary tag id → Tag }.
+    by_subject: dict[str, dict[str, Tag]] = PydField(default_factory=dict)
+    absent: bool = False
+    reason: str | None = None  # PII-safe failure explanation (only when absent)
+
+    @model_validator(mode="after")
+    def _absent_is_empty(self) -> TagsSection:
+        if self.absent and self.by_subject:
+            raise ValueError("an absent TagsSection carries no tags")
+        if not self.absent and self.reason is not None:
+            raise ValueError("a present TagsSection carries no reason")
+        return self
+
+    @classmethod
+    def present(cls, by_subject: dict[str, dict[str, Tag]] | None = None) -> TagsSection:
+        return cls(by_subject=by_subject or {}, absent=False)
+
+    @classmethod
+    def missing(cls) -> TagsSection:
+        return cls(absent=True)
+
+    @classmethod
+    def failed(cls, reason: str) -> TagsSection:
+        """An absent layer because tag production could not build it (with a reason)."""
+        return cls(absent=True, reason=reason)
+
+    @property
+    def is_present(self) -> bool:
+        return not self.absent
+
+
 class Snapshot(BaseModel):
-    """The per-run snapshot — three independent sections + metadata.
+    """The per-run snapshot — a raw layer + a tags layer + metadata.
 
     Frozen: re-assigning an attribute raises (the contained collections are
-    immutable by convention — see the module docstring). ``mismo`` / ``documents`` /
-    ``calculations`` default to present-empty sections. No field correlates sections
-    — a cross-section link cannot be expressed as a *field* (equal-value matching via
-    ``PiiField.match_hash`` is a deliberate downstream capability, not a field here).
+    immutable by convention — see the module docstring). The RAW layer is the three
+    independent sections ``mismo`` / ``documents`` / ``calculations`` (each present-empty by
+    default); the ``tags`` layer (LP-312) is produced over it, present-empty for now. No field
+    correlates the raw sections — a cross-section link cannot be expressed as a *field*
+    (equal-value matching via ``PiiField.match_hash`` is a deliberate downstream capability,
+    not a field here); the tags layer is where cross-fact correlation will live instead.
     """
 
     model_config = {"frozen": True}
@@ -341,9 +412,13 @@ class Snapshot(BaseModel):
     created_at: datetime
     snapshot_version: int = SNAPSHOT_VERSION
 
+    # Raw layer — exactly what Stage 1 builds (unchanged, the substrate).
     mismo: MismoSection = PydField(default_factory=MismoSection)
     documents: DocumentsSection = PydField(default_factory=DocumentsSection)
     calculations: CalculationsSection = PydField(default_factory=CalculationsSection)
+
+    # Tags layer — AI-structured fact-tags over the raw layer (present-empty until LP-313/314).
+    tags: TagsSection = PydField(default_factory=TagsSection)
 
     @field_validator("created_at")
     @classmethod

@@ -61,6 +61,12 @@ from app.models.extraction import Extraction
 from app.models.helpers import only_active
 from app.models.loan_file import LoanFile
 from app.services.borrower_name_matching import BORROWER_NAME_FIELDS
+from app.verification.snapshot.content_id import (
+    DOC_PREFIX,
+    TXN_PREFIX,
+    assign_content_ids,
+    unordered_fingerprint,
+)
 from app.verification.snapshot.fields import Field, FieldSource
 from app.verification.snapshot.model import (
     BorrowerRef,
@@ -259,15 +265,23 @@ def _txn_field(value: Any, *, source: FieldSource = _EXTRACTED) -> Field:
     return Field.present(scalar, source=source)
 
 
-def build_transactions(
+# The four Fields of one transaction row, keyed by their TransactionRecord attribute.
+TransactionFieldSet = dict[str, Field]
+
+
+def transaction_field_sets(
     extracted: dict[str, Any], document_type: str | None
-) -> tuple[TransactionRecord, ...] | None:
-    """The bank-statement transaction rows (LP-302a), or ``None`` when not surfaced.
+) -> list[TransactionFieldSet] | None:
+    """The bank-statement transaction rows reshaped to Fields (LP-302a), or ``None``.
 
     ``None`` = absent (a non-bank document, or a statement whose extraction carried no
-    transaction list); an empty tuple = a statement present with zero transactions
-    (present-empty). Pure read + reshape; no correlation. ``description`` is redacted
-    so a raw account/id never lands at rest.
+    transaction list); an empty list = a statement present with zero transactions
+    (present-empty). Pure read + reshape; no correlation. ``description`` is redacted so a
+    raw account/id never lands at rest.
+
+    This is the reshape half of transaction building. The stable per-row ``content_id``
+    (LP-312) is applied by :func:`build_transactions` once the parent document's id is
+    known — a transaction id is scoped under its document, so it cannot be assigned here.
     """
     if document_type not in _TRANSACTION_DOC_TYPES:
         return None
@@ -276,26 +290,78 @@ def build_transactions(
         return None  # statement present but no transaction list → absent, not empty
     # The statement's masked account is NOT copied onto every row — it lives once on the
     # DocumentEntry's ``fields["account_number_masked"]`` (built by build_document_fields).
-    records: list[TransactionRecord] = []
+    field_sets: list[TransactionFieldSet] = []
     for txn in raw:
         if not isinstance(txn, dict):
             continue
-        records.append(
-            TransactionRecord(
-                date=_txn_field(txn.get("date")),
-                amount=_txn_field(txn.get("amount")),
-                direction=_txn_field(_direction(txn), source=FieldSource.DERIVED),
-                description=_txn_field(_redact_description(txn.get("description"))),
-            )
+        field_sets.append(
+            {
+                "date": _txn_field(txn.get("date")),
+                "amount": _txn_field(txn.get("amount")),
+                "direction": _txn_field(_direction(txn), source=FieldSource.DERIVED),
+                "description": _txn_field(_redact_description(txn.get("description"))),
+            }
         )
-    return tuple(records)
+    return field_sets
+
+
+def _txn_content(field_set: TransactionFieldSet) -> dict[str, Any]:
+    """The content a transaction's id is derived from — its four Fields, JSON-canonical."""
+    return {name: fld.model_dump(mode="json") for name, fld in field_set.items()}
+
+
+def build_transactions(
+    field_sets: list[TransactionFieldSet] | None, *, document_content_id: str
+) -> tuple[TransactionRecord, ...] | None:
+    """Final :class:`TransactionRecord`\\s with stable content_ids, or ``None`` (absent).
+
+    Each row's ``content_id`` is derived from the parent document's id + the row's own
+    content, with a duplicate tiebreak (:func:`assign_content_ids`), so identical deposits
+    in one statement still get distinct ids and no transaction id collides across documents.
+    """
+    if field_sets is None:
+        return None
+    bases = [{"doc": document_content_id, **_txn_content(fs)} for fs in field_sets]
+    ids = assign_content_ids(TXN_PREFIX, bases)
+    return tuple(
+        TransactionRecord(content_id=cid, **fs) for cid, fs in zip(ids, field_sets, strict=True)
+    )
+
+
+def _document_base(
+    document_type: str | None,
+    refs: tuple[BorrowerRef, ...],
+    fields: dict[str, SnapshotField],
+    field_sets: list[TransactionFieldSet] | None,
+) -> dict[str, Any]:
+    """The content a document's stable id is derived from (excluding the id itself).
+
+    Includes an ORDER-INDEPENDENT fingerprint of the document's transaction contents, so two
+    statements identical in type/borrowers/fields but differing in their transactions get
+    distinct ids deterministically (not by positional luck). ``belongs_to`` is reduced to the
+    resolved borrower ids+names; ``fields`` is the JSON-canonical field map (sorted).
+    """
+    return {
+        "document_type": document_type,
+        "belongs_to": (
+            [{"borrower_id": str(r.borrower_id), "name": r.name} for r in refs] if refs else None
+        ),
+        "fields": {key: value.model_dump(mode="json") for key, value in sorted(fields.items())},
+        "transactions_fingerprint": (
+            None
+            if field_sets is None
+            else unordered_fingerprint([_txn_content(fs) for fs in field_sets])
+        ),
+    }
 
 
 async def build_documents_section(db: AsyncSession, loan_file: LoanFile) -> list[DocumentEntry]:
     """Assemble the ``documents`` section for a loan file (active documents only).
 
     Reads each active, current document's extraction + stored borrower links. No
-    extraction, no matching — a pure read + reshape.
+    extraction, no matching — a pure read + reshape. Each entry (and each transaction) is
+    stamped with a stable, run-independent ``content_id`` (LP-312): documents get ids first,
+    then each statement's transactions are scoped under their document's id.
     """
     documents = (
         (
@@ -320,23 +386,40 @@ async def build_documents_section(db: AsyncSession, loan_file: LoanFile) -> list
     borrower_names = await _active_borrower_names(db, loan_file.id)
     links_by_doc = await _links_by_document(db, [d.id for d in documents])
 
-    entries: list[DocumentEntry] = []
+    # Pass 1: reshape each document's content (type / resolved borrowers / fields / transaction
+    # field sets) WITHOUT ids — nothing here depends on array position.
+    reshaped: list[
+        tuple[
+            str | None,
+            tuple[BorrowerRef, ...],
+            dict[str, SnapshotField],
+            list[TransactionFieldSet] | None,
+        ]
+    ] = []
     for document in documents:
         extraction = document.current_extraction
         extracted = extraction.extracted_data if extraction and extraction.extracted_data else {}
         fields = build_document_fields(extracted, document.document_type, loan_file_id=loan_file.id)
-
         refs = tuple(
             BorrowerRef(borrower_id=link.borrower_id, name=borrower_names[link.borrower_id])
             for link in links_by_doc.get(document.id, ())
             if link.borrower_id in borrower_names  # excludes links to soft-deleted borrowers
         )
+        field_sets = transaction_field_sets(extracted, document.document_type)
+        reshaped.append((document.document_type, refs, fields, field_sets))
+
+    # Assign stable, content-derived document ids (with a duplicate tiebreak), then build each
+    # entry scoping its transactions' ids under its own document id.
+    doc_ids = assign_content_ids(DOC_PREFIX, [_document_base(*item) for item in reshaped])
+    entries: list[DocumentEntry] = []
+    for (document_type, refs, fields, field_sets), doc_id in zip(reshaped, doc_ids, strict=True):
         entries.append(
             DocumentEntry(
-                document_type=document.document_type,
+                content_id=doc_id,
+                document_type=document_type,
                 belongs_to=refs or None,  # None when no borrower resolved
                 fields=fields,
-                transactions=build_transactions(extracted, document.document_type),
+                transactions=build_transactions(field_sets, document_content_id=doc_id),
             )
         )
     return entries

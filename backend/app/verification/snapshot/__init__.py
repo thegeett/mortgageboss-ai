@@ -12,6 +12,7 @@ from app.verification.snapshot.documents_section import (
     build_document_fields,
     build_documents_section,
     build_transactions,
+    transaction_field_sets,
 )
 from app.verification.snapshot.fields import Field, FieldSource, JsonScalar
 from app.verification.snapshot.mismo_section import build_mismo_section, load_mismo_section
@@ -26,6 +27,7 @@ from app.verification.snapshot.model import (
     MismoSection,
     Snapshot,
     SnapshotField,
+    TagsSection,
     TransactionRecord,
 )
 from app.verification.snapshot.persistence import (
@@ -36,6 +38,7 @@ from app.verification.snapshot.persistence import (
     persist_snapshot,
 )
 from app.verification.snapshot.pii import PiiField, PiiKind, mask, match_hash
+from app.verification.snapshot.tag import Tag, TagProducedBy, TagRole, TagStage
 
 __all__ = [
     "SNAPSHOT_VERSION",
@@ -56,6 +59,11 @@ __all__ = [
     "Snapshot",
     "SnapshotAlreadyPersisted",
     "SnapshotField",
+    "Tag",
+    "TagProducedBy",
+    "TagRole",
+    "TagStage",
+    "TagsSection",
     "TransactionRecord",
     "build_calculations_section",
     "build_document_fields",
@@ -69,4 +77,5 @@ __all__ = [
     "mask",
     "match_hash",
     "persist_snapshot",
+    "transaction_field_sets",
 ]
