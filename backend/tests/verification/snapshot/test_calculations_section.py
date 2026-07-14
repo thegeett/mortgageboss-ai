@@ -13,23 +13,47 @@ from uuid import uuid4
 from app.models.loan_file import LoanFile
 from app.verification.snapshot import calculations_section as cs
 from app.verification.snapshot.calculations_section import (
+    _calc_confidence,
     build_calculations_section,
     map_dti,
     map_ltv,
     map_mi,
     map_reserves,
 )
-from app.verification.snapshot.model import CalculationEntry, CalculationsSection
+from app.verification.snapshot.model import (
+    CalcBreakdownLine,
+    CalculationEntry,
+    CalculationsSection,
+)
 from sqlalchemy.ext.asyncio import AsyncSession
+
+_UNSET = object()
 
 
 def _line(
-    key: str, label: str, amount: Decimal | None, source: str, overridden: bool = False
+    key: str,
+    label: str,
+    amount: Decimal | None,
+    source: str,
+    overridden: bool = False,
+    auto_amount: Decimal | None | object = _UNSET,
 ) -> NS:
-    return NS(key=key, label=label, amount=amount, source=source, overridden=overridden)
+    # auto_amount defaults to the effective amount (a "known" input); pass None explicitly for an
+    # UNKNOWN input (the calculator couldn't derive it → LP-318 gates on this).
+    auto = amount if auto_amount is _UNSET else auto_amount
+    return NS(
+        key=key,
+        label=label,
+        amount=amount,
+        auto_amount=auto,
+        source=source,
+        overridden=overridden,
+    )
 
 
 def _dti(back_end: Decimal | None = Decimal("43.10")) -> NS:
+    # A COMPLETE, fully-tagged file: the required housing inputs (taxes + insurance) are present, so
+    # the DTI is NOT gated. Uses the real housing keys the calculator emits (so from_tag resolves).
     return NS(
         front_end_dti=Decimal("28.00"),
         back_end_dti=back_end,
@@ -39,8 +63,9 @@ def _dti(back_end: Decimal | None = Decimal("43.10")) -> NS:
         total_monthly_obligations=Decimal("2580.00"),
         income_items=[_line("income.1", "Base", Decimal("6000.00"), "stated")],
         housing_items=[
-            _line("housing.pi", "P&I", Decimal("1380.00"), "computed"),
-            _line("housing.tax", "Tax", Decimal("300.00"), "extracted"),
+            _line("housing.principal_interest", "P&I", Decimal("1380.00"), "computed"),
+            _line("housing.taxes", "Tax", Decimal("300.00"), "extracted"),
+            _line("housing.insurance", "Insurance", Decimal("120.00"), "extracted"),
         ],
         debt_items=[_line("debt.1", "Card", Decimal("900.00"), "stated", overridden=True)],
     )
@@ -98,11 +123,13 @@ def test_dti_maps_value_and_full_breakdown_with_source_tags() -> None:
     entry = map_dti(_dti())
     assert entry is not None
     assert entry.value["back_end_dti"] == "43.10"
-    # every line preserved (1 income + 2 housing + 1 debt), tags passed through verbatim
-    assert len(entry.breakdown) == 4
+    assert entry.gated is False  # complete file → not gated
+    # every line preserved (1 income + 3 housing + 1 debt), tags passed through verbatim
+    assert len(entry.breakdown) == 5
     assert [line.source for line in entry.breakdown] == [
         "stated",
         "computed",
+        "extracted",
         "extracted",
         "stated",
     ]
@@ -277,13 +304,19 @@ async def _seed_loan_file(
 async def test_db_backed_all_four_calculators_map(db_session: AsyncSession) -> None:
     lf = await _seed_loan_file(db_session, with_property=True)
     section = await build_calculations_section(db_session, lf)
-    assert section.dti is not None and section.dti.value["back_end_dti"] is not None
+    # LP-318 fail-closed on REAL data: the seed has no hazard binder / tax figure, so the required
+    # housing inputs are unknown → the DTI is PRESENT but GATED (ratio nulled, reason names the tag),
+    # NOT a confident too-low number. The other three still map to present entries.
+    assert section.dti is not None
+    assert section.dti.gated is True
+    assert section.dti.value["back_end_dti"] is None
+    assert "housing.insurance_monthly" in (section.dti.gate_reason or "")
     assert section.dti.breakdown  # income + housing + debt lines
-    # DTI's income line is fed from STATED income → tagged stated (transparency).
-    income_sources = {
-        line.source for line in section.dti.breakdown if line.key.startswith("income")
-    }
-    assert income_sources == {"stated"}
+    # DTI's income line is fed from STATED income → tagged stated (transparency) + traced to its tag.
+    income_lines = [line for line in section.dti.breakdown if line.key.startswith("income")]
+    assert {line.source for line in income_lines} == {"stated"}
+    assert {line.from_tag for line in income_lines} == {"income.qualifying_monthly"}
+    assert section.ltv is not None and section.mi is not None and section.reserves is not None
     assert section.ltv is not None and section.ltv.value["ltv"] is not None
     assert section.mi is not None  # MI always present
     assert section.reserves is not None
@@ -305,3 +338,175 @@ async def test_db_backed_reserves_none_when_no_piti(db_session: AsyncSession) ->
     lf = await _seed_loan_file(db_session, with_property=True, with_loan_terms=False)
     section = await build_calculations_section(db_session, lf)
     assert section.reserves is None
+
+
+# --------------------------------------------------------------------------- #
+# LP-318 — from_tag lineage, confidence propagation, fail-closed gating
+# --------------------------------------------------------------------------- #
+
+
+def _from_tags(entry: CalculationEntry) -> dict[str, str | None]:
+    return {line.key: line.from_tag for line in entry.breakdown}
+
+
+def test_dti_lines_carry_from_tag_lineage() -> None:
+    entry = map_dti(_dti())
+    assert entry is not None
+    tags = _from_tags(entry)
+    assert tags["income.1"] == "income.qualifying_monthly"
+    assert tags["housing.principal_interest"] == "housing.pi"
+    assert tags["housing.taxes"] == "housing.taxes_monthly"
+    assert tags["housing.insurance"] == "housing.insurance_monthly"
+    assert tags["debt.1"] == "liab.dti_payment"
+
+
+def test_ltv_mi_reserves_lines_carry_from_tag() -> None:
+    ltv = map_ltv(_ltv())
+    assert ltv is not None and _from_tags(ltv)["ltv.first"] is not None
+    # A key with no fact-tag behind it is honestly "derived" — never a fabricated tag id.
+    ltv_full = map_ltv(
+        NS(
+            **{
+                **_ltv().__dict__,
+                "loan_items": [_line("ltv.first_loan", "First", Decimal("1000"), "stated")],
+                "value_items": [
+                    _line("ltv.appraised_value", "Appraised", Decimal("2000"), "manual"),
+                    _line("ltv.unmapped", "Computed subtotal", Decimal("1"), "computed"),
+                ],
+            }
+        )
+    )
+    assert ltv_full is not None
+    ltv_tags = _from_tags(ltv_full)
+    assert ltv_tags["ltv.first_loan"] == "loan.amount"
+    assert ltv_tags["ltv.appraised_value"] == "property.appraised_value"
+    assert ltv_tags["ltv.unmapped"] == "derived"  # honest, not fabricated
+
+    mi = map_mi(
+        NS(
+            **{
+                **_mi().__dict__,
+                "inputs": [
+                    _line("mi.base_loan_amount", "Base loan", Decimal("400000"), "stated"),
+                    _line("mi.pmi_rate_bps", "PMI rate", Decimal("55"), "extracted"),
+                ],
+            }
+        )
+    )
+    mi_tags = _from_tags(mi)
+    assert mi_tags["mi.base_loan_amount"] == "loan.amount"
+    assert mi_tags["mi.pmi_rate_bps"] == "mi.factor"
+
+    reserves = map_reserves(
+        NS(
+            **{
+                **_reserves().__dict__,
+                "inputs": [
+                    _line("reserves.liquid_assets", "Liquid", Decimal("40000"), "stated"),
+                    _line("reserves.down_payment", "Down payment", Decimal("100000"), "computed"),
+                ],
+            }
+        )
+    )
+    assert reserves is not None
+    res_tags = _from_tags(reserves)
+    assert res_tags["reserves.liquid_assets"] == "asset.usable_value"
+    assert res_tags["reserves.down_payment"] == "derived"
+
+
+def test_fully_tagged_calc_is_not_gated_and_has_no_confidence_floor() -> None:
+    # All inputs are parsed/extracted/computed passthroughs (no AI confidence) → confidence None
+    # (the LP-315 convention: passthroughs are ignored in the min). Not gated.
+    entry = map_dti(_dti())
+    assert entry is not None
+    assert entry.gated is False and entry.gate_reason is None
+    assert entry.confidence is None
+
+
+def test_dti_gated_when_insurance_unknown() -> None:
+    # LF-6T3N: no hazard binder → the insurance line is UNKNOWN (auto None) → the DTI is gated:
+    # the ratio is nulled + the reason names the tag, NOT a confident too-low number.
+    dti = _dti()
+    dti.housing_items = [
+        _line("housing.principal_interest", "P&I", Decimal("1380.00"), "computed"),
+        _line("housing.taxes", "Tax", Decimal("300.00"), "extracted"),
+        _line("housing.insurance", "Insurance", Decimal("0.00"), "extracted", auto_amount=None),
+    ]
+    entry = map_dti(dti)
+    assert entry is not None
+    assert entry.gated is True
+    assert entry.value["back_end_dti"] is None  # not a confident number
+    assert entry.value["front_end_dti"] is None
+    assert "housing.insurance_monthly is unknown" in (entry.gate_reason or "")
+    # the unknown line surfaces amount=None (honest — the "absent≠0" trap), not a fabricated 0.
+    insurance = next(x for x in entry.breakdown if x.key == "housing.insurance")
+    assert insurance.amount is None
+    assert insurance.from_tag == "housing.insurance_monthly"
+
+
+def test_dti_gated_when_required_tag_absent_with_distinct_reason() -> None:
+    # A required feeding tag with NO breakdown line at all → gated with an "absent" reason,
+    # distinct from "unknown".
+    dti = _dti()
+    dti.housing_items = [_line("housing.principal_interest", "P&I", Decimal("1380.00"), "computed")]
+    entry = map_dti(dti)
+    assert entry is not None
+    assert entry.gated is True
+    reason = entry.gate_reason or ""
+    assert "housing.insurance_monthly is absent" in reason
+    assert "housing.taxes_monthly is absent" in reason
+
+
+def test_an_overridden_missing_input_is_not_unknown() -> None:
+    # A processor override supplies the number even when auto couldn't derive it → NOT unknown,
+    # NOT gated (a human vouched for it).
+    dti = _dti()
+    dti.housing_items = [
+        _line("housing.principal_interest", "P&I", Decimal("1380.00"), "computed"),
+        _line("housing.taxes", "Tax", Decimal("300.00"), "extracted"),
+        _line(
+            "housing.insurance",
+            "Insurance",
+            Decimal("150.00"),
+            "override",
+            overridden=True,
+            auto_amount=None,
+        ),
+    ]
+    entry = map_dti(dti)
+    assert entry is not None
+    assert entry.gated is False
+    assert entry.value["back_end_dti"] == "43.10"
+
+
+def test_calc_confidence_is_min_of_feeding_tag_confidences() -> None:
+    # The propagation MECHANISM: given materialized feeding-tag confidences, calc_confidence is
+    # their min (ignoring parsed/derived passthroughs, which return None). Dormant in production
+    # today (all inputs are passthroughs → None), it activates when AI-confidence tags are wired.
+    lines = [
+        CalcBreakdownLine(
+            key="a", label="A", amount="1", source="stated", from_tag="income.qualifying_monthly"
+        ),
+        CalcBreakdownLine(key="b", label="B", amount="2", source="computed", from_tag="housing.pi"),
+        CalcBreakdownLine(
+            key="c", label="C", amount="3", source="extracted", from_tag="liab.dti_payment"
+        ),
+    ]
+    confidences = {
+        "income.qualifying_monthly": 0.9,
+        "liab.dti_payment": 0.4,
+    }  # housing.pi passthrough → None
+
+    def lookup(tag: str) -> float | None:
+        return confidences.get(tag)
+
+    assert _calc_confidence(lines, lookup) == 0.4  # min of the non-None feeding confidences
+    assert _calc_confidence(lines, lambda _t: None) is None  # all passthroughs → None
+
+
+def test_max_loan_and_self_employed_are_not_in_the_snapshot() -> None:
+    # LP-318 scope: only the 4 in-snapshot calcs are tagged. max_loan / self_employed are API-only
+    # (no snapshot consumer) → deliberately NOT surfaced here; tagging them would be dead lineage.
+    assert set(CalculationsSection.model_fields) >= {"dti", "ltv", "mi", "reserves"}
+    assert "max_loan" not in CalculationsSection.model_fields
+    assert "self_employed" not in CalculationsSection.model_fields

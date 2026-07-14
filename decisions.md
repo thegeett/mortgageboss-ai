@@ -8931,3 +8931,44 @@ the DTI income, so the fixture is stripped to exactly that — the real trace (a
 counts byte-for-byte real) with every identity/free-text surface removed (a name/SSN/DOB token sweep returns zero). The
 set is AS-1-only by design; scaling to other rules is a later wave. Cross-refs: §3D (tag-level eval + calibration + fail-closed states),
 LP-313/314/314a (tags + strength), LP-315 (rule + gate), LP-316 (finding outcomes + provenance).
+
+## ADR-258: Calculators as structured tags — from_tag lineage + fail-closed THROUGH the calc (LP-318)
+
+**Status:** Accepted. **Context:** The snapshot's four calculators (DTI / LTV / MI / reserves) each emit a
+`{value, breakdown[]}` where every breakdown line carries a `source` (stated/extracted/computed/manual/override)
+but nothing tracing it to the fact-tag behind it, and no confidence. Worse, each calculator collapses a
+non-derivable input to `0` (`effective = override ?? auto ?? 0`) — the "absent≠0" trap the fact-tag vocab
+explicitly warns about — so a DTI missing a hazard binder emits a confident, too-low ratio a rule would trust.
+LP-312 added a null `from_tag` on `CalcBreakdownLine` for exactly this ticket to populate.
+
+**Decision.**
+1. **Wrap at the service/snapshot layer, never the pure arithmetic.** `calculations_section.map_*` / `_line`
+   populate `from_tag` and compute gating/confidence; the pure calculators are untouched (they remain the single
+   source of truth for the math).
+2. **`from_tag` = the canonical fact-tag id (a lineage LABEL).** The referenced tags (`housing.insurance_monthly`,
+   `dti.qualifying_income_monthly`, `loan.amount`, `asset.usable_value`, …) are a defined vocabulary in
+   `fact_tags.csv` but are NOT materialized in the snapshot's tags layer (only `txn.*` Stage-A/B tags are). So
+   `from_tag` names WHICH tag produced a line, keyed by the line's stable `key`. A computed subtotal / a line with
+   no fact-tag behind it → `"derived"` — NEVER a fabricated tag id.
+3. **Fail-closed THROUGH the calc.** An input is UNKNOWN when `auto_amount is None and not overridden` (the
+   calculator couldn't derive it and defaulted to 0; an override means a human vouched for it). Such a line
+   surfaces `amount=None` (honest, not a fabricated 0). If a REQUIRED feeding tag is unknown OR absent, the calc is
+   `gated`: its headline ratio is nulled and `gate_reason` names the tag (unknown vs absent — distinct reasons),
+   so it emits a couldnt_check-equivalent marker, NOT a confident-but-wrong number. For DTI the required set is
+   `{housing.insurance_monthly, housing.taxes_monthly}` (a missing binder/tax understates the payment); `hoa`/`mi`
+   are legitimately 0 → not required. LTV/MI/reserves already return `None` when their core input is missing.
+   The canonical case: LF-6T3N has no binder → the insurance line is unknown → the DTI gates → couldnt_check.
+4. **A rule reading a gated calc → couldnt_check.** AS-1's income read returns None when the DTI is gated (none of
+   a gated calc's numbers are trusted), so it degrades exactly as it gates on any other unknown load-bearing input.
+5. **`confidence` = min of feeding tags' confidences, ignoring parsed/derived passthroughs (LP-315 convention).**
+   The mechanism is built and unit-tested, but is DORMANT today (`None`): every current calc input is
+   parsed/extracted/computed/derived (no AI-confidence tag feeds a calc). It activates when Hybrid tags
+   (`income.qualifying_monthly`, `liab.dti_payment`) are materialized and wired.
+6. **Defer max_loan + self_employed.** They are API-only (LP-310 Area 3) — NOT in the snapshot, no rule reads them
+   from it — so tagging them now would be dead lineage. Only the 4 in-snapshot calcs are tagged.
+
+**Consequences.** `CalculationEntry` gains `gated` / `gate_reason` / `confidence`; `SNAPSHOT_VERSION` 3→4 (the frozen
+LF-6T3N eval fixture re-stamped; new optional fields default, so old blobs stay readable in shape). A file missing a
+required housing input now yields a gated DTI (couldnt_check) instead of a confident too-low ratio — a deliberate,
+honest behavior change (the DB-backed calculators test now asserts the gated path on the incomplete seed). Cross-refs:
+§3D (calculators as structured tags), LP-310 Area 3, LP-312 (from_tag), LP-315 (the gate + confidence convention).

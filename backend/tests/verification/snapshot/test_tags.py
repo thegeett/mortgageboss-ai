@@ -3,7 +3,7 @@
 Covers the §3D tag contract (value incl. "unknown"; nullable confidence; source_facts as
 content_ids; the enums; frozen), and the additive tags layer: a Snapshot carries a
 present-empty `tags` section and a `from_tag` on calc breakdown lines, all round-tripping
-losslessly at snapshot_version 3.
+losslessly at snapshot_version 4.
 """
 
 from __future__ import annotations
@@ -106,7 +106,7 @@ def test_tags_section_absent_carries_no_tags() -> None:
 
 def test_snapshot_has_empty_tags_layer_by_default() -> None:
     snap = Snapshot(loan_file_id=uuid4(), run_id=uuid4(), created_at=_WHEN)
-    assert snap.snapshot_version == SNAPSHOT_VERSION == 3
+    assert snap.snapshot_version == SNAPSHOT_VERSION == 4
     assert snap.tags.is_present and snap.tags.by_subject == {}
 
 
@@ -132,7 +132,7 @@ def test_two_layer_snapshot_round_trips_including_empty_tags_and_from_tag() -> N
     )
     back = Snapshot.model_validate_json(snap.model_dump_json())
     assert back == snap
-    assert back.snapshot_version == 3
+    assert back.snapshot_version == 4
     assert back.tags.is_present and back.tags.by_subject == {}  # present-empty survives
     line = back.calculations.dti.breakdown[0]  # type: ignore[union-attr]
     assert line.from_tag is None  # from_tag round-trips

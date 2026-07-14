@@ -39,9 +39,14 @@ def _threshold_multiplier(large_deposit_threshold: str) -> Decimal | None:
 
 
 def _qualifying_income(snapshot: Snapshot) -> Decimal | None:
-    """The loan-level monthly qualifying income, from the DTI calculator (or None if unavailable)."""
+    """The loan-level monthly qualifying income, from the DTI calculator (or None if unavailable).
+
+    A GATED DTI (LP-318 — built on an unknown/absent required input) is not trustworthy: none of its
+    numbers are read, so AS-1's threshold input is unavailable → the rule degrades to couldnt_check
+    (fail-closed THROUGH the calculator, exactly as it gates on any other unknown load-bearing input).
+    """
     calculations = snapshot.calculations
-    if calculations.absent or calculations.dti is None:
+    if calculations.absent or calculations.dti is None or calculations.dti.gated:
         return None
     return coerce_decimal(calculations.dti.value.get(_INCOME_KEY))
 

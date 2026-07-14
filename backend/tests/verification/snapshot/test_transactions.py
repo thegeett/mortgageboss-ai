@@ -202,7 +202,7 @@ def test_transactions_round_trip_losslessly_and_pass_persist_guard() -> None:
         created_at=datetime(2026, 7, 10, 12, 0, tzinfo=UTC),
         documents=DocumentsSection.present([entry]),
     )
-    assert snap.snapshot_version == SNAPSHOT_VERSION == 3
+    assert snap.snapshot_version == SNAPSHOT_VERSION == 4
 
     # Lossless JSON round-trip (the LP-209 acceptance bar), transactions preserved.
     back = Snapshot.model_validate_json(snap.model_dump_json())

@@ -51,7 +51,9 @@ from app.verification.snapshot.tag import Tag
 # v3 (LP-312) — raw facts gain a stable ``content_id``; a ``tags`` layer is added alongside
 #   the raw sections; ``CalcBreakdownLine`` gains ``from_tag``. v2 is superseded, not
 #   supported — no production snapshot was ever persisted (LP-310), so a clean bump is safe.
-SNAPSHOT_VERSION = 3
+# v4 (LP-318) — ``CalcBreakdownLine.from_tag`` is populated (calc lineage); ``CalculationEntry``
+#   gains ``gated`` / ``gate_reason`` / ``confidence`` (fail-closed through the calculators).
+SNAPSHOT_VERSION = 4
 
 # A snapshot cell is either a plain fact or a masked PII fact. The two are
 # mutually exclusive under LP-203's ``extra="forbid"`` (``value`` vs
@@ -270,12 +272,23 @@ class CalculationEntry(BaseModel):
     ``value`` holds stringified headline numbers (e.g. ``{"back_end_dti": "43.10"}``)
     so the blob serializes exactly. The container never computes — it holds what a
     calculator produced (LP-207 maps them in).
+
+    ``gated`` / ``gate_reason`` / ``confidence`` (LP-318) make the calculator a fail-closed,
+    confidence-propagating tag consumer like every other (§3D). A calc built on a REQUIRED input
+    that is unknown/absent (a breakdown line tracing to an unknown fact-tag — e.g. no insurance
+    binder) is ``gated``: its headline ratio is nulled (not a confident-but-wrong number) and
+    ``gate_reason`` names the tag that caused it — a rule reading it degrades to couldnt_check.
+    ``confidence`` is the min of the feeding tags' confidences (ignoring parsed/derived
+    passthroughs, per the LP-315 convention); ``None`` when nothing but passthroughs feed it.
     """
 
     model_config = {"frozen": True}
 
     value: dict[str, str | bool | None] = PydField(default_factory=dict)
     breakdown: list[CalcBreakdownLine] = PydField(default_factory=list)
+    gated: bool = False
+    gate_reason: str | None = None  # PII-safe: names the fact-tag(s) that gated it, never raw data
+    confidence: float | None = None
 
     @field_validator("value", mode="before")
     @classmethod

@@ -163,3 +163,19 @@ def test_income_unavailable_yields_couldnt_check() -> None:
     snap = _snapshot([("5000.00", "in", "no", "deposit")], income=None)
     result = _only(evaluate_as1_rule(snap))
     assert result.verdict is Verdict.COULDNT_CHECK
+
+
+def test_gated_dti_yields_couldnt_check() -> None:
+    # LP-318: a rule reading a GATED calc degrades to couldnt_check — fail-closed THROUGH the
+    # calculator. AS-1 reads the DTI's income; when the DTI is gated (e.g. no insurance binder),
+    # none of its numbers are trusted, so the threshold input is unavailable.
+    snap = _snapshot([("5000.00", "in", "no", "deposit")], income="8000")
+    gated_dti = CalculationEntry(
+        value={"gross_monthly_income": "8000", "back_end_dti": None},
+        breakdown=[],
+        gated=True,
+        gate_reason="calculation gated (fail-closed): housing.insurance_monthly is unknown",
+    )
+    snap = snap.model_copy(update={"calculations": CalculationsSection.present(dti=gated_dti)})
+    result = _only(evaluate_as1_rule(snap))
+    assert result.verdict is Verdict.COULDNT_CHECK
