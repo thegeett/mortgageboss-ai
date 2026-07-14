@@ -9129,3 +9129,43 @@ logic (it is correct), and the separate Caveat-A gap the investigation noted (th
 inert — `confidence` always None, the `housing.*` tags are never consulted; `from_tag` is a label only) — documented,
 deferred. Cross-refs: LP-317 (the PII stripping that introduced the fiction), LP-318 (the gating), LP-321 (the
 orchestrator + its test), and the LP-318-gating investigation.
+
+## ADR-263: Cross-run finding reconciliation + the immortal lifecycle (LP-322)
+
+**Status:** Accepted. **Context:** LP-321's orchestrator runs ONE verification; re-running the same loan file
+COLLIDED on the `(loan_file, rule, subject_key)` uniqueness index by design — that collision is the signal this
+ticket reconciles. §8 (the five outcome states / four tabs) and §9 (identity, immortality, reconciliation) require a
+finding to have a stable identity, to persist across runs keeping its history, and to NEVER leave the surface silently.
+
+**Decision.**
+1. **Identity = `(rule_id, subject_key)`, resting on STABLE content-ids (LP-312).** Verified: identical raw facts →
+   identical content_id (a re-run matches); a changed amount → a different content_id (a changed deposit is a new
+   subject). Reconciliation is only sound because subject_key is stable; a re-extracted-but-unchanged transaction
+   reconciles to the same finding.
+2. **`reconcile_evaluation_findings` matches this run against the prior run and applies five transitions.**
+   CARRY-FORWARD (detected both runs → same finding id + history, state refreshed), MINT (new subject → new finding),
+   RETIRE (a prior open finding not detected this run → `no_longer_applies`), RESOLVE (a carried-forward finding whose
+   outcome goes open→satisfied because a sourcing tag flipped — the gift-letter loop), REVIVE (a retired finding whose
+   subject reappears by exact subject_key → the same row, back on the surface). It replaces the single-run insert in
+   the orchestrator, so a re-run no longer collides.
+3. **RESOLVE ≠ RETIRE — different states, different events, not collapsed.** RESOLVE = the subject is still here and
+   the rule now PASSES (`satisfied`, a `resolved` event citing the flipped tag). RETIRE = the SUBJECT left the file (or
+   the rule no longer applies to it), `no_longer_applies`, a `retired` event with a reason. One is "it was addressed,"
+   the other is "it's not there anymore."
+4. **Immortality (§9): never a silent delete.** A no-longer-detected finding is RETIRED to `no_longer_applies`
+   (visible, labeled, reason + run_id + timestamp), `deleted_at` stays NULL — it is NOT soft-deleted. A retired finding
+   stays retired until an exact subject_key match REVIVES it (keeping the original identity). A human-resolved finding
+   (`resolution_status != OPEN`) is RETAINED, not retired (Undo/audit depend on it). Retiring subject X never suppresses
+   the rule firing on a new subject Y (different subject_key → its own finding).
+5. **Append-only cross-run event log.** LP-316's `finding_events` records each transition — `carried_forward` /
+   `outcome_changed` / `resolved` / `retired` / `revived` (two new event types added via a CHECK-widening migration),
+   each carrying the run_id in `detail`; a resolve also cites the flipped sourcing tag. History is never rewritten.
+6. **Tag-flip resolves; an observation only surfaces (the LP-320 boundary).** RESOLVE is driven by the sourcing tag
+   flipping (`has_identified_source` no→yes → the rule returns satisfied). An observation (a gift letter, LP-320) only
+   informs a human — reconcile never reads observations, so an observation alone can never flip a finding's state.
+
+**Consequences.** Re-runs are idempotent-safe and cumulative: the surface reflects the current state while preserving
+every finding's identity + history. The four-tab UI that DISPLAYS this lifecycle is deferred (frontend). The old LP-94
+`reconcile_findings` (normalized-substance identity, soft-deletes) is the pre-fact-tag pipeline's and is untouched;
+this is the subject_key-keyed, retire-not-delete reconcile for LP-316 fact-tag findings. Cross-refs: §8, §9,
+LP-312 (content-ids), LP-316 (finding + event log), LP-320 (observation boundary), LP-321 (the orchestrator).

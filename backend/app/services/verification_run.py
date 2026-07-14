@@ -37,7 +37,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.logging import get_logger
 from app.models.finding import Finding, FindingCategory
-from app.services.rule_findings import persist_evaluation_findings
+from app.services.rule_findings import reconcile_evaluation_findings
 from app.services.tag_correlation import (
     Reasoner as StageBReasoner,
 )
@@ -224,25 +224,26 @@ async def _persist(
     *,
     loan_file_id: UUID,
     verification_id: UUID | None,
+    run_id: UUID,
     results: list[RuleEvaluation],
 ) -> list[Finding]:
-    """Persist results as findings, grouped by each rule's finding category (LP-316)."""
-    findings: list[Finding] = []
-    by_category: dict[FindingCategory, list[RuleEvaluation]] = {}
-    for result in results:
-        category = _RULE_CATEGORY.get(result.rule_id, FindingCategory.ASSETS)
-        by_category.setdefault(category, []).append(result)
-    for category, group in by_category.items():
-        findings.extend(
-            await persist_evaluation_findings(
-                db,
-                loan_file_id=loan_file_id,
-                verification_id=verification_id,
-                results=group,
-                category=category,
-            )
-        )
-    return findings
+    """Reconcile this run's results into findings across runs (LP-322).
+
+    Matches against the loan file's prior findings by (rule_id, subject_key): carry-forward / mint /
+    retire / resolve / revive. Replaces the single-run insert that collided on the uniqueness index
+    when the same loan file was re-run (LP-321). Returns this run's DETECTED findings (retired ones
+    stay on the surface, labeled no_longer_applies — immortality).
+    """
+    reconciled = await reconcile_evaluation_findings(
+        db,
+        loan_file_id=loan_file_id,
+        verification_id=verification_id,
+        run_id=run_id,
+        results=results,
+        evaluated_rule_ids=frozenset(_RULE_CATEGORY),
+        category_by_rule=_RULE_CATEGORY,
+    )
+    return reconciled.detected
 
 
 async def run_verification(
@@ -315,7 +316,11 @@ async def run_verification(
     )
     snapshot = _merge_loan_judgment_tags(snapshot, judgment_tags)
     findings = await _persist(
-        db, loan_file_id=loan_file_id, verification_id=verification_id, results=results
+        db,
+        loan_file_id=loan_file_id,
+        verification_id=verification_id,
+        run_id=run_id,
+        results=results,
     )
 
     # Reproducibility: persist the frozen snapshot (best-effort — a persistence hiccup degrades, it

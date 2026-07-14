@@ -32,12 +32,15 @@ if TYPE_CHECKING:
 
 
 class FindingEventType(StrEnum):
-    """What happened to a finding (LP-316). Only ``CREATED`` is emitted single-run."""
+    """What happened to a finding. ``CREATED`` is emitted single-run (LP-316); the rest are the
+    cross-run reconciliation transitions (LP-322)."""
 
-    CREATED = "created"  # the finding was first persisted (with its initial outcome)
+    CREATED = "created"  # the finding was first persisted / minted (with its initial outcome)
+    CARRIED_FORWARD = "carried_forward"  # a re-run re-detected it, unchanged (LP-322)
     OUTCOME_CHANGED = "outcome_changed"  # a re-run changed its evaluation outcome (LP-322)
-    RESOLVED = "resolved"  # a processor resolved it (LP-322)
-    RETIRED = "retired"  # it no longer applies and was retired (LP-322)
+    RESOLVED = "resolved"  # open → satisfied: the rule now PASSES for the subject (LP-322)
+    RETIRED = "retired"  # the SUBJECT is no longer detected → no_longer_applies (LP-322)
+    REVIVED = "revived"  # a retired finding's subject reappeared → back on the surface (LP-322)
 
 
 class FindingEvent(Base, UUIDMixin):
