@@ -135,114 +135,137 @@ ADR: spec-as-file + load-interface decision; note format is provisional until LP
 Reference docs: prompt-set md (spine's spec slots show what a spec must carry), architecture §3C
 Out of scope: generalizing the format, other rules, DB table
 
-LP-304 — Per-rule AI evaluator: spine + calculative body (AS-1)
+Stage 2 (rebuilt around the fact-tag architecture)
+The old "130 AI evaluators" plan is replaced. New spine: build the tag storage + a thin slice (produce tags → thin deterministic rule → finding) end-to-end for AS-1, with the fail-closed armor, then scale.
+Foundation
+LP-310 — Recon + reconcile current state with the tag architecture
 
-Build the shared prompt spine (role, honesty rules, applicability three-valued logic, JSON output contract) — use the exact text from stage2-evaluator-prompts.md, verbatim
-Build the calculative body (Variant 2) — verbatim from the prompt-set doc
-Assemble prompt at runtime: spine + calculative body + injected AS-1 spec + snapshot
-One AI call → applicability (yes/no/can't-tell) + verdict + operative_values + evidence + reasoning, parsed to the JSON contract
-Honest can't-tell → couldn't-check; never fabricate verdict/applicability/value
-Test against LF-6T3N: AS-1 surfaces deposits, evaluates each, surfaces operands X/Y
-ADR: the evaluator output contract (becomes the contract for all rules)
-Reference docs: prompt-set md (spine + Variant 2 — use verbatim), architecture §3C
-Out of scope: numeric bookend (next), other variants, orchestration
+Report current state of load_rule_spec, rule_kinds.csv, the AS-1 spec (is the direction=="credit" filter still there?)
+Report the post-LP-302a snapshot model shape (raw layer, transactions)
+Confirm the real names/signatures of the 6 calculators
+Report the finding model's current state (what LP-306 would need to build)
+Flag anything that contradicts the tag-architecture design
+Output: recon doc, no code
 
-LP-305 — Numeric-integrity bookend (AS-1 calculative)
+LP-311 — Rule + tag storage: files → DB projection
 
-Deterministic pre-compute: the AS-1 threshold (50% of qualifying income), fed into the prompt as precomputed_values
-Deterministic re-verify: re-run the final deposit-vs-threshold comparison on the AI's surfaced operands
-Disagreement handling: arithmetic slip → deterministic silently corrects; input-selection difference → surface to human, never auto-override the AI
-Reuse existing calculator where one exists (per LP-302 recon)
-Test: an AI arithmetic error is caught; an input-judgment difference is surfaced not overridden
-ADR: bookend structure (pre-compute + verify) + two-kinds-of-disagreement rule
-Reference docs: architecture §3C (bookend), prompt-set md (Variant 2)
-Out of scope: non-calculative rules
+Define version-controlled file format for: rule specs (rule_id, kind, required_tags, applicability, reference_values, confidence_floor) and the tag vocabulary (tag_id, entity, type, allowed_values, depends_on, tag_role)
+Build DB tables: rules, tags, rule_tags, tag_dependencies (+ Alembic migration)
+Build the loader: reads files → upserts tables (the sync); DB is a projection, never hand-edited
+Consistency checks: every tag a rule requires exists in the vocabulary; depends_on forms a valid DAG (no cycles)
+Port LP-301's classification + LP-303's AS-1 spec into the new file+DB format
+ADR: files-as-source-of-truth + DB-projection; the table schema
 
-LP-306 — Finding output + four-state shape (AS-1)
+The tag layer (the new core)
+LP-312 — The tag object model + snapshot two-layer shape
 
-Evaluator result → durable finding: identity (rule_id, subject_key), four states (open/satisfied/no-longer-applies/couldn't-check)
-subject_key for AS-1 = per-deposit (account + date + amount) — exercises subject enumeration
-Route to the four surfaces (needs-attention / satisfied / not-applicable); no-longer-needed empty on single run
-Reuse/extend existing finding model (per LP-302)
-Test: AS-1 fires per-deposit on unsourced deposits; each a distinct finding with a stable subject_key
-ADR: subject_key derivation for per-subject rules
-Reference docs: architecture §8-9 (finding lifecycle)
-Out of scope: cross-run reconciliation (Phase C)
+Define the frozen tag object: {value, confidence, reasoning, source_facts, produced_by, tag_role, tag_version, stage}
+Extend the snapshot to two layers: raw (existing) + tags; tags cite raw facts by stable content-id, never array position
+unknown in every tag's value domain; absent≠unknown distinction preserved
+Snapshot_version bump; round-trip lossless; frozen (tags produced once, never re-derived on load); record model + vocab version
+ADR: the two-layer snapshot, the tag object contract
 
-LP-307 — Golden-file eval harness (AS-1)
+LP-313 — Tag production: Stage A (per-entity atomic tags) for transactions
 
-Build the harness: labeled expected outcomes for AS-1 against real files (LF-6T3N + one where AS-1 fires + one satisfied/not-applicable)
-Covers BOTH the finding verdict AND the applicability decision
-Runs automatically; per-case pass/fail; flags regressions
-Test: harness correctly scores the AS-1 evaluator against known labels
-ADR: eval-harness design + labeling approach
-Reference docs: architecture §3C (eval harness), §12 (probabilistic-reproducibility risk)
-Out of scope: scaling the eval set to many rules
+The tag-production prompt (shared "honest structuring" spine + Stage A body) — reuse the AI-call machinery (complete(), truncation guard, honest-parse, Reasoner test seam)
+Produce transaction atomic tags: txn.is_money_in, txn.amount, txn.apparent_category — no direction== filter anywhere (the AI resolves label variance into is_money_in)
+Bounded batches (≤15-20 items/call); unknown mandated; each tag carries provenance
+Keyless tests via stub reasoner; produce tags for LF-6T3N transactions
+ADR: the structuring prompt, batching bound
 
-LP-308 — Generalize the spec format (from AS-1's learnings)
+LP-314 — Tag production: Stage B (cross-entity correlation) + candidate-then-judge
 
-Generalize the minimal AS-1 spec into the real spec format (now informed by what the evaluator actually needed)
-Formalize all fields; define the file format
-Round-trip: AS-1 re-expressed in the general format evaluates identically
-ADR: the finalized rule-spec format (contract for all 130 rules)
-Reference docs: prompt-set md, architecture §3C
-Out of scope: authoring other specs
+Deterministic candidate-search (matching amount/date across accounts) → AI judges the small candidate set
+Produce txn.has_identified_source for LF-6T3N deposits (the AS-1-critical correlation tag)
+Tag dependency DAG: Stage B runs after Stage A; confidence propagates along the DAG (a tag no more confident than its shakiest input)
+Contradiction audit (deterministic): statement balance reconciles to transaction sum
+ADR: candidate-then-judge pattern, DAG ordering, confidence propagation
 
-Phase B — Prove the pattern across kinds (→ go/no-go)
-LP-309 — Structural slice: fuzzy + exact (e.g. ID-5 + ID-2)
+The rule engine + fail-closed
+LP-315 — Thin deterministic rule engine + fail-closed gate (AS-1)
 
-Express a structural rule in the general spec format (ID-5 ID-expiration — date compare)
-Build the structural path: deterministic check; AI only for fuzzy (Variant 3, verbatim from prompt-set doc)
-Add an exact-match rule (ID-2 SSN) proving the deterministic-only, no-AI path
-Extend the eval harness with these cases
-Test against LF-6T3N (ID-5 fires — Akash's DL is expired; concrete validation)
-ADR: the structural path (deterministic-only vs AI-fuzzy split)
-Reference docs: prompt-set md (Variant 3 + no-AI paths — verbatim), classification xlsx
-Out of scope: judgmental rules, orchestration
+AS-1 becomes a thin deterministic rule: query is_money_in + amount + has_identified_source + threshold (from spec) → verdict. No AI in the rule itself.
+The fail-closed gate: required-tag absent → couldn't-check; load-bearing tag unknown → couldn't-check; below confidence floor → needs-review; contradiction → needs-review; only present+high-confidence+non-contradictory → satisfied/fired
+verdict_confidence = min(load-bearing tag confidence)
+Test the AS-1 fraud case: the $40k "transfer" (no source) fires; a sourced deposit doesn't; a low-confidence source → needs-review
+ADR: the rule engine, the fail-closed gate
 
-LP-310 — Judgmental slice (e.g. OC-2 or DT-6) — GO/NO-GO
+LP-316 — Finding output: four states + provenance propagation + subject_key
 
-Express a judgmental rule in the spec format (OC-2 occupancy reasonableness, or DT-6 retained-property)
-Build the pure-AI path (Variant 1, verbatim): no numeric check, human ratifies, reasoning + evidence exposed
-Extend the eval harness
-Test against LF-6T3N (retained-property signal is present — real judgmental case)
-Milestone: all three kinds proven end-to-end with eval scores → decide whether to scale
-ADR: the judgmental path
-Reference docs: prompt-set md (Variant 1 — verbatim), classification xlsx
-Out of scope: orchestration, scaling
+Finding carries its load-bearing tags inline (reasoning + confidence) — provenance tag→finding
+Four states (open/satisfied/no-longer-applies/couldn't-check); subject_key from stable tag values (per-deposit for AS-1)
+Extend/build the finding model (per LP-310 recon)
+Test: AS-1 fires per-deposit; each finding shows the tags it rests on
+ADR: finding shape, subject_key stability
 
-Phase C — Orchestration, discovery, reconciliation (after go/no-go)
-LP-311 — Rule orchestrator
+LP-317 — Golden eval harness: tag-level AND finding-level
 
-Run all applicable rules over a snapshot; route each by kind (static-filter out-of-scope → exact-match deterministic → AI variants → bookend for calculative)
-Assemble findings from all rules into the four surfaces
-Cache-serve unchanged re-runs (input fingerprint)
-Test: full run over LF-6T3N across the built rules produces the four-tab result
-ADR: orchestration + routing + caching
-Reference docs: architecture §3C, §4 (run trigger)
+Golden labels on tags (is_money_in, has_identified_source) — catch a systematically-wrong tag upstream
+Golden labels on findings (AS-1 verdict) — end-to-end
+Measure calibration: unknown rate + accuracy-when-concrete (over/under-abstention)
+Regression cases: the transfer-labeled $40k deposit (the original bug); a gift-letter-resolved deposit
+ADR: eval design, calibration metrics
 
-LP-312 — Cross-source discovery lane (FR-6)
+Prove across kinds + the unbounded world
+LP-318 — Calculators as structured tags (all 6)
 
-Whole-file, no-fixed-scope AI pass, runs last
-Matches an existing rule → feeds it as evidence; novel → "AI found — verify" finding; recurring → flag for graduation to a scoped rule
-Test against LF-6T3N (should surface the retained-property / address class of discrepancy)
-ADR: discovery-lane design + graduation loop
-Reference docs: architecture §7 (cross-source lane)
+Each calculator → {value, breakdown[]} where each line carries source + from_tag
+Confidence propagates through the calc; a line tracing to an unknown tag → calc gated → couldn't-check
+Use the real 6 calculators (from LP-310 recon)
 
-LP-313 — Finding reconciliation across runs
+LP-319 — AI-at-rule-time rules (the judgment slice, e.g. OC-2)
 
-Match findings across runs by identity; carry-forward / mint-new / retire
-Four states with the no-longer-needed retirement; append-only event log; immortality guarantee
-Persisted four-tab surface with jump-back (ties to LP-209 snapshot persistence)
-Test: two runs with a changed file reconcile correctly; a removed subject retires
-ADR: reconciliation + subject_key stability + retire/revive rules
-Reference docs: architecture §8-9
+Pure-AI rules reason over tags (not raw docs); mandatory human ratification; confidence-gated
+One judgment rule end-to-end (occupancy reasonableness) — proves the ~36 judgment rules' safety pattern
 
-Phase D — Scale
-LP-314+ — Rule-family waves
+LP-320 — Observation channel + graduation
 
-Author remaining ~125 specs in category batches (identity → income → assets → credit → property → …)
-Each wave: write specs, add eval-set labels, validate against the harness before the next wave
-Priya sign-off on each wave's thresholds before ship
-Reference docs: all three
-One ticket per wave/family (LP-314 identity, LP-315 income, …)
+Structured observation envelope (about/type/value/structured/relates_to/confidence/needs_tag) for documents/facts not in the vocabulary
+Fails closed to human review when related to a finding
+Graduation log (frequency tally of recurring observation types)
+Test: a gift letter (not yet a formal tag) → observation → surfaces to human; a known doc → tags
+
+Orchestration + scale
+LP-321 — Orchestrator + partial-snapshot semantics
+
+Run: raw snapshot → Stage A tags → Stage B tags → calculators → contradiction audit → rules → findings
+Partial-snapshot: a failed tag-production call → those tags absent-with-reason → dependent rules couldn't-check → other rules still run (graceful degradation)
+Cache: unchanged raw facts → reuse tags (content-id fingerprint)
+
+LP-322 — Finding reconciliation across runs
+
+Match findings by stable subject_key across runs; open→satisfied when a resolving tag flips (the gift-letter loop); retire → no-longer-needed
+Ties to snapshot persistence + the four-tab surface
+
+LP-323+ — Tag + rule waves by category
+
+Author remaining tags + thin rules in category batches (identity → income → assets → credit → property…), each wave validated against the eval harness, thresholds Priya-signed before ship
+
+
+Dependency spine: LP-310 (recon) → 311 (storage) → 312 (tag model) → 313 (Stage A) → 314 (Stage B) → 315 (rule engine + fail-closed) → 316 (findings) → 317 (eval) → go/no-go → 318 (calculators), 319 (judgment rules), 320 (observations) → 321 (orchestrator), 322 (reconciliation) → 323+ (waves).
+The go/no-go is after LP-317 — at that point you have AS-1 fully working the new way (tags produced → thin rule → finding → eval'd, with the fail-closed armor) on LF-6T3N, and you know whether the tag architecture delivers before scaling.
+
+So to answer your question directly: from Claude Code I need the LP-310 recon (current state of the spec/rule_kinds/snapshot/finding models + the real 6 calculator names) before writing the detailed build prompts — because the tickets should target real interfaces, not my memory of them from before your vacation. The ticket plan above is solid without it; the per-ticket Claude Code prompts want the recon first.
+Want me to write the LP-310 recon prompt now (so you can run it and confirm the current state), or start drafting the detailed build prompts for the early tickets from what we already know?give me claude code prompt for your questions.Here's the Claude Code prompt for LP-310 — the recon that confirms current state before we write the tag-architecture build tickets. It's read-only, so it's safe to run with auto-approval; the deliverable is a report.Implement LP-310 — Recon: reconcile current branch state with the fact-tag architecture.
+READ-ONLY. This surveys what's actually on the branch now (after LP-301, LP-302a, LP-303)
+so the upcoming tag-architecture tickets build on reality, not stale assumptions. Write NO
+code and make NO changes — the ONLY deliverable is docs/tickets/LP-310.md.
+
+READ-ONLY: no writing, editing, refactoring, deleting, migrations, or DB mutations. Use only
+read commands (git log/show, ls, cat, grep, find, pytest --collect-only). The one file you
+create is the report.
+
+## CONTEXT (why this recon)
+The project is pivoting Stage 2 from "130 AI rule-evaluators" to a FACT-TAG architecture:
+AI structures raw facts into clean tags in the snapshot; deterministic code queries the tags
++ does arithmetic. Before writing the tag-layer tickets I need an accurate picture of what
+  LP-301/302a/303 left on the branch and what the tag layer must build on. Reference (if
+  present in the repo): /docs/verification-architecture-v2.docx §3D (the fact-tag architecture)
+  and /docs/snapshot-fact-tags.* (the tag vocabulary).
+
+## WHAT TO INVESTIGATE — report each with file:line, and reuse/extend/build-new verdict.
+
+### 1. Rule spec + kinds infrastructure (LP-301, LP-303)
+- load_rule_spec: signature, what a RuleSpec object contains, where specs live on disk.
+- rule_kinds.csv + its loader (kinds.py): schema, the fields per rule (kind, numeric_check,
+  exact_match,
