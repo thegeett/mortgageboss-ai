@@ -29,11 +29,12 @@ import json
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import date
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal
 
 import structlog
 
 from app.ai.cost import estimate_cost
+from app.ai.extraction.parsing import coerce_decimal
 from app.ai.tag_correlation import (
     HAS_IDENTIFIED_SOURCE_VALUES,
     AIClientError,
@@ -107,18 +108,6 @@ class _Sourced:
 SourcingCache = dict[str, _Sourced]
 
 
-def _parse_amount(value: object) -> Decimal | None:
-    if value is None:
-        return None
-    text = str(value).strip().replace(",", "").replace("$", "").replace(" ", "")
-    if not text:
-        return None
-    try:
-        return Decimal(text)
-    except (InvalidOperation, ValueError):
-        return None
-
-
 def _parse_date(value: object) -> date | None:
     if value is None:
         return None
@@ -166,7 +155,7 @@ def find_source_candidates(
             )
         )
 
-    deposit_amount = _parse_amount(_val(deposit.amount))
+    deposit_amount = coerce_decimal(_val(deposit.amount))
     deposit_date = _parse_date(_val(deposit.date))
     if deposit_amount is not None and deposit_date is not None:
         matches = [
@@ -318,7 +307,7 @@ async def produce_stage_b_sourcing_tags(
     for txn in transactions:
         subject = snapshot.tags.by_subject.get(txn.content_id, {})
         if _stage_a_value(subject, _TAG_IS_MONEY_IN) == "out":
-            debits.append((txn, _parse_amount(_val(txn.amount)), _parse_date(_val(txn.date))))
+            debits.append((txn, coerce_decimal(_val(txn.amount)), _parse_date(_val(txn.date))))
 
     by_subject = {cid: dict(tags) for cid, tags in snapshot.tags.by_subject.items()}
     input_tokens = output_tokens = deposits_judged = 0

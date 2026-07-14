@@ -9,12 +9,14 @@ AS-1 (per-deposit); the shape generalizes to more rules later.
 from __future__ import annotations
 
 import re
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal
 
+from app.ai.extraction.parsing import coerce_decimal
 from app.verification.rule_engine.as1 import evaluate_as1
 from app.verification.rule_engine.result import RuleEvaluation
 from app.verification.rules.specs import load_rule_spec
-from app.verification.snapshot.model import Snapshot, TransactionRecord
+from app.verification.snapshot.model import Snapshot
+from app.verification.snapshot.traversal import all_transactions
 
 # The confidence floor below which a load-bearing tag routes a verdict to needs_review. The AS-1
 # spec carries no floor field yet, so this default applies — PRIYA-CONFIRMABLE, like the threshold.
@@ -41,19 +43,7 @@ def _qualifying_income(snapshot: Snapshot) -> Decimal | None:
     calculations = snapshot.calculations
     if calculations.absent or calculations.dti is None:
         return None
-    raw = calculations.dti.value.get(_INCOME_KEY)
-    if raw is None:
-        return None
-    try:
-        return Decimal(str(raw).strip().replace(",", "").replace("$", ""))
-    except (InvalidOperation, ValueError):
-        return None
-
-
-def _all_transactions(snapshot: Snapshot) -> list[TransactionRecord]:
-    if snapshot.documents.absent:
-        return []
-    return [txn for entry in snapshot.documents.entries for txn in (entry.transactions or ())]
+    return coerce_decimal(calculations.dti.value.get(_INCOME_KEY))
 
 
 def evaluate_as1_rule(
@@ -72,16 +62,17 @@ def evaluate_as1_rule(
 
     tags_absent = snapshot.tags.absent
     results: list[RuleEvaluation] = []
-    for txn in _all_transactions(snapshot):
+    for txn in all_transactions(snapshot):
         subject_tags = {} if tags_absent else snapshot.tags.by_subject.get(txn.content_id, {})
         results.append(
             evaluate_as1(
                 txn.content_id,
                 subject_tags,
-                # A missing multiplier means the spec threshold is unusable → income None so the
-                # rule returns couldnt_check rather than comparing against a fabricated number.
-                threshold_multiplier=multiplier if multiplier is not None else Decimal(0),
-                qualifying_income=income if multiplier is not None else None,
+                # A missing multiplier (no percentage in the spec prose) is passed through as
+                # None; the rule returns couldnt_check rather than comparing against a fabricated
+                # number — no argument-nulling trick needed.
+                threshold_multiplier=multiplier,
+                qualifying_income=income,
                 priya_validated=priya_validated,
                 confidence_floor=confidence_floor,
             )

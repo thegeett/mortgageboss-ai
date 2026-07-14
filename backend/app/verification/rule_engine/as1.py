@@ -18,8 +18,9 @@ fail-closed gate over the load-bearing tags → the deterministic fire arithmeti
 from __future__ import annotations
 
 from collections.abc import Mapping
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal
 
+from app.ai.extraction.parsing import coerce_decimal
 from app.verification.rule_engine.gate import GateStatus, evaluate_gate
 from app.verification.rule_engine.result import LoadBearingTag, RuleEvaluation, Verdict
 from app.verification.rules.schema import Condition, Operator, satisfies
@@ -42,18 +43,6 @@ _HOW_TO_FIX = (
     "Document this deposit's source — a payroll/direct-deposit match, a transfer from the "
     "borrower's own account, or a gift / large-deposit letter — before the file is complete."
 )
-
-
-def _parse_decimal(value: object) -> Decimal | None:
-    if value is None:
-        return None
-    text = str(value).strip().replace(",", "").replace("$", "").replace(" ", "")
-    if not text:
-        return None
-    try:
-        return Decimal(text)
-    except (InvalidOperation, ValueError):
-        return None
 
 
 def _load_bearing(subject_tags: Mapping[str, Tag]) -> tuple[LoadBearingTag, ...]:
@@ -94,7 +83,7 @@ def evaluate_as1(
     subject_id: str,
     subject_tags: Mapping[str, Tag],
     *,
-    threshold_multiplier: Decimal,
+    threshold_multiplier: Decimal | None,
     qualifying_income: Decimal | None,
     priya_validated: bool,
     confidence_floor: float,
@@ -103,8 +92,10 @@ def evaluate_as1(
     """Evaluate AS-1 for ONE transaction subject — applicability → gate → fire arithmetic.
 
     ``subject_tags`` is the deposit's tag map (``by_subject[content_id]``). ``qualifying_income``
-    is the loan-level monthly qualifying income (from the DTI calculator). Pure + deterministic:
-    the same tags yield the same verdict every run.
+    is the loan-level monthly qualifying income (from the DTI calculator); ``threshold_multiplier``
+    is the spec's percentage as a fraction. Either being ``None`` (income unavailable, or the spec
+    prose carried no usable percentage) yields ``couldnt_check`` — never a fabricated threshold.
+    Pure + deterministic: the same tags yield the same verdict every run.
     """
     is_money_in = subject_tags.get(TAG_IS_MONEY_IN)
 
@@ -163,7 +154,17 @@ def evaluate_as1(
             priya_validated=priya_validated,
         )
 
-    # 3. Gate passed — the deterministic arithmetic. Income is a required rule-level input.
+    # 3. Gate passed — the deterministic arithmetic. The threshold inputs are required rule-level
+    # inputs: either being None yields couldnt_check, never a fabricated threshold.
+    if threshold_multiplier is None:
+        return _result(
+            subject_id,
+            Verdict.COULDNT_CHECK,
+            "the spec's large-deposit threshold carries no usable percentage — cannot compute it",
+            subject_tags,
+            verdict_confidence=gate.verdict_confidence,
+            priya_validated=priya_validated,
+        )
     if qualifying_income is None:
         return _result(
             subject_id,
@@ -173,7 +174,7 @@ def evaluate_as1(
             verdict_confidence=gate.verdict_confidence,
             priya_validated=priya_validated,
         )
-    amount = _parse_decimal(subject_tags[TAG_AMOUNT].value)
+    amount = coerce_decimal(subject_tags[TAG_AMOUNT].value)
     if amount is None:
         return _result(
             subject_id,

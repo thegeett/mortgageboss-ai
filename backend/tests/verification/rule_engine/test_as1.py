@@ -65,11 +65,12 @@ def _evaluate(
     confidence_floor: float = 0.5,
     contradiction: bool = False,
     income: Decimal | None = _INCOME,
+    multiplier: Decimal | None = _MULTIPLIER,
 ) -> RuleEvaluation:
     return evaluate_as1(
         "txndeposit0000000",
         tags,
-        threshold_multiplier=_MULTIPLIER,
+        threshold_multiplier=multiplier,
         qualifying_income=income,
         priya_validated=False,
         confidence_floor=confidence_floor,
@@ -213,6 +214,21 @@ def test_income_unavailable_is_couldnt_check() -> None:
         income=None,
     )
     assert result.verdict is Verdict.COULDNT_CHECK
+
+
+def test_missing_threshold_multiplier_is_couldnt_check_never_a_fabricated_threshold() -> None:
+    """No usable percentage in the spec prose → the multiplier is None → couldnt_check, never a
+    comparison against a fabricated (e.g. zero) threshold that would fire on any deposit."""
+    result = _evaluate(
+        {
+            TAG_IS_MONEY_IN: _money_in(),
+            TAG_AMOUNT: _amount("5000.00"),
+            TAG_HAS_SOURCE: _source("no"),
+        },
+        multiplier=None,
+    )
+    assert result.verdict is Verdict.COULDNT_CHECK
+    assert result.threshold_used is None  # no threshold was computed
 
 
 # --------------------------------------------------------------------------- #
