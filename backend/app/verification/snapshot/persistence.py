@@ -40,6 +40,14 @@ _RAW_SSN = re.compile(r"\b\d{3}-\d{2}-\d{4}\b")
 # trip the guard and abort the whole persist; a bare-integer id ("123456789", no
 # decimal) is still caught. Residual: a whole-dollar amount ≥ 9 digits with no cents
 # ("123456789") would still trip — rare, and safer to over-flag than to leak.
+#
+# NOTE (LP review): this is a DELIBERATE over-flag. A legitimate ≥9-digit identifier
+# riding in a plain ``Field.value`` — an insurance policy / member number, an
+# un-hyphenated 9-digit ZIP+4 — will also trip and refuse the persist. That is the
+# accepted trade (a raw account/SSN at rest is the worse outcome) and is pinned by
+# ``test_raw_account_number_run_is_rejected``. A raw account is only distinguishable
+# from a legit identifier by which field carries it, not by pattern; a future
+# structural (key-aware) guard could narrow this without weakening leak detection.
 _LONG_DIGITS = re.compile(r"\b\d{9,}\b(?!\.\d)")
 
 

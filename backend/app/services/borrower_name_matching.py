@@ -201,6 +201,11 @@ def _best_token_match(borrower_tok: str, doc_tokens: list[str]) -> tuple[float, 
       ratio of short near-misses (Han/Hahn), so fuzzy only counts when both tokens
       are at least ``_FUZZY_MIN_LEN`` characters (:data:`_FUZZY_MIN_LEN`).
     """
+    # A bare initial confers no match — enforced HERE, before the exact-membership
+    # test, so a single-letter borrower token can't score 1.0 by landing on a stray
+    # single-letter doc token (a middle initial) and forge a same-person link.
+    if len(borrower_tok) < 2:
+        return 0.0, "none"
     if borrower_tok in doc_tokens:
         return 1.0, "exact"
     bc = _canons(borrower_tok)

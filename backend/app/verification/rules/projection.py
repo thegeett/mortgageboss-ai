@@ -136,6 +136,11 @@ def load_desired_tags() -> dict[str, dict[str, Any]]:
     with _FACT_TAGS_CSV.open(encoding="utf-8", newline="") as fh:
         for row in csv.DictReader(fh):
             tag_id = row["tag_id"].strip()
+            # A duplicate tag_id must fail loud (like the rule loader), not silently
+            # overwrite the earlier row — a shadowed vocabulary definition is exactly
+            # the kind of source-file inconsistency this projection exists to catch.
+            if tag_id in desired:
+                raise ProjectionError(f"duplicate tag_id in fact_tags.csv: {tag_id!r}")
             allowed_raw = row.get("allowed_values", "").strip()
             desired[tag_id] = {
                 "entity": row["entity"].strip(),

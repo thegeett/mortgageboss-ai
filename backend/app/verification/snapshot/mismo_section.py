@@ -201,8 +201,21 @@ def build_mismo_section(
         # declarations", never an AttributeError that fails the whole section.
         declarations = borrower.declarations
         if isinstance(declarations, dict):
+            seen_slugs: dict[str, int] = {}
             for name, value in sorted(declarations.items()):
-                put(f"{base}.declaration.{_slug(name)}", value)
+                # A declaration VALUE can also be non-scalar (JSON holds any shape). A
+                # list/dict here must degrade to "skipped", not raise out of _scalar and
+                # fail the whole MISMO section — same tolerance as the non-dict guard.
+                if value is not None and not isinstance(value, (str, int, float, bool)):
+                    continue
+                # Two distinct declaration names can slug to the same key (they differ
+                # only in punctuation/spacing); disambiguate deterministically so neither
+                # indicator is silently overwritten (`x`, then `x.2`, `x.3`, …).
+                slug = _slug(name)
+                count = seen_slugs.get(slug, 0) + 1
+                seen_slugs[slug] = count
+                key = slug if count == 1 else f"{slug}.{count}"
+                put(f"{base}.declaration.{key}", value)
 
     # --- File-level liabilities / assets (deterministic order: id) --------
     for k, liability in enumerate(sorted(_active(liabilities), key=lambda x: str(x.id)), start=1):

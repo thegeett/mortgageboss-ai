@@ -222,6 +222,14 @@ class PiiField(BaseModel):
         captured). The display is the canonical last-4 shape rendered from the value's
         last four alphanumerics, so even a badly-masked or over-masked input reveals at
         most four characters. Use :meth:`from_raw` for a value that is still raw.
+
+        The reveal test is ``len(last4) == 4`` (≥4 alnum chars present), NOT
+        :func:`mask`'s ``> 4`` — deliberately, because the two have different inputs. The
+        input here is ALREADY masked (``"****1234"`` → 4 alnum chars): those four chars
+        ARE the last-4 the extractor chose to expose, so preserving them is the whole
+        point. ``mask`` instead sees the RAW value, where a 4-char value is a short
+        secret to hide entirely. Do not "align" the thresholds — it would blank the
+        last-4 on every normal pre-masked input.
         """
         last4 = _alnum(str(value))[-4:]
         if kind is PiiKind.SSN:
