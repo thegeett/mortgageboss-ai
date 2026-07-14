@@ -8890,3 +8890,44 @@ previously-recordless ``couldnt_check`` and LP-314a's ``needs_review``. **Deferr
 §3D (finding states + provenance + subject_key), LP-310 Area 4, LP-312 (content_ids), LP-314a (source strength +
 needs_review), LP-315 (the evaluation result). Migration mirrors the LP-74 add-column+CHECK+index pattern; ``str_enum`` is
 VARCHAR+CHECK so no ``ALTER TYPE``.
+
+## ADR-257: A two-level golden eval harness (tag + finding) with calibration — the GO/NO-GO instrument (LP-317)
+
+**Status:** Accepted. **Context:** Stage 2 (LP-310…316) built the fact-tag pipeline — per-entity tags (LP-313),
+cross-entity sourcing with strength (LP-314/314a), the thin AS-1 rule + fail-closed gate (LP-315), and persisted
+findings with outcome states (LP-316). Before that pipeline can be trusted as a fraud check it needs a labeled,
+automatically-scored instrument that proves it works in BOTH directions — fires when it should, stays quiet when it
+should not — and that the tags underneath are calibrated, not confidently wrong.
+
+**Decision.**
+1. **Score at TWO levels — tag AND finding.** A rule that passes can MASK a systematically-wrong tag underneath it
+   (a mis-classified `is_money_in`, a `verified` strength that never had a matched debit). Scoring findings alone
+   would green-light a broken tag. So the harness scores each per-transaction tag (`is_money_in`,
+   `apparent_category`, `has_identified_source`, `source_strength`) AND the per-subject AS-1 outcome, independently.
+2. **Both directions, explicitly.** The real fraud file (LF-6T3N) is a NO-FALSE-FIRE fixture — it structurally
+   cannot prove the fires-when-it-should direction (it has no unsourced large deposit). So the golden set adds
+   MUST-FIRE cases (1 unsourced large; 5 the regression — a non-`credit` label still fires, so the old
+   `direction=='credit'` bug cannot recur; 7 the intrinsic-not-a-loophole — the word "PAYROLL" without markers is
+   not auto-satisfied), and the harness asserts coverage of both directions.
+3. **The source-strength distinction (LP-314a) is a first-class case.** `verified` (a real matched debit, cited by
+   content_id) vs `self_asserted` (a description-only claim, no debit) vs `intrinsic` (payroll) vs `none` — the
+   fraud-relevant line between a proven paper trail and a borrower's claim — is scored directly (cases 2/3/9/10).
+4. **Calibration measures abstention, doesn't assume it.** Per dimension: the UNKNOWN rate (over-abstention → the
+   tag is useless) and ACCURACY-WHEN-CONCRETE (under-abstention/fabrication → a confident wrong answer, the
+   dangerous direction for a fraud check). Flags are gated to the dimensions where `unknown` is a true abstention.
+5. **Keyless by default, live optional.** The harness injects the LP-313/314 reasoner stub seam and REPLAYS each
+   fixture's labeled AI judgment, so CI scoring is deterministic and needs no API key; everything downstream of the
+   model (candidate search, strength derivation, gate, rule arithmetic) runs for real. A `--live` mode runs the real
+   model for calibration and skips cleanly without a key. The real file (case 12) is a FROZEN tagged snapshot
+   captured from one live post-LP-314a run — deterministic at test time, faithful to the real trace (0 fired).
+6. **Evaluate, don't fix.** The harness never edits rule/tag logic to make a case pass; a mismatch is a REPORTED
+   regression and a revealed bug is a separate fix ticket. This keeps the instrument honest.
+
+**Consequences.** A single `uv run python -m app.scripts.run_eval` (keyless, CI) or `--live` (calibration) prints a
+PASS/FAIL-per-case + both-directions-coverage + calibration report ending in GO / NO-GO. The frozen LF-6T3N fixture
+is committed as the real-data regression guard, but REDUCED + PII-SCRUBBED: the raw snapshot is a whole loan file (W2s
+with SSNs, licenses with DOB/address, etc.), and the AS-1 scorer reads only the transaction-bearing documents' tags +
+the DTI income, so the fixture is stripped to exactly that — the real trace (amounts, dates, tag VALUES, income; verdict
+counts byte-for-byte real) with every identity/free-text surface removed (a name/SSN/DOB token sweep returns zero). The
+set is AS-1-only by design; scaling to other rules is a later wave. Cross-refs: §3D (tag-level eval + calibration + fail-closed states),
+LP-313/314/314a (tags + strength), LP-315 (rule + gate), LP-316 (finding outcomes + provenance).
