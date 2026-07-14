@@ -60,6 +60,7 @@ from app.models.needs_item import (
     NeedsItemPriority,
     NeedsItemStatus,
 )
+from app.models.observation import GraduationCandidate, Observation
 from app.models.property import OccupancyType, Property, PropertyType
 from app.models.rule import Rule
 from app.models.snapshot_record import SnapshotRecord
@@ -114,6 +115,7 @@ __all__ = [
     "FindingOrigin",
     "FindingResolutionStatus",
     "FindingStatus",
+    "GraduationCandidate",
     "Lender",
     "LoanFile",
     "LoanFileStatus",
@@ -131,6 +133,7 @@ __all__ = [
     "NeedsItemOrigin",
     "NeedsItemPriority",
     "NeedsItemStatus",
+    "Observation",
     "OccupancyType",
     "Property",
     "PropertyType",

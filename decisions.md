@@ -9009,3 +9009,40 @@ structural-fact tags OC-2 reads (`occupancy.stated`, etc.) are produced by OC-1/
 under a loan-level subject (`by_subject["loan"]`) — a documented convention this ticket introduces; keyless tests
 inject them. Cross-refs: §3D (rule_judgment role + the judgment-rule armor), LP-313/314 (the AI-call clone), LP-315
 (the gate + result), LP-316 (needs_review as the ratification-pending outcome).
+
+## ADR-260: The observation channel + graduation log — safety for the unbounded real world (LP-320)
+
+**Status:** Accepted. **Context:** The tag vocabulary is finite; the real world is not. The AI constantly meets
+documents/facts the vocabulary does NOT enumerate — a gift letter, a divorce decree, a trust agreement, an unusual
+credit. Two failure modes must both be avoided: (a) DROPPING the information (a silent false-green — the file looks
+clean because the system had no slot for what it saw), and (b) letting the AI INVENT a formal tag / resolve a finding
+off an un-governed judgment (extensibility becomes a false-green vector — an ungoverned AI opinion silently clears a
+red flag).
+
+**Decision.**
+1. **A structured-but-schemaless Observation.** When the AI can't map to a known tag, it records an `Observation`
+   (envelope: about, type [a free AI-chosen label], value [natural language], structured [schemaless JSONB],
+   relates_to [finding/subject], confidence, reasoning, needs_tag, run_id) instead of inventing a tag or dropping the
+   fact. File-owned, append-only.
+2. **The INFORM-not-RESOLVE boundary, enforced STRUCTURALLY.** An observation may INFORM (surface to a human, feed
+   graduation) but can NEVER drive an automated finding resolution — only governed tags + rules resolve findings.
+   This is enforced by construction: observations live in their own table + service, and the rule engine never reads
+   them, so an observation physically cannot flip a verdict (the rules read the snapshot tags, a different data path).
+   This is the line that keeps extensibility from becoming a false-green vector.
+3. **Fail-closed to human review.** An observation that `needs_tag` or `relates_to` a finding surfaces via a query
+   (`pending_review_observations`) — the processor sees the structured context even though no formal tag/rule handles
+   it yet. A novel/unclassified document ALWAYS yields at least one observation (a fallback flagged `needs_tag` even
+   when the AI call fails) — never silently dropped (§7 discovery output).
+4. **A PII-safe graduation log — the self-improving loop.** Each observation bumps a `GraduationCandidate` tally by a
+   normalized signature (case/space-insensitive type). `top_graduation_candidates` ranks by frequency — production
+   frequency IS the signal for what the vocabulary is missing most, i.e. which unknowns a human (with Priya) should
+   formalize next into a tag+rule. The candidate row holds type + signature + count + timestamps ONLY — never raw
+   values — so it is safe as a system-wide (cross-file/tenant) signal.
+
+**Consequences.** The gift-letter trace works day one: a gift letter (not yet a formal tag) → an observation that
+relates to the AS-1 finding and FAILS CLOSED to human review — it does NOT auto-resolve AS-1 (only a future governed
+`gift.*` tag+rule would). The graduation log accumulates the recurring unknowns for formalization. Deferred: the human
+formalization WORKFLOW (turning a candidate into a committed tag+rule — a governed UI task), and the concrete wiring
+of the channel into a document classifier (no producer of document-level tags exists yet; the channel + AI step +
+`observe_unmapped` seam ship here). Cross-refs: §3D (the unbounded real world), §7 (the discovery lane), LP-313/314
+(tag production — the channel runs alongside it), LP-316 (findings — attach, never resolve).
