@@ -278,3 +278,21 @@ async def test_recurring_type_increments_the_graduation_tally(db_session: AsyncS
     assert by_sig["trust_agreement"].occurrences == 1
     # Ranked by frequency — the most-recurring unknown is what the vocabulary is missing most.
     assert candidates[0].signature == "gift_letter_asserted"
+
+
+async def test_over_long_observation_type_is_clamped_not_dropped(db_session: AsyncSession) -> None:
+    # An over-long AI type must NOT raise a DataError on the VARCHAR(64) column and drop the novel
+    # document — it is clamped to the column width and still recorded (+ its graduation tally bumped).
+    lf_id = await _loan_file_id(db_session)
+    long_type = "gift_letter_" + "x" * 200  # > 64 chars
+    obs = await record_observation(
+        db_session,
+        loan_file_id=lf_id,
+        run_id=uuid4(),
+        about="d",
+        observation_type=long_type,
+        value="a gift",
+    )
+    assert len(obs.observation_type) <= 64  # clamped, not overflowed
+    candidates = await top_graduation_candidates(db_session)
+    assert any(c.observation_type == obs.observation_type for c in candidates)  # tally recorded
