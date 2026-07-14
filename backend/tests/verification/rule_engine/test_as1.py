@@ -8,6 +8,7 @@ from app.verification.rule_engine.as1 import (
     TAG_AMOUNT,
     TAG_HAS_SOURCE,
     TAG_IS_MONEY_IN,
+    TAG_SOURCE_STRENGTH,
     evaluate_as1,
 )
 from app.verification.rule_engine.result import RuleEvaluation, Verdict
@@ -262,3 +263,74 @@ def test_deterministic_same_tags_same_verdict() -> None:
         TAG_HAS_SOURCE: _source("no"),
     }
     assert _evaluate(tags).verdict == _evaluate(tags).verdict == Verdict.FIRED
+
+
+# --------------------------------------------------------------------------- #
+# Source STRENGTH (LP-314a) — a claim is not a proven paper trail
+# --------------------------------------------------------------------------- #
+
+
+def _strength(value: str) -> Tag:
+    return _tag(
+        TAG_SOURCE_STRENGTH,
+        value,
+        confidence=0.8,
+        produced_by=TagProducedBy.DERIVED,
+        stage=TagStage.B,
+    )
+
+
+def _sourced_large(strength: str | None) -> dict[str, Tag]:
+    # A sourced ($5000 > $4000 threshold) deposit, optionally carrying a strength tag.
+    tags = {
+        TAG_IS_MONEY_IN: _money_in(),
+        TAG_AMOUNT: _amount("5000.00"),
+        TAG_HAS_SOURCE: _source("yes"),
+    }
+    if strength is not None:
+        tags[TAG_SOURCE_STRENGTH] = _strength(strength)
+    return tags
+
+
+def test_large_self_asserted_source_is_needs_review() -> None:
+    result = _evaluate(_sourced_large("self_asserted"))
+    assert result.verdict is Verdict.NEEDS_REVIEW  # NOT a clean satisfied
+    assert result.how_to_fix is not None and "paper trail" in result.how_to_fix
+    assert "self_asserted" in result.reasoning
+    # The strength tag is carried inline for provenance.
+    assert any(t.tag_id == TAG_SOURCE_STRENGTH for t in result.load_bearing_tags)
+
+
+def test_large_verified_source_is_satisfied() -> None:
+    assert _evaluate(_sourced_large("verified")).verdict is Verdict.SATISFIED
+
+
+def test_large_intrinsic_source_is_satisfied() -> None:
+    assert _evaluate(_sourced_large("intrinsic")).verdict is Verdict.SATISFIED
+
+
+def test_small_self_asserted_source_is_satisfied() -> None:
+    # A small ($3000 < $4000) self-asserted transfer is not worth a manual chase.
+    tags = {
+        TAG_IS_MONEY_IN: _money_in(),
+        TAG_AMOUNT: _amount("3000.00"),
+        TAG_HAS_SOURCE: _source("yes"),
+        TAG_SOURCE_STRENGTH: _strength("self_asserted"),
+    }
+    assert _evaluate(tags).verdict is Verdict.SATISFIED
+
+
+def test_sourced_without_strength_tag_is_satisfied_backward_compatible() -> None:
+    # An older snapshot with no source_strength tag → sourced large deposit still satisfies.
+    assert _evaluate(_sourced_large(None)).verdict is Verdict.SATISFIED
+
+
+def test_at_threshold_self_asserted_is_needs_review_ge_boundary() -> None:
+    # "at or over" (GE) — a self-asserted deposit exactly at the threshold routes to needs_review.
+    tags = {
+        TAG_IS_MONEY_IN: _money_in(),
+        TAG_AMOUNT: _amount("4000.00"),  # exactly the threshold
+        TAG_HAS_SOURCE: _source("yes"),
+        TAG_SOURCE_STRENGTH: _strength("self_asserted"),
+    }
+    assert _evaluate(tags).verdict is Verdict.NEEDS_REVIEW

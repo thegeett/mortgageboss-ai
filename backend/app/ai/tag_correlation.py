@@ -58,6 +58,18 @@ given NO candidates and the deposit shows no payroll/income signal of its own, t
 "no" — a real "no" meaning "unsourced", NOT "unknown". An unsourced deposit is exactly the
 signal downstream rules must catch, so do not soften it to "unknown".
 
+BE HONEST ABOUT *HOW* YOU KNOW — the strength of the evidence matters downstream:
+- MATCHED PAPER TRAIL: you found a genuine candidate debit (an own-account transfer of the same
+  amount posting on or before the deposit). CITE it (source_index). This is the strongest proof.
+- INTRINSIC INCOME: payroll / interest / dividend — sourced by its own nature; no matching debit
+  is needed or expected. Say so.
+- DESCRIPTION-ONLY CLAIM: the deposit's description CLAIMS an own-account or gift source (e.g.
+  "transfer from my brokerage") but NO matching debit was found among the candidates. This is the
+  borrower's CLAIM, not a proven paper trail — a fraudster can label a deposit anything. Answer
+  "yes" (a source is claimed) with source_index null, but your reasoning MUST state plainly that
+  NO matching debit was found and the source rests on the description alone. Do NOT describe a
+  description-only claim as though a debit had been matched.
+
 Use "unknown" ONLY if you genuinely cannot tell even what the deposit is.
 
 Judge honestly; a candidate of a coincidentally-similar amount is NOT automatically a source —

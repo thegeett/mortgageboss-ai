@@ -8792,3 +8792,50 @@ result shape generalize to every future rule. Cross-refs: §3D (the thin rule + 
 declared tags), LP-312/313/314 (the tags the rule reads), ``rules/schema.py`` (the reused ``satisfies``). **Out of
 scope:** finding PERSISTENCE / four-state model / subject_key column / event log (LP-316), any AI, other rules, the
 orchestrator (LP-321).
+
+## ADR-255: Sourcing STRENGTH — matched paper-trail vs self-asserted claim vs intrinsic (LP-314a)
+
+- **Date:** 2026-07-14
+- **Status:** Accepted
+
+**Context:** The LF-6T3N trace exposed that the Stage-B sourcing judge (LP-314) was too generous: it marked a deposit
+``has_identified_source: yes`` when the deposit's OWN DESCRIPTION claimed a source ("ONLINE TRANSFER FROM PATEL A
+BROKERAGE"), even with NO matching debit found — its reasoning literally said "no candidates were provided… the
+description itself establishes this." For a fraud-catching system a description is the borrower's CLAIM, not a verified
+paper trail: a $20k deposit matched to an actual same-day $20k own-account debit and a $12k deposit merely LABELLED
+"transfer from my brokerage" are not the same evidential strength, yet both got ``yes``.
+
+**Decision — a source STRENGTH, derived deterministically, drives the verdict:**
+
+- **A companion tag ``txn.source_strength``** (produced by Stage B alongside ``has_identified_source``), value ∈:
+  - ``verified`` — a matching debit/paper-trail candidate was found (the deterministic candidate-search surfaced an
+    own-account transfer of the same amount within the window, and the judge cited it). Strong.
+  - ``intrinsic`` — sourced by NATURE: payroll / interest / dividend. Legitimately needs no matching debit. Strong.
+  - ``self_asserted`` — the description claims an own-account/gift source but NO matching debit was found. A CLAIM, not
+    proof. Weak.
+  - ``none`` — no source found. Unsourced.
+- **``has_identified_source`` stays yes|no|unknown** and is consistent with the strength (verified/intrinsic/self_asserted
+  → ``yes``; none → ``no``; the unknown/failed paths → ``unknown`` with no strength tag).
+- **Strength is DERIVED deterministically in the orchestrator, NOT taken from the AI's word.** A cited
+  ``own_account_transfer`` candidate ⇒ ``verified`` (a real matched debit is authoritative regardless of how the model
+  phrased it); an intrinsic-income category (payroll/interest/dividend) ⇒ ``intrinsic``; any other ``yes`` with no matched
+  debit ⇒ ``self_asserted`` (conservative default — a claim can never be upgraded to verified without a paper trail).
+  This is exactly the distinction a fraudster exploits, so it does not rest on the AI self-classifying.
+- **The judge PROMPT is updated** so the AI's reasoning is honest: a description-only claim must be reported as ``yes``
+  with ``source_index`` null AND the reasoning must state plainly that no matching debit was found — never described as if
+  a debit had been matched. (The deterministic candidate-search is unchanged; it already finds the debits, which is what
+  makes ``verified`` verifiable.)
+- **AS-1 (LP-315) reads the strength.** A SOURCED deposit AT OR OVER the large-deposit threshold whose strength is
+  ``self_asserted`` → ``needs_review`` (not a clean ``satisfied``), with a how_to_fix telling the processor to obtain the
+  named source account's statement showing the withdrawal — the "show me the debit" discipline. ``verified`` / ``intrinsic``
+  at any size, and ``self_asserted`` UNDER threshold, → ``satisfied`` (a small self-asserted transfer is not worth a manual
+  chase, but the strength is still recorded for audit). ``source_strength`` is an optional refinement input, NOT gated, and
+  is absent-tolerant (older snapshots fall back to the prior sourced→satisfied behavior).
+
+**Consequences:** on LF-6T3N this flips the two brokerage deposits ($12k under threshold → satisfied but recorded
+self_asserted; a $12k-style deposit AT/OVER threshold would now be ``needs_review``) while keeping the $20k VERIFIED
+(matched debit) satisfied and payroll/interest INTRINSIC satisfied — "correct by design" (the paper trail), not "correct
+by luck" (a believable label). Cross-refs: §3D (the armor — provenance + honest evidence), LP-314 (candidate-then-judge),
+LP-315 (the gate/rule). **Follow-up (documented, out of scope here):** register ``txn.source_strength`` in the fact-tag
+vocabulary source of truth (``docs/snapshot-fact-tags.xlsx`` → ``fact_tags.csv``); it is produced but not yet in the
+vocabulary registry.

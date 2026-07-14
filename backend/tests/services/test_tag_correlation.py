@@ -467,3 +467,94 @@ async def test_absent_tags_layer_is_left_untouched() -> None:
     snap = snap.model_copy(update={"tags": TagsSection.missing()})
     out = await produce_stage_b_sourcing_tags(snap, reasoner=StubJudge())
     assert out.tags.absent is True
+
+
+# --------------------------------------------------------------------------- #
+# Source STRENGTH (LP-314a) — paper-trail vs claim vs intrinsic
+# --------------------------------------------------------------------------- #
+
+
+def _strength_of(snap: Snapshot, txn: Any) -> str | None:
+    tag = snap.tags.by_subject.get(txn.content_id, {}).get("txn.source_strength")
+    return None if tag is None else str(tag.value)
+
+
+async def test_strength_verified_when_a_matching_debit_is_cited() -> None:
+    # A $500 deposit with a matching same/earlier-day $500 own-account debit → judge cites it.
+    snap = _snapshot(
+        [
+            ("docchecking00000", [_txn("500.00", "TRANSFER IN", "2026-05-05")]),
+            ("docsavings000000", [_txn("500.00", "TRANSFER OUT", "2026-05-04")]),
+        ]
+    )
+    snap = _with_stage_a(snap, {"500.00": ("in", "transfer_own")}, default=("out", "transfer_own"))
+    by = {cid: dict(t) for cid, t in snap.tags.by_subject.items()}
+    deposit, debit = _flatten(snap)[0], _flatten(snap)[1]
+    by[deposit.content_id]["txn.is_money_in"] = _stage_a_tag("in", 0.9, deposit.content_id)
+    by[debit.content_id]["txn.is_money_in"] = _stage_a_tag("out", 0.9, debit.content_id)
+    snap = snap.model_copy(update={"tags": TagsSection.present(by)})
+
+    out = await produce_stage_b_sourcing_tags(snap, reasoner=StubJudge(value="yes", source_index=1))
+    assert _require_source_tag(out, deposit).value == "yes"
+    assert _strength_of(out, deposit) == "verified"  # a real matched paper trail
+    # The strength tag is DERIVED (from the matched candidate), not an AI value.
+    assert out.tags.by_subject[deposit.content_id]["txn.source_strength"].produced_by is (
+        TagProducedBy.DERIVED
+    )
+
+
+async def test_strength_self_asserted_when_yes_but_no_matching_debit() -> None:
+    """The $12k/$2k-brokerage case: description claims a source, NO candidate matched → self_asserted,
+    NOT verified. has_identified_source is still 'yes' (a source is claimed), but weakly."""
+    snap = _snapshot(
+        [("docchecking00000", [_txn("12000.00", "ONLINE TRANSFER FROM BROKERAGE", "2026-05-05")])]
+    )
+    snap = _with_stage_a(snap, {"12000.00": ("in", "transfer_own")})
+    deposit = _flatten(snap)[0]
+
+    # No candidates exist (no matching debit); the judge still says "yes" from the description.
+    stub = StubJudge(value="yes", source_index=None)
+    out = await produce_stage_b_sourcing_tags(snap, reasoner=stub)
+    assert stub.calls[0]["candidates"] == []  # code found nothing to match
+    assert _require_source_tag(out, deposit).value == "yes"
+    assert _strength_of(out, deposit) == "self_asserted"  # a claim, not a proven trail
+
+
+async def test_strength_intrinsic_for_payroll() -> None:
+    snap = _snapshot([("docchecking00000", [_txn("5000.00", "WELLS FARGO PAYROLL", "2026-05-05")])])
+    snap = _with_stage_a(snap, {"5000.00": ("in", "payroll")})
+    deposit = _flatten(snap)[0]
+    # Payroll adds a self-candidate; the judge says "yes".
+    out = await produce_stage_b_sourcing_tags(snap, reasoner=StubJudge(value="yes", source_index=1))
+    assert _strength_of(out, deposit) == "intrinsic"  # sourced by nature, no debit needed
+
+
+async def test_strength_intrinsic_for_interest() -> None:
+    snap = _snapshot([("docchecking00000", [_txn("1.93", "Interest Earned", "2026-05-05")])])
+    snap = _with_stage_a(snap, {"1.93": ("in", "interest")})
+    deposit = _flatten(snap)[0]
+    out = await produce_stage_b_sourcing_tags(
+        snap, reasoner=StubJudge(value="yes", source_index=None)
+    )
+    assert _strength_of(out, deposit) == "intrinsic"
+
+
+async def test_strength_none_when_unsourced() -> None:
+    snap = _snapshot(
+        [("docchecking00000", [_txn("147.70", "ZELLE FROM THIRD PARTY", "2026-05-05")])]
+    )
+    snap = _with_stage_a(snap, {"147.70": ("in", "refund")})
+    deposit = _flatten(snap)[0]
+    out = await produce_stage_b_sourcing_tags(snap, reasoner=StubJudge(value="no"))
+    assert _require_source_tag(out, deposit).value == "no"
+    assert _strength_of(out, deposit) == "none"
+
+
+async def test_no_strength_tag_on_unknown_money_in() -> None:
+    # is_money_in unknown → has_identified_source unknown (derived), and NO strength tag.
+    snap = _snapshot([("docchecking00000", [_txn("500.00", "MYSTERY", "2026-05-05")])])
+    snap = _with_stage_a(snap, {"500.00": ("unknown", "unknown")})
+    deposit = _flatten(snap)[0]
+    out = await produce_stage_b_sourcing_tags(snap, reasoner=StubJudge())
+    assert _require_source_tag(out, deposit).value == "unknown"
+    assert _strength_of(out, deposit) is None  # no strength for an unknown source

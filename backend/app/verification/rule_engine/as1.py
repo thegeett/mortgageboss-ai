@@ -30,19 +30,36 @@ RULE_ID = "AS-1"
 
 # The tags AS-1's verdict RESTS ON, in gate order (a subset of AS-1's declared rule_tags,
 # LP-311). ``txn.amount`` is a parsed passthrough (confidence None → ignored in the min).
+# ``txn.source_strength`` (LP-314a) refines a sourced verdict; it is shown inline for provenance
+# but is NOT gated (it is derived from has_identified_source, and may be absent on older snapshots).
 TAG_IS_MONEY_IN = "txn.is_money_in"
 TAG_AMOUNT = "txn.amount"
 TAG_HAS_SOURCE = "txn.has_identified_source"
-LOAD_BEARING_TAGS = (TAG_IS_MONEY_IN, TAG_AMOUNT, TAG_HAS_SOURCE)
+TAG_SOURCE_STRENGTH = "txn.source_strength"
+LOAD_BEARING_TAGS = (TAG_IS_MONEY_IN, TAG_AMOUNT, TAG_HAS_SOURCE, TAG_SOURCE_STRENGTH)
 
 _MONEY_IN = "in"
 _UNKNOWN = "unknown"
 _SOURCED = "yes"
+_STRENGTH_SELF_ASSERTED = "self_asserted"  # a description-only claim — not a proven paper trail
 
 _HOW_TO_FIX = (
     "Document this deposit's source — a payroll/direct-deposit match, a transfer from the "
     "borrower's own account, or a gift / large-deposit letter — before the file is complete."
 )
+# For a large deposit whose source is only self-asserted (claimed in the description, no matching
+# debit found): the processor "show me the debit" discipline (LP-314a).
+_HOW_TO_FIX_SELF_ASSERTED = (
+    "This large deposit claims an own-account or gift source in its description, but no matching "
+    "withdrawal was found in the file. Obtain the statement for the source account named in the "
+    "deposit's description showing the corresponding withdrawal (the paper trail)."
+)
+
+
+def _tag_value(subject_tags: Mapping[str, Tag], tag_id: str) -> object:
+    """The value of a tag if present, else None (for optional, non-gated refinement tags)."""
+    tag = subject_tags.get(tag_id)
+    return tag.value if tag is not None else None
 
 
 def _load_bearing(subject_tags: Mapping[str, Tag]) -> tuple[LoadBearingTag, ...]:
@@ -187,19 +204,50 @@ def evaluate_as1(
 
     threshold = qualifying_income * threshold_multiplier
     over_threshold = satisfies(Condition(op=Operator.GT, value=threshold, unit="usd"), amount)
+    at_or_over_threshold = satisfies(Condition(op=Operator.GE, value=threshold, unit="usd"), amount)
     sourced = subject_tags[TAG_HAS_SOURCE].value == _SOURCED
 
-    if over_threshold and not sourced:
+    if not sourced:
+        # Unsourced (has_identified_source == "no"): the fraud case, if it is a large deposit.
+        if over_threshold:
+            return _result(
+                subject_id,
+                Verdict.FIRED,
+                f"deposit {amount} exceeds the large-deposit threshold {threshold} "
+                f"(= {threshold_multiplier} x qualifying income {qualifying_income}) and is not "
+                f"sourced (has_identified_source={subject_tags[TAG_HAS_SOURCE].value})",
+                subject_tags,
+                verdict_confidence=gate.verdict_confidence,
+                threshold_used=threshold,
+                how_to_fix=_HOW_TO_FIX,
+                priya_validated=priya_validated,
+            )
         return _result(
             subject_id,
-            Verdict.FIRED,
-            f"deposit {amount} exceeds the large-deposit threshold {threshold} "
-            f"(= {threshold_multiplier} x qualifying income {qualifying_income}) and is not sourced "
-            f"(has_identified_source={subject_tags[TAG_HAS_SOURCE].value})",
+            Verdict.SATISFIED,
+            f"deposit {amount} is at or below the large-deposit threshold {threshold}",
             subject_tags,
             verdict_confidence=gate.verdict_confidence,
             threshold_used=threshold,
-            how_to_fix=_HOW_TO_FIX,
+            priya_validated=priya_validated,
+        )
+
+    # Sourced (has_identified_source == "yes"). A LARGE deposit whose source is only SELF-ASSERTED
+    # (claimed in the description, no matching debit) is not a clean pass — it needs the paper
+    # trail, exactly as a processor would ask (LP-314a). A verified / intrinsic source, or a small
+    # self-asserted transfer, is satisfied.
+    strength = _tag_value(subject_tags, TAG_SOURCE_STRENGTH)
+    if strength == _STRENGTH_SELF_ASSERTED and at_or_over_threshold:
+        return _result(
+            subject_id,
+            Verdict.NEEDS_REVIEW,
+            f"deposit {amount} is at or over the large-deposit threshold {threshold} and claims an "
+            f"own-account/gift source, but no matching debit was found in the file (self_asserted) "
+            f"— a verified paper trail is needed",
+            subject_tags,
+            verdict_confidence=gate.verdict_confidence,
+            threshold_used=threshold,
+            how_to_fix=_HOW_TO_FIX_SELF_ASSERTED,
             priya_validated=priya_validated,
         )
     reason = (

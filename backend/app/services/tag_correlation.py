@@ -30,6 +30,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
+from enum import StrEnum
 
 import structlog
 
@@ -66,13 +67,38 @@ _DATE_WINDOW_DAYS = 5
 _SOURCE_LOOKAHEAD_DAYS = 2
 _AMOUNT_TOLERANCE = Decimal("0.00")
 
-# Tag ids (vocabulary keys) — Stage-A inputs this pass consumes + the Stage-B tag it writes.
+# Tag ids (vocabulary keys) — Stage-A inputs this pass consumes + the Stage-B tags it writes.
 _TAG_IS_MONEY_IN = "txn.is_money_in"
 _TAG_APPARENT_CATEGORY = "txn.apparent_category"
 _TAG_HAS_SOURCE = "txn.has_identified_source"
+# Companion to has_identified_source: how STRONG the source evidence is (LP-314a). NOTE: this tag
+# is produced here but is not yet registered in the fact-tag vocabulary (snapshot-fact-tags.xlsx);
+# adding it to the vocabulary source of truth is a documented follow-up (see docs/tickets/LP-314.md).
+_TAG_SOURCE_STRENGTH = "txn.source_strength"
 _TAG_VERSION = 1
 
 _CATEGORY_PAYROLL = "payroll"
+_CATEGORY_TRANSFER = "own_account_transfer"  # the candidate kind that constitutes a matched debit
+# Categories sourced by their own NATURE — legitimately need no matching debit to be strong.
+_INTRINSIC_CATEGORIES = frozenset({"payroll", "interest", "dividend"})
+
+
+class SourceStrength(StrEnum):
+    """How strong a deposit's identified source is (LP-314a) — paper-trail vs claim vs nature.
+
+    A fraud-catching system must distinguish a PROVEN paper trail from the borrower's CLAIM: a
+    description saying "transfer from my brokerage" is not the same as a matching withdrawal.
+    """
+
+    VERIFIED = (
+        "verified"  # a matching debit / paper-trail candidate was found (amount+date+account)
+    )
+    INTRINSIC = "intrinsic"  # sourced by nature (payroll / interest / dividend) — no debit needed
+    SELF_ASSERTED = (
+        "self_asserted"  # the description claims a source but NO matching debit was found
+    )
+    NONE = "none"  # no source found — not intrinsic, no credible matched trail
+
 
 # Reasons attached to an unknown-with-reason tag so a human sees WHY it is unknown.
 _REASON_FAILED = "sourcing judgment failed"
@@ -81,6 +107,13 @@ _REASON_MALFORMED = "sourcing response malformed"
 _REASON_OFF_VOCAB = "model returned an out-of-vocabulary value; coerced to unknown"
 _REASON_BAD_INDEX = "model cited an invalid candidate; failed closed"
 _REASON_MONEY_IN_UNKNOWN = "money-in direction is unknown, so its source cannot be determined"
+
+_STRENGTH_REASONING = {
+    "verified": "a matching own-account debit was found — a verified paper trail",
+    "intrinsic": "sourced by its own nature (payroll / interest / dividend) — no matching debit needed",
+    "self_asserted": "the description claims a source but NO matching debit was found — a claim, not a paper trail",
+    "none": "no source found",
+}
 
 
 @dataclass(frozen=True)
@@ -103,6 +136,7 @@ class _Sourced:
     confidence: float | None
     reasoning: str | None
     cacheable: bool
+    strength: SourceStrength | None  # None on the unknown/failed paths (no strength tag produced)
 
 
 SourcingCache = dict[str, _Sourced]
@@ -223,25 +257,66 @@ def _cache_key(judge_context: dict[str, object]) -> str:
     return content_fingerprint(judge_context)
 
 
-def _resolve(result: SourcingResult, candidates: list[SourceCandidate]) -> _Sourced:
-    """Turn the judge's response into a resolved verdict, honestly + fail-closed."""
+def _derive_strength(cited_kind: str | None, apparent_category: object) -> SourceStrength:
+    """The AUTHORITATIVE source strength for a "yes" verdict, from hard evidence — not the AI's word.
+
+    A matched own-account transfer debit is a paper trail (VERIFIED) regardless of how the model
+    phrased it; income by nature (payroll/interest/dividend) is INTRINSIC and needs no debit;
+    anything else answered "yes" rests on the description alone → SELF_ASSERTED (a claim). This is
+    exactly the distinction a fraudster exploits, so it is derived deterministically, conservatively.
+    """
+    if cited_kind == _CATEGORY_TRANSFER:
+        return SourceStrength.VERIFIED
+    if apparent_category in _INTRINSIC_CATEGORIES or cited_kind == _CATEGORY_PAYROLL:
+        return SourceStrength.INTRINSIC
+    return SourceStrength.SELF_ASSERTED
+
+
+def _resolve(
+    result: SourcingResult, candidates: list[SourceCandidate], apparent_category: object
+) -> _Sourced:
+    """Turn the judge's response into a resolved verdict, honestly + fail-closed.
+
+    Derives the source STRENGTH (LP-314a) for a "yes": a cited own-account-transfer candidate is a
+    matched paper trail (verified); an intrinsic-income category is intrinsic; a "yes" with no
+    matched debit and no intrinsic nature is a description-only claim (self_asserted).
+    """
     if result.truncated:
-        return _Sourced("unknown", None, None, _REASON_TRUNCATED, cacheable=False)
+        return _Sourced("unknown", None, None, _REASON_TRUNCATED, cacheable=False, strength=None)
     judgment = result.judgment
     if judgment is None:
-        return _Sourced("unknown", None, None, _REASON_MALFORMED, cacheable=False)
+        return _Sourced("unknown", None, None, _REASON_MALFORMED, cacheable=False, strength=None)
     if judgment.value not in HAS_IDENTIFIED_SOURCE_VALUES:
-        return _Sourced("unknown", None, None, judgment.reasoning or _REASON_OFF_VOCAB, False)
+        return _Sourced(
+            "unknown", None, None, judgment.reasoning or _REASON_OFF_VOCAB, False, strength=None
+        )
     if judgment.value == "yes":
         source_content_id: str | None = None
+        cited_kind: str | None = None
         if judgment.source_index is not None:
             if not 1 <= judgment.source_index <= len(candidates):
                 # A "yes" citing a candidate that does not exist is untrustworthy — fail closed.
-                return _Sourced("unknown", None, None, _REASON_BAD_INDEX, cacheable=False)
-            source_content_id = candidates[judgment.source_index - 1].source_content_id
-        return _Sourced("yes", source_content_id, judgment.confidence, judgment.reasoning, True)
+                return _Sourced(
+                    "unknown", None, None, _REASON_BAD_INDEX, cacheable=False, strength=None
+                )
+            cited = candidates[judgment.source_index - 1]
+            source_content_id = cited.source_content_id
+            cited_kind = cited.kind
+        strength = _derive_strength(cited_kind, apparent_category)
+        return _Sourced(
+            "yes",
+            source_content_id,
+            judgment.confidence,
+            judgment.reasoning,
+            True,
+            strength=strength,
+        )
     # "no" / "unknown" — any cited source is ignored (a non-sourced deposit has no source).
-    return _Sourced(judgment.value, None, judgment.confidence, judgment.reasoning, cacheable=True)
+    if judgment.value == "no":
+        return _Sourced(
+            "no", None, judgment.confidence, judgment.reasoning, True, strength=SourceStrength.NONE
+        )
+    return _Sourced("unknown", None, judgment.confidence, judgment.reasoning, True, strength=None)
 
 
 def _propagate(judge_confidence: float | None, input_confidence: float | None) -> float | None:
@@ -350,22 +425,38 @@ async def produce_stage_b_sourcing_tags(
                 result = await reason_fn(json.dumps(context))
             except AIClientError:
                 logger.warning("stage_b_judge_failed", candidates=len(candidates))
-                resolved = _Sourced("unknown", None, None, _REASON_FAILED, cacheable=False)
+                resolved = _Sourced(
+                    "unknown", None, None, _REASON_FAILED, cacheable=False, strength=None
+                )
             else:
                 input_tokens += result.input_tokens
                 output_tokens += result.output_tokens
-                resolved = _resolve(result, candidates)
+                resolved = _resolve(
+                    result, candidates, _stage_a_value(subject, _TAG_APPARENT_CATEGORY)
+                )
             if resolved.cacheable:
                 persistent[key] = resolved
 
+        confidence = _propagate(resolved.confidence, is_money_in.confidence)
         by_subject[txn.content_id][_TAG_HAS_SOURCE] = _sourcing_tag(
             value=resolved.value,
             source_content_id=resolved.source_content_id,
-            confidence=_propagate(resolved.confidence, is_money_in.confidence),
+            confidence=confidence,
             reasoning=resolved.reasoning,
             deposit_content_id=txn.content_id,
             produced_by=TagProducedBy.AI,
         )
+        # The companion strength tag (LP-314a): how STRONG the source evidence is. Derived
+        # deterministically from the matched candidate + category — a claim is not a paper trail.
+        if resolved.strength is not None:
+            by_subject[txn.content_id][_TAG_SOURCE_STRENGTH] = _sourcing_tag(
+                value=resolved.strength.value,
+                source_content_id=resolved.source_content_id,
+                confidence=confidence,
+                reasoning=_STRENGTH_REASONING[resolved.strength],
+                deposit_content_id=txn.content_id,
+                produced_by=TagProducedBy.DERIVED,
+            )
 
     if input_tokens or output_tokens:
         logger.info(
@@ -385,6 +476,7 @@ async def produce_stage_b_sourcing_tags(
 __all__ = [
     "Reasoner",
     "SourceCandidate",
+    "SourceStrength",
     "SourcingCache",
     "find_source_candidates",
     "produce_stage_b_sourcing_tags",
