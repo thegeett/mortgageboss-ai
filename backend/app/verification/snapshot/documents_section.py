@@ -46,6 +46,7 @@ from __future__ import annotations
 
 import re
 from collections import defaultdict
+from dataclasses import dataclass
 from typing import Any
 from uuid import UUID
 
@@ -311,17 +312,25 @@ def _txn_content(field_set: TransactionFieldSet) -> dict[str, Any]:
 
 
 def build_transactions(
-    field_sets: list[TransactionFieldSet] | None, *, document_content_id: str
+    field_sets: list[TransactionFieldSet] | None,
+    *,
+    document_content_id: str,
+    txn_contents: list[dict[str, Any]] | None = None,
 ) -> tuple[TransactionRecord, ...] | None:
     """Final :class:`TransactionRecord`\\s with stable content_ids, or ``None`` (absent).
 
     Each row's ``content_id`` is derived from the parent document's id + the row's own
     content, with a duplicate tiebreak (:func:`assign_content_ids`), so identical deposits
     in one statement still get distinct ids and no transaction id collides across documents.
+
+    ``txn_contents`` (optional) is the ``_txn_content(fs)`` list the caller may have already
+    computed for the document's transactions-fingerprint — passing it avoids serializing each
+    row's Fields a second time. When omitted (external callers/tests) it is computed here.
     """
     if field_sets is None:
         return None
-    bases = [{"doc": document_content_id, **_txn_content(fs)} for fs in field_sets]
+    contents = txn_contents if txn_contents is not None else [_txn_content(fs) for fs in field_sets]
+    bases = [{"doc": document_content_id, **content} for content in contents]
     ids = assign_content_ids(TXN_PREFIX, bases)
     return tuple(
         TransactionRecord(content_id=cid, **fs) for cid, fs in zip(ids, field_sets, strict=True)
@@ -333,26 +342,59 @@ def _document_base(
     refs: tuple[BorrowerRef, ...],
     fields: dict[str, SnapshotField],
     field_sets: list[TransactionFieldSet] | None,
+    *,
+    txn_contents: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """The content a document's stable id is derived from (excluding the id itself).
 
     Includes an ORDER-INDEPENDENT fingerprint of the document's transaction contents, so two
     statements identical in type/borrowers/fields but differing in their transactions get
-    distinct ids deterministically (not by positional luck). ``belongs_to`` is reduced to the
-    resolved borrower ids+names; ``fields`` is the JSON-canonical field map (sorted).
+    distinct ids deterministically (not by positional luck). ``fields`` is the JSON-canonical
+    field map (sorted).
+
+    ``belongs_to`` is reduced to the resolved borrower ids+names and **sorted by borrower_id**,
+    so the document id is independent of the order the borrower links happen to arrive in. The
+    link query orders by ``confidence`` and equal-confidence borrowers (a joint document
+    matched to both spouses) have no stable relative order — folding that incidental order into
+    the id would make it change between rebuilds, breaking the run-independence guarantee.
+
+    ``txn_contents`` (optional) is the precomputed ``_txn_content(fs)`` list; when omitted it is
+    computed from ``field_sets`` (keeps the pure-in-test call sites simple).
     """
+    contents = (
+        txn_contents
+        if txn_contents is not None
+        else (None if field_sets is None else [_txn_content(fs) for fs in field_sets])
+    )
     return {
         "document_type": document_type,
         "belongs_to": (
-            [{"borrower_id": str(r.borrower_id), "name": r.name} for r in refs] if refs else None
+            [
+                {"borrower_id": str(r.borrower_id), "name": r.name}
+                for r in sorted(refs, key=lambda ref: str(ref.borrower_id))
+            ]
+            if refs
+            else None
         ),
         "fields": {key: value.model_dump(mode="json") for key, value in sorted(fields.items())},
-        "transactions_fingerprint": (
-            None
-            if field_sets is None
-            else unordered_fingerprint([_txn_content(fs) for fs in field_sets])
-        ),
+        "transactions_fingerprint": (None if contents is None else unordered_fingerprint(contents)),
     }
+
+
+@dataclass(frozen=True)
+class _ReshapedDoc:
+    """One document reshaped for id assignment — content only, no id yet.
+
+    ``txn_contents`` is the ``_txn_content(fs)`` list computed once here and reused by both the
+    document-id fingerprint and :func:`build_transactions`, so a row's Fields are serialized
+    once per build rather than twice.
+    """
+
+    document_type: str | None
+    refs: tuple[BorrowerRef, ...]
+    fields: dict[str, SnapshotField]
+    field_sets: list[TransactionFieldSet] | None
+    txn_contents: list[dict[str, Any]] | None
 
 
 async def build_documents_section(db: AsyncSession, loan_file: LoanFile) -> list[DocumentEntry]:
@@ -388,14 +430,7 @@ async def build_documents_section(db: AsyncSession, loan_file: LoanFile) -> list
 
     # Pass 1: reshape each document's content (type / resolved borrowers / fields / transaction
     # field sets) WITHOUT ids — nothing here depends on array position.
-    reshaped: list[
-        tuple[
-            str | None,
-            tuple[BorrowerRef, ...],
-            dict[str, SnapshotField],
-            list[TransactionFieldSet] | None,
-        ]
-    ] = []
+    reshaped: list[_ReshapedDoc] = []
     for document in documents:
         extraction = document.current_extraction
         extracted = extraction.extracted_data if extraction and extraction.extracted_data else {}
@@ -406,20 +441,33 @@ async def build_documents_section(db: AsyncSession, loan_file: LoanFile) -> list
             if link.borrower_id in borrower_names  # excludes links to soft-deleted borrowers
         )
         field_sets = transaction_field_sets(extracted, document.document_type)
-        reshaped.append((document.document_type, refs, fields, field_sets))
+        txn_contents = None if field_sets is None else [_txn_content(fs) for fs in field_sets]
+        reshaped.append(
+            _ReshapedDoc(document.document_type, refs, fields, field_sets, txn_contents)
+        )
 
     # Assign stable, content-derived document ids (with a duplicate tiebreak), then build each
     # entry scoping its transactions' ids under its own document id.
-    doc_ids = assign_content_ids(DOC_PREFIX, [_document_base(*item) for item in reshaped])
+    doc_ids = assign_content_ids(
+        DOC_PREFIX,
+        [
+            _document_base(
+                d.document_type, d.refs, d.fields, d.field_sets, txn_contents=d.txn_contents
+            )
+            for d in reshaped
+        ],
+    )
     entries: list[DocumentEntry] = []
-    for (document_type, refs, fields, field_sets), doc_id in zip(reshaped, doc_ids, strict=True):
+    for d, doc_id in zip(reshaped, doc_ids, strict=True):
         entries.append(
             DocumentEntry(
                 content_id=doc_id,
-                document_type=document_type,
-                belongs_to=refs or None,  # None when no borrower resolved
-                fields=fields,
-                transactions=build_transactions(field_sets, document_content_id=doc_id),
+                document_type=d.document_type,
+                belongs_to=d.refs or None,  # None when no borrower resolved
+                fields=d.fields,
+                transactions=build_transactions(
+                    d.field_sets, document_content_id=doc_id, txn_contents=d.txn_contents
+                ),
             )
         )
     return entries
@@ -440,7 +488,9 @@ async def _links_by_document(
             await db.execute(
                 select(DocumentBorrowerLink)
                 .where(DocumentBorrowerLink.document_id.in_(document_ids))
-                .order_by(DocumentBorrowerLink.confidence.desc())
+                # borrower_id is a deterministic tiebreak: equal-confidence links (a joint
+                # document matched to both spouses) otherwise return in an unstable order.
+                .order_by(DocumentBorrowerLink.confidence.desc(), DocumentBorrowerLink.borrower_id)
             )
         )
         .scalars()

@@ -9,6 +9,7 @@ and PII-at-rest safety (ids never trip the persistence guard).
 from __future__ import annotations
 
 from typing import Any
+from uuid import UUID
 
 from app.verification.snapshot.content_id import (
     DOC_PREFIX,
@@ -23,6 +24,7 @@ from app.verification.snapshot.documents_section import (
     build_transactions,
     transaction_field_sets,
 )
+from app.verification.snapshot.model import BorrowerRef
 from app.verification.snapshot.persistence import _assert_no_raw_pii
 
 
@@ -152,3 +154,17 @@ def test_documents_differing_only_in_transactions_get_distinct_ids() -> None:
     doc_2 = _document_base("bank_statement", (), {}, _sets([_txn(amount="20.00")]))
     ids = assign_content_ids(DOC_PREFIX, [doc_1, doc_2])
     assert ids[0] != ids[1]
+
+
+def test_document_id_is_independent_of_borrower_ref_order() -> None:
+    """A joint document's id must NOT depend on the order its borrower links arrive in.
+
+    The link query orders by confidence, and equal-confidence borrowers (both spouses matched
+    exactly on a joint statement) have no stable relative order — so the same document could
+    present its refs in either order across rebuilds. The id derivation sorts them, so the id
+    is identical regardless of order (otherwise the id would drift between runs)."""
+    b1 = BorrowerRef(borrower_id=UUID(int=1), name="Akash Patel")
+    b2 = BorrowerRef(borrower_id=UUID(int=2), name="Priya Patel")
+    forward = _document_base("bank_statement", (b1, b2), {}, None)
+    reversed_ = _document_base("bank_statement", (b2, b1), {}, None)
+    assert assign_content_ids(DOC_PREFIX, [forward]) == assign_content_ids(DOC_PREFIX, [reversed_])
