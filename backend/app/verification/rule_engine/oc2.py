@@ -182,6 +182,19 @@ async def evaluate_oc2(
     if gate.status is GateStatus.COULDNT_CHECK:
         # A required structural input is absent/unknown → we do not ask the AI to judge over a hole.
         return Oc2Evaluation(None, _result(Verdict.COULDNT_CHECK, gate.reason or "", subject_tags))
+    if gate.status is GateStatus.NEEDS_REVIEW:
+        # A load-bearing structural input is shaky (below the confidence floor / contradictory) — we
+        # do NOT ask the AI to judge over it (§3D armor). needs_review with NO AI call and NO
+        # judgment tag: a shaky input can't produce a trustworthy judgment.
+        return Oc2Evaluation(
+            None,
+            _result(
+                Verdict.NEEDS_REVIEW,
+                gate.reason or "",
+                subject_tags,
+                verdict_confidence=gate.verdict_confidence,
+            ),
+        )
 
     # 2. Reason over the TAGS (never raw docs). Honest/fail-closed on transport + truncation.
     context = _build_context(subject_tags)
@@ -233,9 +246,11 @@ def _resolve(result: OccupancyJudgmentResult) -> tuple[str, float | None, str | 
     if judgment is None:
         return _UNKNOWN, None, "the occupancy judgment response was malformed — treated as unknown"
     if judgment.value not in OCCUPANCY_REASONABLE_VALUES:
+        # The model's confidence was in its INVALID answer, not in "unknown" — drop it (like the
+        # malformed path), so an unknown-by-coercion is never surfaced as high-confidence.
         return (
             _UNKNOWN,
-            judgment.confidence,
+            None,
             judgment.reasoning
             or "the model returned an out-of-vocabulary value — treated as unknown",
         )

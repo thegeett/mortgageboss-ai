@@ -198,6 +198,16 @@ async def test_low_confidence_judgment_is_needs_review() -> None:
     assert "low-confidence" in ev.evaluation.reasoning
 
 
+async def test_shaky_load_bearing_input_gates_to_needs_review_before_any_ai_call() -> None:
+    # A load-bearing structural tag BELOW the confidence floor → the gate routes to needs_review
+    # BEFORE the AI is consulted (we don't judge over a shaky input); no judgment tag is produced.
+    stub = _StubReasoner(value="yes")
+    ev = await _evaluate(_occupancy_tags(consistent_conf=0.2), stub)  # below the 0.5 floor
+    assert ev.evaluation.verdict is Verdict.NEEDS_REVIEW
+    assert ev.judgment_tag is None  # no judgment tag over a gate-flagged shaky input
+    assert stub.context is None  # the AI was never consulted
+
+
 async def test_absent_load_bearing_tag_yields_couldnt_check() -> None:
     # occupancy.stated absent → the gate blocks BEFORE the AI is called (no judging over a hole).
     stub = _StubReasoner(value="yes")
