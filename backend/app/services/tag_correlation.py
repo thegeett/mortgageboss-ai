@@ -42,9 +42,10 @@ from app.ai.tag_correlation import (
 )
 from app.core.config import settings
 from app.verification.snapshot.content_id import content_fingerprint
-from app.verification.snapshot.fields import Field
 from app.verification.snapshot.model import Snapshot, TagsSection, TransactionRecord
 from app.verification.snapshot.tag import Tag, TagProducedBy, TagRole, TagStage
+from app.verification.snapshot.traversal import all_transactions as _all_transactions
+from app.verification.snapshot.traversal import field_value as _val
 
 logger = structlog.get_logger(__name__)
 
@@ -53,7 +54,15 @@ Reasoner = Callable[[str], Awaitable[SourcingResult]]
 
 # Candidate-match criteria — PRIYA-CONFIRMABLE thresholds (defaults here). Transfers move an
 # exact amount and clear within a few days; the AI judges genuineness, so the code net is tight.
+#
+# The window is DIRECTIONAL: a source transfer's debit must post AT OR BEFORE the deposit it
+# funds (money leaves one account, then arrives) — so a debit is a candidate from
+# ``_DATE_WINDOW_DAYS`` before the deposit up to only ``_SOURCE_LOOKAHEAD_DAYS`` after (a small
+# allowance for bank posting lag). A debit well AFTER the deposit is temporally impossible as its
+# source; surfacing it would let the judge accept a coincidental later same-amount debit and flip
+# a genuinely unexplained deposit to "sourced" — the AS-1 signal we must not hide.
 _DATE_WINDOW_DAYS = 5
+_SOURCE_LOOKAHEAD_DAYS = 2
 _AMOUNT_TOLERANCE = Decimal("0.00")
 
 # Tag ids (vocabulary keys) — Stage-A inputs this pass consumes + the Stage-B tag it writes.
@@ -98,16 +107,6 @@ class _Sourced:
 SourcingCache = dict[str, _Sourced]
 
 
-def _val(field: Field) -> object:
-    return field.value if field.is_present else None
-
-
-def _all_transactions(snapshot: Snapshot) -> list[TransactionRecord]:
-    if snapshot.documents.absent:
-        return []
-    return [txn for entry in snapshot.documents.entries for txn in (entry.transactions or ())]
-
-
 def _parse_amount(value: object) -> Decimal | None:
     if value is None:
         return None
@@ -144,6 +143,7 @@ def find_source_candidates(
     debits: list[tuple[TransactionRecord, Decimal | None, date | None]],
     *,
     date_window_days: int = _DATE_WINDOW_DAYS,
+    source_lookahead_days: int = _SOURCE_LOOKAHEAD_DAYS,
     amount_tolerance: Decimal = _AMOUNT_TOLERANCE,
 ) -> list[SourceCandidate]:
     """Deterministically find candidate sources for one money-in deposit (pure; no AI).
@@ -175,7 +175,10 @@ def find_source_candidates(
             if amount is not None
             and txn_date is not None
             and abs(amount - deposit_amount) <= amount_tolerance
-            and abs((txn_date - deposit_date).days) <= date_window_days
+            # Directional: the debit posts from date_window_days BEFORE the deposit up to only
+            # source_lookahead_days AFTER (posting lag). ``(deposit - debit).days`` is positive
+            # when the debit precedes the deposit — a source cannot post well after what it funds.
+            and -source_lookahead_days <= (deposit_date - txn_date).days <= date_window_days
         ]
         for txn in sorted(matches, key=lambda t: t.content_id):
             candidates.append(
@@ -219,15 +222,16 @@ def _build_judge_context(
     }
 
 
-def _cache_key(deposit: TransactionRecord, candidates: list[SourceCandidate]) -> str:
-    """Key a judgment by the deposit + its candidate SET (both content-addressed, so stable).
+def _cache_key(judge_context: dict[str, object]) -> str:
+    """Key a judgment by the EXACT context the judge is shown.
 
-    A change to the deposit or to any candidate's content changes their content_ids and thus the
-    key, forcing a re-judge; an unchanged deposit+candidate set is a cache hit across runs.
+    Fingerprinting the whole context (the deposit's facts INCLUDING its Stage-A
+    ``apparent_category``, plus the ordered candidate set) means every input the judgment can
+    depend on is in the key — so a changed input forces a re-judge and an unchanged input is a
+    cache hit across runs. Keying on content_ids alone missed ``apparent_category`` (a derived
+    tag, not part of the raw content_id), which could reuse a stale verdict.
     """
-    return content_fingerprint(
-        [deposit.content_id, sorted((c.kind, c.source_content_id) for c in candidates)]
-    )
+    return content_fingerprint(judge_context)
 
 
 def _resolve(result: SourcingResult, candidates: list[SourceCandidate]) -> _Sourced:
@@ -291,6 +295,7 @@ async def produce_stage_b_sourcing_tags(
     reasoner: Reasoner | None = None,
     cache: SourcingCache | None = None,
     date_window_days: int = _DATE_WINDOW_DAYS,
+    source_lookahead_days: int = _SOURCE_LOOKAHEAD_DAYS,
     amount_tolerance: Decimal = _AMOUNT_TOLERANCE,
 ) -> Snapshot:
     """Produce ``txn.has_identified_source`` for each money-in deposit (candidate-then-judge).
@@ -342,14 +347,18 @@ async def produce_stage_b_sourcing_tags(
             subject,
             debits,
             date_window_days=date_window_days,
+            source_lookahead_days=source_lookahead_days,
             amount_tolerance=amount_tolerance,
         )
-        key = _cache_key(txn, candidates)
+        # Key the judgment on the EXACT context the judge sees (incl. the deposit's
+        # apparent_category), so a changed judge input can never reuse a stale verdict.
+        context = _build_judge_context(txn, subject, candidates)
+        key = _cache_key(context)
         resolved = persistent.get(key)
         if resolved is None:
             deposits_judged += 1
             try:
-                result = await reason_fn(json.dumps(_build_judge_context(txn, subject, candidates)))
+                result = await reason_fn(json.dumps(context))
             except AIClientError:
                 logger.warning("stage_b_judge_failed", candidates=len(candidates))
                 resolved = _Sourced("unknown", None, None, _REASON_FAILED, cacheable=False)

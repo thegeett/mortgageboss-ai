@@ -88,3 +88,31 @@ def coerce_optional_confidence(value: Any) -> float | None:
     if number is None or number < 0.0 or number > 1.0:
         return None
     return number
+
+
+def opt_str(value: Any) -> str | None:
+    """A trimmed non-empty string from a model-supplied value, else ``None``.
+
+    Shared by the tag-production/correlation parsers (LP-313/314): a reasoning/label field
+    that is absent or blank is an honest ``None``, never an empty string.
+    """
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def opt_int(value: Any) -> int | None:
+    """An ``int`` from a model-supplied value, else ``None`` (never raises).
+
+    Rejects ``bool`` (an ``int`` subclass, but never a real index) and anything that does not
+    parse as a base-10 integer. Shared by the tag-production/correlation index parsers.
+    """
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    try:
+        return int(str(value))
+    except (TypeError, ValueError):
+        return None

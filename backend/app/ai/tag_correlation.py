@@ -23,10 +23,9 @@ from __future__ import annotations
 import asyncio
 import json
 from dataclasses import dataclass
-from typing import Any
 
 from app.ai.client import AIClientError, complete
-from app.ai.parsing import coerce_optional_confidence, extract_json_object
+from app.ai.parsing import coerce_optional_confidence, extract_json_object, opt_int, opt_str
 from app.core.config import settings
 from app.core.logging import get_logger
 
@@ -48,7 +47,10 @@ A deposit IS sourced ("yes") when:
 - it is clearly PAYROLL / regular income (its own description/category shows an employer or a
   recurring direct deposit), OR
 - a candidate is a GENUINE match — e.g. a transfer FROM the borrower's own account of the same
-  amount within a few days (money left one account and arrived here).
+  amount within a few days (money left one account and arrived here). A genuine source must post
+  ON OR BEFORE the deposit (allowing a day or two of bank posting lag): money cannot leave an
+  account AFTER it has already arrived, so a candidate dated clearly later than the deposit is
+  NOT its source, however closely the amount matches.
 
 A deposit is NOT sourced ("no") when you looked and found NO genuine source — no matching
 own-account transfer, no payroll/income signal, no documented origin. IMPORTANT: if you were
@@ -158,28 +160,10 @@ def _parse_judgment(text: str) -> SourcingJudgment | None:
         return None
     return SourcingJudgment(
         value=value.strip(),
-        source_index=_opt_int(data.get("source_index")),
+        source_index=opt_int(data.get("source_index")),
         confidence=coerce_optional_confidence(data.get("confidence")),
-        reasoning=_opt_str(data.get("reasoning")),
+        reasoning=opt_str(data.get("reasoning")),
     )
-
-
-def _opt_str(value: Any) -> str | None:
-    if value is None:
-        return None
-    text = str(value).strip()
-    return text or None
-
-
-def _opt_int(value: Any) -> int | None:
-    if isinstance(value, bool):
-        return None
-    if isinstance(value, int):
-        return value
-    try:
-        return int(str(value))
-    except (TypeError, ValueError):
-        return None
 
 
 __all__ = [

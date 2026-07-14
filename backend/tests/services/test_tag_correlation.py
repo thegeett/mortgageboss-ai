@@ -279,8 +279,36 @@ def test_find_source_candidates_is_pure_and_matches_by_amount_and_date() -> None
         (far, Decimal("300.00"), date(2026, 4, 1)),
     ]
     candidates = find_source_candidates(deposit, {}, debits)  # no payroll tag → transfer only
-    # Only the in-window debit matches (±5 days); the April one is out of window.
+    # Only the in-window debit matches; the April one is out of window.
     assert [c.source_content_id for c in candidates] == [near.content_id]
+
+
+def test_debit_after_the_deposit_is_not_a_source_candidate() -> None:
+    """A source must post ON OR BEFORE the deposit it funds (small posting-lag aside). A
+    same-amount debit well AFTER the deposit is temporally impossible as its source and must not
+    be surfaced — otherwise the judge could accept a coincidental later spend and flip a genuinely
+    unexplained deposit to 'sourced'."""
+    snap = _snapshot(
+        [
+            ("docchecking00000", [_txn("300.00", "DEP", "2026-05-10")]),
+            (
+                "docsavings000000",
+                [
+                    _txn("300.00", "WD LATER", "2026-05-14"),
+                    _txn("300.00", "WD PRIOR", "2026-05-08"),
+                ],
+            ),
+        ]
+    )
+    deposit = _flatten(snap)[0]
+    later, prior = _flatten(snap)[1], _flatten(snap)[2]
+    debits: list[tuple[Any, Decimal | None, date | None]] = [
+        (later, Decimal("300.00"), date(2026, 5, 14)),  # 4 days AFTER the deposit — impossible
+        (prior, Decimal("300.00"), date(2026, 5, 8)),  # 2 days before — a plausible source
+    ]
+    candidates = find_source_candidates(deposit, {}, debits)
+    # Only the prior debit is a candidate; the later one is excluded (beyond the posting-lag).
+    assert [c.source_content_id for c in candidates] == [prior.content_id]
 
 
 # --------------------------------------------------------------------------- #
@@ -412,6 +440,25 @@ async def test_cache_reuses_unchanged_deposit_and_reproduces_changed_one() -> No
     stub3 = StubJudge(value="no")
     await produce_stage_b_sourcing_tags(snap3, reasoner=stub3, cache=cache)
     assert len(stub3.calls) == 1
+
+
+async def test_cache_key_includes_apparent_category_not_just_content_ids() -> None:
+    """The cache key covers the FULL judge context. The SAME raw deposit (same content_id, same
+    empty candidate set) re-judged with a different NON-payroll apparent_category must NOT reuse
+    the prior verdict — apparent_category is shown to the judge, so it belongs in the key."""
+    cache: SourcingCache = {}
+    snap = _snapshot([("docchecking00000", [_txn("250.00", "MYSTERY", "2026-05-05")])])
+
+    run1 = _with_stage_a(snap, {"250.00": ("in", "vendor")})
+    stub1 = StubJudge(value="no")
+    await produce_stage_b_sourcing_tags(run1, reasoner=stub1, cache=cache)
+    assert len(stub1.calls) == 1
+
+    # Same raw deposit, a different non-payroll category (no candidates either way) → cache MISS.
+    run2 = _with_stage_a(snap, {"250.00": ("in", "gift")})
+    stub2 = StubJudge(value="no")
+    await produce_stage_b_sourcing_tags(run2, reasoner=stub2, cache=cache)
+    assert len(stub2.calls) == 1  # re-judged, not a stale content-id-only cache hit
 
 
 async def test_absent_tags_layer_is_left_untouched() -> None:

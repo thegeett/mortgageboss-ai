@@ -24,7 +24,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from app.ai.client import AIClientError, complete
-from app.ai.parsing import coerce_optional_confidence, extract_json_object
+from app.ai.parsing import coerce_optional_confidence, extract_json_object, opt_int, opt_str
 from app.core.config import settings
 from app.core.logging import get_logger
 
@@ -258,7 +258,7 @@ def _coerce_transaction_judgment(item: Any) -> TransactionJudgment | None:
     """One response object → a TransactionJudgment, or None if it has no usable index."""
     if not isinstance(item, dict):
         return None
-    index = _opt_int(item.get("index"))
+    index = opt_int(item.get("index"))
     if index is None:
         return None
     return TransactionJudgment(
@@ -278,26 +278,8 @@ def _coerce_tag_judgment(item: Any) -> TagJudgment | None:
     return TagJudgment(
         value=value.strip(),
         confidence=coerce_optional_confidence(item.get("confidence")),
-        reasoning=_opt_str(item.get("reasoning")),
+        reasoning=opt_str(item.get("reasoning")),
     )
-
-
-def _opt_str(value: Any) -> str | None:
-    if value is None:
-        return None
-    text = str(value).strip()
-    return text or None
-
-
-def _opt_int(value: Any) -> int | None:
-    if isinstance(value, bool):
-        return None
-    if isinstance(value, int):
-        return value
-    try:
-        return int(str(value))
-    except (TypeError, ValueError):
-        return None
 
 
 __all__ = [

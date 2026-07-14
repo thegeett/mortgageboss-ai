@@ -47,6 +47,8 @@ from app.verification.snapshot.content_id import content_fingerprint
 from app.verification.snapshot.fields import Field
 from app.verification.snapshot.model import Snapshot, TagsSection, TransactionRecord
 from app.verification.snapshot.tag import Tag, TagProducedBy, TagRole, TagStage
+from app.verification.snapshot.traversal import all_transactions as _all_transactions
+from app.verification.snapshot.traversal import field_value as _raw
 
 logger = structlog.get_logger(__name__)
 
@@ -91,11 +93,6 @@ class _Judged:
 TransactionTagCache = dict[str, _Judged]
 
 
-def _raw(field: Field) -> object:
-    """The transaction attribute the AI sees — its present value, or ``None`` when absent."""
-    return field.value if field.is_present else None
-
-
 def _fingerprint(txn: TransactionRecord) -> str:
     """A content fingerprint of a transaction's raw facts (the cache key).
 
@@ -110,13 +107,6 @@ def _fingerprint(txn: TransactionRecord) -> str:
             "description": _raw(txn.description),
         }
     )
-
-
-def _all_transactions(snapshot: Snapshot) -> list[TransactionRecord]:
-    """Every surfaced transaction across the snapshot's documents, in deterministic order."""
-    if snapshot.documents.absent:
-        return []
-    return [txn for entry in snapshot.documents.entries for txn in (entry.transactions or ())]
 
 
 def _build_context(batch: list[TransactionRecord]) -> dict[str, object]:
