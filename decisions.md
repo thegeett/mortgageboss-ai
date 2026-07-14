@@ -9046,3 +9046,41 @@ formalization WORKFLOW (turning a candidate into a committed tag+rule — a gove
 of the channel into a document classifier (no producer of document-level tags exists yet; the channel + AI step +
 `observe_unmapped` seam ship here). Cross-refs: §3D (the unbounded real world), §7 (the discovery lane), LP-313/314
 (tag production — the channel runs alongside it), LP-316 (findings — attach, never resolve).
+
+## ADR-261: The verification orchestrator + partial-snapshot semantics (LP-321)
+
+**Status:** Accepted. **Context:** All the Stage-2 pieces exist independently — raw snapshot (LP-312), Stage-A/B tag
+production (LP-313/314), calculators-as-tags (LP-318), the fail-closed gate + rules (LP-315), judgment rules
+(LP-319), finding persistence (LP-316). Something must ASSEMBLE them into one full run, in dependency order, that
+degrades gracefully and caches. This is that assembly — it owns ORDER, DEGRADATION, and CACHING only; it re-implements
+none of the pieces.
+
+**Decision.**
+1. **Dependency-ordered stage sequence.** `run_verification` runs: raw snapshot (calculators built inside it) →
+   Stage A (per-entity atomic tags) → Stage B (cross-entity sourcing, consuming A's `is_money_in`) → rules (the
+   fail-closed gate + AS-1 deterministic + OC-2 judgment) → findings (persisted with outcome/subject_key/provenance).
+   It CALLS each existing entry point; the DAG is honored by A-before-B (B reads A's tags).
+2. **Partial-snapshot semantics — the system-level fail-closed.** A stage/step failure NEVER fails the whole run:
+   the tag producers already fail-close per call (a bad AI response → unknown-with-reason tags, not a crash), and the
+   orchestrator adds a BACKSTOP (a wholesale stage exception is caught, the pre-stage snapshot kept, a degradation
+   recorded). Rules whose load-bearing tags are now degraded → the LP-315 gate routes them to couldnt_check; rules
+   that do NOT depend on the failed tags STILL RUN (the orchestrator lets every rule run and gate — it never skips a
+   rule silently). The run ALWAYS completes with a coherent result set.
+3. **Degradation visibility.** What degraded is RECORDED on the result (`VerificationRun.degradations`): absent-with-
+   reason raw sections, unknown-with-reason production markers scanned from the tags, and any backstopped stage
+   exception — visible, never a silent gap.
+4. **Cache-by-content-fingerprint reuse.** Tag production is cached (LP-313/314) via a `TagCaches` bundle threaded
+   across runs: a tag whose source raw facts are unchanged (by fingerprint) is REUSED, not re-produced. The snapshot
+   is rebuilt each run (stateless); only changed inputs re-produce. The run records the model + vocab version for
+   reproducibility, and the frozen snapshot is persisted (best-effort).
+5. **Assemble, don't reimplement.** No new tag/rule/calculator/finding logic. Two slots are intentionally inert
+   today: the CALCULATORS run inside `build_snapshot` (their inputs are stated financials, not Stage-A/B tags, so they
+   need no separate post-tag step), and the CONTRADICTION AUDIT has no deterministic cross-checks wired yet (the gate
+   takes a `contradiction` flag; the orchestrator passes False — the audit itself is a future ticket).
+
+**Consequences.** One entry point runs a full verification and returns the snapshot + findings + degradations +
+reproducibility metadata. It runs ONE verification — matching findings ACROSS runs (carry-forward / retire) is
+LP-322; re-running into the SAME loan file collides on the finding uniqueness index by design (that is the signal
+LP-322 reconciles). The occupancy structural tags OC-2 needs are not produced by any stage yet (OC-1/ID-4), so OC-2
+couldnt_checks on a snapshot lacking them (honest fail-closed). Cross-refs: §3A (pipeline stages / run model), §3D
+(partial-snapshot semantics + fail-closed), LP-312/313/314/315/316/318/319.
