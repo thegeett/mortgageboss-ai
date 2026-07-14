@@ -14,6 +14,7 @@ from app.models.loan_file import LoanFile
 from app.verification.snapshot import calculations_section as cs
 from app.verification.snapshot.calculations_section import (
     _calc_confidence,
+    _gate_reason,
     build_calculations_section,
     map_dti,
     map_ltv,
@@ -502,6 +503,23 @@ def test_calc_confidence_is_min_of_feeding_tag_confidences() -> None:
 
     assert _calc_confidence(lines, lookup) == 0.4  # min of the non-None feeding confidences
     assert _calc_confidence(lines, lambda _t: None) is None  # all passthroughs → None
+
+
+def test_gate_reason_checks_every_line_of_a_multi_line_required_tag() -> None:
+    # A required tag fed by SEVERAL breakdown lines must gate if ANY of them is unknown — the gate
+    # must not last-wins-collapse the lines and only inspect the last (LP-318 review).
+    tag = "income.qualifying_monthly"
+    known = CalcBreakdownLine(key="a", label="A", amount="6000", source="stated", from_tag=tag)
+    unknown = CalcBreakdownLine(key="b", label="B", amount=None, source="stated", from_tag=tag)
+
+    # Unknown line first, known line last → last-wins would have wrongly passed.
+    reason = _gate_reason([unknown, known], frozenset({tag}))
+    assert reason is not None and f"{tag} is unknown" in reason
+    # All lines known → not gated.
+    assert _gate_reason([known], frozenset({tag})) is None
+    # No line for the required tag at all → absent.
+    absent = _gate_reason([], frozenset({tag}))
+    assert absent is not None and f"{tag} is absent" in absent
 
 
 def test_max_loan_and_self_employed_are_not_in_the_snapshot() -> None:

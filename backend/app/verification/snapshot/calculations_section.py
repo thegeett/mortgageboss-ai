@@ -25,6 +25,7 @@ pure invoke + map, preserving each breakdown line's own source tag verbatim.
 
 from __future__ import annotations
 
+from collections import defaultdict
 from decimal import Decimal
 from typing import Protocol
 
@@ -174,16 +175,21 @@ def _calc_confidence(lines: list[CalcBreakdownLine], confidence_of: _ConfidenceO
 def _gate_reason(lines: list[CalcBreakdownLine], required: frozenset[str]) -> str | None:
     """Fail-closed: name the required feeding tag(s) that are unknown/absent, else None (not gated).
 
-    A REQUIRED tag with no breakdown line at all → "absent"; a line present but unknown (surfaced
-    ``amount=None``) → "unknown". Distinct reasons, both fail-closed — the calc must not emit a
-    confident number resting on a fabricated 0.
+    A REQUIRED tag with no breakdown line at all → "absent"; ANY line for it surfaced unknown
+    (``amount=None``) → "unknown". Distinct reasons, both fail-closed — the calc must not emit a
+    confident number resting on a fabricated 0. Lines are grouped by from_tag (not last-wins), so a
+    required tag fed by SEVERAL lines gates if any one of them is unknown.
     """
-    by_tag = {line.from_tag: line for line in lines}
+    lines_by_tag: dict[str, list[CalcBreakdownLine]] = defaultdict(list)
+    for line in lines:
+        if line.from_tag is not None:
+            lines_by_tag[line.from_tag].append(line)
     problems: list[str] = []
     for tag in sorted(required):
-        if tag not in by_tag:
+        tag_lines = lines_by_tag.get(tag)
+        if not tag_lines:
             problems.append(f"{tag} is absent")
-        elif by_tag[tag].amount is None:
+        elif any(line.amount is None for line in tag_lines):
             problems.append(f"{tag} is unknown")
     if not problems:
         return None
