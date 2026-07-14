@@ -28,15 +28,21 @@ from app.verification.snapshot.tag import Tag
 
 RULE_ID = "AS-1"
 
-# The tags AS-1's verdict RESTS ON, in gate order (a subset of AS-1's declared rule_tags,
-# LP-311). ``txn.amount`` is a parsed passthrough (confidence None → ignored in the min).
-# ``txn.source_strength`` (LP-314a) refines a sourced verdict; it is shown inline for provenance
-# but is NOT gated (it is derived from has_identified_source, and may be absent on older snapshots).
+# The tags AS-1's verdict RESTS ON — carried inline as provenance. ``txn.amount`` is a parsed
+# passthrough (confidence None → ignored in the min). ``txn.source_strength`` (LP-314a) refines a
+# sourced verdict; it is shown here for provenance but is NOT gated (derived from
+# has_identified_source, and may be absent on older snapshots).
 TAG_IS_MONEY_IN = "txn.is_money_in"
 TAG_AMOUNT = "txn.amount"
 TAG_HAS_SOURCE = "txn.has_identified_source"
 TAG_SOURCE_STRENGTH = "txn.source_strength"
 LOAD_BEARING_TAGS = (TAG_IS_MONEY_IN, TAG_AMOUNT, TAG_HAS_SOURCE, TAG_SOURCE_STRENGTH)
+
+# The subset the fail-closed gate actually inspects — a proper subset of LOAD_BEARING_TAGS. The
+# gate dict is built from THIS constant (not hand-listed), so the gated set has one source of
+# truth and can never silently drift from the provenance list. ``source_strength`` is deliberately
+# excluded: it is provenance-only, so its absence must never force couldnt_check.
+_GATED_TAGS = (TAG_IS_MONEY_IN, TAG_AMOUNT, TAG_HAS_SOURCE)
 
 _MONEY_IN = "in"
 _UNKNOWN = "unknown"
@@ -142,13 +148,9 @@ def evaluate_as1(
             priya_validated=priya_validated,
         )
 
-    # 2. The generic fail-closed gate over the load-bearing tags.
+    # 2. The generic fail-closed gate over the GATED tags (source_strength is provenance-only).
     gate = evaluate_gate(
-        {
-            TAG_IS_MONEY_IN: is_money_in,
-            TAG_AMOUNT: subject_tags.get(TAG_AMOUNT),
-            TAG_HAS_SOURCE: subject_tags.get(TAG_HAS_SOURCE),
-        },
+        {tag_id: subject_tags.get(tag_id) for tag_id in _GATED_TAGS},
         confidence_floor=confidence_floor,
         contradiction=contradiction,
     )
@@ -235,7 +237,8 @@ def evaluate_as1(
     # Sourced (has_identified_source == "yes"). A LARGE deposit whose source is only SELF-ASSERTED
     # (claimed in the description, no matching debit) is not a clean pass — it needs the paper
     # trail, exactly as a processor would ask (LP-314a). A verified / intrinsic source, or a small
-    # self-asserted transfer, is satisfied.
+    # self-asserted transfer, is satisfied. Uses GE ("at or over"): the soft needs-review nudge is
+    # deliberately more inclusive at the boundary than the strict GT "exceeds" of the hard FIRE.
     strength = _tag_value(subject_tags, TAG_SOURCE_STRENGTH)
     if strength == _STRENGTH_SELF_ASSERTED and at_or_over_threshold:
         return _result(

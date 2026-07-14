@@ -453,7 +453,7 @@ async def produce_stage_b_sourcing_tags(
                 value=resolved.strength.value,
                 source_content_id=resolved.source_content_id,
                 confidence=confidence,
-                reasoning=_STRENGTH_REASONING[resolved.strength],
+                reasoning=_STRENGTH_REASONING[resolved.strength.value],
                 deposit_content_id=txn.content_id,
                 produced_by=TagProducedBy.DERIVED,
             )
