@@ -8,6 +8,7 @@ visibility. DB-backed via the rollback fixture.
 
 from __future__ import annotations
 
+from collections import Counter
 from uuid import UUID, uuid4
 
 from app.ai.client import AIClientError
@@ -298,9 +299,13 @@ async def test_rerun_with_one_changed_document_reproduces_only_that_entity(
 # --------------------------------------------------------------------------- #
 
 
-async def test_lf6t3n_full_run_zero_fired(db_session: AsyncSession) -> None:
-    # The frozen real trace threaded through the orchestrator's rules+findings (produce_tags=False —
-    # the tags are the real ones): 0 fired, exactly as the known LF-6T3N outcome.
+async def test_lf6t3n_dti_gated_forces_as1_couldnt_check(db_session: AsyncSession) -> None:
+    # LIVE behavior (LP-321a): LF-6T3N has no insurance binder → the DTI GATES
+    # (housing.insurance_monthly unknown → auto_amount None → LP-318 gated calc) → AS-1's threshold
+    # input is unavailable → AS-1 couldnt_checks its money-in subjects. The fixture previously stored
+    # a STRIPPED DTI (gated=False, breakdown=[]) so AS-1 evaluated normally and the test asserted
+    # "0 fired" as a green FICTION disagreeing with the live pipeline; corrected here to the live
+    # gated-DTI → AS-1-couldnt_check outcome.
     lf_id = await _loan_file_id(db_session)
     frozen = load_fixture_snapshot("lf6t3n_tagged_snapshot.json")
     snap = frozen.model_copy(update={"loan_file_id": lf_id, "run_id": uuid4()})
@@ -311,10 +316,36 @@ async def test_lf6t3n_full_run_zero_fired(db_session: AsyncSession) -> None:
         base_snapshot=snap,
         produce_tags=False,
     )
+
+    # GUARD: the fixture's DTI must gate exactly as the live calc does. If a future PII-reduction
+    # silently strips it back to gated=False, this FAILS instead of passing on a fiction.
+    dti = run.snapshot.calculations.dti
+    assert dti is not None and dti.gated is True
+    assert dti.value["back_end_dti"] is None  # a gated calc emits no confident ratio
+    assert "insurance" in (dti.gate_reason or "")
+    insurance = next(x for x in dti.breakdown if x.key == "housing.insurance")
+    assert insurance.from_tag == "housing.insurance_monthly" and insurance.amount is None
+
+    # AS-1: its subjects are COULDNT_CHECK (the threshold input is gated) — NOT satisfied, NOT fired.
+    # The deposits are unevaluated-for-threshold, NOT cleared (distinguish couldnt_check from satisfied).
     as1 = [f for f in run.findings if f.rule_id == "AS-1"]
     assert as1  # AS-1 evaluated its subjects
-    # 0 fired — no AS-1 finding is OPEN (a fired verdict). The large deposits are verified/self_asserted.
-    assert all(f.evaluation_outcome is not EvaluationOutcome.OPEN for f in as1)
+    assert all(f.evaluation_outcome is not EvaluationOutcome.OPEN for f in as1)  # 0 fired
+    assert all(f.evaluation_outcome is not EvaluationOutcome.SATISFIED for f in as1)  # 0 cleared
+    assert any(
+        f.evaluation_outcome is EvaluationOutcome.COULDNT_CHECK for f in as1
+    )  # gated through
+
+    # The Stage-A/B SOURCING is unaffected by the DTI gate — the large deposits still carry the
+    # verified / self_asserted distinction per the real trace (assert it separately so that coverage
+    # is not lost when the DTI gates).
+    strengths = Counter(
+        tags["txn.source_strength"].value
+        for tags in run.snapshot.tags.by_subject.values()
+        if "txn.source_strength" in tags
+    )
+    assert strengths["verified"] >= 1
+    assert strengths["self_asserted"] >= 1
 
 
 # --------------------------------------------------------------------------- #

@@ -8973,6 +8973,15 @@ required housing input now yields a gated DTI (couldnt_check) instead of a confi
 honest behavior change (the DB-backed calculators test now asserts the gated path on the incomplete seed). Cross-refs:
 §3D (calculators as structured tags), LP-310 Area 3, LP-312 (from_tag), LP-315 (the gate + confidence convention).
 
+**KNOWN LIMITATION (deferred).** The gating is LIVE for the ABSENT-input case but works via the calc's own
+`auto_amount is None` presence signal, NOT the tag layer: `from_tag` is a label only (no consumer reads it),
+`calc_confidence` is always None (`_no_tag_confidence`), and the `housing.*` input tags are never materialized/consulted.
+The gap: gating fires on ABSENT inputs but NOT on PRESENT-BUT-LOW-CONFIDENCE ones (a low-confidence extraction →
+`auto_amount` non-None → no gate). Deferred because the absent case is the common one (and is covered), and tag-driven
+gating before LP-317 calibrates those confidences risks over-gating. Revisit once the input tags are materialized +
+calibrated. Full write-up: [`docs/tickets/LP-318.md`](docs/tickets/LP-318.md) "Known limitation" + [LP-321a](docs/tickets/LP-321a.md)
+(the fixture that had masked this).
+
 ## ADR-259: AI-at-rule-time judgment rules — procedural armor, proven with OC-2 (LP-319)
 
 **Status:** Accepted. **Context:** ~36 of the rule set are JUDGMENT rules — their verdict cannot reduce to a
@@ -9084,3 +9093,39 @@ LP-322; re-running into the SAME loan file collides on the finding uniqueness in
 LP-322 reconciles). The occupancy structural tags OC-2 needs are not produced by any stage yet (OC-1/ID-4), so OC-2
 couldnt_checks on a snapshot lacking them (honest fail-closed). Cross-refs: §3A (pipeline stages / run model), §3D
 (partial-snapshot semantics + fail-closed), LP-312/313/314/315/316/318/319.
+
+## ADR-262: The LF-6T3N regression fixture asserted a fiction — corrected to live DTI gating (LP-321a)
+
+**Status:** Accepted. **Context:** A read-only investigation of LP-318's calculator gating found that the
+orchestrator's `test_lf6t3n_full_run_zero_fired` was GREEN on behavior that does not match the live pipeline. The
+frozen LF-6T3N fixture's `calc.dti` had `gated=False` with `breakdown=[]` — a byproduct of LP-317's PII reduction,
+which rebuilt calculations as `CalculationsSection.present(dti=CalculationEntry(value={"gross_monthly_income": …},
+breakdown=[]))`, dropping the breakdown so `gated` fell back to its `False` default. With no breakdown to gate on and
+income present, AS-1 evaluated normally and the test asserted "0 fired." But LIVE on the real LF-6T3N file (no
+insurance binder → `housing.insurance_monthly` unknown → `auto_amount` None → LP-318 gates the DTI), `calc.dti` is
+`gated=True` / `back_end_dti=None`, and AS-1's `_qualifying_income` returns None on a gated DTI → AS-1 couldnt_checks.
+The fixture and the live pipeline disagreed; a green test on a fiction is worse than no test — it hides a future break
+of the live gating.
+
+**Decision.** The LIVE gating is correct; the FIXTURE was wrong (not the reverse). Corrected:
+1. **Fixture** — spliced the LIVE gated `calc.dti` into the frozen snapshot (`gated=True`, the real
+   `gate_reason` naming the insurance input, `front/back_end_dti=None`, the housing breakdown present with the
+   insurance line `amount=None`). PII-safe: the DTI line KEYS were genericized and the LABELS (which live-produce
+   borrower + creditor names) were replaced with generic `from_tag`-derived labels; amounts-without-identity are the
+   fixture's established posture (LP-317 kept amounts, stripped names), and the gating signal is presence/None, not a
+   raw value. A name/creditor sweep on the fixture returns zero.
+2. **Test** — renamed to `test_lf6t3n_dti_gated_forces_as1_couldnt_check` and rewritten to assert the LIVE outcome:
+   the DTI is gated (`back_end_dti` None, reason names insurance, insurance line `amount=None`); AS-1 subjects are
+   COULDNT_CHECK — explicitly NOT satisfied and NOT fired (the deposits are unevaluated-for-threshold, not cleared);
+   and the Stage-A/B sourcing distinction (verified / self_asserted) is asserted separately (unaffected by the DTI
+   gate).
+3. **Guard** — the test now asserts `dti.gated is True` + `back_end_dti is None`, so a future PII-reduction that
+   silently strips the DTI back to `gated=False` FAILS instead of passing on a fiction.
+
+**Consequences.** The regression test now matches what the live orchestrated run produces on real LF-6T3N. The
+eval-harness case 12 (which shares the fixture) still passes — it asserts `fired==0` (couldnt_check is fail-closed, not
+fired) + the strength-tag counts (unaffected by the gate), both still true. NOT changed here: the live calculator/gating
+logic (it is correct), and the separate Caveat-A gap the investigation noted (the calc's tag-confidence propagation is
+inert — `confidence` always None, the `housing.*` tags are never consulted; `from_tag` is a label only) — documented,
+deferred. Cross-refs: LP-317 (the PII stripping that introduced the fiction), LP-318 (the gating), LP-321 (the
+orchestrator + its test), and the LP-318-gating investigation.
