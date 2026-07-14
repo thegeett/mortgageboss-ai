@@ -8538,3 +8538,67 @@ slots ``rule.criteria`` / ``rule.applicability`` / ``rule.required_inputs`` / ``
 LP-308:** generalizing the spec format across all ~133 rules (the AS-1 shape is provisional). **Out of scope (later
 tickets):** the evaluator / AI call + prompt assembly (LP-304), the numeric bookend (LP-305), finding output + the four
 states + per-deposit identity (LP-306), other rules' specs, and a DB-backed spec store.
+
+## ADR-250: Rule + fact-tag storage — files-as-source-of-truth, DB-as-projection; retire phase3_5_1's verification_rules (LP-311)
+
+- **Date:** 2026-07-13
+- **Status:** Accepted
+
+**Context:** The fact-tag architecture (§3D) needs rules and the tag vocabulary to be QUERYABLE (the engine must ask "which
+tags does rule X require?", "which rules use tag Y?", "what is the DAG?"). Two forces pull apart. Compliance wants rule
+SCHEMA/POLICY — the Priya-validated thresholds, the tag definitions — to live in git as files, because git history IS the
+audit trail (§3D "Storage": "Files > DB for this"). Runtime wants those same facts in the DB to join and filter. A prior
+attempt, ``verification_rules`` (LP-118 / ADR-238, branch phase3_5_1), made the DB table the primary store with a
+version-controlled seed — but it was shaped for the ABANDONED per-rule code-evaluator engine (columns ``evaluator`` /
+``applicability`` / ``canonical_type`` / ``message_template``), does not fit the tag architecture, and a dev DB migrated on
+that branch carries the table + ``rule_change_audits`` as ORPHANS this branch's Alembic does not track (see LP-310 Phase 0).
+
+**Decision — REPLACE, with files as the single source of truth and the DB a pure projection:**
+
+- **Files are authoritative; the DB is a rebuildable PROJECTION, never hand-edited.** The version-controlled source files —
+  ``rule_kinds.csv`` (identity + kind + the Priya gate, the gate of record), ``specs/<rule_id>.yaml`` (the full ``RuleSpec``),
+  and the fact-tag machine-source CSVs (below) — are the truth. The LP-311 loader
+  (``app.verification.rules.projection.project_files_to_db``) reconciles four DB tables to them (insert new / update changed /
+  remove vanished), so a hand-mutated row is overwritten on the next run. This is the clean §3D separation: SCHEMA/POLICY in
+  git, DATA/RESULTS (tag *values* in snapshots, findings) in the DB. The projection is a queryable read-copy of the policy,
+  not a second source of it.
+- **Vocabulary xlsx → committed machine-source CSVs, mirroring LP-301.** The human/Priya authoring form is
+  ``docs/snapshot-fact-tags.xlsx``; a stdlib generator (``app.scripts.generate_fact_tags``) converts it, once, into committed
+  ``fact_tags.csv`` / ``rule_tags.csv`` / ``tag_dependencies.csv`` under ``app/verification/rules/`` — exactly as LP-301
+  converted a classification xlsx into the committed ``rule_kinds.csv`` that the loader reads (the xlsx is never read at
+  runtime; no ``openpyxl`` runtime dependency). A CI ``--check`` mode guards drift.
+- **Four GLOBAL, un-scoped tables** (reference data identical for every company; NO ``company_id`` — per-tenant overrides are a
+  future ticket): ``rules`` (natural key ``rule_id``, kind/gate columns + a JSONB ``spec`` payload, null when no spec file),
+  ``tags`` (natural key ``tag_id``, entity/value_type/allowed_values/description/produced_by + JSONB ``extras``),
+  ``rule_tags`` (rule → required-tag edges), ``tag_dependencies`` (the tag DAG). UUID pk + natural-key UNIQUE, ``TimestampMixin``,
+  no soft-delete (regenerated data), natural-key FKs on the edge tables. Nullable JSONB uses ``none_as_null=True`` so a missing
+  spec / non-enum tag is SQL NULL, not a JSONB ``'null'``.
+- **Load-time consistency checks fail loud** (``ProjectionError``) before any write: a rule requiring a tag absent from the
+  vocabulary, a dependency edge to a non-existent tag, and a cycle in the tag DAG (topological check). Spec/CSV agreement is
+  enforced by ``load_rule_spec`` itself (``RuleSpecInconsistent``), keeping the CSV the gate of record.
+- **The AS-1 (and IN-1) validation contradiction resolves to the FILES.** LP-118's seed optimistically marked AS-1 and IN-1
+  ``validated=TRUE`` (the only 2 of its 140 rows) — but Priya has not signed off in this branch's governance, so the files win:
+  both stay ``priya_validated=false`` / ``threshold_needs_signoff=true``. The abandoned seed's TRUE is not adopted anywhere; the
+  two threshold rules are flagged for Priya review in the ticket doc. General policy: the files' validation state is
+  authoritative; a seed's TRUE is never auto-adopted.
+- **Retire the orphans in this migration.** The LP-311 migration ``DROP TABLE IF EXISTS`` ``rule_change_audits`` then
+  ``verification_rules`` (CASCADE) so a dev DB migrated on phase3_5_1 converges with a fresh one; on a fresh DB it is a no-op.
+  ``downgrade`` does NOT recreate them (they were never part of this branch's schema). No Alembic fork exists on this branch —
+  the LP-118 revision is absent here, so ``alembic heads`` is the single head ``c4e9a7f2b8d3`` and the new migration simply
+  stacks on it (a merge migration would only be needed if phase3_5_1 were merged, which it is not).
+- **``load_rule_spec`` stays FILE-BACKED, its signature preserved as the swap seam.** LP-311 mirrors the full spec into
+  ``rules.spec`` and adds DB read accessors (``get_rule`` / ``get_tag`` / ``tags_for_rule`` / ``rules_using_tag`` /
+  ``tag_dependencies``) alongside it, so a DB-backed ``load_rule_spec`` is a later drop-in without breaking callers.
+
+**Salvage from the abandoned seed:** ``rule_kinds.csv`` already captures identity (``rule_id`` = playbook id, name, category)
+for all 133 rules; the seed's remaining columns are evaluator-engine-shaped and deliberately NOT resurrected (SCOPE). The only
+genuinely additive datum was IN-1's ``variance_pct=5`` threshold (recorded for the future IN-1 spec + Priya). The old→new
+rule_id map and the 18 message templates are preserved as a reference appendix in ``docs/tickets/LP-311.md``, not in the DB.
+
+**Consequences:** rules and tags are now queryable in the DB while remaining git-governed and Priya-signed in the files — the
+drift ADR-238 warned about is structurally prevented, because there is exactly ONE source of truth (the files) and the DB is a
+disposable projection. ``tag_dependencies`` is empty today (the vocabulary has no ``depends_on`` column yet — LP-311 Phase 0);
+the table + cycle check exist so the DAG is a drop-in once authored. Cross-refs: §3D "Storage", LP-310 (the recon that surfaced
+the orphan table), ADR-238 (LP-118's drift warning — now resolved by single-source-of-truth), ADR-247/248/249 (kinds table,
+snapshot transactions, AS-1 spec). **Out of scope (later tickets):** tag PRODUCTION (Stage A/B), rule EVALUATION, the stable
+content-id snapshot change (LP-312), per-tenant overrides, any hand-edit path to the DB, and a UI.

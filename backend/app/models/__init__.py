@@ -59,6 +59,7 @@ from app.models.needs_item import (
     NeedsItemStatus,
 )
 from app.models.property import OccupancyType, Property, PropertyType
+from app.models.rule import Rule
 from app.models.snapshot_record import SnapshotRecord
 from app.models.stated_financials import (
     StatedAsset,
@@ -66,6 +67,7 @@ from app.models.stated_financials import (
     StatedIncomeItem,
     StatedLiability,
 )
+from app.models.tag import RuleTag, Tag, TagDependency
 from app.models.types import (
     LongStr,
     MediumStr,
@@ -129,6 +131,8 @@ __all__ = [
     "PropertyType",
     "RecordStatus",
     "RefinanceType",
+    "Rule",
+    "RuleTag",
     "ShortStr",
     "SnapshotRecord",
     "SoftDeleteMixin",
@@ -136,6 +140,8 @@ __all__ = [
     "StatedEmployer",
     "StatedIncomeItem",
     "StatedLiability",
+    "Tag",
+    "TagDependency",
     "Tier",
     "TimestampMixin",
     "UUIDMixin",

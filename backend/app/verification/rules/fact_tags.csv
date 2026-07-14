@@ -1,0 +1,144 @@
+tag_id,entity,value_type,allowed_values,description,produced_by,decision,used_by_rules,type_raw
+txn.is_money_in,transaction,enum,"[""in"", ""out"", ""unknown""]","Direction of funds, RESOLVED by AI from any label (credit/transfer/ACH/wire/Zelle/null). Replaces raw transaction_type string-matching.",AI,"AS-1, AS-7, AS-8, AS-12",Deterministic-once-tagged,enum: in | out | unknown
+txn.amount,transaction,number,,Transaction amount (absolute).,parsed,"AS-1, AS-3, AS-8, DT-6",Deterministic-once-tagged,number
+txn.date,transaction,date,,Transaction date.,parsed,"AS-1, AS-8, AS-10",Deterministic-once-tagged,date
+txn.apparent_category,transaction,enum,"[""payroll"", ""transfer_own"", ""gift"", ""loan_proceeds"", ""refund"", ""interest"", ""fee"", ""vendor"", ""unknown""]","AI's classification of what the transaction IS, from the description. The key structuring judgment.",AI,"AS-1, AS-2, AS-5, AS-12, IN-1",Deterministic-once-tagged,enum: payroll | transfer_own | gift | loan_proceeds | refund | interest | fee | vendor | unknown
+txn.has_identified_source,transaction,enum,"[""yes"", ""no"", ""unknown""]","Does this money-in have a visible, traceable source (matched payroll, transfer from own account)? no/unknown = needs sourcing.",AI,"AS-1, AS-2, AS-5",Deterministic-once-tagged,enum: yes | no | unknown
+txn.source_reference,transaction,string,,"What the source was matched to (e.g. 'payroll deposit 3d prior', 'transfer from SAV 5683'). Provenance for has_identified_source.",AI,"AS-1, AS-5",AI-at-rule-time,string | null
+txn.counterparty,transaction,string,,"The other party if visible (employer, person, institution).",AI,"AS-2, AS-5, AS-12, FR-5",AI-at-rule-time,string | null
+txn.is_recurring,transaction,enum,"[""yes"", ""no"", ""unknown""]",Does this appear to be a recurring debit/credit (pattern across statements)?,AI,"FR-5, CR-1",AI-at-rule-time,enum: yes | no | unknown
+txn.is_nsf_or_overdraft,transaction,enum,"[""yes"", ""no""]",Is this an NSF/overdraft/returned-item line?,AI,AS-7,Deterministic-once-tagged,enum: yes | no
+txn.implies_obligation,transaction,enum,"[""yes"", ""no"", ""unknown""]","Does this debit imply an undisclosed monthly obligation (garnishment, loan payment, support)?",AI,"FR-4, FR-5, CR-1",AI-at-rule-time,enum: yes | no | unknown
+stmt.account_masked,statement,masked string,,"Masked account number (display only, non-matchable — no raw on branch).",parsed,"AS-6, AS-8",AI-at-rule-time,masked string
+stmt.beginning_balance,statement,number,,Statement opening balance.,parsed,AS-8,Deterministic-once-tagged,number
+stmt.ending_balance,statement,number,,Statement closing balance.,parsed,"AS-8, AS-3",Deterministic-once-tagged,number
+stmt.period_start,statement,date,,Statement period start.,parsed,AS-10,Deterministic-once-tagged,date
+stmt.period_end,statement,date,,Statement period end.,parsed,AS-10,Deterministic-once-tagged,date
+stmt.page_count_declared,statement,int,,'Page X of Y' declared count.,parsed,AS-9,Deterministic-once-tagged,int | null
+stmt.page_count_present,statement,int,,Actual pages extracted.,derived,AS-9,Deterministic-once-tagged,int
+stmt.owner_matches_borrower,statement,enum,"[""yes"", ""no"", ""unknown""]",Does the account holder resolve to a borrower (fuzzy name)?,AI,AS-6,Deterministic-once-tagged,enum: yes | no | unknown
+stmt.is_reserve_eligible,statement,enum,"[""yes"", ""no"", ""partial""]",Are these funds usable as reserves (vs restricted/retirement discount)?,AI,AS-4,Hybrid,enum: yes | no | partial
+income.type,income,enum,"[""base"", ""bonus"", ""overtime"", ""commission"", ""self_employment"", ""rental"", ""other""]",Income category (drives treatment).,AI,"IN-11, IN-12, IN-13, DT-1",Deterministic-once-tagged,enum: base | bonus | overtime | commission | self_employment | rental | other
+income.stated_monthly,income,number,,Monthly amount claimed on the application (MISMO).,parsed,"IN-1, DT-1",Deterministic-once-tagged,number
+income.documented_monthly,income,number,,Monthly amount the DOCUMENTS actually support (AI computes from paystub/W2/frequency). The hard structuring step.,AI,"IN-1, IN-3, DT-1",Deterministic-once-tagged,number | unknown
+income.qualifying_monthly,income,number,,The amount usable for qualifying after AI applies continuity/averaging/history rules.,AI,"DT-1, AS-1 (threshold), AS-3",Hybrid,number | unknown
+income.has_2yr_history,income,enum,"[""yes"", ""no"", ""unknown""]",Is there a 2-year history (needed for variable income).,AI,"IN-11, IN-13",Deterministic-once-tagged,enum: yes | no | unknown
+income.is_declining,income,enum,"[""yes"", ""no"", ""unknown""]",Year-over-year decline detected.,AI,IN-10,Deterministic-once-tagged,enum: yes | no | unknown
+income.employer_normalized,income,string,,Canonicalized employer name (for cross-doc matching).,AI,"IN-5, IN-6",AI-at-rule-time,string
+income.employment_start,income,date,,Employment start date.,parsed,"IN-4, IN-7",Deterministic-once-tagged,date | null
+income.employment_end,income,date,,Employment end date (null = current).,parsed,IN-4,Deterministic-once-tagged,date | null
+income.pay_date,income,date,,Most recent pay date.,parsed,IN-2,Deterministic-once-tagged,date
+income.ytd_gross,income,number,,Year-to-date gross from the paystub.,parsed,IN-3,Deterministic-once-tagged,number
+income.same_line_of_work,income,enum,"[""yes"", ""no"", ""unknown""]",Is a new job in the same field/stability as prior?,AI,IN-7,AI-at-rule-time,enum: yes | no | unknown
+income.continuance_3yr,income,enum,"[""yes"", ""no"", ""unknown""]",Will this income likely continue 3+ years (for other/rental income).,AI,"IN-13, IN-14",AI-at-rule-time,enum: yes | no | unknown
+liab.account_type,liability,enum,"[""revolving"", ""installment"", ""mortgage"", ""heloc"", ""open_30"", ""collection"", ""lease"", ""student"", ""other""]",Liability type (drives DTI treatment).,AI,"CR-1, DT-1, CR-2, CR-9",Deterministic-once-tagged,enum: revolving | installment | mortgage | heloc | open_30 | collection | lease | student | other
+liab.monthly_payment,liability,number,,Monthly payment used for DTI.,parsed/AI,"CR-1, DT-1",Deterministic-once-tagged,number
+liab.balance,liability,number,,Unpaid balance.,parsed,"CR-2, CR-9, CR-10",Deterministic-once-tagged,number
+liab.in_application,liability,enum,"[""yes"", ""no""]",Is this tradeline reflected in the app's liabilities? (report-vs-app).,AI,"CR-1, CR-4",Deterministic-once-tagged,enum: yes | no
+liab.dti_payment,liability,number,,"The payment amount that SHOULD count in DTI per program rules (e.g. open-30 = balance if unpaid; student = % of balance). AI applies method, code sums.",AI,"DT-1, CR-9",Hybrid,number | unknown
+liab.is_derogatory,liability,enum,"[""yes"", ""no"", ""unknown""]",Any derogatory mark.,AI,"CR-6, CR-8",Deterministic-once-tagged,enum: yes | no | unknown
+liab.derogatory_type,liability,enum,"[""bankruptcy"", ""foreclosure"", ""short_sale"", ""deed_in_lieu"", ""collection"", ""charge_off"", ""none""]",Type of derogatory event.,AI,"CR-6, CR-10",Deterministic-once-tagged,enum: bankruptcy | foreclosure | short_sale | deed_in_lieu | collection | charge_off | none
+liab.derogatory_date,liability,date,,Date of the derogatory event (for seasoning).,AI,CR-6,Deterministic-once-tagged,date | null
+liab.payment_status,liability,enum,"[""current"", ""30"", ""60"", ""90"", ""120+"", ""unknown""]",Worst/current delinquency status.,AI,CR-8,AI-at-rule-time,enum: current | 30 | 60 | 90 | 120+ | unknown
+liab.is_disputed,liability,enum,"[""yes"", ""no""]",Marked as disputed on the report.,AI,CR-12,Deterministic-once-tagged,enum: yes | no
+liab.heloc_credit_limit,liability,number,,HELOC credit LIMIT (not balance) — needed for HCLTV.,parsed/AI,"CR-2, PR-1",Deterministic-once-tagged,number | null
+liab.excluded_paid_off,liability,enum,"[""yes"", ""no""]",Marked paid-off/excluded to qualify (needs payoff evidence).,AI,CR-3,Deterministic-once-tagged,enum: yes | no
+liab.representative_score,borrower,int,,Representative credit score (mid of 3 / lower of 2).,AI,CR-7,Deterministic-once-tagged,int | unknown
+liab.has_open_judgment_lien,liability,enum,"[""yes"", ""no""]",Open judgment/tax lien present & unresolved.,AI,"CR-11, TI-4",Deterministic-once-tagged,enum: yes | no
+id.ssn_hash,borrower,match_hash,,Hashed SSN for cross-doc exact match.,parsed,ID-2,Deterministic-once-tagged,match_hash | null
+id.dob,borrower,date,,Date of birth (normalized).,parsed,ID-3,Deterministic-once-tagged,date
+id.name_normalized,borrower,string,,Canonical name for fuzzy cross-source match.,AI,ID-1,AI-at-rule-time,string
+id.address_normalized,doc,string,,Canonicalized address for tolerant match.,AI,"ID-4, PR-7",AI-at-rule-time,string
+id.current_address_type,borrower,enum,"[""residence"", ""mailing"", ""prior"", ""unknown""]",Type of a stated address (so DL vs residence compares correctly — the absent≠empty address trap).,AI,ID-4,Deterministic-once-tagged,enum: residence | mailing | prior | unknown
+id.id_expiration,doc,date,,Government-ID expiration date.,parsed,ID-5,Deterministic-once-tagged,date
+id.citizenship,borrower,enum,"[""us_citizen"", ""permanent_resident"", ""non_permanent"", ""unknown""]",Citizenship/residency status.,parsed,ID-8,Deterministic-once-tagged,enum: us_citizen | permanent_resident | non_permanent | unknown
+id.app_required_fields_present,loan,enum,"[""complete"", ""incomplete + list""]",Are all required 1003 fields present.,derived,ID-6,Deterministic-once-tagged,enum: complete | incomplete + list
+id.poa_present_and_acceptable,doc,enum,"[""yes"", ""no"", ""n/a"", ""unknown""]",POA present and meets investor rules.,AI,ID-9,AI-at-rule-time,enum: yes | no | n/a | unknown
+housing.pi,loan,number,,New P&I (computed from note terms).,derived,DT-1,Deterministic-once-tagged,number
+housing.taxes_monthly,loan,number,,Monthly property taxes.,parsed/AI,"DT-1, DT-4",Deterministic-once-tagged,number | unknown
+housing.insurance_monthly,loan,number,,Monthly homeowners insurance (unknown if no binder — absent≠0).,AI,"DT-1, DT-5, IH-1",Deterministic-once-tagged,number | unknown
+housing.hoa_monthly,loan,number,,Monthly HOA dues (unknown if HOA status undetermined).,AI,"DT-2, CO-2",Deterministic-once-tagged,number | unknown
+housing.mi_monthly,loan,number,,"Monthly MI (0 if not required, unknown if undetermined).",derived,"DT-3, MI-1",Deterministic-once-tagged,number | unknown
+dti.qualifying_income_monthly,loan,number,,Total qualifying monthly income (sum of income.qualifying_monthly).,derived,"DT-1, AS-1, AS-3",Deterministic-once-tagged,number | unknown
+debt.counts_in_dti,liability,enum,"[""yes"", ""no"", ""unknown""]",Does this debt count in DTI (AI decides omit/include per rules; code sums).,AI,DT-1,Hybrid,enum: yes | no | unknown
+property.is_retained_reo,property,enum,"[""yes"", ""no"", ""unknown""]",Is this an owned property being RETAINED (not the subject) — REO.,AI,"DT-6, RE-1, RE-2",Deterministic-once-tagged,enum: yes | no | unknown
+property.retained_pitia,property,number,,Full PITIA of a retained property (or net rental).,AI,"DT-6, RE-1",Deterministic-once-tagged,number | unknown
+dti.atr_factors_documented,loan,enum,"[""complete"", ""incomplete""]",Are all ATR factors documented.,AI,DT-7,AI-at-rule-time,enum: complete | incomplete
+loan.amount,loan,number,,Loan amount.,parsed,"PR-1, PE-1, MI-1",Deterministic-once-tagged,number
+property.purchase_price,property,number,,Contract sales price.,parsed,"PR-1, PR-2, PC-2",Deterministic-once-tagged,number
+property.appraised_value,property,number,,Appraised value (unknown if no appraisal — absent≠price).,AI,"PR-1, PR-2, MI-1",Deterministic-once-tagged,number | unknown
+property.value_basis,property,number,,Lesser of price/appraised for LTV.,derived,PR-1,Deterministic-once-tagged,number
+property.type,property,enum,"[""sfr"", ""condo"", ""pud"", ""2-4unit"", ""manufactured"", ""coop"", ""unknown""]","Property type (drives eligibility, condo rules).",AI,"PR-3, CO-1..5",Deterministic-once-tagged,enum: sfr | condo | pud | 2-4unit | manufactured | coop | unknown
+property.is_warrantable_condo,property,enum,"[""yes"", ""no"", ""n/a"", ""unknown""]",For condos: warrantable vs non-warrantable.,AI,"CO-1, CO-3, CO-5",AI-at-rule-time,enum: yes | no | n/a | unknown
+property.appraisal_date,doc,date,,Appraisal effective date.,parsed,PR-6,Deterministic-once-tagged,date | null
+property.appraisal_condition,doc,enum,"[""c1..c6"", ""unknown""]",Appraisal condition rating (C5/C6 = issue).,AI,PR-5,AI-at-rule-time,enum: c1..c6 | unknown
+property.appraisal_complete,doc,enum,"[""yes"", ""no + missing[]""]",All required appraisal sections present.,AI,PR-4,AI-at-rule-time,enum: yes | no + missing[]
+property.in_disaster_area,property,enum,"[""yes"", ""no"", ""unknown""]",Property in a declared disaster area (date/location cross-ref).,AI,PR-8,AI-at-rule-time,enum: yes | no | unknown
+occupancy.stated,loan,enum,"[""primary"", ""second"", ""investment""]",Stated occupancy.,parsed,OC-1,Deterministic-once-tagged,enum: primary | second | investment
+occupancy.consistent_with_signals,loan,enum,"[""yes"", ""no"", ""unknown""]",Do address/other signals match stated occupancy.,AI,"OC-1, OC-2",AI-at-rule-time,enum: yes | no | unknown
+occupancy.reasonable,loan,enum,"[""yes"", ""no"", ""unknown""]","Is occupancy plausible (distance, existing primary, patterns).",AI,OC-2,AI-at-rule-time,enum: yes | no | unknown
+title.parties_match,doc,enum,"[""yes"", ""no"", ""unknown""]",Title parties match borrowers/seller (fuzzy).,AI,"TI-1, PC-1",AI-at-rule-time,enum: yes | no | unknown
+title.legal_desc_matches,doc,enum,"[""yes"", ""no"", ""unknown""]",Legal description consistent across docs.,AI,TI-2,AI-at-rule-time,enum: yes | no | unknown
+title.open_liens,doc,list,,Open liens/unreleased mortgages on title.,AI,"TI-3, TI-4",AI-at-rule-time,list
+title.vesting,doc,string,,Vesting; consistency w/ borrower/marital.,AI,TI-5,AI-at-rule-time,string | unknown
+title.rapid_transfer,doc,enum,"[""yes"", ""no"", ""unknown""]",Recent transfer / rapid price change (flip signal).,AI,"TI-6, FR-2",AI-at-rule-time,enum: yes | no | unknown
+ins.dwelling_coverage,doc,number,,Dwelling coverage amount.,parsed,IH-1,Deterministic-once-tagged,number | unknown
+ins.effective_date,doc,date,,Policy effective date vs closing.,parsed,IH-3,Deterministic-once-tagged,date | unknown
+ins.mortgagee_clause_correct,doc,enum,"[""yes"", ""no"", ""unknown""]",Mortgagee clause names correct lender.,AI,IH-2,AI-at-rule-time,enum: yes | no | unknown
+ins.premium_annual,doc,number,,Annual premium (for DTI).,parsed,"DT-5, IH-4",Deterministic-once-tagged,number | unknown
+flood.zone,doc,string,,Flood zone from determination.,parsed,IH-5,Deterministic-once-tagged,string | unknown
+flood.in_sfha,doc,enum,"[""yes"", ""no"", ""unknown""]",In a Special Flood Hazard Area (requires flood ins).,AI,"IH-5, IH-6",Deterministic-once-tagged,enum: yes | no | unknown
+flood.policy_adequate,doc,enum,"[""yes"", ""no"", ""n/a"", ""unknown""]","If SFHA, is flood policy present & adequate.",AI,IH-6,AI-at-rule-time,enum: yes | no | n/a | unknown
+contract.sales_price,doc,number,,Contract price.,parsed,PC-2,Deterministic-once-tagged,number
+contract.seller_credit,doc,number,,Seller/interested-party credit amount.,AI,PC-4,Deterministic-once-tagged,number | unknown
+contract.emd_amount,doc,number,,Earnest money amount.,parsed,"PC-5, AS-2",Deterministic-once-tagged,number
+contract.emd_sourced,doc,enum,"[""yes"", ""no"", ""unknown""]",EMD traced to a verified account debit.,AI,"PC-5, AS-2",AI-at-rule-time,enum: yes | no | unknown
+contract.closing_date,doc,date,,Contract closing date.,parsed,"PC-7, CL-1",Deterministic-once-tagged,date
+contract.addenda_signed,doc,enum,"[""yes"", ""no"", ""unknown""]",Addenda present & signed.,AI,PC-6,AI-at-rule-time,enum: yes | no | unknown
+contract.personal_property,doc,enum,"[""yes"", ""no + list""]",Personal property included that may inflate value.,AI,PC-8,AI-at-rule-time,enum: yes | no + list
+contract.contingency_dates,doc,list,,Financing/appraisal contingency dates.,parsed,PC-9,Deterministic-once-tagged,list | null
+contract.arms_length,doc,enum,"[""yes"", ""no"", ""unknown""]",Arm's-length vs related-party/flip.,AI,"FR-2, PC-1",AI-at-rule-time,enum: yes | no | unknown
+mi.required,loan,enum,"[""yes"", ""no""]",Is MI required (LTV>80 conv).,derived,"MI-1, MI-3",Deterministic-once-tagged,enum: yes | no
+mi.factor,doc,number,,MI factor from certificate.,parsed,MI-2,Deterministic-once-tagged,number | unknown
+mi.certificate_present,doc,enum,"[""yes"", ""no""]",MI certificate present when required.,AI,MI-3,Deterministic-once-tagged,enum: yes | no
+mi.structure,loan,enum,"[""bpmi"", ""lpmi"", ""unknown""]",Borrower- vs lender-paid MI.,AI,MI-5,Deterministic-once-tagged,enum: bpmi | lpmi | unknown
+program.type,loan,enum,"[""conventional"", ""fha"", ""va"", ""usda"", ""jumbo"", ""unknown""]",Loan program.,parsed,PE-1..5,Deterministic-once-tagged,enum: conventional | fha | va | usda | jumbo | unknown
+program.conforming_limit,loan,number,,"Applicable conforming/high-balance limit (SPEC data, Priya-validated).",spec,PE-1,Deterministic-once-tagged,number (from spec)
+program.fha_case_number,doc,string,,FHA case number present.,parsed,PE-2,Deterministic-once-tagged,string | null
+program.fha_min_investment_met,loan,enum,"[""yes"", ""no"", ""unknown""]",3.5% minimum investment met.,derived,PE-3,Deterministic-once-tagged,enum: yes | no | unknown
+aus.recommendation,doc,enum,"[""approve_eligible"", ""approve_ineligible"", ""refer"", ""out_of_scope"", ""unknown""]",AUS/DU recommendation.,parsed,AU-3,Deterministic-once-tagged,enum: approve_eligible | approve_ineligible | refer | out_of_scope | unknown
+aus.data_matches_docs,doc,enum,"[""yes"", ""no + diffs""]",AUS inputs match documented values.,AI,AU-1,AI-at-rule-time,enum: yes | no + diffs
+aus.conditions,doc,list,,AUS required conditions parsed.,AI,AU-2,AI-at-rule-time,list
+aus.rerun_needed,loan,enum,"[""yes"", ""no""]",Data changed materially since last AUS run.,derived,AU-4,Deterministic-once-tagged,enum: yes | no
+rate_lock.expiration,doc,date,,Rate lock expiration vs closing.,parsed,CL-1,Deterministic-once-tagged,date | unknown
+fraud.altered_appearance,doc,enum,"[""yes"", ""no"", ""unknown""]",Document shows alteration/formatting anomalies.,AI,FR-1,AI-at-rule-time,enum: yes | no | unknown
+fraud.novel_discrepancy,loan,list,,Open-ended cross-source discrepancies (the discovery lane).,AI,FR-6,AI-at-rule-time,list
+loe.required_conditions,loan,list,,"Conditions that require an LOE (inquiry, gap, large deposit, etc.).",AI,LO-1,AI-at-rule-time,list
+loe.present_and_complete,doc,enum,"[""yes"", ""no"", ""partial""]","LOE present, explains, dated, signed.",AI,"LO-1, LO-2",AI-at-rule-time,enum: yes | no | partial
+asset.liquidation_terms,asset,enum,"[""fully_liquid"", ""vested_usable"", ""restricted"", ""unknown""]","Retirement/stock: what portion is usable, terms/penalties. AI reads plan/statement.",AI,AS-11,Hybrid,enum: fully_liquid | vested_usable | restricted | unknown
+asset.usable_value,asset,number,,Usable value after vesting/discount haircut (for reserves).,AI,"AS-11, AS-4",Hybrid,number | unknown
+credit.inquiry_dates,borrower,list[date],,Credit inquiries on the report (for LOE matching).,AI,CR-5,AI-at-rule-time,list[date]
+credit.inquiry_explained,borrower,enum,"[""yes"", ""no"", ""unknown""]",Each inquiry matched to a new tradeline OR an LOE.,AI,CR-5,AI-at-rule-time,enum: yes | no | unknown
+credit.report_date,doc,date,,Credit report pull date (validity at closing).,parsed,CR-13,Deterministic-once-tagged,date | unknown
+condo.reserve_pct,doc,number,,HOA budget reserve % (>=10% requirement). AI parses budget.,AI,CO-4,Hybrid,number | unknown
+contract.unusual_credits,doc,enum,"[""yes"", ""no + detail""]",Seller credits beyond norms / side agreements.,AI,FR-3,AI-at-rule-time,enum: yes | no + detail
+id.marital_status,borrower,enum,"[""married"", ""unmarried"", ""separated"", ""unknown""]",Stated marital status (title/vesting consistency).,parsed,ID-7,Deterministic-once-tagged,enum: married | unmarried | separated | unknown
+id.title_vesting_consistent,doc,enum,"[""yes"", ""no"", ""unknown""]",Marital status consistent with title vesting.,AI,ID-7,AI-at-rule-time,enum: yes | no | unknown
+ins.condo_master_policy,doc,enum,"[""present_adequate"", ""present_inadequate"", ""absent"", ""n/a"", ""unknown""]",Condo master + fidelity policy adequacy.,AI,IH-7,AI-at-rule-time,enum: present_adequate | present_inadequate | absent | n/a | unknown
+ins.wind_hail_required,doc,enum,"[""yes"", ""no"", ""unknown""]",Wind/hail coverage applicability (coastal/state).,AI,IH-8,AI-at-rule-time,enum: yes | no | unknown
+income.voe_present,income,enum,"[""yes"", ""no""]",Written/verbal VOE document present.,AI,IN-8,Deterministic-once-tagged,enum: yes | no
+income.future_employment,income,enum,"[""yes"", ""no"", ""unknown""]",Future/offer-letter income with start date.,AI,IN-9,Deterministic-once-tagged,enum: yes | no | unknown
+income.offer_letter_present,income,enum,"[""yes"", ""no"", ""n/a""]",Offer letter present + start date for future employment.,AI,IN-9,Deterministic-once-tagged,enum: yes | no | n/a
+mi.fha_ufmip,loan,number,,FHA upfront MIP (financed).,derived,MI-4,Deterministic-once-tagged,number | unknown
+mi.fha_monthly_mip,loan,number,,FHA monthly MIP at the program factor.,derived,MI-4,Deterministic-once-tagged,number | unknown
+occupancy.rental_support,loan,enum,"[""adequate"", ""inadequate"", ""n/a"", ""unknown""]",Rental support docs for investment occupancy.,AI,OC-3,AI-at-rule-time,enum: adequate | inadequate | n/a | unknown
+property.address_normalized_match,property,enum,"[""yes"", ""no"", ""unknown""]",Subject address consistent across MISMO/contract/tax/appraisal (tolerant).,AI,"PC-3, PR-7",AI-at-rule-time,enum: yes | no | unknown
+property.fha_condition_ok,doc,enum,"[""yes"", ""no"", ""unknown""]",FHA property-condition callouts satisfied.,AI,PE-4,AI-at-rule-time,enum: yes | no | unknown
+calc.dti,loan,object,,"Back-end DTI. breakdown = [{label, value, source(stated|extracted|computed|manual), from_tag}] so code sees HOW it was built + traces each line to its tag.",derived,"DT-1, DT-2, DT-3, DT-5, DT-6",Deterministic-once-tagged,"object: {value, breakdown[]}"
+calc.ltv,loan,object,,"LTV. breakdown lines: loan_amount, purchase_price, appraised_value, value_basis — each with source + from_tag.",derived,"PR-1, MI-1",Deterministic-once-tagged,"object: {value, breakdown[]}"
+calc.cltv_hcltv,loan,object,,CLTV/HCLTV. breakdown includes HELOC credit-limit line (from_tag liab.heloc_credit_limit).,derived,"PR-1, CR-2",Deterministic-once-tagged,"object: {value, breakdown[]}"
+calc.mi,loan,object,,"MI premium. breakdown: base_loan, factor(from_tag mi.factor), monthly_premium.",derived,"MI-1, MI-2",Deterministic-once-tagged,"object: {value, breakdown[]}"
+calc.reserves,loan,object,,"Reserves in months PITIA. breakdown: eligible_assets(from_tag asset.usable_value), monthly_pitia, months.",derived,AS-4,Deterministic-once-tagged,"object: {value, breakdown[]}"
+calc.cash_to_close,loan,object,,"Cash to close. breakdown: down_payment, closing_costs, credits, required_reserves, available_funds, shortfall.",derived,AS-3,Deterministic-once-tagged,"object: {value, breakdown[]}"
+calc.line.from_tag,calc-line,tag-reference,,EACH breakdown line carries from_tag = the tag id that produced its value (or 'spec'/'note-derived'). Makes every calc line traceable to a fact-tag with its confidence.,derived,all calc rules,Deterministic-once-tagged,tag-reference
+calc.line.source,calc-line,enum,"[""stated"", ""extracted"", ""computed"", ""manual""]",Provenance of each breakdown line (carried from the existing calculators).,derived,all calc rules,Deterministic-once-tagged,enum: stated | extracted | computed | manual
