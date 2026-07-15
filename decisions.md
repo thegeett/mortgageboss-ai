@@ -9210,3 +9210,60 @@ NOT changed: rule/tag/finding BEHAVIOR (equivalence), and gate.py / satisfies / 
 (reused). Deferred (separate tickets): the CROSS-SOURCE consistency primitive (ID-1/2/3/4/7 — the third rule shape) and
 `id.*` tag materialization. Cross-refs: §3D, LP-303 (the AS-1 spec), LP-308 (never landed — now paid), LP-311 (rule
 kinds/projection), LP-315 (gate), LP-319 (judgment armor), LP-323-ID-A §0.
+
+## ADR-265: The cross-source consistency primitive — the third rule shape (LP-325)
+
+**Status:** Accepted. **Context:** LP-324 gave the engine two rule shapes: AS-1 (per-transaction,
+deterministic) and OC-2 (loan-level, judgment). But LP-323-ID-A found a THIRD shape the ID family is
+dominated by and neither existing evaluator models: *"gather fact T for subject S across ALL sources,
+compare them, judge agreement"* (ID-1 name, ID-2 SSN, ID-3 DOB, ID-4 address, ID-7 marital/title; and
+later IN-1/IN-3 stated-vs-documented income, CR-1 app-vs-credit-report liabilities, PC-3/PR-7 property
+address). Building it as a third hardcoded evaluator would refork the per-rule trajectory LP-324 just
+paid off.
+
+**Decision.**
+1. **A DECLARED spec shape, not a third evaluator** (LP-324's model preserved). `RuleSpec` gains a
+   `consistency` evaluation block (mutually exclusive with `deterministic`/`judgment`; a STRUCTURAL
+   rule may now carry either a `deterministic` OR a `consistency` body). It DECLARES: the `subject`
+   (the `per_borrower` enumerator this ticket adds), the `gather_tag`, the `source_scope` (a gather
+   registry key), a `gather_filter` (a `TagCondition` on each source), the `compare_mode`
+   (`exact`|`fuzzy`), the `normalization` chain (DATA — declared normalizer keys, not code-per-rule),
+   the fuzzy `judge` (prompt + `value_domain` + declared `consistent_value`/`inconsistent_value`), and
+   `on_agree`/`on_disagree`/`on_cannot_tell` outcomes.
+2. **THE EXACT BOOKEND → AI-FUZZY RESIDUE design** (mirrors LP-314 candidate-then-judge — the cost +
+   certainty property). One generic `evaluate_consistency_rule` does the mechanical part
+   deterministically: gather across sources → exact-compare after normalization → **all equal → AGREE,
+   NO AI CALL** (most files match exactly — cheap and certain). Only when values DIFFER, and only in
+   `fuzzy` mode, does the AI judge — and it sees **ONLY the small differing set** (the values + their
+   sources), never the file. `exact`-only rules (ID-2 SSN, ID-3 DOB) NEVER call AI: a difference IS a
+   discrepancy.
+3. **ABSENT ≠ DISAGREEING, and a single source is not agreement.** A source that simply LACKS the fact
+   is EXCLUDED from the compare (not a mismatch). After filtering, **fewer than two instances →
+   couldnt_check** (one source cannot "agree"). An `"unknown"` gathered value → couldnt_check (never a
+   value that agrees/disagrees). The declared `gather_filter` is the **mailing-vs-residence trap** fix
+   (ID-4): compare residence↔residence only, so a driver's-licence prior/mailing address is not a
+   false discrepancy. Reuses `evaluate_gate` (unknown/below-floor over the gathered instances) +
+   `reason_rule_judgment` + the LP-319 armor — no new AI layer.
+4. **The fuzzy leg is ratification-pending; the exact bookend is not.** A `consistency` verdict the AI
+   produced (benign variance → satisfied, or real discrepancy → fired) is `ratification_pending` —
+   an AI made the call. The exact bookend's satisfied and exact-mode's fired are NOT pending (a
+   deterministic decision). This REFINES LP-319's invariant from universal to per-path: OC-2's judgment
+   path forces every verdict to needs_review, but a consistency rule's deterministic bookend legitimately
+   lands `satisfied`/`fired` while its fuzzy residue is pending. `result.py`'s docstring is updated to
+   record this; nothing reads the flag yet (a future ratification consumer will), so no behavior changed.
+5. **Registry dispatch by evaluation BLOCK, not bare kind** (a structural rule may be deterministic OR
+   consistency). ID-2 (exact) and ID-4 (fuzzy) are re-expressed AS DATA (`ID-2.yaml`/`ID-4.yaml`) with
+   ZERO per-rule Python — the proof the shape generalizes. They stay OUT of `ACTIVE_RULE_IDS` (the live
+   set) until the `id.*` producers materialize (LP-323-ID-A §0) — else every run would couldnt_check them.
+
+**Consequences.** The third rule shape is unblocked for the ID wave and every cross-source family (income
+stated-vs-documented, credit app-vs-report, property address) as SPECS. NOT changed: AS-1/OC-2 behavior
+(dispatch is byte-identical), and `evaluate_gate`/`satisfies`/`RuleEvaluation`/the LP-313/314 AI machinery
+(reused). **No schema gap found** — the gather filter, normalization, exact/fuzzy split, and outcomes are
+all DATA. **Gather model (a note for the -B materialization ticket):** the gather tag and its filter tag
+are read from the SAME source subject (each document that states an address carries both its
+`id.address_normalized` and that address's `id.current_address_type`) — the coherent shape the `id.*`
+producers must target. Deferred (separate tickets): the `id.*` tag producers; the -B wave authoring the
+remaining ID rules on this primitive; the consistency-verdict-tag modeling question (LP-323-ID-A §2).
+Cross-refs: §3D; ADR-264; LP-314 (candidate-then-judge), LP-315 (gate), LP-319 (judgment armor), LP-324
+(rules as specs), LP-323-ID-A §0/§2/§4.

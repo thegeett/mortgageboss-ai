@@ -253,6 +253,112 @@ class JudgmentEval(BaseModel):
     confidence_floor: float = 0.5
 
 
+# --------------------------------------------------------------------------- #
+# LP-325 — the CROSS-SOURCE CONSISTENCY block (the third rule shape): gather a
+# fact across sources, exact-compare, AI-judge only the differing residue.
+# --------------------------------------------------------------------------- #
+
+# The placeholders a consistency outcome reasoning template may reference (formatted at eval time
+# over the gathered set) — validated at LOAD so a stray/unknown placeholder never crashes a run.
+_CONSISTENCY_TEMPLATE_FIELDS = frozenset({"values", "sources", "count"})
+
+
+class ConsistencyOutcome(BaseModel):
+    """One terminal outcome of a consistency compare (agree / disagree / cannot-tell → a verdict).
+
+    ``reasoning`` is a ``str.format`` template over ``{values}`` / ``{sources}`` / ``{count}`` (the
+    gathered values, their source ids, and the instance count).
+    """
+
+    model_config = {"frozen": True, "extra": "forbid"}
+
+    verdict: str = PydField(pattern="^(fired|satisfied|needs_review|couldnt_check)$")
+    reasoning: str = PydField(min_length=1)
+    how_to_fix: str | None = None
+
+
+class ConsistencyJudge(BaseModel):
+    """The AI-fuzzy leg (LP-314/319) — invoked ONLY on the small DIFFERING residue, never the file.
+
+    The judge answers with a value in ``value_domain``; ``consistent_value`` maps to AGREE (a benign
+    variance — the same fact written differently) and ``inconsistent_value`` maps to DISAGREE (a real
+    discrepancy). Any other value (incl. an "unknown") → cannot-tell (honest couldnt_check).
+    """
+
+    model_config = {"frozen": True, "extra": "forbid"}
+
+    system_prompt: str = PydField(min_length=1)  # the tolerant-match question, as DATA
+    value_domain: tuple[str, ...] = PydField(min_length=1)  # allowed judge values (incl "unknown")
+    consistent_value: str = PydField(min_length=1)  # the domain value that means AGREE
+    inconsistent_value: str = PydField(min_length=1)  # the domain value that means DISAGREE
+
+    @model_validator(mode="after")
+    def _agree_disagree_are_in_domain_and_distinct(self) -> ConsistencyJudge:
+        for role, val in (
+            ("consistent", self.consistent_value),
+            ("inconsistent", self.inconsistent_value),
+        ):
+            if val not in self.value_domain:
+                raise ValueError(
+                    f"judge {role}_value {val!r} is not in value_domain {list(self.value_domain)}"
+                )
+        if self.consistent_value == self.inconsistent_value:
+            raise ValueError("judge consistent_value and inconsistent_value must differ")
+        return self
+
+
+class ConsistencyEval(BaseModel):
+    """The machine-readable body of a CROSS-SOURCE consistency rule (LP-325, the third shape).
+
+    Gather ``gather_tag`` for the subject across ``source_scope`` (applying ``gather_filter``),
+    exact-compare after ``normalization``; if they differ, ``exact`` mode calls it a discrepancy and
+    ``fuzzy`` mode asks the ``judge`` about the differing residue only. The registry keys (``subject`` /
+    ``source_scope`` / ``normalization``) are resolved by the evaluator (which raises on an unknown
+    key), keeping this schema decoupled from the enumerator/gather/normalizer registries.
+    """
+
+    model_config = {"frozen": True, "extra": "forbid"}
+
+    subject: str = PydField(min_length=1)  # the enumerator key (per_borrower / loan / property)
+    gather_tag: str = PydField(
+        min_length=1
+    )  # the tag gathered across sources (the load-bearing fact)
+    source_scope: str = PydField(min_length=1)  # the gather-registry key (which sources to collect)
+    gather_filter: TagCondition | None = None  # which instances count (residence-vs-mailing trap)
+    compare_mode: str = PydField(pattern="^(exact|fuzzy)$")
+    normalization: tuple[str, ...] = ()  # declared normalizer keys for the exact compare
+    judge: ConsistencyJudge | None = None  # required iff fuzzy (the AI residue leg)
+    confidence_floor: float = 0.5
+    on_agree: ConsistencyOutcome
+    on_disagree: ConsistencyOutcome
+    on_cannot_tell: ConsistencyOutcome
+
+    @model_validator(mode="after")
+    def _judge_matches_mode_and_templates_are_valid(self) -> ConsistencyEval:
+        if self.compare_mode == "fuzzy" and self.judge is None:
+            raise ValueError("a fuzzy consistency rule needs a `judge` block")
+        if self.compare_mode == "exact" and self.judge is not None:
+            raise ValueError(
+                "an exact consistency rule must not declare a `judge` (no AI is called)"
+            )
+        for name, outcome in (
+            ("on_agree", self.on_agree),
+            ("on_disagree", self.on_disagree),
+            ("on_cannot_tell", self.on_cannot_tell),
+        ):
+            try:
+                fields = _template_fields(outcome.reasoning)
+            except ValueError as exc:
+                raise ValueError(f"{name} reasoning template is malformed: {exc}") from exc
+            unknown = fields - _CONSISTENCY_TEMPLATE_FIELDS
+            if unknown:
+                raise ValueError(
+                    f"{name} reasoning references unknown placeholder(s) {sorted(unknown)} "
+                    f"(allowed: {sorted(_CONSISTENCY_TEMPLATE_FIELDS)})"
+                )
+        return self
+
+
 class RuleSpec(BaseModel):
     """A frozen, validated Stage-2 rule spec — every prompt-spine slot populated.
 
@@ -276,17 +382,24 @@ class RuleSpec(BaseModel):
     evidence_required: str = PydField(min_length=1)
     guideline_reference: str = PydField(min_length=1)
     spec_version: int = PydField(ge=1)
-    # LP-324 — the machine-readable evaluation body. Exactly one matches the kind: deterministic for
-    # calculative/structural, judgment for judgmental, NEITHER for out_of_scope (nothing evaluates).
+    # LP-324/325 — the machine-readable evaluation body. Exactly one matches the kind: deterministic
+    # for calculative/(structural), judgment for judgmental, consistency for a cross-source structural
+    # rule, NEITHER for out_of_scope (nothing evaluates).
     deterministic: DeterministicEval | None = None
     judgment: JudgmentEval | None = None
+    consistency: ConsistencyEval | None = None
 
     @model_validator(mode="after")
-    def _not_both_evaluation_bodies(self) -> RuleSpec:
+    def _at_most_one_evaluation_body(self) -> RuleSpec:
         # A pure structural invariant, safe to check early. The kind↔body match is checked at LOAD
         # time (after the CSV consistency cross-check), so a kind-vs-CSV mismatch is reported first.
-        if self.deterministic is not None and self.judgment is not None:
-            raise ValueError(f"spec {self.rule_id}: set deterministic OR judgment, not both")
+        set_count = sum(
+            body is not None for body in (self.deterministic, self.judgment, self.consistency)
+        )
+        if set_count > 1:
+            raise ValueError(
+                f"spec {self.rule_id}: set exactly one of deterministic / judgment / consistency"
+            )
         return self
 
 
@@ -358,16 +471,23 @@ def _load_spec_from(specs_dir: Path, rule_id: str) -> RuleSpec:
 
 
 def _check_evaluation_body(spec: RuleSpec) -> None:
-    """The kind must carry its matching machine-readable body (LP-324): deterministic for
-    calculative/structural, judgment for judgmental, NEITHER for out_of_scope."""
-    det, jud = spec.deterministic is not None, spec.judgment is not None
-    if spec.kind in (RuleKindName.CALCULATIVE, RuleKindName.STRUCTURAL) and not det:
+    """The kind must carry its matching machine-readable body (LP-324/325): deterministic for
+    calculative, deterministic OR consistency for structural (a structural rule can be a per-subject
+    check OR a cross-source consistency check), judgment for judgmental, NEITHER for out_of_scope."""
+    det = spec.deterministic is not None
+    jud = spec.judgment is not None
+    con = spec.consistency is not None
+    if spec.kind is RuleKindName.CALCULATIVE and not det:
         raise RuleSpecInvalid(
-            f"spec {spec.rule_id}: {spec.kind} rule needs a `deterministic` block"
+            f"spec {spec.rule_id}: calculative rule needs a `deterministic` block"
+        )
+    if spec.kind is RuleKindName.STRUCTURAL and not (det or con):
+        raise RuleSpecInvalid(
+            f"spec {spec.rule_id}: structural rule needs a `deterministic` or `consistency` block"
         )
     if spec.kind is RuleKindName.JUDGMENTAL and not jud:
         raise RuleSpecInvalid(f"spec {spec.rule_id}: judgmental rule needs a `judgment` block")
-    if spec.kind is RuleKindName.OUT_OF_SCOPE and (det or jud):
+    if spec.kind is RuleKindName.OUT_OF_SCOPE and (det or jud or con):
         raise RuleSpecInvalid(f"spec {spec.rule_id}: out_of_scope rule carries no evaluation body")
 
 

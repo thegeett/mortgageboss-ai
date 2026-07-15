@@ -52,8 +52,11 @@ class RuleEvaluation:
     )
     reasoning: str
     how_to_fix: str | None
-    # LP-319: an AI-at-rule-time JUDGMENT rule (e.g. OC-2) NEVER auto-ships — its verdict is always
-    # ratification-pending until a human confirms. True marks that mandatory-ratification armor; a
-    # deterministic rule (AS-1) leaves it False. A ratification-pending rule only ever reaches
-    # needs_review / couldnt_check — never a confident satisfied/fired.
+    # LP-319/325: True marks a verdict an AI produced that a human must confirm before it ships. A
+    # deterministic rule (AS-1) leaves it False. OC-2's judgment PATH forces every verdict to
+    # needs_review — so for it, ratification-pending only ever reaches needs_review / couldnt_check.
+    # A cross-source CONSISTENCY rule (LP-325) is different: its DETERMINISTIC exact bookend decides
+    # the clear-agree case (satisfied, NO AI → NOT pending); only the fuzzy RESIDUE calls the AI, and
+    # that AI verdict may land satisfied (benign variance) OR fired (real discrepancy) while still
+    # ratification-pending. So the invariant is per-path, not universal: pending ⟹ an AI made the call.
     ratification_pending: bool = False

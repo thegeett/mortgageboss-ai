@@ -37,9 +37,29 @@ def _loan(snapshot: Snapshot) -> list[Subject]:
     return [(LOAN_SUBJECT, tags)]
 
 
+def _per_borrower(snapshot: Snapshot) -> list[Subject]:
+    """One subject per borrower on the loan (LP-325) — the cross-source consistency subject.
+
+    Borrowers are the distinct ``belongs_to`` refs across the documents (the reliable
+    borrower↔document resolution, LP-202), in first-seen order. The tag map is empty: a consistency
+    rule does NOT read a single borrower tag map — it GATHERS its fact across the borrower's SOURCE
+    documents (each keyed by its own ``content_id``), which the evaluator does from the snapshot.
+    """
+    if snapshot.documents.absent:
+        return []
+    seen: dict[str, None] = {}  # borrower_id -> None, preserving first-seen (deterministic) order
+    for entry in snapshot.documents.entries:
+        if entry.belongs_to is None:
+            continue
+        for ref in entry.belongs_to:
+            seen.setdefault(str(ref.borrower_id), None)
+    return [(borrower_id, {}) for borrower_id in seen]
+
+
 _ENUMERATORS: dict[str, Enumerator] = {
     "per_deposit": _per_deposit,
     "loan": _loan,
+    "per_borrower": _per_borrower,
 }
 
 
