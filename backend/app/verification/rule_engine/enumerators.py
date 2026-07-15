@@ -40,27 +40,47 @@ def _loan(snapshot: Snapshot) -> list[Subject]:
 
 
 def _per_borrower(snapshot: Snapshot) -> list[Subject]:
-    """One subject per borrower on the loan (LP-325) — the cross-source consistency subject.
+    """One subject per borrower on the loan — serving BOTH meanings of ``per_borrower`` (LP-325/331).
 
     Borrowers are the distinct ``belongs_to`` refs across the documents (the reliable
-    borrower↔document resolution, LP-202), in first-seen order. The tag map is empty: a consistency
-    rule does NOT read a single borrower tag map — it GATHERS its fact across the borrower's SOURCE
-    documents (each keyed by its own ``content_id``), which the evaluator does from the snapshot.
+    borrower↔document resolution, LP-202), in first-seen order.
 
-    NOTE (LP-327): the empty tag map means this key is NOT usable by a per-BORROWER *judgment* rule
-    (which reads the subject's tag map). A per-borrower judgment (e.g. ID-8 citizenship eligibility)
-    needs a borrower-tag-keyed enumerator + a producer that materializes borrower facts under
-    ``borrower_id`` — a separate gap. Per-document / per-deposit / loan judgments are unaffected.
+    The subject's tag map is ASSEMBLED (LP-331, GAP-D) by DECLARED keying, so the SAME enumerator
+    serves its two legitimate meanings without duplicating a fact:
+
+    * a CONSISTENCY rule uses ``per_borrower`` as a GROUPING KEY and IGNORES this map — it GATHERS its
+      document-keyed fact across the borrower's documents itself (LP-325). So what this map contains is
+      irrelevant to consistency (verified: ``consistency.py`` discards ``_subject_tags``), and ID-1/2/3/4
+      are unchanged. LP-326's document keying is untouched.
+    * a per-borrower JUDGMENT rule (e.g. ID-8 citizenship eligibility) READS this map. It gets the
+      borrower's OWN facts (materialized under ``by_subject[borrower_id]`` — a borrower-level fact like
+      ``id.citizenship`` from the 1003/MISMO) plus the LOAN-LEVEL shared facts (e.g. ``program.type``)
+      merged in as context — each fact from its ONE declared keying (no duplication, no divergence). A
+      borrower's own facts override a same-id loan fact.
+
+    Borrower isolation: each map holds ONLY that borrower's own tags + the shared loan tags — one
+    borrower's facts never leak into another's. An absent/empty map → the judgment gates to couldnt_check
+    for that borrower (fail-closed), never a fabricated verdict.
+
+    NOTE (deferred, LP-331): a PRODUCER that materializes ``id.citizenship`` under ``borrower_id`` from
+    MISMO (which keys per-borrower facts by INDEX, ``borrower.N.*``) needs a ``borrower_id ↔ MISMO-index``
+    resolution — a separate materialization gap. This enumerator is complete regardless of how the
+    borrower's facts got under ``by_subject[borrower_id]``.
     """
     if snapshot.documents.absent:
         return []
+    by_subject = {} if snapshot.tags.absent else snapshot.tags.by_subject
+    loan_tags = by_subject.get(
+        LOAN_SUBJECT, {}
+    )  # loan-level facts, shared into every borrower's context
     seen: dict[str, None] = {}  # borrower_id -> None, preserving first-seen (deterministic) order
     for entry in snapshot.documents.entries:
         if entry.belongs_to is None:
             continue
         for ref in entry.belongs_to:
             seen.setdefault(str(ref.borrower_id), None)
-    return [(borrower_id, {}) for borrower_id in seen]
+    # {**loan, **own}: the borrower's OWN facts take precedence over a same-id loan fact.
+    return [(bid, {**loan_tags, **by_subject.get(bid, {})}) for bid in seen]
 
 
 def _per_document(snapshot: Snapshot) -> list[Subject]:

@@ -32,3 +32,11 @@ tags:
     allowed_values: ["yes", "no", "unknown"]
     description: Is the power of attorney acceptable under investor rules (ID-9 judgment verdict).
     produced_by: AI
+  # ID-8's rule_judgment output tag (LP-331, per-borrower citizenship/residency eligibility). Added
+  # via the hand-editable overlay (the GAP-E fix, LP-328).
+  id.residency_eligible:
+    entity: borrower
+    value_type: enum
+    allowed_values: ["yes", "no", "unknown"]
+    description: Is the borrower's citizenship/residency eligible for the loan program (ID-8 verdict).
+    produced_by: AI

@@ -9525,3 +9525,54 @@ a false-green) — with the conditional a follow-on + a Priya question. **The cr
 `absent ≠ empty` has now needed explicit handling at the TAG (LP-326), OPERAND (LP-328), GATHER (LP-325),
 and RULE (this) levels — it is a structural principle, not a one-off. Cross-refs: §8; ADR-270 (the
 decision this corrects); LP-325/326/328/329.
+
+## ADR-272: Borrower-keyed facts for per-borrower judgment — declared-keying assembly (LP-331, GAP-D)
+
+**Status:** Accepted. **Context:** LP-327's GAP-D: the `per_borrower` enumerator returned EMPTY tag maps
+(it exists for LP-325 CONSISTENCY, which uses it as a grouping key and gathers document-keyed facts
+itself). A per-borrower JUDGMENT reads the subject's tag map → empty → always couldnt_check. This blocks
+ID-8 and every per-borrower judgment (~a large slice of the ~36 judgment rules). The choice propagates,
+so it was argued on code evidence.
+
+**The evidence that decided it.** ID-8's inputs are NOT document-sourced: `id.citizenship` is
+`borrower.citizenship` (`models/borrower.py`) → MISMO `borrower.N.citizenship` (`mismo_section.py`) — a
+borrower-level 1003/MISMO fact keyed by borrower INDEX; `program.type` is loan-level and unmaterialized.
+NO consistency rule gathers `id.citizenship` (its only consumer is ID-8). And `consistency.py` DISCARDS
+the enumerated tag map (it gathers via its own doc index).
+
+**The design argument.**
+- **Option 2 (judgment declares a gather over the borrower's documents) — REJECTED for ID-8.** Its facts
+  are not on documents; gathering `belongs_to` documents would find neither. This is exactly the "some
+  borrower facts are genuinely borrower-level from the 1003/MISMO" case the gap-owner flagged — verified.
+- **Option 1 (borrower-keyed facts) — ADOPTED, its stated AGAINST rebutted by evidence.** The divergence
+  objection ("the same fact in two keyings that can disagree, resolving which IS a consistency rule
+  hidden in the producer") does NOT apply here: `id.citizenship` has ONE source per borrower and NO
+  document-keyed consumer — no duplicate keying to diverge. (LP-326's `parsed/document` declaration for
+  `id.citizenship` was aspirational and wrong; it never materialized. It must be re-keyed to a borrower
+  subject when the producer lands.)
+- **Third option (make ID-8 a loan-level judgment) — rejected:** collapses per-borrower eligibility into
+  one loan verdict, wrong for multi-borrower files.
+
+**Decision — a DECLARED-keying assembly (the eighth application of declared-key-resolved-generically).**
+The `per_borrower` enumerator now ASSEMBLES each borrower's subject map: the borrower's OWN facts
+(`by_subject[borrower_id]`) + the LOAN-LEVEL shared facts (`by_subject["loan"]`) merged in (borrower-own
+overrides), each fact from its ONE declared keying (LP-326 production subject) — no duplication, no
+divergence. This reconciles `per_borrower`'s two meanings with ONE enumerator: still a grouping key for
+CONSISTENCY (which discards the map → ID-1/2/3/4 and LP-326's document keying are UNTOUCHED, equivalence
+free), now a populated subject map for JUDGMENT. Per-subject fail-closed (LP-327), gate-before-AI, and the
+ratification armor (LP-319) apply per borrower; borrower isolation holds (each map has only that
+borrower's own tags + shared loan tags). Multiple values (the same document-sourced fact from N docs) is
+NOT ID-8's case (one MISMO value per borrower); a FUTURE per-borrower judgment over a document-sourced +
+multi-valued fact (e.g. income used by both a consistency rule and a judgment) would add the LP-325 gather
+LEG reasoning over the SET (disagreement visible to the AI — resolving it is a consistency rule's job),
+NOT built now (YAGNI, reported).
+
+**Consequences.** Per-borrower judgment is unblocked; ID-8 is authored + its mechanism proven (its output
+tag `id.residency_eligible` added via the LP-328 hand-editable overlay). **ID-8 is NOT activated:** a
+producer that materializes `id.citizenship` under `borrower_id` from MISMO needs a `borrower_id ↔
+MISMO-index` resolution, and `program.type` is unmaterialized — a **new reported gap** (not patched). The
+cross-cutting invariant `absent ≠ empty` has now needed explicit handling at the TAG (LP-326), OPERAND
+(LP-328), GATHER (LP-325), RULE (LP-330), and SUBJECT (this) levels — a structural principle. **PRIYA
+(fair-lending-sensitive):** ID-8's non-permanent-resident / DACA eligibility + investor overlays are
+UNSURE; the prompt encodes a defensible default, `priya_validated: false`; the authoritative rules are in
+LP-331's list. Cross-refs: §3D/§8; ADR-272; LP-319/325/326/327/328/329/330, LP-327's GAP-D.
