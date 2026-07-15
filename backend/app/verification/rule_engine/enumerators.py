@@ -9,13 +9,14 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 
-from app.verification.snapshot.model import Snapshot
-from app.verification.snapshot.tag import Tag
+from app.verification.snapshot.model import DocumentEntry, Snapshot
+from app.verification.snapshot.tag import Tag, TagProducedBy, TagRole, TagStage
 from app.verification.snapshot.traversal import all_transactions
 
 # The loan-level subject key: loan-level tags (occupancy.*, id.*, …) live under this single subject
 # in the tags layer (distinct from the per-transaction content_id subjects). Introduced by LP-319.
 LOAN_SUBJECT = "loan"
+_UNKNOWN = "unknown"
 
 Subject = tuple[str, Mapping[str, Tag]]
 Enumerator = Callable[[Snapshot], list[Subject]]
@@ -65,17 +66,41 @@ def _per_document(snapshot: Snapshot) -> list[Subject]:
     """One subject per document (LP-327) — its stable ``content_id`` + the tags ABOUT that document.
 
     Unlike ``per_borrower``, the tag map is POPULATED (a document's tags are keyed under its own
-    content_id), so a per-DOCUMENT judgment rule (e.g. ID-9 POA acceptability, altered-document
-    detection, appraisal condition) can reason over that document's declared tags. A judgment over
-    every document ``couldnt_check``s the documents that lack its inputs — scoping to a document TYPE
-    (so a POA rule does not flood non-POA docs) is the deferred GAP-C (document-type applicability).
+    content_id), so a per-DOCUMENT rule (ID-9 POA acceptability, ID-7 title vesting, altered-document
+    detection, appraisal condition) can reason over that document's declared tags.
+
+    The document's INTRINSIC type (``DocumentEntry.document_type`` — the classifier's known vocabulary:
+    ``title_commitment`` / ``power_of_attorney`` / …) is injected as a structural subject tag
+    ``document.document_type`` (LP-329), so a rule can DECLARE its document-type applicability as a
+    plain tag predicate (``document.document_type == "power_of_attorney"``) — no document types in
+    code, no entry-passing. An unclassified document → value ``"unknown"`` (the applicability then
+    couldnt_checks — honest — rather than wrongly ruling the rule out).
     """
     if snapshot.documents.absent:
         return []
     tags = {} if snapshot.tags.absent else snapshot.tags.by_subject
-    return [
-        (entry.content_id, tags.get(entry.content_id, {})) for entry in snapshot.documents.entries
-    ]
+    subjects: list[Subject] = []
+    for entry in snapshot.documents.entries:
+        subject_tags = {**tags.get(entry.content_id, {}), DOC_TYPE_TAG: _doc_type_tag(entry)}
+        subjects.append((entry.content_id, subject_tags))
+    return subjects
+
+
+# The reserved structural tag id carrying a document's intrinsic type (LP-329) — injected by the
+# per_document enumerator (not an AI/parsed vocabulary tag; a structural fact like the content_id).
+DOC_TYPE_TAG = "document.document_type"
+
+
+def _doc_type_tag(entry: DocumentEntry) -> Tag:
+    return Tag(
+        value=entry.document_type or _UNKNOWN,
+        confidence=None,
+        reasoning="the document's classified type (structural)",
+        source_facts=(entry.content_id,),
+        produced_by=TagProducedBy.DERIVED,
+        tag_role=TagRole.STRUCTURAL_FACT,
+        stage=TagStage.A,
+    )
 
 
 _ENUMERATORS: dict[str, Enumerator] = {

@@ -512,10 +512,9 @@ def test_retire_guard_covers_every_document_derived_shape() -> None:
 
 
 def test_required_ai_groups_runs_only_what_active_rules_consume() -> None:
-    # The materialization stage must not spend an Opus structuring pass on an id.* family no live rule
-    # reads. id_address feeds ID-4 + OC-2; id_name feeds ID-1 (LP-323-ID-B activated it). id_title /
-    # id_poa feed no active rule (ID-7/ID-9 are generalization gaps, not activated) → excluded.
-    # (ID-2's id.ssn_hash and ID-3's id.dob are PARSED, so they contribute no AI group.)
+    # The materialization stage runs ONLY the AI groups a live rule reads (derived from the active
+    # rules' load-bearing tags). id_address feeds ID-4/OC-2; id_name feeds ID-1; id_title feeds ID-7;
+    # id_poa feeds ID-9 (all four now active). (ID-2's id.ssn_hash and ID-3's id.dob are PARSED, so
+    # they contribute no AI group.)
     groups = _required_ai_groups()
-    assert {"id_address", "id_name"} <= groups
-    assert {"id_title", "id_poa"}.isdisjoint(groups)
+    assert {"id_address", "id_name", "id_title", "id_poa"} <= groups

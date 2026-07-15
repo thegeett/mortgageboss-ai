@@ -20,6 +20,7 @@ from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from app.ai.extraction.parsing import coerce_date, coerce_decimal
+from app.verification.rule_engine.applicability import resolve_applicability
 from app.verification.rule_engine.enumerators import enumerate_subjects
 from app.verification.rule_engine.gate import GateResult, GateStatus, evaluate_gate
 from app.verification.rule_engine.result import (
@@ -93,30 +94,6 @@ def _result(
         reasoning=reasoning,
         how_to_fix=how_to_fix,
     )
-
-
-def _applicability(
-    applic: TagCondition, subject_tags: Mapping[str, Tag]
-) -> tuple[Verdict, str] | None:
-    """None → the rule applies; otherwise the terminal (verdict, reason) for this subject."""
-    tag = subject_tags.get(applic.tag)
-    if tag is None:
-        return (
-            Verdict.COULDNT_CHECK,
-            f"applicability tag '{applic.tag}' was not produced — cannot tell if the rule applies",
-        )
-    if tag.value == _UNKNOWN:
-        return (
-            Verdict.COULDNT_CHECK,
-            f"applicability tag '{applic.tag}' is unknown — cannot confirm the rule applies",
-        )
-    matches = (tag.value == applic.value) if applic.op == "eq" else (tag.value != applic.value)
-    if not matches:
-        return (
-            Verdict.NOT_APPLICABLE,
-            f"the rule does not apply to this subject ({applic.tag} {applic.op} {applic.value!r} is false)",
-        )
-    return None
 
 
 def _calc_operand(snapshot: Snapshot, calc_name: str, key: str) -> Decimal | None:
@@ -210,9 +187,9 @@ def evaluate_deterministic_rule(
 
     results: list[RuleEvaluation] = []
     for subject_id, subject_tags in enumerate_subjects(spec.subject_enumeration, snapshot):
-        # 1. Applicability (from the AI-resolved tag — never a raw label).
+        # 1. Applicability (from a declared tag predicate — the SHARED §8 resolver, LP-329).
         if det.applicability is not None:
-            terminal = _applicability(det.applicability, subject_tags)
+            terminal = resolve_applicability(det.applicability, subject_tags)
             if terminal is not None:
                 verdict, reason = terminal
                 results.append(_result(spec, subject_id, verdict, reason, subject_tags))

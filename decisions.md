@@ -9440,3 +9440,50 @@ is valid) + any grace period. **New gap surfaced (reported):** cross-subject ope
 borrower rule reading a loan-level fact) — the reason ID-5 can't yet be a per-borrower rule. Cross-refs:
 §3D; ADR-269; LP-311 (projection), LP-324 (Operand/Comparison), LP-325 (the normalizer registry + date
 discipline), LP-326 (tag_production.yaml + the CSV-from-xlsx problem), LP-327, LP-323-ID-A §3/§4, -ID-B GAP-A.
+
+## ADR-270: Document-type applicability — not_applicable ≠ couldnt_check (LP-329, GAP-C)
+
+**Status:** Accepted. **Context:** LP-323-ID-B's GAP-C: a per-document rule had to enumerate EVERY
+document, flooding ``couldnt_check`` across every non-matching one (ID-7's title rule on a paystub;
+ID-9's POA rule on a W-2) — because a non-title/non-POA document has no title/POA tag, so the gate
+couldnt_checked it. This blocked ID-7 and left ID-9 unactivated (LP-327).
+
+**Decision — a DECLARED subject predicate resolved by shared machinery** (the sixth application of
+declared-key-resolved-generically, after LP-324 enumerators, LP-325 normalizers + gather filter,
+LP-326 production modes, LP-328 operand types). A spec declares an ``applicability: TagCondition`` — a
+predicate over the subject's own tags (e.g. ``document.document_type == "power_of_attorney"``); the
+deterministic evaluator already had it, and it is added to ``JudgmentEval``. A shared
+``resolve_applicability`` (extracted from the deterministic evaluator — behaviour-identical, so AS-1
+and every existing rule are unchanged) is called by BOTH evaluators. **No document types in any
+evaluator** — the value is spec data. The document's intrinsic type (``DocumentEntry.document_type`` —
+the classifier's known vocabulary) is injected by the ``per_document`` enumerator as a structural
+subject tag ``document.document_type`` (like the content_id), so the predicate is a plain tag compare.
+
+**THE §8 HONESTY CONTRACT — the heart.** ``not_applicable`` (scope-false) must NEVER absorb
+``couldnt_check`` (data-missing). The resolution is filter-BEFORE-gate, per subject:
+- out-of-scope (a paystub for the POA rule) → **not_applicable** (Tab 4) — NO gate, NO AI call, NO tag
+  emitted; and ``rule_findings`` DROPS not_applicable (no finding). Out-of-scope costs nothing and the
+  flood is gone (29 non-POA docs → 29 not_applicable → zero findings, not 29 couldnt_check yellows).
+- in-scope but degraded (a title commitment PRESENT, its tag ``"unknown"``) → the gate →
+  **couldnt_check** (Tab 1) — which PERSISTS as a yellow finding. It IS a gap and it blocks.
+- the predicate tag itself ABSENT/``"unknown"`` → couldnt_check (cannot tell if it applies), never
+  not_applicable. These must never collapse — a false "not applicable" would hide a real gap.
+
+**THE ABSENT-DOCUMENT decision.** Non-matching subjects each emit a not_applicable RuleEvaluation
+(VISIBLE in results, dropped only at persistence — never a silent vanish). A file with zero documents
+of the type → the existing docs are all not_applicable; the rule genuinely doesn't apply. The distinct
+"a REQUIRED document is missing → couldnt_check (Tab 1)" case (e.g. a title commitment expected on a
+purchase) is DECLARED-per-rule (whether title is required is itself a Priya question); it is
+RECOMMENDED as a future ``expected: true`` flag and DEFERRED here (ID-7/ID-9 are not always-required —
+POA/title absence is genuinely not_applicable), so no rule silently vanishes today.
+
+**Consequences.** ID-7 (deterministic per_document, scoped to ``title_commitment``) and ID-9 (judgment
+per_document, scoped to ``power_of_attorney``) are ACTIVATED as data; ID-9's output tag
+``id.poa_acceptable`` was added via LP-328's hand-editable vocabulary overlay (proving that fix). Every
+document-scoped rule is unblocked (condo questionnaire, appraisal condition, title). NOT changed: the
+gate / producers / consistency evaluator; the LP-319/327 judgment armor (every ID-9 verdict stays
+ratification-pending). **PRIYA:** ID-7's community-property + married-after-commitment nuances; ID-9's
+investor POA acceptability rules. **Recommendation (not a gap):** persist not_applicable as a visible
+Tab-4 finding (today it is dropped at persistence) — a separate UI/findings concern. Cross-refs: §8;
+ADR-270; LP-324/325 (the declared-filter pattern), LP-326, LP-327 (per_document + the armor), LP-328
+(GAP-E overlay), LP-323-ID-A §1/§4, -ID-B GAP-C.

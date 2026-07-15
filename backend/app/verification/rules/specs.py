@@ -293,6 +293,11 @@ class JudgmentEval(BaseModel):
     )  # allowed judgment values (incl "unknown")
     system_prompt: str = PydField(min_length=1)  # the underwriter question, as DATA
     confidence_floor: float = 0.5
+    # LP-329 (GAP-C): a declared document-type / subject predicate. A subject the predicate rules OUT
+    # → not_applicable (no gate, no AI, no tag — §8 Tab 4); an ABSENT/"unknown" predicate tag →
+    # couldnt_check (cannot tell if it applies). Scopes a per_document judgment (e.g. ID-9 → POA docs)
+    # so it does not flood couldnt_check across every non-matching document.
+    applicability: TagCondition | None = None
 
 
 # --------------------------------------------------------------------------- #

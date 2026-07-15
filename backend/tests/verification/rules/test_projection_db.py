@@ -37,7 +37,7 @@ async def test_projection_counts_match_files(db_session: AsyncSession) -> None:
 
     # First run inserts everything, removes nothing.
     assert result.rules.inserted == 133
-    assert result.tags.inserted == 143
+    assert result.tags.inserted == 144
     assert result.rule_tags.inserted == 203
     assert result.rules.deleted == result.tags.deleted == 0
 
@@ -64,12 +64,11 @@ async def test_as1_projects_priya_validated_false_with_spec(db_session: AsyncSes
     assert as1.spec["rule_id"] == "AS-1"
 
     # A rule with no spec file has SQL NULL spec (none_as_null), not a JSON 'null'. Eight rules carry
-    # a spec now: AS-1 + OC-2 (LP-324) + ID-2 + ID-4 (LP-325) + ID-1 + ID-3 + ID-6 (LP-323-ID-B) +
-    # ID-5 (LP-328, typed date operands).
+    # a spec now: AS-1 + OC-2 + ID-1..ID-6 + ID-5 (LP-328) + ID-7 + ID-9 (LP-329) = 10.
     with_spec = await db_session.scalar(
         select(func.count()).select_from(Rule).where(Rule.spec.isnot(None))
     )
-    assert with_spec == 8
+    assert with_spec == 10
 
 
 async def test_db_loses_to_files(db_session: AsyncSession) -> None:

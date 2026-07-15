@@ -132,6 +132,8 @@ _RULE_CATEGORY: dict[str, FindingCategory] = {
     "ID-1": FindingCategory.CROSS_SOURCE,  # name across sources
     "ID-3": FindingCategory.CROSS_SOURCE,  # DOB across sources
     "ID-6": FindingCategory.DOCUMENTATION,  # 1003 completeness
+    "ID-7": FindingCategory.DOCUMENTATION,  # marital/title vesting consistency
+    "ID-9": FindingCategory.DOCUMENTATION,  # POA acceptability
 }
 
 

@@ -23,4 +23,12 @@
 #     description: Is the borrower's residency status eligible for the loan program (ID-8 verdict).
 #     produced_by: AI
 
-tags: {}
+tags:
+  # ID-9's rule_judgment output tag (LP-329). A NEW verdict tag added via the hand-editable overlay —
+  # the GAP-E fix (LP-328) makes this possible without editing the generated fact_tags.csv / xlsx.
+  id.poa_acceptable:
+    entity: doc
+    value_type: enum
+    allowed_values: ["yes", "no", "unknown"]
+    description: Is the power of attorney acceptable under investor rules (ID-9 judgment verdict).
+    produced_by: AI

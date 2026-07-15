@@ -1,0 +1,59 @@
+rule_id: ID-7
+name: Marital status / title consistency
+category: Identity
+kind: structural
+numeric_check: false
+criteria: >-
+  On a title commitment, the vesting must be consistent with the borrower's stated marital status
+  (e.g. a married borrower vesting as "a single person" is inconsistent). Scoped to TITLE documents:
+  a paystub or W-2 is not in scope (not_applicable), never a couldnt_check.
+applicability:
+  scope: title-commitment documents in the file
+  trigger: once per title document, checking vesting vs marital status
+required_inputs:
+  - name: title_vesting_consistent
+    snapshot_path: 'tags.by_subject[<title doc content_id>]["id.title_vesting_consistent"]'
+    description: whether the title vesting is consistent with the stated marital status (AI enum)
+reference_values:
+  priya_validated: false
+  # PRIYA / HUMAN-VERIFY: community-property states (a spouse must be on title / sign even if not a
+  # borrower) and a borrower married AFTER the title commitment date (explainable, not inconsistent)
+  # are nuances the id.title_vesting_consistent producer must encode. Listed in LP-329's Priya list.
+  threshold_needs_signoff: false
+  guideline_text: >-
+    Title vesting must be consistent with the borrower's marital status. Community-property-state
+    requirements (spousal join/signature) and marriage-after-commitment timing are domain nuances the
+    consistency tag must reflect — pending the domain expert's confirmation.
+subject_enumeration: per_document
+subject_key_fields:
+  - document
+evidence_required: the title vesting and the marital status the consistency judgment cited
+guideline_reference: >-
+  Identity / title — the title vesting must be consistent with marital status. Community-property and
+  timing nuances are a lender/investor documentation standard pending Priya.
+spec_version: 1
+deterministic:
+  # LP-329 (GAP-C): scope to TITLE documents. A non-title document → not_applicable (§8 Tab 4, no
+  # finding); a title document whose consistency tag is "unknown" → couldnt_check (the gate — Tab 1).
+  applicability:
+    tag: document.document_type
+    op: eq
+    value: title_commitment
+  load_bearing_tags:
+    - id.title_vesting_consistent
+  gated_tags:
+    - id.title_vesting_consistent
+  outcomes:
+    - verdict: fired
+      when_tags:
+        - tag: id.title_vesting_consistent
+          op: eq
+          value: "no"
+      reasoning: >-
+        the title vesting is not consistent with the borrower's stated marital status
+      how_to_fix: >-
+        Reconcile the title vesting with the borrower's marital status (e.g. correct the vesting, or
+        document a marital-status change / spousal join as the state requires) before submission.
+    - verdict: satisfied
+      default: true
+      reasoning: the title vesting is consistent with the borrower's stated marital status

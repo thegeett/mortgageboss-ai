@@ -30,6 +30,7 @@ from dataclasses import dataclass
 from app.ai.client import AIClientError
 from app.ai.rule_judgment import Reasoner, RuleJudgmentResult, reason_rule_judgment
 from app.core.logging import get_logger
+from app.verification.rule_engine.applicability import resolve_applicability
 from app.verification.rule_engine.enumerators import enumerate_subjects
 from app.verification.rule_engine.gate import GateStatus, evaluate_gate
 from app.verification.rule_engine.result import LoadBearingTag, RuleEvaluation, Verdict
@@ -193,8 +194,19 @@ async def _evaluate_one_subject(
     reason_fn: Reasoner,
     floor: float,
 ) -> JudgmentEvaluation:
-    """The per-subject judgment armor (§3D) — one subject's gate → AI → tag → ratification-pending
-    verdict. Self-contained so one subject's failure never touches another's evaluation."""
+    """The per-subject judgment armor (§3D) — one subject's applicability → gate → AI → tag →
+    ratification-pending verdict. Self-contained so one subject's failure never touches another's."""
+    # 0. Declared applicability (LP-329, GAP-C) — BEFORE the gate, so an out-of-scope subject costs
+    #    nothing (no gate, no AI, no tag). §8: out-of-scope → not_applicable; an absent/"unknown"
+    #    predicate → couldnt_check — the two must never collapse.
+    if jud.applicability is not None:
+        terminal = resolve_applicability(jud.applicability, subject_tags)
+        if terminal is not None:
+            verdict, reason = terminal
+            return JudgmentEvaluation(
+                None, _result(spec, subject_id, verdict, reason, jud.reasoned_over, subject_tags)
+            )
+
     # 1. Fail-closed gate over the load-bearing structural facts — before any AI call.
     gate = evaluate_gate(
         {tag_id: subject_tags.get(tag_id) for tag_id in jud.load_bearing_tags},
