@@ -518,3 +518,28 @@ def test_fuzzy_rule_missing_on_cannot_tell_is_rejected() -> None:
     )
     with pytest.raises(ValueError, match="on_cannot_tell"):
         RuleSpec.model_validate(bad)
+
+
+def test_unknown_normalizer_key_is_rejected_at_load() -> None:
+    # A typo'd normalizer key must fail LOUD at load — else it raises an uncaught KeyError mid-run
+    # (the rules step is not stage-backstopped), 500-ing every run for the affected loan file.
+    bad = _consistency_spec(normalization=["casefold", "dat"])  # "dat" is not a known normalizer
+    with pytest.raises(ValueError, match="unknown normalizer"):
+        RuleSpec.model_validate(bad)
+
+
+# --------------------------------------------------------------------------- #
+# The `date` normalizer reuses the shared coerce_date (LP-323-ID-B review)
+# --------------------------------------------------------------------------- #
+def test_date_normalizer_canonicalizes_via_shared_coerce_date() -> None:
+    from app.verification.rule_engine.consistency import _date
+
+    # ISO, US MM/DD, 2-digit year, and month-name all canonicalize to ISO (coerce_date's coverage).
+    assert _date("1985-03-04") == "1985-03-04"
+    assert _date("03/04/1985") == "1985-03-04"
+    assert _date("03/04/85") == "1985-03-04"  # 2-digit year — the old ad-hoc list missed this
+    assert _date("March 4, 1985") == "1985-03-04"
+    # A value coerce_date cannot parse is returned VERBATIM (stripped) — compared literally, it can
+    # surface a false discrepancy for review but never masks a real one (never collapses two dates).
+    assert _date("  13/01/1985  ") == "13/01/1985"
+    assert _date("not a date") == "not a date"

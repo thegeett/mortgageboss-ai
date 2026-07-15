@@ -28,9 +28,9 @@ import json
 import re
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import datetime as _dt
 
 from app.ai.client import AIClientError
+from app.ai.extraction.parsing import coerce_date
 from app.ai.rule_judgment import Reasoner, RuleJudgmentResult, reason_rule_judgment
 from app.core.logging import get_logger
 from app.verification.rule_engine.enumerators import enumerate_subjects
@@ -41,7 +41,13 @@ from app.verification.rule_engine.result import (
     RuleEvaluation,
     Verdict,
 )
-from app.verification.rules.specs import ConsistencyEval, ConsistencyOutcome, RuleSpec, TagCondition
+from app.verification.rules.specs import (
+    KNOWN_NORMALIZERS,
+    ConsistencyEval,
+    ConsistencyOutcome,
+    RuleSpec,
+    TagCondition,
+)
 from app.verification.snapshot.model import DocumentEntry, Snapshot
 from app.verification.snapshot.tag import Tag
 
@@ -59,20 +65,20 @@ _UNKNOWN = "unknown"
 _WS = re.compile(r"\s+")
 _PUNCT = re.compile(r"[^\w\s]")
 
-# Common unambiguous date renderings → ISO, so a format-only difference is not a false discrepancy
-# (LP-323-ID-B / ID-3). A genuinely ambiguous value (MM/DD vs DD/MM) or an unparseable one is left
-# VERBATIM — the normalizer never guesses a date, so a real mismatch is never masked.
-_DATE_FORMATS = ("%Y-%m-%d", "%m/%d/%Y", "%m-%d-%Y", "%Y/%m/%d", "%d %b %Y", "%b %d, %Y")
-
 
 def _date(value: str) -> str:
-    text = value.strip()
-    for fmt in _DATE_FORMATS:
-        try:
-            return _dt.strptime(text, fmt).date().isoformat()
-        except ValueError:
-            continue
-    return text
+    """Canonicalize a common date rendering to ISO so a pure FORMAT difference is not a false
+    discrepancy (03/04/1985 and 1985-03-04 are the same date). LP-323-ID-B / ID-3.
+
+    Reuses the shared ``coerce_date`` (ISO-first, 2-digit years, date objects) so extraction and
+    comparison share ONE format list. US MM/DD order is assumed for numeric slash/dash dates (the US
+    mortgage-document norm); a value ``coerce_date`` cannot parse — a non-US DD/DD order, an unusual
+    separator, or a month name under a non-English process locale — is returned VERBATIM and compared
+    LITERALLY. Literal comparison can SURFACE a false discrepancy for a human to resolve but NEVER
+    MASKS a real one (two different date strings never collapse to the same ISO). A locale-robust,
+    ambiguity-aware TYPED date comparison is the deferred GAP-A / ID-5."""
+    d = coerce_date(value)
+    return d.isoformat() if d is not None else value.strip()
 
 
 _NORMALIZERS: dict[str, Callable[[str], str]] = {
@@ -82,6 +88,11 @@ _NORMALIZERS: dict[str, Callable[[str], str]] = {
     "drop_punct": lambda s: _PUNCT.sub("", s),
     "date": _date,
 }
+
+# Drift guard: the normalizer functions here must exactly cover the key set specs validate against at
+# LOAD (a spec's `normalization` chain can only reference these), so a typo'd key fails loud at load
+# rather than as an uncaught KeyError mid-run.
+assert set(_NORMALIZERS) == KNOWN_NORMALIZERS, "normalizer registry drifted from KNOWN_NORMALIZERS"
 
 
 def _normalize(value: object, keys: tuple[str, ...]) -> str:

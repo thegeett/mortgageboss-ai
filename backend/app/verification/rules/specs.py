@@ -262,6 +262,12 @@ class JudgmentEval(BaseModel):
 # over the gathered set) — validated at LOAD so a stray/unknown placeholder never crashes a run.
 _CONSISTENCY_TEMPLATE_FIELDS = frozenset({"values", "sources", "count"})
 
+# The normalizer keys a consistency `normalization` chain may reference. The evaluator maps each key
+# to a function; declaring the KEY SET here (data, no evaluator import) lets a spec be validated at
+# LOAD — a typo'd key fails loud rather than as an uncaught KeyError mid-run (the rules step is not
+# stage-backstopped). The evaluator asserts its function registry covers exactly this set.
+KNOWN_NORMALIZERS = frozenset({"strip", "casefold", "collapse_ws", "drop_punct", "date"})
+
 
 class ConsistencyOutcome(BaseModel):
     """One terminal outcome of a consistency compare (agree / disagree / cannot-tell → a verdict).
@@ -312,9 +318,10 @@ class ConsistencyEval(BaseModel):
 
     Gather ``gather_tag`` for the subject across ``source_scope`` (applying ``gather_filter``),
     exact-compare after ``normalization``; if they differ, ``exact`` mode calls it a discrepancy and
-    ``fuzzy`` mode asks the ``judge`` about the differing residue only. The registry keys (``subject`` /
-    ``source_scope`` / ``normalization``) are resolved by the evaluator (which raises on an unknown
-    key), keeping this schema decoupled from the enumerator/gather/normalizer registries.
+    ``fuzzy`` mode asks the ``judge`` about the differing residue only. ``normalization`` keys are
+    validated at LOAD (against :data:`KNOWN_NORMALIZERS`); ``subject`` / ``source_scope`` are resolved
+    by the evaluator (which raises on an unknown key), keeping this schema decoupled from the
+    enumerator / gather registries.
     """
 
     model_config = {"frozen": True, "extra": "forbid"}
@@ -349,6 +356,12 @@ class ConsistencyEval(BaseModel):
         if self.compare_mode == "exact" and self.on_cannot_tell is not None:
             raise ValueError(
                 "an exact consistency rule must not declare `on_cannot_tell` (it is never reached)"
+            )
+        unknown_norm = set(self.normalization) - KNOWN_NORMALIZERS
+        if unknown_norm:
+            raise ValueError(
+                f"normalization references unknown normalizer(s) {sorted(unknown_norm)} "
+                f"(known: {sorted(KNOWN_NORMALIZERS)})"
             )
         for name, outcome in (
             ("on_agree", self.on_agree),
