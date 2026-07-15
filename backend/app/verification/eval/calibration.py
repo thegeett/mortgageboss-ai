@@ -24,8 +24,18 @@ from app.verification.eval.harness import CaseResult, TagObservation
 _ABSTENTION = {None, "unknown"}
 # Dimensions where "unknown" is a genuine ABSTENTION (→ couldnt_check downstream), so a high rate is
 # over-abstention. For apparent_category, "unknown" is a legitimate value (not a fraud-relevant
-# abstention), so its unknown-rate is informational - never flagged.
-_ABSTAINING_DIMENSIONS = {"txn.is_money_in", "txn.has_identified_source"}
+# abstention), so its unknown-rate is informational - never flagged. The ID family's AI tags (LP-323-
+# ID-C) all abstain to "unknown" (name/address = "could not read"; residency/POA = "cannot judge"),
+# so they are registered here — else over_abstaining would be silently inert for the whole ID family.
+_ABSTAINING_DIMENSIONS = {
+    "txn.is_money_in",
+    "txn.has_identified_source",
+    "id.name_normalized",
+    "id.address_normalized",
+    "id.current_address_type",
+    "id.residency_eligible",
+    "id.poa_acceptable",
+}
 _OVER_ABSTENTION = 0.30  # above this unknown-rate, an abstaining tag is drowning in unknowns
 _UNDER_ABSTENTION_ACCURACY = 0.90  # concrete accuracy below this = fabrication risk
 

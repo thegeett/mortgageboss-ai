@@ -254,12 +254,15 @@ async def test_id3_case2_and_8_format_variance_normalized_satisfied() -> None:
 
 
 async def test_id3_case13_ambiguous_date_not_silently_equal() -> None:
-    # DOMAIN EDGE (LP-328): an unparseable/ambiguous slash-date that coerce_date can't resolve is
-    # compared LITERALLY — a genuine mismatch is NEVER masked into a false match.
-    r = await _id3(
-        {"app": "13/04/1985", "cr": "1985-04-13"}
-    )  # 13 is not a US month → left verbatim
-    assert _verdicts(r) == [Verdict.FIRED]  # literal compare surfaces it (never silently satisfied)
+    # DOMAIN EDGE (LP-328): a slash-date coerce_date can't resolve ("13/04/1985" — 13 is not a US
+    # month) is left VERBATIM and compared LITERALLY, so a GENUINE mismatch is never masked. Here the
+    # other source is a DIFFERENT date (14 April), so the literal compare correctly FIRES.
+    r = await _id3({"app": "13/04/1985", "cr": "1985-04-14"})
+    assert _verdicts(r) == [Verdict.FIRED]
+    # KNOWN coerce_date limitation (LP-323-ID-B review, accepted): the SAME date written DD/MM vs ISO
+    # ("13/04/1985" vs "1985-04-13") would ALSO literal-compare as different → a FALSE discrepancy. It
+    # is fail-SAFE (surfaced for review, never a silent false match) and pending DD/MM parsing — NOT
+    # asserted as correct here (an eval golden label must not encode a false-positive).
 
 
 def test_id3_case3_4_11_12_are_na() -> None:
@@ -387,14 +390,35 @@ def test_id6_case6_unknown_distinct_reason_from_absent() -> None:
 
 
 def test_id6_case13_known_underfire_starter_fieldset() -> None:
-    # KNOWN LIMITATION (NOT a bug to fix here): id.app_required_fields_present is DERIVED from LP-326's
-    # STARTER field set (borrower name, SSN, loan amount, property address) — it does NOT include the
-    # Declarations section or co-borrower fields. So a 1003 MISSING Declarations still derives "complete"
-    # → ID-6 SATISFIED, which is WRONG. The authoritative required-field set is Priya's (the top Priya
-    # item). This asserts the CURRENT (under-firing) behavior honestly; it is documented, not fixed.
+    # KNOWN LIMITATION captured for REAL (not a bug to fix here): id.app_required_fields_present is
+    # DERIVED from LP-326's STARTER field set (borrower name, SSN, loan amount, property address) — it
+    # does NOT include the Declarations section / co-borrower fields. So a 1003 that HAS the four
+    # starter fields but is MISSING Declarations DERIVES "complete" → ID-6 SATISFIED = a false-green.
+    # This runs the ACTUAL derived recipe over a Declarations-less MISMO (not a hardcoded value), so the
+    # eval genuinely captures the under-fire; the authoritative field set is Priya's (top Priya item).
+    from app.verification.snapshot.fields import Field, FieldSource
+    from app.verification.snapshot.model import MismoSection
+    from app.verification.tag_materialization.declarations import load_declarations
+    from app.verification.tag_materialization.derived import produce_derived_tags
+
+    starter = {
+        key: Field.present("x", source=FieldSource.EXTRACTED)
+        for key in ("borrower.1.name", "borrower.1.ssn", "loan.amount", "property.address")
+    }  # the 4 starter fields present; NO Declarations / co-borrower field
+    snap = Snapshot(
+        loan_file_id=_LF,
+        run_id=uuid4(),
+        created_at=datetime(2026, 7, 15, tzinfo=UTC),
+        documents=DocumentsSection.present([]),
+        tags=TagsSection.present({}),
+        mismo=MismoSection.present(starter),
+    )
+    decl = load_declarations()["id.app_required_fields_present"]
+    derived_value = produce_derived_tags(decl, snap)["loan"]["id.app_required_fields_present"].value
     assert (
-        _id6("complete")[0].verdict is Verdict.SATISFIED
-    )  # under-fires on a Declarations-less 1003
+        derived_value == "complete"
+    )  # THE UNDER-FIRE: a Declarations-less 1003 derives "complete"
+    assert _id6(derived_value)[0].verdict is Verdict.SATISFIED  # → ID-6 wrongly satisfies it
 
 
 # --------------------------------------------------------------------------- #
@@ -534,10 +558,13 @@ def test_id10_is_out_of_scope_not_applicable_no_spec() -> None:
 # BOTH-DIRECTIONS GUARD — every in-scope ID rule has a credible must-FIRE case (no eval fatigue)
 # --------------------------------------------------------------------------- #
 def test_every_in_scope_id_rule_has_a_must_fire_case_in_this_module() -> None:
-    # A rule with only a doesn't-fire case is NOT evaluated. This asserts the module names a must-fire
-    # test for each in-scope rule (fails loudly if a future edit drops one).
-    src = __import__("pathlib").Path(__file__).read_text()
-    for rid, marker in [
+    # A rule with only a doesn't-fire case is NOT evaluated. This asserts an actual must-fire test
+    # FUNCTION exists for each in-scope rule — checked against the module's live callables (NOT a
+    # source-string grep, which would trivially match this list itself and could never fail).
+    defined = {
+        name for name, obj in globals().items() if name.startswith("test_") and callable(obj)
+    }
+    for rid, prefix in [
         ("ID-1", "test_id1_case1_must_fire"),
         ("ID-2", "test_id2_case1_must_fire"),
         ("ID-3", "test_id3_case1_must_fire"),
@@ -548,6 +575,6 @@ def test_every_in_scope_id_rule_has_a_must_fire_case_in_this_module() -> None:
         ("ID-8", "test_id8_case1_2_11"),
         ("ID-9", "test_id9_case1_2_11"),
     ]:
-        assert marker in src, (
+        assert any(name.startswith(prefix) for name in defined), (
             f"{rid} is missing a must-fire case — a rule with no fire case is NOT evaluated"
         )
