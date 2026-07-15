@@ -1,0 +1,52 @@
+rule_id: IN-10
+name: Declining income
+category: Income
+kind: calculative        # rule_kinds.csv: IN-10 = calculative (the AI's year-over-year computation is
+numeric_check: true      # materialized into income.is_declining; this rule reads that structured fact)
+criteria: >-
+  A year-over-year DECLINE in income is a red flag even if the file still qualifies — declining income
+  may not be stable/continuing and its treatment needs review. Scoped to W-2 documents (annual figures).
+  NOTE (LP-323-IN-B): the CSV marks this calculative; the numeric year-over-year computation is done by
+  the AI into income.is_declining, so this rule is a deterministic read of that fact (see the doc).
+applicability:
+  scope: the loan file's W-2 documents
+  trigger: once per W-2 document, on the declining-income signal
+required_inputs:
+  - name: is_declining
+    snapshot_path: tags.by_subject[<w2 content_id>]["income.is_declining"]
+    description: whether a year-over-year decline is evident (yes/no/unknown)
+reference_values:
+  priya_validated: false
+  threshold_needs_signoff: true
+  # The DECLINE magnitude/treatment is Priya-validated per the CSV rationale; encoded here as "any
+  # decline flags" (a conservative default). Confirm the treatment (e.g. use the lower year, require a
+  # 2-year average, or decline the income) with Priya.
+  guideline_text: >-
+    Fannie Mae Selling Guide B3-3.1 — declining income must be analyzed; income that is not stable or
+    continuing may not be used. The decline treatment is Priya-validated (pending confirmation).
+subject_enumeration: per_document
+subject_key_fields:
+  - content_id
+evidence_required: whether the income is declining year-over-year on this document
+guideline_reference: "Fannie Mae Selling Guide B3-3.1 (income stability / declining income)."
+spec_version: 1
+deterministic:
+  applicability:
+    tag: document.document_type
+    op: eq
+    value: w2
+  load_bearing_tags:
+    - income.is_declining
+  gated_tags:
+    - income.is_declining
+  outcomes:
+    - verdict: fired
+      when_tags:
+        - {tag: income.is_declining, op: eq, value: "yes"}
+      reasoning: the income is declining year-over-year — stability/continuance must be reviewed
+      how_to_fix: >-
+        Analyze the declining income per the program (use the lower/most-recent year or a conservative
+        average, or document why the income is stable and continuing) before using it to qualify.
+    - verdict: satisfied
+      default: true
+      reasoning: no year-over-year income decline is evident

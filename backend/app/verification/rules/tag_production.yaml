@@ -33,6 +33,33 @@ tags:
   id.title_vesting_consistent: {mode: ai, subject: document, data: id_title}
   id.poa_present_and_acceptable: {mode: ai, subject: document, data: id_poa}
 
+  # --- income.* — the income family (LP-323-IN-A/B). Per-document facts key under the DOCUMENT
+  #     subject (LP-325 gather contract); the DERIVED aggregates key under loan (the derived producer
+  #     is loan-level — per-borrower granularity is deferred, see the LP-323-IN-B doc). The stability
+  #     tags (has_2yr_history / is_declining / same_line_of_work / continuance_3yr) are logically
+  #     per-borrower but materialize per-document today; the per-borrower judgment rules that read them
+  #     EVALUATE via fixtures but do NOT ACTIVATE until per-borrower materialization lands (like ID-8). #
+  income.stated_monthly: {mode: parsed, subject: document, data: stated_monthly_income}
+  income.employment_start: {mode: parsed, subject: document, data: employment_start}
+  income.employment_end: {mode: parsed, subject: document, data: employment_end}
+  income.pay_date: {mode: parsed, subject: document, data: pay_date}
+  income.ytd_gross: {mode: parsed, subject: document, data: ytd_gross}
+  income.type: {mode: ai, subject: document, data: income_amounts}
+  income.documented_monthly: {mode: ai, subject: document, data: income_amounts}
+  income.qualifying_monthly: {mode: ai, subject: document, data: income_amounts}
+  income.employer_normalized: {mode: ai, subject: document, data: income_employer}
+  income.voe_present: {mode: ai, subject: document, data: income_docs}
+  income.future_employment: {mode: ai, subject: document, data: income_docs}
+  income.offer_letter_present: {mode: ai, subject: document, data: income_docs}
+  income.has_2yr_history: {mode: ai, subject: document, data: income_stability}
+  income.is_declining: {mode: ai, subject: document, data: income_stability}
+  income.same_line_of_work: {mode: ai, subject: document, data: income_stability}
+  income.continuance_3yr: {mode: ai, subject: document, data: income_stability}
+  income.documented_income_shortfall_pct: {mode: derived, subject: loan, data: income_documented_shortfall}
+  income.ytd_annualized_shortfall_pct: {mode: derived, subject: loan, data: income_ytd_annualized_shortfall}
+  income.max_employment_gap_days: {mode: derived, subject: loan, data: income_max_employment_gap}
+  income.days_since_most_recent_pay: {mode: derived, subject: loan, data: income_days_since_recent_pay}
+
 # --- AI GROUPS — one structuring pass each: a subject, the tags it co-produces, a context-builder
 #     key, and the system prompt (the perceiver question, as DATA). The model answers per subject
 #     index with one JSON object per tag keyed by the tag's LAST segment; "unknown" is always legal
@@ -110,3 +137,75 @@ ai_groups:
       Judge ONLY from the document's own fields. Return ONLY a JSON array, one object per document,
       echoing the given "index":
       [{"index": <i>, "poa_present_and_acceptable": {"value","confidence","reasoning"}}]
+
+  # --- income.* AI structuring passes (LP-323-IN-B). Subject = document (a paystub / W-2 / VOE /
+  #     1003). "unknown" is always legal and never coerced away. --------------------------------- #
+  income_amounts:
+    subject: document
+    context_builder: document
+    tags: [income.type, income.documented_monthly, income.qualifying_monthly]
+    system_prompt: |
+      You are a senior mortgage loan processor STRUCTURING one income document (a paystub, W-2, or
+      1003) into clean, factual tags. Describe what the income IS — do NOT evaluate rules. For the
+      income this document evidences produce:
+      1. type — "base" | "bonus" | "overtime" | "commission" | "self_employment" | "rental" | "other".
+      2. documented_monthly — the MONTHLY amount the DOCUMENT actually supports (convert the pay
+         frequency to a monthly figure). A plain number, or "unknown" if the document does not support
+         a figure.
+      3. qualifying_monthly — the amount usable for qualifying after continuity/averaging (often equals
+         documented_monthly for stable base pay). A plain number, or "unknown".
+      Judge ONLY from the document's own fields; never invent a figure. Return ONLY a JSON array, one
+      object per document, echoing the given "index":
+      [{"index": <i>, "type": {"value","confidence","reasoning"},
+        "documented_monthly": {"value","confidence","reasoning"},
+        "qualifying_monthly": {"value","confidence","reasoning"}}]
+
+  income_employer:
+    subject: document
+    context_builder: document
+    tags: [income.employer_normalized]
+    system_prompt: |
+      You are a mortgage loan processor STRUCTURING a single income document's EMPLOYER name into a
+      canonical form for tolerant cross-document matching. Produce:
+      1. employer_normalized — the employer name canonicalized (legal/common form, normal casing, drop
+         "Inc"/"LLC" noise where it aids matching). If no employer is stated, value "unknown".
+      Judge ONLY from the document's own fields. Return ONLY a JSON array, one object per document,
+      echoing the given "index":
+      [{"index": <i>, "employer_normalized": {"value","confidence","reasoning"}}]
+
+  income_docs:
+    subject: document
+    context_builder: document
+    tags: [income.voe_present, income.future_employment, income.offer_letter_present]
+    system_prompt: |
+      You are a mortgage loan processor STRUCTURING an income/employment document's presence signals.
+      Produce:
+      1. voe_present — is this a written/verbal Verification of Employment? "yes" | "no".
+      2. future_employment — does it evidence FUTURE/offer-letter income with a start date? "yes" |
+         "no" | "unknown".
+      3. offer_letter_present — is an offer letter with a start date present? "yes" | "no" | "n/a".
+      Judge ONLY from the document's own fields. Return ONLY a JSON array, one object per document,
+      echoing the given "index":
+      [{"index": <i>, "voe_present": {"value","confidence","reasoning"},
+        "future_employment": {"value","confidence","reasoning"},
+        "offer_letter_present": {"value","confidence","reasoning"}}]
+
+  income_stability:
+    subject: document
+    context_builder: document
+    tags: [income.has_2yr_history, income.is_declining, income.same_line_of_work, income.continuance_3yr]
+    system_prompt: |
+      You are a senior mortgage loan processor STRUCTURING an income document's STABILITY signals into
+      clean tags (facts, not verdicts). Produce, judging ONLY from this document's fields:
+      1. has_2yr_history — is a 2-year history of this income evidenced? "yes" | "no" | "unknown".
+      2. is_declining — is a year-over-year DECLINE evident? "yes" | "no" | "unknown".
+      3. same_line_of_work — if this reflects a job change, is the new role the same field/stability?
+         "yes" | "no" | "unknown".
+      4. continuance_3yr — is this income likely to continue 3+ years (for other/rental income)?
+         "yes" | "no" | "unknown".
+      Return "unknown" whenever the document does not support the fact; never guess. Return ONLY a JSON
+      array, one object per document, echoing the given "index":
+      [{"index": <i>, "has_2yr_history": {"value","confidence","reasoning"},
+        "is_declining": {"value","confidence","reasoning"},
+        "same_line_of_work": {"value","confidence","reasoning"},
+        "continuance_3yr": {"value","confidence","reasoning"}}]

@@ -1,0 +1,74 @@
+rule_id: IN-5
+name: Employer name consistency
+category: Income
+kind: structural         # rule_kinds.csv: IN-5 = structural, exact_match=false (ai_fuzzy_match)
+numeric_check: false
+criteria: >-
+  A borrower's EMPLOYER must be named consistently across the sources that state it (paystub, W-2, VOE),
+  tolerant of legal-vs-common-name and formatting variance ("Acme Corp" vs "Acme"). A genuinely
+  different employer with no explanation is a discrepancy. (A borrower with two legitimate jobs shows two
+  employers — the set-coverage case is IN-6, deferred; here the AI judges the residue as benign or not.)
+applicability:
+  scope: every borrower on the loan
+  trigger: once per borrower, comparing employer names across sources
+required_inputs:
+  - name: employer_normalized
+    snapshot_path: tags.by_subject[<source content_id>]["income.employer_normalized"]
+    description: the canonicalized employer name as stated on each source document (AI)
+reference_values:
+  priya_validated: false
+  threshold_needs_signoff: false
+subject_enumeration: per_borrower
+subject_key_fields:
+  - borrower
+evidence_required: the borrower's employer name as stated on each source document
+guideline_reference: >-
+  Employment verification — the employer must be consistent across the file. No single Selling-Guide
+  numeric threshold; compare tolerant of legal-vs-common-name variance.
+spec_version: 1
+consistency:
+  subject: per_borrower
+  gather_tag: income.employer_normalized
+  source_scope: borrower_documents
+  compare_mode: fuzzy
+  normalization:
+    - casefold
+    - drop_punct
+    - collapse_ws
+    - strip
+  confidence_floor: 0.5
+  judge:
+    system_prompt: |-
+      You are a mortgage loan processor comparing a single borrower's EMPLOYER as named on multiple
+      source documents (paystub, W-2, VOE). The names have already been canonicalized and did NOT match
+      exactly. Decide whether the differences are a BENIGN VARIANCE (the same employer written
+      differently — a legal name vs a common/DBA name like "Acme Corporation" vs "Acme", an
+      "Inc"/"LLC" drift, a division vs parent, a minor typo) or a REAL DISCREPANCY (a genuinely
+      different employer with no explanation).
+
+      You are given ONLY the differing employer values and their source ids — never the rest of the
+      file. Do not speculate beyond the values shown.
+
+      Respond with ONLY a JSON object:
+      {"value": "agree" | "disagree" | "unknown", "confidence": <0..1>, "reasoning": "<one sentence>"}
+      "agree" = the same employer (benign variance); "disagree" = a real discrepancy;
+      "unknown" = you cannot tell from the values shown.
+    value_domain:
+      - agree
+      - disagree
+      - unknown
+    consistent_value: agree
+    inconsistent_value: disagree
+  on_agree:
+    verdict: satisfied
+    reasoning: the borrower's employer agrees across all {count} sources ({sources}) after tolerant comparison
+  on_disagree:
+    verdict: fired
+    reasoning: the borrower's employer differs across sources ({sources}) — a discrepancy to reconcile
+    how_to_fix: >-
+      Confirm the borrower's employer and reconcile the source(s) that disagree. A legal-vs-common-name
+      difference should be documented; a genuinely different employer may indicate a second job (verify
+      the income treatment) or a mismatched document.
+  on_cannot_tell:
+    verdict: couldnt_check
+    reasoning: the borrower's employer could not be judged from the differing values ({values})

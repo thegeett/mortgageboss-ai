@@ -9576,3 +9576,45 @@ cross-cutting invariant `absent ≠ empty` has now needed explicit handling at t
 (fair-lending-sensitive):** ID-8's non-permanent-resident / DACA eligibility + investor overlays are
 UNSURE; the prompt encodes a defensible default, `priya_validated: false`; the authoritative rules are in
 LP-331's list. Cross-refs: §3D/§8; ADR-272; LP-319/325/326/327/328/329/330, LP-327's GAP-D.
+
+## ADR-273: Income arithmetic is a DERIVED TAG (loan-level), not a calculator or a new operand (LP-323-IN-B)
+
+**Context.** Wave 2 (Income) needs three arithmetic checks the operand algebra cannot express (it is
+`tag | reference | calc | product` — multiply only, no subtract/divide/abs): IN-1 stated-vs-documented
+variance `(stated − documented)/stated`, IN-3 YTD-annualized shortfall, IN-4 employment-gap days. LP-323-IN-A
+predicted a "calculator-operand primitive" gap; the recon REFUTED it (the `calc` operand already
+generalizes) and recommended DERIVED TAGS. This ADR records the mechanism, confirmed in implementation, as
+the pattern for every future family's arithmetic.
+
+**Decision — the computed figure is a DERIVED TAG (LP-326), produced by a loan-level recipe.** Each
+arithmetic check becomes a `derived` tag whose recipe (a registry entry in `tag_materialization/derived.py`,
+like `_app_required_fields_present`) reads the snapshot, does the arithmetic, and **abstains to `"unknown"`
+with a reason** when a feeding tag is absent/unknown (never a fabricated number). A rule then reads the
+derived tag as a plain `tag` operand vs a `reference` threshold — all existing mechanisms, **ZERO engine
+Python** (the generic producer, evaluators, and gate are untouched; only recipe entries are added). Two
+properties follow:
+
+* **Caveat A (LP-318) stays deferred.** A derived tag's confidence/abstention flows through the ordinary
+  tag GATE (absent/unknown → couldnt_check; below-floor → needs_review), which already handles
+  present-but-low-confidence. A CALCULATOR would have revived Caveat A (`_calc_operand` reads
+  `entry.value` and ignores `entry.confidence`), so the calculator path is deliberately NOT taken.
+* **SIGNED semantics, not abs.** IN-1's tag is a SHORTFALL `(stated − documented)/stated`, not an abs
+  variance — a raise (documented > stated) is a NEGATIVE shortfall and must never fire (the domain edge).
+
+**Constraint — the derived producer is LOAN-ONLY today.** `produce_derived_tags` supports only
+`subject == "loan"` (a snapshot → one value), and `validate_declarations` rejects a non-loan derived
+declaration at load. So the income arithmetic tags are **loan-level aggregates** (a recipe sums the file's
+documents, exactly as the DTI calculator aggregates income). This HOLDS the zero-engine-Python criterion
+(loan-level recipes are registry entries; per-borrower would have forced an edit to the generic producer,
+which was NOT done). It is a v1 with a KNOWN LIMITATION: per-borrower granularity (catching one borrower's
+inflated income in a multi-borrower file) needs a **per-borrower derived producer** — the same
+`borrower_id ↔ MISMO-index` / borrower-keyed materialization work ID-8 waits on (a shared follow-on, not a
+per-wave cost).
+
+**Consequences.** Income authoring was pure DATA + recipe entries — the first wave to hold the
+zero-engine-Python criterion, validating the ~3-tickets/wave steady-state claim. The pattern generalizes:
+any future family's arithmetic is a derived recipe, not a new operand or calculator. Deferred by this
+decision (their own tickets): the per-borrower derived producer; IN-6's set-coverage shape (needs LP-331's
+multi-value gather leg); IN-11's set-membership operand or judgment reframe; IN-12's self-employment
+calculator wiring. Cross-refs: §3D/§8; LP-323-IN-A (the recon), LP-318 (Caveat A), LP-324 (operands),
+LP-326 (derived recipes — the extension point), LP-331 (borrower-keyed facts).

@@ -1,0 +1,62 @@
+rule_id: IN-1
+name: Stated vs documented income variance
+category: Income
+kind: calculative        # must equal rule_kinds.csv (IN-1 = calculative)
+numeric_check: true
+criteria: >-
+  The borrower(s)' DOCUMENTED monthly income (what the paystubs / W-2s actually support) must not fall
+  materially SHORT of the STATED monthly income used to qualify. A shortfall beyond the tolerance means
+  the file qualifies on income the documents do not support and must be reconciled. Documented income
+  ABOVE stated (a raise) is NOT a defect. Evaluated on the loan-level aggregate; per-borrower granularity
+  is a deferred refinement (LP-323-IN-B — the derived producer is loan-level today).
+applicability:
+  scope: the loan file's stated + documented monthly income
+  trigger: once per loan, comparing aggregate documented income to aggregate stated income
+required_inputs:
+  - name: shortfall_pct
+    snapshot_path: 'tags.by_subject["loan"]["income.documented_income_shortfall_pct"]'
+    description: >-
+      (stated − documented) monthly income / stated, loan-level (derived). SIGNED — a negative value
+      means documented exceeds stated (a raise), which must not fire.
+reference_values:
+  # D1 (LP-323-IN-B): my ticket called this "IN-3"; rule_kinds.csv shows the stated-vs-documented
+  # variance is IN-1. Priya reportedly validated 5% (tighter than the 10% default assumption) — but the
+  # CSV row is priya_validated=false and no value was encoded, so this is authored UNCONFIRMED. Confirm
+  # 5% with Priya, then flip rule_kinds.csv IN-1 -> priya_validated=true AND this flag together.
+  priya_validated: false
+  threshold_needs_signoff: true
+  values:
+    income_variance_threshold_pct: "5%"
+  guideline_text: >-
+    Fannie Mae Selling Guide B3-3.1 — documented income must support the income used to qualify. The
+    5% shortfall tolerance is PENDING Priya (the common default assumption is 10%); encoded UNCONFIRMED.
+subject_enumeration: loan
+subject_key_fields:
+  - loan
+evidence_required: the aggregate stated vs documented monthly income and the shortfall the comparison used
+guideline_reference: >-
+  Fannie Mae Selling Guide B3-3.1 (General Income Information). The 5% shortfall tolerance is a
+  Priya-pending value (threshold_needs_signoff).
+spec_version: 1
+deterministic:
+  load_bearing_tags:
+    - income.documented_income_shortfall_pct
+  gated_tags:
+    - income.documented_income_shortfall_pct
+  operands:
+    shortfall: {tag: income.documented_income_shortfall_pct}
+    tolerance: {reference: income_variance_threshold_pct}
+  outcomes:
+    - verdict: fired
+      # SHORTFALL past tolerance. The derived tag is signed, so a raise (documented > stated) is a
+      # NEGATIVE shortfall and never exceeds the positive tolerance — the LP-323-IN-A domain edge.
+      when_compare: {op: ">", left: shortfall, right: tolerance}
+      reasoning: >-
+        documented income falls short of stated by {shortfall}, beyond the {tolerance} tolerance — the
+        file qualifies on income the documents do not support
+      how_to_fix: >-
+        Reconcile documented and stated income — obtain the missing income documentation, or reduce the
+        qualifying income to the figure the documents support.
+    - verdict: satisfied
+      default: true
+      reasoning: documented income supports stated income within the {tolerance} tolerance (or exceeds it)

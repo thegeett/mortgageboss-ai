@@ -1,0 +1,54 @@
+rule_id: IN-3
+name: YTD income consistency
+category: Income
+kind: calculative        # rule_kinds.csv: IN-3 = calculative
+numeric_check: true
+criteria: >-
+  A pay stub's year-to-date gross, annualized over the elapsed period, must be consistent with the
+  documented monthly income used to qualify. If the YTD-implied monthly income falls materially short of
+  the documented monthly income, the documented figure is not supported by the actual pay history.
+  Measured loan-level (aggregate YTD vs aggregate documented).
+applicability:
+  scope: the loan file's YTD gross + documented monthly income
+  trigger: once per loan, comparing the YTD-annualized monthly income to documented monthly income
+required_inputs:
+  - name: ytd_shortfall_pct
+    snapshot_path: 'tags.by_subject["loan"]["income.ytd_annualized_shortfall_pct"]'
+    description: (documented − YTD-annualized-monthly) / documented, loan-level (derived)
+reference_values:
+  priya_validated: false
+  threshold_needs_signoff: true
+  # D4 (LP-323-IN-B): the YTD numeric tolerance is UNSURE — IN-A found no agency value to cite. A
+  # DEFENSIBLE, deliberately-loose 10% default is encoded (YTD annualization is noisy: a mid-year start,
+  # a partial period, seasonal pay), signoff=true, priya=false. Confirm the true tolerance with Priya.
+  values:
+    ytd_variance_threshold_pct: "10%"
+  guideline_text: >-
+    Fannie Mae Selling Guide B3-3.1 — YTD earnings must support the income used to qualify. NO specific
+    numeric tolerance is cited by the guide; the 10% default here is UNSURE and pending Priya.
+subject_enumeration: loan
+subject_key_fields:
+  - loan
+evidence_required: the YTD-annualized vs documented monthly income and the tolerance the comparison used
+guideline_reference: "Fannie Mae Selling Guide B3-3.1 (General Income Information) — YTD consistency."
+spec_version: 1
+deterministic:
+  load_bearing_tags:
+    - income.ytd_annualized_shortfall_pct
+  gated_tags:
+    - income.ytd_annualized_shortfall_pct
+  operands:
+    shortfall: {tag: income.ytd_annualized_shortfall_pct}
+    tolerance: {reference: ytd_variance_threshold_pct}
+  outcomes:
+    - verdict: fired
+      when_compare: {op: ">", left: shortfall, right: tolerance}
+      reasoning: >-
+        the YTD-annualized monthly income falls short of documented by {shortfall}, beyond the
+        {tolerance} tolerance — the documented income is not supported by the pay history
+      how_to_fix: >-
+        Reconcile the pay history with the documented income — verify the pay frequency and period, and
+        reduce the qualifying income to what the YTD supports if needed.
+    - verdict: satisfied
+      default: true
+      reasoning: the YTD-annualized income supports the documented income within the {tolerance} tolerance

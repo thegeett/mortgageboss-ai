@@ -1,0 +1,50 @@
+rule_id: IN-8
+name: VOE present
+category: Income
+kind: structural         # rule_kinds.csv: IN-8 = structural, exact_match=true (deterministic_only)
+numeric_check: false
+criteria: >-
+  A Verification of Employment (written or verbal) should be present and valid. Scoped to VOE documents
+  (LP-329): a VOE document that is not a valid verification fires; a file with NO VOE document — a VOE is
+  expected — degrades to couldnt_check (LP-330, Tab 1, blocks), NOT not_applicable.
+applicability:
+  scope: the loan file's Verification-of-Employment documents
+  trigger: once per VOE document (a file with none → couldnt_check, a VOE is expected)
+required_inputs:
+  - name: voe_present
+    snapshot_path: tags.by_subject[<voe content_id>]["income.voe_present"]
+    description: whether the document is a present/valid VOE (yes/no)
+reference_values:
+  priya_validated: false
+  threshold_needs_signoff: false
+  guideline_text: >-
+    A Verification of Employment is a standard employment document. Whether it is required (vs pay
+    stubs + W-2 alone) is program-dependent — the unconditional expectation here is a conservative
+    default pending Priya.
+subject_enumeration: per_document
+subject_key_fields:
+  - content_id
+evidence_required: whether a valid VOE document is present in the file
+guideline_reference: "Fannie Mae Selling Guide B3-3.1-02 (employment documentation) — VOE."
+spec_version: 1
+deterministic:
+  applicability:
+    tag: document.document_type
+    op: eq
+    value: verification_of_employment
+  # A VOE is expected for the file (a conservative default — see the Priya list); its confident absence
+  # is a GAP → couldnt_check (LP-330), never not_applicable.
+  applicability_expected: true
+  load_bearing_tags:
+    - income.voe_present
+  gated_tags:
+    - income.voe_present
+  outcomes:
+    - verdict: fired
+      when_tags:
+        - {tag: income.voe_present, op: ne, value: "yes"}
+      reasoning: the Verification of Employment is not present/valid on this document
+      how_to_fix: Obtain a complete written or verbal Verification of Employment before submission.
+    - verdict: satisfied
+      default: true
+      reasoning: a valid Verification of Employment is present

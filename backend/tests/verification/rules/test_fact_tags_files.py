@@ -57,7 +57,7 @@ def test_desired_state_shape() -> None:
     # rule_kinds.csv is 133 rules; the vocabulary is 143 xlsx tags + 1 hand-added overlay tag
     # (id.poa_acceptable LP-329, id.residency_eligible LP-331) = 145.
     assert len(rules) == 133
-    assert len(tags) == 145
+    assert len(tags) == 152  # +7 income vocabulary_extra tags (LP-323-IN-B)
     assert len(rule_tags) == 203
     # No depends_on authored yet (LP-311 Phase 0): the DAG is empty.
     assert tag_deps == set()
@@ -75,10 +75,11 @@ def test_as1_gate_is_files_truth_not_seed() -> None:
     rules = load_desired_rules()
     assert rules["AS-1"]["priya_validated"] is False
     assert rules["AS-1"]["threshold_needs_signoff"] is True
-    # Only AS-1 has a spec file today.
+    # AS-1 + OC-2 + the ID family + the IN family carry specs; IN-6 (deferred, LP-323-IN-B) does not.
     assert rules["AS-1"]["spec"] is not None
-    assert rules["IN-1"]["spec"] is None
-    assert rules["IN-1"]["priya_validated"] is False
+    assert rules["IN-1"]["spec"] is not None  # authored by LP-323-IN-B
+    assert rules["IN-6"]["spec"] is None  # deferred (set-coverage shape — see LP-323-IN-B D3)
+    assert rules["IN-6"]["priya_validated"] is False
 
 
 def test_committed_files_are_consistent() -> None:
