@@ -132,15 +132,27 @@ class TagCondition(BaseModel):
     value: str = PydField(min_length=1)
 
 
+# The operand TYPES the deterministic evaluator can coerce + compare (LP-328). ``decimal`` is the
+# DEFAULT (every pre-LP-328 spec is unchanged); ``date`` unblocks date rules (ID-5, IN-2, PR-6, CL-1,
+# CR-6, CR-13). Declaring the KEY SET here (data, no evaluator import) lets a spec be validated at
+# LOAD — a typo'd type fails loud rather than as an uncaught KeyError mid-run; the evaluator asserts
+# its coercer registry covers exactly this set. Adding a type later = one registry entry + one key.
+KNOWN_OPERAND_TYPES = frozenset({"decimal", "date"})
+
+
 class Operand(BaseModel):
     """A declared OPERAND SOURCE — where a comparison value comes from (tag / reference / calc /
     a product of operands). Exactly one source key is set (validated).
 
-    * ``tag`` — a subject tag's value, coerced to Decimal.
+    * ``tag`` — a subject tag's value, coerced per ``type`` (Decimal / date).
     * ``reference`` — a ``reference_values.values`` key; a trailing ``%`` is parsed to a fraction.
     * ``calc`` — ``[calculator_name, value_key]`` from ``snapshot.calculations`` (a GATED calc → None
       → couldnt_check, LP-318).
     * ``product`` — the product of its operands (AS-1's ``multiplier x qualifying_income``).
+
+    ``type`` (LP-328) declares how a ``tag`` operand's value is coerced + compared. It defaults to
+    ``decimal`` (so every existing spec is unchanged) and a non-decimal type is only valid on a
+    ``tag`` operand — ``reference`` / ``calc`` / ``product`` are decimal by construction.
     """
 
     model_config = {"frozen": True, "extra": "forbid"}
@@ -149,12 +161,24 @@ class Operand(BaseModel):
     reference: str | None = None
     calc: tuple[str, str] | None = None
     product: tuple[Operand, ...] | None = None
+    type: str = PydField(
+        default="decimal"
+    )  # decimal (default) | date — the operand's typed coercion
 
     @model_validator(mode="after")
-    def _exactly_one_source(self) -> Operand:
+    def _exactly_one_source_and_valid_type(self) -> Operand:
         set_count = sum(x is not None for x in (self.tag, self.reference, self.calc, self.product))
         if set_count != 1:
             raise ValueError("an Operand sets EXACTLY one of tag / reference / calc / product")
+        if self.type not in KNOWN_OPERAND_TYPES:
+            raise ValueError(
+                f"operand type {self.type!r} is not one of {sorted(KNOWN_OPERAND_TYPES)}"
+            )
+        if self.type != "decimal" and self.tag is None:
+            raise ValueError(
+                f"a non-decimal operand type ({self.type!r}) is only valid on a `tag` operand "
+                "(reference / calc / product are decimal by construction)"
+            )
         return self
 
 
@@ -222,6 +246,16 @@ class DeterministicEval(BaseModel):
                             f"when_compare references unknown operand {ref!r} "
                             f"(operands: {sorted(operand_names)})"
                         )
+                # A comparison's two operands must be the SAME type (LP-328): comparing a date to a
+                # Decimal is a category error that would raise/mis-compare at runtime — catch at LOAD.
+                left_t = self.operands[outcome.when_compare.left].type
+                right_t = self.operands[outcome.when_compare.right].type
+                if left_t != right_t:
+                    raise ValueError(
+                        f"when_compare compares operands of different types "
+                        f"({outcome.when_compare.left!r}:{left_t} vs "
+                        f"{outcome.when_compare.right!r}:{right_t}) — they must match"
+                    )
             # reasoning is `str.format(**operands)` at eval time — a stray brace or an unknown
             # placeholder would crash the run, so both are caught at load.
             try:

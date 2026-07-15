@@ -9393,3 +9393,50 @@ docs, plus a NEW vocabulary output tag (the vocabulary CSV is generated from the
 authored-in-principle but UNACTIVATED; the new shape is proven data-only via a synthetic per-document
 judgment. Cross-refs: §3D; ADR-268; LP-319 (armor), LP-321 (partial-snapshot), LP-324/325 (the sibling
 evaluators), LP-326 (SUBJECT keying), LP-323-ID-B GAP-B.
+
+## ADR-269: Typed operands (GAP-A) + a hand-editable vocabulary (GAP-E) (LP-328)
+
+**Status:** Accepted. **Context:** two gaps blocking the waves.
+- **GAP-A** (LP-323-ID-B): `deterministic.py` coerced EVERY operand to `Decimal`, so a date inequality
+  between two fact-tags was inexpressible — blocking ID-5 and every date rule (IN-2, PR-6, CL-1, CR-6,
+  CR-13).
+- **GAP-E** (LP-326/LP-327): the vocabulary (`fact_tags.csv`) is GENERATED from a binary xlsx, so a wave
+  could not add a tag in a reviewed PR (the generator would overwrite a hand-added row). It blocked twice.
+
+**Decision — GAP-A: TYPED operands via a declared type + a registry** (the pattern that held for
+enumerators / normalizers / production modes — NOT a date special-case). An `Operand` declares a `type`
+(default `decimal`, new `date`); a COERCER registry (`{decimal: coerce_decimal, date: coerce_date}`)
+resolves it, and ONE type-agnostic comparator serves every type — `compare_values(op, left, right)` in
+`schema.py` applies the operator, which is already generic (`<=`/`<`/`==` work for Decimal, date, str).
+`satisfies` is now a thin Decimal wrapper over `compare_values` (not forked). Adding a type = one
+registry entry + one key in `KNOWN_OPERAND_TYPES`.
+- **`decimal` is the default → every existing spec is unchanged** (AS-1's operands declare no type; the
+  comparison is byte-identical to the former `satisfies(...)`). Equivalence proven by the AS-1/ID-3/ID-6
+  suites + the frozen LF-6T3N trace passing UNCHANGED.
+- **Coercion failure / absent operand → couldnt_check, never a fabricated value.** An absent tag → None →
+  couldnt_check with that reason (ID-5's non-expiring-state-ID edge: no expiration ≠ expired). An
+  unparseable/ambiguous date → None → couldnt_check — never a silent epoch/0.
+- **ONE shared date parser.** The `date` coercer REUSES `coerce_date` — the SAME parser the LP-323-ID-B
+  consistency normalizer uses, so the two evaluators can never disagree, and neither guesses an ambiguous
+  date. A load-time validator rejects a comparison whose two operands are different types.
+
+**Decision — GAP-E: a hand-editable vocabulary overlay** (`vocabulary_extra.yaml`). `fact_tags.csv` stays
+the xlsx-generated bulk vocabulary; a NEW tag is ADDED to the overlay — a version-controlled YAML,
+reviewed in a PR, that the generator NEVER touches (so it cannot silently overwrite a hand-added tag).
+The projection merges the overlay (a tag_id already in the vocabulary fails loud); the LP-326 allowed-values
+lookup reads it too, so a new tag also MATERIALIZES. This is the "otherwise reconciled" approach — small,
+additive, zero-risk to the xlsx pipeline — that unblocks the waves NOW (and ID-9's output tag). **The
+fuller inversion** (make ALL of `fact_tags.csv` hand-editable + retire the xlsx as a generated view) is a
+larger migration recommended as its own ticket; the overlay meets the requirement without it.
+
+**Consequences.** Every date rule is unblocked as data (ID-5 authored; IN-2/PR-6/CL-1/CR-6/CR-13 follow),
+and every wave can add a tag in a PR. NOT changed: consistency/judgment/gate logic, the producers (GAP-A
+touched only `deterministic.py` + the shared `compare_values`; the date parser is shared, not forked).
+**ID-5 authored but UNACTIVATED:** it needs both date tags under ONE subject, but LP-326 keys
+`id.id_expiration` + `contract.closing_date` under DOCUMENT subjects (a deterministic loan rule reads one
+subject's map). Co-locating them under the loan subject (with a single-ID caveat) is a materialization
+follow-on. **PRIYA:** ID-5's `>=` vs `>` at closing (encoded default `>=` — an ID valid ON the closing date
+is valid) + any grace period. **New gap surfaced (reported):** cross-subject operands (a per-document/
+borrower rule reading a loan-level fact) — the reason ID-5 can't yet be a per-borrower rule. Cross-refs:
+§3D; ADR-269; LP-311 (projection), LP-324 (Operand/Comparison), LP-325 (the normalizer registry + date
+discipline), LP-326 (tag_production.yaml + the CSV-from-xlsx problem), LP-327, LP-323-ID-A §3/§4, -ID-B GAP-A.

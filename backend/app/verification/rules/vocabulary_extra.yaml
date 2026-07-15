@@ -1,0 +1,26 @@
+# LP-328 (GAP-E) — the HAND-EDITABLE fact-tag vocabulary overlay.
+#
+# `fact_tags.csv` is GENERATED from `docs/snapshot-fact-tags.xlsx` (the human/Priya authoring form) —
+# a binary a PR cannot review, and re-running the generator would OVERWRITE a hand-added row. So the
+# waves ADD a NEW tag HERE instead: a version-controlled YAML, reviewed in a PR, that the generator
+# never touches. This is the vocabulary's hand-editable source of truth for wave-added tags; the xlsx
+# remains the bulk-authoring view. A tag_id declared here that already exists in fact_tags.csv fails
+# loud (never shadow an xlsx tag). Pair a new tag with its production declaration in
+# `tag_production.yaml` (LP-326) so it also MATERIALIZES.
+#
+# Each entry (keyed by tag_id under `tags:`):
+#   entity:        the logical entity (borrower | doc | loan | transaction | property | …) — REQUIRED
+#   value_type:    number | date | string | enum | match_hash | object — REQUIRED
+#   allowed_values: a list (for enum) or null
+#   description:   one line
+#   produced_by:   parsed | derived | AI (documentation; production MODE is in tag_production.yaml)
+#
+# Example (commented — a real add just uncomments + fills it in):
+#   id.residency_eligible:
+#     entity: borrower
+#     value_type: enum
+#     allowed_values: ["yes", "no", "unknown"]
+#     description: Is the borrower's residency status eligible for the loan program (ID-8 verdict).
+#     produced_by: AI
+
+tags: {}

@@ -88,11 +88,18 @@ def _production_doc() -> dict[str, Any]:
 
 @cache
 def _allowed_values_by_tag() -> dict[str, tuple[str, ...] | None]:
-    """The vocabulary's ``allowed_values`` per tag (from the generated ``fact_tags.csv``)."""
+    """The vocabulary's ``allowed_values`` per tag — from the generated ``fact_tags.csv`` AND the
+    hand-editable overlay (LP-328), so a wave-added tag's domain is available for AI coercion."""
     allowed: dict[str, tuple[str, ...] | None] = {}
     with _FACT_TAGS_CSV.open(encoding="utf-8", newline="") as fh:
         for row in csv.DictReader(fh):
             allowed[row["tag_id"].strip()] = _parse_allowed(row.get("allowed_values") or "")
+    # The GAP-E overlay (projection owns the read + the fail-loud on a duplicate tag_id).
+    from app.verification.rules.projection import load_vocab_extra
+
+    for tag_id, body in load_vocab_extra().items():
+        values = body.get("allowed_values")
+        allowed[tag_id] = tuple(str(v) for v in values) if isinstance(values, list) else None
     return allowed
 
 

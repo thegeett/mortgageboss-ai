@@ -15,10 +15,11 @@ per-rule module carries no decision logic. Reuses ``evaluate_gate`` + ``satisfie
 from __future__ import annotations
 
 import re
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from decimal import Decimal, InvalidOperation
+from typing import Any
 
-from app.ai.extraction.parsing import coerce_decimal
+from app.ai.extraction.parsing import coerce_date, coerce_decimal
 from app.verification.rule_engine.enumerators import enumerate_subjects
 from app.verification.rule_engine.gate import GateResult, GateStatus, evaluate_gate
 from app.verification.rule_engine.result import (
@@ -27,8 +28,9 @@ from app.verification.rule_engine.result import (
     RuleEvaluation,
     Verdict,
 )
-from app.verification.rules.schema import Condition, satisfies
+from app.verification.rules.schema import compare_values
 from app.verification.rules.specs import (
+    KNOWN_OPERAND_TYPES,
     DeterministicEval,
     Operand,
     OutcomeRule,
@@ -40,6 +42,20 @@ from app.verification.snapshot.tag import Tag
 
 _UNKNOWN = "unknown"
 _PERCENT = re.compile(r"(\d+(?:\.\d+)?)\s*%")
+
+# Typed operand COERCERS (LP-328) — a declared operand ``type`` → the function that turns a raw tag
+# value into a comparable typed value (or None when it cannot, which fails closed to couldnt_check —
+# never a fabricated value, never a silent 0/epoch). ``date`` REUSES the SHARED ``coerce_date`` (one
+# date parser across the deterministic + consistency evaluators, so they can never disagree; it never
+# guesses an ambiguous date — an unparseable date → None → couldnt_check). A new type is one entry.
+_COERCERS: dict[str, Callable[[Any], Any]] = {
+    "decimal": coerce_decimal,
+    "date": coerce_date,
+}
+
+# Drift guard: the coercer registry must cover EXACTLY the types specs validate against at load, so a
+# declared-but-unhandled type fails loud at import rather than as an uncaught KeyError mid-run.
+assert set(_COERCERS) == KNOWN_OPERAND_TYPES, "operand coercers drifted from KNOWN_OPERAND_TYPES"
 
 
 def _load_bearing(
@@ -130,11 +146,15 @@ def _reference_operand(spec: RuleSpec, key: str) -> Decimal | None:
 
 def _resolve_operand(
     operand: Operand, spec: RuleSpec, snapshot: Snapshot, subject_tags: Mapping[str, Tag]
-) -> Decimal | None:
-    """Resolve a declared operand to a Decimal, or None (→ the caller yields couldnt_check)."""
+) -> Any | None:
+    """Resolve a declared operand to a TYPED value (Decimal / date), or None (→ couldnt_check).
+
+    A ``tag`` operand is coerced per its declared ``type`` (LP-328); an ABSENT tag → None (absent ≠
+    empty — couldnt_check with that reason, never fired), and an unparseable value → None (never a
+    fabricated value). ``reference`` / ``calc`` / ``product`` are decimal by construction."""
     if operand.tag is not None:
         tag = subject_tags.get(operand.tag)
-        return coerce_decimal(tag.value) if tag is not None else None
+        return _COERCERS[operand.type](tag.value) if tag is not None else None
     if operand.reference is not None:
         return _reference_operand(spec, operand.reference)
     if operand.calc is not None:
@@ -161,7 +181,7 @@ def _tags_hold(when_tags: tuple[TagCondition, ...], subject_tags: Mapping[str, T
 
 
 def _outcome_matches(
-    outcome: OutcomeRule, subject_tags: Mapping[str, Tag], operands: dict[str, Decimal]
+    outcome: OutcomeRule, subject_tags: Mapping[str, Tag], operands: dict[str, Any]
 ) -> bool:
     if outcome.default:
         return True
@@ -172,7 +192,10 @@ def _outcome_matches(
         left, right = operands.get(cmp.left), operands.get(cmp.right)
         if left is None or right is None:
             return False
-        return satisfies(Condition(op=cmp.op, value=right), left)
+        # The shared, type-agnostic primitive (LP-328): the load-time validator guarantees left/right
+        # are the SAME type, so ``<op>`` is well-defined for Decimal AND date. Decimal is byte-identical
+        # to the former ``satisfies(Condition(op, right), left)``.
+        return compare_values(cmp.op, left, right)
     return True
 
 
@@ -225,9 +248,9 @@ def evaluate_deterministic_rule(
             )
             continue
 
-        # 3. Resolve the declared operands. Any unresolvable operand → couldnt_check (never a
-        #    fabricated number); threshold_used stays None (no threshold was computed).
-        operands: dict[str, Decimal] = {}
+        # 3. Resolve the declared operands (each to its declared type). Any unresolvable operand →
+        #    couldnt_check (never a fabricated value); threshold_used stays None.
+        operands: dict[str, Any] = {}
         failed: str | None = None
         for name, operand in det.operands.items():
             value = _resolve_operand(operand, spec, snapshot, subject_tags)
@@ -248,7 +271,10 @@ def evaluate_deterministic_rule(
             )
             continue
 
-        threshold_used = operands.get(threshold_operand) if threshold_operand else None
+        # threshold_used is the numeric threshold on the finding (Decimal-only by its column type); a
+        # non-Decimal typed threshold (e.g. a date operand) leaves it None — the operands are inline.
+        threshold_raw = operands.get(threshold_operand) if threshold_operand else None
+        threshold_used = threshold_raw if isinstance(threshold_raw, Decimal) else None
 
         # 4. The ordered outcomes — first match wins (the fire condition via satisfies()).
         for outcome in det.outcomes:
