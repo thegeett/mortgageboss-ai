@@ -160,6 +160,43 @@ async def test_retire_moves_undetected_finding_to_no_longer_applies(
     assert "run_id" in retire_event.detail
 
 
+async def test_degraded_run_does_not_retire_findings_it_could_not_reevaluate(
+    db_session: AsyncSession,
+) -> None:
+    # A degraded run (AS-1's documents domain absent → 0 results AND NOT retire-eligible) must NOT
+    # flip a real open finding to no_longer_applies (that would be a false-green vector). Only a
+    # HEALTHY run that genuinely didn't re-detect the subject retires it.
+    lf = await _loan_file_id(db_session)
+    [f1] = (await _reconcile(db_session, lf, [_as1("dep1", Verdict.FIRED, has_source="no")])).minted
+
+    degraded = await reconcile_evaluation_findings(
+        db_session,
+        loan_file_id=lf,
+        verification_id=None,
+        run_id=uuid4(),
+        results=[],  # the rule produced nothing this run…
+        evaluated_rule_ids=_RULES,
+        category_by_rule=_CATS,
+        retire_eligible_rule_ids=frozenset(),  # …because its domain was not healthily enumerated
+    )
+    assert degraded.retired == []  # dep1's open finding is preserved, not retired
+    await db_session.refresh(f1)
+    assert f1.evaluation_outcome is EvaluationOutcome.OPEN  # still open, untouched
+
+    # Contrast: a HEALTHY run with the same empty results DOES retire (subject genuinely gone).
+    healthy = await reconcile_evaluation_findings(
+        db_session,
+        loan_file_id=lf,
+        verification_id=None,
+        run_id=uuid4(),
+        results=[],
+        evaluated_rule_ids=_RULES,
+        category_by_rule=_CATS,
+        retire_eligible_rule_ids=_RULES,
+    )
+    assert {f.id for f in healthy.retired} == {f1.id}
+
+
 async def test_retire_does_not_suppress_the_rule_firing_on_a_new_subject(
     db_session: AsyncSession,
 ) -> None:

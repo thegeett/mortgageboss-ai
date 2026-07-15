@@ -37,7 +37,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.logging import get_logger
 from app.models.finding import Finding, FindingCategory
-from app.services.rule_findings import reconcile_evaluation_findings
+from app.services.rule_findings import ReconcileRunResult, reconcile_evaluation_findings
 from app.services.tag_correlation import (
     Reasoner as StageBReasoner,
 )
@@ -109,7 +109,8 @@ class VerificationRun:
 
     run_id: UUID
     snapshot: Snapshot
-    findings: list[Finding]
+    findings: list[Finding]  # the findings THIS run DETECTED (retired ones are on `reconciliation`)
+    reconciliation: ReconcileRunResult  # the full cross-run lifecycle breakdown (minted/…/retired)
     degradations: tuple[Degradation, ...]
     model: str  # reproducibility (§3D) — the model that produced the AI tags
     vocab_version: int  # the snapshot/vocabulary version
@@ -219,6 +220,21 @@ def _merge_loan_judgment_tags(snapshot: Snapshot, judgment_tags: dict[str, Tag])
     return snapshot.model_copy(update={"tags": TagsSection.present(by_subject)})
 
 
+def _retire_eligible_rules(snapshot: Snapshot) -> frozenset[str]:
+    """The evaluated rules whose subject domain was HEALTHILY enumerated this run — only these may
+    retire a non-detected prior finding.
+
+    A degraded run must NOT be read as "the subject is gone" (that would flip real open findings to
+    green — false-closed). AS-1 enumerates per-transaction subjects from the documents section: if
+    that section is ABSENT (a build degradation), it saw zero transactions and is NOT retire-eligible.
+    OC-2 has a single loan-level subject that is always evaluated, so it is always eligible.
+    """
+    eligible = set(_RULE_CATEGORY)
+    if snapshot.documents.absent:
+        eligible.discard("AS-1")
+    return frozenset(eligible)
+
+
 async def _persist(
     db: AsyncSession,
     *,
@@ -226,15 +242,17 @@ async def _persist(
     verification_id: UUID | None,
     run_id: UUID,
     results: list[RuleEvaluation],
-) -> list[Finding]:
+    retire_eligible_rule_ids: frozenset[str],
+) -> ReconcileRunResult:
     """Reconcile this run's results into findings across runs (LP-322).
 
     Matches against the loan file's prior findings by (rule_id, subject_key): carry-forward / mint /
     retire / resolve / revive. Replaces the single-run insert that collided on the uniqueness index
-    when the same loan file was re-run (LP-321). Returns this run's DETECTED findings (retired ones
-    stay on the surface, labeled no_longer_applies — immortality).
+    when the same loan file was re-run (LP-321). Retirement is gated on ``retire_eligible_rule_ids``
+    (a degraded run must not retire). Returns the full reconcile breakdown (retired ones stay on the
+    surface, labeled no_longer_applies — immortality).
     """
-    reconciled = await reconcile_evaluation_findings(
+    return await reconcile_evaluation_findings(
         db,
         loan_file_id=loan_file_id,
         verification_id=verification_id,
@@ -242,8 +260,8 @@ async def _persist(
         results=results,
         evaluated_rule_ids=frozenset(_RULE_CATEGORY),
         category_by_rule=_RULE_CATEGORY,
+        retire_eligible_rule_ids=retire_eligible_rule_ids,
     )
-    return reconciled.detected
 
 
 async def run_verification(
@@ -315,13 +333,17 @@ async def run_verification(
         snapshot, oc2_reasoner=reasoners.oc2, confidence_floor=confidence_floor
     )
     snapshot = _merge_loan_judgment_tags(snapshot, judgment_tags)
-    findings = await _persist(
+    reconciliation = await _persist(
         db,
         loan_file_id=loan_file_id,
         verification_id=verification_id,
         run_id=run_id,
         results=results,
+        # A degraded run must not RETIRE findings it could not re-evaluate (false-closed) — gate
+        # retirement on the rules whose subject domain was healthily enumerated.
+        retire_eligible_rule_ids=_retire_eligible_rules(snapshot),
     )
+    findings = reconciliation.detected
 
     # Reproducibility: persist the frozen snapshot (best-effort — a persistence hiccup degrades, it
     # does not fail the run). Idempotent by run_id.
@@ -341,6 +363,7 @@ async def run_verification(
         run_id=run_id,
         snapshot=snapshot,
         findings=findings,
+        reconciliation=reconciliation,
         degradations=tuple(degradations),
         model=settings.anthropic_model_extraction,
         vocab_version=snapshot.snapshot_version,

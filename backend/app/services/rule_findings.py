@@ -290,16 +290,25 @@ async def reconcile_evaluation_findings(
     evaluated_rule_ids: frozenset[str],
     category_by_rule: dict[str, FindingCategory],
     default_category: FindingCategory = FindingCategory.ASSETS,
+    retire_eligible_rule_ids: frozenset[str] | None = None,
 ) -> ReconcileRunResult:
     """Reconcile THIS run's evaluations against the loan file's prior findings (LP-322, §9).
 
     Matches by the STABLE identity ``(rule_id, subject_key)``. For each subject detected this run:
     CARRY-FORWARD the prior finding (keep id + history; REVIVE if it was retired; RESOLVE if
-    open→satisfied; OUTCOME_CHANGED otherwise) or MINT a new one. Each prior finding of an evaluated
-    rule that is NOT detected this run and is still OPEN (no human action) is RETIRED to
-    ``no_longer_applies`` — VISIBLE, labeled, reasoned; NEVER soft-deleted (immortality). Every
+    open→satisfied; OUTCOME_CHANGED otherwise) or MINT a new one. Each prior finding of a
+    RETIRE-ELIGIBLE rule that is NOT detected this run and is still OPEN (no human action) is RETIRED
+    to ``no_longer_applies`` — VISIBLE, labeled, reasoned; NEVER soft-deleted (immortality). Every
     transition appends an event carrying the run_id. Flush-only.
+
+    ``retire_eligible_rule_ids`` (default: every evaluated rule) is the subset whose subject domain
+    was HEALTHILY enumerated this run. A rule whose enumeration input DEGRADED (e.g. AS-1 when the
+    documents section is absent, so it saw zero transactions) must be EXCLUDED: a degraded run is not
+    "the subject is gone", and retiring on it would flip real open findings to green (false-closed).
     """
+    retire_eligible = (
+        retire_eligible_rule_ids if retire_eligible_rule_ids is not None else evaluated_rule_ids
+    )
     persistable = _persistable(results)  # validate all BEFORE any write (empty-reasoning refusal)
     this_by_identity: dict[tuple[str, str], _Persistable] = {
         (result.rule_id, result.subject_id): (result, outcome, severity, message)
@@ -381,6 +390,9 @@ async def reconcile_evaluation_findings(
     for identity, prior_finding in prior_by_identity.items():
         if identity in this_by_identity:
             continue  # matched above
+        if prior_finding.rule_id not in retire_eligible:
+            continue  # this rule's domain was NOT healthily enumerated → a degraded run must not
+            # retire (that would flip a real open finding to green); leave the prior untouched
         if prior_finding.evaluation_outcome is EvaluationOutcome.NO_LONGER_APPLIES:
             continue  # already retired — stays retired (immortality)
         if prior_finding.resolution_status.is_resolved:

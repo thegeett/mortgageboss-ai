@@ -18,6 +18,7 @@ from app.services.verification_run import (
     Reasoners,
     TagCaches,
     _merge_loan_judgment_tags,
+    _retire_eligible_rules,
     _scan_tag_degradations,
     run_verification,
 )
@@ -25,7 +26,7 @@ from app.verification.eval.cases import EvalCase, FixtureTxn
 from app.verification.eval.harness import _build_snapshot, load_fixture_snapshot
 from app.verification.eval.stubs import StubStageAReasoner, StubStageBReasoner
 from app.verification.rule_engine.oc2 import JUDGMENT_TAG, LOAN_SUBJECT
-from app.verification.snapshot.model import Snapshot, TagsSection
+from app.verification.snapshot.model import DocumentsSection, Snapshot, TagsSection
 from app.verification.snapshot.tag import Tag, TagProducedBy, TagRole, TagStage
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -407,3 +408,16 @@ def test_judgment_tag_is_merged_into_the_tags_layer_under_the_loan_subject() -> 
     assert merged.tags.by_subject[LOAN_SUBJECT][JUDGMENT_TAG].value == "no"
     # No judgment tags produced (OC-2 couldnt_check today) → the snapshot is returned unchanged.
     assert _merge_loan_judgment_tags(snap, {}) is snap
+
+
+def test_retire_eligible_excludes_as1_when_the_documents_section_is_degraded() -> None:
+    # AS-1 enumerates its subjects from the documents section; if that section is absent (a build
+    # degradation) it is NOT retire-eligible — a degraded run must not retire AS-1 findings. OC-2
+    # (single loan-level subject) stays eligible.
+    healthy = _snapshot(_TXNS, uuid4())
+    assert "AS-1" in _retire_eligible_rules(healthy)
+
+    degraded = healthy.model_copy(update={"documents": DocumentsSection.failed("build failed")})
+    eligible = _retire_eligible_rules(degraded)
+    assert "AS-1" not in eligible  # not retire-eligible on a degraded documents section
+    assert "OC-2" in eligible
