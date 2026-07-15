@@ -25,31 +25,28 @@ from __future__ import annotations
 
 import json
 import re
-from collections.abc import Awaitable, Callable
+from collections.abc import Callable
 from dataclasses import dataclass
 
 from app.ai.client import AIClientError
-from app.ai.rule_judgment import RuleJudgmentResult, reason_rule_judgment
+from app.ai.rule_judgment import Reasoner, RuleJudgmentResult, reason_rule_judgment
 from app.core.logging import get_logger
 from app.verification.rule_engine.enumerators import enumerate_subjects
 from app.verification.rule_engine.gate import GateStatus, evaluate_gate
-from app.verification.rule_engine.result import LoadBearingTag, RuleEvaluation, Verdict
+from app.verification.rule_engine.result import (
+    VERDICT_BY_NAME,
+    LoadBearingTag,
+    RuleEvaluation,
+    Verdict,
+)
 from app.verification.rules.specs import ConsistencyEval, ConsistencyOutcome, RuleSpec, TagCondition
-from app.verification.snapshot.model import Snapshot
+from app.verification.snapshot.model import DocumentEntry, Snapshot
 from app.verification.snapshot.tag import Tag
 
 logger = get_logger(__name__)
 
-_VERDICT_BY_NAME = {
-    "fired": Verdict.FIRED,
-    "satisfied": Verdict.SATISFIED,
-    "needs_review": Verdict.NEEDS_REVIEW,
-    "couldnt_check": Verdict.COULDNT_CHECK,
-}
-
-# The injected AI seam — same shape as the judgment reasoner (keyless tests supply a stub; None → the
-# real model with the spec prompt). The AI is called ONLY on the differing residue of a fuzzy rule.
-Reasoner = Callable[[str], Awaitable[RuleJudgmentResult]]
+# The AI seam is the shared ``Reasoner`` alias (keyless tests supply a stub; None → the real model
+# with the spec prompt). The AI is called ONLY on the differing residue of a fuzzy rule.
 
 
 # --------------------------------------------------------------------------- #
@@ -88,6 +85,36 @@ class _Gathered:
     tag: Tag
 
 
+@dataclass(frozen=True)
+class _GatherResult:
+    """A gather over one subject: the INCLUDED instances (to compare) + the classification tags that
+    DECIDED inclusion (gated for confidence, so a shaky residence/mailing label cannot silently
+    include or exclude a source) + the count of value-bearing candidates (matched or not)."""
+
+    included: list[_Gathered]
+    filter_tags: dict[str, Tag]
+    candidate_count: int
+
+
+# A borrower_id -> its documents index, built ONCE per run (not re-scanned per subject — that was
+# O(borrowers x documents)).
+_DocIndex = dict[str, list[DocumentEntry]]
+
+
+def _index_borrower_documents(snapshot: Snapshot) -> _DocIndex:
+    """Group every document under each borrower it belongs to — a single O(documents) pass so the
+    per-subject gather is O(that borrower's docs), not a full rescan."""
+    index: _DocIndex = {}
+    if snapshot.documents.absent:
+        return index
+    for entry in snapshot.documents.entries:
+        if entry.belongs_to is None:
+            continue
+        for ref in entry.belongs_to:
+            index.setdefault(str(ref.borrower_id), []).append(entry)
+    return index
+
+
 def _tag_holds(cond: TagCondition, tags: dict[str, Tag]) -> bool:
     """Whether a source's tags satisfy a gather filter — an ABSENT filter tag is a non-match (the
     source is not of the required type, so it is excluded, not counted as disagreeing)."""
@@ -99,31 +126,40 @@ def _tag_holds(cond: TagCondition, tags: dict[str, Tag]) -> bool:
 
 
 def _borrower_documents(
-    snapshot: Snapshot, subject_id: str, gather_tag: str, gather_filter: TagCondition | None
-) -> list[_Gathered]:
+    snapshot: Snapshot,
+    subject_id: str,
+    gather_tag: str,
+    gather_filter: TagCondition | None,
+    index: _DocIndex,
+) -> _GatherResult:
     """Gather ``gather_tag`` from every document belonging to the borrower (filtered).
 
-    A document that lacks the fact is ABSENT → excluded (absent≠empty). A document that fails the
-    filter (or lacks the filter tag) is excluded (a mailing/prior address is not a residence)."""
-    if snapshot.documents.absent or snapshot.tags.absent:
-        return []
-    gathered: list[_Gathered] = []
-    for entry in snapshot.documents.entries:
-        if entry.belongs_to is None:
-            continue
-        if not any(str(ref.borrower_id) == subject_id for ref in entry.belongs_to):
-            continue
+    A document that lacks the fact is ABSENT → not a candidate (absent≠empty). A value-bearing
+    document that fails the filter is excluded (a mailing/prior address is not a residence), but its
+    PRESENT filter tag is still returned so the evaluator can gate the confidence of that
+    inclusion/exclusion decision — a shaky classification must not silently drive the compare set."""
+    if snapshot.tags.absent:
+        return _GatherResult([], {}, 0)
+    included: list[_Gathered] = []
+    filter_tags: dict[str, Tag] = {}
+    candidate_count = 0
+    for entry in index.get(subject_id, []):
         source_tags = snapshot.tags.by_subject.get(entry.content_id, {})
-        if gather_filter is not None and not _tag_holds(gather_filter, source_tags):
-            continue
         tag = source_tags.get(gather_tag)
-        if tag is None:  # this source simply lacks the fact — ABSENT, not a disagreeing value
+        if tag is None:  # this source simply lacks the fact — ABSENT, not a candidate at all
             continue
-        gathered.append(_Gathered(entry.content_id, tag))
-    return gathered
+        candidate_count += 1
+        if gather_filter is not None:
+            filter_tag = source_tags.get(gather_filter.tag)
+            if filter_tag is not None:  # gate its confidence/known-ness (absent → excluded below)
+                filter_tags[entry.content_id] = filter_tag
+            if not _tag_holds(gather_filter, source_tags):
+                continue
+        included.append(_Gathered(entry.content_id, tag))
+    return _GatherResult(included, filter_tags, candidate_count)
 
 
-_Scope = Callable[[Snapshot, str, str, "TagCondition | None"], list[_Gathered]]
+_Scope = Callable[[Snapshot, str, str, "TagCondition | None", "_DocIndex"], _GatherResult]
 _SOURCE_SCOPES: dict[str, _Scope] = {
     "borrower_documents": _borrower_documents,
 }
@@ -191,7 +227,7 @@ def _outcome_result(
     return _result(
         spec,
         subject_id,
-        _VERDICT_BY_NAME[outcome.verdict],
+        VERDICT_BY_NAME[outcome.verdict],
         outcome.reasoning.format(**fields),
         gathered,
         verdict_confidence=verdict_confidence,
@@ -206,8 +242,14 @@ async def _judge_residue(
     """Ask the AI about the DIFFERING residue only (values + sources — never the file). Returns a
     (signal, confidence) where signal is 'agree' / 'disagree' / 'cannot_tell'."""
     assert con.judge is not None
-    # BOUNDED context: only the differing values + their sources. Never the whole file / transactions.
-    context = {"values": [{"source": inst.source_id, "value": inst.tag.value} for inst in gathered]}
+    # BOUNDED context: the DISTINCT gathered values (byte-identical duplicates collapsed) each with
+    # the sources that reported it — the differing residue only, never the whole file / transactions.
+    by_value: dict[str, list[str]] = {}
+    for inst in gathered:
+        by_value.setdefault(str(inst.tag.value), []).append(inst.source_id)
+    context = {
+        "values": [{"value": value, "sources": sources} for value, sources in by_value.items()]
+    }
     try:
         result = await reason_fn(json.dumps(context))
     except AIClientError:
@@ -245,11 +287,39 @@ async def evaluate_consistency_rule(
             f"unknown source_scope {con.source_scope!r} (known: {sorted(_SOURCE_SCOPES)})"
         )
 
+    doc_index = _index_borrower_documents(snapshot)  # built ONCE, not re-scanned per subject
     results: list[RuleEvaluation] = []
     for subject_id, _subject_tags in enumerate_subjects(con.subject, snapshot):
-        gathered = scope(snapshot, subject_id, con.gather_tag, con.gather_filter)
+        result = scope(snapshot, subject_id, con.gather_tag, con.gather_filter, doc_index)
+        gathered = result.included
 
-        # 1. absent≠empty / a single source is not agreement → couldnt_check (nothing to compare).
+        # 1. GATE THE INCLUSION DECISION — when ≥2 value-bearing sources could be compared, a shaky
+        #    filter classification (a below-floor or "unknown" residence/mailing label) means we
+        #    cannot trust WHICH sources are in scope → fail closed rather than silently include or
+        #    exclude one. Only present filter tags are checked (an absent one → excluded, absent≠empty).
+        #    Skipped when <2 candidates exist (nothing could be compared regardless of classification).
+        if result.candidate_count >= 2 and result.filter_tags:
+            filter_gate = evaluate_gate(result.filter_tags, confidence_floor=floor)
+            if filter_gate.status is not GateStatus.PASS:
+                verdict = (
+                    Verdict.COULDNT_CHECK
+                    if filter_gate.status is GateStatus.COULDNT_CHECK
+                    else Verdict.NEEDS_REVIEW
+                )
+                results.append(
+                    _result(
+                        spec,
+                        subject_id,
+                        verdict,
+                        f"the '{con.gather_filter.tag}' classification that decides which sources "  # type: ignore[union-attr]
+                        f"to compare is not trustworthy: {filter_gate.reason}",
+                        gathered,
+                        verdict_confidence=filter_gate.verdict_confidence,
+                    )
+                )
+                continue
+
+        # 2. absent≠empty / a single source is not agreement → couldnt_check (nothing to compare).
         if len(gathered) < 2:
             of_type = (
                 f" of type {con.gather_filter.value!r}" if con.gather_filter is not None else ""
@@ -266,7 +336,7 @@ async def evaluate_consistency_rule(
             )
             continue
 
-        # 2. The generic fail-closed gate over the gathered instances (unknown value → couldnt_check
+        # 4. The generic fail-closed gate over the gathered instances (unknown value → couldnt_check
         #    distinct; a below-floor confidence → needs_review; verdict_confidence = min).
         gate = evaluate_gate(
             {inst.source_id: inst.tag for inst in gathered}, confidence_floor=floor
@@ -296,7 +366,7 @@ async def evaluate_consistency_rule(
             )
             continue
 
-        # 3. THE EXACT BOOKEND — all equal after declared normalization → AGREE. NO AI CALL.
+        # 5. THE EXACT BOOKEND — all equal after declared normalization → AGREE. NO AI CALL.
         normalized = {_normalize(inst.tag.value, con.normalization) for inst in gathered}
         if len(normalized) == 1:
             results.append(
@@ -311,7 +381,7 @@ async def evaluate_consistency_rule(
             )
             continue
 
-        # 4. They DIFFER. exact mode → a discrepancy (NO AI). fuzzy mode → the AI judges the residue.
+        # 6. They DIFFER. exact mode → a discrepancy (NO AI). fuzzy mode → the AI judges the residue.
         if con.compare_mode == "exact":
             results.append(
                 _outcome_result(
@@ -373,6 +443,7 @@ async def evaluate_consistency_rule(
                 )
             )
         else:  # cannot_tell — an honest AI "unknown", NEVER a defaulted agree
+            assert con.on_cannot_tell is not None  # required for fuzzy rules (validated at load)
             results.append(
                 _outcome_result(
                     spec,

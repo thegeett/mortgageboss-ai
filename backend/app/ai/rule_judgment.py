@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
 from app.ai.client import AIClientError, complete
@@ -42,6 +43,12 @@ class RuleJudgmentResult:
     output_tokens: int
     model: str
     truncated: bool
+
+
+# The AI-at-rule-time seam, shared by every rule evaluator that consults the model (judgment,
+# consistency). Keyless tests inject a stub; None → the real model with the spec's prompt bound.
+# One canonical alias so a change to the reasoner contract lands in exactly one place.
+Reasoner = Callable[[str], Awaitable[RuleJudgmentResult]]
 
 
 async def reason_rule_judgment(system_prompt: str, context_json: str) -> RuleJudgmentResult:
@@ -112,6 +119,7 @@ def _parse_judgment(text: str) -> RuleJudgment | None:
 
 __all__ = [
     "AIClientError",
+    "Reasoner",
     "RuleJudgment",
     "RuleJudgmentResult",
     "reason_rule_judgment",

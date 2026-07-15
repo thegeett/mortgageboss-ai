@@ -11,10 +11,10 @@ consistency body.
 
 from __future__ import annotations
 
-from app.verification.rule_engine.consistency import Reasoner as ConsistencyReasoner
+from app.ai.rule_judgment import Reasoner
 from app.verification.rule_engine.consistency import evaluate_consistency_rule
 from app.verification.rule_engine.deterministic import evaluate_deterministic_rule
-from app.verification.rule_engine.judgment import Reasoner, evaluate_judgment_rule
+from app.verification.rule_engine.judgment import evaluate_judgment_rule
 from app.verification.rule_engine.result import RuleEvaluation
 from app.verification.rules.specs import load_rule_spec
 from app.verification.snapshot.model import Snapshot
@@ -30,7 +30,7 @@ async def evaluate_rules(
     snapshot: Snapshot,
     *,
     judgment_reasoners: dict[str, Reasoner] | None = None,
-    consistency_reasoners: dict[str, ConsistencyReasoner] | None = None,
+    consistency_reasoners: dict[str, Reasoner] | None = None,
     confidence_floor: float | None = None,
     rule_ids: tuple[str, ...] = ACTIVE_RULE_IDS,
 ) -> tuple[list[RuleEvaluation], dict[str, Tag]]:

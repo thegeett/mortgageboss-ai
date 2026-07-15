@@ -43,6 +43,3 @@ consistency:
     how_to_fix: >-
       Confirm the borrower's SSN and correct the source(s) that disagree. A genuine mismatch
       across the 1003, credit report, or ID may indicate identity fraud and must be escalated.
-  on_cannot_tell:
-    verdict: couldnt_check
-    reasoning: "the SSN could not be compared across sources ({sources})"

@@ -230,6 +230,101 @@ async def test_id4_mailing_only_is_couldnt_check_not_a_discrepancy() -> None:
     assert "residence" in results[0].reasoning  # names WHY it couldn't compare
 
 
+# --------------------------------------------------------------------------- #
+# The gather_filter classification is itself gated (LP-325 review) — a shaky residence/mailing
+# label must not silently include or exclude a source from the compare set.
+# --------------------------------------------------------------------------- #
+def _addr_typed(v: str, kind: str, type_conf: float | None) -> dict[str, Tag]:
+    """An address whose current_address_type classification carries a specific confidence."""
+    return {
+        "id.address_normalized": _tag(v, produced_by=TagProducedBy.AI),
+        "id.current_address_type": _tag(kind, confidence=type_conf, produced_by=TagProducedBy.AI),
+    }
+
+
+async def test_id4_low_confidence_residence_classification_gates_to_needs_review() -> None:
+    # Two matching residence addresses, but one's residence/mailing classification is below the floor.
+    # We cannot trust WHICH sources are in scope → needs_review BEFORE any exact/AI compare.
+    stub = _Reasoner("agree")
+    snap = _snapshot(
+        [
+            ("app", _addr_typed("123 Main St", "residence", 0.9)),
+            ("dl", _addr_typed("123 Main St", "residence", 0.2)),  # shaky classification
+        ]
+    )
+    results = await _eval_id4(snap, reasoner=stub)
+    assert [r.verdict for r in results] == [Verdict.NEEDS_REVIEW]
+    assert stub.calls == 0  # gated before the exact bookend / AI
+    assert "current_address_type" in results[0].reasoning
+
+
+async def test_id4_unknown_residence_classification_gates_to_couldnt_check() -> None:
+    # A source whose type is "unknown" → we cannot tell if it belongs in the compare → couldnt_check.
+    stub = _Reasoner("agree")
+    snap = _snapshot(
+        [
+            ("app", _addr_typed("123 Main St", "residence", 0.9)),
+            ("dl", _addr_typed("123 Main St", "unknown", 0.9)),
+        ]
+    )
+    results = await _eval_id4(snap, reasoner=stub)
+    assert [r.verdict for r in results] == [Verdict.COULDNT_CHECK]
+    assert stub.calls == 0
+
+
+async def test_id4_shaky_excluded_source_still_gates_the_subject() -> None:
+    # THE EXCLUSION DIRECTION: two confident residences agree, but a THIRD source is classified
+    # 'mailing' at low confidence — it MIGHT actually be a residence that disagrees, so excluding it
+    # is not trustworthy → needs_review rather than a false 'satisfied'.
+    stub = _Reasoner("agree")
+    snap = _snapshot(
+        [
+            ("app", _addr_typed("123 Main St", "residence", 0.9)),
+            ("dl", _addr_typed("123 Main St", "residence", 0.9)),
+            ("cr", _addr_typed("500 Oak Ave", "mailing", 0.2)),  # shaky exclusion
+        ]
+    )
+    results = await _eval_id4(snap, reasoner=stub)
+    assert [r.verdict for r in results] == [Verdict.NEEDS_REVIEW]
+    assert stub.calls == 0
+
+
+async def test_id4_confident_mailing_is_cleanly_excluded_no_over_gating() -> None:
+    # The no-false-positive companion: a CONFIDENTLY-classified mailing is excluded without gating,
+    # and the residence pair still agrees → satisfied (the gate only fires on shaky classifications).
+    stub = _Reasoner("agree")
+    snap = _snapshot(
+        [
+            ("app", _addr_typed("123 Main St", "residence", 0.9)),
+            ("dl", _addr_typed("123 Main St", "residence", 0.9)),
+            ("cr", _addr_typed("PO Box 9", "mailing", 0.95)),  # confidently excluded
+        ]
+    )
+    results = await _eval_id4(snap, reasoner=stub)
+    assert [r.verdict for r in results] == [Verdict.SATISFIED]
+    assert stub.calls == 0
+
+
+async def test_id4_ai_context_collapses_byte_identical_values_to_the_distinct_residue() -> None:
+    # Finding #2: the fuzzy AI sees the DISTINCT differing values (byte-identical duplicates grouped
+    # under their sources), not one entry per source — the residue, bounded to the subject.
+    stub = _Reasoner("agree")
+    snap = _snapshot(
+        [
+            ("app", _addr("123 N Main St")),
+            ("dl", _addr("123 N Main St")),  # byte-identical to app
+            ("cr", _addr("123 North Main Street")),  # the normalization-significant difference
+        ]
+    )
+    await _eval_id4(snap, reasoner=stub)
+    assert stub.context is not None
+    # Exactly two DISTINCT values (app/dl collapsed), not three source-entries.
+    assert stub.context.count('"value":') == 2
+    assert "123 N Main St" in stub.context and "123 North Main Street" in stub.context
+    # app and dl are grouped under the shared value's sources; cr is the other.
+    assert "app" in stub.context and "dl" in stub.context and "cr" in stub.context
+
+
 async def test_id4_ai_failure_is_couldnt_check_never_a_defaulted_agree() -> None:
     stub = _Reasoner("agree", raise_ai=True)
     snap = _snapshot([("app", _addr("123 N Main St")), ("dl", _addr("123 North Main Street"))])
@@ -339,7 +434,6 @@ _SYNTH_SPEC = {
         "normalization": ["casefold", "strip"],
         "on_agree": {"verdict": "satisfied", "reasoning": "{count} sources agree"},
         "on_disagree": {"verdict": "fired", "reasoning": "differ: {values}"},
-        "on_cannot_tell": {"verdict": "couldnt_check", "reasoning": "cannot compare"},
     },
 }
 
@@ -365,3 +459,41 @@ async def test_registry_dispatches_consistency_by_block() -> None:
     # ID-4 saw the address residue; ID-2 saw no ssn tags → couldnt_check (fail-closed, not a crash).
     id4 = next(r for r in results if r.rule_id == "ID-4")
     assert id4.verdict is Verdict.SATISFIED
+
+
+# --------------------------------------------------------------------------- #
+# on_cannot_tell is fuzzy-only (LP-325 review, finding #3) — it is unreachable on the exact path,
+# so an exact rule must not carry it and a fuzzy rule must.
+# --------------------------------------------------------------------------- #
+def _consistency_spec(**consistency_overrides: object) -> dict[str, object]:
+    """A minimal valid consistency spec dict, then apply the block overrides for negative tests."""
+    spec = {k: v for k, v in _SYNTH_SPEC.items() if k != "consistency"}
+    block = dict(_SYNTH_SPEC["consistency"])  # type: ignore[arg-type]
+    block.update(consistency_overrides)
+    return {**spec, "consistency": block}
+
+
+def test_exact_rule_declaring_on_cannot_tell_is_rejected() -> None:
+    # on_cannot_tell can never fire on the exact path → an exact rule must not declare it (dead config).
+    bad = _consistency_spec(
+        compare_mode="exact",
+        on_cannot_tell={"verdict": "couldnt_check", "reasoning": "cannot compare"},
+    )
+    with pytest.raises(ValueError, match="on_cannot_tell"):
+        RuleSpec.model_validate(bad)
+
+
+def test_fuzzy_rule_missing_on_cannot_tell_is_rejected() -> None:
+    # The fuzzy path CAN reach cannot-tell (the AI answered "unknown") → the outcome is required.
+    bad = _consistency_spec(
+        compare_mode="fuzzy",
+        judge={
+            "system_prompt": "judge it",
+            "value_domain": ["agree", "disagree", "unknown"],
+            "consistent_value": "agree",
+            "inconsistent_value": "disagree",
+        },
+        on_cannot_tell=None,
+    )
+    with pytest.raises(ValueError, match="on_cannot_tell"):
+        RuleSpec.model_validate(bad)

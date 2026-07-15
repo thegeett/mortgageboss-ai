@@ -331,7 +331,10 @@ class ConsistencyEval(BaseModel):
     confidence_floor: float = 0.5
     on_agree: ConsistencyOutcome
     on_disagree: ConsistencyOutcome
-    on_cannot_tell: ConsistencyOutcome
+    # cannot-tell is only REACHABLE on the fuzzy path (the AI answered "unknown"); an exact rule can
+    # never hit it (it lands on_agree / on_disagree / a gate verdict), so it is fuzzy-only, mirroring
+    # `judge` — an exact rule must not carry dead config.
+    on_cannot_tell: ConsistencyOutcome | None = None
 
     @model_validator(mode="after")
     def _judge_matches_mode_and_templates_are_valid(self) -> ConsistencyEval:
@@ -341,11 +344,19 @@ class ConsistencyEval(BaseModel):
             raise ValueError(
                 "an exact consistency rule must not declare a `judge` (no AI is called)"
             )
+        if self.compare_mode == "fuzzy" and self.on_cannot_tell is None:
+            raise ValueError("a fuzzy consistency rule needs an `on_cannot_tell` outcome")
+        if self.compare_mode == "exact" and self.on_cannot_tell is not None:
+            raise ValueError(
+                "an exact consistency rule must not declare `on_cannot_tell` (it is never reached)"
+            )
         for name, outcome in (
             ("on_agree", self.on_agree),
             ("on_disagree", self.on_disagree),
             ("on_cannot_tell", self.on_cannot_tell),
         ):
+            if outcome is None:
+                continue
             try:
                 fields = _template_fields(outcome.reasoning)
             except ValueError as exc:

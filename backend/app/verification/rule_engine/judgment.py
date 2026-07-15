@@ -14,11 +14,11 @@ module carries no flow logic. Reuses ``evaluate_gate`` + the LP-313/314 AI clone
 from __future__ import annotations
 
 import json
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Mapping
 from dataclasses import dataclass
 
 from app.ai.client import AIClientError
-from app.ai.rule_judgment import RuleJudgmentResult, reason_rule_judgment
+from app.ai.rule_judgment import Reasoner, RuleJudgmentResult, reason_rule_judgment
 from app.core.logging import get_logger
 from app.verification.rule_engine.enumerators import enumerate_subjects
 from app.verification.rule_engine.gate import GateStatus, evaluate_gate
@@ -31,8 +31,8 @@ logger = get_logger(__name__)
 
 _UNKNOWN = "unknown"
 
-# The injected reasoner seam (keyless tests supply a stub; None → the real model with the spec prompt).
-Reasoner = Callable[[str], Awaitable[RuleJudgmentResult]]
+# The injected reasoner seam is the shared ``Reasoner`` alias (re-exported for existing importers such
+# as oc2.py); keyless tests supply a stub, None → the real model with the spec prompt.
 
 
 @dataclass(frozen=True)

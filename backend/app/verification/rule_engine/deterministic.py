@@ -21,7 +21,12 @@ from decimal import Decimal, InvalidOperation
 from app.ai.extraction.parsing import coerce_decimal
 from app.verification.rule_engine.enumerators import enumerate_subjects
 from app.verification.rule_engine.gate import GateResult, GateStatus, evaluate_gate
-from app.verification.rule_engine.result import LoadBearingTag, RuleEvaluation, Verdict
+from app.verification.rule_engine.result import (
+    VERDICT_BY_NAME,
+    LoadBearingTag,
+    RuleEvaluation,
+    Verdict,
+)
 from app.verification.rules.schema import Condition, satisfies
 from app.verification.rules.specs import (
     DeterministicEval,
@@ -34,12 +39,6 @@ from app.verification.snapshot.model import CalculationEntry, Snapshot
 from app.verification.snapshot.tag import Tag
 
 _UNKNOWN = "unknown"
-_VERDICT_BY_NAME = {
-    "fired": Verdict.FIRED,
-    "satisfied": Verdict.SATISFIED,
-    "needs_review": Verdict.NEEDS_REVIEW,
-    "couldnt_check": Verdict.COULDNT_CHECK,
-}
 _PERCENT = re.compile(r"(\d+(?:\.\d+)?)\s*%")
 
 
@@ -259,7 +258,7 @@ def evaluate_deterministic_rule(
                     _result(
                         spec,
                         subject_id,
-                        _VERDICT_BY_NAME[outcome.verdict],
+                        VERDICT_BY_NAME[outcome.verdict],
                         reasoning,
                         subject_tags,
                         verdict_confidence=gate.verdict_confidence,

@@ -24,6 +24,18 @@ class Verdict(StrEnum):
     NOT_APPLICABLE = "not_applicable"  # this subject is outside the rule's scope
 
 
+# The spec-outcome verdict names → Verdict, shared by every generic evaluator that reads a declared
+# `verdict:` string from a spec (deterministic, consistency). One mapping so a rename/addition can
+# never leave two evaluators disagreeing on which outcome strings are legal. NOT_APPLICABLE is not a
+# declarable outcome (it is derived, not authored), so it is intentionally absent.
+VERDICT_BY_NAME: dict[str, Verdict] = {
+    "fired": Verdict.FIRED,
+    "satisfied": Verdict.SATISFIED,
+    "needs_review": Verdict.NEEDS_REVIEW,
+    "couldnt_check": Verdict.COULDNT_CHECK,
+}
+
+
 @dataclass(frozen=True)
 class LoadBearingTag:
     """One tag a verdict relied on, carried inline so the verdict never cites a bare number."""
