@@ -9677,3 +9677,49 @@ conservative default, the armor). **New gap reported (not patched):** a `belongs
 in MISMO (or vice versa) is not evaluated for per-borrower income — a borrower-set reconciliation edge, a
 small follow-on. Cross-refs: §3D/§8; LP-325/326 (keying), LP-327 (the generalization pattern + per-subject
 fail-closed), LP-331 (GAP-D, the consumer), LP-323-IN-B/-IN-C (PIN #1), LP-323-ID-B (GAP-D).
+
+## ADR-275: Derived tags materialize LAST (data-flow), and IN-1 is de-activated pending calibration (LP-333)
+
+**Context.** LP-333's diagnosis of the inert Income rules found two things the code — not the ticket text
+— revealed. (1) A DATA-FLOW gap: `materialize_tags` ran derived recipes (step 2) against the ORIGINAL,
+pre-materialization snapshot, so a recipe that AGGREGATES other materialized tags (all four income
+recipes sum a borrower's documented income across its documents) read an EMPTY tags layer → every income
+derived tag abstained → the rule couldnt_checked LIVE. (2) IN-1 — which LP-332 added to `ACTIVE_RULE_IDS`
+— therefore couldnt_checked on every real file, AND its feed (`income.documented_monthly`) is an
+UNCALIBRATED AI structuring tag not even wired into the orchestrator's `_required_ai_groups`.
+
+**Decision 1 — derived runs LAST, against the freshly-materialized snapshot.** `materialize_tags` now
+orders parsed → ai → DERIVED, and passes the derived producer a snapshot carrying the parsed + AI tags
+built this run. A recipe that reads only raw MISMO (`id.app_required_fields_present`) is unaffected
+(identical output either order — the regression canary, asserted). No AI group reads a derived tag, so the
+reorder introduces no cycle; equivalence holds (the full suite + LF-6T3N trace unchanged). This is the
+generic fix that unblocks EVERY aggregate-derived tag, not a per-rule patch.
+
+**Decision 2 — activate ONLY what genuinely materializes AND is trustworthy; de-activate IN-1.** The
+discipline (LP-325/326/331): a rule that uniformly couldnt_checks fills Tab 1 with noise and trains
+processors to ignore the tab where real blockers live. IN-1 did exactly that live. Even with the data-flow
+fix, activating IN-1 would require wiring its uncalibrated AI feed into a deterministic FRAUD verdict —
+the precise "ship an uncalibrated tag into a live verdict" risk the wave has flagged since LP-317
+(calibration is keyless — no income AI tag has been scored against real content). So **IN-1 is REMOVED
+from `ACTIVE_RULE_IDS`**: its PIN #1 mechanism (LP-332) is proven and unchanged; live activation is
+DEFERRED until `income.documented_monthly` is calibrated and its recipe dependency is declared/wired.
+Correcting LP-332's premature activation is the honest call — the code is the gate of record.
+
+**What activated instead: IN-2** (pay-stub recency). Its chain is `income.pay_date` (PARSED, a
+deterministic passthrough — no calibration risk) → the loan-level `income.days_since_most_recent_pay`
+(derived). With the data-flow fix it produces REAL verdicts end-to-end with ZERO AI groups run (asserted:
+fires for a stale stub, satisfied for a recent one, couldnt_check with no pay date). Loan-level recency is
+correct (the file's most-recent stub — no per-borrower masking, unlike IN-1/IN-3).
+
+**Consequences.** A newly-surfaced generalization gap (REPORTED, not patched): `_required_ai_groups`
+traces a rule's DIRECT load-bearing tags, so a DERIVED load-bearing tag's feeding AI groups are never
+required — an UNDECLARED recipe dependency. This blocks the live wiring of IN-1/IN-3/IN-5/IN-10 (their
+derived/AI feeds), and its fix is a declared `depends_on` on derived tags (a follow-on). Two spec data
+fixes landed (bucket A): IN-8's applicability `verification_of_employment` → `voe` and IN-9's
+`offer_letter` → `employment_offer_letter` (the classifier's `DOCUMENT_TYPE_INDICATORS` emits `voe` /
+`employment_offer_letter`; the specs referenced types the classifier never produces, so the rules were
+silently `not_applicable` on every file). The remaining Income rules stay INERT with precise causes (the
+LP-333 bucket table): missing extraction fields (IN-4/7), uncalibrated AI feeds (IN-5/10), the
+undeclared-recipe-dependency + calibration (IN-1/3), per-borrower-with-document-context AI (IN-7/13/14),
+and PIN #2/#3 (IN-11/12). Cross-refs: LP-317 (calibration is keyless), LP-326 (the producers), LP-331/332
+(borrower keying), LP-323-IN-B/-C (the rules + the PINs).

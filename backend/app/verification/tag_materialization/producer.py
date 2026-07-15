@@ -58,6 +58,12 @@ async def materialize_tags(
         for sid, tags in ({} if snapshot.tags.absent else snapshot.tags.by_subject).items()
     }
 
+    # Order is parsed → ai → DERIVED-LAST (LP-333). A derived recipe may AGGREGATE other materialized
+    # tags (the income recipes sum a borrower's documented income across its documents), so it must see
+    # the parsed + AI tags produced THIS run — not the original (pre-materialization) tags layer. Derived
+    # therefore runs last, against a snapshot carrying the freshly-built tags. A loan-level recipe that
+    # reads only raw MISMO (id.app_required_fields_present) is unaffected (identical output either order).
+
     # 1. parsed — map the declared extraction field for each subject (absent field → absent tag).
     for decl in declarations.values():
         if decl.mode is not ProductionMode.PARSED or not in_scope(decl.subject):
@@ -69,12 +75,7 @@ async def materialize_tags(
             if tag is not None:
                 by_subject.setdefault(subject_id, {})[decl.tag_id] = tag
 
-    # 2. derived — deterministic recipes.
-    for decl in declarations.values():
-        if decl.mode is ProductionMode.DERIVED and in_scope(decl.subject):
-            _merge(by_subject, produce_derived_tags(decl, snapshot))
-
-    # 3. ai — one bounded structuring pass per AI group (co-locating its tags on one subject).
+    # 2. ai — one bounded structuring pass per AI group (co-locating its tags on one subject).
     for group in ai_groups.values():
         if not in_scope(group.subject) or (
             only_groups is not None and group.key not in only_groups
@@ -93,6 +94,13 @@ async def materialize_tags(
             cache=ai_cache,
         )
         _merge(by_subject, produced)
+
+    # 3. derived — deterministic recipes, run LAST against the snapshot carrying the parsed + AI tags so
+    #    a recipe that aggregates them sees them (the LP-333 data-flow fix).
+    working = snapshot.model_copy(update={"tags": TagsSection.present(by_subject)})
+    for decl in declarations.values():
+        if decl.mode is ProductionMode.DERIVED and in_scope(decl.subject):
+            _merge(by_subject, produce_derived_tags(decl, working))
 
     return snapshot.model_copy(update={"tags": TagsSection.present(by_subject)})
 

@@ -321,7 +321,7 @@ def test_in8_voe_scope_expected_absence_and_verbal_edge() -> None:
             "IN-8",
             {
                 "voe": (
-                    "verification_of_employment",
+                    "voe",  # LP-333: classifier document type
                     {"income.voe_present": _tag("no")},
                 ),  # case 1 fire
                 "pay": ("paystub", {}),  # scope: not_applicable
@@ -330,9 +330,7 @@ def test_in8_voe_scope_expected_absence_and_verbal_edge() -> None:
     }
     assert by["voe"] is Verdict.FIRED and by["pay"] is Verdict.NOT_APPLICABLE
     # case 2 clean; case 13 (a verbal VOE where written required) — the tag encodes acceptability.
-    ok = _det_doc(
-        "IN-8", {"voe": ("verification_of_employment", {"income.voe_present": _tag("yes")})}
-    )
+    ok = _det_doc("IN-8", {"voe": ("voe", {"income.voe_present": _tag("yes")})})
     assert ok[0].verdict is Verdict.SATISFIED
     # case 5/12: no VOE document at all — a VOE is EXPECTED (LP-330) → couldnt_check, never not_applicable.
     miss = _det_doc("IN-8", {"pay": ("paystub", {})})
@@ -340,9 +338,13 @@ def test_in8_voe_scope_expected_absence_and_verbal_edge() -> None:
 
 
 def test_in9_offer_letter_scope_and_fire() -> None:
-    fire = _det_doc("IN-9", {"off": ("offer_letter", {"income.offer_letter_present": _tag("no")})})
+    fire = _det_doc(
+        "IN-9", {"off": ("employment_offer_letter", {"income.offer_letter_present": _tag("no")})}
+    )
     assert fire[0].verdict is Verdict.FIRED  # future job, no valid offer letter
-    ok = _det_doc("IN-9", {"off": ("offer_letter", {"income.offer_letter_present": _tag("yes")})})
+    ok = _det_doc(
+        "IN-9", {"off": ("employment_offer_letter", {"income.offer_letter_present": _tag("yes")})}
+    )
     assert ok[0].verdict is Verdict.SATISFIED
     na = _det_doc("IN-9", {"pay": ("paystub", {})})
     assert na[0].verdict is Verdict.NOT_APPLICABLE  # not expected — offer letters are the exception

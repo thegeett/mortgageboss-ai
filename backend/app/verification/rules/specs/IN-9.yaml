@@ -31,7 +31,7 @@ deterministic:
   applicability:
     tag: document.document_type
     op: eq
-    value: offer_letter
+    value: employment_offer_letter  # LP-333: the classifier emits "employment_offer_letter"
   load_bearing_tags:
     - income.offer_letter_present
   gated_tags:

@@ -35,11 +35,18 @@ ACTIVE_RULE_IDS: tuple[str, ...] = (
     "ID-6",
     "ID-7",
     "ID-9",
-    # LP-332 — borrower-keyed materialization activates these (their tags now materialize under the
-    # borrower subject): ID-8 (citizenship/residency eligibility) + IN-1 (per-borrower income shortfall,
-    # the PIN #1 fix). Both were authored + evaluated but blocked on the borrower_id ↔ MISMO resolution.
+    # LP-332 — ID-8 (citizenship/residency eligibility): its inputs (id.citizenship parsed under the
+    # borrower subject, program.type parsed under loan) are deterministic passthroughs (no uncalibrated
+    # AI), and its judgment is ratification-pending — genuinely live.
     "ID-8",
-    "IN-1",
+    # LP-333 — IN-2 (pay-stub recency): parsed-only (income.pay_date → the loan-level days-since-pay
+    # derived tag), no AI, no calibration risk; verified to produce real verdicts end-to-end.
+    "IN-2",
+    # LP-333 DE-ACTIVATED IN-1: LP-332 activated it, but the diagnosis found it couldnt_checks LIVE — the
+    # derived producer read the pre-materialization tags (fixed here), AND its feed income.documented_monthly
+    # is (a) not wired into _required_ai_groups (an undeclared recipe dependency) and (b) an UNCALIBRATED
+    # AI structuring tag feeding a deterministic FRAUD verdict. The PIN #1 mechanism (LP-332) is proven and
+    # unchanged; live activation is deferred until income.documented_monthly is calibrated + wired. See LP-333.
 )
 
 

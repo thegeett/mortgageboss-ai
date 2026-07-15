@@ -31,7 +31,7 @@ deterministic:
   applicability:
     tag: document.document_type
     op: eq
-    value: verification_of_employment
+    value: voe  # LP-333: the classifier emits "voe", not "verification_of_employment" (was silently not_applicable)
   # A VOE is expected for the file (a conservative default — see the Priya list); its confident absence
   # is a GAP → couldnt_check (LP-330), never not_applicable.
   applicability_expected: true

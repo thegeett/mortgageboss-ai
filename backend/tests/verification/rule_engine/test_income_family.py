@@ -240,7 +240,7 @@ async def test_in5_different_employer_fires_and_single_source_couldnt_check() ->
 # --------------------------------------------------------------------------- #
 def test_in8_voe_scope_and_expected_absence() -> None:
     # A VOE doc marked not-present → fired; a non-VOE doc → not_applicable; NO VOE doc → couldnt_check.
-    docs = [_doc("voe", dtype="verification_of_employment"), _doc("pay", dtype="paystub")]
+    docs = [_doc("voe", dtype="voe"), _doc("pay", dtype="paystub")]  # LP-333: classifier doc type
     by_subject = {"voe": {"income.voe_present": _tag("no")}}
     by = {
         r.subject_id: r.verdict
