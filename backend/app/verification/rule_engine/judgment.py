@@ -149,7 +149,16 @@ async def evaluate_judgment_rule(
     jud = spec.judgment
     assert jud is not None, f"{spec.rule_id} is not a judgment rule"
     floor = confidence_floor if confidence_floor is not None else jud.confidence_floor
-    subject_id, subject_tags = enumerate_subjects(spec.subject_enumeration, snapshot)[0]
+    # A judgment rule is single-subject (loan-level); this evaluator produces ONE verdict + ONE tag.
+    # Fail loud on a misconfigured enumeration rather than silently judging only the first subject
+    # (or IndexError-ing on an empty one).
+    subjects = enumerate_subjects(spec.subject_enumeration, snapshot)
+    if len(subjects) != 1:
+        raise ValueError(
+            f"judgment rule {spec.rule_id} must enumerate exactly one subject, got {len(subjects)} "
+            f"(subject_enumeration={spec.subject_enumeration!r} is not single-subject)"
+        )
+    subject_id, subject_tags = subjects[0]
 
     reason_fn = reasoner if reasoner is not None else _bind_prompt(jud.system_prompt)
 

@@ -55,7 +55,7 @@ from app.services.tag_production import (
 from app.verification.rule_engine.engine import DEFAULT_CONFIDENCE_FLOOR
 from app.verification.rule_engine.enumerators import LOAN_SUBJECT
 from app.verification.rule_engine.judgment import Reasoner as Oc2Reasoner
-from app.verification.rule_engine.registry import evaluate_rules
+from app.verification.rule_engine.registry import ACTIVE_RULE_IDS, evaluate_rules
 from app.verification.rule_engine.result import RuleEvaluation
 from app.verification.snapshot.builder import build_snapshot
 from app.verification.snapshot.model import Snapshot, TagsSection
@@ -64,9 +64,11 @@ from app.verification.snapshot.tag import Tag, TagProducedBy
 
 logger = get_logger(__name__)
 
-# The rule → finding-category map (which area of the file each rule concerns). AS-1 is an assets
-# rule; OC-2 is a property/occupancy rule. persist_evaluation_findings takes ONE category, so results
-# are persisted per rule-group.
+# The rule → finding-category map (which area of the file each rule concerns), a display lookup only.
+# The set of rules that RAN is the registry's ACTIVE_RULE_IDS (the single source of truth) — NOT this
+# map — so reconciliation's evaluated_rule_ids can never drift from what actually evaluated (a drift
+# would drop a rule's priors and mint-collide on the uniqueness index). An unmapped rule falls back to
+# a default category (cosmetic); a missing category never breaks reconciliation.
 _RULE_CATEGORY: dict[str, FindingCategory] = {
     "AS-1": FindingCategory.ASSETS,
     "OC-2": FindingCategory.PROPERTY,
@@ -229,9 +231,10 @@ def _retire_eligible_rules(snapshot: Snapshot) -> frozenset[str]:
     A degraded run must NOT be read as "the subject is gone" (that would flip real open findings to
     green — false-closed). AS-1 enumerates per-transaction subjects from the documents section: if
     that section is ABSENT (a build degradation), it saw zero transactions and is NOT retire-eligible.
-    OC-2 has a single loan-level subject that is always evaluated, so it is always eligible.
+    OC-2 has a single loan-level subject that is always evaluated, so it is always eligible. Starts
+    from the registry's ACTIVE_RULE_IDS (what actually ran) — never a separate list.
     """
-    eligible = set(_RULE_CATEGORY)
+    eligible = set(ACTIVE_RULE_IDS)
     if snapshot.documents.absent:
         eligible.discard("AS-1")
     return frozenset(eligible)
@@ -260,7 +263,8 @@ async def _persist(
         verification_id=verification_id,
         run_id=run_id,
         results=results,
-        evaluated_rule_ids=frozenset(_RULE_CATEGORY),
+        # The rules that RAN — the registry, the single source of truth — never the category map.
+        evaluated_rule_ids=frozenset(ACTIVE_RULE_IDS),
         category_by_rule=_RULE_CATEGORY,
         retire_eligible_rule_ids=retire_eligible_rule_ids,
     )

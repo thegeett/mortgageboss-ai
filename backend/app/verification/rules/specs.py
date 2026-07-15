@@ -24,6 +24,7 @@ rule (AS-1); it is generalized in LP-308. Do not treat the shape as final.
 
 from __future__ import annotations
 
+import string
 from functools import cache
 from pathlib import Path
 
@@ -36,6 +37,17 @@ from app.verification.rules.schema import Operator
 
 # The spec files live co-located with the rules, one YAML per rule_id (AS-1.yaml).
 _SPECS_DIR = Path(__file__).with_name("specs")
+
+_FORMATTER = string.Formatter()
+
+
+def _template_fields(template: str) -> set[str]:
+    """The base operand names a ``str.format`` template references (raises on a malformed template)."""
+    return {
+        name.split(".")[0].split("[")[0]
+        for _literal, name, _spec, _conv in _FORMATTER.parse(template)
+        if name
+    }
 
 
 class RuleSpecError(Exception):
@@ -185,6 +197,44 @@ class DeterministicEval(BaseModel):
     operands: dict[str, Operand] = PydField(default_factory=dict)
     outcomes: tuple[OutcomeRule, ...] = PydField(min_length=1)
     confidence_floor: float = 0.5
+
+    @model_validator(mode="after")
+    def _outcomes_are_exhaustive_and_reference_real_operands(self) -> DeterministicEval:
+        # A `default: true` catch-all LAST guarantees EVERY subject reaches a verdict — otherwise a
+        # subject that matches no branch is silently dropped (no finding = false green). Only the LAST
+        # outcome may be default (an earlier default shadows the branches after it).
+        if not self.outcomes[-1].default:
+            raise ValueError(
+                "deterministic outcomes must end with a `default: true` catch-all, else a subject "
+                "can match no branch and be silently dropped"
+            )
+        if any(o.default for o in self.outcomes[:-1]):
+            raise ValueError(
+                "only the LAST outcome may be `default: true` (an earlier default shadows the "
+                "branches after it)"
+            )
+        operand_names = set(self.operands)
+        for outcome in self.outcomes:
+            if outcome.when_compare is not None:
+                for ref in (outcome.when_compare.left, outcome.when_compare.right):
+                    if ref not in operand_names:
+                        raise ValueError(
+                            f"when_compare references unknown operand {ref!r} "
+                            f"(operands: {sorted(operand_names)})"
+                        )
+            # reasoning is `str.format(**operands)` at eval time — a stray brace or an unknown
+            # placeholder would crash the run, so both are caught at load.
+            try:
+                fields = _template_fields(outcome.reasoning)
+            except ValueError as exc:
+                raise ValueError(f"outcome reasoning template is malformed: {exc}") from exc
+            unknown = fields - operand_names
+            if unknown:
+                raise ValueError(
+                    f"outcome reasoning references unknown operand(s) {sorted(unknown)} "
+                    f"(operands: {sorted(operand_names)})"
+                )
+        return self
 
 
 class JudgmentEval(BaseModel):

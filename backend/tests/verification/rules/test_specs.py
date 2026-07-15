@@ -237,3 +237,74 @@ def test_rule_spec_is_frozen() -> None:
     spec = load_rule_spec("AS-1")
     with pytest.raises(Exception):  # noqa: B017 - pydantic frozen ValidationError
         spec.rule_id = "AS-2"
+
+
+# --------------------------------------------------------------------------- #
+# Deterministic-outcome load-time validation (LP-324 review)
+#
+# The generic evaluator's outcome list drives every verdict; a spec with a hole
+# in it (no catch-all, a shadowing default, a dangling operand reference, a
+# malformed reasoning template) must fail LOUD at load — not crash mid-run or
+# silently drop a subject to a false green.
+# --------------------------------------------------------------------------- #
+
+
+def test_outcomes_without_a_default_catchall_raise_invalid(
+    tmp_path: Path, as1_raw: dict[str, Any]
+) -> None:
+    # Drop the trailing catch-all's `default: true` → a subject that matches no branch would be
+    # silently dropped (no finding = false green). Must fail at load.
+    bad = deepcopy(as1_raw)
+    bad["deterministic"]["outcomes"][-1]["default"] = False
+    _write_spec(tmp_path, "AS-1", bad)
+    with pytest.raises(RuleSpecInvalid, match="default"):
+        _load_spec_from(tmp_path, "AS-1")
+
+
+def test_only_the_last_outcome_may_be_default(tmp_path: Path, as1_raw: dict[str, Any]) -> None:
+    # A default earlier than last shadows every branch after it (first match wins) → loud at load.
+    bad = deepcopy(as1_raw)
+    bad["deterministic"]["outcomes"][0]["default"] = True  # last stays default too
+    _write_spec(tmp_path, "AS-1", bad)
+    with pytest.raises(RuleSpecInvalid, match="only the LAST outcome"):
+        _load_spec_from(tmp_path, "AS-1")
+
+
+def test_when_compare_referencing_unknown_operand_raises(
+    tmp_path: Path, as1_raw: dict[str, Any]
+) -> None:
+    # A comparison against an operand that does not exist would never resolve at eval time → loud.
+    bad = deepcopy(as1_raw)
+    bad["deterministic"]["outcomes"][0]["when_compare"]["left"] = "nonexistent_operand"
+    _write_spec(tmp_path, "AS-1", bad)
+    with pytest.raises(RuleSpecInvalid, match="when_compare references unknown operand"):
+        _load_spec_from(tmp_path, "AS-1")
+
+
+def test_reasoning_template_referencing_unknown_operand_raises(
+    tmp_path: Path, as1_raw: dict[str, Any]
+) -> None:
+    # reasoning is `str.format(**operands)` at eval time — an unknown placeholder would KeyError the
+    # run. Caught at load instead.
+    bad = deepcopy(as1_raw)
+    bad["deterministic"]["outcomes"][0]["reasoning"] = "deposit {no_such_operand} exceeds it"
+    _write_spec(tmp_path, "AS-1", bad)
+    with pytest.raises(RuleSpecInvalid, match="reasoning references unknown operand"):
+        _load_spec_from(tmp_path, "AS-1")
+
+
+def test_malformed_reasoning_template_raises(tmp_path: Path, as1_raw: dict[str, Any]) -> None:
+    # A stray unclosed brace would raise ValueError from str.format at eval time → caught at load.
+    bad = deepcopy(as1_raw)
+    bad["deterministic"]["outcomes"][0]["reasoning"] = "deposit {observed exceeds it"
+    _write_spec(tmp_path, "AS-1", bad)
+    with pytest.raises(RuleSpecInvalid, match="reasoning template is malformed"):
+        _load_spec_from(tmp_path, "AS-1")
+
+
+def test_real_as1_spec_passes_outcome_validation() -> None:
+    # The shipped AS-1 spec satisfies every new outcome rule (catch-all last, real operand refs,
+    # valid reasoning templates) — the validators are not over-strict.
+    spec = load_rule_spec("AS-1")
+    assert spec.deterministic is not None
+    assert spec.deterministic.outcomes[-1].default is True

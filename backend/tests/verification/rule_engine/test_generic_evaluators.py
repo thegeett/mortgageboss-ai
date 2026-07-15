@@ -13,6 +13,7 @@ from uuid import uuid4
 
 import pytest
 from app.verification.rule_engine.deterministic import evaluate_deterministic_rule
+from app.verification.rule_engine.judgment import evaluate_judgment_rule
 from app.verification.rule_engine.registry import ACTIVE_RULE_IDS, evaluate_rules
 from app.verification.rule_engine.result import Verdict
 from app.verification.rules.specs import RuleSpec
@@ -110,3 +111,64 @@ async def test_registry_dispatches_the_active_rule_set_by_kind() -> None:
     # no transaction subjects on this snapshot → no AS-1 results, and the run still completes.
     assert judgment_tags == {}
     assert all(r.rule_id in ACTIVE_RULE_IDS for r in results)
+
+
+# A judgment spec whose enumeration is NOT single-subject (per_deposit, not loan). Judgment rules are
+# loan-level by contract — the evaluator produces ONE verdict + ONE tag; a mis-declared enumeration
+# must fail loud, never silently judge the first subject (or IndexError on an empty one).
+_MISCONFIGURED_JUDGMENT_SPEC = {
+    "rule_id": "JBAD-1",
+    "name": "misconfigured judgment rule",
+    "category": "Occupancy",
+    "kind": "judgmental",
+    "numeric_check": False,
+    "criteria": "n/a",
+    "applicability": {"scope": "all loans", "trigger": "once per loan"},
+    "required_inputs": [
+        {"name": "flag", "snapshot_path": 'tags["loan"]["x.flag"]', "description": "the flag"}
+    ],
+    "reference_values": {"priya_validated": False, "threshold_needs_signoff": False},
+    "subject_enumeration": "per_deposit",  # WRONG for a judgment rule — yields 0..N subjects
+    "subject_key_fields": ["content_id"],
+    "evidence_required": "n/a",
+    "guideline_reference": "n/a — synthetic test rule",
+    "spec_version": 1,
+    "judgment": {
+        "subject": "loan",
+        "load_bearing_tags": ["x.flag"],
+        "reasoned_over": ["x.flag"],
+        "output_tag": "x.judged",
+        "value_domain": ["yes", "no", "unknown"],
+        "system_prompt": "judge the flag",
+    },
+}
+
+
+async def test_judgment_rule_with_non_single_subject_enumeration_fails_loud() -> None:
+    # per_deposit over a snapshot with zero transactions → 0 subjects → the guard raises rather than
+    # IndexError-ing on subjects[0] (the pre-fix silent failure).
+    spec = RuleSpec.model_validate(_MISCONFIGURED_JUDGMENT_SPEC)
+    with pytest.raises(ValueError, match="must enumerate exactly one subject"):
+        await evaluate_judgment_rule(spec, _loan_snapshot(None), confidence_floor=0.5)
+
+
+def test_deterministic_no_outcome_match_fails_closed_to_couldnt_check() -> None:
+    # Defense in depth for the load-time default-outcome validator: if a spec somehow reaches the
+    # evaluator with a non-exhaustive outcome list, a matchless subject fails closed to couldnt_check
+    # rather than being silently dropped (no finding = false green). Build such a spec by bypassing
+    # the model validator (construct.__dict__) so we exercise the runtime for...else fallback.
+    spec = RuleSpec.model_validate(_SYNTHETIC_SPEC)
+    assert spec.deterministic is not None
+    # Replace outcomes with a single NON-default branch that cannot match ("ok" flag, guard wants ne).
+    non_exhaustive = spec.deterministic.model_copy(
+        update={
+            "outcomes": (
+                spec.deterministic.outcomes[0],  # the `x.flag ne ok` fired branch, no catch-all
+            )
+        }
+    )
+    spec_no_catchall = spec.model_copy(update={"deterministic": non_exhaustive})
+
+    results = evaluate_deterministic_rule(spec_no_catchall, _loan_snapshot("ok"))
+    assert [r.verdict for r in results] == [Verdict.COULDNT_CHECK]
+    assert "no outcome matched" in results[0].reasoning

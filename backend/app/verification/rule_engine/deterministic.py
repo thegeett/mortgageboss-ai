@@ -268,6 +268,20 @@ def evaluate_deterministic_rule(
                     )
                 )
                 break
+        else:
+            # Unreachable given the load-time default-outcome validation, but NEVER silently drop a
+            # subject: fail closed to couldnt_check rather than emit no finding (a false green).
+            results.append(
+                _result(
+                    spec,
+                    subject_id,
+                    Verdict.COULDNT_CHECK,
+                    "no outcome matched this subject — cannot reach a verdict",
+                    subject_tags,
+                    verdict_confidence=gate.verdict_confidence,
+                    threshold_used=threshold_used,
+                )
+            )
 
     return results
 
