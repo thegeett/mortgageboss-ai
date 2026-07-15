@@ -27,9 +27,14 @@ _UNKNOWN = "unknown"
 
 
 def _income_numbers(snapshot: Snapshot, tag_id: str) -> tuple[Decimal, bool, bool]:
-    """Sum a per-document numeric income tag across every non-loan subject → (total, any_present,
-    any_unknown). A tag valued ``"unknown"`` or unparseable marks ``any_unknown`` (absent≠unknown — an
-    incomplete sum must abstain, never silently understate). Used by the loan-level income recipes."""
+    """Sum a numeric income tag across every non-loan subject → (total, any_present, any_unknown). A
+    tag valued ``"unknown"`` or unparseable marks ``any_unknown`` (absent≠unknown — an incomplete sum
+    must abstain, never silently understate). Used by the loan-level income recipes.
+
+    CONTRACT (LP-323-IN-B): the sum assumes ONE income figure PER SUBJECT — a household total is the
+    sum over borrowers, not over paystubs. Materialization MUST therefore key these income tags per
+    BORROWER (one figure each), NOT per paystub: keying a monthly figure under each of a borrower's N
+    paystubs would sum to Nx the income here (this recipe cannot dedup — a tag carries no borrower id)."""
     total = Decimal(0)
     any_present = any_unknown = False
     if snapshot.tags.absent:
@@ -72,12 +77,16 @@ def _income_documented_shortfall(snapshot: Snapshot) -> tuple[JsonValue, str]:
     """income.documented_income_shortfall_pct — (stated - documented) / stated, loan-level aggregate.
 
     SIGNED (a SHORTFALL), NOT abs: documented ABOVE stated (a raise) is a NEGATIVE shortfall and must
-    NOT fire (LP-323-IN-A domain edge). Abstains when stated is absent/zero or documented is
-    incomplete (any unknown) — never a fabricated ratio."""
-    stated, s_present, _ = _income_numbers(snapshot, "income.stated_monthly")
+    NOT fire (LP-323-IN-A domain edge). Abstains when EITHER sum is absent/incomplete (any unknown) or
+    stated is zero — an incomplete sum understates the total and would corrupt the ratio, never a
+    fabricated ratio."""
+    stated, s_present, s_unknown = _income_numbers(snapshot, "income.stated_monthly")
     documented, d_present, d_unknown = _income_numbers(snapshot, "income.documented_monthly")
-    if not s_present or stated == 0:
-        return _UNKNOWN, "stated monthly income is absent or zero — cannot compute a shortfall"
+    if not s_present or s_unknown or stated == 0:
+        return (
+            _UNKNOWN,
+            "stated monthly income is absent, incomplete, or zero — cannot compute a shortfall",
+        )
     if not d_present or d_unknown:
         return (
             _UNKNOWN,
@@ -94,19 +103,22 @@ def _income_documented_shortfall(snapshot: Snapshot) -> tuple[JsonValue, str]:
 def _income_ytd_annualized_shortfall(snapshot: Snapshot) -> tuple[JsonValue, str]:
     """income.ytd_annualized_shortfall_pct — (documented - ytd_monthly) / documented, loan-level.
 
-    ytd_monthly = total YTD gross / elapsed months (the most-recent pay date's month number). Fires
+    ytd_monthly = total YTD gross / elapsed months (the MOST-RECENT pay date's month number). Fires
     when the paystub YTD does NOT support the documented monthly (a positive shortfall). Abstains when
-    YTD, a pay date, or documented income is missing."""
+    YTD, a pay date, or documented income is missing/incomplete."""
     ytd, ytd_present, ytd_unknown = _income_numbers(snapshot, "income.ytd_gross")
-    documented, d_present, _ = _income_numbers(snapshot, "income.documented_monthly")
+    documented, d_present, d_unknown = _income_numbers(snapshot, "income.documented_monthly")
     pay_dates = _income_dates(snapshot, "income.pay_date")
     if not ytd_present or ytd_unknown:
         return _UNKNOWN, "year-to-date gross is absent or incomplete — cannot annualize"
     if not pay_dates:
         return _UNKNOWN, "no pay date — cannot determine the elapsed period for the YTD figure"
-    if not d_present or documented == 0:
-        return _UNKNOWN, "documented monthly income is absent or zero — cannot compare"
-    elapsed_months = max(d.month for d in pay_dates)  # month number of the most recent pay date
+    if not d_present or d_unknown or documented == 0:
+        return _UNKNOWN, "documented monthly income is absent, incomplete, or zero — cannot compare"
+    # The MOST-RECENT pay date's month number is the elapsed YTD period. Use max(pay_dates).month —
+    # NOT max(d.month ...), which across a year boundary (a Dec + Jan paystub) would pick December's
+    # 12 over January's most-recent 1 and understate the monthly figure into a false shortfall.
+    elapsed_months = max(pay_dates).month
     ytd_monthly = ytd / Decimal(elapsed_months)
     shortfall = (documented - ytd_monthly) / documented
     return (
@@ -125,8 +137,14 @@ def _income_max_employment_gap(snapshot: Snapshot) -> tuple[JsonValue, str]:
     ends = sorted(_income_dates(snapshot, "income.employment_end"))
     if len(starts) < 2 or not ends:
         return _UNKNOWN, "fewer than two dated employment records — no gap to measure"
-    # The largest gap between a prior job's end and the next job's start.
-    gaps = [(start - end).days for end in ends for start in starts if start > end]
+    # Each end pairs with the NEXT start (the earliest start after it), NOT every later start — else the
+    # max would span intervening jobs (end of job A → start of job C) and overstate a gap that job B
+    # actually fills. The largest of those consecutive gaps is the employment gap.
+    gaps: list[int] = []
+    for end in ends:
+        later_starts = [s for s in starts if s > end]
+        if later_starts:
+            gaps.append((min(later_starts) - end).days)
     if not gaps:
         return _UNKNOWN, "no employment record starts after a prior one ends — cannot measure a gap"
     max_gap = max(gaps)
@@ -143,6 +161,14 @@ def _income_days_since_recent_pay(snapshot: Snapshot) -> tuple[JsonValue, str]:
         return _UNKNOWN, "no pay date on any document — cannot measure recency"
     most_recent = max(pay_dates)
     age = (snapshot.created_at.date() - most_recent).days
+    if age < 0:
+        # A pay date AFTER the file date is a data error, not "ultra-fresh". Emitting the negative age
+        # would let a staleness rule read it as recent — abstain (couldnt_check) so it is surfaced.
+        return (
+            _UNKNOWN,
+            f"the most recent pay date {most_recent.isoformat()} is AFTER the file date — a "
+            "future-dated paystub cannot measure recency",
+        )
     return str(
         age
     ), f"most recent pay date {most_recent.isoformat()} is {age} day(s) before the file date"

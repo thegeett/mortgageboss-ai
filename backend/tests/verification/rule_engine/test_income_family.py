@@ -36,6 +36,7 @@ from app.verification.tag_materialization.derived import (
     _income_days_since_recent_pay,
     _income_documented_shortfall,
     _income_max_employment_gap,
+    _income_ytd_annualized_shortfall,
     produce_derived_tags,
 )
 
@@ -143,6 +144,75 @@ def test_recipe_gap_and_recency_abstain_below_two_or_absent() -> None:
     paid = _snap(docs=[_doc("d")], by_subject={"d": {"income.pay_date": _parsed("2026-06-01")}})
     val, _ = _income_days_since_recent_pay(paid)
     assert val == "44"  # 2026-07-15 - 2026-06-01
+
+
+def test_recipe_ytd_uses_most_recent_pay_month_across_a_year_boundary() -> None:
+    # LP-323-IN-B review #1: elapsed months = the MOST-RECENT pay date's month (Jan → 1), NOT the max
+    # month number (a Dec paystub's 12). A Dec + Jan pair (a January-collected file) must annualize
+    # ytd/1, not ytd/12 — else the monthly is understated 12x and a false shortfall fires.
+    snap = _snap(
+        docs=[_doc("dec"), _doc("jan")],
+        by_subject={
+            "dec": {"income.pay_date": _parsed("2025-12-31")},  # older; no ytd on this stub
+            "jan": {
+                "income.ytd_gross": _parsed("6000"),
+                "income.documented_monthly": _parsed("6000"),
+                "income.pay_date": _parsed("2026-01-20"),  # most recent → month 1
+            },
+        },
+    )
+    value, reason = _income_ytd_annualized_shortfall(snap)
+    assert (
+        value == "0" and "1 month" in reason
+    )  # ytd 6000 / 1 month = 6000/mo = documented → no shortfall
+
+
+def test_recipe_employment_gap_pairs_consecutive_not_spanning_records() -> None:
+    # LP-323-IN-B review #2: three back-to-back jobs (A end, B fills the middle, C start). The gap is
+    # the largest CONSECUTIVE gap (31 days), NOT job-A-end → job-C-start spanning job B (~1127 days).
+    snap = _snap(
+        docs=[_doc("a"), _doc("b"), _doc("c")],
+        by_subject={
+            "a": {"income.employment_end": _parsed("2020-01-01")},
+            "b": {
+                "income.employment_start": _parsed("2020-02-01"),
+                "income.employment_end": _parsed("2023-01-01"),
+            },
+            "c": {"income.employment_start": _parsed("2023-02-01")},
+        },
+    )
+    value, _ = _income_max_employment_gap(snap)
+    assert value == "31"  # the consecutive gap, not the B-spanning 1127-day cartesian pair
+
+
+def test_recipe_documented_shortfall_abstains_on_partial_unknown_stated() -> None:
+    # LP-323-IN-B review #3: one borrower's stated income unknown → the sum is INCOMPLETE → abstain,
+    # never a corrupted ratio against an understated stated total.
+    snap = _snap(
+        docs=[_doc("b1"), _doc("b2")],
+        by_subject={
+            "b1": {
+                "income.stated_monthly": _parsed("5000"),
+                "income.documented_monthly": _parsed("4000"),
+            },
+            "b2": {  # this borrower's STATED is unknown — the stated sum is incomplete
+                "income.stated_monthly": _parsed("unknown"),
+                "income.documented_monthly": _parsed("4000"),
+            },
+        },
+    )
+    value, reason = _income_documented_shortfall(snap)
+    assert value == "unknown" and "incomplete" in reason
+
+
+def test_recipe_days_since_pay_abstains_on_a_future_pay_date() -> None:
+    # LP-323-IN-B review #5: a pay date AFTER the file date → negative age → abstain (a staleness rule
+    # must NOT read a future-dated paystub as "ultra-fresh"; couldnt_check surfaces it).
+    snap = _snap(
+        docs=[_doc("d")], by_subject={"d": {"income.pay_date": _parsed("2026-08-01")}}
+    )  # file date is 2026-07-15
+    value, reason = _income_days_since_recent_pay(snap)
+    assert value == "unknown" and "AFTER the file date" in reason
 
 
 def test_derived_producer_materializes_a_loan_level_income_tag() -> None:
