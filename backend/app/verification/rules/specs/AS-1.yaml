@@ -79,9 +79,14 @@ required_inputs:
 # priya_validated / threshold_needs_signoff mirror rule_kinds.csv and are cross-checked
 # by the loader — recorded HONESTLY: the 50% threshold is NOT yet Priya-confirmed.
 reference_values:
-  large_deposit_threshold: "50% of total monthly qualifying income"
+  large_deposit_threshold: "50% of total monthly qualifying income"   # prose (prompt spine slot)
   priya_validated: false          # rule_kinds.csv: AS-1 priya_validated=false (NOT confirmed)
   threshold_needs_signoff: true   # regulatory threshold — sign off before ship
+  # LP-324: the threshold as MACHINE DATA the generic evaluator reads (generically keyed — no
+  # rule-named field). The 50% multiplier the deterministic block's `threshold` operand consumes.
+  values:
+    large_deposit_threshold_pct: "50%"
+  guideline_text: "Fannie Mae Selling Guide B3-4.2-02 — a large deposit (> 50% of monthly qualifying income) must be sourced."
 
 # Per-deposit subject enumeration → each qualifying transaction is its own subject
 # (feeds LP-306 finding identity). `account` resolves from the parent bank-statement
@@ -99,4 +104,46 @@ evidence_required: >-
 
 guideline_reference: "Fannie Mae Selling Guide B3-4.2-02 (Depository Accounts) — large deposits"
 
-spec_version: 1
+# LP-324 — the MACHINE-READABLE deterministic body. The generic evaluator runs THIS; there is no
+# per-rule Python. Reproduces AS-1's decision tree exactly (LP-315 + LP-314a): applicability via the
+# is_money_in tag (never a raw label) → the fail-closed gate over the gated tags → the operand
+# arithmetic (threshold = 50% × qualifying income from the DTI calc) → the ordered outcomes.
+deterministic:
+  # Provenance (inline on every verdict). source_strength refines a sourced verdict but is NOT gated
+  # (LP-314a: provenance-only; its absence must never force couldnt_check).
+  load_bearing_tags: [txn.is_money_in, txn.amount, txn.has_identified_source, txn.source_strength]
+  gated_tags: [txn.is_money_in, txn.amount, txn.has_identified_source]
+
+  # Applicability from the AI-resolved TAG (the direction== bug cannot recur): != in → not_applicable;
+  # absent/unknown → couldnt_check.
+  applicability: {tag: txn.is_money_in, op: eq, value: in}
+
+  operands:
+    observed: {tag: txn.amount}                       # the deposit amount (operand X)
+    threshold:                                         # 50% × qualifying income (operand Y)
+      product:
+        - {reference: large_deposit_threshold_pct}     # 0.5 (parsed from "50%")
+        - {calc: [dti, gross_monthly_income]}          # a GATED DTI → None → couldnt_check (LP-318)
+
+  outcomes:
+    # 1. Unsourced large deposit → FIRED (strict GT "exceeds").
+    - verdict: fired
+      when_tags: [{tag: txn.has_identified_source, op: ne, value: "yes"}]
+      when_compare: {op: ">", left: observed, right: threshold}
+      reasoning: "deposit {observed} exceeds the large-deposit threshold {threshold} and is not sourced (has_identified_source=no)"
+      how_to_fix: "Document this deposit's source — a payroll/direct-deposit match, a transfer from the borrower's own account, or a gift / large-deposit letter — before the file is complete."
+    # 2. Sourced but SELF-ASSERTED at/over threshold → NEEDS_REVIEW (GE — the soft nudge is more
+    #    inclusive at the boundary than the hard fire's GT). LP-314a "show me the debit" discipline.
+    - verdict: needs_review
+      when_tags:
+        - {tag: txn.has_identified_source, op: eq, value: "yes"}
+        - {tag: txn.source_strength, op: eq, value: self_asserted}
+      when_compare: {op: ">=", left: observed, right: threshold}
+      reasoning: "deposit {observed} is at or over the large-deposit threshold {threshold} and claims an own-account/gift source, but no matching debit was found in the file (self_asserted) — a verified paper trail is needed"
+      how_to_fix: "This large deposit claims an own-account or gift source in its description, but no matching withdrawal was found in the file. Obtain the statement for the source account named in the deposit's description showing the corresponding withdrawal (the paper trail)."
+    # 3. Everything else (below threshold, or verified/intrinsic source) → SATISFIED.
+    - verdict: satisfied
+      default: true
+      reasoning: "deposit {observed} is at or below the large-deposit threshold {threshold}, or is already sourced"
+
+spec_version: 2

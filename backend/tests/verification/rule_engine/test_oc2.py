@@ -143,7 +143,8 @@ async def test_judgment_reasons_over_tags_not_raw_documents() -> None:
     await _evaluate(_occupancy_tags(), stub)
     assert stub.context is not None
     # The context is built from the STRUCTURAL TAGS, addressed by tag id — not raw documents.
-    assert "occupancy_tags" in stub.context
+    # (LP-324 generalized the wrapper key occupancy_tags → tags; the tags-not-docs behavior is intact.)
+    assert '"tags"' in stub.context
     for tag_id in REASONED_OVER:
         assert tag_id in stub.context
     assert '"primary"' in stub.context  # the occupancy.stated value rode in as a tag value

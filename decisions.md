@@ -9169,3 +9169,44 @@ every finding's identity + history. The four-tab UI that DISPLAYS this lifecycle
 `reconcile_findings` (normalized-substance identity, soft-deletes) is the pre-fact-tag pipeline's and is untouched;
 this is the subject_key-keyed, retire-not-delete reconcile for LP-316 fact-tag findings. Cross-refs: §8, §9,
 LP-312 (content-ids), LP-316 (finding + event log), LP-320 (observation boundary), LP-321 (the orchestrator).
+
+## ADR-264: Generalize the rule engine — rules become SPECS run by GENERIC evaluators (LP-324)
+
+**Status:** Accepted. **Context:** LP-323-ID-A's gate found the wave BLOCKED: AS-1 and OC-2 were per-rule Python
+modules dispatched by two hardcoded calls, and `RuleSpec`/`ReferenceValues` were AS-1-shaped (a `large_deposit_threshold`
+field; a PROSE `subject_enumeration`) — a spec literally could not express another rule. This is the deferred LP-308
+debt: authoring ~125 more rules on that base would fork `as1.py`/`oc2.py` across the family and kill the tag
+architecture's scalability. **The safety property of this ticket is EQUIVALENCE:** AS-1 + OC-2 must produce identical
+results after the refactor as before — same verdicts, confidences, gate routing, provenance, threshold_used — but
+driven by their SPECS through generic evaluators.
+
+**Decision.**
+1. **A machine-readable spec schema.** `RuleSpec` gains an `evaluation` body — `deterministic` (calculative/structural)
+   or `judgment` (judgmental), exactly one per the kind; `out_of_scope` carries neither. `subject_enumeration` becomes
+   an EXECUTABLE key (`per_deposit`/`loan`) resolved by an enumerator registry. `reference_values` gains a
+   generically-keyed `values` mapping (AS-1's 50% → `large_deposit_threshold_pct`) + a `guideline_text` authority slot;
+   the old `large_deposit_threshold` prose is retained but now optional. The deterministic body declares
+   `load_bearing_tags` + `gated_tags`, a tag `applicability`, `operands` (tag / reference / calc / product — AS-1's
+   `threshold = multiplier × qualifying_income` as DATA, the calc operand honoring the LP-318 gated flag), and ordered
+   `outcomes` (each a guard of tag predicates + an optional declared `Comparison` run through `satisfies`, first match
+   wins). **No schema gap:** AS-1's LP-314a self_asserted→needs_review nudge — including its GE-vs-GT boundary — is
+   just an outcome whose guard is `has_source==yes ∧ source_strength==self_asserted ∧ observed ≥ threshold`.
+2. **Two generic evaluators, reusing what was already generic.** `evaluate_deterministic_rule(spec, snapshot)` and
+   `evaluate_judgment_rule(spec, snapshot, reasoner)` run ANY rule from its spec — reusing `evaluate_gate`,
+   `satisfies`/`Condition`/`Operator`, `RuleEvaluation`, and (generalized to `reason_rule_judgment`) the LP-313/314 AI
+   clone + LP-319's ratification armor, unchanged.
+3. **A rule registry + generic dispatch.** `ACTIVE_RULE_IDS` + `evaluate_rules` dispatch the rule set by KIND; the
+   orchestrator's two hardcoded calls are replaced by that loop. Adding a rule is a SPEC (+ a registry line + its
+   tags), never new evaluation Python. Out-of-scope → not_applicable (no evaluation).
+4. **AS-1 + OC-2 re-expressed as DATA, with EQUIVALENCE the proof.** `AS-1.yaml`'s `deterministic` block and a new
+   `OC-2.yaml` `judgment` block carry the logic; `as1.py`/`oc2.py` keep only spec-derived identifiers + thin
+   `evaluate_as1_rule`/`evaluate_oc2` wrappers (same signatures, so the eval harness/orchestrator/tests are unchanged).
+   The former decision-tree + flow code is deleted. The existing AS-1/OC-2 suites + the frozen LF-6T3N trace pass
+   unchanged; a synthetic brand-new deterministic rule runs from a spec ONLY (no Python) — the proof the waves can
+   proceed.
+
+**Consequences.** The deferred LP-308 debt is paid; the ~130-rule waves are unblocked (a rule = a spec + its tags).
+NOT changed: rule/tag/finding BEHAVIOR (equivalence), and gate.py / satisfies / RuleEvaluation / LP-316/317/319's armor
+(reused). Deferred (separate tickets): the CROSS-SOURCE consistency primitive (ID-1/2/3/4/7 — the third rule shape) and
+`id.*` tag materialization. Cross-refs: §3D, LP-303 (the AS-1 spec), LP-308 (never landed — now paid), LP-311 (rule
+kinds/projection), LP-315 (gate), LP-319 (judgment armor), LP-323-ID-A §0.

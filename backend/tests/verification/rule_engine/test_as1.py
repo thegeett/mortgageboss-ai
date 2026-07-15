@@ -1,21 +1,39 @@
-"""The thin AS-1 rule (LP-315) — query tags + arithmetic, no AI, no direction filter."""
+"""AS-1 as DATA (LP-324) — the rule runs through the GENERIC deterministic evaluator from its spec.
+
+Behaviourally identical to the former per-rule module (the LP-324 equivalence property): each case
+drives ``evaluate_as1_rule`` over a one-transaction snapshot carrying the subject's tags + a DTI calc
+for the qualifying-income operand. The threshold (50%) and the multiplier now live in ``AS-1.yaml``,
+not in these tests — so the ``multiplier`` knob and the raw ``contradiction`` input are gone (the
+contradiction path is a gate concern, covered by ``test_gate.py``).
+"""
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from decimal import Decimal
+from uuid import uuid4
 
 from app.verification.rule_engine.as1 import (
     TAG_AMOUNT,
     TAG_HAS_SOURCE,
     TAG_IS_MONEY_IN,
     TAG_SOURCE_STRENGTH,
-    evaluate_as1,
 )
+from app.verification.rule_engine.engine import evaluate_as1_rule
 from app.verification.rule_engine.result import RuleEvaluation, Verdict
+from app.verification.snapshot.documents_section import build_transactions, transaction_field_sets
+from app.verification.snapshot.model import (
+    CalculationEntry,
+    CalculationsSection,
+    DocumentEntry,
+    DocumentsSection,
+    Snapshot,
+    TagsSection,
+)
 from app.verification.snapshot.tag import Tag, TagProducedBy, TagRole, TagStage
 
 _INCOME = Decimal("8000")  # threshold = 0.5 * 8000 = 4000
-_MULTIPLIER = Decimal("0.5")
+_DOC = "docstmt0000000000"
 
 
 def _tag(
@@ -64,19 +82,47 @@ def _evaluate(
     tags: dict[str, Tag],
     *,
     confidence_floor: float = 0.5,
-    contradiction: bool = False,
     income: Decimal | None = _INCOME,
-    multiplier: Decimal | None = _MULTIPLIER,
 ) -> RuleEvaluation:
-    return evaluate_as1(
-        "txndeposit0000000",
-        tags,
-        threshold_multiplier=multiplier,
-        qualifying_income=income,
-        priya_validated=False,
-        confidence_floor=confidence_floor,
-        contradiction=contradiction,
+    """Run AS-1 (the spec, via the generic evaluator) over a one-transaction snapshot carrying
+    ``tags`` + a DTI calc for the qualifying-income operand (``income=None`` → no DTI → couldnt_check)."""
+    txns = build_transactions(
+        transaction_field_sets(
+            {
+                "transactions": [
+                    {
+                        "date": "2026-05-05",
+                        "amount": "1",
+                        "description": "D",
+                        "transaction_type": "deposit",
+                    }
+                ]
+            },
+            "bank_statement",
+        ),
+        document_content_id=_DOC,
     )
+    assert txns is not None
+    cid = txns[0].content_id
+    calc = (
+        CalculationsSection.present(
+            dti=CalculationEntry(value={"gross_monthly_income": str(income)}, breakdown=[])
+        )
+        if income is not None
+        else CalculationsSection.missing()
+    )
+    snap = Snapshot(
+        loan_file_id=uuid4(),
+        run_id=uuid4(),
+        created_at=datetime(2026, 7, 14, tzinfo=UTC),
+        documents=DocumentsSection.present(
+            [DocumentEntry(content_id=_DOC, document_type="bank_statement", transactions=txns)]
+        ),
+        calculations=calc,
+        tags=TagsSection.present({cid: dict(tags)}),
+    )
+    [result] = evaluate_as1_rule(snap, confidence_floor=confidence_floor)
+    return result
 
 
 # --------------------------------------------------------------------------- #
@@ -193,19 +239,10 @@ def test_low_confidence_load_bearing_tag_is_needs_review() -> None:
     assert result.verdict_confidence == 0.3
 
 
-def test_contradiction_is_needs_review() -> None:
-    result = _evaluate(
-        {
-            TAG_IS_MONEY_IN: _money_in(),
-            TAG_AMOUNT: _amount("5000.00"),
-            TAG_HAS_SOURCE: _source("no"),
-        },
-        contradiction=True,
-    )
-    assert result.verdict is Verdict.NEEDS_REVIEW
-
-
-def test_income_unavailable_is_couldnt_check() -> None:
+def test_income_unavailable_is_couldnt_check_never_a_fabricated_threshold() -> None:
+    """No DTI → the qualifying-income operand can't resolve → the threshold operand is None →
+    couldnt_check, never a comparison against a fabricated (e.g. zero) threshold that would fire on
+    any deposit. (Replaces the former injected-multiplier test — the multiplier is spec data now.)"""
     result = _evaluate(
         {
             TAG_IS_MONEY_IN: _money_in(),
@@ -213,20 +250,6 @@ def test_income_unavailable_is_couldnt_check() -> None:
             TAG_HAS_SOURCE: _source("no"),
         },
         income=None,
-    )
-    assert result.verdict is Verdict.COULDNT_CHECK
-
-
-def test_missing_threshold_multiplier_is_couldnt_check_never_a_fabricated_threshold() -> None:
-    """No usable percentage in the spec prose → the multiplier is None → couldnt_check, never a
-    comparison against a fabricated (e.g. zero) threshold that would fire on any deposit."""
-    result = _evaluate(
-        {
-            TAG_IS_MONEY_IN: _money_in(),
-            TAG_AMOUNT: _amount("5000.00"),
-            TAG_HAS_SOURCE: _source("no"),
-        },
-        multiplier=None,
     )
     assert result.verdict is Verdict.COULDNT_CHECK
     assert result.threshold_used is None  # no threshold was computed

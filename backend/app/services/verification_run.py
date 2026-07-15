@@ -52,9 +52,10 @@ from app.services.tag_production import (
     TransactionTagCache,
     produce_stage_a_transaction_tags,
 )
-from app.verification.rule_engine.engine import DEFAULT_CONFIDENCE_FLOOR, evaluate_as1_rule
-from app.verification.rule_engine.oc2 import JUDGMENT_TAG, LOAN_SUBJECT, evaluate_oc2
-from app.verification.rule_engine.oc2 import Reasoner as Oc2Reasoner
+from app.verification.rule_engine.engine import DEFAULT_CONFIDENCE_FLOOR
+from app.verification.rule_engine.enumerators import LOAN_SUBJECT
+from app.verification.rule_engine.judgment import Reasoner as Oc2Reasoner
+from app.verification.rule_engine.registry import evaluate_rules
 from app.verification.rule_engine.result import RuleEvaluation
 from app.verification.snapshot.builder import build_snapshot
 from app.verification.snapshot.model import Snapshot, TagsSection
@@ -196,14 +197,15 @@ async def _evaluate_rules(
     Returns the evaluations plus any ``rule_judgment`` tags a judgment rule produced (OC-2's
     ``occupancy.reasonable``), keyed by tag id, for the caller to write back into the tags layer —
     the judgment rule's §3D output must not be discarded.
+
+    Generic dispatch (LP-324): the registry runs the active rule SET by KIND from their specs — no
+    hardcoded per-rule calls. Adding a rule is a spec + a registry entry, never new Python here.
     """
-    results: list[RuleEvaluation] = list(
-        evaluate_as1_rule(snapshot, confidence_floor=confidence_floor)
+    return await evaluate_rules(
+        snapshot,
+        judgment_reasoners={"OC-2": oc2_reasoner} if oc2_reasoner is not None else {},
+        confidence_floor=confidence_floor,
     )
-    oc2 = await evaluate_oc2(snapshot, reasoner=oc2_reasoner, confidence_floor=confidence_floor)
-    results.append(oc2.evaluation)
-    judgment_tags = {JUDGMENT_TAG: oc2.judgment_tag} if oc2.judgment_tag is not None else {}
-    return results, judgment_tags
 
 
 def _merge_loan_judgment_tags(snapshot: Snapshot, judgment_tags: dict[str, Tag]) -> Snapshot:

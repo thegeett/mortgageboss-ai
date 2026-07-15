@@ -28,10 +28,11 @@ from functools import cache
 from pathlib import Path
 
 import yaml
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, ValidationError, model_validator
 from pydantic import Field as PydField
 
 from app.verification.rules.kinds import RuleKind, RuleKindName, kind_for
+from app.verification.rules.schema import Operator
 
 # The spec files live co-located with the rules, one YAML per rule_id (AS-1.yaml).
 _SPECS_DIR = Path(__file__).with_name("specs")
@@ -91,9 +92,115 @@ class ReferenceValues(BaseModel):
 
     model_config = {"frozen": True, "extra": "forbid"}
 
-    large_deposit_threshold: str = PydField(min_length=1)
+    # AS-1's threshold prose (the prompt spine slot) — OPTIONAL: a threshold-free rule (e.g. a
+    # judgment rule) omits it. The machine threshold DATA lives in ``values`` (LP-324).
+    large_deposit_threshold: str | None = None
     priya_validated: bool
     threshold_needs_signoff: bool
+    # LP-324: generically-keyed threshold DATA the generic evaluator reads (e.g.
+    # ``{"large_deposit_threshold_pct": "50%"}``) — no rule-named field. ``large_deposit_threshold``
+    # above is retained as the human/prompt prose (the AS-1 spine slot). ``guideline_text`` is the
+    # encoded guideline authority a finding cites (never AI-recalled).
+    values: dict[str, str] = PydField(default_factory=dict)
+    guideline_text: str | None = None
+
+
+# --------------------------------------------------------------------------- #
+# LP-324 — the machine-readable EVALUATION blocks (a rule is now DATA an evaluator runs)
+# --------------------------------------------------------------------------- #
+
+
+class TagCondition(BaseModel):
+    """One tag-value predicate: ``<tag> <eq|ne> <value>`` (applicability + outcome guards)."""
+
+    model_config = {"frozen": True, "extra": "forbid"}
+
+    tag: str = PydField(min_length=1)
+    op: str = PydField(pattern="^(eq|ne)$")  # eq | ne (string-value equality)
+    value: str = PydField(min_length=1)
+
+
+class Operand(BaseModel):
+    """A declared OPERAND SOURCE — where a comparison value comes from (tag / reference / calc /
+    a product of operands). Exactly one source key is set (validated).
+
+    * ``tag`` — a subject tag's value, coerced to Decimal.
+    * ``reference`` — a ``reference_values.values`` key; a trailing ``%`` is parsed to a fraction.
+    * ``calc`` — ``[calculator_name, value_key]`` from ``snapshot.calculations`` (a GATED calc → None
+      → couldnt_check, LP-318).
+    * ``product`` — the product of its operands (AS-1's ``multiplier x qualifying_income``).
+    """
+
+    model_config = {"frozen": True, "extra": "forbid"}
+
+    tag: str | None = None
+    reference: str | None = None
+    calc: tuple[str, str] | None = None
+    product: tuple[Operand, ...] | None = None
+
+    @model_validator(mode="after")
+    def _exactly_one_source(self) -> Operand:
+        set_count = sum(x is not None for x in (self.tag, self.reference, self.calc, self.product))
+        if set_count != 1:
+            raise ValueError("an Operand sets EXACTLY one of tag / reference / calc / product")
+        return self
+
+
+class Comparison(BaseModel):
+    """A declared numeric comparison between two named operands (reuses :class:`Operator`)."""
+
+    model_config = {"frozen": True, "extra": "forbid"}
+
+    op: Operator
+    left: str = PydField(min_length=1)  # operand name (e.g. "observed")
+    right: str = PydField(min_length=1)  # operand name (e.g. "threshold")
+
+
+class OutcomeRule(BaseModel):
+    """One ordered outcome branch: when its guards hold, it fires its verdict (first match wins).
+
+    ``when_tags`` (all must hold) + optional ``when_compare`` are the guard; ``default=True`` is the
+    catch-all (no guard). ``reasoning`` is a ``str.format`` template over the resolved operands +
+    subject tag values.
+    """
+
+    model_config = {"frozen": True, "extra": "forbid"}
+
+    verdict: str = PydField(pattern="^(fired|satisfied|needs_review|couldnt_check)$")
+    when_tags: tuple[TagCondition, ...] = ()
+    when_compare: Comparison | None = None
+    default: bool = False
+    reasoning: str = PydField(min_length=1)
+    how_to_fix: str | None = None
+
+
+class DeterministicEval(BaseModel):
+    """The machine-readable body of a deterministic (calculative/structural) rule (LP-324)."""
+
+    model_config = {"frozen": True, "extra": "forbid"}
+
+    load_bearing_tags: tuple[str, ...] = PydField(min_length=1)
+    gated_tags: tuple[str, ...] = PydField(min_length=1)  # the gate-required subset
+    applicability: TagCondition | None = None  # a pre-gate per-subject applicability filter
+    operands: dict[str, Operand] = PydField(default_factory=dict)
+    outcomes: tuple[OutcomeRule, ...] = PydField(min_length=1)
+    confidence_floor: float = 0.5
+
+
+class JudgmentEval(BaseModel):
+    """The machine-readable body of an AI-at-rule-time judgment rule (LP-324 / LP-319 armor)."""
+
+    model_config = {"frozen": True, "extra": "forbid"}
+
+    subject: str = PydField(min_length=1)  # the subject key the loan-level tags live under
+    load_bearing_tags: tuple[str, ...] = PydField(min_length=1)  # gated structural inputs
+    reasoned_over: tuple[str, ...] = PydField(min_length=1)  # the tags the AI reasons over
+    output_tag: str = PydField(min_length=1)  # the rule_judgment tag produced
+    value_domain: tuple[str, ...] = PydField(
+        min_length=1
+    )  # allowed judgment values (incl "unknown")
+    system_prompt: str = PydField(min_length=1)  # the underwriter question, as DATA
+    confidence_floor: float = 0.5
 
 
 class RuleSpec(BaseModel):
@@ -114,11 +221,23 @@ class RuleSpec(BaseModel):
     applicability: Applicability
     required_inputs: tuple[RequiredInput, ...] = PydField(min_length=1)
     reference_values: ReferenceValues
-    subject_enumeration: str = PydField(min_length=1)
+    subject_enumeration: str = PydField(min_length=1)  # an EXECUTABLE enumerator key (LP-324)
     subject_key_fields: tuple[str, ...] = PydField(min_length=1)
     evidence_required: str = PydField(min_length=1)
     guideline_reference: str = PydField(min_length=1)
     spec_version: int = PydField(ge=1)
+    # LP-324 — the machine-readable evaluation body. Exactly one matches the kind: deterministic for
+    # calculative/structural, judgment for judgmental, NEITHER for out_of_scope (nothing evaluates).
+    deterministic: DeterministicEval | None = None
+    judgment: JudgmentEval | None = None
+
+    @model_validator(mode="after")
+    def _not_both_evaluation_bodies(self) -> RuleSpec:
+        # A pure structural invariant, safe to check early. The kind↔body match is checked at LOAD
+        # time (after the CSV consistency cross-check), so a kind-vs-CSV mismatch is reported first.
+        if self.deterministic is not None and self.judgment is not None:
+            raise ValueError(f"spec {self.rule_id}: set deterministic OR judgment, not both")
+        return self
 
 
 def _check_consistency(spec: RuleSpec, rk: RuleKind) -> None:
@@ -183,8 +302,23 @@ def _load_spec_from(specs_dir: Path, rule_id: str) -> RuleSpec:
         # A spec without a kinds-table row cannot be consistency-checked — fail loud
         # rather than ship an unclassified, un-gated rule.
         raise RuleSpecInvalid(f"spec {rule_id} has no row in rule_kinds.csv (LP-301)")
-    _check_consistency(spec, rk)
+    _check_consistency(spec, rk)  # CSV cross-check FIRST (a kind mismatch surfaces here)
+    _check_evaluation_body(spec)  # then the LP-324 kind↔evaluation-body match
     return spec
+
+
+def _check_evaluation_body(spec: RuleSpec) -> None:
+    """The kind must carry its matching machine-readable body (LP-324): deterministic for
+    calculative/structural, judgment for judgmental, NEITHER for out_of_scope."""
+    det, jud = spec.deterministic is not None, spec.judgment is not None
+    if spec.kind in (RuleKindName.CALCULATIVE, RuleKindName.STRUCTURAL) and not det:
+        raise RuleSpecInvalid(
+            f"spec {spec.rule_id}: {spec.kind} rule needs a `deterministic` block"
+        )
+    if spec.kind is RuleKindName.JUDGMENTAL and not jud:
+        raise RuleSpecInvalid(f"spec {spec.rule_id}: judgmental rule needs a `judgment` block")
+    if spec.kind is RuleKindName.OUT_OF_SCOPE and (det or jud):
+        raise RuleSpecInvalid(f"spec {spec.rule_id}: out_of_scope rule carries no evaluation body")
 
 
 @cache

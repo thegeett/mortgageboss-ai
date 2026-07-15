@@ -1,0 +1,112 @@
+"""The generic evaluators + registry (LP-324) — rules are SPECS, not per-rule Python.
+
+The AS-1/OC-2 EQUIVALENCE proofs live in test_as1.py / test_engine.py / test_oc2.py / the eval
+harness (all pass unchanged through the generic evaluators). These tests prove the GENERALIZATION:
+the registry dispatches the active rule set by kind FROM SPECS, and a BRAND-NEW deterministic rule
+runs from a spec ONLY — no new Python — which is what unblocks the rule waves.
+"""
+
+from __future__ import annotations
+
+from datetime import UTC, datetime
+from uuid import uuid4
+
+import pytest
+from app.verification.rule_engine.deterministic import evaluate_deterministic_rule
+from app.verification.rule_engine.registry import ACTIVE_RULE_IDS, evaluate_rules
+from app.verification.rule_engine.result import Verdict
+from app.verification.rules.specs import RuleSpec
+from app.verification.snapshot.model import DocumentsSection, Snapshot, TagsSection
+from app.verification.snapshot.tag import Tag, TagProducedBy, TagRole, TagStage
+
+pytestmark = pytest.mark.anyio
+
+
+def _loan_snapshot(flag: str | None) -> Snapshot:
+    """A snapshot with one loan-level tag ``x.flag`` (or none) under the loan subject."""
+    tags: dict[str, dict[str, Tag]] = {}
+    if flag is not None:
+        tags["loan"] = {
+            "x.flag": Tag(
+                value=flag,
+                confidence=0.9,
+                reasoning="fixture",
+                source_facts=("loan",),
+                produced_by=TagProducedBy.AI,
+                tag_role=TagRole.STRUCTURAL_FACT,
+                stage=TagStage.A,
+            )
+        }
+    return Snapshot(
+        loan_file_id=uuid4(),
+        run_id=uuid4(),
+        created_at=datetime(2026, 7, 14, tzinfo=UTC),
+        documents=DocumentsSection.present([]),
+        tags=TagsSection.present(tags),
+    )
+
+
+# A BRAND-NEW deterministic rule expressed as DATA ONLY — a shape AS-1 does not have (no operands,
+# a pure tag compare, the loan subject). If this evaluates with zero new Python, the waves can add
+# rules as specs.
+_SYNTHETIC_SPEC = {
+    "rule_id": "SYNTH-1",
+    "name": "synthetic flag rule",
+    "category": "Identity",
+    "kind": "structural",
+    "numeric_check": False,
+    "criteria": "the flag must be ok",
+    "applicability": {"scope": "all loans", "trigger": "once per loan"},
+    "required_inputs": [
+        {"name": "flag", "snapshot_path": 'tags["loan"]["x.flag"]', "description": "the flag"}
+    ],
+    "reference_values": {"priya_validated": False, "threshold_needs_signoff": False},
+    "subject_enumeration": "loan",
+    "subject_key_fields": ["loan"],
+    "evidence_required": "the flag value",
+    "guideline_reference": "n/a — synthetic test rule",
+    "spec_version": 1,
+    "deterministic": {
+        "load_bearing_tags": ["x.flag"],
+        "gated_tags": ["x.flag"],
+        "outcomes": [
+            {
+                "verdict": "fired",
+                "when_tags": [{"tag": "x.flag", "op": "ne", "value": "ok"}],
+                "reasoning": "the flag is not ok",
+            },
+            {"verdict": "satisfied", "default": True, "reasoning": "the flag is ok"},
+        ],
+    },
+}
+
+
+def test_a_new_deterministic_rule_runs_from_a_spec_only() -> None:
+    # No per-rule Python: a spec the evaluator has never seen evaluates over its subjects.
+    spec = RuleSpec.model_validate(_SYNTHETIC_SPEC)
+
+    fired = evaluate_deterministic_rule(spec, _loan_snapshot("bad"))
+    assert [r.verdict for r in fired] == [Verdict.FIRED]
+    assert fired[0].rule_id == "SYNTH-1" and fired[0].reasoning == "the flag is not ok"
+
+    satisfied = evaluate_deterministic_rule(spec, _loan_snapshot("ok"))
+    assert [r.verdict for r in satisfied] == [Verdict.SATISFIED]
+
+    # Fail-closed for free (reused gate): the required tag absent → couldnt_check, never a silent pass.
+    absent = evaluate_deterministic_rule(spec, _loan_snapshot(None))
+    assert [r.verdict for r in absent] == [Verdict.COULDNT_CHECK]
+
+
+async def test_registry_dispatches_the_active_rule_set_by_kind() -> None:
+    # The orchestrator's dispatch is the registry running the rule SET from specs — AS-1 (deterministic)
+    # + OC-2 (judgment), each by its kind, not hardcoded names.
+    assert set(ACTIVE_RULE_IDS) == {"AS-1", "OC-2"}
+    snapshot = _loan_snapshot(None)  # no occupancy/txn tags → everything fail-closes honestly
+
+    results, judgment_tags = await evaluate_rules(snapshot, confidence_floor=0.5)
+    rule_ids = {r.rule_id for r in results}
+    assert "OC-2" in rule_ids  # the judgment rule ran (couldnt_check here — no structural tags)
+    # OC-2 (judgmental) produced no rule_judgment tag under gated inputs; the deterministic AS-1 had
+    # no transaction subjects on this snapshot → no AS-1 results, and the run still completes.
+    assert judgment_tags == {}
+    assert all(r.rule_id in ACTIVE_RULE_IDS for r in results)
