@@ -34,18 +34,19 @@ async def evaluate_rules(
     consistency_reasoners: dict[str, Reasoner] | None = None,
     confidence_floor: float | None = None,
     rule_ids: tuple[str, ...] = ACTIVE_RULE_IDS,
-) -> tuple[list[RuleEvaluation], dict[str, Tag]]:
+) -> tuple[list[RuleEvaluation], dict[str, dict[str, Tag]]]:
     """Evaluate every requested rule generically (by evaluation block, from its spec).
 
-    Returns the evaluations + any ``rule_judgment`` tags produced (keyed by tag id) for the caller to
-    write back into the tags layer. ``judgment_reasoners`` / ``consistency_reasoners`` inject a keyless
-    stub per rule (tests). Each rule GATES itself (LP-315/319): the dispatcher lets them all run and
-    never skips one silently.
+    Returns the evaluations + any ``rule_judgment`` tags produced, keyed ``{subject_id: {tag_id: Tag}}``
+    (LP-327 — a judgment rule may produce a tag PER SUBJECT, so the tags are subject-scoped) for the
+    caller to write back into the tags layer. ``judgment_reasoners`` / ``consistency_reasoners`` inject
+    a keyless stub per rule (tests). Each rule GATES itself (LP-315/319): the dispatcher lets them all
+    run and never skips one silently.
     """
     judge_reasoners = judgment_reasoners or {}
     con_reasoners = consistency_reasoners or {}
     results: list[RuleEvaluation] = []
-    judgment_tags: dict[str, Tag] = {}
+    judgment_tags: dict[str, dict[str, Tag]] = {}
 
     for rule_id in rule_ids:
         spec = load_rule_spec(rule_id)
@@ -63,15 +64,19 @@ async def evaluate_rules(
                 evaluate_deterministic_rule(spec, snapshot, confidence_floor=confidence_floor)
             )
         elif spec.judgment is not None:
-            evaluation = await evaluate_judgment_rule(
+            output_tag = spec.judgment.output_tag
+            for evaluation in await evaluate_judgment_rule(
                 spec,
                 snapshot,
                 reasoner=judge_reasoners.get(rule_id),
                 confidence_floor=confidence_floor,
-            )
-            results.append(evaluation.evaluation)
-            if evaluation.judgment_tag is not None and spec.judgment is not None:
-                judgment_tags[spec.judgment.output_tag] = evaluation.judgment_tag
+            ):
+                results.append(evaluation.evaluation)
+                if evaluation.judgment_tag is not None:
+                    # Key the produced verdict tag under ITS subject (LP-327); OC-2's loan subject
+                    # lands under LOAN_SUBJECT exactly as before (equivalence).
+                    subject = evaluation.evaluation.subject_id
+                    judgment_tags.setdefault(subject, {})[output_tag] = evaluation.judgment_tag
         # No evaluation block (out_of_scope) → nothing evaluates (not_applicable; no finding).
 
     return results, judgment_tags

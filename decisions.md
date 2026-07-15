@@ -9349,3 +9349,47 @@ comparison declarative and single-sourced, and avoids inflating the (generated) 
 
 Cross-refs: §3D; ADR-265 (the consistency primitive); LP-324 (rules as data), LP-325, LP-326;
 LP-323-ID-A §2 (the verdict-modeling question this resolves).
+
+## ADR-268: Judgment generalized to declared subject enumeration — multi-subject (LP-327, GAP-B)
+
+**Status:** Accepted. **Context:** LP-323-ID-B's GAP-B: `judgment.py` was STRICTLY single-subject (it
+failed loud on ≠1 subject — the OC-2 loan shape it was built for), so most of the ~36 judgment rules —
+per-borrower (citizenship eligibility) and per-document (POA acceptability, altered-document detection,
+appraisal condition) — were blocked. `judgment.py` was the ODD ONE OUT: its siblings `deterministic.py`
+(LP-324) and `consistency.py` (LP-325) already enumerate subjects from the spec's executable
+`subject_enumeration` via the enumerators registry.
+
+**Decision.** Make `judgment.py` use the mechanism its siblings already use — DECLARED subject
+enumeration — rather than invent a new one.
+1. **Multi-subject loop.** `evaluate_judgment_rule` returns `list[JudgmentEvaluation]` — one per
+   enumerated subject. The per-subject armor (`_evaluate_one_subject`) is the former single-subject body
+   verbatim: gate the subject's load-bearing tags (fail-closed, BEFORE any AI call — no AI/no tag on a
+   gated subject) → reason over that subject's declared TAGS (never raw docs) → emit the `rule_judgment`
+   tag KEYED TO THAT SUBJECT (`source_facts=(subject_id,)`) → ALWAYS ratification-pending (LP-319) →
+   one RuleEvaluation. The ≠1 fail-loud is removed.
+2. **Per-subject fail-closed** (LP-321's partial-snapshot discipline, at the rule level). Each subject
+   is self-contained: one subject's gate/AI failure/truncation/malformed degrades ONLY that subject
+   (couldnt_check / unknown-with-reason); the others still evaluate. Never a wholesale rule failure.
+3. **One AI call PER subject** (cost, stated honestly). A judgment is a reasoned verdict per subject;
+   batching N subjects into one call risks the position-degradation LP-313 guards against. So a
+   per-document rule over N docs = N AI calls. (The `_required_ai_groups` gating already prevents
+   running AI families no active rule reads.)
+4. **Per-subject tag keying.** The registry returns `{subject_id: {tag_id: Tag}}` and the orchestrator
+   merges each verdict tag under ITS subject — OC-2's `loan` subject lands under `LOAN_SUBJECT` exactly
+   as before.
+5. **OC-2 equivalence is the proof.** OC-2 declares `subject_enumeration: loan` → exactly one subject →
+   identical verdict/confidence/gate routing/provenance/ratification-pending/tag keying. `evaluate_oc2`
+   keeps its single-return signature (returns the one-element list's `[0]`). The OC-2 suite passes
+   UNCHANGED.
+
+**Consequences.** Per-document and per-deposit judgments are unblocked (a rule = a spec). Added the
+`per_document` enumerator (returns each doc's populated tag map). NOT changed: deterministic/consistency/
+gate/producers; the LP-313/314 AI machinery + LP-319 armor (reused). **Two follow-on gaps surfaced (NOT
+patched):** (i) **per-BORROWER judgment** — the `per_borrower` enumerator returns EMPTY tag maps (LP-325
+consistency gathers across docs; borrower facts key under document content_ids), so a per-borrower
+judgment reads nothing → needs a borrower-tag-keyed enumerator + producer (blocks ID-8); (ii) ID-9's
+per-document POA rule needs GAP-C (document-type applicability) to avoid couldnt_check-flooding non-POA
+docs, plus a NEW vocabulary output tag (the vocabulary CSV is generated from the xlsx). So ID-8/ID-9 are
+authored-in-principle but UNACTIVATED; the new shape is proven data-only via a synthetic per-document
+judgment. Cross-refs: §3D; ADR-268; LP-319 (armor), LP-321 (partial-snapshot), LP-324/325 (the sibling
+evaluators), LP-326 (SUBJECT keying), LP-323-ID-B GAP-B.

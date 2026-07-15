@@ -41,12 +41,15 @@ async def evaluate_oc2(
 ) -> JudgmentEvaluation:
     """Evaluate OC-2 — a thin wrapper: load the OC-2 spec → the generic judgment evaluator.
 
-    Identical results to the former per-rule module (the LP-324 equivalence property); the flow +
-    prompt now live in ``OC-2.yaml``, not in code.
+    Identical results to the former per-rule module (the LP-324/327 equivalence property); the flow +
+    prompt now live in ``OC-2.yaml``, not in code. OC-2 declares ``subject_enumeration: loan`` → the
+    multi-subject evaluator (LP-327) yields exactly ONE evaluation, returned here (single-subject
+    signature unchanged, so callers + the eval harness are untouched).
     """
-    return await evaluate_judgment_rule(
+    evaluations = await evaluate_judgment_rule(
         load_rule_spec(RULE_ID), snapshot, reasoner=reasoner, confidence_floor=confidence_floor
     )
+    return evaluations[0]
 
 
 __all__ = [

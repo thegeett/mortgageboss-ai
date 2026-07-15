@@ -1,14 +1,23 @@
 """The GENERIC AI-at-rule-time JUDGMENT evaluator (LP-324, generalizing LP-319's OC-2).
 
 Runs ANY judgment rule from its spec, with ZERO per-rule Python. The procedural armor (§3D) is here,
-not in a prompt:
+not in a prompt, applied PER SUBJECT:
 
     gate the load-bearing structural tags (fail-closed, before any AI call) → reason over the
-    declared TAGS (never raw docs) → produce the rule_judgment tag → MANDATORY human ratification
-    (every verdict ratification-pending — never auto-ships) → confidence-gated → provenance inline.
+    declared TAGS (never raw docs) → produce the rule_judgment tag KEYED TO THAT SUBJECT → MANDATORY
+    human ratification (every verdict ratification-pending — never auto-ships) → confidence-gated →
+    provenance inline.
 
-OC-2 is re-expressed as data on this evaluator (`OC-2.yaml`'s `judgment` block); its former per-rule
-module carries no flow logic. Reuses ``evaluate_gate`` + the LP-313/314 AI clone as-is.
+MULTI-SUBJECT (LP-327): the rule declares its subjects via the executable ``subject_enumeration`` key
+(``loan`` | ``per_document`` | …), resolved by the enumerators registry — exactly as
+``deterministic.py`` / ``consistency.py`` do. One AI call per subject (a reasoned verdict is
+per-subject; batching risks the position-degradation LP-313 guards against — so N subjects = N calls).
+PER-SUBJECT FAIL-CLOSED: one subject's gate/AI failure/truncation/malformed degrades ONLY that subject
+(couldnt_check / unknown-with-reason); the others still evaluate (LP-321's partial-snapshot discipline,
+at the rule level). OC-2 declares ``subject_enumeration: loan`` → exactly one subject → identical
+results (the LP-324 equivalence property preserved).
+
+Reuses ``evaluate_gate`` + the LP-313/314 AI clone as-is.
 """
 
 from __future__ import annotations
@@ -144,24 +153,36 @@ async def evaluate_judgment_rule(
     *,
     reasoner: Reasoner | None = None,
     confidence_floor: float | None = None,
-) -> JudgmentEvaluation:
-    """Evaluate a judgment rule over its (single) subject, entirely from ``spec.judgment``."""
+) -> list[JudgmentEvaluation]:
+    """Evaluate a judgment rule over ALL its enumerated subjects, entirely from ``spec.judgment``.
+
+    Returns one :class:`JudgmentEvaluation` per subject (each ratification-pending, each tag keyed to
+    its subject). PER-SUBJECT FAIL-CLOSED: one subject's degraded inputs / AI failure degrade ONLY
+    that subject; the others still evaluate. OC-2 (``subject_enumeration: loan``) yields exactly one.
+    """
     jud = spec.judgment
     assert jud is not None, f"{spec.rule_id} is not a judgment rule"
     floor = confidence_floor if confidence_floor is not None else jud.confidence_floor
-    # A judgment rule is single-subject (loan-level); this evaluator produces ONE verdict + ONE tag.
-    # Fail loud on a misconfigured enumeration rather than silently judging only the first subject
-    # (or IndexError-ing on an empty one).
-    subjects = enumerate_subjects(spec.subject_enumeration, snapshot)
-    if len(subjects) != 1:
-        raise ValueError(
-            f"judgment rule {spec.rule_id} must enumerate exactly one subject, got {len(subjects)} "
-            f"(subject_enumeration={spec.subject_enumeration!r} is not single-subject)"
-        )
-    subject_id, subject_tags = subjects[0]
-
     reason_fn = reasoner if reasoner is not None else _bind_prompt(jud.system_prompt)
 
+    evaluations: list[JudgmentEvaluation] = []
+    for subject_id, subject_tags in enumerate_subjects(spec.subject_enumeration, snapshot):
+        evaluations.append(
+            await _evaluate_one_subject(spec, jud, subject_id, subject_tags, reason_fn, floor)
+        )
+    return evaluations
+
+
+async def _evaluate_one_subject(
+    spec: RuleSpec,
+    jud: JudgmentEval,
+    subject_id: str,
+    subject_tags: Mapping[str, Tag],
+    reason_fn: Reasoner,
+    floor: float,
+) -> JudgmentEvaluation:
+    """The per-subject judgment armor (§3D) — one subject's gate → AI → tag → ratification-pending
+    verdict. Self-contained so one subject's failure never touches another's evaluation."""
     # 1. Fail-closed gate over the load-bearing structural facts — before any AI call.
     gate = evaluate_gate(
         {tag_id: subject_tags.get(tag_id) for tag_id in jud.load_bearing_tags},
@@ -199,7 +220,7 @@ async def evaluate_judgment_rule(
     try:
         result = await reason_fn(json.dumps(context))
     except AIClientError:
-        logger.warning("judgment_ai_failed", rule=spec.rule_id)
+        logger.warning("judgment_ai_failed", rule=spec.rule_id, subject=subject_id)
         return JudgmentEvaluation(
             None,
             _result(

@@ -114,22 +114,21 @@ async def test_registry_dispatches_the_active_rule_set_by_kind() -> None:
     assert all(r.rule_id in ACTIVE_RULE_IDS for r in results)
 
 
-# A judgment spec whose enumeration is NOT single-subject (per_deposit, not loan). Judgment rules are
-# loan-level by contract — the evaluator produces ONE verdict + ONE tag; a mis-declared enumeration
-# must fail loud, never silently judge the first subject (or IndexError on an empty one).
-_MISCONFIGURED_JUDGMENT_SPEC = {
+# A judgment spec over a NON-loan enumeration (per_deposit). LP-327 made judgment MULTI-SUBJECT (like
+# its siblings), so this now yields ONE evaluation per subject — not a fail-loud, not a silent [0].
+_MULTI_SUBJECT_JUDGMENT_SPEC = {
     "rule_id": "JBAD-1",
-    "name": "misconfigured judgment rule",
+    "name": "multi-subject judgment rule",
     "category": "Occupancy",
     "kind": "judgmental",
     "numeric_check": False,
     "criteria": "n/a",
-    "applicability": {"scope": "all loans", "trigger": "once per loan"},
+    "applicability": {"scope": "all loans", "trigger": "once per subject"},
     "required_inputs": [
         {"name": "flag", "snapshot_path": 'tags["loan"]["x.flag"]', "description": "the flag"}
     ],
     "reference_values": {"priya_validated": False, "threshold_needs_signoff": False},
-    "subject_enumeration": "per_deposit",  # WRONG for a judgment rule — yields 0..N subjects
+    "subject_enumeration": "per_deposit",  # 0..N subjects — now handled, one verdict each
     "subject_key_fields": ["content_id"],
     "evidence_required": "n/a",
     "guideline_reference": "n/a — synthetic test rule",
@@ -145,12 +144,12 @@ _MISCONFIGURED_JUDGMENT_SPEC = {
 }
 
 
-async def test_judgment_rule_with_non_single_subject_enumeration_fails_loud() -> None:
-    # per_deposit over a snapshot with zero transactions → 0 subjects → the guard raises rather than
-    # IndexError-ing on subjects[0] (the pre-fix silent failure).
-    spec = RuleSpec.model_validate(_MISCONFIGURED_JUDGMENT_SPEC)
-    with pytest.raises(ValueError, match="must enumerate exactly one subject"):
-        await evaluate_judgment_rule(spec, _loan_snapshot(None), confidence_floor=0.5)
+async def test_judgment_rule_enumerates_multiple_subjects_lp327() -> None:
+    # per_deposit over a snapshot with zero transactions → 0 subjects → an EMPTY list (no verdict, no
+    # crash). The multi-subject evaluator returns one evaluation per subject, never fails loud.
+    spec = RuleSpec.model_validate(_MULTI_SUBJECT_JUDGMENT_SPEC)
+    evaluations = await evaluate_judgment_rule(spec, _loan_snapshot(None), confidence_floor=0.5)
+    assert evaluations == []
 
 
 def test_deterministic_no_outcome_match_fails_closed_to_couldnt_check() -> None:

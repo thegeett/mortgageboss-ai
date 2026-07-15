@@ -44,6 +44,11 @@ def _per_borrower(snapshot: Snapshot) -> list[Subject]:
     borrower↔document resolution, LP-202), in first-seen order. The tag map is empty: a consistency
     rule does NOT read a single borrower tag map — it GATHERS its fact across the borrower's SOURCE
     documents (each keyed by its own ``content_id``), which the evaluator does from the snapshot.
+
+    NOTE (LP-327): the empty tag map means this key is NOT usable by a per-BORROWER *judgment* rule
+    (which reads the subject's tag map). A per-borrower judgment (e.g. ID-8 citizenship eligibility)
+    needs a borrower-tag-keyed enumerator + a producer that materializes borrower facts under
+    ``borrower_id`` — a separate gap. Per-document / per-deposit / loan judgments are unaffected.
     """
     if snapshot.documents.absent:
         return []
@@ -56,10 +61,28 @@ def _per_borrower(snapshot: Snapshot) -> list[Subject]:
     return [(borrower_id, {}) for borrower_id in seen]
 
 
+def _per_document(snapshot: Snapshot) -> list[Subject]:
+    """One subject per document (LP-327) — its stable ``content_id`` + the tags ABOUT that document.
+
+    Unlike ``per_borrower``, the tag map is POPULATED (a document's tags are keyed under its own
+    content_id), so a per-DOCUMENT judgment rule (e.g. ID-9 POA acceptability, altered-document
+    detection, appraisal condition) can reason over that document's declared tags. A judgment over
+    every document ``couldnt_check``s the documents that lack its inputs — scoping to a document TYPE
+    (so a POA rule does not flood non-POA docs) is the deferred GAP-C (document-type applicability).
+    """
+    if snapshot.documents.absent:
+        return []
+    tags = {} if snapshot.tags.absent else snapshot.tags.by_subject
+    return [
+        (entry.content_id, tags.get(entry.content_id, {})) for entry in snapshot.documents.entries
+    ]
+
+
 _ENUMERATORS: dict[str, Enumerator] = {
     "per_deposit": _per_deposit,
     "loan": _loan,
     "per_borrower": _per_borrower,
+    "per_document": _per_document,
 }
 
 

@@ -17,7 +17,7 @@ from app.services.loan_files import create_loan_file
 from app.services.verification_run import (
     Reasoners,
     TagCaches,
-    _merge_loan_judgment_tags,
+    _merge_judgment_tags,
     _required_ai_groups,
     _retire_eligible_rules,
     _scan_tag_degradations,
@@ -436,10 +436,11 @@ def test_judgment_tag_is_merged_into_the_tags_layer_under_the_loan_subject() -> 
         tag_role=TagRole.RULE_JUDGMENT,
         stage=TagStage.B,
     )
-    merged = _merge_loan_judgment_tags(snap, {JUDGMENT_TAG: tag})
+    # LP-327: tags are keyed {subject_id: {tag_id: Tag}} — OC-2's loan verdict lands under LOAN_SUBJECT.
+    merged = _merge_judgment_tags(snap, {LOAN_SUBJECT: {JUDGMENT_TAG: tag}})
     assert merged.tags.by_subject[LOAN_SUBJECT][JUDGMENT_TAG].value == "no"
     # No judgment tags produced (OC-2 couldnt_check today) → the snapshot is returned unchanged.
-    assert _merge_loan_judgment_tags(snap, {}) is snap
+    assert _merge_judgment_tags(snap, {}) is snap
 
 
 def test_retire_eligible_excludes_as1_when_the_documents_section_is_degraded() -> None:

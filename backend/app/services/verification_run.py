@@ -55,7 +55,7 @@ from app.services.tag_production import (
 )
 from app.verification.rule_engine.consistency import Reasoner as ConsistencyReasoner
 from app.verification.rule_engine.engine import DEFAULT_CONFIDENCE_FLOOR
-from app.verification.rule_engine.enumerators import LOAN_SUBJECT, enumerate_subjects
+from app.verification.rule_engine.enumerators import enumerate_subjects
 from app.verification.rule_engine.judgment import Reasoner as Oc2Reasoner
 from app.verification.rule_engine.registry import ACTIVE_RULE_IDS, evaluate_rules
 from app.verification.rule_engine.result import RuleEvaluation
@@ -262,7 +262,7 @@ async def _evaluate_rules(
     oc2_reasoner: Oc2Reasoner | None,
     consistency_reasoners: dict[str, ConsistencyReasoner] | None,
     confidence_floor: float,
-) -> tuple[list[RuleEvaluation], dict[str, Tag]]:
+) -> tuple[list[RuleEvaluation], dict[str, dict[str, Tag]]]:
     """Run every rule over the tagged snapshot — deterministic (AS-1), judgment (OC-2), and
     cross-source consistency (ID-2 exact / ID-4 fuzzy, LP-326).
 
@@ -271,8 +271,8 @@ async def _evaluate_rules(
     all run — it never skips a rule silently.
 
     Returns the evaluations plus any ``rule_judgment`` tags a judgment rule produced (OC-2's
-    ``occupancy.reasonable``), keyed by tag id, for the caller to write back into the tags layer —
-    the judgment rule's §3D output must not be discarded.
+    ``occupancy.reasonable``), keyed ``{subject_id: {tag_id: Tag}}`` (LP-327 — per subject), for the
+    caller to write back into the tags layer — the judgment rule's §3D output must not be discarded.
 
     Generic dispatch (LP-324): the registry runs the active rule SET by KIND from their specs — no
     hardcoded per-rule calls. Adding a rule is a spec + a registry entry, never new Python here.
@@ -285,17 +285,19 @@ async def _evaluate_rules(
     )
 
 
-def _merge_loan_judgment_tags(snapshot: Snapshot, judgment_tags: dict[str, Tag]) -> Snapshot:
-    """Write the rule_judgment tags into the tags layer under the loan subject (frozen-safe copy).
+def _merge_judgment_tags(snapshot: Snapshot, judgment_tags: dict[str, dict[str, Tag]]) -> Snapshot:
+    """Write the rule_judgment tags into the tags layer, each under ITS subject (frozen-safe copy).
 
-    A judgment rule's produced tag (OC-2's ``occupancy.reasonable``) belongs in the tags layer, not
-    dropped — a ratifier / downstream reads it there. No-op when none were produced (e.g. OC-2
-    couldnt_check today, since its structural inputs are not yet produced).
+    A judgment rule's produced tag belongs in the tags layer keyed to the subject it judged (LP-327):
+    OC-2's ``occupancy.reasonable`` under the loan subject; a per-document verdict under that
+    document. Not dropped — a ratifier / downstream reads it there. No-op when none were produced
+    (e.g. OC-2 couldnt_check when its structural inputs are absent).
     """
     if not judgment_tags:
         return snapshot
     by_subject = {cid: dict(tags) for cid, tags in snapshot.tags.by_subject.items()}
-    by_subject.setdefault(LOAN_SUBJECT, {}).update(judgment_tags)
+    for subject_id, tags in judgment_tags.items():
+        by_subject.setdefault(subject_id, {}).update(tags)
     return snapshot.model_copy(update={"tags": TagsSection.present(by_subject)})
 
 
@@ -441,7 +443,7 @@ async def run_verification(
         consistency_reasoners=reasoners.consistency,
         confidence_floor=confidence_floor,
     )
-    snapshot = _merge_loan_judgment_tags(snapshot, judgment_tags)
+    snapshot = _merge_judgment_tags(snapshot, judgment_tags)
     reconciliation = await _persist(
         db,
         loan_file_id=loan_file_id,
