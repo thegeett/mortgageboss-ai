@@ -7,16 +7,16 @@ criteria: >-
   The borrower(s)' DOCUMENTED monthly income (what the paystubs / W-2s actually support) must not fall
   materially SHORT of the STATED monthly income used to qualify. A shortfall beyond the tolerance means
   the file qualifies on income the documents do not support and must be reconciled. Documented income
-  ABOVE stated (a raise) is NOT a defect. Evaluated on the loan-level aggregate; per-borrower granularity
-  is a deferred refinement (LP-323-IN-B — the derived producer is loan-level today).
+  ABOVE stated (a raise) is NOT a defect. Evaluated PER BORROWER (LP-332 — the derived shortfall tag is
+  now borrower-keyed, so one borrower's inflated income is no longer masked by another's; PIN #1 fixed).
 applicability:
-  scope: the loan file's stated + documented monthly income
-  trigger: once per loan, comparing aggregate documented income to aggregate stated income
+  scope: every borrower on the loan
+  trigger: once per borrower, comparing that borrower's documented income to their stated income
 required_inputs:
   - name: shortfall_pct
-    snapshot_path: 'tags.by_subject["loan"]["income.documented_income_shortfall_pct"]'
+    snapshot_path: 'tags.by_subject[<borrower_id>]["income.documented_income_shortfall_pct"]'
     description: >-
-      (stated − documented) monthly income / stated, loan-level (derived). SIGNED — a negative value
+      (stated − documented) monthly income / stated, PER BORROWER (derived). SIGNED — a negative value
       means documented exceeds stated (a raise), which must not fire.
 reference_values:
   # D1 (LP-323-IN-B): my ticket called this "IN-3"; rule_kinds.csv shows the stated-vs-documented
@@ -30,10 +30,10 @@ reference_values:
   guideline_text: >-
     Fannie Mae Selling Guide B3-3.1 — documented income must support the income used to qualify. The
     5% shortfall tolerance is PENDING Priya (the common default assumption is 10%); encoded UNCONFIRMED.
-subject_enumeration: loan
+subject_enumeration: per_borrower
 subject_key_fields:
-  - loan
-evidence_required: the aggregate stated vs documented monthly income and the shortfall the comparison used
+  - borrower
+evidence_required: the borrower's stated vs documented monthly income and the shortfall the comparison used
 guideline_reference: >-
   Fannie Mae Selling Guide B3-3.1 (General Income Information). The 5% shortfall tolerance is a
   Priya-pending value (threshold_needs_signoff).

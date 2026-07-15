@@ -112,6 +112,8 @@ async def test_registry_dispatches_the_active_rule_set_by_kind() -> None:
         "ID-6",
         "ID-7",
         "ID-9",
+        "ID-8",  # LP-332 — borrower-keyed citizenship materialized
+        "IN-1",  # LP-332 — per-borrower income shortfall (PIN #1 fix)
     }
     snapshot = _loan_snapshot(None)  # no occupancy/txn tags → everything fail-closes honestly
 

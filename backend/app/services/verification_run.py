@@ -71,8 +71,10 @@ from app.verification.tag_materialization.producer import materialize_tags
 
 # The subject families the generic materialization stage produces live (LP-326). The transaction
 # Stage-A tags stay on their existing producer (their round-trip through the generic producer is
-# proven separately) — this stage adds the id.* families keyed under the document / loan subjects.
-_MATERIALIZED_SUBJECTS = frozenset({"document", "loan"})
+# proven separately) — this stage adds the id.* families keyed under the document / loan subjects, and
+# (LP-332) the borrower subject (borrower-keyed citizenship + the per-borrower income shortfall), which
+# activates ID-8 and IN-1 live.
+_MATERIALIZED_SUBJECTS = frozenset({"document", "loan", "borrower"})
 
 
 # Subject enumerations whose subjects are derived from the DOCUMENTS section (per-transaction /

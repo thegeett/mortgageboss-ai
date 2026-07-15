@@ -9618,3 +9618,62 @@ decision (their own tickets): the per-borrower derived producer; IN-6's set-cove
 multi-value gather leg); IN-11's set-membership operand or judgment reframe; IN-12's self-employment
 calculator wiring. Cross-refs: §3D/§8; LP-323-IN-A (the recon), LP-318 (Caveat A), LP-324 (operands),
 LP-326 (derived recipes — the extension point), LP-331 (borrower-keyed facts).
+
+## ADR-274: Borrower-keyed materialization + the borrower_id ↔ MISMO-index resolution (LP-332)
+
+**Context.** Per-borrower rules (ID-8 citizenship, IN-1 income shortfall, ~9 income rules) were authored +
+evaluated but could not ACTIVATE: LP-331 built the JUDGMENT consumer (`_per_borrower` reads
+`by_subject[borrower_id]`) but nothing PRODUCED borrower-keyed tags, and `produce_derived_tags` was
+loan-only. LP-323-IN-C pinned the #1 false-green this causes: IN-1's loan-level aggregate MASKS
+per-borrower income fraud (a 2-borrower file where borrower A's income is inflated 40% nets to ~0 → IN-1
+satisfied). The prerequisite is a resolution: **no code mapped a `belongs_to` UUID to a MISMO
+`borrower.{n}` index** — MISMO's `n` is a re-derived sort position and the snapshot carried no link back.
+
+**Decision — three parts, all DECLARED, no rule-id/family branch:**
+
+1. **The resolution (a schema FIX, not a work-around).** `mismo_section.py` now emits
+   `borrower.{n}.borrower_id` (`str(borrower.id)`) — a deterministic, snapshot-internal, PII-safe (a UUID,
+   not identity data) link from the `belongs_to` UUID back to the MISMO group. This is the ONLY
+   non-name-matching resolution: `BorrowerRef`'s docstring explicitly rejects cross-section name-matching
+   as an anti-pattern, so name-matching was NOT an option. **THE FAILURE MODE is the heart of the
+   decision:** a borrower group with no id link, or a DUPLICATE/blank id, is SKIPPED — its borrower-keyed
+   tags stay absent → the rule **couldnt_checks**, NEVER a guessed attribution. Misattributing a fact to
+   the wrong borrower would fabricate a discrepancy (or hide one) — strictly worse than not attributing it.
+
+2. **The mechanism — generalize `produce_derived_tags` to the declared subject (REUSE, not a parallel
+   mechanism).** Evidence: the parsed/AI producers ALREADY enumerate the subject registry
+   (`producer.py`); only the derived producer was loan-special-cased. So the derived producer now
+   enumerates the declared subject via the SAME registry (mirroring how LP-327 generalized judgment from
+   single-subject to declared enumeration). A new `borrower` subject type (`subjects.py`) enumerates
+   borrowers by the id link, reads `borrower.{n}.*`, and lets a borrower recipe gather that borrower's
+   `belongs_to` documents. Option (b) — a bespoke gather-for-recipes — was REJECTED: it invents a second
+   mechanism where generalizing the existing one suffices (the divergence risk LP-331 rejected).
+
+3. **The recipe contract** changed `(snapshot) → (v, r)` to `(snapshot, subject_id, subject_raw) → (v,
+   r)`. Loan recipes accept + ignore the two new args — logic identical (`_app_required_fields_present`
+   is the regression canary, asserted unchanged). Loan- and borrower-level recipes coexist.
+
+**How it reconciles with LP-326's SUBJECT ≠ entity keying (WITHOUT breaking the consistency gather).** The
+document keying is UNTOUCHED: `id.address_normalized` + its filter, `income.employer_normalized` still key
+under the DOCUMENT subject, so ID-4's residence filter and IN-5's employer gather work identically
+(asserted — equivalence held, the LF-6T3N trace unchanged). The crossing (a per-borrower DERIVED tag reads
+DOCUMENT-keyed facts and emits a BORROWER-keyed tag) lives entirely in the borrower recipe: it gathers the
+borrower's `belongs_to` documents' `income.documented_monthly` and its own MISMO stated income, emitting
+one borrower-keyed shortfall. The consistency gather never sees a borrower-keyed tag.
+
+**PIN #1 FIXED.** `income.documented_income_shortfall_pct` is now per-borrower: borrower A's 40% shortfall
+FIRES; borrower B's raise is satisfied — no masking. LP-323-IN-C's pinned test now asserts FIRING (the one
+place a pinned known-wrong SHOULD change — its fix ticket landed). **IN-1 and IN-3 are now PER-BORROWER
+checks, not file-level screens** (IN-3's per-borrower re-key is a small reported follow-on; IN-2/IN-4 stay
+legitimately loan-level — recency/gap are file-level).
+
+**Consequences.** ACTIVATED (added to `ACTIVE_RULE_IDS`, and `borrower` added to the orchestrator's
+`_MATERIALIZED_SUBJECTS`): **ID-8** (Wave-1's outstanding debt — its `id.citizenship` now materializes
+under `borrower_id` from MISMO, `program.type` from `loan.program`) and **IN-1** (per-borrower shortfall).
+Every FUTURE family's per-borrower rules now activate for free — the lever LP-323-IN-C named. Per-subject
+fail-closed (LP-327) holds: one borrower's missing data abstains only that borrower. **PRIYA (unchanged):**
+ID-8's non-permanent-resident / DACA eligibility + overlays remain UNSURE (`priya_validated: false`, the
+conservative default, the armor). **New gap reported (not patched):** a `belongs_to` borrower not present
+in MISMO (or vice versa) is not evaluated for per-borrower income — a borrower-set reconciliation edge, a
+small follow-on. Cross-refs: §3D/§8; LP-325/326 (keying), LP-327 (the generalization pattern + per-subject
+fail-closed), LP-331 (GAP-D, the consumer), LP-323-IN-B/-IN-C (PIN #1), LP-323-ID-B (GAP-D).

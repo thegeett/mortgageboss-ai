@@ -34,7 +34,6 @@ from app.verification.snapshot.tag import Tag, TagProducedBy, TagRole, TagStage
 from app.verification.tag_materialization.declarations import ProductionMode, TagDeclaration
 from app.verification.tag_materialization.derived import (
     _income_days_since_recent_pay,
-    _income_documented_shortfall,
     _income_max_employment_gap,
     _income_ytd_annualized_shortfall,
     produce_derived_tags,
@@ -92,57 +91,13 @@ class _Reasoner:
 # --------------------------------------------------------------------------- #
 # The derived recipes — arithmetic + the abstention contract (never a fabricated number)
 # --------------------------------------------------------------------------- #
-def test_recipe_documented_shortfall_and_direction() -> None:
-    # A shortfall (documented < stated) → positive; a raise (documented > stated) → NEGATIVE (the edge).
-    short = _snap(
-        docs=[_doc("d")],
-        by_subject={
-            "d": {
-                "income.stated_monthly": _parsed("5000"),
-                "income.documented_monthly": _tag("4000"),
-            }
-        },
-    )
-    value, reason = _income_documented_shortfall(short)
-    assert value == "0.2" and reason  # (5000-4000)/5000
-
-    raise_ = _snap(
-        docs=[_doc("d")],
-        by_subject={
-            "d": {
-                "income.stated_monthly": _parsed("5000"),
-                "income.documented_monthly": _tag("6000"),
-            }
-        },
-    )
-    value2, _ = _income_documented_shortfall(raise_)
-    assert value2 == "-0.2"  # a raise is a negative shortfall — IN-1 must not fire on it
-
-
-def test_recipe_abstains_when_feeding_tag_absent_or_unknown() -> None:
-    # ABSENT documented → unknown (with a reason), never a fabricated 0.
-    absent = _snap(docs=[_doc("d")], by_subject={"d": {"income.stated_monthly": _parsed("5000")}})
-    v, r = _income_documented_shortfall(absent)
-    assert v == "unknown" and "documented" in r
-
-    # UNKNOWN-valued documented → also abstains (absent≠unknown≠empty).
-    unk = _snap(
-        docs=[_doc("d")],
-        by_subject={
-            "d": {
-                "income.stated_monthly": _parsed("5000"),
-                "income.documented_monthly": _tag("unknown"),
-            }
-        },
-    )
-    assert _income_documented_shortfall(unk)[0] == "unknown"
 
 
 def test_recipe_gap_and_recency_abstain_below_two_or_absent() -> None:
-    assert _income_max_employment_gap(_snap())[0] == "unknown"  # no records
-    assert _income_days_since_recent_pay(_snap())[0] == "unknown"  # no pay date
+    assert _income_max_employment_gap(_snap(), "loan", None)[0] == "unknown"  # no records
+    assert _income_days_since_recent_pay(_snap(), "loan", None)[0] == "unknown"  # no pay date
     paid = _snap(docs=[_doc("d")], by_subject={"d": {"income.pay_date": _parsed("2026-06-01")}})
-    val, _ = _income_days_since_recent_pay(paid)
+    val, _ = _income_days_since_recent_pay(paid, "loan", None)
     assert val == "44"  # 2026-07-15 - 2026-06-01
 
 
@@ -161,7 +116,7 @@ def test_recipe_ytd_uses_most_recent_pay_month_across_a_year_boundary() -> None:
             },
         },
     )
-    value, reason = _income_ytd_annualized_shortfall(snap)
+    value, reason = _income_ytd_annualized_shortfall(snap, "loan", None)
     assert (
         value == "0" and "1 month" in reason
     )  # ytd 6000 / 1 month = 6000/mo = documented → no shortfall
@@ -181,28 +136,8 @@ def test_recipe_employment_gap_pairs_consecutive_not_spanning_records() -> None:
             "c": {"income.employment_start": _parsed("2023-02-01")},
         },
     )
-    value, _ = _income_max_employment_gap(snap)
+    value, _ = _income_max_employment_gap(snap, "loan", None)
     assert value == "31"  # the consecutive gap, not the B-spanning 1127-day cartesian pair
-
-
-def test_recipe_documented_shortfall_abstains_on_partial_unknown_stated() -> None:
-    # LP-323-IN-B review #3: one borrower's stated income unknown → the sum is INCOMPLETE → abstain,
-    # never a corrupted ratio against an understated stated total.
-    snap = _snap(
-        docs=[_doc("b1"), _doc("b2")],
-        by_subject={
-            "b1": {
-                "income.stated_monthly": _parsed("5000"),
-                "income.documented_monthly": _parsed("4000"),
-            },
-            "b2": {  # this borrower's STATED is unknown — the stated sum is incomplete
-                "income.stated_monthly": _parsed("unknown"),
-                "income.documented_monthly": _parsed("4000"),
-            },
-        },
-    )
-    value, reason = _income_documented_shortfall(snap)
-    assert value == "unknown" and "incomplete" in reason
 
 
 def test_recipe_days_since_pay_abstains_on_a_future_pay_date() -> None:
@@ -211,46 +146,43 @@ def test_recipe_days_since_pay_abstains_on_a_future_pay_date() -> None:
     snap = _snap(
         docs=[_doc("d")], by_subject={"d": {"income.pay_date": _parsed("2026-08-01")}}
     )  # file date is 2026-07-15
-    value, reason = _income_days_since_recent_pay(snap)
+    value, reason = _income_days_since_recent_pay(snap, "loan", None)
     assert value == "unknown" and "AFTER the file date" in reason
 
 
-def test_derived_producer_materializes_a_loan_level_income_tag() -> None:
-    # produce_derived_tags (UNTOUCHED by this ticket) routes an income recipe to the loan subject.
+def test_derived_producer_still_materializes_a_loan_recipe() -> None:
+    # LP-332 canary: produce_derived_tags generalized to declared subjects, but a LOAN recipe still
+    # materializes under "loan" unchanged (loan- and borrower-level recipes coexist).
     decl = TagDeclaration(
-        tag_id="income.documented_income_shortfall_pct",
+        tag_id="income.days_since_most_recent_pay",
         mode=ProductionMode.DERIVED,
         subject="loan",
-        data="income_documented_shortfall",
+        data="income_days_since_recent_pay",
         allowed_values=None,
     )
-    snap = _snap(
-        docs=[_doc("d")],
-        by_subject={
-            "d": {
-                "income.stated_monthly": _parsed("5000"),
-                "income.documented_monthly": _tag("4000"),
-            }
-        },
-    )
+    snap = _snap(docs=[_doc("d")], by_subject={"d": {"income.pay_date": _parsed("2026-06-01")}})
     out = produce_derived_tags(decl, snap)
-    assert out["loan"]["income.documented_income_shortfall_pct"].value == "0.2"
+    assert out["loan"]["income.days_since_most_recent_pay"].value == "44"
 
 
 # --------------------------------------------------------------------------- #
 # IN-1 — deterministic through the generic evaluator (fire / raise-edge / couldnt_check)
 # --------------------------------------------------------------------------- #
 def _in1(shortfall: str | None):
+    # LP-332: IN-1 is now PER-BORROWER — the shortfall tag keys under a borrower_id, and the per_borrower
+    # enumerator finds the borrower via a document's belongs_to.
     tags = (
         {
-            "loan": {
+            str(_B1): {
                 "income.documented_income_shortfall_pct": _tag(shortfall, by=TagProducedBy.DERIVED)
             }
         }
         if shortfall
         else {}
     )
-    return evaluate_deterministic_rule(load_rule_spec("IN-1"), _snap(by_subject=tags))
+    return evaluate_deterministic_rule(
+        load_rule_spec("IN-1"), _snap(docs=[_doc("d", borrower=_B1)], by_subject=tags)
+    )
 
 
 def test_in1_fires_on_shortfall_satisfied_on_raise_couldnt_check_on_absent() -> None:

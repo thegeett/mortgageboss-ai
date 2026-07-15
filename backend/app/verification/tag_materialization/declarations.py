@@ -36,7 +36,8 @@ _PRODUCTION_YAML = _RULES_DIR / "tag_production.yaml"
 _VOCAB_EXTRA_YAML = _RULES_DIR / "vocabulary_extra.yaml"
 
 # The subject keys a production declaration may attach a tag to (resolved by the subjects registry).
-KNOWN_SUBJECTS = frozenset({"transaction", "document", "loan"})
+# LP-332 added `borrower` (a tag keyed by borrower_id, materialized from MISMO borrower.{n}.*).
+KNOWN_SUBJECTS = frozenset({"transaction", "document", "loan", "borrower"})
 
 
 class DeclarationError(Exception):
@@ -243,19 +244,14 @@ def validate_declarations(
                 f"(known: {sorted(known_context_builders)})"
             )
     for decl in load_declarations().values():
-        if decl.mode is ProductionMode.DERIVED:
-            if decl.data not in known_recipes:
-                raise DeclarationError(
-                    f"tag {decl.tag_id!r}: unknown derived recipe {decl.data!r} "
-                    f"(known: {sorted(known_recipes)})"
-                )
-            # Derived recipes are snapshot -> ONE value (loan-level) today; a non-loan subject would
-            # be silently misrouted to the loan subject, so reject it at load rather than at run.
-            if decl.subject != "loan":
-                raise DeclarationError(
-                    f"tag {decl.tag_id!r}: derived recipes are loan-level today; "
-                    f"subject {decl.subject!r} is unsupported"
-                )
+        # LP-332: derived recipes now run for ANY declared subject (the producer enumerates the subject
+        # registry, like parsed/ai) — the loan-only restriction is gone, so a borrower-keyed derived tag
+        # (e.g. income.documented_income_shortfall_pct) is valid. Only the recipe key is validated here.
+        if decl.mode is ProductionMode.DERIVED and decl.data not in known_recipes:
+            raise DeclarationError(
+                f"tag {decl.tag_id!r}: unknown derived recipe {decl.data!r} "
+                f"(known: {sorted(known_recipes)})"
+            )
         if decl.mode is ProductionMode.AI:
             ai_group = ai_groups.get(decl.data)
             if ai_group is None:

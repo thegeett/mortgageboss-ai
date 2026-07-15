@@ -35,6 +35,11 @@ ACTIVE_RULE_IDS: tuple[str, ...] = (
     "ID-6",
     "ID-7",
     "ID-9",
+    # LP-332 — borrower-keyed materialization activates these (their tags now materialize under the
+    # borrower subject): ID-8 (citizenship/residency eligibility) + IN-1 (per-borrower income shortfall,
+    # the PIN #1 fix). Both were authored + evaluated but blocked on the borrower_id ↔ MISMO resolution.
+    "ID-8",
+    "IN-1",
 )
 
 

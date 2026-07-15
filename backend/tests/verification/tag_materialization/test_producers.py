@@ -452,28 +452,27 @@ def test_loader_fails_loud_on_invalid_declaration(tmp_path, monkeypatch) -> None
     d.load_declarations.cache_clear()
 
 
-def test_loader_fails_loud_on_non_loan_derived_subject(tmp_path, monkeypatch) -> None:
-    # Derived recipes are snapshot -> ONE value (loan-level) today; a non-loan subject would be
-    # silently misrouted to the loan subject, so it must be rejected at LOAD, not run.
+def test_derived_declaration_accepts_a_non_loan_subject(tmp_path, monkeypatch) -> None:
+    # LP-332 generalized derived production to the declared subject (the producer enumerates the subject
+    # registry, like parsed/ai), so a non-loan derived subject is now VALID — no longer rejected at load.
     import app.verification.tag_materialization.declarations as d
 
-    bad = tmp_path / "tag_production.yaml"
-    bad.write_text(
+    ok = tmp_path / "tag_production.yaml"
+    ok.write_text(
         "tags:\n"
-        "  x.foo: {mode: derived, subject: document, data: app_required_fields_present}\n"
+        "  x.foo: {mode: derived, subject: borrower, data: app_required_fields_present}\n"
         "ai_groups: {}\n"
     )
-    monkeypatch.setattr(d, "_PRODUCTION_YAML", bad)
+    monkeypatch.setattr(d, "_PRODUCTION_YAML", ok)
     d._production_doc.cache_clear()
     d.load_declarations.cache_clear()
     monkeypatch.setattr(d, "_allowed_values_by_tag", lambda: {"x.foo": None})
     from app.verification.tag_materialization.derived import KNOWN_RECIPES
     from app.verification.tag_materialization.subjects import KNOWN_CONTEXT_BUILDERS
 
-    with pytest.raises(DeclarationError, match="derived recipes are loan-level"):
-        d.validate_declarations(
-            known_recipes=KNOWN_RECIPES, known_context_builders=KNOWN_CONTEXT_BUILDERS
-        )
+    d.validate_declarations(  # no raise — a borrower-subject derived tag is valid now
+        known_recipes=KNOWN_RECIPES, known_context_builders=KNOWN_CONTEXT_BUILDERS
+    )
     d._production_doc.cache_clear()
     d.load_declarations.cache_clear()
 

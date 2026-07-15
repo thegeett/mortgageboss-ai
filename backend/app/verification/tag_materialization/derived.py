@@ -15,13 +15,21 @@ from decimal import Decimal, InvalidOperation
 from pydantic import JsonValue
 
 from app.ai.extraction.parsing import coerce_date
+from app.verification.snapshot.fields import Field
 from app.verification.snapshot.model import Snapshot
 from app.verification.snapshot.tag import Tag, TagProducedBy, TagRole, TagStage
 from app.verification.tag_materialization.declarations import TagDeclaration
-from app.verification.tag_materialization.subjects import LOAN_SUBJECT
+from app.verification.tag_materialization.subjects import (
+    LOAN_SUBJECT,
+    BorrowerSubject,
+    subject_type,
+)
 
-# A recipe: snapshot -> (value, reasoning). Deterministic; "unknown" when it cannot compute.
-Recipe = Callable[[Snapshot], tuple[JsonValue, str]]
+# A recipe: (snapshot, subject_id, subject_raw) -> (value, reasoning). Deterministic; "unknown" when it
+# cannot compute. LP-332 added the subject arguments so a recipe can be PER-SUBJECT (a borrower recipe
+# reads THIS borrower's facts). A loan-level recipe (subject_id == "loan") ignores both — its logic is
+# unchanged (the regression canary, _app_required_fields_present).
+Recipe = Callable[[Snapshot, str, object], tuple[JsonValue, str]]
 
 _UNKNOWN = "unknown"
 
@@ -73,34 +81,87 @@ def _income_dates(snapshot: Snapshot, tag_id: str) -> list[date]:
     return out
 
 
-def _income_documented_shortfall(snapshot: Snapshot) -> tuple[JsonValue, str]:
-    """income.documented_income_shortfall_pct — (stated - documented) / stated, loan-level aggregate.
+def _borrower_stated_monthly(snapshot: Snapshot, index: int) -> tuple[Decimal, bool]:
+    """Sum a borrower's MISMO stated income items (borrower.{index}.income.{m}.monthly_amount)."""
+    total = Decimal(0)
+    present = False
+    if snapshot.mismo.absent:
+        return total, present
+    m = 1
+    while True:
+        field = snapshot.mismo.facts.get(f"borrower.{index}.income.{m}.monthly_amount")
+        if field is None:
+            break  # income items are contiguous from 1
+        # A monthly income amount is a plain Field (never PII); guard the type so mypy is satisfied and
+        # a stray PiiField never contributes a display value.
+        if isinstance(field, Field) and field.is_present:
+            try:
+                total += Decimal(str(field.value))
+                present = True
+            except (InvalidOperation, ValueError):
+                pass
+        m += 1
+    return total, present
 
-    SIGNED (a SHORTFALL), NOT abs: documented ABOVE stated (a raise) is a NEGATIVE shortfall and must
-    NOT fire (LP-323-IN-A domain edge). Abstains when EITHER sum is absent/incomplete (any unknown) or
-    stated is zero — an incomplete sum understates the total and would corrupt the ratio, never a
-    fabricated ratio."""
-    stated, s_present, s_unknown = _income_numbers(snapshot, "income.stated_monthly")
-    documented, d_present, d_unknown = _income_numbers(snapshot, "income.documented_monthly")
-    if not s_present or s_unknown or stated == 0:
-        return (
-            _UNKNOWN,
-            "stated monthly income is absent, incomplete, or zero — cannot compute a shortfall",
-        )
+
+def _borrower_documented_monthly(
+    snapshot: Snapshot, borrower_id: str
+) -> tuple[Decimal, bool, bool]:
+    """Sum income.documented_monthly across the borrower's OWN documents (belongs_to) → (total,
+    any_present, any_unknown). Only this borrower's documents — one borrower's income never leaks."""
+    total = Decimal(0)
+    any_present = any_unknown = False
+    if snapshot.tags.absent or snapshot.documents.absent:
+        return total, any_present, any_unknown
+    for entry in snapshot.documents.entries:
+        if entry.belongs_to is None or not any(
+            str(ref.borrower_id) == borrower_id for ref in entry.belongs_to
+        ):
+            continue
+        tag = snapshot.tags.by_subject.get(entry.content_id, {}).get("income.documented_monthly")
+        if tag is None:
+            continue
+        if str(tag.value) == _UNKNOWN:
+            any_unknown = True
+            continue
+        try:
+            total += Decimal(str(tag.value))
+            any_present = True
+        except (InvalidOperation, ValueError):
+            any_unknown = True
+    return total, any_present, any_unknown
+
+
+def _income_documented_shortfall(
+    snapshot: Snapshot, subject_id: str, subject_raw: object
+) -> tuple[JsonValue, str]:
+    """income.documented_income_shortfall_pct — PER BORROWER (LP-332, fixes PIN #1).
+
+    (stated - documented) / stated for THIS borrower: stated = the borrower's MISMO stated income;
+    documented = the sum of income.documented_monthly over the borrower's OWN documents (belongs_to).
+    SIGNED (a raise is negative → never fires — the LP-323-IN-A edge). Abstains PER BORROWER when its
+    stated is absent/zero or its documented is absent/incomplete — one borrower's gap never fails
+    another (per-subject fail-closed), and a borrower A whose income is inflated is no longer MASKED by
+    a borrower B (the loan-level aggregate false-green — PIN #1)."""
+    if not isinstance(subject_raw, BorrowerSubject):
+        return _UNKNOWN, "the income shortfall is a per-borrower recipe (needs a borrower subject)"
+    stated, s_present = _borrower_stated_monthly(snapshot, subject_raw.index)
+    documented, d_present, d_unknown = _borrower_documented_monthly(snapshot, subject_id)
+    if not s_present or stated == 0:
+        return _UNKNOWN, f"borrower {subject_id}: stated monthly income is absent or zero"
     if not d_present or d_unknown:
-        return (
-            _UNKNOWN,
-            "documented monthly income is absent or incomplete — cannot compute a shortfall",
-        )
+        return _UNKNOWN, f"borrower {subject_id}: documented monthly income is absent or incomplete"
     shortfall = (stated - documented) / stated
     return (
         str(shortfall),
-        f"documented monthly income {documented} vs stated {stated} → shortfall {shortfall:.4f} "
-        "(negative = documented exceeds stated, e.g. a raise — not a shortfall)",
+        f"borrower {subject_id}: documented {documented} vs stated {stated} → shortfall "
+        f"{shortfall:.4f} (negative = a raise, not a shortfall)",
     )
 
 
-def _income_ytd_annualized_shortfall(snapshot: Snapshot) -> tuple[JsonValue, str]:
+def _income_ytd_annualized_shortfall(
+    snapshot: Snapshot, _subject_id: str, _subject_raw: object
+) -> tuple[JsonValue, str]:
     """income.ytd_annualized_shortfall_pct — (documented - ytd_monthly) / documented, loan-level.
 
     ytd_monthly = total YTD gross / elapsed months (the MOST-RECENT pay date's month number). Fires
@@ -128,7 +189,9 @@ def _income_ytd_annualized_shortfall(snapshot: Snapshot) -> tuple[JsonValue, str
     )
 
 
-def _income_max_employment_gap(snapshot: Snapshot) -> tuple[JsonValue, str]:
+def _income_max_employment_gap(
+    snapshot: Snapshot, _subject_id: str, _subject_raw: object
+) -> tuple[JsonValue, str]:
     """income.max_employment_gap_days — the largest gap (days) between consecutive employment records.
 
     Sorts the (end → next start) intervals across all employment records. Abstains when fewer than two
@@ -151,7 +214,9 @@ def _income_max_employment_gap(snapshot: Snapshot) -> tuple[JsonValue, str]:
     return str(max_gap), f"largest gap between consecutive employment records is {max_gap} day(s)"
 
 
-def _income_days_since_recent_pay(snapshot: Snapshot) -> tuple[JsonValue, str]:
+def _income_days_since_recent_pay(
+    snapshot: Snapshot, _subject_id: str, _subject_raw: object
+) -> tuple[JsonValue, str]:
     """income.days_since_most_recent_pay — days from the most recent pay date to the snapshot date.
 
     Recency is measured against ``snapshot.created_at`` (the run date — the file's 'as of'). Abstains
@@ -185,7 +250,9 @@ _APP_REQUIRED_FIELDS = (
 )
 
 
-def _app_required_fields_present(snapshot: Snapshot) -> tuple[JsonValue, str]:
+def _app_required_fields_present(
+    snapshot: Snapshot, _subject_id: str, _subject_raw: object
+) -> tuple[JsonValue, str]:
     """id.app_required_fields_present — 'complete' iff every required 1003 field is present."""
     if snapshot.mismo.absent:
         return "unknown", "the 1003 (MISMO) facts are absent — cannot check completeness"
@@ -215,29 +282,31 @@ KNOWN_RECIPES = frozenset(_RECIPES)
 
 
 def produce_derived_tags(decl: TagDeclaration, snapshot: Snapshot) -> dict[str, dict[str, Tag]]:
-    """Produce a derived tag for its subject (``loan`` today), keyed ``{subject_id: {tag_id: Tag}}``."""
+    """Produce a derived tag for EACH of its declared subjects, keyed ``{subject_id: {tag_id: Tag}}``.
+
+    LP-332: generalized from loan-only to the declared subject (mirroring how parsed/ai enumerate the
+    subject registry). A ``loan`` declaration yields one subject (unchanged); a ``borrower`` declaration
+    yields one per borrower, each keyed under its borrower_id. The recipe receives ``(snapshot,
+    subject_id, subject_raw)`` and abstains PER SUBJECT — one subject's ``"unknown"`` never touches
+    another (per-subject fail-closed, LP-327's discipline)."""
     recipe = _RECIPES.get(decl.data)
     if recipe is None:
         raise KeyError(f"unknown derived recipe {decl.data!r} (known: {sorted(_RECIPES)})")
-    # Recipes are snapshot -> ONE value, so they attach to the single loan subject; a non-loan subject
-    # would be misrouted here (validate_declarations rejects it at load, but never route silently).
-    if decl.subject != LOAN_SUBJECT:
-        raise KeyError(
-            f"derived tag {decl.tag_id!r}: subject {decl.subject!r} is unsupported — "
-            f"derived recipes are loan-level (snapshot -> one value) today"
-        )
-    value, reasoning = recipe(snapshot)
-    subject_id = LOAN_SUBJECT
-    tag = Tag(
-        value=value,
-        confidence=None,
-        reasoning=reasoning,
-        source_facts=(subject_id,),
-        produced_by=TagProducedBy.DERIVED,
-        tag_role=TagRole.STRUCTURAL_FACT,
-        stage=TagStage.A,
-    )
-    return {subject_id: {decl.tag_id: tag}}
+    out: dict[str, dict[str, Tag]] = {}
+    for subject_id, subject_raw in subject_type(decl.subject).enumerate(snapshot):
+        value, reasoning = recipe(snapshot, subject_id, subject_raw)
+        out[subject_id] = {
+            decl.tag_id: Tag(
+                value=value,
+                confidence=None,
+                reasoning=reasoning,
+                source_facts=(subject_id,),
+                produced_by=TagProducedBy.DERIVED,
+                tag_role=TagRole.STRUCTURAL_FACT,
+                stage=TagStage.A,
+            )
+        }
+    return out
 
 
 __all__ = ["KNOWN_RECIPES", "Recipe", "produce_derived_tags"]

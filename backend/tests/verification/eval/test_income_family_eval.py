@@ -27,17 +27,20 @@ from app.verification.rule_engine.deterministic import evaluate_deterministic_ru
 from app.verification.rule_engine.judgment import evaluate_judgment_rule
 from app.verification.rule_engine.result import RuleEvaluation, Verdict
 from app.verification.rules.specs import RuleSpecNotFound, load_rule_spec
+from app.verification.snapshot.fields import Field, FieldSource
 from app.verification.snapshot.model import (
     BorrowerRef,
     DocumentEntry,
     DocumentsSection,
+    MismoSection,
     Snapshot,
     TagsSection,
 )
 from app.verification.snapshot.tag import Tag, TagProducedBy, TagRole, TagStage
+from app.verification.tag_materialization.declarations import ProductionMode, TagDeclaration
 from app.verification.tag_materialization.derived import (
-    _income_documented_shortfall,
     _income_max_employment_gap,
+    produce_derived_tags,
 )
 
 pytestmark = pytest.mark.anyio
@@ -107,12 +110,16 @@ def _verdicts(results: list[RuleEvaluation]) -> list[Verdict]:
 # IN-1 — stated-vs-documented shortfall (deterministic, loan, derived tag, 5% threshold)
 # ================================================================================================= #
 def _in1(shortfall: str | None):
+    # LP-332: IN-1 is PER-BORROWER — the shortfall tag keys under a borrower_id; the per_borrower
+    # enumerator finds the borrower via a document's belongs_to.
     tags = (
-        {"loan": {"income.documented_income_shortfall_pct": _derived(shortfall)}}
+        {str(_B1): {"income.documented_income_shortfall_pct": _derived(shortfall)}}
         if shortfall
         else {}
     )
-    return evaluate_deterministic_rule(load_rule_spec("IN-1"), _snap(by_subject=tags))
+    return evaluate_deterministic_rule(
+        load_rule_spec("IN-1"), _snap(docs=[_doc("d", borrower=_B1)], by_subject=tags)
+    )
 
 
 def test_in1_case1_2_must_fire_and_clean() -> None:
@@ -148,42 +155,58 @@ def test_in1_case13_raise_between_documents_does_not_fire() -> None:
 # ================================================================================================= #
 # PIN #1 (THE #1 FALSE-GREEN) — loan-level aggregate MASKS per-borrower income fraud
 # ================================================================================================= #
-def test_pin1_aggregate_masking_hides_per_borrower_fraud() -> None:
-    # A 2-borrower file: borrower A's documented income is 40% SHORT of stated (fraud signal); borrower
-    # B's documented income EXCEEDS stated. The loan-level recipe AGGREGATES → net shortfall ~0 →
-    # IN-1 SATISFIED, masking exactly the case it exists to catch. This is the #1 consequence of the
-    # per-borrower derived-producer gap (derived.py is loan-only). PINNED, not fixed (a separate ticket:
-    # the per-borrower derived producer / borrower-keyed materialization, shared with ID-8).
-    two_borrower = _snap(
-        docs=[_doc("aStub", borrower=_B1), _doc("bStub", borrower=_B2)],
-        by_subject={
-            "aStub": {
-                "income.stated_monthly": _parsed("5000"),
-                "income.documented_monthly": _tag("3000"),
-            },
-            "bStub": {
-                "income.stated_monthly": _parsed("5000"),
-                "income.documented_monthly": _tag("7000"),
-            },
-        },
-    )
-    value, _ = _income_documented_shortfall(two_borrower)
-    assert value == "0"  # (10000-10000)/10000 — the fraud nets to zero at loan level
-    assert (
-        _in1(value)[0].verdict is Verdict.SATISFIED
-    )  # MASKED (borrower A alone: 0.40 → would fire)
+def _mismo_borrower(idx: int, bid, monthly: str) -> dict:
+    return {
+        f"borrower.{idx}.borrower_id": Field.present(str(bid), source=FieldSource.EXTRACTED),
+        f"borrower.{idx}.income.1.monthly_amount": Field.present(
+            monthly, source=FieldSource.EXTRACTED
+        ),
+    }
 
-    # Borrower A in isolation WOULD fire — proving the masking is the aggregation, not the rule logic.
-    a_alone = _snap(
-        docs=[_doc("aStub", borrower=_B1)],
-        by_subject={
-            "aStub": {
-                "income.stated_monthly": _parsed("5000"),
-                "income.documented_monthly": _tag("3000"),
+
+def test_pin1_now_fixed_per_borrower_fires_for_the_fraud_borrower() -> None:
+    # LP-332 FIXES PIN #1 (this test previously asserted SATISFIED — the loan-level masking). The shortfall
+    # is now PER BORROWER: a 2-borrower file where borrower A's documented income is 40% SHORT of stated
+    # (the fraud signal) and borrower B's EXCEEDS stated → borrower A FIRES, borrower B is satisfied — A
+    # is no longer masked by B. The pin's fix ticket has landed (borrower-keyed materialization, LP-332).
+    facts = {**_mismo_borrower(1, _B1, "5000"), **_mismo_borrower(2, _B2, "5000")}
+    snap = Snapshot(
+        loan_file_id=uuid4(),
+        run_id=uuid4(),
+        created_at=datetime(2026, 7, 15, tzinfo=UTC),
+        documents=DocumentsSection.present(
+            [_doc("aStub", borrower=_B1), _doc("bStub", borrower=_B2)]
+        ),
+        mismo=MismoSection.present(facts),
+        tags=TagsSection.present(
+            {
+                "aStub": {"income.documented_monthly": _tag("3000")},  # A: 40% short of stated
+                "bStub": {"income.documented_monthly": _tag("7000")},  # B: a raise
             }
-        },
+        ),
     )
-    assert _income_documented_shortfall(a_alone)[0] == "0.4"
+    decl = TagDeclaration(
+        tag_id="income.documented_income_shortfall_pct",
+        mode=ProductionMode.DERIVED,
+        subject="borrower",
+        data="income_documented_shortfall",
+        allowed_values=None,
+    )
+    produced = produce_derived_tags(decl, snap)
+    assert produced[str(_B1)]["income.documented_income_shortfall_pct"].value == "0.4"  # A fires
+    assert str(produced[str(_B2)]["income.documented_income_shortfall_pct"].value).startswith(
+        "-"
+    )  # B raise
+
+    # IN-1 (per_borrower) now FIRES for borrower A and is satisfied for borrower B — no masking.
+    merged = {**snap.tags.by_subject}
+    for sid, tags in produced.items():
+        merged.setdefault(sid, {}).update(tags)
+    evals = evaluate_deterministic_rule(
+        load_rule_spec("IN-1"), snap.model_copy(update={"tags": TagsSection.present(merged)})
+    )
+    by = {e.subject_id: e.verdict for e in evals}
+    assert by[str(_B1)] is Verdict.FIRED and by[str(_B2)] is Verdict.SATISFIED
 
 
 # ================================================================================================= #
@@ -242,7 +265,7 @@ def test_in4_fire_clean_boundary_abstention_and_recipe() -> None:
     assert _in4(None)[0].verdict is Verdict.COULDNT_CHECK  # 12
     # case 13 (short explained gap) vs long gap — the recipe measures the largest gap; a single job → unknown.
     assert (
-        _income_max_employment_gap(_snap(docs=[_doc("d")]))[0] == "unknown"
+        _income_max_employment_gap(_snap(docs=[_doc("d")]), "loan", None)[0] == "unknown"
     )  # <2 records → abstain
 
 

@@ -167,6 +167,12 @@ def build_mismo_section(
         sorted(_active(borrowers), key=lambda b: (b.borrower_position, str(b.id))), start=1
     ):
         base = f"borrower.{n}"
+        # LP-332: the borrower_id ↔ MISMO-index link. `borrower.{n}` is a re-derived SORT POSITION
+        # (not durable), so borrower-keyed materialization needs a snapshot-internal map from a
+        # `belongs_to` UUID back to this index. Emitting the id here is that map — deterministic, PII-safe
+        # (a UUID, not identity data), and the ONLY non-name-matching resolution (BorrowerRef rejects
+        # name-matching). A borrower group with no id → the borrower subject cannot key it → couldnt_check.
+        put(f"{base}.borrower_id", str(borrower.id))
         put(f"{base}.first_name", borrower.first_name)
         put(f"{base}.middle_name", borrower.middle_name)
         put(f"{base}.last_name", borrower.last_name)

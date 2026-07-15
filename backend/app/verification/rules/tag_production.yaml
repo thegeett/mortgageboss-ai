@@ -22,7 +22,13 @@ tags:
   id.dob: {mode: parsed, subject: document, data: dob}
   id.id_expiration: {mode: parsed, subject: document, data: id_expiration}
   id.marital_status: {mode: parsed, subject: document, data: marital_status}
-  id.citizenship: {mode: parsed, subject: document, data: citizenship}
+  # LP-332: id.citizenship is a BORROWER-level 1003/MISMO fact — now keyed under the borrower subject
+  # (borrower.{n}.citizenship), resolved to the borrower_id via the LP-332 id link. This ACTIVATES ID-8
+  # (its LP-331 aspirational `subject: document` declaration never materialized — no document has it).
+  id.citizenship: {mode: parsed, subject: borrower, data: citizenship}
+  # LP-332: the loan program (loan.program in MISMO), ID-8's other load-bearing tag. The loan subject
+  # reads the FULL MISMO key (unlike the borrower subject, which prepends borrower.{n}.).
+  program.type: {mode: parsed, subject: loan, data: loan.program}
   contract.closing_date: {mode: parsed, subject: document, data: closing_date}
   id.app_required_fields_present: {mode: derived, subject: loan, data: app_required_fields_present}
   id.name_normalized: {mode: ai, subject: document, data: id_name}
@@ -55,7 +61,9 @@ tags:
   income.is_declining: {mode: ai, subject: document, data: income_stability}
   income.same_line_of_work: {mode: ai, subject: document, data: income_stability}
   income.continuance_3yr: {mode: ai, subject: document, data: income_stability}
-  income.documented_income_shortfall_pct: {mode: derived, subject: loan, data: income_documented_shortfall}
+  # LP-332 (fixes PIN #1): PER-BORROWER now — the recipe reads THIS borrower's stated (MISMO) + its own
+  # documents' documented income, so borrower A's inflated income is no longer masked by borrower B.
+  income.documented_income_shortfall_pct: {mode: derived, subject: borrower, data: income_documented_shortfall}
   income.ytd_annualized_shortfall_pct: {mode: derived, subject: loan, data: income_ytd_annualized_shortfall}
   income.max_employment_gap_days: {mode: derived, subject: loan, data: income_max_employment_gap}
   income.days_since_most_recent_pay: {mode: derived, subject: loan, data: income_days_since_recent_pay}
