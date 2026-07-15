@@ -81,38 +81,52 @@ def _income_dates(snapshot: Snapshot, tag_id: str) -> list[date]:
     return out
 
 
-def _borrower_stated_monthly(snapshot: Snapshot, index: int) -> tuple[Decimal, bool]:
-    """Sum a borrower's MISMO stated income items (borrower.{index}.income.{m}.monthly_amount)."""
+def _borrower_stated_monthly(snapshot: Snapshot, index: int) -> tuple[Decimal, bool, bool]:
+    """Sum a borrower's MISMO stated income items (borrower.{index}.income.{m}.monthly_amount) →
+    (total, any_present, any_unknown). A present-but-unparseable amount marks any_unknown so the caller
+    ABSTAINS rather than silently understating stated (an understated stated masks a real shortfall — the
+    same absent≠unknown discipline the documented side already follows). Enumerates ALL income keys for
+    the borrower rather than assuming contiguous indices — a gap must not silently truncate the sum."""
     total = Decimal(0)
-    present = False
+    any_present = any_unknown = False
     if snapshot.mismo.absent:
-        return total, present
-    m = 1
-    while True:
-        field = snapshot.mismo.facts.get(f"borrower.{index}.income.{m}.monthly_amount")
-        if field is None:
-            break  # income items are contiguous from 1
+        return total, any_present, any_unknown
+    prefix = f"borrower.{index}.income."
+    for name, field in snapshot.mismo.facts.items():
+        if not (name.startswith(prefix) and name.endswith(".monthly_amount")):
+            continue
         # A monthly income amount is a plain Field (never PII); guard the type so mypy is satisfied and
         # a stray PiiField never contributes a display value.
-        if isinstance(field, Field) and field.is_present:
-            try:
-                total += Decimal(str(field.value))
-                present = True
-            except (InvalidOperation, ValueError):
-                pass
-        m += 1
-    return total, present
+        if not isinstance(field, Field) or not field.is_present:
+            continue
+        try:
+            total += Decimal(str(field.value))
+            any_present = True
+        except (InvalidOperation, ValueError):
+            any_unknown = (
+                True  # a present-but-unparseable amount → incomplete sum → abstain, not drop
+            )
+    return total, any_present, any_unknown
 
 
 def _borrower_documented_monthly(
     snapshot: Snapshot, borrower_id: str
 ) -> tuple[Decimal, bool, bool]:
-    """Sum income.documented_monthly across the borrower's OWN documents (belongs_to) → (total,
-    any_present, any_unknown). Only this borrower's documents — one borrower's income never leaks."""
-    total = Decimal(0)
+    """The borrower's documented monthly income from its OWN documents (belongs_to) → (value,
+    any_present, any_unknown). Only this borrower's documents — one borrower's income never leaks.
+
+    income.documented_monthly is a PER-PAYSTUB figure (materialized per document), so the standard two
+    recent paystubs from ONE job carry the SAME monthly amount — SUMMING them would double-count and turn
+    a real shortfall into an apparent raise (the exact PIN #1 false-green, re-created within a borrower).
+    We therefore take the DISTINCT documented figure: exactly one distinct value → that is the documented
+    monthly; MORE than one (variable pay, or a genuine multi-job borrower whose sources need per-employer
+    aggregation) → any_unknown → the caller ABSTAINS (couldnt_check), never a summed over-count. Summing
+    a true multi-job borrower's sources is a domain follow-on (needs per-employer grouping); until then
+    the honest answer is to abstain, never to mask."""
+    values: set[Decimal] = set()
     any_present = any_unknown = False
     if snapshot.tags.absent or snapshot.documents.absent:
-        return total, any_present, any_unknown
+        return Decimal(0), any_present, any_unknown
     for entry in snapshot.documents.entries:
         if entry.belongs_to is None or not any(
             str(ref.borrower_id) == borrower_id for ref in entry.belongs_to
@@ -125,11 +139,14 @@ def _borrower_documented_monthly(
             any_unknown = True
             continue
         try:
-            total += Decimal(str(tag.value))
+            values.add(Decimal(str(tag.value)))
             any_present = True
         except (InvalidOperation, ValueError):
             any_unknown = True
-    return total, any_present, any_unknown
+    if len(values) > 1:
+        any_unknown = True  # conflicting documented figures → ambiguous aggregation → abstain
+    value = next(iter(values)) if len(values) == 1 else Decimal(0)
+    return value, any_present, any_unknown
 
 
 def _income_documented_shortfall(
@@ -138,19 +155,28 @@ def _income_documented_shortfall(
     """income.documented_income_shortfall_pct — PER BORROWER (LP-332, fixes PIN #1).
 
     (stated - documented) / stated for THIS borrower: stated = the borrower's MISMO stated income;
-    documented = the sum of income.documented_monthly over the borrower's OWN documents (belongs_to).
-    SIGNED (a raise is negative → never fires — the LP-323-IN-A edge). Abstains PER BORROWER when its
-    stated is absent/zero or its documented is absent/incomplete — one borrower's gap never fails
-    another (per-subject fail-closed), and a borrower A whose income is inflated is no longer MASKED by
-    a borrower B (the loan-level aggregate false-green — PIN #1)."""
+    documented = the borrower's OWN documents' documented monthly income (belongs_to) — the DISTINCT
+    per-paystub figure, NOT a sum across paystubs (summing would double-count one job's income; see
+    _borrower_documented_monthly). SIGNED (a raise is negative → never fires — the LP-323-IN-A edge).
+    Abstains PER BORROWER when its stated is absent/zero/incomplete or its documented is absent/
+    incomplete/conflicting — one borrower's gap never fails another (per-subject fail-closed), and a
+    borrower A whose income is inflated is no longer MASKED by a borrower B (the loan-level aggregate
+    false-green — PIN #1)."""
     if not isinstance(subject_raw, BorrowerSubject):
         return _UNKNOWN, "the income shortfall is a per-borrower recipe (needs a borrower subject)"
-    stated, s_present = _borrower_stated_monthly(snapshot, subject_raw.index)
+    stated, s_present, s_unknown = _borrower_stated_monthly(snapshot, subject_raw.index)
     documented, d_present, d_unknown = _borrower_documented_monthly(snapshot, subject_id)
-    if not s_present or stated == 0:
-        return _UNKNOWN, f"borrower {subject_id}: stated monthly income is absent or zero"
+    if not s_present or s_unknown or stated == 0:
+        return (
+            _UNKNOWN,
+            f"borrower {subject_id}: stated monthly income is absent, zero, or incomplete",
+        )
     if not d_present or d_unknown:
-        return _UNKNOWN, f"borrower {subject_id}: documented monthly income is absent or incomplete"
+        return (
+            _UNKNOWN,
+            f"borrower {subject_id}: documented monthly income is absent, incomplete, or has "
+            "conflicting figures across documents",
+        )
     shortfall = (stated - documented) / stated
     return (
         str(shortfall),

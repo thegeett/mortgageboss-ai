@@ -114,10 +114,22 @@ def test_borrower_subject_resolves_each_borrower_by_id() -> None:
 # THE FAILURE MODE — unresolvable/ambiguous → skip → couldnt_check, never a guess
 # --------------------------------------------------------------------------- #
 def test_missing_id_link_skips_the_borrower_never_guesses() -> None:
-    # A borrower group with NO borrower_id fact → not enumerated (no safe attribution). The list ends at
-    # the first gap; a later group is not reached (contiguous-from-1 contract).
+    # A borrower group with NO borrower_id fact → not enumerated (no safe attribution).
     snap = _snap(mismo={"borrower.1.citizenship": _f("us_citizen")})  # no borrower_id
     assert subject_type("borrower").enumerate(snap) == []
+
+
+def test_non_contiguous_borrower_indices_are_all_enumerated() -> None:
+    # A gap in the MISMO indices (borrower.1 + borrower.3, no borrower.2 — a co-borrower dropped
+    # mid-build, or an emitter change) must NOT truncate the borrower set: BOTH are enumerated, so a
+    # real borrower is never silently left un-checked. (Regression: the old loop broke at the first gap.)
+    snap = _snap(
+        mismo={
+            "borrower.1.borrower_id": _f(str(_A)),
+            "borrower.3.borrower_id": _f(str(_B)),  # index 2 is absent
+        }
+    )
+    assert [sid for sid, _ in subject_type("borrower").enumerate(snap)] == [str(_A), str(_B)]
 
 
 def test_duplicate_id_link_skips_the_ambiguous_borrower() -> None:
@@ -175,6 +187,77 @@ def test_per_borrower_shortfall_isolated_and_fixes_pin1() -> None:
     assert (
         p2[str(_B)]["income.documented_income_shortfall_pct"].value == "unknown"
     )  # B abstains, A unaffected
+
+
+_SHORTFALL_DECL = TagDeclaration(
+    "income.documented_income_shortfall_pct",
+    ProductionMode.DERIVED,
+    "borrower",
+    "income_documented_shortfall",
+    None,
+)
+
+
+# --------------------------------------------------------------------------- #
+# income.documented_monthly is PER PAYSTUB — must NOT be summed across a borrower's paystubs
+# --------------------------------------------------------------------------- #
+def test_two_paystubs_same_figure_are_not_double_counted() -> None:
+    # A borrower short of stated income submits the two recent paystubs a lender requires, both
+    # documenting the SAME monthly figure. SUMMING them (the old bug) would inflate documented to 6000 >
+    # stated 5000 → a NEGATIVE shortfall → SATISFIED, masking a real 40% shortfall (PIN #1, re-created
+    # within a borrower). The distinct figure is 3000 → shortfall (5000-3000)/5000 = 0.4, and it FIRES.
+    snap = _snap(
+        mismo={
+            "borrower.1.borrower_id": _f(str(_A)),
+            "borrower.1.income.1.monthly_amount": _f("5000"),
+        },
+        docs=[_doc("s1", borrower=_A), _doc("s2", borrower=_A)],
+        tags={
+            "s1": {"income.documented_monthly": _tag("3000")},
+            "s2": {
+                "income.documented_monthly": _tag("3000")
+            },  # same job, same monthly — not additive
+        },
+    )
+    produced = produce_derived_tags(_SHORTFALL_DECL, snap)
+    assert produced[str(_A)]["income.documented_income_shortfall_pct"].value == "0.4"
+
+
+def test_conflicting_documented_figures_abstain_never_sum() -> None:
+    # Two paystubs documenting DIFFERENT monthly figures (variable pay, or a genuine multi-job borrower
+    # whose sources need per-employer aggregation) are ambiguous — the recipe ABSTAINS (couldnt_check),
+    # never a summed over-count that could mask a shortfall. (Per-employer summing is a domain follow-on.)
+    snap = _snap(
+        mismo={
+            "borrower.1.borrower_id": _f(str(_A)),
+            "borrower.1.income.1.monthly_amount": _f("5000"),
+        },
+        docs=[_doc("s1", borrower=_A), _doc("s2", borrower=_A)],
+        tags={
+            "s1": {"income.documented_monthly": _tag("3000")},
+            "s2": {"income.documented_monthly": _tag("3500")},  # conflicting → ambiguous
+        },
+    )
+    produced = produce_derived_tags(_SHORTFALL_DECL, snap)
+    assert produced[str(_A)]["income.documented_income_shortfall_pct"].value == "unknown"
+
+
+def test_unparseable_stated_income_item_abstains_never_understates() -> None:
+    # A borrower with one parseable stated income item and one present-but-unparseable one. Silently
+    # dropping the bad item (the old bug) understates stated and can mask a shortfall; the fix ABSTAINS
+    # (an incomplete stated sum is not a smaller-but-known stated) — the same absent≠unknown discipline
+    # the documented side already follows.
+    snap = _snap(
+        mismo={
+            "borrower.1.borrower_id": _f(str(_A)),
+            "borrower.1.income.1.monthly_amount": _f("5000"),
+            "borrower.1.income.2.monthly_amount": _f("N/A"),  # present but unparseable
+        },
+        docs=[_doc("s1", borrower=_A)],
+        tags={"s1": {"income.documented_monthly": _tag("3000")}},
+    )
+    produced = produce_derived_tags(_SHORTFALL_DECL, snap)
+    assert produced[str(_A)]["income.documented_income_shortfall_pct"].value == "unknown"
 
 
 # --------------------------------------------------------------------------- #

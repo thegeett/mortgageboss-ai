@@ -15,6 +15,7 @@ co-locate.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable
 from dataclasses import dataclass
 
@@ -141,27 +142,33 @@ class BorrowerSubject:
     snapshot: Snapshot
 
 
+_BORROWER_ID_KEY = re.compile(r"^borrower\.(\d+)\.borrower_id$")
+
+
 def _borrower_enumerate(snapshot: Snapshot) -> list[Subject]:
     """One subject per MISMO borrower that carries the LP-332 id link, keyed by that borrower_id.
 
     A borrower group WITHOUT a ``borrower_id`` fact is SKIPPED (no attribution is safe → its
-    borrower-keyed tags stay absent → the rule couldnt_checks; never a name-guessed attribution)."""
+    borrower-keyed tags stay absent → the rule couldnt_checks; never a name-guessed attribution).
+
+    Enumerates EVERY ``borrower.{n}.borrower_id`` fact present (sorted by index) rather than assuming
+    contiguous indices from 1 — a gap (a co-borrower dropped mid-build, an emitter change) must not
+    silently truncate the borrower set, which would leave a real borrower un-checked with no signal."""
     if snapshot.mismo.absent:
         return []
+    indices = sorted(
+        int(m.group(1)) for name in snapshot.mismo.facts if (m := _BORROWER_ID_KEY.match(name))
+    )
     subjects: list[Subject] = []
     seen: set[str] = set()
-    index = 1
-    while True:
-        id_field = snapshot.mismo.facts.get(f"borrower.{index}.borrower_id")
-        if id_field is None:
-            break  # borrower.{index} groups are contiguous from 1; the first gap ends the list
+    for index in indices:
+        id_field = snapshot.mismo.facts[f"borrower.{index}.borrower_id"]
         borrower_id = str(_field_value(id_field) or "")  # None/PII-display-safe extraction
         if (
             borrower_id and borrower_id not in seen
         ):  # a duplicate/blank id is unsafe → skip (fail-closed)
             seen.add(borrower_id)
             subjects.append((borrower_id, BorrowerSubject(borrower_id, index, snapshot)))
-        index += 1
     return subjects
 
 

@@ -39,6 +39,12 @@ _VOCAB_EXTRA_YAML = _RULES_DIR / "vocabulary_extra.yaml"
 # LP-332 added `borrower` (a tag keyed by borrower_id, materialized from MISMO borrower.{n}.*).
 KNOWN_SUBJECTS = frozenset({"transaction", "document", "loan", "borrower"})
 
+# The subjects a DERIVED recipe may be declared for. LP-332 generalized the derived producer beyond
+# loan-only, but the recipes are written to read either loan-level MISMO (loan) or a single borrower's
+# facts + documents (borrower). A derived tag on a per-row subject (transaction/document) would run a
+# loan/borrower recipe against the wrong raw object and silently mis-key garbage — fail loud at load.
+_DERIVED_SUBJECTS = frozenset({"loan", "borrower"})
+
 
 class DeclarationError(Exception):
     """A production declaration is missing required data or references an unknown registry key."""
@@ -244,14 +250,20 @@ def validate_declarations(
                 f"(known: {sorted(known_context_builders)})"
             )
     for decl in load_declarations().values():
-        # LP-332: derived recipes now run for ANY declared subject (the producer enumerates the subject
-        # registry, like parsed/ai) — the loan-only restriction is gone, so a borrower-keyed derived tag
-        # (e.g. income.documented_income_shortfall_pct) is valid. Only the recipe key is validated here.
-        if decl.mode is ProductionMode.DERIVED and decl.data not in known_recipes:
-            raise DeclarationError(
-                f"tag {decl.tag_id!r}: unknown derived recipe {decl.data!r} "
-                f"(known: {sorted(known_recipes)})"
-            )
+        # LP-332: derived recipes now run for a declared subject (the producer enumerates the subject
+        # registry, like parsed/ai) — loan OR borrower, the two the recipes are written for. A derived
+        # tag on any other subject (transaction/document) would mis-key garbage, so reject it at load.
+        if decl.mode is ProductionMode.DERIVED:
+            if decl.subject not in _DERIVED_SUBJECTS:
+                raise DeclarationError(
+                    f"tag {decl.tag_id!r}: derived subject {decl.subject!r} is not supported "
+                    f"(a recipe is written for {sorted(_DERIVED_SUBJECTS)})"
+                )
+            if decl.data not in known_recipes:
+                raise DeclarationError(
+                    f"tag {decl.tag_id!r}: unknown derived recipe {decl.data!r} "
+                    f"(known: {sorted(known_recipes)})"
+                )
         if decl.mode is ProductionMode.AI:
             ai_group = ai_groups.get(decl.data)
             if ai_group is None:
