@@ -1,0 +1,112 @@
+# LP-326 — the TAG PRODUCTION declaration (a companion to the fact-tag vocabulary).
+#
+# fact_tags.csv is GENERATED from docs/snapshot-fact-tags.xlsx, so production is declared HERE instead
+# (a version-controlled vocabulary file the generator does not overwrite). Production is a property of
+# the TAG: its MODE (parsed | derived | ai), the SUBJECT it is keyed under (transaction | document |
+# loan — the LP-325 keying, distinct from the logical `entity`), and mode DATA. A tag with no entry
+# here is not-yet-materialized (its family's wave will declare it); an entry that cannot resolve to a
+# real producer FAILS LOUD (no silently-unproducible tag). Adding a family = entries here, never new
+# producer Python.
+
+tags:
+  # --- txn.* — the existing Stage-A tags (declared for the round-trip EQUIVALENCE proof; the live
+  #     legacy producer still runs them). Subject = transaction. --------------------------------- #
+  txn.amount: {mode: parsed, subject: transaction, data: amount}
+  txn.date: {mode: parsed, subject: transaction, data: date}
+  txn.is_money_in: {mode: ai, subject: transaction, data: txn_stage_a}
+  txn.apparent_category: {mode: ai, subject: transaction, data: txn_stage_a}
+
+  # --- id.* — the identity family (LP-323-ID-A §2). Cross-source facts are keyed under the DOCUMENT
+  #     subject (LP-325 gather contract), even when logically about the borrower. ----------------- #
+  id.ssn_hash: {mode: parsed, subject: document, data: "ssn:hash"}
+  id.dob: {mode: parsed, subject: document, data: dob}
+  id.id_expiration: {mode: parsed, subject: document, data: id_expiration}
+  id.marital_status: {mode: parsed, subject: document, data: marital_status}
+  id.citizenship: {mode: parsed, subject: document, data: citizenship}
+  contract.closing_date: {mode: parsed, subject: document, data: closing_date}
+  id.app_required_fields_present: {mode: derived, subject: loan, data: app_required_fields_present}
+  id.name_normalized: {mode: ai, subject: document, data: id_name}
+  # address_normalized + current_address_type share ONE group → co-located on the same document
+  # subject, so ID-4's residence filter works (the LP-325 contract).
+  id.address_normalized: {mode: ai, subject: document, data: id_address}
+  id.current_address_type: {mode: ai, subject: document, data: id_address}
+  id.title_vesting_consistent: {mode: ai, subject: document, data: id_title}
+  id.poa_present_and_acceptable: {mode: ai, subject: document, data: id_poa}
+
+# --- AI GROUPS — one structuring pass each: a subject, the tags it co-produces, a context-builder
+#     key, and the system prompt (the perceiver question, as DATA). The model answers per subject
+#     index with one JSON object per tag keyed by the tag's LAST segment; "unknown" is always legal
+#     and never coerced away. ---------------------------------------------------------------------- #
+ai_groups:
+  txn_stage_a:
+    subject: transaction
+    context_builder: transaction
+    tags: [txn.is_money_in, txn.apparent_category]
+    system_prompt: |
+      You are a senior mortgage loan processor STRUCTURING raw bank-statement transactions into
+      clean, factual tags. Describe what each transaction IS — do NOT evaluate rules or reach any
+      conclusion. Return "unknown" whenever you cannot determine a value; never guess.
+      For each transaction produce two tags:
+      1. is_money_in — direction of funds: "in" | "out" | "unknown".
+      2. apparent_category — "payroll" | "transfer_own" | "gift" | "loan_proceeds" | "refund" |
+         "interest" | "fee" | "vendor" | "unknown".
+      Return ONLY a JSON array, one object per transaction, echoing the given "index":
+      [{"index": <i>, "is_money_in": {"value","confidence","reasoning"},
+        "apparent_category": {"value","confidence","reasoning"}}]
+
+  id_address:
+    subject: document
+    context_builder: document
+    tags: [id.address_normalized, id.current_address_type]
+    system_prompt: |
+      You are a mortgage loan processor STRUCTURING a single document's stated borrower address into
+      clean tags. From the document's fields, produce for the address it states:
+      1. address_normalized — the address CANONICALIZED (expand abbreviations: St->Street, N->North;
+         normal casing; unit as "Apt N"). If no address is stated, value "unknown".
+      2. current_address_type — what KIND of address this document states: "residence" (the
+         borrower's current home), "mailing" (a mailing/PO-box address), "prior" (a former address,
+         e.g. an old driver's-licence address), or "unknown". This is the LP-325 residence-vs-mailing
+         filter — be precise, and use "unknown" when the document does not make the type clear.
+      Judge ONLY from the document's own fields; never invent an address or a type. Return ONLY a JSON
+      array, one object per document, echoing the given "index":
+      [{"index": <i>, "address_normalized": {"value","confidence","reasoning"},
+        "current_address_type": {"value","confidence","reasoning"}}]
+
+  id_name:
+    subject: document
+    context_builder: document
+    tags: [id.name_normalized]
+    system_prompt: |
+      You are a mortgage loan processor STRUCTURING a single document's stated borrower name into a
+      canonical form for tolerant cross-source matching. Produce:
+      1. name_normalized — the borrower's name canonicalized (full given + family name, normal
+         casing, no honorifics). If no name is stated, value "unknown".
+      Judge ONLY from the document's own fields. Return ONLY a JSON array, one object per document,
+      echoing the given "index":
+      [{"index": <i>, "name_normalized": {"value","confidence","reasoning"}}]
+
+  id_title:
+    subject: document
+    context_builder: document
+    tags: [id.title_vesting_consistent]
+    system_prompt: |
+      You are a mortgage loan processor checking whether a document's TITLE VESTING is consistent
+      with the borrower's stated marital status. Produce:
+      1. title_vesting_consistent — "yes" (vesting matches the marital status), "no" (a conflict,
+         e.g. a married borrower vesting as "a single person"), or "unknown" (cannot tell).
+      Judge ONLY from the document's own fields. Return ONLY a JSON array, one object per document,
+      echoing the given "index":
+      [{"index": <i>, "title_vesting_consistent": {"value","confidence","reasoning"}}]
+
+  id_poa:
+    subject: document
+    context_builder: document
+    tags: [id.poa_present_and_acceptable]
+    system_prompt: |
+      You are a mortgage loan processor assessing a power-of-attorney (POA) document. Produce:
+      1. poa_present_and_acceptable — "yes" (a POA is present and appears acceptable), "no" (present
+         but unacceptable — e.g. an interested party as attorney-in-fact, or dated after the note),
+         "n/a" (this document is not a POA), or "unknown" (cannot tell).
+      Judge ONLY from the document's own fields. Return ONLY a JSON array, one object per document,
+      echoing the given "index":
+      [{"index": <i>, "poa_present_and_acceptable": {"value","confidence","reasoning"}}]

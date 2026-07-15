@@ -30,6 +30,7 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
+from functools import cache
 from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -52,15 +53,64 @@ from app.services.tag_production import (
     TransactionTagCache,
     produce_stage_a_transaction_tags,
 )
+from app.verification.rule_engine.consistency import Reasoner as ConsistencyReasoner
 from app.verification.rule_engine.engine import DEFAULT_CONFIDENCE_FLOOR
-from app.verification.rule_engine.enumerators import LOAN_SUBJECT
+from app.verification.rule_engine.enumerators import LOAN_SUBJECT, enumerate_subjects
 from app.verification.rule_engine.judgment import Reasoner as Oc2Reasoner
 from app.verification.rule_engine.registry import ACTIVE_RULE_IDS, evaluate_rules
 from app.verification.rule_engine.result import RuleEvaluation
+from app.verification.rules.specs import load_rule_spec
 from app.verification.snapshot.builder import build_snapshot
 from app.verification.snapshot.model import Snapshot, TagsSection
 from app.verification.snapshot.persistence import persist_snapshot
 from app.verification.snapshot.tag import Tag, TagProducedBy
+from app.verification.tag_materialization.ai import AiTagCache
+from app.verification.tag_materialization.ai import Reasoner as AiGroupReasoner
+from app.verification.tag_materialization.declarations import ProductionMode, load_declarations
+from app.verification.tag_materialization.producer import materialize_tags
+
+# The subject families the generic materialization stage produces live (LP-326). The transaction
+# Stage-A tags stay on their existing producer (their round-trip through the generic producer is
+# proven separately) — this stage adds the id.* families keyed under the document / loan subjects.
+_MATERIALIZED_SUBJECTS = frozenset({"document", "loan"})
+
+# The per-borrower consistency rules — retire-eligible only when their subject domain was healthily
+# enumerated (documents present AND borrowers resolvable). Kept beside AS-1's per-transaction guard.
+_PER_BORROWER_RULES = frozenset({"ID-2", "ID-4"})
+
+
+def _load_bearing_tag_ids(rule_id: str) -> set[str]:
+    """The tag ids a rule rests on — its evaluation block's load-bearing / gathered tags."""
+    spec = load_rule_spec(rule_id)
+    if spec.consistency is not None:
+        tags = {spec.consistency.gather_tag}
+        if spec.consistency.gather_filter is not None:
+            tags.add(spec.consistency.gather_filter.tag)
+        return tags
+    if spec.deterministic is not None:
+        return set(spec.deterministic.load_bearing_tags)
+    if spec.judgment is not None:
+        return set(spec.judgment.load_bearing_tags) | set(spec.judgment.reasoned_over)
+    return set()
+
+
+@cache
+def _required_ai_groups() -> frozenset[str]:
+    """The AI groups the ACTIVE rule set actually consumes (LP-326) — so the materialization stage
+    runs ONLY those, never an AI structuring pass for a family no live rule reads yet.
+
+    Derived generically from each active rule's load-bearing tags → their production declarations →
+    the AI group each declares. A parsed/derived load-bearing tag contributes no AI group.
+    """
+    declarations = load_declarations()
+    needed: set[str] = set()
+    for rule_id in ACTIVE_RULE_IDS:
+        for tag_id in _load_bearing_tag_ids(rule_id):
+            decl = declarations.get(tag_id)
+            if decl is not None and decl.mode is ProductionMode.AI:
+                needed.add(decl.data)  # the AI group key
+    return frozenset(needed)
+
 
 logger = get_logger(__name__)
 
@@ -72,6 +122,8 @@ logger = get_logger(__name__)
 _RULE_CATEGORY: dict[str, FindingCategory] = {
     "AS-1": FindingCategory.ASSETS,
     "OC-2": FindingCategory.PROPERTY,
+    "ID-2": FindingCategory.CROSS_SOURCE,  # identity facts compared across sources
+    "ID-4": FindingCategory.CROSS_SOURCE,
 }
 
 
@@ -86,6 +138,7 @@ class TagCaches:
 
     stage_a: TransactionTagCache = field(default_factory=dict)
     stage_b: SourcingCache = field(default_factory=dict)
+    materialization: AiTagCache = field(default_factory=dict)  # LP-326 generic AI producer cache
 
 
 @dataclass(frozen=True)
@@ -95,6 +148,10 @@ class Reasoners:
     stage_a: StageAReasoner | None = None
     stage_b: StageBReasoner | None = None
     oc2: Oc2Reasoner | None = None
+    # LP-326: keyed by AI-GROUP for the generic materialization producer (e.g. "id_address").
+    materialization: dict[str, AiGroupReasoner] | None = None
+    # LP-325/326: keyed by RULE_ID for the consistency evaluators' fuzzy leg (e.g. "ID-4").
+    consistency: dict[str, ConsistencyReasoner] | None = None
 
 
 @dataclass(frozen=True)
@@ -188,9 +245,14 @@ def _scan_tag_degradations(snapshot: Snapshot) -> list[Degradation]:
 
 
 async def _evaluate_rules(
-    snapshot: Snapshot, *, oc2_reasoner: Oc2Reasoner | None, confidence_floor: float
+    snapshot: Snapshot,
+    *,
+    oc2_reasoner: Oc2Reasoner | None,
+    consistency_reasoners: dict[str, ConsistencyReasoner] | None,
+    confidence_floor: float,
 ) -> tuple[list[RuleEvaluation], dict[str, Tag]]:
-    """Run every rule over the tagged snapshot — deterministic (AS-1) + judgment (OC-2).
+    """Run every rule over the tagged snapshot — deterministic (AS-1), judgment (OC-2), and
+    cross-source consistency (ID-2 exact / ID-4 fuzzy, LP-326).
 
     Each rule runs and GATES itself (LP-315/319): a rule whose load-bearing tags are degraded returns
     couldnt_check; a rule that does not depend on them evaluates normally. The orchestrator lets them
@@ -206,6 +268,7 @@ async def _evaluate_rules(
     return await evaluate_rules(
         snapshot,
         judgment_reasoners={"OC-2": oc2_reasoner} if oc2_reasoner is not None else {},
+        consistency_reasoners=consistency_reasoners or {},
         confidence_floor=confidence_floor,
     )
 
@@ -229,14 +292,22 @@ def _retire_eligible_rules(snapshot: Snapshot) -> frozenset[str]:
     retire a non-detected prior finding.
 
     A degraded run must NOT be read as "the subject is gone" (that would flip real open findings to
-    green — false-closed). AS-1 enumerates per-transaction subjects from the documents section: if
-    that section is ABSENT (a build degradation), it saw zero transactions and is NOT retire-eligible.
-    OC-2 has a single loan-level subject that is always evaluated, so it is always eligible. Starts
-    from the registry's ACTIVE_RULE_IDS (what actually ran) — never a separate list.
+    green — false-closed). AS-1 enumerates per-transaction subjects from the documents section, and
+    ID-2/ID-4 enumerate per-borrower subjects from the documents' belongs_to: if that section is
+    ABSENT (a build degradation), all three saw zero subjects and are NOT retire-eligible. Beyond the
+    absent section, the per-borrower rules also need borrowers to have RESOLVED — documents present
+    but zero borrowers enumerated (belongs_to unresolved) is a degradation, not "the borrowers are
+    gone", so they must not retire then either. OC-2 has a single loan-level subject that is always
+    evaluated, so it is always eligible. Starts from the registry's ACTIVE_RULE_IDS (what actually
+    ran) — never a separate list.
     """
     eligible = set(ACTIVE_RULE_IDS)
     if snapshot.documents.absent:
-        eligible.discard("AS-1")
+        eligible.difference_update({"AS-1", *_PER_BORROWER_RULES})
+    # Per-borrower rules that enumerated ZERO borrowers (documents present but belongs_to unresolved)
+    # saw no subjects for a DEGRADED reason — not retire-eligible (else a real prior finding retires).
+    if not enumerate_subjects("per_borrower", snapshot):
+        eligible.difference_update(_PER_BORROWER_RULES)
     return frozenset(eligible)
 
 
@@ -328,6 +399,23 @@ async def run_verification(
             snapshot,
             degradations,
         )
+        # 3b. Generic vocabulary-driven materialization (LP-326) — the declared id.* families
+        #     (parsed / derived / ai) keyed under the document / loan subjects. Each producer
+        #     fail-closes per call; a wholesale failure degrades (the stage backstop), never crashes.
+        snapshot = await _run_stage(
+            "materialization",
+            lambda s: materialize_tags(
+                s,
+                ai_reasoners=reasoners.materialization,
+                ai_cache=caches.materialization,
+                only_subjects=_MATERIALIZED_SUBJECTS,
+                # Run ONLY the AI groups a live rule consumes — no dead structuring pass (Opus cost)
+                # for an id.* family whose rule has not activated yet. Parsed/derived tags always run.
+                only_groups=_required_ai_groups(),
+            ),
+            snapshot,
+            degradations,
+        )
     # 4. Calculators — already present (built in step 1). 5. Contradiction audit — no deterministic
     #    cross-checks are wired yet; the slot exists (the LP-315 gate takes a contradiction flag),
     #    so this is a no-op today (contradiction defaults to False).
@@ -336,7 +424,10 @@ async def run_verification(
     # 6. Rules — the fail-closed gate + deterministic + judgment rules. Any rule_judgment tag a
     #    judgment rule produced is written back into the tags layer (not discarded). 7. Findings.
     results, judgment_tags = await _evaluate_rules(
-        snapshot, oc2_reasoner=reasoners.oc2, confidence_floor=confidence_floor
+        snapshot,
+        oc2_reasoner=reasoners.oc2,
+        consistency_reasoners=reasoners.consistency,
+        confidence_floor=confidence_floor,
     )
     snapshot = _merge_loan_judgment_tags(snapshot, judgment_tags)
     reconciliation = await _persist(

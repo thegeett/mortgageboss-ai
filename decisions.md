@@ -9267,3 +9267,56 @@ producers must target. Deferred (separate tickets): the `id.*` tag producers; th
 remaining ID rules on this primitive; the consistency-verdict-tag modeling question (LP-323-ID-A §2).
 Cross-refs: §3D; ADR-264; LP-314 (candidate-then-judge), LP-315 (gate), LP-319 (judgment armor), LP-324
 (rules as specs), LP-323-ID-A §0/§2/§4.
+
+## ADR-266: Generic vocabulary-driven tag materialization — production is a declaration (LP-326)
+
+**Status:** Accepted. **Context:** the fact-tag vocabulary defines ~140 tags across 10 entities, but
+the pipeline materialized ONLY the 4 ``txn.*`` Stage-A tags (via a bespoke producer). This systemic
+gap — vocabulary ≠ production — has now blocked three tickets (LP-318's inert calculator ``from_tag``,
+LP-319's occupancy tags, LP-323-ID-A's ``id.*``) and would block EVERY wave: a rule can require a tag
+the pipeline never produces, so it uniformly ``couldnt_check``. Ten bespoke per-family producers would
+reintroduce exactly the per-family Python coupling LP-324 eliminated for rules.
+
+**Decision.** Production becomes a PROPERTY OF THE TAG, declared in the vocabulary and resolved by
+GENERIC producers — adding a family's tags is declarations, never new producer Python (mirroring
+LP-324's rules-as-data).
+
+1. **The declaration** (``tag_production.yaml``, a companion to the vocabulary — ``fact_tags.csv`` is
+   GENERATED from the xlsx, so a hand-edited column there would be overwritten). Each materialized tag
+   declares its MODE (``parsed`` / ``derived`` / ``ai``), the SUBJECT it is keyed under (``transaction``
+   / ``document`` / ``loan`` — distinct from the logical ``entity``), and mode DATA (a field / a recipe
+   key / an AI-group key). A tag with no entry is not-yet-materialized; a declared tag that cannot
+   resolve to a real producer FAILS LOUD at projection time (``ProjectionError`` — no
+   silently-unproducible tag).
+2. **The SUBJECT is the LP-325 keying lever.** ``id.ssn_hash`` / ``id.address_normalized`` /
+   ``id.current_address_type`` are logically borrower/doc facts but are declared under the DOCUMENT
+   subject so a source's gather-tag and its filter-tag CO-LOCATE on the same subject — ID-4's residence
+   filter works only because the ``id_address`` AI group emits both address + type on the same document.
+3. **Three generic producers, registry-resolved, ZERO per-family branches.** ``parsed`` maps a declared
+   extraction field (``produced_by=parsed``, ``confidence=None``, NEVER AI-re-typed — LP-313's
+   discipline; an ABSENT field → an ABSENT tag, absent≠unknown≠empty; a non-matchable hash → absent so a
+   gather excludes it). ``derived`` resolves a recipe key to a deterministic function (recipe registry).
+   ``ai`` reuses the LP-313 machinery — bounded ≤15 batches, index-echo integrity, honest/fail-closed
+   parse ("unknown" always legal & never coerced; off-vocabulary → unknown; failure/truncation/omission
+   → unknown-with-reason), cache-by-content-fingerprint, the injected Reasoner stub — parameterized by an
+   AI-group declaration + a per-subject-type context-builder. A new AI family on an existing subject type
+   is a declaration only.
+4. **Equivalence (risk-controlled).** The live ``txn.*`` Stage-A/B producers are UNTOUCHED, so the
+   LP-313/314 suites + the frozen LF-6T3N trace pass unchanged (zero regression by construction). The
+   ``txn.*`` tags carry declarations and a ROUND-TRIP test proves the generic AI producer reproduces the
+   legacy Stage-A tags byte-for-byte (value/confidence/reasoning/provenance/stage). Migrating the live
+   ``txn`` path onto the generic producer is a noted low-risk follow-on.
+5. **Wiring + activation.** A new orchestrator stage (after Stage B) materializes the declared ``id.*``
+   families (document / loan subjects); ``only_subjects`` / ``only_groups`` scope it. With their tags now
+   materialized, **ID-2 and ID-4 join ``ACTIVE_RULE_IDS``** (LP-325 held them out pending producers) and
+   evaluate end-to-end.
+
+**Consequences.** Every wave's tags are unblocked as declarations. NOT changed: the ``txn.*`` live path
+(equivalence), rule/gate/evaluator logic, the LP-313/314 AI machinery (reused). **Schema gaps found:**
+none — mode + subject + mode-data express every id.* tag. **LP-318 Caveat A** (inert calculator
+``from_tag`` / ``calc_confidence``) is now newly WIREABLE — a calculator's input facts can be declared +
+materialized as tags the calculators consume — but that wiring is deferred (out of scope here).
+Deferred: the calculator ``from_tag`` wiring; migrating live ``txn`` onto the generic producer; the -B
+ID rules; other families' declarations (income/credit/property — their waves). Cross-refs: §3D; ADR-266;
+LP-311 (projection), LP-312 (Tag + content_ids), LP-313/314 (Stage A/B machinery), LP-318 (Caveat A),
+LP-319 (occupancy gap), LP-324 (rules-as-data), LP-325 (the gather contract), LP-323-ID-A §0/§2.

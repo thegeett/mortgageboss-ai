@@ -99,9 +99,10 @@ def test_a_new_deterministic_rule_runs_from_a_spec_only() -> None:
 
 
 async def test_registry_dispatches_the_active_rule_set_by_kind() -> None:
-    # The orchestrator's dispatch is the registry running the rule SET from specs — AS-1 (deterministic)
-    # + OC-2 (judgment), each by its kind, not hardcoded names.
-    assert set(ACTIVE_RULE_IDS) == {"AS-1", "OC-2"}
+    # The orchestrator's dispatch is the registry running the rule SET from specs, each by its
+    # evaluation block, not hardcoded names — AS-1 (deterministic) + OC-2 (judgment) + ID-2/ID-4
+    # (consistency, LIVE as of LP-326 now their id.* tags materialize).
+    assert set(ACTIVE_RULE_IDS) == {"AS-1", "OC-2", "ID-2", "ID-4"}
     snapshot = _loan_snapshot(None)  # no occupancy/txn tags → everything fail-closes honestly
 
     results, judgment_tags = await evaluate_rules(snapshot, confidence_floor=0.5)

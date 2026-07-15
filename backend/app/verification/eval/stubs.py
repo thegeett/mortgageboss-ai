@@ -21,6 +21,15 @@ from app.ai.tag_production import (
     TransactionJudgment,
 )
 from app.verification.eval.cases import FixtureTxn
+from app.verification.tag_materialization.ai import (
+    AiGroupResult,
+    AiSubjectJudgment,
+    AiTagJudgment,
+)
+from app.verification.tag_materialization.ai import (
+    Reasoner as AiGroupReasoner,
+)
+from app.verification.tag_materialization.declarations import load_ai_groups
 
 # A stub judgment is high-confidence so the fail-closed gate passes on a well-formed fixture (the
 # gate's job is tested by the real pipeline; a fixture that WANTS couldnt_check uses is_money_in
@@ -117,6 +126,49 @@ class StubStageBReasoner:
         if fx is None:
             raise KeyError(f"stage-B stub has no label for deposit {description!r}")
         return fx
+
+
+class _StubAiGroupReasoner:
+    """Replays an AI-group structuring pass (LP-326) — an HONEST 'unknown' (WITH confidence, so it is
+    a genuine judgment, NOT a fail-closed degradation) for every subject the group is asked about.
+
+    A fixture built for the txn/AS-1/OC-2 pipeline has no identity documents, so the id.* groups
+    correctly perceive nothing — a clean run, not a degraded one. A test that WANTS a real id.* value
+    supplies its own reasoner for that group.
+    """
+
+    def __init__(self, shorts: tuple[str, ...]) -> None:
+        self.shorts = shorts
+        self.calls = 0
+
+    async def __call__(self, context_json: str) -> AiGroupResult:
+        self.calls += 1
+        subjects = json.loads(context_json).get("subjects", [])
+        judgments = [
+            AiSubjectJudgment(
+                index=int(s["index"]),
+                tags={
+                    short: AiTagJudgment("unknown", _STUB_CONFIDENCE, "not stated in this document")
+                    for short in self.shorts
+                },
+            )
+            for s in subjects
+        ]
+        return AiGroupResult(
+            judgments, input_tokens=1, output_tokens=1, model=_STUB_MODEL, truncated=False
+        )
+
+
+def stub_materialization_reasoners(subject: str = "document") -> dict[str, AiGroupReasoner]:
+    """A keyless materialization seam (LP-326) — one honest-unknown stub per declared AI group of the
+    given subject, so the orchestrator's materialization stage never hits the network in a test."""
+    reasoners: dict[str, AiGroupReasoner] = {}
+    for key, group in load_ai_groups().items():
+        if group.subject != subject:
+            continue
+        shorts = tuple(tag_id.rsplit(".", 1)[-1] for tag_id in group.tag_ids)
+        reasoners[key] = _StubAiGroupReasoner(shorts)
+    return reasoners
 
 
 def _judge_reasoning(fx: FixtureTxn, *, cited: bool) -> str:

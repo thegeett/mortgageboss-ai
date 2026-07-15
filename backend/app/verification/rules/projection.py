@@ -216,6 +216,26 @@ def check_consistency(
                 f"tag {tag_id!r} depends on unknown tag {dep!r} (not in fact_tags.csv)"
             )
     _reject_cycle(tag_dependencies)
+    # Every tag with a PRODUCTION declaration (LP-326) must resolve to a real producer — no
+    # silently-unproducible tag. Fails loud on an unknown mode/subject/recipe/ai-group.
+    _check_production_declarations()
+
+
+def _check_production_declarations() -> None:
+    """Fail loud on any invalid tag-production declaration (LP-326)."""
+    from app.verification.tag_materialization.declarations import (
+        DeclarationError,
+        validate_declarations,
+    )
+    from app.verification.tag_materialization.derived import KNOWN_RECIPES
+    from app.verification.tag_materialization.subjects import KNOWN_CONTEXT_BUILDERS
+
+    try:
+        validate_declarations(
+            known_recipes=KNOWN_RECIPES, known_context_builders=KNOWN_CONTEXT_BUILDERS
+        )
+    except DeclarationError as exc:
+        raise ProjectionError(f"invalid tag-production declaration: {exc}") from exc
 
 
 def _reject_cycle(edges: set[tuple[str, str]]) -> None:

@@ -18,15 +18,26 @@ from app.services.verification_run import (
     Reasoners,
     TagCaches,
     _merge_loan_judgment_tags,
+    _required_ai_groups,
     _retire_eligible_rules,
     _scan_tag_degradations,
     run_verification,
 )
 from app.verification.eval.cases import EvalCase, FixtureTxn
 from app.verification.eval.harness import _build_snapshot, load_fixture_snapshot
-from app.verification.eval.stubs import StubStageAReasoner, StubStageBReasoner
+from app.verification.eval.stubs import (
+    StubStageAReasoner,
+    StubStageBReasoner,
+    stub_materialization_reasoners,
+)
 from app.verification.rule_engine.oc2 import JUDGMENT_TAG, LOAN_SUBJECT
-from app.verification.snapshot.model import DocumentsSection, Snapshot, TagsSection
+from app.verification.snapshot.model import (
+    BorrowerRef,
+    DocumentEntry,
+    DocumentsSection,
+    Snapshot,
+    TagsSection,
+)
 from app.verification.snapshot.tag import Tag, TagProducedBy, TagRole, TagStage
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -87,6 +98,7 @@ def _reasoners(txns: tuple[FixtureTxn, ...], *, oc2: object = None) -> Reasoners
         stage_a=StubStageAReasoner(txns),
         stage_b=StubStageBReasoner(txns),
         oc2=oc2,  # type: ignore[arg-type]
+        materialization=stub_materialization_reasoners(),
     )
 
 
@@ -172,7 +184,11 @@ async def test_stage_b_per_call_failure_degrades_gracefully(db_session: AsyncSes
         run_id=snap.run_id,
         loan_file_id=lf_id,
         base_snapshot=snap,
-        reasoners=Reasoners(stage_a=StubStageAReasoner(_TXNS), stage_b=_FailingStageB()),  # type: ignore[arg-type]
+        reasoners=Reasoners(
+            stage_a=StubStageAReasoner(_TXNS),
+            stage_b=_FailingStageB(),
+            materialization=stub_materialization_reasoners(),
+        ),  # type: ignore[arg-type]
     )
     # The run COMPLETED with a coherent result set.
     as1 = [f for f in run.findings if f.rule_id == "AS-1"]
@@ -202,7 +218,11 @@ async def test_stage_b_wholesale_exception_is_backstopped(db_session: AsyncSessi
         run_id=snap.run_id,
         loan_file_id=lf_id,
         base_snapshot=snap,
-        reasoners=Reasoners(stage_a=StubStageAReasoner(_TXNS), stage_b=_ExplodingStageB()),  # type: ignore[arg-type]
+        reasoners=Reasoners(
+            stage_a=StubStageAReasoner(_TXNS),
+            stage_b=_ExplodingStageB(),
+            materialization=stub_materialization_reasoners(),
+        ),  # type: ignore[arg-type]
     )
     assert any(d.stage == "stage_b" and "ValueError" in d.reason for d in run.degradations)
     # Stage A tags survived; Stage B tags are absent → AS-1 couldnt_check (gate on absent has_source).
@@ -228,7 +248,11 @@ async def test_rerun_with_unchanged_inputs_reuses_tags(db_session: AsyncSession)
     # exercise tag reuse.
     caches = TagCaches()
     counting_a = _CountingStageA(_TXNS)
-    reasoners = Reasoners(stage_a=counting_a, stage_b=StubStageBReasoner(_TXNS))
+    reasoners = Reasoners(
+        stage_a=counting_a,
+        stage_b=StubStageBReasoner(_TXNS),
+        materialization=stub_materialization_reasoners(),
+    )
 
     lf1 = await _loan_file_id(db_session)
     run1_snap = _snapshot(_TXNS, lf1)
@@ -271,7 +295,11 @@ async def test_rerun_with_one_changed_document_reproduces_only_that_entity(
         loan_file_id=lf1,
         base_snapshot=run1_snap,
         caches=caches,
-        reasoners=Reasoners(stage_a=counting1, stage_b=StubStageBReasoner(_TXNS)),
+        reasoners=Reasoners(
+            stage_a=counting1,
+            stage_b=StubStageBReasoner(_TXNS),
+            materialization=stub_materialization_reasoners(),
+        ),
     )
     # Change ONE transaction's amount → its content fingerprint changes → only it re-produces.
     changed = (
@@ -288,7 +316,11 @@ async def test_rerun_with_one_changed_document_reproduces_only_that_entity(
         loan_file_id=lf2,
         base_snapshot=run2_snap,
         caches=caches,
-        reasoners=Reasoners(stage_a=counting2, stage_b=StubStageBReasoner(changed)),
+        reasoners=Reasoners(
+            stage_a=counting2,
+            stage_b=StubStageBReasoner(changed),
+            materialization=stub_materialization_reasoners(),
+        ),
     )
     # The unchanged two are cache hits; only the changed entity re-produced (one small batch),
     # NOT a full re-tag of all three.
@@ -421,3 +453,43 @@ def test_retire_eligible_excludes_as1_when_the_documents_section_is_degraded() -
     eligible = _retire_eligible_rules(degraded)
     assert "AS-1" not in eligible  # not retire-eligible on a degraded documents section
     assert "OC-2" in eligible
+
+
+def _doc_snapshot(entries: list[DocumentEntry]) -> Snapshot:
+    return _snapshot(_TXNS, uuid4()).model_copy(
+        update={"documents": DocumentsSection.present(entries)}
+    )
+
+
+def test_retire_eligible_excludes_per_borrower_rules_when_no_borrower_resolved() -> None:
+    # ID-2/ID-4 enumerate per-borrower from documents' belongs_to. Documents present but NO borrower
+    # resolved (belongs_to unresolved) is a DEGRADATION, not "the borrowers are gone" — the rules must
+    # NOT be retire-eligible then (else a real prior identity finding retires to false-green).
+    borrower = uuid4()
+    resolved = _doc_snapshot(
+        [
+            DocumentEntry(
+                content_id="d1",
+                document_type="doc",
+                belongs_to=(BorrowerRef(borrower_id=borrower, name="Sam"),),
+                fields={},
+            )
+        ]
+    )
+    assert {"ID-2", "ID-4"} <= _retire_eligible_rules(resolved)  # a borrower resolved → eligible
+
+    unresolved = _doc_snapshot(
+        [DocumentEntry(content_id="d1", document_type="doc", belongs_to=None, fields={})]
+    )
+    eligible = _retire_eligible_rules(unresolved)
+    assert "ID-2" not in eligible and "ID-4" not in eligible  # zero borrowers → not eligible
+    assert "OC-2" in eligible  # the loan-level rule is always eligible
+
+
+def test_required_ai_groups_runs_only_what_active_rules_consume() -> None:
+    # The materialization stage must not spend an Opus structuring pass on an id.* family no live rule
+    # reads. id_address feeds ID-4 (gather) + OC-2 (reasoned_over); id_name/id_title/id_poa feed no
+    # active rule → excluded. (ID-2's id.ssn_hash is PARSED, so it contributes no AI group.)
+    groups = _required_ai_groups()
+    assert "id_address" in groups
+    assert {"id_name", "id_title", "id_poa"}.isdisjoint(groups)

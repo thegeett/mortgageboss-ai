@@ -14,8 +14,9 @@ the mechanical part; AI judges only the small ambiguous set):
     set ONLY (never the file) benign-variance vs real-discrepancy → the declared outcome.
 
 The absent≠disagreeing rules (§3D, critical): a source that simply LACKS the fact is EXCLUDED (not a
-mismatch); fewer than two instances after filtering → couldnt_check (a single source is not
-"agreement"); an ``"unknown"`` gathered value → couldnt_check (never a value that agrees/disagrees).
+mismatch) — the tag is absent OR an AI perceiver returned ``"unknown"`` (it states no value), which is
+absent-for-comparison, NOT a value that agrees/disagrees; fewer than two STATED instances after
+filtering → couldnt_check (a single source is not "agreement").
 
 Reuses ``evaluate_gate`` + ``reason_rule_judgment`` (LP-313/314) + the LP-319 armor as-is; a fuzzy
 verdict is ratification-pending (the AI made the call) — the exact bookend never is.
@@ -44,6 +45,8 @@ from app.verification.snapshot.model import DocumentEntry, Snapshot
 from app.verification.snapshot.tag import Tag
 
 logger = get_logger(__name__)
+
+_UNKNOWN = "unknown"
 
 # The AI seam is the shared ``Reasoner`` alias (keyless tests supply a stub; None → the real model
 # with the spec prompt). The AI is called ONLY on the differing residue of a fuzzy rule.
@@ -146,7 +149,11 @@ def _borrower_documents(
     for entry in index.get(subject_id, []):
         source_tags = snapshot.tags.by_subject.get(entry.content_id, {})
         tag = source_tags.get(gather_tag)
-        if tag is None:  # this source simply lacks the fact — ABSENT, not a candidate at all
+        # absent≠unknown≠empty: a source that does not STATE the fact is EXCLUDED — the tag was never
+        # produced (None), OR an AI perceiver returned "unknown" (it looked and found no value: a bank
+        # statement has no address). Neither is a value to compare; counting it would inflate the
+        # candidate count and poison the filter gate with a non-stated source's classification.
+        if tag is None or str(tag.value) == _UNKNOWN:
             continue
         candidate_count += 1
         if gather_filter is not None:

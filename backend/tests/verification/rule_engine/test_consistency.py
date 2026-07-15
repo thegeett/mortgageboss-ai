@@ -163,10 +163,12 @@ async def test_id2_single_source_is_not_agreement() -> None:
     assert results[0].verdict is Verdict.COULDNT_CHECK  # a single source is NOT "satisfied"
 
 
-async def test_id2_unknown_value_couldnt_check_distinct() -> None:
+async def test_id2_unknown_value_is_excluded_as_absent_not_compared() -> None:
+    # An "unknown" gathered value states no fact → EXCLUDED (absent-for-comparison), never a value
+    # that agrees/disagrees. Here only one source states a usable value → <2 → couldnt_check.
     results = await _eval_id2(_snapshot([("app", _ssn("unknown")), ("cr", _ssn("H"))]))
     assert results[0].verdict is Verdict.COULDNT_CHECK
-    assert "unknown" in results[0].reasoning  # distinct reason — never "agrees"/"disagrees"
+    assert "nothing to compare" in results[0].reasoning  # the <2-stated-sources reason
 
 
 # --------------------------------------------------------------------------- #
@@ -303,6 +305,25 @@ async def test_id4_confident_mailing_is_cleanly_excluded_no_over_gating() -> Non
     results = await _eval_id4(snap, reasoner=stub)
     assert [r.verdict for r in results] == [Verdict.SATISFIED]
     assert stub.calls == 0
+
+
+async def test_id4_non_address_document_with_unknown_tags_does_not_poison() -> None:
+    # THE ABSENT≠UNKNOWN FIX: the generic AI producer tags EVERY document, so a bank statement gets
+    # id.address_normalized='unknown' + id.current_address_type='unknown'. That source states no
+    # address → it must be EXCLUDED (absent-for-comparison), NOT counted as a candidate whose
+    # 'unknown' classification poisons the filter gate. Two real residences still agree → satisfied.
+    stub = _Reasoner("agree")
+    snap = _snapshot(
+        [
+            ("app", _addr_typed("123 Main St", "residence", 0.9)),
+            ("dl", _addr_typed("123 Main St", "residence", 0.9)),
+            ("stmt", _addr_typed("unknown", "unknown", 0.8)),  # a non-address doc, honestly unknown
+        ]
+    )
+    results = await _eval_id4(snap, reasoner=stub)
+    assert [r.verdict for r in results] == [Verdict.SATISFIED]
+    # provenance carries ONLY the two stated residences, not the unknown non-address source.
+    assert {t.source_facts[0] for t in results[0].load_bearing_tags} == {"app", "dl"}
 
 
 async def test_id4_ai_context_collapses_byte_identical_values_to_the_distinct_residue() -> None:
