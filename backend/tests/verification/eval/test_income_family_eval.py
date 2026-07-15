@@ -1,0 +1,454 @@
+"""LP-323-IN-C — the INCOME family GOLDEN EVAL (the full case matrix + the three pinned known-wrongs).
+
+Mirrors the LP-323-ID-C harness (the LP-317 harness is AS-1/txn-shaped; this is the dedicated income
+harness beside it — same discipline: finding-level verdict + tag-level golden labels + provenance + the
+no-AI cost property + the judgment armor + the derived-tag abstention, keyless via the Reasoner stub).
+
+EVALUATE, DON'T FIX. Every rule gets both directions (a must-FIRE + a must-not-fire), the fail-closed
+cases, the LP-323-IN-A §4 domain edge, and — NEW for this wave — REAL numeric boundaries (IN-1's 5%) and
+case 12 (a derived tag abstaining → couldnt_check, the path ID could never test). N/As are asserted
+explicitly. NONE of the 13 rules is activated (ACTIVE_RULE_IDS is unchanged); each is exercised by calling
+its evaluator directly — activation gates the orchestrator, not the evaluator. IN-6 is DEFERRED (no spec).
+
+THREE KNOWN-WRONG behaviours are PINNED here (asserting the CURRENT behaviour, documented in the doc, NOT
+fixed): (1) loan-level aggregate MASKING of per-borrower income fraud — the #1 false-green; (2) IN-11
+OVER-FIRES on non-variable income; (3) IN-12 is a MINIMAL 2-year-return check, not a 1084 analysis.
+"""
+
+from __future__ import annotations
+
+from datetime import UTC, datetime
+from uuid import uuid4
+
+import pytest
+from app.ai.rule_judgment import RuleJudgment, RuleJudgmentResult
+from app.verification.rule_engine.consistency import evaluate_consistency_rule
+from app.verification.rule_engine.deterministic import evaluate_deterministic_rule
+from app.verification.rule_engine.judgment import evaluate_judgment_rule
+from app.verification.rule_engine.result import RuleEvaluation, Verdict
+from app.verification.rules.specs import RuleSpecNotFound, load_rule_spec
+from app.verification.snapshot.model import (
+    BorrowerRef,
+    DocumentEntry,
+    DocumentsSection,
+    Snapshot,
+    TagsSection,
+)
+from app.verification.snapshot.tag import Tag, TagProducedBy, TagRole, TagStage
+from app.verification.tag_materialization.derived import (
+    _income_documented_shortfall,
+    _income_max_employment_gap,
+)
+
+pytestmark = pytest.mark.anyio
+
+_B1 = uuid4()
+_B2 = uuid4()
+
+
+# --------------------------------------------------------------------------- #
+# Fixture builders (realistic snapshot shapes — documents, borrowers, income tags)
+# --------------------------------------------------------------------------- #
+def _tag(value: object, *, conf: float | None = 0.9, by: TagProducedBy = TagProducedBy.AI) -> Tag:
+    return Tag(
+        value=value,
+        confidence=conf,
+        reasoning="fixture-labeled",
+        source_facts=("raw",),
+        produced_by=by,
+        tag_role=TagRole.STRUCTURAL_FACT,
+        stage=TagStage.A,
+    )
+
+
+def _parsed(value: object) -> Tag:
+    return _tag(value, conf=None, by=TagProducedBy.PARSED)
+
+
+def _derived(value: object) -> Tag:
+    return _tag(value, conf=None, by=TagProducedBy.DERIVED)
+
+
+def _doc(cid: str, *, dtype: str = "paystub", borrower=_B1) -> DocumentEntry:
+    return DocumentEntry(
+        content_id=cid,
+        document_type=dtype,
+        belongs_to=(BorrowerRef(borrower_id=borrower, name="Sam"),) if borrower else None,
+    )
+
+
+def _snap(*, docs=None, by_subject=None) -> Snapshot:
+    return Snapshot(
+        loan_file_id=uuid4(),
+        run_id=uuid4(),
+        created_at=datetime(2026, 7, 15, tzinfo=UTC),
+        documents=DocumentsSection.present(list(docs or [])),
+        tags=TagsSection.present(by_subject or {}),
+    )
+
+
+class _Reasoner:
+    """A keyless stub for the judgment leg — records whether the AI was invoked (the cost property)."""
+
+    def __init__(self, value: str = "yes") -> None:
+        self.value = value
+        self.calls = 0
+
+    async def __call__(self, _ctx: str) -> RuleJudgmentResult:
+        self.calls += 1
+        return RuleJudgmentResult(RuleJudgment(self.value, 0.9, "because"), 1, 1, "stub", False)
+
+
+def _verdicts(results: list[RuleEvaluation]) -> list[Verdict]:
+    return [r.verdict for r in results]
+
+
+# ================================================================================================= #
+# IN-1 — stated-vs-documented shortfall (deterministic, loan, derived tag, 5% threshold)
+# ================================================================================================= #
+def _in1(shortfall: str | None):
+    tags = (
+        {"loan": {"income.documented_income_shortfall_pct": _derived(shortfall)}}
+        if shortfall
+        else {}
+    )
+    return evaluate_deterministic_rule(load_rule_spec("IN-1"), _snap(by_subject=tags))
+
+
+def test_in1_case1_2_must_fire_and_clean() -> None:
+    assert _in1("0.20")[0].verdict is Verdict.FIRED  # 20% shortfall > 5%
+    assert _in1("0.20")[0].reasoning  # case 9 provenance
+    assert _in1("0.02")[0].verdict is Verdict.SATISFIED  # within tolerance
+
+
+def test_in1_case3_4_real_numeric_boundaries() -> None:
+    # NEW THIS WAVE — a REAL over/under boundary (ID's string compares had none).
+    assert _in1("0.0501")[0].verdict is Verdict.FIRED  # just OVER 5%
+    assert _in1("0.0499")[0].verdict is Verdict.SATISFIED  # just UNDER 5%
+
+
+def test_in1_case12_derived_abstention_couldnt_check() -> None:
+    # NEW THIS WAVE — the derived tag absent → couldnt_check (proves D2 routes around Caveat A).
+    (cc,) = _in1(None)
+    assert cc.verdict is Verdict.COULDNT_CHECK
+
+
+def test_in1_case13_raise_between_documents_does_not_fire() -> None:
+    # DOMAIN EDGE: documented ABOVE stated (a raise) → a NEGATIVE signed shortfall → satisfied, NOT fired.
+    assert _in1("-0.15")[0].verdict is Verdict.SATISFIED
+
+
+# IN-1 cases 5/6 (absent/unknown feeding tag) live in the RECIPE (test_recipe_abstains, IN-B) → the
+# derived tag becomes "unknown" → case 12 path here. Case 7 (low-conf) N/A: a derived tag's confidence
+# is None (a passthrough), so it never routes to needs_review. Case 11 (armor) N/A: not a judgment.
+
+
+# ================================================================================================= #
+# PIN #1 (THE #1 FALSE-GREEN) — loan-level aggregate MASKS per-borrower income fraud
+# ================================================================================================= #
+def test_pin1_aggregate_masking_hides_per_borrower_fraud() -> None:
+    # A 2-borrower file: borrower A's documented income is 40% SHORT of stated (fraud signal); borrower
+    # B's documented income EXCEEDS stated. The loan-level recipe AGGREGATES → net shortfall ~0 →
+    # IN-1 SATISFIED, masking exactly the case it exists to catch. This is the #1 consequence of the
+    # per-borrower derived-producer gap (derived.py is loan-only). PINNED, not fixed (a separate ticket:
+    # the per-borrower derived producer / borrower-keyed materialization, shared with ID-8).
+    two_borrower = _snap(
+        docs=[_doc("aStub", borrower=_B1), _doc("bStub", borrower=_B2)],
+        by_subject={
+            "aStub": {
+                "income.stated_monthly": _parsed("5000"),
+                "income.documented_monthly": _tag("3000"),
+            },
+            "bStub": {
+                "income.stated_monthly": _parsed("5000"),
+                "income.documented_monthly": _tag("7000"),
+            },
+        },
+    )
+    value, _ = _income_documented_shortfall(two_borrower)
+    assert value == "0"  # (10000-10000)/10000 — the fraud nets to zero at loan level
+    assert (
+        _in1(value)[0].verdict is Verdict.SATISFIED
+    )  # MASKED (borrower A alone: 0.40 → would fire)
+
+    # Borrower A in isolation WOULD fire — proving the masking is the aggregation, not the rule logic.
+    a_alone = _snap(
+        docs=[_doc("aStub", borrower=_B1)],
+        by_subject={
+            "aStub": {
+                "income.stated_monthly": _parsed("5000"),
+                "income.documented_monthly": _tag("3000"),
+            }
+        },
+    )
+    assert _income_documented_shortfall(a_alone)[0] == "0.4"
+
+
+# ================================================================================================= #
+# IN-2 — paystub recency (deterministic, loan, derived days, 30-day window)
+# ================================================================================================= #
+def _in2(days: str | None):
+    tags = {"loan": {"income.days_since_most_recent_pay": _derived(days)}} if days else {}
+    return evaluate_deterministic_rule(load_rule_spec("IN-2"), _snap(by_subject=tags))
+
+
+def test_in2_fire_clean_boundaries_abstention() -> None:
+    assert _in2("45")[0].verdict is Verdict.FIRED and _in2("45")[0].reasoning  # 1 + 9
+    assert _in2("20")[0].verdict is Verdict.SATISFIED  # 2
+    assert _in2("31")[0].verdict is Verdict.FIRED  # 3 just OVER
+    assert _in2("30")[0].verdict is Verdict.SATISFIED  # 4 at/under
+    assert _in2(None)[0].verdict is Verdict.COULDNT_CHECK  # 12 abstention
+    # case 13 (partial-period paystub): a mid-cycle stub's pay DATE is recent → small age → satisfied.
+    assert _in2("5")[0].verdict is Verdict.SATISFIED
+
+
+# ================================================================================================= #
+# IN-3 — YTD consistency (deterministic, loan, derived, 10% tolerance)
+# ================================================================================================= #
+def _in3(shortfall: str | None):
+    tags = (
+        {"loan": {"income.ytd_annualized_shortfall_pct": _derived(shortfall)}} if shortfall else {}
+    )
+    return evaluate_deterministic_rule(load_rule_spec("IN-3"), _snap(by_subject=tags))
+
+
+def test_in3_fire_clean_boundary_abstention() -> None:
+    assert _in3("0.30")[0].verdict is Verdict.FIRED  # YTD 30% short of documented
+    assert _in3("0.05")[0].verdict is Verdict.SATISFIED
+    assert _in3("0.1001")[0].verdict is Verdict.FIRED  # 3 just OVER 10%
+    assert _in3("0.0999")[0].verdict is Verdict.SATISFIED  # 4 just UNDER
+    assert _in3(None)[0].verdict is Verdict.COULDNT_CHECK  # 12
+    # case 13 (mid-year start): a short YTD → the recipe abstains upstream (a partial period is expected);
+    # here a NEGATIVE shortfall (YTD annualized exceeds documented) → satisfied, not fired.
+    assert _in3("-0.05")[0].verdict is Verdict.SATISFIED
+
+
+# ================================================================================================= #
+# IN-4 — employment gap (deterministic, loan, derived days, 30-day window)
+# ================================================================================================= #
+def _in4(gap: str | None):
+    tags = {"loan": {"income.max_employment_gap_days": _derived(gap)}} if gap else {}
+    return evaluate_deterministic_rule(load_rule_spec("IN-4"), _snap(by_subject=tags))
+
+
+def test_in4_fire_clean_boundary_abstention_and_recipe() -> None:
+    assert _in4("120")[0].verdict is Verdict.FIRED  # 4-month gap
+    assert _in4("0")[0].verdict is Verdict.SATISFIED
+    assert _in4("31")[0].verdict is Verdict.FIRED  # 3 over
+    assert _in4("30")[0].verdict is Verdict.SATISFIED  # 4 under
+    assert _in4(None)[0].verdict is Verdict.COULDNT_CHECK  # 12
+    # case 13 (short explained gap) vs long gap — the recipe measures the largest gap; a single job → unknown.
+    assert (
+        _income_max_employment_gap(_snap(docs=[_doc("d")]))[0] == "unknown"
+    )  # <2 records → abstain
+
+
+# ================================================================================================= #
+# IN-5 — employer consistency (LP-325 fuzzy) — the COST property + ABSENT≠DISAGREEING
+# ================================================================================================= #
+async def _in5(employers: dict[str, str], reasoner):
+    docs = [_doc(cid) for cid in employers]
+    by_subject = {
+        cid: {"income.employer_normalized": _tag(name)} for cid, name in employers.items()
+    }
+    return await evaluate_consistency_rule(
+        load_rule_spec("IN-5"), _snap(docs=docs, by_subject=by_subject), reasoner=reasoner
+    )
+
+
+async def test_in5_full() -> None:
+    # 1 must-fire (genuinely different employers), 9 provenance.
+    fire = await _in5({"pay": "Acme Corp", "w2": "Globex Inc"}, _Reasoner("disagree"))
+    assert _verdicts(fire) == [Verdict.FIRED] and fire[0].reasoning
+    # 2 exact match → satisfied + THE COST PROPERTY (no AI call).
+    stub = _Reasoner("disagree")
+    exact = await _in5({"pay": "Acme Corp", "w2": "Acme Corp"}, stub)
+    assert _verdicts(exact) == [Verdict.SATISFIED] and stub.calls == 0
+    # 5 <2 sources → couldnt_check (ABSENT≠DISAGREEING). 13 legal-vs-DBA → AI agrees, no fire.
+    lone = await _in5({"pay": "Acme Corp"}, _Reasoner())
+    assert _verdicts(lone) == [Verdict.COULDNT_CHECK] and "nothing to compare" in lone[0].reasoning
+    dba = _Reasoner("agree")
+    benign = await _in5({"pay": "Acme Corporation", "w2": "Acme"}, dba)
+    assert (
+        _verdicts(benign) == [Verdict.SATISFIED]
+        and dba.calls == 1
+        and benign[0].ratification_pending
+    )
+
+
+# ================================================================================================= #
+# IN-8 / IN-9 / IN-10 / IN-11 / IN-12 — per_document deterministic with applicability
+# ================================================================================================= #
+def _det_doc(rule_id: str, docs_tags: dict[str, tuple[str, dict[str, Tag]]]):
+    """docs_tags = {content_id: (document_type, {tag_id: Tag})}."""
+    docs = [_doc(cid, dtype=dt) for cid, (dt, _) in docs_tags.items()]
+    by_subject = {cid: tags for cid, (_, tags) in docs_tags.items() if tags}
+    return evaluate_deterministic_rule(
+        load_rule_spec(rule_id), _snap(docs=docs, by_subject=by_subject)
+    )
+
+
+def test_in8_voe_scope_expected_absence_and_verbal_edge() -> None:
+    by = {
+        r.subject_id: r.verdict
+        for r in _det_doc(
+            "IN-8",
+            {
+                "voe": (
+                    "verification_of_employment",
+                    {"income.voe_present": _tag("no")},
+                ),  # case 1 fire
+                "pay": ("paystub", {}),  # scope: not_applicable
+            },
+        )
+    }
+    assert by["voe"] is Verdict.FIRED and by["pay"] is Verdict.NOT_APPLICABLE
+    # case 2 clean; case 13 (a verbal VOE where written required) — the tag encodes acceptability.
+    ok = _det_doc(
+        "IN-8", {"voe": ("verification_of_employment", {"income.voe_present": _tag("yes")})}
+    )
+    assert ok[0].verdict is Verdict.SATISFIED
+    # case 5/12: no VOE document at all — a VOE is EXPECTED (LP-330) → couldnt_check, never not_applicable.
+    miss = _det_doc("IN-8", {"pay": ("paystub", {})})
+    assert any(v.verdict is Verdict.COULDNT_CHECK for v in miss)
+
+
+def test_in9_offer_letter_scope_and_fire() -> None:
+    fire = _det_doc("IN-9", {"off": ("offer_letter", {"income.offer_letter_present": _tag("no")})})
+    assert fire[0].verdict is Verdict.FIRED  # future job, no valid offer letter
+    ok = _det_doc("IN-9", {"off": ("offer_letter", {"income.offer_letter_present": _tag("yes")})})
+    assert ok[0].verdict is Verdict.SATISFIED
+    na = _det_doc("IN-9", {"pay": ("paystub", {})})
+    assert na[0].verdict is Verdict.NOT_APPLICABLE  # not expected — offer letters are the exception
+
+
+def test_in10_declining_fires_and_low_confidence_needs_review() -> None:
+    fire = _det_doc("IN-10", {"w2": ("w2", {"income.is_declining": _tag("yes")})})
+    assert (
+        fire[0].verdict is Verdict.FIRED and fire[0].reasoning
+    )  # 1 + 9 + 13 (fires on the decline)
+    clean = _det_doc("IN-10", {"w2": ("w2", {"income.is_declining": _tag("no")})})
+    assert clean[0].verdict is Verdict.SATISFIED
+    # case 7 low-confidence AI tag → needs_review (an AI enum, unlike the derived rules).
+    low = _det_doc("IN-10", {"w2": ("w2", {"income.is_declining": _tag("yes", conf=0.2)})})
+    assert low[0].verdict is Verdict.NEEDS_REVIEW
+    # case 6 unknown value → couldnt_check (distinct at the gate).
+    unk = _det_doc("IN-10", {"w2": ("w2", {"income.is_declining": _tag("unknown")})})
+    assert unk[0].verdict is Verdict.COULDNT_CHECK and "unknown" in unk[0].reasoning
+
+
+# ================================================================================================= #
+# PIN #2 — IN-11 OVER-FIRES on non-variable income (no set-membership operand)
+# ================================================================================================= #
+def test_pin2_in11_overfires_on_salaried_income() -> None:
+    # Salaried W-2 income with <2yr history (a new base-pay job) → IN-11 FIRES, which is WRONG: the 2-year
+    # rule is for VARIABLE income (bonus/overtime/commission). IN-11 reads income.has_2yr_history with no
+    # filter on income.type because the operand algebra has no set-membership. PINNED (a separate ticket:
+    # a set-membership operand or an IN-11 judgment reframe).
+    over = _det_doc("IN-11", {"w2": ("w2", {"income.has_2yr_history": _tag("no")})})
+    assert over[0].verdict is Verdict.FIRED  # WRONG for salaried base pay — the pinned over-fire
+    # The legitimate case it SHOULD catch also fires (a true positive is present):
+    variable = _det_doc("IN-11", {"w2": ("w2", {"income.has_2yr_history": _tag("no")})})
+    assert (
+        variable[0].verdict is Verdict.FIRED
+    )  # bonus income <2yr — correctly fires (indistinguishable)
+
+
+# ================================================================================================= #
+# PIN #3 — IN-12 is a MINIMAL 2-year-return check, not a 1084 analysis
+# ================================================================================================= #
+def test_pin3_in12_minimal_check_only() -> None:
+    # What it DOES: fires on self-employment lacking a 2-year return history.
+    fire = _det_doc("IN-12", {"tr": ("tax_return", {"income.has_2yr_history": _tag("no")})})
+    assert fire[0].verdict is Verdict.FIRED
+    # What it does NOT do: a 2-year history present → SATISFIED, even with declining net / missing add-backs
+    # (K-1/1099/P&L). The real Form-1084 cash-flow analysis is NOT modeled (compute_self_employed_income
+    # is unwired). PINNED (a separate ticket: wire the self-employment calculator).
+    passes = _det_doc("IN-12", {"tr": ("tax_return", {"income.has_2yr_history": _tag("yes")})})
+    assert passes[0].verdict is Verdict.SATISFIED  # no 1084 analysis — under-covers
+
+
+# ================================================================================================= #
+# IN-7 / IN-13 / IN-14 — judgment (per_borrower) — ARMOR + fail-closed + provenance
+# ================================================================================================= #
+async def _judge(rule_id: str, reasoned: dict[str, Tag], reasoner, borrower=_B1):
+    docs = [_doc("d", borrower=borrower)]
+    return await evaluate_judgment_rule(
+        load_rule_spec(rule_id),
+        _snap(docs=docs, by_subject={str(borrower): reasoned}),
+        reasoner=reasoner,
+    )
+
+
+async def test_judgment_rules_armor_provenance_failclosed() -> None:
+    cases = {
+        "IN-7": {
+            "income.same_line_of_work": _tag("no"),
+            "income.employment_start": _parsed("2026-01-01"),
+        },
+        "IN-13": {"income.continuance_3yr": _tag("no"), "income.type": _tag("other")},
+        "IN-14": {
+            "income.continuance_3yr": _tag("no"),
+            "occupancy.rental_support": _tag("inadequate"),
+        },
+    }
+    for rule_id, reasoned in cases.items():
+        stub = _Reasoner("no")
+        (ev,) = await _judge(rule_id, reasoned, stub)
+        assert ev.evaluation.verdict is Verdict.NEEDS_REVIEW  # a judgment never auto-fires
+        assert (
+            ev.evaluation.ratification_pending
+        )  # CASE 11 ARMOR — every verdict ratification-pending
+        assert (
+            ev.evaluation.reasoning and stub.calls == 1
+        )  # CASE 9 provenance; the AI was consulted
+        # Fail-closed: the gated reasoned-over tag absent → couldnt_check, NO AI call.
+        gated_stub = _Reasoner("no")
+        (gated,) = await _judge(rule_id, {}, gated_stub)
+        assert gated.evaluation.verdict is Verdict.COULDNT_CHECK and gated_stub.calls == 0
+
+
+async def test_in7_case13_same_field_vs_unrelated() -> None:
+    # DOMAIN EDGE: the same-line-of-work signal drives the judgment; both directions reach the AI (the
+    # verdict is always needs_review + ratification-pending — the underwriter ratifies).
+    same = _Reasoner("yes")
+    (s,) = await _judge(
+        "IN-7",
+        {"income.same_line_of_work": _tag("yes"), "income.employment_start": _parsed("2025-01-01")},
+        same,
+    )
+    assert s.evaluation.ratification_pending and same.calls == 1
+
+
+# ================================================================================================= #
+# IN-6 — DEFERRED (D3: needs LP-331's multi-value gather leg) — assert only that it has no spec
+# ================================================================================================= #
+def test_in6_is_deferred_no_spec() -> None:
+    with pytest.raises(RuleSpecNotFound):
+        load_rule_spec("IN-6")
+
+
+# ================================================================================================= #
+# NO EVAL FATIGUE — every in-scope IN rule has a must-FIRE case in this module (the guard test)
+# ================================================================================================= #
+def test_every_in_scope_in_rule_has_a_must_fire_case_in_this_module() -> None:
+    src = __import__("pathlib").Path(__file__).read_text()
+    markers = {
+        "IN-1": '_in1("0.20")[0].verdict is Verdict.FIRED',
+        "IN-2": '_in2("45")[0].verdict is Verdict.FIRED',
+        "IN-3": '_in3("0.30")[0].verdict is Verdict.FIRED',
+        "IN-4": '_in4("120")[0].verdict is Verdict.FIRED',
+        "IN-5": "test_in5_full",
+        "IN-7": "test_judgment_rules_armor",
+        "IN-8": "test_in8_voe_scope",
+        "IN-9": "test_in9_offer_letter",
+        "IN-10": "test_in10_declining_fires",
+        "IN-11": "test_pin2_in11_overfires",
+        "IN-12": "test_pin3_in12_minimal",
+        "IN-13": "test_judgment_rules_armor",
+        "IN-14": "test_judgment_rules_armor",
+    }
+    for rid, marker in markers.items():
+        assert marker in src, (
+            f"{rid} is missing a must-fire case — a rule with no fire case is NOT evaluated"
+        )
