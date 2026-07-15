@@ -122,6 +122,14 @@ class ReferenceValues(BaseModel):
 # --------------------------------------------------------------------------- #
 
 
+# The reserved structural tag carrying a document's intrinsic type (LP-329) — INJECTED by the
+# ``per_document`` enumerator, so it exists ONLY for per_document subjects. Declared here (the schema
+# layer) as the ONE source of the contract: the enumerator imports it, and RuleSpec validates that a
+# spec scoping itself on this tag actually enumerates per_document (else its predicate is always
+# absent → the rule silently never applies). Not a vocabulary tag (never in fact_tags.csv).
+DOC_TYPE_TAG = "document.document_type"
+
+
 class TagCondition(BaseModel):
     """One tag-value predicate: ``<tag> <eq|ne> <value>`` (applicability + outcome guards)."""
 
@@ -470,6 +478,29 @@ class RuleSpec(BaseModel):
         if set_count > 1:
             raise ValueError(
                 f"spec {self.rule_id}: set exactly one of deterministic / judgment / consistency"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _document_type_applicability_requires_per_document(self) -> RuleSpec:
+        # DOC_TYPE_TAG is injected ONLY by the per_document enumerator (LP-329). A rule scoping its
+        # applicability on it under any other enumeration would find the predicate ABSENT for every
+        # subject → couldnt_check for all of them → the rule silently NEVER applies. Catch that (and a
+        # typo'd reserved tag) at LOAD rather than as an invisible all-yellow rule.
+        applic = None
+        if self.deterministic is not None:
+            applic = self.deterministic.applicability
+        elif self.judgment is not None:
+            applic = self.judgment.applicability
+        if (
+            applic is not None
+            and applic.tag == DOC_TYPE_TAG
+            and self.subject_enumeration != "per_document"
+        ):
+            raise ValueError(
+                f"spec {self.rule_id}: applicability on {DOC_TYPE_TAG!r} requires "
+                f"subject_enumeration: per_document (the tag is injected only for per_document "
+                f"subjects), got {self.subject_enumeration!r}"
             )
         return self
 

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 
+from app.verification.rules.specs import DOC_TYPE_TAG
 from app.verification.snapshot.model import DocumentEntry, Snapshot
 from app.verification.snapshot.tag import Tag, TagProducedBy, TagRole, TagStage
 from app.verification.snapshot.traversal import all_transactions
@@ -86,9 +87,9 @@ def _per_document(snapshot: Snapshot) -> list[Subject]:
     return subjects
 
 
-# The reserved structural tag id carrying a document's intrinsic type (LP-329) — injected by the
-# per_document enumerator (not an AI/parsed vocabulary tag; a structural fact like the content_id).
-DOC_TYPE_TAG = "document.document_type"
+# DOC_TYPE_TAG (the reserved structural tag id for a document's intrinsic type) is the ONE contract
+# source in ``specs`` — imported above — so a spec's applicability predicate and this injection can
+# never drift, and RuleSpec validates a document-type-scoped rule is actually per_document.
 
 
 def _doc_type_tag(entry: DocumentEntry) -> Tag:

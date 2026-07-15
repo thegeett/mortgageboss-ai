@@ -165,3 +165,36 @@ def test_no_document_types_hardcoded_in_the_evaluators() -> None:
         src = (engine / name).read_text()
         assert "title_commitment" not in src, name  # the value lives ONLY in the spec (yaml)
         assert "power_of_attorney" not in src, name
+
+
+# --------------------------------------------------------------------------- #
+# Load-time guard: document.document_type is injected ONLY for per_document (LP-329 review) — a spec
+# scoping on it under any other enumeration would silently never apply (all couldnt_check).
+# --------------------------------------------------------------------------- #
+def test_document_type_applicability_on_non_per_document_fails_loud() -> None:
+    from app.verification.rules.specs import DOC_TYPE_TAG, RuleSpec
+
+    spec = {
+        "rule_id": "ID-7",  # reuse ID-7's kinds row; a distinct synthetic body
+        "name": "misconfigured doc-type rule",
+        "category": "Identity",
+        "kind": "structural",
+        "numeric_check": False,
+        "criteria": "n/a",
+        "applicability": {"scope": "n/a", "trigger": "n/a"},
+        "required_inputs": [{"name": "f", "snapshot_path": 't["x"]', "description": "f"}],
+        "reference_values": {"priya_validated": False, "threshold_needs_signoff": False},
+        "subject_enumeration": "loan",  # WRONG — DOC_TYPE_TAG is not injected for loan subjects
+        "subject_key_fields": ["loan"],
+        "evidence_required": "n/a",
+        "guideline_reference": "n/a — synthetic",
+        "spec_version": 1,
+        "deterministic": {
+            "applicability": {"tag": DOC_TYPE_TAG, "op": "eq", "value": "title_commitment"},
+            "load_bearing_tags": ["x.flag"],
+            "gated_tags": ["x.flag"],
+            "outcomes": [{"verdict": "satisfied", "default": True, "reasoning": "ok"}],
+        },
+    }
+    with pytest.raises(ValueError, match="requires subject_enumeration: per_document"):
+        RuleSpec.model_validate(spec)
