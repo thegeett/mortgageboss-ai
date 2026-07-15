@@ -27,6 +27,8 @@ _ABSTENTION = {None, "unknown"}
 # abstention), so its unknown-rate is informational - never flagged. The ID family's AI tags (LP-323-
 # ID-C) all abstain to "unknown" (name/address = "could not read"; residency/POA = "cannot judge"),
 # so they are registered here — else over_abstaining would be silently inert for the whole ID family.
+# The income family's AI tags (LP-323-IN-C) likewise abstain to "unknown" (a structuring output that
+# couldn't read the figure / a judgment that couldn't decide), so they are registered here too.
 _ABSTAINING_DIMENSIONS = {
     "txn.is_money_in",
     "txn.has_identified_source",
@@ -35,6 +37,17 @@ _ABSTAINING_DIMENSIONS = {
     "id.current_address_type",
     "id.residency_eligible",
     "id.poa_acceptable",
+    "income.documented_monthly",
+    "income.qualifying_monthly",
+    "income.employer_normalized",
+    "income.type",
+    "income.is_declining",
+    "income.has_2yr_history",
+    "income.same_line_of_work",
+    "income.continuance_3yr",
+    "income.job_change_acceptable",
+    "income.other_income_continues",
+    "income.rental_income_supportable",
 }
 _OVER_ABSTENTION = 0.30  # above this unknown-rate, an abstaining tag is drowning in unknowns
 _UNDER_ABSTENTION_ACCURACY = 0.90  # concrete accuracy below this = fabrication risk

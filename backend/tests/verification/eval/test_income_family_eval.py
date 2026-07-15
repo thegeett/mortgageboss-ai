@@ -116,8 +116,10 @@ def _in1(shortfall: str | None):
 
 
 def test_in1_case1_2_must_fire_and_clean() -> None:
-    assert _in1("0.20")[0].verdict is Verdict.FIRED  # 20% shortfall > 5%
-    assert _in1("0.20")[0].reasoning  # case 9 provenance
+    (fired,) = _in1("0.20")
+    assert (
+        fired.verdict is Verdict.FIRED and fired.reasoning
+    )  # 20% shortfall > 5% + case 9 provenance
     assert _in1("0.02")[0].verdict is Verdict.SATISFIED  # within tolerance
 
 
@@ -193,7 +195,8 @@ def _in2(days: str | None):
 
 
 def test_in2_fire_clean_boundaries_abstention() -> None:
-    assert _in2("45")[0].verdict is Verdict.FIRED and _in2("45")[0].reasoning  # 1 + 9
+    (fired,) = _in2("45")
+    assert fired.verdict is Verdict.FIRED and fired.reasoning  # 1 + 9
     assert _in2("20")[0].verdict is Verdict.SATISFIED  # 2
     assert _in2("31")[0].verdict is Verdict.FIRED  # 3 just OVER
     assert _in2("30")[0].verdict is Verdict.SATISFIED  # 4 at/under
@@ -345,13 +348,17 @@ def test_pin2_in11_overfires_on_salaried_income() -> None:
     # rule is for VARIABLE income (bonus/overtime/commission). IN-11 reads income.has_2yr_history with no
     # filter on income.type because the operand algebra has no set-membership. PINNED (a separate ticket:
     # a set-membership operand or an IN-11 judgment reframe).
-    over = _det_doc("IN-11", {"w2": ("w2", {"income.has_2yr_history": _tag("no")})})
-    assert over[0].verdict is Verdict.FIRED  # WRONG for salaried base pay — the pinned over-fire
-    # The legitimate case it SHOULD catch also fires (a true positive is present):
-    variable = _det_doc("IN-11", {"w2": ("w2", {"income.has_2yr_history": _tag("no")})})
+    # Even with income.type EXPLICITLY salary, IN-11 still fires — proving it has no income.type filter
+    # (the over-fire root cause), not just that a type-less fixture happens to fire.
+    salaried = _det_doc(
+        "IN-11",
+        {"w2": ("w2", {"income.has_2yr_history": _tag("no"), "income.type": _tag("salary")})},
+    )
     assert (
-        variable[0].verdict is Verdict.FIRED
-    )  # bonus income <2yr — correctly fires (indistinguishable)
+        salaried[0].verdict is Verdict.FIRED
+    )  # WRONG for salaried base pay — the pinned over-fire
+    # A variable-income case (bonus/overtime/commission) is the TRUE positive IN-11 exists for — but
+    # the rule reads only has_2yr_history, so it cannot tell the two apart (the pinned limitation).
 
 
 # ================================================================================================= #
@@ -432,12 +439,17 @@ def test_in6_is_deferred_no_spec() -> None:
 # NO EVAL FATIGUE — every in-scope IN rule has a must-FIRE case in this module (the guard test)
 # ================================================================================================= #
 def test_every_in_scope_in_rule_has_a_must_fire_case_in_this_module() -> None:
-    src = __import__("pathlib").Path(__file__).read_text()
+    # Checked against the module's LIVE callables (NOT a source-string grep, which would trivially match
+    # the marker list itself and could never fail). Each value is the must-fire test FUNCTION's name
+    # prefix; deleting that test trips the guard.
+    defined = {
+        name for name, obj in globals().items() if name.startswith("test_") and callable(obj)
+    }
     markers = {
-        "IN-1": '_in1("0.20")[0].verdict is Verdict.FIRED',
-        "IN-2": '_in2("45")[0].verdict is Verdict.FIRED',
-        "IN-3": '_in3("0.30")[0].verdict is Verdict.FIRED',
-        "IN-4": '_in4("120")[0].verdict is Verdict.FIRED',
+        "IN-1": "test_in1_case1_2_must_fire",
+        "IN-2": "test_in2_fire",
+        "IN-3": "test_in3_fire",
+        "IN-4": "test_in4_fire",
         "IN-5": "test_in5_full",
         "IN-7": "test_judgment_rules_armor",
         "IN-8": "test_in8_voe_scope",
@@ -448,7 +460,7 @@ def test_every_in_scope_in_rule_has_a_must_fire_case_in_this_module() -> None:
         "IN-13": "test_judgment_rules_armor",
         "IN-14": "test_judgment_rules_armor",
     }
-    for rid, marker in markers.items():
-        assert marker in src, (
+    for rid, prefix in markers.items():
+        assert any(name.startswith(prefix) for name in defined), (
             f"{rid} is missing a must-fire case — a rule with no fire case is NOT evaluated"
         )
