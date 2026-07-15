@@ -28,6 +28,7 @@ import json
 import re
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import datetime as _dt
 
 from app.ai.client import AIClientError
 from app.ai.rule_judgment import Reasoner, RuleJudgmentResult, reason_rule_judgment
@@ -58,11 +59,28 @@ _UNKNOWN = "unknown"
 _WS = re.compile(r"\s+")
 _PUNCT = re.compile(r"[^\w\s]")
 
+# Common unambiguous date renderings → ISO, so a format-only difference is not a false discrepancy
+# (LP-323-ID-B / ID-3). A genuinely ambiguous value (MM/DD vs DD/MM) or an unparseable one is left
+# VERBATIM — the normalizer never guesses a date, so a real mismatch is never masked.
+_DATE_FORMATS = ("%Y-%m-%d", "%m/%d/%Y", "%m-%d-%Y", "%Y/%m/%d", "%d %b %Y", "%b %d, %Y")
+
+
+def _date(value: str) -> str:
+    text = value.strip()
+    for fmt in _DATE_FORMATS:
+        try:
+            return _dt.strptime(text, fmt).date().isoformat()
+        except ValueError:
+            continue
+    return text
+
+
 _NORMALIZERS: dict[str, Callable[[str], str]] = {
     "strip": str.strip,
     "casefold": str.casefold,
     "collapse_ws": lambda s: _WS.sub(" ", s),
     "drop_punct": lambda s: _PUNCT.sub("", s),
+    "date": _date,
 }
 
 

@@ -9320,3 +9320,32 @@ Deferred: the calculator ``from_tag`` wiring; migrating live ``txn`` onto the ge
 ID rules; other families' declarations (income/credit/property — their waves). Cross-refs: §3D; ADR-266;
 LP-311 (projection), LP-312 (Tag + content_ids), LP-313/314 (Stage A/B machinery), LP-318 (Caveat A),
 LP-319 (occupancy gap), LP-324 (rules-as-data), LP-325 (the gather contract), LP-323-ID-A §0/§2.
+
+## ADR-267: Cross-source consistency verdicts are RULE OUTPUTS, not verdict tags (LP-323-ID-B, D2)
+
+**Status:** Accepted. **Context:** LP-325's consistency primitive gathers a fact across sources and
+produces the agree/disagree verdict. The vocabulary is inconsistent about how a cross-source
+consistency check is represented: some rules would compare RAW tags (`id.name_normalized`, `id.dob`),
+while a few tags bake the verdict IN (`id.title_vesting_consistent`, `property.address_normalized_match`).
+Authoring the ID family forced a decision: does a consistency rule read raw tags and produce the
+verdict itself, or does it read a pre-computed `id.name_consistent` / `id.address_consistent` verdict tag?
+
+**Decision — RAW-COMPARE-IN-RULE (no verdict tags minted).** The consistency evaluator (LP-325) already
+performs the comparison; a verdict tag would DUPLICATE that machinery in two places that can disagree,
+and it makes the compare IMPLICIT (buried in a producer prompt) rather than DECLARED (the spec's
+`compare_mode` + `normalization` + `gather_filter`). So ID-1 gathers raw `id.name_normalized` and ID-3
+gathers raw `id.dob`; NO `id.name_consistent` / `id.address_consistent` tags are minted. This keeps the
+comparison declarative and single-sourced, and avoids inflating the (generated) vocabulary.
+
+**Consequences.**
+- Every cross-source family (income stated-vs-documented, credit app-vs-report, property address)
+  follows the same pattern: gather the RAW fact, declare the compare — no per-family verdict tag.
+- `id.title_vesting_consistent` and `property.address_normalized_match` are the ODD ONES OUT — a verdict
+  baked into an AI tag. They are NOT collapsed into each other (borrower identity/title vs subject-property
+  address are different facts). A rule reading them is a thin structural check, not a consistency gather.
+- ID-7 (marital/title) would read `id.title_vesting_consistent` as-is (option i) rather than re-express
+  the marital-vs-vesting reconciliation as a consistency gather — but ID-7 is deferred as a generalization
+  gap (per-document structural rule with document-type applicability; see LP-323-ID-B.md).
+
+Cross-refs: §3D; ADR-265 (the consistency primitive); LP-324 (rules as data), LP-325, LP-326;
+LP-323-ID-A §2 (the verdict-modeling question this resolves).

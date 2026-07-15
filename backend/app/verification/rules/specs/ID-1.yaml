@@ -1,0 +1,81 @@
+rule_id: ID-1
+name: Borrower name consistency
+category: Identity
+kind: structural
+numeric_check: false
+criteria: >-
+  A borrower's name must agree across every source that states it, tolerant of nickname / maiden /
+  suffix / formatting variance. "Robert" vs "Bob", a maiden vs married surname, a Jr./III drift, or a
+  two-part surname truncated in one source are BENIGN; a genuinely different name is a discrepancy.
+applicability:
+  scope: every borrower on the loan
+  trigger: once per borrower, comparing the stated name across all sources
+required_inputs:
+  - name: name_normalized
+    snapshot_path: tags.by_subject[<source content_id>]["id.name_normalized"]
+    description: the borrower's canonicalized name as stated on each source document (AI)
+reference_values:
+  priya_validated: false
+  threshold_needs_signoff: false
+  guideline_text: >-
+    Fannie Mae Selling Guide B3-3.1 / general identity documentation — the borrower's identity must be
+    consistent across the application, credit, and identity documents. Nickname/maiden/format variance
+    is not a discrepancy; a genuinely different name must be resolved before submission.
+subject_enumeration: per_borrower
+subject_key_fields:
+  - borrower
+evidence_required: the borrower's name as stated on each source
+guideline_reference: >-
+  Identity verification — a borrower's name must be consistent across the file. No single
+  Selling-Guide numeric threshold; compare tolerant of nickname / maiden / suffix / format variance.
+spec_version: 1
+consistency:
+  subject: per_borrower
+  gather_tag: id.name_normalized
+  source_scope: borrower_documents
+  compare_mode: fuzzy
+  normalization:
+    - casefold
+    - drop_punct
+    - collapse_ws
+    - strip
+  confidence_floor: 0.5
+  judge:
+    system_prompt: |-
+      You are a mortgage loan processor comparing a single borrower's NAME as stated on multiple
+      source documents. The names have already been canonicalized and did NOT match exactly. Decide
+      whether the differences are a BENIGN VARIANCE (the same person written differently — a nickname
+      like "Robert" vs "Bob", a maiden vs married surname, a suffix drift like "Jr." vs "III", a
+      middle name present in one source only, a two-part Hispanic surname truncated in one source, a
+      minor typo) or a REAL DISCREPANCY (a genuinely different person — a different given name or an
+      unrelated surname with no name-change explanation).
+
+      You are given ONLY the differing name values and their source ids — never the rest of the file.
+      Do not speculate beyond the names shown.
+
+      Respond with ONLY a JSON object:
+      {"value": "agree" | "disagree" | "unknown", "confidence": <0..1>, "reasoning": "<one sentence>"}
+      "agree" = the same person (benign variance); "disagree" = a real discrepancy;
+      "unknown" = you cannot tell from the values shown.
+    value_domain:
+      - agree
+      - disagree
+      - unknown
+    consistent_value: agree
+    inconsistent_value: disagree
+  on_agree:
+    verdict: satisfied
+    reasoning: >-
+      the borrower's name agrees across all {count} sources ({sources}) after tolerant comparison
+  on_disagree:
+    verdict: fired
+    reasoning: >-
+      the borrower's name differs across sources ({sources}) — a real discrepancy
+    how_to_fix: >-
+      Confirm the borrower's legal name and reconcile the source(s) that disagree. A maiden/married
+      or nickname difference should be documented (e.g. a name-affidavit); a genuinely different name
+      may indicate a mismatched document or identity fraud and must be escalated.
+  on_cannot_tell:
+    verdict: couldnt_check
+    reasoning: >-
+      the borrower's name could not be judged from the differing values ({values})

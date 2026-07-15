@@ -1,0 +1,52 @@
+rule_id: ID-6
+name: Application completeness (1003)
+category: Identity
+kind: structural
+numeric_check: false
+criteria: >-
+  The application (1003) must have every required field present and non-blank. An incomplete
+  application (a missing required field) must be completed before submission.
+applicability:
+  scope: every loan file
+  trigger: once per loan, over the 1003's required-field set
+required_inputs:
+  - name: app_required_fields_present
+    snapshot_path: tags.by_subject["loan"]["id.app_required_fields_present"]
+    description: >-
+      whether every required 1003 field is present (derived — 'complete' | 'incomplete + list'); the
+      missing fields are named in this tag's own reasoning
+reference_values:
+  priya_validated: false
+  threshold_needs_signoff: false
+  guideline_text: >-
+    Uniform Residential Loan Application (Form 1003) — every required field must be completed and
+    non-blank before the file is submitted. The required-field set encoded here is a STARTER
+    (borrower name, SSN, loan amount, property address) pending the domain expert's authoritative set.
+subject_enumeration: loan
+subject_key_fields:
+  - loan
+evidence_required: the presence of every required 1003 field
+guideline_reference: >-
+  Application completeness — the 1003 (Uniform Residential Loan Application) required-field set. The
+  authoritative required set (incl. Declarations + co-borrower) is a lender/investor documentation
+  standard; LP-326 ships a STARTER set pending Priya's confirmation.
+spec_version: 1
+deterministic:
+  load_bearing_tags:
+    - id.app_required_fields_present
+  gated_tags:
+    - id.app_required_fields_present
+  outcomes:
+    - verdict: fired
+      when_tags:
+        - tag: id.app_required_fields_present
+          op: ne
+          value: complete
+      reasoning: >-
+        the application is incomplete — a required 1003 field is missing (see the load-bearing tag's
+        reasoning for the specific field(s))
+      how_to_fix: >-
+        Complete the missing required 1003 field(s) named in the finding's evidence before submission.
+    - verdict: satisfied
+      default: true
+      reasoning: every required 1003 field is present

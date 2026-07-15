@@ -488,8 +488,9 @@ def test_retire_eligible_excludes_per_borrower_rules_when_no_borrower_resolved()
 
 def test_required_ai_groups_runs_only_what_active_rules_consume() -> None:
     # The materialization stage must not spend an Opus structuring pass on an id.* family no live rule
-    # reads. id_address feeds ID-4 (gather) + OC-2 (reasoned_over); id_name/id_title/id_poa feed no
-    # active rule → excluded. (ID-2's id.ssn_hash is PARSED, so it contributes no AI group.)
+    # reads. id_address feeds ID-4 + OC-2; id_name feeds ID-1 (LP-323-ID-B activated it). id_title /
+    # id_poa feed no active rule (ID-7/ID-9 are generalization gaps, not activated) → excluded.
+    # (ID-2's id.ssn_hash and ID-3's id.dob are PARSED, so they contribute no AI group.)
     groups = _required_ai_groups()
-    assert "id_address" in groups
-    assert {"id_name", "id_title", "id_poa"}.isdisjoint(groups)
+    assert {"id_address", "id_name"} <= groups
+    assert {"id_title", "id_poa"}.isdisjoint(groups)

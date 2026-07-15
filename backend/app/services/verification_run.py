@@ -74,9 +74,18 @@ from app.verification.tag_materialization.producer import materialize_tags
 # proven separately) — this stage adds the id.* families keyed under the document / loan subjects.
 _MATERIALIZED_SUBJECTS = frozenset({"document", "loan"})
 
-# The per-borrower consistency rules — retire-eligible only when their subject domain was healthily
-# enumerated (documents present AND borrowers resolvable). Kept beside AS-1's per-transaction guard.
-_PER_BORROWER_RULES = frozenset({"ID-2", "ID-4"})
+
+@cache
+def _per_borrower_rules() -> frozenset[str]:
+    """The ACTIVE rules that enumerate per-borrower subjects — DERIVED from each spec's
+    ``subject_enumeration``, never a hardcoded rule-id list (so a new per-borrower rule is picked up
+    by adding its spec + activating it, with no edit here). Retire-eligible only when their subject
+    domain was healthily enumerated (documents present AND borrowers resolvable)."""
+    return frozenset(
+        rule_id
+        for rule_id in ACTIVE_RULE_IDS
+        if load_rule_spec(rule_id).subject_enumeration == "per_borrower"
+    )
 
 
 def _load_bearing_tag_ids(rule_id: str) -> set[str]:
@@ -124,6 +133,9 @@ _RULE_CATEGORY: dict[str, FindingCategory] = {
     "OC-2": FindingCategory.PROPERTY,
     "ID-2": FindingCategory.CROSS_SOURCE,  # identity facts compared across sources
     "ID-4": FindingCategory.CROSS_SOURCE,
+    "ID-1": FindingCategory.CROSS_SOURCE,  # name across sources
+    "ID-3": FindingCategory.CROSS_SOURCE,  # DOB across sources
+    "ID-6": FindingCategory.DOCUMENTATION,  # 1003 completeness
 }
 
 
@@ -303,11 +315,11 @@ def _retire_eligible_rules(snapshot: Snapshot) -> frozenset[str]:
     """
     eligible = set(ACTIVE_RULE_IDS)
     if snapshot.documents.absent:
-        eligible.difference_update({"AS-1", *_PER_BORROWER_RULES})
+        eligible.difference_update({"AS-1", *_per_borrower_rules()})
     # Per-borrower rules that enumerated ZERO borrowers (documents present but belongs_to unresolved)
     # saw no subjects for a DEGRADED reason — not retire-eligible (else a real prior finding retires).
     if not enumerate_subjects("per_borrower", snapshot):
-        eligible.difference_update(_PER_BORROWER_RULES)
+        eligible.difference_update(_per_borrower_rules())
     return frozenset(eligible)
 
 

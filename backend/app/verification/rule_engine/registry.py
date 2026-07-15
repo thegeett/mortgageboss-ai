@@ -21,9 +21,10 @@ from app.verification.snapshot.model import Snapshot
 from app.verification.snapshot.tag import Tag
 
 # The rules wired for evaluation (each has a spec + its tags). A wave adds a rule_id here + a spec.
-# ID-2/ID-4 (cross-source consistency) are LIVE as of LP-326 — the generic producers now materialize
-# their ``id.*`` load-bearing tags, so they evaluate for real instead of uniformly couldnt_check.
-ACTIVE_RULE_IDS: tuple[str, ...] = ("AS-1", "OC-2", "ID-2", "ID-4")
+# ID-2/ID-4 (cross-source consistency) went LIVE at LP-326 (their id.* tags materialize); LP-323-ID-B
+# adds ID-1 (name, fuzzy consistency), ID-3 (DOB, exact consistency), ID-6 (1003 completeness,
+# deterministic) — all authored as DATA, their tags materialize via the generic LP-326 producers.
+ACTIVE_RULE_IDS: tuple[str, ...] = ("AS-1", "OC-2", "ID-2", "ID-4", "ID-1", "ID-3", "ID-6")
 
 
 async def evaluate_rules(
