@@ -179,6 +179,14 @@ class Operand(BaseModel):
                 f"a non-decimal operand type ({self.type!r}) is only valid on a `tag` operand "
                 "(reference / calc / product are decimal by construction)"
             )
+        # A product MULTIPLIES numbers — every factor must be decimal. A non-decimal factor (e.g. a
+        # date tag) would raise `Decimal * date` at eval; catch it at LOAD. Nested products are covered
+        # transitively (a sub-product's own type is decimal, and its factors run this same validator).
+        if self.product is not None and any(factor.type != "decimal" for factor in self.product):
+            raise ValueError(
+                "a `product` operand's factors must all be `decimal` — a product multiplies numbers, "
+                "so a non-decimal factor (e.g. a `date`) is a category error"
+            )
         return self
 
 

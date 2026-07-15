@@ -30,6 +30,10 @@ import yaml
 _RULES_DIR = Path(__file__).parents[1] / "rules"
 _FACT_TAGS_CSV = _RULES_DIR / "fact_tags.csv"
 _PRODUCTION_YAML = _RULES_DIR / "tag_production.yaml"
+# LP-328 (GAP-E): the HAND-EDITABLE vocabulary overlay lives HERE (the vocabulary loader) rather than
+# in projection, so declarations owns the vocabulary's source of truth (CSV + overlay) and no longer
+# imports projection — the two are one-directional (projection reads the vocabulary, not vice versa).
+_VOCAB_EXTRA_YAML = _RULES_DIR / "vocabulary_extra.yaml"
 
 # The subject keys a production declaration may attach a tag to (resolved by the subjects registry).
 KNOWN_SUBJECTS = frozenset({"transaction", "document", "loan"})
@@ -86,18 +90,62 @@ def _production_doc() -> dict[str, Any]:
     return raw
 
 
+def load_vocab_extra() -> dict[str, dict[str, Any]]:
+    """The hand-editable vocabulary overlay (LP-328, GAP-E) -> ``{tag_id: field-dict}`` (empty when the
+    file has no tags). Shaped to match a ``fact_tags.csv`` row so projection treats both alike. Each
+    entry needs ``entity`` + ``value_type``; ``allowed_values`` (list | null) drives AI coercion.
+
+    Owned here (the vocabulary loader) so both readers — projection (rows) and ``_allowed_values_by_tag``
+    (coercion domains) — import ONE reader without a projection<->declarations import cycle.
+    """
+    if not _VOCAB_EXTRA_YAML.is_file():
+        return {}
+    raw = yaml.safe_load(_VOCAB_EXTRA_YAML.read_text(encoding="utf-8")) or {}
+    tags = raw.get("tags") if isinstance(raw, dict) else None
+    if not isinstance(tags, dict):
+        return {}
+    out: dict[str, dict[str, Any]] = {}
+    for tag_id, body in tags.items():
+        if not isinstance(body, dict) or not body.get("entity") or not body.get("value_type"):
+            raise DeclarationError(
+                f"vocabulary_extra.yaml tag {tag_id!r} needs at least `entity` and `value_type`"
+            )
+        allowed = body.get("allowed_values")
+        out[str(tag_id).strip()] = {
+            "entity": str(body["entity"]).strip(),
+            "value_type": str(body["value_type"]).strip(),
+            "allowed_values": [str(v) for v in allowed] if isinstance(allowed, list) else None,
+            "description": str(body.get("description", "")),
+            "produced_by": str(body.get("produced_by", "derived")).strip(),
+            "tag_role": None,
+            "tag_version": int(body.get("tag_version", 1)),
+            "extras": {
+                "decision": "",
+                "used_by_rules": "",
+                "type_raw": "",
+                "source": "vocabulary_extra",
+            },
+        }
+    return out
+
+
 @cache
 def _allowed_values_by_tag() -> dict[str, tuple[str, ...] | None]:
     """The vocabulary's ``allowed_values`` per tag — from the generated ``fact_tags.csv`` AND the
-    hand-editable overlay (LP-328), so a wave-added tag's domain is available for AI coercion."""
+    hand-editable overlay (LP-328), so a wave-added tag's domain is available for AI coercion.
+
+    A duplicate overlay tag_id (already in the CSV) FAILS LOUD — the same guard projection enforces, so
+    the two overlay readers can never disagree (never silently shadow an xlsx-authored tag's domain)."""
     allowed: dict[str, tuple[str, ...] | None] = {}
     with _FACT_TAGS_CSV.open(encoding="utf-8", newline="") as fh:
         for row in csv.DictReader(fh):
             allowed[row["tag_id"].strip()] = _parse_allowed(row.get("allowed_values") or "")
-    # The GAP-E overlay (projection owns the read + the fail-loud on a duplicate tag_id).
-    from app.verification.rules.projection import load_vocab_extra
-
     for tag_id, body in load_vocab_extra().items():
+        if tag_id in allowed:
+            raise DeclarationError(
+                f"vocabulary_extra.yaml tag {tag_id!r} duplicates a fact_tags.csv tag "
+                "(hand-added tags must be NEW — remove it from the overlay or the xlsx)"
+            )
         values = body.get("allowed_values")
         allowed[tag_id] = tuple(str(v) for v in values) if isinstance(values, list) else None
     return allowed
@@ -234,5 +282,6 @@ __all__ = [
     "TagDeclaration",
     "load_ai_groups",
     "load_declarations",
+    "load_vocab_extra",
     "validate_declarations",
 ]

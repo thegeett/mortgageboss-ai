@@ -30,7 +30,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-import yaml
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -43,11 +42,6 @@ _RULES_DIR = Path(__file__).parent
 _FACT_TAGS_CSV = _RULES_DIR / "fact_tags.csv"
 _RULE_TAGS_CSV = _RULES_DIR / "rule_tags.csv"
 _TAG_DEPS_CSV = _RULES_DIR / "tag_dependencies.csv"
-# LP-328 (GAP-E): the HAND-EDITABLE vocabulary overlay. ``fact_tags.csv`` is GENERATED from the
-# authoring xlsx (a binary a PR cannot review, and the generator would overwrite a hand-added row), so
-# the waves ADD a tag here — a version-controlled YAML, reviewed in a PR, that the generator never
-# touches. Same field shape as a fact_tags.csv row; a tag_id already in the vocabulary fails loud.
-_VOCAB_EXTRA_YAML = _RULES_DIR / "vocabulary_extra.yaml"
 
 
 class ProjectionError(Exception):
@@ -168,8 +162,11 @@ def load_desired_tags() -> dict[str, dict[str, Any]]:
 
 
 def _merge_vocab_extra(desired: dict[str, dict[str, Any]]) -> None:
-    """Merge the hand-editable overlay (LP-328, GAP-E). A tag_id already in the vocabulary fails loud
-    (never silently shadow an xlsx-authored tag)."""
+    """Merge the hand-editable overlay (LP-328, GAP-E) — the reader is owned by the vocabulary loader
+    (``declarations``). A tag_id already in the vocabulary fails loud (never silently shadow an
+    xlsx-authored tag)."""
+    from app.verification.tag_materialization.declarations import load_vocab_extra
+
     for tag_id, body in load_vocab_extra().items():
         if tag_id in desired:
             raise ProjectionError(
@@ -177,43 +174,6 @@ def _merge_vocab_extra(desired: dict[str, dict[str, Any]]) -> None:
                 "hand-added tags must be NEW (remove it from the overlay or the xlsx)"
             )
         desired[tag_id] = body
-
-
-def load_vocab_extra() -> dict[str, dict[str, Any]]:
-    """The hand-editable vocabulary overlay -> {tag_id: field-dict} (empty when the file has no tags).
-
-    Each entry: ``entity`` / ``value_type`` (required); ``allowed_values`` (list | null), ``description``,
-    ``produced_by`` (optional). Shaped to match a fact_tags.csv row so the projection treats both alike.
-    """
-    if not _VOCAB_EXTRA_YAML.is_file():
-        return {}
-    raw = yaml.safe_load(_VOCAB_EXTRA_YAML.read_text(encoding="utf-8")) or {}
-    tags = raw.get("tags") if isinstance(raw, dict) else None
-    if not isinstance(tags, dict):
-        return {}
-    out: dict[str, dict[str, Any]] = {}
-    for tag_id, body in tags.items():
-        if not isinstance(body, dict) or not body.get("entity") or not body.get("value_type"):
-            raise ProjectionError(
-                f"vocabulary_extra.yaml tag {tag_id!r} needs at least `entity` and `value_type`"
-            )
-        allowed = body.get("allowed_values")
-        out[str(tag_id).strip()] = {
-            "entity": str(body["entity"]).strip(),
-            "value_type": str(body["value_type"]).strip(),
-            "allowed_values": [str(v) for v in allowed] if isinstance(allowed, list) else None,
-            "description": str(body.get("description", "")),
-            "produced_by": str(body.get("produced_by", "derived")).strip(),
-            "tag_role": None,
-            "tag_version": int(body.get("tag_version", 1)),
-            "extras": {
-                "decision": "",
-                "used_by_rules": "",
-                "type_raw": "",
-                "source": "vocabulary_extra",
-            },
-        }
-    return out
 
 
 def _load_edges(path: Path, left: str, right: str) -> set[tuple[str, str]]:

@@ -168,6 +168,7 @@ def test_no_operand_type_branch_outside_the_registry() -> None:
 # --------------------------------------------------------------------------- #
 def test_gap_e_new_tag_from_the_overlay_projects(tmp_path, monkeypatch) -> None:
     import app.verification.rules.projection as projection
+    import app.verification.tag_materialization.declarations as declarations
 
     overlay = tmp_path / "vocabulary_extra.yaml"
     overlay.write_text(
@@ -179,7 +180,8 @@ def test_gap_e_new_tag_from_the_overlay_projects(tmp_path, monkeypatch) -> None:
         "    description: A wave-added verdict tag.\n"
         "    produced_by: AI\n"
     )
-    monkeypatch.setattr(projection, "_VOCAB_EXTRA_YAML", overlay)
+    # The overlay reader lives in the vocabulary loader (declarations), not projection (LP-328 review).
+    monkeypatch.setattr(declarations, "_VOCAB_EXTRA_YAML", overlay)
 
     tags = projection.load_desired_tags()
     assert "id.residency_eligible" in tags  # projects from the hand-edited file, no xlsx round-trip
@@ -189,11 +191,46 @@ def test_gap_e_new_tag_from_the_overlay_projects(tmp_path, monkeypatch) -> None:
 
 def test_gap_e_overlay_tag_duplicating_the_vocabulary_fails_loud(tmp_path, monkeypatch) -> None:
     import app.verification.rules.projection as projection
+    import app.verification.tag_materialization.declarations as declarations
 
     overlay = tmp_path / "vocabulary_extra.yaml"
     # id.dob already exists in fact_tags.csv — the overlay must not silently shadow it.
     overlay.write_text("tags:\n  id.dob:\n    entity: borrower\n    value_type: date\n")
-    monkeypatch.setattr(projection, "_VOCAB_EXTRA_YAML", overlay)
+    monkeypatch.setattr(declarations, "_VOCAB_EXTRA_YAML", overlay)
 
     with pytest.raises(projection.ProjectionError, match=r"duplicates a fact_tags\.csv tag"):
         projection.load_desired_tags()
+
+
+def test_gap_e_overlay_duplicate_also_fails_loud_in_the_declarations_reader(
+    tmp_path, monkeypatch
+) -> None:
+    # The SECOND overlay reader (_allowed_values_by_tag, used at eval time for AI coercion) must guard
+    # duplicates the SAME way projection does — the two readers can never disagree (LP-328 review #2).
+    import app.verification.tag_materialization.declarations as declarations
+
+    overlay = tmp_path / "vocabulary_extra.yaml"
+    overlay.write_text("tags:\n  id.dob:\n    entity: borrower\n    value_type: date\n")
+    monkeypatch.setattr(declarations, "_VOCAB_EXTRA_YAML", overlay)
+    declarations._allowed_values_by_tag.cache_clear()
+    try:
+        with pytest.raises(declarations.DeclarationError, match=r"duplicates a fact_tags\.csv tag"):
+            declarations._allowed_values_by_tag()
+    finally:
+        declarations._allowed_values_by_tag.cache_clear()
+
+
+def test_product_operand_with_a_date_factor_fails_loud_at_load() -> None:
+    # A product multiplies numbers; a date factor would raise `Decimal * date` at eval. The Operand
+    # validator must reject it at LOAD (LP-328 review #1) — never a runtime crash of an un-backstopped
+    # rules step.
+    bad = {**_SYNTH_DATE_SPEC}
+    bad["deterministic"] = {
+        **_SYNTH_DATE_SPEC["deterministic"],
+        "operands": {
+            "a": {"tag": "x.a", "type": "date"},
+            "b": {"product": [{"tag": "x.b", "type": "date"}, {"reference": "k"}]},
+        },
+    }
+    with pytest.raises(ValueError, match="factors must all be `decimal`"):
+        RuleSpec.model_validate(bad)
