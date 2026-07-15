@@ -20,7 +20,11 @@ from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from app.ai.extraction.parsing import coerce_date, coerce_decimal
-from app.verification.rule_engine.applicability import resolve_applicability
+from app.verification.rule_engine.applicability import (
+    absent_document_couldnt_check,
+    missing_document_subject_id,
+    resolve_applicability,
+)
 from app.verification.rule_engine.enumerators import enumerate_subjects
 from app.verification.rule_engine.gate import GateResult, GateStatus, evaluate_gate
 from app.verification.rule_engine.result import (
@@ -185,8 +189,27 @@ def evaluate_deterministic_rule(
     floor = confidence_floor if confidence_floor is not None else det.confidence_floor
     threshold_operand = "threshold" if "threshold" in det.operands else None
 
+    subjects = enumerate_subjects(spec.subject_enumeration, snapshot)
+
+    # LP-330: an EXPECTED-but-confidently-absent document is a GAP (couldnt_check, §8 Tab 1), not
+    # scope-false. Resolved from the declaration — before the loop, so the reason is emitted once.
+    absent_reason = absent_document_couldnt_check(
+        det.applicability, det.applicability_expected, subjects
+    )
+    if absent_reason is not None:
+        assert det.applicability is not None  # guaranteed when a reason is returned
+        return [
+            _result(
+                spec,
+                missing_document_subject_id(det.applicability),
+                Verdict.COULDNT_CHECK,
+                absent_reason,
+                {},
+            )
+        ]
+
     results: list[RuleEvaluation] = []
-    for subject_id, subject_tags in enumerate_subjects(spec.subject_enumeration, snapshot):
+    for subject_id, subject_tags in subjects:
         # 1. Applicability (from a declared tag predicate — the SHARED §8 resolver, LP-329).
         if det.applicability is not None:
             terminal = resolve_applicability(det.applicability, subject_tags)

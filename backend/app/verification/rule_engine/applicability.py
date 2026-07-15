@@ -52,4 +52,44 @@ def resolve_applicability(
     return None
 
 
-__all__ = ["resolve_applicability"]
+# The subject_id a missing-document couldnt_check is keyed under — a STABLE identity per (rule, type),
+# so cross-run reconciliation carries it forward / retires it when the document appears.
+def missing_document_subject_id(applic: TagCondition) -> str:
+    return f"missing:{applic.value}"
+
+
+def absent_document_couldnt_check(
+    applic: TagCondition | None,
+    expected: bool,
+    subjects: list[tuple[str, Mapping[str, Tag]]],
+) -> str | None:
+    """LP-330 — should a per_document rule emit a MISSING-DOCUMENT couldnt_check?
+
+    The §8 question is NOT "did the filter match anything" — it is "SHOULD this document exist for this
+    file?". Returns a reason (naming the expected type) when the document is EXPECTED yet CONFIDENTLY
+    ABSENT: every subject is clearly out of scope (all ``not_applicable`` — none in scope, none
+    ambiguous). Returns ``None`` (→ LP-329's not_applicable default) when the rule doesn't declare the
+    document expected, OR any subject is in scope (the document EXISTS), OR any subject's type is
+    ``"unknown"`` (we cannot claim it is absent — that subject already couldnt_checks).
+
+    A missing EXPECTED document is LOST VISIBILITY (Tab 1, BLOCKS), NOT scope-false (Tab 4)."""
+    if applic is None or not expected:
+        return None
+    for _sid, tags in subjects:
+        terminal = resolve_applicability(applic, tags)
+        if terminal is None:  # a subject IS in scope → the document exists → not absent
+            return None
+        if terminal[0] is Verdict.COULDNT_CHECK:  # an unknown-type subject → cannot claim absence
+            return None
+    # Every subject (or zero) is confidently out of scope → the expected document is absent.
+    return (
+        f"no '{applic.value}' document in the file — the rule requires one to evaluate "
+        f"(the document is expected but missing; lost visibility, not out of scope)"
+    )
+
+
+__all__ = [
+    "absent_document_couldnt_check",
+    "missing_document_subject_id",
+    "resolve_applicability",
+]

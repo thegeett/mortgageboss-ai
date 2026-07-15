@@ -144,9 +144,20 @@ def test_id7_title_mismatch_fires_consistent_satisfied_scoped_to_title() -> None
     ok = _id7([("title", "title_commitment", {"id.title_vesting_consistent": _tag("yes")})])
     assert [r.verdict for r in ok] == [Verdict.SATISFIED]
 
-    # A non-title document → not_applicable (scope-false), never couldnt_check.
-    (na,) = _id7([("pay", "paystub", {})])
-    assert na.verdict is Verdict.NOT_APPLICABLE
+    # A non-title document ALONGSIDE a title → the paystub is scope-false → not_applicable; the title
+    # evaluates (LP-329 scoping intact). (A file with NO title → couldnt_check — the LP-330 fix, tested
+    # in test_absent_document.py.)
+    verdicts = {
+        r.subject_id: r.verdict
+        for r in _id7(
+            [
+                ("title", "title_commitment", {"id.title_vesting_consistent": _tag("yes")}),
+                ("pay", "paystub", {}),
+            ]
+        )
+    }
+    assert verdicts["pay"] is Verdict.NOT_APPLICABLE
+    assert verdicts["title"] is Verdict.SATISFIED
 
 
 def test_id7_title_present_but_unreadable_is_couldnt_check_not_not_applicable() -> None:

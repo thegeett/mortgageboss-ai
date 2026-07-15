@@ -39,6 +39,11 @@ deterministic:
     tag: document.document_type
     op: eq
     value: title_commitment
+  # LP-330: a title commitment IS expected for the file (the lender needs title insurance on a
+  # purchase AND a refinance), so its CONFIDENT ABSENCE is a GAP → couldnt_check ("no title_commitment
+  # in file", §8 Tab 1, BLOCKS) — NOT not_applicable. Fixes the live false-green. Encoded
+  # UNCONDITIONALLY (no loan-purpose tag exists to make it purchase-only — see LP-330's Priya list).
+  applicability_expected: true
   load_bearing_tags:
     - id.title_vesting_consistent
   gated_tags:

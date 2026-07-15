@@ -30,7 +30,11 @@ from dataclasses import dataclass
 from app.ai.client import AIClientError
 from app.ai.rule_judgment import Reasoner, RuleJudgmentResult, reason_rule_judgment
 from app.core.logging import get_logger
-from app.verification.rule_engine.applicability import resolve_applicability
+from app.verification.rule_engine.applicability import (
+    absent_document_couldnt_check,
+    missing_document_subject_id,
+    resolve_applicability,
+)
 from app.verification.rule_engine.enumerators import enumerate_subjects
 from app.verification.rule_engine.gate import GateStatus, evaluate_gate
 from app.verification.rule_engine.result import LoadBearingTag, RuleEvaluation, Verdict
@@ -173,6 +177,28 @@ async def evaluate_judgment_rule(
     reason_fn = reasoner if reasoner is not None else _bind_prompt(jud.system_prompt)
 
     subjects = enumerate_subjects(spec.subject_enumeration, snapshot)
+
+    # LP-330: an EXPECTED-but-confidently-absent document is a GAP (couldnt_check, §8 Tab 1), not
+    # scope-false. (ID-9's POA leaves applicability_expected False → absent = not_applicable, unchanged.)
+    absent_reason = absent_document_couldnt_check(
+        jud.applicability, jud.applicability_expected, subjects
+    )
+    if absent_reason is not None:
+        assert jud.applicability is not None
+        return [
+            JudgmentEvaluation(
+                None,
+                _result(
+                    spec,
+                    missing_document_subject_id(jud.applicability),
+                    Verdict.COULDNT_CHECK,
+                    absent_reason,
+                    jud.reasoned_over,
+                    {},
+                ),
+            )
+        ]
+
     sem = asyncio.Semaphore(_MAX_CONCURRENT_SUBJECTS)
 
     async def _bounded(subject_id: str, subject_tags: Mapping[str, Tag]) -> JudgmentEvaluation:

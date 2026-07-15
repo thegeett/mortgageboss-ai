@@ -9487,3 +9487,41 @@ investor POA acceptability rules. **Recommendation (not a gap):** persist not_ap
 Tab-4 finding (today it is dropped at persistence) — a separate UI/findings concern. Cross-refs: §8;
 ADR-270; LP-324/325 (the declared-filter pattern), LP-326, LP-327 (per_document + the armor), LP-328
 (GAP-E overlay), LP-323-ID-A §1/§4, -ID-B GAP-C.
+
+## ADR-271: Declared absent-document resolution — should this document EXIST for this file? (LP-330)
+
+**Status:** Accepted. **Context:** LP-329 (ADR-270) resolved EVERY zero-in-scope per_document rule to
+`not_applicable`, justified as "a rule whose scope matched nothing was never in scope for that file."
+That reasoning is CIRCULAR: ID-7's scope is "title documents"; the FILE is a purchase; title documents
+ARE in scope for a purchase — what matched nothing is the DATA, not the scope. Consequence: ID-7 is
+LIVE, so a purchase with NO title commitment sat in Tab 4 (`not_applicable`, doesn't block) instead of
+Tab 1 (`couldnt_check`, blocks) — a live FALSE-GREEN. §8 is explicit: a missing document that the rule
+applies to is LOST VISIBILITY (Tab 1), not scope-false (Tab 4); "visible in Tab 4 with a reason" is the
+exact false-green §8 warns against (Tab 4 is the doesn't-block tab).
+
+**Decision.** The question is NOT "did the filter match anything" — it is **"SHOULD this document exist
+for this file?"**. Only the rule knows, so it is DECLARED (the seventh application of
+declared-key-resolved-generically, after LP-324/325/326/328/329): `applicability_expected: bool` on the
+eval block (a sibling of LP-329's `applicability`). A shared `absent_document_couldnt_check` resolves it:
+- `expected` AND the applicability-scoped document is CONFIDENTLY ABSENT (every enumerated subject is
+  clearly out of scope — all `not_applicable`; none in scope, none ambiguous `couldnt_check`-from-unknown-
+  type) → **couldnt_check** (Tab 1, BLOCKS), a reason NAMING the missing type, under a stable
+  `missing:<type>` subject id (for cross-run reconciliation).
+- default `false` / any subject in scope (the document EXISTS) / any unknown-type subject (cannot claim
+  absence) → **not_applicable** (LP-329's behavior). Default `false` → EVERY existing spec is unchanged
+  (equivalence).
+The three §8 "not firing" cases stay DISTINCT: in-scope-but-degraded (title present, tag `"unknown"`) →
+`couldnt_check` "present but unreadable"; confidently-absent-but-expected → `couldnt_check` "no
+title_commitment in file"; not-expected-absent (ID-9 POA) → `not_applicable`. Same mechanism, opposite
+answers for ID-7 vs ID-9 — the DECLARATION is the only difference, no rule-id branch.
+
+**Consequences.** ID-7 declares `applicability_expected: true` → the live false-green is CLOSED (a
+title-less file now blocks). ID-9 keeps the default → a POA-less file stays `not_applicable` (unchanged).
+**Conditional-on-purchase is NOT supportable yet (reported, not invented):** the general form
+(`expected when loan.purpose == purchase`) needs a loan-purpose TAG; none exists (only the `LoanFile`
+DB field, not a snapshot tag). So ID-7 is encoded UNCONDITIONALLY expected — defensible (a lender needs
+title insurance on a purchase AND a refinance; a rare title-less refinance → `couldnt_check` is safe, not
+a false-green) — with the conditional a follow-on + a Priya question. **The cross-cutting invariant:**
+`absent ≠ empty` has now needed explicit handling at the TAG (LP-326), OPERAND (LP-328), GATHER (LP-325),
+and RULE (this) levels — it is a structural principle, not a one-off. Cross-refs: §8; ADR-270 (the
+decision this corrects); LP-325/326/328/329.

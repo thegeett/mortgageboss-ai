@@ -234,9 +234,24 @@ class DeterministicEval(BaseModel):
     load_bearing_tags: tuple[str, ...] = PydField(min_length=1)
     gated_tags: tuple[str, ...] = PydField(min_length=1)  # the gate-required subset
     applicability: TagCondition | None = None  # a pre-gate per-subject applicability filter
+    # LP-330: whether the applicability-scoped document is EXPECTED for this file. False (default,
+    # LP-329's behavior) → a file with no in-scope subject is not_applicable (§8 Tab 4). True → the
+    # document SHOULD exist, so its confident absence is a GAP → couldnt_check (§8 Tab 1, BLOCKS). Only
+    # meaningful with `applicability` (validated). Fixes ID-7's live false-green (missing title on a
+    # purchase).
+    applicability_expected: bool = False
     operands: dict[str, Operand] = PydField(default_factory=dict)
     outcomes: tuple[OutcomeRule, ...] = PydField(min_length=1)
     confidence_floor: float = 0.5
+
+    @model_validator(mode="after")
+    def _applicability_expected_needs_applicability(self) -> DeterministicEval:
+        if self.applicability_expected and self.applicability is None:
+            raise ValueError(
+                "applicability_expected=true requires an `applicability` predicate (it declares WHICH "
+                "document is expected)"
+            )
+        return self
 
     @model_validator(mode="after")
     def _outcomes_are_exhaustive_and_reference_real_operands(self) -> DeterministicEval:
@@ -306,6 +321,19 @@ class JudgmentEval(BaseModel):
     # couldnt_check (cannot tell if it applies). Scopes a per_document judgment (e.g. ID-9 → POA docs)
     # so it does not flood couldnt_check across every non-matching document.
     applicability: TagCondition | None = None
+    # LP-330: whether the applicability-scoped document is EXPECTED for this file (see DeterministicEval).
+    # False (default) → confidently absent = not_applicable (ID-9's POA: irrelevant when none used).
+    # True → confidently absent = couldnt_check (§8 Tab 1). Only meaningful with `applicability`.
+    applicability_expected: bool = False
+
+    @model_validator(mode="after")
+    def _applicability_expected_needs_applicability(self) -> JudgmentEval:
+        if self.applicability_expected and self.applicability is None:
+            raise ValueError(
+                "applicability_expected=true requires an `applicability` predicate (it declares WHICH "
+                "document is expected)"
+            )
+        return self
 
 
 # --------------------------------------------------------------------------- #
