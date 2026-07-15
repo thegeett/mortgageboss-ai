@@ -181,7 +181,10 @@ async def evaluate_judgment_rule(
     # LP-330: an EXPECTED-but-confidently-absent document is a GAP (couldnt_check, §8 Tab 1), not
     # scope-false. (ID-9's POA leaves applicability_expected False → absent = not_applicable, unchanged.)
     absent_reason = absent_document_couldnt_check(
-        jud.applicability, jud.applicability_expected, subjects
+        jud.applicability,
+        jud.applicability_expected,
+        subjects,
+        documents_absent=snapshot.documents.absent,
     )
     if absent_reason is not None:
         assert jud.applicability is not None

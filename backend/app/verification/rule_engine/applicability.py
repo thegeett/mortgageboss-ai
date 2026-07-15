@@ -62,6 +62,8 @@ def absent_document_couldnt_check(
     applic: TagCondition | None,
     expected: bool,
     subjects: list[tuple[str, Mapping[str, Tag]]],
+    *,
+    documents_absent: bool,
 ) -> str | None:
     """LP-330 — should a per_document rule emit a MISSING-DOCUMENT couldnt_check?
 
@@ -70,10 +72,13 @@ def absent_document_couldnt_check(
     ABSENT: every subject is clearly out of scope (all ``not_applicable`` — none in scope, none
     ambiguous). Returns ``None`` (→ LP-329's not_applicable default) when the rule doesn't declare the
     document expected, OR any subject is in scope (the document EXISTS), OR any subject's type is
-    ``"unknown"`` (we cannot claim it is absent — that subject already couldnt_checks).
+    ``"unknown"`` (we cannot claim it is absent — that subject already couldnt_checks), OR the
+    documents section itself is ABSENT (a build degradation: we COULDN'T LOOK, so "confidently absent"
+    is a lie — the §8 fourth case, distinct from confidently-absent; the missing SECTION is recorded by
+    the orchestrator's degradation scan, not mis-attributed here as a missing document).
 
     A missing EXPECTED document is LOST VISIBILITY (Tab 1, BLOCKS), NOT scope-false (Tab 4)."""
-    if applic is None or not expected:
+    if applic is None or not expected or documents_absent:
         return None
     for _sid, tags in subjects:
         terminal = resolve_applicability(applic, tags)
@@ -81,7 +86,7 @@ def absent_document_couldnt_check(
             return None
         if terminal[0] is Verdict.COULDNT_CHECK:  # an unknown-type subject → cannot claim absence
             return None
-    # Every subject (or zero) is confidently out of scope → the expected document is absent.
+    # Every subject (or an empty-but-PRESENT documents section) is confidently out of scope → absent.
     return (
         f"no '{applic.value}' document in the file — the rule requires one to evaluate "
         f"(the document is expected but missing; lost visibility, not out of scope)"

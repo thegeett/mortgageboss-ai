@@ -83,6 +83,17 @@ def test_no_documents_at_all_is_also_couldnt_check_for_id7() -> None:
     assert "title_commitment" in r.reasoning
 
 
+def test_documents_section_absent_does_not_mint_a_missing_document_finding() -> None:
+    # LP-330 review: a DEGRADED documents section ("couldn't look") is NOT "confidently absent". ID-7
+    # must NOT claim the title is missing — the missing SECTION is recorded by the orchestrator's
+    # degradation scan, not mis-attributed here. (An empty-but-PRESENT section IS missing → the test
+    # above.) So a degraded run emits NOTHING for ID-7, never a spurious "missing:title" couldnt_check.
+    degraded = _snapshot([]).model_copy(
+        update={"documents": DocumentsSection.failed("build failed")}
+    )
+    assert evaluate_deterministic_rule(load_rule_spec("ID-7"), degraded) == []
+
+
 # --------------------------------------------------------------------------- #
 # THE CONTRAST — ID-9 (POA not expected) → not_applicable, UNCHANGED. Same mechanism, opposite answer.
 # --------------------------------------------------------------------------- #
@@ -220,4 +231,37 @@ def test_expected_without_applicability_fails_loud_at_load() -> None:
         },
     }
     with pytest.raises(ValueError, match="requires an `applicability`"):
+        RuleSpec.model_validate(bad)
+
+
+def test_expected_on_a_non_document_applicability_fails_loud_at_load() -> None:
+    # LP-330 review: applicability_expected declares a MISSING DOCUMENT is a gap, so the predicate must
+    # be the document-type tag — else the missing-document reason frames a non-document scope as a
+    # missing document.
+    from app.verification.rules.specs import RuleSpec
+
+    bad = {
+        "rule_id": "ID-7",  # reuse ID-7's kinds row; a distinct synthetic body
+        "name": "bad",
+        "category": "Identity",
+        "kind": "structural",
+        "numeric_check": False,
+        "criteria": "x",
+        "applicability": {"scope": "s", "trigger": "t"},
+        "required_inputs": [{"name": "x", "snapshot_path": "p", "description": "d"}],
+        "reference_values": {"priya_validated": False, "threshold_needs_signoff": False},
+        "subject_enumeration": "per_document",
+        "subject_key_fields": ["document"],
+        "evidence_required": "x",
+        "guideline_reference": "n/a",
+        "spec_version": 1,
+        "deterministic": {
+            "load_bearing_tags": ["x.flag"],
+            "gated_tags": ["x.flag"],
+            "applicability": {"tag": "some.other.tag", "op": "eq", "value": "v"},  # not doc-type
+            "applicability_expected": True,
+            "outcomes": [{"verdict": "satisfied", "default": True, "reasoning": "ok"}],
+        },
+    }
+    with pytest.raises(ValueError, match="requires a document-type applicability"):
         RuleSpec.model_validate(bad)

@@ -194,7 +194,10 @@ def evaluate_deterministic_rule(
     # LP-330: an EXPECTED-but-confidently-absent document is a GAP (couldnt_check, §8 Tab 1), not
     # scope-false. Resolved from the declaration — before the loop, so the reason is emitted once.
     absent_reason = absent_document_couldnt_check(
-        det.applicability, det.applicability_expected, subjects
+        det.applicability,
+        det.applicability_expected,
+        subjects,
+        documents_absent=snapshot.documents.absent,
     )
     if absent_reason is not None:
         assert det.applicability is not None  # guaranteed when a reason is returned

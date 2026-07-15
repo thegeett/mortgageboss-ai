@@ -140,6 +140,26 @@ class TagCondition(BaseModel):
     value: str = PydField(min_length=1)
 
 
+def _check_applicability_expected(expected: bool, applic: TagCondition | None) -> None:
+    """Shared validation (LP-330) for ``applicability_expected`` on DeterministicEval / JudgmentEval,
+    so they can never diverge. ``applicability_expected`` declares that a MISSING DOCUMENT is a gap, so
+    it requires an `applicability` predicate AND that predicate must be the document-type predicate
+    (``DOC_TYPE_TAG``): the missing-document resolver names a document type, so scoping the expectation
+    on any other tag would emit a document-framed reason for a non-document concern."""
+    if not expected:
+        return
+    if applic is None:
+        raise ValueError(
+            "applicability_expected=true requires an `applicability` predicate (it declares WHICH "
+            "document is expected)"
+        )
+    if applic.tag != DOC_TYPE_TAG:
+        raise ValueError(
+            f"applicability_expected=true requires a document-type applicability (tag {DOC_TYPE_TAG!r})"
+            f" — the expectation is that a DOCUMENT is missing; got applicability on {applic.tag!r}"
+        )
+
+
 # The operand TYPES the deterministic evaluator can coerce + compare (LP-328). ``decimal`` is the
 # DEFAULT (every pre-LP-328 spec is unchanged); ``date`` unblocks date rules (ID-5, IN-2, PR-6, CL-1,
 # CR-6, CR-13). Declaring the KEY SET here (data, no evaluator import) lets a spec be validated at
@@ -245,12 +265,8 @@ class DeterministicEval(BaseModel):
     confidence_floor: float = 0.5
 
     @model_validator(mode="after")
-    def _applicability_expected_needs_applicability(self) -> DeterministicEval:
-        if self.applicability_expected and self.applicability is None:
-            raise ValueError(
-                "applicability_expected=true requires an `applicability` predicate (it declares WHICH "
-                "document is expected)"
-            )
+    def _applicability_expected_needs_document_applicability(self) -> DeterministicEval:
+        _check_applicability_expected(self.applicability_expected, self.applicability)
         return self
 
     @model_validator(mode="after")
@@ -327,12 +343,8 @@ class JudgmentEval(BaseModel):
     applicability_expected: bool = False
 
     @model_validator(mode="after")
-    def _applicability_expected_needs_applicability(self) -> JudgmentEval:
-        if self.applicability_expected and self.applicability is None:
-            raise ValueError(
-                "applicability_expected=true requires an `applicability` predicate (it declares WHICH "
-                "document is expected)"
-            )
+    def _applicability_expected_needs_document_applicability(self) -> JudgmentEval:
+        _check_applicability_expected(self.applicability_expected, self.applicability)
         return self
 
 
