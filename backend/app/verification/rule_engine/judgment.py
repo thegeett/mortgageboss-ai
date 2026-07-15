@@ -22,6 +22,7 @@ Reuses ``evaluate_gate`` + the LP-313/314 AI clone as-is.
 
 from __future__ import annotations
 
+import asyncio
 import json
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -39,6 +40,11 @@ from app.verification.snapshot.tag import Tag, TagProducedBy, TagRole, TagStage
 logger = get_logger(__name__)
 
 _UNKNOWN = "unknown"
+
+# Bound the parallel per-subject AI calls: subjects are independent, so a multi-subject rule runs them
+# concurrently (cutting wall-clock from N x latency), capped so a large per-document rule cannot fan
+# out into a burst of simultaneous model calls (rate limits). One subject (OC-2) → one call, as before.
+_MAX_CONCURRENT_SUBJECTS = 8
 
 # The injected reasoner seam is the shared ``Reasoner`` alias (re-exported for existing importers such
 # as oc2.py); keyless tests supply a stub, None → the real model with the spec prompt.
@@ -165,12 +171,18 @@ async def evaluate_judgment_rule(
     floor = confidence_floor if confidence_floor is not None else jud.confidence_floor
     reason_fn = reasoner if reasoner is not None else _bind_prompt(jud.system_prompt)
 
-    evaluations: list[JudgmentEvaluation] = []
-    for subject_id, subject_tags in enumerate_subjects(spec.subject_enumeration, snapshot):
-        evaluations.append(
-            await _evaluate_one_subject(spec, jud, subject_id, subject_tags, reason_fn, floor)
-        )
-    return evaluations
+    subjects = enumerate_subjects(spec.subject_enumeration, snapshot)
+    sem = asyncio.Semaphore(_MAX_CONCURRENT_SUBJECTS)
+
+    async def _bounded(subject_id: str, subject_tags: Mapping[str, Tag]) -> JudgmentEvaluation:
+        # Each subject is self-contained + internally fail-closed (AI errors → couldnt_check), so
+        # bounded-concurrent evaluation preserves per-subject semantics; gather keeps subject order.
+        async with sem:
+            return await _evaluate_one_subject(
+                spec, jud, subject_id, subject_tags, reason_fn, floor
+            )
+
+    return list(await asyncio.gather(*(_bounded(sid, tags) for sid, tags in subjects)))
 
 
 async def _evaluate_one_subject(

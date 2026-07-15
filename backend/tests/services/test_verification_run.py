@@ -479,12 +479,36 @@ def test_retire_eligible_excludes_per_borrower_rules_when_no_borrower_resolved()
     )
     assert {"ID-2", "ID-4"} <= _retire_eligible_rules(resolved)  # a borrower resolved → eligible
 
+    # Every ACTIVE per-borrower rule (derived from subject_enumeration, not a hardcoded list) — not
+    # just ID-2/ID-4 — is eligible when a borrower resolved.
+    assert {"ID-1", "ID-2", "ID-3", "ID-4"} <= _retire_eligible_rules(resolved)
+
     unresolved = _doc_snapshot(
         [DocumentEntry(content_id="d1", document_type="doc", belongs_to=None, fields={})]
     )
     eligible = _retire_eligible_rules(unresolved)
-    assert "ID-2" not in eligible and "ID-4" not in eligible  # zero borrowers → not eligible
-    assert "OC-2" in eligible  # the loan-level rule is always eligible
+    # ALL per-borrower rules drop (zero borrowers → degraded, not "gone"); loan rules stay.
+    assert {"ID-1", "ID-2", "ID-3", "ID-4"}.isdisjoint(eligible)
+    assert "OC-2" in eligible and "ID-6" in eligible  # loan-level rules are always eligible
+
+
+def test_retire_guard_covers_every_document_derived_shape() -> None:
+    # The guard is generalized (LP-327): per_deposit / per_borrower / per_document all derive their
+    # subjects from the documents section, so a rule on ANY of them (incl. a future per_document
+    # judgment rule) is covered automatically — no per-shape special-casing left to forget.
+    from app.services.verification_run import _DOCUMENT_DERIVED_ENUMERATIONS
+
+    assert (
+        frozenset({"per_deposit", "per_borrower", "per_document"}) == _DOCUMENT_DERIVED_ENUMERATIONS
+    )
+    # documents absent → AS-1 (per_deposit) drops via the SAME generic path (not by rule-id name).
+    absent = _snapshot(_TXNS, uuid4()).model_copy(
+        update={"documents": DocumentsSection.failed("build failed")}
+    )
+    eligible = _retire_eligible_rules(absent)
+    assert "AS-1" not in eligible
+    assert {"ID-1", "ID-2", "ID-3", "ID-4"}.isdisjoint(eligible)
+    assert "OC-2" in eligible and "ID-6" in eligible
 
 
 def test_required_ai_groups_runs_only_what_active_rules_consume() -> None:

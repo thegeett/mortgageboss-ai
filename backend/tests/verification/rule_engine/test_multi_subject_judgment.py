@@ -9,6 +9,7 @@ reason-over-tags with bounded per-subject context. OC-2's equivalence is proven 
 
 from __future__ import annotations
 
+import asyncio
 import json
 from datetime import UTC, datetime
 from uuid import uuid4
@@ -167,3 +168,44 @@ async def test_truncated_is_couldnt_check_for_that_subject() -> None:
     (result,) = await evaluate_judgment_rule(_SPEC, snap, reasoner=stub, confidence_floor=0.5)
     assert result.evaluation.verdict is Verdict.COULDNT_CHECK
     assert "truncated" in result.evaluation.reasoning
+
+
+async def test_subjects_are_evaluated_concurrently_not_sequentially() -> None:
+    # LP-327 review: per-subject AI calls run concurrently (bounded). A barrier reasoner blocks each
+    # call until ALL subjects are in-flight — this can only resolve if they run concurrently; a
+    # SEQUENTIAL loop would hang on the first call (the others never start) → TimeoutError.
+    n = 4  # < _MAX_CONCURRENT_SUBJECTS, so all can be in-flight at once
+    entered = 0
+    all_entered = asyncio.Event()
+
+    class _BarrierReasoner:
+        async def __call__(self, context_json: str) -> RuleJudgmentResult:
+            nonlocal entered
+            entered += 1
+            if entered == n:
+                all_entered.set()
+            await asyncio.wait_for(
+                all_entered.wait(), timeout=5
+            )  # concurrent → set; sequential → hang
+            return RuleJudgmentResult(RuleJudgment("yes", 0.8, "ok"), 1, 1, "stub", False)
+
+    snap = _snapshot({f"d{i}": {"x.flag": _flag(str(i))} for i in range(n)})
+    evals = await evaluate_judgment_rule(
+        _SPEC, snap, reasoner=_BarrierReasoner(), confidence_floor=0.5
+    )
+    assert [e.evaluation.subject_id for e in evals] == [
+        f"d{i}" for i in range(n)
+    ]  # order preserved
+
+
+async def test_evaluate_oc2_fails_loud_when_not_exactly_one_evaluation(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    # evaluate_oc2 preserves the single-subject signature by indexing [0]; a mis-edited enumeration
+    # that yields != 1 must fail LOUD, never IndexError or silently drop verdicts.
+    from app.verification.rule_engine import oc2
+
+    async def _fake(*_a: object, **_k: object) -> list[object]:
+        return []  # simulate an enumeration that produced zero subjects
+
+    monkeypatch.setattr(oc2, "evaluate_judgment_rule", _fake)
+    with pytest.raises(ValueError, match="exactly one"):
+        await oc2.evaluate_oc2(_snapshot({"d1": {"x.flag": _flag("a")}}))

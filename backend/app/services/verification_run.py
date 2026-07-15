@@ -75,17 +75,13 @@ from app.verification.tag_materialization.producer import materialize_tags
 _MATERIALIZED_SUBJECTS = frozenset({"document", "loan"})
 
 
-@cache
-def _per_borrower_rules() -> frozenset[str]:
-    """The ACTIVE rules that enumerate per-borrower subjects — DERIVED from each spec's
-    ``subject_enumeration``, never a hardcoded rule-id list (so a new per-borrower rule is picked up
-    by adding its spec + activating it, with no edit here). Retire-eligible only when their subject
-    domain was healthily enumerated (documents present AND borrowers resolvable)."""
-    return frozenset(
-        rule_id
-        for rule_id in ACTIVE_RULE_IDS
-        if load_rule_spec(rule_id).subject_enumeration == "per_borrower"
-    )
+# Subject enumerations whose subjects are derived from the DOCUMENTS section (per-transaction /
+# per-borrower / per-document). A rule on one of these that enumerated ZERO subjects this run did so
+# for a DEGRADED reason (documents absent, or borrower/document resolution failed) — NOT "the subjects
+# are gone" — so it must not retire a prior finding. ``loan`` is document-independent (always one
+# subject) → always retire-eligible. Adding a new document-derived shape means adding its key here,
+# and every rule that declares it is covered automatically (no per-rule-id list).
+_DOCUMENT_DERIVED_ENUMERATIONS = frozenset({"per_deposit", "per_borrower", "per_document"})
 
 
 def _load_bearing_tag_ids(rule_id: str) -> set[str]:
@@ -306,22 +302,24 @@ def _retire_eligible_rules(snapshot: Snapshot) -> frozenset[str]:
     retire a non-detected prior finding.
 
     A degraded run must NOT be read as "the subject is gone" (that would flip real open findings to
-    green — false-closed). AS-1 enumerates per-transaction subjects from the documents section, and
-    ID-2/ID-4 enumerate per-borrower subjects from the documents' belongs_to: if that section is
-    ABSENT (a build degradation), all three saw zero subjects and are NOT retire-eligible. Beyond the
-    absent section, the per-borrower rules also need borrowers to have RESOLVED — documents present
-    but zero borrowers enumerated (belongs_to unresolved) is a degradation, not "the borrowers are
-    gone", so they must not retire then either. OC-2 has a single loan-level subject that is always
-    evaluated, so it is always eligible. Starts from the registry's ACTIVE_RULE_IDS (what actually
-    ran) — never a separate list.
+    green — false-closed). Derived generically PER RULE from its ``subject_enumeration``: a rule whose
+    subjects come from the documents section (per-transaction / per-borrower / per-document) is
+    retire-eligible ONLY if it actually enumerated ≥1 subject this run. Documents absent (a build
+    degradation) or unresolved borrowers/documents → zero subjects for a DEGRADED reason, so the rule
+    does not retire. ``loan`` rules (OC-2, ID-6) are document-independent — always one subject, always
+    eligible. No hardcoded rule-id or per-shape list, so a new per-document / per-borrower rule is
+    covered automatically (LP-327).
     """
     eligible = set(ACTIVE_RULE_IDS)
-    if snapshot.documents.absent:
-        eligible.difference_update({"AS-1", *_per_borrower_rules()})
-    # Per-borrower rules that enumerated ZERO borrowers (documents present but belongs_to unresolved)
-    # saw no subjects for a DEGRADED reason — not retire-eligible (else a real prior finding retires).
-    if not enumerate_subjects("per_borrower", snapshot):
-        eligible.difference_update(_per_borrower_rules())
+    enumerated_empty: dict[str, bool] = {}  # memoize per enumeration key (rules share enumerations)
+    for rule_id in ACTIVE_RULE_IDS:
+        enumeration = load_rule_spec(rule_id).subject_enumeration
+        if enumeration not in _DOCUMENT_DERIVED_ENUMERATIONS:
+            continue
+        if enumeration not in enumerated_empty:
+            enumerated_empty[enumeration] = not enumerate_subjects(enumeration, snapshot)
+        if enumerated_empty[enumeration]:
+            eligible.discard(rule_id)
     return frozenset(eligible)
 
 

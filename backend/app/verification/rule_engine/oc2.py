@@ -49,6 +49,13 @@ async def evaluate_oc2(
     evaluations = await evaluate_judgment_rule(
         load_rule_spec(RULE_ID), snapshot, reasoner=reasoner, confidence_floor=confidence_floor
     )
+    if len(evaluations) != 1:
+        # OC-2's `loan` enumeration always yields exactly one subject; anything else means the spec
+        # was mis-edited — fail loud rather than IndexError or silently drop verdicts.
+        raise ValueError(
+            f"OC-2 expected exactly one loan-level evaluation, got {len(evaluations)} "
+            "(subject_enumeration must stay `loan`)"
+        )
     return evaluations[0]
 
 
