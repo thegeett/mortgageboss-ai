@@ -56,11 +56,12 @@ _WS = re.compile(r"\s+")
 
 
 def _norm(value: str | None) -> str:
-    """The STRING comparison normalizer — casefold + drop punct + collapse ws. So a golden 'Robert J
-    Smith' matches a predicted 'Robert J. Smith' (a normalized-name tag has many valid renderings); for an
-    enum (residence / yes / no) it is exact anyway. This is the SAME casefold+drop_punct chain ID-1
-    applies to id.name_normalized (consistency.py), so a name scores as the rule would compare it. NUMERIC
-    tags must NOT use this — see _values_match (dropping the '.' collides different numbers)."""
+    """The EXACT-path string normalizer — casefold + DELETE punct + collapse ws. Used ONLY by
+    ``_values_match``'s string fallback, i.e. enum tags (residence / yes / no), where deleting punct
+    mirrors ID-1/ID-4's ``drop_punct`` exact bookend. It is NOT the free-text path: names/addresses score
+    via ``calibration.normalized_match`` (punctuation as a word BOUNDARY, LP-342) — this deletes punct
+    instead, so the two INTENTIONALLY differ (they agree on the punctuation-free enums this actually sees).
+    NUMERIC tags must NOT use this — see _values_match (dropping the '.' collides different numbers)."""
     if value is None:
         return ""
     return _WS.sub(" ", _PUNCT.sub("", value.casefold())).strip()
@@ -129,10 +130,14 @@ class ScoredTag:
 
     @property
     def correct(self) -> bool:
-        # A golden-abstention case is correct WHEN the tag abstains (measuring correct abstention, not
-        # over-abstention). Otherwise: committed AND matches — by the tag's DECLARED scoring method
-        # (LP-342): `normalized` for free-text names/addresses (format-only, punctuation as a word
-        # boundary), else the numeric/normalized `exact` path (BYTE-IDENTICAL for every enum/number tag).
+        # A human_review tag has NO defensible golden, so it is never a scored pass — recorded via
+        # review_cases, never %-scored (guard here so `correct` can't be misused on a mixed list; callers
+        # also filter on needs_review). A golden-abstention case is correct WHEN the tag abstains (measuring
+        # correct abstention, not over-abstention). Otherwise: committed AND matches — by the tag's DECLARED
+        # scoring method (LP-342): `normalized` for free-text names/addresses (format-only, punctuation as a
+        # word boundary), else the numeric/normalized `exact` path (BYTE-IDENTICAL for every enum/number).
+        if self.needs_review:
+            return False
         if self.golden_is_abstention:
             return self.abstained
         if self.abstained:

@@ -44,6 +44,11 @@ _MATCH_SET = [  # a valid RENDERING of the same value → must score EQUAL
     ("123 Maple Ave", "123  Maple   Ave"),  # collapsed whitespace
     ("ACME LOGISTICS", "acme logistics"),  # case
     ("123 Main St, Apt 4", "123 Main St Apt 4"),  # comma
+    (
+        "Sean O'Brien",
+        "Sean OBrien",
+    ),  # apostrophe ELIDES, not a boundary (mirrors ID-1's drop_punct)
+    ("D'Angelo Russell", "DAngelo Russell"),  # same: apostrophe is elision within a token
 ]
 _MISMATCH_SET = [  # genuinely DIFFERENT → must score WRONG (the leniency boundary)
     ("Jordan A Rivera", "Taylor M Nguyen"),  # a different person

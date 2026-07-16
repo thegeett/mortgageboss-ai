@@ -97,20 +97,22 @@ def scoring_mode(tag_id: str) -> str:
     return _SCORING_MODE.get(tag_id, SCORING_EXACT)
 
 
-# The ``normalized`` comparison key: casefold + treat EVERY run of non-word characters as ONE word boundary
-# (a space), then strip. This is the fix FINDING-2 needs — the rule's `drop_punct` DELETES a hyphen
-# ("Garcia-Lopez" -> "garcialopez") and so scores a valid rendering WRONG; a word BOUNDARY ("garcia lopez")
-# is what a human (and the rule's AI judge) reads. It reuses the registry's philosophy (casefold + collapse)
-# but corrects punctuation handling for scoring. Genuine token differences (Ave↔Avenue, different name)
-# survive unequal — the leniency boundary. Justified independently of any tag result (proven by the
-# MATCH/MISMATCH sets), never tuned to the numbers.
+# The ``normalized`` comparison key: casefold, ELIDE apostrophes, then treat EVERY run of the remaining
+# non-word characters as ONE word boundary (a space), then strip. This is the fix FINDING-2 needs — the
+# rule's `drop_punct` DELETES a hyphen ("Garcia-Lopez" -> "garcialopez") and so scores a valid rendering
+# WRONG; a word BOUNDARY ("garcia lopez") is what a human (and the rule's AI judge) reads. But an
+# APOSTROPHE is elision, not a boundary: "O'Brien" and "OBrien" are the same surname (and ID-1's drop_punct
+# maps BOTH to "obrien"), so a word boundary there ("o brien") would false-MISMATCH a valid rendering — the
+# very FINDING-2 failure, on apostrophes. So apostrophes are dropped (join), hyphens/other punct split.
+# Genuine token differences (Ave↔Avenue, different name) survive unequal — the leniency boundary.
+_APOSTROPHE = re.compile("['\u2019\u02bc]")  # straight/typographic/modifier-letter apostrophes
 _NON_WORD = re.compile(r"\W+")
 
 
 def _normalized_key(value: str | None) -> str:
     if value is None:
         return ""
-    return _NON_WORD.sub(" ", value.casefold()).strip()
+    return _NON_WORD.sub(" ", _APOSTROPHE.sub("", value.casefold())).strip()
 
 
 def normalized_match(a: str | None, b: str | None) -> bool:
