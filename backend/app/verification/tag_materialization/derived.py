@@ -293,6 +293,114 @@ def _app_required_fields_present(
     return "incomplete + list", f"missing required 1003 field(s): {', '.join(missing)}"
 
 
+# --------------------------------------------------------------------------- #
+# LP-323-AS-B — the assets family's loan-level arithmetic. Loan-level recipes that, where a check is
+# per-ACCOUNT, GROUP internally via resolve_accounts (LP-336) and fire-if-ANY (never masking a single
+# account — PIN #1's cousin avoided). Registry entries only; produce_derived_tags is untouched.
+# --------------------------------------------------------------------------- #
+# Agency-standard reserve requirements by occupancy (1-unit), Fannie Selling Guide B3-4.1-01. The full
+# matrix (2-4 units, LTV tiers, multiple financed properties, FHA/VA overlays) is Priya's — an occupancy
+# not in this map ABSTAINS (couldnt_check), never a guessed requirement. priya_validated:false on IN-4.
+_RESERVE_MONTHS_BY_OCCUPANCY = {"investment": "6", "second_home": "2", "primary_residence": "0"}
+
+
+def _mismo_str(snapshot: Snapshot, key: str) -> str | None:
+    if snapshot.mismo.absent:
+        return None
+    field = snapshot.mismo.facts.get(key)
+    if not isinstance(field, Field) or not field.is_present:
+        return None
+    return str(field.value).strip() or None
+
+
+def _reserves_required_months(
+    snapshot: Snapshot, _subject_id: str, _subject_raw: object
+) -> tuple[JsonValue, str]:
+    """reserves.required_months — the reserve requirement (months of PITIA) selected from the loan's
+    occupancy (AS-4's threshold, the D1 derived-matrix pattern). ABSTAINS for any occupancy not in the
+    encoded agency-standard cells — the full matrix is Priya's, and a guessed requirement is a silent,
+    permanent error."""
+    occupancy = _mismo_str(snapshot, "property.occupancy")
+    if occupancy is None:
+        return _UNKNOWN, "occupancy is unknown — cannot select the reserve requirement"
+    months = _RESERVE_MONTHS_BY_OCCUPANCY.get(occupancy.casefold())
+    if months is None:
+        return (
+            _UNKNOWN,
+            f"no encoded reserve requirement for occupancy {occupancy!r} (Priya-pending)",
+        )
+    return (
+        months,
+        f"reserve requirement for {occupancy}: {months} months (Fannie B3-4.1-01, Priya-pending)",
+    )
+
+
+def _stmt_nsf_count(
+    snapshot: Snapshot, _subject_id: str, _subject_raw: object
+) -> tuple[JsonValue, str]:
+    """stmt.nsf_count — the count of NSF / overdraft transactions across the file (AS-7). Reads the
+    per-transaction ``txn.is_nsf_or_overdraft`` tag. An absent tag is not counted (absent≠no)."""
+    if snapshot.tags.absent:
+        return _UNKNOWN, "no tags materialized — cannot count NSF/overdraft items"
+    count = 0
+    for tags in snapshot.tags.by_subject.values():
+        tag = tags.get("txn.is_nsf_or_overdraft")
+        if tag is not None and str(tag.value) == "yes":
+            count += 1
+    return str(count), f"{count} NSF/overdraft transaction(s) across the file's statements"
+
+
+def _stmt_min_account_months(
+    snapshot: Snapshot, _subject_id: str, _subject_raw: object
+) -> tuple[JsonValue, str]:
+    """stmt.min_account_months — the FEWEST distinct statement months any ONE account has (AS-10 recency).
+    Groups statements per account via resolve_accounts (LP-336) and takes the MIN across accounts, so a
+    single short account is never MASKED by a well-documented one (fire-if-any). Abstains when no
+    resolvable account or no period dates. Deterministic (parsed period fields + the parsed identity)."""
+    from app.verification.rule_engine.enumerators import (
+        resolve_accounts,
+    )  # lazy: avoid an import cycle
+
+    resolved, _unresolvable = resolve_accounts(snapshot)
+    if not resolved:
+        return (
+            _UNKNOWN,
+            "no resolvable account (no bank statement, or an unidentifiable one) — cannot check recency",
+        )
+    by_subject = {} if snapshot.tags.absent else snapshot.tags.by_subject
+    per_account: list[int] = []
+    for content_ids in resolved.values():
+        months = set()
+        for cid in content_ids:
+            tag = by_subject.get(cid, {}).get("stmt.period_end")
+            parsed = (
+                coerce_date(str(tag.value))
+                if tag is not None and str(tag.value) != _UNKNOWN
+                else None
+            )
+            if parsed is not None:
+                months.add((parsed.year, parsed.month))
+        per_account.append(len(months))
+    if not any(per_account):
+        return _UNKNOWN, "no statement period dates — cannot count months"
+    fewest = min(per_account)
+    return str(fewest), f"the account with the fewest statements has {fewest} distinct month(s)"
+
+
+def _cash_to_close_shortfall(
+    snapshot: Snapshot, _subject_id: str, _subject_raw: object
+) -> tuple[JsonValue, str]:
+    """calc.cash_to_close — the cash-to-close SHORTFALL (need minus available). BUCKET C: there is NO
+    cash-to-close calculator (§3B), and ``closing_costs`` is not a fact today (no Loan-Estimate
+    extraction), so this recipe cannot compute the need and ABSTAINS — AS-3 couldnt_checks until the
+    closing-costs input exists (reported in the LP-323-AS-B doc, not invented)."""
+    return (
+        _UNKNOWN,
+        "cash-to-close needs the closing-costs figure, which is not extracted today (no Loan-Estimate / "
+        "Closing-Disclosure extraction) — cannot compute the requirement (upstream gap, LP-323-AS-B)",
+    )
+
+
 _RECIPES: dict[str, Recipe] = {
     "app_required_fields_present": _app_required_fields_present,
     # LP-323-IN-B — the income family's loan-level arithmetic (per-borrower granularity is deferred:
@@ -302,6 +410,11 @@ _RECIPES: dict[str, Recipe] = {
     "income_ytd_annualized_shortfall": _income_ytd_annualized_shortfall,
     "income_max_employment_gap": _income_max_employment_gap,
     "income_days_since_recent_pay": _income_days_since_recent_pay,
+    # LP-323-AS-B — the assets family (registry entries only).
+    "reserves_required_months": _reserves_required_months,
+    "stmt_nsf_count": _stmt_nsf_count,
+    "stmt_min_account_months": _stmt_min_account_months,
+    "cash_to_close_shortfall": _cash_to_close_shortfall,
 }
 
 KNOWN_RECIPES = frozenset(_RECIPES)

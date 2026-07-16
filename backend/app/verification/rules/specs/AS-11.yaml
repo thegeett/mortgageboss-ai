@@ -1,0 +1,49 @@
+rule_id: AS-11
+name: Retirement/stock liquidation terms
+category: Assets
+kind: calculative
+numeric_check: true
+criteria: >-
+  Retirement / stock assets used for reserves or funds must reflect their liquidation terms — a RESTRICTED
+  (not accessible) account cannot be counted at full value. This flags restricted assets so their usable
+  portion (after a vesting/access discount) is applied. The discount factor (60% vs 70%) is Priya-pending.
+applicability:
+  scope: the loan file's retirement / investment asset statements
+  trigger: once per asset document, on its liquidation terms
+required_inputs:
+  - name: liquidation_terms
+    snapshot_path: tags.by_subject[<asset content_id>]["asset.liquidation_terms"]
+    description: the usable portion / access terms the statement shows (AI)
+reference_values:
+  priya_validated: false
+  threshold_needs_signoff: true
+  guideline_text: >-
+    Fannie Mae Selling Guide B3-4.3-03 — retirement assets are counted at a discount of their vested,
+    accessible balance (commonly 60%, or 70% when employment continues). The exact factor is Priya-pending
+    (UNSURE — not guessed here); a RESTRICTED account is not usable.
+subject_enumeration: per_document
+subject_key_fields:
+  - content_id
+evidence_required: the asset's liquidation terms and whether it is restricted
+guideline_reference: "Fannie Mae Selling Guide B3-4.3-03 (Retirement Accounts)."
+spec_version: 1
+deterministic:
+  applicability:
+    tag: document.document_type
+    op: eq
+    value: retirement_account
+  load_bearing_tags:
+    - asset.liquidation_terms
+  gated_tags:
+    - asset.liquidation_terms
+  outcomes:
+    - verdict: fired
+      when_tags:
+        - {tag: asset.liquidation_terms, op: eq, value: restricted}
+      reasoning: this retirement/stock asset is RESTRICTED — its funds are not accessible and cannot be counted
+      how_to_fix: >-
+        Exclude the restricted asset, or document the accessible/vested portion and apply the program's
+        discount factor.
+    - verdict: satisfied
+      default: true
+      reasoning: the asset's funds are accessible (fully liquid or a vested, usable portion)

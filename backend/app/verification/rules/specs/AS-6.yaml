@@ -1,0 +1,44 @@
+rule_id: AS-6
+name: Account ownership
+category: Assets
+kind: structural
+numeric_check: false
+criteria: >-
+  A bank statement used for assets must belong to a borrower on the loan. A statement whose account holder
+  does not resolve to a borrower is a third-party account and cannot be used without further documentation.
+applicability:
+  scope: the loan file's bank statements
+  trigger: once per bank statement, on the account holder vs the borrowers
+required_inputs:
+  - name: owner_matches_borrower
+    snapshot_path: tags.by_subject[<statement content_id>]["stmt.owner_matches_borrower"]
+    description: whether the account holder resolves to a borrower (AI, tolerant of naming)
+reference_values:
+  priya_validated: false
+  threshold_needs_signoff: false
+subject_enumeration: per_document
+subject_key_fields:
+  - content_id
+evidence_required: the account holder name and whether it resolves to a borrower
+guideline_reference: "Fannie Mae Selling Guide B3-4.2-01 (Verification of Deposits and Assets)."
+spec_version: 1
+deterministic:
+  applicability:
+    tag: document.document_type
+    op: eq
+    value: bank_statement
+  load_bearing_tags:
+    - stmt.owner_matches_borrower
+  gated_tags:
+    - stmt.owner_matches_borrower
+  outcomes:
+    - verdict: fired
+      when_tags:
+        - {tag: stmt.owner_matches_borrower, op: eq, value: "no"}
+      reasoning: the account holder does not resolve to a borrower on the loan
+      how_to_fix: >-
+        Confirm the account belongs to a borrower (a joint account with a borrower is acceptable), or
+        document the third party per the program's rules.
+    - verdict: satisfied
+      default: true
+      reasoning: the account holder resolves to a borrower on the loan

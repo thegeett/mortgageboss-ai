@@ -1,0 +1,46 @@
+rule_id: AS-10
+name: Statement recency completeness
+category: Assets
+kind: structural
+numeric_check: false
+criteria: >-
+  Each account must have the required number of recent consecutive months of statements. The account with
+  the FEWEST months is compared to the requirement — a single short account is not masked by a
+  well-documented one (the recipe groups per account and takes the minimum).
+applicability:
+  scope: the loan file's bank statements, grouped per account
+  trigger: once per loan, on the account with the fewest statement months
+required_inputs:
+  - name: min_account_months
+    snapshot_path: 'tags.by_subject["loan"]["stmt.min_account_months"]'
+    description: the fewest distinct statement months any one account has (derived, per-account minimum)
+reference_values:
+  priya_validated: false
+  threshold_needs_signoff: false
+  values:
+    required_statement_months: "2"
+  guideline_text: >-
+    Fannie Mae Selling Guide B3-4.2-01 — typically the 2 most recent months of account statements. The
+    exact window is an agency default pending Priya confirmation.
+subject_enumeration: loan
+subject_key_fields:
+  - loan
+evidence_required: the fewest statement months any account has vs the required months
+guideline_reference: "Fannie Mae Selling Guide B3-4.2-01 (Verification of Deposits and Assets)."
+spec_version: 1
+deterministic:
+  load_bearing_tags:
+    - stmt.min_account_months
+  gated_tags:
+    - stmt.min_account_months
+  operands:
+    months: {tag: stmt.min_account_months}
+    required: {reference: required_statement_months}
+  outcomes:
+    - verdict: fired
+      when_compare: {op: "<", left: months, right: required}
+      reasoning: "an account has only {months} month(s) of statements, fewer than the {required} required"
+      how_to_fix: Obtain the missing recent statement(s) for the short account.
+    - verdict: satisfied
+      default: true
+      reasoning: every account has at least the required {required} months of statements

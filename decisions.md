@@ -9809,3 +9809,31 @@ surfaces one. Equivalence held (every live rule identical; the LF-6T3N trace unc
 additive). Cross-refs: LP-332 (the mirrored borrower_id resolution + its fail-closed failure mode),
 LP-323-AS-A (the recon + the SubjectType refutation), LP-325/326 (keying + gather), LP-312 (stable
 content-ids), ADR-149 (masked account numbers, never raw).
+
+## ADR-278: A conditional (matrix) threshold is a DERIVED TAG, not a structured reference (LP-323-AS-B)
+
+**Context.** AS-4 (reserves adequacy) compares reserve months available to a REQUIRED number that is a
+MATRIX — occupancy × property-type × units × program (Fannie B3-4.1-01). `reference_values.values` is a
+flat `dict[str, str]` and an operand reads ONE `reference` key, so it cannot do the CONDITIONAL lookup
+(pick the cell). This recurs wherever agency requirements are a matrix (LTV tiers, MI factors, DTI limits).
+
+**Decision — the conditional threshold is a DERIVED TAG whose recipe selects the cell from the loan's
+attributes (the ADR-273 pattern extended).** `reserves.required_months` is a `derived` loan tag; its recipe
+reads `property.occupancy` (MISMO) and returns the months for that cell. AS-4 then reads it as an ordinary
+`tag` operand — no engine change, no schema addition. **Two properties, both critical:**
+- **Un-encoded cells ABSTAIN, never guess.** The recipe encodes ONLY the agency-standard occupancy cells
+  (investment 6 / second-home 2 / 1-unit primary 0, cited); any other cell (2-4 units, LTV tiers, multiple
+  financed properties, FHA/VA overlays) returns `"unknown"` → the tag gate → AS-4 couldnt_checks. A wrong
+  reserve requirement is a silent, permanent error; the full matrix is Priya's.
+- **The recipe's confidence/abstention flows through the ordinary tag gate** (ADR-273) — a matrix in
+  `reference_values` (the alternative, a schema addition) would need a new operand type AND would not
+  degrade to couldnt_check on an un-encoded cell. The derived-tag route reuses everything.
+
+**Consequences.** Any future matrix threshold is a derived recipe reading the conditioning facts +
+abstaining on un-encoded cells — the pattern is set. **The Assets wave held the zero-engine-Python
+criterion** (like Income): all 10 rules (AS-2..AS-12 minus the deferred AS-8) are DATA + declarations +
+recipe registry entries; no evaluator/gate/producer-core changed. **NO Assets threshold is Priya-validated**
+(AS-1's 50% is `priya_validated:false` — no validated precedent row exists, AS-A's correction confirmed);
+everything is authored `priya_validated:false`. Cross-refs: ADR-273 (arithmetic as derived tags), LP-323-AS-A
+(the recon + the matrix-shape question), LP-318/324 (the calc operand + its gate — AS-4's case-12 path),
+LP-336 (per_account + resolve_accounts, used inside the AS-10 recency recipe).

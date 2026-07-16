@@ -68,6 +68,27 @@ tags:
   income.max_employment_gap_days: {mode: derived, subject: loan, data: income_max_employment_gap}
   income.days_since_most_recent_pay: {mode: derived, subject: loan, data: income_days_since_recent_pay}
 
+  # --- stmt.* / asset.* — the assets family (LP-323-AS-B). Statement/asset facts key under the DOCUMENT
+  #     subject (a statement IS a document — LP-336/AS-A: no `account` SubjectType; per-account grouping
+  #     is the per_account ENUMERATOR's job). The derived aggregates key under loan; the per-account ones
+  #     (min_account_months) GROUP internally via resolve_accounts, firing-if-any (no aggregate masking).
+  stmt.beginning_balance: {mode: parsed, subject: document, data: beginning_balance}
+  stmt.ending_balance: {mode: parsed, subject: document, data: ending_balance}
+  stmt.period_start: {mode: parsed, subject: document, data: statement_period_start}
+  stmt.period_end: {mode: parsed, subject: document, data: statement_period_end}
+  stmt.account_masked: {mode: parsed, subject: document, data: account_number_masked}
+  # stmt.page_count_declared: NO extraction field exists (bank_statement.py has no 'Page X of Y') → this
+  # parses to ABSENT; AS-9 couldnt_checks. Declared so the gap is visible, not silent (bucket C).
+  stmt.page_count_declared: {mode: parsed, subject: document, data: page_count_declared}
+  stmt.owner_matches_borrower: {mode: ai, subject: document, data: stmt_facts}
+  stmt.is_reserve_eligible: {mode: ai, subject: document, data: stmt_facts}
+  asset.liquidation_terms: {mode: ai, subject: document, data: asset_facts}
+  asset.usable_value: {mode: ai, subject: document, data: asset_facts}
+  reserves.required_months: {mode: derived, subject: loan, data: reserves_required_months}
+  stmt.nsf_count: {mode: derived, subject: loan, data: stmt_nsf_count}
+  stmt.min_account_months: {mode: derived, subject: loan, data: stmt_min_account_months}
+  calc.cash_to_close: {mode: derived, subject: loan, data: cash_to_close_shortfall}
+
 # --- AI GROUPS — one structuring pass each: a subject, the tags it co-produces, a context-builder
 #     key, and the system prompt (the perceiver question, as DATA). The model answers per subject
 #     index with one JSON object per tag keyed by the tag's LAST segment; "unknown" is always legal
@@ -229,3 +250,40 @@ ai_groups:
         "is_declining": {"value","confidence","reasoning"},
         "same_line_of_work": {"value","confidence","reasoning"},
         "continuance_3yr": {"value","confidence","reasoning"}}]
+
+  # --- stmt.* / asset.* AI structuring passes (LP-323-AS-B). Report what the document STATES; do NOT
+  #     encode a downstream rule's caution in an exemplar (LP-335 FINDING-1). "unknown" always legal. ---
+  stmt_facts:
+    subject: document
+    context_builder: document
+    tags: [stmt.owner_matches_borrower, stmt.is_reserve_eligible]
+    system_prompt: |
+      You are a mortgage loan processor STRUCTURING one depository (bank) statement into clean facts —
+      describe what the document SHOWS; do NOT evaluate rules. Produce:
+      1. owner_matches_borrower — does the account holder named on the statement resolve to a borrower
+         on the loan (tolerant of nickname / middle-name / joint-account naming)? "yes" | "no" |
+         "unknown".
+      2. is_reserve_eligible — are the funds in this account usable as reserves as the statement shows
+         them (a normal checking/savings balance), vs restricted or a retirement/discounted account?
+         "yes" | "no" | "partial" | "unknown".
+      Judge ONLY from this document's own fields; never invent. Return ONLY a JSON array, one object per
+      document, echoing the given "index":
+      [{"index": <i>, "owner_matches_borrower": {"value","confidence","reasoning"},
+        "is_reserve_eligible": {"value","confidence","reasoning"}}]
+
+  asset_facts:
+    subject: document
+    context_builder: document
+    tags: [asset.liquidation_terms, asset.usable_value]
+    system_prompt: |
+      You are a mortgage loan processor STRUCTURING one asset statement (retirement / brokerage /
+      investment) into clean facts — describe what the document SHOWS. Produce:
+      1. liquidation_terms — what portion of the account is usable per the statement's own terms:
+         "fully_liquid" (a normal brokerage/cash balance), "vested_usable" (a vested, accessible
+         retirement portion), "restricted" (locked / not accessible), or "unknown".
+      2. usable_value — the dollar amount the statement shows as usable after any vesting/access terms it
+         states (a plain number), or "unknown" if the statement does not support a figure.
+      Judge ONLY from this document's own fields; never invent a figure or a term. Return ONLY a JSON
+      array, one object per document, echoing the given "index":
+      [{"index": <i>, "liquidation_terms": {"value","confidence","reasoning"},
+        "usable_value": {"value","confidence","reasoning"}}]

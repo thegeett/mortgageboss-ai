@@ -97,3 +97,33 @@ tags:
     allowed_values: ["yes", "no", "unknown"]
     description: Is claimed rental income supported by docs + a continuance/vacancy adjustment (IN-14 verdict).
     produced_by: AI
+
+  # --- LP-323-AS-B — the assets family's NEW derived + judgment tags (not in fact_tags.csv). ----------
+  reserves.required_months:
+    entity: loan
+    value_type: number
+    allowed_values: null
+    description: >-
+      Required reserves in months of PITIA, selected from occupancy (AS-4 threshold). Derived; abstains
+      ("unknown") for any occupancy/property cell not in the agency-standard map (the full matrix is Priya's).
+    produced_by: derived
+  stmt.nsf_count:
+    entity: loan
+    value_type: number
+    allowed_values: null
+    description: The count of NSF/overdraft transactions across the file's statements (AS-7). Derived.
+    produced_by: derived
+  stmt.min_account_months:
+    entity: loan
+    value_type: number
+    allowed_values: null
+    description: >-
+      The fewest distinct statement months any ONE account has (AS-10 recency) — grouped per account via
+      resolve_accounts, min across accounts (a short account is never masked by a well-documented one).
+    produced_by: derived
+  as.borrowed_funds:
+    entity: loan
+    value_type: enum
+    allowed_values: ["yes", "no", "unknown"]
+    description: Do deposit patterns suggest an undisclosed borrowed-funds source (AS-12 judgment verdict)?
+    produced_by: AI

@@ -37,7 +37,7 @@ async def test_projection_counts_match_files(db_session: AsyncSession) -> None:
 
     # First run inserts everything, removes nothing.
     assert result.rules.inserted == 133
-    assert result.tags.inserted == 152  # +7 income vocabulary_extra tags (LP-323-IN-B)
+    assert result.tags.inserted == 156  # +4 assets vocabulary_extra tags (LP-323-AS-B)
     assert result.rule_tags.inserted == 203
     assert result.rules.deleted == result.tags.deleted == 0
 
@@ -68,7 +68,7 @@ async def test_as1_projects_priya_validated_false_with_spec(db_session: AsyncSes
     with_spec = await db_session.scalar(
         select(func.count()).select_from(Rule).where(Rule.spec.isnot(None))
     )
-    assert with_spec == 24
+    assert with_spec == 34  # +10 AS-2..AS-12 specs (AS-8 deferred) — LP-323-AS-B
 
 
 async def test_db_loses_to_files(db_session: AsyncSession) -> None:

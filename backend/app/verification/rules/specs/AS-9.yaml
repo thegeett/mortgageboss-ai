@@ -1,0 +1,50 @@
+rule_id: AS-9
+name: Missing pages
+category: Assets
+kind: structural
+numeric_check: false
+criteria: >-
+  A bank statement must be complete: the pages present must match the 'Page X of Y' declared count. A
+  short statement may hide transactions. NOTE (LP-323-AS-B): the page-count fields are NOT extracted today
+  (bank_statement.py has no page count) — so AS-9 couldnt_checks until that extraction exists (bucket C).
+applicability:
+  scope: the loan file's bank statements
+  trigger: once per bank statement, comparing declared vs present page counts
+required_inputs:
+  - name: page_count_declared
+    snapshot_path: tags.by_subject[<statement content_id>]["stmt.page_count_declared"]
+    description: the 'Page X of Y' declared count (parsed — NOT extracted today, bucket C)
+  - name: page_count_present
+    snapshot_path: tags.by_subject[<statement content_id>]["stmt.page_count_present"]
+    description: the actual pages extracted (derived — not computable without the page data, bucket C)
+reference_values:
+  priya_validated: false
+  threshold_needs_signoff: false
+subject_enumeration: per_document
+subject_key_fields:
+  - content_id
+evidence_required: the declared page count vs the pages actually present
+guideline_reference: "Fannie Mae Selling Guide B3-4.2-01 — complete asset statements."
+spec_version: 1
+deterministic:
+  applicability:
+    tag: document.document_type
+    op: eq
+    value: bank_statement
+  load_bearing_tags:
+    - stmt.page_count_declared
+    - stmt.page_count_present
+  gated_tags:
+    - stmt.page_count_declared
+    - stmt.page_count_present
+  operands:
+    declared: {tag: stmt.page_count_declared}
+    present: {tag: stmt.page_count_present}
+  outcomes:
+    - verdict: fired
+      when_compare: {op: ">", left: declared, right: present}
+      reasoning: "the statement declares {declared} pages but {present} are present — a page is missing"
+      how_to_fix: Obtain the complete statement (all declared pages).
+    - verdict: satisfied
+      default: true
+      reasoning: all declared pages are present

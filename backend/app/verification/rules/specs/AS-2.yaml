@@ -1,0 +1,50 @@
+rule_id: AS-2
+name: Earnest money deposit sourcing
+category: Assets
+kind: structural
+numeric_check: false
+criteria: >-
+  An earnest-money deposit paid from the borrower's funds must be sourced (traceable to a verified
+  account). An unsourced EMD may be undisclosed borrowed funds. NOTE (LP-323-AS-B): the true shape is a
+  cross-document MATCH (contract EMD amount ↔ a debit) which is not cleanly expressible today; this
+  approximates it via the AS-1 txn sourcing vocabulary and is reported for -C.
+applicability:
+  scope: the loan file's bank-statement transactions
+  trigger: per transaction, on earnest-money / large outflows and their sourcing
+required_inputs:
+  - name: has_identified_source
+    snapshot_path: tags.by_subject[<txn content_id>]["txn.has_identified_source"]
+    description: whether the transaction has a traceable source (AI, reused from AS-1)
+  - name: apparent_category
+    snapshot_path: tags.by_subject[<txn content_id>]["txn.apparent_category"]
+    description: the transaction category (AI, reused from AS-1)
+reference_values:
+  priya_validated: false
+  threshold_needs_signoff: false
+  guideline_text: >-
+    Fannie Mae Selling Guide B3-4.2-02 — an earnest-money deposit must be sourced from verified funds.
+    Agency-default; confirm the EMD sourcing requirements with Priya.
+subject_enumeration: per_deposit
+subject_key_fields:
+  - account
+  - date
+  - amount
+evidence_required: the earnest-money transaction and whether its source is traceable
+guideline_reference: "Fannie Mae Selling Guide B3-4.2-02 (Earnest money)."
+spec_version: 1
+deterministic:
+  load_bearing_tags:
+    - txn.has_identified_source
+    - txn.apparent_category
+  gated_tags:
+    - txn.has_identified_source
+  outcomes:
+    - verdict: fired
+      when_tags:
+        - {tag: txn.apparent_category, op: eq, value: loan_proceeds}
+        - {tag: txn.has_identified_source, op: ne, value: "yes"}
+      reasoning: an earnest-money / large outflow appears to be from an unverified (possibly borrowed) source
+      how_to_fix: Source the earnest-money deposit to a verified account (a debit from the borrower's own funds).
+    - verdict: satisfied
+      default: true
+      reasoning: the earnest-money deposit is sourced from verified funds

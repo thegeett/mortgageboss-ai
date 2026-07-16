@@ -1,0 +1,56 @@
+rule_id: AS-4
+name: Reserves adequacy
+category: Assets
+kind: calculative        # rule_kinds.csv: AS-4 = calculative
+numeric_check: true
+criteria: >-
+  The loan file's reserve-eligible assets, expressed in months of PITIA, must meet the reserve requirement
+  for this loan's occupancy/property. Fewer months than required means the file lacks adequate reserves.
+  The requirement is a MATRIX (occupancy × property × units × program) — this encodes the agency-standard
+  occupancy cells; an un-encoded cell (Priya-pending) yields couldnt_check, never a guessed requirement.
+applicability:
+  scope: the loan file's reserve-eligible assets and its reserve requirement
+  trigger: once per loan, comparing reserve months available to months required
+required_inputs:
+  - name: months_available
+    snapshot_path: 'calculations.reserves.value["months_available"]'
+    description: reserve-eligible assets in months of PITIA (the wired reserves calculator — gated → couldnt_check)
+  - name: required_months
+    snapshot_path: 'tags.by_subject["loan"]["reserves.required_months"]'
+    description: the required reserve months, selected from occupancy (derived; abstains for Priya-pending cells)
+reference_values:
+  priya_validated: false
+  threshold_needs_signoff: true
+  guideline_text: >-
+    Fannie Mae Selling Guide B3-4.1-01 — reserve requirements by occupancy/property (e.g. investment 6
+    months, second home 2 months, 1-unit primary 0). The FULL matrix (2-4 units, LTV, multiple financed
+    properties, FHA/VA overlays) is PENDING Priya; un-encoded cells couldnt_check.
+subject_enumeration: loan
+subject_key_fields:
+  - loan
+evidence_required: the reserve months available (from the calculator) vs the months required
+guideline_reference: "Fannie Mae Selling Guide B3-4.1-01 (Minimum Reserve Requirements)."
+spec_version: 1
+deterministic:
+  load_bearing_tags:
+    - reserves.required_months
+  gated_tags:
+    - reserves.required_months
+  operands:
+    months_available: {calc: [reserves, months_available]}
+    required_months: {tag: reserves.required_months}
+  outcomes:
+    - verdict: fired
+      # A GATED reserves calc → the operand is None → couldnt_check (the LP-318 path, generic since
+      # LP-324) — never a fabricated adequacy. required_months "unknown" (a Priya-pending cell) → the gate
+      # → couldnt_check. So AS-4 fires ONLY on a real, computed shortfall.
+      when_compare: {op: "<", left: months_available, right: required_months}
+      reasoning: >-
+        reserves cover {months_available} months but {required_months} months are required for this
+        occupancy — the file lacks adequate reserves
+      how_to_fix: >-
+        Document additional reserve-eligible assets, or confirm the reserve requirement for this
+        occupancy/property is correctly applied.
+    - verdict: satisfied
+      default: true
+      reasoning: reserve months available meet or exceed the {required_months} months required

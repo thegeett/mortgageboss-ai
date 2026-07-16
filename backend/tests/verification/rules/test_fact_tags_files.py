@@ -57,7 +57,7 @@ def test_desired_state_shape() -> None:
     # rule_kinds.csv is 133 rules; the vocabulary is 143 xlsx tags + 1 hand-added overlay tag
     # (id.poa_acceptable LP-329, id.residency_eligible LP-331) = 145.
     assert len(rules) == 133
-    assert len(tags) == 152  # +7 income vocabulary_extra tags (LP-323-IN-B)
+    assert len(tags) == 156  # +4 assets vocabulary_extra tags (LP-323-AS-B)
     assert len(rule_tags) == 203
     # No depends_on authored yet (LP-311 Phase 0): the DAG is empty.
     assert tag_deps == set()
