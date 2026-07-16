@@ -22,3 +22,15 @@ Condo (CO)~5Priya's team works condos — warrantable vs non-warrantable, not ju
 Purchase/Program + MI + AUS + Fraud + Occupancy remainder (PC/PE/MI/AU/FR/OC)~30Several small families; could be grouped
 
 Plus CL (closing) and DC (disclosures) — mostly out-of-scope per the earlier classification, so they'd resolve to not_applicable rather than needing waves.
+
+
+2. The remaining waves (~21 tickets)
+   CategoryRulesTicketsAssets (AS-2..AS-12)~113DTI~73Title~63Insurance/Hazard~83Condo~53Small families (program/MI/AUS/fraud/occupancy)~306
+3. Blocked on blocker documents (~6 tickets + extractors)
+   Credit (~13) and Property (~8) cannot activate until the credit report, DU/AUS findings, and appraisal are extractable. PDF-only, deeply nested schemas, no independent cross-check source. Needs the golden-file eval set (LP-143) built alongside the first extractor. That's 3-4 extractor tickets + 6 wave tickets.
+4. The product (unestimated, and the biggest)
+
+The UI — four tabs, finding detail, upload + re-run, resolve/override/waive actions. Doesn't exist. This is the gap between an engine and something Priya can use.
+Priya's session — ~40 items by the time all waves land
+Breadth validation — everything is validated on LF-6T3N (one conventional purchase) + synthetic. No jumbo, FHA, condo, self-employed, or refinance corpus.
+The mortgageboss-synthetic tool completion
