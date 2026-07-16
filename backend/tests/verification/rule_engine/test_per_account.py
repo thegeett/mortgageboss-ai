@@ -198,3 +198,56 @@ def test_stable_account_key_across_runs() -> None:
         resolve_accounts(_snap([_stmt("z", bank="chase", num="12345678")])),
     )
     assert list(r1) == list(r2) == ["account:chase:****5678"]  # pragma: allowlist secret
+
+
+def test_institution_name_variance_groups_as_ONE_account() -> None:
+    # Punctuation / whitespace / case variance in the bank name must NOT over-split one account (an
+    # over-split fabricates or hides a chaining break). 'Chase Bank, N.A.' and 'Chase Bank NA' normalize
+    # to a single key (casefold + drop_punct + collapse_ws), the LP-336-review over-split fix.
+    resolved, unresolvable = resolve_accounts(
+        _snap(
+            [
+                _stmt("jan", bank="Chase Bank, N.A.", num="12345678"),
+                _stmt("feb", bank="Chase Bank NA", num="12345678"),
+            ]
+        )
+    )
+    assert list(resolved.values()) == [["jan", "feb"]] and unresolvable == []
+
+
+def test_conflicting_per_statement_tag_is_dropped_not_last_wins() -> None:
+    # Each statement carries its OWN ending_balance (different values). The account subject must NOT keep
+    # an arbitrary last-wins value — the conflicting tag is DROPPED so a rule couldnt_checks (fail-closed).
+    # A tag that AGREES across the statements (account_type) is kept.
+    snap = _snap(
+        [_stmt("s1", bank="Chase", num="12345678"), _stmt("s2", bank="Chase", num="12345678")],
+        by_subject={
+            "s1": {"stmt.ending_balance": _tag("100"), "stmt.account_type": _tag("checking")},
+            "s2": {"stmt.ending_balance": _tag("250"), "stmt.account_type": _tag("checking")},
+        },
+    )
+    ((_key, tags),) = enumerate_subjects("per_account", snap)
+    assert (
+        "stmt.ending_balance" not in tags
+    )  # conflicting per-statement values → dropped, not 100/250
+    assert tags["stmt.account_type"].value == "checking"  # agrees across statements → kept
+
+
+def test_resolution_keys_identically_on_the_pre_masked_production_field_path() -> None:
+    # Production builds account_number_masked via PiiField.pre_masked (an already-masked capture), NOT
+    # from_raw — assert the resolution keys identically on the real path, not only the test-helper path.
+    stmt = DocumentEntry(
+        content_id="p",
+        document_type="bank_statement",
+        fields={
+            "bank_name": _bank("Chase"),
+            "account_number_masked": PiiField.pre_masked(
+                "****5678",  # pragma: allowlist secret
+                kind=PiiKind.ACCOUNT,
+                source=FieldSource.EXTRACTED,
+            ),
+        },
+    )
+    resolved, unresolvable = resolve_accounts(_snap([stmt]))
+    assert list(resolved) == ["account:chase:****5678"]  # pragma: allowlist secret
+    assert unresolvable == []

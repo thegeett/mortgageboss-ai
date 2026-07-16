@@ -7,6 +7,7 @@ snapshot. Adding a rule over an existing subject shape needs no new Python — i
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable, Mapping
 
 from app.verification.rules.specs import DOC_TYPE_TAG
@@ -146,7 +147,26 @@ def _doc_type_tag(entry: DocumentEntry) -> Tag:
 # account_number_masked, no uncalibrated AI). A statement MISSING either identifier is UNRESOLVABLE — it is
 # SURFACED (never dropped, never merged) so the rule couldnt_checks it WITH A REASON. A guessed grouping
 # would MIS-GROUP (fabricating a chaining break) or OVER-SPLIT (hiding a real one) — worse than abstaining.
+#
+# KNOWN LIMITATION (accepted, LP-336 review): the identity does NOT include account_type. Two accounts at
+# the SAME institution sharing a masked last-4 (a checking and a savings both ****1234 at Chase) collide
+# into one key. This is rare (a last-4 clash WITHIN one bank on one file) and adding account_type trades it
+# for a MORE common over-split (account_type extracts inconsistently across a statement series) — so we keep
+# the minimal identity and prefer minimizing over-split. Revisit if a real file surfaces the collision.
 # --------------------------------------------------------------------------- #
+_INST_PUNCT = re.compile(r"[^\w\s]")
+_INST_WS = re.compile(r"\s+")
+
+
+def _norm_institution(name: str) -> str:
+    """Normalize a bank name for the account key — casefold + drop punctuation + collapse whitespace (the
+    consistency-evaluator chain), so 'Chase Bank, N.A.' / 'Chase Bank NA' / 'chase bank  n.a.' resolve to
+    ONE account rather than over-splitting (an over-split fabricates or hides a chaining break — the LP-336
+    danger). It does NOT fuzzy-match substantively different renderings ('Chase' vs 'JPMorgan Chase') — a
+    deterministic key cannot, and fail-closed prefers a clean under-match to a guessed merge."""
+    return _INST_WS.sub(" ", _INST_PUNCT.sub("", name.casefold())).strip()
+
+
 def _field_str(field: Field | PiiField | None) -> str | None:
     """A present field's display value (PiiField → its MASKED display; Field → its value), stripped, or
     None. A PiiField contributes only its non-raw masked last-4 — no raw PII enters the account key."""
@@ -180,7 +200,7 @@ def resolve_accounts(snapshot: Snapshot) -> tuple[dict[str, list[str]], list[str
         if institution is None or masked is None:
             unresolvable.append(entry.content_id)  # cannot identify → never a guessed grouping
             continue
-        account_key = f"account:{institution.casefold()}:{masked}"
+        account_key = f"account:{_norm_institution(institution)}:{masked}"
         resolved.setdefault(account_key, []).append(entry.content_id)
     return resolved, unresolvable
 
@@ -209,13 +229,22 @@ def _per_account(snapshot: Snapshot) -> list[Subject]:
     by_subject = {} if snapshot.tags.absent else snapshot.tags.by_subject
     subjects: list[Subject] = []
     for account_key, content_ids in resolved.items():
+        # The account subject carries only tags that AGREE across its statements. A per-statement tag that
+        # DIFFERS between statements (each statement's own ending_balance) is DROPPED, not kept last-wins —
+        # a rule reading it then couldnt_checks (fail-closed) instead of silently getting one arbitrary
+        # statement's value. A rule that needs the per-statement series uses resolve_accounts directly.
         merged: dict[str, Tag] = {}
-        for (
-            cid
-        ) in content_ids:  # the account's statements' tags (a grouping-key convenience; a rule that
-            merged.update(
-                by_subject.get(cid, {})
-            )  # needs the ORDERED statements uses resolve_accounts)
+        conflicting: set[str] = set()
+        for cid in content_ids:
+            for tag_id, tag in by_subject.get(cid, {}).items():
+                if tag_id in conflicting:
+                    continue
+                existing = merged.get(tag_id)
+                if existing is None:
+                    merged[tag_id] = tag
+                elif str(existing.value) != str(tag.value):
+                    del merged[tag_id]  # conflicting per-statement values → drop (never last-wins)
+                    conflicting.add(tag_id)
         subjects.append((account_key, merged))
     for cid in unresolvable:
         subjects.append((cid, {ACCOUNT_UNRESOLVED_TAG: _account_unresolved_tag(cid)}))
