@@ -9723,3 +9723,46 @@ LP-333 bucket table): missing extraction fields (IN-4/7), uncalibrated AI feeds 
 undeclared-recipe-dependency + calibration (IN-1/3), per-borrower-with-document-context AI (IN-7/13/14),
 and PIN #2/#3 (IN-11/12). Cross-refs: LP-317 (calibration is keyless), LP-326 (the producers), LP-331/332
 (borrower keying), LP-323-IN-B/-C (the rules + the PINs).
+
+## ADR-276: Live calibration — the content source is a swappable seam; the activation bar is risk-weighted (LP-334)
+
+**Context.** The architecture's thesis (§3D) is that AI structures messy reality into honest fact-tags and
+deterministic code queries them. Every gate/floor assumes the structuring is good enough and honestly
+abstaining — an assumption NEVER tested: calibration was keyless (labels replayed, trivially perfect). Five
+Income rules are gated on this (LP-333), and ID-1/4/7/8/9 are LIVE producing verdicts on unmeasured tags.
+LP-334 takes the first real measurement. Two decisions were forced but are NOT Claude Code's to settle.
+
+**Decision 1 (recorded as a decision-to-be-made — awaits Geet's privacy call). The content source is a
+SWAPPABLE SEAM.** A code finding reframes the privacy trade-off: the tag reasoners consume EXTRACTED
+FIELDS, not raw scans (`_doc_context` sends `document.fields`), so "messy real scans" is an EXTRACTION-stage
+risk, upstream of the tag reasoner. The harness (`live_calibration.calibrate(docs, reasoner=...)`) takes any
+iterable of `LabeledDoc`; the in-repo `LABELED_DOCS` is clean-field content that measures the fields→tags
+reasoning faithfully. Options for the truth set: (a) synthetic/labeled fields (safe, runnable now — this
+ticket); (b) local Qwen over real files (measures Qwen, not production); (c) de-identified real → Anthropic
+(real + production model, but LF-6T3N is a *tagged* snapshot with NO golden labels and rests on
+de-identification trust). **Recommendation: a hybrid** — synthetic now for breadth/regression + a small
+hand-labeled de-identified real set for truth, **pending Geet's privacy approval** (privacy-first: local
+models for real PII, cloud for non-PII). The seam makes the source swappable without touching the harness.
+
+**Decision 2 (recorded as a decision-to-be-made — a PRIYA question). The activation bar is RISK-WEIGHTED,
+not one number.** Risk differs by what the tag FEEDS: `id.title_vesting_consistent` → ID-7's DETERMINISTIC
+auto-shipping verdict (a wrong tag → a wrong confident finding) and `income.documented_monthly` → IN-1's
+deterministic FRAUD verdict need a HIGH bar (proposal: ≥95% concrete-accuracy, ≤15% unknown-rate);
+`id.name_normalized` → ID-1's fuzzy leg is RATIFICATION-PENDING (a human sees every verdict) → a lower bar.
+The proposal is encoded in the doc and marked UNCONFIRMED: *"how often can this be wrong before you'd stop
+trusting it?"* is a domain judgment, Priya's, not engineering's. This ticket MEASURES; activation decisions
+follow separately with the numbers + Priya's bar in hand — no rule was activated/de-activated here.
+
+**Consequences (the first real numbers, on clean synthetic fields — plumbing + obvious biases, NOT
+real-scan messiness or true fuzzy-tag accuracy).** Enum tags scored well (title/poa/income.type 100%). Two
+findings, REPORTED not fixed (evaluate-don't-fix — tuning a prompt to the eval destroys the measurement):
+(1) `id.current_address_type` defaults a driver's-license address to `prior` ("DLs are often not current")
+→ under-includes DL residences in ID-4's residence filter → couldnt_check — a live-rule bias, its own fix
+ticket; (2) fuzzy free-text tags (`id.name_normalized` / `id.address_normalized`) CANNOT be scored by
+string comparison (valid renderings differ: hyphen vs space, suffix retention) — the raw % under-measures
+them; they need human review of the harness's failing-case DETAIL (which it records) or an AI-judge
+comparison. The harness records predicted/golden/confidence/reasoning per case so a wrong tag is
+inspectable. Cost: ~4s + ~270 tokens per call (claude-sonnet-4-5); keyless CI unchanged (live is gated on
+an explicit `LP334_LIVE=1` flag, never the mere presence of a key). No rule/tag/engine/spec logic changed.
+Cross-refs: LP-317 (DimensionCalibration + the live seam), LP-333 (calibration as the activation blocker),
+LP-313/326 (the Reasoner seam + AI producers), LP-323-ID-C/-IN-C (the keyless family suites, unchanged).
