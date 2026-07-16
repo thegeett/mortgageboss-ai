@@ -298,9 +298,16 @@ def _app_required_fields_present(
 # per-ACCOUNT, GROUP internally via resolve_accounts (LP-336) and fire-if-ANY (never masking a single
 # account — PIN #1's cousin avoided). Registry entries only; produce_derived_tags is untouched.
 # --------------------------------------------------------------------------- #
-# Agency-standard reserve requirements by occupancy (1-unit), Fannie Selling Guide B3-4.1-01. The full
-# matrix (2-4 units, LTV tiers, multiple financed properties, FHA/VA overlays) is Priya's — an occupancy
-# not in this map ABSTAINS (couldnt_check), never a guessed requirement. priya_validated:false on IN-4.
+# Agency-standard reserve requirements by occupancy (1-unit PURCHASE), Fannie Selling Guide B3-4.1-01. The
+# full matrix (2-4 units, LTV tiers, multiple financed properties, FHA/VA overlays) is Priya's — an
+# occupancy not in this map ABSTAINS (couldnt_check), never a guessed requirement. priya_validated:false.
+#
+# KNOWN UNDER-STATEMENT (LP-323-AS-B review, Priya-pending): this keys on occupancy ONLY. The un-modeled
+# axes (unit count, # of financed properties, LTV) can only RAISE the requirement, so a NON-1-unit or
+# multiple-financed-property PRIMARY gets required=0 here and AS-4 can false-green a real reserve shortfall.
+# Not guarded in code: the reserve-matrix "units" axis is not a clean MISMO fact today (only
+# property.financed_unit_count exists, whose semantics are ambiguous for this axis), so a guard would be a
+# domain guess — deferred to Priya with the rest of the matrix rather than approximated here.
 _RESERVE_MONTHS_BY_OCCUPANCY = {"investment": "6", "second_home": "2", "primary_residence": "0"}
 
 
@@ -339,14 +346,26 @@ def _stmt_nsf_count(
     snapshot: Snapshot, _subject_id: str, _subject_raw: object
 ) -> tuple[JsonValue, str]:
     """stmt.nsf_count — the count of NSF / overdraft transactions across the file (AS-7). Reads the
-    per-transaction ``txn.is_nsf_or_overdraft`` tag. An absent tag is not counted (absent≠no)."""
+    per-transaction ``txn.is_nsf_or_overdraft`` tag. ABSTAINS when that tag is present on NO transaction —
+    a concrete 0 there would mean "detection ran and found none", but it actually means the detection tag
+    was never materialized (absent≠no); returning 0 would false-green AS-7 (every file reads NSF-clean)."""
     if snapshot.tags.absent:
         return _UNKNOWN, "no tags materialized — cannot count NSF/overdraft items"
     count = 0
+    any_seen = False
     for tags in snapshot.tags.by_subject.values():
         tag = tags.get("txn.is_nsf_or_overdraft")
-        if tag is not None and str(tag.value) == "yes":
+        if tag is None:
+            continue
+        any_seen = True
+        if str(tag.value) == "yes":
             count += 1
+    if not any_seen:
+        return (
+            _UNKNOWN,
+            "no txn.is_nsf_or_overdraft tag on any transaction — NSF/overdraft detection has not run "
+            "(absent≠no) — cannot assert a clean count",
+        )
     return str(count), f"{count} NSF/overdraft transaction(s) across the file's statements"
 
 
@@ -357,9 +376,11 @@ def _stmt_min_account_months(
     Groups statements per account via resolve_accounts (LP-336) and takes the MIN across accounts, so a
     single short account is never MASKED by a well-documented one (fire-if-any). Abstains when no
     resolvable account or no period dates. Deterministic (parsed period fields + the parsed identity)."""
-    from app.verification.rule_engine.enumerators import (
-        resolve_accounts,
-    )  # lazy: avoid an import cycle
+    # LAZY IMPORT — load-bearing, do NOT hoist to module top. rule_engine imports (transitively) reorder
+    # module initialization in a way that breaks the snapshot-persistence import order under a full-suite
+    # run (a PII-at-rest guard misfires); keeping this function-local avoids the back-edge. Verified: a
+    # top-level import turns test_e2e's persist step red.
+    from app.verification.rule_engine.enumerators import resolve_accounts
 
     resolved, _unresolvable = resolve_accounts(snapshot)
     if not resolved:
@@ -380,9 +401,17 @@ def _stmt_min_account_months(
             )
             if parsed is not None:
                 months.add((parsed.year, parsed.month))
+        # An account with statements but ZERO parseable period dates is UNCOUNTABLE — counting it as 0
+        # months would report a false recency violation (extraction failure ≠ a genuinely short account),
+        # and the true MIN is unknowable (this account could be the shortest). ABSTAIN (couldnt_check) —
+        # fail-closed: never a fabricated 0, never a silent drop that could mask this account's shortness.
+        if not months:
+            return (
+                _UNKNOWN,
+                "an account's statement period dates could not be parsed — cannot count its months "
+                "without reporting a false 0",
+            )
         per_account.append(len(months))
-    if not any(per_account):
-        return _UNKNOWN, "no statement period dates — cannot count months"
     fewest = min(per_account)
     return str(fewest), f"the account with the fewest statements has {fewest} distinct month(s)"
 

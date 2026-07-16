@@ -118,6 +118,47 @@ def test_nsf_count_and_min_account_months_recipes() -> None:
     assert _stmt_min_account_months(snap, "loan", None)[0] == "2"
 
 
+def test_nsf_count_abstains_when_the_detection_tag_is_absent_everywhere() -> None:
+    # PRODUCTION REALITY: txn.is_nsf_or_overdraft has no producer, so no transaction carries it. A concrete
+    # "0" would false-green AS-7 (every file reads NSF-clean); the recipe abstains (absent≠no). But when the
+    # tag IS present — even all "no" — a concrete 0 is legitimate (detection ran, found none).
+    no_tag = _snap(by_subject={"t1": {"txn.is_money_in": _tag("yes")}})  # txns exist, no NSF tag
+    v, r = _stmt_nsf_count(no_tag, "loan", None)
+    assert v == "unknown" and "has not run" in r
+    clean = _snap(by_subject={"t1": {"txn.is_nsf_or_overdraft": _tag("no")}})
+    assert _stmt_nsf_count(clean, "loan", None)[0] == "0"
+
+
+def test_min_account_months_abstains_when_an_account_has_no_parseable_dates() -> None:
+    # Account A (Chase) has a dated statement; account B (Wells Fargo) has ONLY an unparseable date. B is
+    # uncountable — counting it as 0 months would fire a FALSE recency violation, and the true min is
+    # unknowable (B could be the shortest). The recipe abstains rather than report a fabricated 0.
+    a, b = _doc("a_jan"), _doc("b_jan")
+    a.fields.update(
+        {
+            "bank_name": _f("Chase"),
+            "account_number_masked": Field.present("1111", source=FieldSource.EXTRACTED),
+        }
+    )
+    b.fields.update(
+        {
+            "bank_name": _f("Wells Fargo"),
+            "account_number_masked": Field.present("2222", source=FieldSource.EXTRACTED),
+        }
+    )
+    snap = _snap(
+        docs=[a, b],
+        by_subject={
+            "a_jan": {"stmt.period_end": _tag("2026-05-31")},
+            "b_jan": {
+                "stmt.period_end": _tag("not-a-date")
+            },  # uncountable account → abstain, not 0
+        },
+    )
+    v, r = _stmt_min_account_months(snap, "loan", None)
+    assert v == "unknown" and "could not be parsed" in r
+
+
 # --------------------------------------------------------------------------- #
 # AS-4 — the calc + matrix rule; case 12 (a GATED reserves calc → couldnt_check)
 # --------------------------------------------------------------------------- #
