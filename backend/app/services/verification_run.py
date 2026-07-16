@@ -82,8 +82,12 @@ _MATERIALIZED_SUBJECTS = frozenset({"document", "loan", "borrower"})
 # for a DEGRADED reason (documents absent, or borrower/document resolution failed) — NOT "the subjects
 # are gone" — so it must not retire a prior finding. ``loan`` is document-independent (always one
 # subject) → always retire-eligible. Adding a new document-derived shape means adding its key here,
-# and every rule that declares it is covered automatically (no per-rule-id list).
-_DOCUMENT_DERIVED_ENUMERATIONS = frozenset({"per_deposit", "per_borrower", "per_document"})
+# and every rule that declares it is covered automatically (no per-rule-id list). LP-336 added
+# ``per_account`` (accounts are grouped from the statement documents — zero accounts means no statements
+# resolved, a degraded reason, not "the accounts are gone").
+_DOCUMENT_DERIVED_ENUMERATIONS = frozenset(
+    {"per_deposit", "per_borrower", "per_document", "per_account"}
+)
 
 
 def _load_bearing_tag_ids(rule_id: str) -> set[str]:

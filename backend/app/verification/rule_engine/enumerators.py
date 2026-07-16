@@ -10,7 +10,9 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 
 from app.verification.rules.specs import DOC_TYPE_TAG
+from app.verification.snapshot.fields import Field
 from app.verification.snapshot.model import DocumentEntry, Snapshot
+from app.verification.snapshot.pii import PiiField
 from app.verification.snapshot.tag import Tag, TagProducedBy, TagRole, TagStage
 from app.verification.snapshot.traversal import all_transactions
 
@@ -18,6 +20,13 @@ from app.verification.snapshot.traversal import all_transactions
 # in the tags layer (distinct from the per-transaction content_id subjects). Introduced by LP-319.
 LOAN_SUBJECT = "loan"
 _UNKNOWN = "unknown"
+
+# The reserved structural marker an unresolvable statement carries (LP-336) — a NON-vocabulary tag (like
+# DOC_TYPE_TAG), so a per_account rule can see WHY a statement was not grouped and couldnt_check it. The
+# statements that DID resolve carry their account_key as the subject id; this marks the ones that did not.
+ACCOUNT_UNRESOLVED_TAG = "account.unresolved"
+# Only depository statements carry the (institution, masked-number) account identity this groups on.
+_STATEMENT_DOC_TYPE = "bank_statement"
 
 Subject = tuple[str, Mapping[str, Tag]]
 Enumerator = Callable[[Snapshot], list[Subject]]
@@ -124,11 +133,101 @@ def _doc_type_tag(entry: DocumentEntry) -> Tag:
     )
 
 
+# --------------------------------------------------------------------------- #
+# per_account (LP-336) — group a file's bank-statement DOCUMENTS by account, FAIL-CLOSED.
+#
+# NOT a SubjectType (LP-323-AS-A refuted that): a statement IS a document, so stmt.* facts key under the
+# DOCUMENT subject; grouping by account is an ENUMERATION concern, not a second keying (no fact keys under
+# two subjects — the divergence risk LP-331/332 rejected).
+#
+# THE DANGER (mirrors LP-332's borrower_id resolution): the masked account number is "display only,
+# non-matchable" (fact_tags.csv) — ****1234 at Chase and ****1234 at Wells Fargo look IDENTICAL. So the
+# identity is (INSTITUTION, masked-number): both are deterministic extraction fields (bank_name +
+# account_number_masked, no uncalibrated AI). A statement MISSING either identifier is UNRESOLVABLE — it is
+# SURFACED (never dropped, never merged) so the rule couldnt_checks it WITH A REASON. A guessed grouping
+# would MIS-GROUP (fabricating a chaining break) or OVER-SPLIT (hiding a real one) — worse than abstaining.
+# --------------------------------------------------------------------------- #
+def _field_str(field: Field | PiiField | None) -> str | None:
+    """A present field's display value (PiiField → its MASKED display; Field → its value), stripped, or
+    None. A PiiField contributes only its non-raw masked last-4 — no raw PII enters the account key."""
+    if field is None or not field.is_present:
+        return None
+    value = field.display if isinstance(field, PiiField) else field.value
+    text = str(value).strip() if value is not None else ""
+    return text or None
+
+
+def resolve_accounts(snapshot: Snapshot) -> tuple[dict[str, list[str]], list[str]]:
+    """The FAIL-CLOSED account-identity resolution (the heart of LP-336). Returns
+    ``({account_key: [statement content_id, …]}, [unresolvable content_id, …])``.
+
+    A bank statement's account is identified by ``(institution, masked-number)`` — BOTH required, because
+    the masked number alone collides across institutions. A statement missing EITHER is UNRESOLVABLE (not
+    grouped, not dropped). The ``account_key`` is stable (derived from the identity, LP-312 spirit) so
+    LP-322 reconciliation matches an account across runs; it carries only the bank name + masked last-4
+    (both display-safe, the AS-1 subject-key precedent). Deterministic — reads parsed extraction fields."""
+    resolved: dict[
+        str, list[str]
+    ] = {}  # account_key -> content_ids, first-seen (deterministic) order
+    unresolvable: list[str] = []
+    if snapshot.documents.absent:
+        return resolved, unresolvable
+    for entry in snapshot.documents.entries:
+        if entry.document_type != _STATEMENT_DOC_TYPE:
+            continue  # only depository statements carry this account identity
+        institution = _field_str(entry.fields.get("bank_name"))
+        masked = _field_str(entry.fields.get("account_number_masked"))
+        if institution is None or masked is None:
+            unresolvable.append(entry.content_id)  # cannot identify → never a guessed grouping
+            continue
+        account_key = f"account:{institution.casefold()}:{masked}"
+        resolved.setdefault(account_key, []).append(entry.content_id)
+    return resolved, unresolvable
+
+
+def _account_unresolved_tag(content_id: str) -> Tag:
+    return Tag(
+        value="yes",
+        confidence=None,
+        reasoning=(
+            f"statement {content_id} has no resolvable account identity (missing institution and/or "
+            "masked account number) — not grouped, to avoid a guessed merge that could fabricate or hide "
+            "a chaining break"
+        ),
+        source_facts=(content_id,),
+        produced_by=TagProducedBy.DERIVED,
+        tag_role=TagRole.STRUCTURAL_FACT,
+        stage=TagStage.A,
+    )
+
+
+def _per_account(snapshot: Snapshot) -> list[Subject]:
+    """One subject per resolved ACCOUNT (its stable key + its statements' merged tags), PLUS one subject
+    per UNRESOLVABLE statement (its content_id + an ``account.unresolved`` marker), so a per_account rule
+    couldnt_checks the ones that could not be grouped rather than silently missing them (absent≠empty)."""
+    resolved, unresolvable = resolve_accounts(snapshot)
+    by_subject = {} if snapshot.tags.absent else snapshot.tags.by_subject
+    subjects: list[Subject] = []
+    for account_key, content_ids in resolved.items():
+        merged: dict[str, Tag] = {}
+        for (
+            cid
+        ) in content_ids:  # the account's statements' tags (a grouping-key convenience; a rule that
+            merged.update(
+                by_subject.get(cid, {})
+            )  # needs the ORDERED statements uses resolve_accounts)
+        subjects.append((account_key, merged))
+    for cid in unresolvable:
+        subjects.append((cid, {ACCOUNT_UNRESOLVED_TAG: _account_unresolved_tag(cid)}))
+    return subjects
+
+
 _ENUMERATORS: dict[str, Enumerator] = {
     "per_deposit": _per_deposit,
     "loan": _loan,
     "per_borrower": _per_borrower,
     "per_document": _per_document,
+    "per_account": _per_account,
 }
 
 
@@ -144,4 +243,10 @@ def is_known_enumerator(key: str) -> bool:
     return key in _ENUMERATORS
 
 
-__all__ = ["LOAN_SUBJECT", "enumerate_subjects", "is_known_enumerator"]
+__all__ = [
+    "ACCOUNT_UNRESOLVED_TAG",
+    "LOAN_SUBJECT",
+    "enumerate_subjects",
+    "is_known_enumerator",
+    "resolve_accounts",
+]

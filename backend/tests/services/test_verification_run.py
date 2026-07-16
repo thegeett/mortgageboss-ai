@@ -493,13 +493,14 @@ def test_retire_eligible_excludes_per_borrower_rules_when_no_borrower_resolved()
 
 
 def test_retire_guard_covers_every_document_derived_shape() -> None:
-    # The guard is generalized (LP-327): per_deposit / per_borrower / per_document all derive their
-    # subjects from the documents section, so a rule on ANY of them (incl. a future per_document
-    # judgment rule) is covered automatically — no per-shape special-casing left to forget.
+    # The guard is generalized (LP-327): per_deposit / per_borrower / per_document / per_account (LP-336)
+    # all derive their subjects from the documents section, so a rule on ANY of them (incl. a future
+    # per_account rule) is covered automatically — no per-shape special-casing left to forget.
     from app.services.verification_run import _DOCUMENT_DERIVED_ENUMERATIONS
 
     assert (
-        frozenset({"per_deposit", "per_borrower", "per_document"}) == _DOCUMENT_DERIVED_ENUMERATIONS
+        frozenset({"per_deposit", "per_borrower", "per_document", "per_account"})
+        == _DOCUMENT_DERIVED_ENUMERATIONS
     )
     # documents absent → AS-1 (per_deposit) drops via the SAME generic path (not by rule-id name).
     absent = _snapshot(_TXNS, uuid4()).model_copy(

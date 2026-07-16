@@ -9766,3 +9766,46 @@ inspectable. Cost: ~4s + ~270 tokens per call (claude-sonnet-4-5); keyless CI un
 an explicit `LP334_LIVE=1` flag, never the mere presence of a key). No rule/tag/engine/spec logic changed.
 Cross-refs: LP-317 (DimensionCalibration + the live seam), LP-333 (calibration as the activation blocker),
 LP-313/326 (the Reasoner seam + AI producers), LP-323-ID-C/-IN-C (the keyless family suites, unchanged).
+
+## ADR-277: per_account is an ENUMERATION concern (not a keying one), with a fail-closed identity (LP-336)
+
+**Context.** LP-323-AS-A found AS-6/AS-8/AS-10 group a borrower's bank-statement documents by ACCOUNT, but
+no `per_account` enumerator exists. The account identity available today — `stmt.account_masked` — is
+`fact_tags.csv`-flagged *"display only, non-matchable"*: `****1234` at Chase and `****1234` at Wells Fargo
+look IDENTICAL. A guessed grouping is dangerous: MIS-GROUPING two accounts FABRICATES a statement-chaining
+break (a false positive on fraud), and OVER-SPLITTING one HIDES a real break (a false-green) — PIN #1's
+cousin at the account level, the same danger LP-332's `borrower_id ↔ MISMO-index` resolution guarded.
+
+**Decision 1 — `per_account` is an ENUMERATOR, NOT a SubjectType.** LP-323-AS-A refuted the SubjectType
+option with evidence: a bank statement IS a `document`, so `stmt.*` facts key under the existing DOCUMENT
+subject; grouping by account is an ENUMERATION concern, not a second keying. **No fact keys under both
+document and account** (the divergence risk LP-331/332 repeatedly rejected). So `per_account` is one
+registry entry in `enumerators.py` (`subjects.py` is UNTOUCHED — no `account` SubjectType).
+
+**Decision 2 — the identity is `(institution, masked-number)`, both DETERMINISTIC, and the resolution is
+FAIL-CLOSED.** The masked number alone collides across institutions, so the institution is required. Both
+are parsed extraction fields — `bank_name` (a `Field`) + `account_number_masked` (a `PiiField`, masked
+last-4) — already landing in `DocumentEntry.fields` (`documents_section.py`). So **`stmt.institution` did
+NOT need to be added** (no new tag, no declaration, no uncalibrated AI): the enumerator reads `bank_name`
+directly, the same way `_per_borrower` reads `belongs_to`. **THE INVARIANT (mirroring LP-332):** a
+statement missing EITHER identifier is UNRESOLVABLE — SURFACED as its own subject with an
+`account.unresolved` marker (a non-vocabulary structural tag, the `DOC_TYPE_TAG` precedent), never grouped,
+never dropped — so a per_account rule couldnt_checks it WITH A REASON. A guessed grouping is worse than
+abstaining: abstaining says "I can't tell"; a guess makes a confident, wrong claim. The `account_key`
+(`account:{institution.casefold()}:{masked-last4}`) is stable across runs (LP-312 spirit → LP-322
+reconciliation) and carries only display-safe values (bank name + masked last-4, the AS-1 subject-key
+precedent — no raw PII).
+
+**Consequences.** Unblocks AS-6 (ownership), AS-8 (chaining — its enumerator; its pairwise-sequential
+EVALUATOR is a DEFERRED shape, the IN-6 precedent, NOT built here), AS-10 (recency), and every future
+per-account rule — from a spec's `subject_enumeration: per_account`, no new Python. `resolve_accounts` is
+exported so AS-8's future evaluator gets the grouping (and the ordered statements it needs). `per_account`
+was added to `_DOCUMENT_DERIVED_ENUMERATIONS` (zero accounts = no statements resolved, a degraded reason →
+not retire-eligible). **NEW residual limitation REPORTED (not patched):** the identity is the MASKED
+last-4, so two DISTINCT accounts at the SAME institution with the SAME last-4 mask identically → they would
+mis-group, and this is UNDETECTABLE from the masked display (raw account numbers are never stored,
+ADR-149). Rare, but real — a follow-on could add a fuller (still-masked) discriminator if extraction
+surfaces one. Equivalence held (every live rule identical; the LF-6T3N trace unchanged; per_account is
+additive). Cross-refs: LP-332 (the mirrored borrower_id resolution + its fail-closed failure mode),
+LP-323-AS-A (the recon + the SubjectType refutation), LP-325/326 (keying + gather), LP-312 (stable
+content-ids), ADR-149 (masked account numbers, never raw).
