@@ -19,9 +19,11 @@ real model (needs ``ANTHROPIC_API_KEY``). CI never depends on a key or a paid ca
 
 from __future__ import annotations
 
+import asyncio
 import re
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from decimal import Decimal, InvalidOperation
 from uuid import uuid4
 
 from app.verification.eval.calibration import DimensionCalibration
@@ -34,7 +36,13 @@ from app.verification.snapshot.model import (
     TagsSection,
 )
 from app.verification.tag_materialization.ai import Reasoner, produce_ai_group_tags
-from app.verification.tag_materialization.declarations import load_ai_groups, load_declarations
+from app.verification.tag_materialization.declarations import (
+    AiGroup,
+    load_ai_groups,
+    load_declarations,
+)
+
+_MAX_CONCURRENCY = 4
 
 _ABSTENTION = {None, "unknown", "n/a"}
 _PUNCT = re.compile(r"[^\w\s]")
@@ -42,12 +50,39 @@ _WS = re.compile(r"\s+")
 
 
 def _norm(value: str | None) -> str:
-    """The comparison normalizer — casefold + drop punct + collapse ws. So a golden 'Robert J Smith'
-    matches a predicted 'Robert J. Smith' (a normalized-name tag has many valid renderings); for an enum
-    (residence / yes / no) it is exact anyway."""
+    """The STRING comparison normalizer — casefold + drop punct + collapse ws. So a golden 'Robert J
+    Smith' matches a predicted 'Robert J. Smith' (a normalized-name tag has many valid renderings); for an
+    enum (residence / yes / no) it is exact anyway. This is the SAME casefold+drop_punct chain ID-1
+    applies to id.name_normalized (consistency.py), so a name scores as the rule would compare it. NUMERIC
+    tags must NOT use this — see _values_match (dropping the '.' collides different numbers)."""
     if value is None:
         return ""
     return _WS.sub(" ", _PUNCT.sub("", value.casefold())).strip()
+
+
+def _as_decimal(value: str | None) -> Decimal | None:
+    if value is None:
+        return None
+    try:
+        return Decimal(value.strip())
+    except (InvalidOperation, ValueError):
+        return None
+
+
+def _values_match(golden: str, predicted: str | None) -> bool:
+    """Compare a predicted tag value to its golden. When BOTH parse as numbers, compare as Decimals —
+    income.documented_monthly (which feeds IN-1's deterministic fraud verdict) is a numeric tag, and the
+    string normalizer would strip its decimal point and collide different magnitudes ('4333.33' vs
+    '43333.3' both → '433333', a 10x error scored correct; '6000' vs '6000.00' scored wrong). Production
+    compares these numerically (compare_values on Decimal operands), so calibration must too — with a
+    cent-level tolerance for rounding, which still catches order-of-magnitude errors. Otherwise fall back
+    to the string normalizer (names/enums)."""
+    if predicted is None:
+        return False
+    g_num, p_num = _as_decimal(golden), _as_decimal(predicted)
+    if g_num is not None and p_num is not None:
+        return abs(g_num - p_num) <= max(Decimal("0.01"), abs(g_num) * Decimal("0.001"))
+    return _norm(predicted) == _norm(golden)
 
 
 @dataclass(frozen=True)
@@ -84,10 +119,10 @@ class ScoredTag:
     @property
     def correct(self) -> bool:
         # A golden-abstention case is correct WHEN the tag abstains (measuring correct abstention, not
-        # over-abstention). Otherwise: committed AND matches after normalization.
+        # over-abstention). Otherwise: committed AND matches (numeric for numbers, normalized for strings).
         if self.golden_is_abstention:
             return self.abstained
-        return not self.abstained and _norm(self.predicted) == _norm(self.golden)
+        return not self.abstained and _values_match(self.golden, self.predicted)
 
 
 def _snapshot(doc: LabeledDoc) -> Snapshot:
@@ -106,43 +141,78 @@ def _snapshot(doc: LabeledDoc) -> Snapshot:
     )
 
 
-async def calibrate(docs: list[LabeledDoc], *, reasoner: Reasoner | None = None) -> list[ScoredTag]:
-    """Run each doc's AI group over its fields and score every golden tag. ``reasoner=None`` → the REAL
-    model (one call per doc); a stub scores the plumbing keyless. One doc's failure never aborts the run."""
-    groups = load_ai_groups()
-    decls = load_declarations()
-    scored: list[ScoredTag] = []
-    for doc in docs:
-        group = groups[doc.group]
-        allowed = {t: decls[t].allowed_values for t in group.tag_ids if t in decls}
+async def _score_doc(
+    doc: LabeledDoc,
+    group: AiGroup,
+    allowed: dict[str, tuple[str, ...] | None],
+    reasoner: Reasoner | None,
+) -> list[ScoredTag]:
+    """Score one doc's golden tags. A failure (a live transport error / timeout) records the doc's tags as
+    abstentions WITH the reason, so one doc never aborts the batch (the resilience the module promises)."""
+    try:
         produced = await produce_ai_group_tags(_snapshot(doc), group, allowed, reasoner=reasoner)
         tags = produced.get(doc.doc_id, {})
-        for tag_id, golden in doc.golden.items():
-            tag = tags.get(tag_id)
-            scored.append(
-                ScoredTag(
-                    doc_id=doc.doc_id,
-                    tag_id=tag_id,
-                    golden=golden,
-                    predicted=None if tag is None else str(tag.value),
-                    confidence=None if tag is None else tag.confidence,
-                    reasoning=None if tag is None else tag.reasoning,
-                )
+    except Exception as exc:  # a per-doc failure (live transport/timeout) never aborts the run
+        reason = f"scoring failed: {type(exc).__name__}"
+        return [
+            ScoredTag(doc.doc_id, tag_id, golden, None, None, reason)
+            for tag_id, golden in doc.golden.items()
+        ]
+    scored: list[ScoredTag] = []
+    for tag_id, golden in doc.golden.items():
+        tag = tags.get(tag_id)
+        scored.append(
+            ScoredTag(
+                doc_id=doc.doc_id,
+                tag_id=tag_id,
+                golden=golden,
+                predicted=None if tag is None else str(tag.value),
+                confidence=None if tag is None else tag.confidence,
+                reasoning=None if tag is None else tag.reasoning,
             )
+        )
     return scored
 
 
+async def calibrate(
+    docs: list[LabeledDoc],
+    *,
+    reasoner: Reasoner | None = None,
+    max_concurrency: int = _MAX_CONCURRENCY,
+) -> list[ScoredTag]:
+    """Run each doc's AI group over its fields and score every golden tag. ``reasoner=None`` → the REAL
+    model (one call per doc, run BOUNDED-CONCURRENTLY — the docs are independent). A stub scores the
+    plumbing keyless. One doc's failure never aborts the run (a failed call → abstentions with the
+    reason); results preserve input order."""
+    groups = load_ai_groups()
+    decls = load_declarations()
+    sem = asyncio.Semaphore(max_concurrency)
+
+    async def _bounded(doc: LabeledDoc) -> list[ScoredTag]:
+        group = groups[doc.group]
+        allowed = {t: decls[t].allowed_values for t in group.tag_ids if t in decls}
+        async with sem:
+            return await _score_doc(doc, group, allowed, reasoner)
+
+    per_doc = await asyncio.gather(*(_bounded(doc) for doc in docs))
+    return [s for doc_scored in per_doc for s in doc_scored]
+
+
 def summarize(scored: list[ScoredTag]) -> list[DimensionCalibration]:
-    """Aggregate per tag → the LP-317 DimensionCalibration (unknown-rate + accuracy-when-concrete)."""
+    """Aggregate per tag → the LP-317 DimensionCalibration (unknown-rate + accuracy-when-concrete). The
+    unknown-rate is measured over ANSWERABLE docs only: a doc whose golden IS an abstention (abstaining is
+    correct) is excluded, so correct abstentions can never trip over_abstaining. A wrong such case (the
+    model COMMITTED where it should have abstained) is still surfaced by failing_cases."""
     by_tag: dict[str, list[ScoredTag]] = {}
     for s in scored:
         by_tag.setdefault(s.tag_id, []).append(s)
     out: list[DimensionCalibration] = []
     for tag_id, group in sorted(by_tag.items()):
-        unknown = sum(1 for s in group if s.abstained)
-        concrete = [s for s in group if not s.abstained]
+        answerable = [s for s in group if not s.golden_is_abstention]
+        unknown = sum(1 for s in answerable if s.abstained)
+        concrete = [s for s in answerable if not s.abstained]
         correct = sum(1 for s in concrete if s.correct)
-        out.append(DimensionCalibration(tag_id, len(group), unknown, len(concrete), correct))
+        out.append(DimensionCalibration(tag_id, len(answerable), unknown, len(concrete), correct))
     return out
 
 

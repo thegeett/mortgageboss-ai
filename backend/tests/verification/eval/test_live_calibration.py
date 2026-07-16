@@ -77,9 +77,46 @@ async def test_a_wrong_prediction_is_a_failing_case_and_inspectable() -> None:
 
 
 async def test_normalized_comparison_accepts_valid_renderings() -> None:
-    # 'Robert J. Smith' matches golden 'Robert J Smith' (a normalized-name tag has many valid renderings).
-    (scored,) = await calibrate([_NAME_DOC], reasoner=_stub("name_normalized", "Robert  smith"))
-    assert scored.correct  # casefold + collapse-ws
+    # 'Robert J. Smith' matches golden 'Robert J Smith' — drop_punct removes the '.', so a valid rendering
+    # is not a false failure (the same casefold+drop_punct chain ID-1 applies to id.name_normalized).
+    doc = LabeledDoc(
+        "d1",
+        "drivers_license",
+        "id_name",
+        {"full_name": "Robert J Smith"},
+        {"id.name_normalized": "Robert J Smith"},
+    )
+    (scored,) = await calibrate([doc], reasoner=_stub("name_normalized", "Robert J. Smith"))
+    assert scored.correct  # casefold + drop_punct + collapse-ws
+
+
+async def test_numeric_tags_are_compared_numerically_not_as_strings() -> None:
+    # income.documented_monthly is NUMERIC (feeds IN-1's fraud verdict). A string normalizer would strip
+    # the '.' and collide magnitudes; numeric comparison must catch a 10x error and accept a re-formatted
+    # equal value.
+    num_doc = LabeledDoc(
+        "ps",
+        "pay_stub",
+        "income_amounts",
+        {"gross_pay": "x"},
+        {"income.documented_monthly": "6000"},
+    )
+    wrong = await calibrate([num_doc], reasoner=_stub("documented_monthly", "60000"))  # 10x off
+    assert not wrong[0].correct  # a decimal-point string collision must NOT score this correct
+    same = await calibrate(
+        [num_doc], reasoner=_stub("documented_monthly", "6000.00")
+    )  # equal value
+    assert same[
+        0
+    ].correct  # '6000' == '6000.00' numerically (a string normalizer would call it WRONG)
+
+
+async def test_a_wrong_commit_on_a_golden_abstention_still_fails() -> None:
+    # Excluding golden-abstention docs from the unknown-RATE must not hide a wrong COMMIT: a doc whose
+    # golden is 'unknown' where the model invents a name is still a failing case.
+    no_name = LabeledDoc("du", "drivers_license", "id_name", {}, {"id.name_normalized": "unknown"})
+    (scored,) = await calibrate([no_name], reasoner=_stub("name_normalized", "Invented Name"))
+    assert not scored.correct and failing_cases([scored]) == [scored]
 
 
 async def test_over_abstention_counts_as_unknown() -> None:
