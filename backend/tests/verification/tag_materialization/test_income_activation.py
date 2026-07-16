@@ -14,6 +14,7 @@ orchestrator's required AI groups. See docs/tickets/LP-333.md.
 
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime
 from uuid import uuid4
 
@@ -28,6 +29,11 @@ from app.verification.snapshot.model import (
     MismoSection,
     Snapshot,
     TagsSection,
+)
+from app.verification.tag_materialization.ai import (
+    AiGroupResult,
+    AiSubjectJudgment,
+    AiTagJudgment,
 )
 from app.verification.tag_materialization.producer import materialize_tags
 
@@ -81,6 +87,48 @@ async def test_derived_abstains_when_its_feeding_tag_is_absent() -> None:
     # No pay_date field → income.pay_date absent → the derived tag abstains (honest couldnt_check feed).
     out = await materialize_tags(_snap(doc_fields={}), only_groups=_NO_AI, only_subjects=_SUBJECTS)
     assert out.tags.by_subject["loan"]["income.days_since_most_recent_pay"].value == "unknown"
+
+
+class _AiStub:
+    """A deterministic income_amounts reasoner — returns the given short-name values for each subject."""
+
+    def __init__(self, by_short: dict[str, str]) -> None:
+        self.by_short = by_short
+
+    async def __call__(self, context_json: str) -> AiGroupResult:
+        subjects = json.loads(context_json)["subjects"]
+        judgments = [
+            AiSubjectJudgment(
+                index=int(s["index"]),
+                tags={k: AiTagJudgment(v, 0.9, "stub") for k, v in self.by_short.items()},
+            )
+            for s in subjects
+        ]
+        return AiGroupResult(judgments, 1, 1, "stub", False)
+
+
+async def test_derived_recipe_reads_freshly_produced_ai_tags() -> None:
+    # THE REORDER'S MOTIVATING CASE (AI → derived): income.documented_monthly is an AI tag (income_amounts
+    # group), and the per-borrower shortfall recipe AGGREGATES it. Derived runs LAST, so the AI tag produced
+    # THIS run is visible. Before the fix (derived BEFORE ai) the recipe read an empty tags layer → abstained.
+    snap = _snap(
+        doc_fields={},  # the AI stub supplies documented_monthly — not a parsed field
+        mismo={
+            "borrower.1.borrower_id": _f(str(_B)),
+            "borrower.1.income.1.monthly_amount": _f("5000"),
+        },
+    )
+    stub = _AiStub({"type": "base", "documented_monthly": "3000", "qualifying_monthly": "3000"})
+    out = await materialize_tags(
+        snap,
+        ai_reasoners={"income_amounts": stub},
+        only_groups=frozenset({"income_amounts"}),
+        only_subjects=_SUBJECTS,
+    )
+    # The AI tag materialized on the document this run...
+    assert out.tags.by_subject["ps"]["income.documented_monthly"].value == "3000"
+    # ...and the derived PER-BORROWER recipe SAW it: (5000 - 3000) / 5000 = 0.4 (AI → derived, reorder).
+    assert out.tags.by_subject[str(_B)]["income.documented_income_shortfall_pct"].value == "0.4"
 
 
 # --------------------------------------------------------------------------- #

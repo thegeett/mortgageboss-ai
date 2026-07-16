@@ -59,7 +59,7 @@ async def materialize_tags(
     }
 
     # Order is parsed → ai → DERIVED-LAST (LP-333). A derived recipe may AGGREGATE other materialized
-    # tags (the income recipes sum a borrower's documented income across its documents), so it must see
+    # tags (the income recipes read a borrower's documented income across its documents), so it must see
     # the parsed + AI tags produced THIS run — not the original (pre-materialization) tags layer. Derived
     # therefore runs last, against a snapshot carrying the freshly-built tags. A loan-level recipe that
     # reads only raw MISMO (id.app_required_fields_present) is unaffected (identical output either order).
@@ -96,8 +96,15 @@ async def materialize_tags(
         _merge(by_subject, produced)
 
     # 3. derived — deterministic recipes, run LAST against the snapshot carrying the parsed + AI tags so
-    #    a recipe that aggregates them sees them (the LP-333 data-flow fix).
-    working = snapshot.model_copy(update={"tags": TagsSection.present(by_subject)})
+    #    a recipe that aggregates them sees them (the LP-333 data-flow fix). ``working`` is a transient
+    #    READ view over the live ``by_subject`` map: model_construct skips re-validating the (already
+    #    validated) Tag objects — the one authoritative validated build is the return below, not this
+    #    hot-path view. Because it references ``by_subject``, a derived recipe also sees any derived tag
+    #    merged EARLIER in this loop, so a recipe may depend only on a tag produced before it (parsed, AI,
+    #    or an earlier-declared derived tag in tag_production.yaml) — never a later-declared derived tag.
+    working = snapshot.model_copy(
+        update={"tags": TagsSection.model_construct(by_subject=by_subject, absent=False)}
+    )
     for decl in declarations.values():
         if decl.mode is ProductionMode.DERIVED and in_scope(decl.subject):
             _merge(by_subject, produce_derived_tags(decl, working))

@@ -7,8 +7,10 @@ no-AI cost property + the judgment armor + the derived-tag abstention, keyless v
 EVALUATE, DON'T FIX. Every rule gets both directions (a must-FIRE + a must-not-fire), the fail-closed
 cases, the LP-323-IN-A §4 domain edge, and — NEW for this wave — REAL numeric boundaries (IN-1's 5%) and
 case 12 (a derived tag abstaining → couldnt_check, the path ID could never test). N/As are asserted
-explicitly. NONE of the 13 rules is activated (ACTIVE_RULE_IDS is unchanged); each is exercised by calling
-its evaluator directly — activation gates the orchestrator, not the evaluator. IN-6 is DEFERRED (no spec).
+explicitly. This eval is INDEPENDENT of activation — each rule is exercised by calling its evaluator
+directly (activation gates the orchestrator, not the evaluator), so it holds whether or not a rule is in
+ACTIVE_RULE_IDS (IN-2 is active as of LP-333; IN-1 was activated by LP-332, then de-activated by LP-333).
+IN-6 is DEFERRED (no spec).
 
 THREE KNOWN-WRONG behaviours are PINNED here (asserting the CURRENT behaviour, documented in the doc, NOT
 fixed): (1) loan-level aggregate MASKING of per-borrower income fraud — the #1 false-green; (2) IN-11
