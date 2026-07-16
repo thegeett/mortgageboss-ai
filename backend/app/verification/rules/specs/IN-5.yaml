@@ -36,6 +36,12 @@ consistency:
     - drop_punct
     - collapse_ws
     - strip
+    # LP-340 / ADR-281: a corporate entity suffix (Inc/LLC/Corp/Co/Ltd) is FORMAT, not content, for
+    # employer matching — a suffix change is a restructuring, not an employer change (Geet's decision).
+    # ACCEPTED TRADE-OFF (Priya item): `Acme Inc` and `Acme LLC` now match at the exact bookend and the
+    # fuzzy leg never runs. If Priya rules that an Inc->LLC change IS worth flagging, REVERSE by deleting
+    # this one line. The TAG still reports the full stated name (LP-335); the strip is this rule's job.
+    - drop_entity_suffix
   confidence_floor: 0.5
   judge:
     system_prompt: |-

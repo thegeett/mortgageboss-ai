@@ -292,11 +292,18 @@ async def test_in5_full() -> None:
     stub = _Reasoner("disagree")
     exact = await _in5({"pay": "Acme Corp", "w2": "Acme Corp"}, stub)
     assert _verdicts(exact) == [Verdict.SATISFIED] and stub.calls == 0
-    # 5 <2 sources → couldnt_check (ABSENT≠DISAGREEING). 13 legal-vs-DBA → AI agrees, no fire.
+    # 5 <2 sources → couldnt_check (ABSENT≠DISAGREEING).
     lone = await _in5({"pay": "Acme Corp"}, _Reasoner())
     assert _verdicts(lone) == [Verdict.COULDNT_CHECK] and "nothing to compare" in lone[0].reasoning
+    # 13a (LP-340): "Acme Corporation" vs "Acme" is now a benign SUFFIX difference — drop_entity_suffix
+    # collapses it at the EXACT bookend → satisfied, NO AI call (the case the convention optimises for).
+    suffix = _Reasoner("agree")
+    suffix_diff = await _in5({"pay": "Acme Corporation", "w2": "Acme"}, suffix)
+    assert _verdicts(suffix_diff) == [Verdict.SATISFIED] and suffix.calls == 0
+    # 13b: a genuine common-name/DBA variance that is NOT a suffix still reaches the AI judge, which
+    # agrees → satisfied + ratification_pending (the fuzzy leg survives for the real signal).
     dba = _Reasoner("agree")
-    benign = await _in5({"pay": "Acme Corporation", "w2": "Acme"}, dba)
+    benign = await _in5({"pay": "Acme Corporation", "w2": "Acme Trucking"}, dba)
     assert (
         _verdicts(benign) == [Verdict.SATISFIED]
         and dba.calls == 1

@@ -361,7 +361,9 @@ _CONSISTENCY_TEMPLATE_FIELDS = frozenset({"values", "sources", "count"})
 # to a function; declaring the KEY SET here (data, no evaluator import) lets a spec be validated at
 # LOAD — a typo'd key fails loud rather than as an uncaught KeyError mid-run (the rules step is not
 # stage-backstopped). The evaluator asserts its function registry covers exactly this set.
-KNOWN_NORMALIZERS = frozenset({"strip", "casefold", "collapse_ws", "drop_punct", "date"})
+KNOWN_NORMALIZERS = frozenset(
+    {"strip", "casefold", "collapse_ws", "drop_punct", "date", "drop_entity_suffix"}
+)
 
 
 class ConsistencyOutcome(BaseModel):

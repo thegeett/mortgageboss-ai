@@ -22,6 +22,32 @@
 #     allowed_values: ["yes", "no", "unknown"]
 #     description: Is the borrower's residency status eligible for the loan program (ID-8 verdict).
 #     produced_by: AI
+#
+# =============================================================================================
+# THE `*_normalized` TAG CONVENTION (LP-340 / ADR-281) — binds EVERY `*_normalized` tag, present
+# and future (employer, name, address, and every family's future ones). Read this before minting a
+# new one; do not re-decide it by accident.
+#
+#   GENERAL RULE (D3): a `*_normalized` tag reports the value THE DOCUMENT STATES, canonicalized for
+#   FORMAT ONLY — casing, whitespace, punctuation, abbreviation expansion (St->Street). Normalize
+#   FORMAT, NOT CONTENT: content differences (a different name, a different street) are the SIGNAL the
+#   consistency rules exist to catch — never erase them in the tag. The tag reports; the RULE decides
+#   how to compare (LP-335's principle — no downstream-matching concern in a tag prompt/exemplar).
+#
+#   RECORDED EXCEPTION (D1, Geet's decision): a corporate ENTITY SUFFIX (Inc/LLC/Corp/Co/Ltd) is
+#   declared to be FORMAT, not content, for EMPLOYER matching — a suffix change is a restructuring,
+#   not an employer change. It is stripped by the RULE via the declared `drop_entity_suffix` normalizer
+#   (currently IN-5 only), NOT by the tag — the tag still reports `Acme Logistics Inc` in full. This
+#   is a deliberate, recorded exception to the general rule, chosen (not overlooked). ACCEPTED
+#   TRADE-OFF / PRIYA ITEM: `Acme Inc` and `Acme LLC` then compare equal — reversible by removing the
+#   one `drop_entity_suffix` line from the rule's chain.
+#
+#   NAME (D2): a name `*_normalized` tag reports the document's PRIMARY printed name of record; it does
+#   NOT prefer a fuller asserted/alternate form (the fuzzy consistency judge reconciles variants).
+#
+#   SCORING (D4): genuine content variance (nicknames, maiden vs married) still cannot be string-equality
+#   scored (FINDING-2) — that is the fuzzy-scoring method's own ticket, not this convention.
+# =============================================================================================
 
 tags:
   # ID-9's rule_judgment output tag (LP-329). A NEW verdict tag added via the hand-editable overlay —

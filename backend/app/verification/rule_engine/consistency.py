@@ -81,12 +81,51 @@ def _date(value: str) -> str:
     return d.isoformat() if d is not None else value.strip()
 
 
+# LP-340: a corporate ENTITY SUFFIX (Inc / LLC / Corp / Co / Ltd …) is FORMAT, not content, for the
+# purpose of matching an employer across a borrower's documents — a suffix change is a restructuring, not
+# an employer change (Geet's decision, ADR-281). This is a DECLARED normalizer a rule opts into on its
+# `normalization` chain (currently IN-5 only); the TAG keeps reporting what the document states (LP-335's
+# principle — the strip is the RULE's comparison convention, not baked into the tag prompt).
+_ENTITY_SUFFIXES = frozenset(
+    {
+        "inc",
+        "incorporated",
+        "llc",
+        "lc",
+        "llp",
+        "lp",
+        "ltd",
+        "limited",
+        "corp",
+        "corporation",
+        "co",
+        "company",
+        "pc",
+        "plc",
+    }
+)
+
+
+def _drop_entity_suffix(value: str) -> str:
+    """Strip trailing corporate entity-suffix tokens so ``Acme Logistics Inc`` and ``Acme Logistics LLC``
+    (and ``Acme Logistics``) compare equal (LP-340 / ADR-281). Applied AFTER ``drop_punct``/``collapse_ws``,
+    so it matches bare lowercase tokens (``inc``, not ``Inc.``). Never strips to empty — a firm literally
+    named ``Company`` keeps its sole token. ACCEPTED TRADE-OFF (the Priya item): two genuinely different
+    legal entities sharing a base name (``Acme Inc`` vs ``Acme LLC``) then match — reversible by removing
+    this one key from a rule's chain."""
+    tokens = value.split()
+    while len(tokens) > 1 and tokens[-1] in _ENTITY_SUFFIXES:
+        tokens = tokens[:-1]
+    return " ".join(tokens)
+
+
 _NORMALIZERS: dict[str, Callable[[str], str]] = {
     "strip": str.strip,
     "casefold": str.casefold,
     "collapse_ws": lambda s: _WS.sub(" ", s),
     "drop_punct": lambda s: _PUNCT.sub("", s),
     "date": _date,
+    "drop_entity_suffix": _drop_entity_suffix,
 }
 
 # Drift guard: the normalizer functions here must exactly cover the key set specs validate against at

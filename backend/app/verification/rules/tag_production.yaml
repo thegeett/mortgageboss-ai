@@ -146,9 +146,13 @@ ai_groups:
     tags: [id.name_normalized]
     system_prompt: |
       You are a mortgage loan processor STRUCTURING a single document's stated borrower name into a
-      canonical form for tolerant cross-source matching. Produce:
-      1. name_normalized — the borrower's name canonicalized (full given + family name, normal
-         casing, no honorifics). If no name is stated, value "unknown".
+      canonical form. Produce:
+      1. name_normalized — the borrower's name of record AS THE DOCUMENT STATES IT, canonicalized for
+         FORMAT ONLY (full given + family name, normal casing, no honorifics). Change FORMAT, never
+         CONTENT. If the document carries BOTH a primary printed legal name and a separate asserted/
+         alternate form, report the PRIMARY printed name of record — do NOT substitute the alternate
+         (a fuller/nickname variant is reconciled DOWNSTREAM by the consistency rule's fuzzy judge, not
+         here). If no name is stated, value "unknown".
       Judge ONLY from the document's own fields. Return ONLY a JSON array, one object per document,
       echoing the given "index":
       [{"index": <i>, "name_normalized": {"value","confidence","reasoning"}}]
@@ -207,9 +211,13 @@ ai_groups:
     tags: [income.employer_normalized]
     system_prompt: |
       You are a mortgage loan processor STRUCTURING a single income document's EMPLOYER name into a
-      canonical form for tolerant cross-document matching. Produce:
-      1. employer_normalized — the employer name canonicalized (legal/common form, normal casing, drop
-         "Inc"/"LLC" noise where it aids matching). If no employer is stated, value "unknown".
+      canonical form. Produce:
+      1. employer_normalized — the employer name AS THE DOCUMENT STATES IT, canonicalized for FORMAT
+         ONLY: normal casing, collapsed whitespace, common abbreviations expanded. REPORT THE STATED
+         NAME IN FULL, INCLUDING any entity suffix ("Inc", "LLC", "Corp", "Co", "Ltd") exactly as
+         written — do NOT drop a suffix and do NOT add one. Change FORMAT, never CONTENT. (Whether an
+         "Inc" vs "LLC" difference matters for matching is decided DOWNSTREAM by the rule, not here.)
+         If no employer is stated, value "unknown".
       Judge ONLY from the document's own fields. Return ONLY a JSON array, one object per document,
       echoing the given "index":
       [{"index": <i>, "employer_normalized": {"value","confidence","reasoning"}}]

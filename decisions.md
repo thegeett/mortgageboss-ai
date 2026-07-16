@@ -9917,3 +9917,51 @@ own follow-in). EVALUATE, DON'T FIX held: no rule/tag/engine/spec behavior chang
 unchanged, the frozen trace unchanged. Corrects ADR-279 (which repeated the n=0 claim). Cross-refs: LP-337
 (the bug's origin), LP-321a (the stripped-fixture-fiction precedent), LP-333 (bucket B wiring gaps), LP-334
 (the harness + FINDING-2), LP-335 (FINDING-1).
+
+## ADR-281: The `*_normalized` tag convention — normalize FORMAT not CONTENT; strip entity suffixes in the RULE (LP-340)
+
+**Context.** LP-337's first real live calibration measured `income.employer_normalized` at 25% (6/8) and
+`id.name_normalized` at 50% — but the model was NOT wrong. It stripped the entity suffix (`Acme Logistics`
+vs the golden `Acme Logistics Inc`) and chose the fuller `asserted_name` over `full_name`, both consistent,
+reasoned behaviours against a tag the vocabulary never defined. **The silence was the bug:** "normalized"
+had no stated meaning, so the model chose one convention and the human labeler another. The `income_employer`
+prompt even hedged — *"drop 'Inc'/'LLC' noise where it aids matching"* — smuggling a downstream MATCHING
+concern into a tag exemplar (FINDING-1's exact class, LP-335).
+
+**Decision.** Define the `*_normalized` convention once, for every such tag present and future:
+- **General rule (D3): normalize FORMAT, not CONTENT.** A `*_normalized` tag reports the value the document
+  STATES, canonicalized for format only (casing, whitespace, punctuation, abbreviation expansion). Content
+  differences are the SIGNAL the consistency rules exist to catch — a tag must never erase them. The TAG
+  reports; the RULE decides how to compare (LP-335's principle).
+- **Recorded exception (D1, Geet's decision): strip the corporate ENTITY SUFFIX** (Inc/LLC/Corp/Co/Ltd) —
+  declared to be FORMAT, not content, for employer matching (a suffix change is a restructuring, not an
+  employer change). **Implemented in the RULE, not the tag:** a new declared normalizer `drop_entity_suffix`
+  on IN-5's `normalization` chain (the LP-325 registry's sanctioned extension — a registry entry, like the
+  LP-328 date coercer, not evaluator logic). The tag keeps reporting `Acme Logistics Inc` in full; IN-5
+  strips at the exact bookend. **Scoped to IN-5 (INERT) only — ID-1 and ID-4 (LIVE) chains untouched.**
+- **Name (D2): report the document's PRIMARY printed name of record** (not a fuller asserted/alternate
+  form); ID-1's fuzzy judge reconciles genuine variants. Argued (not a Geet decision) — a defensible
+  default, Priya-confirmable.
+- **Scoring (D4):** genuine content variance (nicknames, maiden vs married) still can't be string-equality
+  scored — FINDING-2's fuzzy-scoring method, its own ticket. Not this convention's job.
+
+**Consequences.**
+- **ACCEPTED TRADE-OFF (the PRIYA item):** IN-5's exact bookend now treats `Acme Logistics Inc` and
+  `Acme Logistics LLC` as identical → they match, and the fuzzy leg never runs. Those are different legal
+  entities; a real Inc→LLC change passes silently. Accepted because a suffix change on the same base name is
+  a restructuring, not an employer change. **PRIYA:** *"Across a pay-stub and a W-2, is `Acme Inc` vs
+  `Acme LLC` worth flagging as an employer change?"* If yes, **reverse by deleting the one `drop_entity_suffix`
+  line from IN-5's chain** — the named test `test_in5_inc_vs_llc_matches_THE_ACCEPTED_TRADEOFF` flips and is
+  the findable anchor. The countervailing benefit: no AI call + no ratification-pending finding on the COMMON
+  benign `Inc`-vs-no-suffix formatting difference.
+- **The golden labels' status flips:** Geet's `Acme Logistics Inc` labels are now CORRECT (the tag preserves
+  the full stated form); the model's stripping became the RULE's job. So a better `employer_normalized`
+  number after this is the GOLDEN matching the convention, NOT the model improving. No re-measure was done
+  here (LP-335 discipline: one principled change, measure once — the re-run waits for the judgment CSV).
+- Every FUTURE `*_normalized` tag (assets/credit/property waves) inherits this convention, recorded in the
+  vocabulary overlay's header. No live rule changed; `ACTIVE_RULE_IDS` unchanged; the declared-normalizer
+  registry is the DATA extension point (drift-guard `set(_NORMALIZERS) == KNOWN_NORMALIZERS` intact).
+
+Cross-refs: LP-325 (the exact bookend + the declared-normalizer registry this extends), LP-328 (the date
+coercer — the registry-entry precedent), LP-334 (FINDING-2), LP-335 (FINDING-1 + the tag-reports/rule-
+compares principle), LP-337 (the measurement that found this).
