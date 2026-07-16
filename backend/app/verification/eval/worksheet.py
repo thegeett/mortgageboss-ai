@@ -1,27 +1,27 @@
-"""LP-337 — the LF-6T3N labeling worksheet generator (the instrument) + its scoring run.
+"""LF-6T3N labeling worksheet generator + scoring run (LP-337, corrected by LP-338).
 
-**THIS IS A BIAS HUNT, NOT VALIDATION.** LF-6T3N is ONE conventional purchase (5 bank statements, 50
-transactions). Only ``txn.*`` reaches a real n; everything else is n<=6 or n=0 on this file. A clean
-result here does NOT unblock the inert rules — activation needs RATES across varied files + Priya's bars
-(see docs/tickets/LP-337.md). LP-334's own conclusion: **n=2-5 finds BIASES, not RATES.**
+**THIS IS A BIAS HUNT, NOT VALIDATION.** A clean result does NOT unblock the inert rules — activation needs
+RATES across VARIED files + Priya's bars (see docs/tickets/LP-337.md / LP-338.md).
 
-Two halves, both reusing existing machinery UNCHANGED:
+LP-338 fixed a conflation bug. LP-337's coverage function statically hardcoded the txn.* family and
+declared id.* / income.* / asset.* "UNMEASURABLE" — it measured *what the fixture happened to contain*
+(and even that only for txn.*), then LABELLED that as the file's inherent capacity and drew a false
+conclusion (*"txn.* is the calibration ceiling; other families need files that don't exist"*). Two distinct
+numbers were conflated. This module now reports THREE separate facts per AI tag (absent != empty != unwired
+— the invariant this project handles at every other level, now at the coverage level):
 
-1. THE WORKSHEET (deterministic + KEYLESS). ``build_worksheet(snapshot)`` enumerates every scorable
-   AI-tag INSTANCE the file would produce — one row per (tag, subject) — with enough document context to
-   label it WITHOUT the file and WITHOUT the model's prediction (a labeler who sees the prediction anchors
-   to it, so predictions are kept OUT of the artifact). Rows split by WHO should label:
-     * MECHANICAL — a factual read from the document (Geet can label it): ``txn.is_money_in``.
-     * JUDGMENT — a domain call (Priya; Geet's label would be another guess): ``txn.apparent_category``
-       on an ambiguous wire, ``txn.has_identified_source`` (sourcing), and the free-text tags.
-   Free-text tags (``txn.counterparty`` / ``txn.source_reference``) are enumerated for human review but
-   marked DEFERRED from % scoring — string equality cannot honestly score them (FINDING-2, LP-334).
+1. **FILE CAPACITY** — how many instances the SNAPSHOT could support for the tag's DECLARED subject
+   (`tag_production.yaml`). The labeling ceiling. Independent of wiring / ACTIVE_RULE_IDS.
+2. **PIPELINE YIELD** — how many the wired pipeline produces today (a declared AI tag runs; a vocabulary
+   tag with no tag_production declaration does not). A wiring fact, not a file fact.
+3. **CONTENT-EMPTINESS** — a subject that EXISTS but carries no usable fields (a brokerage_statement with
+   `fields = {}`) genuinely cannot be labeled — distinct from "no subject" and from "not wired".
 
-2. THE SCORING RUN (live, opt-in). ``calibrate_lf6t3n(snapshot, golden, reasoner=...)`` runs the REAL
-   Stage-A structuring reasoner (the ``txn_stage_a`` group — AS-1's UNAUDITED prompt) over the snapshot
-   and scores predicted-vs-golden, reusing LP-334's ``ScoredTag`` / ``summarize`` / ``failing_cases``.
-   An UNFILLED worksheet → NO numbers + a clear message (the correct outcome, not a failure). Keyless-safe:
-   a stub ``reasoner`` exercises the plumbing with no key; ``reasoner=None`` runs the real model.
+Status per tag: ``labelable`` (capacity>0, wired) · ``wiring_gap`` (capacity>0, yield=0 — LP-333 bucket B,
+reported not fixed) · ``content_empty`` (subjects exist but all field-empty) · ``no_subject`` (0 subjects).
+
+Both halves reuse existing machinery UNCHANGED (LP-317 ``DimensionCalibration``; LP-334 ``ScoredTag`` /
+``summarize``). Deterministic + KEYLESS for generation; the live scoring run is opt-in (``LP334_LIVE=1``).
 """
 
 from __future__ import annotations
@@ -34,215 +34,387 @@ from pathlib import Path
 from app.verification.eval.live_calibration import ScoredTag
 from app.verification.rule_engine.registry import ACTIVE_RULE_IDS
 from app.verification.snapshot.fields import Field
-from app.verification.snapshot.model import Snapshot
+from app.verification.snapshot.model import DocumentEntry, Snapshot
+from app.verification.snapshot.tag import Tag
 from app.verification.tag_materialization.ai import Reasoner, produce_ai_group_tags
-from app.verification.tag_materialization.declarations import load_ai_groups, load_declarations
+from app.verification.tag_materialization.declarations import (
+    ProductionMode,
+    TagDeclaration,
+    load_ai_groups,
+    load_declarations,
+)
 
-# The Stage-A structuring group (AS-1's txn_stage_a prompt) is the only group the GENERIC producer scores
-# on this file; its two enum tags are the clean n=50 measurement this ticket prioritizes.
-_STAGE_A_GROUP = "txn_stage_a"
-_SCORABLE_STAGE_A = frozenset({"txn.is_money_in", "txn.apparent_category"})
 _CREDIT = "credit"
+_FREE_TEXT = frozenset({"txn.counterparty", "txn.source_reference"})
 
 
 @dataclass(frozen=True)
-class TagCoverage:
-    """One AI tag's coverage metadata for LF-6T3N — the auditable map that shapes the worksheet + report.
-
-    ``money_in_only``: the Stage-B sourcing tags only exist for money-in CANDIDATES, so they are
-    enumerated for credit-direction transactions (production's candidate search keys on ``is_money_in``;
-    ``direction == "credit"`` is the deterministic snapshot proxy)."""
+class _TagMeta:
+    """Per-tag eval metadata (bucket + scoring + rules). ``wired`` marks a tag the DECLARED tag-production
+    pipeline produces; a vocabulary AI tag with no declaration (the Stage-B sourcing tags) is wired=False
+    -> a wiring gap, not an unmeasurable tag."""
 
     tag_id: str
-    subject_kind: str  # "transaction" (the only labelable kind on this file)
-    scoring: str  # "enum" | "free_text_deferred"
+    scoring: str  # "enum" | "string" | "free_text_deferred"
     bucket: str  # "mechanical" | "judgment"
-    producer: str  # a human label of the producing pass
     consuming_rules: tuple[str, ...]
-    allowed_values: tuple[str, ...] | None
     money_in_only: bool = False
+    wired: bool = True
+
+
+@dataclass(frozen=True)
+class _Group:
+    """An AI group's coverage metadata: its subject kind + (for document tags) the document_types whose
+    content the group's tags can be labeled from. The doc-type applicability is eval metadata — the
+    architecture keys AI groups by subject only and relies on the prompt to abstain off-type."""
+
+    subject_kind: str  # "transaction" | "document"
+    applicable_types: tuple[str, ...]  # () for transaction (all txns)
+    tags: tuple[_TagMeta, ...]
+
+
+# The coverage map. Document-subject applicability is the honest capacity proxy (which doc types carry the
+# fields a tag is labeled from). Buckets: MECHANICAL = a factual read (Geet); JUDGMENT = a domain call
+# (Priya) — incl. id.current_address_type, the REAL-DL check of LP-335's FINDING-1 fix.
+_GROUPS: tuple[_Group, ...] = (
+    _Group(
+        "transaction",
+        (),
+        (
+            _TagMeta("txn.is_money_in", "enum", "mechanical", ("AS-1", "AS-7", "AS-8", "AS-12")),
+            _TagMeta(
+                "txn.apparent_category",
+                "enum",
+                "judgment",
+                ("AS-1", "AS-2", "AS-5", "AS-12", "IN-1"),
+            ),
+        ),
+    ),
+    # Stage-B sourcing tags: vocabulary AI tags with NO tag_production declaration (produced by the
+    # separate tag_correlation pass, not the generic pipeline) -> wired=False -> a wiring gap.
+    _Group(
+        "transaction",
+        (),
+        (
+            _TagMeta(
+                "txn.has_identified_source",
+                "enum",
+                "judgment",
+                ("AS-1", "AS-2", "AS-5"),
+                money_in_only=True,
+                wired=False,
+            ),
+            _TagMeta(
+                "txn.counterparty",
+                "free_text_deferred",
+                "judgment",
+                ("AS-2", "AS-5", "AS-12", "FR-5"),
+                money_in_only=True,
+                wired=False,
+            ),
+            _TagMeta(
+                "txn.source_reference",
+                "free_text_deferred",
+                "judgment",
+                ("AS-1", "AS-5"),
+                money_in_only=True,
+                wired=False,
+            ),
+        ),
+    ),
+    _Group(
+        "document",
+        ("drivers_license", "passport", "state_id"),
+        (_TagMeta("id.name_normalized", "string", "mechanical", ("ID-1",)),),
+    ),
+    _Group(
+        "document",
+        ("drivers_license", "passport", "state_id"),
+        (
+            _TagMeta("id.address_normalized", "string", "mechanical", ("ID-4",)),
+            _TagMeta(
+                "id.current_address_type", "enum", "judgment", ("ID-4",)
+            ),  # LP-335 real-DL check (high value)
+        ),
+    ),
+    _Group(
+        "document",
+        ("title_commitment",),
+        (_TagMeta("id.title_vesting_consistent", "enum", "judgment", ("ID-7",)),),
+    ),
+    _Group(
+        "document",
+        ("power_of_attorney",),
+        (_TagMeta("id.poa_present_and_acceptable", "enum", "judgment", ("ID-9",)),),
+    ),
+    _Group(
+        "document",
+        ("pay_stub", "w2"),
+        (
+            _TagMeta("income.type", "enum", "judgment", ("IN-1",)),
+            _TagMeta("income.documented_monthly", "string", "mechanical", ("IN-1",)),
+            _TagMeta("income.qualifying_monthly", "string", "judgment", ("IN-1",)),
+        ),
+    ),
+    _Group(
+        "document",
+        ("pay_stub", "w2", "voe", "employment_offer_letter"),
+        (_TagMeta("income.employer_normalized", "string", "mechanical", ("IN-5",)),),
+    ),
+    _Group(
+        "document",
+        ("voe", "employment_offer_letter"),
+        (
+            _TagMeta("income.voe_present", "enum", "judgment", ("IN-2",)),
+            _TagMeta("income.future_employment", "enum", "judgment", ("IN-2",)),
+            _TagMeta("income.offer_letter_present", "enum", "judgment", ("IN-2",)),
+        ),
+    ),
+    _Group(
+        "document",
+        ("pay_stub", "w2"),
+        (
+            _TagMeta("income.has_2yr_history", "enum", "judgment", ("IN-3",)),
+            _TagMeta("income.is_declining", "enum", "judgment", ("IN-1",)),
+            _TagMeta("income.same_line_of_work", "enum", "judgment", ("IN-3",)),
+            _TagMeta("income.continuance_3yr", "enum", "judgment", ("IN-4",)),
+        ),
+    ),
+    _Group(
+        "document",
+        ("bank_statement", "investment_account", "brokerage_statement"),
+        (
+            _TagMeta("stmt.owner_matches_borrower", "enum", "judgment", ("AS-6",)),
+            _TagMeta("stmt.is_reserve_eligible", "enum", "judgment", ("AS-4",)),
+        ),
+    ),
+    _Group(
+        "document",
+        ("investment_account", "brokerage_statement", "retirement_account"),
+        (
+            _TagMeta("asset.liquidation_terms", "enum", "judgment", ("AS-11",)),
+            _TagMeta("asset.usable_value", "string", "judgment", ("AS-4",)),
+        ),
+    ),
+)
+
+
+def _fv(field: object) -> str:
+    if not isinstance(field, Field) or field.absent or field.value is None:
+        return ""
+    return str(field.value)
+
+
+def _doc_has_content(doc: DocumentEntry) -> bool:
+    return bool(doc.fields)
+
+
+def _txn_context(txn: object) -> str:
+    return "; ".join(
+        f"{k}={_fv(getattr(txn, k, None))}" for k in ("date", "amount", "direction", "description")
+    )
+
+
+def _doc_context(doc: DocumentEntry) -> str:
+    return "; ".join(f"{k}={_fv(v)}" for k, v in doc.fields.items())
+
+
+@dataclass(frozen=True)
+class TagCapacity:
+    """The three facts for one AI tag on this file — never conflated (LP-338)."""
+
+    tag_id: str
+    subject_kind: str
+    scoring: str
+    bucket: str
+    consuming_rules: tuple[str, ...]
+    capacity: int  # labelable instances (subject present + content present)
+    content_empty: int  # subjects present but field-empty (cannot be labeled)
+    wired: bool  # produced by the declared tag-production pipeline today
 
     @property
     def rule_live(self) -> bool:
         return any(r in ACTIVE_RULE_IDS for r in self.consuming_rules)
 
+    @property
+    def pipeline_yield(self) -> int:
+        return self.capacity if self.wired else 0
 
-# The scorable txn.* family on LF-6T3N. Stage A = the generic txn_stage_a group; Stage B = the separate
-# sourcing pass (tag_correlation.reason_stage_b_sourcing) — a DIFFERENT producer signature, enumerated on
-# the worksheet but scored by a follow-in (this run scores only the Stage-A enum tags — AS-1's prompt).
-COVERAGE: tuple[TagCoverage, ...] = (
-    TagCoverage(
-        "txn.is_money_in",
-        "transaction",
-        "enum",
-        "mechanical",
-        "Stage A (txn_stage_a group)",
-        ("AS-1", "AS-7", "AS-8", "AS-12"),
-        ("in", "out", "unknown"),
-    ),
-    TagCoverage(
-        "txn.apparent_category",
-        "transaction",
-        "enum",
-        "judgment",
-        "Stage A (txn_stage_a group)",
-        ("AS-1", "AS-2", "AS-5", "AS-12", "IN-1"),
-        (
-            "payroll",
-            "transfer_own",
-            "gift",
-            "loan_proceeds",
-            "refund",
-            "interest",
-            "fee",
-            "vendor",
-            "unknown",
-        ),
-    ),
-    TagCoverage(
-        "txn.has_identified_source",
-        "transaction",
-        "enum",
-        "judgment",
-        "Stage B (sourcing)",
-        ("AS-1", "AS-2", "AS-5"),
-        ("yes", "no", "unknown"),
-        money_in_only=True,
-    ),
-    TagCoverage(
-        "txn.counterparty",
-        "transaction",
-        "free_text_deferred",
-        "judgment",
-        "Stage B (sourcing)",
-        ("AS-2", "AS-5", "AS-12", "FR-5"),
-        None,
-        money_in_only=True,
-    ),
-    TagCoverage(
-        "txn.source_reference",
-        "transaction",
-        "free_text_deferred",
-        "judgment",
-        "Stage B (sourcing)",
-        ("AS-1", "AS-5"),
-        None,
-        money_in_only=True,
-    ),
-)
-
-# Families with NO labelable content on LF-6T3N — reported UNMEASURABLE, never silently dropped. The 5
-# bank statements carry EMPTY extracted fields, so stmt.* would abstain (no owner/balance to read); there
-# are no id / income / retirement-asset documents at all.
-UNMEASURABLE_ON_LF6T3N: tuple[tuple[str, str], ...] = (
-    (
-        "stmt.owner_matches_borrower / stmt.is_reserve_eligible",
-        "5 statements but EMPTY fields -> content-free (all-abstain); not labelable",
-    ),
-    ("id.*", "n=0 -> no identity documents in LF-6T3N"),
-    ("income.*", "n=0 -> no paystub / W-2 / VOE documents"),
-    (
-        "asset.liquidation_terms / asset.usable_value",
-        "n=0 -> no retirement / brokerage account documents",
-    ),
-)
+    @property
+    def status(self) -> str:
+        if self.capacity > 0:
+            return "labelable" if self.wired else "wiring_gap"
+        if self.content_empty > 0:
+            return "content_empty"
+        return "no_subject"
 
 
-def _fv(field: Field | None) -> str:
-    """A Field's value as a display string ('' when absent/None) — for the context columns."""
-    if field is None or field.absent or field.value is None:
-        return ""
-    return str(field.value)
+def _transactions(snapshot: Snapshot) -> list[object]:
+    return [t for doc in snapshot.documents.entries for t in (doc.transactions or ())]
 
 
+def compute_capacity(snapshot: Snapshot) -> list[TagCapacity]:
+    """Per AI tag: file_capacity (labelable subjects) · content_empty (subjects present but field-empty) ·
+    wired. Deterministic + KEYLESS (from the snapshot + the declared subjects; no AI, no key). Capacity is
+    a FILE fact (does the subject + its content exist), yield a WIRING fact — never conflated."""
+    docs_by_type: dict[str, list[DocumentEntry]] = {}
+    for d in snapshot.documents.entries:
+        docs_by_type.setdefault(d.document_type or "", []).append(d)
+    txns = _transactions(snapshot)
+    credits = [t for t in txns if _fv(getattr(t, "direction", None)) == _CREDIT]
+
+    out: list[TagCapacity] = []
+    for group in _GROUPS:
+        for meta in group.tags:
+            if group.subject_kind == "transaction":
+                pool = credits if meta.money_in_only else txns
+                cap = sum(
+                    1
+                    for t in pool
+                    if _fv(getattr(t, "description", None)) or _fv(getattr(t, "amount", None))
+                )
+                empty = len(pool) - cap
+            else:
+                applicable = [d for t in group.applicable_types for d in docs_by_type.get(t, [])]
+                cap = sum(1 for d in applicable if _doc_has_content(d))
+                empty = sum(1 for d in applicable if not _doc_has_content(d))
+            out.append(
+                TagCapacity(
+                    meta.tag_id,
+                    group.subject_kind,
+                    meta.scoring,
+                    meta.bucket,
+                    meta.consuming_rules,
+                    cap,
+                    empty,
+                    meta.wired,
+                )
+            )
+    return out
+
+
+# --------------------------------------------------------------------------- #
+# The worksheet rows (one per labelable instance) — context-bearing, prediction-free
+# --------------------------------------------------------------------------- #
 @dataclass(frozen=True)
 class WorksheetRow:
-    """One (tag, transaction) instance a human labels. Carries document context, NOT the AI prediction."""
-
     bucket: str
     tag_id: str
     subject_id: str
+    subject_kind: str
+    document_type: str
     scoring: str
     allowed_values: str
     consuming_rules: str
-    rule_status: str  # "LIVE" or "inert" — so a labeler knows which rows actually matter today
-    statement_id: str
-    txn_date: str
-    txn_amount: str
-    txn_direction: str
-    txn_description: str
-    golden_label: str = ""  # EMPTY — the human fills this
-    labeler_note: str = ""  # EMPTY — the human's rationale / uncertainty
+    rule_status: str  # "LIVE" | "inert"
+    context: str  # enough to label WITHOUT the file
+    golden_label: str = ""
+    labeler_note: str = ""
 
 
 _HEADERS = (
     "tag_id",
     "subject_id",
+    "subject_kind",
+    "document_type",
     "scoring",
     "allowed_values",
     "consuming_rules",
     "rule_status",
-    "statement_id",
-    "txn_date",
-    "txn_amount",
-    "txn_direction",
-    "txn_description",
+    "context",
     "golden_label",
     "labeler_note",
 )
 
 
+def _allowed_str(tag_id: str, decls: dict[str, TagDeclaration]) -> str:
+    decl = decls.get(tag_id)
+    if decl is not None and decl.allowed_values:
+        return " | ".join(decl.allowed_values)
+    return "(free text)"
+
+
 def build_worksheet(snapshot: Snapshot) -> list[WorksheetRow]:
-    """Enumerate every labelable AI-tag instance LF-6T3N produces — deterministically, from the SNAPSHOT
-    (no AI, no key). One row per (tag, transaction); Stage-B sourcing tags only on money-in candidates."""
+    """Enumerate every LABELABLE AI-tag instance (subject present + content present) — deterministically,
+    from the snapshot (no AI, no key). One row per (tag, subject); document rows carry the document's
+    fields as context, txn rows carry date/amount/direction/description. Content-empty subjects (a
+    brokerage_statement with no fields) are NOT rows — they cannot be labeled (reported in the coverage)."""
+    decls = load_declarations()
+    docs_by_type: dict[str, list[DocumentEntry]] = {}
+    for d in snapshot.documents.entries:
+        docs_by_type.setdefault(d.document_type or "", []).append(d)
+
     rows: list[WorksheetRow] = []
-    for doc in snapshot.documents.entries:
-        for txn in doc.transactions or ():
-            direction = _fv(txn.direction)
-            is_candidate = direction == _CREDIT
-            for cov in COVERAGE:
-                if cov.money_in_only and not is_candidate:
-                    continue
-                allowed = " | ".join(cov.allowed_values) if cov.allowed_values else "(free text)"
-                rows.append(
-                    WorksheetRow(
-                        bucket=cov.bucket,
-                        tag_id=cov.tag_id,
-                        subject_id=txn.content_id,
-                        scoring=cov.scoring,
-                        allowed_values=allowed,
-                        consuming_rules=", ".join(cov.consuming_rules),
-                        rule_status="LIVE" if cov.rule_live else "inert",
-                        statement_id=doc.content_id,
-                        txn_date=_fv(txn.date),
-                        txn_amount=_fv(txn.amount),
-                        txn_direction=direction,
-                        txn_description=_fv(txn.description),
-                    )
-                )
+    for group in _GROUPS:
+        for meta in group.tags:
+            allowed = _allowed_str(meta.tag_id, decls)
+            rule_status = (
+                "LIVE" if any(r in ACTIVE_RULE_IDS for r in meta.consuming_rules) else "inert"
+            )
+            if group.subject_kind == "transaction":
+                for doc in snapshot.documents.entries:
+                    for txn in doc.transactions or ():
+                        if meta.money_in_only and _fv(getattr(txn, "direction", None)) != _CREDIT:
+                            continue
+                        if not (
+                            _fv(getattr(txn, "description", None))
+                            or _fv(getattr(txn, "amount", None))
+                        ):
+                            continue
+                        rows.append(
+                            WorksheetRow(
+                                meta.bucket,
+                                meta.tag_id,
+                                txn.content_id,
+                                "transaction",
+                                doc.document_type or "",
+                                meta.scoring,
+                                allowed,
+                                ", ".join(meta.consuming_rules),
+                                rule_status,
+                                _txn_context(txn),
+                            )
+                        )
+            else:
+                for dtype in group.applicable_types:
+                    for doc in docs_by_type.get(dtype, []):
+                        if not _doc_has_content(doc):
+                            continue
+                        rows.append(
+                            WorksheetRow(
+                                meta.bucket,
+                                meta.tag_id,
+                                doc.content_id,
+                                "document",
+                                dtype,
+                                meta.scoring,
+                                allowed,
+                                ", ".join(meta.consuming_rules),
+                                rule_status,
+                                _doc_context(doc),
+                            )
+                        )
     return rows
 
 
 def render_csv(rows: list[WorksheetRow]) -> str:
-    """One bucket's rows → CSV text (deterministic order: as enumerated). Predictions are NOT a column."""
     buf = io.StringIO()
-    writer = csv.writer(buf, lineterminator="\n")  # "\n" (not the csv default "\r\n") — matches the
-    # repo's mixed-line-ending pre-commit hook, so a regenerated worksheet is byte-identical (no churn).
+    writer = csv.writer(
+        buf, lineterminator="\n"
+    )  # "\n" — matches the repo's mixed-line-ending hook
     writer.writerow(_HEADERS)
     for r in rows:
         writer.writerow(
             [
                 r.tag_id,
                 r.subject_id,
+                r.subject_kind,
+                r.document_type,
                 r.scoring,
                 r.allowed_values,
                 r.consuming_rules,
                 r.rule_status,
-                r.statement_id,
-                r.txn_date,
-                r.txn_amount,
-                r.txn_direction,
-                r.txn_description,
+                r.context,
                 r.golden_label,
                 r.labeler_note,
             ]
@@ -250,8 +422,23 @@ def render_csv(rows: list[WorksheetRow]) -> str:
     return buf.getvalue()
 
 
+def _existing_labels(path: Path) -> dict[tuple[str, str], tuple[str, str]]:
+    """Read a previously-written worksheet -> {(tag_id, subject_id): (golden_label, labeler_note)} for the
+    FILLED rows, so a regeneration never clobbers human labels already entered."""
+    if not path.is_file():
+        return {}
+    kept: dict[tuple[str, str], tuple[str, str]] = {}
+    for row in csv.DictReader(io.StringIO(path.read_text(encoding="utf-8"))):
+        label = (row.get("golden_label") or "").strip()
+        note = (row.get("labeler_note") or "").strip()
+        if label or note:
+            kept[(row["tag_id"].strip(), row["subject_id"].strip())] = (label, note)
+    return kept
+
+
 def write_worksheets(snapshot: Snapshot, out_dir: Path) -> dict[str, Path]:
-    """Write the split worksheets: mechanical (Geet) + judgment (Priya). Returns the paths written."""
+    """Write the split worksheets (mechanical = Geet, judgment = Priya), PRESERVING any labels already
+    filled in the existing files (merge by the stable (tag_id, subject_id) key)."""
     rows = build_worksheet(snapshot)
     out_dir.mkdir(parents=True, exist_ok=True)
     written: dict[str, Path] = {}
@@ -260,50 +447,59 @@ def write_worksheets(snapshot: Snapshot, out_dir: Path) -> dict[str, Path]:
         ("judgment", "lf6t3n-labels-judgment.csv"),
     ):
         path = out_dir / name
-        path.write_text(render_csv([r for r in rows if r.bucket == bucket]), encoding="utf-8")
+        prior = _existing_labels(path)
+        merged = [
+            WorksheetRow(
+                **{
+                    **r.__dict__,
+                    "golden_label": prior.get((r.tag_id, r.subject_id), ("", ""))[0],
+                    "labeler_note": prior.get((r.tag_id, r.subject_id), ("", ""))[1],
+                }
+            )
+            if (r.tag_id, r.subject_id) in prior
+            else r
+            for r in rows
+            if r.bucket == bucket
+        ]
+        path.write_text(render_csv(merged), encoding="utf-8")
         written[bucket] = path
     return written
 
 
 def coverage_report(snapshot: Snapshot) -> str:
-    """The Phase-0 deliverable: every AI tag -> n on THIS file -> enum/free-text -> consuming rule live?
-    Plus the UNMEASURABLE families, stated plainly. Deterministic (from the snapshot; no AI)."""
-    rows = build_worksheet(snapshot)
-    counts: dict[str, int] = {}
-    for r in rows:
-        counts[r.tag_id] = counts.get(r.tag_id, 0) + 1
+    """The corrected coverage: per AI tag -> capacity | yield | status | scoring | live? -- capacity and
+    yield NEVER conflated. Deterministic (from the snapshot; no AI)."""
     lines = [
-        "=" * 92,
-        "LF-6T3N COVERAGE — a BIAS HUNT, not validation (a clean result does NOT unblock inert rules)",
-        "=" * 92,
+        "=" * 104,
+        "LF-6T3N COVERAGE (LP-338) — capacity != yield != content-empty. A BIAS HUNT, not validation.",
+        "=" * 104,
     ]
-    lines.append(f"{'tag':<28} {'n':>4}  {'scoring':<20} {'live?':<6} {'producer':<24} rules")
-    for cov in COVERAGE:
-        n = counts.get(cov.tag_id, 0)
-        flag = "n>=20" if n >= 20 else ("n=0" if n == 0 else "bias-hunt")
+    lines.append(
+        f"{'tag':<30} {'cap':>4} {'yield':>6} {'empty':>6}  {'status':<13} {'scoring':<18} {'live?':<6} rules"
+    )
+    for c in sorted(compute_capacity(snapshot), key=lambda x: x.tag_id):
         lines.append(
-            f"{cov.tag_id:<28} {n:>4}  {cov.scoring:<20} {('LIVE' if cov.rule_live else 'inert'):<6} "
-            f"{cov.producer:<24} {', '.join(cov.consuming_rules)}   [{flag}]"
+            f"{c.tag_id:<30} {c.capacity:>4} {c.pipeline_yield:>6} {c.content_empty:>6}  "
+            f"{c.status:<13} {c.scoring:<18} {('LIVE' if c.rule_live else 'inert'):<6} {', '.join(c.consuming_rules)}"
         )
-    lines.append("-" * 92)
-    lines.append("UNMEASURABLE on LF-6T3N (reported, not dropped):")
-    for name, why in UNMEASURABLE_ON_LF6T3N:
-        lines.append(f"  {name}: {why}")
+    lines.append("-" * 104)
+    lines.append(
+        "capacity>0 & yield=0 = WIRING GAP (LP-333 bucket B — reported, not fixed). "
+        "capacity=0 & empty>0 = content-empty (e.g. brokerage_statement fields={})."
+    )
     return "\n".join(lines)
 
 
 # --------------------------------------------------------------------------- #
-# PHASE 2 — the scoring run (live, opt-in). Reuses LP-334's ScoredTag/summarize/failing_cases.
+# PHASE 2 — the scoring run (live, opt-in; keyless via stub). Reuses LP-334's ScoredTag/summarize.
 # --------------------------------------------------------------------------- #
 def load_golden(csv_text: str) -> dict[tuple[str, str], str]:
-    """Read a FILLED worksheet -> {(tag_id, subject_id): golden_label}. Rows with an empty golden_label
-    are skipped (unlabeled). This is how the human's truth enters the scoring run."""
+    """A FILLED worksheet -> {(tag_id, subject_id): golden_label}; unlabeled rows skipped."""
     golden: dict[tuple[str, str], str] = {}
     for row in csv.DictReader(io.StringIO(csv_text)):
         label = (row.get("golden_label") or "").strip()
-        if not label:
-            continue
-        golden[(row["tag_id"].strip(), row["subject_id"].strip())] = label
+        if label:
+            golden[(row["tag_id"].strip(), row["subject_id"].strip())] = label
     return golden
 
 
@@ -313,20 +509,32 @@ async def calibrate_lf6t3n(
     *,
     reasoner: Reasoner | None = None,
 ) -> list[ScoredTag]:
-    """Score the REAL Stage-A reasoner over LF-6T3N against the filled worksheet. Returns [] when there
-    are no Stage-A golden labels yet (the correct outcome for an unfilled worksheet — NOT a crash, NOT a
-    fabricated score). Free-text + Stage-B tags in the golden are intentionally NOT %-scored here
-    (FINDING-2 / separate producer) — they are the human-review + follow-in surface."""
-    stage_a_golden = {k: v for k, v in golden.items() if k[0] in _SCORABLE_STAGE_A}
-    if not stage_a_golden:
+    """Score the REAL reasoner over LF-6T3N against the filled worksheet — for every DECLARED AI enum/
+    string tag with labels (not just txn.*: id/income/stmt/asset too, now the fixture supports them).
+    Returns [] with no such labels (the correct outcome for an unfilled worksheet — NOT a crash). Free-text
+    (FINDING-2) and Stage-B tags (not declared -> a separate producer) are NOT %-scored here."""
+    decls = load_declarations()
+    scorable = {
+        t
+        for (t, _s) in golden
+        if t in decls and decls[t].mode is ProductionMode.AI and t not in _FREE_TEXT
+    }
+    if not scorable:
         return []
     groups = load_ai_groups()
-    decls = load_declarations()
-    group = groups[_STAGE_A_GROUP]
-    allowed = {t: decls[t].allowed_values for t in group.tag_ids if t in decls}
-    produced = await produce_ai_group_tags(snapshot, group, allowed, reasoner=reasoner)
+    produced: dict[str, dict[str, Tag]] = {}
+    for group_key in sorted({decls[t].data for t in scorable}):
+        group = groups[group_key]
+        allowed = {t: decls[t].allowed_values for t in group.tag_ids if t in decls}
+        for sid, tags in (
+            await produce_ai_group_tags(snapshot, group, allowed, reasoner=reasoner)
+        ).items():
+            produced.setdefault(sid, {}).update(tags)
+
     scored: list[ScoredTag] = []
-    for (tag_id, subject_id), gold in sorted(stage_a_golden.items()):
+    for (tag_id, subject_id), gold in sorted(golden.items()):
+        if tag_id not in scorable:
+            continue
         tag = produced.get(subject_id, {}).get(tag_id)
         scored.append(
             ScoredTag(
@@ -342,12 +550,11 @@ async def calibrate_lf6t3n(
 
 
 __all__ = [
-    "COVERAGE",
-    "UNMEASURABLE_ON_LF6T3N",
-    "TagCoverage",
+    "TagCapacity",
     "WorksheetRow",
     "build_worksheet",
     "calibrate_lf6t3n",
+    "compute_capacity",
     "coverage_report",
     "load_golden",
     "render_csv",

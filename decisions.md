@@ -9862,9 +9862,10 @@ prediction (so a labeler cannot anchor). The scoring run reuses LP-317's `Dimens
 **What this measurement CAN and CANNOT establish.** It finds **BIASES, not RATES** — one conventional
 purchase file gives most tags n≤6. **The one exception is `txn.*`:** LF-6T3N's 5 statements carry 50
 transactions, so `txn.is_money_in` / `txn.apparent_category` reach **n=50** — the system's first candidate
-for a real rate measurement (scoped: on ONE conventional purchase). Everything else (`id.*`, `income.*`,
-`asset.*`) is n=0 UNMEASURABLE on this file; `stmt.*` is content-free (empty statement fields). **A clean
-result does NOT unblock the ~15 inert rules** — activation still requires n≥20 across VARIED files (FHA /
+for a real rate measurement (scoped: on ONE conventional purchase). ~~Everything else (`id.*`, `income.*`,
+`asset.*`) is n=0 UNMEASURABLE on this file~~ **[CORRECTED BY LP-338 / ADR-280: that was a bug + a stripped
+fixture — the real LF-6T3N supports `id.*` n=2, `income.*` n=8, `asset.*` n=3, a bias hunt at n=2-8; only
+`txn.*` reaches a rate at n=50].** **A clean result does NOT unblock the ~15 inert rules** — activation still requires n≥20 across VARIED files (FHA /
 refi / condo / self-employed) + Priya's D2 bars. Free-text tags (`txn.counterparty` / `source_reference`)
 are NOT string-scored (FINDING-2) — captured for human review, deferred to the fuzzy-scoring method.
 
@@ -9874,3 +9875,45 @@ the numbers). The worksheet generator + scoring live in the eval harness only; n
 behavior changed. Cross-refs: LP-334 (the harness + D1/D2 + FINDING-2), LP-335 (FINDING-1's fix + the
 anti-fit-to-eval discipline), LP-317 (`DimensionCalibration`), LP-313/314 (the txn Stage-A + sourcing
 producers being audited).
+
+## ADR-280: The LF-6T3N eval fixture was a stripped subset; replace it + separate file-capacity from pipeline-yield in coverage (LP-338)
+
+**Context.** LP-337 measured calibration coverage on `lf6t3n_tagged_snapshot.json` and concluded the
+project's calibration ceiling on existing files was `txn.*`, and that an n≥20 rate for other families
+"needs varied real files that don't exist in the repo yet." That conclusion was WRONG on two counts, and it
+had begun to propagate (the plan briefly treated acquiring synthetic files as the blocker to ~15 rules):
+
+1. **The fixture is a STRIPPED SUBSET.** `lf6t3n_tagged_snapshot.json` is 5 bank statements with empty
+   `fields` — not the real ~30-document LF-6T3N (2 driver's licences, 4 pay-stubs, 4 W-2s, 3 investment
+   accounts, a brokerage statement, mortgage statements, a purchase agreement, …). This is the LP-321a
+   problem one layer up: the central eval fixture under-represented the real file, so a conclusion drawn
+   from it was a fiction.
+2. **The coverage function CONFLATED two numbers.** It statically hardcoded the `txn.*` family and declared
+   `id.*` / `income.*` / `asset.*` "UNMEASURABLE" — reporting *what the wired pipeline + that fixture
+   happened to yield* while LABELLING it the file's inherent *capacity*.
+
+**Decision.**
+- **Replace the fixture** with a representative, de-identified 30-document synthetic snapshot with POPULATED
+  fields — built IN CODE by `build_lf6t3n_snapshot()` (`app/verification/eval/lf6t3n_fixture.py`), NOT a
+  committed snapshot JSON (a deliberate constraint: no snapshot JSONs enter the repo). It reads the
+  already-committed `lf6t3n_tagged_snapshot.json` for the 5 bank statements + 50 transactions verbatim (so
+  `txn.*` labels/subject-ids are stable) and appends the other 25 documents in code. The OLD fixture stays
+  for the frozen golden-eval trace (unchanged — the equivalence property).
+- **Coverage reports THREE separate facts** per AI tag, never conflated (the *absent ≠ empty ≠ unwired*
+  invariant this project already handles at the tag / operand / gather / rule / subject levels, now at the
+  COVERAGE level): **file_capacity** (subjects + content the snapshot supports for the tag's declared
+  subject — the labeling ceiling, independent of wiring) · **pipeline_yield** (what the wired pipeline
+  produces today — a declared AI tag runs; a vocabulary tag with no declaration does not) · **content_empty**
+  (a subject that exists but is field-empty — a brokerage_statement with `fields={}`). Status: `labelable` /
+  `wiring_gap` (capacity>0, yield=0 — LP-333 bucket B, surfaced not hidden) / `content_empty` / `no_subject`.
+
+**Consequences.** The honest calibration position: **LF-6T3N supports a BIAS HUNT across `id.*` (n=2) /
+`income.*` (n=8) / `asset.*` (n=3) TODAY**, and a real RATE only for `txn.*` (n=50). Varied files (FHA /
+refi / condo / self-employed) are still needed for RATES on the other families — that part of LP-337 stands;
+the "n=0 / files don't exist" framing does not. LP-335's `id.current_address_type` fix can now be checked
+against a REAL driver's licence (n=2) rather than the synthetic n=2 it was measured on. The corrected report
+also surfaces the Stage-B sourcing tags as WIRING GAPS (capacity>0, yield=0) — reported, not fixed (their
+own follow-in). EVALUATE, DON'T FIX held: no rule/tag/engine/spec behavior changed, `ACTIVE_RULE_IDS`
+unchanged, the frozen trace unchanged. Corrects ADR-279 (which repeated the n=0 claim). Cross-refs: LP-337
+(the bug's origin), LP-321a (the stripped-fixture-fiction precedent), LP-333 (bucket B wiring gaps), LP-334
+(the harness + FINDING-2), LP-335 (FINDING-1).
