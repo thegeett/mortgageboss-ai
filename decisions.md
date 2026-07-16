@@ -9965,3 +9965,60 @@ concern into a tag exemplar (FINDING-1's exact class, LP-335).
 Cross-refs: LP-325 (the exact bookend + the declared-normalizer registry this extends), LP-328 (the date
 coercer — the registry-entry precedent), LP-334 (FINDING-2), LP-335 (FINDING-1 + the tag-reports/rule-
 compares principle), LP-337 (the measurement that found this).
+
+## ADR-282: Fuzzy scoring for free-text calibration — declared per tag; normalize FORMAT; the ruler must fail things (LP-342)
+
+**Context.** Calibration scored a tag by string equality (after a light `_norm`). That is correct for enums/
+numbers and STRUCTURALLY WRONG for free text: LP-334's FINDING-2 measured `id.name_normalized` at 33% where
+the "failures" were `Maria Garcia-Lopez` vs the golden `Maria Garcia Lopez` — a valid rendering. **The model
+was right; the ruler was wrong.** ID-1 itself uses an AI FUZZY leg to compare names precisely because string
+equality does not work — and then the harness scored names by string equality.
+
+**Empirical finding that steered the method (the code beat the ticket).** The ticket proposed reusing the
+consuming rule's declared normalizer chain, assuming `drop_punct` would make the hyphen case equal. It does
+NOT: `drop_punct` DELETES the hyphen without a space (`Garcia-Lopez` → `garcialopez` ≠ `garcia lopez`), so
+reusing ID-1's exact chain would STILL score the FINDING-2 headline wrong. The fix is to treat punctuation as
+a WORD BOUNDARY, not as noise to delete.
+
+**Decision.** A tag DECLARES its scoring method (in `calibration.py`, beside `_ABSTAINING_DIMENSIONS`); the
+comparator dispatches by METHOD, never by tag-id (add a tag = one line):
+- **`exact`** (default) — the enum/number path, BYTE-IDENTICAL to pre-LP-342 (numeric Decimal tolerance +
+  `_norm` string equality). Every enum/number tag is unchanged (`txn.is_money_in` 98%/n=50,
+  `income.documented_monthly` 100% do not move).
+- **`normalized`** — casefold + every run of non-word chars → ONE space + strip, then equality. Reuses the
+  registry's philosophy (casefold + collapse) but CORRECTS punctuation to a word boundary. Applied to
+  `id.name_normalized` / `id.address_normalized`.
+- **`human_review`** — a tag with NO defensible canonical golden (a free-form bank wire memo:
+  `txn.counterparty`, `txn.source_reference`) — its cases are recorded with per-case detail and NEVER
+  %-scored (a forced number would be a fiction). `DimensionCalibration` gained a `review` count (default 0).
+
+**What the `normalized` score MEANS (say it plainly):** *"the tag matches the golden as the consuming rule's
+DETERMINISTIC bookend would see it"* — NOT *"the tag is objectively correct."* It does NOT reproduce the
+rule's AI fuzzy judge, so abbreviation/initial/generational variance (`Ave`↔`Avenue`, `M`↔`Marie`,
+`Jr`↔`III`) is NOT collapsed — that residue is surfaced in the per-case detail (human review) and resolved at
+SOURCE by LP-340's convention (expand abbreviations; report the name of record) + consistent golden labeling.
+An AI-judge scorer (rejected: it puts a second, uncalibrated AI inside the measurement of an AI — who
+calibrates the judge?) is the only thing that would collapse that residue; a validated distance threshold
+(rejected: an unvalidated threshold is exactly the number this project refuses to guess) is the other
+alternative. Deterministic normalized comparison + human-review residue is the chosen, free, defensible ruler.
+
+**The leniency boundary (the heart of it).** A ruler that fails nothing is worthless. The method is proven
+BOTH DIRECTIONS by MATCH/MISMATCH sets chosen INDEPENDENTLY of any tag's performance (never iterated against
+the numbers — the LP-335 discipline applied to the scorer): valid renderings score EQUAL; genuinely different
+values (`Jordan Rivera` vs `Taylor Nguyen`; right street/wrong number) score WRONG; a not-inert guard asserts
+a wrong-by-construction distribution fires the fabrication flag.
+
+**Interaction with LP-340 (no hidden leniency).** The name/address scorer must NOT strip entity suffixes —
+`drop_entity_suffix` is IN-5's RULE-declared normalizer, deliberately scoped there. `Acme Inc` vs `Acme LLC`
+scores WRONG under the name scorer (asserted), so the scorer never hides a difference the convention decides
+elsewhere, keeping LP-340 testable.
+
+**Consequences.** Two LIVE-rule free-text tags (`id.name_normalized` → ID-1, `id.address_normalized` → ID-4)
+become honestly measurable; two provenance tags stay human-review. **Risk note:** all four feed
+ratification-pending verdicts a human already reviews — lower-risk than a wrong enum feeding an auto-shipping
+deterministic verdict; this makes them MEASURABLE, it does not imply they are the urgent risk. **No re-score
+was run here** (LP-335: measure once, with Priya's judgment rows, LP-341). A better `id.name_normalized`
+number under this scorer means the RULER now matches what the system cares about — NOT that the tag got
+better. No rule/tag/engine/spec behaviour changed; `ACTIVE_RULE_IDS` unchanged. Cross-refs: LP-334
+(FINDING-2), LP-337 (`_FREE_TEXT` / `calibrate_lf6t3n`), LP-340 (the convention + `drop_entity_suffix`),
+LP-325 (the normalizer registry), LP-317 (`DimensionCalibration`, extended not replaced).

@@ -15,6 +15,7 @@ replay the labels, so they read as a trivially perfect baseline (useful as a plu
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 
 from app.verification.eval.harness import CaseResult, TagObservation
@@ -64,15 +65,73 @@ _OVER_ABSTENTION = 0.30  # above this unknown-rate, an abstaining tag is drownin
 _UNDER_ABSTENTION_ACCURACY = 0.90  # concrete accuracy below this = fabrication risk
 
 
+# LP-342 (FINDING-2): string equality is correct for enums/numbers and STRUCTURALLY WRONG for free text —
+# a normalized name/address has MANY valid renderings (Maria Garcia-Lopez vs Maria Garcia Lopez). A tag
+# DECLARES its scoring METHOD here; the scorer dispatches by METHOD, never by tag-id (add a tag = one line).
+#   exact         — string-equality after light normalization (the enum/number path, UNCHANGED, default).
+#   normalized    — collapse FORMAT (case / whitespace / punctuation-as-a-word-boundary) so a valid
+#                   rendering scores equal; genuine content differences still score WRONG (the leniency
+#                   boundary). The score MEANS "matches as the consuming rule's deterministic bookend would
+#                   see it" — NOT "the tag is objectively correct". It does NOT reproduce the rule's AI
+#                   fuzzy judge (abbreviation/initial/suffix variance: Ave↔Avenue, M↔Marie) — that residue
+#                   is surfaced in the per-case detail (human review) + resolved at source by LP-340's
+#                   convention, never forced to a number here.
+#   human_review  — a tag with NO defensible canonical golden (a free-form wire memo) — recorded with its
+#                   per-case detail, NEVER %-scored (a forced number would be a fiction).
+SCORING_EXACT = "exact"
+SCORING_NORMALIZED = "normalized"
+SCORING_HUMAN_REVIEW = "human_review"
+_SCORING_MODE: dict[str, str] = {
+    # ID-1 / ID-4 free-text (LIVE, fuzzy-consistency → ratification-pending): the FINDING-2 tags.
+    "id.name_normalized": SCORING_NORMALIZED,
+    "id.address_normalized": SCORING_NORMALIZED,
+    # Free-form provenance strings with no canonical golden (a bank wire memo) — human review only.
+    "txn.counterparty": SCORING_HUMAN_REVIEW,
+    "txn.source_reference": SCORING_HUMAN_REVIEW,
+}
+
+
+def scoring_mode(tag_id: str) -> str:
+    """The DECLARED scoring method for a tag (default ``exact`` — every enum/number tag, byte-identical to
+    the pre-LP-342 path). Declaration, not a scorer branch: the comparator dispatches on the returned mode."""
+    return _SCORING_MODE.get(tag_id, SCORING_EXACT)
+
+
+# The ``normalized`` comparison key: casefold + treat EVERY run of non-word characters as ONE word boundary
+# (a space), then strip. This is the fix FINDING-2 needs — the rule's `drop_punct` DELETES a hyphen
+# ("Garcia-Lopez" -> "garcialopez") and so scores a valid rendering WRONG; a word BOUNDARY ("garcia lopez")
+# is what a human (and the rule's AI judge) reads. It reuses the registry's philosophy (casefold + collapse)
+# but corrects punctuation handling for scoring. Genuine token differences (Ave↔Avenue, different name)
+# survive unequal — the leniency boundary. Justified independently of any tag result (proven by the
+# MATCH/MISMATCH sets), never tuned to the numbers.
+_NON_WORD = re.compile(r"\W+")
+
+
+def _normalized_key(value: str | None) -> str:
+    if value is None:
+        return ""
+    return _NON_WORD.sub(" ", value.casefold()).strip()
+
+
+def normalized_match(a: str | None, b: str | None) -> bool:
+    """Two free-text values are equal under the ``normalized`` method (shared by both scoring paths)."""
+    return _normalized_key(a) == _normalized_key(b)
+
+
 @dataclass(frozen=True)
 class DimensionCalibration:
-    """Calibration for one tag dimension over the eval set."""
+    """Calibration for one tag dimension over the eval set.
+
+    LP-342 added ``review`` (default 0 → the enum/number path is byte-identical): a ``human_review`` tag's
+    answerable cases land here instead of in ``concrete``/``concrete_correct`` (no % is claimed for a tag
+    with no defensible golden)."""
 
     dimension: str
     total: int
     unknown: int
     concrete: int
     concrete_correct: int
+    review: int = 0
 
     @property
     def unknown_rate(self) -> float:
@@ -92,6 +151,11 @@ class DimensionCalibration:
         # Committing confidently but wrong often - the dangerous direction for a fraud check.
         return self.concrete > 0 and self.accuracy_when_concrete < _UNDER_ABSTENTION_ACCURACY
 
+    @property
+    def is_human_review(self) -> bool:
+        # A tag with no defensible golden — its answerable cases are recorded, never %-scored (LP-342).
+        return scoring_mode(self.dimension) == SCORING_HUMAN_REVIEW
+
 
 def _observations(results: list[CaseResult]) -> list[TagObservation]:
     return [o for r in results for o in r.observations]
@@ -105,9 +169,19 @@ def summarize(results: list[CaseResult]) -> list[DimensionCalibration]:
 
     summaries: list[DimensionCalibration] = []
     for dimension, group in sorted(by_dim.items()):
+        mode = scoring_mode(dimension)
+        if mode == SCORING_HUMAN_REVIEW:
+            # No defensible golden → record the answerable cases as review, claim no accuracy (LP-342).
+            summaries.append(
+                DimensionCalibration(dimension, len(group), 0, 0, 0, review=len(group))
+            )
+            continue
         unknown = sum(1 for o in group if o.actual in _ABSTENTION)
         concrete = [o for o in group if o.actual not in _ABSTENTION]
-        correct = sum(1 for o in concrete if o.actual == o.expected)
+        if mode == SCORING_NORMALIZED:
+            correct = sum(1 for o in concrete if normalized_match(o.actual, o.expected))
+        else:  # SCORING_EXACT — byte-identical to the pre-LP-342 path
+            correct = sum(1 for o in concrete if o.actual == o.expected)
         summaries.append(
             DimensionCalibration(dimension, len(group), unknown, len(concrete), correct)
         )
@@ -120,6 +194,11 @@ def format_calibration(summaries: list[DimensionCalibration], *, live: bool) -> 
     lines = ["-" * 78, f"CALIBRATION - {mode}", "-" * 78]
     lines.append(f"{'dimension':<28} {'n':>4} {'unknown%':>9} {'acc-concrete%':>14}  flags")
     for s in summaries:
+        if s.is_human_review:
+            lines.append(
+                f"{s.dimension:<28} {s.total:>4} {'':>9} {'HUMAN-REVIEW':>14}  {s.review} to review"
+            )
+            continue
         flags = []
         if s.over_abstaining:
             flags.append("OVER-ABSTENTION")

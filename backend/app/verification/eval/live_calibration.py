@@ -26,7 +26,13 @@ from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
 from uuid import uuid4
 
-from app.verification.eval.calibration import DimensionCalibration
+from app.verification.eval.calibration import (
+    SCORING_HUMAN_REVIEW,
+    SCORING_NORMALIZED,
+    DimensionCalibration,
+    normalized_match,
+    scoring_mode,
+)
 from app.verification.snapshot.fields import Field, FieldSource
 from app.verification.snapshot.model import (
     DocumentEntry,
@@ -117,12 +123,23 @@ class ScoredTag:
         return self.golden.casefold() in _ABSTENTION
 
     @property
+    def needs_review(self) -> bool:
+        """A ``human_review`` tag (no defensible golden) — recorded, never %-scored (LP-342)."""
+        return scoring_mode(self.tag_id) == SCORING_HUMAN_REVIEW
+
+    @property
     def correct(self) -> bool:
         # A golden-abstention case is correct WHEN the tag abstains (measuring correct abstention, not
-        # over-abstention). Otherwise: committed AND matches (numeric for numbers, normalized for strings).
+        # over-abstention). Otherwise: committed AND matches — by the tag's DECLARED scoring method
+        # (LP-342): `normalized` for free-text names/addresses (format-only, punctuation as a word
+        # boundary), else the numeric/normalized `exact` path (BYTE-IDENTICAL for every enum/number tag).
         if self.golden_is_abstention:
             return self.abstained
-        return not self.abstained and _values_match(self.golden, self.predicted)
+        if self.abstained:
+            return False
+        if scoring_mode(self.tag_id) == SCORING_NORMALIZED:
+            return normalized_match(self.golden, self.predicted)
+        return _values_match(self.golden, self.predicted)
 
 
 def _snapshot(doc: LabeledDoc) -> Snapshot:
@@ -209,6 +226,12 @@ def summarize(scored: list[ScoredTag]) -> list[DimensionCalibration]:
     out: list[DimensionCalibration] = []
     for tag_id, group in sorted(by_tag.items()):
         answerable = [s for s in group if not s.golden_is_abstention]
+        if scoring_mode(tag_id) == SCORING_HUMAN_REVIEW:
+            # No defensible golden → answerable cases are recorded for review, no % claimed (LP-342).
+            out.append(
+                DimensionCalibration(tag_id, len(answerable), 0, 0, 0, review=len(answerable))
+            )
+            continue
         unknown = sum(1 for s in answerable if s.abstained)
         concrete = [s for s in answerable if not s.abstained]
         correct = sum(1 for s in concrete if s.correct)
@@ -218,9 +241,16 @@ def summarize(scored: list[ScoredTag]) -> list[DimensionCalibration]:
 
 def failing_cases(scored: list[ScoredTag]) -> list[ScoredTag]:
     """The actionable part — every case the tag got WRONG: over-abstained on an answerable doc, or
-    committed to a value that doesn't match the golden. A correct abstention (golden is 'unknown') is NOT
-    a failure."""
-    return [s for s in scored if not s.correct]
+    committed to a value that doesn't match the golden (by its DECLARED scoring method). A correct
+    abstention (golden is 'unknown') is NOT a failure; a ``human_review`` tag is neither pass nor fail —
+    excluded here, listed under review_cases instead (LP-342)."""
+    return [s for s in scored if not s.needs_review and not s.correct]
+
+
+def review_cases(scored: list[ScoredTag]) -> list[ScoredTag]:
+    """The ``human_review`` tags' answerable cases — recorded with their per-case detail for a human, never
+    %-scored (a free-form wire memo has no canonical golden). LP-342."""
+    return [s for s in scored if s.needs_review and not s.golden_is_abstention]
 
 
 def format_report(scored: list[ScoredTag], *, live: bool) -> str:
@@ -228,10 +258,17 @@ def format_report(scored: list[ScoredTag], *, live: bool) -> str:
     lines = ["=" * 78, f"LIVE CALIBRATION — {mode}", "=" * 78]
     lines.append(f"{'tag':<34} {'n':>3} {'unknown%':>9} {'acc-concrete%':>14}")
     for c in summarize(scored):
-        lines.append(
-            f"{c.dimension:<34} {c.total:>3} {c.unknown_rate * 100:>8.1f}% "
-            f"{c.accuracy_when_concrete * 100:>13.1f}%"
-        )
+        acc = "  HUMAN-REVIEW" if c.is_human_review else f"{c.accuracy_when_concrete * 100:>13.1f}%"
+        unk = "" if c.is_human_review else f"{c.unknown_rate * 100:>8.1f}%"
+        lines.append(f"{c.dimension:<34} {c.total:>3} {unk:>9} {acc:>14}")
+    reviews = review_cases(scored)
+    if reviews:
+        lines.append("-" * 78)
+        lines.append(f"HUMAN REVIEW ({len(reviews)}) — no canonical golden, inspect the detail:")
+        for s in reviews:
+            lines.append(
+                f"  [REVIEW] {s.tag_id} @ {s.doc_id}: predicted={s.predicted!r} golden={s.golden!r}"
+            )
     fails = failing_cases(scored)
     lines.append("-" * 78)
     lines.append(f"FAILING CASES ({len(fails)}) — predicted vs golden:")
