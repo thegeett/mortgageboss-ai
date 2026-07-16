@@ -28,13 +28,14 @@ from __future__ import annotations
 
 import csv
 import io
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from app.verification.eval.live_calibration import ScoredTag
 from app.verification.rule_engine.registry import ACTIVE_RULE_IDS
 from app.verification.snapshot.fields import Field
-from app.verification.snapshot.model import DocumentEntry, Snapshot
+from app.verification.snapshot.model import DocumentEntry, Snapshot, TransactionRecord
+from app.verification.snapshot.pii import PiiField
 from app.verification.snapshot.tag import Tag
 from app.verification.tag_materialization.ai import Reasoner, produce_ai_group_tags
 from app.verification.tag_materialization.declarations import (
@@ -200,6 +201,10 @@ _GROUPS: tuple[_Group, ...] = (
 
 
 def _fv(field: object) -> str:
+    # A PiiField contributes only its MASKED display (never a raw value) — safe context for the labeler,
+    # not dropped. A plain Field contributes its value; absent/None → "".
+    if isinstance(field, PiiField):
+        return (field.display or "") if field.is_present else ""
     if not isinstance(field, Field) or field.absent or field.value is None:
         return ""
     return str(field.value)
@@ -209,10 +214,14 @@ def _doc_has_content(doc: DocumentEntry) -> bool:
     return bool(doc.fields)
 
 
-def _txn_context(txn: object) -> str:
-    return "; ".join(
-        f"{k}={_fv(getattr(txn, k, None))}" for k in ("date", "amount", "direction", "description")
-    )
+def _txn_context(txn: TransactionRecord) -> str:
+    parts = {
+        "date": txn.date,
+        "amount": txn.amount,
+        "direction": txn.direction,
+        "description": txn.description,
+    }
+    return "; ".join(f"{k}={_fv(v)}" for k, v in parts.items())
 
 
 def _doc_context(doc: DocumentEntry) -> str:
@@ -249,7 +258,7 @@ class TagCapacity:
         return "no_subject"
 
 
-def _transactions(snapshot: Snapshot) -> list[object]:
+def _transactions(snapshot: Snapshot) -> list[TransactionRecord]:
     return [t for doc in snapshot.documents.entries for t in (doc.transactions or ())]
 
 
@@ -261,18 +270,14 @@ def compute_capacity(snapshot: Snapshot) -> list[TagCapacity]:
     for d in snapshot.documents.entries:
         docs_by_type.setdefault(d.document_type or "", []).append(d)
     txns = _transactions(snapshot)
-    credits = [t for t in txns if _fv(getattr(t, "direction", None)) == _CREDIT]
+    credits = [t for t in txns if _fv(t.direction) == _CREDIT]
 
     out: list[TagCapacity] = []
     for group in _GROUPS:
         for meta in group.tags:
             if group.subject_kind == "transaction":
                 pool = credits if meta.money_in_only else txns
-                cap = sum(
-                    1
-                    for t in pool
-                    if _fv(getattr(t, "description", None)) or _fv(getattr(t, "amount", None))
-                )
+                cap = sum(1 for t in pool if _fv(t.description) or _fv(t.amount))
                 empty = len(pool) - cap
             else:
                 applicable = [d for t in group.applicable_types for d in docs_by_type.get(t, [])]
@@ -354,12 +359,9 @@ def build_worksheet(snapshot: Snapshot) -> list[WorksheetRow]:
             if group.subject_kind == "transaction":
                 for doc in snapshot.documents.entries:
                     for txn in doc.transactions or ():
-                        if meta.money_in_only and _fv(getattr(txn, "direction", None)) != _CREDIT:
+                        if meta.money_in_only and _fv(txn.direction) != _CREDIT:
                             continue
-                        if not (
-                            _fv(getattr(txn, "description", None))
-                            or _fv(getattr(txn, "amount", None))
-                        ):
+                        if not (_fv(txn.description) or _fv(txn.amount)):
                             continue
                         rows.append(
                             WorksheetRow(
@@ -449,14 +451,8 @@ def write_worksheets(snapshot: Snapshot, out_dir: Path) -> dict[str, Path]:
         path = out_dir / name
         prior = _existing_labels(path)
         merged = [
-            WorksheetRow(
-                **{
-                    **r.__dict__,
-                    "golden_label": prior.get((r.tag_id, r.subject_id), ("", ""))[0],
-                    "labeler_note": prior.get((r.tag_id, r.subject_id), ("", ""))[1],
-                }
-            )
-            if (r.tag_id, r.subject_id) in prior
+            replace(r, golden_label=prior[key][0], labeler_note=prior[key][1])
+            if (key := (r.tag_id, r.subject_id)) in prior
             else r
             for r in rows
             if r.bucket == bucket
