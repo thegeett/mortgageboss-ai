@@ -10022,3 +10022,52 @@ number under this scorer means the RULER now matches what the system cares about
 better. No rule/tag/engine/spec behaviour changed; `ACTIVE_RULE_IDS` unchanged. Cross-refs: LP-334
 (FINDING-2), LP-337 (`_FREE_TEXT` / `calibrate_lf6t3n`), LP-340 (the convention + `drop_entity_suffix`),
 LP-325 (the normalizer registry), LP-317 (`DimensionCalibration`, extended not replaced).
+
+## ADR-283: Converge the two txn Stage-A prompts — one text, guarded; the calibration measured the wrong prompt (LP-344)
+
+**Context.** LP-343's audit found TWO prompts producing the same `txn.*` tags: the standalone
+`STAGE_A_TRANSACTION_SYSTEM_PROMPT` (`app/ai/tag_production.py`) that **LIVE AS-1 actually runs** (via
+`produce_stage_a_transaction_tags`), and the generic `txn_stage_a` group (`tag_production.yaml`, LP-326's
+re-implementation). **LP-337's live calibration (98%, n=50 on `txn.is_money_in`) measured the YAML group —
+NOT the prompt AS-1 uses.** The two had already DRIFTED (the standalone defines `apparent_category`'s enum
+values; the YAML listed them undefined — LP-343 F5). This is a measurement-validity bug: the audited,
+measured, and shipped prompts were not guaranteed to be the same text, and were not.
+
+**The code decided the direction (verified, not assumed).** A live run produces `txn.*` via a dedicated
+`stage_a` step calling the standalone producer; `materialize_tags` (the generic path) is invoked with
+`only_subjects={document, loan, borrower}` — deliberately EXCLUDING `transaction`. The generic path never
+produces txn tags live. Migrating the live path onto the generic producer (option a) is blocked by the
+two-stage txn flow (Stage-A → Stage-B sourcing is not a single generic group — exactly why LP-326 deferred
+the migration), and would touch LIVE AS-1 for no measurement benefit.
+
+**Decision — (c): one text, single-sourced by a guard; the live path untouched.**
+- The **standalone constant is the canonical text** (it lives in `app/ai`, the clean lower layer;
+  `app/ai` does NOT import `app/verification`, and must not). The generic `txn_stage_a` group's YAML
+  `system_prompt` is set **byte-identical** to it.
+- A **TEXT DRIFT GUARD** (`test_txn_stage_a_prompt_convergence`) fails if the two ever diverge — so the
+  measured prompt and the shipped prompt can never silently differ again.
+- The **PRODUCER equivalence is already guarded** (the pre-existing
+  `test_txn_roundtrip_through_the_generic_producer_is_equivalent`: given identical judgments, the generic
+  and standalone producers assemble IDENTICAL tags). Text-identical + producer-equivalent → the calibration
+  (generic path) measures exactly what LIVE AS-1 (standalone path) ships. Rewiring `calibrate_lf6t3n` to
+  literally call the standalone was REJECTED: it would break the keyless stub harness and cross the
+  `app/ai ⊥ app/verification` layering, for a guarantee the two guards already give.
+- The surviving TEXT is the standalone's — LP-343 called it exemplary (states the §3D principle, defines
+  every category, anti-biases direction, makes `unknown` first-class). No text was IMPROVED here (the
+  shipped standalone is unchanged); the thin YAML copy was converged UP to match it. One change at a time.
+
+**D2 — LP-337's 98% is VOID and must be RE-EARNED.** It measured the OLD thin YAML `is_money_in`
+instruction via the generic producer; AS-1 ships the richer standalone text (label-tolerant, anti-bias).
+Different prompt → the number does not transfer. **The project currently has NO valid accuracy measurement
+of the shipped `txn.*` prompt.** It gets one in LP-345 (re-run against the converged prompt, with Priya's
+judgment rows, so the whole picture is measured once). The 98% is NOT quietly inherited.
+
+**Consequences.** The drift CLASS (two producers for one tag, silently divergent, unnoticed for months) is
+closed by the two standing guards. A duplicate-producer survey found **txn Stage-A is the ONLY dual case**
+(Stage-B sourcing produces its tags but they are not declared as a generic group — one producer, a
+different gap: LP-343 F1). No live rule moved; `ACTIVE_RULE_IDS` unchanged; the frozen LF-6T3N trace and
+AS-1's suite unchanged; the standalone's batching is untouched (no call-count regression). LP-326's
+deferred migration has come due — and the code shows full migration is still blocked by the two-stage flow,
+so the guard, not a migration, is the fix. Cross-refs: LP-326 (the deferred migration + the producer
+equivalence proof this leans on), LP-343 (the drift finding), LP-337 (the measurement it voids), LP-313/314/
+314a (the txn producers), LP-345 (where the number is re-earned).

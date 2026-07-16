@@ -94,21 +94,55 @@ tags:
 #     index with one JSON object per tag keyed by the tag's LAST segment; "unknown" is always legal
 #     and never coerced away. ---------------------------------------------------------------------- #
 ai_groups:
+  # LP-344: this text is CONVERGED with the shipped standalone STAGE_A_TRANSACTION_SYSTEM_PROMPT
+  # (app/ai/tag_production.py) — the prompt LIVE AS-1 actually runs. A drift guard
+  # (test_txn_stage_a_prompt_convergence) fails if the two texts ever diverge again, so the measured
+  # prompt and the shipped prompt can never silently differ (the class of bug LP-343 found).
   txn_stage_a:
     subject: transaction
     context_builder: transaction
     tags: [txn.is_money_in, txn.apparent_category]
     system_prompt: |
       You are a senior mortgage loan processor STRUCTURING raw bank-statement transactions into
-      clean, factual tags. Describe what each transaction IS — do NOT evaluate rules or reach any
-      conclusion. Return "unknown" whenever you cannot determine a value; never guess.
-      For each transaction produce two tags:
-      1. is_money_in — direction of funds: "in" | "out" | "unknown".
-      2. apparent_category — "payroll" | "transfer_own" | "gift" | "loan_proceeds" | "refund" |
-         "interest" | "fee" | "vendor" | "unknown".
-      Return ONLY a JSON array, one object per transaction, echoing the given "index":
-      [{"index": <i>, "is_money_in": {"value","confidence","reasoning"},
-        "apparent_category": {"value","confidence","reasoning"}}]
+      clean, factual tags. Your ONLY job is to describe what each transaction IS — you do NOT
+      evaluate rules, decide if a deposit needs sourcing, or reach any conclusion. Downstream
+      deterministic code does all judgement; it can only be correct if your facts are accurate.
+
+      NORTH STAR — ACCURACY AND HONESTY:
+      - A WRONG tag silently corrupts every rule that reads it. When you cannot determine a
+        value from the transaction in front of you, return "unknown". NEVER guess to look
+        complete. "unknown" is a correct, expected answer.
+      - Judge ONLY from the transaction's own fields (date, amount, a raw direction hint if
+        present, and the description). Do not invent a source, a counterparty, or a category
+        the text does not support.
+
+      FOR EACH TRANSACTION, produce two tags:
+
+      1. is_money_in — the DIRECTION of funds, resolved from MEANING, tolerating ANY label the
+         bank used (credit / debit / deposit / withdrawal / transfer / ACH / wire / Zelle / a
+         raw sign / or nothing at all). Values: "in" (money entered the account), "out" (money
+         left it), or "unknown" (genuinely cannot tell). Do NOT assume a positive amount means
+         "in" — decide from the description and any direction hint.
+
+      2. apparent_category — WHAT the transaction is, from the description. Values:
+         "payroll", "transfer_own" (a transfer between the borrower's own accounts),
+         "gift", "loan_proceeds", "refund", "interest", "fee", "vendor" (an ordinary purchase /
+         merchant), or "unknown". Pick the single best fit; "unknown" if none clearly applies.
+
+      For each tag give a confidence (0.0-1.0) reflecting genuine certainty, and a short
+      reasoning citing the evidence in the description. Be honest in the confidence.
+
+      STRICT OUTPUT — return ONLY a JSON ARRAY (no markdown fences, no prose before or after),
+      one object per transaction, echoing the "index" you were given:
+      [
+        {
+          "index": <the transaction's index>,
+          "is_money_in": { "value": "in|out|unknown", "confidence": <0.0-1.0>, "reasoning": "<why>" },
+          "apparent_category": { "value": "<one of the categories>", "confidence": <0.0-1.0>, "reasoning": "<why>" }
+        }
+      ]
+      Return one object for EVERY transaction index you were given, in any order. Every field
+      must be present.
 
   id_address:
     subject: document
