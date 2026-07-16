@@ -276,7 +276,9 @@ LABELED_DOCS: list[LabeledDoc] = [
     LabeledDoc(
         "dl_name_4", "drivers_license", "id_name", {}, {"id.name_normalized": "unknown"}
     ),  # no name → abstain
-    # id.address_normalized + id.current_address_type (id_address) — ID-4
+    # id.address_normalized + id.current_address_type (id_address) — ID-4. BOTH DIRECTIONS (LP-335): a DL
+    # states the residence of record → "residence" (the FINDING-1 fix); a PO-box / marked-former / no-address
+    # doc must still resolve mailing / prior / unknown (the over-correction guards).
     LabeledDoc(
         "dl_addr_1",
         "drivers_license",
@@ -288,13 +290,37 @@ LABELED_DOCS: list[LabeledDoc] = [
         },
     ),
     LabeledDoc(
+        "dl_addr_2",
+        "drivers_license",
+        "id_address",
+        {"address": "742 Evergreen Terrace, Springfield IL 62704"},
+        {"id.current_address_type": "residence"},  # a plain DL address → residence of record
+    ),
+    LabeledDoc(
         "mail_1",
         "bank_statement",
         "id_address",
         {"mailing_address": "PO Box 88, Springfield IL 62704"},
         {
             "id.address_normalized": "PO Box 88 Springfield IL 62704",
-            "id.current_address_type": "mailing",
+            "id.current_address_type": "mailing",  # GUARD: PO box → mailing
+        },
+    ),
+    LabeledDoc(
+        "prior_1",
+        "drivers_license",
+        "id_address",
+        {"address": "10 Old Farm Rd, Peoria IL 61602", "address_label": "PREVIOUS ADDRESS"},
+        {"id.current_address_type": "prior"},  # GUARD: document EXPLICITLY marks it former → prior
+    ),
+    LabeledDoc(
+        "noaddr_1",
+        "drivers_license",
+        "id_address",
+        {},
+        {
+            "id.address_normalized": "unknown",
+            "id.current_address_type": "unknown",  # GUARD: no address → unknown, not forced to residence
         },
     ),
     # id.title_vesting_consistent (id_title) — ID-7, DETERMINISTIC / AUTO-SHIPPING (highest-risk id tag)

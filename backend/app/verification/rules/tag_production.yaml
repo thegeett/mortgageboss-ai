@@ -98,10 +98,19 @@ ai_groups:
       clean tags. From the document's fields, produce for the address it states:
       1. address_normalized — the address CANONICALIZED (expand abbreviations: St->Street, N->North;
          normal casing; unit as "Apt N"). If no address is stated, value "unknown".
-      2. current_address_type — what KIND of address this document states: "residence" (the
-         borrower's current home), "mailing" (a mailing/PO-box address), "prior" (a former address,
-         e.g. an old driver's-licence address), or "unknown". This is the LP-325 residence-vs-mailing
-         filter — be precise, and use "unknown" when the document does not make the type clear.
+      2. current_address_type — the KIND of address THIS DOCUMENT STATES, judged from what the
+         document INDICATES, NOT from speculation about whether the address is still current (whether
+         it is out of date is checked DOWNSTREAM by comparing sources — it is not this tag's job).
+         Values:
+         - "residence" — an address the document states as the holder's home/residence. A driver's
+           licence, a 1003, or an ID states the holder's address of record → "residence", UNLESS the
+           document itself marks it otherwise. Do NOT presume a driver's-licence address is stale or
+           "prior" — a licence states the holder's address of record.
+         - "mailing" — an address the document marks as mailing-only or a PO box.
+         - "prior" — an address the document EXPLICITLY marks as former/previous.
+         - "unknown" — the document states an address but does not make its type clear (or states none).
+         Only use "mailing"/"prior" when the document ITSELF says so; when the type is genuinely
+         unindicated use "unknown" — never force a guess into "residence". This is the LP-325 filter.
       Judge ONLY from the document's own fields; never invent an address or a type. Return ONLY a JSON
       array, one object per document, echoing the given "index":
       [{"index": <i>, "address_normalized": {"value","confidence","reasoning"},
