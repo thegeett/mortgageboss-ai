@@ -101,6 +101,36 @@ def test_drop_entity_suffix_strips_but_never_invents_or_empties() -> None:
     assert strip("inc") == "inc"  # never strips to empty (a firm literally named by one token)
 
 
+def test_drop_entity_suffix_is_greedy_multi_token() -> None:
+    # GREEDY on purpose: peel EVERY trailing suffix token so a full legal name and its short form collapse
+    # to the same base (the W-2-legal-name vs paystub-short-form matching case). Documented cost: a real
+    # name-word that is also a suffix word (Company / Co) is removed when trailing.
+    strip = _NORMALIZERS["drop_entity_suffix"]
+    assert strip("acme logistics company llc") == "acme logistics"  # both suffix tokens peeled
+    assert strip("acme co ltd") == "acme"  # multiple entity tokens
+    assert strip("the trading company") == "the trading"  # trailing suffix-WORD removed (the cost)
+    assert strip("company") == "company"  # sole token preserved (never empty)
+
+
+def test_drop_entity_suffix_requires_casefold_and_drop_punct_before_it() -> None:
+    # LP-340 ordering guard: drop_entity_suffix matches lowercase, punctuation-free tokens, so a chain that
+    # places it before casefold/drop_punct fails LOUD at LOAD — not as a silent mid-run under-strip.
+    from app.verification.rules.specs import ConsistencyEval, ConsistencyOutcome
+
+    ok = ConsistencyOutcome(verdict="satisfied", reasoning="ok")
+    bad = ConsistencyOutcome(verdict="fired", reasoning="differ")
+    with pytest.raises(ValueError, match="drop_entity_suffix"):
+        ConsistencyEval(
+            subject="loan",
+            gather_tag="income.employer_normalized",
+            source_scope="borrower_documents",
+            compare_mode="exact",
+            normalization=("drop_entity_suffix", "casefold"),  # casefold AFTER the strip → invalid
+            on_agree=ok,
+            on_disagree=bad,
+        )
+
+
 def test_full_in5_chain_collapses_suffix_variants() -> None:
     # Through the REAL declared chain the rule uses (casefold->punct->ws->strip->drop_entity_suffix).
     norm = lambda v: _normalize(v, _IN5_CHAIN)  # noqa: E731

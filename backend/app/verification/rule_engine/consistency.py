@@ -109,10 +109,15 @@ _ENTITY_SUFFIXES = frozenset(
 def _drop_entity_suffix(value: str) -> str:
     """Strip trailing corporate entity-suffix tokens so ``Acme Logistics Inc`` and ``Acme Logistics LLC``
     (and ``Acme Logistics``) compare equal (LP-340 / ADR-281). Applied AFTER ``drop_punct``/``collapse_ws``,
-    so it matches bare lowercase tokens (``inc``, not ``Inc.``). Never strips to empty — a firm literally
-    named ``Company`` keeps its sole token. ACCEPTED TRADE-OFF (the Priya item): two genuinely different
-    legal entities sharing a base name (``Acme Inc`` vs ``Acme LLC``) then match — reversible by removing
-    this one key from a rule's chain."""
+    so it matches bare lowercase tokens (``inc``, not ``Inc.``) — the spec loader enforces that ordering.
+
+    GREEDY on purpose: it peels EVERY trailing suffix token, so a full legal name ``Acme Logistics Company
+    LLC`` and the short form ``Acme Logistics`` both reduce to ``acme logistics`` (W-2 legal name vs paystub
+    short form — the common employer-matching case). The cost is that a real name-WORD that happens to be a
+    suffix word is also removed when trailing (``Smith Company`` -> ``smith``). Never strips to empty — a
+    firm named by a single token (``Company``, ``Inc``) keeps it. ACCEPTED TRADE-OFF (the Priya item): two
+    genuinely different legal entities sharing a base name (``Acme Inc`` vs ``Acme LLC``) then match —
+    reversible by removing this one key from a rule's chain."""
     tokens = value.split()
     while len(tokens) > 1 and tokens[-1] in _ENTITY_SUFFIXES:
         tokens = tokens[:-1]

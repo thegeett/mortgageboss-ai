@@ -460,6 +460,18 @@ class ConsistencyEval(BaseModel):
                 f"normalization references unknown normalizer(s) {sorted(unknown_norm)} "
                 f"(known: {sorted(KNOWN_NORMALIZERS)})"
             )
+        # LP-340: drop_entity_suffix matches bare lowercase, punctuation-free tokens ("inc", not "Inc."),
+        # so casefold + drop_punct MUST run before it — else it silently under-strips ("Inc."/"INC" survive).
+        # Enforce the ordering at LOAD so a misordered chain fails loud, not as a quiet non-match mid-run.
+        if "drop_entity_suffix" in self.normalization:
+            idx = self.normalization.index("drop_entity_suffix")
+            before = self.normalization[:idx]
+            missing = [k for k in ("casefold", "drop_punct") if k not in before]
+            if missing:
+                raise ValueError(
+                    f"normalization: `drop_entity_suffix` requires {missing} to run before it "
+                    f"(it matches lowercase, punctuation-free tokens); chain was {list(self.normalization)}"
+                )
         for name, outcome in (
             ("on_agree", self.on_agree),
             ("on_disagree", self.on_disagree),
