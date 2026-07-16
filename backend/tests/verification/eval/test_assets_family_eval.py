@@ -170,7 +170,7 @@ def test_as10_domain13_a_short_account_is_not_masked_by_a_full_one() -> None:
     # THE COUNTER-EXAMPLE to AS-4's masking: the recipe takes the per-account MINIMUM (LP-336
     # resolve_accounts), so one 1-month account among a 3-month account → min 1 → AS-10 FIRES. AS-B fixed
     # this shape at authoring; assert it. Chase-****5678 has 1 month, Wells-****9999 has 3 → min 1.
-    def stmt(cid, bank, num, month):
+    def stmt(cid, bank, num):
         return _doc(
             cid,
             fields={
@@ -181,11 +181,13 @@ def test_as10_domain13_a_short_account_is_not_masked_by_a_full_one() -> None:
 
     from app.verification.tag_materialization.derived import _stmt_min_account_months
 
+    # Chase: 1 statement (May) → 1 distinct month. Wells: 3 statements (Apr/May/Jun) → 3. Months come
+    # from stmt.period_end below, not from the doc fields.
     docs = [
-        stmt("c1", "Chase", "12345678", 5),
-        stmt("w1", "Wells", "99999999", 4),
-        stmt("w2", "Wells", "99999999", 5),
-        stmt("w3", "Wells", "99999999", 6),
+        stmt("c1", "Chase", "12345678"),
+        stmt("w1", "Wells", "99999999"),
+        stmt("w2", "Wells", "99999999"),
+        stmt("w3", "Wells", "99999999"),
     ]
     by = {
         "c1": {"stmt.period_end": _tag("2026-05-31")},
@@ -276,6 +278,26 @@ def test_as11_restricted_fires_scoped() -> None:
 # AS-5 — gift chain (applicability; the gift-letter loop domain edge)
 # ================================================================================================= #
 def test_as5_gift_chain_scope_and_fire() -> None:
+    # SCOPE (production-faithful): a non-gift-letter doc → not_applicable.
+    na = _det("AS-5", _snap(docs=[_doc("bs", "bank_statement")]))
+    assert (
+        na[0].verdict is Verdict.NOT_APPLICABLE
+    )  # 13/scope: no gift used → not_applicable (a gift rule is irrelevant)
+
+    # KEYING-GAP PIN (LP-323-AS-C review): AS-5 is per_document on the gift letter and reads
+    # txn.apparent_category from the gift-letter DOCUMENT subject (AS-5.yaml), but that tag is materialized
+    # subject: transaction (tag_production.yaml) — a gift-letter document NEVER carries it. So in
+    # production the load-bearing tag is absent → couldnt_check, ALWAYS; AS-5 cannot FIRE/SATISFY as
+    # authored. It must read the gift DEPOSIT transaction's category (a cross-document gift↔deposit
+    # correlation), not the letter's. PINNED — a spec fix, reported like the bucket-C gaps.
+    gap = _det(
+        "AS-5", _snap(docs=[_doc("gl", "gift_letter")])
+    )  # no txn tag on the letter, as in prod
+    assert gap[0].verdict is Verdict.COULDNT_CHECK
+
+    # The rule's LOGIC is sound once the category reaches where AS-5 reads it (proving the gap is
+    # keying/materialization, not logic) — reachable only AFTER the re-keying above. Tags hand-placed on
+    # the gift-letter subject here to exercise the deterministic path:
     fire = _det(
         "AS-5",
         _snap(
@@ -285,11 +307,7 @@ def test_as5_gift_chain_scope_and_fire() -> None:
     )
     assert (
         fire[0].verdict is Verdict.FIRED
-    )  # 1: gift letter but the transfer is not evidenced as a gift
-    na = _det("AS-5", _snap(docs=[_doc("bs", "bank_statement")]))
-    assert (
-        na[0].verdict is Verdict.NOT_APPLICABLE
-    )  # 13/scope: no gift used → not_applicable (a gift rule is irrelevant)
+    )  # spec logic: gift letter but the transfer is not evidenced as a gift (reachable only after re-key)
     ok = _det(
         "AS-5",
         _snap(
@@ -297,7 +315,7 @@ def test_as5_gift_chain_scope_and_fire() -> None:
             by_subject={"gl": {"txn.apparent_category": _tag("gift")}},
         ),
     )
-    assert ok[0].verdict is Verdict.SATISFIED  # 2
+    assert ok[0].verdict is Verdict.SATISFIED  # spec logic (reachable only after re-key)
 
 
 # ================================================================================================= #
