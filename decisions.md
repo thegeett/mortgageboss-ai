@@ -9837,3 +9837,40 @@ recipe registry entries; no evaluator/gate/producer-core changed. **NO Assets th
 everything is authored `priya_validated:false`. Cross-refs: ADR-273 (arithmetic as derived tags), LP-323-AS-A
 (the recon + the matrix-shape question), LP-318/324 (the calc operand + its gate — AS-4's case-12 path),
 LP-336 (per_account + resolve_accounts, used inside the AS-10 recency recipe).
+
+## ADR-279: Calibrate the shipped path against de-identified real content via the Anthropic API — a bias hunt, not validation (LP-337)
+
+**Context.** Calibration was keyless (labels replayed, trivially perfect — a plumbing check). LP-334 added a
+LIVE seam and, at n=2, found a real systematic bias (`id.current_address_type` presumed a driver's-licence
+address `prior` — *because our own prompt exemplar taught it*; LP-335 fixed it). Keyless calibration
+STRUCTURALLY cannot catch that class (replayed labels agree with the prompt that produced them). LP-334's D1
+left the content source open (option 1 synthetic-equivalent / option 2 hand-built real-shaped / **option 3
+de-identified real content → the real API**). The AI tags feed LIVE AS-1 (whose accuracy had never been
+checked) and gate the inert Assets rules; the `txn_stage_a` / sourcing / income / asset prompts are all
+UNAUDITED — exactly the kind that taught the FINDING-1 bias.
+
+**Decision — DECIDED by Geet: execute option 3. Calibrate against LF-6T3N (real, de-identified) through the
+Anthropic production model**, because it measures the path actually shipped (real messiness + the real
+model), not a proxy. **Privacy posture, recorded as a deliberate decision (not a drift):** LF-6T3N is
+de-identified, and the SAME API already processes real files in production; the calibration adds no new data
+exposure. Because LF-6T3N has NO ground-truth labels, the first deliverable is the INSTRUMENT — a labeling
+worksheet a human fills in — generated deterministically from the snapshot (keyless), split MECHANICAL
+(factual reads — Geet) vs JUDGMENT (domain calls — Priya), carrying document context and EXCLUDING the AI's
+prediction (so a labeler cannot anchor). The scoring run reuses LP-317's `DimensionCalibration` and LP-334's
+`ScoredTag`/`summarize` UNCHANGED; it is opt-in (`LP334_LIVE=1`), never key-presence gated.
+
+**What this measurement CAN and CANNOT establish.** It finds **BIASES, not RATES** — one conventional
+purchase file gives most tags n≤6. **The one exception is `txn.*`:** LF-6T3N's 5 statements carry 50
+transactions, so `txn.is_money_in` / `txn.apparent_category` reach **n=50** — the system's first candidate
+for a real rate measurement (scoped: on ONE conventional purchase). Everything else (`id.*`, `income.*`,
+`asset.*`) is n=0 UNMEASURABLE on this file; `stmt.*` is content-free (empty statement fields). **A clean
+result does NOT unblock the ~15 inert rules** — activation still requires n≥20 across VARIED files (FHA /
+refi / condo / self-employed) + Priya's D2 bars. Free-text tags (`txn.counterparty` / `source_reference`)
+are NOT string-scored (FINDING-2) — captured for human review, deferred to the fuzzy-scoring method.
+
+**Consequences.** EVALUATE, DON'T FIX: a bad number is a reported finding + its own fix ticket — no prompt is
+tuned in the measuring pass (LP-335's discipline: one principled change, measure once, never iterate against
+the numbers). The worksheet generator + scoring live in the eval harness only; no rule/tag/engine/spec
+behavior changed. Cross-refs: LP-334 (the harness + D1/D2 + FINDING-2), LP-335 (FINDING-1's fix + the
+anti-fit-to-eval discipline), LP-317 (`DimensionCalibration`), LP-313/314 (the txn Stage-A + sourcing
+producers being audited).
