@@ -48,6 +48,17 @@ _ABSTAINING_DIMENSIONS = {
     "income.job_change_acceptable",
     "income.other_income_continues",
     "income.rental_income_supportable",
+    # The assets family's AI tags (LP-323-AS-C) abstain to "unknown" too (a statement-owner match that
+    # couldn't be read; a liquidation-terms / reserve-eligibility / usable-value structuring that
+    # couldn't decide; a borrowed-funds judgment that couldn't decide), so they are registered here — else
+    # over_abstaining would be silently inert for the AS family. txn.apparent_category stays UNregistered
+    # (its "unknown" is a legitimate value, per the note above); txn.counterparty is free-text (FINDING-2:
+    # not string-scorable) so it is not calibrated here at all.
+    "stmt.owner_matches_borrower",
+    "stmt.is_reserve_eligible",
+    "asset.liquidation_terms",
+    "asset.usable_value",
+    "as.borrowed_funds",
 }
 _OVER_ABSTENTION = 0.30  # above this unknown-rate, an abstaining tag is drowning in unknowns
 _UNDER_ABSTENTION_ACCURACY = 0.90  # concrete accuracy below this = fabrication risk
