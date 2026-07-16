@@ -6,7 +6,11 @@ numeric_check: false
 criteria: >-
   A borrower's CURRENT RESIDENCE address must agree across every source that states it, tolerant
   of formatting / abbreviation variance. Compare residence-to-residence only: a mailing / PO-box or
-  a prior (e.g. driver's-licence) address is not a discrepancy.
+  an explicitly-former (prior) address is not a discrepancy. A driver's licence STATES the holder's
+  residence of record (LP-335 — it is NOT presumed stale), so a DL address that genuinely differs
+  from the 1003 residence SURFACES for reconciliation rather than being silently dropped. NOTE:
+  whether an outdated DL should FIRE vs route to review is pending Priya sign-off (priya_validated
+  is false) — the current behavior surfaces the mismatch (fail toward catching, not masking).
 applicability:
   scope: every borrower on the loan
   trigger: once per borrower, comparing residence-typed addresses across sources

@@ -311,7 +311,11 @@ LABELED_DOCS: list[LabeledDoc] = [
         "drivers_license",
         "id_address",
         {"address": "10 Old Farm Rd, Peoria IL 61602", "address_label": "PREVIOUS ADDRESS"},
-        {"id.current_address_type": "prior"},  # GUARD: document EXPLICITLY marks it former → prior
+        # SYNTHETIC probe of the "explicitly-marked-former → prior" branch. Real DL extraction emits
+        # only `address` (no former-marker field exists in any extraction schema), so in production a DL
+        # never types "prior" — it types "residence" and ID-4 surfaces any genuine mismatch (LP-335).
+        # This case validates the prompt's reasoning on a marked-former field, not a producible input.
+        {"id.current_address_type": "prior"},
     ),
     LabeledDoc(
         "noaddr_1",

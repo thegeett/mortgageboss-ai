@@ -20,7 +20,7 @@ from uuid import uuid4
 import pytest
 from app.ai.rule_judgment import RuleJudgment, RuleJudgmentResult
 from app.verification.rule_engine.consistency import evaluate_consistency_rule
-from app.verification.rule_engine.result import Verdict
+from app.verification.rule_engine.result import RuleEvaluation, Verdict
 from app.verification.rules.specs import load_rule_spec
 from app.verification.snapshot.model import (
     BorrowerRef,
@@ -60,7 +60,7 @@ class _Reasoner:
         return RuleJudgmentResult(RuleJudgment(self.value, 0.9, "because"), 1, 1, "stub", False)
 
 
-def _snap(docs: list[tuple[str, str, str, str]]):
+def _snap(docs: list[tuple[str, str, str, str]]) -> Snapshot:
     """docs = [(content_id, document_type, address, current_address_type)] — the DL/1003 sources,
     each co-locating id.address_normalized + id.current_address_type on its own document subject (LP-325/326)."""
     entries = [
@@ -82,7 +82,7 @@ def _snap(docs: list[tuple[str, str, str, str]]):
     )
 
 
-async def _id4(docs, reasoner):
+async def _id4(docs: list[tuple[str, str, str, str]], reasoner: _Reasoner) -> list[RuleEvaluation]:
     return await evaluate_consistency_rule(load_rule_spec("ID-4"), _snap(docs), reasoner=reasoner)
 
 

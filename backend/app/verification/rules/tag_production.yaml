@@ -108,9 +108,12 @@ ai_groups:
            "prior" — a licence states the holder's address of record.
          - "mailing" — an address the document marks as mailing-only or a PO box.
          - "prior" — an address the document EXPLICITLY marks as former/previous.
-         - "unknown" — the document states an address but does not make its type clear (or states none).
-         Only use "mailing"/"prior" when the document ITSELF says so; when the type is genuinely
-         unindicated use "unknown" — never force a guess into "residence". This is the LP-325 filter.
+         - "unknown" — the document neither states the holder's own residence nor marks the address's
+           type (e.g. a stray address on a document that does not say whose it is, or no address at all).
+         Only use "mailing"/"prior" when the document ITSELF marks the address that way. An identity or
+         application document that states the holder's OWN address (a driver's licence, an ID, a 1003)
+         IS a residence indication → "residence" — that is not a forced guess; reserve "unknown" for a
+         genuinely unidentified address, never as a hedge on a stated holder residence. LP-325 filter.
       Judge ONLY from the document's own fields; never invent an address or a type. Return ONLY a JSON
       array, one object per document, echoing the given "index":
       [{"index": <i>, "address_normalized": {"value","confidence","reasoning"},
