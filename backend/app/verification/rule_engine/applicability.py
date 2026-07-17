@@ -17,12 +17,30 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 
-from app.verification.rule_engine.reasons import document_label
+from app.verification.rule_engine.reasons import document_label, fact_label
 from app.verification.rule_engine.result import Verdict
-from app.verification.rules.specs import TagCondition
+from app.verification.rules.specs import DOC_TYPE_TAG, TagCondition
 from app.verification.snapshot.tag import Tag
 
 _UNKNOWN = "unknown"
+
+
+def _undetermined_reason(applic: TagCondition, *, present_but_unclear: bool) -> str:
+    """The couldnt_check reason when the applicability predicate's tag is absent/unknown — SHAPE-AWARE
+    (LP-376-C): a per-DOCUMENT rule (the predicate IS the document type) asks for classification; ANY
+    other predicate (e.g. AS-1's ``txn.is_money_in``) names the mortgage FACT it needs, never a document
+    action for a non-document fact."""
+    if applic.tag == DOC_TYPE_TAG:
+        verb = "could not be classified" if present_but_unclear else "has not been classified"
+        return (
+            f"a document in the file {verb} — it may be the {document_label(applic.value)} this "
+            "check needs; classify it so the check can run"
+        )
+    verb = "could not be determined" if present_but_unclear else "has not been determined"
+    return (
+        f"the {fact_label(applic.tag)} {verb} — this check needs it to tell whether the rule "
+        "applies here"
+    )
 
 
 def resolve_applicability(
@@ -32,21 +50,11 @@ def resolve_applicability(
 
     ABSENT / ``"unknown"`` predicate tag → couldnt_check (cannot tell if it applies); a predicate that
     is DEFINITELY false → not_applicable (out of scope). The predicate holding → the rule applies."""
-    # LP-376-C: a per-document rule scopes on the document's TYPE; when that could not be determined we
-    # cannot tell if THIS document is the one the rule needs — say so in mortgage terms + the action.
     tag = subject_tags.get(applic.tag)
     if tag is None:
-        return (
-            Verdict.COULDNT_CHECK,
-            f"a document in the file has not been classified — it may be the "
-            f"{document_label(applic.value)} this check needs; classify it so the check can run",
-        )
+        return (Verdict.COULDNT_CHECK, _undetermined_reason(applic, present_but_unclear=False))
     if tag.value == _UNKNOWN:
-        return (
-            Verdict.COULDNT_CHECK,
-            f"a document in the file could not be classified — it may be the "
-            f"{document_label(applic.value)} this check needs; classify it so the check can run",
-        )
+        return (Verdict.COULDNT_CHECK, _undetermined_reason(applic, present_but_unclear=True))
     matches = (tag.value == applic.value) if applic.op == "eq" else (tag.value != applic.value)
     if not matches:
         return (

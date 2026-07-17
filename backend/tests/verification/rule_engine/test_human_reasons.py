@@ -113,3 +113,53 @@ def test_absent_expected_document_reason_is_human_and_names_the_action() -> None
     assert reason is not None
     _assert_clean(reason)
     assert "title commitment" in reason and "request" in reason.lower()
+
+
+def test_non_document_applicability_reason_names_the_fact_not_a_document() -> None:
+    # AS-1's applicability is txn.is_money_in (a TRANSACTION predicate, not a document type). An unknown
+    # direction must NOT read as "classify the document / the 'in'" — it names the mortgage FACT.
+    applic = TagCondition(tag="txn.is_money_in", op="eq", value="in")
+    unknown = resolve_applicability(applic, {"txn.is_money_in": _tag("unknown")})
+    assert unknown is not None
+    _assert_clean(unknown[1])
+    assert "deposit direction" in unknown[1] and "document" not in unknown[1].lower()
+
+    absent = resolve_applicability(applic, {})  # tag not produced
+    assert absent is not None
+    _assert_clean(absent[1])
+    assert "deposit direction" in absent[1] and "document" not in absent[1].lower()
+
+
+def test_every_live_rule_reason_tag_has_a_curated_fact_label() -> None:
+    # DRIFT GUARD (LP-376-C review): a live rule's couldnt_check reason interpolates fact_label(tag) for the
+    # tag whose absence/unknown caused it. An UNMAPPED tag degrades to a humanized STEM — clean-looking (so
+    # _assert_clean passes) but NOT the curated mortgage phrase. Assert every such tag is mapped, so a new
+    # live rule cannot silently ship a half-translated reason.
+    from app.verification.rule_engine.reasons import _FACT_LABELS
+    from app.verification.rule_engine.registry import ACTIVE_RULE_IDS
+    from app.verification.rules.specs import DOC_TYPE_TAG, load_rule_spec
+
+    missing: dict[str, set[str]] = {}
+    for rule_id in ACTIVE_RULE_IDS:
+        spec = load_rule_spec(rule_id)
+        tags: set[str] = set()
+        if spec.deterministic is not None:
+            tags |= set(spec.deterministic.gated_tags)
+            applic = spec.deterministic.applicability
+            if applic is not None and applic.tag != DOC_TYPE_TAG:
+                tags.add(applic.tag)
+        if spec.judgment is not None:
+            tags |= set(spec.judgment.load_bearing_tags)
+            applic = spec.judgment.applicability
+            if applic is not None and applic.tag != DOC_TYPE_TAG:
+                tags.add(applic.tag)
+        if spec.consistency is not None:
+            tags.add(spec.consistency.gather_tag)
+            if spec.consistency.gather_filter is not None:
+                tags.add(spec.consistency.gather_filter.tag)
+        unmapped = {t for t in tags if t not in _FACT_LABELS}
+        if unmapped:
+            missing[rule_id] = unmapped
+    assert not missing, (
+        f"live rules whose couldnt_check reason-tags lack a curated fact label: {missing}"
+    )

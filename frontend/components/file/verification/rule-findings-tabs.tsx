@@ -15,6 +15,7 @@ import type { EvaluationOutcome, RuleFinding } from "@/lib/types/verification";
 import { cn } from "@/lib/utils";
 import {
   OUTCOME_META,
+  type OutcomeTone,
   type TabId,
   attentionGroups,
   bucketRuleFindings,
@@ -165,11 +166,22 @@ function GroupedFindingList({ findings }: { findings: RuleFinding[] }) {
   );
 }
 
+// The collapsed-summary dot color per outcome tone — so a collapsed SATISFIED group reads green (a pass),
+// an `open` group red, etc., not a blanket warning (every member of a group shares one outcome).
+const TONE_DOT: Record<OutcomeTone, string> = {
+  danger: "bg-destructive",
+  warning: "bg-warning",
+  info: "bg-info",
+  success: "bg-success",
+  muted: "bg-gray-300",
+};
+
 function CollapsedFindings({ findings }: { findings: RuleFinding[] }) {
   const [open, setOpen] = useState(false);
   const panelId = useId();
   const first = findings[0];
   if (first === undefined) return null; // never — the caller only builds this for a non-empty group
+  const dot = TONE_DOT[outcomeMeta(first.evaluation_outcome).tone];
   return (
     <div className="rounded-lg border border-gray-200/70">
       <button
@@ -179,7 +191,7 @@ function CollapsedFindings({ findings }: { findings: RuleFinding[] }) {
         aria-controls={panelId}
         className="flex w-full items-start gap-2.5 rounded-lg px-3 py-2.5 text-left hover:bg-gray-50/70"
       >
-        <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-warning" aria-hidden />
+        <span className={cn("mt-1.5 h-2 w-2 shrink-0 rounded-full", dot)} aria-hidden />
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
             <span className="font-mono text-xs font-semibold text-gray-800">{first.rule_id}</span>
