@@ -73,6 +73,7 @@ function status(findings: VerificationFinding[]): VerificationStatus {
       total_cost_estimate: null,
     },
     findings,
+    rule_findings: [],
     aggression: {
       level: "balanced",
       default: "balanced",

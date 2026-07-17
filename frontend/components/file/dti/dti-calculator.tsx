@@ -22,7 +22,7 @@ import { useClearDtiOverride, useDti, useSetDtiOverride } from "@/lib/api/dti";
 import { formatMoneyPrecise, formatPercent, humanize } from "@/lib/format";
 import type { DtiCalculation, DtiLimit, DtiLineItem } from "@/lib/types/dti";
 import { cn } from "@/lib/utils";
-import { AlertTriangle, Calculator, Check, Pencil, RotateCcw, X } from "lucide-react";
+import { AlertTriangle, Calculator, Check, Lock, Pencil, RotateCcw, X } from "lucide-react";
 import { useState } from "react";
 
 export function DtiCalculator({ fileId }: { fileId: string }) {
@@ -92,6 +92,7 @@ function DtiBody({ fileId, data }: { fileId: string; data: DtiCalculation }) {
   return (
     <div className="space-y-6">
       {data.findings.unresolved && <UnresolvedAlert count={data.findings.open_in_scope_count} />}
+      {data.gated && <GatedBanner reason={data.gate_reason} />}
 
       <HeroRatios data={data} />
 
@@ -287,6 +288,10 @@ function LineRow({
             <span className="text-primary">
               overridden · auto {formatMoneyPrecise(item.auto_amount)}
             </span>
+          ) : item.unknown ? (
+            <span className="text-warning">
+              unknown — no binder / not extracted (absent, not $0)
+            </span>
           ) : (
             humanize(item.source)
           )}
@@ -338,10 +343,14 @@ function LineRow({
             }}
             className={cn(
               "group inline-flex items-center gap-1.5 rounded px-1 py-0.5 tabular-nums hover:bg-gray-100",
-              item.overridden ? "font-semibold text-primary" : "font-medium text-gray-900",
+              item.unknown
+                ? "font-medium text-warning"
+                : item.overridden
+                  ? "font-semibold text-primary"
+                  : "font-medium text-gray-900",
             )}
           >
-            {formatMoneyPrecise(item.amount)}
+            {item.unknown ? "Unknown" : formatMoneyPrecise(item.amount)}
             <Pencil className="h-3 w-3 text-gray-300 group-hover:text-gray-500" />
           </button>
           {item.overridden && (
@@ -365,6 +374,25 @@ function LineRow({
 // --------------------------------------------------------------------------- //
 // The explicit formula + the unresolved-findings alert
 // --------------------------------------------------------------------------- //
+
+/** LP-375: the DTI is FAIL-CLOSED — a required housing input is unknown, so no confident ratio is shown
+ * (a $0 there would read confidently too-low). The display agrees with the engine's gate. */
+function GatedBanner({ reason }: { reason?: string | null }) {
+  return (
+    <div
+      role="alert"
+      className="flex items-start gap-2 rounded-lg border border-warning/40 bg-warning/5 px-3 py-2.5 text-sm text-gray-700"
+    >
+      <Lock className="mt-0.5 h-4 w-4 shrink-0 text-warning" />
+      <span>
+        <span className="font-medium text-gray-900">The DTI can't be computed yet</span> —{" "}
+        {reason?.replace(/^calculation gated \(fail-closed\):\s*/, "") ??
+          "a required housing input is unknown"}
+        . It's shown as gated rather than a confident ratio resting on a missing value.
+      </span>
+    </div>
+  );
+}
 
 function FormulaReceipt({ data }: { data: DtiCalculation }) {
   return (

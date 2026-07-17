@@ -80,11 +80,14 @@ function Tile({
 
 function DtiTile({ fileId, expanded, onToggle }: TileProps) {
   const { data } = useDti(fileId);
+  // LP-375: a gated DTI shows "Gated" (a required housing input is unknown), never a number on a
+  // fabricated 0. The engine already nulled the ratio; the tile agrees with it.
+  const gated = data?.gated === true;
   return (
     <Tile
       title="Back-end DTI"
-      headline={data?.back_end_dti != null ? `${data.back_end_dti}%` : "—"}
-      status={data?.limit.status}
+      headline={gated ? "Gated" : data?.back_end_dti != null ? `${data.back_end_dti}%` : "—"}
+      status={gated ? "unknown" : data?.limit.status}
       expanded={expanded}
       onToggle={onToggle}
     />

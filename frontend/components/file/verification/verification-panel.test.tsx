@@ -82,6 +82,7 @@ const STATUS: VerificationStatus = {
   findings: [
     finding({ id: "f-1", message: "Stated income exceeds the documents by 8%.", confidence: 0.82 }),
   ],
+  rule_findings: [],
   aggression: {
     level: "balanced",
     default: "balanced",
@@ -109,6 +110,13 @@ function baseRun() {
   return STATUS.latest_run;
 }
 
+/** The legacy AI-sweep surface (dial, stats, findings, submit status) now lives in Tab 5 — "Old findings"
+ * (LP-376: rule-engine tabs 1-4 are default). Open it before asserting on legacy content; the behaviour
+ * there is unchanged, just one tab over. */
+function openLegacy() {
+  fireEvent.click(screen.getByRole("tab", { name: /old findings/i }));
+}
+
 afterEach(() => {
   cleanup();
   vi.resetAllMocks(); // resets call history AND any per-test mockImplementation
@@ -120,6 +128,7 @@ describe("VerificationPanel", () => {
     render(<VerificationPanel fileId="LF-1" />);
 
     expect(screen.getByRole("button", { name: /run verification/i })).toBeDefined();
+    openLegacy();
     expect(screen.getByText("Stated income exceeds the documents by 8%.")).toBeDefined();
     expect(screen.getByText(/82.00% confidence/)).toBeDefined();
     expect(screen.getByText(/p\.1/)).toBeDefined();
@@ -173,6 +182,7 @@ describe("VerificationPanel", () => {
     // The run claims 5 yellow, but one finding is in scope at Balanced — follow the list.
     mock({ data: { ...STATUS, latest_run: { ...baseRun(), yellow_count: 5 } } });
     render(<VerificationPanel fileId="LF-1" />);
+    openLegacy();
     expect(screen.getByText("1 finding")).toBeDefined();
   });
 
@@ -195,6 +205,7 @@ describe("VerificationPanel", () => {
   it("renders the dial with the active level pressed", () => {
     mock();
     render(<VerificationPanel fileId="LF-1" />);
+    openLegacy();
     const balanced = screen.getByRole("button", { name: "Balanced" });
     expect(balanced.getAttribute("aria-pressed")).toBe("true");
     expect(screen.getByRole("button", { name: "Thorough" }).getAttribute("aria-pressed")).toBe(
@@ -205,6 +216,7 @@ describe("VerificationPanel", () => {
   it("moving the dial sets the per-file override — no AI re-run", () => {
     mock();
     render(<VerificationPanel fileId="LF-1" />);
+    openLegacy();
     fireEvent.click(screen.getByRole("button", { name: "Thorough" }));
     // The dial calls setAggression (a read-time re-filter), NOT runVerification (the AI).
     expect(setAggressionMutate).toHaveBeenCalledTimes(1);
@@ -223,6 +235,7 @@ describe("VerificationPanel", () => {
       },
     });
     render(<VerificationPanel fileId="LF-1" />);
+    openLegacy();
     // At Balanced (≥0.5) the 0.4 hunch is hidden.
     expect(screen.queryByText("Low-confidence hunch.")).toBeNull();
     expect(screen.getByText("High-confidence discrepancy.")).toBeDefined();
@@ -242,6 +255,7 @@ describe("VerificationPanel", () => {
       },
     });
     render(<VerificationPanel fileId="LF-1" />);
+    openLegacy();
     expect(screen.getByText("1 red")).toBeDefined();
     // Move the dial — the in-scope set may change, but severity is intrinsic.
     fireEvent.click(screen.getByRole("button", { name: "Conservative" }));
@@ -264,6 +278,7 @@ describe("VerificationPanel", () => {
     );
     mock({ data });
     render(<VerificationPanel fileId="LF-1" />);
+    openLegacy();
     fireEvent.click(screen.getByRole("button", { name: "Thorough" }));
     // Thorough surfaced the 0.4 finding → the consequence is communicated.
     expect(screen.getByText(/Thorough surfaced 1 more finding/)).toBeDefined();
@@ -277,6 +292,7 @@ describe("VerificationPanel", () => {
       },
     });
     render(<VerificationPanel fileId="LF-1" />);
+    openLegacy();
     fireEvent.click(screen.getByRole("button", { name: /reset to default/i }));
     expect(setAggressionMutate.mock.calls[0]?.[0]).toBeNull(); // null = revert to user default
   });
@@ -289,6 +305,7 @@ describe("VerificationPanel", () => {
       },
     });
     render(<VerificationPanel fileId="LF-1" />);
+    openLegacy();
     fireEvent.click(screen.getByRole("button", { name: /set thorough as my default/i }));
     expect(updatePreferencesMutate.mock.calls[0]?.[0]).toBe("thorough");
   });
@@ -296,6 +313,7 @@ describe("VerificationPanel", () => {
   it("shows the blocked submit status with the active thoroughness", () => {
     mock({ data: { ...STATUS, blocked: true, in_scope_open_count: 2 } });
     render(<VerificationPanel fileId="LF-1" />);
+    openLegacy();
     expect(
       screen.getByText(/must be resolved to submit \(at Balanced thoroughness\)/),
     ).toBeDefined();

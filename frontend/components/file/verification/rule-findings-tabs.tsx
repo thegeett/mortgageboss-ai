@@ -1,0 +1,240 @@
+"use client";
+
+/**
+ * The five §8 tabs (LP-376) — the first human view of the rule engine's governed output.
+ *
+ * Tabs 1-4 read `rule_findings` (the governed engine); Tab 5 reads the legacy `findings` list (the AI sweep
+ * + retired xsrc rows). They are NEVER merged and their counts are NEVER summed (LP-375 made that
+ * structural; this preserves it). Tab 1 (Needs attention) is default and groups its three outcomes —
+ * `open` first — so the real violations don't drown in `couldnt_check`. Tab 4 (Not applicable) is
+ * structurally empty (those subjects aren't persisted) and says so honestly rather than being dropped.
+ */
+
+import type { EvaluationOutcome, RuleFinding } from "@/lib/types/verification";
+import { cn } from "@/lib/utils";
+import {
+  ATTENTION_ORDER,
+  OUTCOME_META,
+  type TabId,
+  attentionGroups,
+  bucketRuleFindings,
+} from "@/lib/verification/rule-findings";
+import { Archive, CheckCircle2, CircleSlash, History, TriangleAlert } from "lucide-react";
+import type { ReactNode } from "react";
+import { useState } from "react";
+import { RuleFindingRow } from "./rule-finding-row";
+
+interface TabDef {
+  id: TabId;
+  label: string;
+  count: number;
+  hasViolations?: boolean;
+}
+
+function TabStrip({
+  tabs,
+  active,
+  onPick,
+}: {
+  tabs: TabDef[];
+  active: TabId;
+  onPick: (id: TabId) => void;
+}) {
+  return (
+    <div
+      role="tablist"
+      aria-label="Verification outcomes"
+      className="flex gap-1 overflow-x-auto border-b border-gray-200"
+    >
+      {tabs.map((tab) => {
+        const isActive = tab.id === active;
+        return (
+          <button
+            key={tab.id}
+            type="button"
+            role="tab"
+            aria-selected={isActive}
+            onClick={() => onPick(tab.id)}
+            className={cn(
+              "flex shrink-0 items-center gap-1.5 border-b-2 px-3 py-2 text-sm transition-colors",
+              isActive
+                ? "border-primary font-semibold text-gray-900"
+                : "border-transparent text-gray-500 hover:text-gray-800",
+            )}
+          >
+            {tab.label}
+            <span
+              className={cn(
+                "rounded-full px-1.5 py-px text-[11px] font-medium tabular-nums",
+                tab.hasViolations
+                  ? "bg-destructive/10 text-destructive"
+                  : isActive
+                    ? "bg-primary/10 text-primary"
+                    : "bg-gray-100 text-gray-500",
+              )}
+            >
+              {tab.count}
+            </span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function EmptyState({ icon, title, body }: { icon: ReactNode; title: string; body: string }) {
+  return (
+    <div className="flex flex-col items-center gap-2 rounded-lg border border-dashed border-gray-200 px-6 py-10 text-center">
+      <div className="text-gray-300">{icon}</div>
+      <p className="text-sm font-medium text-gray-600">{title}</p>
+      <p className="max-w-md text-xs leading-relaxed text-gray-400">{body}</p>
+    </div>
+  );
+}
+
+/** Tab 1 — the three outcomes grouped + labelled, `open` first (the real signal must not drown). */
+function AttentionTab({ findings }: { findings: RuleFinding[] }) {
+  if (findings.length === 0) {
+    return (
+      <EmptyState
+        icon={<CheckCircle2 className="h-8 w-8" />}
+        title="Nothing needs attention"
+        body="No rule fired, could-not-check, or is awaiting review on this file. When the engine finds a violation, a gap, or a judgment to ratify, it appears here — grouped by kind."
+      />
+    );
+  }
+  const groups = attentionGroups(findings);
+  return (
+    <div className="space-y-5">
+      {groups.map(({ outcome, findings: groupFindings }) => (
+        <OutcomeGroup key={outcome} outcome={outcome} findings={groupFindings} />
+      ))}
+    </div>
+  );
+}
+
+function OutcomeGroup({
+  outcome,
+  findings,
+}: {
+  outcome: EvaluationOutcome;
+  findings: RuleFinding[];
+}) {
+  const meta = OUTCOME_META[outcome];
+  return (
+    <section className="space-y-2">
+      <div className="flex items-baseline gap-2">
+        <h4 className="text-sm font-semibold text-gray-800">{meta.label}</h4>
+        <span className="text-xs tabular-nums text-gray-400">{findings.length}</span>
+        <span className="text-xs text-gray-400">— {meta.blurb}</span>
+      </div>
+      <div className="space-y-2">
+        {findings.map((finding) => (
+          <RuleFindingRow key={finding.id} finding={finding} />
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function FindingList({ findings }: { findings: RuleFinding[] }) {
+  return (
+    <div className="space-y-2">
+      {findings.map((finding) => (
+        <RuleFindingRow key={finding.id} finding={finding} />
+      ))}
+    </div>
+  );
+}
+
+export function RuleFindingsTabs({
+  ruleFindings,
+  legacyCount,
+  legacy,
+}: {
+  ruleFindings: RuleFinding[];
+  legacyCount: number;
+  legacy: ReactNode;
+}) {
+  const [active, setActive] = useState<TabId>("attention");
+  const buckets = bucketRuleFindings(ruleFindings);
+  const openCount = buckets.attention.filter((f) => f.evaluation_outcome === "open").length;
+
+  const tabs: TabDef[] = [
+    {
+      id: "attention",
+      label: "Needs attention",
+      count: buckets.attention.length,
+      hasViolations: openCount > 0,
+    },
+    { id: "satisfied", label: "Satisfied", count: buckets.satisfied.length },
+    {
+      id: "no_longer_applies",
+      label: "No longer applies",
+      count: buckets.no_longer_applies.length,
+    },
+    { id: "not_applicable", label: "Not applicable", count: buckets.not_applicable.length },
+    { id: "legacy", label: "Old findings", count: legacyCount },
+  ];
+
+  return (
+    <div className="space-y-4">
+      <TabStrip tabs={tabs} active={active} onPick={setActive} />
+
+      <div role="tabpanel">
+        {active === "attention" && <AttentionTab findings={buckets.attention} />}
+
+        {active === "satisfied" &&
+          (buckets.satisfied.length > 0 ? (
+            <div className="space-y-2">
+              <p className="text-xs text-gray-400">
+                {OUTCOME_META.satisfied.blurb} These ran and passed — visible so you know a rule was
+                actually checked, not silently skipped.
+              </p>
+              <FindingList findings={buckets.satisfied} />
+            </div>
+          ) : (
+            <EmptyState
+              icon={<CheckCircle2 className="h-8 w-8" />}
+              title="No satisfied rules yet"
+              body="When a rule runs and passes with evidence, it appears here — so a pass is visible, never assumed."
+            />
+          ))}
+
+        {active === "no_longer_applies" &&
+          (buckets.no_longer_applies.length > 0 ? (
+            <FindingList findings={buckets.no_longer_applies} />
+          ) : (
+            <EmptyState
+              icon={<History className="h-8 w-8" />}
+              title="Nothing has stopped applying"
+              body="A finding lands here when its subject leaves the file between runs (e.g. a deposit that's gone). It needs a prior run to compare against, so a first run never populates it. It is NOT the same as 'not applicable'."
+            />
+          ))}
+
+        {active === "not_applicable" && (
+          <EmptyState
+            icon={<CircleSlash className="h-8 w-8" />}
+            title="Nothing to show — and that's by design"
+            body="Subjects a rule doesn't apply to (e.g. AS-1's money-OUT transactions) are not recorded as findings, so this tab is structurally empty on every file. It exists so that 'not applicable' can never quietly absorb a 'couldn't check' — a real gap always stays in Needs attention."
+          />
+        )}
+
+        {active === "legacy" && (
+          <div className="space-y-3">
+            <div className="flex items-start gap-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5 text-xs text-gray-500">
+              <Archive className="mt-0.5 h-3.5 w-3.5 shrink-0 text-gray-400" />
+              <span>
+                <span className="font-medium text-gray-600">Legacy — two deprecated systems</span>{" "}
+                (the AI cross-source sweep + retired rules). These are NOT the governed rule engine
+                and are scheduled for removal; they carry their own counts and actions, separate
+                from the tabs above.
+              </span>
+            </div>
+            {legacy}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}

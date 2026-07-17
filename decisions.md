@@ -10526,3 +10526,33 @@ spans both systems — the display lists are separated, but a per-system BLOCKIN
 (`not_applicable`) has no persisted rows. Cross-refs: §8, LP-316 (the Finding model), LP-364-B (the
 discriminator), LP-374 (the traced $0.00 + DTI-reads-the-extraction), LP-318 (the gate), LP-376 (the UI),
 LP-377 (§10 actions / blocking policy).
+
+## ADR-292: The five §8 tabs + the provenance card — the subject-label + Tab-4 decisions (LP-376)
+
+The §8 mapping (five outcomes → four governed tabs + the legacy quarantine) is the architecture, implemented,
+not a decision. Two real decisions were forced in rendering it, recorded here.
+
+**The subject label — the message is the identity; the raw content-id is never shown.** `subject_key` is an
+opaque content-id (`txn54c6…`, a borrower UUID, or `"loan"`). A row nobody can identify is a row nobody can
+action (LP-376), and a hash is not an identity. Decision: render the **message** as the row's identity (it is
+ALWAYS present — the backend refuses to persist a reasonless verdict — and it differs per subject, so rows are
+distinguishable), plus a compact **subject chip** derived from the load-bearing tags where a recognisable
+value exists (`ruleSubjectChip`: AS-1's txn.amount+txn.date → "$20,000 · date"; a name/address tag; `"loan"` →
+"Loan-level"), and NEVER the raw content-id. **Surfaced gap:** the rule NAME (`spec.name`) is not in the
+payload — rows show `rule_id` ("ID-4"), not "Current address consistency". Reported for LP-377 (a small
+`RuleFindingPublic` addition), not worked around by reaching into the backend.
+
+**Tab 4 (Not applicable) is structurally empty — kept, explained, never fabricated.** `not_applicable`
+subjects are not persisted (LP-375), so Tab 4 renders empty on every file. Decision: keep the tab (count 0)
+with an honest empty state explaining WHY — because dropping it would let "not applicable" quietly absorb a
+"couldn't check", which is the exact honesty violation §8's five-outcome split exists to prevent. Not
+fabricated rows, not a hidden tab. This surfaced a model choice: because n/a isn't persisted, the UI cannot
+show what a rule found irrelevant; if that ever matters, the backend must persist n/a — a decision, not a bug.
+
+**Everything else is enforcement, not decision.** couldnt_check → Tab 1 only; Tab 3 ≠ Tab 4 (distinct empty
+states); needs_review ≠ open (own group + a ratification marker); the two systems are two typed lists into two
+tab sets, counts per-list and never summed; Tab 1 groups `open` first so 2 violations don't drown in 30
+couldnt_check; the DTI card renders its gate ("Gated", the reason, "Unknown" lines) so the display agrees with
+the engine; NO §10 actions on tabs 1-4 (LP-377). Frontend only — zero backend change; `ACTIVE_RULE_IDS` and
+the legacy sweep untouched. Cross-refs: §8, LP-316, LP-375 (the two lists + the DTI gate), LP-329/330 (the
+honesty contract), LP-333 (uniform couldnt_check), LP-377 (§10 actions).

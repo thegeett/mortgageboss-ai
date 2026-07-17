@@ -1,0 +1,192 @@
+"use client";
+
+/**
+ * One GOVERNED rule-engine finding (LP-376) — the row + its provenance card (the detail).
+ *
+ * The row is identifiable WITHOUT its raw content-id: the rule id + category + a recognisable subject chip
+ * (from the load-bearing tags) + the message as the identifying subline. Expanding reveals THE PROVENANCE —
+ * the product: the SPEC's guideline citation, the reason in plain language, and each load-bearing tag with
+ * its value, confidence, and — prominently — the AI's own REASONING (the sentence that makes a finding
+ * trustworthy, LP-334). A confidence number without its reasoning is noise, so confidence shows only
+ * alongside a reasoning sentence. NO §10 actions here (Accept-risk / Request-docs / Override / Note are
+ * LP-377, and a button that does nothing is a lie).
+ */
+
+import { humanize } from "@/lib/format";
+import type { RuleFinding, RuleFindingTag } from "@/lib/types/verification";
+import { cn } from "@/lib/utils";
+import { OUTCOME_META, type OutcomeTone, ruleSubjectChip } from "@/lib/verification/rule-findings";
+import { ChevronDown, Gavel } from "lucide-react";
+import { useId, useState } from "react";
+
+const TONE: Record<OutcomeTone, { text: string; chipBg: string; border: string; dot: string }> = {
+  danger: {
+    text: "text-destructive",
+    chipBg: "bg-destructive/10 text-destructive",
+    border: "border-destructive/30",
+    dot: "bg-destructive",
+  },
+  warning: {
+    text: "text-warning",
+    chipBg: "bg-warning/10 text-warning",
+    border: "border-warning/30",
+    dot: "bg-warning",
+  },
+  info: {
+    text: "text-info",
+    chipBg: "bg-info/10 text-info",
+    border: "border-info/30",
+    dot: "bg-info",
+  },
+  success: {
+    text: "text-success",
+    chipBg: "bg-success/10 text-success",
+    border: "border-success/30",
+    dot: "bg-success",
+  },
+  muted: {
+    text: "text-gray-500",
+    chipBg: "bg-gray-100 text-gray-500",
+    border: "border-gray-200",
+    dot: "bg-gray-300",
+  },
+};
+
+function formatTagValue(value: unknown): string {
+  if (value == null) return "—";
+  if (typeof value === "boolean") return value ? "yes" : "no";
+  const text = String(value).trim();
+  return text.length > 0 ? text : "—";
+}
+
+/** One load-bearing tag's provenance — value + (only WITH its reasoning) confidence + the reasoning. */
+function TagProvenance({ tag }: { tag: RuleFindingTag }) {
+  const hasReasoning = tag.reasoning != null && tag.reasoning.trim().length > 0;
+  const confidence =
+    hasReasoning && tag.confidence != null ? `${Math.round(tag.confidence * 100)}%` : null;
+  return (
+    <li className="rounded-md border border-gray-200 bg-white px-2.5 py-2">
+      <div className="flex items-baseline justify-between gap-2">
+        <span className="truncate font-mono text-[11px] text-gray-500">{tag.tag_id}</span>
+        <div className="flex shrink-0 items-baseline gap-2">
+          <span className="text-xs font-semibold tabular-nums text-gray-900">
+            {formatTagValue(tag.value)}
+          </span>
+          {confidence != null && (
+            <span className="text-[11px] font-medium text-gray-400">conf {confidence}</span>
+          )}
+        </div>
+      </div>
+      {hasReasoning && (
+        <p className="mt-1 text-xs leading-relaxed text-gray-600">{tag.reasoning}</p>
+      )}
+    </li>
+  );
+}
+
+function DetailBlock({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div>
+      <div className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">{label}</div>
+      <div className="mt-0.5">{children}</div>
+    </div>
+  );
+}
+
+export function RuleFindingRow({ finding }: { finding: RuleFinding }) {
+  const [expanded, setExpanded] = useState(false);
+  const meta = OUTCOME_META[finding.evaluation_outcome];
+  const tone = TONE[meta.tone];
+  const chip = ruleSubjectChip(finding);
+  const panelId = useId();
+
+  return (
+    <div className={cn("rounded-lg border", expanded ? tone.border : "border-gray-200/70")}>
+      <button
+        type="button"
+        onClick={() => setExpanded((v) => !v)}
+        aria-expanded={expanded}
+        aria-controls={panelId}
+        className="flex w-full items-start gap-2.5 rounded-lg px-3 py-2.5 text-left hover:bg-gray-50/70"
+      >
+        <span className={cn("mt-1.5 h-2 w-2 shrink-0 rounded-full", tone.dot)} aria-hidden />
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+            <span className="font-mono text-xs font-semibold text-gray-800">{finding.rule_id}</span>
+            <span className="text-[11px] text-gray-400">{humanize(finding.category)}</span>
+            {chip != null && (
+              <span className="rounded bg-gray-100 px-1.5 py-px text-[11px] font-medium text-gray-600">
+                {chip}
+              </span>
+            )}
+            {finding.ratification_pending && (
+              <span className="inline-flex items-center gap-0.5 rounded bg-info/10 px-1.5 py-px text-[11px] font-medium text-info">
+                <Gavel className="h-2.5 w-2.5" /> Ratification pending
+              </span>
+            )}
+          </div>
+          <p className="mt-0.5 line-clamp-2 text-sm text-gray-700">{finding.message}</p>
+        </div>
+        <span
+          className={cn("shrink-0 rounded px-1.5 py-0.5 text-[11px] font-semibold", tone.chipBg)}
+        >
+          {meta.label}
+        </span>
+        <ChevronDown
+          className={cn(
+            "mt-0.5 h-4 w-4 shrink-0 text-gray-300 transition-transform",
+            expanded && "rotate-180",
+          )}
+        />
+      </button>
+
+      {expanded && (
+        <div
+          id={panelId}
+          className="space-y-3 border-t border-gray-100 bg-gray-50/40 px-3 py-3 pl-[1.375rem]"
+        >
+          <DetailBlock label={`Outcome — ${meta.label}`}>
+            <p className={cn("text-xs font-medium", tone.text)}>{meta.blurb}</p>
+            <p className="mt-1 text-sm text-gray-700">{finding.message}</p>
+          </DetailBlock>
+
+          {finding.how_to_fix != null && finding.how_to_fix.trim().length > 0 && (
+            <DetailBlock label="How to fix">
+              <p className="text-sm text-gray-700">{finding.how_to_fix}</p>
+            </DetailBlock>
+          )}
+
+          {finding.guideline != null && finding.guideline.trim().length > 0 && (
+            <DetailBlock label="Guideline (from the rule spec)">
+              <p className="text-sm italic leading-relaxed text-gray-600">{finding.guideline}</p>
+            </DetailBlock>
+          )}
+
+          {finding.ratification_pending && (
+            <p className="flex items-start gap-1.5 rounded-md border border-info/30 bg-info/5 px-2.5 py-2 text-xs text-gray-600">
+              <Gavel className="mt-0.5 h-3.5 w-3.5 shrink-0 text-info" />
+              This is a judgment (AI) verdict awaiting human ratification — it is not an
+              auto-shipped conclusion, and it is not a violation.
+            </p>
+          )}
+
+          {finding.load_bearing_tags.length > 0 && (
+            <DetailBlock label="Provenance — the tags this verdict rested on">
+              <ul className="space-y-2">
+                {finding.load_bearing_tags.map((tag, index) => (
+                  <TagProvenance key={`${tag.tag_id}-${index}`} tag={tag} />
+                ))}
+              </ul>
+            </DetailBlock>
+          )}
+
+          {finding.subject_key != null && (
+            <p className="text-[11px] text-gray-400">
+              Subject id: <span className="font-mono">{finding.subject_key}</span>
+            </p>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}

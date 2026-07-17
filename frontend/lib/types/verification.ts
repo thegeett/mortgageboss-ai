@@ -52,6 +52,54 @@ export interface FindingSourceDocument {
   filename: string;
 }
 
+/**
+ * The five §8 outcome states a rule evaluation can conclude (LP-316). Orthogonal to the RED/YELLOW/GREEN
+ * severity color: this is the VERDICT itself. `not_applicable` subjects are not persisted (so they never
+ * arrive as a finding — Tab 4 is structurally empty, LP-375/376); `no_longer_applies` only appears across
+ * runs (the subject left the file), so run #1 never has one.
+ */
+export type EvaluationOutcome =
+  | "open"
+  | "satisfied"
+  | "needs_review"
+  | "couldnt_check"
+  | "no_longer_applies";
+
+/** One load-bearing tag inline (LP-316) — the provenance a human reads to see WHY a verdict held. */
+export interface RuleFindingTag {
+  tag_id: string;
+  value: unknown;
+  confidence: number | null;
+  reasoning: string | null;
+  source_facts: string[];
+}
+
+/**
+ * A GOVERNED rule-engine finding (LP-316/375) — a DISTINCT shape from `VerificationFinding` (the legacy
+ * AI sweep / retired xsrc quarantine). The two are deliberately different TYPES so their lists can never
+ * be concatenated or their counts summed. Carries the §8 outcome (the tab), the reason, the SPEC's
+ * guideline citation (read-time, never AI-recalled), inline provenance, and the ratification marker.
+ */
+export interface RuleFinding {
+  id: string;
+  rule_id: string;
+  evaluation_outcome: EvaluationOutcome;
+  status: "red" | "yellow" | "green";
+  category: string;
+  /** The reason — every non-satisfied outcome carries one (§8's honesty contract). */
+  message: string;
+  /** The stable per-subject content-id (LP-312); NOT human-legible — never render it as a row's identity. */
+  subject_key: string | null;
+  /** The rule's guideline citation, from the SPEC (never AI-recalled). */
+  guideline: string | null;
+  load_bearing_tags: RuleFindingTag[];
+  /** A judgment/AI verdict awaiting human ratification (not a violation). */
+  ratification_pending: boolean;
+  how_to_fix: string | null;
+  confidence: number;
+  resolution_status: string;
+}
+
 /** The three aggression levels (LP-79) — confidence cutoffs, Conservative highest. */
 export type AggressionLevel = "conservative" | "balanced" | "thorough";
 
@@ -74,8 +122,12 @@ export interface VerificationStatus {
   /** The file's loan program (conventional / fha) — drives the rule set + the tab header. */
   program: string | null;
   latest_run: VerificationRun | null;
-  /** The full stored cross-source set; the client shows only those at/above `aggression.cutoff`. */
+  /** The LEGACY quarantine (Tab 5) — the AI sweep + retired xsrc rows (evaluation_outcome null). The
+   * client shows only those at/above `aggression.cutoff`. Unchanged shape + behaviour (LP-375). */
   findings: VerificationFinding[];
+  /** The GOVERNED rule-engine findings (LP-316) — a SEPARATE typed list (LP-375) driving §8 tabs 1-4,
+   * including `satisfied` (Tab 2). Never merged/summed with `findings`. */
+  rule_findings: RuleFinding[];
   aggression: Aggression;
   /** Authoritative: any open in-scope finding at the active cutoff blocks submission. */
   blocked: boolean;

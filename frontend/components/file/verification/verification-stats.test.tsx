@@ -23,6 +23,7 @@ function status(): VerificationStatus {
       { id: "d", status: "red", resolution_status: "overridden", confidence: 0.9 }, // resolved
       // biome-ignore lint/suspicious/noExplicitAny: minimal finding fixtures
     ] as any,
+    rule_findings: [],
     aggression: {
       level: "balanced",
       default: "balanced",

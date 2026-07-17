@@ -13,6 +13,7 @@
 import { FindingFilterPills } from "@/components/file/verification/finding-filters";
 import { FindingsList } from "@/components/file/verification/findings-list";
 import { NeedsCompleteness } from "@/components/file/verification/needs-completeness";
+import { RuleFindingsTabs } from "@/components/file/verification/rule-findings-tabs";
 import { VerificationStats } from "@/components/file/verification/verification-stats";
 import { VersionSelector } from "@/components/file/verification/version-selector";
 import { Badge } from "@/components/ui/badge";
@@ -258,6 +259,60 @@ function VerificationBody({
   onDismissConsequence: () => void;
   running: boolean;
 }) {
+  // The file-level chrome sits ABOVE the tabs; the governed §8 tabs (1-4) render the rule engine's
+  // output; the LEGACY body (the dial + stats + AI-sweep findings list) is quarantined into Tab 5, its
+  // behaviour unchanged. The two systems' lists + counts are never merged (LP-375/376).
+  return (
+    <div className="space-y-4">
+      {data.stale && !running && <StaleBanner />}
+      <NeedsCompleteness fileId={fileId} />
+      <RuleFindingsTabs
+        ruleFindings={data.rule_findings}
+        legacyCount={data.findings.length}
+        legacy={
+          <LegacyBody
+            fileId={fileId}
+            data={data}
+            running={running}
+            activeLevel={activeLevel}
+            dialBusy={dialBusy}
+            consequence={consequence}
+            onPick={onPick}
+            onResetToDefault={onResetToDefault}
+            onSetAsDefault={onSetAsDefault}
+            onDismissConsequence={onDismissConsequence}
+          />
+        }
+      />
+    </div>
+  );
+}
+
+/** Tab 5 — the LEGACY quarantine: the AI cross-source sweep (+ retired xsrc rows) with its dial, stats,
+ * filters, list, and actions UNCHANGED (LP-376 keeps the sweep identical). */
+function LegacyBody({
+  fileId,
+  data,
+  running,
+  activeLevel,
+  dialBusy,
+  consequence,
+  onPick,
+  onResetToDefault,
+  onSetAsDefault,
+  onDismissConsequence,
+}: {
+  fileId: string;
+  data: VerificationStatus;
+  activeLevel: AggressionLevel;
+  dialBusy: boolean;
+  consequence: Consequence | null;
+  onPick: (level: AggressionLevel) => void;
+  onResetToDefault: () => void;
+  onSetAsDefault: () => void;
+  onDismissConsequence: () => void;
+  running: boolean;
+}) {
   // The dial filters the OPEN findings by the active cutoff (a read-time view filter —
   // never re-fetched/re-run); resolved findings are kept in their own group below.
   const cutoff = data.aggression.cutoffs[activeLevel];
@@ -271,9 +326,6 @@ function VerificationBody({
 
   return (
     <div className="space-y-4">
-      {data.stale && !running && <StaleBanner />}
-      <NeedsCompleteness fileId={fileId} />
-
       {/* At-a-glance stats (LP-88) — where does this file stand. */}
       <VerificationStats fileId={fileId} data={data} activeLevel={activeLevel} />
 
