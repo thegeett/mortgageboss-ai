@@ -75,11 +75,9 @@ _PRODUCED_OUTSIDE_DECLARATIONS: frozenset[str] = frozenset(
 # a genuine orphan TODAY (asserted below, so the exemption cannot rot into hiding a resolved tag). Removing
 # a tag's producer gap is what clears it from here.
 _KNOWN_LIVE_ORPHANS: dict[str, str] = {
-    # The DTI calculator gates on BOTH required inputs; neither has a producer, so the DTI can never compute
-    # on any file (LP-367, open — no binder/tax extractor wires them; the UI renders a fabricated $0.00).
-    "housing.insurance_monthly": "LP-367 (open) — the DTI calc's required insurance input has no producer",
-    # The SECOND half of the same DTI-calc gap, surfaced by this ticket's full scan (LP-367 named only
-    # insurance). Same shape, same fix ticket.
+    # housing.insurance_monthly was here (LP-367); LP-374 wired its derived producer, so it is now PRODUCED
+    # and no longer exempted (the guard closing on the instance it flagged). housing.taxes_monthly remains:
+    # the DTI calc requires it too and nothing produces it (no tax-figure producer wired — a follow-up).
     "housing.taxes_monthly": "LP-367 (open) — the DTI calc's required property-tax input has no producer",
 }
 
@@ -240,7 +238,9 @@ def test_guard_fires_on_a_synthetic_dti_calc_orphan() -> None:
 
 
 def test_guard_catches_the_dti_calc_orphans_when_not_exempted() -> None:
-    # Proof the guard FIRES on the real open orphans — without the exemption, both DTI inputs are caught.
+    # Proof the guard FIRES on a real open orphan — without the exemption, housing.taxes_monthly (the DTI's
+    # remaining unproduced required input) is caught. housing.insurance_monthly is no longer here: LP-374
+    # wired its producer, so it is PRODUCED and drops out of the fatal set entirely.
     fatal = _fatal_orphans(
         set(_vocabulary()),
         _produced(),
@@ -248,7 +248,8 @@ def test_guard_catches_the_dti_calc_orphans_when_not_exempted() -> None:
         set(_REQUIRED_DTI_TAGS),
         exempt=set(),
     )
-    assert set(fatal) == {"housing.insurance_monthly", "housing.taxes_monthly"}
+    assert set(fatal) == {"housing.taxes_monthly"}
+    assert "housing.insurance_monthly" not in fatal  # LP-374 produced it
 
 
 # --------------------------------------------------------------------------- #

@@ -10440,3 +10440,47 @@ produced+consumed tag missing from the vocabulary.
 `test_guard_fires_on_a_synthetic_live_rule_orphan` proves it can fail; `test_guard_catches_the_dti_calc_orphans_when_not_exempted`
 proves it fires on the real open orphans. Cross-refs: LP-366-A/367/370/371 (the instances), LP-369 (the sibling
 guard), LP-326 (declarations), LP-333 (the `_required_ai_groups` seam), LP-379 (calibration).
+
+## ADR-290: Wire homeowners insurance as a derived tag — the last orphan, and the DTI-read-path finding (LP-374)
+
+**The third orphan, closed.** `housing.insurance_monthly` was declared in `fact_tags.csv` (`produced_by=AI`)
+but nothing produced it — the last instance of the ADR-289 class. Wired as a **derived** recipe reading the
+`homeowners_insurance` binder's extracted `annual_premium ÷ 12`. LP-373's guard now PASSES on it (removed from
+`_KNOWN_LIVE_ORPHANS`); `housing.taxes_monthly` remains the one exempted DTI-required orphan (a follow-up).
+
+**D1 — the finding that overturned the ticket's premise (the code is the gate of record).** The ticket held
+that the DTI "can never compute on any file" because this tag never materializes. **False.** The DTI reads
+insurance DIRECTLY from the extraction — `services/dti.py` `_extracted_monthly(homeowners_insurance,
+annual_premium) ÷ 12` — and the `_REQUIRED_DTI_TAGS` gate checks the calc LINE (grouped by `from_tag`
+*lineage*), never the tag layer. So **the DTI already computes on any file with a binder, independent of this
+tag.** `housing.insurance_monthly` (vocab `subject=loan`) is consumed only by INERT rules (DT-1/DT-5/IH-1) — it
+is really an inert orphan; ADR-289's "live-orphan(dti-calc)" label rested on reading `_REQUIRED_DTI_TAGS`
+membership as a tag read, but it is lineage. **Wiring the tag does NOT unblock the DTI** (nothing was blocked);
+it closes the orphan, materializes the tag on a binder file, ALIGNS it with the same `annual_premium ÷ 12` the
+DTI computes, and serves the tag's own consumers. Recorded here so the record is honest rather than echoing the
+premise.
+
+**D1 subject.** `subject: loan, mode: derived` — matching the vocabulary + the loan-level consumers (a
+document-keyed tag would be a lateral move: orphan → present-but-unreadable). A derived recipe reads the whole
+snapshot, and `annual_premium` IS in the snapshot's document fields (`build_document_fields`), so — unlike
+LP-371's loan-subject AI *context* (MISMO-only) — the recipe can see the binder. Mirrors `occupancy_stated` /
+`qualifying_income_monthly`.
+
+**D2 — multiple binders → `unknown` with a reason, never a guessed premium.** The recipe takes the DISTINCT
+`annual_premium`; conflicting binders → abstain naming the conflict (the LP-332/LP-336 fail-closed-on-ambiguity
+precedent); identical duplicates → the one value. The DTI's `_extracted_monthly` takes the single current binder
+without this check, so the tag is STRICTER on ambiguity — deliberate and reported (the DTI is out of scope).
+
+**Absent ≠ 0, and why.** No binder / no premium / non-positive / unparseable → `unknown` with a reason, NEVER
+0. A 0 premium makes the DTI confidently too-low — the exact false-green the DTI's gate exists to prevent.
+
+**What this does NOT fix.** LF-6T3N has no binder, so the tag is `unknown` and the DTI stays gated there — the
+correct, honest outcome, UNCHANGED by this ticket (the gate is extraction-driven). The UI DTI card's fabricated
+"$0.00 Extracted" (the display `DtiCalculation` collapses the unknown insurance input to 0 while the snapshot
+calc correctly gates) is LP-375's — reported precisely, not fixed here, and independent of the tag wiring.
+
+**Consequences.** No engine change (a declaration + a recipe-registry entry; `produce_derived_tags` untouched).
+Real run (`01039e93`): tag = `unknown` ("no homeowners insurance binder in the file"); DTI `gated=True`
+("housing.insurance_monthly is unknown"). Full suite green (2367). Cross-refs: LP-318 (the calc gate), LP-326
+(derived recipes + abstention), LP-366-A/370/371/373 (the orphan class + its guard), LP-364 (the UI that exposed
+the $0.00), LP-375 (the display fix).

@@ -408,6 +408,62 @@ def _occupancy_stated(
     return mapped, f"stated occupancy {mapped} (MISMO property.occupancy={occupancy!r})"
 
 
+def _housing_insurance_monthly(
+    snapshot: Snapshot, _subject_id: str, _subject_raw: object
+) -> tuple[JsonValue, str]:
+    """housing.insurance_monthly — the loan's monthly homeowners (hazard) insurance = the extracted
+    ``annual_premium`` on the file's homeowners-insurance binder ÷ 12 (LP-374). A DERIVED loan recipe: the
+    tag's vocabulary subject is ``loan`` and its consumers (DT-1/DT-5/IH-1) read it there. It reads the
+    binder DOCUMENT's extracted ``annual_premium`` field from the snapshot — the SAME field the DTI
+    calculator already reads directly from the extraction (``services/dti.py`` ``_extracted_monthly``), so
+    the tag AGREES with the DTI's insurance line (this recipe does NOT feed the DTI, which reads the
+    extraction itself — it closes the vocabulary orphan and serves the tag's own consumers).
+
+    FAIL-CLOSED (``absent ≠ 0`` — the tag's vocabulary note): a 0 premium makes the DTI confidently
+    too-low, the exact false-green the DTI's gate exists to prevent. ABSTAINS to ``unknown`` WITH A REASON
+    when: no homeowners-insurance binder is in the file; a binder is present but states no (or a
+    non-positive) annual premium; or multiple binders state CONFLICTING premiums — cannot tell which is
+    current (the LP-332/LP-336 fail-closed-on-ambiguity discipline; the DTI's ``_extracted_monthly`` takes
+    the single current binder without this check, so the tag is STRICTER on ambiguity). Reads ONLY
+    ``homeowners_insurance`` (hazard) — NOT ``flood_insurance_policy`` or MI, which the classifier types
+    separately and which carry their own DTI lines / calculators (LP-374 D3)."""
+    if snapshot.documents.absent:
+        return _UNKNOWN, "no documents in the file — no homeowners insurance binder to read"
+    premiums: set[Decimal] = set()
+    any_binder = unparseable = False
+    for entry in snapshot.documents.entries:
+        if entry.document_type != "homeowners_insurance":
+            continue
+        any_binder = True
+        field = entry.fields.get("annual_premium")
+        if not isinstance(field, Field) or not field.is_present:
+            continue
+        try:
+            premiums.add(Decimal(str(field.value)))
+        except (InvalidOperation, ValueError):
+            unparseable = True
+    if not any_binder:
+        return _UNKNOWN, "no homeowners insurance binder in the file — insurance is unknown, not 0"
+    if unparseable:
+        return _UNKNOWN, "a homeowners insurance binder states an unparseable annual premium"
+    if len(premiums) > 1:
+        return (
+            _UNKNOWN,
+            f"{len(premiums)} homeowners insurance binders state conflicting annual premiums "
+            f"({', '.join(str(p) for p in sorted(premiums))}) — cannot tell which is current",
+        )
+    if not premiums:
+        return _UNKNOWN, "a homeowners insurance binder is present but states no annual premium"
+    annual = next(iter(premiums))
+    if annual <= 0:
+        return (
+            _UNKNOWN,
+            f"the homeowners insurance binder states a non-positive annual premium ({annual})",
+        )
+    monthly = annual / Decimal(12)
+    return str(monthly), f"monthly homeowners insurance {monthly} (annual premium {annual} ÷ 12)"
+
+
 def _reserves_required_months(
     snapshot: Snapshot, _subject_id: str, _subject_raw: object
 ) -> tuple[JsonValue, str]:
@@ -532,6 +588,9 @@ _RECIPES: dict[str, Recipe] = {
     "income_days_since_recent_pay": _income_days_since_recent_pay,
     # LP-371 — the loan's stated occupancy, mapped from MISMO to the tag's enum (OC-2's load-bearing tag).
     "occupancy_stated": _occupancy_stated,
+    # LP-374 — the loan's monthly homeowners (hazard) insurance from the binder's annual_premium ÷ 12
+    # (the DTI's last vocabulary orphan). Fail-closed to unknown, never 0.
+    "housing_insurance_monthly": _housing_insurance_monthly,
     # LP-323-AS-B — the assets family (registry entries only).
     "reserves_required_months": _reserves_required_months,
     "stmt_nsf_count": _stmt_nsf_count,

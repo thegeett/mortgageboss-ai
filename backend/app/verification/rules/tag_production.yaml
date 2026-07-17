@@ -110,6 +110,16 @@ tags:
   stmt.min_account_months: {mode: derived, subject: loan, data: stmt_min_account_months}
   calc.cash_to_close: {mode: derived, subject: loan, data: cash_to_close_shortfall}
 
+  # --- housing.insurance_monthly — the DTI's LAST vocabulary orphan (LP-374). Declared in fact_tags.csv
+  #     with a producer (produced_by=AI) but nothing wrote it → LP-373's guard exempted it. DERIVED (not
+  #     AI): the recipe reads the homeowners_insurance binder's extracted annual_premium ÷ 12 — the SAME
+  #     field the DTI reads directly from the extraction (services/dti.py), so the tag agrees with the DTI
+  #     line. It does NOT unblock the DTI (which never read this tag — it reads the extraction); it closes
+  #     the orphan and serves the tag's own consumers (DT-1/DT-5/IH-1, inert). Fail-closed to unknown,
+  #     never 0 (absent≠0 — a 0 premium makes the DTI confidently too-low). ⚠️ VOCABULARY DRIFT: the CSV
+  #     says produced_by=AI; it is DERIVED here (needs xlsx reconciliation).
+  housing.insurance_monthly: {mode: derived, subject: loan, data: housing_insurance_monthly}
+
   # --- occupancy.* — OC-2's load-bearing tags (LP-371). Both were in the vocabulary WITH producers but
   #     never declared here → OC-2 (LIVE judgment) couldnt_checked on every file (the orphan class,
   #     LP-366-A/367). occupancy.stated is DERIVED (a MISMO→enum mapping, not parsed — see the recipe).
