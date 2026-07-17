@@ -120,16 +120,23 @@ deterministic:
 
   operands:
     observed: {tag: txn.amount}                       # the deposit amount (operand X)
-    threshold:                                         # 50% × qualifying income (operand Y)
+    threshold:                                         # 50% × income (operand Y) — see the caveat below
       product:
         - {reference: large_deposit_threshold_pct}     # 0.5 (parsed from "50%")
         # LP-366: read income DIRECTLY as a loan-level tag (LP-366-A's `loan_tag` operand), NOT through
         # the DTI calc. AS-1 asks "is this deposit large vs. what the borrower earns?" — it needs income,
         # nothing else. The DTI calc fail-closed on housing.insurance_monthly (an input AS-1 never uses,
         # and an orphaned tag — LP-367), so the threshold never resolved and EVERY money-in deposit was an
-        # unresolved candidate regardless of size. dti.qualifying_income_monthly is derived from the same
-        # MISMO stated 1003 income the DTI qualifies on (one figure, produced once). Fail-closed: absent/
-        # unknown income → None → couldnt_check (never 0 — a 0 threshold would fire on every deposit).
+        # unresolved candidate regardless of size. This wiring makes AS-1 EVALUATE (previously it
+        # couldnt_checked every deposit — a strict improvement). Fail-closed: absent/unknown income → None
+        # → couldnt_check (never 0 — a 0 threshold would fire on every deposit).
+        #   ⚠️ STATED, NOT QUALIFYING (priya_validated:false — needs sign-off): dti.qualifying_income_monthly
+        #   sums the MISMO STATED 1003 income, but the guideline below is 50% of QUALIFYING income. STATED >=
+        #   QUALIFYING (qualifying haircuts declining/variable pay), so this threshold is LOOSER than the
+        #   guideline: a deposit between 50%×qualifying and 50%×stated now reads SATISFIED (before: the gated
+        #   calc made it couldnt_check → surfaced) — a false-green BAND for variable-income files. Accepted
+        #   provisionally (the qualifying tag is underspecified — LP-343 F2 — and degraded live); resolve by
+        #   sizing on qualifying once F2 lands, or by Priya confirming stated is an acceptable proxy.
         - {loan_tag: dti.qualifying_income_monthly}
 
   outcomes:

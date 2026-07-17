@@ -175,9 +175,11 @@ class Operand(BaseModel):
     * ``tag`` — a SUBJECT tag's value, coerced per ``type`` (Decimal / date).
     * ``loan_tag`` (LP-366-A) — a LOAN-subject tag's value, coerced per ``type``. The ONLY operand that
       lets a per-subject rule (AS-1 is per-deposit) read a loan-level fact WITHOUT routing through a
-      calculator. Fail-closed: absent/unknown → None → couldnt_check (never 0, never a fallback). Unlike
-      ``calc``, the value carries the tag's CONFIDENCE — a governed fact, not an opaque number (LP-318's
-      Caveat A: ``calc`` ignores a calculator's confidence; a loan tag does not).
+      calculator. Fail-closed: absent/unknown → None → couldnt_check (never 0, never a fallback). Unlike a
+      ``calc``'s opaque number, a loan_tag is a GOVERNED FACT — a materialized tag carrying provenance
+      (source_facts, reasoning). NOTE: the operand resolves only the tag's VALUE (like every operand); its
+      CONFIDENCE is NOT propagated into the comparison — put the tag in ``load_bearing_tags`` if the verdict
+      must weigh its confidence (a loan_tag operand's tag need not be load-bearing).
     * ``reference`` — a ``reference_values.values`` key; a trailing ``%`` is parsed to a fraction.
     * ``calc`` — ``[calculator_name, value_key]`` from ``snapshot.calculations`` (a GATED calc → None
       → couldnt_check, LP-318).
