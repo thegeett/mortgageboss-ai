@@ -18,6 +18,7 @@ from app.verification.eval.cases import CASES, EvalCase, crafted_cases
 from app.verification.eval.harness import (
     CaseResult,
     _build_snapshot,
+    _materialize_income_tag,
     run_case,
     run_suite,
 )
@@ -66,6 +67,9 @@ async def test_must_fire_cases_fire() -> None:
         snapshot = await produce_stage_b_sourcing_tags(
             snapshot, reasoner=StubStageBReasoner(case.txns)
         )
+        snapshot = _materialize_income_tag(
+            snapshot
+        )  # LP-366 — AS-1 reads the derived income loan tag
         verdicts = {r.verdict for r in evaluate_as1_rule(snapshot)}
         assert Verdict.FIRED in verdicts, f"case {case_id} did not fire: {verdicts}"
 
@@ -154,6 +158,7 @@ async def test_persisted_fired_finding_carries_load_bearing_provenance(db_sessio
         snapshot, reasoner=StubStageAReasoner(case.txns)
     )
     snapshot = await produce_stage_b_sourcing_tags(snapshot, reasoner=StubStageBReasoner(case.txns))
+    snapshot = _materialize_income_tag(snapshot)  # LP-366 — AS-1 reads the derived income loan tag
     results = [r for r in evaluate_as1_rule(snapshot) if r.verdict is Verdict.FIRED]
     assert results
 

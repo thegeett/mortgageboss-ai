@@ -27,11 +27,13 @@ from app.verification.eval.stubs import StubStageAReasoner, StubStageBReasoner
 from app.verification.rule_engine.engine import evaluate_as1_rule
 from app.verification.rule_engine.result import RuleEvaluation, Verdict
 from app.verification.snapshot.documents_section import build_transactions, transaction_field_sets
+from app.verification.snapshot.fields import Field, FieldSource
 from app.verification.snapshot.model import (
     CalculationEntry,
     CalculationsSection,
     DocumentEntry,
     DocumentsSection,
+    MismoSection,
     Snapshot,
     TagsSection,
 )
@@ -132,12 +134,29 @@ def _build_snapshot(case: EvalCase) -> Snapshot:
         if case.income is not None
         else CalculationsSection.missing()
     )
+    # LP-366 — AS-1 now reads income as the derived LOAN tag `dti.qualifying_income_monthly`, materialized
+    # from the borrowers' MISMO stated income (NOT the DTI calc, which fail-closed on orphaned insurance).
+    # Surface the case's income as a MISMO stated-income line so the REAL derived recipe produces that tag
+    # (the DTI calc above is KEPT for the DTI/AS-4 story). income=None → no MISMO income → the recipe
+    # abstains → AS-1 fails closed to couldnt_check, exactly as on the income-less frozen fixture.
+    mismo = (
+        MismoSection.present(
+            {
+                "borrower.1.income.1.monthly_amount": Field.present(
+                    case.income, source=FieldSource.PARSED
+                )
+            }
+        )
+        if case.income is not None
+        else MismoSection.missing()
+    )
     return Snapshot(
         loan_file_id=uuid4(),
         run_id=uuid4(),
         created_at=_WHEN,
         documents=DocumentsSection.present([entry]),
         calculations=calculations,
+        mismo=mismo,
         tags=TagsSection.present({}),
     )
 
@@ -169,8 +188,31 @@ async def run_case(case: EvalCase, *, live: bool = False) -> CaseResult:
 
     snapshot = await produce_stage_a_transaction_tags(snapshot, reasoner=reasoner_a)
     snapshot = await produce_stage_b_sourcing_tags(snapshot, reasoner=reasoner_b)
+    # LP-366 — the derived-materialization stage (production runs it after Stage A/B). AS-1 reads income
+    # as the derived loan tag `dti.qualifying_income_monthly`; without this step the harness would skip
+    # materialization and AS-1 would couldnt_check on income it does have. Stage A rebuilds by_subject
+    # from the transaction tags, so this must run AFTER it (an injected loan tag would be wiped).
+    snapshot = _materialize_income_tag(snapshot)
     results = evaluate_as1_rule(snapshot)
     return _score_case(case, snapshot, results)
+
+
+def _materialize_income_tag(snapshot: Snapshot) -> Snapshot:
+    """Materialize the loan-level `dti.qualifying_income_monthly` derived tag via the REAL recipe (from
+    the snapshot's MISMO stated income), merged onto the loan subject. Faithful to production's
+    materialization stage; a no-op if the tag is not declared. income-less snapshot → the recipe abstains
+    to `unknown` → AS-1 couldnt_checks (fail-closed)."""
+    from app.verification.tag_materialization.declarations import load_declarations
+    from app.verification.tag_materialization.derived import produce_derived_tags
+
+    decl = load_declarations().get("dti.qualifying_income_monthly")
+    if decl is None:
+        return snapshot
+    produced = produce_derived_tags(decl, snapshot)
+    by_subject = {cid: dict(tags) for cid, tags in snapshot.tags.by_subject.items()}
+    for subject_id, tags in produced.items():
+        by_subject.setdefault(subject_id, {}).update(tags)
+    return snapshot.model_copy(update={"tags": TagsSection.present(by_subject)})
 
 
 def _score_case(case: EvalCase, snapshot: Snapshot, results: list[RuleEvaluation]) -> CaseResult:

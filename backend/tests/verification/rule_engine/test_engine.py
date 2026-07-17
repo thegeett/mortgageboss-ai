@@ -1,8 +1,9 @@
 """The thin rule engine end-to-end (LP-315) — AS-1 over a tagged snapshot.
 
 Exercises the real path: load_rule_spec("AS-1") (the 50% threshold + priya_validated=false), the
-qualifying income from the DTI calculator, per-deposit subject enumeration, and the gate+rule per
-subject. No AI, no DB — tags + the DTI calc are provided via fixtures.
+qualifying income read as a LOAN tag (`dti.qualifying_income_monthly`, via LP-366-A's `loan_tag` operand
+— NOT the gated DTI calc, LP-366), per-deposit subject enumeration, and the gate+rule per subject. No AI,
+no DB — tags are provided via fixtures.
 """
 
 from __future__ import annotations
@@ -12,6 +13,7 @@ from decimal import Decimal
 from uuid import uuid4
 
 from app.verification.rule_engine.engine import evaluate_as1_rule
+from app.verification.rule_engine.enumerators import LOAN_SUBJECT
 from app.verification.rule_engine.result import RuleEvaluation, Verdict
 from app.verification.snapshot.documents_section import build_transactions, transaction_field_sets
 from app.verification.snapshot.model import (
@@ -79,6 +81,19 @@ def _snapshot(
             )
         by_subject[cid] = tags
 
+    # LP-366 — income is read as the loan-level `dti.qualifying_income_monthly` tag (derived), NOT the DTI
+    # calc. The calc is kept below (still consumed by AS-4 etc.) but AS-1 no longer reads it.
+    if income is not None:
+        by_subject[LOAN_SUBJECT] = {
+            "dti.qualifying_income_monthly": _tag(
+                income,
+                confidence=None,
+                produced_by=TagProducedBy.DERIVED,
+                stage=TagStage.A,
+                cid=LOAN_SUBJECT,
+            )
+        }
+
     entry = DocumentEntry(content_id=_DOC, document_type="bank_statement", transactions=txns)
     calculations = (
         CalculationsSection.present(
@@ -111,7 +126,7 @@ def test_end_to_end_fires_on_unsourced_large_deposit() -> None:
     assert result.verdict is Verdict.FIRED
     assert result.threshold_used == Decimal(
         "4000.0"
-    )  # 0.5 (from the spec) * 8000 (from the DTI calc)
+    )  # 0.5 (from the spec) * 8000 (from the income loan tag)
     assert result.gated_pending_signoff is True  # AS-1 priya_validated=false in the spec
 
 
@@ -165,10 +180,12 @@ def test_income_unavailable_yields_couldnt_check() -> None:
     assert result.verdict is Verdict.COULDNT_CHECK
 
 
-def test_gated_dti_yields_couldnt_check() -> None:
-    # LP-318: a rule reading a GATED calc degrades to couldnt_check — fail-closed THROUGH the
-    # calculator. AS-1 reads the DTI's income; when the DTI is gated (e.g. no insurance binder),
-    # none of its numbers are trusted, so the threshold input is unavailable.
+def test_gated_dti_no_longer_blocks_as1_the_whole_point_of_lp366() -> None:
+    # THE FIX (LP-366): AS-1 reads income as a loan tag, NOT the DTI calc. So a GATED DTI (e.g. the
+    # orphaned housing.insurance_monthly, LP-367) is now IRRELEVANT to AS-1 — the deposit still evaluates.
+    # Before LP-366 this exact snapshot yielded couldnt_check on every deposit regardless of size; now the
+    # 5000 unsourced deposit FIRES (threshold = 50% x 8000 = 4000). The income tag is present; the gated
+    # calc is ignored. Fail-closed still holds on AS-1's OWN input — see test_income_unavailable above.
     snap = _snapshot([("5000.00", "in", "no", "deposit")], income="8000")
     gated_dti = CalculationEntry(
         value={"gross_monthly_income": "8000", "back_end_dti": None},
@@ -178,4 +195,4 @@ def test_gated_dti_yields_couldnt_check() -> None:
     )
     snap = snap.model_copy(update={"calculations": CalculationsSection.present(dti=gated_dti)})
     result = _only(evaluate_as1_rule(snap))
-    assert result.verdict is Verdict.COULDNT_CHECK
+    assert result.verdict is Verdict.FIRED

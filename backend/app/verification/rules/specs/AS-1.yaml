@@ -123,7 +123,14 @@ deterministic:
     threshold:                                         # 50% × qualifying income (operand Y)
       product:
         - {reference: large_deposit_threshold_pct}     # 0.5 (parsed from "50%")
-        - {calc: [dti, gross_monthly_income]}          # a GATED DTI → None → couldnt_check (LP-318)
+        # LP-366: read income DIRECTLY as a loan-level tag (LP-366-A's `loan_tag` operand), NOT through
+        # the DTI calc. AS-1 asks "is this deposit large vs. what the borrower earns?" — it needs income,
+        # nothing else. The DTI calc fail-closed on housing.insurance_monthly (an input AS-1 never uses,
+        # and an orphaned tag — LP-367), so the threshold never resolved and EVERY money-in deposit was an
+        # unresolved candidate regardless of size. dti.qualifying_income_monthly is derived from the same
+        # MISMO stated 1003 income the DTI qualifies on (one figure, produced once). Fail-closed: absent/
+        # unknown income → None → couldnt_check (never 0 — a 0 threshold would fire on every deposit).
+        - {loan_tag: dti.qualifying_income_monthly}
 
   outcomes:
     # 1. Unsourced large deposit → FIRED (strict GT "exceeds").

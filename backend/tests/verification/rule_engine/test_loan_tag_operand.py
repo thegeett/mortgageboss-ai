@@ -8,8 +8,8 @@ was `calc`, which drags in a calculator's gate (AS-1's false DTI dependency, LP-
 missing door: it reaches `by_subject[LOAN_SUBJECT]` directly, fail-closed, carrying the tag's confidence
 (the property `calc` lacks — LP-318 Caveat A). No rule-id branch; a rule opts in with a SPEC line only.
 
-Equivalence: every live rule is untouched (AS-1 still reads `calc`; that swap is LP-366), and the `calc`
-operand is untouched (AS-4's reserves→PITI→insurance dependency is legitimate).
+The `calc` operand MECHANISM is untouched by LP-366-A (AS-4's reserves→PITI→insurance dependency keeps it);
+AS-1's income read moved onto `loan_tag` in LP-366 — asserted below.
 """
 
 from __future__ import annotations
@@ -239,17 +239,27 @@ def test_per_deposit_rule_couldnt_check_when_income_tag_absent() -> None:
 
 
 # --------------------------------------------------------------------------- #
-# Equivalence — LP-366-A changes NO live rule; AS-1 still reads calc; the fleet is unchanged
+# The `calc` operand mechanism is untouched by LP-366-A; AS-1's income read is now a loan_tag (LP-366)
 # --------------------------------------------------------------------------- #
-def test_as1_still_reads_the_dti_calc_untouched() -> None:
-    # LP-366-A adds the operand KIND; the AS-1→loan_tag swap is LP-366. AS-1's threshold is still a
-    # product ending in the DTI calc, verbatim.
+def test_as1_reads_income_as_a_loan_tag_not_the_dti_calc() -> None:
+    # LP-366-A added the operand KIND; LP-366 swapped AS-1's income read onto it. AS-1's threshold is now
+    # a product ending in the `dti.qualifying_income_monthly` loan_tag, and references NO calc.
     det = load_rule_spec("AS-1").deterministic
     assert det is not None
     threshold = det.operands["threshold"]
     assert threshold.product is not None
-    assert threshold.product[-1].calc == ("dti", "gross_monthly_income")
-    assert all(op.loan_tag is None for op in det.operands.values())
+    assert threshold.product[-1].loan_tag == "dti.qualifying_income_monthly"
+
+    def _has_calc(op: object) -> bool:
+        o = op  # narrow for the recursion
+        return bool(
+            getattr(o, "calc", None) is not None
+            or (getattr(o, "product", None) and any(_has_calc(f) for f in o.product))  # type: ignore[attr-defined]
+        )
+
+    assert not any(
+        _has_calc(op) for op in det.operands.values()
+    )  # AS-1 no longer reads the DTI calc
 
 
 def test_active_rule_ids_unchanged() -> None:

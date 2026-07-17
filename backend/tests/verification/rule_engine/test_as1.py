@@ -20,11 +20,10 @@ from app.verification.rule_engine.as1 import (
     TAG_SOURCE_STRENGTH,
 )
 from app.verification.rule_engine.engine import evaluate_as1_rule
+from app.verification.rule_engine.enumerators import LOAN_SUBJECT
 from app.verification.rule_engine.result import RuleEvaluation, Verdict
 from app.verification.snapshot.documents_section import build_transactions, transaction_field_sets
 from app.verification.snapshot.model import (
-    CalculationEntry,
-    CalculationsSection,
     DocumentEntry,
     DocumentsSection,
     Snapshot,
@@ -34,6 +33,8 @@ from app.verification.snapshot.tag import Tag, TagProducedBy, TagRole, TagStage
 
 _INCOME = Decimal("8000")  # threshold = 0.5 * 8000 = 4000
 _DOC = "docstmt0000000000"
+# LP-366 — the income tag AS-1 now reads (a loan-level `loan_tag` operand), replacing the DTI calc.
+_INCOME_TAG = "dti.qualifying_income_monthly"
 
 
 def _tag(
@@ -85,7 +86,8 @@ def _evaluate(
     income: Decimal | None = _INCOME,
 ) -> RuleEvaluation:
     """Run AS-1 (the spec, via the generic evaluator) over a one-transaction snapshot carrying
-    ``tags`` + a DTI calc for the qualifying-income operand (``income=None`` → no DTI → couldnt_check)."""
+    ``tags`` + the qualifying-income LOAN tag AS-1 reads via its ``loan_tag`` operand (LP-366). ``income=
+    None`` → no income tag → the operand resolves to None → couldnt_check (the fail-closed path)."""
     txns = build_transactions(
         transaction_field_sets(
             {
@@ -104,13 +106,19 @@ def _evaluate(
     )
     assert txns is not None
     cid = txns[0].content_id
-    calc = (
-        CalculationsSection.present(
-            dti=CalculationEntry(value={"gross_monthly_income": str(income)}, breakdown=[])
-        )
-        if income is not None
-        else CalculationsSection.missing()
-    )
+    by_subject: dict[str, dict[str, Tag]] = {cid: dict(tags)}
+    if income is not None:
+        # The loan-level income tag (derived from the borrowers' MISMO stated income), read by AS-1's
+        # `loan_tag` operand. No confidence — it is a deterministic derived aggregate.
+        by_subject[LOAN_SUBJECT] = {
+            _INCOME_TAG: _tag(
+                _INCOME_TAG,
+                str(income),
+                confidence=None,
+                produced_by=TagProducedBy.DERIVED,
+                stage=TagStage.A,
+            )
+        }
     snap = Snapshot(
         loan_file_id=uuid4(),
         run_id=uuid4(),
@@ -118,8 +126,7 @@ def _evaluate(
         documents=DocumentsSection.present(
             [DocumentEntry(content_id=_DOC, document_type="bank_statement", transactions=txns)]
         ),
-        calculations=calc,
-        tags=TagsSection.present({cid: dict(tags)}),
+        tags=TagsSection.present(by_subject),
     )
     [result] = evaluate_as1_rule(snap, confidence_floor=confidence_floor)
     return result
