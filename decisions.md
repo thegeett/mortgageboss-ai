@@ -10484,3 +10484,45 @@ Real run (`01039e93`): tag = `unknown` ("no homeowners insurance binder in the f
 ("housing.insurance_monthly is unknown"). Full suite green (2367). Cross-refs: LP-318 (the calc gate), LP-326
 (derived recipes + abstention), LP-366-A/370/371/373 (the orphan class + its guard), LP-364 (the UI that exposed
 the $0.00), LP-375 (the display fix).
+
+## ADR-291: The read path — surface `satisfied`, separate the two systems' counts structurally, stop the DTI card fabricating 0 (LP-375)
+
+**Why GREEN/`satisfied` must be returned.** `_build_status` filtered findings to `status IN (RED, YELLOW)`,
+dropping GREEN — where `satisfied` (and `no_longer_applies`) land. §8 makes `satisfied` FIRST-CLASS: it is how
+a human knows a rule RAN and PASSED rather than silently not running. This project found FOUR live rules that
+were silently not running (AS-1, ID-2, ID-3, OC-2), each with every test green — a visible `satisfied` is what
+makes that difference legible. On LF-6T3N there are 2 `satisfied` rule findings that were unreachable; now they
+surface (Tab 2). Fix: `rule_findings` is returned with NO status filter (all outcomes).
+
+**Why the two systems' counts are STRUCTURALLY separate.** An ungoverned 75%-confidence AI sweep observation
+(no gated tags, no provenance, no outcome state) and a governed rule finding (gated load-bearing tags, inline
+provenance, a spec-cited guideline, a §8 outcome) are not the same kind of thing; summing them makes the §8
+honesty contract meaningless. The response returns TWO DIFFERENT TYPES — `findings: list[FindingPublic]`
+(legacy) and `rule_findings: list[RuleFindingPublic]` (governed). Different types cannot be concatenated or
+their counts summed — structural, not merely conventional. **The discriminator is `evaluation_outcome IS NOT
+NULL`, not `origin`:** confirmed on real data, `origin=deterministic_rule` spans BOTH the governed engine AND
+retired `xsrc.*` findings (outcome null, stale). So "Tab 5 — Old Findings" is TWO legacy systems (the
+`ai_cross_source` sweep + the `xsrc` deterministic rows) = 16 on LF-6T3N; `rule_findings` = 38 (30 couldnt_check
+· 4 needs_review · 2 open · 2 satisfied). The guideline citation is read from the SPEC
+(`load_rule_spec(rule_id).guideline_reference`), never AI-recalled.
+
+**The $0.00 fix — display layer, and the coupling that shaped it.** The display path collapsed an absent input
+to 0 (`_to_items`: `auto.auto or Decimal(0)`) and computed a confident ratio on it, while the snapshot path
+(`calculations_section.map_dti`) GATED on the same `auto_amount=None` — two paths contradicting each other on
+one page. **Absent ≠ 0: a 0 premium makes the DTI confidently too-low, the exact false-green the gate exists to
+prevent.** A subtlety: `build_calculations_section` calls the SAME `build_dti_calculation`, and `map_dti`
+returns `None` (absent DTI) when `back_end_dti is None` — so nulling the ratio inside `build_dti_calculation`
+would have flipped the snapshot's honest *gated* entry to *absent*, changing the path I was told not to touch.
+The fix therefore keeps the ratio computed in `build_dti_calculation` (adding `gated`/`gate_reason` + an
+`unknown` line flag) and nulls the ratio at the API boundary (`gate_display_ratios`), so the DISPLAY agrees
+with the engine WITHOUT altering the snapshot path or any gate / `_REQUIRED_DTI_TAGS`.
+
+**What this does NOT change.** The sweep's `findings`, counts, and banner are identical (its filter is
+unchanged; GREEN is not un-dropped for it). The submission gate (`blocked`/`in_scope_open_count`, LP-75) still
+spans both systems — the display lists are separated, but a per-system BLOCKING split is a policy question
+(LP-377). `calculations_section.py`, `_REQUIRED_DTI_TAGS`, every gate, and every rule/tag/spec are untouched;
+`ACTIVE_RULE_IDS` unchanged; full suite green (2371). Reported for LP-376: `subject_key` is not human-legible
+(a compact subject label needs per-family logic — a finding, not faked); Tab 5 is two legacy systems; Tab 4
+(`not_applicable`) has no persisted rows. Cross-refs: §8, LP-316 (the Finding model), LP-364-B (the
+discriminator), LP-374 (the traced $0.00 + DTI-reads-the-extraction), LP-318 (the gate), LP-376 (the UI),
+LP-377 (§10 actions / blocking policy).

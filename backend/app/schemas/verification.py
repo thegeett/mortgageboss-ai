@@ -18,6 +18,16 @@ from app.models.finding import Finding
 from app.models.verification import Verification
 from app.verification.confidence import AggressionLevel
 from app.verification.finding_guidance import resolve_guidance
+from app.verification.rules.specs import load_rule_spec
+
+
+def _guideline_for(rule_id: str) -> str | None:
+    """The rule's guideline citation from its SPEC — never AI-recalled (LP-375). None if the spec
+    cannot load (e.g. a retired/legacy rule_id with no spec file)."""
+    try:
+        return load_rule_spec(rule_id).guideline_reference
+    except (OSError, KeyError, ValueError):
+        return None
 
 
 def _as_uuid(value: str) -> UUID | None:
@@ -172,6 +182,68 @@ class FindingPublic(BaseModel):
         )
 
 
+class RuleFindingPublic(BaseModel):
+    """One GOVERNED rule-engine finding (LP-316/375) — a DISTINCT shape from :class:`FindingPublic`.
+
+    The rule engine's findings carry an ``evaluation_outcome`` (the §8 axis) and inline provenance; the
+    legacy AI sweep / xsrc findings (``FindingPublic``, ``evaluation_outcome`` null) do not. Keeping them
+    two DIFFERENT types is the structural guarantee that the two systems' findings cannot be concatenated
+    into one list or their counts summed (LP-375 §3 — an ungoverned 75%-confidence AI observation and a
+    governed, gated, provenance-carrying rule finding are not the same kind of thing).
+
+    Carries what LP-376 needs to render §8's tabs + a provenance card: the OUTCOME (the tab discriminator),
+    the reason, the SPEC's guideline citation (read-time, NEVER AI-recalled), each load-bearing tag with its
+    value/confidence/reasoning, and the ratification-pending marker. ``subject_key`` is the STABLE
+    content-id (LP-312) — not yet human-legible (a compact "Deposit of $X on D" label needs per-family
+    logic that is not uniformly derivable from the stored data; that is a finding for LP-376, not faked)."""
+
+    id: UUID
+    rule_id: str
+    evaluation_outcome: (
+        str  # open | satisfied | needs_review | couldnt_check | no_longer_applies — the tab
+    )
+    status: str  # the severity color (red / yellow / green) — orthogonal to the outcome
+    category: str
+    message: str  # the reason — EVERY non-satisfied outcome carries one (§8's honesty contract)
+    subject_key: (
+        str | None
+    )  # the stable per-subject content-id (LP-312); human legibility is LP-376's
+    guideline: str | None  # the rule's guideline citation, from the SPEC (never AI-recalled)
+    # Inline provenance (§3D): each {tag_id, value, confidence, reasoning, source_facts} — a human sees WHY.
+    load_bearing_tags: list[dict[str, Any]]
+    ratification_pending: (
+        bool  # a judgment/AI verdict awaits human ratification (gated_pending_signoff)
+    )
+    how_to_fix: str | None
+    confidence: float
+    resolution_status: str
+
+    @classmethod
+    def from_model(cls, finding: Finding) -> RuleFindingPublic:
+        details = finding.details or {}
+        return cls(
+            id=finding.id,
+            rule_id=finding.rule_id,
+            # Guaranteed present by the caller's ``evaluation_outcome IS NOT NULL`` filter; empty only if a
+            # future caller passes a legacy finding (which would not belong here).
+            evaluation_outcome=(
+                finding.evaluation_outcome.value if finding.evaluation_outcome is not None else ""
+            ),
+            status=finding.status.value,
+            category=finding.category.value,
+            message=finding.message,
+            subject_key=finding.subject_key,
+            guideline=_guideline_for(finding.rule_id),
+            load_bearing_tags=finding.load_bearing_tags or [],
+            ratification_pending=bool(details.get("gated_pending_signoff")),
+            how_to_fix=details.get("how_to_fix")
+            if isinstance(details.get("how_to_fix"), str)
+            else None,
+            confidence=finding.confidence,
+            resolution_status=finding.resolution_status.value,
+        )
+
+
 class AggressionPublic(BaseModel):
     """The aggression dial's state for a file (LP-79) — the confidence-cutoff filter.
 
@@ -202,7 +274,12 @@ class VerificationStatusPublic(BaseModel):
     stale: bool
     program: str | None  # the file's loan program (conventional / fha) — drives the rule set
     latest_run: VerificationRunPublic | None
+    # The LEGACY quarantine (Tab 5) — the AI cross-source sweep AND the retired xsrc deterministic findings
+    # (both carry a null evaluation_outcome). Unchanged shape + behaviour (LP-375 keeps the sweep identical).
     findings: list[FindingPublic]
+    # The GOVERNED rule-engine findings (LP-316), a SEPARATE typed list (LP-375) so tabs 1-4 — including
+    # `satisfied` (Tab 2, previously dropped) — are reachable and can never be summed with `findings`.
+    rule_findings: list[RuleFindingPublic]
     aggression: AggressionPublic
     blocked: bool
     in_scope_open_count: int

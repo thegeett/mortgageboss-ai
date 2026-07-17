@@ -17,6 +17,7 @@ from app.services.dti import (
     UnknownDtiFieldError,
     build_dti_calculation,
     clear_dti_override,
+    gate_display_ratios,
     set_dti_override,
 )
 from app.services.loan_files import get_loan_file
@@ -32,8 +33,10 @@ async def get_dti(identifier: str, db: DbSession, current_user: CurrentUser) -> 
     loan_file = await get_loan_file(db, company_id=current_user.company_id, identifier=identifier)
     if loan_file is None:
         raise _NOT_FOUND
-    return await build_dti_calculation(
-        db, loan_file=loan_file, confidence_cutoff=active_cutoff(loan_file, current_user)
+    return gate_display_ratios(
+        await build_dti_calculation(
+            db, loan_file=loan_file, confidence_cutoff=active_cutoff(loan_file, current_user)
+        )
     )
 
 
@@ -63,7 +66,7 @@ async def put_dti_override(
             status_code=status.HTTP_404_NOT_FOUND, detail="Unknown DTI input field"
         ) from exc
     await db.commit()
-    return calculation
+    return gate_display_ratios(calculation)
 
 
 @router.delete("/{identifier}/dti/overrides/{field_key}", response_model=DtiCalculation)
@@ -82,4 +85,4 @@ async def delete_dti_override(
         confidence_cutoff=active_cutoff(loan_file, current_user),
     )
     await db.commit()
-    return calculation
+    return gate_display_ratios(calculation)

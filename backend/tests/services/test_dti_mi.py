@@ -26,6 +26,7 @@ from app.services.dti import (
     HOUSING_MORTGAGE_INSURANCE,
     HOUSING_PRINCIPAL_INTEREST,
     build_dti_calculation,
+    gate_display_ratios,
     set_dti_override,
 )
 from app.services.loan_files import create_loan_file
@@ -114,10 +115,14 @@ async def test_fha_dti_includes_monthly_mip_no_longer_omitted(db_session: AsyncS
     assert mi.source == "computed"
     # 300000 x 55bps / 12 = 137.50 (the FHA monthly annual-MIP starter).
     assert mi.auto_amount == Decimal("137.50")
-    # It is actually in PITI: housing payment = P&I + MI (taxes/ins/hoa absent here).
+    # It is actually in PITI: housing payment = P&I + MI (taxes/ins/hoa absent here). This is the
+    # MI-in-PITI proof — unaffected by the LP-375 gate (housing_payment sums the components regardless).
     assert calc.housing_payment == _pi_line(calc).amount + Decimal("137.50")
-    # The front-end DTI reflects MI (not the MI-omitted, understated value).
-    assert calc.front_end_dti == Decimal("9.71")  # (833.33 + 137.50) / 10000
+    # taxes + insurance are absent here → the DTI fail-closes (LP-375: absent≠0, never a confident too-low
+    # number). The MI-inclusion correctness is the housing_payment above, not the (gated) ratio. The service
+    # marks it gated; the DISPLAY view nulls the ratio.
+    assert calc.gated is True
+    assert gate_display_ratios(calc).front_end_dti is None
 
 
 async def test_dti_mi_equals_mi_calculator_single_source_of_truth(db_session: AsyncSession) -> None:

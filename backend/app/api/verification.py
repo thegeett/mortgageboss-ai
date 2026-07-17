@@ -33,6 +33,7 @@ from app.schemas.verification import (
     NoteRequest,
     OverrideRequest,
     RequestDocsRequest,
+    RuleFindingPublic,
     VerificationRunPublic,
     VerificationStatusPublic,
 )
@@ -226,12 +227,19 @@ async def _build_status(
     )
     latest = (await db.execute(latest_stmt)).scalars().first()
 
+    # LP-375 — the two finding systems are split STRUCTURALLY by ``evaluation_outcome`` (the discriminator;
+    # ``origin`` does NOT work — ``deterministic_rule`` spans BOTH the governed rule engine AND retired
+    # ``xsrc`` findings). ``findings`` is the LEGACY quarantine (evaluation_outcome null: the AI sweep +
+    # the retired xsrc deterministic findings) — RED/YELLOW, unchanged, so the sweep behaves identically.
     findings_stmt = (
         only_active(
             select(Finding).where(
                 Finding.loan_file_id == loan_file.id,
                 Finding.origin.in_(_SHOWN_ORIGINS),
                 Finding.status.in_((FindingStatus.RED, FindingStatus.YELLOW)),
+                Finding.evaluation_outcome.is_(
+                    None
+                ),  # legacy only — governed findings go to rule_findings
             ),
             Finding,
         )
@@ -239,6 +247,18 @@ async def _build_status(
         .order_by(Finding.created_at.desc())
     )
     findings = (await db.execute(findings_stmt)).scalars().all()
+
+    # The GOVERNED rule-engine findings (evaluation_outcome present) — ALL outcomes, NO status filter, so
+    # ``satisfied`` (Tab 2, previously dropped by the RED/YELLOW filter) and ``no_longer_applies`` (Tab 3)
+    # are reachable. A SEPARATE list of a SEPARATE type → the two systems' counts can never be summed.
+    rule_findings_stmt = only_active(
+        select(Finding).where(
+            Finding.loan_file_id == loan_file.id,
+            Finding.evaluation_outcome.is_not(None),
+        ),
+        Finding,
+    ).order_by(Finding.created_at.desc())
+    rule_findings = (await db.execute(rule_findings_stmt)).scalars().all()
 
     # LP-114.1: the file's document names, loaded ONCE, to name every finding's source-document set
     # (no N+1). Keyed by id → readable filename.
@@ -263,6 +283,7 @@ async def _build_status(
         program=loan_file.loan_program.value if loan_file.loan_program else None,
         latest_run=VerificationRunPublic.from_model(latest) if latest else None,
         findings=[FindingPublic.from_model(f, document_names=document_names) for f in findings],
+        rule_findings=[RuleFindingPublic.from_model(f) for f in rule_findings],
         aggression=AggressionPublic(
             level=level.value,
             default=user.default_aggression_level.value,

@@ -13,6 +13,10 @@ from app.models import (
     ActivityType,
     Borrower,
     Company,
+    Document,
+    DocumentStatus,
+    Extraction,
+    ExtractionStatus,
     Finding,
     FindingCategory,
     FindingOrigin,
@@ -21,6 +25,7 @@ from app.models import (
     LoanProgram,
     StatedIncomeItem,
     StatedLiability,
+    UploadSource,
     User,
     UserRole,
 )
@@ -30,6 +35,7 @@ from app.services.dti import (
     UnknownDtiFieldError,
     build_dti_calculation,
     clear_dti_override,
+    gate_display_ratios,
     set_dti_override,
 )
 from app.services.finding_resolution import apply_finding
@@ -60,6 +66,44 @@ async def _user(db: AsyncSession, company: Company) -> User:
     return user
 
 
+async def _seed_housing(
+    db: AsyncSession,
+    loan_file,
+    *,
+    annual_tax: str = "3600",  # → 300/mo
+    annual_premium: str = "1200",  # → 100/mo
+) -> None:
+    """Seed the REQUIRED housing extraction inputs (a property-tax bill + a homeowners binder) so the DTI
+    is computable, not gated. LP-375: absent taxes/insurance now fail-closes the DTI (absent≠0), so a math
+    test must provide them. Documents are created directly (the DTI reads the extraction, not the bytes)."""
+    for doc_type, field, value in (
+        ("property_tax_bill", "annual_tax_amount", annual_tax),
+        ("homeowners_insurance", "annual_premium", annual_premium),
+    ):
+        doc = Document(
+            loan_file_id=loan_file.id,
+            original_filename=f"{doc_type}.pdf",
+            mime_type="application/pdf",
+            file_size_bytes=1,
+            storage_path=f"seed/{doc_type}",
+            document_type=doc_type,
+            status=DocumentStatus.COMPLETED,
+            upload_source=UploadSource.USER_UPLOAD,
+        )
+        db.add(doc)
+        await db.flush()
+        db.add(
+            Extraction(
+                document_id=doc.id,
+                version=1,
+                is_current=True,
+                extracted_data={field: {"value": value}},
+                extraction_status=ExtractionStatus.SUCCEEDED,
+            )
+        )
+    await db.flush()
+
+
 async def _file_with_financials(
     db: AsyncSession,
     company: Company,
@@ -67,8 +111,11 @@ async def _file_with_financials(
     lender_id=None,
     income: Decimal = Decimal("10000"),
     debt: Decimal = Decimal("2000"),
+    with_housing: bool = True,
 ):
-    """A Conventional file: $10k income, a $2k debt, $100k @ 0% / 360mo (P&I = 277.78)."""
+    """A Conventional file: $10k income, a $2k debt, $100k @ 0% / 360mo (P&I = 277.78). With
+    ``with_housing`` (default), also seeds taxes ($300/mo) + insurance ($100/mo) so the DTI computes;
+    pass ``with_housing=False`` to exercise the LP-375 fail-closed gate (a required input unknown)."""
     loan_file = await create_loan_file(
         db, company_id=company.id, loan_program=LoanProgram.CONVENTIONAL, lender_id=lender_id
     )
@@ -92,6 +139,8 @@ async def _file_with_financials(
         )
     )
     await db.flush()
+    if with_housing:
+        await _seed_housing(db, loan_file)
     return loan_file
 
 
@@ -114,11 +163,41 @@ async def test_auto_populates_from_structured_data(db_session: AsyncSession) -> 
     # Debt itemized.
     assert len(calc.debt_items) == 1
     assert calc.debt_items[0].auto_amount == Decimal("2000")
-    # Ratios: housing 277.78 / 10000 = 2.78; back (277.78 + 2000)/10000 = 22.78.
-    assert calc.front_end_dti == Decimal("2.78")
-    assert calc.back_end_dti == Decimal("22.78")
+    # Ratios: housing (277.78 P&I + 300 taxes + 100 insurance) = 677.78 / 10000 = 6.78;
+    # back (677.78 + 2000)/10000 = 26.78. Not gated — the required housing inputs are present.
+    assert calc.gated is False and calc.gate_reason is None
+    assert calc.front_end_dti == Decimal("6.78")
+    assert calc.back_end_dti == Decimal("26.78")
     # The explicit formula is present.
     assert "Back-end DTI" in calc.back_end_formula
+
+
+async def test_gated_when_required_housing_input_unknown(db_session: AsyncSession) -> None:
+    """LP-375 — the $0.00 fix: with no insurance binder / no tax bill, the DTI is GATED (the display path
+    catching up to the honest snapshot path), NOT a confident ratio resting on a fabricated 0."""
+    company = await _company(db_session, "acme")
+    loan_file = await _file_with_financials(db_session, company, with_housing=False)
+
+    calc = await build_dti_calculation(db_session, loan_file=loan_file)
+
+    # The service marks it GATED with a reason naming the unknown inputs. (The ratios stay computed here so
+    # the snapshot path can re-gate from the lines; the DISPLAY view nulls them — asserted below.)
+    assert calc.gated is True
+    assert calc.gate_reason is not None
+    assert "Homeowners insurance is unknown" in calc.gate_reason
+    assert "Property taxes is unknown" in calc.gate_reason
+    # The required inputs surface as UNKNOWN — never a fabricated $0.00 "Extracted".
+    insurance = next(i for i in calc.housing_items if i.key == "housing.insurance")
+    taxes = next(i for i in calc.housing_items if i.key == "housing.taxes")
+    assert insurance.unknown is True and insurance.auto_amount is None
+    assert taxes.unknown is True and taxes.auto_amount is None
+
+    # The DISPLAY view nulls the ratios (no confident number on a fabricated 0) + marks the limit unknown.
+    display = gate_display_ratios(calc)
+    assert display.front_end_dti is None and display.back_end_dti is None
+    assert display.limit.status == "unknown"
+    # And it never fabricates a 0 for the unknown inputs (the line stays unknown, not "$0.00").
+    assert next(i for i in display.housing_items if i.key == "housing.insurance").unknown is True
 
 
 async def test_effective_limit_program_default(db_session: AsyncSession) -> None:
@@ -176,8 +255,8 @@ async def test_override_takes_precedence_recomputes_and_is_audited(
     assert debt.amount == Decimal("0")
     assert debt.overridden is True
     assert debt.source == "override"
-    # Back-end recomputed without the debt: 277.78 / 10000 = 2.78.
-    assert calc.back_end_dti == Decimal("2.78")
+    # Back-end recomputed without the debt: (277.78 + 300 + 100) / 10000 = 6.78.
+    assert calc.back_end_dti == Decimal("6.78")
 
     # Audited with the prior value (2000 → 0).
     logs = (

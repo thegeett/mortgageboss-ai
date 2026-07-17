@@ -23,6 +23,7 @@ from app.models import (
     UserRole,
 )
 from app.models.base import utcnow
+from app.models.finding import EvaluationOutcome
 from app.models.verification import Verification, VerificationStatus, VerificationTrigger
 from app.services.cross_source import assemble_cross_source_context, compute_input_fingerprint
 from app.services.loan_files import create_loan_file
@@ -194,6 +195,98 @@ async def test_get_status_reports_staleness_and_findings(
     assert f["origin"] == "ai_cross_source"
     assert f["resolution_status"] == "open"
     assert f["source_page"] == 1
+
+
+def _rule_finding(
+    loan_file: LoanFile,
+    *,
+    rule_id: str,
+    outcome: EvaluationOutcome,
+    status: FindingStatus,
+    message: str,
+    subject_key: str,
+    ratification_pending: bool = False,
+) -> Finding:
+    """A GOVERNED rule-engine finding (evaluation_outcome present + inline provenance) — LP-316/375."""
+    return Finding(
+        loan_file_id=loan_file.id,
+        rule_id=rule_id,
+        origin=FindingOrigin.DETERMINISTIC_RULE,
+        confidence=1.0,
+        status=status,
+        category=FindingCategory.CROSS_SOURCE,
+        message=message,
+        evaluation_outcome=outcome,
+        subject_key=subject_key,
+        load_bearing_tags=[
+            {
+                "tag_id": "id.current_address_type",
+                "value": "unknown",
+                "confidence": 0.9,
+                "reasoning": "the doc states no type",
+                "source_facts": ["doc1"],
+            }
+        ],
+        details={"gated_pending_signoff": ratification_pending, "subject_key": subject_key},
+    )
+
+
+async def test_rule_findings_separate_and_satisfied_is_reachable(
+    client: AsyncClient, db: AsyncSession
+) -> None:
+    """LP-375 — governed rule findings surface in a SEPARATE typed list (incl. `satisfied`, previously
+    dropped by the RED/YELLOW filter); the legacy sweep stays in `findings`; the two never merge/sum."""
+    company, _user, token = await _user_and_token(db, slug="acme", email="u@acme.com")
+    loan_file = await create_loan_file(db, company_id=company.id)
+    # A LEGACY sweep finding (ai_cross_source, no evaluation_outcome) → Tab 5 / `findings`.
+    await _add_finding(db, loan_file, confidence=0.8)
+    # GOVERNED rule findings (deterministic_rule, evaluation_outcome present) → Tabs 1-4 / `rule_findings`.
+    db.add(
+        _rule_finding(
+            loan_file,
+            rule_id="ID-4",
+            outcome=EvaluationOutcome.SATISFIED,
+            status=FindingStatus.GREEN,
+            message="the address agrees across sources",
+            subject_key="b1",
+        )
+    )
+    db.add(
+        _rule_finding(
+            loan_file,
+            rule_id="ID-4",
+            outcome=EvaluationOutcome.COULDNT_CHECK,
+            status=FindingStatus.YELLOW,
+            message="the address-type classification is unknown",
+            subject_key="b2",
+            ratification_pending=True,
+        )
+    )
+    await db.commit()
+
+    body = (
+        await client.get(f"{API}/{loan_file.display_id}/verification", headers=_auth(token))
+    ).json()
+
+    # TWO typed lists → structurally unmergeable. The sweep stays put; the governed findings are elsewhere.
+    assert "findings" in body and "rule_findings" in body
+    assert [f["origin"] for f in body["findings"]] == [
+        "ai_cross_source"
+    ]  # legacy only — no rule findings
+    assert len(body["findings"]) == 1  # the rule findings are NOT summed into this count
+
+    outcomes = {rf["evaluation_outcome"] for rf in body["rule_findings"]}
+    assert outcomes == {"satisfied", "couldnt_check"}  # Tab 2 (`satisfied`) is REACHABLE
+
+    # The honesty contract: couldnt_check carries its REASON and is NOT typed satisfied / not_applicable.
+    cc = next(rf for rf in body["rule_findings"] if rf["evaluation_outcome"] == "couldnt_check")
+    assert cc["message"] and cc["evaluation_outcome"] not in ("satisfied", "not_applicable")
+    # The governed shape carries the SPEC guideline (never AI-recalled), inline provenance, the ratification
+    # marker — everything LP-376 needs to render a §8 tab + a provenance card.
+    assert cc["guideline"]  # loaded from ID-4's spec at read time
+    assert cc["load_bearing_tags"][0]["tag_id"] == "id.current_address_type"
+    assert cc["ratification_pending"] is True
+    assert cc["subject_key"] == "b2"  # the stable content-id (human legibility is LP-376's)
 
 
 async def test_verification_is_tenant_scoped(client: AsyncClient, db: AsyncSession) -> None:
