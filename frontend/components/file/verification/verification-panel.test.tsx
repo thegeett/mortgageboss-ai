@@ -148,6 +148,22 @@ describe("VerificationPanel", () => {
     expect(runMutate).toHaveBeenCalledWith(true); // force = bypass the cache
   });
 
+  it("keeps the 'Re-run anyway' hatch after a FAILED run — the escape from a stuck cache (LP-376-A)", () => {
+    // The bug: the hatch was gated on status === "completed", so a failed run hid it — exactly when a
+    // force re-run is the only way forward. It must stay visible and force (bypass the cache) on a failure.
+    mock({ data: { ...STATUS, latest_run: { ...baseRun(), status: "failed" } } });
+    render(<VerificationPanel fileId="LF-1" />);
+    fireEvent.click(screen.getByRole("button", { name: /re-run anyway/i }));
+    expect(runMutate).toHaveBeenCalledWith(true);
+  });
+
+  it("hides the hatch only while a run is in progress (no double-trigger)", () => {
+    const run = STATUS.latest_run ?? null;
+    mock({ data: { ...STATUS, latest_run: run ? { ...run, status: "running" } : null } });
+    render(<VerificationPanel fileId="LF-1" />);
+    expect(screen.queryByRole("button", { name: /re-run anyway/i })).toBeNull();
+  });
+
   it("shows the staleness banner when out of date", () => {
     mock({ data: { ...STATUS, stale: true } });
     render(<VerificationPanel fileId="LF-1" />);

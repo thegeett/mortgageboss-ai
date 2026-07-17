@@ -193,9 +193,12 @@ export function VerificationPanel({ fileId }: { fileId: string }) {
             {running ? <Spinner className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5" />}
             {running ? "Running…" : "Run verification"}
           </Button>
-          {/* Escape hatch: re-run the AI even when inputs are unchanged. The default
-              button returns the cached result instantly when nothing changed. */}
-          {data?.latest_run?.status === "completed" && !running && (
+          {/* Escape hatch (LP-376-A): force a run past the fingerprint cache, enqueuing BOTH passes. Shown
+              whenever a prior run exists and we're not currently running — INCLUDING a failed run, which is
+              exactly when you need it (the default button caches against the last COMPLETED run, so a failed
+              or stale run leaves no other way to force). Gating this on status === "completed" hid the hatch
+              after a failure — the bug this restores. The cache being blind to engine changes is LP-377. */}
+          {data?.latest_run != null && !running && (
             <button
               type="button"
               onClick={() => run.mutate(true)}
