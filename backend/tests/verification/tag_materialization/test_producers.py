@@ -380,7 +380,8 @@ async def test_id2_end_to_end_from_parsed_ssn_hashes() -> None:
             if ssn is not None
             else PiiField.missing()
         )
-        return _doc(cid, fields={"ssn": pii}, borrower=b)
+        # LP-369: id.ssn_hash reads the W2's `employee_ssn` field (was the nonexistent `ssn`).
+        return _doc(cid, fields={"employee_ssn": pii}, borrower=b)
 
     # Two docs, same SSN → matching hashes → satisfied.
     snap = await materialize_tags(

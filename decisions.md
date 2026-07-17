@@ -10176,3 +10176,83 @@ total keeps F2 entirely OFF AS-1's path: AS-1 never depends on the AI qualifying
 - LP-366 now becomes the one-line data swap; LP-367 (the insurance orphan) is still needed for the DTI/AS-4,
   but no longer blocks AS-1. Cross-refs: LP-366 (the data swap), LP-367 (insurance orphan), LP-318 (the calc
   gate + Caveat A), LP-328 (typed operands / the coercer registry), LP-343 (F2), LP-365 (the real run).
+
+## ADR-286: The declared-key-with-no-member class — validate what declarations POINT AT, not just that they exist (LP-369)
+
+**Context.** A recurring, high-severity bug has now been found FOUR times, each at a different seam but with one
+shape: **a declaration names a key that resolves against a registry/field-set with no such member, and the
+system resolves the miss to ABSENT rather than ERROR. Absent is indistinguishable from "the input genuinely
+doesn't have this," so the consuming rule couldnt_checks — silently, on every file, forever, with every test
+green.**
+- **AS-1** (LP-366): read income through a DTI calc gated on `housing.insurance_monthly` — an input AS-1 never
+  uses. The calc gated → the threshold never resolved → AS-1 never evaluated a deposit.
+- **IN-8 / IN-9** (LP-333): applicability named document types the classifier doesn't emit
+  (`verification_of_employment` vs `voe`) → `not_applicable` on every file.
+- **The orphaned tags** (LP-366-A / LP-367): `housing.insurance_monthly` / `dti.qualifying_income_monthly`
+  declared with a `producer` in the vocabulary but NO producer anywhere in `app/`.
+- **Parsed field-name mismatches** (LP-368 / this ticket): parsed declarations named extraction fields that
+  don't exist — `id.dob` read `dob` (it is `date_of_birth`), `id.ssn_hash` read `ssn` (it is `employee_ssn`),
+  `id.marital_status` read a document field that lives on the borrower in MISMO. **Two LIVE rules (ID-3 DOB,
+  ID-2 SSN) had never evaluated anything.**
+
+**The root, named:** *the loader validates declarations that EXIST; it does not validate that what they POINT
+AT exists.* A declared key with no member → absent → silent. The four instances are one class at four seams
+(calc input, classifier document type, tag producer, extraction field).
+
+**Decision — fix the parsed field mismatches (DATA) and add a GUARD that closes the parsed seam.**
+- **The fixes (tag_production.yaml, declaration edits only — no engine Python):** `id.dob` → `date_of_birth`;
+  `id.ssn_hash` → `employee_ssn:hash`; `id.id_expiration` → `expiration_date`; `income.employment_start` →
+  `start_date`; `income.employment_end` → `end_date` (all real extraction field names). `id.marital_status`
+  was wrong on BOTH axes (a document field named `marital_status` that no document has, and it lives on the
+  BORROWER in MISMO) → re-keyed to `{subject: borrower, data: marital_status}`.
+- **The SUBJECT decision, driven by the rule's read pattern (not the field's logical owner).** `id.dob` feeds
+  ID-3, a CONSISTENCY rule that GATHERS a document-keyed fact across the borrower's sources
+  (`source_scope: borrower_documents`) and compares. A borrower-keyed tag would give ONE value → nothing to
+  compare → uniformly couldnt_check (a lateral move). So `id.dob` stays `subject: document` — only the field
+  name was wrong. Same for `id.ssn_hash` → ID-2. Conversely `id.marital_status` is NOT gathered by any live
+  rule (ID-7 reads only `id.title_vesting_consistent`, into which the marital/vesting judgment is baked), so
+  its correct home is the borrower subject. **The subject must match how the rule READS the tag.**
+- **The GUARD (the durable deliverable — worth more than the fixes):** a test asserting every `mode: parsed`
+  declaration names a field that EXISTS in its subject's resolution universe — `subject: document` → an
+  extraction model's field name (the `DocumentEntry.fields` key space, introspected from `app.ai.extraction.*`
+  + the `asserted_name` alias); `subject: transaction` → a `_TXN_FIELDS` key. It **fails loud** on the exact
+  pre-fix shape (proven by a self-test: `data: "dob"` → flagged; `data: "date_of_birth"` → passes), splitting
+  the `:hash` suffix as the producer does.
+
+**What the guard COVERS and does NOT.**
+- COVERS: `subject: document` and `subject: transaction` parsed declarations — a static, complete field
+  universe from the models. This is where all four parsed mismatches lived.
+- DOES NOT: `subject: borrower` / `loan` declarations read MISMO facts, whose keys are DATA-DEPENDENT
+  (`borrower.{n}.<field>` / a full key) and cannot be enumerated from the models — the guard SKIPS them and
+  says so. Nor does it cover the OTHER three seams of the class (calc inputs, classifier types, tag producers)
+  — each needs its own analogous guard (the classifier seam already has LP-333's).
+- **Two declarations are EXEMPTED, loudly:** `income.stated_monthly` (stated income is MISMO-indexed, not a
+  document field — needs a derived source) and `stmt.page_count_declared` (no extractor emits a page count).
+  Both feed DORMANT rules; the exemption lists them with a reason and a test asserts each is STILL a genuine
+  mismatch, so the allow-list cannot rot into hiding a now-resolvable declaration.
+
+**Why a TEST, not a load-time check.** The authoritative field universe lives in `app.ai.extraction.*`. A
+load-time validation would force the deterministic tag-vocabulary loader (`declarations.py`) to import the AI
+extraction layer — a layering inversion. The test fails CI just as loudly without that coupling; promoting it
+to a loader validation is a small follow-up if the layering is ever resolved.
+
+**Consequences (deterministic replay on the persisted LF-6T3N snapshot).**
+- **ID-2 (SSN) resurrected:** before, both borrowers couldnt_check ("0 sources carry id.ssn_hash" — the tag
+  was absent); after, borrower A → **satisfied** ("SSN matches across all 2 sources", two W2s), borrower B →
+  couldnt_check ("only 1 source" — one W2's SSN was non-matchable). A real verdict where there was silent death.
+- **ID-3 (DOB): the tag is fixed and materializes (2 driver's licences), but ID-3 still couldnt_checks** —
+  because each borrower has exactly ONE document stating DOB (the DL; no 1003/URLA document is in the file), so
+  there is nothing to compare. The reason improved from "0 sources (tag broken)" to "1 source (genuinely one)".
+  This is CORRECT (a file limitation, not the bug) and, crucially, NOT the lateral move — document-keying means
+  a file WITH a second DOB source would now compare; borrower-keying never could.
+- **ID-7 unchanged:** not_applicable on non-title documents, couldnt_check on the untyped ones — blocked by the
+  absent title document (correct). `id.marital_status` now materializes but no live rule reads it as a tag.
+- Every other live rule identical; the full suite passes (2338). No rule spec, vocabulary meaning, or allowed
+  value changed — the declarations were wrong; the tags were not.
+
+**Still open (reported, not done here):** the live-rule materialization audit (each of the 11 live rules'
+load-bearing tags checked on a real file — this ticket did ID-2/ID-3/ID-7); the dormant tag-layer smoke test
+(income/asset AI groups have never run); `income.stated_monthly` re-architecture as a derived tag; the page-
+count extraction gap (AS-9). Cross-refs: LP-368 (the diagnosis that found the parsed class), LP-333 (the
+classifier-mismatch analogue + `_required_ai_groups`), LP-326 (the declaration/producer model), LP-366 (AS-1,
+the first instance of the class), LP-367 (the orphaned insurance producer).

@@ -18,10 +18,16 @@ tags:
 
   # --- id.* — the identity family (LP-323-ID-A §2). Cross-source facts are keyed under the DOCUMENT
   #     subject (LP-325 gather contract), even when logically about the borrower. ----------------- #
-  id.ssn_hash: {mode: parsed, subject: document, data: "ssn:hash"}
-  id.dob: {mode: parsed, subject: document, data: dob}
-  id.id_expiration: {mode: parsed, subject: document, data: id_expiration}
-  id.marital_status: {mode: parsed, subject: document, data: marital_status}
+  # LP-369: these read EXTRACTION FIELD NAMES (subject: document → DocumentEntry.fields[data];
+  # the `:hash` suffix is split off first — producer.py). The `data` keys below were WRONG — they
+  # named fields no extractor emits, so the tags were ABSENT and their rules silently couldnt_checked
+  # on every file (ID-2, ID-3 — LIVE). Corrected to the real field names (see the extraction models).
+  id.ssn_hash: {mode: parsed, subject: document, data: "employee_ssn:hash"}  # was "ssn" — W2's SSN
+  id.dob: {mode: parsed, subject: document, data: date_of_birth}             # was "dob" — DL's DOB
+  id.id_expiration: {mode: parsed, subject: document, data: expiration_date} # was "id_expiration"
+  # id.marital_status lives on the BORROWER in MISMO (borrower.{n}.marital_status), NOT on any
+  # document — it was wrong on BOTH axes (name AND subject). Re-keyed to the borrower subject.
+  id.marital_status: {mode: parsed, subject: borrower, data: marital_status}
   # LP-332: id.citizenship is a BORROWER-level 1003/MISMO fact — now keyed under the borrower subject
   # (borrower.{n}.citizenship), resolved to the borrower_id via the LP-332 id link. This ACTIVATES ID-8
   # (its LP-331 aspirational `subject: document` declaration never materialized — no document has it).
@@ -45,9 +51,14 @@ tags:
   #     tags (has_2yr_history / is_declining / same_line_of_work / continuance_3yr) are logically
   #     per-borrower but materialize per-document today; the per-borrower judgment rules that read them
   #     EVALUATE via fixtures but do NOT ACTIVATE until per-borrower materialization lands (like ID-8). #
+  # LP-369: income.stated_monthly names a document field NO extractor emits — stated income lives in
+  # MISMO as indexed borrower.{n}.income.{m}.monthly_amount, not a single document field. It cannot be
+  # a parsed:document tag; it needs a DERIVED/borrower source (cf. dti.qualifying_income_monthly,
+  # LP-366-A). Left as-is + EXEMPTED in the guard (IN-1/DT-1 are dormant); tracked for re-architecture.
   income.stated_monthly: {mode: parsed, subject: document, data: stated_monthly_income}
-  income.employment_start: {mode: parsed, subject: document, data: employment_start}
-  income.employment_end: {mode: parsed, subject: document, data: employment_end}
+  # LP-369: corrected to the VOE extractor's real field names (was employment_start/_end).
+  income.employment_start: {mode: parsed, subject: document, data: start_date}
+  income.employment_end: {mode: parsed, subject: document, data: end_date}
   income.pay_date: {mode: parsed, subject: document, data: pay_date}
   income.ytd_gross: {mode: parsed, subject: document, data: ytd_gross}
   income.type: {mode: ai, subject: document, data: income_amounts}
@@ -88,6 +99,7 @@ tags:
   stmt.account_masked: {mode: parsed, subject: document, data: account_number_masked}
   # stmt.page_count_declared: NO extraction field exists (bank_statement.py has no 'Page X of Y') → this
   # parses to ABSENT; AS-9 couldnt_checks. Declared so the gap is visible, not silent (bucket C).
+  # LP-369: EXEMPTED in the parsed-field guard (a known missing-extraction gap, not a typo; AS-9 dormant).
   stmt.page_count_declared: {mode: parsed, subject: document, data: page_count_declared}
   stmt.owner_matches_borrower: {mode: ai, subject: document, data: stmt_facts}
   stmt.is_reserve_eligible: {mode: ai, subject: document, data: stmt_facts}
