@@ -32,24 +32,30 @@ def test_pass_when_all_present_confident_known() -> None:
 def test_absent_tag_is_couldnt_check_naming_the_tag() -> None:
     result = evaluate_gate({"a": _tag("in"), "b": None}, confidence_floor=0.5)
     assert result.status is GateStatus.COULDNT_CHECK
-    assert "'b'" in (result.reason or "") and "absent" in (result.reason or "")
+    # LP-376-C: names the missing FACT (here the fallback humanized stem 'b') in mortgage terms, not a
+    # tag id or the word "absent"/"tag".
+    assert "b" in (result.reason or "") and "could not be found" in (result.reason or "")
 
 
 def test_unknown_tag_is_couldnt_check_distinct_from_absent() -> None:
     result = evaluate_gate({"a": _tag("unknown")}, confidence_floor=0.5)
     assert result.status is GateStatus.COULDNT_CHECK
-    assert "unknown" in (result.reason or "") and "absent" not in (result.reason or "")
+    # A present-but-unclear fact reads DIFFERENTLY from an absent one ("could not be read" vs "found").
+    assert "could not be read" in (result.reason or "")
+    assert "could not be found" not in (result.reason or "")
 
 
 def test_absent_takes_precedence_over_unknown() -> None:
     # Decision order: absent is checked before unknown.
     result = evaluate_gate({"a": None, "b": _tag("unknown")}, confidence_floor=0.5)
-    assert result.status is GateStatus.COULDNT_CHECK and "absent" in (result.reason or "")
+    assert result.status is GateStatus.COULDNT_CHECK and "could not be found" in (
+        result.reason or ""
+    )
 
 
 def test_contradiction_is_needs_review() -> None:
     result = evaluate_gate({"a": _tag("in")}, confidence_floor=0.5, contradiction=True)
-    assert result.status is GateStatus.NEEDS_REVIEW and "contradiction" in (result.reason or "")
+    assert result.status is GateStatus.NEEDS_REVIEW and "contradict" in (result.reason or "")
 
 
 def test_below_confidence_floor_is_needs_review() -> None:

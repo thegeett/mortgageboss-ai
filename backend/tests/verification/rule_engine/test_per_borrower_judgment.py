@@ -173,7 +173,9 @@ async def test_one_borrower_missing_citizenship_couldnt_check_the_other_still_ev
     assert (
         evals[str(_A)].evaluation.verdict is Verdict.COULDNT_CHECK
     )  # A fail-closed (missing input)
-    assert "id.citizenship" in evals[str(_A)].evaluation.reasoning  # names what was missing
+    assert (
+        "citizenship" in evals[str(_A)].evaluation.reasoning
+    )  # LP-376-C: the fact, not the tag id
     assert evals[str(_A)].judgment_tag is None  # gate-before-AI: no tag on a gated subject
     assert evals[str(_B)].evaluation.verdict is Verdict.NEEDS_REVIEW  # B still evaluates
     assert stub.calls == 1  # the AI was NOT called for the gated borrower A

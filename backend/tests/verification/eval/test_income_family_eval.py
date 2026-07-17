@@ -294,7 +294,7 @@ async def test_in5_full() -> None:
     assert _verdicts(exact) == [Verdict.SATISFIED] and stub.calls == 0
     # 5 <2 sources → couldnt_check (ABSENT≠DISAGREEING).
     lone = await _in5({"pay": "Acme Corp"}, _Reasoner())
-    assert _verdicts(lone) == [Verdict.COULDNT_CHECK] and "nothing to compare" in lone[0].reasoning
+    assert _verdicts(lone) == [Verdict.COULDNT_CHECK] and "needs at least two" in lone[0].reasoning
     # 13a (LP-340): "Acme Corporation" vs "Acme" is now a benign SUFFIX difference — drop_entity_suffix
     # collapses it at the EXACT bookend → satisfied, NO AI call (the case the convention optimises for).
     suffix = _Reasoner("agree")
@@ -371,7 +371,7 @@ def test_in10_declining_fires_and_low_confidence_needs_review() -> None:
     assert low[0].verdict is Verdict.NEEDS_REVIEW
     # case 6 unknown value → couldnt_check (distinct at the gate).
     unk = _det_doc("IN-10", {"w2": ("w2", {"income.is_declining": _tag("unknown")})})
-    assert unk[0].verdict is Verdict.COULDNT_CHECK and "unknown" in unk[0].reasoning
+    assert unk[0].verdict is Verdict.COULDNT_CHECK and "could not be read" in unk[0].reasoning
 
 
 # ================================================================================================= #

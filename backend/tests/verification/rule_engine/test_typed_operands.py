@@ -77,7 +77,7 @@ def test_id5_absent_expiration_is_couldnt_check_not_expired() -> None:
     # and the reason names the absent tag (never a fabricated fire).
     (r,) = _id5(expiration=None)
     assert r.verdict is Verdict.COULDNT_CHECK
-    assert "id.id_expiration" in r.reasoning
+    assert "ID expiration" in r.reasoning  # LP-376-C: the mortgage fact, not the tag id
 
 
 def test_id5_unparseable_date_is_couldnt_check_never_silently_coerced() -> None:
@@ -85,7 +85,7 @@ def test_id5_unparseable_date_is_couldnt_check_never_silently_coerced() -> None:
     # epoch/0 (which would fire or pass wrongly).
     (r,) = _id5(expiration="not-a-date", closing="2026-05-01")
     assert r.verdict is Verdict.COULDNT_CHECK
-    assert "could not be resolved" in r.reasoning
+    assert "could not run" in r.reasoning  # LP-376-C: no "operand" in user text
 
 
 # --------------------------------------------------------------------------- #

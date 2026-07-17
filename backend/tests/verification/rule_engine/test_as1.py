@@ -212,7 +212,9 @@ def test_has_identified_source_unknown_is_couldnt_check_not_fired() -> None:
         }
     )
     assert result.verdict is Verdict.COULDNT_CHECK
-    assert "unknown" in result.reasoning
+    assert (
+        "could not be read" in result.reasoning
+    )  # LP-376-C: the deposit's source, in mortgage terms
 
 
 def test_is_money_in_unknown_is_couldnt_check() -> None:
@@ -231,7 +233,8 @@ def test_absent_source_tag_is_couldnt_check_distinct_reason() -> None:
         {TAG_IS_MONEY_IN: _money_in(), TAG_AMOUNT: _amount("5000.00")}
     )  # no has_source
     assert result.verdict is Verdict.COULDNT_CHECK
-    assert "absent" in result.reasoning and TAG_HAS_SOURCE in result.reasoning
+    # LP-376-C: names the deposit's source (the missing fact) + "could not be found", not the tag id.
+    assert "could not be found" in result.reasoning and "source" in result.reasoning
 
 
 def test_low_confidence_load_bearing_tag_is_needs_review() -> None:

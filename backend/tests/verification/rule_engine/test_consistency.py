@@ -155,7 +155,7 @@ async def test_id2_null_hash_source_is_absent_not_a_false_match() -> None:
     # One source lacks the hash entirely (ABSENT) → excluded; only one real instance remains → <2.
     results = await _eval_id2(_snapshot([("app", _ssn("H")), ("dl", {})]))
     assert [r.verdict for r in results] == [Verdict.COULDNT_CHECK]
-    assert "nothing to compare" in results[0].reasoning
+    assert "needs at least two" in results[0].reasoning  # LP-376-C
 
 
 async def test_id2_single_source_is_not_agreement() -> None:
@@ -168,7 +168,7 @@ async def test_id2_unknown_value_is_excluded_as_absent_not_compared() -> None:
     # that agrees/disagrees. Here only one source states a usable value → <2 → couldnt_check.
     results = await _eval_id2(_snapshot([("app", _ssn("unknown")), ("cr", _ssn("H"))]))
     assert results[0].verdict is Verdict.COULDNT_CHECK
-    assert "nothing to compare" in results[0].reasoning  # the <2-stated-sources reason
+    assert "needs at least two" in results[0].reasoning  # LP-376-C: the <2-stated-sources reason
 
 
 # --------------------------------------------------------------------------- #
@@ -257,7 +257,7 @@ async def test_id4_low_confidence_residence_classification_gates_to_needs_review
     results = await _eval_id4(snap, reasoner=stub)
     assert [r.verdict for r in results] == [Verdict.NEEDS_REVIEW]
     assert stub.calls == 0  # gated before the exact bookend / AI
-    assert "current_address_type" in results[0].reasoning
+    assert "address type" in results[0].reasoning  # LP-376-C: the fact, not the tag id
 
 
 async def test_id4_unknown_type_is_excluded_not_vetoed() -> None:
@@ -288,7 +288,7 @@ async def test_id4_unknown_type_is_excluded_not_vetoed() -> None:
     ]  # the veto no longer blocks the compare
     assert stub.calls == 0  # the two residences are byte-identical → exact bookend, no AI
     assert (
-        "excluded from the compare" in results[0].reasoning
+        "set aside" in results[0].reasoning  # LP-376-C
     )  # the exclusion is SURFACED, not silent
     # provenance carries ONLY the two residences — not the unknown-typed property source.
     assert {t.source_facts[0] for t in results[0].load_bearing_tags} == {"app", "dl"}
@@ -308,7 +308,7 @@ async def test_id4_unknown_type_does_not_mask_a_real_discrepancy() -> None:
     )
     results = await _eval_id4(snap, reasoner=stub)
     assert [r.verdict for r in results] == [Verdict.FIRED]
-    assert "excluded from the compare" in results[0].reasoning
+    assert "set aside" in results[0].reasoning  # LP-376-C
 
 
 async def test_id4_single_residence_plus_unknown_candidate_is_honest_couldnt_check() -> None:
@@ -328,8 +328,8 @@ async def test_id4_single_residence_plus_unknown_candidate_is_honest_couldnt_che
     results = await _eval_id4(snap, reasoner=stub)
     assert [r.verdict for r in results] == [Verdict.COULDNT_CHECK]
     assert stub.calls == 0
-    assert "only 1 source" in results[0].reasoning
-    assert "excluded from the compare" in results[0].reasoning
+    assert "only 1 document" in results[0].reasoning  # LP-376-C
+    assert "set aside" in results[0].reasoning  # LP-376-C
     assert "not trustworthy" not in results[0].reasoning  # the old veto reason is gone
 
 

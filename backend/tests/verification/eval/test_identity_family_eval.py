@@ -143,7 +143,7 @@ async def test_id1_case2_must_not_fire_exact_match_no_ai_call() -> None:
 async def test_id1_case5_absent_tag_couldnt_check() -> None:
     # Only one source has a name → <2 stated instances → couldnt_check (a single source is not agreement).
     r = await _id1({"app": "Robert Smith"}, _Reasoner())
-    assert _verdicts(r) == [Verdict.COULDNT_CHECK] and "nothing to compare" in r[0].reasoning
+    assert _verdicts(r) == [Verdict.COULDNT_CHECK] and "needs at least two" in r[0].reasoning
 
 
 async def test_id1_case6_unknown_value_excluded_like_absent_gate_owns_distinctness() -> None:
@@ -153,7 +153,7 @@ async def test_id1_case6_unknown_value_excluded_like_absent_gate_owns_distinctne
     # (unknown → a reason distinct from absent) is a GATE property — demonstrated on the deterministic
     # ID-6 (test_id6_case6_unknown_distinct_reason_from_absent) and the judgment ID-8. Documented.
     r = await _id1({"app": "unknown", "cr": "Robert Smith"}, _Reasoner())
-    assert _verdicts(r) == [Verdict.COULDNT_CHECK] and "nothing to compare" in r[0].reasoning
+    assert _verdicts(r) == [Verdict.COULDNT_CHECK] and "needs at least two" in r[0].reasoning
 
 
 async def test_id1_case7_low_confidence_tag_needs_review() -> None:
@@ -220,7 +220,7 @@ async def test_id2_case2_must_not_fire_matching() -> None:
 async def test_id2_case5_and_13_null_hash_excluded_then_lt2_couldnt_check() -> None:
     # DOMAIN EDGE: a null/blank hash source is EXCLUDED (not a false match); <2 remaining → couldnt_check.
     r = await _id2({"app": "111-22-3333", "cr": None})
-    assert _verdicts(r) == [Verdict.COULDNT_CHECK] and "nothing to compare" in r[0].reasoning
+    assert _verdicts(r) == [Verdict.COULDNT_CHECK] and "needs at least two" in r[0].reasoning
 
 
 async def test_id2_case13_itin_vs_ssn_fires() -> None:
@@ -343,7 +343,7 @@ def test_id5_case3_4_boundary_equals_closing_ge_default() -> None:
 def test_id5_case5_and_13_absent_expiration_couldnt_check_not_fired() -> None:
     # DOMAIN EDGE: a non-expiring state ID (no expiration) → couldnt_check, NOT fired.
     (r,) = _id5(expiration=None)
-    assert r.verdict is Verdict.COULDNT_CHECK and "id.id_expiration" in r.reasoning
+    assert r.verdict is Verdict.COULDNT_CHECK and "ID expiration" in r.reasoning
 
 
 def test_id5_case13_closing_slip_expires_at_closing() -> None:
@@ -375,7 +375,7 @@ def test_id6_case2_must_not_fire_complete() -> None:
 
 def test_id6_case5_absent_couldnt_check() -> None:
     (r,) = _id6(None)
-    assert r.verdict is Verdict.COULDNT_CHECK and "absent" in r.reasoning
+    assert r.verdict is Verdict.COULDNT_CHECK and "could not be found" in r.reasoning
 
 
 def test_id6_case6_unknown_distinct_reason_from_absent() -> None:
@@ -384,8 +384,8 @@ def test_id6_case6_unknown_distinct_reason_from_absent() -> None:
     # a consistency rule collapses them (test_id1_case6), the gate keeps them distinct.
     (unknown,) = _id6("unknown")
     (absent,) = _id6(None)
-    assert unknown.verdict is Verdict.COULDNT_CHECK and "is unknown" in unknown.reasoning
-    assert absent.verdict is Verdict.COULDNT_CHECK and "absent" in absent.reasoning
+    assert unknown.verdict is Verdict.COULDNT_CHECK and "could not be read" in unknown.reasoning
+    assert absent.verdict is Verdict.COULDNT_CHECK and "could not be found" in absent.reasoning
     assert unknown.reasoning != absent.reasoning  # case 6 ≠ case 5
 
 
@@ -459,7 +459,7 @@ def test_id7_case13_scope_and_absent_document() -> None:
     assert by["pay"] is Verdict.NOT_APPLICABLE and by["title"] is Verdict.SATISFIED
     # DOMAIN EDGE (LP-330): a file with NO title commitment (title is EXPECTED) → couldnt_check, Tab 1 BLOCKS.
     (miss,) = _id7({"pay": ("paystub", None), "w2": ("w2", None)})
-    assert miss.verdict is Verdict.COULDNT_CHECK and "title_commitment" in miss.reasoning
+    assert miss.verdict is Verdict.COULDNT_CHECK and "title commitment" in miss.reasoning
 
 
 # --------------------------------------------------------------------------- #
@@ -500,7 +500,7 @@ async def test_id8_case13_per_borrower_isolation_one_absent_couldnt_check() -> N
     }
     assert (
         evals[str(_B1)].verdict is Verdict.COULDNT_CHECK
-        and "id.citizenship" in evals[str(_B1)].reasoning
+        and "citizenship" in evals[str(_B1)].reasoning
     )
     assert evals[str(_B2)].verdict is Verdict.NEEDS_REVIEW  # B2 unaffected + provenance
     assert evals[str(_B2)].reasoning and stub.calls == 1  # gate-before-AI: no call for gated B1

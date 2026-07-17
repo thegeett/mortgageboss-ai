@@ -128,5 +128,5 @@ async def test_oc2_still_couldnt_checks_when_occupancy_absent() -> None:
     materialized = await materialize_tags(snap, only_groups=frozenset())  # derived only, no AI
     results, _ = await evaluate_rules(materialized, rule_ids=("OC-2",))
     assert [r.verdict for r in results] == [Verdict.COULDNT_CHECK]
-    # the gate names an absent/unknown load-bearing OCCUPANCY tag (not a fabricated verdict)
-    assert "occupancy." in (results[0].reasoning or "")
+    # LP-376-C: the gate names the missing occupancy FACT in mortgage terms (not a fabricated verdict)
+    assert "occupancy" in (results[0].reasoning or "")

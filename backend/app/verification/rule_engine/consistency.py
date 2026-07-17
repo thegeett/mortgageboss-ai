@@ -35,6 +35,7 @@ from app.ai.rule_judgment import Reasoner, RuleJudgmentResult, reason_rule_judgm
 from app.core.logging import get_logger
 from app.verification.rule_engine.enumerators import enumerate_subjects
 from app.verification.rule_engine.gate import GateStatus, evaluate_gate
+from app.verification.rule_engine.reasons import enum_label, fact_label
 from app.verification.rule_engine.result import (
     VERDICT_BY_NAME,
     LoadBearingTag,
@@ -399,9 +400,9 @@ async def evaluate_consistency_rule(
         # unchanged. Wording stays rule-generic (over any ``gather_filter``, not just ID-4's address).
         n_undetermined = result.type_undetermined
         excluded_note = (
-            f" ({n_undetermined} other {'source' if n_undetermined == 1 else 'sources'} could not be "
-            f"typed as {con.gather_filter.value!r} and {'was' if n_undetermined == 1 else 'were'} "
-            f"excluded from the compare)"
+            f" ({n_undetermined} other {'document' if n_undetermined == 1 else 'documents'} could not "
+            f"be confirmed as a {enum_label(con.gather_filter.value)} and "
+            f"{'was' if n_undetermined == 1 else 'were'} set aside)"
             if n_undetermined and con.gather_filter is not None
             else ""
         )
@@ -425,8 +426,9 @@ async def evaluate_consistency_rule(
                         spec,
                         subject_id,
                         verdict,
-                        f"the '{con.gather_filter.tag}' classification that decides which sources "  # type: ignore[union-attr]
-                        f"to compare is not trustworthy: {filter_gate.reason}" + excluded_note,
+                        f"the {fact_label(con.gather_filter.tag)} could not be established reliably, "  # type: ignore[union-attr]
+                        f"so we cannot tell which documents to compare — {filter_gate.reason}"
+                        + excluded_note,
                         gathered,
                         verdict_confidence=filter_gate.verdict_confidence,
                     )
@@ -435,16 +437,20 @@ async def evaluate_consistency_rule(
 
         # 2. absent≠empty / a single source is not agreement → couldnt_check (nothing to compare).
         if len(gathered) < 2:
+            # LP-376-C: name the mortgage FACT + what a consistency check needs, not the tag id.
             of_type = (
-                f" of type {con.gather_filter.value!r}" if con.gather_filter is not None else ""
+                f" (as a {enum_label(con.gather_filter.value)})"
+                if con.gather_filter is not None
+                else ""
             )
             results.append(
                 _result(
                     spec,
                     subject_id,
                     Verdict.COULDNT_CHECK,
-                    f"only {len(gathered)} source(s) carry '{con.gather_tag}'{of_type} for this "
-                    f"subject — nothing to compare across sources" + excluded_note,
+                    f"only {len(gathered)} document(s) in the file state the "
+                    f"{fact_label(con.gather_tag)}{of_type} — a consistency check needs at least two "
+                    f"to compare" + excluded_note,
                     gathered,
                 )
             )

@@ -87,7 +87,8 @@ async def test_honesty_contract_not_applicable_never_absorbs_couldnt_check() -> 
     assert by_subject["pay"].verdict is Verdict.NOT_APPLICABLE
     assert "does not apply" in by_subject["pay"].reasoning
     assert by_subject["poa"].verdict is Verdict.COULDNT_CHECK
-    assert "unknown" in by_subject["poa"].reasoning
+    # The POA doc IS classified but its acceptability tag is unknown → the gate reason (present-but-unclear).
+    assert "could not be read" in by_subject["poa"].reasoning  # LP-376-C
     # The two are DIFFERENT outcomes — the whole point.
     assert by_subject["pay"].verdict is not by_subject["poa"].verdict
     assert stub.calls == 0  # neither made an AI call (out-of-scope skips; degraded gates first)

@@ -1,0 +1,115 @@
+"""The couldnt_check reasons speak MORTGAGE, not engine (LP-376-C) — the ticket, in a test.
+
+A loan processor reads these. NO user-facing reason may contain engine vocabulary: a dotted tag id
+(`id.dob`), a content-id hash (`txn54c6…`), or the words `operand` / `load-bearing tag` / `subject`. This
+scans the reason each of the four sites produces (gate, consistency <2, applicability, absent-document) and
+asserts it is clean — AND that it still names WHAT is missing.
+"""
+
+from __future__ import annotations
+
+import re
+from collections.abc import Mapping
+
+from app.verification.rule_engine.applicability import (
+    absent_document_couldnt_check,
+    resolve_applicability,
+)
+from app.verification.rule_engine.gate import evaluate_gate
+from app.verification.rule_engine.reasons import fact_label
+from app.verification.rules.specs import TagCondition
+from app.verification.snapshot.tag import Tag, TagProducedBy, TagRole, TagStage
+
+# A dotted tag id (id.dob), a content-id hash (txn54c6…/doc067c2…), and the raw engine words.
+_DOTTED_ID = re.compile(r"\b[a-z][a-z_]*(?:\.[a-z][a-z_]*)+\b")
+_CONTENT_ID = re.compile(r"\b(?:txn|doc)[0-9a-f]{6,}\b")
+_ENGINE_WORDS = (
+    "operand",
+    "load-bearing",
+    "load bearing",
+    "load_bearing",
+    " subject",
+    "gather_tag",
+)
+
+
+def _engine_vocab(reason: str) -> str | None:
+    """The first piece of engine vocabulary in a user-facing reason, or None if it is clean."""
+    if (m := _DOTTED_ID.search(reason)) is not None:
+        return f"dotted id {m.group(0)!r}"
+    if (m := _CONTENT_ID.search(reason)) is not None:
+        return f"content-id {m.group(0)!r}"
+    low = reason.lower()
+    for word in _ENGINE_WORDS:
+        if word in low:
+            return f"engine word {word!r}"
+    return None
+
+
+def _tag(value: str, *, confidence: float | None = 0.9) -> Tag:
+    return Tag(
+        value=value,
+        confidence=confidence,
+        reasoning="fixture",
+        source_facts=("raw",),
+        produced_by=TagProducedBy.AI,
+        tag_role=TagRole.STRUCTURAL_FACT,
+        stage=TagStage.A,
+    )
+
+
+def _assert_clean(reason: str) -> None:
+    found = _engine_vocab(reason)
+    assert found is None, (
+        f"engine vocabulary leaked into a processor-facing reason: {found}\n  {reason!r}"
+    )
+
+
+# --------------------------------------------------------------------------- #
+# The gate — absent / unknown / low-confidence
+# --------------------------------------------------------------------------- #
+def test_gate_absent_reason_is_human() -> None:
+    r = evaluate_gate({"id.dob": None}, confidence_floor=0.5).reason or ""
+    _assert_clean(r)
+    assert fact_label("id.dob") in r  # names the missing fact in mortgage terms
+
+
+def test_gate_unknown_reason_is_human() -> None:
+    r = evaluate_gate({"id.ssn_hash": _tag("unknown")}, confidence_floor=0.5).reason or ""
+    _assert_clean(r)
+    assert fact_label("id.ssn_hash") in r
+
+
+def test_gate_low_confidence_reason_is_human() -> None:
+    r = (
+        evaluate_gate({"txn.amount": _tag("5000", confidence=0.4)}, confidence_floor=0.5).reason
+        or ""
+    )
+    _assert_clean(r)
+    assert "review" in r.lower()
+
+
+# --------------------------------------------------------------------------- #
+# Applicability — a document that could not be classified + a genuinely-absent expected document
+# --------------------------------------------------------------------------- #
+def test_untyped_document_reason_is_human_and_names_the_document() -> None:
+    applic = TagCondition(tag="document.document_type", op="eq", value="title_commitment")
+    subject_tags: Mapping[str, Tag] = {"document.document_type": _tag("unknown")}
+    terminal = resolve_applicability(applic, subject_tags)
+    assert terminal is not None
+    _assert_clean(terminal[1])
+    assert "title commitment" in terminal[1] and "classif" in terminal[1].lower()
+
+
+def test_absent_expected_document_reason_is_human_and_names_the_action() -> None:
+    applic = TagCondition(tag="document.document_type", op="eq", value="title_commitment")
+    # Every (present) subject is confidently out of scope → the good "no title commitment" sentence.
+    reason = absent_document_couldnt_check(
+        applic,
+        expected=True,
+        subjects=[("d1", {"document.document_type": _tag("paystub")})],
+        documents_absent=False,
+    )
+    assert reason is not None
+    _assert_clean(reason)
+    assert "title commitment" in reason and "request" in reason.lower()

@@ -72,15 +72,15 @@ def test_purchase_with_no_title_commitment_is_couldnt_check_the_false_green_fix(
     r = results[0]
     assert r.verdict is not Verdict.NOT_APPLICABLE  # the fix — NOT swept into the doesn't-block tab
     assert (
-        "title_commitment" in r.reasoning and "missing" in r.reasoning
-    )  # names the missing document
+        "title commitment" in r.reasoning and "request" in r.reasoning
+    )  # LP-376-C: names the missing document + the action, in mortgage terms (not the slug)
     assert r.subject_id == "missing:title_commitment"  # stable identity for reconciliation
 
 
 def test_no_documents_at_all_is_also_couldnt_check_for_id7() -> None:
     (r,) = evaluate_deterministic_rule(load_rule_spec("ID-7"), _snapshot([]))
     assert r.verdict is Verdict.COULDNT_CHECK
-    assert "title_commitment" in r.reasoning
+    assert "title commitment" in r.reasoning
 
 
 def test_documents_section_absent_does_not_mint_a_missing_document_finding() -> None:
@@ -133,9 +133,9 @@ def test_present_but_unreadable_is_a_different_couldnt_check_than_absent() -> No
         ),
     )
     assert absent[0].verdict is present_unreadable[0].verdict is Verdict.COULDNT_CHECK
-    # Both block, but for DIFFERENT reasons — the fix keeps them distinct.
-    assert "missing" in absent[0].reasoning  # the document is absent
-    assert "unknown" in present_unreadable[0].reasoning  # the document is present but unreadable
+    # Both block, but for DIFFERENT reasons — the fix keeps them distinct (LP-376-C, in mortgage terms).
+    assert "no title commitment is in the file" in absent[0].reasoning  # the document is absent
+    assert "could not be read" in present_unreadable[0].reasoning  # present but unreadable
     assert absent[0].reasoning != present_unreadable[0].reasoning
 
 

@@ -10582,3 +10582,42 @@ of record. Frontend renders whichever the API sends (no UI change).
 
 Cross-refs: LP-375 (the two-type quarantine), LP-376/376-B (the tabs + the bug), `rule_kinds.csv` (the gate of
 record for a rule's category + kind).
+
+## ADR-294: couldnt_check reasons speak mortgage — a declared tag-label registry; the action's home; the untyped-doc collapse (LP-376-C)
+
+**Context.** The first human view of the tabs (LP-376) surfaced right verdicts in unreadable words: every
+`couldnt_check` reason was hardcoded in an evaluator interpolating an ENGINE id — a tag (`id.dob`), an
+operand, a content-id hash — plus "source"/"subject"/"load-bearing tag". A loan processor reads these and
+cannot act on them. The engine was honest; its vocabulary was not.
+
+**Where human text lives (D1).** The evaluator (generic, one place per failure SHAPE) knows a fact is
+missing; the DOMAIN (that the fix is "request the 1003") it does not know. Decision: a **declared
+`tag_id → mortgage-noun-phrase` registry** (`rule_engine/reasons.py`, keyed by tag — the sanctioned
+declared-key-resolved-by-registry pattern, never a per-rule-id branch) lets the evaluator name WHAT is
+missing generically ("the borrower's date of birth could not be found in the file"); an unmapped tag
+degrades to a humanized stem, so a raw dotted id or hash can never reach a processor. The ACTION stays
+SHAPE-derived and honest — "classify it" (untyped document), "a consistency check needs at least two"
+(<2 sources), "review it" (low confidence) — and is NOT invented where unknown (the <2-sources reason does
+not guess which document to fetch). **An evaluator cannot name an action it has no domain knowledge of;**
+per-rule domain actions belong in a spec's `how_to_fix` (precedent exists), authored as a scoped follow-up
+for ~130 rules, not here. The tag id remains only in the provenance card (the engineer's view, LP-376).
+
+**The engine was already right, and already knew the good sentence.** `absent_document_couldnt_check` already
+composes "no title commitment is in the file — the rule requires one," and is SUPPRESSED, correctly, when ≥1
+document is unclassified (LP-330: an untyped doc might BE the title commitment; claiming it is absent would be
+a false-negative). The engine was being honest in a sentence nobody could act on, four times. This ticket
+humanized that sentence; it did not touch the suppression.
+
+**The untyped-document collapse: UI, not engine (D3).** Four unclassified documents each spawn a distinct
+`(rule_id, subject_key)` couldnt_check for ID-7 and ID-9 (8 rows), and LP-322's reconciler keys on exactly
+`(rule_id, subject_key)`. Collapsing in the engine would change those keys and break carry-forward/retire.
+So the collapse is DISPLAY-ONLY: the UI groups findings sharing `(rule_id, message)` into one summary row
+(expandable to the members). The model, the reconciler, and every verdict are untouched — this ticket changes
+WORDS, not VERDICTS (audited; the failing tests were all string assertions).
+
+**Cost / what's still open.** The subject a summary expands to is still a content-id, not a document a
+processor recognises (LP-375's subject-label finding — mitigated, not solved). The 4 unclassified documents
+are ONE root with THREE symptoms (ID-7/ID-9 noise, the suppressed good sentence, ID-4's poisoned filter,
+LP-372) — the classifier gap is its own ticket; fixing it collapses all three at the source. Cross-refs:
+LP-330 (absent-document contract), LP-375 (subject label + the two-type quarantine), LP-376/376-B (the surface
++ message-states-the-verdict), LP-372 (ID-4's gate), LP-322 (the reconciler key).

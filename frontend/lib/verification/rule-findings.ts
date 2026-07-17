@@ -115,6 +115,28 @@ export function bucketRuleFindings(findings: RuleFinding[]): GovernedBuckets {
   return buckets;
 }
 
+/**
+ * Group findings that share the SAME rule + reason (LP-376-C) — so N documents failing one check the same
+ * way (e.g. 4 unclassified documents each yielding ID-7's "a document could not be classified…") render as
+ * ONE summary row a processor can act on, not N identical lines. Each group keeps its members (the model is
+ * untouched — this is a display collapse only), so a reader can expand to WHICH ones. Order is preserved.
+ */
+export function groupBySameReason(findings: RuleFinding[]): RuleFinding[][] {
+  const groups = new Map<string, RuleFinding[]>();
+  const order: string[] = [];
+  for (const finding of findings) {
+    const key = `${finding.rule_id} ${finding.message}`;
+    const existing = groups.get(key);
+    if (existing) {
+      existing.push(finding);
+    } else {
+      groups.set(key, [finding]);
+      order.push(key);
+    }
+  }
+  return order.map((key) => groups.get(key) as RuleFinding[]);
+}
+
 /** Split a Tab-1 (attention) bucket into its three outcome groups, in priority order (open first). */
 export function attentionGroups(
   findings: RuleFinding[],

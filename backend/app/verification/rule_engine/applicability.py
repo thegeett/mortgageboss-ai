@@ -17,6 +17,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 
+from app.verification.rule_engine.reasons import document_label
 from app.verification.rule_engine.result import Verdict
 from app.verification.rules.specs import TagCondition
 from app.verification.snapshot.tag import Tag
@@ -31,16 +32,20 @@ def resolve_applicability(
 
     ABSENT / ``"unknown"`` predicate tag → couldnt_check (cannot tell if it applies); a predicate that
     is DEFINITELY false → not_applicable (out of scope). The predicate holding → the rule applies."""
+    # LP-376-C: a per-document rule scopes on the document's TYPE; when that could not be determined we
+    # cannot tell if THIS document is the one the rule needs — say so in mortgage terms + the action.
     tag = subject_tags.get(applic.tag)
     if tag is None:
         return (
             Verdict.COULDNT_CHECK,
-            f"applicability tag '{applic.tag}' was not produced — cannot tell if the rule applies",
+            f"a document in the file has not been classified — it may be the "
+            f"{document_label(applic.value)} this check needs; classify it so the check can run",
         )
     if tag.value == _UNKNOWN:
         return (
             Verdict.COULDNT_CHECK,
-            f"applicability tag '{applic.tag}' is unknown — cannot confirm the rule applies",
+            f"a document in the file could not be classified — it may be the "
+            f"{document_label(applic.value)} this check needs; classify it so the check can run",
         )
     matches = (tag.value == applic.value) if applic.op == "eq" else (tag.value != applic.value)
     if not matches:
@@ -87,9 +92,11 @@ def absent_document_couldnt_check(
         if terminal[0] is Verdict.COULDNT_CHECK:  # an unknown-type subject → cannot claim absence
             return None
     # Every subject (or an empty-but-PRESENT documents section) is confidently out of scope → absent.
+    # LP-376-C: name the document + the action (this good sentence is only reached when NO document is
+    # unclassified — otherwise it is correctly suppressed above, since an untyped doc might BE this one).
     return (
-        f"no '{applic.value}' document in the file — the rule requires one to evaluate "
-        f"(the document is expected but missing; lost visibility, not out of scope)"
+        f"no {document_label(applic.value)} is in the file — this check needs one; request it "
+        "from the borrower or originator"
     )
 
 

@@ -21,6 +21,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import StrEnum
 
+from app.verification.rule_engine.reasons import fact_label
 from app.verification.snapshot.tag import Tag
 
 _UNKNOWN = "unknown"
@@ -62,19 +63,27 @@ def evaluate_gate(
     ``verdict_confidence`` is the min of the tags' non-None confidences (None when they are all
     parsed passthroughs — no AI-derived uncertainty).
     """
+    # LP-376-C: name the MISSING FACT in mortgage terms (never the tag id) — the message a processor reads.
     for tag_id, tag in load_bearing.items():
         if tag is None:
             return GateResult(
-                GateStatus.COULDNT_CHECK, f"required tag '{tag_id}' is absent (not produced)", None
+                GateStatus.COULDNT_CHECK,
+                f"the {fact_label(tag_id)} could not be found in the file — this check needs it",
+                None,
             )
     for tag_id, tag in load_bearing.items():
         if tag is not None and tag.value == _UNKNOWN:
             return GateResult(
-                GateStatus.COULDNT_CHECK, f"load-bearing tag '{tag_id}' is unknown", None
+                GateStatus.COULDNT_CHECK,
+                f"the {fact_label(tag_id)} could not be read from the documents "
+                "(it is present but unclear)",
+                None,
             )
     if contradiction:
         return GateResult(
-            GateStatus.NEEDS_REVIEW, "a contradiction is flagged for this subject", None
+            GateStatus.NEEDS_REVIEW,
+            "the documents contradict each other on this — a human should review",
+            None,
         )
 
     confidences = [
@@ -86,8 +95,8 @@ def evaluate_gate(
     if verdict_confidence is not None and verdict_confidence < confidence_floor:
         return GateResult(
             GateStatus.NEEDS_REVIEW,
-            f"a load-bearing tag confidence ({verdict_confidence}) is below the floor "
-            f"({confidence_floor})",
+            f"the automated read of this was low-confidence ({verdict_confidence}) — "
+            "a human should review it",
             verdict_confidence,
         )
     return GateResult(GateStatus.PASS, None, verdict_confidence)

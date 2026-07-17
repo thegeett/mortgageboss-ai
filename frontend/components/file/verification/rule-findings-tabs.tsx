@@ -10,6 +10,7 @@
  * structurally empty (those subjects aren't persisted) and says so honestly rather than being dropped.
  */
 
+import { humanize } from "@/lib/format";
 import type { EvaluationOutcome, RuleFinding } from "@/lib/types/verification";
 import { cn } from "@/lib/utils";
 import {
@@ -17,11 +18,19 @@ import {
   type TabId,
   attentionGroups,
   bucketRuleFindings,
+  groupBySameReason,
   outcomeMeta,
 } from "@/lib/verification/rule-findings";
-import { Archive, CheckCircle2, CircleSlash, History, TriangleAlert } from "lucide-react";
+import {
+  Archive,
+  CheckCircle2,
+  ChevronDown,
+  CircleSlash,
+  History,
+  TriangleAlert,
+} from "lucide-react";
 import type { ReactNode } from "react";
-import { useState } from "react";
+import { useId, useState } from "react";
 import { RuleFindingRow } from "./rule-finding-row";
 
 interface TabDef {
@@ -132,23 +141,76 @@ function OutcomeGroup({
         <span className="text-xs tabular-nums text-gray-400">{findings.length}</span>
         <span className="text-xs text-gray-400">— {meta.blurb}</span>
       </div>
-      <div className="space-y-2">
-        {findings.map((finding) => (
-          <RuleFindingRow key={finding.id} finding={finding} />
-        ))}
-      </div>
+      <GroupedFindingList findings={findings} />
     </section>
   );
 }
 
-function FindingList({ findings }: { findings: RuleFinding[] }) {
+/** LP-376-C: render findings that share a rule + reason as ONE summary row (expandable to WHICH ones), so
+ * N documents failing a check the same way don't read as N identical lines. A lone finding renders plainly.
+ * A pure display collapse — the underlying findings (and their reconcile keys) are untouched. */
+function GroupedFindingList({ findings }: { findings: RuleFinding[] }) {
   return (
     <div className="space-y-2">
-      {findings.map((finding) => (
-        <RuleFindingRow key={finding.id} finding={finding} />
-      ))}
+      {groupBySameReason(findings).map((group) => {
+        const first = group[0];
+        if (first === undefined) return null; // never — groups are non-empty by construction
+        return group.length === 1 ? (
+          <RuleFindingRow key={first.id} finding={first} />
+        ) : (
+          <CollapsedFindings key={first.id} findings={group} />
+        );
+      })}
     </div>
   );
+}
+
+function CollapsedFindings({ findings }: { findings: RuleFinding[] }) {
+  const [open, setOpen] = useState(false);
+  const panelId = useId();
+  const first = findings[0];
+  if (first === undefined) return null; // never — the caller only builds this for a non-empty group
+  return (
+    <div className="rounded-lg border border-gray-200/70">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        aria-controls={panelId}
+        className="flex w-full items-start gap-2.5 rounded-lg px-3 py-2.5 text-left hover:bg-gray-50/70"
+      >
+        <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-warning" aria-hidden />
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+            <span className="font-mono text-xs font-semibold text-gray-800">{first.rule_id}</span>
+            <span className="text-[11px] text-gray-400">{humanize(first.category)}</span>
+            <span className="rounded bg-gray-100 px-1.5 py-px text-[11px] font-medium text-gray-600">
+              {findings.length} findings
+            </span>
+          </div>
+          <p className="mt-0.5 text-sm text-gray-700">{first.message}</p>
+        </div>
+        <ChevronDown
+          className={cn(
+            "mt-0.5 h-4 w-4 shrink-0 text-gray-300 transition-transform",
+            open && "rotate-180",
+          )}
+        />
+      </button>
+      {open && (
+        <div id={panelId} className="space-y-2 border-t border-gray-100 bg-gray-50/40 px-3 py-3">
+          {findings.map((finding) => (
+            <RuleFindingRow key={finding.id} finding={finding} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function FindingList({ findings }: { findings: RuleFinding[] }) {
+  // Also collapsed by reason (LP-376-C) — e.g. AS-1's 15 identical "deposit sourced" satisfied rows.
+  return <GroupedFindingList findings={findings} />;
 }
 
 export function RuleFindingsTabs({

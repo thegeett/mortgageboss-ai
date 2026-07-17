@@ -109,6 +109,29 @@ describe("the §8 tabs — the honesty contract", () => {
     fireEvent.click(tab(/satisfied/i));
     expect(screen.getByText("the address agrees")).toBeDefined();
   });
+
+  it("collapses N findings sharing a rule + reason into one summary, expandable to WHICH ones (LP-376-C)", () => {
+    // 4 unclassified documents each yield ID-7's identical couldnt_check → ONE row, not four.
+    const reason =
+      "a document in the file could not be classified — it may be the title commitment";
+    renderTabs(
+      ["s1", "s2", "s3", "s4"].map((sid) =>
+        ruleFinding({
+          id: sid,
+          rule_id: "ID-7",
+          evaluation_outcome: "couldnt_check",
+          message: reason,
+          subject_key: sid,
+        }),
+      ),
+    );
+    // The reason renders ONCE (a summary), with the count — not four identical lines.
+    expect(screen.getAllByText(reason)).toHaveLength(1);
+    expect(screen.getByText("4 findings")).toBeDefined();
+    // Expanding reveals the individual findings (the model is intact — which four is recoverable).
+    fireEvent.click(screen.getByText("4 findings"));
+    expect(screen.getAllByText(reason).length).toBeGreaterThan(1);
+  });
 });
 
 describe("the quarantine — the two systems never merge", () => {
