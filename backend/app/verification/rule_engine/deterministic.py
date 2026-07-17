@@ -25,7 +25,7 @@ from app.verification.rule_engine.applicability import (
     missing_document_subject_id,
     resolve_applicability,
 )
-from app.verification.rule_engine.enumerators import enumerate_subjects
+from app.verification.rule_engine.enumerators import LOAN_SUBJECT, enumerate_subjects
 from app.verification.rule_engine.gate import GateResult, GateStatus, evaluate_gate
 from app.verification.rule_engine.result import (
     VERDICT_BY_NAME,
@@ -132,10 +132,18 @@ def _resolve_operand(
 
     A ``tag`` operand is coerced per its declared ``type`` (LP-328); an ABSENT tag → None (absent ≠
     empty — couldnt_check with that reason, never fired), and an unparseable value → None (never a
-    fabricated value). ``reference`` / ``calc`` / ``product`` are decimal by construction."""
+    fabricated value). A ``loan_tag`` (LP-366-A) reads the LOAN subject's tag map, so a per-subject rule
+    can read a loan-level fact without a calculator; same fail-closed coercion. ``reference`` / ``calc`` /
+    ``product`` are decimal by construction."""
     if operand.tag is not None:
         tag = subject_tags.get(operand.tag)
         return _COERCERS[operand.type](tag.value) if tag is not None else None
+    if operand.loan_tag is not None:
+        # The LOAN-subject tag map (absent tags layer → {}). Absent/unknown loan tag → None →
+        # couldnt_check (fail-closed), never a fabricated 0 — the property AS-1 needs for income.
+        loan_tags = {} if snapshot.tags.absent else snapshot.tags.by_subject.get(LOAN_SUBJECT, {})
+        loan_tag = loan_tags.get(operand.loan_tag)
+        return _COERCERS[operand.type](loan_tag.value) if loan_tag is not None else None
     if operand.reference is not None:
         return _reference_operand(spec, operand.reference)
     if operand.calc is not None:

@@ -215,6 +215,59 @@ def _income_ytd_annualized_shortfall(
     )
 
 
+def _income_borrower_indices(snapshot: Snapshot) -> list[int]:
+    """The borrower indices that have a MISMO income section (borrower.<n>.income.*). Enumerated from the
+    facts, never assumed contiguous — a gap must not silently truncate the loan-level sum."""
+    if snapshot.mismo.absent:
+        return []
+    idx: set[int] = set()
+    for name in snapshot.mismo.facts:
+        parts = name.split(".")
+        if (
+            len(parts) >= 3
+            and parts[0] == "borrower"
+            and parts[2] == "income"
+            and parts[1].isdigit()
+        ):
+            idx.add(int(parts[1]))
+    return sorted(idx)
+
+
+def _qualifying_income_monthly(
+    snapshot: Snapshot, _subject_id: str, _subject_raw: object
+) -> tuple[JsonValue, str]:
+    """dti.qualifying_income_monthly — the loan's total monthly qualifying income = the sum of the
+    borrowers' MISMO STATED income lines (``borrower.<n>.income.<m>.monthly_amount``), the SAME income the
+    DTI qualifies on (its income lines are ``source='stated'``). A per-subject rule reads THIS via a
+    ``loan_tag`` operand (LP-366-A) instead of the DTI calc — a deposit-size question needs income, NOT
+    the housing expenses the DTI also weighs (taxes/insurance/MI/HOA), so it must never inherit the DTI's
+    insurance gate.
+
+    Reads STATED 1003 income (``source='parsed'``), NOT the AI ``income.qualifying_monthly`` tag — which
+    need not materialize (it degraded on the real run) and whose "continuity/averaging" convention is
+    underspecified (LP-343 F2). Reading the stated total keeps F2 OFF this path. ABSTAINS to ``unknown``
+    (NEVER 0) when no income is stated or a line is unparseable — fail-closed, so a rule reading it
+    couldnt_checks on a missing income rather than sizing a threshold from 0."""
+    if snapshot.mismo.absent:
+        return _UNKNOWN, "no stated financials (MISMO absent) — cannot establish qualifying income"
+    total = Decimal(0)
+    any_present = any_unknown = False
+    for index in _income_borrower_indices(snapshot):
+        subtotal, present, unknown = _borrower_stated_monthly(snapshot, index)
+        total += subtotal
+        any_present = any_present or present
+        any_unknown = any_unknown or unknown
+    if not any_present or any_unknown:
+        return (
+            _UNKNOWN,
+            "no stated monthly income (or an unparseable income line) — cannot establish qualifying income",
+        )
+    return (
+        str(total),
+        f"total stated qualifying income {total}/mo (sum of the borrowers' MISMO stated income lines)",
+    )
+
+
 def _income_max_employment_gap(
     snapshot: Snapshot, _subject_id: str, _subject_raw: object
 ) -> tuple[JsonValue, str]:
@@ -437,6 +490,9 @@ _RECIPES: dict[str, Recipe] = {
     # LP-323-IN-B doc). Registry entries only; produce_derived_tags is untouched (the wave criterion).
     "income_documented_shortfall": _income_documented_shortfall,
     "income_ytd_annualized_shortfall": _income_ytd_annualized_shortfall,
+    # LP-366-A — the loan's total stated qualifying income, read by AS-1 via a `loan_tag` operand
+    # (instead of the gated DTI calc). Fail-closed to unknown, never 0.
+    "qualifying_income_monthly": _qualifying_income_monthly,
     "income_max_employment_gap": _income_max_employment_gap,
     "income_days_since_recent_pay": _income_days_since_recent_pay,
     # LP-323-AS-B — the assets family (registry entries only).

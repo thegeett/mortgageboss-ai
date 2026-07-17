@@ -10119,3 +10119,60 @@ the 95 degradations, the stale xsrc findings). No engine/rule/tag/spec change; `
 the AI sweep behaviour-identical; the frozen fixture trace unchanged. Cross-refs: LP-316/321 (the
 architecture), LP-322 (the reconciler), LP-209 (snapshot_records), LP-364-B (the diagnosis that found it
 unplugged), LP-78 (the sweep it coexists with).
+
+## ADR-285: The `loan_tag` operand — a rule reads a LOAN-level tag from any subject, without a calculator (LP-366-A)
+
+**Context.** LP-366 set out to fix AS-1's false DTI dependency as a **pure DATA change**: swap AS-1's income
+operand from `{calc: [dti, gross_monthly_income]}` (which fail-closes on `housing.insurance_monthly`, an
+input AS-1 never uses — LP-367) to a direct income read. Phase 0 proved the pure-data fix is **impossible**:
+`_resolve_operand` reads a `tag` operand from `subject_tags`, and the `per_deposit` enumerator hands each
+transaction ONLY its own tag map (`by_subject[txn.content_id]`) — never the loan's. A per-deposit rule
+therefore **cannot** read a loan-level fact through a `tag` operand; the ONLY operand that reaches loan-level
+is `calc`, which is exactly what drags in the calculator's gate. The blocker is a **missing operand kind**,
+not a data typo — so it splits out as its own ticket (LP-366-A, engine), leaving LP-366 as the trivial
+data swap that consumes it.
+
+**Decision — add a declared `loan_tag` operand: a LOAN-subject tag read from ANY rule, whatever its subject.**
+- **Mechanism.** `_resolve_operand` gains one branch: a `loan_tag` operand reads
+  `snapshot.tags.by_subject[LOAN_SUBJECT]` directly (the same access the loan enumerator uses), bypassing
+  `subject_tags`. It is coerced through the SAME `_COERCERS[type]` registry as `tag` (so `date`/`decimal`
+  work identically), and is a first-class member of the Operand's exactly-one-source set.
+- **Fail-closed, never 0.** Absent loan subject / absent tag / unparseable value → `None` → `couldnt_check`.
+  Never a fabricated `0` (a `0` income would size AS-1's threshold to `0` and fire on every deposit — the
+  precise false-positive the fact-tag discipline exists to prevent).
+- **Why it BEATS a `calc` — independent of AS-1.** A `calc` operand ignores the calculator's confidence
+  (LP-318 Caveat A: `_calc_operand` never reads `entry.confidence`); a `loan_tag` flows the tag's confidence
+  through the ordinary tag gate, like every other governed fact. Reading a loan-level fact as a *governed
+  tag* rather than an *opaque calculator number* is strictly more honest — a general property, not an AS-1
+  special case.
+- **Generic — no rule-id branch.** A new rule opts in with a SPEC line (`{loan_tag: <tag>}`); zero engine
+  code per rule. This is the eleventh application of the declared-key-registry pattern.
+- **Equivalence.** Every live rule is byte-identical: AS-1 still reads `{calc: [dti, ...]}` (its swap to
+  `loan_tag` is LP-366, a separate data change), and the `calc` operand is UNTOUCHED — AS-4 keeps it, because
+  its reserves→PITI→insurance dependency is legitimate (a reserves rule genuinely needs the housing expense).
+  `ACTIVE_RULE_IDS` unchanged.
+
+**The income tag it reads — `dti.qualifying_income_monthly` (D1, argued not assumed).** The tag already
+exists in `fact_tags.csv` (mode `derived`, subject `loan`, consumers `DT-1, AS-1, AS-3`) but was **never
+declared in `tag_production.yaml` and had no recipe**, so it never materialized. LP-366-A declares it and adds
+the recipe: it sums the borrowers' **MISMO STATED income lines** (`borrower.<n>.income.<m>.monthly_amount`),
+the SAME income the DTI qualifies on (its income lines are `source='stated'`). This is the right tag — not a
+newly-minted second income figure (which LP-323-IN-A warns against) — because AS-1's threshold is
+definitionally "50% of total monthly qualifying income," and the stated 1003 total IS what the DTI qualifies.
+On the real file it materializes to **$28,168.80**, matching LP-365's reported `gross_monthly_income` exactly.
+
+**F2 (recorded prominently).** AS-1's income is the **MISMO stated 1003 total** (`source='parsed'`), NOT the
+AI `income.qualifying_monthly` tag — which did **not** materialize on the real run (one of the 95
+degradations) and whose continuity/averaging convention is underspecified (LP-343 F2). Reading the stated
+total keeps F2 entirely OFF AS-1's path: AS-1 never depends on the AI qualifying-income judgment.
+
+**Consequences / reported, not fixed.**
+- The **95 `tag_production` degradations** (LP-365) remain their own ticket — NOT investigated here; whether
+  `income.qualifying_monthly` *should* materialize is orthogonal to AS-1 reading the stated total.
+- **Pre-existing flaky test discovered (its own ticket):** `test_no_raw_pii_in_stored_json` trips the
+  `_LONG_DIGITS` at-rest guard (`\b\d{9,}\b`) ~0.6%/persisted-PiiField because a salted `match_hash` hex
+  occasionally contains a quote-bounded 12-digit run. Independent of LP-366-A (that test hand-builds its
+  snapshot; no recipe runs). Flagged, not fixed.
+- LP-366 now becomes the one-line data swap; LP-367 (the insurance orphan) is still needed for the DTI/AS-4,
+  but no longer blocks AS-1. Cross-refs: LP-366 (the data swap), LP-367 (insurance orphan), LP-318 (the calc
+  gate + Caveat A), LP-328 (typed operands / the coercer registry), LP-343 (F2), LP-365 (the real run).

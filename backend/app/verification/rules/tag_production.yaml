@@ -67,6 +67,9 @@ tags:
   income.ytd_annualized_shortfall_pct: {mode: derived, subject: loan, data: income_ytd_annualized_shortfall}
   income.max_employment_gap_days: {mode: derived, subject: loan, data: income_max_employment_gap}
   income.days_since_most_recent_pay: {mode: derived, subject: loan, data: income_days_since_recent_pay}
+  # LP-366-A — the loan's total stated qualifying income (sum of the borrowers' MISMO income lines).
+  # AS-1 reads this via a `loan_tag` operand instead of the gated DTI calc. Fail-closed to unknown.
+  dti.qualifying_income_monthly: {mode: derived, subject: loan, data: qualifying_income_monthly}
 
   # --- stmt.* / asset.* — the assets family (LP-323-AS-B). Statement/asset facts key under the DOCUMENT
   #     subject (a statement IS a document — LP-336/AS-A: no `account` SubjectType; per-account grouping

@@ -172,20 +172,26 @@ class Operand(BaseModel):
     """A declared OPERAND SOURCE — where a comparison value comes from (tag / reference / calc /
     a product of operands). Exactly one source key is set (validated).
 
-    * ``tag`` — a subject tag's value, coerced per ``type`` (Decimal / date).
+    * ``tag`` — a SUBJECT tag's value, coerced per ``type`` (Decimal / date).
+    * ``loan_tag`` (LP-366-A) — a LOAN-subject tag's value, coerced per ``type``. The ONLY operand that
+      lets a per-subject rule (AS-1 is per-deposit) read a loan-level fact WITHOUT routing through a
+      calculator. Fail-closed: absent/unknown → None → couldnt_check (never 0, never a fallback). Unlike
+      ``calc``, the value carries the tag's CONFIDENCE — a governed fact, not an opaque number (LP-318's
+      Caveat A: ``calc`` ignores a calculator's confidence; a loan tag does not).
     * ``reference`` — a ``reference_values.values`` key; a trailing ``%`` is parsed to a fraction.
     * ``calc`` — ``[calculator_name, value_key]`` from ``snapshot.calculations`` (a GATED calc → None
       → couldnt_check, LP-318).
     * ``product`` — the product of its operands (AS-1's ``multiplier x qualifying_income``).
 
-    ``type`` (LP-328) declares how a ``tag`` operand's value is coerced + compared. It defaults to
-    ``decimal`` (so every existing spec is unchanged) and a non-decimal type is only valid on a
-    ``tag`` operand — ``reference`` / ``calc`` / ``product`` are decimal by construction.
+    ``type`` (LP-328) declares how a ``tag`` / ``loan_tag`` operand's value is coerced + compared. It
+    defaults to ``decimal`` (so every existing spec is unchanged) and a non-decimal type is only valid on
+    a ``tag`` / ``loan_tag`` operand — ``reference`` / ``calc`` / ``product`` are decimal by construction.
     """
 
     model_config = {"frozen": True, "extra": "forbid"}
 
     tag: str | None = None
+    loan_tag: str | None = None
     reference: str | None = None
     calc: tuple[str, str] | None = None
     product: tuple[Operand, ...] | None = None
@@ -195,16 +201,21 @@ class Operand(BaseModel):
 
     @model_validator(mode="after")
     def _exactly_one_source_and_valid_type(self) -> Operand:
-        set_count = sum(x is not None for x in (self.tag, self.reference, self.calc, self.product))
+        set_count = sum(
+            x is not None
+            for x in (self.tag, self.loan_tag, self.reference, self.calc, self.product)
+        )
         if set_count != 1:
-            raise ValueError("an Operand sets EXACTLY one of tag / reference / calc / product")
+            raise ValueError(
+                "an Operand sets EXACTLY one of tag / loan_tag / reference / calc / product"
+            )
         if self.type not in KNOWN_OPERAND_TYPES:
             raise ValueError(
                 f"operand type {self.type!r} is not one of {sorted(KNOWN_OPERAND_TYPES)}"
             )
-        if self.type != "decimal" and self.tag is None:
+        if self.type != "decimal" and self.tag is None and self.loan_tag is None:
             raise ValueError(
-                f"a non-decimal operand type ({self.type!r}) is only valid on a `tag` operand "
+                f"a non-decimal operand type ({self.type!r}) is only valid on a `tag`/`loan_tag` operand "
                 "(reference / calc / product are decimal by construction)"
             )
         # A product MULTIPLIES numbers — every factor must be decimal. A non-decimal factor (e.g. a
