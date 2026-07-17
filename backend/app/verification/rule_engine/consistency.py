@@ -393,13 +393,16 @@ async def evaluate_consistency_rule(
         gathered = result.included
 
         # LP-372: a note SURFACING candidates dropped because their filter TYPE was AI-``unknown``
-        # (absent-for-comparison — excluded, not vetoed). Appended to the couldnt_check / satisfied /
-        # fired reason so a residence hiding behind ``unknown`` is not silently dropped. Empty for the
-        # common case and for every filterless rule (ID-1/2/3, IN-5) → their reasons are unchanged.
+        # (absent-for-comparison — excluded, not vetoed). Appended to EVERY verdict this subject can
+        # reach so a value hiding behind ``unknown`` is never silently dropped, whatever the outcome.
+        # Empty for the common case and for every filterless rule (ID-1/2/3, IN-5) → their reasons are
+        # unchanged. Wording stays rule-generic (over any ``gather_filter``, not just ID-4's address).
+        n_undetermined = result.type_undetermined
         excluded_note = (
-            f" ({result.type_undetermined} other address-bearing source(s) could not be typed as "
-            f"{con.gather_filter.value!r} and were excluded from the compare)"
-            if result.type_undetermined and con.gather_filter is not None
+            f" ({n_undetermined} other {'source' if n_undetermined == 1 else 'sources'} could not be "
+            f"typed as {con.gather_filter.value!r} and {'was' if n_undetermined == 1 else 'were'} "
+            f"excluded from the compare)"
+            if n_undetermined and con.gather_filter is not None
             else ""
         )
 
@@ -423,7 +426,7 @@ async def evaluate_consistency_rule(
                         subject_id,
                         verdict,
                         f"the '{con.gather_filter.tag}' classification that decides which sources "  # type: ignore[union-attr]
-                        f"to compare is not trustworthy: {filter_gate.reason}",
+                        f"to compare is not trustworthy: {filter_gate.reason}" + excluded_note,
                         gathered,
                         verdict_confidence=filter_gate.verdict_confidence,
                     )
@@ -458,7 +461,7 @@ async def evaluate_consistency_rule(
                     spec,
                     subject_id,
                     Verdict.COULDNT_CHECK,
-                    gate.reason or "",
+                    (gate.reason or "") + excluded_note,
                     gathered,
                     verdict_confidence=gate.verdict_confidence,
                 )
@@ -470,7 +473,7 @@ async def evaluate_consistency_rule(
                     spec,
                     subject_id,
                     Verdict.NEEDS_REVIEW,
-                    gate.reason or "",
+                    (gate.reason or "") + excluded_note,
                     gathered,
                     verdict_confidence=gate.verdict_confidence,
                 )
@@ -541,7 +544,8 @@ async def evaluate_consistency_rule(
                     spec,
                     subject_id,
                     Verdict.COULDNT_CHECK,
-                    "the consistency judgment could not be produced (AI call failed) — cannot judge",
+                    "the consistency judgment could not be produced (AI call failed) — cannot judge"
+                    + excluded_note,
                     gathered,
                     verdict_confidence=gate.verdict_confidence,
                 )
@@ -552,7 +556,8 @@ async def evaluate_consistency_rule(
                     spec,
                     subject_id,
                     Verdict.COULDNT_CHECK,
-                    "the consistency judgment response was truncated — cannot trust a partial judgment",
+                    "the consistency judgment response was truncated — cannot trust a partial judgment"
+                    + excluded_note,
                     gathered,
                     verdict_confidence=gate.verdict_confidence,
                 )
@@ -567,6 +572,7 @@ async def evaluate_consistency_rule(
                     gathered,
                     verdict_confidence=conf,
                     ratification_pending=True,
+                    reason_suffix=excluded_note,
                 )
             )
 

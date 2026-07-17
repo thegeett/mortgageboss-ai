@@ -46,11 +46,12 @@ def _snapshot(mismo: Mapping[str, Field] | None) -> Snapshot:
 # occupancy.stated — the MISMO → enum mapping (derived, not parsed)
 # --------------------------------------------------------------------------- #
 def test_occupancy_stated_maps_the_mismo_value_to_the_enum() -> None:
+    # The mapped keys mirror the OccupancyType StrEnum (primary_residence / second_home / investment),
+    # which is the only value space property.occupancy can carry.
     for mismo_value, expected in (
         ("primary_residence", "primary"),
         ("second_home", "second"),
         ("investment", "investment"),
-        ("investment_property", "investment"),
         ("PRIMARY_RESIDENCE", "primary"),  # casefolded
     ):
         value, _ = _occupancy_stated(

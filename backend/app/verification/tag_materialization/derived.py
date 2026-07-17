@@ -385,7 +385,6 @@ _OCCUPANCY_ENUM = {
     "primary_residence": "primary",
     "second_home": "second",
     "investment": "investment",
-    "investment_property": "investment",
 }
 
 
