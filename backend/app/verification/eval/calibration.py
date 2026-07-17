@@ -60,6 +60,10 @@ _ABSTAINING_DIMENSIONS = {
     "asset.liquidation_terms",
     "asset.usable_value",
     "as.borrowed_funds",
+    # The occupancy family's AI tag (LP-371) abstains to "unknown" (the declarations needed to judge
+    # consistency are missing/ambiguous), and it feeds LIVE OC-2 — register it, else over_abstaining is
+    # silently inert and a prompt that couldnt_checks OC-2 on every file (the orphan-class failure) hides.
+    "occupancy.consistent_with_signals",
 }
 _OVER_ABSTENTION = 0.30  # above this unknown-rate, an abstaining tag is drowning in unknowns
 _UNDER_ABSTENTION_ACCURACY = 0.90  # concrete accuracy below this = fabrication risk

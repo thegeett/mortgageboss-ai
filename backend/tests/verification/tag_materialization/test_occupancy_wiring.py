@@ -106,6 +106,14 @@ def test_oc2_is_live() -> None:
     )  # the whole point — a live rule that could never verdict, now can
 
 
+def test_consistent_with_signals_is_calibration_registered() -> None:
+    # An abstaining AI tag feeding a LIVE rule must be in _ABSTAINING_DIMENSIONS, else over_abstaining is
+    # silently inert and a prompt that couldnt_checks OC-2 on every file (the orphan-class failure) hides.
+    from app.verification.eval.calibration import _ABSTAINING_DIMENSIONS
+
+    assert "occupancy.consistent_with_signals" in _ABSTAINING_DIMENSIONS
+
+
 # --------------------------------------------------------------------------- #
 # Fail-closed PRESERVED — absent occupancy → OC-2 couldnt_checks (the gate, no AI call)
 # --------------------------------------------------------------------------- #

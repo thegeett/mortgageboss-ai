@@ -115,6 +115,9 @@ tags:
   #     LP-366-A/367). occupancy.stated is DERIVED (a MISMO→enum mapping, not parsed — see the recipe).
   #     occupancy.consistent_with_signals is the FIRST loan-subject AI group; its context is the loan's
   #     MISMO facts (the 1003 declaration signals — NOT address signals, which are not in that context). #
+  # ⚠️ VOCABULARY DRIFT (needs xlsx reconciliation): fact_tags.csv classifies occupancy.stated
+  #    produced_by=parsed and used_by=OC-1 — STALE. It is DERIVED here (D1: a parsed passthrough would emit
+  #    MISMO's "primary_residence", not the tag's "primary" enum), and OC-2 (LIVE) is now its consumer.
   occupancy.stated: {mode: derived, subject: loan, data: occupancy_stated}
   occupancy.consistent_with_signals: {mode: ai, subject: loan, data: occupancy}
 
