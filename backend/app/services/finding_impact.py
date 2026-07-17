@@ -27,7 +27,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.finding import Finding
 from app.models.loan_file import LoanFile
 from app.schemas.finding_impact import FindingImpactPreview
-from app.services.dti import build_dti_calculation
+from app.services.dti import build_dti_calculation, gate_display_ratios
 from app.services.finding_resolution import apply_finding
 from app.services.ltv import build_ltv_calculation
 
@@ -86,6 +86,8 @@ async def preview_finding_apply(
     await db.refresh(finding)
     await db.refresh(loan_file)
 
+    # Change-detection reads the RAW (computed) ratios so an underlying move is still detected when the
+    # calc is gated (a gated card nulls both ratios → None==None would hide a real change).
     dti_changed = (
         dti_before.back_end_dti != dti_after.back_end_dti
         or dti_before.front_end_dti != dti_after.front_end_dti
@@ -103,9 +105,11 @@ async def preview_finding_apply(
         summary=summary,
         applied_record=applied_record,
         affects=affects,
-        # Only the calculators the apply actually moves are returned (the rest would be noise).
-        dti_before=dti_before if dti_changed else None,
-        dti_after=dti_after if dti_changed else None,
+        # Only the calculators the apply actually moves are returned (the rest would be noise). The DTI
+        # is passed through ``gate_display_ratios`` so the preview shows the SAME honest (nulled-when-
+        # gated) ratios as the /dti card — never a confident number resting on a fabricated 0 (LP-375).
+        dti_before=gate_display_ratios(dti_before) if dti_changed else None,
+        dti_after=gate_display_ratios(dti_after) if dti_changed else None,
         ltv_before=ltv_before if ltv_changed else None,
         ltv_after=ltv_after if ltv_changed else None,
     )

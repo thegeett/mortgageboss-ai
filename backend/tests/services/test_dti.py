@@ -395,3 +395,15 @@ async def test_calculation_is_tenant_scoped(db_session: AsyncSession) -> None:
     calc = await build_dti_calculation(db_session, loan_file=mine)
     assert calc.gross_monthly_income == Decimal("10000")  # not theirs
     assert theirs.id != mine.id
+
+
+def test_display_and_snapshot_required_gates_stay_in_sync() -> None:
+    # DRIFT GUARD (LP-375 review): the DISPLAY gate (_REQUIRED_HOUSING_KEYS, keyed by housing line keys)
+    # and the SNAPSHOT gate (_REQUIRED_DTI_TAGS, keyed by fact-tag ids) must name the SAME required inputs
+    # — they live in different modules (a one-directional dependency forbids sharing one constant), so a
+    # third required input added to one and not the other would silently make the /dti card and the
+    # snapshot calc disagree on gating. _DTI_FROM_TAG is the line-key → tag-id map that bridges them.
+    from app.services.dti import _REQUIRED_HOUSING_KEYS
+    from app.verification.snapshot.calculations_section import _DTI_FROM_TAG, _REQUIRED_DTI_TAGS
+
+    assert {_DTI_FROM_TAG[key] for key in _REQUIRED_HOUSING_KEYS} == _REQUIRED_DTI_TAGS

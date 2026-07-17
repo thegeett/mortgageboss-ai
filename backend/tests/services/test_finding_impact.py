@@ -11,6 +11,10 @@ from uuid import UUID
 from app.models import (
     Borrower,
     Company,
+    Document,
+    DocumentStatus,
+    Extraction,
+    ExtractionStatus,
     Finding,
     FindingCategory,
     FindingOrigin,
@@ -19,6 +23,7 @@ from app.models import (
     LoanProgram,
     StatedIncomeItem,
     StatedLiability,
+    UploadSource,
     User,
     UserRole,
 )
@@ -78,7 +83,43 @@ async def _file_with_debt(db: AsyncSession, company: Company):
         )
     )
     await db.flush()
+    await _seed_housing(
+        db, loan_file
+    )  # taxes + insurance so the DTI is computable, not gated (LP-375)
     return loan_file
+
+
+async def _seed_housing(db: AsyncSession, loan_file) -> None:
+    """Seed the REQUIRED housing extraction inputs (a property-tax bill + a homeowners binder) so the DTI
+    is computable, not gated. LP-375 fail-closes an absent (or non-positive) tax/insurance figure, so a
+    file that needs a real back-end ratio must provide them (a real file has them). $300/mo tax, $100/mo
+    insurance. Documents are created directly (the DTI reads the extraction, not the bytes)."""
+    for doc_type, field, value in (
+        ("property_tax_bill", "annual_tax_amount", "3600"),
+        ("homeowners_insurance", "annual_premium", "1200"),
+    ):
+        doc = Document(
+            loan_file_id=loan_file.id,
+            original_filename=f"{doc_type}.pdf",
+            mime_type="application/pdf",
+            file_size_bytes=1,
+            storage_path=f"seed/{doc_type}",
+            document_type=doc_type,
+            status=DocumentStatus.COMPLETED,
+            upload_source=UploadSource.USER_UPLOAD,
+        )
+        db.add(doc)
+        await db.flush()
+        db.add(
+            Extraction(
+                document_id=doc.id,
+                version=1,
+                is_current=True,
+                extracted_data={field: {"value": value}},
+                extraction_status=ExtractionStatus.SUCCEEDED,
+            )
+        )
+    await db.flush()
 
 
 async def _undisclosed_finding(db: AsyncSession, loan_file, *, amount: str = "500") -> Finding:

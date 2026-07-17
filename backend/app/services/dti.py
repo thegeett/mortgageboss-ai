@@ -215,9 +215,17 @@ def _typed_value(data: dict[str, Any] | None, field: str) -> Decimal | None:
 async def _extracted_monthly(
     db: AsyncSession, loan_file_id: UUID, document_type: str, field: str, *, annual: bool
 ) -> Decimal | None:
-    """A monthly amount from an extracted (possibly annual) figure, or None."""
+    """A monthly amount from an extracted (possibly annual) figure, or None.
+
+    A NON-POSITIVE figure is NOT derivable → None (LP-375). This feeds only the REQUIRED housing inputs
+    (property taxes / homeowners insurance), where a $0 is implausible and — exactly like an ABSENT
+    figure (absent≠0) — must FAIL-CLOSED to "unknown", never a confident too-low DTI resting on a
+    fabricated 0. This is the single source both gates read: the display ``unknown`` flag and the
+    snapshot ``_is_unknown`` both key off ``auto_amount is None``, so returning None here gates BOTH.
+    A processor who knows a figure is genuinely 0 can still override the line explicitly (an override
+    is trusted)."""
     value = _typed_value(await _current_extracted_data(db, loan_file_id, document_type), field)
-    if value is None:
+    if value is None or value <= 0:
         return None
     return (value / Decimal(12)) if annual else value
 

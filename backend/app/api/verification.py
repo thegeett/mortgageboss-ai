@@ -255,6 +255,10 @@ async def _build_status(
         select(Finding).where(
             Finding.loan_file_id == loan_file.id,
             Finding.evaluation_outcome.is_not(None),
+            # Parity with the legacy query's exposure gate: a finding of a non-shown origin is not
+            # surfaced by EITHER system. Governed findings are DETERMINISTIC_RULE (in _SHOWN_ORIGINS),
+            # so this is a no-op today and a guard against a future non-shown-origin governed finding.
+            Finding.origin.in_(_SHOWN_ORIGINS),
         ),
         Finding,
     ).order_by(Finding.created_at.desc())
