@@ -378,6 +378,37 @@ def _mismo_str(snapshot: Snapshot, key: str) -> str | None:
     return str(field.value).strip() or None
 
 
+# LP-371 — MISMO's occupancy value space → occupancy.stated's declared enum (primary | second |
+# investment). MISMO uses the long forms (property.occupancy = "primary_residence"); the tag's
+# allowed_values are the shorthand. A value NOT in this map ABSTAINS (never a guessed occupancy).
+_OCCUPANCY_ENUM = {
+    "primary_residence": "primary",
+    "second_home": "second",
+    "investment": "investment",
+    "investment_property": "investment",
+}
+
+
+def _occupancy_stated(
+    snapshot: Snapshot, _subject_id: str, _subject_raw: object
+) -> tuple[JsonValue, str]:
+    """occupancy.stated — the borrower's stated occupancy, MAPPED from the MISMO ``property.occupancy``
+    value to the tag's enum (primary | second | investment). A derived mapping, NOT a raw parsed
+    passthrough, because MISMO's value ("primary_residence") is not the tag's shorthand enum ("primary")
+    — a parsed tag is never re-typed, so it would emit an out-of-enum value (LP-371 D1). ABSTAINS to
+    ``unknown`` when occupancy is absent or is a MISMO value not in the map — never a guessed occupancy."""
+    occupancy = _mismo_str(snapshot, "property.occupancy")
+    if occupancy is None:
+        return _UNKNOWN, "property.occupancy is absent — no stated occupancy to report"
+    mapped = _OCCUPANCY_ENUM.get(occupancy.casefold())
+    if mapped is None:
+        return (
+            _UNKNOWN,
+            f"MISMO occupancy {occupancy!r} is not a mapped value (primary/second/investment)",
+        )
+    return mapped, f"stated occupancy {mapped} (MISMO property.occupancy={occupancy!r})"
+
+
 def _reserves_required_months(
     snapshot: Snapshot, _subject_id: str, _subject_raw: object
 ) -> tuple[JsonValue, str]:
@@ -500,6 +531,8 @@ _RECIPES: dict[str, Recipe] = {
     "qualifying_income_monthly": _qualifying_income_monthly,
     "income_max_employment_gap": _income_max_employment_gap,
     "income_days_since_recent_pay": _income_days_since_recent_pay,
+    # LP-371 — the loan's stated occupancy, mapped from MISMO to the tag's enum (OC-2's load-bearing tag).
+    "occupancy_stated": _occupancy_stated,
     # LP-323-AS-B — the assets family (registry entries only).
     "reserves_required_months": _reserves_required_months,
     "stmt_nsf_count": _stmt_nsf_count,

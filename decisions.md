@@ -10256,3 +10256,71 @@ load-bearing tags checked on a real file — this ticket did ID-2/ID-3/ID-7); th
 count extraction gap (AS-9). Cross-refs: LP-368 (the diagnosis that found the parsed class), LP-333 (the
 classifier-mismatch analogue + `_required_ai_groups`), LP-326 (the declaration/producer model), LP-366 (AS-1,
 the first instance of the class), LP-367 (the orphaned insurance producer).
+
+## ADR-287: Wire OC-2's occupancy tags — the third orphan; the first loan-subject AI group; defining "the signals" (LP-371)
+
+**Context.** OC-2 (occupancy reasonableness) is LIVE (`ACTIVE_RULE_IDS`) but had **never assessed a single
+file.** Its two load-bearing judgment tags — `occupancy.stated` and `occupancy.consistent_with_signals` —
+were in `fact_tags.csv` WITH producers named, but **neither was declared in `tag_production.yaml` and nothing
+wrote them** (`grep` → 0; 0 instances in the persisted snapshot). A judgment rule gates its load-bearing tags
+fail-closed BEFORE any AI call (`gate.py:56`), so OC-2 couldnt_checked on **every file, structurally** — an
+occupancy-fraud signal silently unchecked since the beginning. This is **the third orphan** of a class:
+*a tag declared in the vocabulary with a producer, but with no declaration and nothing writing it, resolves to
+ABSENT; absent is indistinguishable from "the document genuinely doesn't have this", so the rule couldnt_checks
+silently, forever, with every test green.* Prior instances: `housing.insurance_monthly` (LP-367, still open),
+`dti.qualifying_income_monthly` (LP-366-A, fixed). **LP-373 will GUARD the class** (a vocabulary tag with a
+producer must HAVE a declaration) — not built here.
+
+**Decision — wire both tags as data/declaration/recipe/prompt; no engine change.** The AI materialization path
+is already subject-generic (`ai.py` uses `subject_type(group.subject).enumerate/.build_context`) and
+`_MATERIALIZED_SUBJECTS` includes `loan`, so a loan-subject AI group runs without new Python.
+
+**D1 — `occupancy.stated` is DERIVED, not parsed.** MISMO's `property.occupancy` = `"primary_residence"`; the
+tag's declared `allowed_values` are the shorthand `[primary, second, investment]`. A parsed tag is never
+re-typed, so a raw passthrough (LP-370's suggestion) would emit the out-of-enum `"primary_residence"`. Wired
+as a **derived recipe** mapping MISMO→enum (`primary_residence→primary`, `second_home→second`,
+`investment[_property]→investment`), abstaining to `unknown` on absent/unmapped — never a guessed occupancy.
+This is a reported change of production mode, NOT a change to the tag's meaning or allowed_values. (Contrast:
+`program.type`'s MISMO `loan.program` is already `"conventional"`, matching its enum — occupancy is the
+exception that needs a mapping.)
+
+**D2/D3 — "the signals," and whether the AI can SEE them (the durable part).** `occupancy.consistent_with_signals`
+is the FIRST loan-subject AI group. A loan-subject AI's context (`_loan_context`) is the loan's **MISMO facts
+ONLY** — NOT the tag layer, NOT the documents. MISMO carries **no borrower residence address** (only
+`property.address` = the subject). So the *address*-consistency signals the vocabulary's one-line description
+hints at ("address/other signals") are **invisible** to this tag — an AI told to check them would be judging on
+nothing (the LP-368/370 "wrong subject's context" trap, avoided). What MISMO DOES carry, and what the tag is
+therefore DEFINED to use, are the 1003 **declaration** signals: `property.occupancy` (the claim),
+`borrower.<n>.declaration.intenttooccupytype`, `borrower.<n>.declaration.fhasecondaryresidenceindicator`, and
+`property.financed_unit_count`. **The tag reports whether the borrower's OTHER declarations AGREE with the
+stated occupancy — a structural FACT, not OC-2's reasonableness judgment.** Defining "the signals" concretely
+is the antidote to LP-340's root cause (an undefined term the model and the labeler read differently). **LIMIT
+(reported, not fixed):** the address-consistency dimension needs a borrower-residence-address MISMO fact
+(absent) or surfacing per-document address tags into the loan context (an engine/context change) — a follow-up.
+
+**The prompt (LP-335/340 class avoided).** Copies `STAGE_A_TRANSACTION_SYSTEM_PROMPT`'s §3D framing verbatim in
+spirit: STATES that the model structures a fact and does NOT judge rules/approvability/fraud ("Downstream
+deterministic code and a human reviewer do all judgement; they can only be correct if your fact is accurate");
+NAMES the exact MISMO signals; DEFINES every value (yes/no/unknown) with examples of what the DECLARATIONS
+STATE (not what a rule should conclude); makes `unknown` first-class and reachable; and says **nothing** about
+OC-2, rules, purpose, or reliability. No exemplar encodes a downstream assumption; no purpose hedge ("so the
+rule can…", "where it aids matching" — LP-340/F5); no reliability speculation ("often stale" — LP-335). **The
+honest limit: this prompt is UNMEASURED** — LP-335/340 were found by MEASUREMENT, not reading (LP-343's own
+stated limit). It must join the calibration worksheet (LP-379).
+
+**D4 — cost.** One added AI call per run (the loan-subject `occupancy` group, 1 subject), plus OC-2's existing
+judgment call. Small; runs on every file.
+
+**Consequences (real run on DB LF-6T3N — reported, not predicted).** `occupancy.stated` materializes to
+`primary`; the `occupancy` AI group produced `occupancy.consistent_with_signals = yes` (conf 1.0), reasoning
+precisely over the named signals ("both borrowers intent-to-occupy 'Yes', secondary-residence 'false',
+financed_unit_count 1 — all support primary_residence"); OC-2 then produced a real judgment: **needs_review,
+ratification_pending=True** ("occupancy is reasonable … 'yes' is an AI judgment and must be ratified by a
+human"). **OC-2 went from couldnt_check-forever to producing a ratification-pending judgment.** `needs_review`
+is the correct terminal state for a judgment rule — it never auto-ships; a human ratifies. Fail-closed
+preserved: absent occupancy → `occupancy.stated` unknown / `occupancy.consistent_with_signals` absent → the
+gate couldnt_checks with a reason (no fabricated verdict). Every other live rule identical; full suite green.
+
+**No fourth orphan surfaced** in this ticket. Cross-refs: LP-370 (the audit that found OC-2 dead), LP-366-A/367
+(the orphan class), LP-373 (the orphan guard, deferred), LP-326 (declarations/producers), LP-335/340/343 (the
+prompt-bug class this prompt must not join), LP-379 (calibration — this prompt is unmeasured).

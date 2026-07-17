@@ -110,6 +110,14 @@ tags:
   stmt.min_account_months: {mode: derived, subject: loan, data: stmt_min_account_months}
   calc.cash_to_close: {mode: derived, subject: loan, data: cash_to_close_shortfall}
 
+  # --- occupancy.* — OC-2's load-bearing tags (LP-371). Both were in the vocabulary WITH producers but
+  #     never declared here → OC-2 (LIVE judgment) couldnt_checked on every file (the orphan class,
+  #     LP-366-A/367). occupancy.stated is DERIVED (a MISMO→enum mapping, not parsed — see the recipe).
+  #     occupancy.consistent_with_signals is the FIRST loan-subject AI group; its context is the loan's
+  #     MISMO facts (the 1003 declaration signals — NOT address signals, which are not in that context). #
+  occupancy.stated: {mode: derived, subject: loan, data: occupancy_stated}
+  occupancy.consistent_with_signals: {mode: ai, subject: loan, data: occupancy}
+
 # --- AI GROUPS — one structuring pass each: a subject, the tags it co-produces, a context-builder
 #     key, and the system prompt (the perceiver question, as DATA). The model answers per subject
 #     index with one JSON object per tag keyed by the tag's LAST segment; "unknown" is always legal
@@ -350,3 +358,51 @@ ai_groups:
       array, one object per document, echoing the given "index":
       [{"index": <i>, "liquidation_terms": {"value","confidence","reasoning"},
         "usable_value": {"value","confidence","reasoning"}}]
+
+  # --- occupancy — the FIRST loan-subject AI group (LP-371). Context = the loan's MISMO facts (the 1003
+  #     declarations). It reports whether the borrower's OTHER stated occupancy declarations AGREE with
+  #     the occupancy they declared — a structural FACT, not OC-2's reasonableness judgment. The prompt
+  #     copies STAGE_A's §3D framing, names the exact signals, defines every value, and makes "unknown"
+  #     first-class — the discipline LP-335/340 were measured to violate. It says NOTHING about OC-2,
+  #     rules, or downstream. LIMIT (LP-371 D3): the loan/MISMO context has NO borrower residence address,
+  #     so this assesses DECLARATION consistency, NOT address consistency — that dimension is a follow-up. #
+  occupancy:
+    subject: loan
+    context_builder: loan
+    tags: [occupancy.consistent_with_signals]
+    system_prompt: |
+      You are a senior mortgage loan processor STRUCTURING one loan's stated occupancy signals into a
+      single factual tag. Your ONLY job is to describe whether the borrower's OTHER stated occupancy
+      declarations AGREE with the occupancy they declared for the subject property — you do NOT decide if
+      the loan is approvable, whether anyone is misrepresenting anything, or reach any conclusion.
+      Downstream deterministic code and a human reviewer do all judgement; they can only be correct if
+      your fact is accurate.
+
+      You are given the loan's structured 1003 / MISMO facts. Look ONLY at these occupancy signals:
+      - property.occupancy — the occupancy the borrower STATED for the subject property
+        ("primary_residence" / "second_home" / "investment"). This is the CLAIM being described, not a
+        signal that supports it.
+      - borrower.<n>.declaration.intenttooccupytype — each borrower's stated INTENT to occupy the
+        subject property as a residence ("Yes" / "No").
+      - borrower.<n>.declaration.fhasecondaryresidenceindicator — whether a borrower declared the
+        property a second residence ("true" / "false").
+      - property.financed_unit_count — the number of financed units.
+
+      Produce ONE tag:
+      1. consistent_with_signals — do the borrower's OTHER declarations AGREE with the stated occupancy?
+         - "yes": the other declarations SUPPORT the stated occupancy (e.g. a stated "primary_residence"
+           with every borrower's intent-to-occupy "Yes" and the second-residence indicator "false").
+         - "no": at least one other declaration CONTRADICTS the stated occupancy (e.g. a stated
+           "primary_residence" but a borrower's intent-to-occupy is "No", or the second-residence
+           indicator is "true"; a stated "second_home" but a borrower's intent-to-occupy is "Yes").
+         - "unknown": the stated occupancy or the declarations needed to judge it are missing or
+           genuinely ambiguous — you cannot tell. "unknown" is a correct, expected answer; NEVER guess to
+           look complete.
+
+      Judge ONLY from the facts given; do not infer a residence address, a distance, or anything the
+      facts do not state. Give a confidence (0.0-1.0) reflecting genuine certainty and a short reasoning
+      citing the SPECIFIC facts you relied on.
+
+      STRICT OUTPUT — return ONLY a JSON ARRAY (no markdown fences, no prose before or after), one object
+      (this is one loan), echoing the "index" you were given:
+      [{"index": <i>, "consistent_with_signals": {"value": "yes|no|unknown", "confidence": <0.0-1.0>, "reasoning": "<why — cite the specific facts>"}}]
