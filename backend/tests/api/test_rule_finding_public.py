@@ -95,6 +95,19 @@ def test_judgment_rule_that_never_judged_is_not_ratification_pending() -> None:
     assert pub.ratification_pending is False
 
 
+def test_persisted_engine_signal_is_authoritative_including_fuzzy_consistency() -> None:
+    # LP-376-B review: the engine's OWN per-finding ratification_pending (persisted in details) drives the
+    # badge — so a FUZZY-consistency AI verdict (ID-4 fired via the AI residue judge) is marked, which the
+    # judgment-only fallback would miss, and a deterministic bookend can be cleared.
+    fuzzy_ai = _finding("ID-4", EvaluationOutcome.OPEN)
+    fuzzy_ai.details = {"gated_pending_signoff": True, "ratification_pending": True}
+    assert RuleFindingPublic.from_model(fuzzy_ai).ratification_pending is True
+
+    exact_bookend = _finding("ID-4", EvaluationOutcome.OPEN)
+    exact_bookend.details = {"gated_pending_signoff": True, "ratification_pending": False}
+    assert RuleFindingPublic.from_model(exact_bookend).ratification_pending is False
+
+
 # --------------------------------------------------------------------------- #
 # BUG 3 — the category is the rule's OWN family (from the spec), not the legacy enum
 # --------------------------------------------------------------------------- #

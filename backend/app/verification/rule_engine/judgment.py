@@ -310,7 +310,10 @@ async def _evaluate_one_subject(
     tag = _judgment_tag(jud, subject_id, value, confidence, reasoning)
     # LP-376-B: the AI's own verdict + reasoning goes into the PROVENANCE (a load-bearing tag the ratifier
     # reads in the card), NOT the message. The message states the verdict; the reasoning explains it.
+    # Skip it when the output tag is already among the reasoned-over provenance (a rule reasoning over its
+    # own output) so it never renders twice.
     verdict_provenance = LoadBearingTag(jud.output_tag, value, confidence, reasoning, (subject_id,))
+    extra_load_bearing = () if jud.output_tag in jud.reasoned_over else (verdict_provenance,)
     evaluation = _result(
         spec,
         subject_id,
@@ -319,7 +322,7 @@ async def _evaluate_one_subject(
         jud.reasoned_over,
         subject_tags,
         verdict_confidence=confidence if confidence is not None else gate.verdict_confidence,
-        extra_load_bearing=(verdict_provenance,),
+        extra_load_bearing=extra_load_bearing,
     )
     return JudgmentEvaluation(tag, evaluation)
 

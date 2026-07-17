@@ -20,12 +20,6 @@ from app.verification.confidence import AggressionLevel
 from app.verification.finding_guidance import resolve_guidance
 from app.verification.rules.specs import RuleSpec, load_rule_spec
 
-# The §8 outcomes where a JUDGMENT rule actually reached an AI verdict (so a ratification badge is honest);
-# couldnt_check / no_longer_applies mean the AI never judged (a gate/applicability/reconcile terminal).
-_AI_VERDICT_OUTCOMES = frozenset(
-    {EvaluationOutcome.OPEN, EvaluationOutcome.SATISFIED, EvaluationOutcome.NEEDS_REVIEW}
-)
-
 
 def _rule_spec(rule_id: str) -> RuleSpec | None:
     """The rule's SPEC — the gate of record for its guideline + category — or None for a retired/legacy
@@ -39,15 +33,24 @@ def _rule_spec(rule_id: str) -> RuleSpec | None:
 def _ratification_pending(finding: Finding, spec: RuleSpec | None) -> bool:
     """Whether this finding's verdict rests on an AI JUDGMENT a human must ratify (LP-376-B).
 
+    Prefers the ENGINE's own per-finding signal (``details.ratification_pending``) — authoritative for
+    BOTH a judgment verdict AND a fuzzy-consistency AI verdict (the engine set it; the schema does not
+    re-derive it). Falls back to the judgment heuristic ONLY for a legacy finding persisted before that
+    field existed (it is re-persisted on the next run).
+
     NOT ``details.gated_pending_signoff`` — that is ``not priya_validated`` (the rule's THRESHOLDS await
-    domain sign-off; true for nearly every rule) and has nothing to do with AI ratification. The honest
-    signal is: a JUDGMENT rule (``spec.judgment``) that actually reached a verdict (open/satisfied/
-    needs_review) — a couldnt_check/gate-fail never invoked the AI, so it does not ratify. (Limitation: a
-    FUZZY-consistency AI verdict is under-marked here — it needs the engine's per-finding
-    ``ratification_pending`` persisted, a follow-up; it does not arise on today's live files.)"""
-    if spec is None or spec.judgment is None:
-        return False
-    return finding.evaluation_outcome in _AI_VERDICT_OUTCOMES
+    domain sign-off; true for nearly every rule) and has nothing to do with AI ratification."""
+    details = finding.details or {}
+    persisted = details.get("ratification_pending")
+    if isinstance(persisted, bool):
+        return persisted
+    # Legacy fallback: a JUDGMENT rule that actually reached its verdict (always needs_review; a
+    # couldnt_check/gate-fail never invoked the AI, so it does not ratify).
+    return (
+        spec is not None
+        and spec.judgment is not None
+        and finding.evaluation_outcome is EvaluationOutcome.NEEDS_REVIEW
+    )
 
 
 def _rule_category(finding: Finding, spec: RuleSpec | None) -> str:

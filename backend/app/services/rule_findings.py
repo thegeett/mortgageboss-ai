@@ -92,6 +92,10 @@ def _details(result: RuleEvaluation) -> dict[str, object]:
         "threshold_used": str(result.threshold_used) if result.threshold_used is not None else None,
         "priya_validated": result.priya_validated,
         "gated_pending_signoff": result.gated_pending_signoff,
+        # LP-376-B: the engine's authoritative per-finding AI-ratification signal — TRUE for a judgment
+        # verdict AND a fuzzy-consistency AI verdict, FALSE for a deterministic/exact-bookend/gate-fail.
+        # The public schema reads THIS rather than re-deriving a judgment-only approximation.
+        "ratification_pending": result.ratification_pending,
         "how_to_fix": result.how_to_fix,
         "source_strength": _source_strength(result),
         # Duplicated into details ONLY so LP-93's finding_identity() (which reads details.subject_key)
