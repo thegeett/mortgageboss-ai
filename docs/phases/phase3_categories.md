@@ -176,3 +176,101 @@ LP-390/391/392 — Wave 10: Property (~8)
 EPIC 8
 
 LP-393 — CL/DC out-of-scope disposition
+
+
+
+
+
+
+=========
+
+PHASE A — WIRE IT UP (see what's real)
+LP-365 — Wire the orchestrator into the real run
+
+The gap is one Celery task + one enqueue line. The orchestrator, snapshot_records table, and LP-322 reconciler are all built and migrated. run_verification already takes exactly a run's params.
+New task, sibling to run_cross_source_pass: load the run + loan file → call run_verification(...)
+Enqueue it from POST /verification/run alongside the AI sweep (coexist)
+This is the first time the LP-316/321 architecture runs on a real loan file. Everything to date came from a stripped 5-statement fixture; the DB file has ~30 documents.
+Report the real per-tab counts — do not predict them
+Report what LP-322's reconcile does on run #2 (run #1 has no prior → Tab 3 legitimately empty)
+No engine/rule/spec change. ACTIVE_RULE_IDS unchanged.
+Expect surprises. The last four contacts with reality each found something.
+
+
+PHASE B — FIX WHAT B1 SHOWS
+LP-366 — AS-1 reads income directly, not through the gated DTI
+
+AS-1 reads {calc: [dti, gross_monthly_income]} → the DTI fail-closes on housing.insurance_monthly → every deposit couldnt_checks regardless of size
+AS-1 should never read the DTI. DTI answers "can they afford it"; AS-1 answers "is this deposit large relative to earnings." It needs income only.
+Point it at the income tag directly (dti.qualifying_income_monthly exists — do not mint a second income tag)
+Flag LP-343's F2 collision: qualifying_monthly is underspecified and F2 named AS-1's threshold as the false-green path. documented_monthly scored 100% and was called clean — argue which.
+Survey: do other rules read a calculator for a single value? Same false dependency.
+Report (don't build): per-key calculator gating — the general case
+
+LP-367 — Wire the homeowners insurance producer
+
+housing.insurance_monthly is orphaned — declared producer=AI in the vocabulary, no declaration in tag_production.yaml, nothing in app/ writes it
+The extractor exists (homeowners_insurance.py → annual_premium) but isn't wired
+The DTI can never compute on any file — a required gate has no producer
+Wire annual_premium ÷ 12 → housing.insurance_monthly, declared, derived
+No binder → unknown with a reason. Never 0 (vocabulary: "absent≠0")
+LF-6T3N has no insurance doc → the DTI stays gated there. That's honest.
+
+LP-368 — The orphaned-tag audit
+
+How many vocabulary tags declare a producer that doesn't exist?
+This one was invisible for months and killed a live rule
+The loader validates declarations that exist — it doesn't validate that a producer=AI tag has one
+Report + make the loader fail loud
+
+
+PHASE C — SURFACE IT
+LP-369 — The read path
+
+_build_status returns status in (RED, YELLOW) — GREEN is dropped, so Tab 2 (Satisfied) is unreachable from the API
+Return rule findings with evaluation_outcome, subject_key, load_bearing_tags
+Keep the two systems' counts separate — never sum
+Expose gated/gate_reason in schemas/dti.py (the $0.00 insurance fix's backend half)
+
+LP-370 — The five tabs + provenance detail
+
+Needs attention (open + couldnt_check + needs_review) · Satisfied · No longer applies · Not applicable · Old Findings
+Discriminator: evaluation_outcome present → tabs 1-4; else → Tab 5
+The honesty contract, in tests: couldnt_check renders in Tab 1, never Tab 2/4. Tab 3 ≠ Tab 4.
+Within Tab 1, the three outcomes stay visually distinguishable
+Provenance is the product — each load-bearing tag's value, confidence, and reasoning, rendered prominently
+Subject renders as a human recognizes it ("Deposit of $20,000 on 3/27", not txn54c…)
+DTI card: "unknown — no binder", DTI marked gated, not a confident 39.70%
+Tab 5 visibly marked legacy
+No §10 actions on tabs 1-4 yet
+Uses the frontend-design skill
+
+LP-371 — §10 actions on rule findings (policy decision)
+
+The mechanism already works — actions write shared columns
+The question: can you "Accept risk" on a couldnt_check? That's not "I disagree" — it's "I'm proceeding without knowing." Different act, arguably a different action.
+Decide per outcome state, then wire
+
+
+PHASE D — THE ACTIVATION CLUSTER (unchanged)
+
+LP-372 — Priya's judgment labels + full calibration re-run (the first valid measurement of the shipped prompt)
+LP-373 — F1: Stage-B sourcing "no vs unknown"
+LP-374 — F2: qualifying_monthly's convention (collides with LP-366)
+LP-375 — F6: stmt.is_reserve_eligible
+LP-376 — F3/F4: small prompt fixes
+LP-377 — Priya's activation bars
+LP-378/379/380 — extraction: page counts · employment dates · LE/CD
+LP-381 — declared recipe dependencies
+LP-382 — per-borrower document context
+LP-383 — IN-3 per-borrower
+LP-384/385 — PIN #2 / PIN #3
+LP-386 — the activation pass (how many of the 21 go live?)
+
+PHASE E — DEFERRED SHAPES
+
+LP-387 multi-value gather leg · LP-388 IN-6 · LP-389 AS-8 · LP-390 borrower-set reconciliation
+
+PHASE F — WAVES 4-10 + BLOCKERS
+
+LP-391+ — DTI, Title, Insurance, Condo, small families; then the blocker-doc extractors + Credit/Property
