@@ -6,8 +6,12 @@ a tag declared in ``fact_tags.csv`` WITH a producer named, but with NO declarati
 couldnt_checks on EVERY file, structurally, silently, forever.
   * ``dti.qualifying_income_monthly`` (LP-366-A) — AS-1 had no loan-level income to read → it read the DTI
     calc instead → AS-1 never evaluated a deposit.
-  * ``housing.insurance_monthly`` (LP-367, STILL OPEN) — a required gating input to the DTI calculator with
-    no producer → the DTI can never compute on ANY file → the UI renders a fabricated $0.00.
+  * ``housing.insurance_monthly`` (LP-367; LP-374 wired it) — a vocabulary tag declared with a producer but
+    with nothing writing it. NOTE the mechanics precisely: the DTI calculator reads the annual premium from
+    the EXTRACTION (``services/dti.py``), not from this materialized tag, and it FAIL-CLOSES to couldnt_check
+    (not a fabricated $0.00 — LP-318 surfaces amount=None for an absent binder) when the figure is missing.
+    So this instance's "live consumer" is the ``_REQUIRED_DTI_TAGS`` heuristic below (a trustworthy DTI ratio
+    genuinely needs the figure), NOT a dead live rule; the tag's own rule consumers (DT-1/DT-5/IH-1) are inert.
   * ``occupancy.stated`` + ``occupancy.consistent_with_signals`` (LP-371) — OC-2 was dead since the
     beginning; occupancy fraud never assessed on any file.
 
@@ -22,8 +26,10 @@ BUILD FAILURE only when a LIVE consumer HARD-reads it:
   * a LIVE rule (``ACTIVE_RULE_IDS``) reads it as a GATED input — load-bearing / operand / gather /
     applicability / when-tag — the reads whose absence → couldnt_check (all three instances were this
     shape or the calc one), OR
-  * it is a REQUIRED input to the always-computed DTI calculator (``_REQUIRED_DTI_TAGS``; the only
-    tag-gated calc, built on every real run by ``builder.py`` and rendered in the UI — LP-367's shape).
+  * its figure is a REQUIRED input to the always-computed DTI calculator (``_REQUIRED_DTI_TAGS``; the calc
+    fail-closes to couldnt_check when that figure is absent — ``calculations_section`` gates on the
+    DtiCalculation LINE, sourced from the extraction, not on this materialized tag). Requiring a producer
+    for the tag is the PROXY the guard uses for "the figure a trustworthy DTI ratio needs" — LP-367's shape.
 An unproduced tag read only by INERT rules, by NO rule, or SOFTLY (a judgment rule's ``reasoned_over``,
 which is not gated — absence degrades the AI's context but never couldnt_checks) is REPORTED by the census
 (docs/tickets/LP-373.md), not failed here.

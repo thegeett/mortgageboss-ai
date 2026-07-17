@@ -415,34 +415,41 @@ def _housing_insurance_monthly(
     ``annual_premium`` on the file's homeowners-insurance binder ÷ 12 (LP-374). A DERIVED loan recipe: the
     tag's vocabulary subject is ``loan`` and its consumers (DT-1/DT-5/IH-1) read it there. It reads the
     binder DOCUMENT's extracted ``annual_premium`` field from the snapshot — the SAME field the DTI
-    calculator already reads directly from the extraction (``services/dti.py`` ``_extracted_monthly``), so
-    the tag AGREES with the DTI's insurance line (this recipe does NOT feed the DTI, which reads the
-    extraction itself — it closes the vocabulary orphan and serves the tag's own consumers).
+    calculator reads directly from the extraction (``services/dti.py`` ``_extracted_monthly``). This recipe
+    does NOT feed the DTI (which reads the extraction itself); it closes the vocabulary orphan and serves
+    the tag's own consumers.
 
-    FAIL-CLOSED (``absent ≠ 0`` — the tag's vocabulary note): a 0 premium makes the DTI confidently
-    too-low, the exact false-green the DTI's gate exists to prevent. ABSTAINS to ``unknown`` WITH A REASON
-    when: no homeowners-insurance binder is in the file; a binder is present but states no (or a
-    non-positive) annual premium; or multiple binders state CONFLICTING premiums — cannot tell which is
-    current (the LP-332/LP-336 fail-closed-on-ambiguity discipline; the DTI's ``_extracted_monthly`` takes
-    the single current binder without this check, so the tag is STRICTER on ambiguity). Reads ONLY
-    ``homeowners_insurance`` (hazard) — NOT ``flood_insurance_policy`` or MI, which the classifier types
-    separately and which carry their own DTI lines / calculators (LP-374 D3)."""
+    AGREES-OR-ABSTAINS (never LOOSER than the DTI): the DTI takes the SINGLE NEWEST current binder
+    (``_current_extracted_data`` orders by ``created_at`` desc, limit 1). The snapshot exposes no
+    ``created_at`` on a document entry, so we cannot pick "the newest" here — instead we ABSTAIN on ANY
+    multi-binder ambiguity, which is stricter-than-or-equal-to the DTI in every case (so the tag can agree
+    with the DTI's insurance line but never emit a premium the DTI's newest-binder rule would treat as
+    unknown). FAIL-CLOSED (``absent ≠ 0`` — the tag's vocabulary note): a 0 premium makes the DTI
+    confidently too-low, the exact false-green the DTI's gate exists to prevent. ABSTAINS to ``unknown``
+    WITH A REASON when: no homeowners-insurance binder is in the file; the (only) binder states no or a
+    non-positive annual premium; multiple binders state CONFLICTING premiums; or multiple binders are
+    present and at least one states no premium — cannot tell which is current (the LP-332/LP-336
+    fail-closed-on-ambiguity discipline). Reads ONLY ``homeowners_insurance`` (hazard) — NOT
+    ``flood_insurance_policy`` or MI, which the classifier types separately and which carry their own DTI
+    lines / calculators (LP-374 D3)."""
     if snapshot.documents.absent:
         return _UNKNOWN, "no documents in the file — no homeowners insurance binder to read"
     premiums: set[Decimal] = set()
-    any_binder = unparseable = False
+    binder_count = 0
+    unparseable = missing_premium = False
     for entry in snapshot.documents.entries:
         if entry.document_type != "homeowners_insurance":
             continue
-        any_binder = True
+        binder_count += 1
         field = entry.fields.get("annual_premium")
         if not isinstance(field, Field) or not field.is_present:
+            missing_premium = True
             continue
         try:
             premiums.add(Decimal(str(field.value)))
         except (InvalidOperation, ValueError):
             unparseable = True
-    if not any_binder:
+    if binder_count == 0:
         return _UNKNOWN, "no homeowners insurance binder in the file — insurance is unknown, not 0"
     if unparseable:
         return _UNKNOWN, "a homeowners insurance binder states an unparseable annual premium"
@@ -454,6 +461,14 @@ def _housing_insurance_monthly(
         )
     if not premiums:
         return _UNKNOWN, "a homeowners insurance binder is present but states no annual premium"
+    # Exactly one distinct premium, but a SECOND binder stated none → the DTI would use its newest binder
+    # (which may be the premium-less one) → abstain rather than risk emitting a premium the DTI ignores.
+    if missing_premium:
+        return (
+            _UNKNOWN,
+            f"{binder_count} homeowners insurance binders are present but at least one states no annual "
+            "premium — cannot tell which is current",
+        )
     annual = next(iter(premiums))
     if annual <= 0:
         return (

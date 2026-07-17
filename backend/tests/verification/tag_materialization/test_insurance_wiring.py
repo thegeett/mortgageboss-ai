@@ -118,6 +118,16 @@ def test_identical_duplicate_binders_do_not_conflict() -> None:
     assert value == "100"
 
 
+def test_multiple_binders_one_missing_premium_abstains() -> None:
+    # STRICTER-OR-EQUAL-TO-THE-DTI: the DTI takes the NEWEST binder (which may be the premium-less one).
+    # The snapshot exposes no created_at, so we cannot pick the newest → abstain rather than emit the OTHER
+    # binder's premium (which the DTI would ignore). Never LOOSER than the DTI.
+    snap = _snapshot([_binder("1200", content_id="a"), _binder(None, content_id="b")])
+    value, reason = _housing_insurance_monthly(snap, "loan", None)
+    assert value == _UNKNOWN
+    assert "at least one states no annual premium" in reason
+
+
 def test_never_emits_zero_across_all_degenerate_inputs() -> None:
     # The explicit NEVER-0 guarantee (the false-green the gate exists to prevent).
     for docs in ([], [_binder(None)], [_binder("0")], [_binder("-5")]):
