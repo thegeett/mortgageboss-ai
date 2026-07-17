@@ -247,7 +247,12 @@ def _qualifying_income_monthly(
     need not materialize (it degraded on the real run) and whose "continuity/averaging" convention is
     underspecified (LP-343 F2). Reading the stated total keeps F2 OFF this path. ABSTAINS to ``unknown``
     (NEVER 0) when no income is stated or a line is unparseable — fail-closed, so a rule reading it
-    couldnt_checks on a missing income rather than sizing a threshold from 0."""
+    couldnt_checks on a missing income rather than sizing a threshold from 0.
+
+    ⚠️ The vocabulary (``fact_tags.csv``, xlsx-generated) still describes this as "sum of
+    income.qualifying_monthly" — STALE: it reads STATED income. STATED >= QUALIFYING (qualifying haircuts
+    declining/variable pay), so a threshold sized on this is LOOSER than 50%-of-qualifying; the AS-1 wiring
+    (LP-366-B) must account for it, and the xlsx description needs reconciling."""
     if snapshot.mismo.absent:
         return _UNKNOWN, "no stated financials (MISMO absent) — cannot establish qualifying income"
     total = Decimal(0)

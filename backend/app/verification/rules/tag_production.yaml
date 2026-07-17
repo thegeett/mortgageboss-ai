@@ -67,8 +67,14 @@ tags:
   income.ytd_annualized_shortfall_pct: {mode: derived, subject: loan, data: income_ytd_annualized_shortfall}
   income.max_employment_gap_days: {mode: derived, subject: loan, data: income_max_employment_gap}
   income.days_since_most_recent_pay: {mode: derived, subject: loan, data: income_days_since_recent_pay}
-  # LP-366-A — the loan's total stated qualifying income (sum of the borrowers' MISMO income lines).
-  # AS-1 reads this via a `loan_tag` operand instead of the gated DTI calc. Fail-closed to unknown.
+  # LP-366-A — the loan's total STATED income (sum of the borrowers' MISMO income lines). STAGED ahead of
+  # its consumer: AS-1 will read this via a `loan_tag` operand instead of the gated DTI calc (LP-366-B); no
+  # rule reads it yet. Fail-closed to unknown, never 0.
+  #   ⚠️ VOCABULARY MISMATCH (needs xlsx reconciliation): fact_tags.csv describes this as
+  #   "sum of income.qualifying_monthly", but the recipe reads MISMO STATED income (the AI qualifying tag
+  #   is underspecified — LP-343 F2 — and degraded on the real run). STATED income >= QUALIFYING (qualifying
+  #   haircuts declining/variable pay), so a threshold sized on this is 50%-of-STATED, LOOSER than
+  #   50%-of-qualifying — the AS-1 wiring (LP-366-B) MUST account for this; update the xlsx description too.
   dti.qualifying_income_monthly: {mode: derived, subject: loan, data: qualifying_income_monthly}
 
   # --- stmt.* / asset.* — the assets family (LP-323-AS-B). Statement/asset facts key under the DOCUMENT
