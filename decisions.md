@@ -10383,3 +10383,60 @@ a `residence`? (Here they typed `address_normalized=unknown`; not decided.) Cros
 refused to call ID-4 correct), LP-325 (the gather contract — ABSENT≠DISAGREEING, `<2`→couldnt_check), LP-335
 (FINDING-1, the same tag's last bug), LP-333 (uniform couldnt_check is a failure), LP-343/334 (the prompt is
 unmeasured), LP-379 (calibration).
+
+## ADR-289: The vocabulary orphan guard — fail loud when a live consumer reads a tag nobody produces (LP-373)
+
+**The class.** *A tag declared in the vocabulary (`fact_tags.csv`) with a producer named, but with no
+declaration in `tag_production.yaml` and nothing in `app/` writing it, resolves to ABSENT; absent is
+indistinguishable from "the document genuinely doesn't have this", so the rule reading it couldnt_checks
+silently, forever, with every test green.* Found THREE times, each by accident after a LIVE rule was already
+dead: `dti.qualifying_income_monthly` (LP-366-A — AS-1 never evaluated a deposit); `housing.insurance_monthly`
+(LP-367, open — the DTI calc can never compute on any file, UI shows a fabricated $0.00);
+`occupancy.stated`/`occupancy.consistent_with_signals` (LP-371 — OC-2 dead since the beginning). **The root:**
+the loader validates declarations that EXIST; it never checks that a vocabulary tag with a producer HAS one.
+
+**Decision — a guard (a TEST) that fails when a LIVE consumer HARD-reads an unproduced vocabulary tag.**
+Sibling to LP-369's declaration→field guard, one seam earlier (vocabulary→producer).
+
+**D1 — "produced" has THREE sources, not one.** A definition checking only `tag_production.yaml` is wrong:
+(1) a declaration there (54 tags); (2) the **hardcoded transaction path** — `services/tag_production.py`
+(Stage A) + `tag_correlation.py` (Stage B, `txn.has_identified_source`), which the live orchestrator leaves
+alone (`producer.py`); (3) a live judgment rule's `output_tag`. Missing (2) would false-positive on
+`txn.has_identified_source` (read by LIVE AS-1) — D1's trap.
+
+**D2 — the severity model (the census decided it, not the framing).** A guard that fires on every
+authored-ahead tag is noise and gets muted within a week (LP-333's dynamic); one that misses a live rule's
+orphan is worthless. So an unproduced tag FAILS the build only when a LIVE consumer **hard-reads** it — a live
+rule reads it as a gated input (load-bearing / operand / gather / applicability / when-tag → absence =
+couldnt_check), OR it is a required input to the always-computed DTI calculator (`_REQUIRED_DTI_TAGS`, the only
+tag-gated calc, on the live path, rendered in the UI — LP-367's shape). All three instances were this. Read
+only by INERT rules, by NO rule, or **softly** (a judgment rule's `reasoned_over` — not gated, so absence only
+thins the AI's context) → reported, not failed. Real census (156 tags): 58 fine, 73 inert-orphan, 22
+no-rule-orphan, **2 live DTI-calc orphans**, 1 live-soft orphan. **Zero live-rule HARD orphans remain** (the
+three fixes closed them); every `id.*` tag is produced.
+
+**D3 — where it lives: a TEST, not load-time.** The guard needs `ACTIVE_RULE_IDS`, the rule specs, and the
+calc layer. Running it at load would force the tag-vocabulary loader to import the rule engine — inverting the
+dependency (the vocabulary is read BY the rule engine). Same argument, same conclusion as LP-369; a CI test
+fails just as loudly.
+
+**D4 — what it does NOT cover (the seam map).** A declared producer that never RUNS (`_required_ai_groups`,
+LP-333/368 — unguarded); a declaration naming a nonexistent field (LP-369, document/transaction only); a tag
+that materializes but is WRONG (calibration, LP-379); a live-rule SOFT `reasoned_over` orphan (reported); a
+produced+consumed tag ABSENT from the vocabulary (`txn.source_strength` — read by live AS-1, produced by Stage
+B, not in `fact_tags.csv` — invisible to a vocabulary scan). This is ONE seam of several — the class is not
+"closed", it is now GUARDED at this seam.
+
+**`housing.insurance_monthly` (LP-367 open) is handled, not fixed.** The guard would fail on it today (correct
+— it IS a live orphan). It is a LOUD exemption in `_KNOWN_LIVE_ORPHANS` naming LP-367, with a test asserting it
+is STILL a genuine orphan (unproduced AND live-consumed), so the exemption cannot rot — LP-369's discipline.
+
+**Fourth orphans found (reported, not fixed — the first complete scan).** `housing.taxes_monthly` — a SECOND
+DTI-calc orphan (LP-367 named only insurance; the calc needs both); `property.address_normalized_match` — a
+live SOFT orphan (OC-2 `reasoned_over`, ADR-287's documented address follow-up); `txn.source_strength` — a
+produced+consumed tag missing from the vocabulary.
+
+**Consequences.** No engine/rule/vocabulary change; `ACTIVE_RULE_IDS` unchanged; full suite green (2357).
+`test_guard_fires_on_a_synthetic_live_rule_orphan` proves it can fail; `test_guard_catches_the_dti_calc_orphans_when_not_exempted`
+proves it fires on the real open orphans. Cross-refs: LP-366-A/367/370/371 (the instances), LP-369 (the sibling
+guard), LP-326 (declarations), LP-333 (the `_required_ai_groups` seam), LP-379 (calibration).
