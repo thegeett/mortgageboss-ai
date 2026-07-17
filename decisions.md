@@ -10556,3 +10556,29 @@ couldnt_check; the DTI card renders its gate ("Gated", the reason, "Unknown" lin
 the engine; NO §10 actions on tabs 1-4 (LP-377). Frontend only — zero backend change; `ACTIVE_RULE_IDS` and
 the legacy sweep untouched. Cross-refs: §8, LP-316, LP-375 (the two lists + the DTI gate), LP-329/330 (the
 honesty contract), LP-333 (uniform couldnt_check), LP-377 (§10 actions).
+
+## ADR-293: Governed rule findings carry their OWN category taxonomy, not the legacy sweep's (LP-376-B)
+
+**Context.** The first human view of the LP-376 tabs showed ID-8 (a citizenship/eligibility rule) as
+"Assets" and IN-2 (a pay-stub recency rule) as "Assets". Root cause: a governed rule finding's `category`
+was the persisted legacy `FindingCategory` enum — `income/assets/credit/property/documentation/cross_source/
+regulatory` — the AI cross-source SWEEP's taxonomy (it drives the legacy filter chips). That enum has **no
+Identity and no Occupancy**, so a rule whose real family is Identity/Occupancy (from `rule_kinds.csv`) was
+coerced into it, defaulting to `ASSETS`.
+
+**Decision.** `RuleFindingPublic.category` is the rule's OWN category from its SPEC / `rule_kinds.csv` (the
+gate of record) — Identity / Income / Occupancy / Assets / … — read at load time, NOT the coerced legacy
+`FindingCategory`. The persisted column and the legacy sweep's use of it are unchanged.
+
+**Why — the two systems are different things down to their vocabularies.** LP-375 quarantined the governed
+rule engine from the legacy sweep as two distinct TYPES so their lists and counts can never merge. Their
+CATEGORY taxonomies are just as distinct: the sweep classifies AI observations into a fixed handful of areas;
+the rule engine has its own rule families (Identity, Income, Assets, Occupancy, Credit, Property, …). Forcing
+the sweep's enum onto rule findings is the same merge LP-375 forbade, one field down — and it is exactly how
+ID-8 became "Assets". So the governed findings carry their own family; the legacy findings keep theirs. A
+shared `FindingCategory` enum with Identity/Occupancy added would be the alternative, but that couples the two
+taxonomies again and touches the sweep — rejected in favour of reading the rule's own category from the gate
+of record. Frontend renders whichever the API sends (no UI change).
+
+Cross-refs: LP-375 (the two-type quarantine), LP-376/376-B (the tabs + the bug), `rule_kinds.csv` (the gate of
+record for a rule's category + kind).

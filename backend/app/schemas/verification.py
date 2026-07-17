@@ -14,20 +14,50 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field
 
-from app.models.finding import Finding
+from app.models.finding import EvaluationOutcome, Finding
 from app.models.verification import Verification
 from app.verification.confidence import AggressionLevel
 from app.verification.finding_guidance import resolve_guidance
-from app.verification.rules.specs import load_rule_spec
+from app.verification.rules.specs import RuleSpec, load_rule_spec
+
+# The §8 outcomes where a JUDGMENT rule actually reached an AI verdict (so a ratification badge is honest);
+# couldnt_check / no_longer_applies mean the AI never judged (a gate/applicability/reconcile terminal).
+_AI_VERDICT_OUTCOMES = frozenset(
+    {EvaluationOutcome.OPEN, EvaluationOutcome.SATISFIED, EvaluationOutcome.NEEDS_REVIEW}
+)
 
 
-def _guideline_for(rule_id: str) -> str | None:
-    """The rule's guideline citation from its SPEC — never AI-recalled (LP-375). None if the spec
-    cannot load (e.g. a retired/legacy rule_id with no spec file)."""
+def _rule_spec(rule_id: str) -> RuleSpec | None:
+    """The rule's SPEC — the gate of record for its guideline + category — or None for a retired/legacy
+    rule_id with no spec file."""
     try:
-        return load_rule_spec(rule_id).guideline_reference
+        return load_rule_spec(rule_id)
     except (OSError, KeyError, ValueError):
         return None
+
+
+def _ratification_pending(finding: Finding, spec: RuleSpec | None) -> bool:
+    """Whether this finding's verdict rests on an AI JUDGMENT a human must ratify (LP-376-B).
+
+    NOT ``details.gated_pending_signoff`` — that is ``not priya_validated`` (the rule's THRESHOLDS await
+    domain sign-off; true for nearly every rule) and has nothing to do with AI ratification. The honest
+    signal is: a JUDGMENT rule (``spec.judgment``) that actually reached a verdict (open/satisfied/
+    needs_review) — a couldnt_check/gate-fail never invoked the AI, so it does not ratify. (Limitation: a
+    FUZZY-consistency AI verdict is under-marked here — it needs the engine's per-finding
+    ``ratification_pending`` persisted, a follow-up; it does not arise on today's live files.)"""
+    if spec is None or spec.judgment is None:
+        return False
+    return finding.evaluation_outcome in _AI_VERDICT_OUTCOMES
+
+
+def _rule_category(finding: Finding, spec: RuleSpec | None) -> str:
+    """The rule's OWN category (Identity / Income / Occupancy / …) from its SPEC — the gate of record
+    (``rule_kinds.csv``). NOT the persisted ``FindingCategory`` enum, which lacks Identity/Occupancy and
+    coerces them to the wrong legacy value (ID-8 Identity → 'assets'). The two systems' taxonomies are
+    separate (LP-375); the governed findings carry their own family, not the sweep's."""
+    if spec is not None and spec.category:
+        return spec.category
+    return finding.category.value  # a legacy/retired rule with no spec → its stored category
 
 
 def _as_uuid(value: str) -> UUID | None:
@@ -221,6 +251,9 @@ class RuleFindingPublic(BaseModel):
     @classmethod
     def from_model(cls, finding: Finding) -> RuleFindingPublic:
         details = finding.details or {}
+        spec = _rule_spec(
+            finding.rule_id
+        )  # the gate of record for category + ratification (LP-376-B)
         return cls(
             id=finding.id,
             rule_id=finding.rule_id,
@@ -230,12 +263,16 @@ class RuleFindingPublic(BaseModel):
                 finding.evaluation_outcome.value if finding.evaluation_outcome is not None else ""
             ),
             status=finding.status.value,
-            category=finding.category.value,
+            category=_rule_category(
+                finding, spec
+            ),  # the rule's OWN family, not the legacy enum (Bug 3)
             message=finding.message,
             subject_key=finding.subject_key,
-            guideline=_guideline_for(finding.rule_id),
+            guideline=spec.guideline_reference if spec is not None else None,
             load_bearing_tags=finding.load_bearing_tags or [],
-            ratification_pending=bool(details.get("gated_pending_signoff")),
+            # An AI judgment verdict a human must ratify — NOT gated_pending_signoff (= not priya_validated;
+            # true for nearly every rule). See _ratification_pending (Bug 1).
+            ratification_pending=_ratification_pending(finding, spec),
             how_to_fix=details.get("how_to_fix")
             if isinstance(details.get("how_to_fix"), str)
             else None,

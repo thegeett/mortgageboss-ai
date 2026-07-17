@@ -174,7 +174,11 @@ async def test_not_reasonable_judgment_is_needs_review_with_reasoning() -> None:
     ev = await _evaluate(_occupancy_tags(stated="primary", consistent="no"), stub)
     assert ev.evaluation.verdict is Verdict.NEEDS_REVIEW
     assert ev.evaluation.ratification_pending is True
-    assert "second home" in ev.evaluation.reasoning
+    # LP-376-B: the MESSAGE states the verdict; the AI's raw reasoning ("second home") lives in the
+    # PROVENANCE (a load-bearing tag), NOT the message — engine reasoning must not be a finding's identity.
+    assert "second home" not in ev.evaluation.reasoning
+    assert "judged 'no'" in ev.evaluation.reasoning
+    assert any("second home" in (t.reasoning or "") for t in ev.evaluation.load_bearing_tags)
 
 
 async def test_no_judgment_path_ever_auto_ships() -> None:
@@ -196,7 +200,9 @@ async def test_low_confidence_judgment_is_needs_review() -> None:
     ev = await _evaluate(_occupancy_tags(), stub)
     assert ev.evaluation.verdict is Verdict.NEEDS_REVIEW
     assert ev.evaluation.ratification_pending is True
-    assert "low-confidence" in ev.evaluation.reasoning
+    assert (
+        "low confidence" in ev.evaluation.reasoning
+    )  # the verdict message names the low confidence
 
 
 async def test_shaky_load_bearing_input_gates_to_needs_review_before_any_ai_call() -> None:
@@ -264,7 +270,8 @@ async def test_malformed_response_is_unknown_needs_review_not_a_default() -> Non
     ev = await _evaluate(_occupancy_tags(), stub)
     assert ev.evaluation.verdict is Verdict.NEEDS_REVIEW
     assert ev.judgment_tag is not None and ev.judgment_tag.value == "unknown"
-    assert "unknown" in ev.evaluation.reasoning
+    # A malformed answer → the 'unknown' verdict message (the tags don't support a confident judgment).
+    assert "do not support a confident judgment" in ev.evaluation.reasoning
 
 
 async def test_model_unknown_is_preserved() -> None:

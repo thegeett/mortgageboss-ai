@@ -97,14 +97,19 @@ def _result(
     subject_tags: Mapping[str, Tag],
     *,
     verdict_confidence: float | None = None,
+    extra_load_bearing: tuple[LoadBearingTag, ...] = (),
 ) -> RuleEvaluation:
-    """A ratification-pending RuleEvaluation carrying the structural tags inline (provenance)."""
+    """A ratification-pending RuleEvaluation carrying the structural tags inline (provenance).
+
+    ``extra_load_bearing`` (LP-376-B) appends the AI VERDICT itself (value + the model's reasoning) to the
+    provenance, so the ratifier reads WHY in the provenance card — while the ``reasoning`` (the finding's
+    message) states the verdict, not the raw reasoning paragraph."""
     return RuleEvaluation(
         rule_id=spec.rule_id,
         subject_id=subject_id,
         verdict=verdict,
         verdict_confidence=verdict_confidence,
-        load_bearing_tags=_load_bearing(reasoned_over, subject_tags),
+        load_bearing_tags=_load_bearing(reasoned_over, subject_tags) + extra_load_bearing,
         threshold_used=None,  # a judgment rule has no numeric threshold
         priya_validated=spec.reference_values.priya_validated,
         gated_pending_signoff=True,
@@ -146,16 +151,15 @@ def _resolve(
     return judgment.value, judgment.confidence, judgment.reasoning
 
 
-def _verdict_reasoning(
-    value: str, reasoning: str | None, confidence: float | None, floor: float
-) -> str:
-    """The needs_review reasoning — the AI's judgment + why it awaits ratification."""
-    base = reasoning or f"the judgment is '{value}'"
+def _verdict_message(value: str, confidence: float | None, floor: float) -> str:
+    """The needs_review MESSAGE — states the VERDICT (LP-376-B), never the raw AI reasoning paragraph
+    (which now lives in the provenance, as a load-bearing tag). Engine-internal reasoning ("Tag
+    id.citizenship confirms…") must not leak to a processor as a finding's identity."""
     if value == _UNKNOWN:
-        return f"{base} — the tags do not support a confident judgment; a human must review"
+        return "the tags do not support a confident judgment — a human must review"
     if confidence is not None and confidence < floor:
-        return f"{base} — the judgment '{value}' is low-confidence ({confidence} < {floor}); a human must ratify"
-    return f"{base} — '{value}' is an AI judgment and must be ratified by a human"
+        return f"the AI judged '{value}' at low confidence ({confidence} < {floor}) — a human must ratify"
+    return f"the AI judged '{value}' — an AI verdict a human must ratify (it never auto-ships)"
 
 
 async def evaluate_judgment_rule(
@@ -304,14 +308,18 @@ async def _evaluate_one_subject(
     #    honest unknown, never a defaulted verdict). MANDATORY: always needs_review.
     value, confidence, reasoning = _resolve(result, jud.value_domain)
     tag = _judgment_tag(jud, subject_id, value, confidence, reasoning)
+    # LP-376-B: the AI's own verdict + reasoning goes into the PROVENANCE (a load-bearing tag the ratifier
+    # reads in the card), NOT the message. The message states the verdict; the reasoning explains it.
+    verdict_provenance = LoadBearingTag(jud.output_tag, value, confidence, reasoning, (subject_id,))
     evaluation = _result(
         spec,
         subject_id,
         Verdict.NEEDS_REVIEW,
-        _verdict_reasoning(value, reasoning, confidence, floor),
+        _verdict_message(value, confidence, floor),
         jud.reasoned_over,
         subject_tags,
         verdict_confidence=confidence if confidence is not None else gate.verdict_confidence,
+        extra_load_bearing=(verdict_provenance,),
     )
     return JudgmentEvaluation(tag, evaluation)
 

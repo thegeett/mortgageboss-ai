@@ -281,11 +281,12 @@ async def test_rule_findings_separate_and_satisfied_is_reachable(
     # The honesty contract: couldnt_check carries its REASON and is NOT typed satisfied / not_applicable.
     cc = next(rf for rf in body["rule_findings"] if rf["evaluation_outcome"] == "couldnt_check")
     assert cc["message"] and cc["evaluation_outcome"] not in ("satisfied", "not_applicable")
-    # The governed shape carries the SPEC guideline (never AI-recalled), inline provenance, the ratification
-    # marker — everything LP-376 needs to render a §8 tab + a provenance card.
+    # The governed shape carries the SPEC guideline (never AI-recalled) + inline provenance.
     assert cc["guideline"]  # loaded from ID-4's spec at read time
     assert cc["load_bearing_tags"][0]["tag_id"] == "id.current_address_type"
-    assert cc["ratification_pending"] is True
+    # LP-376-B: ID-4 is a CONSISTENCY rule, and this is a couldnt_check — no AI verdict was made, so the
+    # ratification badge is FALSE (it is NOT derived from gated_pending_signoff = not priya_validated).
+    assert cc["ratification_pending"] is False
     assert cc["subject_key"] == "b2"  # the stable content-id (human legibility is LP-376's)
 
 
