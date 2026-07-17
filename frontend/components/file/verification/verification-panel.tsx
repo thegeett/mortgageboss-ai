@@ -267,7 +267,9 @@ function VerificationBody({
       {data.stale && !running && <StaleBanner />}
       <NeedsCompleteness fileId={fileId} />
       <RuleFindingsTabs
-        ruleFindings={data.rule_findings}
+        // `?? []` guards a stale/version-skewed response missing the newly-added field — degrade to the
+        // empty-state tabs rather than throwing in bucketRuleFindings and blanking the whole panel.
+        ruleFindings={data.rule_findings ?? []}
         legacyCount={data.findings.length}
         legacy={
           <LegacyBody

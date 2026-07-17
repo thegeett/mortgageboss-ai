@@ -290,7 +290,7 @@ function LineRow({
             </span>
           ) : item.unknown ? (
             <span className="text-warning">
-              unknown — no binder / not extracted (absent, not $0)
+              unknown — missing or unusable input (fail-closed, never assumed $0)
             </span>
           ) : (
             humanize(item.source)

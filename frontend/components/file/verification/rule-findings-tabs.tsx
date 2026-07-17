@@ -13,11 +13,11 @@
 import type { EvaluationOutcome, RuleFinding } from "@/lib/types/verification";
 import { cn } from "@/lib/utils";
 import {
-  ATTENTION_ORDER,
   OUTCOME_META,
   type TabId,
   attentionGroups,
   bucketRuleFindings,
+  outcomeMeta,
 } from "@/lib/verification/rule-findings";
 import { Archive, CheckCircle2, CircleSlash, History, TriangleAlert } from "lucide-react";
 import type { ReactNode } from "react";
@@ -28,7 +28,9 @@ interface TabDef {
   id: TabId;
   label: string;
   count: number;
-  hasViolations?: boolean;
+  /** Count-badge emphasis: "danger" = a violation (`open`), "warning" = a blocking gap (`couldnt_check`).
+   *  A gap must not read as fine at a glance (the honesty contract) — hence a distinct warning tone. */
+  tone?: "danger" | "warning";
 }
 
 function TabStrip({
@@ -66,11 +68,13 @@ function TabStrip({
             <span
               className={cn(
                 "rounded-full px-1.5 py-px text-[11px] font-medium tabular-nums",
-                tab.hasViolations
+                tab.tone === "danger"
                   ? "bg-destructive/10 text-destructive"
-                  : isActive
-                    ? "bg-primary/10 text-primary"
-                    : "bg-gray-100 text-gray-500",
+                  : tab.tone === "warning"
+                    ? "bg-warning/10 text-warning"
+                    : isActive
+                      ? "bg-primary/10 text-primary"
+                      : "bg-gray-100 text-gray-500",
               )}
             >
               {tab.count}
@@ -120,7 +124,7 @@ function OutcomeGroup({
   outcome: EvaluationOutcome;
   findings: RuleFinding[];
 }) {
-  const meta = OUTCOME_META[outcome];
+  const meta = outcomeMeta(outcome);
   return (
     <section className="space-y-2">
       <div className="flex items-baseline gap-2">
@@ -159,13 +163,18 @@ export function RuleFindingsTabs({
   const [active, setActive] = useState<TabId>("attention");
   const buckets = bucketRuleFindings(ruleFindings);
   const openCount = buckets.attention.filter((f) => f.evaluation_outcome === "open").length;
+  const couldntCheckCount = buckets.attention.filter(
+    (f) => f.evaluation_outcome === "couldnt_check",
+  ).length;
 
   const tabs: TabDef[] = [
     {
       id: "attention",
       label: "Needs attention",
       count: buckets.attention.length,
-      hasViolations: openCount > 0,
+      // A violation reds the badge; a blocking gap (couldnt_check, no open) warns it — never neutral, so
+      // a file that only "couldn't check" doesn't read as fine at the tab-strip glance (honesty contract).
+      tone: openCount > 0 ? "danger" : couldntCheckCount > 0 ? "warning" : undefined,
     },
     { id: "satisfied", label: "Satisfied", count: buckets.satisfied.length },
     {

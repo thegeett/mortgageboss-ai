@@ -15,7 +15,7 @@
 import { humanize } from "@/lib/format";
 import type { RuleFinding, RuleFindingTag } from "@/lib/types/verification";
 import { cn } from "@/lib/utils";
-import { OUTCOME_META, type OutcomeTone, ruleSubjectChip } from "@/lib/verification/rule-findings";
+import { type OutcomeTone, outcomeMeta, ruleSubjectChip } from "@/lib/verification/rule-findings";
 import { ChevronDown, Gavel } from "lucide-react";
 import { useId, useState } from "react";
 
@@ -95,7 +95,7 @@ function DetailBlock({ label, children }: { label: string; children: React.React
 
 export function RuleFindingRow({ finding }: { finding: RuleFinding }) {
   const [expanded, setExpanded] = useState(false);
-  const meta = OUTCOME_META[finding.evaluation_outcome];
+  const meta = outcomeMeta(finding.evaluation_outcome);
   const tone = TONE[meta.tone];
   const chip = ruleSubjectChip(finding);
   const panelId = useId();

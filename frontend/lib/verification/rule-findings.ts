@@ -27,7 +27,10 @@ const OUTCOME_TAB: Record<EvaluationOutcome, GovernedTabId> = {
 };
 
 export function tabForOutcome(outcome: EvaluationOutcome): GovernedTabId {
-  return OUTCOME_TAB[outcome];
+  // Fallback to "attention" for an outcome this union doesn't know (a backend enum that grew past the
+  // frontend): an unrecognised verdict must surface where action lives — never silently dropped, and
+  // never crash the whole panel via `buckets[undefined].push`.
+  return OUTCOME_TAB[outcome] ?? "attention";
 }
 
 /** Tab 1's three outcomes in PRIORITY order — `open` first so the real violations never drown in a pile
@@ -46,6 +49,20 @@ export interface OutcomeMeta {
   /** One line: what THIS outcome means (so `couldnt_check` reads as a gap, not a violation). */
   blurb: string;
   tone: OutcomeTone;
+}
+
+/** Shown for an outcome outside this union (a backend enum that grew) — surfaced, never crashed on. */
+const FALLBACK_META: OutcomeMeta = {
+  label: "Unknown outcome",
+  blurb:
+    "An outcome this view doesn't recognise yet — surfaced here so it is never silently dropped.",
+  tone: "warning",
+};
+
+/** OUTCOME_META lookup that never returns undefined: an outcome outside the union → a safe fallback, so
+ *  one unexpected value degrades a single row instead of crashing the whole tabs render. */
+export function outcomeMeta(outcome: EvaluationOutcome): OutcomeMeta {
+  return OUTCOME_META[outcome] ?? FALLBACK_META;
 }
 
 export const OUTCOME_META: Record<EvaluationOutcome, OutcomeMeta> = {
@@ -102,10 +119,18 @@ export function bucketRuleFindings(findings: RuleFinding[]): GovernedBuckets {
 export function attentionGroups(
   findings: RuleFinding[],
 ): { outcome: EvaluationOutcome; findings: RuleFinding[] }[] {
-  return ATTENTION_ORDER.map((outcome) => ({
-    outcome,
-    findings: findings.filter((f) => f.evaluation_outcome === outcome),
-  })).filter((group) => group.findings.length > 0);
+  // Known outcomes first (open → couldnt_check → needs_review), then any UNEXPECTED outcome that landed
+  // in this bucket via the tabForOutcome fallback — appended as its own group so it is shown, not dropped.
+  const known = new Set<EvaluationOutcome>(ATTENTION_ORDER);
+  const extras = [
+    ...new Set(findings.map((f) => f.evaluation_outcome).filter((o) => !known.has(o))),
+  ];
+  return [...ATTENTION_ORDER, ...extras]
+    .map((outcome) => ({
+      outcome,
+      findings: findings.filter((f) => f.evaluation_outcome === outcome),
+    }))
+    .filter((group) => group.findings.length > 0);
 }
 
 // --------------------------------------------------------------------------- //
@@ -118,6 +143,13 @@ function tagValue(finding: RuleFinding, tagId: string): string | null {
   if (tag == null || tag.value == null) return null;
   const value = String(tag.value).trim();
   return value.length > 0 && value !== "unknown" ? value : null;
+}
+
+/** A compact "M/D" from an ISO date (parsed by parts to avoid a timezone shift on a date-only string);
+ *  the raw value verbatim if it isn't ISO — the chip is an identity hint, never a computed field. */
+function shortDate(value: string): string {
+  const iso = value.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  return iso != null ? `${Number(iso[2])}/${Number(iso[3])}` : value;
 }
 
 /**
@@ -133,7 +165,7 @@ export function ruleSubjectChip(finding: RuleFinding): string | null {
   const date = tagValue(finding, "txn.date");
   if (amount != null) {
     const money = formatMoney(amount);
-    return date != null ? `${money} · ${date}` : money;
+    return date != null ? `${money} · ${shortDate(date)}` : money;
   }
   const name = tagValue(finding, "id.name_normalized");
   if (name != null) return name;
