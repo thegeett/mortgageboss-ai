@@ -260,18 +260,77 @@ async def test_id4_low_confidence_residence_classification_gates_to_needs_review
     assert "current_address_type" in results[0].reasoning
 
 
-async def test_id4_unknown_residence_classification_gates_to_couldnt_check() -> None:
-    # A source whose type is "unknown" → we cannot tell if it belongs in the compare → couldnt_check.
-    stub = _Reasoner("agree")
+async def test_id4_unknown_type_is_excluded_not_vetoed() -> None:
+    # LP-372 — THE DECISION (was: ONE 'unknown'-typed candidate VETOED the whole compare → couldnt_check,
+    # even when other sources were confidently typed). An AI 'unknown' TYPE is now ABSENT-FOR-COMPARISON:
+    # the source is EXCLUDED (like an absent filter tag, like the gather-tag 'unknown'), NOT a veto. Two
+    # confidently-typed residences that AGREE still satisfy; the excluded source is SURFACED in the reason.
+    #
+    # ACCEPTED TRADE-OFF (named here so a reversal is findable — the LP-340 precedent): if the ONLY
+    # disagreeing residence were hidden behind an 'unknown' type it would be dropped from the compare and
+    # a discrepancy could go unsurfaced. We accept that over the alternative — couldnt_checking EVERY
+    # purchase file because its subject-property address is (correctly) typed 'unknown' (LP-333's uniform-
+    # couldnt_check-is-a-failure). The exclusion COUNT is surfaced so a human can still look.
+    stub = _Reasoner("disagree")
     snap = _snapshot(
         [
             ("app", _addr_typed("123 Main St", "residence", 0.9)),
-            ("dl", _addr_typed("123 Main St", "unknown", 0.9)),
+            ("dl", _addr_typed("123 Main St", "residence", 0.9)),
+            (
+                "pa",
+                _addr_typed("999 Property Rd", "unknown", 0.9),
+            ),  # subject-property addr, untyped
+        ]
+    )
+    results = await _eval_id4(snap, reasoner=stub)
+    assert [r.verdict for r in results] == [
+        Verdict.SATISFIED
+    ]  # the veto no longer blocks the compare
+    assert stub.calls == 0  # the two residences are byte-identical → exact bookend, no AI
+    assert (
+        "excluded from the compare" in results[0].reasoning
+    )  # the exclusion is SURFACED, not silent
+    # provenance carries ONLY the two residences — not the unknown-typed property source.
+    assert {t.source_facts[0] for t in results[0].load_bearing_tags} == {"app", "dl"}
+
+
+async def test_id4_unknown_type_does_not_mask_a_real_discrepancy() -> None:
+    # THE SIGNAL SURVIVES: two residence sources that DISAGREE now SURFACE (fired) even with an
+    # unknown-typed candidate present. Under the old veto this couldnt_checked → the discrepancy was
+    # SILENTLY MASKED (the false-green ID-4 exists to prevent).
+    stub = _Reasoner("disagree")
+    snap = _snapshot(
+        [
+            ("app", _addr_typed("123 Main St", "residence", 0.9)),
+            ("dl", _addr_typed("500 Oak Ave", "residence", 0.9)),
+            ("pa", _addr_typed("999 Property Rd", "unknown", 0.9)),
+        ]
+    )
+    results = await _eval_id4(snap, reasoner=stub)
+    assert [r.verdict for r in results] == [Verdict.FIRED]
+    assert "excluded from the compare" in results[0].reasoning
+
+
+async def test_id4_single_residence_plus_unknown_candidate_is_honest_couldnt_check() -> None:
+    # THE REAL LF-6T3N SHAPE (run 01039e93): one residence-typed source (the DL) + a purchase-agreement
+    # address the AI CORRECTLY typed 'unknown' (the subject property, not a residence). The unknown source
+    # is EXCLUDED (not vetoed), leaving 1 residence → couldnt_check for the HONEST root (thin data — one
+    # residence source), and the excluded source is SURFACED. Before LP-372 this couldnt_checked with the
+    # MISLEADING 'classification … is not trustworthy: … is unknown' veto reason (which blamed the
+    # classifier for correctly declining to call a property address a residence).
+    stub = _Reasoner("disagree")
+    snap = _snapshot(
+        [
+            ("dl", _addr_typed("4415 Overlook Cove Road", "residence", 0.9)),
+            ("pa", _addr_typed("2619 Mary Butler Way", "unknown", 0.9)),
         ]
     )
     results = await _eval_id4(snap, reasoner=stub)
     assert [r.verdict for r in results] == [Verdict.COULDNT_CHECK]
     assert stub.calls == 0
+    assert "only 1 source" in results[0].reasoning
+    assert "excluded from the compare" in results[0].reasoning
+    assert "not trustworthy" not in results[0].reasoning  # the old veto reason is gone
 
 
 async def test_id4_shaky_excluded_source_still_gates_the_subject() -> None:

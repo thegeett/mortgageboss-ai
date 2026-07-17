@@ -165,11 +165,14 @@ class _Gathered:
 class _GatherResult:
     """A gather over one subject: the INCLUDED instances (to compare) + the classification tags that
     DECIDED inclusion (gated for confidence, so a shaky residence/mailing label cannot silently
-    include or exclude a source) + the count of value-bearing candidates (matched or not)."""
+    include or exclude a source) + the count of value-bearing candidates (matched or not) + the count
+    of candidates whose TYPE was AI-``unknown`` (absent-for-comparison, excluded WITHOUT vetoing —
+    LP-372 — but surfaced in the finding so the exclusion is visible)."""
 
     included: list[_Gathered]
     filter_tags: dict[str, Tag]
     candidate_count: int
+    type_undetermined: int = 0
 
 
 # A borrower_id -> its documents index, built ONCE per run (not re-scanned per subject — that was
@@ -211,14 +214,15 @@ def _borrower_documents(
     """Gather ``gather_tag`` from every document belonging to the borrower (filtered).
 
     A document that lacks the fact is ABSENT → not a candidate (absent≠empty). A value-bearing
-    document that fails the filter is excluded (a mailing/prior address is not a residence), but its
-    PRESENT filter tag is still returned so the evaluator can gate the confidence of that
+    document that fails the filter is excluded (a mailing/prior address is not a residence), but a
+    PRESENT, CONCRETE filter tag is still returned so the evaluator can gate the confidence of that
     inclusion/exclusion decision — a shaky classification must not silently drive the compare set."""
     if snapshot.tags.absent:
         return _GatherResult([], {}, 0)
     included: list[_Gathered] = []
     filter_tags: dict[str, Tag] = {}
     candidate_count = 0
+    type_undetermined = 0
     for entry in index.get(subject_id, []):
         source_tags = snapshot.tags.by_subject.get(entry.content_id, {})
         tag = source_tags.get(gather_tag)
@@ -231,12 +235,23 @@ def _borrower_documents(
         candidate_count += 1
         if gather_filter is not None:
             filter_tag = source_tags.get(gather_filter.tag)
-            if filter_tag is not None:  # gate its confidence/known-ness (absent → excluded below)
+            # LP-372: an AI-``unknown`` TYPE is ABSENT-FOR-COMPARISON. The source states an address but
+            # no determinable TYPE, so — exactly like an ABSENT filter tag (no branch below adds it), and
+            # like the gather-tag ``unknown`` above — it is EXCLUDED from the compare and must NOT poison
+            # the confidence gate (an honest "I can't type this" is not evidence the classifier is
+            # unreliable on the sources it COULD type; on a purchase file the subject-property address is
+            # correctly ``unknown`` on every file, so vetoing on it uniformly couldnt_checks — LP-333).
+            # Only a PRESENT, CONCRETE type is gated for confidence. The exclusion is COUNTED so the
+            # finding can SURFACE it — a residence hiding behind ``unknown`` is not silently dropped (the
+            # false-green the plain-exclude option would risk).
+            if filter_tag is not None and str(filter_tag.value) == _UNKNOWN:
+                type_undetermined += 1
+            elif filter_tag is not None:  # gate its confidence/known-ness (absent → excluded below)
                 filter_tags[entry.content_id] = filter_tag
             if not _tag_holds(gather_filter, source_tags):
                 continue
         included.append(_Gathered(entry.content_id, tag))
-    return _GatherResult(included, filter_tags, candidate_count)
+    return _GatherResult(included, filter_tags, candidate_count, type_undetermined)
 
 
 _Scope = Callable[[Snapshot, str, str, "TagCondition | None", "_DocIndex"], _GatherResult]
@@ -297,8 +312,12 @@ def _outcome_result(
     *,
     verdict_confidence: float | None,
     ratification_pending: bool,
+    reason_suffix: str = "",
 ) -> RuleEvaluation:
-    """Build the RuleEvaluation for a declared outcome, formatting its reasoning over the gathered set."""
+    """Build the RuleEvaluation for a declared outcome, formatting its reasoning over the gathered set.
+
+    ``reason_suffix`` (LP-372) appends a note about candidates that were excluded because their filter
+    TYPE was AI-``unknown`` — so a satisfied/fired verdict SURFACES what it could not compare."""
     fields = {
         "values": ", ".join(str(inst.tag.value) for inst in gathered),
         "sources": ", ".join(inst.source_id for inst in gathered),
@@ -308,7 +327,7 @@ def _outcome_result(
         spec,
         subject_id,
         VERDICT_BY_NAME[outcome.verdict],
-        outcome.reasoning.format(**fields),
+        outcome.reasoning.format(**fields) + reason_suffix,
         gathered,
         verdict_confidence=verdict_confidence,
         how_to_fix=outcome.how_to_fix,
@@ -373,10 +392,22 @@ async def evaluate_consistency_rule(
         result = scope(snapshot, subject_id, con.gather_tag, con.gather_filter, doc_index)
         gathered = result.included
 
+        # LP-372: a note SURFACING candidates dropped because their filter TYPE was AI-``unknown``
+        # (absent-for-comparison — excluded, not vetoed). Appended to the couldnt_check / satisfied /
+        # fired reason so a residence hiding behind ``unknown`` is not silently dropped. Empty for the
+        # common case and for every filterless rule (ID-1/2/3, IN-5) → their reasons are unchanged.
+        excluded_note = (
+            f" ({result.type_undetermined} other address-bearing source(s) could not be typed as "
+            f"{con.gather_filter.value!r} and were excluded from the compare)"
+            if result.type_undetermined and con.gather_filter is not None
+            else ""
+        )
+
         # 1. GATE THE INCLUSION DECISION — when ≥2 value-bearing sources could be compared, a shaky
-        #    filter classification (a below-floor or "unknown" residence/mailing label) means we
-        #    cannot trust WHICH sources are in scope → fail closed rather than silently include or
-        #    exclude one. Only present filter tags are checked (an absent one → excluded, absent≠empty).
+        #    filter classification (a below-floor CONCRETE residence/mailing label — an ``unknown`` type
+        #    is now excluded upstream, LP-372) means we cannot trust WHICH sources are in scope → fail
+        #    closed rather than silently include or exclude one. Only present, concrete filter tags are
+        #    checked (an absent OR unknown one → excluded, absent≠empty).
         #    Skipped when <2 candidates exist (nothing could be compared regardless of classification).
         if result.candidate_count >= 2 and result.filter_tags:
             filter_gate = evaluate_gate(result.filter_tags, confidence_floor=floor)
@@ -410,7 +441,7 @@ async def evaluate_consistency_rule(
                     subject_id,
                     Verdict.COULDNT_CHECK,
                     f"only {len(gathered)} source(s) carry '{con.gather_tag}'{of_type} for this "
-                    f"subject — nothing to compare across sources",
+                    f"subject — nothing to compare across sources" + excluded_note,
                     gathered,
                 )
             )
@@ -457,6 +488,7 @@ async def evaluate_consistency_rule(
                     gathered,
                     verdict_confidence=gate.verdict_confidence,
                     ratification_pending=False,
+                    reason_suffix=excluded_note,
                 )
             )
             continue
@@ -471,6 +503,7 @@ async def evaluate_consistency_rule(
                     gathered,
                     verdict_confidence=gate.verdict_confidence,
                     ratification_pending=False,
+                    reason_suffix=excluded_note,
                 )
             )
             continue
@@ -487,6 +520,7 @@ async def evaluate_consistency_rule(
                     gathered,
                     verdict_confidence=conf,
                     ratification_pending=True,
+                    reason_suffix=excluded_note,
                 )
             )
         elif signal == "disagree":
@@ -498,6 +532,7 @@ async def evaluate_consistency_rule(
                     gathered,
                     verdict_confidence=conf,
                     ratification_pending=True,
+                    reason_suffix=excluded_note,
                 )
             )
         elif signal == "ai_failed":

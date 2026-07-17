@@ -10324,3 +10324,62 @@ gate couldnt_checks with a reason (no fabricated verdict). Every other live rule
 **No fourth orphan surfaced** in this ticket. Cross-refs: LP-370 (the audit that found OC-2 dead), LP-366-A/367
 (the orphan class), LP-373 (the orphan guard, deferred), LP-326 (declarations/producers), LP-335/340/343 (the
 prompt-bug class this prompt must not join), LP-379 (calibration — this prompt is unmeasured).
+
+## ADR-288: An AI `unknown` gather-filter type is absent-for-comparison — exclude + surface, not veto (LP-372)
+
+**Context — the NEW shape.** ID-4 (current-address consistency, an identity-fraud signal, LIVE + auto-shipping)
+gathers `id.address_normalized` filtered by `id.current_address_type == residence`. When ≥2 address candidates
+exist, the consistency engine gated the filter tags' confidence/known-ness (`consistency.py`, LP-325 review):
+**if ANY candidate's `current_address_type` was `unknown`, the whole per-borrower comparison was VETOED →
+couldnt_check.** LP-370 flagged this UNCERTAIN and refused to call it correct ("exactly the call that let
+AS-1/ID-2/ID-3 survive"). The shape is genuinely new: not an absent tag, not a wrong field — **a present,
+materialized filter tag whose `unknown` value on ONE candidate vetoes an entire per-subject comparison.**
+
+**Evidence (real run 01039e93, LF-6T3N — reasoning strings read, not trusted).** The address-bearing sources
+typed `unknown` are the **subject-property documents** — the purchase agreement (`"This is the subject property
+being purchased, not the buyer's residence address"`), mortgage statements, property-tax bills. Their `unknown`
+is **honest and CORRECT**: a property address is genuinely not the holder's residence. `absent ≠ unknown` holds;
+the **producer is innocent** (D1/D2 — not a producer bug; the bank statements typed `address_normalized=unknown`
+and dropped out one step earlier, never reaching the gate — LP-370's "bank statements poison it" premise is not
+what happens). Each borrower has exactly ONE residence-typed source (their DL) and no 1003, so ID-4 couldnt_checks
+on this file for **thin data** — and would do so under EITHER policy (excluding the unknown leaves 1 residence).
+**LF-6T3N cannot by itself exercise the veto-vs-exclude choice** (that needs ≥2 confidently-typed residences +
+an `unknown` candidate) — the honest limit. But the choice is decidable **on principle**, and that is D3.
+
+**Decision — treat an AI `unknown` filter-type as ABSENT-FOR-COMPARISON: exclude the source, keep it out of the
+veto gate, and SURFACE the exclusion count in the finding's reason.** This restores the codebase's own invariant,
+which the veto violated: a gather-tag `unknown` is *already* "absent-for-comparison → exclude" (`consistency.py`,
+the `_UNKNOWN` skip), and an **absent** filter tag is *already* silently excluded with no veto. Only a *present*
+filter tag valued `unknown` vetoed — so **"honest unknown" was punished more harshly than "absent"**, an inversion
+of `absent ≠ unknown`. The veto's rationale ("the classifier is untrustworthy here, so distrust its `residence`
+labels too") is refuted by the reasoning strings: the classifier is *confidently, correctly* declining to call a
+property address a residence — that is it WORKING. And because the purchase agreement is in **every purchase file**
+and correctly typed `unknown`, the veto made ID-4 **uniformly couldnt_check** on realistic files (LP-333: a rule
+that uniformly couldnt_checks is a FAILURE). **KEPT:** the confidence gate for a present, CONCRETE-but-shaky type
+(a `residence`/`mailing` label below the floor) — that IS a genuine shaky inclusion decision.
+
+**Why not (a) keep the veto, or (b) plain-exclude.** (a) VETO → uniform couldnt_check → Tab 1 noise → the tab that
+matters gets ignored, and ID-4 never protects anything. (b) PLAIN-EXCLUDE → a disagreeing residence hiding behind
+an `unknown` type is silently dropped → an auto-shipped false-green on identity fraud. **(c) EXCLUDE + SURFACE**
+takes exclude's usability and closes plain-exclude's gap: the finding's reason names the count of address-bearing
+sources that could not be typed and were excluded, so a human can look. **ACCEPTED TRADE-OFF (named in a test so a
+reversal is findable — the LP-340 precedent):** if the ONLY disagreeing residence were hidden behind `unknown`,
+the discrepancy surfaces only as an exclusion count, not as a `fired`. We accept that over couldnt_checking every
+file. Reversible by restoring the veto.
+
+**Generic, no rule-id branch.** The change lives in the generic `_borrower_documents` gather + the evaluator's
+reason assembly; it is DECLARED-behavior over any rule's `gather_filter`. **ID-4 is the only spec with a
+`gather_filter`**, so no other live rule's behavior changes (ID-1/2/3, IN-5 have `gather_filter=None` and skip the
+branch — their reasons are byte-identical). The pattern of keeping engine code rule-generic holds.
+
+**Consequences (real run, reported not predicted).** ID-4 on LF-6T3N: **before** = 2 couldnt_check with the
+misleading veto reason (`"… classification … is not trustworthy: … is unknown"`, blaming `doc067c2` = the purchase
+agreement); **after** = still 2 couldnt_check, now with the HONEST root (`"only 1 source … of type 'residence' …
+nothing to compare (1 other address-bearing source could not be typed as 'residence' and were excluded)"`). Same
+verdict, truthful reason. On a richer file (DL + 1003 both residence + an `unknown` candidate) ID-4 now COMPARES
+and satisfies/fires — which the veto previously blocked (pinned by new both-direction tests). The `id_address`
+prompt remains UNMEASURED and should join LP-379's worksheet. **Priya item:** is a bank statement's stated address
+a `residence`? (Here they typed `address_normalized=unknown`; not decided.) Cross-refs: LP-370 (the audit that
+refused to call ID-4 correct), LP-325 (the gather contract — ABSENT≠DISAGREEING, `<2`→couldnt_check), LP-335
+(FINDING-1, the same tag's last bug), LP-333 (uniform couldnt_check is a failure), LP-343/334 (the prompt is
+unmeasured), LP-379 (calibration).
