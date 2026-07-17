@@ -10621,3 +10621,80 @@ are ONE root with THREE symptoms (ID-7/ID-9 noise, the suppressed good sentence,
 LP-372) — the classifier gap is its own ticket; fixing it collapses all three at the source. Cross-refs:
 LP-330 (absent-document contract), LP-375 (subject label + the two-type quarantine), LP-376/376-B (the surface
 + message-states-the-verdict), LP-372 (ID-4's gate), LP-322 (the reconciler key).
+
+## ADR-295: The run wrapper's honesty — atomic status, visible enqueue failure, and an engine-aware cache key (LP-377)
+
+**Context — the class.** The architecture spent ~20 tickets making every FINDING honest: gates, confidence
+floors, `couldnt_check`, fail-closed calculators, `absent ≠ 0`. Then the RUN WRAPPER — the layer that reports
+a verification COMPLETED — did not carry the contract up. LP-365 wired the governed rule pass alongside the AI
+sweep on one run row, and its own review found three run-level fail-opens: (1) a "never overwrite FAILED"
+guard that read a stale in-memory ORM `run.status` across sessions (a no-op); (2) a swallowed rule-pass
+enqueue failure (a run reads COMPLETED with the governed pass never enqueued); (3) a cache keyed only on the
+cross-source inputs, so a rule/spec/tag change with unchanged documents served a prior run's findings from a
+version of the engine that no longer existed. **All three are run-level false-greens — the honesty contract
+does not survive one layer up.** #3 already cost real time: LP-366/369/371/372/374 all landed after run
+`01039e93`, documents unchanged → fingerprint matched → cache hit → neither pass re-ran → ~20 of 30
+`couldnt_check` rows were already-fixed bugs, and a human concluded the engine was broken.
+
+**#1 and #2 were already fixed (gate of record).** The LP-365 REVIEW commit (`0000088`, after the original
+`a697cbb`) already made the status atomic and the enqueue failure visible. This ADR records the decisions;
+LP-377's implementation is #3.
+
+**Atomic status + the partial-failure status (#1).** An ORM in-memory `run.status` check cannot work: the
+sweep and the rule pass write the row in SEPARATE task sessions, and SQLAlchemy does not auto-refresh across
+sessions, so the sweep's in-memory status is stale (still RUNNING) even after the rule pass committed FAILED.
+Decision: the sweep re-reads status under a ROW LOCK (`SELECT status ... FOR UPDATE`) immediately before its
+write and sets COMPLETED only if the fresh DB value is not FAILED; the lock is held to commit, so the rule
+pass's unconditional `UPDATE status=FAILED` serializes AFTER and stays sticky. **FAILED wins regardless of
+commit order.** The run's status on partial failure IS **FAILED** — a run reads COMPLETED only if BOTH passes
+completed. A COMPLETED run atop a dead governed engine is the false-green; the sweep's valid findings do not
+rescue the wrapper's contract ("COMPLETED = the engine ran"). No new PARTIAL status is introduced (it would
+touch the UI, the watchdog, `_build_status`, the version selector for no gain today) and **no UI change is
+forced** — the existing FAILED surface + the force-run link handle it.
+
+**Visible enqueue failure (#2).** The task's own fail-closed FAILED only fires if the task RUNS; an
+un-enqueued rule pass (broker/worker down) never marks FAILED, so the sweep would complete the run with no
+governed verification. Decision: `_enqueue_rule_engine` returns a bool and the handler marks the run FAILED on
+an enqueue failure — mirroring `_enqueue_cross_source`. The two paths must fail in the SAME direction (toward
+visible), never the direction that hides the problem.
+
+**The engine-aware cache key (#3 — this ticket's build).** The fingerprint must bind the ENGINE's version,
+not just the file inputs. Decision: fold an `engine_fingerprint()` into `compute_input_fingerprint` —
+`sha256(engine_fingerprint ⊕ canonicalized cross-source context)`, where `engine_fingerprint()` hashes
+`sorted(ACTIVE_RULE_IDS)` + the content bytes of every declarative artifact under `app/verification/rules/`
+(the rule specs, `tag_production.yaml`, the fact/rule/tag/dependency CSVs, `vocabulary_extra.yaml`), cached
+per process. A cache HIT now means "inputs AND engine unchanged → the prior run's findings are genuinely
+current"; ANY declarative engine change misses and re-runs the governed pass.
+
+**Why not the alternatives.** *Always-enqueue the rule pass:* rejected — LP-365 measured the rule pass at
+~282s and ~$0.15–0.30 of AI per run (Stage A/B + materialization), and the task builds a fresh `TagCaches()`
+every invocation (the tag cache does not persist across task runs), so re-running is full cost. Always-enqueue
+would DOUBLE AI spend on every no-op Run — exactly what the cache exists to prevent. The rule pass cost is not
+small; the ticket's "if it's cheap, always-enqueue" premise is falsified by the code. *A manual ENGINE_VERSION
+constant / `app_version`:* rejected — `app_version` is a static `"0.1.0"`, never bumped; a manual constant
+relies on a human remembering to bump it, the discipline that already failed five times. A key that can be
+forgotten re-introduces the exact silent miss. **A cache MISS is cheap; a cache HIT that serves stale governed
+findings is a false-green. The cache was built to avoid re-paying for the AI sweep; the rule engine has a
+different cost profile. Caching two systems on one key was always going to break. Fail toward re-running.**
+
+**The reported residual (not worked around).** The engine's Python-resident logic and the AI-group / judgment
+prompts that live as Python constants (`tag_materialization/ai.py`, `subjects.py`, `ai/rule_judgment.py`) are
+NOT hashed — a change to those with zero declarative edit would not invalidate. Mitigations: such changes
+nearly always co-ship a spec/tag/registry edit (which does invalidate); the force-run link (LP-376-A) is the
+manual escape hatch; and it is closable later by wiring `app_version` to the build/git-SHA or moving the
+Python-resident prompts to files. This residual is strictly SMALLER than the prior behaviour, which ignored
+the engine version entirely. Old runs' engine-unaware fingerprints will not match the new key → the next Run
+re-runs, which is correct (they were computed under an old engine).
+
+**The test that could not fail.** `test_sweep_completion_never_overwrites_a_failed_run` pinned #1 with a single
+in-memory `SimpleNamespace(status=FAILED)` — a state that cannot occur cross-session — so it asserted a
+scenario that can't happen and missed the one that can (the bug shipped WITH a green test). The review commit
+replaced it with a test that models the guard as a function of the LOCKED DB value. LP-377 adds, for #3, a unit
+test asserting the same inputs under a different engine hash to a DIFFERENT fingerprint and an endpoint test
+that a rule-relevant change re-runs BOTH passes — both verified to FAIL on the pre-fix code (the endpoint
+returns `completed`, the stale hit, instead of `running`).
+
+**Cross-refs.** LP-365 (where all three shipped; the two-task wiring, the cost measurement), the LP-365 review
+`0000088` (#1/#2 fixed + the masking test replaced), LP-376/376-C (the stale render that exposed #3), LP-78.1
+(the original cross-source cache), LP-376-A (the force-run escape hatch), LP-322 (the reconciler keyed on
+`(rule_id, subject_key)`).

@@ -466,6 +466,54 @@ async def test_run_stores_the_input_fingerprint(db_session: AsyncSession) -> Non
     assert (await latest_completed_run(db_session, loan_file.id)).input_fingerprint == expected
 
 
+# --- LP-377: the fingerprint binds the ENGINE version, not just the file inputs -----------------
+
+
+def test_engine_fingerprint_is_a_stable_hex_digest() -> None:
+    """The declared engine hashes to a stable 64-char digest (cached per process)."""
+    from app.services.cross_source import engine_fingerprint
+
+    digest = engine_fingerprint()
+    assert len(digest) == 64 and int(digest, 16) >= 0  # a hex sha-256
+    assert digest == engine_fingerprint()  # stable across calls
+
+
+def test_engine_fingerprint_changes_with_the_active_rule_set(monkeypatch) -> None:
+    """Activating/deactivating a rule (editing ACTIVE_RULE_IDS) changes the engine digest — so a rule
+    that goes live re-runs the governed pass instead of serving a prior run's findings."""
+    import app.verification.rule_engine.registry as registry
+    from app.services.cross_source import engine_fingerprint
+
+    engine_fingerprint.cache_clear()
+    base = engine_fingerprint()
+    monkeypatch.setattr(registry, "ACTIVE_RULE_IDS", (*registry.ACTIVE_RULE_IDS, "ZZ-9"))
+    engine_fingerprint.cache_clear()
+    try:
+        assert engine_fingerprint() != base
+    finally:
+        engine_fingerprint.cache_clear()  # drop the monkeypatched value from the process cache
+
+
+def test_input_fingerprint_binds_the_engine_version(monkeypatch) -> None:
+    """THE BUG-3 FIX, at the unit level: the same file inputs under a DIFFERENT engine hash to a
+    DIFFERENT fingerprint. This FAILS on the pre-fix code, where compute_input_fingerprint hashed only
+    the cross-source context and ignored the engine — so a rule/spec/tag change served stale findings."""
+    import app.services.cross_source as xsrc
+
+    ctx = {"liabilities": [{"holder": "A", "pmt": "100"}]}
+    before = compute_input_fingerprint(ctx)
+    # A rule/spec/tag change with the SAME documents → a different engine token.
+    monkeypatch.setattr(xsrc, "engine_fingerprint", lambda: "engine-v2-after-a-rule-change")
+    after = compute_input_fingerprint(ctx)
+    assert before != after  # same inputs, changed engine → cache MUST miss
+
+
+def test_input_fingerprint_still_matches_when_nothing_changed() -> None:
+    """The cache still WORKS: same inputs + same engine → the same fingerprint (no wasted AI sweep)."""
+    ctx = {"liabilities": [{"holder": "A", "pmt": "100"}]}
+    assert compute_input_fingerprint(ctx) == compute_input_fingerprint(dict(ctx))
+
+
 # --- Re-run replaces the prior open findings (no duplication) -----------------
 
 

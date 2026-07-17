@@ -389,6 +389,70 @@ async def test_cached_return_reconciles_staleness(
     assert status["stale"] is False  # reconciled — matching inputs means not stale
 
 
+def _spy_both_delays(monkeypatch, calls: list) -> None:
+    """Spy BOTH worker enqueues (the AI sweep + the governed rule pass) — LP-377 asserts the GOVERNED
+    pass re-runs on a rule-relevant change, so both are captured."""
+    monkeypatch.setattr(
+        "app.tasks.cross_source.run_cross_source_pass.delay",
+        lambda *a: calls.append(("sweep", *a)),
+        raising=True,
+    )
+    monkeypatch.setattr(
+        "app.tasks.verification_rules.run_rule_engine_pass.delay",
+        lambda *a: calls.append(("rules", *a)),
+        raising=True,
+    )
+
+
+async def test_rule_relevant_change_reruns_the_governed_pass(
+    client: AsyncClient, db: AsyncSession, monkeypatch
+) -> None:
+    """LP-377 BUG 3 — the one that already bit. A RULE/spec/tag change with UNCHANGED documents must
+    re-run the governed pass, not serve a prior run's findings from a version of the engine that no
+    longer exists. Seed a completed run whose stored fingerprint matches the current inputs under the
+    CURRENT engine, then change the ENGINE (a rule edit) → the POST must MISS the cache and enqueue BOTH
+    passes on a fresh RUNNING run. On the pre-fix code (the engine ignored in the key) this HIT the
+    cache and NEITHER pass ran — exactly the ~12-hour-stale render that cost a human an afternoon."""
+    calls: list = []
+    _spy_both_delays(monkeypatch, calls)
+    company, _user, token = await _user_and_token(db, slug="acme", email="u@acme.com")
+    loan_file = await create_loan_file(db, company_id=company.id)
+    # The stored fingerprint matches the current inputs UNDER THE CURRENT ENGINE (a genuine no-op today).
+    await _seed_completed_run(db, loan_file, fingerprint=await _current_fingerprint(db, loan_file))
+    await db.commit()
+
+    # The engine changes (a rule/spec/tag edit) while the documents do NOT.
+    monkeypatch.setattr(
+        "app.services.cross_source.engine_fingerprint",
+        lambda: "engine-token-after-a-rule-change",
+        raising=True,
+    )
+    resp = await client.post(f"{API}/{loan_file.display_id}/verification/run", headers=_auth(token))
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "running"  # a FRESH run — the cache MISSED on the engine change
+    assert {c[0] for c in calls} == {
+        "sweep",
+        "rules",
+    }  # BOTH re-ran — the governed pass is not stale
+
+
+async def test_governed_pass_enqueued_alongside_the_sweep_on_a_miss(
+    client: AsyncClient, db: AsyncSession, monkeypatch
+) -> None:
+    """A cache miss (no prior run) enqueues the governed pass ALONGSIDE the sweep — so the cache never
+    skips the rule engine on a real re-run (the fail-open the LP-377 key closes)."""
+    calls: list = []
+    _spy_both_delays(monkeypatch, calls)
+    company, _user, token = await _user_and_token(db, slug="acme", email="u@acme.com")
+    loan_file = await create_loan_file(db, company_id=company.id)
+    await db.commit()
+
+    resp = await client.post(f"{API}/{loan_file.display_id}/verification/run", headers=_auth(token))
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "running"
+    assert {c[0] for c in calls} == {"sweep", "rules"}
+
+
 # --- The aggression dial (LP-79) ---------------------------------------------
 
 

@@ -29,6 +29,8 @@ import json
 import re
 from collections.abc import Awaitable, Callable
 from decimal import Decimal
+from functools import cache
+from pathlib import Path
 from typing import Any
 from uuid import UUID
 
@@ -446,18 +448,68 @@ def _resolve_income_target(context: dict[str, Any]) -> str | None:
 # --------------------------------------------------------------------------- #
 
 
-def compute_input_fingerprint(context: dict[str, Any]) -> str:
-    """A stable SHA-256 over the verification inputs (the AI's compared substance).
+@cache
+def engine_fingerprint() -> str:
+    """A stable SHA-256 over the DECLARED verification engine — the ACTIVE rule set plus every
+    version-controlled declarative artifact the rule engine reads (LP-377).
 
-    Same inputs → same fingerprint; **row order does not matter** (lists are sorted
-    by their canonical form); changing any value changes the hash. The hash is over
-    the assembled context (the stated + verified values that feed the AI) — there is
-    no volatile metadata (timestamps / run ids) in it. Returns a 64-char hex digest.
+    Folded into :func:`compute_input_fingerprint` so the LP-78.1 cache MISSES when the ENGINE changes
+    even if the file's inputs did not. Without this the fingerprint hashed only the cross-source inputs,
+    so a rule / spec / tag change with unchanged documents matched a prior run's fingerprint → cache hit
+    → NEITHER pass re-ran → the UI served findings from a version of the engine that no longer existed
+    (a run-level false-green that already cost a human an afternoon: LP-366/369/371/372/374 all landed,
+    documents unchanged, and ~20 of 30 `couldnt_check` rows were already-fixed bugs served as current).
+
+    Hashes the content bytes of the declarative surface under ``app/verification/rules/`` — the rule
+    specs, ``tag_production.yaml`` (the tag declarations), and the fact/rule/tag/dependency CSVs +
+    ``vocabulary_extra.yaml`` — keyed by relative path, in sorted order, plus the ACTIVE rule tuple.
+    Any edit to any of them changes the digest; a rule is activated by editing ``ACTIVE_RULE_IDS``, so
+    that is hashed too. Cached per process: these artifacts are immutable within a running process (they
+    change only on deploy/restart), so the walk runs once.
+
+    NOT captured (the reported LP-377 residual, NOT worked around): the engine's Python-resident logic
+    and the AI-group / judgment prompts that live as Python constants (``tag_materialization/ai.py``,
+    ``subjects.py``, ``ai/rule_judgment.py``). A change to those with NO declarative edit would not
+    invalidate. Such changes almost always co-ship a spec/tag edit (which does invalidate), and the
+    force-run link (LP-376-A) is the manual escape hatch. This is strictly smaller than the prior
+    behaviour, which ignored the engine version entirely.
+    """
+    import app.verification.rules as rules_pkg
+    from app.verification.rule_engine.registry import ACTIVE_RULE_IDS
+
+    rules_dir = Path(rules_pkg.__file__).resolve().parent
+    hasher = hashlib.sha256()
+    hasher.update(json.dumps(sorted(ACTIVE_RULE_IDS)).encode("utf-8"))
+    hasher.update(b"\0")
+    for path in sorted(rules_dir.rglob("*")):
+        if path.suffix not in (".yaml", ".yml", ".csv") or not path.is_file():
+            continue
+        hasher.update(str(path.relative_to(rules_dir)).encode("utf-8"))
+        hasher.update(b"\0")
+        hasher.update(path.read_bytes())
+        hasher.update(b"\0")
+    return hasher.hexdigest()
+
+
+def compute_input_fingerprint(context: dict[str, Any]) -> str:
+    """A stable SHA-256 over the verification inputs (the AI's compared substance) AND the engine.
+
+    Same inputs + same engine → same fingerprint; **row order does not matter** (lists are sorted by
+    their canonical form); changing any input value OR any declared rule/spec/tag changes the hash. The
+    hash is over the assembled context (the stated + verified values that feed the AI) bound to the
+    :func:`engine_fingerprint` — no volatile metadata (timestamps / run ids). Returns a 64-char hex
+    digest.
+
+    LP-377 — the engine binding: the cache exists to avoid re-paying for the AI SWEEP on unchanged
+    inputs, but the governed rule pass reads the ENGINE ITSELF (rules, specs, tag declarations). Binding
+    the engine version in makes a cache HIT mean "inputs AND engine unchanged → the prior run's findings
+    are genuinely current"; any engine change misses and re-runs the governed pass. Fail toward
+    re-running: a miss is cheap, a hit that serves stale governed findings is a false-green.
     """
     blob = json.dumps(
         _canonicalize(context), sort_keys=True, separators=(",", ":"), ensure_ascii=False
     )
-    return hashlib.sha256(blob.encode("utf-8")).hexdigest()
+    return hashlib.sha256(f"{engine_fingerprint()}\0{blob}".encode()).hexdigest()
 
 
 def _canonicalize(obj: Any) -> Any:
