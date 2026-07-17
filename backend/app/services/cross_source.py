@@ -180,7 +180,13 @@ async def run_cross_source(
     # their guidance from the stored grounded-starter set at read time (no model call).
     await _generate_novel_guidance(outcome.added, guidance_fn)
 
-    run.status = VerificationStatus.COMPLETED
+    # LP-365 fail-closed coexistence: two tasks write this run row. NEVER overwrite a FAILED with
+    # COMPLETED — if the governed rule-engine pass failed, the run must keep reading FAILED (a run marked
+    # COMPLETED while the engine silently failed is a run-level false-green). The normal (no-rule-failure)
+    # path is behaviour-identical. red_count/yellow_count remain the SWEEP's counts only — the two systems'
+    # counts are never summed (their trust properties differ).
+    if run.status is not VerificationStatus.FAILED:
+        run.status = VerificationStatus.COMPLETED
     run.completed_at = utcnow()
     run.red_count = red
     run.yellow_count = yellow

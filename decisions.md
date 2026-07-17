@@ -10071,3 +10071,51 @@ deferred migration has come due — and the code shows full migration is still b
 so the guard, not a migration, is the fix. Cross-refs: LP-326 (the deferred migration + the producer
 equivalence proof this leans on), LP-343 (the drift finding), LP-337 (the measurement it voids), LP-313/314/
 314a (the txn producers), LP-345 (where the number is re-earned).
+
+## ADR-284: Wire the snapshot/rules orchestrator into the real run — two tasks, one run row, fail-closed (LP-365)
+
+**Context.** The LP-316/321 fact-tag architecture — the orchestrator (`verification_run.run_verification`),
+the reconciler (`reconcile_evaluation_findings`, LP-322), the snapshot table (`snapshot_records`, LP-209) —
+was built, tested, and migrated over ~20 tickets and **never executed on a real loan file.** The Run button
+enqueued exactly one task: the AI cross-source sweep (LP-78). Neither rule engine was wired (LP-364-B's
+diagnosis confirmed it). The tests asserted every part; none asserted the path. This ADR records the first
+wiring and the decisions it forced.
+
+**Decision — a second Celery task (`run_rule_engine_pass`) runs the governed pass ALONGSIDE the sweep on the
+same run row.**
+- **Run status is FAIL-CLOSED.** Two tasks now write one `Verification` row. The rule task marks the run
+  FAILED on exhaustion; the sweep's `COMPLETED` set is guarded to **never overwrite a FAILED**
+  (`cross_source.py`). So a run reads COMPLETED **only if BOTH passes completed**; if either failed, it
+  reads FAILED. *A run marked COMPLETED while the governed engine silently failed is a run-level
+  false-green — the exact class this architecture exists to prevent.* The normal path is behaviour-identical.
+- **Counts are NEVER summed.** The sweep keeps sole ownership of `red_count`/`yellow_count` — an ungoverned
+  75%-confidence AI observation and a governed, gated, provenance-carrying rule finding are **not the same
+  kind of thing**; summing them makes the §8 honesty contract meaningless. The rule findings carry their
+  own `evaluation_outcome` axis and are counted separately at read time (LP-369).
+- **The LP-78.1 input-fingerprint cache is inherited, and REPORTED as mis-keyed.** It is computed from the
+  cross-source inputs; the rule engine reads a SUPERSET (all documents), so a cache-hit could skip a rule
+  run a rule-relevant-only change should have triggered. The rule task rides the same cache-miss trigger as
+  the sweep for now; a rule-aware fingerprint is its own follow-up. Not silently inherited — flagged.
+- **A real run uses the REAL model** (the task passes no reasoners → `reasoners=None`), never a stub.
+
+**Consequences — the engine's first contact with a real file (DB LF-6T3N, 30 documents, 282s, sonnet-4-5):**
+- **38 governed findings persisted** (origin `DETERMINISTIC_RULE`, `evaluation_outcome` set, provenance):
+  `couldnt_check` 30, `needs_review` 4, `satisfied` 2, **`open` 2** — the first real rule VIOLATIONS ever
+  produced (ID-6, IN-2). Separation held: the sweep's `ai_cross_source` findings kept `evaluation_outcome`
+  null; nothing merged.
+- **The fixture numbers SURVIVED** (they were expected to break): AS-1 = 15 `couldnt_check` + 2
+  `needs_review`, identical to the stripped-fixture claim — because the insurance-orphan bug (LP-367) gates
+  the DTI on the real file too (`housing.insurance_monthly` unknown; `gross_monthly_income` resolves to
+  $28,168.80 but is trapped behind the gate). AS-1's DTI dependency (LP-366) is real on the real file.
+- **Run #2 exercised the reconciler for the first time ever**: 38 carried_forward, 0 minted, 0 retired, 0
+  resolved — LP-322 reconciles correctly (no duplicate mint on the uniqueness index, no false retirement).
+- **95 `tag_production` degradations** on the real run — reported for its own ticket, not fixed here.
+- **9 stale `xsrc.*` `deterministic_rule` findings** (2026-07-08) with `evaluation_outcome` null — pre-wiring
+  artifacts of the older LP-74 engine; the five-tab read (LP-370) must place null-outcome deterministic
+  findings deliberately.
+
+**REPORT, don't fix.** Every surprise is its own ticket (LP-366 AS-1's DTI dep, LP-367 the insurance orphan,
+the 95 degradations, the stale xsrc findings). No engine/rule/tag/spec change; `ACTIVE_RULE_IDS` unchanged;
+the AI sweep behaviour-identical; the frozen fixture trace unchanged. Cross-refs: LP-316/321 (the
+architecture), LP-322 (the reconciler), LP-209 (snapshot_records), LP-364-B (the diagnosis that found it
+unplugged), LP-78 (the sweep it coexists with).
