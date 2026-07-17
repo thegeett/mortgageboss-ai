@@ -130,16 +130,20 @@ def _enqueue_cross_source(loan_file_id: UUID, run_id: UUID) -> bool:
         return False
 
 
-def _enqueue_rule_engine(loan_file_id: UUID, run_id: UUID) -> None:
-    """Enqueue the governed snapshot/rules pass (LP-365) ALONGSIDE the sweep, on the same run. Best-effort:
-    an enqueue failure is logged but does not fail the request (the sweep still runs); the fail-closed run
-    status is enforced by the task itself (it marks the run FAILED on exhaustion). Never raises."""
+def _enqueue_rule_engine(loan_file_id: UUID, run_id: UUID) -> bool:
+    """Enqueue the governed snapshot/rules pass (LP-365) ALONGSIDE the sweep, on the same run. Returns
+    False on an enqueue failure (broker/worker unavailable) so the caller can mark the run FAILED — the
+    task's own fail-closed FAILED only fires if the task RUNS, so an UN-enqueued pass must fail the run
+    here, else the sweep would mark it COMPLETED with the governed pass never having run (a false-green).
+    Never raises."""
     try:
         from app.tasks.verification_rules import run_rule_engine_pass
 
         run_rule_engine_pass.delay(str(loan_file_id), str(run_id))
+        return True
     except Exception:
         log.warning("rule_engine_enqueue_failed", loan_file_id=str(loan_file_id))
+        return False
 
 
 @router.post("/{identifier}/verification/run", response_model=VerificationRunPublic)
@@ -186,11 +190,18 @@ async def run_verification(
         await db.commit()
 
     # LP-365: the governed snapshot/rules pass runs ALONGSIDE the sweep on the same run. Enqueued on the
-    # cache-MISS path only (a new run). NOTE (reported, not fixed): the LP-78.1 fingerprint above is keyed
-    # on the CROSS-SOURCE inputs; the rule engine reads a SUPERSET (all documents), so a cache-hit could
-    # skip a rule run a rule-relevant-only change should have triggered — the cache needs a rule-aware key
-    # (its own ticket). Here it simply rides the same trigger as the sweep.
-    _enqueue_rule_engine(loan_file.id, run.id)
+    # cache-MISS path only (a new run). A failed enqueue marks the run FAILED (fail-closed: the governed
+    # pass must run, or the run must NOT read COMPLETED). NOTE (reported, not fixed): the LP-78.1
+    # fingerprint above is keyed on the CROSS-SOURCE inputs; the rule engine reads a SUPERSET (all
+    # documents), so a cache-hit could skip a rule run a rule-relevant-only change should have triggered —
+    # the cache needs a rule-aware key (its own ticket). Here it simply rides the same trigger as the sweep.
+    if not _enqueue_rule_engine(loan_file.id, run.id):
+        run.status = VerificationStatus.FAILED
+        run.completed_at = utcnow()
+        run.error_detail = (
+            "Could not enqueue the governed rule-engine pass (worker/broker unavailable)."
+        )
+        await db.commit()
 
     return VerificationRunPublic.from_model(run)
 

@@ -180,12 +180,16 @@ async def run_cross_source(
     # their guidance from the stored grounded-starter set at read time (no model call).
     await _generate_novel_guidance(outcome.added, guidance_fn)
 
-    # LP-365 fail-closed coexistence: two tasks write this run row. NEVER overwrite a FAILED with
-    # COMPLETED — if the governed rule-engine pass failed, the run must keep reading FAILED (a run marked
-    # COMPLETED while the engine silently failed is a run-level false-green). The normal (no-rule-failure)
-    # path is behaviour-identical. red_count/yellow_count remain the SWEEP's counts only — the two systems'
-    # counts are never summed (their trust properties differ).
-    if run.status is not VerificationStatus.FAILED:
+    # LP-365 fail-closed coexistence: the sweep and the governed rule-engine pass write this run row in
+    # SEPARATE task transactions, so the sweep's in-memory `run.status` is STALE (it never sees the other
+    # session's committed FAILED). Re-read the status under a ROW LOCK and mark COMPLETED only if a FAILED
+    # has not been committed — an unguarded in-memory set would overwrite a concurrent FAILED (a run-level
+    # false-green, the exact class this architecture prevents). The lock is held to commit, so the
+    # rule-engine's unconditional FAILED write serializes AFTER and stays sticky (FAILED always wins).
+    locked_status = await db.scalar(
+        select(Verification.status).where(Verification.id == run.id).with_for_update()
+    )
+    if locked_status is not VerificationStatus.FAILED:
         run.status = VerificationStatus.COMPLETED
     run.completed_at = utcnow()
     run.red_count = red

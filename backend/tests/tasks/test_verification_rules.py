@@ -103,30 +103,35 @@ def test_enqueue_fires_the_governed_pass_alongside_the_sweep(monkeypatch) -> Non
     import app.tasks.verification_rules as vr
 
     monkeypatch.setattr(vr, "run_rule_engine_pass", _Task())
-    api._enqueue_rule_engine(_LF, _RUN)
+    assert api._enqueue_rule_engine(_LF, _RUN) is True  # enqueued OK
     assert delayed == [(str(_LF), str(_RUN))]  # enqueued once, with the run's ids
 
 
-def test_enqueue_never_raises(monkeypatch) -> None:
-    # A broker hiccup must not 500 the request (the sweep still runs); the fail-closed status is the task's.
+def test_enqueue_never_raises_but_reports_failure(monkeypatch) -> None:
+    # A broker hiccup must not 500 the request, but it MUST be reported (return False) so the handler marks
+    # the run FAILED — an un-enqueued governed pass never runs, so its own fail-closed FAILED never fires;
+    # the run must not read COMPLETED via the sweep alone.
     import app.tasks.verification_rules as vr
     from app.api import verification as api
 
     boom = SimpleNamespace(delay=lambda *a: (_ for _ in ()).throw(RuntimeError("broker down")))
     monkeypatch.setattr(vr, "run_rule_engine_pass", boom)
-    api._enqueue_rule_engine(_LF, _RUN)  # does not raise
+    assert api._enqueue_rule_engine(_LF, _RUN) is False  # does not raise, reports the failure
 
 
-def test_sweep_completion_never_overwrites_a_failed_run() -> None:
-    # THE fail-closed run-status invariant (the guard in cross_source.py:183): a run FAILED by the governed
-    # pass stays FAILED even when the sweep completes. A run is COMPLETED only if BOTH passes completed.
-    run = SimpleNamespace(status=VerificationStatus.FAILED)
-    # the guard, exactly as the sweep applies it
-    if run.status is not VerificationStatus.FAILED:
-        run.status = VerificationStatus.COMPLETED
-    assert run.status is VerificationStatus.FAILED
-    # and a healthy run DOES complete
-    ok = SimpleNamespace(status=VerificationStatus.RUNNING)
-    if ok.status is not VerificationStatus.FAILED:
-        ok.status = VerificationStatus.COMPLETED
-    assert ok.status is VerificationStatus.COMPLETED
+def test_sweep_completion_respects_a_concurrently_committed_failed() -> None:
+    # THE fail-closed run-status invariant (cross_source.py): the sweep marks COMPLETED only if the run is
+    # not already FAILED — reading the status FROM THE DB UNDER A ROW LOCK (`locked_status`), NOT from its
+    # own STALE in-memory run object. The governed pass commits FAILED in a SEPARATE session, invisible to
+    # the sweep's ORM object (whose status is still RUNNING), so the decision MUST key on the fresh locked
+    # DB value. Modeled here as a function of that value; the two-session end-to-end path is integration.
+    def sweep_effective_status(locked_db_status: VerificationStatus) -> VerificationStatus:
+        # the guard exactly as cross_source.py applies it: COMPLETED unless the DB already holds FAILED
+        if locked_db_status is not VerificationStatus.FAILED:
+            return VerificationStatus.COMPLETED
+        return locked_db_status  # the sweep leaves the DB's FAILED untouched
+
+    # a concurrently-committed governed FAILED stays FAILED even though the sweep's in-memory run is RUNNING
+    assert sweep_effective_status(VerificationStatus.FAILED) is VerificationStatus.FAILED
+    # a healthy run (no governed FAILED in the DB) completes
+    assert sweep_effective_status(VerificationStatus.RUNNING) is VerificationStatus.COMPLETED
