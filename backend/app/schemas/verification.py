@@ -16,7 +16,6 @@ from pydantic import BaseModel, Field
 
 from app.models.finding import EvaluationOutcome, Finding
 from app.models.verification import Verification
-from app.services.rule_subject_label import resolve_subject_label
 from app.verification.confidence import AggressionLevel
 from app.verification.finding_guidance import resolve_guidance
 from app.verification.rules.specs import RuleSpec, load_rule_spec
@@ -257,7 +256,7 @@ class RuleFindingPublic(BaseModel):
     resolution_status: str
 
     @classmethod
-    def from_model(cls, finding: Finding, *, subject_label: str | None = None) -> RuleFindingPublic:
+    def from_model(cls, finding: Finding, *, subject_label: str) -> RuleFindingPublic:
         details = finding.details or {}
         spec = _rule_spec(
             finding.rule_id
@@ -276,12 +275,10 @@ class RuleFindingPublic(BaseModel):
             ),  # the rule's OWN family, not the legacy enum (Bug 3)
             message=finding.message,
             subject_key=finding.subject_key,
-            # The DB-resolved label from the read path (borrower/document maps); when a caller resolves no
-            # maps (a unit call), fall back to the maps-free label — loan/deposit resolve, the rest read
-            # honestly. Either way NEVER the raw subject_key (LP-377-B).
-            subject_label=subject_label
-            if subject_label is not None
-            else resolve_subject_label(finding.subject_key, finding.load_bearing_tags or []),
+            # The processor-facing label is resolved by the READ PATH (the one place with the borrower /
+            # document DB maps) and passed in — the schema never guesses it from a maps-free subject_key
+            # (which could only claim "no longer in this file"). NEVER the raw subject_key (LP-377-B).
+            subject_label=subject_label,
             guideline=spec.guideline_reference if spec is not None else None,
             load_bearing_tags=finding.load_bearing_tags or [],
             # An AI judgment verdict a human must ratify — NOT gated_pending_signoff (= not priya_validated;

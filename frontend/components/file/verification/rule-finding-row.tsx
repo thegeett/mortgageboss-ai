@@ -99,7 +99,8 @@ export function RuleFindingRow({ finding }: { finding: RuleFinding }) {
   const tone = TONE[meta.tone];
   // LP-377-B: the subject label (a filename / amount / borrower / "Loan-level") — resolved by the read
   // path per subject TYPE, never the raw content-id. Two rows of the same rule are now tellable apart.
-  const chip = finding.subject_label;
+  // `?? ""` guards a version-skewed response missing the newly-added field (degrade to no chip, not throw).
+  const chip = finding.subject_label ?? "";
   const panelId = useId();
 
   return (

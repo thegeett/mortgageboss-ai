@@ -303,7 +303,7 @@ async def _build_status(
     # content-id hash. The borrower map is cheap; the document content-id → filename map is built ONLY
     # when a governed finding actually has a document subject (it rebuilds the documents section — the
     # single honest way to recover a content-id → filename, LP-312 ids being content hashes).
-    borrower_names = await _borrower_names(db, loan_file.id)
+    borrower_names = await _borrower_names(db, loan_file.id) if rule_findings else {}
     document_filenames = (
         await document_filenames_by_content_id(db, loan_file)
         if any((f.subject_key or "").startswith(DOC_PREFIX) for f in rule_findings)

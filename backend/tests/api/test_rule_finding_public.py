@@ -24,6 +24,12 @@ from app.models.finding import (
 from app.schemas.verification import RuleFindingPublic
 
 
+def _public(finding: Finding, *, subject_label: str = "Subject") -> RuleFindingPublic:
+    """Build the public shape. The READ PATH supplies subject_label from its DB maps; a placeholder here —
+    these tests assert category / ratification / guideline, not the label."""
+    return RuleFindingPublic.from_model(finding, subject_label=subject_label)
+
+
 def _finding(
     rule_id: str, outcome: EvaluationOutcome, *, status: FindingStatus = FindingStatus.YELLOW
 ) -> Finding:
@@ -52,46 +58,23 @@ def _finding(
 def test_judgment_verdict_is_ratification_pending() -> None:
     # OC-2 + ID-8 are JUDGMENT rules that reached a verdict → an AI judged → a human must ratify.
     for rule_id in ("OC-2", "ID-8"):
-        pub = RuleFindingPublic.from_model(_finding(rule_id, EvaluationOutcome.NEEDS_REVIEW))
+        pub = _public(_finding(rule_id, EvaluationOutcome.NEEDS_REVIEW))
         assert pub.ratification_pending is True, rule_id
 
 
 def test_deterministic_and_consistency_are_not_ratification_pending() -> None:
     # NOT judgment rules → no AI verdict → NO badge, even though gated_pending_signoff is true.
-    assert (
-        RuleFindingPublic.from_model(
-            _finding("ID-3", EvaluationOutcome.COULDNT_CHECK)
-        ).ratification_pending
-        is False
-    )
-    assert (
-        RuleFindingPublic.from_model(
-            _finding("ID-2", EvaluationOutcome.COULDNT_CHECK)
-        ).ratification_pending
-        is False
-    )
-    assert (
-        RuleFindingPublic.from_model(
-            _finding("ID-4", EvaluationOutcome.COULDNT_CHECK)
-        ).ratification_pending
-        is False
-    )
-    assert (
-        RuleFindingPublic.from_model(
-            _finding("AS-1", EvaluationOutcome.SATISFIED)
-        ).ratification_pending
-        is False
-    )
-    assert (
-        RuleFindingPublic.from_model(_finding("IN-2", EvaluationOutcome.OPEN)).ratification_pending
-        is False
-    )
+    assert _public(_finding("ID-3", EvaluationOutcome.COULDNT_CHECK)).ratification_pending is False
+    assert _public(_finding("ID-2", EvaluationOutcome.COULDNT_CHECK)).ratification_pending is False
+    assert _public(_finding("ID-4", EvaluationOutcome.COULDNT_CHECK)).ratification_pending is False
+    assert _public(_finding("AS-1", EvaluationOutcome.SATISFIED)).ratification_pending is False
+    assert _public(_finding("IN-2", EvaluationOutcome.OPEN)).ratification_pending is False
 
 
 def test_judgment_rule_that_never_judged_is_not_ratification_pending() -> None:
     # ID-9 is a judgment rule, but a couldnt_check means the gate/applicability terminated BEFORE the AI —
     # no verdict was made, so nothing awaits ratification. (The always-on badge painted this too.)
-    pub = RuleFindingPublic.from_model(_finding("ID-9", EvaluationOutcome.COULDNT_CHECK))
+    pub = _public(_finding("ID-9", EvaluationOutcome.COULDNT_CHECK))
     assert pub.ratification_pending is False
 
 
@@ -101,11 +84,11 @@ def test_persisted_engine_signal_is_authoritative_including_fuzzy_consistency() 
     # judgment-only fallback would miss, and a deterministic bookend can be cleared.
     fuzzy_ai = _finding("ID-4", EvaluationOutcome.OPEN)
     fuzzy_ai.details = {"gated_pending_signoff": True, "ratification_pending": True}
-    assert RuleFindingPublic.from_model(fuzzy_ai).ratification_pending is True
+    assert _public(fuzzy_ai).ratification_pending is True
 
     exact_bookend = _finding("ID-4", EvaluationOutcome.OPEN)
     exact_bookend.details = {"gated_pending_signoff": True, "ratification_pending": False}
-    assert RuleFindingPublic.from_model(exact_bookend).ratification_pending is False
+    assert _public(exact_bookend).ratification_pending is False
 
 
 # --------------------------------------------------------------------------- #
@@ -120,5 +103,5 @@ def test_category_comes_from_the_rule_spec_not_the_legacy_enum() -> None:
         "AS-1": "Assets",
     }
     for rule_id, expected in cases.items():
-        pub = RuleFindingPublic.from_model(_finding(rule_id, EvaluationOutcome.NEEDS_REVIEW))
+        pub = _public(_finding(rule_id, EvaluationOutcome.NEEDS_REVIEW))
         assert pub.category == expected, f"{rule_id} → {pub.category!r}, expected {expected!r}"
