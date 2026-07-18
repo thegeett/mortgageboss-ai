@@ -72,6 +72,44 @@ def test_exhausted_retries_set_terminal_failed() -> None:
     assert calls["terminal"] == 1  # visible terminal-failed — NOT a silent permanent pending
 
 
+def test_terminal_on_exception_fails_closed_without_retrying() -> None:
+    # LP-377-C: a non-transient failure (e.g. a task SOFT time-limit) must NOT retry — retrying re-runs the
+    # same expensive work, times out again, and stacked retries outlast the stuck-run watchdog. It marks
+    # terminal ONCE and re-raises.
+    class _SoftTimeout(Exception):
+        pass
+
+    calls = {"work": 0, "terminal": 0}
+
+    def work() -> None:
+        calls["work"] += 1
+        raise _SoftTimeout("time limit exceeded")
+
+    result = _drive_terminal(
+        _FakeTask(MAX_RETRIES),
+        work,
+        lambda: calls.__setitem__("terminal", calls["terminal"] + 1),
+        terminal_on=(_SoftTimeout,),
+    )
+
+    assert result == "terminal"
+    assert calls["work"] == 1  # NOT retried — one attempt only
+    assert calls["terminal"] == 1  # failed closed immediately
+
+
+def _drive_terminal(task, work, on_exhausted, *, terminal_on) -> str:
+    """Like _drive, but exercises the terminal_on path (never reschedules)."""
+    try:
+        retry_or_terminal(
+            task, work, on_exhausted=on_exhausted, event="test", terminal_on=terminal_on
+        )
+        return "ok"
+    except Retry:  # pragma: no cover - a terminal exception must not reschedule
+        return "retried"
+    except Exception:
+        return "terminal"
+
+
 def test_a_scheduled_retry_passes_through_untouched() -> None:
     """A ``Retry`` raised inside the work (already scheduled) propagates, not double-handled."""
     task = _FakeTask(MAX_RETRIES)

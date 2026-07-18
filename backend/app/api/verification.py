@@ -336,9 +336,10 @@ async def _build_status(
             )
             for f in rule_findings
         ],
-        # LP-377-C Fix 3: the governed findings are stale when the latest run's rule engine did not complete
-        # (it is still RUNNING, or it FAILED / was killed) yet governed findings exist — carried forward from
-        # an earlier run (LP-322). The surface must not present a prior run's output as this run's.
+        # LP-377-C Fix 3: the latest run did not complete (still RUNNING, or FAILED / killed) yet governed
+        # findings exist — so they MAY be carried forward from an earlier run (LP-322). Keyed on RUN status,
+        # not "the rule engine failed" (a run can fail on the SWEEP while the rule pass succeeded, so the
+        # findings can even be fresh) — the surface just flags possible staleness, never claims which half failed.
         rule_findings_stale=(
             latest is not None
             and latest.status is not VerificationStatus.COMPLETED

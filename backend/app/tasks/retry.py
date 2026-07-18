@@ -30,6 +30,7 @@ def retry_or_terminal(
     *,
     on_exhausted: Callable[[], None],
     event: str,
+    terminal_on: tuple[type[BaseException], ...] = (),
 ) -> None:
     """Run ``work``; on a transient error retry with backoff, and on exhaustion run
     ``on_exhausted`` (the terminal-failed marker) before failing.
@@ -37,11 +38,20 @@ def retry_or_terminal(
     ``task`` is the bound Celery task (``bind=True``). ``Retry`` propagates so Celery
     reschedules; once ``MAX_RETRIES`` is hit, ``on_exhausted`` records the visible
     terminal state and the original error re-raises (the task is marked FAILURE).
+
+    ``terminal_on`` exceptions are NOT transient and are NEVER retried — they mark terminal
+    (``on_exhausted``) immediately and re-raise. A task TIME LIMIT belongs here: a retry re-runs the
+    same expensive work and will time out again, and stacked retries can outlast the stuck-run watchdog
+    (LP-377-C). Default ``()`` catches nothing — unchanged behaviour for callers that don't pass it.
     """
     try:
         work()
     except Retry:
         raise  # a retry we (or Celery) already scheduled — let it through
+    except terminal_on:
+        logger.error(event, terminal=True)  # not transient — fail closed, no retry
+        on_exhausted()
+        raise
     except Exception as exc:
         retries = task.request.retries or 0
         try:

@@ -131,9 +131,10 @@ export interface VerificationStatus {
   /** The GOVERNED rule-engine findings (LP-316) — a SEPARATE typed list (LP-375) driving §8 tabs 1-4,
    * including `satisfied` (Tab 2). Never merged/summed with `findings`. */
   rule_findings: RuleFinding[];
-  /** LP-377-C: the governed findings are from an EARLIER run — the latest run's rule engine did not
-   * complete (still running, or failed/killed). The UI must say so, or a prior run's output reads as
-   * this run's. The findings still show (carry-forward, LP-322); this only flags them as possibly stale. */
+  /** LP-377-C: the latest run did not complete (still running, or failed/killed), so the governed findings
+   * MAY be from an earlier run (carry-forward, LP-322). Keyed on RUN status, not "the rule engine failed"
+   * (a run can fail on the sweep while the rule pass succeeded — findings can even be fresh). The UI flags
+   * possible staleness; the findings still show. */
   rule_findings_stale: boolean;
   aggression: Aggression;
   /** Authoritative: any open in-scope finding at the active cutoff blocks submission. */

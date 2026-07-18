@@ -279,7 +279,7 @@ describe("the subject label (LP-377-B) — the read path's label, never a raw co
 });
 
 describe("LP-377-C — the stale-findings notice", () => {
-  it("warns when the latest run's rule engine did not complete but findings are shown", () => {
+  it("warns when the latest run did not complete but governed findings are shown", () => {
     renderTabs([ruleFinding({ evaluation_outcome: "couldnt_check" })], 0, /* stale */ true);
     expect(screen.getByText(/from an earlier run/i)).toBeDefined();
   });

@@ -13,10 +13,15 @@ the same kind of thing as a 75%-confidence AI guess).
 FAIL-CLOSED RUN STATUS (LP-377-C): the RULE PASS is the run's COMPLETION AUTHORITY. The governed pass needs
 ~282s on a 30-document file (LP-365) — far more than the 65s sweep — so the sweep NO LONGER marks a run
 COMPLETED (it cannot know this half finished). A run reads COMPLETED ONLY when THIS pass reaches the end and
-sets it. A pass killed by the time limit never reaches that line, so the run stays RUNNING and the watchdog
-(``_reconcile_stuck_run``, timeout raised above this pass's hard limit) fails it — detection that does NOT
-depend on the dying task committing anything. On exhaustion this still marks FAILED (best-effort); the
-watchdog is the backstop for a hard-limit kill that cannot commit its own marker.
+sets it. The two failure paths:
+  * a SOFT time-limit (or a transient error that exhausts retries) raises INTO the task → ``on_exhausted``
+    marks the run FAILED immediately. A soft time-limit is ``terminal_on`` (NOT retried) — retrying re-runs
+    the same ~282s+ work, times out again, and stacked retries (up to 3x the hard limit) would outlast the
+    watchdog and let it fail a run mid-retry. Fail closed once.
+  * a HARD kill (SIGKILL at the hard limit) cannot commit its own marker → the run stays RUNNING and the
+    watchdog (``_reconcile_stuck_run``, timeout sized ABOVE this pass's hard limit) fails it — detection that
+    does NOT depend on the dying task. Because soft time-limits no longer retry, the watchdog only ever
+    bounds a single un-retried attempt, so its "above one hard limit" sizing is correct.
 
 The governed pass gets its OWN, generous time limits (below): the 65s sweep keeps the short global limits
 (``celery_app.py``), but a ~282s pass must not be killed at the global 120s soft limit — the fourth
@@ -29,6 +34,7 @@ from uuid import UUID
 
 import structlog
 from celery import Task
+from celery.exceptions import SoftTimeLimitExceeded
 from sqlalchemy import select
 
 from app.models.base import utcnow
@@ -67,6 +73,10 @@ def run_rule_engine_pass(self: Task, loan_file_id: str, run_id: str) -> None:
         lambda: run_async(_run(loan_file_id, run_id)),
         on_exhausted=lambda: run_async(_mark_failed(run_id)),
         event="rule_engine_pass_exhausted",
+        # LP-377-C: a SOFT time-limit is terminal, NOT transient — retrying re-runs the same ~282s+ work
+        # and will time out again, and stacked retries (up to 3x the hard limit) would outlast the 1500s
+        # stuck-run watchdog and let it fail a run mid-retry. Fail closed once, immediately.
+        terminal_on=(SoftTimeLimitExceeded,),
     )
 
 

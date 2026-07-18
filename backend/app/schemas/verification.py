@@ -328,11 +328,13 @@ class VerificationStatusPublic(BaseModel):
     # The GOVERNED rule-engine findings (LP-316), a SEPARATE typed list (LP-375) so tabs 1-4 — including
     # `satisfied` (Tab 2, previously dropped) — are reachable and can never be summed with `findings`.
     rule_findings: list[RuleFindingPublic]
-    # LP-377-C Fix 3: the governed findings shown are NOT from the latest run — its rule engine has not
-    # completed (it is still RUNNING, or it FAILED / was killed). True when the latest run is not COMPLETED
-    # AND governed findings exist (carried forward from an earlier run, LP-322). The surface must say so, or a
-    # processor mistakes a prior run's output for this run's. NOT a verification_id filter (that would gut the
-    # reconciler's carry-forward) — the findings still all show; this only flags that they may be stale.
+    # LP-377-C Fix 3: the latest run did NOT complete (still RUNNING, or FAILED / killed) yet governed
+    # findings exist — so they MAY be from an earlier run (carried forward, LP-322). True when the latest run
+    # is not COMPLETED AND governed findings exist. Keyed on RUN status (not "the rule engine failed"): a run
+    # can also FAIL because the SWEEP failed while the rule pass succeeded, so the findings can even be fresh
+    # — the honest statement is "the run didn't complete; results may be out of date, re-run", not a claim
+    # about which half failed. NOT a verification_id filter (that would gut carry-forward — all findings still
+    # show); this only flags possible staleness.
     rule_findings_stale: bool
     aggression: AggressionPublic
     blocked: bool
