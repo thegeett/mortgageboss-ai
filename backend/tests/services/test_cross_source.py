@@ -478,6 +478,21 @@ def test_engine_fingerprint_is_a_stable_hex_digest() -> None:
     assert digest == engine_fingerprint()  # stable across calls
 
 
+def test_engine_fingerprint_hashes_python_recipes_not_just_declarative() -> None:
+    """LP-377 review: a pure-Python recipe fix (derived.py — occupancy/insurance/reserves/income) must
+    invalidate the cache too, else the governed pass can serve stale findings. The Python source is in the
+    hashed surface, not only the yaml/csv."""
+    from pathlib import Path
+
+    import app.verification as verification_pkg
+    from app.services.cross_source import _engine_artifact_paths
+
+    engine_dir = Path(verification_pkg.__file__).resolve().parent
+    names = {p.name for p in _engine_artifact_paths(engine_dir)}
+    assert "derived.py" in names  # the recipes participate in the digest (the review gap)
+    assert "tag_production.yaml" in names  # the declarations still do
+
+
 def test_engine_fingerprint_changes_with_the_active_rule_set(monkeypatch) -> None:
     """Activating/deactivating a rule (editing ACTIVE_RULE_IDS) changes the engine digest — so a rule
     that goes live re-runs the governed pass instead of serving a prior run's findings."""

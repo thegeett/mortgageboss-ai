@@ -67,6 +67,19 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         raise RuntimeError("Cannot start: Redis is unreachable")
     log.info("redis_connected")
 
+    # LP-377: warm the engine-fingerprint cache OFF the event loop, so the first verification request
+    # doesn't pay the synchronous verification-package walk on the async handler path. Best-effort — the
+    # lazy first-call path remains the fallback, so a transient FS hiccup must not block startup.
+    import asyncio
+
+    from app.services.cross_source import engine_fingerprint
+
+    try:
+        await asyncio.to_thread(engine_fingerprint)
+        log.info("engine_fingerprint_warmed")
+    except OSError as exc:  # pragma: no cover - best-effort warmup
+        log.warning("engine_fingerprint_warm_failed", error=str(exc))
+
     log.info("application_ready")
 
     yield

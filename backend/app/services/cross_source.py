@@ -448,10 +448,19 @@ def _resolve_income_target(context: dict[str, Any]) -> str | None:
 # --------------------------------------------------------------------------- #
 
 
+_ENGINE_SUFFIXES = frozenset({".py", ".yaml", ".yml", ".csv"})
+
+
+def _engine_artifact_paths(engine_dir: Path) -> list[Path]:
+    """The version-controlled files whose bytes define the engine (declarative + Python), sorted for a
+    stable digest (LP-377)."""
+    return sorted(p for p in engine_dir.rglob("*") if p.suffix in _ENGINE_SUFFIXES and p.is_file())
+
+
 @cache
 def engine_fingerprint() -> str:
     """A stable SHA-256 over the DECLARED verification engine — the ACTIVE rule set plus every
-    version-controlled declarative artifact the rule engine reads (LP-377).
+    version-controlled artifact under the verification package that shapes a governed verdict (LP-377).
 
     Folded into :func:`compute_input_fingerprint` so the LP-78.1 cache MISSES when the ENGINE changes
     even if the file's inputs did not. Without this the fingerprint hashed only the cross-source inputs,
@@ -460,31 +469,35 @@ def engine_fingerprint() -> str:
     (a run-level false-green that already cost a human an afternoon: LP-366/369/371/372/374 all landed,
     documents unchanged, and ~20 of 30 `couldnt_check` rows were already-fixed bugs served as current).
 
-    Hashes the content bytes of the declarative surface under ``app/verification/rules/`` — the rule
-    specs, ``tag_production.yaml`` (the tag declarations), and the fact/rule/tag/dependency CSVs +
-    ``vocabulary_extra.yaml`` — keyed by relative path, in sorted order, plus the ACTIVE rule tuple.
-    Any edit to any of them changes the digest; a rule is activated by editing ``ACTIVE_RULE_IDS``, so
-    that is hashed too. Cached per process: these artifacts are immutable within a running process (they
-    change only on deploy/restart), so the walk runs once.
+    Hashes the content bytes of BOTH surfaces under ``app/verification/`` — keyed by relative path, in
+    sorted order, plus the ACTIVE rule tuple:
+      * the DECLARATIVE artifacts (the rule specs, ``tag_production.yaml``, the fact/rule/tag/dependency
+        CSVs, ``vocabulary_extra.yaml``); AND
+      * the PYTHON SOURCE (LP-377 review) — the rule engine, the tag-materialization RECIPES
+        (``tag_materialization/derived.py``: occupancy / insurance / reserves / income arithmetic), the
+        AI-group builders, and the snapshot assembly. A pure-Python fix to a recipe (no yaml edit) now
+        invalidates too, so it cannot serve stale governed findings — the boundary is the whole package,
+        not just its data files.
+    A rule is activated by editing ``ACTIVE_RULE_IDS``, so that is hashed too. Cached per process: the
+    package is immutable within a running process (it changes only on deploy/restart), so the walk runs
+    once (a dev ``--reload`` spawns a fresh process, re-running it).
 
-    NOT captured (the reported LP-377 residual, NOT worked around): the engine's Python-resident logic
-    and the AI-group / judgment prompts that live as Python constants (``tag_materialization/ai.py``,
-    ``subjects.py``, ``ai/rule_judgment.py``). A change to those with NO declarative edit would not
-    invalidate. Such changes almost always co-ship a spec/tag edit (which does invalidate), and the
-    force-run link (LP-376-A) is the manual escape hatch. This is strictly smaller than the prior
-    behaviour, which ignored the engine version entirely.
+    NOT captured (the reported LP-377 residual): engine-relevant code OUTSIDE ``app/verification/`` — the
+    AI cross-source SWEEP prompt/logic in this module (``app/services/cross_source.py``) and the judgment
+    prompt-binding in ``app/ai/``. The judgment/AI-group PROMPTS themselves live in the spec/tag YAML and
+    ARE captured. A change to the uncaptured residual almost always co-ships a spec/tag/recipe edit (which
+    invalidates), and the force-run link (LP-376-A) is the manual escape hatch. Over-invalidation is safe
+    (a miss just re-runs); a stale hit is the false-green this exists to prevent.
     """
-    import app.verification.rules as rules_pkg
+    import app.verification as verification_pkg
     from app.verification.rule_engine.registry import ACTIVE_RULE_IDS
 
-    rules_dir = Path(rules_pkg.__file__).resolve().parent
+    engine_dir = Path(verification_pkg.__file__).resolve().parent
     hasher = hashlib.sha256()
     hasher.update(json.dumps(sorted(ACTIVE_RULE_IDS)).encode("utf-8"))
     hasher.update(b"\0")
-    for path in sorted(rules_dir.rglob("*")):
-        if path.suffix not in (".yaml", ".yml", ".csv") or not path.is_file():
-            continue
-        hasher.update(str(path.relative_to(rules_dir)).encode("utf-8"))
+    for path in _engine_artifact_paths(engine_dir):
+        hasher.update(str(path.relative_to(engine_dir)).encode("utf-8"))
         hasher.update(b"\0")
         hasher.update(path.read_bytes())
         hasher.update(b"\0")
