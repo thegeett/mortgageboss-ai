@@ -6,6 +6,7 @@ the cross-source findings. Cross-company → 404.
 """
 
 from collections.abc import AsyncIterator
+from uuid import uuid4
 
 import pytest_asyncio
 from app.core.database import get_db
@@ -13,6 +14,7 @@ from app.core.jwt import create_access_token
 from app.core.security import hash_password
 from app.main import app
 from app.models import (
+    Borrower,
     Company,
     Finding,
     FindingCategory,
@@ -26,9 +28,11 @@ from app.models.base import utcnow
 from app.models.finding import EvaluationOutcome
 from app.models.verification import Verification, VerificationStatus, VerificationTrigger
 from app.services.cross_source import assemble_cross_source_context, compute_input_fingerprint
+from app.services.documents import create_document
 from app.services.loan_files import create_loan_file
 from app.services.verifications import mark_verification_stale
 from app.verification.confidence import AggressionLevel
+from app.verification.snapshot.documents_section import document_filenames_by_content_id
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
@@ -288,6 +292,123 @@ async def test_rule_findings_separate_and_satisfied_is_reachable(
     # ratification badge is FALSE (it is NOT derived from gated_pending_signoff = not priya_validated).
     assert cc["ratification_pending"] is False
     assert cc["subject_key"] == "b2"  # the stable content-id (human legibility is LP-376's)
+
+
+# --- LP-377-B: the subject label — a finding names its subject, never a content-id ---------------
+
+
+async def _governed_finding_label(client: AsyncClient, token: str, loan_file: LoanFile) -> str:
+    """GET the file's status and return the single governed finding's subject_label."""
+    body = (
+        await client.get(f"{API}/{loan_file.display_id}/verification", headers=_auth(token))
+    ).json()
+    return body["rule_findings"][0]["subject_label"]
+
+
+async def test_loan_subject_reads_loan_level(client: AsyncClient, db: AsyncSession) -> None:
+    company, _user, token = await _user_and_token(db, slug="acme", email="u@acme.com")
+    loan_file = await create_loan_file(db, company_id=company.id)
+    db.add(
+        _rule_finding(
+            loan_file,
+            rule_id="OC-2",
+            outcome=EvaluationOutcome.COULDNT_CHECK,
+            status=FindingStatus.YELLOW,
+            message="occupancy could not be determined",
+            subject_key="loan",
+        )
+    )
+    await db.commit()
+    assert await _governed_finding_label(client, token, loan_file) == "Loan-level"
+
+
+async def test_borrower_subject_reads_the_name(client: AsyncClient, db: AsyncSession) -> None:
+    company, _user, token = await _user_and_token(db, slug="acme", email="u@acme.com")
+    loan_file = await create_loan_file(db, company_id=company.id)
+    borrower = Borrower(
+        loan_file_id=loan_file.id, first_name="Dana", last_name="Sample", is_primary=True
+    )
+    db.add(borrower)
+    await db.flush()
+    db.add(
+        _rule_finding(
+            loan_file,
+            rule_id="ID-8",
+            outcome=EvaluationOutcome.NEEDS_REVIEW,
+            status=FindingStatus.YELLOW,
+            message="citizenship needs review",
+            subject_key=str(borrower.id),
+        )
+    )
+    await db.commit()
+    # The borrower's UUID resolves to their name — never the raw id.
+    assert await _governed_finding_label(client, token, loan_file) == "Dana Sample"
+
+
+async def test_document_subject_reads_the_filename_via_the_content_id_bridge(
+    client: AsyncClient, db: AsyncSession
+) -> None:
+    """THE BRIDGE, end-to-end (LP-377-B): a governed per-document finding whose subject_key is a document
+    content-id resolves — through the read-path rebuild of ``{content_id → filename}`` — to the actual
+    filename a processor recognises, never the raw hash."""
+    company, _user, token = await _user_and_token(db, slug="acme", email="u@acme.com")
+    loan_file = await create_loan_file(db, company_id=company.id)
+    await create_document(
+        db,
+        loan_file=loan_file,
+        document_id=uuid4(),
+        filename="Statement_Mar2026.pdf",
+        mime_type="application/pdf",
+        size=1024,
+        storage_path="acme/lf/doc.pdf",
+        uploaded_by_user_id=None,
+    )
+    await db.flush()
+    # Learn the content-id this document gets (the SAME derivation the read path uses).
+    cid_map = await document_filenames_by_content_id(db, loan_file)
+    (content_id,) = list(cid_map)  # exactly one document on the file
+    db.add(
+        _rule_finding(
+            loan_file,
+            rule_id="ID-7",
+            outcome=EvaluationOutcome.COULDNT_CHECK,
+            status=FindingStatus.YELLOW,
+            message="a document in the file could not be classified",
+            subject_key=content_id,
+        )
+    )
+    await db.commit()
+
+    body = (
+        await client.get(f"{API}/{loan_file.display_id}/verification", headers=_auth(token))
+    ).json()
+    rf = body["rule_findings"][0]
+    assert rf["subject_label"] == "Statement_Mar2026.pdf"  # the filename, resolved via the bridge
+    assert rf["subject_key"] == content_id  # the KEY is untouched (LP-322's reconciler identity)
+    assert content_id not in rf["subject_label"]  # the hash never reaches the label
+
+
+async def test_document_subject_gone_reads_honestly_not_a_hash(
+    client: AsyncClient, db: AsyncSession
+) -> None:
+    """A per-document finding whose content-id is not among the file's current documents (removed / a
+    Tab-3 no_longer_applies subject) reads honestly — never the raw hash."""
+    company, _user, token = await _user_and_token(db, slug="acme", email="u@acme.com")
+    loan_file = await create_loan_file(db, company_id=company.id)
+    db.add(
+        _rule_finding(
+            loan_file,
+            rule_id="ID-9",
+            outcome=EvaluationOutcome.NO_LONGER_APPLIES,
+            status=FindingStatus.GREEN,
+            message="the power of attorney is no longer in the file",
+            subject_key="doc067c28e496b10b5f",  # a content-id with no current document
+        )
+    )
+    await db.commit()
+    label = await _governed_finding_label(client, token, loan_file)
+    assert label == "a document no longer in this file"
+    assert "doc067c" not in label
 
 
 async def test_verification_is_tenant_scoped(client: AsyncClient, db: AsyncSession) -> None:

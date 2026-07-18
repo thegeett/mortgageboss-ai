@@ -18,6 +18,7 @@ from sqlalchemy.orm import selectinload
 from app.api.dependencies import CurrentUser
 from app.core.database import DbSession
 from app.models.base import utcnow
+from app.models.borrower import Borrower
 from app.models.document import Document
 from app.models.finding import Finding, FindingOrigin, FindingStatus
 from app.models.helpers import only_active
@@ -55,8 +56,11 @@ from app.services.finding_resolution import (
     undo_finding,
 )
 from app.services.loan_files import get_loan_file
+from app.services.rule_subject_label import resolve_subject_label
 from app.services.verifications import create_verification_run, mark_verification_current
 from app.verification.confidence import CONFIDENCE_CUTOFFS
+from app.verification.snapshot.content_id import DOC_PREFIX
+from app.verification.snapshot.documents_section import document_filenames_by_content_id
 
 log = structlog.get_logger(__name__)
 
@@ -103,6 +107,22 @@ async def _reconcile_stuck_run(db: DbSession, loan_file: LoanFile) -> None:
     latest.error_detail = "Verification timed out — the worker did not finish. Re-run it."
     await db.commit()
     log.warning("verification_run_watchdog_failed", run_id=str(latest.id))
+
+
+async def _borrower_names(db: DbSession, loan_file_id: UUID) -> dict[str, str]:
+    """The file's active borrowers as ``str(id) → "First Last"`` (LP-377-B), so a per-borrower finding's
+    subject resolves to a name a processor recognises rather than the borrower's UUID."""
+    rows = (
+        await db.execute(
+            only_active(
+                select(Borrower.id, Borrower.first_name, Borrower.last_name).where(
+                    Borrower.loan_file_id == loan_file_id
+                ),
+                Borrower,
+            )
+        )
+    ).all()
+    return {str(r.id): f"{r.first_name} {r.last_name}".strip() for r in rows}
 
 
 async def _get_finding(db: DbSession, *, loan_file: LoanFile, finding_id: UUID) -> Finding | None:
@@ -278,6 +298,18 @@ async def _build_status(
     ).all()
     document_names: dict[UUID, str] = {row.id: row.original_filename for row in doc_rows}
 
+    # LP-377-B — the processor-facing SUBJECT LABEL for each governed finding (a filename / amount /
+    # borrower / "Loan-level"), resolved read-time per subject TYPE so a row names its subject, never a
+    # content-id hash. The borrower map is cheap; the document content-id → filename map is built ONLY
+    # when a governed finding actually has a document subject (it rebuilds the documents section — the
+    # single honest way to recover a content-id → filename, LP-312 ids being content hashes).
+    borrower_names = await _borrower_names(db, loan_file.id)
+    document_filenames = (
+        await document_filenames_by_content_id(db, loan_file)
+        if any((f.subject_key or "").startswith(DOC_PREFIX) for f in rule_findings)
+        else {}
+    )
+
     level = resolve_aggression_level(loan_file, user)
     cutoff = active_cutoff(loan_file, user)
     in_scope = await open_in_scope_findings(db, loan_file_id=loan_file.id, confidence_cutoff=cutoff)
@@ -287,7 +319,18 @@ async def _build_status(
         program=loan_file.loan_program.value if loan_file.loan_program else None,
         latest_run=VerificationRunPublic.from_model(latest) if latest else None,
         findings=[FindingPublic.from_model(f, document_names=document_names) for f in findings],
-        rule_findings=[RuleFindingPublic.from_model(f) for f in rule_findings],
+        rule_findings=[
+            RuleFindingPublic.from_model(
+                f,
+                subject_label=resolve_subject_label(
+                    f.subject_key,
+                    f.load_bearing_tags or [],
+                    borrower_names=borrower_names,
+                    document_filenames=document_filenames,
+                ),
+            )
+            for f in rule_findings
+        ],
         aggression=AggressionPublic(
             level=level.value,
             default=user.default_aggression_level.value,

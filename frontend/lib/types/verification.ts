@@ -88,8 +88,11 @@ export interface RuleFinding {
   category: string;
   /** The reason — every non-satisfied outcome carries one (§8's honesty contract). */
   message: string;
-  /** The stable per-subject content-id (LP-312); NOT human-legible — never render it as a row's identity. */
+  /** The stable per-subject content-id (LP-312) — the reconciler's KEY (LP-322), NEVER rendered to a user. */
   subject_key: string | null;
+  /** The processor-facing subject name (LP-377-B) — a filename / amount / borrower / "Loan-level", resolved
+   *  read-time per subject TYPE. This is what a row and the provenance card show; never the content-id. */
+  subject_label: string;
   /** The rule's guideline citation, from the SPEC (never AI-recalled). */
   guideline: string | null;
   load_bearing_tags: RuleFindingTag[];

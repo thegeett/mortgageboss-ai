@@ -10698,3 +10698,58 @@ returns `completed`, the stale hit, instead of `running`).
 `0000088` (#1/#2 fixed + the masking test replaced), LP-376/376-C (the stale render that exposed #3), LP-78.1
 (the original cross-source cache), LP-376-A (the force-run escape hatch), LP-322 (the reconciler keyed on
 `(rule_id, subject_key)`).
+
+## ADR-296: A finding names its subject — the label resolves in the read path, declared per subject type (LP-377-B)
+
+**Context.** A governed finding's row identity was its ``subject_key`` — a stable content-id (LP-312): a
+document ``doc067c…``, a transaction ``txn…``, a borrower UUID, or ``"loan"``. LP-376's provenance card
+rendered ``Subject id: 59e173ce-…`` verbatim. A processor reads *"a document in the file could not be
+classified"* — over 30 documents, WHICH one? The finding model knows exactly which; it just never said. Both
+LP-375 (*"a legible subject label needs per-family logic, not uniformly derivable from the stored data"*) and
+LP-376-C (*"the FILENAME is not reachable — subject_key is a content-id; no doc index at the reason site"*)
+reported this wall and stopped at it. This ticket goes through it.
+
+**Where the label resolves (D1) — the READ PATH, not the evaluator.** The deciding fact: the filename is NOT
+in the snapshot. ``DocumentEntry`` carries ``content_id`` / ``document_type`` / ``belongs_to`` (borrower refs
+with names) / extraction ``fields`` — but not ``original_filename`` (which lives only in DB
+``Document.original_filename``). The evaluator holds only the snapshot and is DB-free, so option (a) — naming
+the document in the evaluator's reason string — is impossible without plumbing a filename through the whole
+tag/rule pipeline. The read path (``_build_status``) has DB access and the finding's ``subject_key``, so the
+label resolves there: ``RuleFindingPublic`` gains a ``subject_label``, resolved once per finding with the
+file's borrower + document maps. This fixes the row AND the card in one place, for ALL findings (old and new),
+with nothing persisted.
+
+**Declared per SUBJECT TYPE, dispatched on the key's SHAPE (D2) — no rule-id branch.** The subject TYPE is
+the key, not the rule id, and the content-id prefixes are designed for exactly this dispatch:
+``"loan"`` → "Loan-level"; ``txn…`` → "Deposit of $20,000 on 3/27" (from the inline ``txn.amount`` /
+``txn.date`` tags — generalising LP-376's amount chip into ONE mechanism, retiring the frontend
+``ruleSubjectChip``); ``doc…`` → the filename; a UUID → the borrower's name; ``account:…`` → "a bank account".
+This is ``declared-key-resolved-by-registry`` again — a per-rule-id branch would be the anti-pattern.
+
+**The document bridge — a shared derivation, never duplicated.** A document's content-id is a content hash
+(irreversible), so the read path recovers ``{content_id → filename}`` by REBUILDING it from the current
+documents via the SAME reshape+assign the snapshot uses (``documents_section._reshape_and_assign_ids`` —
+extracted so ``build_documents_section`` and the map share it; duplicating it would let the ids drift and
+silently resolve to nothing). Built only when a governed finding actually has a ``doc…`` subject.
+
+**The honest fallback (D3) — never a hash.** A content-id rebuilt from the CURRENT documents will not contain
+a removed or re-extracted document's id (a Tab-3 ``no_longer_applies`` finding's subject is gone BY
+DEFINITION) → the label reads *"a document no longer in this file"*; a borrower who left → *"a borrower no
+longer on this file"*. Never a fabricated name, never the id. This falls out of the rebuild naturally.
+
+**PII posture (D4) — read-time, not persisted.** A filename can carry a borrower's name
+(``Bansari_Patel_W2.pdf``). Resolving the label at read time means it is NEVER written into the finding row —
+consistent with the existing posture (borrower names already appear in read-time finding messages;
+``BorrowerRef.name`` is in the snapshot). This is the argument FOR the read-path option and against persisting
+the label.
+
+**The label is cosmetic; the key is identity.** ``subject_key`` stays the reconciler's key (LP-322 matches on
+``(rule_id, subject_key)``) and is unchanged — the LABEL must never become the KEY. No verdict, outcome, tab,
+or count changed; this ticket changes LABELS.
+
+**Reported cost.** Resolving document labels rebuilds the documents section at read time (the only honest way
+to recover a content-id → filename — the id is a content hash). Gated on a ``doc…`` subject being present.
+
+**Cross-refs.** LP-312 (``subject_key`` / content-ids), LP-375 + LP-376-C (both reported this wall and
+stopped), LP-376 (the provenance card + the amount chip generalised here), LP-322 (the reconciler key — the
+label must not touch it), LP-330 (the absent-document contract behind the honest fallback).

@@ -16,6 +16,7 @@ from pydantic import BaseModel, Field
 
 from app.models.finding import EvaluationOutcome, Finding
 from app.models.verification import Verification
+from app.services.rule_subject_label import resolve_subject_label
 from app.verification.confidence import AggressionLevel
 from app.verification.finding_guidance import resolve_guidance
 from app.verification.rules.specs import RuleSpec, load_rule_spec
@@ -240,7 +241,11 @@ class RuleFindingPublic(BaseModel):
     message: str  # the reason — EVERY non-satisfied outcome carries one (§8's honesty contract)
     subject_key: (
         str | None
-    )  # the stable per-subject content-id (LP-312); human legibility is LP-376's
+    )  # the stable per-subject content-id (LP-312) — the reconciler's KEY (LP-322), NOT for display
+    subject_label: (
+        str  # the processor-facing subject name (LP-377-B) — a filename / amount / borrower /
+    )
+    # "Loan-level", resolved read-time per subject TYPE; NEVER a content-id, UUID, or dotted tag id
     guideline: str | None  # the rule's guideline citation, from the SPEC (never AI-recalled)
     # Inline provenance (§3D): each {tag_id, value, confidence, reasoning, source_facts} — a human sees WHY.
     load_bearing_tags: list[dict[str, Any]]
@@ -252,7 +257,7 @@ class RuleFindingPublic(BaseModel):
     resolution_status: str
 
     @classmethod
-    def from_model(cls, finding: Finding) -> RuleFindingPublic:
+    def from_model(cls, finding: Finding, *, subject_label: str | None = None) -> RuleFindingPublic:
         details = finding.details or {}
         spec = _rule_spec(
             finding.rule_id
@@ -271,6 +276,12 @@ class RuleFindingPublic(BaseModel):
             ),  # the rule's OWN family, not the legacy enum (Bug 3)
             message=finding.message,
             subject_key=finding.subject_key,
+            # The DB-resolved label from the read path (borrower/document maps); when a caller resolves no
+            # maps (a unit call), fall back to the maps-free label — loan/deposit resolve, the rest read
+            # honestly. Either way NEVER the raw subject_key (LP-377-B).
+            subject_label=subject_label
+            if subject_label is not None
+            else resolve_subject_label(finding.subject_key, finding.load_bearing_tags or []),
             guideline=spec.guideline_reference if spec is not None else None,
             load_bearing_tags=finding.load_bearing_tags or [],
             # An AI judgment verdict a human must ratify — NOT gated_pending_signoff (= not priya_validated;

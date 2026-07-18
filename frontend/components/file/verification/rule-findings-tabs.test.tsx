@@ -23,6 +23,7 @@ function ruleFinding(overrides: Partial<RuleFinding> = {}): RuleFinding {
     category: overrides.category ?? "identity",
     message: overrides.message ?? "the address-type classification is unknown",
     subject_key: overrides.subject_key ?? "b-1",
+    subject_label: overrides.subject_label ?? "Dana Sample",
     guideline: overrides.guideline ?? "Fannie B3-4.1: the borrower's residence must be consistent.",
     load_bearing_tags: overrides.load_bearing_tags ?? [
       {
@@ -217,37 +218,62 @@ describe("the provenance card — the reasoning IS the product", () => {
   });
 });
 
-describe("the subject label — never a raw content-id", () => {
-  it("derives a recognisable chip from the tags and never renders the raw subject_key as identity", () => {
+describe("the subject label (LP-377-B) — the read path's label, never a raw content-id", () => {
+  it("renders the subject_label on the row and NEVER the raw subject_key", () => {
     renderTabs([
       ruleFinding({
         rule_id: "AS-1",
         evaluation_outcome: "open",
         status: "red",
         subject_key: "txn54c6369affffffffffff",
+        subject_label: "Deposit of $20,000 on 3/27",
         message: "a large deposit needs sourcing",
-        load_bearing_tags: [
-          {
-            tag_id: "txn.amount",
-            value: "20000",
-            confidence: null,
-            reasoning: null,
-            source_facts: [],
-          },
-          {
-            tag_id: "txn.date",
-            value: "2025-03-27",
-            confidence: null,
-            reasoning: null,
-            source_facts: [],
-          },
-        ],
       }),
     ]);
-    // The row is identifiable by a money chip, never the raw hash.
     const row = screen.getByRole("button", { name: /a large deposit needs sourcing/i });
-    expect(within(row).getByText(/\$20,000/)).toBeDefined();
-    expect(within(row).queryByText(/txn54c6369a/)).toBeNull();
+    expect(within(row).getByText(/Deposit of \$20,000 on 3\/27/)).toBeDefined();
+    expect(within(row).queryByText(/txn54c6369a/)).toBeNull(); // the hash is never a user-facing identity
+  });
+
+  it("names the document in the provenance card, never the content-id hash", () => {
+    renderTabs([
+      ruleFinding({
+        rule_id: "ID-7",
+        evaluation_outcome: "couldnt_check",
+        subject_key: "doc067c28e496b10b5f",
+        subject_label: "Statement_Mar2026.pdf",
+        message: "a document in the file could not be classified",
+      }),
+    ]);
+    fireEvent.click(screen.getByRole("button", { name: /could not be classified/i }));
+    // The filename names the subject on BOTH the row chip and the detail card; the raw content-id is gone.
+    expect(screen.getAllByText(/Statement_Mar2026\.pdf/).length).toBeGreaterThanOrEqual(2);
+    expect(screen.queryByText(/doc067c28e496b10b5f/)).toBeNull();
+  });
+
+  it("a collapsed group expands to WHICH documents (each member's label)", () => {
+    renderTabs([
+      ruleFinding({
+        id: "rf-a",
+        rule_id: "ID-7",
+        evaluation_outcome: "couldnt_check",
+        subject_key: "docaaaa",
+        subject_label: "March_Statement.pdf",
+        message: "a document in the file could not be classified",
+      }),
+      ruleFinding({
+        id: "rf-b",
+        rule_id: "ID-7",
+        evaluation_outcome: "couldnt_check",
+        subject_key: "docbbbb",
+        subject_label: "April_Statement.pdf",
+        message: "a document in the file could not be classified",
+      }),
+    ]);
+    // Two identical-reason rows collapse to one summary; expanding names WHICH documents.
+    fireEvent.click(screen.getByRole("button", { name: /2 findings/i }));
+    expect(screen.getByText("March_Statement.pdf")).toBeDefined();
+    expect(screen.getByText("April_Statement.pdf")).toBeDefined();
   });
 });
 

@@ -15,7 +15,7 @@
 import { humanize } from "@/lib/format";
 import type { RuleFinding, RuleFindingTag } from "@/lib/types/verification";
 import { cn } from "@/lib/utils";
-import { type OutcomeTone, outcomeMeta, ruleSubjectChip } from "@/lib/verification/rule-findings";
+import { type OutcomeTone, outcomeMeta } from "@/lib/verification/rule-findings";
 import { ChevronDown, Gavel } from "lucide-react";
 import { useId, useState } from "react";
 
@@ -97,7 +97,9 @@ export function RuleFindingRow({ finding }: { finding: RuleFinding }) {
   const [expanded, setExpanded] = useState(false);
   const meta = outcomeMeta(finding.evaluation_outcome);
   const tone = TONE[meta.tone];
-  const chip = ruleSubjectChip(finding);
+  // LP-377-B: the subject label (a filename / amount / borrower / "Loan-level") — resolved by the read
+  // path per subject TYPE, never the raw content-id. Two rows of the same rule are now tellable apart.
+  const chip = finding.subject_label;
   const panelId = useId();
 
   return (
@@ -114,7 +116,7 @@ export function RuleFindingRow({ finding }: { finding: RuleFinding }) {
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
             <span className="font-mono text-xs font-semibold text-gray-800">{finding.rule_id}</span>
             <span className="text-[11px] text-gray-400">{humanize(finding.category)}</span>
-            {chip != null && (
+            {chip.length > 0 && (
               <span className="rounded bg-gray-100 px-1.5 py-px text-[11px] font-medium text-gray-600">
                 {chip}
               </span>
@@ -180,9 +182,11 @@ export function RuleFindingRow({ finding }: { finding: RuleFinding }) {
             </DetailBlock>
           )}
 
-          {finding.subject_key != null && (
+          {finding.subject_label.length > 0 && (
+            // LP-377-B: the subject in human terms (a filename / borrower / "Loan-level"), never the raw
+            // content-id an engineer's `subject_key` carries — a processor should not see a hash here.
             <p className="text-[11px] text-gray-400">
-              Subject id: <span className="font-mono">{finding.subject_key}</span>
+              Subject: <span className="font-medium text-gray-500">{finding.subject_label}</span>
             </p>
           )}
         </div>

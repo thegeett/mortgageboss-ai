@@ -1,4 +1,3 @@
-import { formatMoney } from "@/lib/format";
 /**
  * The §8 tab model (LP-376) — the FIVE outcome states → FOUR governed tabs (+ the legacy quarantine).
  *
@@ -12,7 +11,7 @@ import { formatMoney } from "@/lib/format";
  * pass, never Tab 2/4. Tab 3 ≠ Tab 4 (the subject left vs never relevant). `needs_review` ≠ `open` (a
  * ratification-pending judgment is not a violation) — same tab, the detail says which.
  */
-import type { EvaluationOutcome, RuleFinding, RuleFindingTag } from "@/lib/types/verification";
+import type { EvaluationOutcome, RuleFinding } from "@/lib/types/verification";
 
 export type GovernedTabId = "attention" | "satisfied" | "no_longer_applies" | "not_applicable";
 export type TabId = GovernedTabId | "legacy";
@@ -155,44 +154,7 @@ export function attentionGroups(
     .filter((group) => group.findings.length > 0);
 }
 
-// --------------------------------------------------------------------------- //
-// The subject label — a human-recognisable identity for a row. NEVER the raw content-id hash (LP-376:
-// "a row nobody can identify is a row nobody can action"). Derived from the load-bearing tags where a
-// recognisable value exists; the `message` prose carries the full identity as the row's subline.
-// --------------------------------------------------------------------------- //
-function tagValue(finding: RuleFinding, tagId: string): string | null {
-  const tag = finding.load_bearing_tags.find((t: RuleFindingTag) => t.tag_id === tagId);
-  if (tag == null || tag.value == null) return null;
-  const value = String(tag.value).trim();
-  return value.length > 0 && value !== "unknown" ? value : null;
-}
-
-/** A compact "M/D" from an ISO date (parsed by parts to avoid a timezone shift on a date-only string);
- *  the raw value verbatim if it isn't ISO — the chip is an identity hint, never a computed field. */
-function shortDate(value: string): string {
-  const iso = value.match(/^(\d{4})-(\d{2})-(\d{2})/);
-  return iso != null ? `${Number(iso[2])}/${Number(iso[3])}` : value;
-}
-
-/**
- * A COMPACT subject chip a processor recognises, or null (then the row relies on its message). Per family:
- *  - AS-1 (per-deposit): the deposit's amount + date from txn.amount / txn.date → "$20,000 · 3/27".
- *  - ID-* per-borrower: a name tag if present.
- *  - loan-level (subject_key "loan"): "Loan".
- *  - per-document: the address / a stated value if present.
- * Never returns the raw content-id (a hash is not an identity).
- */
-export function ruleSubjectChip(finding: RuleFinding): string | null {
-  const amount = tagValue(finding, "txn.amount");
-  const date = tagValue(finding, "txn.date");
-  if (amount != null) {
-    const money = formatMoney(amount);
-    return date != null ? `${money} · ${shortDate(date)}` : money;
-  }
-  const name = tagValue(finding, "id.name_normalized");
-  if (name != null) return name;
-  const address = tagValue(finding, "id.address_normalized");
-  if (address != null) return address;
-  if (finding.subject_key === "loan") return "Loan-level";
-  return null;
-}
+// The subject LABEL (LP-377-B) is resolved by the READ PATH per subject TYPE (a filename / amount /
+// borrower / "Loan-level") and arrives on `finding.subject_label`. The former frontend `ruleSubjectChip`
+// (which guessed a chip from the load-bearing tags and could only ever show an amount, never a document's
+// name) is retired — one mechanism, in the one place with DB access, so a row names its subject honestly.

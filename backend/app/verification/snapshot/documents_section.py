@@ -397,13 +397,17 @@ class _ReshapedDoc:
     txn_contents: list[dict[str, Any]] | None
 
 
-async def build_documents_section(db: AsyncSession, loan_file: LoanFile) -> list[DocumentEntry]:
-    """Assemble the ``documents`` section for a loan file (active documents only).
+async def _reshape_and_assign_ids(
+    db: AsyncSession, loan_file: LoanFile
+) -> tuple[list[Document], list[_ReshapedDoc], list[str]]:
+    """Load the file's current documents, reshape each (type / resolved borrowers / fields / transaction
+    field sets), and assign the stable, content-derived document ids — returned as ALIGNED lists
+    ``(documents, reshaped, content_ids)``.
 
-    Reads each active, current document's extraction + stored borrower links. No
-    extraction, no matching — a pure read + reshape. Each entry (and each transaction) is
-    stamped with a stable, run-independent ``content_id`` (LP-312): documents get ids first,
-    then each statement's transactions are scoped under their document's id.
+    The ONE place the document content-ids are derived, so the snapshot's ``documents`` section and the
+    read-time ``content_id -> filename`` map (LP-377-B) build from the SAME reshape+assign — a finding's
+    ``subject_key`` (a document content-id) is guaranteed to match the id the map keys on. Duplicating
+    this reshape would let the two drift and silently resolve to nothing.
     """
     documents = (
         (
@@ -446,8 +450,8 @@ async def build_documents_section(db: AsyncSession, loan_file: LoanFile) -> list
             _ReshapedDoc(document.document_type, refs, fields, field_sets, txn_contents)
         )
 
-    # Assign stable, content-derived document ids (with a duplicate tiebreak), then build each
-    # entry scoping its transactions' ids under its own document id.
+    # Pass 2: assign stable, content-derived document ids (with a duplicate tiebreak), aligned to the
+    # documents/reshaped lists by input order.
     doc_ids = assign_content_ids(
         DOC_PREFIX,
         [
@@ -457,6 +461,18 @@ async def build_documents_section(db: AsyncSession, loan_file: LoanFile) -> list
             for d in reshaped
         ],
     )
+    return list(documents), reshaped, doc_ids
+
+
+async def build_documents_section(db: AsyncSession, loan_file: LoanFile) -> list[DocumentEntry]:
+    """Assemble the ``documents`` section for a loan file (active documents only).
+
+    Reads each active, current document's extraction + stored borrower links. No
+    extraction, no matching — a pure read + reshape. Each entry (and each transaction) is
+    stamped with a stable, run-independent ``content_id`` (LP-312): documents get ids first,
+    then each statement's transactions are scoped under their document's id.
+    """
+    _documents, reshaped, doc_ids = await _reshape_and_assign_ids(db, loan_file)
     entries: list[DocumentEntry] = []
     for d, doc_id in zip(reshaped, doc_ids, strict=True):
         entries.append(
@@ -471,6 +487,24 @@ async def build_documents_section(db: AsyncSession, loan_file: LoanFile) -> list
             )
         )
     return entries
+
+
+async def document_filenames_by_content_id(db: AsyncSession, loan_file: LoanFile) -> dict[str, str]:
+    """Map each current document's stable ``content_id`` → its ``original_filename`` (LP-377-B).
+
+    The read path uses this to resolve a governed finding's document subject (its ``subject_key`` is a
+    document content-id, LP-312) to a filename a processor recognises — never the raw hash. Reuses the
+    EXACT reshape+assign the snapshot uses (:func:`_reshape_and_assign_ids`), so the keys match the
+    findings' subject_keys. A document whose content changed since its run gets a DIFFERENT id now and is
+    simply absent from the map (the read path then falls back honestly — the finding's subject is gone /
+    no longer in this form). Documents with no stored filename are omitted (same honest fallback).
+    """
+    documents, _reshaped, doc_ids = await _reshape_and_assign_ids(db, loan_file)
+    return {
+        doc_id: document.original_filename
+        for document, doc_id in zip(documents, doc_ids, strict=True)
+        if document.original_filename
+    }
 
 
 async def _links_by_document(
