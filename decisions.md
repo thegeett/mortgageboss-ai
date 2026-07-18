@@ -10852,3 +10852,39 @@ run's real numbers are recorded in `docs/tickets/LP-377-C.md` (reported, not pre
 row-lock pattern moved here), LP-322 (the reconciler carry-forward Fix 3 preserves), LP-368 (the per-document
 AI cost — rec 4, the engine-level capacity fix), LP-89 (the watchdog), LP-376/376-C/377-B (counts read off the
 failed run).
+
+## ADR-299: The dormant income/asset producers mostly work — except income_stability, which reorders Epic 1 (LP-378)
+
+**Context.** The ~15 dormant income/asset rules (LP-333 bucket D) were believed "gated on calibration." But
+calibration measures a tag's ACCURACY, presupposing it MATERIALIZES — and the income/asset AI groups had never
+once run on real data (`_required_ai_groups()` requests only the groups a LIVE rule reads, and none of these is
+live). LP-368 warned: *"calibration is necessary but may not be sufficient — the producers are unproven on real
+data."* LP-378 forced the 6 dormant groups to run once on LF-6T3N (real sonnet-4-5, off-path, persisting
+nothing) to find out.
+
+**Finding — the pipe carries water on 5 of 6.** `income_amounts`, `income_employer`, `income_docs`,
+`stmt_facts`, and `asset_facts` all materialize real, structured values on the doc-types they apply to (W-2 →
+`$18,697.06` monthly; W-2 → `Wells Fargo Bank, N.A.`; bank statement → owner-match + reserve-eligible;
+investment account → `$211,688.19` usable). Their dormant rules are **genuinely calibration-ready** — LP-379 is
+well-aimed at them.
+
+**Decision — `income_stability` is blocked on a PRODUCER GAP, not calibration, so it precedes LP-379.** It
+produced **0 real values on 120 observations** — a 100% abstention. The cause is architectural, not a bug: it
+is asked **per-document** a **cross-document** question (2-year history / decline / same-line-of-work / 3-year
+continuance need the borrower's income documents across years, seen together), and a single W-2 or paystub
+cannot evidence it (*"a single year does not evidence 2-year history"*). Calibrating a uniformly-`unknown` tag
+measures nothing. **The 5 rules that read it (IN-7, IN-10, IN-11, IN-13, IN-14) need a per-borrower,
+multi-document income-stability producer BEFORE Priya's time — this reorders Epic 1.** A second, smaller
+finding: `income_amounts` **over-produces** a `documented_monthly` on non-income documents (mortgage statement,
+property-tax bill, bank statement) — materializing ≠ correct; LP-379 must catch it or LP-377-D must gate the
+group to income doc-types.
+
+**Honesty preserved.** This proved the producers RUN and emit values on real data; it did NOT prove those
+values are RIGHT (that is LP-379). A uniform-`unknown` group is reported as a finding, not a pass. The probe is
+off the normal path (never imported by `verification_run`), used the real model, and persisted nothing — a
+diagnostic, not an activation.
+
+**Cross-refs.** LP-368 (the census / the warning this confirms), LP-333 (the dormant bucket), LP-377-C (the
+first complete run — the baseline), LP-379 (Priya's calibration — well-aimed for 5 of 6, premature for
+income_stability), LP-377-D (the per-document-group gate — fed this probe's doc-type data), LP-377-A (the
+brokerage_statement extraction gap that starves asset_facts on that one doc).
