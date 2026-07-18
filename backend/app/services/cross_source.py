@@ -182,18 +182,14 @@ async def run_cross_source(
     # their guidance from the stored grounded-starter set at read time (no model call).
     await _generate_novel_guidance(outcome.added, guidance_fn)
 
-    # LP-365 fail-closed coexistence: the sweep and the governed rule-engine pass write this run row in
-    # SEPARATE task transactions, so the sweep's in-memory `run.status` is STALE (it never sees the other
-    # session's committed FAILED). Re-read the status under a ROW LOCK and mark COMPLETED only if a FAILED
-    # has not been committed — an unguarded in-memory set would overwrite a concurrent FAILED (a run-level
-    # false-green, the exact class this architecture prevents). The lock is held to commit, so the
-    # rule-engine's unconditional FAILED write serializes AFTER and stays sticky (FAILED always wins).
-    locked_status = await db.scalar(
-        select(Verification.status).where(Verification.id == run.id).with_for_update()
-    )
-    if locked_status is not VerificationStatus.FAILED:
-        run.status = VerificationStatus.COMPLETED
-    run.completed_at = utcnow()
+    # LP-377-C Fix 2: the sweep NO LONGER marks the run COMPLETED. The governed rule pass is the run's
+    # completion authority (it needs ~282s; the sweep ~65s — the sweep cannot know the other half finished,
+    # and marking COMPLETED alone was the fourth fail-open: a COMPLETED run whose governed engine never ran).
+    # The sweep records its OWN outputs (counts / tokens / fingerprint) and leaves the run RUNNING; the rule
+    # pass marks COMPLETED on success (``verification_rules._run``), or the watchdog fails a run whose
+    # governed pass never finished. The sweep still marks FAILED on its OWN failure (the AIClientError path
+    # above) — a sweep failure is a run failure, and FAILED still wins over the rule pass's later COMPLETED
+    # via that pass's own row-lock re-read.
     run.red_count = red
     run.yellow_count = yellow
     run.green_count = 0

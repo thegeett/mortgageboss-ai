@@ -176,7 +176,9 @@ async def test_emits_structured_findings_into_shared_model(db_session: AsyncSess
         ],
     )
 
-    assert run.status is VerificationStatus.COMPLETED
+    # LP-377-C: the sweep NO LONGER marks the run COMPLETED — the governed rule pass is the completion
+    # authority. The sweep did its work and left the run RUNNING (a full run completes when the rule pass ends).
+    assert run.status is VerificationStatus.RUNNING
     findings = await _findings(db_session, loan_file.id)
     assert len(findings) == 1
     f = findings[0]
@@ -456,13 +458,19 @@ def test_fingerprint_changes_on_value_change() -> None:
 
 
 async def test_run_stores_the_input_fingerprint(db_session: AsyncSession) -> None:
-    """A completed pass stores the fingerprint of the inputs it compared."""
+    """The sweep stores the fingerprint of the inputs it compared. LP-377-C: the sweep no longer COMPLETES
+    the run (the governed pass does), so the cache's ``latest_completed_run`` finds it only after completion."""
     company = await _company(db_session, "acme")
     loan_file = await _file(db_session, company)
     expected = compute_input_fingerprint(await assemble_cross_source_context(db_session, loan_file))
 
     run = await _run(db_session, loan_file, [_raw(type="income_variance")])
-    assert run.input_fingerprint == expected
+    assert run.input_fingerprint == expected  # the sweep records the fingerprint
+    assert run.status is VerificationStatus.RUNNING  # ...but does not complete the run alone
+
+    # Once the governed pass completes the run, the cache (latest_completed_run) can find the fingerprint.
+    run.status = VerificationStatus.COMPLETED
+    await db_session.flush()
     assert (await latest_completed_run(db_session, loan_file.id)).input_fingerprint == expected
 
 

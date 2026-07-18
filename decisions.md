@@ -10797,3 +10797,58 @@ question of whether a due-diligence-fee wire request is an `earnest_money_receip
 **Cross-refs.** LP-368 (the census / recommendation 5), LP-372 (ID-4's gate — symptom #3, unrelated), LP-330 (the
 absent-document contract), LP-333 (the wrong-type silent-failure class), LP-335/340/343 (the prompt-bug class — why
 an unmeasured indicator change was not made), LP-376-C (the reason text that made the rows legible).
+
+## ADR-298: The fourth fail-open — the governed pass has never been allowed to finish (LP-377-C)
+
+**Context — the number was always there.** LP-365 measured the governed rule pass at **~282s** on a 30-document
+file; `celery_app.py` set `task_soft_time_limit=120`. **Nobody put 282 next to 120.** Every normal run: the AI
+sweep succeeds in ~65s and marked the run COMPLETED; the rule pass was killed at the 120s soft limit, retried
+(each retry also timing out), exhausted, and its FAILED marker never landed. The result was a **COMPLETED run
+with no governed output**, displaying stale findings from a prior FAILED run as current — and **every governed
+count from LP-376 onward (the per-tab numbers, "AS-1's 15 couldnt_check cleared", LP-376-C's before/after,
+LP-377-B's labels) was read off run `96f55e9d`, killed mid-flight.** Nobody has ever seen a complete run.
+
+**Why every guard was individually correct and collectively blind.** LP-377 fixed three run-level fail-opens;
+none models a timeout mid-execution. BUG 1 (the sweep's atomic status re-read won't overwrite FAILED) is
+**moot** — nothing ever set FAILED, because the pass was killed before `_mark_failed` could commit. BUG 2 (a
+failed enqueue marks FAILED) is **moot** — `.delay()` **succeeded**; the task was received and ran. The
+`retry_or_terminal` → `_mark_failed` exhaustion path runs in **borrowed time after the soft limit already
+fired**, so the hard limit kills the worker child before its commit lands. The stuck-RUNNING watchdog only
+fired on a **RUNNING** run — which the sweep had already flipped to **COMPLETED**. And the read path showed
+governed findings with **no run filter, no status filter**, under the latest run's status. Five correct
+pieces, one invisible failure.
+
+**Fix 1 — the runtime/limit mismatch (D1).** The ~282s is dominated by **sequential AI calls**: `materialize_tags`
+awaits each of 6 AI groups in a `for` loop, each batching its subjects sequentially, run across every document
+(the per-document id.* groups), plus Stage A/B. Reducing it (parallelize / gate groups to relevant doc-types,
+LP-368 rec 4) is an ENGINE change — out of scope. So the lever is TIME: `run_rule_engine_pass` gets its OWN
+`soft_time_limit=900` / `time_limit=1200` (the 65s sweep keeps the short global 120/180). Threading `TagCaches`
+across task runs (LP-377's aside) was rejected — it dedupes only within a run, so the FIRST run pays full cost
+regardless; not the lever. A file large enough to exceed even 1200s needs the engine-level fix (reported).
+
+**Fix 2 — the run's status must depend on the governed pass (D2).** The **rule pass is now the completion
+authority**: the sweep records its findings/counts/fingerprint and **leaves the run RUNNING** (it cannot know
+the other half finished — marking COMPLETED alone was the fail-open); the rule pass marks COMPLETED **on its
+success path**, under the LP-377 row lock (only if not already FAILED). A pass killed by the time limit never
+reaches that line → the run stays RUNNING → the **watchdog** (timeout raised to **1500s**, above the rule
+pass's hard limit) fails it. **Detection does not depend on the dying task committing anything** — the watchdog
+owns it. A new `PARTIAL` status (the sweep's findings are valid) was **rejected** for blast radius (an enum
+value rippling through the UI, the watchdog, `_build_status`, the version selector); instead the run reads
+FAILED, the sweep's findings remain readable (LP-322 immortality), and Fix 3 makes the surface honest. No
+schema migration.
+
+**Fix 3 — the read path couples findings to run success (D3).** `_build_status` still shows ALL governed
+findings (a `verification_id` filter would **gut LP-322's carry-forward** — a finding minted in run 1 and
+carried into run 5 legitimately belongs to run 5). One honest signal is added: `rule_findings_stale` = the
+latest run is not COMPLETED AND governed findings exist. The surface then says *"these rule-engine findings are
+from an earlier run; the latest run's rule engine did not complete."* This forces a minimal frontend notice
+(the D3 honesty; reported and built).
+
+**What this invalidates.** Every governed count from LP-376 onward was partial-run output. The first complete
+run's real numbers are recorded in `docs/tickets/LP-377-C.md` (reported, not predicted); LP-377-A survives
+(it read the documents + classifier directly, not the findings).
+
+**Cross-refs.** LP-365 (the ~282s measurement nobody compared to 120), LP-377 (the three blind guards + the
+row-lock pattern moved here), LP-322 (the reconciler carry-forward Fix 3 preserves), LP-368 (the per-document
+AI cost — rec 4, the engine-level capacity fix), LP-89 (the watchdog), LP-376/376-C/377-B (counts read off the
+failed run).

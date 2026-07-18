@@ -10,16 +10,26 @@ The two systems stay SEPARATE: this writes findings with ``origin=DETERMINISTIC_
 counts are never summed (their trust properties differ — a gated, provenance-carrying rule verdict is not
 the same kind of thing as a 75%-confidence AI guess).
 
-FAIL-CLOSED RUN STATUS: on exhaustion this marks the run FAILED. A run must NOT read COMPLETED when the
-governed engine silently failed — that is a run-level false-green, the exact class this architecture exists
-to prevent. The sweep's COMPLETED set is guarded to never overwrite a FAILED (``run_cross_source``), so a
-run is COMPLETED only if BOTH passes completed; if EITHER failed, the run reads FAILED.
+FAIL-CLOSED RUN STATUS (LP-377-C): the RULE PASS is the run's COMPLETION AUTHORITY. The governed pass needs
+~282s on a 30-document file (LP-365) — far more than the 65s sweep — so the sweep NO LONGER marks a run
+COMPLETED (it cannot know this half finished). A run reads COMPLETED ONLY when THIS pass reaches the end and
+sets it. A pass killed by the time limit never reaches that line, so the run stays RUNNING and the watchdog
+(``_reconcile_stuck_run``, timeout raised above this pass's hard limit) fails it — detection that does NOT
+depend on the dying task committing anything. On exhaustion this still marks FAILED (best-effort); the
+watchdog is the backstop for a hard-limit kill that cannot commit its own marker.
+
+The governed pass gets its OWN, generous time limits (below): the 65s sweep keeps the short global limits
+(``celery_app.py``), but a ~282s pass must not be killed at the global 120s soft limit — the fourth
+fail-open (LP-377-C: nobody put 282 next to 120). These cover the current realistic file sizes with margin;
+a file large enough to exceed even these needs the engine-level fix (parallelize / gate the per-document AI
+groups — LP-368 rec 4), which is out of scope here.
 """
 
 from uuid import UUID
 
 import structlog
 from celery import Task
+from sqlalchemy import select
 
 from app.models.base import utcnow
 from app.models.loan_file import LoanFile
@@ -31,13 +41,27 @@ from app.tasks.retry import MAX_RETRIES, retry_or_terminal
 
 logger = structlog.get_logger(__name__)
 
+# The governed pass's OWN time limits (LP-377-C, Fix 1). LP-365 measured ~282s on a 30-document file; the
+# runtime is dominated by SEQUENTIAL AI calls (6 materialization groups, each over per-document batches,
+# plus Stage A/B), so it grows with document count. Sized generously above 282s so a realistic file
+# completes; the soft limit raises inside the task for a graceful mark, the hard limit is the SIGKILL
+# ceiling. The stuck-run watchdog (``verification.py``) is sized ABOVE the hard limit so a hard-kill (which
+# cannot commit its own FAILED marker) is still caught.
+RULE_ENGINE_SOFT_LIMIT_SECONDS = 900  # 15 min — a 30-doc run (~282s) finishes with wide headroom
+RULE_ENGINE_HARD_LIMIT_SECONDS = 1200  # 20 min — the SIGKILL ceiling
+
 
 @celery_app.task(  # type: ignore[untyped-decorator]
-    bind=True, name="verification.run_rule_engine", max_retries=MAX_RETRIES
+    bind=True,
+    name="verification.run_rule_engine",
+    max_retries=MAX_RETRIES,
+    soft_time_limit=RULE_ENGINE_SOFT_LIMIT_SECONDS,
+    time_limit=RULE_ENGINE_HARD_LIMIT_SECONDS,
 )
 def run_rule_engine_pass(self: Task, loan_file_id: str, run_id: str) -> None:
-    """Build the snapshot, evaluate the ACTIVE rules, persist the findings + snapshot for a file's run;
-    mark the run FAILED on exhaustion (fail-closed — never a silent permanent RUNNING or a false COMPLETED)."""
+    """Build the snapshot, evaluate the ACTIVE rules, persist the findings + snapshot, and — on success —
+    mark the run COMPLETED (the completion authority, LP-377-C); mark FAILED on exhaustion (fail-closed —
+    never a silent permanent RUNNING or a false COMPLETED via the sweep alone)."""
     retry_or_terminal(
         self,
         lambda: run_async(_run(loan_file_id, run_id)),
@@ -61,6 +85,17 @@ async def _run(loan_file_id: str, run_id: str) -> None:
             company_id=loan_file.company_id,
             verification_id=run.id,
         )
+        # LP-377-C Fix 2: the governed pass is the completion authority. Re-read status under a ROW LOCK
+        # (the LP-377 BUG-1 pattern, moved here from the sweep) and mark COMPLETED only if a concurrent
+        # FAILED (a sweep failure) has not been committed — the lock is held to commit, so a FAILED that
+        # arrives later serializes AFTER and stays sticky (FAILED always wins). Reaching this line at all is
+        # the proof the governed engine finished; a timed-out pass never gets here.
+        locked_status = await db.scalar(
+            select(Verification.status).where(Verification.id == run.id).with_for_update()
+        )
+        if locked_status is not VerificationStatus.FAILED:
+            run.status = VerificationStatus.COMPLETED
+            run.completed_at = utcnow()
         await db.commit()
 
 

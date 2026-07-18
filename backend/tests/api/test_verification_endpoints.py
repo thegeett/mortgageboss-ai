@@ -411,6 +411,81 @@ async def test_document_subject_gone_reads_honestly_not_a_hash(
     assert "doc067c" not in label
 
 
+# --- LP-377-C Fix 3: governed findings coupled to their run's completion ------------------------
+
+
+async def _add_run(
+    db: AsyncSession, loan_file: LoanFile, *, status: VerificationStatus
+) -> Verification:
+    run = Verification(
+        loan_file_id=loan_file.id,
+        status=status,
+        trigger=VerificationTrigger.MANUAL,
+        started_at=utcnow(),
+        completed_at=utcnow() if status is not VerificationStatus.RUNNING else None,
+    )
+    db.add(run)
+    await db.flush()
+    return run
+
+
+async def test_rule_findings_flagged_stale_when_latest_run_did_not_complete(
+    client: AsyncClient, db: AsyncSession
+) -> None:
+    """LP-377-C Fix 3 — the fourth fail-open's tell: governed findings shown while the LATEST run's rule
+    engine did not complete (it FAILED) are flagged stale, AND still shown (LP-322 carry-forward preserved —
+    NOT a verification_id filter, which would gut the reconciler)."""
+    company, _user, token = await _user_and_token(db, slug="acme", email="u@acme.com")
+    loan_file = await create_loan_file(db, company_id=company.id)
+    # A governed finding carried forward from an earlier run.
+    db.add(
+        _rule_finding(
+            loan_file,
+            rule_id="ID-7",
+            outcome=EvaluationOutcome.COULDNT_CHECK,
+            status=FindingStatus.YELLOW,
+            message="a document in the file could not be classified",
+            subject_key="doc1",
+        )
+    )
+    # The LATEST run FAILED — its governed pass never completed (the LP-377-C scenario).
+    await _add_run(db, loan_file, status=VerificationStatus.FAILED)
+    await db.commit()
+
+    body = (
+        await client.get(f"{API}/{loan_file.display_id}/verification", headers=_auth(token))
+    ).json()
+    assert (
+        body["rule_findings_stale"] is True
+    )  # the surface says the findings are from an earlier run
+    assert len(body["rule_findings"]) == 1  # ...and STILL shows them (carry-forward is not broken)
+
+
+async def test_rule_findings_not_stale_when_latest_run_completed(
+    client: AsyncClient, db: AsyncSession
+) -> None:
+    """A COMPLETED latest run means the governed pass finished — the findings are current, not stale."""
+    company, _user, token = await _user_and_token(db, slug="acme", email="u@acme.com")
+    loan_file = await create_loan_file(db, company_id=company.id)
+    db.add(
+        _rule_finding(
+            loan_file,
+            rule_id="ID-7",
+            outcome=EvaluationOutcome.COULDNT_CHECK,
+            status=FindingStatus.YELLOW,
+            message="a document in the file could not be classified",
+            subject_key="doc1",
+        )
+    )
+    await _add_run(db, loan_file, status=VerificationStatus.COMPLETED)
+    await db.commit()
+
+    body = (
+        await client.get(f"{API}/{loan_file.display_id}/verification", headers=_auth(token))
+    ).json()
+    assert body["rule_findings_stale"] is False
+
+
 async def test_verification_is_tenant_scoped(client: AsyncClient, db: AsyncSession) -> None:
     _company_a, _ua, token_a = await _user_and_token(db, slug="acme", email="a@acme.com")
     company_b, _ub, _tb = await _user_and_token(db, slug="other", email="b@other.com")
@@ -804,12 +879,14 @@ async def test_stuck_running_run_is_reconciled_to_failed_on_read(
 
     company, _user, token = await _user_and_token(db, slug="acme", email="u@acme.com")
     loan_file = await create_loan_file(db, company_id=company.id)
-    # A run that started 10 minutes ago and never finished (the worker died).
+    # A run RUNNING far past the watchdog timeout (LP-377-C raised it to 1500s so it clears the governed
+    # pass's 1200s hard limit) — the governed pass was hard-killed and could not commit its own FAILED, so
+    # the watchdog is the only thing that can fail it.
     stuck = Verification(
         loan_file_id=loan_file.id,
         status=VerificationStatus.RUNNING,
         trigger=VerificationTrigger.MANUAL,
-        started_at=utcnow() - timedelta(minutes=10),
+        started_at=utcnow() - timedelta(minutes=30),
     )
     db.add(stuck)
     await db.flush()
@@ -826,14 +903,17 @@ async def test_stuck_running_run_is_reconciled_to_failed_on_read(
 
 
 async def test_a_recent_running_run_is_left_alone(client: AsyncClient, db: AsyncSession) -> None:
-    """A run RUNNING within the timeout is NOT touched (the watchdog never races a healthy run)."""
+    """A run RUNNING within the timeout is NOT touched — critically, LP-377-C's governed pass legitimately
+    runs ~282s (and a large file longer), so a run RUNNING for 10 minutes must NOT be raced to FAILED."""
+    from datetime import timedelta
+
     company, _user, token = await _user_and_token(db, slug="acme", email="u@acme.com")
     loan_file = await create_loan_file(db, company_id=company.id)
     fresh = Verification(
         loan_file_id=loan_file.id,
         status=VerificationStatus.RUNNING,
         trigger=VerificationTrigger.MANUAL,
-        started_at=utcnow(),
+        started_at=utcnow() - timedelta(minutes=10),
     )
     db.add(fresh)
     await db.flush()

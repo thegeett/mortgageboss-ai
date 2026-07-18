@@ -74,6 +74,7 @@ function status(findings: VerificationFinding[]): VerificationStatus {
     },
     findings,
     rule_findings: [],
+    rule_findings_stale: false,
     aggression: {
       level: "balanced",
       default: "balanced",

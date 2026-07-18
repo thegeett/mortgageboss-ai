@@ -273,6 +273,8 @@ function VerificationBody({
         // `?? []` guards a stale/version-skewed response missing the newly-added field — degrade to the
         // empty-state tabs rather than throwing in bucketRuleFindings and blanking the whole panel.
         ruleFindings={data.rule_findings ?? []}
+        // LP-377-C: the latest run's rule engine did not complete → these findings are from an earlier run.
+        ruleFindingsStale={data.rule_findings_stale ?? false}
         legacyCount={data.findings.length}
         legacy={
           <LegacyBody

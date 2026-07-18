@@ -41,10 +41,11 @@ function ruleFinding(overrides: Partial<RuleFinding> = {}): RuleFinding {
   };
 }
 
-function renderTabs(ruleFindings: RuleFinding[], legacyCount = 0) {
+function renderTabs(ruleFindings: RuleFinding[], legacyCount = 0, ruleFindingsStale = false) {
   return render(
     <RuleFindingsTabs
       ruleFindings={ruleFindings}
+      ruleFindingsStale={ruleFindingsStale}
       legacyCount={legacyCount}
       legacy={<div>LEGACY-SWEEP-CONTENT</div>}
     />,
@@ -274,6 +275,23 @@ describe("the subject label (LP-377-B) — the read path's label, never a raw co
     fireEvent.click(screen.getByRole("button", { name: /2 findings/i }));
     expect(screen.getByText("March_Statement.pdf")).toBeDefined();
     expect(screen.getByText("April_Statement.pdf")).toBeDefined();
+  });
+});
+
+describe("LP-377-C — the stale-findings notice", () => {
+  it("warns when the latest run's rule engine did not complete but findings are shown", () => {
+    renderTabs([ruleFinding({ evaluation_outcome: "couldnt_check" })], 0, /* stale */ true);
+    expect(screen.getByText(/from an earlier run/i)).toBeDefined();
+  });
+
+  it("shows no notice when the findings are current (not stale)", () => {
+    renderTabs([ruleFinding({ evaluation_outcome: "couldnt_check" })], 0, /* stale */ false);
+    expect(screen.queryByText(/from an earlier run/i)).toBeNull();
+  });
+
+  it("shows no notice when stale but there are no governed findings to mislead about", () => {
+    renderTabs([], 0, /* stale */ true);
+    expect(screen.queryByText(/from an earlier run/i)).toBeNull();
   });
 });
 

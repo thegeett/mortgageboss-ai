@@ -227,10 +227,13 @@ function FindingList({ findings }: { findings: RuleFinding[] }) {
 
 export function RuleFindingsTabs({
   ruleFindings,
+  ruleFindingsStale = false,
   legacyCount,
   legacy,
 }: {
   ruleFindings: RuleFinding[];
+  /** LP-377-C: the latest run's rule engine did not complete — these findings are from an earlier run. */
+  ruleFindingsStale?: boolean;
   legacyCount: number;
   legacy: ReactNode;
 }) {
@@ -262,6 +265,21 @@ export function RuleFindingsTabs({
 
   return (
     <div className="space-y-4">
+      {ruleFindingsStale && ruleFindings.length > 0 && (
+        // LP-377-C: the latest run's rule engine did not complete (still running, or failed/killed), so
+        // these governed findings are from an EARLIER run. Say so — a processor must not read a prior run's
+        // output as this run's. The findings still show (carry-forward, LP-322).
+        <div className="flex items-start gap-2 rounded-lg border border-warning/30 bg-warning/5 px-3 py-2.5 text-xs text-gray-600">
+          <TriangleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0 text-warning" />
+          <span>
+            <span className="font-medium text-gray-700">
+              These rule-engine findings are from an earlier run.
+            </span>{" "}
+            The latest run&rsquo;s rule engine did not complete, so the results below may be out of
+            date — re-run verification to refresh them.
+          </span>
+        </div>
+      )}
       <TabStrip tabs={tabs} active={active} onPick={setActive} />
 
       <div role="tabpanel">

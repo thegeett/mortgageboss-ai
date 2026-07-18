@@ -83,6 +83,7 @@ const STATUS: VerificationStatus = {
     finding({ id: "f-1", message: "Stated income exceeds the documents by 8%.", confidence: 0.82 }),
   ],
   rule_findings: [],
+  rule_findings_stale: false,
   aggression: {
     level: "balanced",
     default: "balanced",

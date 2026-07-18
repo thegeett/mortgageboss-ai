@@ -24,6 +24,7 @@ function status(): VerificationStatus {
       // biome-ignore lint/suspicious/noExplicitAny: minimal finding fixtures
     ] as any,
     rule_findings: [],
+    rule_findings_stale: false,
     aggression: {
       level: "balanced",
       default: "balanced",

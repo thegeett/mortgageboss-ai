@@ -75,11 +75,16 @@ _FINDING_NOT_FOUND = HTTPException(
 # uniformly (the origin distinguishes provenance). Green passes are not findings.
 _SHOWN_ORIGINS = (FindingOrigin.AI_CROSS_SOURCE, FindingOrigin.DETERMINISTIC_RULE)
 
-# The stuck-RUNNING watchdog (LP-89): a run RUNNING longer than this is treated as
-# dead (the worker died mid-run / the broker dropped the task) and reconciled to FAILED
-# on read, so the UI never spins forever with no recovery. Sized above the task hard
-# limit (180s) + queue/start slack — generous, never racing a healthy run.
-_STUCK_RUN_TIMEOUT_SECONDS = 300
+# The stuck-RUNNING watchdog (LP-89): a run RUNNING longer than this is treated as dead (the worker died
+# mid-run / the broker dropped the task / a pass was hard-killed and could not commit its own FAILED) and
+# reconciled to FAILED on read, so the UI never spins forever with no recovery.
+#
+# LP-377-C: this is the BACKSTOP for the fourth fail-open. The governed rule pass is now the run's completion
+# authority (it needs ~282s; the sweep leaves the run RUNNING), and a pass killed at its hard limit (1200s,
+# ``RULE_ENGINE_HARD_LIMIT_SECONDS``) cannot commit its own FAILED marker — so detection must NOT depend on
+# the dying task. This timeout is sized ABOVE that hard limit (+ queue/start slack) so a healthy long run is
+# never raced, but a run whose governed pass never finished is reliably failed here.
+_STUCK_RUN_TIMEOUT_SECONDS = 1500
 
 
 async def _reconcile_stuck_run(db: DbSession, loan_file: LoanFile) -> None:
@@ -331,6 +336,14 @@ async def _build_status(
             )
             for f in rule_findings
         ],
+        # LP-377-C Fix 3: the governed findings are stale when the latest run's rule engine did not complete
+        # (it is still RUNNING, or it FAILED / was killed) yet governed findings exist — carried forward from
+        # an earlier run (LP-322). The surface must not present a prior run's output as this run's.
+        rule_findings_stale=(
+            latest is not None
+            and latest.status is not VerificationStatus.COMPLETED
+            and len(rule_findings) > 0
+        ),
         aggression=AggressionPublic(
             level=level.value,
             default=user.default_aggression_level.value,
