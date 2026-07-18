@@ -10753,3 +10753,47 @@ to recover a content-id → filename — the id is a content hash). Gated on a `
 **Cross-refs.** LP-312 (``subject_key`` / content-ids), LP-375 + LP-376-C (both reported this wall and
 stopped), LP-376 (the provenance card + the amount chip generalised here), LP-322 (the reconciler key — the
 label must not touch it), LP-330 (the absent-document contract behind the honest fallback).
+
+## ADR-297: The LF-6T3N "classifier gap" was not one — 4 untyped documents, three unrelated roots (LP-377-A)
+
+**Context.** LP-368 flagged (recommendation 5) that 4 documents on LF-6T3N were typed `unknown` and starved the
+per-document `id.*` tags, and asked *"what those 4 are and why the classifier abstained."* LP-377-A framed them
+as the single root behind ID-7/ID-9's 8 `couldnt_check` rows, the suppressed *"no title commitment is in the
+file"* sentence, and ID-4's poisoned filter — *"fix the classification and all three collapse."*
+
+**Decision: no classifier / catalog / prompt change — the premise was falsified by the data.** Reading the 4
+documents from the live DB (with the classifier's confidence and the generic-analyzer's own words): (1) **"Akash
+W2 Wells 2024.pdf"** produced **0 characters** of text → short-circuited to `unknown` at conf 0.0 without an API
+call — an **extraction/OCR failure**, not a classifier one. (2) **"EMD wire receipt.pdf"** is a Wells Fargo wire
+*request* for a *due-diligence fee* — `earnest_money_receipt` exists in the catalog but the match is
+domain-ambiguous, and it is irrelevant to the three symptoms. (3)+(4) the two **"Home Value estimate"** files are
+UWM **lender-dashboard screenshots** the model itself flagged as *"NOT a loan document or financial record for a
+borrower"* — genuinely not borrower documents, for which `unknown` is correct and no catalog type should exist.
+**None of the four is a title commitment, deed, or POA** — the documents ID-7/ID-9 need — and LF-6T3N genuinely
+has none (verified: `title_commitment`/`power_of_attorney` absent). So typing the four resolves none of the three
+symptoms, and for two of them it would require fabricating a type that should not exist.
+
+**The asymmetric risk (the reason not to guess).** `unknown` is honest and BLOCKS — a `couldnt_check` a human
+sees. A WRONG type is SILENT — it routes a rule at the wrong document and produces a confident verdict from the
+wrong source, with nothing to catch it (LP-333's IN-8/IN-9 class). Eliminating `unknown` by guessing trades an
+honest blocker for a false-green — strictly worse. **A classifier that never abstains fabricates.** `unknown`
+stays first-class and reachable (already guarded by five tests).
+
+**The suppression was NOT touched.** *"No title commitment is in the file"* is suppressed while any document is
+untyped because an untyped document might BE the title commitment (LP-330). Two of the four are lender
+screenshots that cannot be legitimately typed, so the suppression correctly persists. The engine's honesty was
+never the bug.
+
+**One root, three symptoms — disproven.** The three symptoms have three different, unrelated roots: (1) ID-7/ID-9
+`couldnt_check` because the file genuinely lacks title/POA documents (not because of the untyped four); (2) the
+suppressed sentence is correctly suppressed (LP-330); (3) ID-4's filter was settled by LP-372 —
+`id.current_address_type = unknown` on **correctly-typed** property documents, not the untyped four.
+
+**New gaps reported (each its own ticket, none fixed here):** the extraction/OCR failure on the text-less W2; the
+real design question of a *"confidently not a borrower document"* state distinct from `unknown` (so a screenshot
+does not masquerade as *"might be the title commitment"* and block a rule forever); and the domain (sister)
+question of whether a due-diligence-fee wire request is an `earnest_money_receipt`.
+
+**Cross-refs.** LP-368 (the census / recommendation 5), LP-372 (ID-4's gate — symptom #3, unrelated), LP-330 (the
+absent-document contract), LP-333 (the wrong-type silent-failure class), LP-335/340/343 (the prompt-bug class — why
+an unmeasured indicator change was not made), LP-376-C (the reason text that made the rows legible).
