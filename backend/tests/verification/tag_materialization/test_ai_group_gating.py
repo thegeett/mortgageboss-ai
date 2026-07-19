@@ -201,3 +201,40 @@ def test_gate_is_generic_no_group_id_or_doc_type_branch() -> None:
     ]
     for token in forbidden:
         assert token not in code, f"the gate must be generic (data-driven), found {token!r}"
+
+
+# --------------------------------------------------------------------------- #
+# Load-time guards on `applies_to` (LP-377-D review) — a typo can't silently gate a group to death
+# --------------------------------------------------------------------------- #
+def test_applies_to_rejects_a_document_type_not_in_the_catalog() -> None:
+    # A slug the classifier never emits (typo / rename) would gate the group out on every real doc → a
+    # silent-dead tag. It must fail LOUD at load, not silently, against the canonical catalog.
+    from app.verification.tag_materialization.declarations import (
+        DeclarationError,
+        _parse_applies_to,
+    )
+
+    with pytest.raises(DeclarationError, match="not in the catalog"):
+        _parse_applies_to("some_group", "document", ["pay_stub", "retirment_account"])  # typo
+
+
+def test_applies_to_accepts_real_catalog_types_and_all() -> None:
+    from app.verification.tag_materialization.declarations import _parse_applies_to
+
+    assert _parse_applies_to("g", "document", ["pay_stub", "w2"]) == frozenset({"pay_stub", "w2"})
+    assert _parse_applies_to("g", "document", "all") is None
+    assert _parse_applies_to("g", "document", None) is None
+
+
+def test_applies_to_on_a_non_document_group_is_rejected() -> None:
+    # `_gate_subjects` only gates document subjects, so a list `applies_to` on a transaction/loan group is
+    # dead config — reject it at load rather than let it silently do nothing.
+    from app.verification.tag_materialization.declarations import (
+        DeclarationError,
+        _parse_applies_to,
+    )
+
+    with pytest.raises(DeclarationError, match="only meaningful for a document-subject"):
+        _parse_applies_to("txn_group", "transaction", ["pay_stub"])
+    # 'all' / omitted stays fine on any subject (it is the no-op default).
+    assert _parse_applies_to("txn_group", "transaction", "all") is None

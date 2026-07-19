@@ -27,6 +27,8 @@ from typing import Any
 
 import yaml
 
+from app.documents.catalog import CATALOG
+
 _RULES_DIR = Path(__file__).parents[1] / "rules"
 _FACT_TAGS_CSV = _RULES_DIR / "fact_tags.csv"
 _PRODUCTION_YAML = _RULES_DIR / "tag_production.yaml"
@@ -194,24 +196,38 @@ def load_ai_groups() -> dict[str, AiGroup]:
             context_builder=context_builder,
             tag_ids=tuple(str(t) for t in tags),
             system_prompt=prompt,
-            applies_to=_parse_applies_to(key, body.get("applies_to")),
+            applies_to=_parse_applies_to(key, subject, body.get("applies_to")),
         )
     return groups
 
 
-def _parse_applies_to(key: str, raw: object) -> frozenset[str] | None:
+def _parse_applies_to(key: str, subject: str, raw: object) -> frozenset[str] | None:
     """``applies_to`` (LP-377-D): a list of document-type slugs, or absent / ``"all"`` → None (all types).
 
     None is the fail-open default — an omitted or ``all`` declaration runs the group on every document, so a
     group is never accidentally narrowed by a missing entry (too-wide is a redundant call; too-narrow is a
-    silent-dead tag)."""
+    silent-dead tag). Guarded at load: ``applies_to`` is document-only (the dispatcher only gates document
+    subjects), and every slug MUST be a real document type in the catalog — a typo / rename would otherwise
+    silently gate the group to death (LP-373's silent-dead-tag class)."""
     if raw is None or (isinstance(raw, str) and raw.strip().lower() == "all"):
         return None
+    if subject != "document":
+        raise DeclarationError(
+            f"ai group {key!r}: `applies_to` is only meaningful for a document-subject group "
+            f"(subject={subject!r} is never gated) — use 'all' or omit it"
+        )
     if not isinstance(raw, list) or not all(isinstance(v, str) and v.strip() for v in raw):
         raise DeclarationError(
             f"ai group {key!r}: `applies_to` must be a non-empty list of document-type strings or 'all'"
         )
-    return frozenset(v.strip() for v in raw)
+    slugs = frozenset(v.strip() for v in raw)
+    unknown = slugs - set(CATALOG)
+    if unknown:
+        raise DeclarationError(
+            f"ai group {key!r}: `applies_to` names document types not in the catalog: "
+            f"{sorted(unknown)} — a typo or renamed slug would silently gate the group to death"
+        )
+    return slugs
 
 
 @cache
