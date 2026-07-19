@@ -63,7 +63,7 @@ LP-379 — Priya's judgment labels + full calibration re-run
 170 rows, then the first valid measurement of the shipped prompt
 Tests F1, F2, and LP-335's fix on real driver's licenses
 Only after LP-378 confirms the tags materialize
-
+  
 LP-380 — Priya's activation bars
 
 THEN — Activation
