@@ -69,13 +69,21 @@ class TagDeclaration:
 
 @dataclass(frozen=True)
 class AiGroup:
-    """One AI structuring pass — a subject, the tags it co-produces, a context builder, a prompt."""
+    """One AI structuring pass — a subject, the tags it co-produces, a context builder, a prompt.
+
+    ``applies_to`` (LP-377-D) declares the DOCUMENT TYPES a per-document group is relevant to — the
+    applicability that was always IMPLICIT in the prompt's runtime "not my document" abstention, now
+    DECLARED so the dispatcher can skip the redundant call (and stop a group over-producing on a document
+    it doesn't apply to). ``None`` = "all" (runs on every document — cross-document / presence groups, and
+    a fail-open default). Only consulted for ``subject == "document"`` groups; the gate ALWAYS fails open on
+    an unknown/low-confidence/no-match document (see the dispatcher)."""
 
     key: str
     subject: str
     context_builder: str
     tag_ids: tuple[str, ...]
     system_prompt: str
+    applies_to: frozenset[str] | None = None  # None = all document types (fail-open default)
 
 
 def _parse_allowed(raw: str) -> tuple[str, ...] | None:
@@ -186,8 +194,24 @@ def load_ai_groups() -> dict[str, AiGroup]:
             context_builder=context_builder,
             tag_ids=tuple(str(t) for t in tags),
             system_prompt=prompt,
+            applies_to=_parse_applies_to(key, body.get("applies_to")),
         )
     return groups
+
+
+def _parse_applies_to(key: str, raw: object) -> frozenset[str] | None:
+    """``applies_to`` (LP-377-D): a list of document-type slugs, or absent / ``"all"`` → None (all types).
+
+    None is the fail-open default — an omitted or ``all`` declaration runs the group on every document, so a
+    group is never accidentally narrowed by a missing entry (too-wide is a redundant call; too-narrow is a
+    silent-dead tag)."""
+    if raw is None or (isinstance(raw, str) and raw.strip().lower() == "all"):
+        return None
+    if not isinstance(raw, list) or not all(isinstance(v, str) and v.strip() for v in raw):
+        raise DeclarationError(
+            f"ai group {key!r}: `applies_to` must be a non-empty list of document-type strings or 'all'"
+        )
+    return frozenset(v.strip() for v in raw)
 
 
 @cache

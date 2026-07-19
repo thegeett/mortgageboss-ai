@@ -69,6 +69,12 @@ class Settings(BaseSettings):
     # semantic-duplicate residue for the processor to confirm (never a silent delete). Gated so the
     # extra per-run classification call can be turned off; the deterministic layers run regardless.
     needs_duplicate_flagging_enabled: bool = True
+    # Per-document AI-group gating (LP-377-D): skip an AI structuring group on a document its declared
+    # `applies_to` doc-types exclude — a paid call the group would only abstain on (and, for income_amounts,
+    # over-produce on). ALWAYS fails open (unknown / no-match document → runs every group). Set
+    # GATE_AI_GROUPS=0 to instantly restore brute-force (run every group on every document) with no redeploy
+    # — the safety net if a tag ever goes missing on a file shape the equivalence proof did not cover.
+    gate_ai_groups: bool = True
 
     # JWT / Auth
     jwt_secret_key: str = Field(

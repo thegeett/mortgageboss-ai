@@ -10888,3 +10888,53 @@ diagnostic, not an activation.
 first complete run — the baseline), LP-379 (Priya's calibration — well-aimed for 5 of 6, premature for
 income_stability), LP-377-D (the per-document-group gate — fed this probe's doc-type data), LP-377-A (the
 brokerage_statement extraction gap that starves asset_facts on that one doc).
+
+## ADR-300: Per-document AI groups declare their doc-types and the dispatcher gates on them — fail-open (LP-377-D)
+
+**Context.** A per-document AI structuring group runs on EVERY document and abstains where it doesn't apply
+(LP-368: 95 abstention instances — each a paid call returning "no"). LP-378 upgraded this from a cost problem
+to a CORRECTNESS one: `income_amounts` OVER-PRODUCED a confident `documented_monthly` on mortgage statements,
+property-tax bills, and bank statements — documents with no income emitting income figures. If such a value
+reaches IN-1 (stated-vs-documented income), it fabricates a discrepancy.
+
+**Decision — declare `applies_to` per group; gate the dispatcher on it; FAIL OPEN.** Each per-document group
+declares `applies_to: [doc_types]` (or `all`) in `tag_production.yaml` — the applicability that was always
+IMPLICIT in the prompt's runtime "not my document" abstention, now DECLARED (the 13th
+declared-key-resolved-by-registry). The materializer (`produce_ai_group_tags`) skips a document a group's
+`applies_to` excludes — a redundant call, and for income_amounts a fabricated value. Generic: keyed only on
+`group.applies_to` + the document's type, with **no group-id or doc-type branch** (a test asserts the gate's
+source is free of both).
+
+**The gate FAILS OPEN, layered — the only failure mode is a silently-dead tag, so every uncertainty runs the
+group:** the reversibility flag is off (`GATE_AI_GROUPS=0`), the group is not document-subject, `applies_to`
+is `all`, the document is typed `unknown`/`None` (LP-377-A's untyped documents — the classifier abstained),
+or the type IS in `applies_to`. It ONLY removes a document whose KNOWN, confident type the group's list does
+not contain. **The asymmetry is total: a redundant call costs a fraction of a cent; a skipped one costs a
+silent-dead rule — the AS-1 / ID-2 / OC-2 class, four times this session. When unsure, wider.** The prompt's
+own abstention remains the backstop on every kept document — the gate is an optimization ON TOP of the
+existing safety, never a replacement (a test pins that a fail-open document the group shouldn't read still
+gets an abstention, not a wrong value).
+
+**`applies_to` derived from each prompt, verified against LP-378's real-value map.** `income_amounts` →
+`[pay_stub, w2, uniform_residential_loan_application]`; `income_employer` → +`voe`; `stmt_facts` →
+`[bank_statement, money_market_statement]`; `asset_facts` → `[investment_account, brokerage_statement,
+retirement_account]`; `id_title`/`id_poa` → their narrow title/POA types. Deliberately kept `all`:
+`id_name`/`id_address` (broad — any document with a name/address; feed LIVE auto-shipping ID-1/ID-4;
+narrowing them is the silent-death risk), `income_docs` (presence signals), `txn_stage_a`/`occupancy`
+(not document-subject), and **`income_stability`** (LP-378: it produces NOTHING per-document — gating masks
+its real problem; LP-385 fixes the producer first).
+
+**The confident-mistype residual (reported, not hidden).** The snapshot carries no per-document
+classification CONFIDENCE (it lives on the DB `Document`, not `DocumentEntry` — plumbing it is a v5 snapshot
+bump that breaks persisted v4, out of scope), so a document CONFIDENTLY mis-typed (a title document typed
+`w2`) is gated by its wrong type and its group is skipped. Mitigated by the unknown fail-open + deliberately
+wide lists; named in a test as the accepted residual, not silently absorbed.
+
+**Cost & correctness.** The gate removes redundant CALLS and, for income_amounts, the OVER-PRODUCED GARBAGE —
+never a legitimate verdict, tag, or confidence (equivalence-except-garbage, proven on LF-6T3N: every
+legitimate tag identical, income_amounts' non-income `documented_monthly` gone). Single-file guarantee
+(LF-6T3N is the only seeded real file) with the `GATE_AI_GROUPS=0` reversibility net for uncovered shapes.
+
+**Cross-refs.** LP-368 (the 95 abstentions), LP-378 (the gate spec + the over-production), LP-377-A (the
+classifier's failure modes + the no-confidence-in-snapshot gap), LP-377-C (the baseline), LP-334 (the
+harness), LP-326 (declared production), LP-385 (the income_stability producer fix — why it is NOT gated).

@@ -25,7 +25,7 @@ from app.ai.parsing import coerce_optional_confidence, extract_json_object, opt_
 from app.core.config import settings
 from app.core.logging import get_logger
 from app.verification.snapshot.content_id import content_fingerprint
-from app.verification.snapshot.model import Snapshot
+from app.verification.snapshot.model import DocumentEntry, Snapshot
 from app.verification.snapshot.tag import Tag, TagProducedBy, TagRole, TagStage
 from app.verification.tag_materialization.declarations import AiGroup
 from app.verification.tag_materialization.subjects import subject_type
@@ -233,6 +233,40 @@ def _chunks(items: list[tuple[str, object]], size: int) -> list[list[tuple[str, 
     return [items[i : i + size] for i in range(0, len(items), size)]
 
 
+_DOCUMENT_SUBJECT = "document"
+_UNKNOWN_DOC_TYPE = "unknown"
+
+
+def _gate_subjects(group: AiGroup, subjects: list[tuple[str, object]]) -> list[tuple[str, object]]:
+    """LP-377-D: drop the documents a group's declared ``applies_to`` excludes — the redundant call the
+    group would only abstain on (and, for income_amounts, over-produce a value on a non-income document).
+
+    FAILS OPEN, always, toward RUNNING the group: the gate is off (``GATE_AI_GROUPS=0`` — reversibility),
+    the group is not document-subject, or ``applies_to`` is None ("all"), or a document's type is
+    ``None`` / ``"unknown"`` (the classifier abstained or is unsure — LP-377-A's untyped documents), or the
+    type IS in ``applies_to`` → the document is kept. It ONLY removes a document whose KNOWN, confident type
+    the group's ``applies_to`` does not list. Generic — keyed on ``group.applies_to`` + the document's type,
+    with NO group-id or doc-type branch. The prompt's own "not my document" abstention remains the backstop
+    on every kept document (this gate never removes that safety — it only skips redundant calls).
+
+    Residual (reported, LP-377-D): the snapshot carries no per-document classification CONFIDENCE, so a
+    document CONFIDENTLY mis-typed (e.g. a title document typed ``w2``) is gated by its wrong type and its
+    group is skipped. Mitigated by the unknown fail-open + deliberately wide ``applies_to`` lists; a
+    reported residual, not silently absorbed."""
+    if (
+        not settings.gate_ai_groups
+        or group.subject != _DOCUMENT_SUBJECT
+        or group.applies_to is None
+    ):
+        return subjects
+    kept: list[tuple[str, object]] = []
+    for subject_id, raw in subjects:
+        doc_type = raw.document_type if isinstance(raw, DocumentEntry) else None
+        if doc_type in (None, _UNKNOWN_DOC_TYPE) or doc_type in group.applies_to:
+            kept.append((subject_id, raw))
+    return kept
+
+
 async def produce_ai_group_tags(
     snapshot: Snapshot,
     group: AiGroup,
@@ -251,7 +285,9 @@ async def produce_ai_group_tags(
     group_cache = cache.setdefault(group.key, {}) if cache is not None else {}
     st = subject_type(group.subject)
 
-    subjects = st.enumerate(snapshot)
+    subjects = _gate_subjects(
+        group, st.enumerate(snapshot)
+    )  # LP-377-D: skip inapplicable docs (fail-open)
     if not subjects:
         return {}
 

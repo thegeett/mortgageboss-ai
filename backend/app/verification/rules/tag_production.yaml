@@ -143,6 +143,7 @@ ai_groups:
   txn_stage_a:
     subject: transaction
     context_builder: transaction
+    applies_to: all
     tags: [txn.is_money_in, txn.apparent_category]
     system_prompt: |
       You are a senior mortgage loan processor STRUCTURING raw bank-statement transactions into
@@ -189,6 +190,7 @@ ai_groups:
   id_address:
     subject: document
     context_builder: document
+    applies_to: all
     tags: [id.address_normalized, id.current_address_type]
     system_prompt: |
       You are a mortgage loan processor STRUCTURING a single document's stated borrower address into
@@ -219,6 +221,7 @@ ai_groups:
   id_name:
     subject: document
     context_builder: document
+    applies_to: all
     tags: [id.name_normalized]
     system_prompt: |
       You are a mortgage loan processor STRUCTURING a single document's stated borrower name into a
@@ -236,6 +239,7 @@ ai_groups:
   id_title:
     subject: document
     context_builder: document
+    applies_to: [title_commitment, preliminary_title_report, warranty_deed]
     tags: [id.title_vesting_consistent]
     system_prompt: |
       You are a mortgage loan processor checking whether a document's TITLE VESTING is consistent
@@ -249,6 +253,7 @@ ai_groups:
   id_poa:
     subject: document
     context_builder: document
+    applies_to: [power_of_attorney]
     tags: [id.poa_present_and_acceptable]
     system_prompt: |
       You are a mortgage loan processor assessing a power-of-attorney (POA) document. Produce:
@@ -264,6 +269,7 @@ ai_groups:
   income_amounts:
     subject: document
     context_builder: document
+    applies_to: [pay_stub, w2, uniform_residential_loan_application]
     tags: [income.type, income.documented_monthly, income.qualifying_monthly]
     system_prompt: |
       You are a senior mortgage loan processor STRUCTURING one income document (a paystub, W-2, or
@@ -284,6 +290,7 @@ ai_groups:
   income_employer:
     subject: document
     context_builder: document
+    applies_to: [pay_stub, w2, uniform_residential_loan_application, voe]
     tags: [income.employer_normalized]
     system_prompt: |
       You are a mortgage loan processor STRUCTURING a single income document's EMPLOYER name into a
@@ -301,6 +308,7 @@ ai_groups:
   income_docs:
     subject: document
     context_builder: document
+    applies_to: all
     tags: [income.voe_present, income.future_employment, income.offer_letter_present]
     system_prompt: |
       You are a mortgage loan processor STRUCTURING an income/employment document's presence signals.
@@ -318,6 +326,7 @@ ai_groups:
   income_stability:
     subject: document
     context_builder: document
+    applies_to: all
     tags: [income.has_2yr_history, income.is_declining, income.same_line_of_work, income.continuance_3yr]
     system_prompt: |
       You are a senior mortgage loan processor STRUCTURING an income document's STABILITY signals into
@@ -340,6 +349,7 @@ ai_groups:
   stmt_facts:
     subject: document
     context_builder: document
+    applies_to: [bank_statement, money_market_statement]
     tags: [stmt.owner_matches_borrower, stmt.is_reserve_eligible]
     system_prompt: |
       You are a mortgage loan processor STRUCTURING one depository (bank) statement into clean facts —
@@ -358,6 +368,7 @@ ai_groups:
   asset_facts:
     subject: document
     context_builder: document
+    applies_to: [investment_account, brokerage_statement, retirement_account]
     tags: [asset.liquidation_terms, asset.usable_value]
     system_prompt: |
       You are a mortgage loan processor STRUCTURING one asset statement (retirement / brokerage /
@@ -382,6 +393,7 @@ ai_groups:
   occupancy:
     subject: loan
     context_builder: loan
+    applies_to: all
     tags: [occupancy.consistent_with_signals]
     system_prompt: |
       You are a senior mortgage loan processor STRUCTURING one loan's stated occupancy signals into a
