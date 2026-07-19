@@ -44,9 +44,16 @@ from app.verification.tag_materialization.declarations import (
     load_ai_groups,
     load_declarations,
 )
+from app.verification.tag_materialization.subjects import subject_type
 
 _CREDIT = "credit"
 _FREE_TEXT = frozenset({"txn.counterparty", "txn.source_reference"})
+
+# income_stability (LP-385) is a per-BORROWER group: its context is the income documents ATTRIBUTED to a
+# borrower, seen TOGETHER (a 2-year trend / decline / continuance is a cross-document question a single
+# document cannot answer — LP-378 measured 0/120 per-document). These are the doc types that feed that
+# per-borrower income context (mirrors the group's prompt: "the W-2s, pay stubs, VOE, and 1003").
+_INCOME_STABILITY_DOCS = ("w2", "pay_stub", "voe", "uniform_residential_loan_application")
 
 
 @dataclass(frozen=True)
@@ -65,11 +72,16 @@ class _TagMeta:
 
 @dataclass(frozen=True)
 class _Group:
-    """An AI group's coverage metadata: its subject kind + (for document tags) the document_types whose
-    content the group's tags can be labeled from. The doc-type applicability is eval metadata — the
-    architecture keys AI groups by subject only and relies on the prompt to abstain off-type."""
+    """An AI group's coverage metadata: its subject kind + (for document / borrower tags) the document_types
+    whose content the group's tags can be labeled from. The doc-type applicability is eval metadata — the
+    architecture keys AI groups by subject only and relies on the prompt to abstain off-type.
 
-    subject_kind: str  # "transaction" | "document"
+    ``subject_kind`` is "transaction" | "document" | "borrower". A BORROWER group (income_stability, LP-385)
+    produces one row per borrower per tag; ``applicable_types`` are the income doc types whose attributed
+    content forms that borrower's context. A borrower with NO attributed income document is not labelable
+    (the tag abstains) — so, like a content-empty document, it yields no row."""
+
+    subject_kind: str  # "transaction" | "document" | "borrower"
     applicable_types: tuple[str, ...]  # () for transaction (all txns)
     tags: tuple[_TagMeta, ...]
 
@@ -171,9 +183,13 @@ _GROUPS: tuple[_Group, ...] = (
             _TagMeta("income.offer_letter_present", "enum", "judgment", ("IN-2",)),
         ),
     ),
+    # income_stability — PER-BORROWER as of LP-385 (was per-document; it produced 0/120 because a 2-year
+    # trend is a cross-document question). One row per borrower per tag; context = the borrower's attributed
+    # income documents. On a fixture with no wired borrowers (belongs_to / MISMO borrower_id) this yields
+    # NO rows — the honest state, distinct from the stale per-document capacity it used to report (LP-379-A).
     _Group(
-        "document",
-        ("pay_stub", "w2"),
+        "borrower",
+        _INCOME_STABILITY_DOCS,
         (
             _TagMeta("income.has_2yr_history", "enum", "judgment", ("IN-3",)),
             _TagMeta("income.is_declining", "enum", "judgment", ("IN-1",)),
@@ -228,6 +244,28 @@ def _doc_context(doc: DocumentEntry) -> str:
     return "; ".join(f"{k}={_fv(v)}" for k, v in doc.fields.items())
 
 
+def _borrower_income_docs(
+    context: dict[str, object], applicable: tuple[str, ...]
+) -> list[dict[str, object]]:
+    """The income documents (of the applicable types) attributed to one borrower — from the borrower subject's
+    context ({borrower_mismo, documents}); the documents already carry only PII-masked field displays."""
+    docs = context.get("documents") or []
+    assert isinstance(docs, list)
+    return [d for d in docs if isinstance(d, dict) and d.get("document_type") in applicable]
+
+
+def _borrower_context_str(income_docs: list[dict[str, object]]) -> str:
+    """A per-borrower context string: each attributed income document as ``[type] k=v; k=v`` joined by
+    `` || ``, so the labeler sees the whole income picture (all years/employers) without opening the file."""
+    parts: list[str] = []
+    for d in income_docs:
+        fields = d.get("fields") or {}
+        assert isinstance(fields, dict)
+        body = "; ".join(f"{k}={v}" for k, v in fields.items() if v not in (None, ""))
+        parts.append(f"[{d.get('document_type')}] {body}")
+    return " || ".join(parts)
+
+
 @dataclass(frozen=True)
 class TagCapacity:
     """The three facts for one AI tag on this file — never conflated (LP-338)."""
@@ -272,6 +310,17 @@ def compute_capacity(snapshot: Snapshot) -> list[TagCapacity]:
     txns = _transactions(snapshot)
     credits = [t for t in txns if _fv(t.direction) == _CREDIT]
 
+    # Borrower subjects (LP-385): one per MISMO borrower carrying the LP-332 id link; a borrower is labelable
+    # for a borrower-group tag iff at least one income document is ATTRIBUTED to them (else the tag abstains).
+    borrower_income_counts = [
+        len(
+            _borrower_income_docs(
+                subject_type("borrower").build_context(bsub, None), _INCOME_STABILITY_DOCS
+            )
+        )
+        for _bid, bsub in subject_type("borrower").enumerate(snapshot)
+    ]
+
     out: list[TagCapacity] = []
     for group in _GROUPS:
         for meta in group.tags:
@@ -279,6 +328,9 @@ def compute_capacity(snapshot: Snapshot) -> list[TagCapacity]:
                 pool = credits if meta.money_in_only else txns
                 cap = sum(1 for t in pool if _fv(t.description) or _fv(t.amount))
                 empty = len(pool) - cap
+            elif group.subject_kind == "borrower":
+                cap = sum(1 for n in borrower_income_counts if n > 0)
+                empty = sum(1 for n in borrower_income_counts if n == 0)
             else:
                 applicable = [d for t in group.applicable_types for d in docs_by_type.get(t, [])]
                 cap = sum(1 for d in applicable if _doc_has_content(d))
@@ -377,6 +429,30 @@ def build_worksheet(snapshot: Snapshot) -> list[WorksheetRow]:
                                 _txn_context(txn),
                             )
                         )
+            elif group.subject_kind == "borrower":
+                # One row per borrower (keyed by borrower_id — the LP-332/LP-385 subject key), not per
+                # document; context aggregates that borrower's attributed income documents. A borrower with
+                # none is skipped (the tag would abstain) — no un-labelable rows.
+                for borrower_id, bsub in subject_type("borrower").enumerate(snapshot):
+                    income_docs = _borrower_income_docs(
+                        subject_type("borrower").build_context(bsub, None), group.applicable_types
+                    )
+                    if not income_docs:
+                        continue
+                    rows.append(
+                        WorksheetRow(
+                            meta.bucket,
+                            meta.tag_id,
+                            borrower_id,
+                            "borrower",
+                            "borrower",
+                            meta.scoring,
+                            allowed,
+                            ", ".join(meta.consuming_rules),
+                            rule_status,
+                            _borrower_context_str(income_docs),
+                        )
+                    )
             else:
                 for dtype in group.applicable_types:
                     for doc in docs_by_type.get(dtype, []):
