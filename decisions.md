@@ -10938,3 +10938,58 @@ legitimate tag identical, income_amounts' non-income `documented_monthly` gone).
 **Cross-refs.** LP-368 (the 95 abstentions), LP-378 (the gate spec + the over-production), LP-377-A (the
 classifier's failure modes + the no-confidence-in-snapshot gap), LP-377-C (the baseline), LP-334 (the
 harness), LP-326 (declared production), LP-385 (the income_stability producer fix — why it is NOT gated).
+
+## ADR-301: income_stability is a per-BORROWER group, not per-document — the subject was the bug (LP-385)
+
+**Context.** LP-378 measured `income_stability` producing **0 / 120** on real LF-6T3N — a 100% abstention,
+alone among the six dormant income/asset groups. ADR-299 diagnosed the cause as architectural, not a bug, and
+reordered it ahead of LP-379's calibration: its four tags (`has_2yr_history`, `is_declining`,
+`same_line_of_work`, `continuance_3yr`) each ask a **cross-document** question — an income TREND across years —
+but the group was declared `subject: document`, so the producer saw **one document at a time**. A single W-2
+cannot evidence a two-year trend. 0/120 was the honest producer being correct about a structurally impossible
+question.
+
+**Decision — move the group and its four tags to the `borrower` subject, and teach the borrower context to
+gather the borrower's documents.** The LP-332 `borrower` subject already enumerates one subject per MISMO
+borrower (keyed by the evidence-based `borrower.{n}.borrower_id` link) and already carries the whole snapshot.
+The fix was one context-builder: `_borrower_context` now returns `{borrower_mismo, documents}` — this
+borrower's MISMO facts PLUS every document **attributed to them by `belongs_to`** (the LP-202 evidence link).
+The group sees ONE borrower's income documents **together**, which is exactly what a trend/decline/continuance
+question needs. This is a generic **per-borrower-over-documents** primitive: any future borrower group asking a
+cross-document question inherits it, with no new plumbing.
+
+**Attribution is by evidence, never a guess (the LP-332/LP-336 invariant, preserved).** A document is gathered
+for a borrower only if its `belongs_to` names that borrower_id. A document with no `belongs_to` is gathered for
+**nobody** — the context is honestly incomplete and the tag abstains with a reason, rather than a trend
+fabricated from a mis-attributed document. Each borrower's AI call carries ONLY that borrower's documents (a
+test and the real probe both confirm no cross-feed — the masking class). PiiField values contribute masked
+displays only; no raw PII enters the prompt.
+
+**This is a PRODUCTION fix, not a CORRECTNESS one — the boundary held.** The rewritten prompt DEFINES the four
+terms (`has_2yr_history` = ≥2 consecutive years evidenced; `is_declining` = a year-over-year decrease;
+`same_line_of_work` = same field after a job change, single-employer → "yes"; `continuance_3yr` = likely to
+continue 3+ years) with `unknown` first-class. **These definitions are defensible defaults flagged for Priya
+(LP-379), NOT validated.** The Phase-3 probe (off-path, real sonnet-4-5, persisting nothing, on LF-6T3N) proved
+production: `income_stability` went from 0/120 to **6 real / 8** — both borrowers got `has_2yr_history=yes`,
+`is_declining=no`, `same_line_of_work=yes` from their own two W-2s, and `continuance_3yr=unknown` (correct —
+W-2 employment states no horizon). Whether those judgments match a human golden is LP-379's job, unmeasured
+here. A group that materialises is reported as materialising, not as passing.
+
+**Reconciles with LP-377-D, does not contradict it.** ADR-300 deliberately left `income_stability` OUT of the
+per-document `applies_to` gate ("gating masks its real problem; LP-385 fixes the producer first"). Now that the
+group is `subject: borrower`, `applies_to` is dropped entirely — it is a per-document concept and the validator
+rejects it on a non-document group. The document-type filtering `income_stability` needs happens inside
+`_borrower_context` (it only reasons over the income doc-types among a borrower's attributed docs, per the
+prompt), not via the dispatcher gate.
+
+**The IN-10/IN-11 consumption gap (reported, not fixed).** Five dormant rules read these tags. IN-7/IN-13/IN-14
+read them **per_borrower** — satisfied directly by the borrower-keyed tags. IN-10/IN-11 read `is_declining` /
+`has_2yr_history` **per_document** — they now read a subject that no longer carries the tag, so they need a
+per_borrower spec change to consume it. Out of scope (all five rules dormant); named for the rule owner, not
+silently absorbed.
+
+**Cross-refs.** LP-378 / ADR-299 (the 0/120 finding + the reorder this executes), LP-332 (the borrower subject
++ the evidence-attribution invariant), LP-202 (the `belongs_to` document→borrower link), LP-336 (never a
+guessed attribution), LP-377-D / ADR-300 (why income_stability was left un-gated), LP-379 (the calibration that
+validates the term definitions this ticket only defaults), LP-368 (the census that first flagged the borrower
+context reading MISMO only).

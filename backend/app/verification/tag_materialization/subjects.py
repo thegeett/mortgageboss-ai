@@ -27,6 +27,11 @@ from app.verification.snapshot.traversal import all_transactions
 # The loan-level production subject key (a single subject, like the rule-engine LOAN_SUBJECT).
 LOAN_SUBJECT = "loan"
 
+# The classifier's unclassified document-type value (str form; a document may also be None-typed). The
+# doc-type filters (here + LP-377-D's dispatcher gate) FAIL OPEN on it — an abstained classification is
+# never used to drop a document.
+_UNKNOWN_DOC_TYPE = "unknown"
+
 RawField = Field | PiiField
 Subject = tuple[str, object]  # (content_id, the raw object to read from)
 
@@ -37,7 +42,10 @@ class SubjectType:
 
     enumerate: Callable[[Snapshot], list[Subject]]
     read_field: Callable[[object, str], RawField | None]
-    build_context: Callable[[object], dict[str, object]]
+    # ``applies_to`` (LP-385) = the group's declared document types (or None = all). Only a context that
+    # GATHERS documents (the borrower context) uses it — to filter the gathered set to the group's relevant
+    # doc-types; every other subject ignores it.
+    build_context: Callable[[object, frozenset[str] | None], dict[str, object]]
 
 
 # --------------------------------------------------------------------------- #
@@ -61,7 +69,7 @@ def _txn_read_field(raw: object, field: str) -> RawField | None:
     return getattr(raw, attr) if attr is not None else None
 
 
-def _txn_context(raw: object) -> dict[str, object]:
+def _txn_context(raw: object, _applies_to: frozenset[str] | None) -> dict[str, object]:
     assert isinstance(raw, TransactionRecord)
     return {
         "date": _field_value(raw.date),
@@ -85,7 +93,7 @@ def _doc_read_field(raw: object, field: str) -> RawField | None:
     return raw.fields.get(field)
 
 
-def _doc_context(raw: object) -> dict[str, object]:
+def _doc_context(raw: object, _applies_to: frozenset[str] | None) -> dict[str, object]:
     assert isinstance(raw, DocumentEntry)
     # Send the document's present fields as {name: value/display} — PiiFields contribute only their
     # MASKED display (never a raw value), so nothing raw-PII leaves in the AI prompt.
@@ -112,7 +120,7 @@ def _loan_read_field(raw: object, field: str) -> RawField | None:
     return raw.mismo.facts.get(field)
 
 
-def _loan_context(raw: object) -> dict[str, object]:
+def _loan_context(raw: object, _applies_to: frozenset[str] | None) -> dict[str, object]:
     assert isinstance(raw, Snapshot)
     if raw.mismo.absent:
         return {}
@@ -179,16 +187,58 @@ def _borrower_read_field(raw: object, field: str) -> RawField | None:
     return raw.snapshot.mismo.facts.get(f"borrower.{raw.index}.{field}")
 
 
-def _borrower_context(raw: object) -> dict[str, object]:
+def _borrower_context(raw: object, applies_to: frozenset[str] | None) -> dict[str, object]:
+    """The per-borrower AI context: this borrower's MISMO facts PLUS the documents ATTRIBUTED to them
+    (LP-385). The generic per-borrower-over-documents primitive: a group asking a CROSS-document question
+    (income_stability's 2-year history / decline / continuance) sees all of ONE borrower's documents at
+    once — the per-document framing that made those questions structurally unanswerable (LP-378: 0/120).
+
+    Attribution is by ``belongs_to`` — the LP-202 EVIDENCE-based document→borrower link (the SSN/name
+    resolved at upload), NEVER a guess. A document with no ``belongs_to`` (unattributed) is NOT gathered
+    for any borrower — the context is honestly incomplete and the tag abstains with a reason, never a
+    trend fabricated from a mis-attributed document (LP-332/LP-336: "never a guessed attribution"). Fields
+    carry PiiField MASKED displays only (via ``_field_value``) — no raw PII leaves in the prompt.
+
+    ``applies_to`` (the group's declared doc-types, LP-385 generalizing LP-377-D) filters the gathered set
+    to the group's relevant document types, so a non-income document (a bank statement / tax bill / ID) is
+    NOT sent to income_stability — the prompt's "ignore non-income" instruction is not a load-bearing
+    filter (LP-378 measured that backstop failing: ~20 fabricated income values). FAILS OPEN exactly like
+    the LP-377-D gate: an unknown / ``None`` type is kept (the classifier abstained — never dropped on a
+    guess); only a KNOWN, confident type outside ``applies_to`` is excluded. ``applies_to=None`` → keep all.
+    """
     assert isinstance(raw, BorrowerSubject)
-    if raw.snapshot.mismo.absent:
-        return {}
-    prefix = f"borrower.{raw.index}."
-    return {
-        name[len(prefix) :]: _field_value(field)
-        for name, field in raw.snapshot.mismo.facts.items()
-        if name.startswith(prefix)
-    }
+    snapshot = raw.snapshot
+    mismo: dict[str, object] = {}
+    if not snapshot.mismo.absent:
+        prefix = f"borrower.{raw.index}."
+        mismo = {
+            name[len(prefix) :]: _field_value(field)
+            for name, field in snapshot.mismo.facts.items()
+            if name.startswith(prefix)
+        }
+    documents: list[dict[str, object]] = []
+    if not snapshot.documents.absent:
+        for entry in snapshot.documents.entries:
+            attributed = entry.belongs_to is not None and any(
+                str(ref.borrower_id) == raw.borrower_id for ref in entry.belongs_to
+            )
+            if not attributed:
+                continue  # unattributed → not this borrower's → the context is honestly incomplete
+            # Fail-open doc-type filter (LP-385): drop only a KNOWN, confident type the group's applies_to
+            # excludes; keep None/"unknown" (classifier abstained) and everything when applies_to is None.
+            if (
+                applies_to is not None
+                and entry.document_type not in (None, _UNKNOWN_DOC_TYPE)
+                and entry.document_type not in applies_to
+            ):
+                continue
+            documents.append(
+                {
+                    "document_type": entry.document_type,
+                    "fields": {name: _field_value(field) for name, field in entry.fields.items()},
+                }
+            )
+    return {"borrower_mismo": mismo, "documents": documents}
 
 
 _SUBJECT_TYPES: dict[str, SubjectType] = {

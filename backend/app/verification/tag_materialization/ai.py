@@ -292,7 +292,8 @@ async def produce_ai_group_tags(
         return {}
 
     fingerprinted: list[tuple[str, str, object]] = [
-        (content_fingerprint(st.build_context(raw)), sid, raw) for sid, raw in subjects
+        (content_fingerprint(st.build_context(raw, group.applies_to)), sid, raw)
+        for sid, raw in subjects
     ]
 
     representatives: list[tuple[str, object]] = []
@@ -310,7 +311,8 @@ async def produce_ai_group_tags(
     for batch in _chunks(representatives, _BATCH_SIZE):
         context = {
             "subjects": [
-                {"index": i, **st.build_context(raw)} for i, (_fp, raw) in enumerate(batch, 1)
+                {"index": i, **st.build_context(raw, group.applies_to)}
+                for i, (_fp, raw) in enumerate(batch, 1)
             ]
         }
         try:

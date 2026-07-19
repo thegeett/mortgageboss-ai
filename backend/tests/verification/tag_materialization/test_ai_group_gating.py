@@ -226,15 +226,17 @@ def test_applies_to_accepts_real_catalog_types_and_all() -> None:
     assert _parse_applies_to("g", "document", None) is None
 
 
-def test_applies_to_on_a_non_document_group_is_rejected() -> None:
-    # `_gate_subjects` only gates document subjects, so a list `applies_to` on a transaction/loan group is
-    # dead config — reject it at load rather than let it silently do nothing.
+def test_applies_to_on_a_loan_or_transaction_group_is_rejected() -> None:
+    # applies_to names doc types, so it is meaningful only for a group that GATES on them (document, LP-377-D)
+    # or GATHERS them (borrower, LP-385). On a loan/transaction group it is dead config — reject at load.
     from app.verification.tag_materialization.declarations import (
         DeclarationError,
         _parse_applies_to,
     )
 
-    with pytest.raises(DeclarationError, match="only meaningful for a document-subject"):
+    with pytest.raises(DeclarationError, match="does not gate or gather documents"):
         _parse_applies_to("txn_group", "transaction", ["pay_stub"])
+    # A BORROWER group (gathers documents into its context, LP-385) IS allowed a list applies_to.
+    assert _parse_applies_to("g", "borrower", ["w2", "pay_stub"]) == frozenset({"w2", "pay_stub"})
     # 'all' / omitted stays fine on any subject (it is the no-op default).
     assert _parse_applies_to("txn_group", "transaction", "all") is None

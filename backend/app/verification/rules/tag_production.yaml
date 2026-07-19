@@ -48,9 +48,11 @@ tags:
   # --- income.* — the income family (LP-323-IN-A/B). Per-document facts key under the DOCUMENT
   #     subject (LP-325 gather contract); the DERIVED aggregates key under loan (the derived producer
   #     is loan-level — per-borrower granularity is deferred, see the LP-323-IN-B doc). The stability
-  #     tags (has_2yr_history / is_declining / same_line_of_work / continuance_3yr) are logically
-  #     per-borrower but materialize per-document today; the per-borrower judgment rules that read them
-  #     EVALUATE via fixtures but do NOT ACTIVATE until per-borrower materialization lands (like ID-8). #
+  #     tags (has_2yr_history / is_declining / same_line_of_work / continuance_3yr) are PER-BORROWER as of
+  #     LP-385: a 2-year trend / decline / continuance is a CROSS-document question a single document cannot
+  #     answer (LP-378 measured 0/120 per-document). They materialize under the BORROWER subject, whose
+  #     context gathers the borrower's ATTRIBUTED income documents seen together (subjects._borrower_context).
+  #     IN-7/IN-13/IN-14 (per_borrower) consume them; IN-10/IN-11 read per-document — a reported gap (LP-385).#
   # LP-369: income.stated_monthly names a document field NO extractor emits — stated income lives in
   # MISMO as indexed borrower.{n}.income.{m}.monthly_amount, not a single document field. It cannot be
   # a parsed:document tag; it needs a DERIVED/borrower source (cf. dti.qualifying_income_monthly,
@@ -68,10 +70,10 @@ tags:
   income.voe_present: {mode: ai, subject: document, data: income_docs}
   income.future_employment: {mode: ai, subject: document, data: income_docs}
   income.offer_letter_present: {mode: ai, subject: document, data: income_docs}
-  income.has_2yr_history: {mode: ai, subject: document, data: income_stability}
-  income.is_declining: {mode: ai, subject: document, data: income_stability}
-  income.same_line_of_work: {mode: ai, subject: document, data: income_stability}
-  income.continuance_3yr: {mode: ai, subject: document, data: income_stability}
+  income.has_2yr_history: {mode: ai, subject: borrower, data: income_stability}
+  income.is_declining: {mode: ai, subject: borrower, data: income_stability}
+  income.same_line_of_work: {mode: ai, subject: borrower, data: income_stability}
+  income.continuance_3yr: {mode: ai, subject: borrower, data: income_stability}
   # LP-332 (fixes PIN #1): PER-BORROWER now — the recipe reads THIS borrower's stated (MISMO) + its own
   # documents' documented income, so borrower A's inflated income is no longer masked by borrower B.
   income.documented_income_shortfall_pct: {mode: derived, subject: borrower, data: income_documented_shortfall}
@@ -323,22 +325,53 @@ ai_groups:
         "future_employment": {"value","confidence","reasoning"},
         "offer_letter_present": {"value","confidence","reasoning"}}]
 
+  # income_stability — PER-BORROWER over the borrower's documents (LP-385). The context is ONE borrower's
+  #     MISMO facts + all documents ATTRIBUTED to them (subjects._borrower_context); the group reasons about
+  #     the income TREND ACROSS the borrower's documents (which a per-document pass could not — LP-378 0/120).
+  #     ⚠️ TERM DEFINITIONS (D2) are DEFENSIBLE DEFAULTS flagged for Priya (LP-379) — not yet validated;
+  #     "materializes" is NOT "correct" (LP-385 proves production; LP-379 measures accuracy).
   income_stability:
-    subject: document
-    context_builder: document
-    applies_to: all
+    subject: borrower
+    context_builder: borrower
+    # LP-385: the INCOME document types this group reasons over — the context filters the borrower's
+    # gathered documents to these, so a bank statement / tax bill / ID is not sent (the over-production
+    # surface LP-377-D/LP-378 measured the prompt's "ignore" instruction failing to hold). Fails open on an
+    # unknown/None type. The 1003 (uniform_residential_loan_application) carries the borrower's stated income.
+    applies_to: [w2, pay_stub, voe, uniform_residential_loan_application]
     tags: [income.has_2yr_history, income.is_declining, income.same_line_of_work, income.continuance_3yr]
     system_prompt: |
-      You are a senior mortgage loan processor STRUCTURING an income document's STABILITY signals into
-      clean tags (facts, not verdicts). Produce, judging ONLY from this document's fields:
-      1. has_2yr_history — is a 2-year history of this income evidenced? "yes" | "no" | "unknown".
-      2. is_declining — is a year-over-year DECLINE evident? "yes" | "no" | "unknown".
-      3. same_line_of_work — if this reflects a job change, is the new role the same field/stability?
-         "yes" | "no" | "unknown".
-      4. continuance_3yr — is this income likely to continue 3+ years (for other/rental income)?
-         "yes" | "no" | "unknown".
-      Return "unknown" whenever the document does not support the fact; never guess. Return ONLY a JSON
-      array, one object per document, echoing the given "index":
+      You are a senior mortgage loan processor STRUCTURING one BORROWER'S income-stability signals into
+      clean factual tags. You are given the borrower's structured facts and ALL documents attributed to
+      them (`borrower_mismo` + `documents`, each with its `document_type` + `fields`). Your ONLY job is to
+      describe what the borrower's INCOME DOCUMENTS — the W-2s, pay stubs, VOE, and 1003 — EVIDENCE about
+      the income across time. Consider ONLY those income documents; ignore bank statements, IDs, and other
+      document types. You do NOT decide whether the income QUALIFIES for the loan — a downstream rule and a
+      human reviewer do that; they can only be correct if your facts are accurate.
+
+      NORTH STAR — ACCURACY AND HONESTY (a WRONG tag silently corrupts every rule that reads it):
+      - Judge ONLY from what the documents EVIDENCE. Never infer a trend the documents do not show.
+      - "unknown" is a correct, expected answer — return it (with a reason) whenever the documents do not
+        show enough to tell. NEVER guess to look complete. If NO income document is attributed to this
+        borrower, every tag is "unknown".
+
+      Produce, for THIS borrower, judging across their income documents:
+      1. has_2yr_history — do the documents EVIDENCE this income across at least TWO consecutive years
+         (e.g. two W-2s for consecutive tax years, or a W-2 plus a full prior year)? "yes" (≥2 consecutive
+         years evidenced) | "no" (the documents evidence only one year / a shorter span) | "unknown" (the
+         years the documents cover cannot be determined). A single year of documents is "no", not a guess.
+      2. is_declining — comparing the documented income across the evidenced years, is there a
+         year-over-year DECREASE? "yes" (a later year's income is lower than an earlier year's) | "no" (flat
+         or rising) | "unknown" (fewer than two comparable years, so no comparison is possible).
+      3. same_line_of_work — if the documents show a job/employer CHANGE, is the new role the SAME line of
+         work / occupation? "yes" (same field) | "no" (a different field) | "unknown" (no change shown, or
+         the field cannot be determined). If there is only one employer throughout, answer "yes".
+      4. continuance_3yr — do the documents EVIDENCE that this income is likely to continue 3+ years
+         (relevant for other / rental / fixed-term income with a stated end)? "yes" | "no" (a stated end
+         within 3 years) | "unknown" (the documents do not indicate the continuation horizon).
+
+      For each tag give a confidence (0.0-1.0) reflecting genuine certainty and a short reasoning citing the
+      SPECIFIC documents/years you relied on. STRICT OUTPUT — return ONLY a JSON ARRAY (no markdown fences,
+      no prose before or after), one object per borrower, echoing the "index" you were given:
       [{"index": <i>, "has_2yr_history": {"value","confidence","reasoning"},
         "is_declining": {"value","confidence","reasoning"},
         "same_line_of_work": {"value","confidence","reasoning"},

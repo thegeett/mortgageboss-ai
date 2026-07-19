@@ -211,10 +211,13 @@ def _parse_applies_to(key: str, subject: str, raw: object) -> frozenset[str] | N
     silently gate the group to death (LP-373's silent-dead-tag class)."""
     if raw is None or (isinstance(raw, str) and raw.strip().lower() == "all"):
         return None
-    if subject != "document":
+    # `applies_to` names document types, so it is only meaningful for a group that GATES on them
+    # (document subject — LP-377-D dispatcher gate) or GATHERS them (borrower subject — LP-385 context
+    # filter). On a loan/transaction group it would silently do nothing, so reject it.
+    if subject not in ("document", "borrower"):
         raise DeclarationError(
-            f"ai group {key!r}: `applies_to` is only meaningful for a document-subject group "
-            f"(subject={subject!r} is never gated) — use 'all' or omit it"
+            f"ai group {key!r}: `applies_to` is only meaningful for a document- or borrower-subject group "
+            f"(subject={subject!r} does not gate or gather documents) — use 'all' or omit it"
         )
     if not isinstance(raw, list) or not all(isinstance(v, str) and v.strip() for v in raw):
         raise DeclarationError(
