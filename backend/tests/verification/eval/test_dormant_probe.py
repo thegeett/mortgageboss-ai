@@ -13,6 +13,7 @@ from datetime import UTC, datetime
 from uuid import uuid4
 
 import pytest
+from app.ai.client import AIClientError
 from app.services.verification_run import _required_ai_groups
 from app.verification.eval import dormant_probe
 from app.verification.eval.dormant_probe import (
@@ -27,7 +28,12 @@ from app.verification.snapshot.model import (
     Snapshot,
     TagsSection,
 )
-from app.verification.tag_materialization.ai import AiGroupResult, AiSubjectJudgment, AiTagJudgment
+from app.verification.tag_materialization.ai import (
+    AiGroupResult,
+    AiSubjectJudgment,
+    AiTagJudgment,
+    Reasoner,
+)
 from app.verification.tag_materialization.declarations import load_ai_groups
 
 pytestmark = pytest.mark.anyio
@@ -102,8 +108,13 @@ class _AiStub:
         return AiGroupResult(judgments, 1, 1, "stub", False)
 
 
-def _all_dormant_stubs(**overrides: _AiStub) -> dict[str, _AiStub]:
-    """A stub for EVERY dormant group — so a unit test never falls through to the real model for an
+async def _failing_reasoner(_context_json: str) -> AiGroupResult:
+    """A reasoner whose AI call fails — materialize_tags catches AIClientError and degrades to unknown."""
+    raise AIClientError("AI provider down")
+
+
+def _all_dormant_stubs(**overrides: Reasoner) -> dict[str, Reasoner]:
+    """A reasoner for EVERY dormant group — so a unit test never falls through to the real model for an
     un-stubbed group (they are all document-subject and run on the same fixture doc). Un-overridden groups
     abstain (empty tags → fail-closed unknown)."""
     return {group: overrides.get(group, _AiStub({})) for group in _DORMANT_EXPECTED}
@@ -150,6 +161,22 @@ async def test_uniform_unknown_is_reported_as_a_finding_not_a_pass() -> None:
     grp = next(g for g in report.groups if g.key == "income_amounts")
     assert grp.real == []  # nothing usable
     assert grp.verdict == "mostly_abstains"  # honest — an abstention is a finding, not a pass
+    assert grp.ai_failures == []  # a genuine model abstention is NOT an AI-call failure
+
+
+async def test_ai_call_failure_reads_as_ai_failed_not_an_abstention() -> None:
+    # materialize_tags degrades a failed AI call to `unknown` (it catches AIClientError), so a transient
+    # outage looks like uniform-unknown. The probe MUST surface that as `ai_failed`, never read it as "the
+    # producer abstains" (a false producer/applicability gap — the misdiagnosis this probe exists to prevent).
+    snap = _snapshot([DocumentEntry(content_id="ps1", document_type="pay_stub", fields={})])
+    report = await probe_dormant_groups_on_snapshot(
+        snap, ai_reasoners=_all_dormant_stubs(income_amounts=_failing_reasoner)
+    )
+    grp = next(g for g in report.groups if g.key == "income_amounts")
+    assert grp.real == []
+    assert grp.ai_failures  # the failure is surfaced, distinct from an abstention
+    assert grp.abstentions == []  # a call failure is not counted as a genuine abstention
+    assert grp.verdict == "ai_failed"  # NOT "mostly_abstains"
 
 
 # --------------------------------------------------------------------------- #

@@ -26,17 +26,12 @@ from uuid import UUID, uuid4
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.loan_file import LoanFile
-from app.services.verification_run import _required_ai_groups
+from app.services.verification_run import required_ai_groups
 from app.verification.snapshot.builder import build_snapshot
 from app.verification.snapshot.model import Snapshot
-from app.verification.tag_materialization.ai import Reasoner
+from app.verification.tag_materialization.ai import AI_CALL_FAILURE_REASONS, Reasoner
 from app.verification.tag_materialization.declarations import load_ai_groups
 from app.verification.tag_materialization.producer import materialize_tags
-
-# Every dormant income/asset group is keyed under the DOCUMENT subject, so the probe scopes materialization to
-# documents — the loan/borrower derived recipes (out of scope, and not what "does the producer run?" asks) are
-# never touched.
-_DOCUMENT_SUBJECT = frozenset({"document"})
 
 _UNKNOWN = "unknown"
 
@@ -47,7 +42,7 @@ def dormant_ai_groups() -> frozenset[str]:
     Derived from the SAME single source the normal run uses, so the dormant set is exactly the complement of
     what a real verification materializes (this probe can never disagree with the orchestrator about which
     groups are live)."""
-    return frozenset(load_ai_groups()) - _required_ai_groups()
+    return frozenset(load_ai_groups()) - required_ai_groups()
 
 
 @dataclass(frozen=True)
@@ -69,13 +64,12 @@ class TagObservation:
 
 @dataclass(frozen=True)
 class GroupProbe:
-    """One dormant group's real-data behaviour: what it produced, on which doc-types, or an error."""
+    """One dormant group's real-data behaviour: what it produced, on which doc-types, or an AI-call failure."""
 
     key: str
     subject: str
     tag_ids: tuple[str, ...]
     observations: list[TagObservation] = field(default_factory=list)
-    error: str | None = None
 
     @property
     def real(self) -> list[TagObservation]:
@@ -83,8 +77,21 @@ class GroupProbe:
         return [o for o in self.observations if not o.is_unknown]
 
     @property
+    def ai_failures(self) -> list[TagObservation]:
+        """Observations that are ``unknown`` because the AI CALL failed (transport / truncated), NOT a
+        genuine model abstention. Surfaced separately so an outage is never misread as a producer gap —
+        the misdiagnosis this probe exists to prevent (materialize_tags degrades a failed call to
+        ``unknown`` rather than raising, so the reason string is the only signal)."""
+        return [o for o in self.observations if o.reasoning in AI_CALL_FAILURE_REASONS]
+
+    @property
     def abstentions(self) -> list[TagObservation]:
-        return [o for o in self.observations if o.is_unknown]
+        """Genuine model abstentions (``unknown`` from a completed call) — excludes AI-call failures."""
+        return [
+            o
+            for o in self.observations
+            if o.is_unknown and o.reasoning not in AI_CALL_FAILURE_REASONS
+        ]
 
     @property
     def doctypes_with_real_value(self) -> set[str | None]:
@@ -93,13 +100,14 @@ class GroupProbe:
 
     @property
     def verdict(self) -> str:
-        """✅ produces usable tags · ⚠️ produces but mostly abstains · ❌ produces nothing / errors."""
-        if self.error is not None:
-            return "error"
+        """✅ produces_usable · ⚠️ mostly_abstains · ❌ produces_nothing · 🔌 ai_failed (the AI call
+        failed — re-run / fix infra, NOT a producer gap)."""
         if not self.observations:
             return "produces_nothing"
         if not self.real:
-            return "mostly_abstains"
+            # No usable value: an AI-call failure (unreliable, re-run) is NOT a genuine abstention (a real
+            # producer/data finding) — the report must not conflate them.
+            return "ai_failed" if self.ai_failures else "mostly_abstains"
         # produced a real value somewhere; "mostly abstains" if the abstentions dominate heavily.
         return (
             "produces_usable"
@@ -123,10 +131,14 @@ async def probe_dormant_groups_on_snapshot(
     snapshot is READ then DISCARDED — nothing is persisted."""
     dormant = dormant_ai_groups()
     groups = load_ai_groups()
+    # Scope materialization to exactly the SUBJECTS the dormant groups declare (today all "document", but
+    # derived — never hardcoded), so a dormant group on ANY subject actually runs and is reported honestly,
+    # rather than being silently scoped out and misreported "produces_nothing".
+    subjects = frozenset(groups[key].subject for key in dormant)
     materialized = await materialize_tags(
         snapshot,
         ai_reasoners=ai_reasoners,
-        only_subjects=_DOCUMENT_SUBJECT,
+        only_subjects=subjects,
         only_groups=dormant,
     )
     doc_type_by_cid = {

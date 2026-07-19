@@ -123,6 +123,11 @@ def _required_ai_groups() -> frozenset[str]:
     return frozenset(needed)
 
 
+# Public name for out-of-orchestrator callers (the dormant-probe diagnostic, LP-378) — the live AI-group
+# set without depending on a private symbol. Same single source of truth as the orchestrator uses.
+required_ai_groups = _required_ai_groups
+
+
 logger = get_logger(__name__)
 
 # The rule → finding-category map (which area of the file each rule concerns), a display lookup only.

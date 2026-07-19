@@ -44,6 +44,13 @@ _REASON_MALFORMED = "tag value missing or malformed in structuring response"
 _REASON_BAD_INDEX = "structuring pass returned unrecognized subject indices"
 _REASON_OFF_VOCAB = "model returned an out-of-vocabulary value; coerced to unknown"
 
+# The unknown-tag reasons that mean the AI CALL itself did not deliver a usable answer (a transport
+# failure, or a truncated response) — as opposed to a completed response that genuinely abstained or
+# omitted a tag. A caller inspecting produced tags (e.g. the dormant-probe diagnostic, LP-378) uses this
+# to tell "the producer ran and abstained" from "the AI call failed", so an outage is never misread as a
+# producer gap.
+AI_CALL_FAILURE_REASONS = frozenset({_REASON_FAILED, _REASON_TRUNCATED})
+
 _UNKNOWN = "unknown"
 
 
@@ -349,6 +356,7 @@ def _bind_prompt(system_prompt: str) -> Reasoner:
 
 
 __all__ = [
+    "AI_CALL_FAILURE_REASONS",
     "AiGroupResult",
     "AiSubjectJudgment",
     "AiTagCache",
