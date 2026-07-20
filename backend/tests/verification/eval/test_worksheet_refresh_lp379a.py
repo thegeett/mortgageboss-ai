@@ -4,11 +4,12 @@ The instrument must match what the tags DO today, before Priya labels. The ONE t
 income_stability: LP-385 moved it from the DOCUMENT subject to the BORROWER subject (a 2-year trend is a
 cross-document question a single document cannot answer — LP-378 measured 0/120 per-document). So:
 
-* its 32 stale PER-DOCUMENT rows must be GONE,
-* on the borrower-less calibration FIXTURE it must yield NO labelable rows (a fixture-wiring gap — the
-  fixture carries no MISMO borrowers / belongs_to — NOT a per-document "labelable cap=8" the stale generator
-  used to claim), and
+* its 32 stale PER-DOCUMENT rows must be GONE, and
 * when borrowers ARE wired it must produce one row PER BORROWER per tag (matching LP-385's producer).
+
+(LP-379-B has since wired the 2 DB borrowers into the fixture, so income_stability now materializes there —
+the once-borrower-less assertion below was updated to the wired truth. The fixture-level wiring + no-cross-feed
+proofs live in test_fixture_borrowers_lp379b.py.)
 
 And the non-drift facts the ticket predicted but the gate of record refuted are pinned too: every filled
 label survives verbatim (nothing rewritten — LP-340 kept the entity-suffix strip in IN-5's RULE, so the
@@ -94,14 +95,15 @@ def test_income_stability_is_reported_as_a_borrower_subject() -> None:
         assert caps[t].subject_kind == "borrower"  # LP-385 — no longer "document"
 
 
-def test_no_income_stability_rows_on_the_borrowerless_fixture() -> None:
-    # The 32 stale per-document rows (4 tags x 8 pay_stub/w2 docs) are GONE — the fixture carries no wired
-    # borrowers, so the per-borrower producer enumerates none and abstains. This is the honest state, NOT
-    # the stale "labelable cap=8" the document-subject generator used to report.
-    rows = build_worksheet(_snap())
-    assert [r for r in rows if r.tag_id in _STABILITY] == []
+def test_income_stability_is_labelable_per_borrower_on_the_wired_fixture() -> None:
+    # UPDATED BY LP-379-B: this test previously asserted the borrower-LESS fiction (0 rows / no_subject) —
+    # correct for LP-379-A, when the fixture had no wired borrowers. LP-379-B wired the 2 DB borrowers into
+    # the fixture, so income_stability now materializes per-BORROWER (the true state). The 32 stale
+    # per-DOCUMENT rows are still gone; what returns is 8 per-borrower rows (2 borrowers x 4 tags).
+    rows = [r for r in build_worksheet(_snap()) if r.tag_id in _STABILITY]
+    assert len(rows) == 8 and {r.subject_kind for r in rows} == {"borrower"}
     caps = {c.tag_id: c for c in compute_capacity(_snap())}
-    assert all(caps[t].capacity == 0 and caps[t].status == "no_subject" for t in _STABILITY)
+    assert all(caps[t].capacity == 2 and caps[t].status == "labelable" for t in _STABILITY)
 
 
 def test_income_stability_rows_are_per_borrower_when_borrowers_are_wired() -> None:

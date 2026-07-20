@@ -15,11 +15,34 @@ left ``fields = {}`` on purpose — the content-empty case (a subject that exist
 
 from __future__ import annotations
 
+from uuid import UUID
+
 from app.verification.eval.harness import load_fixture_snapshot
 from app.verification.snapshot.fields import Field, FieldSource
-from app.verification.snapshot.model import DocumentEntry, DocumentsSection, Snapshot
+from app.verification.snapshot.model import (
+    BorrowerRef,
+    DocumentEntry,
+    DocumentsSection,
+    MismoSection,
+    Snapshot,
+    SnapshotField,
+)
 
 _BASE_FIXTURE = "lf6t3n_tagged_snapshot.json"
+
+# --------------------------------------------------------------------------- #
+# LP-379-B — the 2 wired borrowers, mirroring the DB LF-6T3N's STRUCTURE (2 borrowers, one primary + one
+# co-borrower, each owning their income documents). The DB's real borrowers are Akash (primary, index 1) and
+# Bansari (co, index 2) Patel; the FIXTURE stays de-identified — it mirrors the SHAPE (ids + attribution +
+# a 2-year non-declining W-2 history), never the DB's PII. borrower_ids are fixed synthetic UUIDs.
+_B1_ID = UUID(
+    "11111111-1111-4111-8111-111111111111"
+)  # Jordan A Rivera (primary — mirrors DB index 1)
+_B2_ID = UUID("22222222-2222-4222-8222-222222222222")  # Taylor M Nguyen (co — mirrors DB index 2)
+_B1_NAME = "Jordan A Rivera"
+_B2_NAME = "Taylor M Nguyen"
+_B1_REF = BorrowerRef(borrower_id=_B1_ID, name=_B1_NAME)
+_B2_REF = BorrowerRef(borrower_id=_B2_ID, name=_B2_NAME)
 
 
 def _f(value: str) -> Field:
@@ -33,6 +56,46 @@ def _doc(cid: str, dtype: str, **fields: str) -> DocumentEntry:
         belongs_to=None,
         fields={k: _f(v) for k, v in fields.items()},
     )
+
+
+# The borrower identity facts (built after _f is defined). borrower.1 = primary, borrower.2 = co-borrower,
+# mirroring the DB. employer.{n}.name traces to each borrower's OWN W-2s in this fixture.
+_BORROWER_MISMO: dict[str, SnapshotField] = {
+    "borrower.1.borrower_id": _f(str(_B1_ID)),
+    "borrower.1.first_name": _f("Jordan"),
+    "borrower.1.last_name": _f("Rivera"),
+    "borrower.1.is_primary": _f("true"),
+    "borrower.1.employer.1.name": _f("Acme Logistics Inc"),
+    "borrower.1.employer.2.name": _f("Northgate Warehousing"),
+    "borrower.2.borrower_id": _f(str(_B2_ID)),
+    "borrower.2.first_name": _f("Taylor"),
+    "borrower.2.last_name": _f("Nguyen"),
+    "borrower.2.is_primary": _f("false"),
+    "borrower.2.employer.1.name": _f("Sterling Retail LLC"),
+    "borrower.2.employer.2.name": _f("Cafe Bluebird"),
+}
+
+# Attribution by the RESOLVED holder name (LP-202: belongs_to is the evidence-based link). A document is
+# attributed to the borrower whose name its own identity field carries; joint/property documents (mortgage,
+# property-tax, purchase agreement, the empty brokerage, unknowns) resolve to no single borrower → None.
+_NAME_FIELD_BY_TYPE = {
+    "drivers_license": "full_name",
+    "pay_stub": "employee_name",
+    "w2": "employee_name",
+    "investment_account": "account_holder",
+    "bank_statement": "account_holder_name",
+}
+_REF_BY_NAME = {_B1_NAME: _B1_REF, _B2_NAME: _B2_REF}
+
+
+def _attribution(entry: DocumentEntry) -> tuple[BorrowerRef, ...] | None:
+    name_field = _NAME_FIELD_BY_TYPE.get(entry.document_type or "")
+    if name_field is None:
+        return None
+    field = entry.fields.get(name_field)
+    holder = str(field.value) if isinstance(field, Field) and field.is_present else None
+    ref = _REF_BY_NAME.get(holder or "")
+    return (ref,) if ref is not None else None
 
 
 # De-identified field metadata for the 5 preserved bank statements (holder + account + period + balances).
@@ -210,8 +273,15 @@ def build_lf6t3n_snapshot() -> Snapshot:
             )
         )
 
-    # 4) w2 x4 — IN-1/5
-    for i, (name, ssn, emp, ein, wages, fed) in enumerate(
+    # 4) w2 x4 — IN-1/5, and (LP-379-B) income_stability's per-borrower history. Each borrower has TWO W-2s;
+    # the tax_year is assigned so the LOWER-wage W-2 falls in 2024 and the higher in 2025 — a 2-year,
+    # NON-DECLINING history mirroring the DB (both DB borrowers rose/held). tax_year is the ONLY field changed
+    # here (no golden reads it); employer_name + wages are untouched, so the employer_normalized /
+    # documented_monthly goldens stay valid. Jordan: Northgate 12,200 (2024) -> Acme 76,500 (2025); Taylor:
+    # Cafe Bluebird 8,300 (2024) -> Sterling 50,400 (2025). Residual vs DB: the DB's co-borrower (Bansari)
+    # held ONE employer across both years; the fixture's Taylor changes employer — mirroring that would rewrite
+    # w4's employer_name and break its filled golden, so it is left and reported (see docs/tickets/LP-379-B.md).
+    for i, (name, ssn, emp, ein, wages, fed, tax_year) in enumerate(
         [
             (
                 "Jordan A Rivera",
@@ -220,6 +290,7 @@ def build_lf6t3n_snapshot() -> Snapshot:
                 "**-***1234",
                 "76500.00",
                 "9120.00",
+                "2025",
             ),
             (
                 "Jordan A Rivera",
@@ -228,6 +299,7 @@ def build_lf6t3n_snapshot() -> Snapshot:
                 "**-***5566",
                 "12200.00",
                 "1300.00",
+                "2024",
             ),
             (
                 "Taylor M Nguyen",
@@ -236,8 +308,17 @@ def build_lf6t3n_snapshot() -> Snapshot:
                 "**-***7788",
                 "50400.00",
                 "5210.00",
+                "2025",
             ),
-            ("Taylor M Nguyen", "***-**-7702", "Cafe Bluebird", "**-***9900", "8300.00", "610.00"),
+            (
+                "Taylor M Nguyen",
+                "***-**-7702",
+                "Cafe Bluebird",
+                "**-***9900",
+                "8300.00",
+                "610.00",
+                "2024",
+            ),
         ],
         start=1,
     ):
@@ -245,7 +326,7 @@ def build_lf6t3n_snapshot() -> Snapshot:
             _doc(
                 f"w{i}",
                 "w2",
-                tax_year="2025",
+                tax_year=tax_year,
                 employee_name=name,
                 employee_ssn=ssn,
                 employer_name=emp,
@@ -356,7 +437,16 @@ def build_lf6t3n_snapshot() -> Snapshot:
     for i in range(1, 5):
         entries.append(_doc(f"unk{i}", "unknown"))
 
-    return base.model_copy(update={"documents": DocumentsSection.present(entries)})
+    # LP-379-B: attribute each person-owned document to its borrower (belongs_to, by resolved holder name),
+    # and wire the 2 MISMO borrowers — so the per-borrower producer (LP-385) enumerates them and
+    # income_stability materializes. Additive: joint/property documents stay unattributed; no field changed.
+    attributed = [entry.model_copy(update={"belongs_to": _attribution(entry)}) for entry in entries]
+    return base.model_copy(
+        update={
+            "mismo": MismoSection.present(_BORROWER_MISMO),
+            "documents": DocumentsSection.present(attributed),
+        }
+    )
 
 
 __all__ = ["build_lf6t3n_snapshot"]
