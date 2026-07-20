@@ -11050,3 +11050,54 @@ Priya's in-progress notes — LP-379-D re-scores). This changes what the system 
 the model-vs-labeler bug these definitions avoid), LP-343 (the prompt-bug class + the exemplary Stage-A
 prompt), LP-344 (the convergence guard the two prompt copies stay under), LP-314a (AS-1's source-strength
 ladder — what AS-1 actually reads), LP-335 (the tag reports what the document SHOWS; the rule judges).
+
+## ADR-303: A DB-sourced calibration worksheet for the human, alongside the fixture for CI (LP-379-D)
+
+**Context.** The ticket's premise was that Priya labeled the REAL DB file (Akash Patel, real BofA statements)
+while the harness scores the de-identified FIXTURE (Jordan/Taylor), so her labels share no `subject_id`s and
+are unscorable. **The gate of record REFUTED this:** all 122 of her filled goldens join to the FIXTURE
+worksheet 100% — she labeled the COMMITTED fixture CSVs, so her `subject_id`s ARE the fixture's. Two facts make
+them scorable against the fixture: her TRANSACTION labels sit on VERBATIM transactions (the fixture reuses the
+DB's real transactions unchanged — same content-ids, date/amount/description; only statement-level fields were
+de-identified), and her DOCUMENT labels use the fixture CONTEXT (`id.name_normalized="Jordan A Rivera"`,
+`documented_monthly=6500` = Jordan's data). Her notes name real people because she recognized them, not because
+the row keys are the DB's.
+
+**Decision — score her labels against the fixture NOW, and ADD a DB-sourced path for FUTURE real-document
+rounds (never replacing the fixture path).** Scoring the stable-vocabulary tags against the fixture (real
+reasoner): `txn.is_money_in` **98%** (49/50 — one real `in`-vs-`out` review case); `id.name_normalized`,
+`id.current_address_type`, `income.documented_monthly`, `income.employer_normalized` **100%**;
+`id.address_normalized` 0% — **not a model miss** but Priya's data-entry error (names typed into the address
+column, already flagged in LP-379-A; the model output the correct addresses). This is the first REAL
+calibration signal off a domain expert's labels.
+
+**Held, explicitly.** `txn.apparent_category` (50 labels) and `txn.has_identified_source` (0) are HELD from
+scoring via a named set (`HELD_FOR_RELABELING`), reported — never a silent skip. Her apparent_category labels
+are FREE TEXT ("transfer to some one", "Credit card payment"); LP-379-E widened the enum (already committed),
+so they can now be re-labeled to enum values — a mapping pass — before scoring. (The ticket's "hold until
+LP-379-E lands" is moot — it landed; the hold is now for the re-label.)
+
+**Two paths, clearly separated.** The FIXTURE path (`worksheet.py` + `build_lf6t3n_snapshot`) is the
+deterministic, keyless CI path — UNTOUCHED (a new module carries the DB path, importing the same generator).
+The DB path (`db_worksheet.write_db_worksheets`) reuses `build_snapshot` + the governed
+`document_filenames_by_content_id` + `write_worksheets` — same generator, different snapshot source — for a
+future round that labels the real DOCUMENTS (income/id), where the fixture is synthetic and her fixture-context
+labels don't transfer. It is DELIBERATE: never called by CI or a normal run.
+
+**PII containment (the serious constraint) — fail-closed, following LP-210.** A DB worksheet carries real
+borrower NPI (names, addresses; accounts/SSNs are PiiField-masked). It MUST NEVER be committed. A guard
+(`guard_pii_safe_out_dir`) refuses any output path inside the repo tree unless it is under a gitignored
+`calibration-local/` segment — outside-repo or gitignored only, raising rather than writing PII to a
+committable path; `.gitignore` covers `calibration-local/`. The generator only WRITES to that `out_dir`;
+`build_snapshot`'s own logging is the app's existing behaviour (masked fields). A test proves the guard
+rejects `docs/calibration/` and the write lands only under the given PII-safe dir.
+
+**Honesty preserved.** The premise refutation is reported, not hidden (a test pins the 122/122 fixture join);
+the held tags are held by a named set, not silently; `id.address_normalized` 0% is attributed to the labeler's
+data-entry error, not the model; the DB worksheet is never committed and never the CI path.
+
+**Cross-refs.** LP-345 (the live-reasoner path — scores real AI against fixtures/cases, does NOT build a DB
+snapshot, so this reuses `build_snapshot` directly), LP-379-A/B/C (the fixture chain + the real-filename
+`source_document` column she labeled against), LP-379-E (the widened enum the held apparent_category labels
+await a re-map onto), LP-210 (the real-PII generated-locally posture this follows), LP-334 (the calibration
+harness whose `summarize`/`failing_cases` produced these numbers).
