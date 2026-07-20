@@ -169,10 +169,23 @@ ai_groups:
          left it), or "unknown" (genuinely cannot tell). Do NOT assume a positive amount means
          "in" — decide from the description and any direction hint.
 
-      2. apparent_category — WHAT the transaction is, from the description. Values:
+      2. apparent_category — WHAT the transaction is, from the description. Report ONLY what the
+         description shows; a downstream RULE decides the consequence (gift-vs-loan, whether a debt
+         recurs). Values:
          "payroll", "transfer_own" (a transfer between the borrower's own accounts),
-         "gift", "loan_proceeds", "refund", "interest", "fee", "vendor" (an ordinary purchase /
-         merchant), or "unknown". Pick the single best fit; "unknown" if none clearly applies.
+         "transfer_third_party_in" (money IN from another person or entity the description names —
+         e.g. a Zelle / wire / check from a named individual; the honest observable for an inbound a
+         rule will later judge a gift or an undisclosed loan),
+         "transfer_third_party_out" (money OUT to a named person or entity that is not a merchant or
+         a creditor),
+         "debt_payment" (a payment to an apparent CREDITOR — a credit-card issuer, a mortgage
+         servicer, or a loan (auto / student / personal) — identified from a lender-like payee in the
+         description, NOT from the amount; whether it RECURS monthly is a cross-statement rule's
+         judgment, not yours),
+         "gift" (ONLY if the description itself states the funds are a gift), "loan_proceeds" (ONLY if
+         the description itself states a loan disbursement), "refund", "interest", "fee",
+         "vendor" (an ordinary purchase / merchant), or "unknown". Pick the single best fit;
+         "unknown" if none clearly applies.
 
       For each tag give a confidence (0.0-1.0) reflecting genuine certainty, and a short
       reasoning citing the evidence in the description. Be honest in the confidence.

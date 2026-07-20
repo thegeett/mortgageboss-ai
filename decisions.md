@@ -10993,3 +10993,60 @@ silently absorbed.
 guessed attribution), LP-377-D / ADR-300 (why income_stability was left un-gated), LP-379 (the calibration that
 validates the term definitions this ticket only defaults), LP-368 (the census that first flagged the borrower
 context reading MISMO only).
+
+## ADR-302: A tag that cannot express a risk makes the risk uncatchable — widen txn.apparent_category (LP-379-E)
+
+**Context.** Calibrating LF-6T3N (LP-379), Priya labeled `txn.apparent_category` and reached for values the
+enum (`payroll | transfer_own | gift | loan_proceeds | refund | interest | fee | vendor | unknown`) could not
+hold: **third-party transfers** (*"Ravi transferred money to Akash"*, *"Akash transferred money to Anand
+Patel"* — the enum has only `transfer_own`, the borrower's OWN accounts) and **payments to a creditor**
+(*"Must be American Express CC payment"*, *"Some kind of mortgage payment — make sure this is not a monthly
+obligation, if so should flag?"* — lumped into `fee`/`vendor`). Her *"should flag?"* is an underwriter
+spotting a risk the system is STRUCTURALLY BLIND TO. **Where a tag cannot express a risk, no downstream rule
+can ever catch it — the information dies at the tag layer.** This is a hole in what the system can PERCEIVE,
+not how accurately it perceives.
+
+**Decision — widen the enum with three Priya-PENDING defaults, defined once in the converged prompt.**
+`transfer_third_party_in` (money in from a named third party), `transfer_third_party_out` (money out to a
+named person/entity that is not a merchant or creditor), and `debt_payment` (a payment to an apparent
+creditor). **These are DEFAULTS to confirm, not decisions taken** — an undefined category is LP-340's exact
+bug (the model picks one meaning, the labeler another), so each is DEFINED in the prompt and every one is
+flagged as a Priya item. The vocabulary lives in three places kept in sync: `fact_tags.csv` `allowed_values`
+(generic-producer coercion), `APPARENT_CATEGORY_VALUES` (standalone-producer coercion), and the prompt; the
+two prompt copies stay byte-identical under the LP-344 convergence guard (a test would go red on drift).
+
+**D1 — the tag reports the OBSERVABLE; recurrence is a RULE's job.** *"Recurring obligation"* needs MULTIPLE
+statements — a single-statement AI cannot see recurrence, and Priya's ground-truth descriptions were generic
+(*"CARD PURCHASE / PAYMENT"* $14,316 → she inferred "American Express" from the AMOUNT + judgment, not the
+text). So the honest tag is **`debt_payment`** — "a payment to an apparent creditor," observable when the
+description names a lender/card/servicer — NOT the ticket's proposed `recurring_obligation`. A **future DTI
+rule** detects recurrence across statements and sizes the undisclosed monthly obligation (noted here, NOT
+built). The tag reports the payee-is-a-creditor fact; the rule judges recurrence (LP-335).
+
+**D2 — gift/loan_proceeds are RULE conclusions, but they are load-bearing for dormant rules → kept, with the
+simplification flagged.** A bank statement rarely SAYS "gift"/"loan_proceeds" — those are conclusions after
+sourcing (AS-5 needs a signed gift letter; AS-2 an undisclosed-loan finding). By LP-335 the honest tag for an
+inbound is `transfer_third_party_in`, and a rule decides gift-vs-loan. **But dormant AS-2 (`==loan_proceeds`),
+AS-5 (`==gift`), and AS-12 read these values;** removing them would break those specs (out of scope). So they
+are KEPT, the prompt reserves them for when the description ITSELF states a gift/loan (rare), and the full
+simplification (gift/loan → rule conclusions, rewire AS-2/AS-5) is recorded as a Priya-item + future ticket —
+a smaller, honest enum, once its dormant consumers are re-architected.
+
+**D3 — no LIVE rule reads apparent_category, so widening shifts NOTHING live (structural, not just tested).**
+The ticket's premise that `apparent_category` "feeds AS-1" is refuted by the gate of record: AS-1's
+deterministic body reads `[is_money_in, amount, has_identified_source, source_strength]` and **never
+`apparent_category`** (fact_tags.csv's optimistic "used_by_rules: AS-1,…" notwithstanding). Only DORMANT
+AS-2/AS-5/AS-12 consume it. A test asserts no `ACTIVE_RULE_IDS` spec references the tag. The committed frozen
+fixture tags are unchanged (the AI is NOT re-run here); a real off-path probe confirmed the AI now emits
+`transfer_third_party_in` / `transfer_third_party_out` / `debt_payment` on named-payee descriptions (perception
+gap closed) while `payroll` etc. are unaffected.
+
+**Honesty preserved.** New categories are DEFAULTS flagged for Priya (not decided); recurrence detection is a
+future rule (not built); gift/loan kept because their dormant consumers still need them (the simplification is
+recommended, not forced); `unknown` stays first-class; the worksheet is NOT regenerated (it would destroy
+Priya's in-progress notes — LP-379-D re-scores). This changes what the system can PERCEIVE, nothing it decides.
+
+**Cross-refs.** LP-379 (Priya's calibration session — the source of the finding), LP-340 (undefined-term =
+the model-vs-labeler bug these definitions avoid), LP-343 (the prompt-bug class + the exemplary Stage-A
+prompt), LP-344 (the convergence guard the two prompt copies stay under), LP-314a (AS-1's source-strength
+ladder — what AS-1 actually reads), LP-335 (the tag reports what the document SHOWS; the rule judges).
