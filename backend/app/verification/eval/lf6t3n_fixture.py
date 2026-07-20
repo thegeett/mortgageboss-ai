@@ -98,6 +98,39 @@ def _attribution(entry: DocumentEntry) -> tuple[BorrowerRef, ...] | None:
     return (ref,) if ref is not None else None
 
 
+# LP-379-C — the REAL DB original_filename for each LF-6T3N document (exactly what the Document tab shows),
+# keyed by the fixture's content_id, so the calibration worksheet names the actual document a labeler opens.
+# Read from the DB LF-6T3N (mirrors it). The 5 bank statements share content_ids with the DB (they come from
+# the committed tagged snapshot); the synthetic documents map by borrower + document type + order. NOTE: the
+# field VALUES stay de-identified (Jordan/Taylor/Acme) while the FILENAMES are the real ones (Akash/BofA) — a
+# deliberate choice (a labeler locates the document by the tab's real name; the row's context is a stand-in).
+LF6T3N_DOCUMENT_FILENAMES: dict[str, str] = {
+    # bank statements — content_ids match the DB (the transaction parents; the acute "which statement?" case)
+    "doce9fa604faeb2faaa": "BofA checking April.pdf",
+    "doc78c0460250e6cefb": "BofA checking_May.pdf",
+    "docd8f0515f0f1ef311": "BofA savings April.pdf",
+    "docb6645cb3380bb3e5": "BofA savings May.pdf",
+    "doc30312688b1d919b3": "EMD Withdrawal.pdf",
+    # drivers licenses (primary = Akash, co = Bansari)
+    "dl1": "DL Akash Patel.pdf",
+    "dl2": "DL Bansari.pdf",
+    # pay stubs
+    "ps1": "Akash Pay stub 1.pdf",
+    "ps2": "Akash pay stub 2.pdf",
+    "ps3": "Bansari Stub May 1 (1).pdf",
+    "ps4": "PAY Bansari Stub May 2 (1).pdf",
+    # W-2s (w1/w3 = 2025, w2/w4 = 2024 per the LP-379-B tax-year wiring)
+    "w1": "Akash W2 BofA 2025.pdf",
+    "w2": "Akash W2 BofA 2024.pdf",
+    "w3": "W2 2025 Bansari.pdf",
+    "w4": "Bansari W2 2024.pdf",
+    # investment accounts (the DB's Wells brokerage/savings statements)
+    "inv1": "Wells Brokerage April.pdf",
+    "inv2": "Wells Brokerage May.pdf",
+    "inv3": "Wells Savings April.pdf",
+}
+
+
 # De-identified field metadata for the 5 preserved bank statements (holder + account + period + balances).
 _BANK_META = [
     (
@@ -449,4 +482,4 @@ def build_lf6t3n_snapshot() -> Snapshot:
     )
 
 
-__all__ = ["build_lf6t3n_snapshot"]
+__all__ = ["LF6T3N_DOCUMENT_FILENAMES", "build_lf6t3n_snapshot"]

@@ -28,9 +28,11 @@ from __future__ import annotations
 
 import csv
 import io
+from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from pathlib import Path
 
+from app.services.rule_subject_label import resolve_subject_label
 from app.verification.eval.live_calibration import ScoredTag
 from app.verification.rule_engine.registry import ACTIVE_RULE_IDS
 from app.verification.snapshot.fields import Field
@@ -244,6 +246,94 @@ def _doc_context(doc: DocumentEntry) -> str:
     return "; ".join(f"{k}={_fv(v)}" for k, v in doc.fields.items())
 
 
+# --------------------------------------------------------------------------- #
+# The SOURCE DOCUMENT of a row (LP-379-C) — so a labeler never hunts for which document a row came from.
+# We REUSE LP-377-B's resolve_subject_label (subject-key → human label): borrower rows go through its UUID
+# branch, and a document/transaction row's SOURCE DOCUMENT key goes through its document_filenames map. The
+# fixture has no real filenames, so we POPULATE that map (its contract: content-id → filename) from each
+# document's own identifying fields — a legible descriptor, never a hash.
+# --------------------------------------------------------------------------- #
+_HUMAN_TYPE = {
+    "bank_statement": "Bank statement",
+    "drivers_license": "Driver's license",
+    "pay_stub": "Pay stub",
+    "w2": "W-2",
+    "voe": "VOE",
+    "investment_account": "Investment account",
+    "brokerage_statement": "Brokerage statement",
+    "mortgage_statement": "Mortgage statement",
+    "property_tax_bill": "Property-tax bill",
+    "purchase_agreement": "Purchase agreement",
+}
+# The identity fields that make a document locatable in the file (never PII beyond what the row already shows).
+_SOURCE_IDENTITY = {
+    "bank_statement": (
+        "bank_name",
+        "account_number_masked",
+        "statement_period_start",
+        "statement_period_end",
+    ),
+    "drivers_license": ("full_name",),
+    "pay_stub": ("employer_name", "pay_date"),
+    "w2": ("employer_name", "tax_year"),
+    "voe": ("employer_name",),
+    "investment_account": ("institution_name", "account_number_masked"),
+    "mortgage_statement": ("servicer_name", "loan_number_masked", "statement_date"),
+    "property_tax_bill": ("parcel_number", "tax_year"),
+    "purchase_agreement": ("property_address",),
+}
+
+
+def _document_descriptor(entry: DocumentEntry) -> str:
+    """A legible source-document label from a document's own fields (the fixture has no real filename). Never a
+    hash: worst case the human document type alone (e.g. an empty brokerage_statement → "Brokerage statement")."""
+    dtype = entry.document_type or "document"
+    human = _HUMAN_TYPE.get(dtype, dtype.replace("_", " ").capitalize())
+    vals = [v for f in _SOURCE_IDENTITY.get(dtype, ()) if (v := _fv(entry.fields.get(f)))]
+    return f"{human}: {' '.join(vals)}" if vals else human
+
+
+def _document_filenames(snapshot: Snapshot) -> dict[str, str]:
+    """resolve_subject_label's document_filenames map, POPULATED for the fixture (content-id → descriptor)."""
+    return {e.content_id: _document_descriptor(e) for e in snapshot.documents.entries}
+
+
+def _txn_parent(snapshot: Snapshot) -> dict[str, str]:
+    """transaction content-id → its parent DOCUMENT content-id (the snapshot nests txns under documents)."""
+    return {
+        txn.content_id: doc.content_id
+        for doc in snapshot.documents.entries
+        for txn in (doc.transactions or ())
+    }
+
+
+def _document_source(source_key: str, document_filenames: dict[str, str]) -> str:
+    """The source document's label for a document/transaction row. resolve_subject_label routes doc-PREFIXED
+    keys (the bank statements — the transaction parents) through document_filenames; the fixture's synthetic
+    non-bank ids are not prefixed, so we supplement with the SAME map (no branch added to the resolver)."""
+    label = resolve_subject_label(source_key, (), document_filenames=document_filenames)
+    return document_filenames.get(source_key, label)
+
+
+def _borrower_source(
+    snapshot: Snapshot,
+    borrower_id: str,
+    applicable: tuple[str, ...],
+    document_filenames: dict[str, str],
+) -> str:
+    """A borrower (income_stability) row aggregates several documents — so its source is the real filenames of
+    the borrower's ATTRIBUTED income documents (what the labeler opens to judge the trend), semicolon-joined
+    and sorted for determinism. Never a hash: an un-mapped document falls back to its descriptor."""
+    files = sorted(
+        document_filenames.get(e.content_id) or _document_descriptor(e)
+        for e in snapshot.documents.entries
+        if e.document_type in applicable
+        and e.belongs_to is not None
+        and any(str(ref.borrower_id) == borrower_id for ref in e.belongs_to)
+    )
+    return "; ".join(files)
+
+
 def _borrower_income_docs(
     context: dict[str, object], applicable: tuple[str, ...]
 ) -> list[dict[str, object]]:
@@ -365,6 +455,9 @@ class WorksheetRow:
     consuming_rules: str
     rule_status: str  # "LIVE" | "inert"
     context: str  # enough to label WITHOUT the file
+    source_document: str = (
+        ""  # LP-379-C — which document the row came from (or "borrower: …"/"Loan-level")
+    )
     golden_label: str = ""
     labeler_note: str = ""
 
@@ -374,6 +467,7 @@ _HEADERS = (
     "subject_id",
     "subject_kind",
     "document_type",
+    "source_document",
     "scoring",
     "allowed_values",
     "consuming_rules",
@@ -391,15 +485,26 @@ def _allowed_str(tag_id: str, decls: dict[str, TagDeclaration]) -> str:
     return "(free text)"
 
 
-def build_worksheet(snapshot: Snapshot) -> list[WorksheetRow]:
+def build_worksheet(
+    snapshot: Snapshot, *, document_filenames: Mapping[str, str] | None = None
+) -> list[WorksheetRow]:
     """Enumerate every LABELABLE AI-tag instance (subject present + content present) — deterministically,
     from the snapshot (no AI, no key). One row per (tag, subject); document rows carry the document's
     fields as context, txn rows carry date/amount/direction/description. Content-empty subjects (a
-    brokerage_statement with no fields) are NOT rows — they cannot be labeled (reported in the coverage)."""
+    brokerage_statement with no fields) are NOT rows — they cannot be labeled (reported in the coverage).
+
+    ``document_filenames`` (LP-379-C) is the REAL content-id → original_filename map (what the Document tab
+    shows), so ``source_document`` names the actual file a labeler opens. It OVERRIDES the field-derived
+    fallback where present; any document not in it still gets a legible descriptor (never a hash)."""
     decls = load_declarations()
     docs_by_type: dict[str, list[DocumentEntry]] = {}
     for d in snapshot.documents.entries:
         docs_by_type.setdefault(d.document_type or "", []).append(d)
+
+    # LP-379-C source-document resolution maps (reused by resolve_subject_label), built once. Real filenames
+    # override the field-derived descriptor fallback so every row still resolves to something legible.
+    filenames = {**_document_filenames(snapshot), **(document_filenames or {})}
+    txn_parent = _txn_parent(snapshot)
 
     rows: list[WorksheetRow] = []
     for group in _GROUPS:
@@ -427,6 +532,9 @@ def build_worksheet(snapshot: Snapshot) -> list[WorksheetRow]:
                                 ", ".join(meta.consuming_rules),
                                 rule_status,
                                 _txn_context(txn),
+                                source_document=_document_source(
+                                    txn_parent.get(txn.content_id, doc.content_id), filenames
+                                ),
                             )
                         )
             elif group.subject_kind == "borrower":
@@ -451,6 +559,9 @@ def build_worksheet(snapshot: Snapshot) -> list[WorksheetRow]:
                             ", ".join(meta.consuming_rules),
                             rule_status,
                             _borrower_context_str(income_docs),
+                            source_document=_borrower_source(
+                                snapshot, borrower_id, group.applicable_types, filenames
+                            ),
                         )
                     )
             else:
@@ -470,6 +581,7 @@ def build_worksheet(snapshot: Snapshot) -> list[WorksheetRow]:
                                 ", ".join(meta.consuming_rules),
                                 rule_status,
                                 _doc_context(doc),
+                                source_document=_document_source(doc.content_id, filenames),
                             )
                         )
     return rows
@@ -488,6 +600,7 @@ def render_csv(rows: list[WorksheetRow]) -> str:
                 r.subject_id,
                 r.subject_kind,
                 r.document_type,
+                r.source_document,
                 r.scoring,
                 r.allowed_values,
                 r.consuming_rules,
@@ -514,10 +627,13 @@ def _existing_labels(path: Path) -> dict[tuple[str, str], tuple[str, str]]:
     return kept
 
 
-def write_worksheets(snapshot: Snapshot, out_dir: Path) -> dict[str, Path]:
+def write_worksheets(
+    snapshot: Snapshot, out_dir: Path, *, document_filenames: Mapping[str, str] | None = None
+) -> dict[str, Path]:
     """Write the split worksheets (mechanical = Geet, judgment = Priya), PRESERVING any labels already
-    filled in the existing files (merge by the stable (tag_id, subject_id) key)."""
-    rows = build_worksheet(snapshot)
+    filled in the existing files (merge by the stable (tag_id, subject_id) key). ``document_filenames``
+    (LP-379-C) names each row's real source document (the Document tab's original_filename)."""
+    rows = build_worksheet(snapshot, document_filenames=document_filenames)
     out_dir.mkdir(parents=True, exist_ok=True)
     written: dict[str, Path] = {}
     for bucket, name in (
