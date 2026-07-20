@@ -1,0 +1,262 @@
+# LP-380 — ACTIVATION BARS: the decision surface for which INERT rules may go live.
+#
+# A rule's activation bar is the accuracy its load-bearing AI tags must reach before the rule ships a TRUSTED
+# (auto, non-ratified) verdict. It CANNOT be computed — the height depends on the COST OF ERROR for that rule,
+# which is DOMAIN judgment. THIS FILE PROPOSES a defensible default per rule and flags it for Priya
+# (validated: false). It sets no real bar and activates nothing (that is LP-389).
+#
+# Fields per rule:
+#   status  — calibratable-now | not-calibratable-yet | needs-producer | no-ai-dependency
+#             * calibratable-now      : every load-bearing AI tag has a MEASURED accuracy (LP-379) → a bar can
+#                                       be set and met.
+#             * not-calibratable-yet  : a load-bearing AI tag is PRODUCED but UNSCORED (or measured only in a
+#                                       different context) → BLOCKED ON CALIBRATION, not "bar unmet". No number.
+#             * needs-producer        : a load-bearing tag does not materialize at all → blocked on a producer.
+#             * no-ai-dependency      : no AI load-bearing tag (parsed/deterministic) → no calibration gate;
+#                                       activation is a wiring decision, not a bar (cf. active IN-2 / ID-8).
+#   ships   — auto | ratify. From the rule's KIND (rule_kinds.csv): judgmental → ratify (LP-376-B: a judgment
+#             rule NEVER auto-ships, a human ratifies); structural/calculative → auto.
+#   threshold — the PROPOSED default bar in [0,1], or null when no bar can apply (any status but
+#               calibratable-now). A DEFAULT flagged for Priya, never a decision.
+#   validated — ALWAYS false here. Priya's sign-off flips it (the LP-379 priya_validated pattern). This ticket
+#               flips none.
+#   load_bearing_ai_tags — the AI tags whose accuracy gates the rule (direct, or a noted derived upstream).
+#   fp_fn   — the false-positive-vs-false-negative asymmetry (Priya's to confirm) — what sets the bar height.
+#   rationale — why this default, from ships + fp_fn + the measured numbers.
+#
+# THE HONEST STATE (report, not a pass): of 23 inert rules, only 2 are calibratable-now. The bar can be SET
+# for those 2 today; the rest are blocked on calibration / a producer / a wiring decision — reported so a rule
+# never ships on a tag nobody measured.
+
+# ===================== calibratable-now (a bar can be set + met) ===================================
+IN-1:
+  status: calibratable-now
+  ships: auto
+  threshold: 0.98
+  validated: false
+  load_bearing_ai_tags: [income.documented_monthly]   # via the derived income.documented_income_shortfall_pct
+  fp_fn: "FN (misses an income overstatement -> a bad loan ships) >> FP (a false variance -> a human glances)"
+  rationale: >-
+    documented_monthly measured 100% (LP-379-D). Calculative + FRAUD-adjacent (feeds a deterministic
+    variance verdict) -> a HIGH bar; consider RATIFY-ONLY until measured on more files (one file, one label
+    set). Priya sets the height + the ratify-vs-auto call.
+
+IN-5:
+  status: calibratable-now
+  ships: auto
+  threshold: 0.95
+  validated: false
+  load_bearing_ai_tags: [income.employer_normalized]
+  fp_fn: "FP (a false employer-mismatch flag -> a human compares two names) > FN, but both low stakes"
+  rationale: >-
+    employer_normalized measured 100% (LP-379-D). Structural consistency check, low error cost either way ->
+    a moderate bar. Priya confirms.
+
+# ===================== not-calibratable-yet (BLOCKED ON CALIBRATION — no bar, not "bar unmet") ======
+AS-2:
+  status: not-calibratable-yet
+  ships: auto
+  threshold: null
+  validated: false
+  load_bearing_ai_tags: [txn.apparent_category, txn.has_identified_source]
+  fp_fn: "FN (misses undisclosed loan proceeds funding the deal) >> FP"
+  rationale: >-
+    reads apparent_category == loan_proceeds — a category UNMEASURED (LP-379-F: apparent_category is measured
+    only for payroll/interest/transfer_own on this file's generic memos); has_identified_source never labeled.
+    No accuracy to clear a bar against. Blocked on calibration, not a low bar.
+
+AS-4:
+  status: not-calibratable-yet
+  ships: auto
+  threshold: null
+  validated: false
+  load_bearing_ai_tags: [stmt.is_reserve_eligible]   # via the reserves calculator (months_available)
+  fp_fn: "FN (clears a file with insufficient reserves) >> FP (a false shortfall -> a human re-checks)"
+  rationale: >-
+    the reserves calc is fed by stmt.is_reserve_eligible (AI), PRODUCED (LP-378) but UNSCORED. Blocked on
+    calibration.
+
+AS-5:
+  status: not-calibratable-yet
+  ships: auto
+  threshold: null
+  validated: false
+  load_bearing_ai_tags: [txn.apparent_category]
+  fp_fn: "FN (accepts an undocumented gift) > FP"
+  rationale: >-
+    reads apparent_category == gift — UNMEASURED (LP-379-F). By LP-335 'gift' is arguably a rule conclusion,
+    not a tag value (ADR-302 D2). Blocked on calibration.
+
+AS-6:
+  status: not-calibratable-yet
+  ships: auto
+  threshold: null
+  validated: false
+  load_bearing_ai_tags: [stmt.owner_matches_borrower]
+  fp_fn: "FN (accepts a statement not owned by the borrower) >> FP"
+  rationale: "owner_matches_borrower PRODUCED (LP-378) but UNSCORED. Blocked on calibration."
+
+AS-7:
+  status: not-calibratable-yet
+  ships: auto
+  threshold: null
+  validated: false
+  load_bearing_ai_tags: [txn.is_nsf_or_overdraft]   # via the derived stmt.nsf_count — verify the chain
+  fp_fn: "FP (a false NSF flag) > FN, low stakes"
+  rationale: >-
+    reads the derived stmt.nsf_count, aggregated from txn.is_nsf_or_overdraft (AI), UNSCORED. Blocked on
+    calibration (verify the derived chain when calibrating).
+
+AS-11:
+  status: not-calibratable-yet
+  ships: auto
+  threshold: null
+  validated: false
+  load_bearing_ai_tags: [asset.liquidation_terms]
+  fp_fn: "FN (counts restricted retirement funds as usable) > FP"
+  rationale: "liquidation_terms PRODUCED (LP-378) but UNSCORED. Blocked on calibration."
+
+AS-12:
+  status: not-calibratable-yet
+  ships: ratify
+  threshold: null
+  validated: false
+  load_bearing_ai_tags: [txn.apparent_category, txn.counterparty, txn.has_identified_source]
+  fp_fn: "FN (misses a borrowed-funds pattern) >> FP — but judgmental, a human ratifies"
+  rationale: >-
+    judgmental (ships ratify, LP-376-B). Reads apparent_category + counterparty + has_identified_source, all
+    UNMEASURED. Even ratify-only needs the tags to produce meaningfully. Blocked on calibration.
+
+IN-7:
+  status: not-calibratable-yet
+  ships: ratify
+  threshold: null
+  validated: false
+  load_bearing_ai_tags: [income.same_line_of_work]
+  fp_fn: "FN (accepts a disqualifying job change) > FP — judgmental, a human ratifies"
+  rationale: "same_line_of_work PRODUCED per-borrower (LP-385) but UNSCORED. Blocked on calibration."
+
+IN-8:
+  status: not-calibratable-yet
+  ships: auto
+  threshold: null
+  validated: false
+  load_bearing_ai_tags: [income.voe_present]
+  fp_fn: "FP (a false 'VOE missing' -> a human checks) > FN, low stakes"
+  rationale: "voe_present PRODUCED (LP-378) but UNSCORED. Blocked on calibration."
+
+IN-9:
+  status: not-calibratable-yet
+  ships: auto
+  threshold: null
+  validated: false
+  load_bearing_ai_tags: [income.offer_letter_present]
+  fp_fn: "FP > FN, low stakes"
+  rationale: "offer_letter_present PRODUCED (LP-378) but UNSCORED. Blocked on calibration."
+
+IN-10:
+  status: not-calibratable-yet
+  ships: auto
+  threshold: null
+  validated: false
+  load_bearing_ai_tags: [income.is_declining]
+  fp_fn: "FN (uses declining income at face value) >> FP"
+  rationale: >-
+    is_declining PRODUCED per-borrower (LP-385) but UNSCORED. NB: IN-10 reads it per-DOCUMENT (LP-385's
+    reported IN-10/IN-11 spec gap) — a producer/consumer mismatch to resolve before calibration.
+
+IN-11:
+  status: not-calibratable-yet
+  ships: auto
+  threshold: null
+  validated: false
+  load_bearing_ai_tags: [income.has_2yr_history]
+  fp_fn: "FN (qualifies variable income without the required history) >> FP"
+  rationale: >-
+    has_2yr_history PRODUCED per-borrower (LP-385) but UNSCORED; IN-11 reads it per-DOCUMENT (the LP-385 gap).
+    Blocked on calibration.
+
+IN-12:
+  status: not-calibratable-yet
+  ships: auto
+  threshold: null
+  validated: false
+  load_bearing_ai_tags: [income.has_2yr_history]
+  fp_fn: "FN (self-employment without history) >> FP"
+  rationale: "has_2yr_history PRODUCED (LP-385) but UNSCORED. Blocked on calibration."
+
+IN-13:
+  status: not-calibratable-yet
+  ships: ratify
+  threshold: null
+  validated: false
+  load_bearing_ai_tags: [income.continuance_3yr, income.type]
+  fp_fn: "FN (counts non-continuing other income) >> FP — judgmental, a human ratifies"
+  rationale: "continuance_3yr PRODUCED (LP-385) + income.type UNSCORED. Blocked on calibration."
+
+# ===================== needs-producer (the tag does not materialize) ===============================
+IN-14:
+  status: needs-producer
+  ships: ratify
+  threshold: null
+  validated: false
+  load_bearing_ai_tags: [income.continuance_3yr, occupancy.rental_support]
+  fp_fn: "FN (counts unsupported rental income) >> FP — judgmental, a human ratifies"
+  rationale: >-
+    occupancy.rental_support has NO declared producer (not in tag_production.yaml) — it does not materialize.
+    Blocked on a PRODUCER before any calibration.
+
+# ===================== no-ai-dependency (no AI gate — activation is a wiring/deterministic call) ====
+AS-3:
+  status: no-ai-dependency
+  ships: auto
+  threshold: null
+  validated: false
+  load_bearing_ai_tags: []
+  fp_fn: "n/a — deterministic (calc.cash_to_close from parsed figures)"
+  rationale: "no AI load-bearing tag; activation is a wiring/deterministic decision, not a calibration bar."
+
+AS-9:
+  status: no-ai-dependency
+  ships: auto
+  threshold: null
+  validated: false
+  load_bearing_ai_tags: []
+  fp_fn: "n/a — deterministic (statement page counts, parsed)"
+  rationale: "no AI load-bearing tag; a wiring decision."
+
+AS-10:
+  status: no-ai-dependency
+  ships: auto
+  threshold: null
+  validated: false
+  load_bearing_ai_tags: []
+  fp_fn: "n/a — deterministic (min account months, parsed)"
+  rationale: "no AI load-bearing tag; a wiring decision."
+
+ID-5:
+  status: no-ai-dependency
+  ships: auto
+  threshold: null
+  validated: false
+  load_bearing_ai_tags: []
+  fp_fn: "n/a — deterministic (id.id_expiration, parsed)"
+  rationale: "no AI load-bearing tag; a wiring decision (cf. active ID-8, parsed-only)."
+
+IN-3:
+  status: no-ai-dependency
+  ships: auto
+  threshold: null
+  validated: false
+  load_bearing_ai_tags: []
+  fp_fn: "n/a — deterministic (YTD-annualized shortfall from parsed income)"
+  rationale: "no AI load-bearing tag; a wiring decision."
+
+IN-4:
+  status: no-ai-dependency
+  ships: auto
+  threshold: null
+  validated: false
+  load_bearing_ai_tags: []
+  fp_fn: "n/a — deterministic (employment gap from parsed dates)"
+  rationale: "no AI load-bearing tag; a wiring decision."

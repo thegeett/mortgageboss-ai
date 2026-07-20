@@ -11140,3 +11140,47 @@ principle this validates), LP-379-D (the held 50 this scores; the fixture-join f
 `source_document` filenames Priya labeled against — how she saw the un-redacted payees), LP-335/340/343 (the
 prompt discipline the 100%/honest-abstention result confirms is intact), AS-1 (the "PII-redacted memo" whose
 redaction removes the payee signal).
+
+## ADR-305: Activation bars — a declared, Priya-set decision surface; unmeasured ≠ low bar (LP-380)
+
+**What an activation bar is.** The accuracy a rule's load-bearing AI tags must reach before the rule ships a
+TRUSTED (auto, non-ratified) verdict. **It cannot be computed.** `is_money_in` at 98% may be plenty for a
+large-deposit FLAG (a false flag → a human glances) and nowhere near enough for a rule that AUTO-APPROVES (a
+false approval → a bad loan ships). The height is the COST OF ERROR for THAT rule — the FP-vs-FN asymmetry —
+which is DOMAIN judgment. **Priya's.** LP-380 builds the decision surface and PROPOSES a defensible default per
+rule (`validated: false`, the LP-379 priya_validated pattern); it sets no bar and activates nothing (LP-389).
+
+**The honest state (reported, not a pass): of 23 inert rules, only 2 are calibratable-now.** `activation_bars.yaml`
+classifies every inert rule: **calibratable-now (2)** — IN-1 (documented_monthly 100%), IN-5 (employer_normalized
+100%) — a bar can be set + met; **not-calibratable-yet (14)** — a load-bearing AI tag is PRODUCED but UNSCORED
+(income_stability, stmt/asset facts) or measured only in a different context (apparent_category is measured for
+payroll/interest/transfer_own but UNMEASURED for the gift/loan_proceeds/third-party categories AS-2/AS-5/AS-12
+actually read — LP-379-F); **needs-producer (1)** — IN-14's `occupancy.rental_support` has no declared producer;
+**no-ai-dependency (6)** — parsed/deterministic rules with no AI gate (activation is a wiring decision, cf. active
+IN-2/ID-8). The bar can be SET for 2 rules today; the rest are blocked.
+
+**Unmeasured ≠ low bar — the load-bearing distinction.** A rule with an unmeasured tag is **BLOCKED ON
+CALIBRATION**, not "sitting under a high bar it hasn't cleared." Conflating them ships a rule on a tag nobody
+measured — the AS-1/ID-2 silent-death class, one level up. So `not-calibratable-yet` carries `threshold: null`
+(the loader REJECTS a threshold on a non-calibratable rule) and `activation_mode` returns `blocked`, distinct
+from a calibratable rule below its bar (`needs_review`). The two are behaviourally and visibly separate.
+
+**Declared, not branched — the ~15th declared-key-resolved-by-registry.** A bar is a value attached to a rule
+in `activation_bars.yaml`, loaded + validated once, resolved by data. `activation_mode(bar, accuracy)` is pure
+and depends only on the bar's status/ships/threshold — NO per-rule-id branch in any evaluator (a test pins that
+two rules with identical bar data get identical modes).
+
+**One safety with LP-376-B, not a parallel one.** The bar and the ratification armor are the same guard, two
+settings. `activation_mode` reconciles them: a judgment rule (`ships: ratify`) NEVER auto-ships (LP-376-B — a
+human ratifies even at 100%); a calibratable auto-ship rule BELOW its bar routes to `needs_review`, not an
+untrusted auto-ship; an unmeasured rule is `blocked`. LP-389 wires this into activation; LP-380 only declares it.
+
+**Every default is Priya's to confirm** — the FP-vs-FN cost calls, the thresholds (0.98 for the fraud-adjacent
+IN-1, 0.95 for IN-5), and the ratify-vs-auto question (IN-1 may warrant ratify-only despite 100% — one file,
+one label set). `validated: false` on all; this ticket flips none. **A real finding for LP-389: only 2 rules
+have a settable bar; the activation surface is mostly blocked on calibration, not on Priya's bars.**
+
+**Cross-refs.** LP-379-D/F (the measured numbers + the apparent_category-unmeasured-for-gift finding this
+consumes), LP-376-B (the ratification armor this reconciles with), LP-385/LP-378 (why income_stability /
+stmt / asset tags are produced-but-unscored), LP-333 (the dormant-rule buckets), LP-389 (the activation pass
+this feeds), the priya_validated threshold discipline (rule_kinds.csv) the `validated:false` pattern follows.
