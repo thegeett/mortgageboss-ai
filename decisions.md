@@ -11101,3 +11101,42 @@ snapshot, so this reuses `build_snapshot` directly), LP-379-A/B/C (the fixture c
 `source_document` column she labeled against), LP-379-E (the widened enum the held apparent_category labels
 await a re-map onto), LP-210 (the real-PII generated-locally posture this follows), LP-334 (the calibration
 harness whose `summarize`/`failing_cases` produced these numbers).
+
+## ADR-304: apparent_category is measurable only where the memo carries a payee — not a prompt bug (LP-379-F)
+
+**Context.** LP-379-F mapped Priya's 50 free-text `apparent_category` labels onto the LP-379-E enum and scored
+them — the tag's FIRST measurement against a domain expert's labels. The gate of record surfaced a decisive
+constraint: **30 of the 50 labels sit on the SAME transaction memo — "CARD PURCHASE / PAYMENT"** — which
+carries no payee. Priya gave those 30 eight different categories (credit-card payment, mortgage, a transfer to
+a friend, an At&t bill, a fee…) from the AMOUNTS + the un-redacted file she opened via LP-379-C's real
+filenames. LP-379-E's prompt CORRECTLY tells the AI to categorize from the payee in the description, NOT the
+amount — so the AI cannot (and must not) reproduce her call. The memos are the AS-1 "PII-redacted transaction
+memo": the redaction that protects PII also removes the payee signal apparent_category needs.
+
+**Decision — score only where the DESCRIPTION supports the category; hold the rest, never guess.** The
+mapping (`apparent_category_relabel.relabel`) is CONFIRMED only for description-supported labels and HELD
+otherwise: 17 confirmed (payroll ×8 on "PAYROLL DIRECT DEPOSIT", interest ×4 on "INTEREST EARNED",
+transfer_own ×4 on "ONLINE TRANSFER … OWN ACCOUNT", one inbound), 33 held (30 generic-memo, 2 uncertain, 1
+typo). Scored: **accuracy 100% when concrete (16/16)** — the structuring layer is exactly right on the
+categories the memo supports. The 17th (an inbound Priya knew was from "Ravi") the AI **abstained** on —
+*"INBOUND PAYMENT RECEIVED is generic, provides no information about the sender"* — an HONEST abstention, not a
+miss: the prompt working as designed.
+
+**The finding: NO prompt bug — a DATA limitation.** apparent_category is unmeasurable on this file's redacted
+memos for the widened categories (`debt_payment`, `transfer_third_party_*`); the AI correctly abstains rather
+than guessing from the amount. Calibrating those categories needs transactions whose memos NAME the payee
+(real bank descriptions like "AMEX EPAYMENT", "ZELLE TO ANAND") — which LP-379-E's own probe confirmed the AI
+categorizes correctly. That is a calibration-DATA gap (a future ticket: descriptive-memo transactions, weighed
+against the PII the redaction removes), not a prompt or model fix.
+
+**Uncertainty preserved; her words preserved.** Where Priya wrote "not sure it's own transfer", the mapping
+returns `unknown`, held — a golden never more certain than the labeler. The mapping is a scoring-time
+TRANSLATION LAYER (`relabel`), applied to a copy at scoring; her committed free-text golden column is
+UNTOUCHED — the strongest form of "preserve her words" (a test pins that "transfer to some one" etc. remain
+verbatim in the worksheet). The proposed mapping is Priya's to confirm; the non-obvious 33 stay flagged.
+
+**Cross-refs.** LP-379-E / ADR-302 (the widened enum + the "categorize from the payee, not the amount"
+principle this validates), LP-379-D (the held 50 this scores; the fixture-join finding), LP-379-C (the real
+`source_document` filenames Priya labeled against — how she saw the un-redacted payees), LP-335/340/343 (the
+prompt discipline the 100%/honest-abstention result confirms is intact), AS-1 (the "PII-redacted memo" whose
+redaction removes the payee signal).
