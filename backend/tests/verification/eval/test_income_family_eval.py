@@ -534,7 +534,8 @@ def test_pin3_in12_minimal_check_only() -> None:
     # What it DOES mechanically: fires on self-employment lacking a 2-year return history. NB (LP-390-1
     # review): this hand-places has_2yr_history at the tax_return DOCUMENT subject — the path PRODUCTION no
     # longer feeds, since LP-385 moved the tag to subject:borrower. So this asserts IN-12's evaluator wiring,
-    # NOT that IN-12 works on a real file; the structural-death guard is test_in12_..._dead_until_lp390_2 below.
+    # NOT that IN-12 works on a real file; the structural-death guard is
+    # test_in12_..._structurally_dead_pending_a_producer below (LP-390-2a: blocked on a producer, ADR-310).
     fire = _det_doc("IN-12", {"tr": ("tax_return", {"income.has_2yr_history": _tag("no")})})
     assert fire[0].verdict is Verdict.FIRED
     # What it does NOT do: a 2-year history present → SATISFIED, even with declining net / missing add-backs
@@ -546,17 +547,21 @@ def test_pin3_in12_minimal_check_only() -> None:
 
 @pytest.mark.xfail(
     strict=True,
-    reason="LP-390-2: IN-12 still reads income.has_2yr_history per_document at the tax_return subject, but "
-    "LP-385 produces that tag at subject:borrower — so on a REAL file IN-12 is structurally dead "
-    "(couldnt_check), the same sixth-instance bug LP-390-1 fixed for IN-10/IN-11. The fix is NOT a naive "
-    "per_borrower copy (that would duplicate IN-11's has_2yr_history fire — IN-12 must stay self-employment-"
-    "specific), which is why it is deferred. When LP-390-2 lands, this XPASSES (strict) and must be rewritten.",
+    reason="IN-12 reads income.has_2yr_history per_document at the tax_return subject, but LP-385 produces that "
+    "tag at subject:borrower — so on a REAL file IN-12 is structurally dead (couldnt_check), the IN-10/IN-11 "
+    "class. LP-390-2a INVESTIGATED the fix and found it is NOT a subject re-scope: a naive per_borrower copy "
+    "collapses IN-12 into IN-11 (both read the income-type-agnostic has_2yr_history), and keeping it "
+    "self-employment-specific needs a BORROWER-LEVEL self-employment signal that does not exist (income.type "
+    "is subject:document; income_stability produces no income-type tag). So IN-12 is BLOCKED-ON-A-PRODUCER "
+    "(ADR-310), deferred to a producer subtask under LP-390-8 — NOT fixed by re-scoping. This stays xfail "
+    "(still dead) until that producer lands; XPASS ⇒ a real fix arrived and this must be rewritten.",
 )
-def test_in12_self_employment_history_is_structurally_dead_until_lp390_2() -> None:
+def test_in12_self_employment_history_is_structurally_dead_pending_a_producer() -> None:
     # DESIRED production behavior: a self-employed borrower whose tax returns lack a 2-year history → IN-12
     # FIRES. ACTUAL today: has_2yr_history lives at the BORROWER subject (LP-385), invisible to IN-12's
-    # per_document tax_return read → couldnt_check. This pin makes the deferred debt VISIBLE and fails loudly
-    # (XPASS) the moment IN-12 is fixed, forcing LP-390-2 to be deliberate rather than silently green-while-dead.
+    # per_document tax_return read → couldnt_check. LP-390-2a confirmed the fix is producer-first (a
+    # borrower-level self-employment signal), not a subject re-scope (that would duplicate IN-11). This pin
+    # keeps the deferred debt VISIBLE and fails loudly (XPASS) the moment IN-12 is genuinely fixed.
     docs = [_doc("tr", dtype="tax_return", borrower=_B1)]
     by_subject = {str(_B1): {"income.has_2yr_history": _tag("no")}}
     verdicts = evaluate_deterministic_rule(
@@ -564,7 +569,7 @@ def test_in12_self_employment_history_is_structurally_dead_until_lp390_2() -> No
     )
     assert any(
         v.verdict is Verdict.FIRED for v in verdicts
-    )  # xfails today; XPASS ⇒ LP-390-2 landed
+    )  # xfails today; XPASS ⇒ a producer-based fix landed
 
 
 # ================================================================================================= #

@@ -11367,3 +11367,38 @@ the enumerator yields the borrower), plus a test that the same tag at the DOCUME
 (the per-borrower fix pattern; ID-5 needed a recipe, this does not), LP-321a (fiction-asserting tests),
 LP-332/LP-202 (borrower attribution), LP-378 (the 0/120 that proved per-document can't answer income trend),
 LP-390-2 (the audit of the remaining income rules — IN-12 confirmed as the same class here).
+
+## ADR-310: IN-12 + AS-5 are blocked-on-producer, not subject fixes; the income wave calibrates 12, not 14 (LP-390-2a)
+
+**The finding.** LP-390-2's audit classed IN-12 and AS-5 as subject-mismatches (structurally dead). LP-390-2a
+tried to fix them and found the gate of record disagrees: **neither is a subject fix — both are blocked on a
+PRODUCER that does not exist.** Per the decision on the ticket, neither is fixed; both become producer subtasks.
+
+**IN-12 — not the IN-11 fix.** IN-12 reads `income.has_2yr_history` per_document (tax_return); the producer is
+at `subject: borrower`. A naive per_borrower re-scope (the IN-10/IN-11 fix) makes IN-12 fire IDENTICALLY to
+IN-11 — both read the borrower's `has_2yr_history`, which is **income-type-agnostic** — collapsing the
+self-employment rule into the variable-income rule. The LP-390-1 reviewer pinned exactly this (a `strict`
+xfail). Keeping IN-12 self-employment-specific needs a **borrower-level self-employment signal**: `income.type`
+has a `self_employment` value but is `subject: document` (not in the per_borrower map), and `income_stability`
+produces no income-type tag. No such signal exists → blocked on a producer.
+
+**AS-5 — a redirection with no linking tag.** AS-5 reads `txn.apparent_category` (a **transaction** fact) at a
+`gift_letter` **document** subject. Its two sides — the gift letter (document) and the gift deposit
+(transaction) — have **no linking tag**: no gift-letter-presence tag exists (only `voe_present` /
+`offer_letter_present`, for income docs), and no loan-level gift-deposit-present signal exists. So no subject
+choice makes both sides readable → blocked on a producer.
+
+**Neither blocks Priya.** `has_2yr_history` already reaches IN-11 and `apparent_category` already reaches AS-2
+(both calibration-ready), so fixing IN-12/AS-5 adds no new calibration target. **The income wave's calibratable
+count stays 12 (LP-390-2), not 14.** The premise "two simple subject fixes" was wrong for both; they join
+IN-14 / AS-7 as producer-blocked in the LP-390-8 fix list.
+
+**Two producer gaps reported (LP-390-8):** (1) a borrower-level self-employment signal (promote `income.type`
+to the borrower, or income-type-specific history) — unblocks IN-12 AND resolves IN-11's pinned over-fire (a
+shared fix); (2) a gift-documentation signal (gift-letter-presence and/or loan-level gift-deposit-present) —
+unblocks AS-5.
+
+**Cross-refs.** LP-390-2 (the audit that flagged them), LP-390-1 (the reviewer xfail that pinned IN-12's
+non-triviality; the IN-10/IN-11 fix this does NOT transfer), LP-385 (the borrower-subject income producer),
+LP-379-E/F (the `apparent_category` widening + `gift` unmeasured on LF-6T3N), LP-323-IN-B (IN-11's pinned
+set-membership over-fire, the same income-type gap).
