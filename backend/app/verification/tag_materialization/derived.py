@@ -288,26 +288,56 @@ def _qualifying_income_monthly(
 def _income_max_employment_gap(
     snapshot: Snapshot, _subject_id: str, _subject_raw: object
 ) -> tuple[JsonValue, str]:
-    """income.max_employment_gap_days — the largest gap (days) between consecutive employment records.
+    """income.max_employment_gap_days — the largest gap (days) between consecutive employment records,
+    computed PER BORROWER and NEVER across borrowers.
 
-    Sorts the (end → next start) intervals across all employment records. Abstains when fewer than two
-    records with the needed dates exist (a single job cannot have a gap)."""
-    starts = sorted(_income_dates(snapshot, "income.employment_start"))
-    ends = sorted(_income_dates(snapshot, "income.employment_end"))
-    if len(starts) < 2 or not ends:
+    Employment continuity is a per-borrower concept: one borrower's job-end must not pair with ANOTHER
+    borrower's job-start — that manufactures a gap neither borrower has (a false FIRE) or masks a real
+    one (a false SATISFY). So records are GROUPED by their document's belongs_to attribution (documents
+    with no belongs_to share one group), each group's consecutive (end → next start) gaps are measured,
+    and the loan-level tag is the LARGEST gap across the groups. Abstains when no group has two dated
+    records (a single job cannot have a gap)."""
+    if snapshot.tags.absent or snapshot.documents.absent:
         return _UNKNOWN, "fewer than two dated employment records — no gap to measure"
-    # Each end pairs with the NEXT start (the earliest start after it), NOT every later start — else the
-    # max would span intervening jobs (end of job A → start of job C) and overstate a gap that job B
-    # actually fills. The largest of those consecutive gaps is the employment gap.
+    # (starts, ends) keyed by the document's borrower attribution — records only pair WITHIN a group,
+    # so a gap is never spanned across two different borrowers' timelines.
+    groups: dict[object, tuple[list[date], list[date]]] = {}
+    for entry in snapshot.documents.entries:
+        tags = snapshot.tags.by_subject.get(entry.content_id)
+        if not tags:
+            continue
+        key = (
+            frozenset(str(ref.borrower_id) for ref in entry.belongs_to)
+            if entry.belongs_to
+            else None
+        )
+        starts, ends = groups.setdefault(key, ([], []))
+        for tag_id, bucket in (
+            ("income.employment_start", starts),
+            ("income.employment_end", ends),
+        ):
+            tag = tags.get(tag_id)
+            if tag is None or str(tag.value) == _UNKNOWN:
+                continue
+            parsed = coerce_date(str(tag.value))
+            if parsed is not None:
+                bucket.append(parsed)
+    # Each end pairs with the NEXT start in its OWN group (the earliest start after it), NOT every later
+    # start — else the max would span intervening jobs (end of job A → start of job C) and overstate a
+    # gap that job B actually fills. The largest of those consecutive per-borrower gaps is the answer.
     gaps: list[int] = []
-    for end in ends:
-        later_starts = [s for s in starts if s > end]
-        if later_starts:
-            gaps.append((min(later_starts) - end).days)
+    for starts, ends in groups.values():
+        for end in ends:
+            later_starts = [s for s in starts if s > end]
+            if later_starts:
+                gaps.append((min(later_starts) - end).days)
     if not gaps:
-        return _UNKNOWN, "no employment record starts after a prior one ends — cannot measure a gap"
+        return _UNKNOWN, "fewer than two dated employment records — no gap to measure"
     max_gap = max(gaps)
-    return str(max_gap), f"largest gap between consecutive employment records is {max_gap} day(s)"
+    return (
+        str(max_gap),
+        f"largest gap between consecutive employment records (per borrower) is {max_gap} day(s)",
+    )
 
 
 def _income_days_since_recent_pay(

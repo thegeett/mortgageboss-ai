@@ -275,20 +275,29 @@ ID-5:
     borrowers), so input_resolves is true and the gate lets ID-5 through.
 
 IN-3:
-  status: no-ai-dependency
+  # RECLASSIFIED (LP-384 review fix): IN-3 is an AI rule, NOT no-ai. income.ytd_annualized_shortfall_pct is
+  # derived, but its recipe reads income.documented_monthly (AI, income_amounts) alongside the parsed
+  # ytd_gross/pay_date — the SAME transitive AI dependency as IN-1. Encoding it as no-ai left a latent trap:
+  # a future input_resolves:true would ADMIT it via the no-AI gate, and — its bar declaring no AI tag — the
+  # income_amounts group would never fold into _required_ai_groups, so IN-3 would couldnt_check FOREVER,
+  # invisible to the LP-389 guard (which only inspects declared load_bearing_ai_tags). As calibratable-now the
+  # loader now REJECTS any input_resolves on it (that gate is no-ai-only), and the declared AI tag makes the
+  # fold-in + guard see the real dependency. HELD by validated:false — Priya has not signed off the shortfall
+  # bar; documented_monthly itself is measured 100% (LP-379), the same evidence IN-1 rests on.
+  status: calibratable-now
   ships: auto
-  threshold: null
+  threshold: 0.98
   validated: false
-  input_resolves: false   # LP-384: NOT unblockable by fixture data — its recipe reads documented_monthly (AI) — HELD
-  load_bearing_ai_tags: []
-  fp_fn: "n/a — deterministic (YTD-annualized shortfall from parsed income)"
+  load_bearing_ai_tags:
+    - income.documented_monthly
+  measured_accuracy: 1.0
+  fp_fn: "false-fire if documented monthly income is over-read; the YTD-annualized comparison is deterministic"
   rationale: >-
-    MISCLASSIFIED as no-ai (LP-384 finding): income.ytd_annualized_shortfall_pct is derived, but its recipe
-    reads income.documented_monthly (AI, income_amounts) alongside the parsed ytd_gross/pay_date. So IN-3 has
-    a transitive AI dependency (the SAME shape as IN-1) and cannot resolve from fixture DOCUMENTS alone — it
-    abstains on "documented monthly income is absent" until income_amounts runs. An income-wave rule; its bar
-    should be reclassified (calibratable, via documented_monthly's 100% measurement) when that wave activates
-    it. Held here; not this ticket's (LP-384 extends the fixture for the deterministic rules, not the AI ones).
+    an AI rule (transitive dependency on income.documented_monthly, the SAME shape as IN-1), not the no-ai it
+    was first filed as (LP-384 review finding). It abstains on "documented monthly income is absent" until the
+    income_amounts wave runs; its shortfall bar (proposed 0.98, via documented_monthly's 100% measurement)
+    awaits Priya's sign-off. Held here — the income wave activates the AI rules; LP-384 shipped the
+    deterministic ones.
 
 IN-4:
   status: no-ai-dependency

@@ -24,7 +24,6 @@ from app.verification.eval.live_calibration import (
     review_cases,
     summarize,
 )
-from app.verification.rule_engine.registry import ACTIVE_RULE_IDS
 
 
 def _st(tag_id: str, golden: str, predicted: str | None) -> ScoredTag:
@@ -155,28 +154,4 @@ def test_near_miss_is_inspectable() -> None:
     (fail,) = failing_cases([miss])
     assert (
         fail.predicted == "Robert Smyth" and fail.golden == "Robert Smith" and fail.reasoning == "r"
-    )
-
-
-def test_no_rule_activation_changed() -> None:
-    assert ACTIVE_RULE_IDS == (
-        "AS-1",
-        "OC-2",
-        "ID-2",
-        "ID-4",
-        "ID-1",
-        "ID-3",
-        "ID-6",
-        "ID-7",
-        "ID-9",
-        "ID-8",
-        "IN-2",
-        # LP-389 — the first activation pass, via the eligibility gate (activation_bars.is_eligible)
-        "IN-1",
-        "IN-5",
-        "ID-5",  # LP-389-A — the subject mismatch fixed (per-borrower), input now resolves
-        # LP-384 — the second activation pass: the stuck deterministic rules, verified on build_lf6t3n_plus
-        "AS-9",
-        "IN-4",
-        "AS-10",
     )

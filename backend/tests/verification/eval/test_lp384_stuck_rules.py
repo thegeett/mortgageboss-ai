@@ -21,10 +21,12 @@ from app.verification.rule_engine.result import Verdict
 from app.verification.rules.specs import load_rule_spec
 from app.verification.snapshot.fields import Field, FieldSource
 from app.verification.snapshot.model import (
+    BorrowerRef,
     DocumentEntry,
     DocumentsSection,
     MismoSection,
     Snapshot,
+    SnapshotField,
     TagsSection,
 )
 from app.verification.tag_materialization.declarations import load_declarations
@@ -49,7 +51,7 @@ async def _verdicts(snap: Snapshot, rule_id: str) -> dict[str, Verdict]:
     }
 
 
-def _snap(docs: list[DocumentEntry], *, mismo: dict | None = None) -> Snapshot:
+def _snap(docs: list[DocumentEntry], *, mismo: dict[str, SnapshotField] | None = None) -> Snapshot:
     return Snapshot(
         loan_file_id=uuid4(),
         run_id=uuid4(),
@@ -102,6 +104,9 @@ async def test_plus_only_appends_documents_without_mutating_the_base() -> None:
     # 3) AS-10's input is UNDISTURBED (the AS-9 statement joined an existing account + month on purpose).
     base_loan, plus_loan = base.tags.by_subject["loan"], plus.tags.by_subject["loan"]
     assert plus_loan["stmt.min_account_months"].value == base_loan["stmt.min_account_months"].value
+    # ... no base loan tag DISAPPEARS in plus (additive means append-only — a dropped tag is a regression the
+    # `changed` diff below cannot see, since it would default a vanished tag to its base value).
+    assert set(base_loan) <= set(plus_loan)
     # ... and the ONLY loan tag that changes is the employment gap (the VOEs resolve it: unknown → 77).
     changed = {
         t for t in base_loan if base_loan[t].value != plus_loan.get(t, base_loan[t]).value
@@ -130,6 +135,32 @@ async def test_in4_satisfies_without_a_gap() -> None:
         ),
     ]
     assert (await _verdicts(_snap(docs), "IN-4"))["loan"] is Verdict.SATISFIED
+
+
+async def test_in4_does_not_pair_a_gap_across_borrowers() -> None:
+    # THE PER-BORROWER ISOLATION (LP-384 review fix): B1 has only a PRIOR job (ended 2024-06-30); B2 has only
+    # a CURRENT job (started 2024-09-15). Neither borrower has a measurable gap on their OWN records. A
+    # loan-level producer that POOLED all dates would pair B1's end with B2's start → a phantom 77-day gap →
+    # a FALSE FIRE. Grouped by belongs_to, no group has two dated records, so IN-4 honestly couldnt_checks.
+    _b1 = uuid4()
+    _b2 = uuid4()
+    docs = [
+        DocumentEntry(
+            content_id="b1_prior",
+            document_type="voe",
+            belongs_to=(BorrowerRef(borrower_id=_b1, name="B1"),),
+            fields={"start_date": _f("2022-01-10"), "end_date": _f("2024-06-30")},
+        ),
+        DocumentEntry(
+            content_id="b2_current",
+            document_type="voe",
+            belongs_to=(BorrowerRef(borrower_id=_b2, name="B2"),),
+            fields={"start_date": _f("2024-09-15")},
+        ),
+    ]
+    assert (await _verdicts(_snap(docs), "IN-4"))[
+        "loan"
+    ] is Verdict.COULDNT_CHECK  # no phantom fire
 
 
 # --------------------------------------------------------------------------- #

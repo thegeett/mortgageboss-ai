@@ -45,12 +45,12 @@ def test_bars_cover_exactly_the_inert_rules() -> None:
 
 
 def test_the_honest_activation_state_is_reported() -> None:
-    # only 2 of 23 are calibratable-now; the rest are blocked on calibration / a producer / a wiring decision
+    # 3 of 23 are calibratable-now; the rest are blocked on calibration / a producer / a wiring decision
     bars = load_activation_bars()
     by = {
         s: sum(1 for b in bars.values() if b.status == s) for s in {b.status for b in bars.values()}
     }
-    assert by["calibratable-now"] == 2  # IN-1, IN-5
+    assert by["calibratable-now"] == 3  # IN-1, IN-5, IN-3 (reclassified from no-ai — LP-384 review)
     assert by.get("not-calibratable-yet", 0) >= 1 and by.get("no-ai-dependency", 0) >= 1
 
 

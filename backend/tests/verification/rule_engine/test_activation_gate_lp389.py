@@ -68,8 +68,10 @@ def test_the_held_rules_each_fail_for_a_named_reason() -> None:
     assert not is_eligible(bars["IN-14"]) and bars["IN-14"].status == "needs-producer"
     # AS-3 — no-ai but its recipe is a STUB (no §3B cash-to-close calculator): the input never resolves → held
     assert not is_eligible(bars["AS-3"]) and not bars["AS-3"].input_resolves
-    # IN-3 — labelled no-ai but its recipe reads documented_monthly (AI): a transitive AI dep → held (LP-384)
-    assert not is_eligible(bars["IN-3"]) and not bars["IN-3"].input_resolves
+    # IN-3 — reclassified to an AI rule (its recipe reads documented_monthly, AI) but Priya has not validated
+    # its shortfall bar → held; the loader now forbids input_resolves on it (that gate is no-ai-only) (LP-384)
+    assert not is_eligible(bars["IN-3"]) and bars["IN-3"].status == "calibratable-now"
+    assert not bars["IN-3"].validated and not bars["IN-3"].input_resolves
 
 
 # --------------------------------------------------------------------------- #
