@@ -97,7 +97,13 @@ def parse_bar(rule_id: str, body: object) -> ActivationBar:
             f"{rule_id}: validated must be a boolean (true = Priya-confirmed), got {validated!r}"
         )
     if status == "calibratable-now":
-        if not isinstance(threshold, int | float) or not (0.0 <= float(threshold) <= 1.0):
+        # `not isinstance(threshold, bool)` — a YAML bool is an int in Python (bool ⊂ int), so `threshold:
+        # true` would otherwise coerce to a silent 1.0 bar instead of failing loud like the other typos.
+        if (
+            not isinstance(threshold, int | float)
+            or isinstance(threshold, bool)
+            or not (0.0 <= float(threshold) <= 1.0)
+        ):
             raise ActivationBarError(
                 f"{rule_id}: calibratable-now needs a proposed threshold in [0,1], got {threshold!r}"
             )

@@ -80,6 +80,22 @@ def test_loader_rejects_a_threshold_on_a_non_calibratable_rule() -> None:
         )
 
 
+def test_loader_rejects_a_boolean_threshold() -> None:
+    # A YAML bool is an int in Python (bool ⊂ int); `threshold: true` must fail loud, never coerce to a
+    # silent 1.0 bar in an otherwise fail-loud loader.
+    with pytest.raises(ActivationBarError, match="proposed threshold in"):
+        ab.parse_bar(
+            "AS-2",
+            {
+                "status": "calibratable-now",
+                "ships": "auto",
+                "threshold": True,
+                "validated": False,
+                "rationale": "x",
+            },
+        )
+
+
 def test_loader_rejects_validating_a_non_calibratable_rule() -> None:
     # Priya can sign off a bar, but NOT on a rule blocked on calibration — that would sign off a tag nobody
     # measured. Only calibratable-now may be validated.
