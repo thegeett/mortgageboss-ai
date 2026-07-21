@@ -102,20 +102,27 @@ async def test_registry_dispatches_the_active_rule_set_by_kind() -> None:
     # The orchestrator's dispatch is the registry running the rule SET from specs, each by its
     # evaluation block, not hardcoded names — AS-1 + OC-2 + ID-1..ID-4/ID-6 + ID-7/ID-9 (per_document,
     # document-type scoped, LP-329).
-    assert set(ACTIVE_RULE_IDS) == {
-        "AS-1",
-        "OC-2",
-        "ID-2",
-        "ID-4",
-        "ID-1",
-        "ID-3",
-        "ID-6",
-        "ID-7",
-        "ID-9",
-        "ID-8",  # LP-332 — borrower-keyed citizenship materialized
-        "IN-2",  # LP-333 — pay-stub recency (parsed-only, no uncalibrated AI)
-        # IN-1 was activated by LP-332 but DE-ACTIVATED by LP-333 (couldnt_checks live + uncalibrated feed).
-    }
+    assert (
+        set(ACTIVE_RULE_IDS)
+        == {
+            "AS-1",
+            "OC-2",
+            "ID-2",
+            "ID-4",
+            "ID-1",
+            "ID-3",
+            "ID-6",
+            "ID-7",
+            "ID-9",
+            "ID-8",  # LP-332 — borrower-keyed citizenship materialized
+            "IN-2",  # LP-333 — pay-stub recency (parsed-only, no uncalibrated AI)
+            # LP-389 — the first activation pass, via the eligibility gate:
+            "IN-1",  # income.documented_monthly measured 100% >= its 0.98 bar (supersedes the LP-333 deferral)
+            "IN-5",  # income.employer_normalized measured 100% >= its 0.95 bar
+            # (ID-5 was PROPOSED but HELD — its parsed inputs resolve at the document subject, not the loan
+            #  subject ID-5 reads: a producer/consumer mismatch. See test_activation_gate_lp389.)
+        }
+    )
     snapshot = _loan_snapshot(None)  # no occupancy/txn tags → everything fail-closes honestly
 
     results, judgment_tags = await evaluate_rules(snapshot, confidence_floor=0.5)

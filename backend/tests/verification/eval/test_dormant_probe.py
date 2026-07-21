@@ -38,18 +38,27 @@ from app.verification.tag_materialization.declarations import load_ai_groups
 
 pytestmark = pytest.mark.anyio
 
+# LP-389 activated IN-1 (needs income_amounts, via the derived shortfall its bar declares) and IN-5 (needs
+# income_employer) — both moved from dormant to live; ID-5 is no-AI and pulls no group.
 _DORMANT_EXPECTED = frozenset(
     {
-        "income_amounts",
         "income_docs",
-        "income_employer",
         "income_stability",
         "stmt_facts",
         "asset_facts",
     }
 )
 _LIVE_EXPECTED = frozenset(
-    {"id_address", "id_name", "id_poa", "id_title", "occupancy", "txn_stage_a"}
+    {
+        "id_address",
+        "id_name",
+        "id_poa",
+        "id_title",
+        "income_amounts",
+        "income_employer",
+        "occupancy",
+        "txn_stage_a",
+    }
 )
 
 
@@ -59,7 +68,9 @@ _LIVE_EXPECTED = frozenset(
 def test_dormant_set_is_all_declared_groups_minus_the_live_ones() -> None:
     all_groups = frozenset(load_ai_groups())
     dormant = dormant_ai_groups()
-    assert dormant == _DORMANT_EXPECTED  # the 6 income/asset groups
+    assert (
+        dormant == _DORMANT_EXPECTED
+    )  # the 4 remaining income/asset groups (2 went live with LP-389)
     assert (
         _required_ai_groups() == _LIVE_EXPECTED
     )  # the normal run's set is unchanged (byte-identical)
@@ -121,44 +132,50 @@ def _all_dormant_stubs(**overrides: Reasoner) -> dict[str, Reasoner]:
 
 
 async def test_probe_reports_what_a_dormant_group_produced_per_document() -> None:
+    # income_amounts is now LIVE (IN-1); this probes a STILL-dormant group — income_docs on a VOE.
     snap = _snapshot(
         [
             DocumentEntry(
-                content_id="ps1",
-                document_type="pay_stub",
-                fields={"gross": Field.present("5000", source=FieldSource.EXTRACTED)},
+                content_id="voe1",
+                document_type="voe",
+                fields={"employer_name": Field.present("Acme", source=FieldSource.EXTRACTED)},
             )
         ]
     )
-    stub = _AiStub({"type": "base", "documented_monthly": "3000", "qualifying_monthly": "3000"})
+    stub = _AiStub({"voe_present": "yes", "future_employment": "no", "offer_letter_present": "no"})
     report = await probe_dormant_groups_on_snapshot(
-        snap, ai_reasoners=_all_dormant_stubs(income_amounts=stub)
+        snap, ai_reasoners=_all_dormant_stubs(income_docs=stub)
     )
 
     assert stub.calls == 1  # the injected reasoner was actually invoked
-    grp = next(g for g in report.groups if g.key == "income_amounts")
+    grp = next(g for g in report.groups if g.key == "income_docs")
     values = {(o.tag_id, o.value, o.document_type) for o in grp.observations}
     assert (
-        "income.documented_monthly",
-        "3000",
-        "pay_stub",
-    ) in values  # produced a real value on the paystub
+        "income.voe_present",
+        "yes",
+        "voe",
+    ) in values  # produced a real value on the VOE
     assert grp.verdict == "produces_usable"
-    assert grp.doctypes_with_real_value == {"pay_stub"}  # LP-377-D's gating input
+    assert grp.doctypes_with_real_value == {"voe"}  # LP-377-D's gating input
     # The probe covers the WHOLE dormant set, not just the stubbed one.
     assert {g.key for g in report.groups} == _DORMANT_EXPECTED
 
 
 async def test_uniform_unknown_is_reported_as_a_finding_not_a_pass() -> None:
-    snap = _snapshot([DocumentEntry(content_id="w2", document_type="w2", fields={})])
+    # income_amounts is now LIVE (IN-1); probe the still-dormant income_docs group.
+    snap = _snapshot([DocumentEntry(content_id="voe1", document_type="voe", fields={})])
     # The stub abstains on every tag — the LP-368 pattern. This must NOT read as "produces_usable".
     stub = _AiStub(
-        {"type": "unknown", "documented_monthly": "unknown", "qualifying_monthly": "unknown"}
+        {
+            "voe_present": "unknown",
+            "future_employment": "unknown",
+            "offer_letter_present": "unknown",
+        }
     )
     report = await probe_dormant_groups_on_snapshot(
-        snap, ai_reasoners=_all_dormant_stubs(income_amounts=stub)
+        snap, ai_reasoners=_all_dormant_stubs(income_docs=stub)
     )
-    grp = next(g for g in report.groups if g.key == "income_amounts")
+    grp = next(g for g in report.groups if g.key == "income_docs")
     assert grp.real == []  # nothing usable
     assert grp.verdict == "mostly_abstains"  # honest — an abstention is a finding, not a pass
     assert grp.ai_failures == []  # a genuine model abstention is NOT an AI-call failure
@@ -168,11 +185,11 @@ async def test_ai_call_failure_reads_as_ai_failed_not_an_abstention() -> None:
     # materialize_tags degrades a failed AI call to `unknown` (it catches AIClientError), so a transient
     # outage looks like uniform-unknown. The probe MUST surface that as `ai_failed`, never read it as "the
     # producer abstains" (a false producer/applicability gap — the misdiagnosis this probe exists to prevent).
-    snap = _snapshot([DocumentEntry(content_id="ps1", document_type="pay_stub", fields={})])
+    snap = _snapshot([DocumentEntry(content_id="voe1", document_type="voe", fields={})])
     report = await probe_dormant_groups_on_snapshot(
-        snap, ai_reasoners=_all_dormant_stubs(income_amounts=_failing_reasoner)
+        snap, ai_reasoners=_all_dormant_stubs(income_docs=_failing_reasoner)
     )
-    grp = next(g for g in report.groups if g.key == "income_amounts")
+    grp = next(g for g in report.groups if g.key == "income_docs")
     assert grp.real == []
     assert grp.ai_failures  # the failure is surfaced, distinct from an abstention
     assert grp.abstentions == []  # a call failure is not counted as a genuine abstention
@@ -207,6 +224,6 @@ async def test_probe_passes_reasoners_through_defaulting_to_real(monkeypatch) ->
     await probe_dormant_groups_on_snapshot(snap)
     assert captured["ai_reasoners"] is None  # None → the real model runs (no forced stub)
 
-    stubs = {"income_amounts": _AiStub({})}
+    stubs = {"income_docs": _AiStub({})}
     await probe_dormant_groups_on_snapshot(snap, ai_reasoners=stubs)
     assert captured["ai_reasoners"] is stubs  # an injected reasoner is honoured

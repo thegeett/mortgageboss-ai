@@ -20,7 +20,7 @@ from pathlib import Path
 
 import yaml
 
-from app.verification.rule_engine.registry import ACTIVE_RULE_IDS
+from app.verification.rule_engine.registry import _BASE_ACTIVE
 
 _BARS_YAML = Path(__file__).resolve().parents[1] / "rules" / "activation_bars.yaml"
 _SPECS_DIR = Path(__file__).resolve().parents[1] / "rules" / "specs"
@@ -49,12 +49,20 @@ class ActivationBar:
     load_bearing_ai_tags: tuple[str, ...]
     fp_fn: str
     rationale: str
+    # LP-389 — the eligibility evidence. ``measured_accuracy`` is the load-bearing tags' MEASURED accuracy
+    # (LP-379), used with the validated bar to gate an AI rule; None when unmeasured. ``input_resolves`` is
+    # the no-AI verification that the parsed input RESOLVES to real values on a real file (LP-381), used to
+    # gate a no-ai-dependency rule. Both default to the fail-closed value (None / False).
+    measured_accuracy: float | None = None
+    input_resolves: bool = False
 
 
-def _inert_rule_ids() -> frozenset[str]:
-    """The rules with a spec that are NOT active — the set the bars must cover exactly."""
+def _candidate_rule_ids() -> frozenset[str]:
+    """The rules the bars must cover exactly — every spec NOT in the BASE (pre-LP-389) active set. Anchored to
+    ``_BASE_ACTIVE``, not the live ``ACTIVE_RULE_IDS``, so an activated rule (IN-1/IN-5/ID-5) KEEPS its bar as
+    the record of why it went live — the candidate set stays a stable 23, not shrinking as rules activate."""
     specs = {p.stem for p in _SPECS_DIR.glob("*.yaml")}
-    return frozenset(specs - set(ACTIVE_RULE_IDS))
+    return frozenset(specs - set(_BASE_ACTIVE))
 
 
 @cache
@@ -65,12 +73,12 @@ def load_activation_bars() -> dict[str, ActivationBar]:
     if not isinstance(raw, dict):
         raise ActivationBarError("activation_bars.yaml must be a mapping of rule_id -> bar")
 
-    inert = _inert_rule_ids()
+    candidates = _candidate_rule_ids()
     declared = set(raw)
-    if declared != inert:
+    if declared != candidates:
         raise ActivationBarError(
-            f"activation_bars.yaml must cover EXACTLY the inert rules. "
-            f"missing={sorted(inert - declared)} extra={sorted(declared - inert)}"
+            f"activation_bars.yaml must cover EXACTLY the candidate (non-base) rules. "
+            f"missing={sorted(candidates - declared)} extra={sorted(declared - candidates)}"
         )
 
     return {rule_id: parse_bar(rule_id, body) for rule_id, body in raw.items()}
@@ -125,6 +133,27 @@ def parse_bar(rule_id: str, body: object) -> ActivationBar:
         raise ActivationBarError(
             f"{rule_id}: a rationale is required (the proposal Priya reasons over)"
         )
+    # LP-389 eligibility evidence. measured_accuracy (bool ⊂ int guard, like threshold) is optional in [0,1];
+    # input_resolves is a bool defaulting to the fail-closed False, and only a no-ai-dependency rule may set it
+    # true (a rule's parsed input resolving is only the gate when it HAS no AI tag to measure).
+    measured_accuracy = body.get("measured_accuracy")
+    if measured_accuracy is not None and (
+        not isinstance(measured_accuracy, int | float)
+        or isinstance(measured_accuracy, bool)
+        or not (0.0 <= float(measured_accuracy) <= 1.0)
+    ):
+        raise ActivationBarError(
+            f"{rule_id}: measured_accuracy must be a number in [0,1] or null, got {measured_accuracy!r}"
+        )
+    input_resolves = body.get("input_resolves", False)
+    if not isinstance(input_resolves, bool):
+        raise ActivationBarError(
+            f"{rule_id}: input_resolves must be a boolean, got {input_resolves!r}"
+        )
+    if input_resolves and status != "no-ai-dependency":
+        raise ActivationBarError(
+            f"{rule_id}: input_resolves is the gate ONLY for a no-ai-dependency rule (status={status})"
+        )
     return ActivationBar(
         rule_id=rule_id,
         status=status,
@@ -134,7 +163,36 @@ def parse_bar(rule_id: str, body: object) -> ActivationBar:
         load_bearing_ai_tags=tuple(str(t) for t in tags),
         fp_fn=str(body.get("fp_fn", "")).strip(),
         rationale=rationale,
+        measured_accuracy=float(measured_accuracy) if measured_accuracy is not None else None,
+        input_resolves=input_resolves,
     )
+
+
+def is_eligible(bar: ActivationBar) -> bool:
+    """LP-389 — the ACTIVATION GATE, fail-closed. A rule may go live ONLY if:
+
+    * (AI rule) it is ``calibratable-now``, its bar is Priya-``validated``, and its MEASURED accuracy meets
+      the bar (accuracy >= threshold — which is exactly ``activation_mode`` == auto/ratify); OR
+    * (no-AI rule) it is ``no-ai-dependency`` and its parsed ``input_resolves`` to real values (verified).
+
+    Every other state — an unmeasured tag (``not-calibratable-yet``), an unvalidated bar, a missing accuracy,
+    an absent input, or ``needs-producer`` — is NOT eligible. When in doubt, hold. This is the inverse of the
+    run-level fail-opens: activation never trusts what it hasn't measured."""
+    if bar.status == "calibratable-now":
+        return (
+            bar.validated
+            and bar.threshold is not None
+            and bar.measured_accuracy is not None
+            and bar.measured_accuracy >= bar.threshold
+        )
+    if bar.status == "no-ai-dependency":
+        return bar.input_resolves
+    return False
+
+
+def eligible_rule_ids() -> tuple[str, ...]:
+    """The candidate rules that PASS the activation gate today (sorted) — what LP-389 activated."""
+    return tuple(sorted(rid for rid, bar in load_activation_bars().items() if is_eligible(bar)))
 
 
 def activation_mode(bar: ActivationBar, measured_accuracy: float | None) -> str:
@@ -159,6 +217,8 @@ __all__ = [
     "ActivationBar",
     "ActivationBarError",
     "activation_mode",
+    "eligible_rule_ids",
+    "is_eligible",
     "load_activation_bars",
     "parse_bar",
 ]

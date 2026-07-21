@@ -135,7 +135,8 @@ async def test_derived_recipe_reads_freshly_produced_ai_tags() -> None:
 # IN-2 ACTIVATES — a REAL verdict end-to-end through the orchestrator (not couldnt_check)
 # --------------------------------------------------------------------------- #
 async def test_in2_is_active() -> None:
-    assert "IN-2" in ACTIVE_RULE_IDS and "IN-1" not in ACTIVE_RULE_IDS  # LP-333 swap
+    # LP-333 activated IN-2 and deferred IN-1; LP-389 re-activated IN-1 (documented_monthly now calibrated 100%).
+    assert "IN-2" in ACTIVE_RULE_IDS and "IN-1" in ACTIVE_RULE_IDS
 
 
 async def test_in2_fires_end_to_end_through_the_registry() -> None:

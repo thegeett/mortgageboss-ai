@@ -213,8 +213,9 @@ async def test_id1_fuzzy_leg_still_reconciles_naming_variance() -> None:
 
 def test_registry_drift_guard_and_activation_unchanged() -> None:
     assert set(_NORMALIZERS) == KNOWN_NORMALIZERS  # the new key is registered on both sides
-    # IN-5 stays INERT (this ticket activates nothing); the live set is unchanged.
-    assert "IN-5" not in ACTIVE_RULE_IDS
+    # LP-340 added IN-5's normalizer while IN-5 was inert; LP-389 later activated IN-5 (employer_normalized
+    # measured 100% >= its 0.95 bar). IN-5 is now LIVE — the drift guard tracks the CURRENT active set.
+    assert "IN-5" in ACTIVE_RULE_IDS
     assert ACTIVE_RULE_IDS == (
         "AS-1",
         "OC-2",
@@ -227,4 +228,7 @@ def test_registry_drift_guard_and_activation_unchanged() -> None:
         "ID-9",
         "ID-8",
         "IN-2",
+        # LP-389 — the first activation pass, via the eligibility gate (activation_bars.is_eligible)
+        "IN-1",
+        "IN-5",
     )

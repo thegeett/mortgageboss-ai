@@ -11184,3 +11184,49 @@ have a settable bar; the activation surface is mostly blocked on calibration, no
 consumes), LP-376-B (the ratification armor this reconciles with), LP-385/LP-378 (why income_stability /
 stmt / asset tags are produced-but-unscored), LP-333 (the dormant-rule buckets), LP-389 (the activation pass
 this feeds), the priya_validated threshold discipline (rule_kinds.csv) the `validated:false` pattern follows.
+
+## ADR-306: The first activation pass is a DECLARED gate, not a list edit; ID-5 held on a subject mismatch (LP-389)
+
+**What activated.** Two inert rules went live: **IN-1** (documented-vs-stated income shortfall; bar 0.98 auto,
+Priya-validated; `income.documented_monthly` measured 100% at LP-379-D) and **IN-5** (employer consistency; bar
+0.95 auto, validated; `income.employer_normalized` measured 100%). `ACTIVE_RULE_IDS` goes 11 → 13. This
+SUPERSEDES the LP-333 IN-1 deferral (documented_monthly is now calibrated and the derived per-borrower producer
+is fixed).
+
+**Activation is a gate, not a hand-list — the load-bearing decision.** A rule goes live ONLY by passing
+`activation_bars.is_eligible(bar)`, fail-closed: an AI rule needs a Priya-VALIDATED bar its MEASURED accuracy
+clears (`measured_accuracy >= threshold`); a no-AI rule needs its parsed input VERIFIED to resolve to real
+values **at the subject the rule reads**. Everything else — an unmeasured tag, an unvalidated bar, a missing
+accuracy, an unresolved input, `needs-producer` — is HELD. `ACTIVE_RULE_IDS` stays an explicit list (the
+foundational registry must not import the bar loader — a circular edge), but a test pins `set(ACTIVE_RULE_IDS) -
+_BASE_ACTIVE == eligible_rule_ids()`, so a rule CANNOT enter the live set without meeting the gate, and the list
+can never silently drift from the declared evidence. The bars carry two new fields — `measured_accuracy` (the
+LP-379 number) and `input_resolves` (the verified-on-a-real-file bit) — both fail-closed defaults (None/False).
+
+**ID-5 was PROPOSED and HELD — the gate caught a producer/consumer subject mismatch.** LP-381 reported ID-5's
+parsed inputs (`id.id_expiration`, `contract.closing_date`) "resolve on LF-6T3N" — but at the **document**
+subject: both are declared `subject: document` and materialize on the ID/contract documents (`dl1`/`dl2`/`pa1`).
+ID-5 READS them at `tags.by_subject["loan"]`, so they never reach it and ID-5 couldnt_checks on **every** file,
+not just LF-6T3N (its existing tests only pass because they hand-place the tags at `loan`). So `input_resolves`
+is honestly **false**, the gate holds ID-5, and its subject model is a flagged follow-up — with two borrowers,
+"which ID is the loan-level expiration" is a Priya call, out of scope for a deliberately small pass. This is the
+declared gate earning its keep: a blind list edit would have shipped a rule that never checks anything.
+
+**A derived load-bearing tag pulls its upstream AI group (the second wiring fix).** IN-1's load-bearing tag is
+the DERIVED `income.documented_income_shortfall_pct`, which rests on the AI `income.documented_monthly`
+(group `income_amounts`). `_required_ai_groups` previously pulled a group only when the DIRECT load-bearing tag
+was AI — so IN-1 would have couldnt_checked forever (its AI input group never ran). Fix: an active rule's
+activation-bar `load_bearing_ai_tags` (which declare exactly the upstream AI a derived tag rests on — IN-1's bar
+names `income.documented_monthly`) are folded into the required set. `income_amounts` + `income_employer` move
+from dormant to live; the dormant probe's set shrinks 6 → 4 accordingly.
+
+**Phase 2 — the real run on LF-6T3N (reported, not predicted).** IN-5 → **SATISFIED** on both borrowers (resolves
+end-to-end). IN-1 → **couldnt_check**, root: that fixture's MISMO carries no borrower STATED income; the AI
+documented side is calibrated and the chain is correct, so it resolves on a file that states income — a DATA
+gap (the LP-381/382 derived-input-absent class), not a defect, and not a bar to activating an AI-accuracy-gated
+rule. ID-5 → couldnt_check, root: the subject mismatch above (held).
+
+**Cross-refs.** LP-380/ADR-305 (the bars this reads through `is_eligible`), LP-379-D (the 100% measurements that
+clear IN-1/IN-5's bars), LP-381 (the ID-5 "input resolves" claim this refines to the subject level; the no-AI
+input-resolves pattern), LP-382 (the derived-input-absent-on-LF-6T3N class IN-1's couldnt_check belongs to),
+LP-333 (the IN-1 deferral this supersedes), LP-376-B (the ratification armor `activation_mode` reconciles with).

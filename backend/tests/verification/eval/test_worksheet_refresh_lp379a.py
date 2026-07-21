@@ -172,6 +172,9 @@ def test_no_rule_activation_changed() -> None:
         "ID-9",
         "ID-8",
         "IN-2",
+        # LP-389 — the first activation pass, via the eligibility gate (activation_bars.is_eligible)
+        "IN-1",
+        "IN-5",
     )
 
 

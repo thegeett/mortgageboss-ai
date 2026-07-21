@@ -25,7 +25,8 @@ from app.verification.snapshot.tag import Tag
 # ID-6 (1003 completeness); LP-329 adds ID-7 (marital/title, deterministic per_document) + ID-9 (POA
 # acceptability, judgment per_document) — both DOCUMENT-TYPE scoped (GAP-C), so a non-matching document
 # resolves to not_applicable, never a couldnt_check flood. All authored as DATA.
-ACTIVE_RULE_IDS: tuple[str, ...] = (
+# The BASE set — the rules live before LP-389's first activation pass. A wave adds a rule_id + a spec.
+_BASE_ACTIVE: tuple[str, ...] = (
     "AS-1",
     "OC-2",
     "ID-2",
@@ -42,12 +43,31 @@ ACTIVE_RULE_IDS: tuple[str, ...] = (
     # LP-333 — IN-2 (pay-stub recency): parsed-only (income.pay_date → the loan-level days-since-pay
     # derived tag), no AI, no calibration risk; verified to produce real verdicts end-to-end.
     "IN-2",
-    # LP-333 DE-ACTIVATED IN-1: LP-332 activated it, but the diagnosis found it couldnt_checks LIVE — the
-    # derived producer read the pre-materialization tags (fixed here), AND its feed income.documented_monthly
-    # is (a) not wired into _required_ai_groups (an undeclared recipe dependency) and (b) an UNCALIBRATED
-    # AI structuring tag feeding a deterministic FRAUD verdict. The PIN #1 mechanism (LP-332) is proven and
-    # unchanged; live activation is deferred until income.documented_monthly is calibrated + wired. See LP-333.
 )
+
+# LP-389 — the FIRST activation pass. Two inert rules EARNED activation via the eligibility gate
+# (activation_bars.is_eligible), fail-closed: a rule activates only when its AI-tag accuracy meets a
+# Priya-VALIDATED bar, or its parsed input RESOLVES to real values AT THE SUBJECT THE RULE READS. An unmeasured
+# tag, an unvalidated bar, or an unresolved input holds the rule — the inverse of this session's run-level fail-opens.
+#   IN-1 — income.documented_monthly measured 100% (LP-379-D); bar 0.98 auto, validated by Priya (LP-380). This
+#          SUPERSEDES the LP-333 deferral: documented_monthly is now calibrated (100%) and the derived producer
+#          is fixed. Auto, fraud-adjacent — a real income discrepancy is a finding a human sees. (On LF-6T3N it
+#          couldnt_checks — that fixture's MISMO carries no borrower STATED income — but the AI side is
+#          calibrated and the chain is correct; it resolves on a file that states income. A DATA gap, not a defect.)
+#   IN-5 — income.employer_normalized measured 100% (LP-379-D); bar 0.95 auto, validated (LP-380). Auto.
+#          Resolves end-to-end on LF-6T3N: SATISFIED on both borrowers.
+# ID-5 was PROPOSED for this pass but HELD (LP-389 Phase 2, fail-closed): its parsed inputs (id.id_expiration,
+# contract.closing_date) are declared subject:document and materialize on the ID/contract DOCUMENTS, but ID-5
+# reads them at tags.by_subject["loan"] — a producer/consumer SUBJECT MISMATCH, so it couldnt_checks on EVERY
+# file (LP-381 measured the inputs at the document subject, not the loan subject ID-5 consumes). Its bar's
+# input_resolves is therefore false, the gate holds it, and its subject model is a flagged follow-up (the
+# two-borrower "which ID is the loan-level expiration" is a Priya call, out of this small pass).
+# The OTHER 21 inert rules FAIL the gate (unmeasured tag / validated:false / input unresolved / no producer) and
+# are HELD. test_activation_gate_lp389 asserts EXACTLY these two pass and the 21 fail — a rule CANNOT enter this
+# set without meeting the gate (the declared safety; not a hand-list that can drift).
+_LP389_ACTIVATED: tuple[str, ...] = ("IN-1", "IN-5")
+
+ACTIVE_RULE_IDS: tuple[str, ...] = (*_BASE_ACTIVE, *_LP389_ACTIVATED)
 
 
 async def evaluate_rules(

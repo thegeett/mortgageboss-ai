@@ -111,7 +111,11 @@ def _required_ai_groups() -> frozenset[str]:
     runs ONLY those, never an AI structuring pass for a family no live rule reads yet.
 
     Derived generically from each active rule's load-bearing tags → their production declarations →
-    the AI group each declares. A parsed/derived load-bearing tag contributes no AI group.
+    the AI group each declares. A parsed/derived load-bearing tag contributes no AI group DIRECTLY —
+    but a DERIVED load-bearing tag still rests on the AI tag(s) that feed it, and those must materialize
+    or the rule couldnt_checks forever. The activation bar declares exactly those upstream AI tags
+    (LP-380/389: IN-1 rests on income.documented_monthly via the derived shortfall), so an activated
+    rule's bar tags are folded in — the group runs, the derived input resolves, the verdict is real.
     """
     declarations = load_declarations()
     needed: set[str] = set()
@@ -120,6 +124,18 @@ def _required_ai_groups() -> frozenset[str]:
             decl = declarations.get(tag_id)
             if decl is not None and decl.mode is ProductionMode.AI:
                 needed.add(decl.data)  # the AI group key
+    # LP-389 — fold in each ACTIVE rule's activation-bar AI tags (the upstream AI a derived load-bearing
+    # tag rests on; base-active rules have no bar and are unaffected). Imported lazily to keep the
+    # registry → activation_bars → registry edge one-directional at module load.
+    from app.verification.rule_engine.activation_bars import load_activation_bars
+
+    active = set(ACTIVE_RULE_IDS)
+    for rule_id, bar in load_activation_bars().items():
+        if rule_id in active:
+            for tag_id in bar.load_bearing_ai_tags:
+                decl = declarations.get(tag_id)
+                if decl is not None and decl.mode is ProductionMode.AI:
+                    needed.add(decl.data)
     return frozenset(needed)
 
 

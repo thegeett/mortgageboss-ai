@@ -34,6 +34,11 @@ _FACT_LABELS: dict[str, str] = {
     "income.pay_date": "pay-stub date",
     "income.days_since_most_recent_pay": "pay-stub recency",
     "income.qualifying_monthly": "qualifying income",
+    # LP-389 — the first activation pass; each live rule's reason tag gets a curated mortgage phrase.
+    # (ID-5 was PROPOSED but HELD, so contract.closing_date is deliberately NOT added here — added when it
+    #  goes live, per the "seeded with every LIVE rule's reason tags" convention.)
+    "income.documented_income_shortfall_pct": "documented-vs-stated income shortfall",  # IN-1
+    "income.employer_normalized": "employer name",  # IN-5
     "dti.qualifying_income_monthly": "qualifying income",
     "housing.insurance_monthly": "homeowners insurance",
     "housing.taxes_monthly": "property taxes",

@@ -20,7 +20,7 @@ from app.verification.rule_engine.activation_bars import (
     activation_mode,
     load_activation_bars,
 )
-from app.verification.rule_engine.registry import ACTIVE_RULE_IDS
+from app.verification.rule_engine.registry import _BASE_ACTIVE, ACTIVE_RULE_IDS
 
 
 def _bar(status: str, ships: str, threshold: float | None) -> ActivationBar:
@@ -35,8 +35,10 @@ def test_bars_cover_exactly_the_inert_rules() -> None:
     specs = {
         p.stem for p in (Path(ab.__file__).resolve().parents[1] / "rules/specs").glob("*.yaml")
     }
-    inert = specs - set(ACTIVE_RULE_IDS)
-    assert set(bars) == inert  # no inert rule missing, no active rule sneaking in
+    # Anchored to _BASE_ACTIVE, not the live set: a rule LP-389 activated (IN-1/IN-5) KEEPS its bar as the
+    # record of why it went live, so the candidate set stays a stable 23 rather than shrinking on activation.
+    candidates = specs - set(_BASE_ACTIVE)
+    assert set(bars) == candidates  # no candidate rule missing, no base-active rule sneaking in
     assert all(
         b.rationale.strip() for b in bars.values()
     )  # none blank — the proposal Priya reasons over
@@ -166,9 +168,9 @@ def test_below_bar_routes_to_needs_review_and_judgment_ratifies() -> None:
 
 
 # --------------------------------------------------------------------------- #
-# EQUIVALENCE — nothing is activated
+# ACTIVATION — LP-380 activated nothing; LP-389 (the first pass) activated exactly IN-1/IN-5 via the gate
 # --------------------------------------------------------------------------- #
-def test_no_rule_activation_changed() -> None:
+def test_active_set_is_base_plus_lp389() -> None:
     assert ACTIVE_RULE_IDS == (
         "AS-1",
         "OC-2",
@@ -181,5 +183,12 @@ def test_no_rule_activation_changed() -> None:
         "ID-9",
         "ID-8",
         "IN-2",
+        # LP-389 — the first activation pass, via the eligibility gate (activation_bars.is_eligible)
+        "IN-1",
+        "IN-5",
     )
-    assert not (set(load_activation_bars()) & set(ACTIVE_RULE_IDS))  # bars are for INERT rules only
+    # A bar persists after activation as the record of WHY the rule went live, so the bars now intersect the
+    # active set at EXACTLY the two LP-389 activated — never a base-active rule (those never had a bar). ID-5
+    # KEPT its bar too, but is HELD (input_resolves false), so it is not in the active set.
+    assert set(load_activation_bars()) & set(ACTIVE_RULE_IDS) == {"IN-1", "IN-5"}
+    assert not (set(load_activation_bars()) & set(_BASE_ACTIVE))
