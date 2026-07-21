@@ -51,12 +51,14 @@ class Settings(BaseSettings):
     # used by the app/ai client wrapper (LP-37). These are CONFIGURATION, not baked-in
     # facts — model strings change over time.
     # TODO(models): verify against the current Anthropic docs before relying on these.
-    # The extraction/reasoning tier runs on Opus 4.8 — the highest-capability model,
-    # for document extraction, cross-source reasoning, and needs/guidance. The cheap
-    # high-volume classification/summarization tier stays on Haiku. Both are
-    # env-overridable (ANTHROPIC_MODEL_CLASSIFICATION / ANTHROPIC_MODEL_EXTRACTION).
+    # The extraction/reasoning tier runs on Sonnet 4.5 (document extraction, cross-source
+    # reasoning, needs/guidance) — the cost/quality default; a deployment can dial up to
+    # Opus via env for more capability. The cheap high-volume classification/summarization
+    # tier stays on Haiku. Both are env-overridable (ANTHROPIC_MODEL_CLASSIFICATION /
+    # ANTHROPIC_MODEL_EXTRACTION); the default is the safe value, so a missing env var
+    # degrades to Sonnet (correct + cheap), never silently to a 5x-cost Opus fallback.
     anthropic_model_classification: str = "claude-haiku-4-5"
-    anthropic_model_extraction: str = "claude-opus-4-8"
+    anthropic_model_extraction: str = "claude-sonnet-4-5"
     # AI retry policy (LP-37): transient failures (429/5xx/connection) are retried with
     # exponential backoff + jitter, capped at this many attempts.
     ai_max_retries: int = 3

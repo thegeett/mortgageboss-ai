@@ -86,7 +86,8 @@ async def reason_observation(context_json: str) -> ObservationResult:
     """Structure ONE unmapped document/fact into an observation envelope.
 
     ``context_json`` is the deterministically-assembled context (what little is known about the
-    unmapped thing). Calls Opus at temperature 0, guards truncation, parses defensively (a malformed
+    unmapped thing). Calls the extraction/reasoning tier (Sonnet by default, env-overridable) at
+    temperature 0, guards truncation, parses defensively (a malformed
     response → ``read=None`` → the caller still records a minimal fallback observation, never drops
     the info). Raises :class:`~app.ai.client.AIClientError` on a transport failure OR a timeout.
     NEVER logs the context or the response — only counts + the chosen type.

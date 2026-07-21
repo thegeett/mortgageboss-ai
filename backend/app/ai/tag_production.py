@@ -146,7 +146,8 @@ async def reason_stage_a_transactions(context_json: str) -> StageAResult:
     """Run one Stage-A structuring pass over a bounded batch of transactions.
 
     ``context_json`` is ``{"transactions": [{"index", "date", "amount", "direction",
-    "description"}, ...]}`` assembled deterministically by the orchestrator. Calls Opus at
+    "description"}, ...]}`` assembled deterministically by the orchestrator. Calls the
+    extraction/reasoning tier (Sonnet by default, env-overridable) at
     temperature 0 (same file → same tags), guards truncation, and parses defensively (a
     malformed response yields no judgments — the orchestrator falls back to unknown). Raises
     :class:`~app.ai.client.AIClientError` on a transport failure OR a timeout (``complete()``
@@ -155,7 +156,7 @@ async def reason_stage_a_transactions(context_json: str) -> StageAResult:
     try:
         result = await asyncio.wait_for(
             complete(
-                model=settings.anthropic_model_extraction,  # Opus — real reasoning over the facts
+                model=settings.anthropic_model_extraction,  # Sonnet by default — real reasoning over the facts
                 system=STAGE_A_TRANSACTION_SYSTEM_PROMPT,
                 messages=[{"role": "user", "content": context_json}],
                 max_tokens=_MAX_TOKENS,

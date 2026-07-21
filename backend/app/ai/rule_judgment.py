@@ -54,7 +54,8 @@ Reasoner = Callable[[str], Awaitable[RuleJudgmentResult]]
 async def reason_rule_judgment(system_prompt: str, context_json: str) -> RuleJudgmentResult:
     """Ask ONE judgment question (``system_prompt``) over the structured-tag ``context_json``.
 
-    Calls Opus at temperature 0, guards truncation, parses defensively (a malformed response →
+    Calls the extraction/reasoning tier (Sonnet by default, env-overridable) at temperature 0,
+    guards truncation, parses defensively (a malformed response →
     ``judgment=None`` → the evaluator falls back to unknown/needs_review). Raises
     :class:`~app.ai.client.AIClientError` on a transport failure OR a timeout. NEVER logs the context
     or the response — only counts + the single verdict.
@@ -62,7 +63,7 @@ async def reason_rule_judgment(system_prompt: str, context_json: str) -> RuleJud
     try:
         result = await asyncio.wait_for(
             complete(
-                model=settings.anthropic_model_extraction,  # Opus — real judgment over the facts
+                model=settings.anthropic_model_extraction,  # Sonnet by default — real judgment over the facts
                 system=system_prompt,
                 messages=[{"role": "user", "content": context_json}],
                 max_tokens=_MAX_TOKENS,

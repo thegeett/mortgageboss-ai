@@ -5,8 +5,8 @@ then parsed the text. None checked ``stop_reason``, so a response the model TRUN
 ceiling (``stop_reason == "max_tokens"``, cut off mid-JSON) silently failed to parse and was
 misreported as ``"could not parse extraction"`` → an empty ``NEEDS_REVIEW`` extraction. A pay stub
 (many earnings/deduction/tax line items, each with a verbatim snippet) overflowed 4096 tokens and
-hit exactly this; ``investment_account`` hit it on its densest doc too. Under Opus 4.8's more
-thorough transcription, any verbose type can.
+hit exactly this; ``investment_account`` hit it on its densest doc too. Under a thorough
+transcription model, any verbose type can.
 
 This is the ONE shared place that guards against it, so all extractors benefit without duplicating
 the logic. The guard:
