@@ -19,6 +19,7 @@ OVER-FIRES on non-variable income; (3) IN-12 is a MINIMAL 2-year-return check, n
 
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime
 from uuid import uuid4
 
@@ -39,11 +40,13 @@ from app.verification.snapshot.model import (
     TagsSection,
 )
 from app.verification.snapshot.tag import Tag, TagProducedBy, TagRole, TagStage
+from app.verification.tag_materialization.ai import AiGroupResult, AiSubjectJudgment, AiTagJudgment
 from app.verification.tag_materialization.declarations import ProductionMode, TagDeclaration
 from app.verification.tag_materialization.derived import (
     _income_max_employment_gap,
     produce_derived_tags,
 )
+from app.verification.tag_materialization.producer import materialize_tags
 
 pytestmark = pytest.mark.anyio
 
@@ -451,11 +454,87 @@ def test_in10_11_inert_but_now_reach_the_rule() -> None:
         assert load_rule_spec(rid).subject_enumeration == "per_borrower"
 
 
+class _StabilityStub:
+    """income_stability reasoner reporting a DECLINING trend for every subject — to drive IN-10 end to end."""
+
+    async def __call__(self, context_json: str) -> AiGroupResult:
+        subjects = json.loads(context_json)["subjects"]
+        return AiGroupResult(
+            [
+                AiSubjectJudgment(
+                    index=int(s["index"]),
+                    tags={
+                        "has_2yr_history": AiTagJudgment("yes", 0.9, "two consecutive years"),
+                        "is_declining": AiTagJudgment("yes", 0.9, "wages fell year over year"),
+                        "same_line_of_work": AiTagJudgment("yes", 0.9, "same employer"),
+                        "continuance_3yr": AiTagJudgment("unknown", 0.5, "no horizon stated"),
+                    },
+                )
+                for s in subjects
+            ],
+            1,
+            1,
+            "stub",
+            False,
+        )
+
+
+async def test_in10_fires_end_to_end_through_real_income_stability_materialization() -> None:
+    # THE DURABLE GUARD (LP-390-1 review): the hand-placed tests above prove IN-10 READS the borrower subject,
+    # but not that income_stability WRITES there — the exact producer/consumer alignment whose break made this
+    # rule structurally dead. Materialize income.is_declining through the REAL producer (it, not the test,
+    # chooses the subject key) and evaluate IN-10 against it, so a future divergence between the production
+    # enumerator (MISMO-keyed) and IN-10's per_borrower read (belongs_to-keyed) fails HERE, not silently in prod.
+    snap = Snapshot(
+        loan_file_id=uuid4(),
+        run_id=uuid4(),
+        created_at=datetime(2026, 7, 15, tzinfo=UTC),
+        documents=DocumentsSection.present(
+            [
+                DocumentEntry(
+                    content_id="w2a",
+                    document_type="w2",
+                    belongs_to=(BorrowerRef(borrower_id=_B1, name="Sam"),),
+                    fields={
+                        "tax_year": Field.present("2024", source=FieldSource.EXTRACTED),
+                        "employer_name": Field.present("Acme", source=FieldSource.EXTRACTED),
+                        "wages_tips_other_comp": Field.present(
+                            "90000", source=FieldSource.EXTRACTED
+                        ),
+                    },
+                )
+            ]
+        ),
+        mismo=MismoSection.present(
+            {"borrower.1.borrower_id": Field.present(str(_B1), source=FieldSource.EXTRACTED)}
+        ),
+        tags=TagsSection.present({}),
+    )
+    mat = await materialize_tags(
+        snap,
+        ai_reasoners={"income_stability": _StabilityStub()},
+        only_subjects=frozenset({"borrower"}),
+        only_groups=frozenset({"income_stability"}),
+    )
+    # the producer keyed the signal under the BORROWER subject (borrower_id), not a document content_id ...
+    assert mat.tags.by_subject[str(_B1)]["income.is_declining"].value == "yes"
+    assert "w2a" not in mat.tags.by_subject
+    # ... and IN-10 reads it at that same key → FIRED. Producer key == consumer key, proven end to end.
+    verdicts = {
+        str(r.subject_id): r.verdict
+        for r in evaluate_deterministic_rule(load_rule_spec("IN-10"), mat)
+    }
+    assert verdicts[str(_B1)] is Verdict.FIRED
+
+
 # ================================================================================================= #
 # PIN #3 — IN-12 is a MINIMAL 2-year-return check, not a 1084 analysis
 # ================================================================================================= #
 def test_pin3_in12_minimal_check_only() -> None:
-    # What it DOES: fires on self-employment lacking a 2-year return history.
+    # What it DOES mechanically: fires on self-employment lacking a 2-year return history. NB (LP-390-1
+    # review): this hand-places has_2yr_history at the tax_return DOCUMENT subject — the path PRODUCTION no
+    # longer feeds, since LP-385 moved the tag to subject:borrower. So this asserts IN-12's evaluator wiring,
+    # NOT that IN-12 works on a real file; the structural-death guard is test_in12_..._dead_until_lp390_2 below.
     fire = _det_doc("IN-12", {"tr": ("tax_return", {"income.has_2yr_history": _tag("no")})})
     assert fire[0].verdict is Verdict.FIRED
     # What it does NOT do: a 2-year history present → SATISFIED, even with declining net / missing add-backs
@@ -463,6 +542,29 @@ def test_pin3_in12_minimal_check_only() -> None:
     # is unwired). PINNED (a separate ticket: wire the self-employment calculator).
     passes = _det_doc("IN-12", {"tr": ("tax_return", {"income.has_2yr_history": _tag("yes")})})
     assert passes[0].verdict is Verdict.SATISFIED  # no 1084 analysis — under-covers
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason="LP-390-2: IN-12 still reads income.has_2yr_history per_document at the tax_return subject, but "
+    "LP-385 produces that tag at subject:borrower — so on a REAL file IN-12 is structurally dead "
+    "(couldnt_check), the same sixth-instance bug LP-390-1 fixed for IN-10/IN-11. The fix is NOT a naive "
+    "per_borrower copy (that would duplicate IN-11's has_2yr_history fire — IN-12 must stay self-employment-"
+    "specific), which is why it is deferred. When LP-390-2 lands, this XPASSES (strict) and must be rewritten.",
+)
+def test_in12_self_employment_history_is_structurally_dead_until_lp390_2() -> None:
+    # DESIRED production behavior: a self-employed borrower whose tax returns lack a 2-year history → IN-12
+    # FIRES. ACTUAL today: has_2yr_history lives at the BORROWER subject (LP-385), invisible to IN-12's
+    # per_document tax_return read → couldnt_check. This pin makes the deferred debt VISIBLE and fails loudly
+    # (XPASS) the moment IN-12 is fixed, forcing LP-390-2 to be deliberate rather than silently green-while-dead.
+    docs = [_doc("tr", dtype="tax_return", borrower=_B1)]
+    by_subject = {str(_B1): {"income.has_2yr_history": _tag("no")}}
+    verdicts = evaluate_deterministic_rule(
+        load_rule_spec("IN-12"), _snap(docs=docs, by_subject=by_subject)
+    )
+    assert any(
+        v.verdict is Verdict.FIRED for v in verdicts
+    )  # xfails today; XPASS ⇒ LP-390-2 landed
 
 
 # ================================================================================================= #
