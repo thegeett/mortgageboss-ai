@@ -625,22 +625,26 @@ def _borrower_id_expiration(
             _UNKNOWN,
             f"borrower {subject_id}: no tags materialized to read an ID expiration from",
         )
-    values: set[str] = set()
+    # Key by the NORMALIZED date (coerce_date, mirroring the operand's `type: date`), not the raw string, so the
+    # same expiration in two renderings ("2027-01-15" vs "01/15/2027") is ONE value, not a spurious conflict.
+    # Unparseable values fall back to their raw string as the key — kept distinct, still fail-closed.
+    values: dict[object, str] = {}
     for entry in _borrower_attributed_documents(snapshot, subject_id):
         if entry.document_type not in _GOVERNMENT_ID_DOC_TYPES:
             continue  # only a government photo ID carries the expiration ID-5 checks
         tag = snapshot.tags.by_subject.get(entry.content_id, {}).get("id.id_expiration")
         if tag is None or str(tag.value) == _UNKNOWN:
             continue
-        values.add(str(tag.value))
+        raw = str(tag.value)
+        values[coerce_date(raw) or raw] = raw
     if not values:
         return _UNKNOWN, f"borrower {subject_id}: no driver's licence found for this borrower"
     if len(values) > 1:
         return _UNKNOWN, (
             f"borrower {subject_id}: the borrower's ID documents disagree on the expiration date "
-            f"({', '.join(sorted(values))}) — ambiguous"
+            f"({', '.join(sorted(values.values()))}) — ambiguous"
         )
-    expiration = next(iter(values))
+    expiration = next(iter(values.values()))
     return (
         expiration,
         f"borrower {subject_id}: government-ID expiration {expiration} (from their attributed ID)",
@@ -656,19 +660,24 @@ def _loan_closing_date(
     unknown; documents that DISAGREE on it → unknown (ambiguous), never a silently-picked date."""
     if snapshot.tags.absent:
         return _UNKNOWN, "no tags materialized to read a closing date from"
-    values: set[str] = set()
+    # Normalize before the disagreement check (coerce_date, mirroring the operand's `type: date`), so one closing
+    # date rendered two ways ("2027-01-15" vs "01/15/2027") is ONE value, not a spurious conflict; an unparseable
+    # value falls back to its raw string as the key — kept distinct, still fail-closed.
+    values: dict[object, str] = {}
     for tags in snapshot.tags.by_subject.values():
         tag = tags.get("contract.closing_date")
         if tag is None or str(tag.value) == _UNKNOWN:
             continue
-        values.add(str(tag.value))
+        raw = str(tag.value)
+        values[coerce_date(raw) or raw] = raw
     if not values:
         return _UNKNOWN, "no closing date is stated in the file"
     if len(values) > 1:
         return _UNKNOWN, (
-            f"the file's documents disagree on the closing date ({', '.join(sorted(values))}) — ambiguous"
+            f"the file's documents disagree on the closing date "
+            f"({', '.join(sorted(values.values()))}) — ambiguous"
         )
-    closing = next(iter(values))
+    closing = next(iter(values.values()))
     return closing, f"the loan's closing date {closing} (from the contract document)"
 
 

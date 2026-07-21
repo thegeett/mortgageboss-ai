@@ -15,10 +15,11 @@ closing date is promoted to loan level (one date, every borrower checked against
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from uuid import UUID, uuid4
 
 import pytest
+from app.ai.extraction.parsing import coerce_date
 from app.verification.rule_engine.deterministic import evaluate_deterministic_rule
 from app.verification.rule_engine.result import Verdict
 from app.verification.rules.specs import load_rule_spec
@@ -161,6 +162,17 @@ async def test_conflicting_id_expirations_abstain_never_a_silently_picked_date()
     )
     tag = mat.tags.by_subject[str(_B1)]["id.borrower_id_expiration"]
     assert tag.value == "unknown" and "disagree" in (tag.reasoning or "")
+
+
+async def test_same_expiration_two_formats_is_not_a_spurious_conflict() -> None:
+    # Two DLs for B1 stating the SAME expiration in different renderings ("2029-06-12" vs "06/12/2029") AGREE.
+    # The disagreement check normalizes dates (coerce_date), so a format difference is NOT read as ambiguity.
+    mat = await _materialize(
+        [_dl("dl1", _B1, "2029-06-12"), _dl("dl1b", _B1, "06/12/2029"), _pa()], borrowers=(_B1,)
+    )
+    tag = mat.tags.by_subject[str(_B1)]["id.borrower_id_expiration"]
+    assert tag.value != "unknown"  # one agreed date, not a spurious "disagree" abstention
+    assert coerce_date(str(tag.value)) == date(2029, 6, 12)
 
 
 # --------------------------------------------------------------------------- #
