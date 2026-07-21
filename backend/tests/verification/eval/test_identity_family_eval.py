@@ -8,8 +8,9 @@ tag-level golden labels + provenance + the cost property + the armor), keyless v
 EVALUATE, DON'T FIX. Every rule gets both directions (a must-FIRE + a must-not-fire), the fail-closed
 cases (absent / unknown / low-confidence — each a DISTINCT reason), a variance case, provenance, a
 tag-level check, and the LP-323-ID-A §4 domain edge. N/As are asserted explicitly. Case 12 (gated calc)
-is N/A for the whole family (no ID rule reads a calculator). A rule that is UNACTIVATED (ID-5, ID-8) is
-evaluated by calling its evaluator directly — activation gates the orchestrator, not the evaluator.
+is N/A for the whole family (no ID rule reads a calculator). A rule is evaluated by calling its evaluator
+directly (activation gates the orchestrator, not the evaluator) — ID-8 is unactivated; ID-5 went live
+per-borrower at LP-389-A and is evaluated here at its true borrower/loan subjects.
 
 Known limitation asserted here (NOT a bug to fix): ID-6 UNDER-FIRES on the LP-326 STARTER 1003
 field-set (see test_id6_case13_known_underfire_starter_fieldset). The doc records it as the top Priya item.
@@ -317,13 +318,19 @@ async def test_id4_case8_benign_variance_ai_agrees_ratification_pending() -> Non
 
 
 # --------------------------------------------------------------------------- #
-# ID-5 — ID expiration (date deterministic) — UNACTIVATED, evaluated directly
+# ID-5 — ID expiration, PER BORROWER (LP-389-A) — evaluated directly at the TRUE subjects
 # --------------------------------------------------------------------------- #
 def _id5(*, expiration: str | None, closing: str = "2026-05-01"):
-    tags = {"loan": {"contract.closing_date": _parsed(closing)}}
+    # LP-389-A: the borrower's OWN id.borrower_id_expiration under the borrower subject + the loan's one
+    # contract.loan_closing_date under "loan", with a belongs_to document so the per_borrower enumerator
+    # yields the borrower. NOT the pre-fix fiction that placed both tags at "loan" (where ID-5 wrongly read).
+    by_subject: dict = {"loan": {"contract.loan_closing_date": _parsed(closing)}}
     if expiration is not None:
-        tags["loan"]["id.id_expiration"] = _parsed(expiration)
-    return evaluate_deterministic_rule(load_rule_spec("ID-5"), _snap(by_subject=tags))
+        by_subject[str(_B1)] = {"id.borrower_id_expiration": _parsed(expiration)}
+    docs = [_doc("dl", dtype="drivers_license", borrower=_B1)]
+    return evaluate_deterministic_rule(
+        load_rule_spec("ID-5"), _snap(docs=docs, by_subject=by_subject)
+    )
 
 
 def test_id5_case1_must_fire_expired_before_closing() -> None:

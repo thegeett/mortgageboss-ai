@@ -119,8 +119,7 @@ async def test_registry_dispatches_the_active_rule_set_by_kind() -> None:
             # LP-389 — the first activation pass, via the eligibility gate:
             "IN-1",  # income.documented_monthly measured 100% >= its 0.98 bar (supersedes the LP-333 deferral)
             "IN-5",  # income.employer_normalized measured 100% >= its 0.95 bar
-            # (ID-5 was PROPOSED but HELD — its parsed inputs resolve at the document subject, not the loan
-            #  subject ID-5 reads: a producer/consumer mismatch. See test_activation_gate_lp389.)
+            "ID-5",  # LP-389-A — the document→loan subject mismatch fixed (per-borrower); input now resolves
         }
     )
     snapshot = _loan_snapshot(None)  # no occupancy/txn tags → everything fail-closes honestly

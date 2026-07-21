@@ -16,7 +16,7 @@ from pydantic import JsonValue
 
 from app.ai.extraction.parsing import coerce_date
 from app.verification.snapshot.fields import Field
-from app.verification.snapshot.model import Snapshot
+from app.verification.snapshot.model import DocumentEntry, Snapshot
 from app.verification.snapshot.tag import Tag, TagProducedBy, TagRole, TagStage
 from app.verification.tag_materialization.declarations import TagDeclaration
 from app.verification.tag_materialization.subjects import (
@@ -109,6 +109,22 @@ def _borrower_stated_monthly(snapshot: Snapshot, index: int) -> tuple[Decimal, b
     return total, any_present, any_unknown
 
 
+def _borrower_attributed_documents(snapshot: Snapshot, borrower_id: str) -> list[DocumentEntry]:
+    """The documents belongs_to-ATTRIBUTED to this borrower (LP-202/385) — the shared per-borrower-over-
+    documents primitive. Attribution is the EVIDENCE-based upload link, NEVER a guess: an unattributed
+    document (no ``belongs_to``) is not this borrower's and is excluded, so a borrower's context is
+    honestly incomplete rather than padded by a mis-attributed document (LP-332/336). Reused by the
+    income AND the ID-expiration per-borrower recipes — one attribution mechanism, not two."""
+    if snapshot.documents.absent:
+        return []
+    return [
+        entry
+        for entry in snapshot.documents.entries
+        if entry.belongs_to is not None
+        and any(str(ref.borrower_id) == borrower_id for ref in entry.belongs_to)
+    ]
+
+
 def _borrower_documented_monthly(
     snapshot: Snapshot, borrower_id: str
 ) -> tuple[Decimal, bool, bool]:
@@ -127,11 +143,7 @@ def _borrower_documented_monthly(
     any_present = any_unknown = False
     if snapshot.tags.absent or snapshot.documents.absent:
         return Decimal(0), any_present, any_unknown
-    for entry in snapshot.documents.entries:
-        if entry.belongs_to is None or not any(
-            str(ref.borrower_id) == borrower_id for ref in entry.belongs_to
-        ):
-            continue
+    for entry in _borrower_attributed_documents(snapshot, borrower_id):
         tag = snapshot.tags.by_subject.get(entry.content_id, {}).get("income.documented_monthly")
         if tag is None:
             continue
@@ -589,6 +601,77 @@ def _cash_to_close_shortfall(
     )
 
 
+# LP-389-A — the government photo-ID document types whose expiration ID-5 checks. Only drivers_license
+# has an expiration extractor today; id.id_expiration otherwise LEAKS (homeowners_insurance also emits an
+# expiration_date field), so the promotion is scoped to the ID document — never any document that happens
+# to carry an expiration_date. Extend when a passport / state-ID expiration extractor lands.
+_GOVERNMENT_ID_DOC_TYPES = frozenset({"drivers_license"})
+
+
+def _borrower_id_expiration(
+    snapshot: Snapshot, subject_id: str, subject_raw: object
+) -> tuple[JsonValue, str]:
+    """id.borrower_id_expiration — the borrower's government-ID expiration date, PER BORROWER (LP-389-A).
+
+    Reads id.id_expiration (a document fact) from the driver's-licence(s) belongs_to-ATTRIBUTED to THIS
+    borrower — the per-borrower promotion that fixes ID-5's document→loan subject mismatch (LP-389). One
+    borrower's ID never satisfies another's check (belongs_to isolation). FAIL-CLOSED: NO attributable ID
+    → unknown ("no driver's licence found for this borrower"), never a guessed pass; ID documents that
+    DISAGREE on the expiration → unknown (ambiguous), never a silently-picked date."""
+    if not isinstance(subject_raw, BorrowerSubject):
+        return _UNKNOWN, "the ID expiration is a per-borrower recipe (needs a borrower subject)"
+    if snapshot.tags.absent:
+        return (
+            _UNKNOWN,
+            f"borrower {subject_id}: no tags materialized to read an ID expiration from",
+        )
+    values: set[str] = set()
+    for entry in _borrower_attributed_documents(snapshot, subject_id):
+        if entry.document_type not in _GOVERNMENT_ID_DOC_TYPES:
+            continue  # only a government photo ID carries the expiration ID-5 checks
+        tag = snapshot.tags.by_subject.get(entry.content_id, {}).get("id.id_expiration")
+        if tag is None or str(tag.value) == _UNKNOWN:
+            continue
+        values.add(str(tag.value))
+    if not values:
+        return _UNKNOWN, f"borrower {subject_id}: no driver's licence found for this borrower"
+    if len(values) > 1:
+        return _UNKNOWN, (
+            f"borrower {subject_id}: the borrower's ID documents disagree on the expiration date "
+            f"({', '.join(sorted(values))}) — ambiguous"
+        )
+    expiration = next(iter(values))
+    return (
+        expiration,
+        f"borrower {subject_id}: government-ID expiration {expiration} (from their attributed ID)",
+    )
+
+
+def _loan_closing_date(
+    snapshot: Snapshot, _subject_id: str, _subject_raw: object
+) -> tuple[JsonValue, str]:
+    """contract.loan_closing_date — the loan's single closing date, promoted to loan level from the
+    document-subject contract.closing_date (LP-389-A; that tag stays a document fact). Mirrors
+    housing.insurance_monthly's document→loan promotion. FAIL-CLOSED: NO closing date in the file →
+    unknown; documents that DISAGREE on it → unknown (ambiguous), never a silently-picked date."""
+    if snapshot.tags.absent:
+        return _UNKNOWN, "no tags materialized to read a closing date from"
+    values: set[str] = set()
+    for tags in snapshot.tags.by_subject.values():
+        tag = tags.get("contract.closing_date")
+        if tag is None or str(tag.value) == _UNKNOWN:
+            continue
+        values.add(str(tag.value))
+    if not values:
+        return _UNKNOWN, "no closing date is stated in the file"
+    if len(values) > 1:
+        return _UNKNOWN, (
+            f"the file's documents disagree on the closing date ({', '.join(sorted(values))}) — ambiguous"
+        )
+    closing = next(iter(values))
+    return closing, f"the loan's closing date {closing} (from the contract document)"
+
+
 _RECIPES: dict[str, Recipe] = {
     "app_required_fields_present": _app_required_fields_present,
     # LP-323-IN-B — the income family's loan-level arithmetic (per-borrower granularity is deferred:
@@ -596,6 +679,10 @@ _RECIPES: dict[str, Recipe] = {
     # LP-323-IN-B doc). Registry entries only; produce_derived_tags is untouched (the wave criterion).
     "income_documented_shortfall": _income_documented_shortfall,
     "income_ytd_annualized_shortfall": _income_ytd_annualized_shortfall,
+    # LP-389-A — ID-5's per-borrower inputs: the borrower's attributed-ID expiration + the loan's one
+    # closing date (both promotions of document facts, reusing LP-385's belongs_to attribution).
+    "borrower_id_expiration": _borrower_id_expiration,
+    "loan_closing_date": _loan_closing_date,
     # LP-366-A — the loan's total stated qualifying income, read by AS-1 via a `loan_tag` operand
     # (instead of the gated DTI calc). Fail-closed to unknown, never 0.
     "qualifying_income_monthly": _qualifying_income_monthly,

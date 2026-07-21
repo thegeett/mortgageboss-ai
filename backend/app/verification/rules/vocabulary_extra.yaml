@@ -67,6 +67,31 @@ tags:
     description: Is the borrower's citizenship/residency eligible for the loan program (ID-8 verdict).
     produced_by: AI
 
+  # --- LP-389-A — ID-5's per-borrower inputs (the fix for the document→loan subject mismatch). The DL
+  #     expiration STAYS a document fact (id.id_expiration, document subject); these two DERIVED tags
+  #     promote it to the subjects ID-5 actually reads — the borrower's attributed ID, and the file's
+  #     one closing date — reusing LP-385's per-borrower-over-documents shape (belongs_to). "unknown"
+  #     always legal (the recipes abstain, never fabricate). --------------------------------------- #
+  id.borrower_id_expiration:
+    entity: borrower
+    value_type: date
+    allowed_values: null
+    description: >-
+      The borrower's government photo ID expiration date, resolved from the driver's-licence
+      ATTRIBUTED to that borrower (belongs_to) — the per-borrower promotion of the document-subject
+      id.id_expiration (LP-389-A). Feeds ID-5. "unknown" when the borrower has no attributable ID, or
+      its ID documents disagree on the expiration.
+    produced_by: derived
+  contract.loan_closing_date:
+    entity: loan
+    value_type: date
+    allowed_values: null
+    description: >-
+      The loan's single closing date, promoted to loan level from the contract document's
+      contract.closing_date (LP-389-A — contract.closing_date itself stays a document fact). Feeds
+      ID-5. "unknown" when no closing date is in the file, or documents disagree on it.
+    produced_by: derived
+
   # --- LP-323-IN-B — the income family's DERIVED arithmetic tags (loan-level aggregates; the derived
   #     producer is loan-only, so per-borrower granularity is deferred — see the LP-323-IN-B doc).
   #     value_type number, "unknown" always legal (the derived recipe abstains, never fabricates). --- #

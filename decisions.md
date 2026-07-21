@@ -11230,3 +11230,60 @@ rule. ID-5 → couldnt_check, root: the subject mismatch above (held).
 clear IN-1/IN-5's bars), LP-381 (the ID-5 "input resolves" claim this refines to the subject level; the no-AI
 input-resolves pattern), LP-382 (the derived-input-absent-on-LF-6T3N class IN-1's couldnt_check belongs to),
 LP-333 (the IN-1 deferral this supersedes), LP-376-B (the ratification armor `activation_mode` reconciles with).
+
+## ADR-307: ID-5's structural-dead subject mismatch — fixed per-borrower; the fifth instance (LP-389-A)
+
+**The bug (a fifth structural-dead instance — the AS-1/ID-2/OC-2/LP-321a class).** ID-5 ("the government photo
+ID must be unexpired at closing") read `id.id_expiration` + `contract.closing_date` at
+`tags.by_subject["loan"]`, but both are declared `subject: document` and materialize on the ID/contract
+DOCUMENTS (`dl1`/`dl2`/`pa1`). They never reach `"loan"`, so ID-5 couldnt_checked on **every** file — LP-389
+found this and held it. Its tests were green only because they **hand-placed the tags at `"loan"`** (a fixture
+asserting a fiction, LP-321a): the rule "passed tests" and was structurally dead.
+
+**Priya's decision: ID-5 checks EVERY borrower's ID — per-borrower, one verdict each** (a file with 2 borrowers
+→ 2 ID-5 findings, one per driver's licence). Not "the earliest expiration," not loan-level — per-borrower,
+mirroring LP-385's income move (document→borrower).
+
+**The shape: reuse LP-385's per-borrower-over-documents attribution — the tag stays a document fact, the
+CONSUMPTION becomes per-borrower.** `id.id_expiration` STAYS `subject: document` (a DL's expiration *is* a
+document fact). A new derived **borrower**-subject tag `id.borrower_id_expiration` promotes it: the recipe reads
+`id.id_expiration` from the driver's-licence `belongs_to`-ATTRIBUTED to that borrower (LP-202/332), reusing the
+extracted `_borrower_attributed_documents` primitive shared with `_borrower_documented_monthly` — one
+attribution mechanism, not two. ID-5 re-scopes to `subject_enumeration: per_borrower` and reads that
+borrower-subject tag against the loan's closing date.
+
+**The closing date — a gate-of-record correction.** The ticket assumed `contract.closing_date` was loan-level;
+it is `subject: document` (materializes on the purchase agreement). To honor both the intent (one loan-level
+closing date each borrower is checked against) and "do not change `contract.closing_date`," a new derived
+**loan**-subject tag `contract.loan_closing_date` promotes it (mirroring `housing.insurance_monthly`'s
+document→loan promotion); ID-5 reads it via a `loan_tag` operand. `contract.closing_date` itself is untouched.
+
+**Fail-closed, per-borrower isolation, doc-type scoping.** A borrower with no attributable driver's licence →
+`unknown` ("no driver's licence found for this borrower") → couldnt_check, never a guessed pass; ID documents
+that disagree on the expiration → `unknown` (ambiguous), never a silently-picked date. One borrower's ID never
+satisfies another's check (the LP-332 masking class). The promotion is scoped to `drivers_license` — because
+`id.id_expiration` is not doc-type-scoped (`homeowners_insurance` also emits an `expiration_date` field), an
+unscoped read would leak a policy's expiry into an ID check.
+
+**The fiction-asserting tests rewritten to the true path (LP-321a).** `test_typed_operands` and
+`test_identity_family_eval` placed ID-5's tags at `"loan"`; both now place the derived tags at the TRUE subjects
+(borrower + loan) with a `belongs_to` document so the per-borrower enumerator yields the borrower. A new
+`test_id5_per_borrower_lp389a` pins the full documents→`materialize_tags`→per-borrower-ID-5 path, the isolation,
+the fail-closed reasons, and the doc-type scoping. A test that places a tag where the rule wrongly reads it hid
+this bug for five rule-generations — it is worse than no test.
+
+**Activation (earned this time): 13 → 14.** ID-5's input now resolves at the subject it reads, so its bar's
+`input_resolves` flips true and the SAME LP-389 gate (`is_eligible`) admits it — the gate never changed, only
+the evidence did. Phase 2 real run on LF-6T3N: **both borrowers SATISFIED** (DLs expire 2029-06-12 / 2028-02-28,
+both after the 2026-07-15 closing). NB the ticket predicted a fire from different dates (2026-06-26 / 2027-08-03)
+that the fixture does not carry; the fire path is proven with a synthetic expired DL instead.
+
+**A reported limitation.** The per-borrower rule enumerates borrowers from documents' `belongs_to`, so a
+borrower with ZERO attributed documents is not enumerated and gets no ID-5 verdict (inherent to LP-385's
+document-driven shape). A borrower with *any* document but no DL IS checked (couldnt_check). Closing the
+zero-document gap would need a MISMO-borrower-driven rule enumerator — a separate change.
+
+**Cross-refs.** LP-389/ADR-306 (the mismatch this fixes + the gate that admits ID-5), LP-385 (the per-borrower
+document→borrower shape reused), LP-321a (fiction-asserting tests), LP-332/LP-202 (borrower attribution /
+`belongs_to`), LP-328 (the `date` typed operand + `loan_tag` operand ID-5 uses), LP-374 (`housing.insurance_monthly`,
+the document→loan promotion precedent).

@@ -231,4 +231,5 @@ def test_registry_drift_guard_and_activation_unchanged() -> None:
         # LP-389 — the first activation pass, via the eligibility gate (activation_bars.is_eligible)
         "IN-1",
         "IN-5",
+        "ID-5",  # LP-389-A — the subject mismatch fixed (per-borrower), input now resolves
     )

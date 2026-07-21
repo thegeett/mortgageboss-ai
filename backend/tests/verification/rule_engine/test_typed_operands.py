@@ -12,13 +12,19 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from pathlib import Path
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 from app.verification.rule_engine.deterministic import evaluate_deterministic_rule
 from app.verification.rule_engine.result import Verdict
 from app.verification.rules.specs import RuleSpec, load_rule_spec
-from app.verification.snapshot.model import DocumentsSection, Snapshot, TagsSection
+from app.verification.snapshot.model import (
+    BorrowerRef,
+    DocumentEntry,
+    DocumentsSection,
+    Snapshot,
+    TagsSection,
+)
 from app.verification.snapshot.tag import Tag, TagProducedBy, TagRole, TagStage
 
 
@@ -44,15 +50,36 @@ def _loan(tags: dict[str, Tag]) -> Snapshot:
     )
 
 
+# LP-389-A — ID-5 is PER BORROWER. The TRUE subjects (not the pre-LP-389-A fiction that placed the tags at
+# "loan" where the rule wrongly read them): the borrower's OWN id.borrower_id_expiration under the borrower
+# subject, the loan's contract.loan_closing_date under "loan", and a belongs_to document so the per_borrower
+# enumerator yields the borrower. The document→borrower promotion itself is proven end-to-end in
+# test_id5_per_borrower_lp389a.py; here we exercise the deterministic date operands at those subjects.
+_BID = UUID("11111111-1111-4111-8111-111111111111")
+
+
 def _id5(*, expiration: str | None, closing: str = "2026-05-01") -> list:
-    tags: dict[str, Tag] = {"contract.closing_date": _tag(closing)}
+    by_subject: dict[str, dict[str, Tag]] = {"loan": {"contract.loan_closing_date": _tag(closing)}}
     if expiration is not None:
-        tags["id.id_expiration"] = _tag(expiration)
-    return evaluate_deterministic_rule(load_rule_spec("ID-5"), _loan(tags))
+        by_subject[str(_BID)] = {"id.borrower_id_expiration": _tag(expiration)}
+    doc = DocumentEntry(
+        content_id="dl",
+        document_type="drivers_license",
+        belongs_to=(BorrowerRef(borrower_id=_BID, name="Sam Borrower"),),
+        fields={},
+    )
+    snap = Snapshot(
+        loan_file_id=uuid4(),
+        run_id=uuid4(),
+        created_at=datetime(2026, 7, 15, tzinfo=UTC),
+        documents=DocumentsSection.present([doc]),
+        tags=TagsSection.present(by_subject),
+    )
+    return evaluate_deterministic_rule(load_rule_spec("ID-5"), snap)
 
 
 # --------------------------------------------------------------------------- #
-# ID-5 — the `date` typed comparison (id_expiration >= closing_date)
+# ID-5 — the `date` typed comparison (id_expiration >= closing_date), PER BORROWER
 # --------------------------------------------------------------------------- #
 def test_id5_expired_before_closing_fires() -> None:
     (r,) = _id5(expiration="2026-04-30", closing="2026-05-01")

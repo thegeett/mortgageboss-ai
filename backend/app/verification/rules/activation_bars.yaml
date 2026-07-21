@@ -259,16 +259,16 @@ ID-5:
   ships: auto
   threshold: null
   validated: false
-  input_resolves: false   # LP-389 Phase 2: a SUBJECT MISMATCH — the input does NOT resolve at ID-5's subject — HELD
+  input_resolves: true    # LP-389-A: the subject mismatch is FIXED (per-borrower) — the input now resolves → ELIGIBLE
   load_bearing_ai_tags: []
-  fp_fn: "n/a — deterministic (id.id_expiration, parsed)"
+  fp_fn: "n/a — deterministic (per-borrower ID expiration vs the loan's closing date)"
   rationale: >-
-    no AI load-bearing tag; a wiring decision (cf. active ID-8, parsed-only). LP-381 reported its parsed inputs
-    (id.id_expiration, contract.closing_date) resolve on LF-6T3N — but at the DOCUMENT subject: both are
-    declared subject:document and materialize on the ID/contract documents (dl1/dl2/pa1). ID-5 READS them at
-    tags.by_subject["loan"], so they never reach it and ID-5 couldnt_checks on EVERY file. input_resolves is
-    false (the input does not resolve at the subject the rule consumes); the gate holds ID-5. Its subject model
-    is a flagged follow-up — with two borrowers, "which ID is the loan-level expiration" is a Priya call.
+    no AI load-bearing tag; a wiring decision (cf. active ID-8, parsed-only). LP-389 HELD ID-5: a producer/
+    consumer subject mismatch (inputs on the DOCUMENT subject, rule read at "loan") → couldnt_check on every
+    file. LP-389-A FIXED it — ID-5 is now PER BORROWER, reading the borrower's belongs_to-attributed ID
+    expiration (id.borrower_id_expiration, derived) against the loan's closing date (contract.loan_closing_date,
+    derived). The input now RESOLVES at the subject the rule reads (verified on LF-6T3N: SATISFIED for both
+    borrowers), so input_resolves is true and the gate lets ID-5 through.
 
 IN-3:
   status: no-ai-dependency

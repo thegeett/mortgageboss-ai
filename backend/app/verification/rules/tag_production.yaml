@@ -25,6 +25,10 @@ tags:
   id.ssn_hash: {mode: parsed, subject: document, data: "employee_ssn:hash"}  # was "ssn" — W2's SSN
   id.dob: {mode: parsed, subject: document, data: date_of_birth}             # was "dob" — DL's DOB
   id.id_expiration: {mode: parsed, subject: document, data: expiration_date} # was "id_expiration"
+  # LP-389-A — the per-borrower promotion of the DL expiration (id.id_expiration STAYS a document fact).
+  # The recipe reads THIS borrower's belongs_to-attributed driver's-licence expiration, so ID-5 checks
+  # every borrower's OWN ID (reusing LP-385's per-borrower-over-documents attribution).
+  id.borrower_id_expiration: {mode: derived, subject: borrower, data: borrower_id_expiration}
   # id.marital_status lives on the BORROWER in MISMO (borrower.{n}.marital_status), NOT on any
   # document — it was wrong on BOTH axes (name AND subject). Re-keyed to the borrower subject.
   id.marital_status: {mode: parsed, subject: borrower, data: marital_status}
@@ -36,6 +40,10 @@ tags:
   # reads the FULL MISMO key (unlike the borrower subject, which prepends borrower.{n}.).
   program.type: {mode: parsed, subject: loan, data: loan.program}
   contract.closing_date: {mode: parsed, subject: document, data: closing_date}
+  # LP-389-A — the loan's single closing date, promoted to loan level from the document-subject
+  # contract.closing_date above (which stays a document fact). ID-5 reads this loan-level tag so every
+  # borrower's ID is checked against ONE closing date (mirrors housing.insurance_monthly's promotion).
+  contract.loan_closing_date: {mode: derived, subject: loan, data: loan_closing_date}
   id.app_required_fields_present: {mode: derived, subject: loan, data: app_required_fields_present}
   id.name_normalized: {mode: ai, subject: document, data: id_name}
   # address_normalized + current_address_type share ONE group → co-located on the same document

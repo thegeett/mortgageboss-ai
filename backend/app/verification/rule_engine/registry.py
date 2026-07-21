@@ -45,10 +45,10 @@ _BASE_ACTIVE: tuple[str, ...] = (
     "IN-2",
 )
 
-# LP-389 — the FIRST activation pass. Two inert rules EARNED activation via the eligibility gate
-# (activation_bars.is_eligible), fail-closed: a rule activates only when its AI-tag accuracy meets a
-# Priya-VALIDATED bar, or its parsed input RESOLVES to real values AT THE SUBJECT THE RULE READS. An unmeasured
-# tag, an unvalidated bar, or an unresolved input holds the rule — the inverse of this session's run-level fail-opens.
+# LP-389 / LP-389-A — the FIRST activation pass (+ its follow-up). Three inert rules EARNED activation via the
+# eligibility gate (activation_bars.is_eligible), fail-closed: a rule activates only when its AI-tag accuracy
+# meets a Priya-VALIDATED bar, or its parsed input RESOLVES to real values AT THE SUBJECT THE RULE READS. An
+# unmeasured tag, an unvalidated bar, or an unresolved input holds the rule — the inverse of the run-level fail-opens.
 #   IN-1 — income.documented_monthly measured 100% (LP-379-D); bar 0.98 auto, validated by Priya (LP-380). This
 #          SUPERSEDES the LP-333 deferral: documented_monthly is now calibrated (100%) and the derived producer
 #          is fixed. Auto, fraud-adjacent — a real income discrepancy is a finding a human sees. (On LF-6T3N it
@@ -56,16 +56,16 @@ _BASE_ACTIVE: tuple[str, ...] = (
 #          calibrated and the chain is correct; it resolves on a file that states income. A DATA gap, not a defect.)
 #   IN-5 — income.employer_normalized measured 100% (LP-379-D); bar 0.95 auto, validated (LP-380). Auto.
 #          Resolves end-to-end on LF-6T3N: SATISFIED on both borrowers.
-# ID-5 was PROPOSED for this pass but HELD (LP-389 Phase 2, fail-closed): its parsed inputs (id.id_expiration,
-# contract.closing_date) are declared subject:document and materialize on the ID/contract DOCUMENTS, but ID-5
-# reads them at tags.by_subject["loan"] — a producer/consumer SUBJECT MISMATCH, so it couldnt_checks on EVERY
-# file (LP-381 measured the inputs at the document subject, not the loan subject ID-5 consumes). Its bar's
-# input_resolves is therefore false, the gate holds it, and its subject model is a flagged follow-up (the
-# two-borrower "which ID is the loan-level expiration" is a Priya call, out of this small pass).
-# The OTHER 21 inert rules FAIL the gate (unmeasured tag / validated:false / input unresolved / no producer) and
-# are HELD. test_activation_gate_lp389 asserts EXACTLY these two pass and the 21 fail — a rule CANNOT enter this
+#   ID-5 — LP-389 HELD it: a producer/consumer SUBJECT MISMATCH (its inputs materialized on the DOCUMENT subject
+#          but ID-5 read them at "loan"), so it couldnt_checked on every file. LP-389-A FIXED it — ID-5 is now
+#          PER BORROWER, reading the borrower's belongs_to-attributed ID expiration (id.borrower_id_expiration,
+#          derived) against the loan's one closing date (contract.loan_closing_date, derived). The input now
+#          resolves at the subject the rule reads (input_resolves flipped true), so the gate lets it through.
+#          Resolves end-to-end on LF-6T3N: SATISFIED for both borrowers (both DLs unexpired at closing).
+# The OTHER 20 inert rules FAIL the gate (unmeasured tag / validated:false / input unresolved / no producer) and
+# are HELD. test_activation_gate_lp389 asserts EXACTLY these three pass and the 20 fail — a rule CANNOT enter this
 # set without meeting the gate (the declared safety; not a hand-list that can drift).
-_LP389_ACTIVATED: tuple[str, ...] = ("IN-1", "IN-5")
+_LP389_ACTIVATED: tuple[str, ...] = ("IN-1", "IN-5", "ID-5")
 
 ACTIVE_RULE_IDS: tuple[str, ...] = (*_BASE_ACTIVE, *_LP389_ACTIVATED)
 
