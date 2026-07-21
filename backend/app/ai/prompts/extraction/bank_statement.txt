@@ -22,6 +22,9 @@ CAPTURE EVERYTHING. There are three buckets:
      ending_balance          (number)  closing balance
      total_deposits          (number)  total deposits/credits for the period
      total_withdrawals       (number)  total withdrawals/debits for the period
+     page_count_declared     (int)     the TOTAL page count the statement PRINTS, e.g. the "5" in
+                                       "Page 1 of 5" / "Page 3 of 5". Report the total N, not the
+                                       current page. null if no such "of N" is printed anywhere.
 
 2. TRANSACTIONS — capture EVERY transaction across ALL pages, in order, each as:
      date              (date)    the transaction/posting date
@@ -65,7 +68,8 @@ Respond with ONLY a single JSON object, no markdown fences and no prose, exactly
     "beginning_balance":      {"value": <number|null>, "page": <int|null>, "snippet": <string|null>},
     "ending_balance":         {"value": <number|null>, "page": <int|null>, "snippet": <string|null>},
     "total_deposits":         {"value": <number|null>, "page": <int|null>, "snippet": <string|null>},
-    "total_withdrawals":      {"value": <number|null>, "page": <int|null>, "snippet": <string|null>}
+    "total_withdrawals":      {"value": <number|null>, "page": <int|null>, "snippet": <string|null>},
+    "page_count_declared":    {"value": <int|null>, "page": <int|null>, "snippet": <string|null>}
   },
   "transactions": [
     {"date": <YYYY-MM-DD|null>, "description": <string|null>, "amount": <number|null>,

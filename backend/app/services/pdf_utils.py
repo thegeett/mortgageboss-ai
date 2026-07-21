@@ -73,6 +73,27 @@ def _extract_sync(content: bytes) -> PdfTextExtractionResult:
         doc.close()  # type: ignore[no-untyped-call]
 
 
+def _page_count_sync(content: bytes) -> int | None:
+    """The PDF's page total, or None if it can't be read as a PDF. Never raises (blocking)."""
+    try:
+        doc = pymupdf.open(stream=content, filetype="pdf")  # type: ignore[no-untyped-call]
+    except Exception:
+        return None
+    try:
+        return int(doc.page_count)
+    except Exception:
+        return None
+    finally:
+        doc.close()  # type: ignore[no-untyped-call]
+
+
+async def pdf_page_count(content: bytes) -> int | None:
+    """The PDF's actual page total (DETERMINISTIC, from the file — never a model read), or None if the bytes
+    are not a readable PDF. Async, never raises. LP-381: AS-9's ``stmt.page_count_present`` — the count of
+    pages actually present, computed from the document, so a model miscount can never fabricate completeness."""
+    return await asyncio.to_thread(_page_count_sync, content)
+
+
 async def extract_text_from_pdf(content: bytes) -> PdfTextExtractionResult:
     """Extract a PDF's text layer from bytes (multi-page). Async; never raises.
 

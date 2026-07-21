@@ -99,10 +99,12 @@ tags:
   stmt.period_start: {mode: parsed, subject: document, data: statement_period_start}
   stmt.period_end: {mode: parsed, subject: document, data: statement_period_end}
   stmt.account_masked: {mode: parsed, subject: document, data: account_number_masked}
-  # stmt.page_count_declared: NO extraction field exists (bank_statement.py has no 'Page X of Y') → this
-  # parses to ABSENT; AS-9 couldnt_checks. Declared so the gap is visible, not silent (bucket C).
-  # LP-369: EXEMPTED in the parsed-field guard (a known missing-extraction gap, not a typo; AS-9 dormant).
+  # LP-381 (AS-9): page counts now extract. page_count_declared = the PRINTED "of N" (bank_statement.py, a
+  # model read, null when the statement doesn't print it → AS-9 honestly couldnt_checks). page_count_present =
+  # the DETERMINISTIC actual page total (set from the PDF in the extractor, never a model read). AS-9 fires
+  # when declared > present (a page is missing). The LP-369 exemption for page_count_declared is REMOVED.
   stmt.page_count_declared: {mode: parsed, subject: document, data: page_count_declared}
+  stmt.page_count_present: {mode: parsed, subject: document, data: page_count_present}
   stmt.owner_matches_borrower: {mode: ai, subject: document, data: stmt_facts}
   stmt.is_reserve_eligible: {mode: ai, subject: document, data: stmt_facts}
   asset.liquidation_terms: {mode: ai, subject: document, data: asset_facts}

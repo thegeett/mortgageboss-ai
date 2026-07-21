@@ -238,12 +238,46 @@ def test_as3_and_as9_bucket_c_couldnt_check() -> None:
         evaluate_deterministic_rule(load_rule_spec("AS-3"), _snap())[0].verdict
         is Verdict.COULDNT_CHECK
     )
-    # AS-9: page-count tags never materialize (no extraction) → couldnt_check.
+    # AS-9: with NO page-count tags on the statement → couldnt_check (both gated). LP-381 makes the fields
+    # extractable; a statement that carries them resolves (test_as9_resolves_when_page_counts_present).
     docs = [_doc("bs", "bank_statement")]
     assert (
         evaluate_deterministic_rule(load_rule_spec("AS-9"), _snap(docs=docs))[0].verdict
         is Verdict.COULDNT_CHECK
     )
+
+
+def test_as9_resolves_when_page_counts_present() -> None:
+    # LP-381: the page-count tags now extract; given them, AS-9 reaches a REAL verdict (not couldnt_check).
+    docs = [_doc("bs", "bank_statement")]
+    # declared (printed "of 5") > present (3 actual pages) → a page is MISSING → fired.
+    fired = evaluate_deterministic_rule(
+        load_rule_spec("AS-9"),
+        _snap(
+            docs=docs,
+            by_subject={
+                "bs": {"stmt.page_count_declared": _tag(5), "stmt.page_count_present": _tag(3)}
+            },
+        ),
+    )[0]
+    assert fired.verdict is Verdict.FIRED
+    # declared == present → all pages present → satisfied.
+    ok = evaluate_deterministic_rule(
+        load_rule_spec("AS-9"),
+        _snap(
+            docs=docs,
+            by_subject={
+                "bs": {"stmt.page_count_declared": _tag(5), "stmt.page_count_present": _tag(5)}
+            },
+        ),
+    )[0]
+    assert ok.verdict is Verdict.SATISFIED
+    # only the deterministic present, no printed "of N" → still couldnt_check (the honest completeness gap).
+    no_decl = evaluate_deterministic_rule(
+        load_rule_spec("AS-9"),
+        _snap(docs=docs, by_subject={"bs": {"stmt.page_count_present": _tag(3)}}),
+    )[0]
+    assert no_decl.verdict is Verdict.COULDNT_CHECK
 
 
 # --------------------------------------------------------------------------- #

@@ -53,8 +53,8 @@ _KNOWN_UNPRODUCIBLE: dict[str, str] = {
     # stated income is MISMO-indexed (borrower.{n}.income.{m}.monthly_amount), not a document field —
     # it needs a DERIVED/borrower source (cf. dti.qualifying_income_monthly). IN-1 / DT-1 dormant.
     "income.stated_monthly": "stated income is MISMO-indexed, not a document field (needs a derived source)",
-    # no extractor emits a page count ('Page X of Y'); AS-9 dormant. A missing-extraction gap.
-    "stmt.page_count_declared": "no extraction model emits a page count",
+    # LP-381: stmt.page_count_declared / page_count_present are now emitted by bank_statement.py (the printed
+    # "of N" + the deterministic PDF page total) — the exemption is REMOVED (the field resolves for AS-9).
 }
 
 

@@ -36,6 +36,7 @@ from app.ai.extraction.parsing import (
     CoreSpec,
     coerce_date,
     coerce_decimal,
+    coerce_int,
     coerce_str,
     derive_status,
     parse_catch_all,
@@ -46,6 +47,7 @@ from app.ai.extraction.shape import CatchAllSection, SourceLocation, TypedField
 from app.ai.parsing import coerce_confidence, extract_json_object
 from app.ai.prompt_loader import load_prompt
 from app.models.extraction import ExtractionStatus
+from app.services.pdf_utils import pdf_page_count
 
 logger = structlog.get_logger(__name__)
 
@@ -93,6 +95,12 @@ class BankStatementExtraction(BaseModel):
     # --- Transactions (the structurally-new part, ADR-061) ------------------ #
     transactions: list[Transaction] = Field(default_factory=list)
 
+    # --- Page completeness (LP-381, AS-9) ----------------------------------- #
+    # page_count_declared: the "of N" the statement PRINTS ("Page 1 of 5") — a MODEL read (null if not printed).
+    # page_count_present: the DETERMINISTIC actual page total, set from the PDF post-extraction (NOT the model).
+    page_count_declared: TypedField[int] = Field(default_factory=TypedField)
+    page_count_present: TypedField[int] = Field(default_factory=TypedField)
+
     # --- Grouped catch-all — everything else -------------------------------- #
     additional_sections: list[CatchAllSection] = Field(default_factory=list)
 
@@ -130,6 +138,10 @@ _CORE_SPEC: CoreSpec = (
     ("ending_balance", coerce_decimal),
     ("total_deposits", coerce_decimal),
     ("total_withdrawals", coerce_decimal),
+    (
+        "page_count_declared",
+        coerce_int,
+    ),  # LP-381 — the printed "of N"; page_count_present is set separately
 )
 
 
@@ -235,6 +247,15 @@ async def extract_bank_statement(content: bytes, media_type: str) -> BankStateme
 
     result.input_tokens = call.input_tokens
     result.output_tokens = call.output_tokens
+
+    # LP-381 (AS-9): page_count_present is the DETERMINISTIC page total — computed from the PDF, never a model
+    # read (a model can miscount, and completeness must not be fabricated). Absent for non-PDF statements →
+    # AS-9 honestly couldnt_checks. page_count_declared (the printed "of N") is the model's job, above.
+    present = (
+        await pdf_page_count(content) if media_type.lower().strip() == "application/pdf" else None
+    )
+    if present is not None:
+        result.data.page_count_present = TypedField(value=present)
 
     # Metadata only: status, confidence, COUNTS — never values/account number/transactions.
     core_present = sum(1 for key, _ in _CORE_SPEC if getattr(result.data, key).value is not None)
