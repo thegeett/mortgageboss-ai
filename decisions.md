@@ -11325,3 +11325,45 @@ measurement) when the income wave activates it. Not corrected here — reclassif
 **Cross-refs.** LP-381/382/383 (the five stuck rules + their inputs), LP-389/ADR-306 (the eligibility gate this
 activates through), LP-379-B (the fixture growth that made AS-10 already-resolve), LP-323-AS-B (the §3B
 cash-to-close calculator AS-3 waits on), LP-333/369 (the field-name trap the added documents close).
+
+## ADR-309: IN-10/IN-11 re-scoped per-borrower — the sixth structural-dead instance; a direct read, no recipe (LP-390-1)
+
+**The bug (a sixth structural-dead instance — AS-1/ID-2/OC-2/ID-5/IN-12-class).** LP-385 moved the
+income_stability tags (`income.is_declining`, `income.has_2yr_history`) to `subject: borrower` — income trend
+is a cross-document question the AI answers over a borrower's income documents (LP-378 measured per-document at
+0/120). But IN-10 (`is_declining`) and IN-11 (`has_2yr_history`) still read them `per_document` at the W-2
+subject, where the borrower-subject tag never lives → **couldnt_check on every file, silently**, every test
+green. LP-385 flagged it as its own ticket; this is it.
+
+**The fix — a DIRECT read, simpler than ID-5 (no promotion recipe).** ID-5 (LP-389-A) needed a promotion
+recipe because its source tag was `subject: document` and had to be lifted to the borrower. Here the tag is
+ALREADY at the borrower subject (LP-385 put it there) — so the fix is a pure SPEC re-scope: IN-10/IN-11 become
+`subject_enumeration: per_borrower`, drop the `document.document_type == w2` applicability, and read the
+borrower-subject tag directly through the per_borrower enumerator's merged map (exactly how IN-1 reads its
+borrower-subject shortfall). No new code, no recipe, no producer change. Fail-closed (a borrower with no
+evidenced trend → the tag is absent/unknown → the gate couldnt_checks with a reason), per-borrower isolation
+(one borrower's trend never feeds another's — the LP-332 masking class).
+
+**Verified, still inert.** On the wired fixture with income_stability materialized, IN-10/IN-11 now reach REAL
+per-borrower verdicts (a declining borrower → FIRED; a stable one → SATISFIED; unknown → couldnt_check-with-a-
+reason) — the rule can now DISTINGUISH, where before it always couldnt_checked-because-empty. They stay INERT
+(`ACTIVE_RULE_IDS` unchanged): the tags are AI and UNSCORED, so their bars are `not-calibratable-yet` — held
+on CALIBRATION now (the income wave), not on the subject mismatch. The bar rationales are updated to record the
+mismatch resolved.
+
+**A reported additional instance (deferred, by scope).** IN-12 reads the SAME `income.has_2yr_history`
+(borrower subject) `per_document` at the tax-return subject — the identical latent mismatch. It is out of this
+ticket's scope (LP-390-2 audits the other income rules); reported here and in the ticket doc, its fiction test
+left in place (still hand-placing the tag) until LP-390-2. IN-13 already reads its borrower-subject tag
+per_borrower (correct).
+
+**The fiction-asserting tests rewritten (LP-321a).** IN-10/IN-11's tests hand-placed the tag at the W-2/tax-
+return DOCUMENT subject and asserted FIRED — green only because they wired the tag where the rule wrongly read
+it. Rewritten to the true per-borrower path (the tag at `by_subject[borrower_id]`, a `belongs_to` document so
+the enumerator yields the borrower), plus a test that the same tag at the DOCUMENT subject now couldnt_checks
+(proving the rule no longer reads there) and per-borrower isolation.
+
+**Cross-refs.** LP-385 (moved the tags to the borrower subject — the producer this consumes), LP-389-A/ADR-307
+(the per-borrower fix pattern; ID-5 needed a recipe, this does not), LP-321a (fiction-asserting tests),
+LP-332/LP-202 (borrower attribution), LP-378 (the 0/120 that proved per-document can't answer income trend),
+LP-390-2 (the audit of the remaining income rules — IN-12 confirmed as the same class here).

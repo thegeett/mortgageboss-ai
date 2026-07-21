@@ -256,11 +256,16 @@ def test_in8_voe_scope_and_expected_absence() -> None:
     assert any(v.verdict is Verdict.COULDNT_CHECK for v in only_pay)
 
 
-def test_in10_declining_scoped_to_w2() -> None:
-    docs = [_doc("w2", dtype="w2")]
+def test_in10_declining_read_per_borrower() -> None:
+    # LP-390-1: IN-10 reads income.is_declining at the BORROWER subject (where income_stability produces it,
+    # LP-385), NOT the W-2 document. A document belongs_to the borrower so the per_borrower enumerator yields
+    # them; the tag hand-placed at a document subject would NOT be read (the pre-fix fiction).
     fired = evaluate_deterministic_rule(
         load_rule_spec("IN-10"),
-        _snap(docs=docs, by_subject={"w2": {"income.is_declining": _tag("yes")}}),
+        _snap(
+            docs=[_doc("d", borrower=_B1)],
+            by_subject={str(_B1): {"income.is_declining": _tag("yes")}},
+        ),
     )
     assert fired[0].verdict is Verdict.FIRED
 

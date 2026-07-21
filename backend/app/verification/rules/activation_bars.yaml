@@ -177,8 +177,9 @@ IN-10:
   load_bearing_ai_tags: [income.is_declining]
   fp_fn: "FN (uses declining income at face value) >> FP"
   rationale: >-
-    is_declining PRODUCED per-borrower (LP-385) but UNSCORED. NB: IN-10 reads it per-DOCUMENT (LP-385's
-    reported IN-10/IN-11 spec gap) — a producer/consumer mismatch to resolve before calibration.
+    is_declining PRODUCED per-borrower (LP-385) but UNSCORED. The per-DOCUMENT consumer mismatch (LP-385's
+    reported gap) is FIXED — LP-390-1 re-scoped IN-10 to per_borrower, so the tag now REACHES the rule.
+    Blocked purely on calibration now (the income wave scores is_declining, then this may go live).
 
 IN-11:
   status: not-calibratable-yet
@@ -188,8 +189,9 @@ IN-11:
   load_bearing_ai_tags: [income.has_2yr_history]
   fp_fn: "FN (qualifies variable income without the required history) >> FP"
   rationale: >-
-    has_2yr_history PRODUCED per-borrower (LP-385) but UNSCORED; IN-11 reads it per-DOCUMENT (the LP-385 gap).
-    Blocked on calibration.
+    has_2yr_history PRODUCED per-borrower (LP-385) but UNSCORED. The per-DOCUMENT consumer mismatch (the
+    LP-385 gap) is FIXED — LP-390-1 re-scoped IN-11 to per_borrower, so the tag now REACHES the rule.
+    Blocked purely on calibration now (also the pinned over-fire on non-variable income — a separate ticket).
 
 IN-12:
   status: not-calibratable-yet

@@ -312,7 +312,10 @@ async def test_in5_full() -> None:
 
 
 # ================================================================================================= #
-# IN-8 / IN-9 / IN-10 / IN-11 / IN-12 — per_document deterministic with applicability
+# IN-8 / IN-9 / IN-12 — per_document deterministic with applicability. (IN-10/IN-11 MOVED to per_borrower
+# by LP-390-1 — they read income.is_declining / has_2yr_history, which LP-385 produces at the BORROWER
+# subject; see _det_borrower + the per-borrower section below. IN-12 reads has_2yr_history per_document too
+# — the SAME latent mismatch, deferred to LP-390-2 by scope; its test still hand-places the tag.)
 # ================================================================================================= #
 def _det_doc(rule_id: str, docs_tags: dict[str, tuple[str, dict[str, Tag]]]):
     """docs_tags = {content_id: (document_type, {tag_id: Tag})}."""
@@ -320,6 +323,17 @@ def _det_doc(rule_id: str, docs_tags: dict[str, tuple[str, dict[str, Tag]]]):
     by_subject = {cid: tags for cid, (_, tags) in docs_tags.items() if tags}
     return evaluate_deterministic_rule(
         load_rule_spec(rule_id), _snap(docs=docs, by_subject=by_subject)
+    )
+
+
+def _det_borrower(rule_id: str, borrower_tags: dict[str, Tag], *, borrower=_B1):
+    """LP-390-1 — a per-BORROWER deterministic read: the tag lives under by_subject[borrower_id] (where the
+    income_stability producer puts it, LP-385), with a document belongs_to that borrower so the per_borrower
+    enumerator yields it. The TRUE path — NOT hand-placing a borrower-subject tag at the document subject
+    (the fiction IN-10/IN-11 passed under before LP-390-1)."""
+    docs = [_doc("d", borrower=borrower)]
+    return evaluate_deterministic_rule(
+        load_rule_spec(rule_id), _snap(docs=docs, by_subject={str(borrower): borrower_tags})
     )
 
 
@@ -359,40 +373,82 @@ def test_in9_offer_letter_scope_and_fire() -> None:
     assert na[0].verdict is Verdict.NOT_APPLICABLE  # not expected — offer letters are the exception
 
 
+# ================================================================================================= #
+# IN-10 / IN-11 — PER BORROWER (LP-390-1). Read at the borrower subject through the TRUE path (was read
+# per_document, where LP-385's borrower-subject tag never lives → couldnt_check on every file, the sixth
+# structural-dead instance). Still INERT (AI-uncalibrated) — the income wave activates them.
+# ================================================================================================= #
 def test_in10_declining_fires_and_low_confidence_needs_review() -> None:
-    fire = _det_doc("IN-10", {"w2": ("w2", {"income.is_declining": _tag("yes")})})
-    assert (
-        fire[0].verdict is Verdict.FIRED and fire[0].reasoning
-    )  # 1 + 9 + 13 (fires on the decline)
-    clean = _det_doc("IN-10", {"w2": ("w2", {"income.is_declining": _tag("no")})})
+    fire = _det_borrower("IN-10", {"income.is_declining": _tag("yes")})
+    assert fire[0].verdict is Verdict.FIRED and fire[0].reasoning  # fires on the decline
+    clean = _det_borrower("IN-10", {"income.is_declining": _tag("no")})
     assert clean[0].verdict is Verdict.SATISFIED
-    # case 7 low-confidence AI tag → needs_review (an AI enum, unlike the derived rules).
-    low = _det_doc("IN-10", {"w2": ("w2", {"income.is_declining": _tag("yes", conf=0.2)})})
+    # low-confidence AI tag → needs_review (an AI enum, unlike the derived rules).
+    low = _det_borrower("IN-10", {"income.is_declining": _tag("yes", conf=0.2)})
     assert low[0].verdict is Verdict.NEEDS_REVIEW
-    # case 6 unknown value → couldnt_check (distinct at the gate).
-    unk = _det_doc("IN-10", {"w2": ("w2", {"income.is_declining": _tag("unknown")})})
+    # unknown value → couldnt_check WITH A REASON (distinct at the gate) — never a guessed verdict.
+    unk = _det_borrower("IN-10", {"income.is_declining": _tag("unknown")})
     assert unk[0].verdict is Verdict.COULDNT_CHECK and "could not be read" in unk[0].reasoning
 
 
+def test_in10_11_read_the_borrower_subject_not_the_document() -> None:
+    # THE FIX (LP-390-1): the tag placed at the DOCUMENT subject is NOT read (the pre-fix fiction). Placed at
+    # the BORROWER subject, it IS. A document with belongs_to but the tag hand-placed on the DOCUMENT →
+    # couldnt_check (the borrower's tag is absent), proving the rule no longer reads the document subject.
+    at_document = _det_doc("IN-10", {"w2": ("w2", {"income.is_declining": _tag("yes")})})
+    assert at_document[0].verdict is Verdict.COULDNT_CHECK  # the borrower-subject tag is absent
+    at_borrower = _det_borrower("IN-10", {"income.is_declining": _tag("yes")})
+    assert at_borrower[0].verdict is Verdict.FIRED  # read at the subject the tag actually lives on
+
+
+def test_in10_11_per_borrower_isolation() -> None:
+    # B1 declining, B2 not — each judged on their OWN tag; borrower A's trend never feeds borrower B's
+    # (the LP-332 masking class). Both borrowers enumerate (each has a document); one verdict each.
+    docs = [_doc("d1", borrower=_B1), _doc("d2", borrower=_B2)]
+    by_subject = {
+        str(_B1): {"income.is_declining": _tag("yes")},
+        str(_B2): {"income.is_declining": _tag("no")},
+    }
+    verdicts = {
+        str(r.subject_id): r.verdict
+        for r in evaluate_deterministic_rule(
+            load_rule_spec("IN-10"), _snap(docs=docs, by_subject=by_subject)
+        )
+    }
+    assert verdicts[str(_B1)] is Verdict.FIRED  # B1's own declining trend
+    assert verdicts[str(_B2)] is Verdict.SATISFIED  # B2's own stable trend — not masked, not leaked
+
+
 # ================================================================================================= #
-# PIN #2 — IN-11 OVER-FIRES on non-variable income (no set-membership operand)
+# PIN #2 — IN-11 OVER-FIRES on non-variable income (no set-membership operand) — now PER BORROWER
 # ================================================================================================= #
 def test_pin2_in11_overfires_on_salaried_income() -> None:
-    # Salaried W-2 income with <2yr history (a new base-pay job) → IN-11 FIRES, which is WRONG: the 2-year
-    # rule is for VARIABLE income (bonus/overtime/commission). IN-11 reads income.has_2yr_history with no
-    # filter on income.type because the operand algebra has no set-membership. PINNED (a separate ticket:
-    # a set-membership operand or an IN-11 judgment reframe).
-    # Even with income.type EXPLICITLY salary, IN-11 still fires — proving it has no income.type filter
-    # (the over-fire root cause), not just that a type-less fixture happens to fire.
-    salaried = _det_doc(
-        "IN-11",
-        {"w2": ("w2", {"income.has_2yr_history": _tag("no"), "income.type": _tag("salary")})},
+    # Salaried income with <2yr history (a new base-pay job) → IN-11 FIRES, which is WRONG: the 2-year rule
+    # is for VARIABLE income (bonus/overtime/commission). IN-11 reads income.has_2yr_history with no filter
+    # on income.type (no set-membership operand). PINNED (a separate ticket). Even with income.type EXPLICITLY
+    # salary, IN-11 still fires — proving it has no income.type filter, read per-borrower (LP-390-1).
+    salaried = _det_borrower(
+        "IN-11", {"income.has_2yr_history": _tag("no"), "income.type": _tag("salary")}
     )
     assert (
         salaried[0].verdict is Verdict.FIRED
     )  # WRONG for salaried base pay — the pinned over-fire
-    # A variable-income case (bonus/overtime/commission) is the TRUE positive IN-11 exists for — but
-    # the rule reads only has_2yr_history, so it cannot tell the two apart (the pinned limitation).
+    # a 2-year history present → satisfied (the true-negative path).
+    assert (
+        _det_borrower("IN-11", {"income.has_2yr_history": _tag("yes")})[0].verdict
+        is Verdict.SATISFIED
+    )
+
+
+def test_in10_11_inert_but_now_reach_the_rule() -> None:
+    # LP-390-1 does NOT activate: IN-10/IN-11 stay inert (AI-uncalibrated; the income wave calibrates them).
+    # But the input now REACHES the rule (per-borrower), so they are calibratable — no longer structurally
+    # dead. (Their bars are AI, not-calibratable-yet — the gate holds them on calibration, not the mismatch.)
+    from app.verification.rule_engine.registry import ACTIVE_RULE_IDS
+
+    assert "IN-10" not in ACTIVE_RULE_IDS and "IN-11" not in ACTIVE_RULE_IDS
+    for rid in ("IN-10", "IN-11"):
+        assert load_rule_spec(rid).subject_enumeration == "per_borrower"
 
 
 # ================================================================================================= #

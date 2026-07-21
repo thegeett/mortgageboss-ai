@@ -6,17 +6,18 @@ numeric_check: true
 criteria: >-
   Variable income (bonus, overtime, commission) may be used only with an adequate history (generally 2
   years) and must be averaged, not annualized from a peak. This rule flags variable income lacking a
-  2-year history. NOTE (LP-323-IN-B): the CSV marks this calculative; a FAITHFUL implementation needs
-  operand set-membership (fire only for the VARIABLE income types) or a judgment reframe — the current
-  spec fires on any income lacking a 2-year history scoped to W-2/paystub docs (an OVER-FIRE limitation
-  reported in the doc; NOT resolved by editing the CSV).
+  2-year history. Evaluated PER BORROWER (LP-390-1): a 2-year history is a cross-document question the AI
+  answers over that borrower's income documents (LP-385), read at the borrower subject — NOT per document.
+  NOTE (LP-323-IN-B): the CSV marks this calculative; a FAITHFUL implementation needs operand set-membership
+  (fire only for the VARIABLE income types) or a judgment reframe — the current spec fires on any income
+  lacking a 2-year history (an OVER-FIRE limitation reported in the doc; NOT resolved here or by editing the CSV).
 applicability:
-  scope: the loan file's income documents
-  trigger: once per income document, on the income history
+  scope: each borrower's income history
+  trigger: once per borrower, on the income history
 required_inputs:
   - name: has_2yr_history
-    snapshot_path: tags.by_subject[<content_id>]["income.has_2yr_history"]
-    description: whether a 2-year history of this income is evidenced (yes/no/unknown)
+    snapshot_path: tags.by_subject[<borrower_id>]["income.has_2yr_history"]
+    description: whether a 2-year history of the borrower's income is evidenced (yes/no/unknown; per-borrower)
 reference_values:
   priya_validated: false
   threshold_needs_signoff: true
@@ -24,17 +25,16 @@ reference_values:
   guideline_text: >-
     Fannie Mae Selling Guide B3-3.1-01 — variable income requires a 2-year history and is AVERAGED (24
     months, or 12 if trending up). The averaging trigger is Priya-validated (pending confirmation).
-subject_enumeration: per_document
+subject_enumeration: per_borrower
 subject_key_fields:
-  - content_id
-evidence_required: whether the variable income has an adequate (2-year) history
+  - borrower
+evidence_required: whether the borrower's variable income has an adequate (2-year) history
 guideline_reference: "Fannie Mae Selling Guide B3-3.1-01 (variable income history/averaging)."
 spec_version: 1
 deterministic:
-  applicability:
-    tag: document.document_type
-    op: eq
-    value: w2
+  # LP-390-1: no document-type applicability — the rule enumerates per BORROWER and reads that borrower's
+  # income.has_2yr_history (produced at the borrower subject by income_stability, LP-385). A borrower whose
+  # documents cannot establish the history → the tag is absent/unknown → the fail-closed gate couldnt_checks.
   load_bearing_tags:
     - income.has_2yr_history
   gated_tags:
