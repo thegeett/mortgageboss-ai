@@ -135,3 +135,29 @@ def test_no_ai_rule_eligibility_requires_input_resolves() -> None:
         },
     )
     assert not is_eligible(held)
+
+
+def test_active_rules_upstream_ai_groups_are_actually_materialized() -> None:
+    # LP-389 review guard: an activated rule whose DERIVED load-bearing tag rests on an AI tag (IN-1's
+    # income.documented_income_shortfall_pct rests on income.documented_monthly) needs that AI group folded
+    # into _required_ai_groups — else the group never runs, the derived tag is absent, and the rule
+    # couldnt_checks FOREVER, silently. Pin that every ACTIVE candidate rule's bar AI tags resolve to a group
+    # _required_ai_groups actually runs, so a regression that drops the LP-389 fold-in fails loudly here.
+    # (The DEEPER guarantee — that a bar's list is COMPLETE vs. the recipe's real AI deps — is LP-384's
+    # declared recipe dependencies; this pins the wiring that exists.)
+    from app.services.verification_run import _required_ai_groups
+    from app.verification.tag_materialization.declarations import ProductionMode, load_declarations
+
+    decls = load_declarations()
+    required = _required_ai_groups()
+    active = set(ACTIVE_RULE_IDS)
+    for rule_id, bar in load_activation_bars().items():
+        if rule_id not in active:
+            continue
+        for tag_id in bar.load_bearing_ai_tags:
+            decl = decls.get(tag_id)
+            if decl is not None and decl.mode is ProductionMode.AI:
+                assert decl.data in required, (
+                    f"{rule_id}: bar AI tag {tag_id} -> group {decl.data!r} is NOT in "
+                    f"_required_ai_groups (the LP-389 fold-in regressed -> the rule couldnt_checks forever)"
+                )
