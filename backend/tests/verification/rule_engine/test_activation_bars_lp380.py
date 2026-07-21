@@ -80,12 +80,14 @@ def test_loader_rejects_a_threshold_on_a_non_calibratable_rule() -> None:
         )
 
 
-def test_loader_rejects_validated_true() -> None:
-    with pytest.raises(ActivationBarError, match="validated must be false"):
+def test_loader_rejects_validating_a_non_calibratable_rule() -> None:
+    # Priya can sign off a bar, but NOT on a rule blocked on calibration — that would sign off a tag nobody
+    # measured. Only calibratable-now may be validated.
+    with pytest.raises(ActivationBarError, match="only a calibratable-now rule may be validated"):
         ab.parse_bar(
             "AS-2",
             {
-                "status": "no-ai-dependency",
+                "status": "not-calibratable-yet",
                 "ships": "auto",
                 "threshold": None,
                 "validated": True,
@@ -94,11 +96,31 @@ def test_loader_rejects_validated_true() -> None:
         )
 
 
+def test_loader_rejects_non_bool_validated() -> None:
+    with pytest.raises(ActivationBarError, match="validated must be a boolean"):
+        ab.parse_bar(
+            "AS-2",
+            {
+                "status": "no-ai-dependency",
+                "ships": "auto",
+                "threshold": None,
+                "validated": "yes",
+                "rationale": "x",
+            },
+        )
+
+
 # --------------------------------------------------------------------------- #
-# validated=false everywhere — Priya's sign-off flips it, not this ticket
+# Priya's sign-off — exactly IN-1 and IN-5 are validated; all others stay false
 # --------------------------------------------------------------------------- #
-def test_every_bar_is_unvalidated() -> None:
-    assert all(b.validated is False for b in load_activation_bars().values())
+def test_exactly_in1_in5_are_validated_per_priya() -> None:
+    bars = load_activation_bars()
+    validated = {rid for rid, b in bars.items() if b.validated}
+    assert validated == {"IN-1", "IN-5"}  # Priya's two sign-offs, no more
+    assert all(b.validated is False for rid, b in bars.items() if rid not in validated)
+    # a validated bar is still calibratable-now with a real threshold (never a blocked rule)
+    for rid in ("IN-1", "IN-5"):
+        assert bars[rid].status == "calibratable-now" and bars[rid].threshold is not None
 
 
 def test_thresholds_exist_only_where_calibratable() -> None:

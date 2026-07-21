@@ -37,8 +37,9 @@ class ActivationBarError(ValueError):
 
 @dataclass(frozen=True)
 class ActivationBar:
-    """One inert rule's PROPOSED activation bar (Priya confirms). ``threshold`` is set only for
-    ``calibratable-now``; ``validated`` is always false here."""
+    """One inert rule's activation bar. ``threshold`` is set only for ``calibratable-now``; ``validated`` is
+    Priya's sign-off — False by default, True on the bars she has confirmed (IN-1/IN-5). Validating a bar does
+    NOT activate the rule (that is LP-389); it records that the height is domain-approved."""
 
     rule_id: str
     status: str
@@ -88,15 +89,23 @@ def parse_bar(rule_id: str, body: object) -> ActivationBar:
         raise ActivationBarError(f"{rule_id}: unknown status {status!r}")
     if ships not in _SHIPS:
         raise ActivationBarError(f"{rule_id}: ships must be auto|ratify, got {ships!r}")
-    if validated is not False:
+    # ``validated`` is Priya's sign-off (LP-380 flipped none; her sign-offs flip specific bars, e.g. IN-1/IN-5).
+    # It must be an explicit bool, and only a calibratable-now rule with a real threshold may be validated —
+    # a rule blocked on calibration can never be signed off as live-able.
+    if not isinstance(validated, bool):
         raise ActivationBarError(
-            f"{rule_id}: validated must be false — Priya's sign-off flips it, never this file"
+            f"{rule_id}: validated must be a boolean (true = Priya-confirmed), got {validated!r}"
         )
     if status == "calibratable-now":
         if not isinstance(threshold, int | float) or not (0.0 <= float(threshold) <= 1.0):
             raise ActivationBarError(
                 f"{rule_id}: calibratable-now needs a proposed threshold in [0,1], got {threshold!r}"
             )
+    elif validated:
+        raise ActivationBarError(
+            f"{rule_id}: only a calibratable-now rule may be validated (status={status}) — a rule blocked "
+            f"on calibration cannot be signed off as live-able"
+        )
     elif threshold is not None:
         raise ActivationBarError(
             f"{rule_id}: threshold must be null unless calibratable-now (status={status}) — an "
@@ -115,7 +124,7 @@ def parse_bar(rule_id: str, body: object) -> ActivationBar:
         status=status,
         ships=ships,
         threshold=float(threshold) if threshold is not None else None,
-        validated=False,
+        validated=validated,
         load_bearing_ai_tags=tuple(str(t) for t in tags),
         fp_fn=str(body.get("fp_fn", "")).strip(),
         rationale=rationale,

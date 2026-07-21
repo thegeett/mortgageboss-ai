@@ -18,8 +18,9 @@
 #             rule NEVER auto-ships, a human ratifies); structural/calculative → auto.
 #   threshold — the PROPOSED default bar in [0,1], or null when no bar can apply (any status but
 #               calibratable-now). A DEFAULT flagged for Priya, never a decision.
-#   validated — ALWAYS false here. Priya's sign-off flips it (the LP-379 priya_validated pattern). This ticket
-#               flips none.
+#   validated — False by default (proposed). Priya's sign-off flips it (the LP-379 priya_validated pattern).
+#               CONFIRMED by Priya: IN-1 (0.98, auto) and IN-5 (0.95, auto). All others remain false. Only a
+#               calibratable-now rule may be validated — a blocked rule cannot be signed off as live-able.
 #   load_bearing_ai_tags — the AI tags whose accuracy gates the rule (direct, or a noted derived upstream).
 #   fp_fn   — the false-positive-vs-false-negative asymmetry (Priya's to confirm) — what sets the bar height.
 #   rationale — why this default, from ships + fp_fn + the measured numbers.
@@ -33,7 +34,7 @@ IN-1:
   status: calibratable-now
   ships: auto
   threshold: 0.98
-  validated: false
+  validated: true
   load_bearing_ai_tags: [income.documented_monthly]   # via the derived income.documented_income_shortfall_pct
   fp_fn: "FN (misses an income overstatement -> a bad loan ships) >> FP (a false variance -> a human glances)"
   rationale: >-
@@ -45,7 +46,7 @@ IN-5:
   status: calibratable-now
   ships: auto
   threshold: 0.95
-  validated: false
+  validated: true
   load_bearing_ai_tags: [income.employer_normalized]
   fp_fn: "FP (a false employer-mismatch flag -> a human compares two names) > FN, but both low stakes"
   rationale: >-
