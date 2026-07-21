@@ -83,7 +83,66 @@ THEN — Waves 4-10
 DTI · Title · Insurance · Condo · small families (~3 tickets each)
 Blocker extractors (credit report, DU/AUS, appraisal) + golden-file evals → Credit · Property
 
+===============================
 
+
+1. The income wave — what's actually in it
+   It's both coding and Priya, in a specific order. The coding comes first, then her, then more coding.
+   The work, in sequence:
+
+Coding — the ~14 income/asset rules mostly exist (they're inert). But calibration revealed gaps: IN-10/IN-11 read per-document but the producer is per-borrower (a spec fix); IN-3 is misclassified; some tags aren't wired to their consumers. That's engineering, no Priya.
+The worksheet + Priya — she labels the income tags that feed those rules (has_2yr_history, is_declining, same_line_of_work, continuance_3yr, has_identified_source, the widened apparent_category). That's her session — the thing you did a slice of with the 122 labels. Yes, you fill the sheet with her.
+Coding again — calibrate against her labels, set activation bars (she signs off), activate the rules that clear their bar.
+
+So: ~40% coding, ~20% her time, ~40% coding. Her part is a few labeling sessions, not continuous. And it's gated on her availability — which is exactly why I'd run it as a background lane, not a blocker.
+What it unlocks: ~14 rules (IN-3, IN-7, IN-10, IN-11, IN-12, IN-13, AS-2, AS-4, AS-5, AS-6, AS-7, AS-11, AS-12) — the judgment-heavy income and asset checks. High value, because these are the real underwriting rules (bonus continuance, reserve eligibility, gift sourcing).
+2. The deterministic waves — what's in them, how many rules
+   "Deterministic wave" = a category dominated by structural/calculative rules (presence, count, match, arithmetic) that need little or no AI calibration — so they activate fast, like the 5 you just cleared. No Priya labeling.
+   Your remaining categories, roughly:
+   wavemostlyest. rulesAI-heavy?DTIcalculative (ratios, limits)~8-10Low — mostly arithmetic on parsed fieldsTitlestructural (presence, warrantable-condo)~8-12Low — presence/match checksInsurance/Hazardstructural + calculative~6-8Low-mediumCondostructural (warrantable vs non-warrantable)~6-10Medium — some questionnaire readingCreditmixed~10-15Blocked — needs the credit-report extractorProperty/Appraisalmixed~10-15Blocked — needs the appraisal extractor
+   DTI and Title are your fastest wins — mostly deterministic, no calibration, activate like the 5 you just did. Each wave is ~3 tickets and lights up 8-12 rules. DTI + Title alone ≈ 20 rules, mostly without Priya.
+   Credit and Property are the hard ones — they need the blocker-document extractors (credit report, DU/AUS, appraisal are PDF-only, no structured feed) and golden-file evals, because there's no independent source-of-truth to cross-check. Those are later, and they're genuinely harder.
+3. High-level plan to all 130
+   Here's the whole arc, in the order that maximizes coverage-per-effort:
+   Phase A — Finish the cheap deterministic wins (now)
+   Two lanes in parallel:
+
+Engineering lane: DTI wave → Title wave. ~6 tickets, ~20 rules, mostly no Priya. This is your momentum.
+Priya lane (background): income-wave labeling whenever she's free → calibrate → activate. ~14 rules. Runs alongside, doesn't block engineering.
+
+End of Phase A: ~17 → ~50 rules (~40%).
+Phase B — The remaining structural waves
+
+Insurance/Hazard, Condo. ~6 tickets, ~15 rules. Condo needs the warrantable-vs-non-warrantable logic (some AI). Still mostly deterministic.
+
+End of Phase B: ~50 → ~65 rules (~50%).
+Phase C — The blocker extractors (the hard infrastructure)
+This is the big one, and it's what stands between you and the last ~40 rules:
+
+Build the credit-report extractor (nested tradelines, scores, inquiries)
+Build the DU/AUS findings extractor
+Build the appraisal extractor (UAD 2.6 + 3.6 layouts)
+Build LP-143 golden-file evals alongside each — because these have no independent source-of-truth, so silent misreads have nothing to catch them. This is where the eval infrastructure matters most.
+Build the §3B cash-to-close calculator (unblocks AS-3 and DTI depth)
+
+This phase is mostly extractor + eval engineering, not rules. It's the foundation the last waves stand on.
+End of Phase C: infrastructure done, ~65 rules still.
+Phase D — Credit + Property waves
+
+With extractors live, write and activate the Credit and Property/Appraisal rules. ~25-30 rules.
+
+End of Phase D: ~65 → ~130 (~100%).
+The honest shape of it
+
+Phases A-B (structural waves): the bulk of the rule count, moves fast, low risk. ~50% of rules, maybe ~30% of the effort.
+Phase C (extractors + evals): the smallest rule count but the biggest, riskiest engineering — the blocker documents with no cross-check. ~10% of rules, ~40% of the effort.
+Phase D (Credit/Property): rides on Phase C. Fast once the extractors exist.
+
+The critical insight: the last ~40 rules (Credit, Property) are gated on infrastructure you haven't built (extractors + evals), not on writing rules. So the plan isn't linear — it's "harvest the cheap structural rules now, then build the hard extractor infrastructure, then harvest the rest."
+
+
+
+===============================
 
 EPIC: LP-390 — Income Wave: Calibrate & Activate the Income/Asset Judgment Rules
 Goal: Take the ~14 inert income/asset judgment rules (IN-3, IN-7, IN-10, IN-11, IN-12, IN-13, AS-2, AS-4, AS-5, AS-6, AS-7, AS-11, AS-12) from inert → calibrated → live, without shipping an uncalibrated AI tag into a trusted verdict.
