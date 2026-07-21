@@ -11287,3 +11287,41 @@ zero-document gap would need a MISMO-borrower-driven rule enumerator — a separ
 document→borrower shape reused), LP-321a (fiction-asserting tests), LP-332/LP-202 (borrower attribution /
 `belongs_to`), LP-328 (the `date` typed operand + `loan_tag` operand ID-5 uses), LP-374 (`housing.insurance_monthly`,
 the document→loan promotion precedent).
+
+## ADR-308: A frozen base fixture + an extended sibling; the second activation pass; IN-3's misclassification (LP-384)
+
+**The problem.** Five no-AI deterministic rules (AS-9, IN-4, AS-3, AS-10, IN-3) resolved `unknown` because
+LF-6T3N lacked the documents they read — not because they are broken (LP-381/382/383 established the pattern).
+LP-384 adds those documents, proves each rule's verdict, and activates what passes the eligibility gate.
+
+**Decision 1 — a frozen base + an extended sibling, not a mutated base.** `build_lf6t3n_snapshot` is consumed
+by many frozen tests (worksheet / eval traces that assert its exact 30-document shape). Mutating it to add
+documents would break those consumers for reasons unrelated to what they test. So LP-384 adds a SIBLING
+`build_lf6t3n_plus()` = the base snapshot + exactly three appended documents, each carrying a KNOWN, asserted
+answer (the fixture has asserted a fiction five times — LP-321a/337/365/379-A/ID-5 — so every addition is
+built to a provable catch, never "it resolved"):
+* two VOEs with a DELIBERATE 77-day employment gap → **IN-4 FIRES** (beyond the 30-day window); a no-gap
+  variant satisfies.
+* one bank statement declaring "Page 1 of 5" with only 4 present → **AS-9 FIRES** ("a page is missing"); a
+  complete statement satisfies. It joins an EXISTING account + month, so **AS-10 is undisturbed** (this
+  document exercises AS-9 only).
+The base is byte-identical; the extension only appends (a test pins that no existing document's tags change).
+
+**Decision 2 — activate the three that resolve; the gate admits them.** AS-9, IN-4, and AS-10 pass the
+eligibility gate (`input_resolves` flips true, verified on the fixture), so they enter `ACTIVE_RULE_IDS` via the
+declared gate (not a hand-list): **14 → 17**. AS-10 needed no fixture change — it ALREADY resolves on the base
+(the statements grew account identity + period dates as the fixture matured; LP-381's "input absent" went
+stale). AS-3 stays HELD, fail-closed: its `calc.cash_to_close` recipe is a stub with no §3B cash-to-close
+calculator (LP-383) — data cannot unblock it.
+
+**Decision 3 (reported, not fixed) — IN-3 is misclassified as no-AI.** IN-3's load-bearing tag is the derived
+`income.ytd_annualized_shortfall_pct`, but that recipe reads `income.documented_monthly` (AI, income_amounts)
+alongside the parsed ytd_gross/pay_date. So IN-3 has a TRANSITIVE AI dependency — the same shape as IN-1 — and
+cannot resolve from fixture documents alone (it abstains on "documented monthly income is absent"). Its
+`no-ai-dependency` bar is wrong; it is an income-wave rule. LP-384 holds it (fail-closed) and its bar's
+rationale now records the misclassification, to be reclassified (calibratable, via documented_monthly's 100%
+measurement) when the income wave activates it. Not corrected here — reclassification is that wave's Priya call.
+
+**Cross-refs.** LP-381/382/383 (the five stuck rules + their inputs), LP-389/ADR-306 (the eligibility gate this
+activates through), LP-379-B (the fixture growth that made AS-10 already-resolve), LP-323-AS-B (the §3B
+cash-to-close calculator AS-3 waits on), LP-333/369 (the field-name trap the added documents close).

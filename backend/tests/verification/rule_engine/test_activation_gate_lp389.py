@@ -28,7 +28,8 @@ from app.verification.rule_engine.activation_bars import (
 )
 from app.verification.rule_engine.registry import _BASE_ACTIVE, ACTIVE_RULE_IDS
 
-_ACTIVATED = frozenset({"IN-1", "IN-5", "ID-5"})  # LP-389 activated IN-1/IN-5; LP-389-A added ID-5
+# LP-389 activated IN-1/IN-5; LP-389-A added ID-5; LP-384 added AS-9/IN-4/AS-10 (the stuck deterministic rules).
+_ACTIVATED = frozenset({"IN-1", "IN-5", "ID-5", "AS-9", "IN-4", "AS-10"})
 
 
 def _specs() -> set[str]:
@@ -36,20 +37,19 @@ def _specs() -> set[str]:
 
 
 # --------------------------------------------------------------------------- #
-# THE GATE — exactly three candidates pass, the other twenty are held
+# THE GATE — exactly the eligible candidates pass, the rest are held
 # --------------------------------------------------------------------------- #
-def test_exactly_three_candidates_are_eligible() -> None:
+def test_exactly_the_eligible_candidates_pass() -> None:
     bars = load_activation_bars()
     eligible = {rid for rid, bar in bars.items() if is_eligible(bar)}
     held = set(bars) - eligible
-    assert eligible == set(
-        _ACTIVATED
-    )  # IN-1/IN-5 (AI, validated, measured >= bar) + ID-5 (no-AI, resolves)
-    assert len(held) == 20 and not (held & _ACTIVATED)  # every other candidate is held
+    # IN-1/IN-5 (AI, validated, measured >= bar); ID-5 + AS-9/IN-4/AS-10 (no-AI, input resolves).
+    assert eligible == set(_ACTIVATED)
+    assert len(held) == 17 and not (held & _ACTIVATED)  # every other candidate is held
 
 
 def test_eligible_rule_ids_is_sorted_and_matches() -> None:
-    assert eligible_rule_ids() == ("ID-5", "IN-1", "IN-5")  # sorted, the three activated
+    assert eligible_rule_ids() == ("AS-10", "AS-9", "ID-5", "IN-1", "IN-4", "IN-5")  # sorted
 
 
 def test_id5_now_passes_after_the_subject_fix() -> None:
@@ -66,10 +66,10 @@ def test_the_held_rules_each_fail_for_a_named_reason() -> None:
     assert not is_eligible(bars["AS-2"]) and bars["AS-2"].status == "not-calibratable-yet"
     # a needs-producer rule: the tag doesn't even materialize → held
     assert not is_eligible(bars["IN-14"]) and bars["IN-14"].status == "needs-producer"
-    # a no-ai-dependency rule whose input does NOT resolve on LF-6T3N (no VOE dates) → held (data absence,
-    # distinct from ID-5 which LP-389-A fixed and activated)
-    assert not is_eligible(bars["IN-4"]) and bars["IN-4"].status == "no-ai-dependency"
-    assert not bars["IN-4"].input_resolves
+    # AS-3 — no-ai but its recipe is a STUB (no §3B cash-to-close calculator): the input never resolves → held
+    assert not is_eligible(bars["AS-3"]) and not bars["AS-3"].input_resolves
+    # IN-3 — labelled no-ai but its recipe reads documented_monthly (AI): a transitive AI dep → held (LP-384)
+    assert not is_eligible(bars["IN-3"]) and not bars["IN-3"].input_resolves
 
 
 # --------------------------------------------------------------------------- #
@@ -78,7 +78,7 @@ def test_the_held_rules_each_fail_for_a_named_reason() -> None:
 def test_active_set_is_exactly_base_plus_eligible() -> None:
     # the invariant that keeps a rule from being activated without passing the gate
     assert set(ACTIVE_RULE_IDS) - set(_BASE_ACTIVE) == set(eligible_rule_ids()) == set(_ACTIVATED)
-    assert len(ACTIVE_RULE_IDS) == 14 and len(_BASE_ACTIVE) == 11
+    assert len(ACTIVE_RULE_IDS) == 17 and len(_BASE_ACTIVE) == 11
     assert set(_BASE_ACTIVE) < set(ACTIVE_RULE_IDS)  # the original 11 are intact, none dropped
     # no duplicates crept in when concatenating base + activated
     assert len(set(ACTIVE_RULE_IDS)) == len(ACTIVE_RULE_IDS)

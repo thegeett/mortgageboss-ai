@@ -40,6 +40,11 @@ _FACT_LABELS: dict[str, str] = {
     # LP-389-A — ID-5 went live per-borrower; its couldnt_check reads on these two derived inputs.
     "id.borrower_id_expiration": "borrower's government ID expiration date",  # ID-5
     "contract.loan_closing_date": "loan's closing date",  # ID-5
+    # LP-384 — the second activation pass (AS-9 / IN-4 / AS-10 went live).
+    "stmt.page_count_declared": "declared page count (the statement's 'of N')",  # AS-9
+    "stmt.page_count_present": "pages actually present",  # AS-9
+    "income.max_employment_gap_days": "largest employment gap",  # IN-4
+    "stmt.min_account_months": "months of statements on file per account",  # AS-10
     "dti.qualifying_income_monthly": "qualifying income",
     "housing.insurance_monthly": "homeowners insurance",
     "housing.taxes_monthly": "property taxes",

@@ -98,11 +98,15 @@ class _Reasoner:
         return RuleJudgmentResult(RuleJudgment(self.value, 0.9, "x"), 1, 1, "stub", False)
 
 
-def test_none_of_the_10_is_activated() -> None:
-    for rid in ["AS-2", "AS-3", "AS-4", "AS-5", "AS-6", "AS-7", "AS-9", "AS-10", "AS-11", "AS-12"]:
-        assert (
-            rid not in ACTIVE_RULE_IDS
-        )  # authored + evaluated, not shipped (the LP-333 discipline)
+def test_assets_activation_state() -> None:
+    # LP-384 activated AS-9 (page completeness) + AS-10 (statement recency) — the stuck deterministic rules
+    # whose inputs now resolve on the extended LF-6T3N fixture (verified via the eligibility gate).
+    for rid in ("AS-9", "AS-10"):
+        assert rid in ACTIVE_RULE_IDS
+    # The rest stay inert: authored + evaluated, not shipped (the LP-333 discipline). AS-3 is calculator-
+    # blocked (no §3B cash-to-close calc); the others rest on unscored AI tags.
+    for rid in ("AS-2", "AS-3", "AS-4", "AS-5", "AS-6", "AS-7", "AS-11", "AS-12"):
+        assert rid not in ACTIVE_RULE_IDS
 
 
 # ================================================================================================= #

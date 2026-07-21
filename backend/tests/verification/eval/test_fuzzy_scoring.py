@@ -175,4 +175,8 @@ def test_no_rule_activation_changed() -> None:
         "IN-1",
         "IN-5",
         "ID-5",  # LP-389-A — the subject mismatch fixed (per-borrower), input now resolves
+        # LP-384 — the second activation pass: the stuck deterministic rules, verified on build_lf6t3n_plus
+        "AS-9",
+        "IN-4",
+        "AS-10",
     )

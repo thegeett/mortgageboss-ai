@@ -120,6 +120,10 @@ async def test_registry_dispatches_the_active_rule_set_by_kind() -> None:
             "IN-1",  # income.documented_monthly measured 100% >= its 0.98 bar (supersedes the LP-333 deferral)
             "IN-5",  # income.employer_normalized measured 100% >= its 0.95 bar
             "ID-5",  # LP-389-A — the document→loan subject mismatch fixed (per-borrower); input now resolves
+            # LP-384 — the second activation pass (stuck deterministic rules, verified on build_lf6t3n_plus):
+            "AS-9",  # a statement declaring 5 pages / 4 present → fires
+            "IN-4",  # two VOEs with a 77-day gap → fires
+            "AS-10",  # already resolves on the base fixture → satisfied
         }
     )
     snapshot = _loan_snapshot(None)  # no occupancy/txn tags → everything fail-closes honestly

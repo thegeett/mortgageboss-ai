@@ -237,22 +237,26 @@ AS-9:
   ships: auto
   threshold: null
   validated: false
-  input_resolves: false   # LP-381: page_count_present now produced, but no measured resolution on a real file — HELD
+  input_resolves: true    # LP-384: verified on build_lf6t3n_plus — a statement declaring 5/present 4 → FIRES → ELIGIBLE
   load_bearing_ai_tags: []
   fp_fn: "n/a — deterministic (statement page counts, parsed)"
   rationale: >-
     no AI load-bearing tag; a wiring decision. LP-381 unblocked the producer (page_count_declared model-read +
-    page_count_present deterministic), but the input's resolution on a real file is not yet verified — held.
+    page_count_present deterministic); LP-384 VERIFIED it on a real statement (build_lf6t3n_plus: declared 5,
+    present 4 → AS-9 FIRES; a complete statement satisfies). The input resolves — eligible.
 
 AS-10:
   status: no-ai-dependency
   ships: auto
   threshold: null
   validated: false
-  input_resolves: false   # LP-381: min account months resolves `unknown` on LF-6T3N (inputs absent) — HELD
+  input_resolves: true    # LP-384: ALREADY resolves on the base LF-6T3N (statements carry account id + period dates) → ELIGIBLE
   load_bearing_ai_tags: []
   fp_fn: "n/a — deterministic (min account months, parsed)"
-  rationale: "no AI load-bearing tag; a wiring decision. Input does NOT resolve yet (LP-381 derived-4) — held."
+  rationale: >-
+    no AI load-bearing tag; a wiring decision. LP-381 reported the input absent, but the fixture has since
+    grown the statement account identity + period dates: LP-384 VERIFIED stmt.min_account_months resolves on
+    the BASE LF-6T3N (AS-10 SATISFIED — every account has >= 2 months). The input resolves — eligible.
 
 ID-5:
   status: no-ai-dependency
@@ -275,19 +279,26 @@ IN-3:
   ships: auto
   threshold: null
   validated: false
-  input_resolves: false   # LP-381: YTD-annualized shortfall resolves `unknown` on LF-6T3N (inputs absent) — HELD
+  input_resolves: false   # LP-384: NOT unblockable by fixture data — its recipe reads documented_monthly (AI) — HELD
   load_bearing_ai_tags: []
   fp_fn: "n/a — deterministic (YTD-annualized shortfall from parsed income)"
-  rationale: "no AI load-bearing tag; a wiring decision. Input does NOT resolve yet (LP-381 derived-4) — held."
+  rationale: >-
+    MISCLASSIFIED as no-ai (LP-384 finding): income.ytd_annualized_shortfall_pct is derived, but its recipe
+    reads income.documented_monthly (AI, income_amounts) alongside the parsed ytd_gross/pay_date. So IN-3 has
+    a transitive AI dependency (the SAME shape as IN-1) and cannot resolve from fixture DOCUMENTS alone — it
+    abstains on "documented monthly income is absent" until income_amounts runs. An income-wave rule; its bar
+    should be reclassified (calibratable, via documented_monthly's 100% measurement) when that wave activates
+    it. Held here; not this ticket's (LP-384 extends the fixture for the deterministic rules, not the AI ones).
 
 IN-4:
   status: no-ai-dependency
   ships: auto
   threshold: null
   validated: false
-  input_resolves: false   # LP-382: no VOE / no MISMO dates on LF-6T3N → the gap producer abstains `unknown` — HELD
+  input_resolves: true    # LP-384: build_lf6t3n_plus adds 2 VOEs (77-day gap) → the gap producer resolves → ELIGIBLE
   load_bearing_ai_tags: []
   fp_fn: "n/a — deterministic (employment gap from parsed dates)"
   rationale: >-
-    no AI load-bearing tag; a wiring decision. LP-382 proved the chain computes given ≥2 dated records, but
-    LF-6T3N carries none (a data gap) so the input does NOT resolve — held.
+    no AI load-bearing tag; a wiring decision. LP-382 proved the chain computes given >= 2 dated records;
+    LP-384 adds them to the fixture (build_lf6t3n_plus: two VOEs with a deliberate 77-day gap → IN-4 FIRES;
+    a no-gap variant satisfies). The input resolves — eligible.

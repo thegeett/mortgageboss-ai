@@ -62,12 +62,25 @@ _BASE_ACTIVE: tuple[str, ...] = (
 #          derived) against the loan's one closing date (contract.loan_closing_date, derived). The input now
 #          resolves at the subject the rule reads (input_resolves flipped true), so the gate lets it through.
 #          Resolves end-to-end on LF-6T3N: SATISFIED for both borrowers (both DLs unexpired at closing).
-# The OTHER 20 inert rules FAIL the gate (unmeasured tag / validated:false / input unresolved / no producer) and
-# are HELD. test_activation_gate_lp389 asserts EXACTLY these three pass and the 20 fail — a rule CANNOT enter this
-# set without meeting the gate (the declared safety; not a hand-list that can drift).
 _LP389_ACTIVATED: tuple[str, ...] = ("IN-1", "IN-5", "ID-5")
 
-ACTIVE_RULE_IDS: tuple[str, ...] = (*_BASE_ACTIVE, *_LP389_ACTIVATED)
+# LP-384 — the SECOND activation pass: three STUCK deterministic (no-AI) rules whose inputs LF-6T3N lacked
+# now resolve, verified on the fixture, so the gate (input_resolves) admits them. Each proves a KNOWN answer.
+#   AS-10 — stmt.min_account_months ALREADY resolves on the BASE LF-6T3N (its statements grew account identity
+#           + period dates as the fixture matured; LP-381's "input absent" went stale). SATISFIED — every
+#           account has >= 2 months. No fixture change needed.
+#   AS-9  — stmt.page_count_declared/present. build_lf6t3n_plus adds a statement that declares 5 pages but has
+#           4 present → AS-9 FIRES ("a page is missing"); a complete statement satisfies. Input resolves.
+#   IN-4  — income.max_employment_gap_days. build_lf6t3n_plus adds two VOEs with a deliberate 77-day gap →
+#           IN-4 FIRES (beyond the 30-day window); a no-gap variant satisfies. Input resolves.
+# STILL HELD (fail-closed): AS-3 (no §3B cash-to-close calculator — its recipe is a stub, LP-383), and IN-3
+# (its derived recipe reads income.documented_monthly (AI) — a transitive AI dependency like IN-1, an
+# income-wave rule; its no-ai bar is a MISCLASSIFICATION reported in activation_bars.yaml).
+_LP384_ACTIVATED: tuple[str, ...] = ("AS-9", "IN-4", "AS-10")
+
+# The gate is the source of truth: test_activation_gate_lp389 asserts ACTIVE_RULE_IDS - _BASE_ACTIVE ==
+# eligible_rule_ids() — a rule CANNOT enter this set without meeting the eligibility gate (not a hand-list).
+ACTIVE_RULE_IDS: tuple[str, ...] = (*_BASE_ACTIVE, *_LP389_ACTIVATED, *_LP384_ACTIVATED)
 
 
 async def evaluate_rules(

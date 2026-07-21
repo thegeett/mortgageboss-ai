@@ -187,9 +187,20 @@ def test_active_set_is_base_plus_lp389() -> None:
         "IN-1",
         "IN-5",
         "ID-5",  # LP-389-A — the subject mismatch fixed (per-borrower), input now resolves
+        # LP-384 — the second activation pass: the stuck deterministic rules, verified on build_lf6t3n_plus
+        "AS-9",
+        "IN-4",
+        "AS-10",
     )
     # A bar persists after activation as the record of WHY the rule went live, so the bars now intersect the
     # active set at EXACTLY the three activated (IN-1/IN-5 from LP-389, ID-5 from LP-389-A) — never a
     # base-active rule (those never had a bar).
-    assert set(load_activation_bars()) & set(ACTIVE_RULE_IDS) == {"IN-1", "IN-5", "ID-5"}
+    assert set(load_activation_bars()) & set(ACTIVE_RULE_IDS) == {
+        "IN-1",
+        "IN-5",
+        "ID-5",
+        "AS-9",
+        "IN-4",
+        "AS-10",
+    }
     assert not (set(load_activation_bars()) & set(_BASE_ACTIVE))

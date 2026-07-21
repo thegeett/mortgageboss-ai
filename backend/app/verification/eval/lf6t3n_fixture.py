@@ -482,4 +482,64 @@ def build_lf6t3n_snapshot() -> Snapshot:
     )
 
 
-__all__ = ["LF6T3N_DOCUMENT_FILENAMES", "build_lf6t3n_snapshot"]
+def build_lf6t3n_plus() -> Snapshot:
+    """LP-384 — LF-6T3N EXTENDED: the base snapshot PLUS the documents its stuck deterministic rules need,
+    each carrying a KNOWN, assertable answer. ``build_lf6t3n_snapshot`` stays FROZEN for its many existing
+    consumers (worksheet / eval traces); this SIBLING adds only:
+
+      * TWO VOEs with a DELIBERATE 77-day employment gap (a prior job ending 2024-06-30, the current job
+        starting 2024-09-15) → IN-4 FIRES (the gap exceeds the 30-day window). The known typo, so the rule's
+        CATCH is provable.
+      * ONE bank statement that PRINTS "Page 1 of 5" but has only 4 pages present → AS-9 FIRES (a page is
+        missing). It joins an EXISTING account + month (First Springfield ``****5678``, May 2026), so AS-10's
+        per-account month counts — and its SATISFIED verdict — are UNCHANGED (this document exercises AS-9
+        only, never AS-10).
+
+    AS-10 already resolves on the BASE fixture (its statements carry account identity + period dates —
+    LP-381's "input absent" went stale as the fixture grew). AS-3 (no §3B cash-to-close calculator) and IN-3
+    (needs the AI ``income.documented_monthly``) stay blocked — see docs/tickets/LP-384.md. Additive: every
+    tag the base materializes is identical here; the extension only appends documents."""
+    base = build_lf6t3n_snapshot()
+    extra: list[DocumentEntry] = [
+        # IN-4 — the deliberate 77-day gap (prior job end → current job start).
+        DocumentEntry(
+            content_id="voe_prior",
+            document_type="voe",
+            belongs_to=(_B1_REF,),
+            fields={
+                "employer_name": _f("Northgate Warehousing"),
+                "start_date": _f("2022-01-10"),
+                "end_date": _f("2024-06-30"),
+            },
+        ),
+        DocumentEntry(
+            content_id="voe_current",
+            document_type="voe",
+            belongs_to=(_B1_REF,),
+            fields={
+                "employer_name": _f("Acme Logistics Inc"),
+                "start_date": _f("2024-09-15"),
+            },
+        ),
+        # AS-9 — declares 5 pages, only 4 present. SAME account + month as an existing First Springfield
+        # statement, so AS-10's month counts (and its SATISFIED verdict) are unchanged.
+        _doc(
+            "stmt_missing_page",
+            "bank_statement",
+            account_holder_name="Jordan A Rivera",
+            bank_name="First Springfield Bank",
+            account_number_masked="****5678",
+            account_type="checking",
+            statement_period_start="2026-05-01",
+            statement_period_end="2026-05-31",
+            beginning_balance="10544.90",
+            ending_balance="10980.00",
+            page_count_declared="5",
+            page_count_present="4",
+        ),
+    ]
+    docs = list(base.documents.entries) + extra
+    return base.model_copy(update={"documents": DocumentsSection.present(docs)})
+
+
+__all__ = ["LF6T3N_DOCUMENT_FILENAMES", "build_lf6t3n_plus", "build_lf6t3n_snapshot"]
