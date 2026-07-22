@@ -75,10 +75,20 @@ AS-2:
   validated: false
   load_bearing_ai_tags: [txn.apparent_category, txn.has_identified_source]
   fp_fn: "FN (misses undisclosed loan proceeds funding the deal) >> FP"
+  # LP-390-6 PROPOSED has_identified_source bar (for Priya, when apparent_category also lands): ~0.90 auto, or
+  # ratify-only while n=16 is one file — her call. Not encoded as `threshold` (the loader forbids one on a
+  # not-calibratable rule, and it would falsely read as met); it is the prose proposal below.
   rationale: >-
-    reads apparent_category == loan_proceeds — a category UNMEASURED (LP-379-F: apparent_category is measured
-    only for payroll/interest/transfer_own on this file's generic memos); has_identified_source never labeled.
-    No accuracy to clear a bar against. Blocked on calibration, not a low bar.
+    LP-390-6: has_identified_source is now MEASURED — 93.8% (15/16, n=16, LP-390-5), and the ONE miss is the
+    SAFE direction (AI said no/unsourced where Priya said yes/sourced -> a conservative over-flag a human
+    clears; NO dangerous AI-says-sourced-where-actually-unsourced miss in the 16). PROPOSED for Priya: a ~0.90
+    AUTO bar (a source-verification gate -> over-flagging is the safe direction), OR ratify-only while n=16 is
+    one file; the one memo-richness miss (a generic INBOUND memo -> unknown/no) pairs with LP-376-B (below-bar
+    / unknown -> needs_review, never a silent pass). BUT AS-2 STILL reads apparent_category == loan_proceeds
+    (load-bearing, UNGATED: a wrong category SILENTLY satisfies -> the dangerous FN), and apparent_category is
+    UNMEASURED (relabel-blocked, LP-390-5). So AS-2 is BLOCKED ONLY on apparent_category now -- advanced from
+    both-tags-unmeasured to one-measured-and-passing; not-calibratable-yet until apparent_category is scored
+    (the LP-379-F relabel).
 
 AS-4:
   status: not-calibratable-yet
@@ -88,8 +98,10 @@ AS-4:
   load_bearing_ai_tags: [stmt.is_reserve_eligible]   # via the reserves calculator (months_available)
   fp_fn: "FN (clears a file with insufficient reserves) >> FP (a false shortfall -> a human re-checks)"
   rationale: >-
-    the reserves calc is fed by stmt.is_reserve_eligible (AI), PRODUCED (LP-378) but UNSCORED. Blocked on
-    calibration.
+    the reserves calc is fed by stmt.is_reserve_eligible (AI). LP-390-6: now MEASURED — 0% (0/5, n=5,
+    LP-390-5): the model calls standard checking/savings reserve-eligible where Priya labels 'no' — a
+    SYSTEMATIC domain disagreement (not noise). Blocked now NOT on scoring but on a DOMAIN/PROMPT fix — a
+    Priya-confirmed reserve-eligible definition, then a prompt alignment (its own follow-up). No bar.
 
 AS-5:
   status: not-calibratable-yet
@@ -109,7 +121,11 @@ AS-6:
   validated: false
   load_bearing_ai_tags: [stmt.owner_matches_borrower]
   fp_fn: "FN (accepts a statement not owned by the borrower) >> FP"
-  rationale: "owner_matches_borrower PRODUCED (LP-378) but UNSCORED. Blocked on calibration."
+  rationale: >-
+    LP-390-6: owner_matches_borrower now MEASURED — 100% abstain (5/5 'unknown', n=5, LP-390-5): the
+    stmt_facts group is given only the statement, never the borrower names, so it CANNOT compare and correctly
+    abstains on every file. Blocked on a PRODUCER/CONTEXT fix (feed the group the borrower identity), not on
+    scoring. No bar until it can produce a real value.
 
 AS-7:
   status: not-calibratable-yet
@@ -129,18 +145,25 @@ AS-11:
   validated: false
   load_bearing_ai_tags: [asset.liquidation_terms]
   fp_fn: "FN (counts restricted retirement funds as usable) > FP"
-  rationale: "liquidation_terms PRODUCED (LP-378) but UNSCORED. Blocked on calibration."
+  rationale: >-
+    LP-390-6: liquidation_terms now MEASURED — 66.7% (2/3, n=3, LP-390-5): INDICATIVE, not validated (n<5 —
+    the one miss called a Roth IRA vested_usable vs Priya's fully_liquid). Too thin for a bar; blocked on more
+    labels. No bar.
 
 AS-12:
   status: not-calibratable-yet
   ships: ratify
   threshold: null
   validated: false
-  load_bearing_ai_tags: [txn.apparent_category, txn.counterparty, txn.has_identified_source]
+  load_bearing_ai_tags: [txn.apparent_category, txn.has_identified_source]
   fp_fn: "FN (misses a borrowed-funds pattern) >> FP — but judgmental, a human ratifies"
   rationale: >-
-    judgmental (ships ratify, LP-376-B). Reads apparent_category + counterparty + has_identified_source, all
-    UNMEASURED. Even ratify-only needs the tags to produce meaningfully. Blocked on calibration.
+    LP-390-6: FIXED the load-bearing list — the AS-12 spec's load_bearing_tags are [apparent_category,
+    has_identified_source]; txn.counterparty is reasoned_over (context) only AND an orphan (no producer,
+    LP-390-2), never load-bearing -> removed here. has_identified_source is now MEASURED 93.8% (n=16,
+    LP-390-5). Judgmental -> ships ratify (a human ratifies EVERY verdict, LP-376-B), so the tag need only be
+    trustworthy enough to SURFACE for ratification, which 93.8% supports. Still blocked on apparent_category
+    (UNMEASURED, relabel-blocked) for the reasoning to rest on sound category facts. not-calibratable-yet.
 
 IN-7:
   status: not-calibratable-yet
