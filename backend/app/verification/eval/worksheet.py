@@ -70,6 +70,23 @@ class _TagMeta:
     consuming_rules: tuple[str, ...]
     money_in_only: bool = False
     wired: bool = True
+    # LP-390-3: an explicit labeling QUESTION prepended to the row's context, for a tag whose question a
+    # labeler could misread as a duplicate of another tag on the same subject. Priya skipped EVERY
+    # has_identified_source row (LP-379-D) reading it as a repeat of apparent_category on the same
+    # transaction — same facts, different tag. The prompt frames the DISTINCT question so the row is
+    # answerable on its own. Empty = the context is just the facts (the default, unchanged for every other tag).
+    label_prompt: str = ""
+
+
+# LP-390-3 / 3a — the SOURCE-TRACE question (LP-314a), distinct from txn.apparent_category (WHAT the deposit
+# is). has_identified_source asks whether the deposit's ORIGIN is verifiable to an underwriter's standard. It
+# is appended AFTER the transaction facts (LP-390-3a: the identity leads, like apparent_category, so no row
+# opens with identical boilerplate) and is PLAIN ASCII (LP-390-3a: em-dashes rendered as mojibake in the CSV).
+_SOURCE_TRACE_PROMPT = (
+    "SOURCE-TRACE: is this money-in's ORIGIN traceable to a verifiable source (a named payer/employer, the "
+    "borrower's own verified account, an itemized proceeds line) vs an unexplained deposit? yes/no/unknown "
+    "(distinct from the category = what the deposit is)."
+)
 
 
 @dataclass(frozen=True)
@@ -105,8 +122,11 @@ _GROUPS: tuple[_Group, ...] = (
             ),
         ),
     ),
-    # Stage-B sourcing tags: vocabulary AI tags with NO tag_production declaration (produced by the
-    # separate tag_correlation pass, not the generic pipeline) -> wired=False -> a wiring gap.
+    # Stage-B sourcing: txn.has_identified_source is a vocabulary AI tag with NO tag_production declaration
+    # (produced by the separate tag_correlation pass, not the generic pipeline) -> wired=False. It is an
+    # enum-scored, producer-backed JUDGMENT tag Priya labels. LP-390-3a DROPPED its two siblings —
+    # txn.counterparty and txn.source_reference — from the worksheet: both are free_text_deferred (nothing
+    # to score) AND orphans (no producer, LP-390-2), so they are non-labelable and only added noise.
     _Group(
         "transaction",
         (),
@@ -118,22 +138,7 @@ _GROUPS: tuple[_Group, ...] = (
                 ("AS-1", "AS-2", "AS-5"),
                 money_in_only=True,
                 wired=False,
-            ),
-            _TagMeta(
-                "txn.counterparty",
-                "free_text_deferred",
-                "judgment",
-                ("AS-2", "AS-5", "AS-12", "FR-5"),
-                money_in_only=True,
-                wired=False,
-            ),
-            _TagMeta(
-                "txn.source_reference",
-                "free_text_deferred",
-                "judgment",
-                ("AS-1", "AS-5"),
-                money_in_only=True,
-                wired=False,
+                label_prompt=_SOURCE_TRACE_PROMPT,  # LP-390-3: the distinct SOURCE-TRACE question
             ),
         ),
     ),
@@ -520,6 +525,15 @@ def build_worksheet(
                             continue
                         if not (_fv(txn.description) or _fv(txn.amount)):
                             continue
+                        # LP-390-3a: the transaction IDENTITY leads (exactly like apparent_category), THEN a
+                        # tag with a label_prompt appends its short, distinct question. Leading with the facts
+                        # (not 400 chars of boilerplate) is what stops the row reading as a repeat; every other
+                        # tag's context is the facts alone (unchanged).
+                        context = (
+                            f"{_txn_context(txn)} | {meta.label_prompt}"
+                            if meta.label_prompt
+                            else _txn_context(txn)
+                        )
                         rows.append(
                             WorksheetRow(
                                 meta.bucket,
@@ -531,7 +545,7 @@ def build_worksheet(
                                 allowed,
                                 ", ".join(meta.consuming_rules),
                                 rule_status,
-                                _txn_context(txn),
+                                context,
                                 source_document=_document_source(
                                     txn_parent.get(txn.content_id, doc.content_id), filenames
                                 ),
