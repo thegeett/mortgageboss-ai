@@ -18,6 +18,7 @@ transfers / a named inbound) are CONFIRMED and scored. Uncertainty in ("not sure
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 
 # The LP-379-E enum values this maps onto (the mapping never emits an off-enum value).
@@ -85,4 +86,49 @@ def relabel(free_text: str, description: str, note: str) -> Relabel:
     )
 
 
-__all__ = ["Relabel", "relabel"]
+@dataclass(frozen=True)
+class HeldGolden:
+    """LP-390-5a — one apparent_category golden that is NOT scored (a generic memo, an uncertain note, or a
+    typo). Reported separately as the redacted-memo / memo-richness limit, never counted as a wrong score."""
+
+    subject_id: str
+    free_text: str
+    description: str
+    enum: str | None  # 'unknown' for an uncertain note; None for a generic memo / typo
+    rationale: str
+
+
+def _description_of(context: str) -> str:
+    """Pull the transaction DESCRIPTION out of a worksheet context cell (``...; description=CARD PURCHASE``)."""
+    return context.split("description=", 1)[1].strip() if "description=" in context else ""
+
+
+def map_apparent_category_goldens(
+    rows: Iterable[Mapping[str, str]],
+) -> tuple[dict[tuple[str, str], str], list[HeldGolden]]:
+    """LP-390-5a — apply the LP-379-F free-text->enum mapping to Priya's ``txn.apparent_category`` goldens at
+    SCORING TIME (never mutating her committed free text). Returns ``(confirmed, held)``: ``confirmed`` is a
+    ``{(tag_id, subject_id): enum}`` golden dict ready for ``score_snapshot_against_golden`` — ONLY the
+    description-supported labels; ``held`` is every ambiguous / uncertain / typo row, reported not scored. The
+    24.5% byte-compare artifact (LP-390-5) came from scoring the free text directly; this scores the mapped,
+    confirmed subset (n=17) and holds the rest (the 30 payee-less memos + uncertain/typo)."""
+    confirmed: dict[tuple[str, str], str] = {}
+    held: list[HeldGolden] = []
+    for r in rows:
+        if r.get("tag_id") != "txn.apparent_category":
+            continue
+        free_text = (r.get("golden_label") or "").strip()
+        if not free_text:
+            continue
+        desc = _description_of(r.get("context", ""))
+        note = (r.get("Note") or "").strip()
+        rl = relabel(free_text, desc, note)
+        key = (str(r["tag_id"]), str(r["subject_id"]))
+        if rl.confirmed and rl.enum is not None:
+            confirmed[key] = rl.enum
+        else:
+            held.append(HeldGolden(str(r["subject_id"]), free_text, desc, rl.enum, rl.rationale))
+    return confirmed, held
+
+
+__all__ = ["HeldGolden", "Relabel", "map_apparent_category_goldens", "relabel"]

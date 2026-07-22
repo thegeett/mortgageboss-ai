@@ -45,13 +45,17 @@ def test_bars_cover_exactly_the_inert_rules() -> None:
 
 
 def test_the_honest_activation_state_is_reported() -> None:
-    # 3 of 23 are calibratable-now; the rest are blocked on calibration / a producer / a wiring decision
+    # 5 of 23 are calibratable-now; the rest are blocked on calibration / a producer / a wiring decision
     bars = load_activation_bars()
     by = {
         s: sum(1 for b in bars.values() if b.status == s) for s in {b.status for b in bars.values()}
     }
-    assert by["calibratable-now"] == 3  # IN-1, IN-5, IN-3 (reclassified from no-ai — LP-384 review)
+    # IN-1, IN-5, IN-3 + AS-2, AS-12 (LP-390-5a: both their load-bearing AI tags now measured — apparent_category
+    # re-scored 100% concrete + has_identified_source 93.8%). All still validated:false → none activated.
+    assert by["calibratable-now"] == 5
     assert by.get("not-calibratable-yet", 0) >= 1 and by.get("no-ai-dependency", 0) >= 1
+    # the 2 newly-calibratable rules are proposed, NOT signed off — nothing activates on this ticket
+    assert not bars["AS-2"].validated and not bars["AS-12"].validated
 
 
 # --------------------------------------------------------------------------- #

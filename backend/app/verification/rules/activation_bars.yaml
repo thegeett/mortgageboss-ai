@@ -69,26 +69,28 @@ IN-5:
 
 # ===================== not-calibratable-yet (BLOCKED ON CALIBRATION — no bar, not "bar unmet") ======
 AS-2:
-  status: not-calibratable-yet
+  # LP-390-5a: BOTH load-bearing AI tags are now MEASURED -> calibratable-now (was not-calibratable-yet, blocked
+  # on apparent_category). apparent_category re-scored 100% concrete (16/16, n=17) once mapped free-text->enum
+  # (the LP-390-5 24.5% was a byte-compare artifact); has_identified_source 93.8% (n=16, LP-390-5). validated
+  # stays FALSE -> is_eligible false -> NOT activated (Priya's sign-off + LP-390-7 do that).
+  status: calibratable-now
   ships: auto
-  threshold: null
+  threshold: 0.90
   validated: false
+  measured_accuracy: 0.938   # the WEAKEST measured load-bearing tag (has_identified_source); apparent_category
+                             # is 1.0-concrete but see the loan_proceeds n=0 caveat below — the honest floor.
   load_bearing_ai_tags: [txn.apparent_category, txn.has_identified_source]
   fp_fn: "FN (misses undisclosed loan proceeds funding the deal) >> FP"
-  # LP-390-6 PROPOSED has_identified_source bar (for Priya, when apparent_category also lands): ~0.90 auto, or
-  # ratify-only while n=16 is one file — her call. Not encoded as `threshold` (the loader forbids one on a
-  # not-calibratable rule, and it would falsely read as met); it is the prose proposal below.
   rationale: >-
-    LP-390-6: has_identified_source is now MEASURED — 93.8% (15/16, n=16, LP-390-5), and the ONE miss is the
-    SAFE direction (AI said no/unsourced where Priya said yes/sourced -> a conservative over-flag a human
-    clears; NO dangerous AI-says-sourced-where-actually-unsourced miss in the 16). PROPOSED for Priya: a ~0.90
-    AUTO bar (a source-verification gate -> over-flagging is the safe direction), OR ratify-only while n=16 is
-    one file; the one memo-richness miss (a generic INBOUND memo -> unknown/no) pairs with LP-376-B (below-bar
-    / unknown -> needs_review, never a silent pass). BUT AS-2 STILL reads apparent_category == loan_proceeds
-    (load-bearing, UNGATED: a wrong category SILENTLY satisfies -> the dangerous FN), and apparent_category is
-    UNMEASURED (relabel-blocked, LP-390-5). So AS-2 is BLOCKED ONLY on apparent_category now -- advanced from
-    both-tags-unmeasured to one-measured-and-passing; not-calibratable-yet until apparent_category is scored
-    (the LP-379-F relabel).
+    LP-390-5a: apparent_category re-scored 100% concrete (16/16, n=17) after the LP-379-F free-text->enum
+    mapping (the 24.5% was a scoring artifact, NOT the model); has_identified_source 93.8% (n=16, its one miss
+    the SAFE over-flag direction). Both AS-2 gates now measured -> calibratable-now. PROPOSED for Priya: a ~0.90
+    AUTO bar, or ratify-only while this is one file; below-bar/unknown -> needs_review (LP-376-B).
+    ⚠️ CAVEAT (Priya weighs before sign-off): AS-2 FIRES on apparent_category == loan_proceeds, and LF-6T3N has
+    ZERO loan_proceeds transactions (n=17 covered payroll/interest/transfer_own/third_party) — the tag is
+    measured broadly but its loan_proceeds VALUE is untested; a file with a loan-proceeds deposit would
+    strengthen this. measured_accuracy is set to has_identified_source's 0.938 (the weaker MEASURED gate), not
+    apparent_category's 1.0, so the number does not over-read the untested trigger.
 
 AS-4:
   status: not-calibratable-yet
@@ -111,8 +113,11 @@ AS-5:
   load_bearing_ai_tags: [txn.apparent_category]
   fp_fn: "FN (accepts an undocumented gift) > FP"
   rationale: >-
-    reads apparent_category == gift — UNMEASURED (LP-379-F). By LP-335 'gift' is arguably a rule conclusion,
-    not a tag value (ADR-302 D2). Blocked on calibration.
+    LP-390-5a: apparent_category is now MEASURED (100% concrete, n=17) — but AS-5 gates on apparent_category ==
+    gift, and LF-6T3N has ZERO gift transactions (n=0 on the trigger value), AND the LP-335 / ADR-302 D2
+    question stands: 'gift' is arguably a rule CONCLUSION, not a tag value. So AS-5's blocker is no longer
+    'apparent_category unscored' — it is a DESIGN question (should AS-5 fire on a gift tag at all?) plus a gift
+    n=0 coverage gap. Held (not calibratable) until that design call is made — not a calibration gap. No bar.
 
 AS-6:
   status: not-calibratable-yet
@@ -151,19 +156,24 @@ AS-11:
     labels. No bar.
 
 AS-12:
-  status: not-calibratable-yet
+  # LP-390-5a: both load-bearing AI tags now measured -> calibratable-now. Judgmental -> ships RATIFY, so a
+  # human ratifies every verdict regardless of the number (activation_mode returns 'ratify' for ships:ratify);
+  # the threshold is the SURFACING floor. validated stays false -> not activated.
+  status: calibratable-now
   ships: ratify
-  threshold: null
+  threshold: 0.90
   validated: false
+  measured_accuracy: 0.938   # weakest measured load-bearing tag (has_identified_source); apparent_category 1.0-concrete
   load_bearing_ai_tags: [txn.apparent_category, txn.has_identified_source]
   fp_fn: "FN (misses a borrowed-funds pattern) >> FP — but judgmental, a human ratifies"
   rationale: >-
-    LP-390-6: FIXED the load-bearing list — the AS-12 spec's load_bearing_tags are [apparent_category,
-    has_identified_source]; txn.counterparty is reasoned_over (context) only AND an orphan (no producer,
-    LP-390-2), never load-bearing -> removed here. has_identified_source is now MEASURED 93.8% (n=16,
-    LP-390-5). Judgmental -> ships ratify (a human ratifies EVERY verdict, LP-376-B), so the tag need only be
-    trustworthy enough to SURFACE for ratification, which 93.8% supports. Still blocked on apparent_category
-    (UNMEASURED, relabel-blocked) for the reasoning to rest on sound category facts. not-calibratable-yet.
+    LP-390-6 fixed the load-bearing list (dropped txn.counterparty — reasoned_over context + an orphan, not
+    load-bearing per the spec). LP-390-5a: apparent_category re-scored 100% concrete (n=17, the 24.5% was an
+    artifact) + has_identified_source 93.8% (n=16) -> both gates measured -> calibratable-now. Judgmental ->
+    ships RATIFY (a human ratifies EVERY verdict, LP-376-B), so 100%/93.8% is far more than enough for the
+    tags to SURFACE a pattern for human judgment; unlike AS-2, AS-12 reasons over apparent_category BROADLY
+    (no single trigger value), so the loan_proceeds n=0 caveat does not bind it. PROPOSED 0.90 surfacing floor;
+    Priya confirms. Still one-file n — she weighs that before sign-off.
 
 IN-7:
   status: not-calibratable-yet

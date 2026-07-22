@@ -63,7 +63,13 @@ def test_id5_now_passes_after_the_subject_fix() -> None:
 def test_the_held_rules_each_fail_for_a_named_reason() -> None:
     bars = load_activation_bars()
     # a not-calibratable-yet rule: unmeasured AI tag → held regardless of anything else
-    assert not is_eligible(bars["AS-2"]) and bars["AS-2"].status == "not-calibratable-yet"
+    assert not is_eligible(bars["AS-4"]) and bars["AS-4"].status == "not-calibratable-yet"
+    # AS-2 — LP-390-5a: now calibratable-now (both load-bearing tags measured, 0.938 >= the 0.90 bar) but HELD
+    # on the sign-off — validated:false → is_eligible false. The bar CAN be met; Priya has not signed it yet.
+    assert bars["AS-2"].status == "calibratable-now"
+    assert bars["AS-2"].measured_accuracy is not None and bars["AS-2"].threshold is not None
+    assert bars["AS-2"].measured_accuracy >= bars["AS-2"].threshold
+    assert not bars["AS-2"].validated and not is_eligible(bars["AS-2"])
     # a needs-producer rule: the tag doesn't even materialize → held
     assert not is_eligible(bars["IN-14"]) and bars["IN-14"].status == "needs-producer"
     # AS-3 — no-ai but its recipe is a STUB (no §3B cash-to-close calculator): the input never resolves → held
