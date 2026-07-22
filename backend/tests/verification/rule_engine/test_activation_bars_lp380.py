@@ -73,9 +73,11 @@ def test_unmeasured_rule_is_blocked_not_below_a_bar() -> None:
 
 
 def test_loader_rejects_a_threshold_on_a_non_calibratable_rule() -> None:
+    # These loader-rejection tests use the neutral synthetic label "X-1" (not a real rule id) — the rejected
+    # bar shapes below are invalid on purpose, and "AS-2" is now a real validated calibratable-now rule.
     with pytest.raises(ActivationBarError, match="threshold must be null"):
         ab.parse_bar(
-            "AS-2",
+            "X-1",
             {
                 "status": "not-calibratable-yet",
                 "ships": "auto",
@@ -91,7 +93,7 @@ def test_loader_rejects_a_boolean_threshold() -> None:
     # silent 1.0 bar in an otherwise fail-loud loader.
     with pytest.raises(ActivationBarError, match="proposed threshold in"):
         ab.parse_bar(
-            "AS-2",
+            "X-1",
             {
                 "status": "calibratable-now",
                 "ships": "auto",
@@ -107,7 +109,7 @@ def test_loader_rejects_validating_a_non_calibratable_rule() -> None:
     # measured. Only calibratable-now may be validated.
     with pytest.raises(ActivationBarError, match="only a calibratable-now rule may be validated"):
         ab.parse_bar(
-            "AS-2",
+            "X-1",
             {
                 "status": "not-calibratable-yet",
                 "ships": "auto",
@@ -121,7 +123,7 @@ def test_loader_rejects_validating_a_non_calibratable_rule() -> None:
 def test_loader_rejects_non_bool_validated() -> None:
     with pytest.raises(ActivationBarError, match="validated must be a boolean"):
         ab.parse_bar(
-            "AS-2",
+            "X-1",
             {
                 "status": "no-ai-dependency",
                 "ships": "auto",
@@ -133,7 +135,7 @@ def test_loader_rejects_non_bool_validated() -> None:
 
 
 # --------------------------------------------------------------------------- #
-# Priya's sign-off — exactly IN-1 and IN-5 are validated; all others stay false
+# Priya's sign-off — IN-1/IN-5 (LP-389) + AS-2/AS-12 (LP-390-7) are validated; all others stay false
 # --------------------------------------------------------------------------- #
 def test_exactly_the_signed_off_bars_are_validated() -> None:
     bars = load_activation_bars()
