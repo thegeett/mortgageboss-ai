@@ -32,8 +32,8 @@ from app.verification.rule_engine.activation_bars import (
 from app.verification.rule_engine.registry import _BASE_ACTIVE, ACTIVE_RULE_IDS
 
 # LP-389 activated IN-1/IN-5; LP-389-A added ID-5; LP-384 added AS-9/IN-4/AS-10 (the stuck deterministic rules);
-# LP-390-7 added AS-2/AS-12 (the first income-wave AI rules — Priya signed off their 0.90 bars).
-_ACTIVATED = frozenset({"IN-1", "IN-5", "ID-5", "AS-9", "IN-4", "AS-10", "AS-2", "AS-12"})
+# LP-390-7 added AS-2/AS-12 (the first income-wave AI rules); LP-390-9 added IN-3 (same tag+evidence as IN-1).
+_ACTIVATED = frozenset({"IN-1", "IN-5", "ID-5", "AS-9", "IN-4", "AS-10", "AS-2", "AS-12", "IN-3"})
 
 
 def _specs() -> set[str]:
@@ -47,9 +47,9 @@ def test_exactly_the_eligible_candidates_pass() -> None:
     bars = load_activation_bars()
     eligible = {rid for rid, bar in bars.items() if is_eligible(bar)}
     held = set(bars) - eligible
-    # IN-1/IN-5/AS-2/AS-12 (AI, validated, measured >= bar); ID-5 + AS-9/IN-4/AS-10 (no-AI, input resolves).
+    # IN-1/IN-5/AS-2/AS-12/IN-3 (AI, validated, measured >= bar); ID-5 + AS-9/IN-4/AS-10 (no-AI, input resolves).
     assert eligible == set(_ACTIVATED)
-    assert len(held) == 15 and not (held & _ACTIVATED)  # every other candidate is held
+    assert len(held) == 14 and not (held & _ACTIVATED)  # every other candidate is held
 
 
 def test_eligible_rule_ids_is_sorted_and_matches() -> None:
@@ -60,6 +60,7 @@ def test_eligible_rule_ids_is_sorted_and_matches() -> None:
         "AS-9",
         "ID-5",
         "IN-1",
+        "IN-3",
         "IN-4",
         "IN-5",
     )  # sorted
@@ -86,10 +87,9 @@ def test_the_held_rules_each_fail_for_a_named_reason() -> None:
     assert not is_eligible(bars["IN-14"]) and bars["IN-14"].status == "needs-producer"
     # AS-3 — no-ai but its recipe is a STUB (no §3B cash-to-close calculator): the input never resolves → held
     assert not is_eligible(bars["AS-3"]) and not bars["AS-3"].input_resolves
-    # IN-3 — reclassified to an AI rule (its recipe reads documented_monthly, AI) but Priya has not validated
-    # its shortfall bar → held; the loader now forbids input_resolves on it (that gate is no-ai-only) (LP-384)
-    assert not is_eligible(bars["IN-3"]) and bars["IN-3"].status == "calibratable-now"
-    assert not bars["IN-3"].validated and not bars["IN-3"].input_resolves
+    # (IN-3 was the "calibratable but not-yet-signed" held example through LP-390-7; LP-390-9 signed off its bar,
+    # so it is now eligible + active — see test_in3_is_live_after_priya_signoff. Every remaining held rule fails
+    # for one of the reasons above.)
 
 
 # --------------------------------------------------------------------------- #
@@ -98,7 +98,7 @@ def test_the_held_rules_each_fail_for_a_named_reason() -> None:
 def test_active_set_is_exactly_base_plus_eligible() -> None:
     # the invariant that keeps a rule from being activated without passing the gate
     assert set(ACTIVE_RULE_IDS) - set(_BASE_ACTIVE) == set(eligible_rule_ids()) == set(_ACTIVATED)
-    assert len(ACTIVE_RULE_IDS) == 19 and len(_BASE_ACTIVE) == 11
+    assert len(ACTIVE_RULE_IDS) == 20 and len(_BASE_ACTIVE) == 11
     assert set(_BASE_ACTIVE) < set(ACTIVE_RULE_IDS)  # the original 11 are intact, none dropped
     # no duplicates crept in when concatenating base + activated
     assert len(set(ACTIVE_RULE_IDS)) == len(ACTIVE_RULE_IDS)
@@ -225,3 +225,35 @@ def test_as5_stays_held_and_a_stray_validated_flag_is_a_load_error() -> None:
                 "rationale": "x",
             },
         )
+
+
+# --------------------------------------------------------------------------- #
+# LP-390-9 — IN-3 activation (Priya signed off its 0.98 bar; same tag + evidence as IN-1)
+# --------------------------------------------------------------------------- #
+def test_in3_is_live_after_priya_signoff() -> None:
+    bars = load_activation_bars()
+    in3 = bars["IN-3"]
+    # calibratable-now, a REAL threshold (not the AS-5 null/stray-flag class), validated, measured >= bar
+    assert in3.status == "calibratable-now" and in3.ships == "auto"
+    assert in3.threshold == 0.98 and in3.validated
+    assert in3.measured_accuracy is not None and in3.measured_accuracy >= in3.threshold
+    assert in3.load_bearing_ai_tags == ("income.documented_monthly",)  # the IN-1 tag + evidence
+    assert is_eligible(in3) and "IN-3" in ACTIVE_RULE_IDS
+
+
+def test_in3_validated_bar_is_legal_not_the_as5_stray_flag_class() -> None:
+    # the LP-390-7 loader guard rejects validated:true on a NON-calibratable / null-threshold rule (AS-5). IN-3
+    # is the legal counter-case: calibratable-now WITH a real threshold → the loader ACCEPTS the validated bar.
+    ok = parse_bar(
+        "IN-3",
+        {
+            "status": "calibratable-now",
+            "ships": "auto",
+            "threshold": 0.98,
+            "validated": True,
+            "measured_accuracy": 1.0,
+            "load_bearing_ai_tags": ["income.documented_monthly"],
+            "rationale": "x",
+        },
+    )
+    assert is_eligible(ok)  # no ActivationBarError — a real bar signed off is legal

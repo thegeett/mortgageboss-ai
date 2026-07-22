@@ -86,9 +86,16 @@ _LP384_ACTIVATED: tuple[str, ...] = ("AS-9", "IN-4", "AS-10")
 #           with a loan-proceeds deposit would strengthen it); it must not falsely fire (Phase-2 verified).
 #   AS-12 — Borrowed-funds detection (judgmental -> ships RATIFY; surfaces to needs_review, never an auto
 #           verdict). Reasons over apparent_category broadly, so the loan_proceeds n=0 caveat does not bind it.
-# STILL HELD: AS-5 (design question ADR-302 + gift n=0 — validated:false, the loader rejects a stray true on
-# its null-threshold/not-calibratable state) and IN-3 (calibratable-now but Priya has not signed its bar).
+# STILL HELD after LP-390-7: AS-5 (design question ADR-302 + gift n=0 — validated:false, the loader rejects a
+# stray true on its null-threshold/not-calibratable state).
 _LP390_ACTIVATED: tuple[str, ...] = ("AS-2", "AS-12")
+
+# LP-390-9 — Priya signed off IN-3's bar (0.98 auto). IN-3 is an AI rule (LP-384 reclassification): its derived
+# YTD-annualized shortfall reads income.documented_monthly (AI, income_amounts) — the SAME tag + evidence as
+# IN-1, measured 100% (LP-379-D) >= the 0.98 bar. Because IN-3 DECLARES that tag as load-bearing, income_amounts
+# folds into _required_ai_groups (already required via live IN-1), so IN-3's tag is PRODUCED, not just declared —
+# it does not couldnt_check for a missing tag (an honest no-stated-income abstain is a different, correct thing).
+_LP390_9_ACTIVATED: tuple[str, ...] = ("IN-3",)
 
 # The gate is the source of truth: test_activation_gate_lp389 asserts ACTIVE_RULE_IDS - _BASE_ACTIVE ==
 # eligible_rule_ids() — a rule CANNOT enter this set without meeting the eligibility gate (not a hand-list).
@@ -97,6 +104,7 @@ ACTIVE_RULE_IDS: tuple[str, ...] = (
     *_LP389_ACTIVATED,
     *_LP384_ACTIVATED,
     *_LP390_ACTIVATED,
+    *_LP390_9_ACTIVATED,
 )
 
 

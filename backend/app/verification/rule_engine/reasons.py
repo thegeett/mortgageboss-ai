@@ -36,6 +36,7 @@ _FACT_LABELS: dict[str, str] = {
     "income.qualifying_monthly": "qualifying income",
     # LP-389 — the first activation pass; each live rule's reason tag gets a curated mortgage phrase.
     "income.documented_income_shortfall_pct": "documented-vs-stated income shortfall",  # IN-1
+    "income.ytd_annualized_shortfall_pct": "YTD-annualized income shortfall",  # IN-3 (LP-390-9)
     "income.employer_normalized": "employer name",  # IN-5
     # LP-389-A — ID-5 went live per-borrower; its couldnt_check reads on these two derived inputs.
     "id.borrower_id_expiration": "borrower's government ID expiration date",  # ID-5

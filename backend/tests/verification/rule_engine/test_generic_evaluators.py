@@ -126,6 +126,7 @@ async def test_registry_dispatches_the_active_rule_set_by_kind() -> None:
             "AS-10",  # already resolves on the base fixture → satisfied
             "AS-2",  # LP-390-7 — EMD sourcing (auto), Priya signed off the 0.90 bar
             "AS-12",  # LP-390-7 — borrowed-funds (ratify)
+            "IN-3",  # LP-390-9 — YTD-annualized shortfall (auto), same tag+evidence as IN-1
         }
     )
     snapshot = _loan_snapshot(None)  # no occupancy/txn tags → everything fail-closes honestly

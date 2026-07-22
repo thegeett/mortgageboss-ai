@@ -54,8 +54,8 @@ def test_the_honest_activation_state_is_reported() -> None:
     # 100% concrete LP-390-5a + has_identified_source 93.8%).
     assert by["calibratable-now"] == 5
     assert by.get("not-calibratable-yet", 0) >= 1 and by.get("no-ai-dependency", 0) >= 1
-    # LP-390-7: Priya signed off AS-2 + AS-12 (validated:true) → activated; IN-3 still awaits her sign-off.
-    assert bars["AS-2"].validated and bars["AS-12"].validated and not bars["IN-3"].validated
+    # LP-390-7 signed off AS-2 + AS-12; LP-390-9 signed off IN-3 — all 5 calibratable rules are now validated.
+    assert all(bars[r].validated for r in ("IN-1", "IN-5", "AS-2", "AS-12", "IN-3"))
 
 
 # --------------------------------------------------------------------------- #
@@ -135,13 +135,13 @@ def test_loader_rejects_non_bool_validated() -> None:
 
 
 # --------------------------------------------------------------------------- #
-# Priya's sign-off — IN-1/IN-5 (LP-389) + AS-2/AS-12 (LP-390-7) are validated; all others stay false
+# Priya's sign-off — IN-1/IN-5 (LP-389) + AS-2/AS-12 (LP-390-7) + IN-3 (LP-390-9) are validated; rest stay false
 # --------------------------------------------------------------------------- #
 def test_exactly_the_signed_off_bars_are_validated() -> None:
     bars = load_activation_bars()
     validated = {rid for rid, b in bars.items() if b.validated}
-    # IN-1/IN-5 (LP-389) + AS-2/AS-12 (LP-390-7, Priya signed off the 0.90 income-wave bars); IN-3 still awaits.
-    assert validated == {"IN-1", "IN-5", "AS-2", "AS-12"}
+    # IN-1/IN-5 (LP-389) + AS-2/AS-12 (LP-390-7) + IN-3 (LP-390-9) — every calibratable rule is signed off now.
+    assert validated == {"IN-1", "IN-5", "AS-2", "AS-12", "IN-3"}
     assert all(b.validated is False for rid, b in bars.items() if rid not in validated)
     # a validated bar is always calibratable-now with a real threshold (never a blocked rule — loader invariant)
     for rid in validated:
@@ -178,29 +178,33 @@ def test_below_bar_routes_to_needs_review_and_judgment_ratifies() -> None:
 # ACTIVATION — LP-380 activated nothing; LP-389 (the first pass) activated exactly IN-1/IN-5 via the gate
 # --------------------------------------------------------------------------- #
 def test_active_set_is_base_plus_lp389() -> None:
-    assert ACTIVE_RULE_IDS == (
-        "AS-1",
-        "OC-2",
-        "ID-2",
-        "ID-4",
-        "ID-1",
-        "ID-3",
-        "ID-6",
-        "ID-7",
-        "ID-9",
-        "ID-8",
-        "IN-2",
-        # LP-389 — the first activation pass, via the eligibility gate (activation_bars.is_eligible)
-        "IN-1",
-        "IN-5",
-        "ID-5",  # LP-389-A — the subject mismatch fixed (per-borrower), input now resolves
-        # LP-384 — the second activation pass: the stuck deterministic rules, verified on build_lf6t3n_plus
-        "AS-9",
-        "IN-4",
-        "AS-10",
-        # LP-390-7 — the first income-wave activation: AS-2 (auto) + AS-12 (ratify), Priya's 0.90 bars signed off
-        "AS-2",
-        "AS-12",
+    assert (
+        ACTIVE_RULE_IDS
+        == (
+            "AS-1",
+            "OC-2",
+            "ID-2",
+            "ID-4",
+            "ID-1",
+            "ID-3",
+            "ID-6",
+            "ID-7",
+            "ID-9",
+            "ID-8",
+            "IN-2",
+            # LP-389 — the first activation pass, via the eligibility gate (activation_bars.is_eligible)
+            "IN-1",
+            "IN-5",
+            "ID-5",  # LP-389-A — the subject mismatch fixed (per-borrower), input now resolves
+            # LP-384 — the second activation pass: the stuck deterministic rules, verified on build_lf6t3n_plus
+            "AS-9",
+            "IN-4",
+            "AS-10",
+            # LP-390-7 — the first income-wave activation: AS-2 (auto) + AS-12 (ratify), Priya's 0.90 bars signed off
+            "AS-2",
+            "AS-12",
+            "IN-3",  # LP-390-9 — YTD-annualized shortfall (auto), Priya signed off the 0.98 bar (same tag as IN-1)
+        )
     )
     # A bar persists after activation as the record of WHY the rule went live, so the bars now intersect the
     # active set at EXACTLY the activated candidates — never a base-active rule (those never had a bar).
@@ -213,5 +217,6 @@ def test_active_set_is_base_plus_lp389() -> None:
         "AS-10",
         "AS-2",
         "AS-12",
+        "IN-3",
     }
     assert not (set(load_activation_bars()) & set(_BASE_ACTIVE))

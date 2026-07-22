@@ -3,9 +3,11 @@
 Five no-AI rules resolved `unknown` because LF-6T3N lacked their inputs (LP-381/382/383), NOT because they are
 broken. build_lf6t3n_plus adds those documents, each carrying a KNOWN, ASSERTED answer so the rule's CATCH is
 provable — a deliberate 77-day gap (IN-4 FIRES), a deliberate missing page (AS-9 FIRES). AS-10 already resolves
-on the base fixture. AS-3 (no §3B calculator) and IN-3 (needs the AI documented_monthly) stay blocked — the
-gate correctly holds them (fail-closed). These pin the field-name match (the LP-333/369 trap), each rule's real
-verdict (fire AND satisfy), the base-fixture additivity, and the earned activation.
+on the base fixture. AS-3 (no §3B calculator) stayed blocked at LP-384 — the gate correctly holds it
+(fail-closed); IN-3 was later activated (LP-390-9, Priya signed off its bar) but still honestly abstains here
+(couldnt_check — no stated-income/ytd comparison input on the fixture, like live IN-1). These pin the
+field-name match (the LP-333/369 trap), each rule's real verdict (fire AND satisfy), the base-fixture
+additivity, and the earned activation.
 """
 
 from __future__ import annotations
@@ -202,25 +204,28 @@ async def test_as10_fires_on_a_short_account() -> None:
 
 
 # --------------------------------------------------------------------------- #
-# STILL HELD (fail-closed) — AS-3 (no calculator) + IN-3 (AI dependency) only abstain
+# ABSTAIN on this fixture — AS-3 (no calculator, still held) + IN-3 (now LIVE, LP-390-9) both couldnt_check
 # --------------------------------------------------------------------------- #
 async def test_as3_and_in3_stay_couldnt_check_even_on_the_plus_fixture() -> None:
     plus = build_lf6t3n_plus()
     assert (await _verdicts(plus, "AS-3"))["loan"] is Verdict.COULDNT_CHECK  # no §3B calculator
-    assert (await _verdicts(plus, "IN-3"))[
-        "loan"
-    ] is Verdict.COULDNT_CHECK  # needs documented_monthly (AI)
+    # IN-3 is ACTIVE (LP-390-9) but honestly abstains here: documented_monthly (AI) IS produced, but the
+    # derived YTD-annualized shortfall has no stated-income/ytd comparison input on the fixture — the same
+    # honest couldnt_check as live IN-1, NOT a tag-production failure.
+    assert (await _verdicts(plus, "IN-3"))["loan"] is Verdict.COULDNT_CHECK
 
 
 # --------------------------------------------------------------------------- #
-# ACTIVATION — the three earned rules are live (14 → 17); AS-3/IN-3 are not
+# ACTIVATION — LP-384's three earned rules are live; AS-3 stays blocked; IN-3 later went live (LP-390-9)
 # --------------------------------------------------------------------------- #
 def test_the_three_stuck_rules_activated_and_the_blocked_two_did_not() -> None:
     for rid in ("AS-9", "IN-4", "AS-10"):
         assert rid in ACTIVE_RULE_IDS
-    for rid in ("AS-3", "IN-3"):
-        assert rid not in ACTIVE_RULE_IDS
-    assert len(ACTIVE_RULE_IDS) == 19
+    assert "AS-3" not in ACTIVE_RULE_IDS  # still blocked — no §3B cash-to-close calculator
+    assert (
+        "IN-3" in ACTIVE_RULE_IDS
+    )  # LP-390-9 activated it (Priya signed off; same tag+evidence as IN-1)
+    assert len(ACTIVE_RULE_IDS) == 20
 
 
 async def test_the_activated_rules_reach_real_verdicts_through_the_orchestrator() -> None:

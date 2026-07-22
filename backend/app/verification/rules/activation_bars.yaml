@@ -32,9 +32,9 @@
 #               held. Meaningless (and rejected) for any status but no-ai-dependency.
 #
 # THE HONEST STATE (report, not a pass): of 23 candidate rules, 5 are calibratable-now (IN-1, IN-5, IN-3, and
-# — LP-390-5a — AS-2, AS-12). Priya has signed off FOUR (IN-1, IN-5 in LP-389; AS-2, AS-12 in LP-390-7); IN-3
-# awaits her. The rest are blocked on calibration / a producer / a wiring decision — reported so a rule never
-# ships on a tag nobody measured.
+# — LP-390-5a — AS-2, AS-12), and Priya has now signed off ALL FIVE (IN-1, IN-5 in LP-389; AS-2, AS-12 in
+# LP-390-7; IN-3 in LP-390-9) — every calibratable rule is live. The rest are blocked on calibration / a
+# producer / a wiring decision — reported so a rule never ships on a tag nobody measured.
 #
 # LP-389 — the FIRST activation pass reads THIS file through activation_bars.is_eligible: IN-1 + IN-5 (AI,
 # validated, measured 100% >= bar) pass the gate and go live; the other 21 stay held. ID-5 was PROPOSED but
@@ -322,12 +322,13 @@ IN-3:
   # income_amounts group would never fold into _required_ai_groups, so IN-3 would couldnt_check FOREVER,
   # invisible to the LP-389 guard (which only inspects declared load_bearing_ai_tags). As calibratable-now the
   # loader now REJECTS any input_resolves on it (that gate is no-ai-only), and the declared AI tag makes the
-  # fold-in + guard see the real dependency. HELD by validated:false — Priya has not signed off the shortfall
-  # bar; documented_monthly itself is measured 100% (LP-379), the same evidence IN-1 rests on.
+  # fold-in + guard see the real dependency. LP-390-9: Priya SIGNED OFF the 0.98 auto bar (validated:true);
+  # documented_monthly is measured 100% (LP-379-D, the same evidence IN-1 rests on) >= 0.98 -> is_eligible ->
+  # ACTIVE (registry _LP390_9_ACTIVATED).
   status: calibratable-now
   ships: auto
   threshold: 0.98
-  validated: false
+  validated: true
   load_bearing_ai_tags:
     - income.documented_monthly
   measured_accuracy: 1.0
@@ -335,9 +336,8 @@ IN-3:
   rationale: >-
     an AI rule (transitive dependency on income.documented_monthly, the SAME shape as IN-1), not the no-ai it
     was first filed as (LP-384 review finding). It abstains on "documented monthly income is absent" until the
-    income_amounts wave runs; its shortfall bar (proposed 0.98, via documented_monthly's 100% measurement)
-    awaits Priya's sign-off. Held here — the income wave activates the AI rules; LP-384 shipped the
-    deterministic ones.
+    income_amounts wave runs; its shortfall bar (0.98, via documented_monthly's 100% measurement) is signed off
+    by Priya (LP-390-9) — the same tag + evidence as IN-1. ACTIVE.
 
 IN-4:
   status: no-ai-dependency
