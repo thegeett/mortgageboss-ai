@@ -449,6 +449,35 @@ class CalibrationRun:
         return failing_cases(self.scored)
 
 
+def score_snapshot_against_golden(
+    snapshot: Snapshot, golden: dict[tuple[str, str], str]
+) -> tuple[list[ScoredTag], list[tuple[str, str]]]:
+    """LP-390-5 — join a MATERIALIZED snapshot's predicted tags to golden labels by the stable
+    ``(tag_id, subject_id)`` key and score each (reusing ``ScoredTag``). Unlike ``calibrate`` (one AI-group
+    per single-document snapshot), this scores a WHOLE materialized snapshot — so transaction-subject
+    (apparent_category), borrower-subject (income_stability), and Stage-B (has_identified_source) tags are
+    scored together with the document-subject ones, exactly where each producer places them.
+
+    Returns ``(scored, unmatched)``: a labeled ``(tag_id, subject_id)`` with NO produced tag is REPORTED in
+    ``unmatched``, never silently dropped (a missing prediction is a finding — the producer didn't run there
+    or the subject id drifted). Deterministic given the snapshot: the only non-determinism is the live model
+    that produced the snapshot's tags."""
+    by = {} if snapshot.tags.absent else snapshot.tags.by_subject
+    scored: list[ScoredTag] = []
+    unmatched: list[tuple[str, str]] = []
+    for (tag_id, subject_id), golden_value in golden.items():
+        tag = by.get(subject_id, {}).get(tag_id)
+        if tag is None:
+            unmatched.append((tag_id, subject_id))
+            continue
+        scored.append(
+            ScoredTag(
+                subject_id, tag_id, golden_value, str(tag.value), tag.confidence, tag.reasoning
+            )
+        )
+    return scored, unmatched
+
+
 __all__ = [
     "LABELED_DOCS",
     "CalibrationRun",
@@ -457,5 +486,6 @@ __all__ = [
     "calibrate",
     "failing_cases",
     "format_report",
+    "score_snapshot_against_golden",
     "summarize",
 ]

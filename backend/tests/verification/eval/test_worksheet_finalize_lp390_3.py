@@ -4,8 +4,9 @@ The worksheet is the instrument: if it's wrong her hours produce noise. Fixes pi
 framing that makes has_identified_source a distinct question (facts first, plain ASCII — LP-390-3a), the
 id.address_normalized correction (a name where an address belongs), and the drop of the non-labelable orphan
 sourcing tags (counterparty / source_reference). The reframing WORKED: LP-390-3a adopted Priya's active
-labeling copy, in which she labeled all 16 has_identified_source (she had skipped them as duplicates), so the
-committed golden now holds 148 labels (78 judgment + 70 mechanical) + 35 notes. No tag / rule / spec / producer
+labeling copy, in which she labeled all 16 has_identified_source (she had skipped them as duplicates); she then
+completed the judgment set for the LP-390-5 calibration, so the committed golden now holds 159 labels (89
+judgment + 70 mechanical) + 35 notes. No tag / rule / spec / producer
 changed; only the worksheet's presentation. (The real-name DB copy she cross-checks against lives in the
 gitignored calibration-local/ — never committed.)
 """
@@ -96,9 +97,11 @@ def test_all_priya_labels_and_notes_are_preserved() -> None:
     jrows, mrows = _rows(_JUDGMENT), _rows(_MECHANICAL)
     goldens = sum(1 for r in jrows + mrows if r.get("golden_label", "").strip())
     notes = sum(1 for r in jrows if r.get("Note", "").strip())
-    # LP-390-3a adopted Priya's active labeling copy: 78 judgment (she labeled all 16 has_identified_source
-    # once reframed, + owner_matches_borrower + has_2yr_history) + 70 mechanical = 148, and the 35 notes.
-    assert goldens == 148
+    # LP-390-5: Priya continued labeling for the calibration session — 89 judgment (the LP-390-3a 78, plus the
+    # remaining 3 owner_matches_borrower + 3 is_reserve_eligible on the investment docs, + more apparent_category
+    # /has_identified_source fills) + 70 mechanical = 159, and the 35 notes. Her labels are only ever added, never
+    # dropped — this asserts the committed golden the LP-390-5 scores were measured against.
+    assert goldens == 159
     assert notes == 35
 
 
