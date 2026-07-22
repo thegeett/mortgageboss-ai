@@ -11402,3 +11402,52 @@ unblocks AS-5.
 non-triviality; the IN-10/IN-11 fix this does NOT transfer), LP-385 (the borrower-subject income producer),
 LP-379-E/F (the `apparent_category` widening + `gift` unmeasured on LF-6T3N), LP-323-IN-B (IN-11's pinned
 set-membership over-fire, the same income-type gap).
+
+
+## ADR-311: The first income-wave activation — AS-2 (auto) + AS-12 (ratify) go live; the AS-5 stray-flag fail-closed hardening (LP-390-7)
+
+**The decision.** Activate exactly two AI rules through the eligibility gate: **AS-2** (earnest-money sourcing,
+ships auto) and **AS-12** (borrowed-funds detection, ships ratify). Both had their load-bearing tags measured
+against Priya's labels — `apparent_category` re-scored **100% concrete (n=17, LP-390-5a)** once the free-text
+goldens were mapped to the enum, and `has_identified_source` **93.8% (n=16, LP-390-5)** — and Priya signed off
+the proposed 0.90 bars. `measured_accuracy 0.938 >= 0.90` → the gate admits both. `ACTIVE_RULE_IDS` 17 → 19.
+
+**Via the gate, not a hand-list.** Activation is `validated: true` in `activation_bars.yaml` PLUS the id in
+`registry._LP390_ACTIVATED` — kept in sync by `test_activation_gate_lp389` (`ACTIVE_RULE_IDS − _BASE_ACTIVE ==
+eligible_rule_ids()`). A rule cannot enter the live set without passing `is_eligible`.
+
+**The real run (reported, not predicted; a point-in-time live run on LF-6T3N).**
+- **AS-2 (auto): 0 FIRED** — it does NOT falsely fire (LF-6T3N has no `loan_proceeds` deposit, AS-2's trigger).
+  15 satisfied + 2 needs_review on the 17 money-in deposits; 33 couldnt_check on the money-out transactions
+  (Stage-B produces `has_identified_source` only for money-in, so a sourcing rule has nothing to check on an
+  outflow — couldnt_check is the safe non-verdict, not a false pass).
+- **AS-12 (ratify): 0 auto** — 16 needs_review (surfaced for human ratification, LP-376-B) + 34 couldnt_check.
+  Every verdict routes to a human or is a non-verdict; it never auto-ships.
+
+**The loan_proceeds n=0 caveat AS-2 ships with.** AS-2 fires on `apparent_category == loan_proceeds`, a value
+that does not occur on LF-6T3N — so its specific trigger is UNTESTED. `apparent_category` is measured broadly
+(100% concrete across payroll/interest/transfer_own/third_party), and `measured_accuracy` is recorded as the
+weaker MEASURED gate (`has_identified_source` 0.938), not `apparent_category`'s 1.0, so the number does not
+over-read the untested trigger. A file with a loan-proceeds deposit would strengthen it; Priya signed off
+knowing this.
+
+**The AS-5 stray-flag hardening (fail-closed).** The ticket warned of `AS-5: validated: true` while
+`status: not-calibratable-yet, threshold: null` — a contradiction that would sign off a rule with no bar.
+Against the gate of record it was already `validated: false` (LP-390-5a), and the loader ALREADY rejects the
+scenario: `parse_bar` raises "only a calibratable-now rule may be validated" on any non-calibratable rule
+(LP-380). So no data fix and no loader change were needed — the safety already exists. LP-390-7 PROVES it: a
+test asserts AS-5 stays held and that `validated: true` on its null-threshold/not-calibratable state is a LOAD
+ERROR, not silent eligibility. A mis-set sign-off cannot leak a rule live.
+
+**Still held.** AS-5 (a DESIGN question — is `gift` a tag value or a rule conclusion, ADR-302 — plus gift n=0)
+and IN-3 (calibratable-now but Priya has not signed its shortfall bar). Every other candidate fails the gate
+(unmeasured tag / needs-producer / input absent).
+
+**A reported observation (polish, not a blocker).** AS-2/AS-12 enumerate per-transaction and couldnt_check the
+~33 money-out transactions (their sourcing tags exist only for money-in). An `is_money_in == in` applicability
+filter (as AS-1 has) would trim that noise — a follow-up, not dangerous (couldnt_check surfaces nothing false).
+
+**Cross-refs.** LP-390-5a (apparent_category re-score + the calibratable-now flip), LP-390-6 (the proposed
+bars), LP-390-5 (has_identified_source measurement), LP-389/389-A (the eligibility gate + the two-step
+activation), LP-380 (the bar mechanism + the loader's validated-only-on-calibratable guard), ADR-302 (the AS-5
+gift-as-conclusion design question).

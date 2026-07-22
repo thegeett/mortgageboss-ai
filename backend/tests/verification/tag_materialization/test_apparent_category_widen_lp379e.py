@@ -132,13 +132,17 @@ async def test_off_vocab_value_still_coerces_to_unknown() -> None:
 # --------------------------------------------------------------------------- #
 # THE CRITICAL EQUIVALENCE — no LIVE rule reads apparent_category, so widening shifts nothing
 # --------------------------------------------------------------------------- #
-def test_no_live_rule_reads_apparent_category() -> None:
-    offenders = []
+def test_only_lp390_7_rules_read_apparent_category_live() -> None:
+    readers = []
     for rule_id in ACTIVE_RULE_IDS:
         spec = _SPECS / f"{rule_id}.yaml"
         if spec.is_file() and "apparent_category" in spec.read_text(encoding="utf-8"):
-            offenders.append(rule_id)
-    assert offenders == []  # widening the enum cannot change any live verdict
+            readers.append(rule_id)
+    # LP-390-7 activated AS-2 + AS-12 (they read apparent_category, now measured 100% concrete, LP-390-5a) —
+    # the INTENDED live consumers. No OTHER live rule reads it, so the LP-379-E widening still cannot silently
+    # change an UNINTENDED live verdict. (AS-2's trigger is loan_proceeds — an original enum value, unaffected
+    # by the widening; AS-12 is judgmental — a human ratifies every verdict.)
+    assert set(readers) == {"AS-2", "AS-12"}
 
 
 def test_as1_does_not_read_apparent_category() -> None:
@@ -170,4 +174,6 @@ def test_no_rule_activation_changed() -> None:
         "AS-9",
         "IN-4",
         "AS-10",
+        "AS-2",
+        "AS-12",
     )

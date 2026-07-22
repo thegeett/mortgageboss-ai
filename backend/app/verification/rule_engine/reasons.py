@@ -53,6 +53,7 @@ _FACT_LABELS: dict[str, str] = {
     "txn.is_money_in": "deposit direction",
     "txn.has_identified_source": "deposit's source",
     "txn.source_strength": "deposit's source strength",
+    "txn.apparent_category": "deposit category",  # LP-390-7: AS-12 (live) reads it — a curated reason label
 }
 
 

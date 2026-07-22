@@ -220,7 +220,7 @@ def test_the_three_stuck_rules_activated_and_the_blocked_two_did_not() -> None:
         assert rid in ACTIVE_RULE_IDS
     for rid in ("AS-3", "IN-3"):
         assert rid not in ACTIVE_RULE_IDS
-    assert len(ACTIVE_RULE_IDS) == 17
+    assert len(ACTIVE_RULE_IDS) == 19
 
 
 async def test_the_activated_rules_reach_real_verdicts_through_the_orchestrator() -> None:

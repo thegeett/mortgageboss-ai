@@ -99,13 +99,14 @@ class _Reasoner:
 
 
 def test_assets_activation_state() -> None:
-    # LP-384 activated AS-9 (page completeness) + AS-10 (statement recency) — the stuck deterministic rules
-    # whose inputs now resolve on the extended LF-6T3N fixture (verified via the eligibility gate).
-    for rid in ("AS-9", "AS-10"):
+    # LP-384 activated AS-9 (page completeness) + AS-10 (statement recency); LP-390-7 activated AS-2 (EMD
+    # sourcing, auto) + AS-12 (borrowed-funds, ratify) — the first income-wave AI rules, Priya's 0.90 bars
+    # signed off once apparent_category (100% concrete, LP-390-5a) + has_identified_source (93.8%) were measured.
+    for rid in ("AS-9", "AS-10", "AS-2", "AS-12"):
         assert rid in ACTIVE_RULE_IDS
     # The rest stay inert: authored + evaluated, not shipped (the LP-333 discipline). AS-3 is calculator-
-    # blocked (no §3B cash-to-close calc); the others rest on unscored AI tags.
-    for rid in ("AS-2", "AS-3", "AS-4", "AS-5", "AS-6", "AS-7", "AS-11", "AS-12"):
+    # blocked (no §3B cash-to-close calc); the others rest on unscored AI tags / a design question (AS-5).
+    for rid in ("AS-3", "AS-4", "AS-5", "AS-6", "AS-7", "AS-11"):
         assert rid not in ACTIVE_RULE_IDS
 
 

@@ -124,6 +124,8 @@ async def test_registry_dispatches_the_active_rule_set_by_kind() -> None:
             "AS-9",  # a statement declaring 5 pages / 4 present → fires
             "IN-4",  # two VOEs with a 77-day gap → fires
             "AS-10",  # already resolves on the base fixture → satisfied
+            "AS-2",  # LP-390-7 — EMD sourcing (auto), Priya signed off the 0.90 bar
+            "AS-12",  # LP-390-7 — borrowed-funds (ratify)
         }
     )
     snapshot = _loan_snapshot(None)  # no occupancy/txn tags → everything fail-closes honestly

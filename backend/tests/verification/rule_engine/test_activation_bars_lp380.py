@@ -50,12 +50,12 @@ def test_the_honest_activation_state_is_reported() -> None:
     by = {
         s: sum(1 for b in bars.values() if b.status == s) for s in {b.status for b in bars.values()}
     }
-    # IN-1, IN-5, IN-3 + AS-2, AS-12 (LP-390-5a: both their load-bearing AI tags now measured — apparent_category
-    # re-scored 100% concrete + has_identified_source 93.8%). All still validated:false → none activated.
+    # IN-1, IN-5, IN-3 + AS-2, AS-12 (both their load-bearing AI tags measured — apparent_category re-scored
+    # 100% concrete LP-390-5a + has_identified_source 93.8%).
     assert by["calibratable-now"] == 5
     assert by.get("not-calibratable-yet", 0) >= 1 and by.get("no-ai-dependency", 0) >= 1
-    # the 2 newly-calibratable rules are proposed, NOT signed off — nothing activates on this ticket
-    assert not bars["AS-2"].validated and not bars["AS-12"].validated
+    # LP-390-7: Priya signed off AS-2 + AS-12 (validated:true) → activated; IN-3 still awaits her sign-off.
+    assert bars["AS-2"].validated and bars["AS-12"].validated and not bars["IN-3"].validated
 
 
 # --------------------------------------------------------------------------- #
@@ -135,13 +135,14 @@ def test_loader_rejects_non_bool_validated() -> None:
 # --------------------------------------------------------------------------- #
 # Priya's sign-off — exactly IN-1 and IN-5 are validated; all others stay false
 # --------------------------------------------------------------------------- #
-def test_exactly_in1_in5_are_validated_per_priya() -> None:
+def test_exactly_the_signed_off_bars_are_validated() -> None:
     bars = load_activation_bars()
     validated = {rid for rid, b in bars.items() if b.validated}
-    assert validated == {"IN-1", "IN-5"}  # Priya's two sign-offs, no more
+    # IN-1/IN-5 (LP-389) + AS-2/AS-12 (LP-390-7, Priya signed off the 0.90 income-wave bars); IN-3 still awaits.
+    assert validated == {"IN-1", "IN-5", "AS-2", "AS-12"}
     assert all(b.validated is False for rid, b in bars.items() if rid not in validated)
-    # a validated bar is still calibratable-now with a real threshold (never a blocked rule)
-    for rid in ("IN-1", "IN-5"):
+    # a validated bar is always calibratable-now with a real threshold (never a blocked rule — loader invariant)
+    for rid in validated:
         assert bars[rid].status == "calibratable-now" and bars[rid].threshold is not None
 
 
@@ -195,10 +196,12 @@ def test_active_set_is_base_plus_lp389() -> None:
         "AS-9",
         "IN-4",
         "AS-10",
+        # LP-390-7 — the first income-wave activation: AS-2 (auto) + AS-12 (ratify), Priya's 0.90 bars signed off
+        "AS-2",
+        "AS-12",
     )
     # A bar persists after activation as the record of WHY the rule went live, so the bars now intersect the
-    # active set at EXACTLY the three activated (IN-1/IN-5 from LP-389, ID-5 from LP-389-A) — never a
-    # base-active rule (those never had a bar).
+    # active set at EXACTLY the activated candidates — never a base-active rule (those never had a bar).
     assert set(load_activation_bars()) & set(ACTIVE_RULE_IDS) == {
         "IN-1",
         "IN-5",
@@ -206,5 +209,7 @@ def test_active_set_is_base_plus_lp389() -> None:
         "AS-9",
         "IN-4",
         "AS-10",
+        "AS-2",
+        "AS-12",
     }
     assert not (set(load_activation_bars()) & set(_BASE_ACTIVE))

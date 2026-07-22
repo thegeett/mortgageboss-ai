@@ -78,9 +78,26 @@ _LP389_ACTIVATED: tuple[str, ...] = ("IN-1", "IN-5", "ID-5")
 # income-wave rule; its no-ai bar is a MISCLASSIFICATION reported in activation_bars.yaml).
 _LP384_ACTIVATED: tuple[str, ...] = ("AS-9", "IN-4", "AS-10")
 
+# LP-390-7 — the FIRST income-wave activation: two AI rules whose load-bearing tags Priya's labels finally
+# measured (LP-390-5/5a). Both go live through the gate (validated:true + measured_accuracy >= the 0.90 bar).
+#   AS-2  — Earnest-money sourcing (ships AUTO). apparent_category re-scored 100% concrete (n=17, LP-390-5a) +
+#           has_identified_source 93.8% (n=16, LP-390-5); measured_accuracy 0.938. ⚠️ its trigger value
+#           loan_proceeds is n=0 on LF-6T3N — the tag is measured broadly but that value is UNTESTED (a file
+#           with a loan-proceeds deposit would strengthen it); it must not falsely fire (Phase-2 verified).
+#   AS-12 — Borrowed-funds detection (judgmental -> ships RATIFY; surfaces to needs_review, never an auto
+#           verdict). Reasons over apparent_category broadly, so the loan_proceeds n=0 caveat does not bind it.
+# STILL HELD: AS-5 (design question ADR-302 + gift n=0 — validated:false, the loader rejects a stray true on
+# its null-threshold/not-calibratable state) and IN-3 (calibratable-now but Priya has not signed its bar).
+_LP390_ACTIVATED: tuple[str, ...] = ("AS-2", "AS-12")
+
 # The gate is the source of truth: test_activation_gate_lp389 asserts ACTIVE_RULE_IDS - _BASE_ACTIVE ==
 # eligible_rule_ids() — a rule CANNOT enter this set without meeting the eligibility gate (not a hand-list).
-ACTIVE_RULE_IDS: tuple[str, ...] = (*_BASE_ACTIVE, *_LP389_ACTIVATED, *_LP384_ACTIVATED)
+ACTIVE_RULE_IDS: tuple[str, ...] = (
+    *_BASE_ACTIVE,
+    *_LP389_ACTIVATED,
+    *_LP384_ACTIVATED,
+    *_LP390_ACTIVATED,
+)
 
 
 async def evaluate_rules(

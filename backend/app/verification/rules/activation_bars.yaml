@@ -31,9 +31,10 @@
 #               input is VERIFIED to resolve to real values on a real file (LP-381/382). False by default =
 #               held. Meaningless (and rejected) for any status but no-ai-dependency.
 #
-# THE HONEST STATE (report, not a pass): of 23 inert rules, only 2 are calibratable-now. The bar can be SET
-# for those 2 today; the rest are blocked on calibration / a producer / a wiring decision — reported so a rule
-# never ships on a tag nobody measured.
+# THE HONEST STATE (report, not a pass): of 23 candidate rules, 5 are calibratable-now (IN-1, IN-5, IN-3, and
+# — LP-390-5a — AS-2, AS-12). Priya has signed off FOUR (IN-1, IN-5 in LP-389; AS-2, AS-12 in LP-390-7); IN-3
+# awaits her. The rest are blocked on calibration / a producer / a wiring decision — reported so a rule never
+# ships on a tag nobody measured.
 #
 # LP-389 — the FIRST activation pass reads THIS file through activation_bars.is_eligible: IN-1 + IN-5 (AI,
 # validated, measured 100% >= bar) pass the gate and go live; the other 21 stay held. ID-5 was PROPOSED but
@@ -69,14 +70,14 @@ IN-5:
 
 # ===================== not-calibratable-yet (BLOCKED ON CALIBRATION — no bar, not "bar unmet") ======
 AS-2:
-  # LP-390-5a: BOTH load-bearing AI tags are now MEASURED -> calibratable-now (was not-calibratable-yet, blocked
-  # on apparent_category). apparent_category re-scored 100% concrete (16/16, n=17) once mapped free-text->enum
-  # (the LP-390-5 24.5% was a byte-compare artifact); has_identified_source 93.8% (n=16, LP-390-5). validated
-  # stays FALSE -> is_eligible false -> NOT activated (Priya's sign-off + LP-390-7 do that).
+  # LP-390-5a: BOTH load-bearing AI tags MEASURED -> calibratable-now. apparent_category re-scored 100% concrete
+  # (16/16, n=17) mapped free-text->enum (the LP-390-5 24.5% was a byte-compare artifact); has_identified_source
+  # 93.8% (n=16). LP-390-7: Priya SIGNED OFF the 0.90 auto bar (validated:true); the rule is now ACTIVE
+  # (registry _LP390_ACTIVATED). 0.938 >= 0.90 -> is_eligible -> LIVE. See the loan_proceeds n=0 caveat below.
   status: calibratable-now
   ships: auto
   threshold: 0.90
-  validated: false
+  validated: true
   measured_accuracy: 0.938   # the WEAKEST measured load-bearing tag (has_identified_source); apparent_category
                              # is 1.0-concrete but see the loan_proceeds n=0 caveat below — the honest floor.
   load_bearing_ai_tags: [txn.apparent_category, txn.has_identified_source]
@@ -106,6 +107,9 @@ AS-4:
     Priya-confirmed reserve-eligible definition, then a prompt alignment (its own follow-up). No bar.
 
 AS-5:
+  # LP-390-7 fail-closed check: validated MUST stay false here — AS-5 is not-calibratable-yet with a null
+  # threshold, so the loader REJECTS validated:true on it (parse_bar: "only a calibratable-now rule may be
+  # validated"). A mis-set flag cannot leak AS-5 live; the gate holds it even were the flag true.
   status: not-calibratable-yet
   ships: auto
   threshold: null
@@ -158,11 +162,12 @@ AS-11:
 AS-12:
   # LP-390-5a: both load-bearing AI tags now measured -> calibratable-now. Judgmental -> ships RATIFY, so a
   # human ratifies every verdict regardless of the number (activation_mode returns 'ratify' for ships:ratify);
-  # the threshold is the SURFACING floor. validated stays false -> not activated.
+  # the threshold is the SURFACING floor. LP-390-7: Priya SIGNED OFF (validated:true); ACTIVE (_LP390_ACTIVATED)
+  # — it surfaces to needs_review for human ratification, never an auto verdict.
   status: calibratable-now
   ships: ratify
   threshold: 0.90
-  validated: false
+  validated: true
   measured_accuracy: 0.938   # weakest measured load-bearing tag (has_identified_source); apparent_category 1.0-concrete
   load_bearing_ai_tags: [txn.apparent_category, txn.has_identified_source]
   fp_fn: "FN (misses a borrowed-funds pattern) >> FP — but judgmental, a human ratifies"
