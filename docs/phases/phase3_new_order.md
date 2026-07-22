@@ -189,7 +189,7 @@ Acceptance criteria:
 
 Every income judgment tag that materializes has a labelable row
 No row targets a non-producing tag; no data-entry errors
-has_identified_source distinguishable from apparent_category
+has_identified_source distinguishable from apparent_category  
 All prior filled labels preserved (count asserted)
 
 
