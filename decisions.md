@@ -11700,3 +11700,48 @@ rides every bar. The B12/B14 golden change is recorded with her originals preser
 
 **Cross-refs.** LP-393-5 (the proposals), LP-393-4b (the measurements), LP-376-B (the ratification armor),
 LP-390-7 / LP-390-9 (the validate+activate precedent), LP-389 (the eligibility gate + its invariant).
+
+## ADR-317: The calibration wave found 0 of 4 calibratable — AS-7 is an orphan (needs-producer), and IN-8/IN-9/IN-13 need scenarios, not scoring (LP-395)
+
+**Context.** LP-394's census classified IN-8, IN-9, IN-13, AS-7 as `needs-calibration` — "the cheapest remaining
+rules-per-ticket win." LP-395's Phase 0 (establish the achievable n BEFORE labeling) found that **none of the
+four is calibratable now**, correcting the census. No worksheet was generated; nothing was scored.
+
+**AS-7 is a true ORPHAN → needs-producer (census wrong; LP-390-2 vindicated).** `txn.is_nsf_or_overdraft` is in
+the vocabulary (`fact_tags.csv`, mode=AI) and is READ by the derived `stmt.nsf_count` recipe (`derived.py:558`,
+which ABSTAINS when the tag is on no transaction) — but it is produced by **no path**: not in
+`tag_production.yaml` (the declared layer), and not in Stage-B (`tag_correlation` emits only
+`txn.has_identified_source` / `txn.source_strength`). The AS-7 bar's own rationale hedged ("aggregated from
+txn.is_nsf_or_overdraft (AI), UNSCORED — verify the derived chain when calibrating"); the chain is broken at the
+leaf. **AS-7's real blocker is a MISSING PRODUCER for `txn.is_nsf_or_overdraft`, not calibration.** This confirms
+LP-390-2's orphan finding and reclassifies AS-7 `needs-calibration → needs-producer`.
+
+**IN-8 / IN-9 / IN-13 are `needs-more-scenarios`, not `needs-calibration`.** Their tags produce, but no fixture
+carries the discriminating scenario at n≥6 (the LP-393 thin-n discipline):
+- **IN-8 `income.voe_present`** — labelable only on VOE / offer-letter documents (the worksheet capacity model);
+  the scenario fixture has **3** VOE docs (lf6t3n 0, lf6t3n_plus 2), so **n=3 < 6**. Thin. (A secondary finding:
+  the producer runs `voe_present` on ALL documents but the worksheet only labels VOE/offer-letter types, so the
+  precision direction — does the AI false-tag a W-2 as a VOE — is not even in the labelable set.)
+- **IN-9 `income.offer_letter_present`** — **no offer-letter document exists in any fixture**, so its positive
+  class is empty (one-sided, like the AS-5 gift n=0 case). Not measurable until a scenario carries one.
+- **IN-13 `income.continuance_3yr`** — produces 13 rows (enough by count), but every borrower carries only
+  EMPLOYMENT income, where continuance is honestly `unknown` (LP-393-1 reached n=1 meaningful). The tag is about
+  OTHER income (pension / child support / alimony — B3-3.1-09); no such borrower exists. Its second input
+  `income.type` is also thinly measured (n=2, all `base`, in the LP-334 set) — though `income.type` is context,
+  not the binding load-bearing tag.
+
+**The fixture gaps this spins off (their own tickets, the LP-393-1 pattern — NOT built here):** (1) ≥3 more VOE
+documents (and non-VOE income docs for precision) to lift IN-8 to n≥6; (2) an `employment_offer_letter` document
+to give IN-9 a positive class; (3) other-income borrowers (pension, child support, alimony, award) to give
+IN-13 a discriminating continuance signal. And separately, (4) a PRODUCER for `txn.is_nsf_or_overdraft` (a
+Stage-B / statement AI classifier) to unblock AS-7.
+
+**Consequences for the plan.** LP-394's roll-up said one calibration wave clears IN-8/IN-9/IN-13/AS-7 — the
+cheapest written-rule win. **That win does not exist:** each of the four needs upstream work (a producer or a
+scenario fixture) before any scoring. The corrected blocker classes: AS-7 → needs-producer; IN-8/IN-9/IN-13 →
+needs-more-scenarios. The genuinely cheap calibration win among written-inert rules is now: **none** — the
+next income-family progress needs a small other-income + VOE + offer-letter scenario fixture first, then a score.
+
+**Cross-refs.** LP-394 (the census this corrects), LP-390-2 (the original AS-7 orphan finding), LP-390-3 (the
+IN-8/IN-9 zero-rows-on-LF-6T3N finding), LP-393-1 (the continuance n=1 finding + the scenario-fixture pattern),
+LP-393's thin-n discipline.
