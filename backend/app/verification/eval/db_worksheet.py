@@ -33,6 +33,13 @@ _REPO_ROOT = Path(__file__).resolve().parents[4]
 # The gitignored path segment a real-PII worksheet may live under IN the repo (see .gitignore, LP-379-D).
 _PII_SAFE_SEGMENT = "calibration-local"
 
+# LP-392 — tags whose prior (fixture-context) golden must NOT carry to the real-DB worksheet: their answer
+# depends on the REAL identity, so carrying the de-identified label would ship a now-possibly-wrong golden.
+# stmt.owner_matches_borrower ("does this account holder match the borrower?") is literally a name-match — its
+# fixture 'yes' (Jordan==Jordan) is not evidence the real account (AKASH) self-matches; Priya must re-judge it
+# on the real document (the whole point of the DB worksheet). Flagged for re-label, never silently carried.
+RELABEL_ON_REAL_CONTEXT = frozenset({"stmt.owner_matches_borrower"})
+
 # LP-379-D: tags HELD from scoring pending a re-label pass against the LP-379-E-widened enum. Priya's current
 # apparent_category goldens are FREE TEXT ("transfer to some one", "Credit card payment"), not enum values;
 # they need mapping to the widened enum before scoring. has_identified_source is unlabeled. The hold is
@@ -83,11 +90,17 @@ async def write_db_worksheets(
         company_id=loan_file.company_id,
     )
     filenames = await document_filenames_by_content_id(session, loan_file)
-    return write_worksheets(snapshot, safe, document_filenames=filenames)
+    return write_worksheets(
+        snapshot,
+        safe,
+        document_filenames=filenames,
+        relabel_on_context_change=RELABEL_ON_REAL_CONTEXT,
+    )
 
 
 __all__ = [
     "HELD_FOR_RELABELING",
+    "RELABEL_ON_REAL_CONTEXT",
     "guard_pii_safe_out_dir",
     "stable_scorable_goldens",
     "write_db_worksheets",

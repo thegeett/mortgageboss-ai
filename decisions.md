@@ -11502,3 +11502,41 @@ real `needs_review` (a judgment worth ratifying) or `couldnt_check` (a data gap)
 blocked and why; LP-390-8 (the producers the cannot-surface-yet rules — AS-7's NSF, IN-14's rental support —
 still need); §8 (the outcome model / the tabs). The path to a real verdict replacing a manual-review flag is
 calibration (a Priya-signed bar) or a producer, per each rule's LP-390 status.
+
+
+## ADR-313: Name-match goldens do not carry from the de-identified fixture to the real-DB worksheet — some of Priya's labels need re-doing on real data (LP-392)
+
+**The context.** LP-392 generates Priya's labeling worksheet from the REAL loan file (real identities, masked
+here), because the committed worksheet's context showed the DE-IDENTIFIED fixture (Jordan A Rivera / First
+Springfield Bank) while she validates against the real PDFs — so the two didn't line up and
+`stmt.owner_matches_borrower` ("does this account holder match the borrower?") was unanswerable. The real-DB worksheet is LOCAL + gitignored (real PII, never committed); the committed fixture
+worksheet is untouched (CI).
+
+**The finding — a name-match golden cannot safely carry.** Priya's 159 committed goldens join to the real-DB
+worksheet by the stable `(tag_id, subject_id)` key: **121 carry** (transaction + bank-statement rows share
+content_ids with the DB), **33 drop** (fixture-only subject_ids — the DL / investment / pay-stub / W2 rows,
+whose DB content_ids differ), and **5 are FLAGGED for re-label**: `stmt.owner_matches_borrower` on the five
+bank statements. Its subject_id MATCHES the DB, so it WOULD silently carry — but its meaning is a name-match,
+and a fixture 'yes' (Jordan==Jordan) is NOT evidence the real account self-matches. Carrying it would ship a
+now-possibly-wrong golden into a real-context row.
+
+**The decision.** A tag whose golden's MEANING depends on the (now-changed) identity context is NOT carried on
+the real-DB path — it is BLANKED and FLAGGED for re-label (`worksheet.write_worksheets`'
+`relabel_on_context_change`; `db_worksheet.RELABEL_ON_REAL_CONTEXT = {stmt.owner_matches_borrower}`). Visible,
+never a silent carry. The fixture path (empty relabel set) is byte-unchanged.
+
+**What it affects.** `stmt.owner_matches_borrower` was MEASURED in LP-390-5 (5 bank statements, 100% abstain —
+the producer can't see the borrower names, LP-390-6's AS-6 finding). Those goldens were labeled on the
+de-identified fixture; on real data Priya must RE-JUDGE them. So the AS-6 calibration record rests on
+fixture-context goldens that need redoing — reported here so a future AS-6 activation does not lean on a golden
+whose real-data answer is unconfirmed. (The 33 dropped rows — DL/investment/income mechanical labels — also
+need filling on the real worksheet; those are absence, not a wrong carry.)
+
+**Scope note.** The de-identified NAME/ADDRESS mechanical goldens (`id.name_normalized`,
+`id.address_normalized`) would ALSO be wrong in a real row, but they DROP anyway (their DL subject_ids don't
+match the DB) — so no carry, no flag needed. Only `owner_matches_borrower` both matches by key AND depends on
+the identity, so it is the one that must be actively re-flagged.
+
+**Cross-refs.** LP-379-D (the DB worksheet path + the PII guard), LP-390-3/3a (the worksheet finalization +
+the prior 71-label DB copy), LP-390-5/6 (the `owner_matches_borrower` measurement + the AS-6 producer/context
+finding this partly rests on), the LP-210 PII posture (real-loan artifacts generated locally, gitignored).

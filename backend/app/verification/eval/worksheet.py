@@ -641,12 +641,46 @@ def _existing_labels(path: Path) -> dict[tuple[str, str], tuple[str, str]]:
     return kept
 
 
+# LP-392 — the note a re-label-flagged row carries: its prior golden was labeled against a DIFFERENT context
+# (the de-identified fixture) and its MEANING depends on that context (a name-match), so it must be RE-JUDGED
+# on the real document rather than carried. Plain ASCII (readable in Excel/Sheets).
+_RELABEL_FLAG = "RE-LABEL on the real document — this row's answer depends on the real identity (do not assume the prior label)"
+
+
+def _merge_label(
+    row: WorksheetRow,
+    prior: dict[tuple[str, str], tuple[str, str]],
+    relabel_on_context_change: frozenset[str],
+) -> WorksheetRow:
+    """Merge one prior label into a freshly-generated row by the stable (tag_id, subject_id) key.
+
+    A tag in ``relabel_on_context_change`` is NOT carried: its prior golden was judged against a different
+    (de-identified) context and its meaning depends on it (a name-match), so carrying it would ship a
+    now-possibly-wrong golden. Instead the label is BLANKED and the row is FLAGGED for re-label — visible, never
+    a silent carry (LP-392)."""
+    key = (row.tag_id, row.subject_id)
+    if key not in prior:
+        return row
+    label, note = prior[key]
+    if row.tag_id in relabel_on_context_change:
+        flag = _RELABEL_FLAG if not note else f"{note} | {_RELABEL_FLAG}"
+        return replace(row, golden_label="", labeler_note=flag)
+    return replace(row, golden_label=label, labeler_note=note)
+
+
 def write_worksheets(
-    snapshot: Snapshot, out_dir: Path, *, document_filenames: Mapping[str, str] | None = None
+    snapshot: Snapshot,
+    out_dir: Path,
+    *,
+    document_filenames: Mapping[str, str] | None = None,
+    relabel_on_context_change: frozenset[str] = frozenset(),
 ) -> dict[str, Path]:
     """Write the split worksheets (mechanical = Geet, judgment = Priya), PRESERVING any labels already
     filled in the existing files (merge by the stable (tag_id, subject_id) key). ``document_filenames``
-    (LP-379-C) names each row's real source document (the Document tab's original_filename)."""
+    (LP-379-C) names each row's real source document (the Document tab's original_filename).
+    ``relabel_on_context_change`` (LP-392) names tags whose prior golden must NOT carry when the context
+    changes (the real-DB path re-flags the name-match ``stmt.owner_matches_borrower``) — default empty, so the
+    fixture path is byte-unchanged."""
     rows = build_worksheet(snapshot, document_filenames=document_filenames)
     out_dir.mkdir(parents=True, exist_ok=True)
     written: dict[str, Path] = {}
@@ -657,11 +691,7 @@ def write_worksheets(
         path = out_dir / name
         prior = _existing_labels(path)
         merged = [
-            replace(r, golden_label=prior[key][0], labeler_note=prior[key][1])
-            if (key := (r.tag_id, r.subject_id)) in prior
-            else r
-            for r in rows
-            if r.bucket == bucket
+            _merge_label(r, prior, relabel_on_context_change) for r in rows if r.bucket == bucket
         ]
         path.write_text(render_csv(merged), encoding="utf-8")
         written[bucket] = path
