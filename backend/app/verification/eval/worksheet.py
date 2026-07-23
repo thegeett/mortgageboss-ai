@@ -643,8 +643,9 @@ def _existing_labels(path: Path) -> dict[tuple[str, str], tuple[str, str]]:
 
 # LP-392 — the note a re-label-flagged row carries: its prior golden was labeled against a DIFFERENT context
 # (the de-identified fixture) and its MEANING depends on that context (a name-match), so it must be RE-JUDGED
-# on the real document rather than carried. Plain ASCII (readable in Excel/Sheets).
-_RELABEL_FLAG = "RE-LABEL on the real document — this row's answer depends on the real identity (do not assume the prior label)"
+# on the real document rather than carried. Plain ASCII (readable in Excel/Sheets) — its presence in a row's
+# note also MARKS the row as already-transitioned, so a later regeneration carries instead of re-blanking.
+_RELABEL_FLAG = "RE-LABEL on the real document -- this row's answer depends on the real identity (do not assume the prior label)"
 
 
 def _merge_label(
@@ -654,15 +655,20 @@ def _merge_label(
 ) -> WorksheetRow:
     """Merge one prior label into a freshly-generated row by the stable (tag_id, subject_id) key.
 
-    A tag in ``relabel_on_context_change`` is NOT carried: its prior golden was judged against a different
-    (de-identified) context and its meaning depends on it (a name-match), so carrying it would ship a
-    now-possibly-wrong golden. Instead the label is BLANKED and the row is FLAGGED for re-label — visible, never
-    a silent carry (LP-392)."""
+    A tag in ``relabel_on_context_change`` is NOT carried ON THE FIRST CONTEXT CHANGE: its prior (fixture)
+    golden was judged against a different (de-identified) context and its meaning depends on it (a name-match),
+    so carrying it would ship a now-possibly-wrong golden. Instead the label is BLANKED and the row is FLAGGED
+    for re-label — visible, never a silent carry (LP-392).
+
+    The flag is a ONE-TIME signal. Once a row's prior note already carries ``_RELABEL_FLAG`` (a later
+    regeneration, or Priya has since re-judged it on the real document), we CARRY what is there rather than
+    re-blanking her real-data label and doubling the flag — ``_existing_labels``' "regeneration never clobbers
+    human labels" invariant must hold here too."""
     key = (row.tag_id, row.subject_id)
     if key not in prior:
         return row
     label, note = prior[key]
-    if row.tag_id in relabel_on_context_change:
+    if row.tag_id in relabel_on_context_change and _RELABEL_FLAG not in note:
         flag = _RELABEL_FLAG if not note else f"{note} | {_RELABEL_FLAG}"
         return replace(row, golden_label="", labeler_note=flag)
     return replace(row, golden_label=label, labeler_note=note)

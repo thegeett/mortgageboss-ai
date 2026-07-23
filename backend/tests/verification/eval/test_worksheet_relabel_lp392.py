@@ -62,6 +62,21 @@ def _write(out_dir: Path, relabel: frozenset[str]) -> dict[tuple[str, str], dict
     return _rows(written["judgment"])
 
 
+def _priya_fills(out_dir: Path, tag_id: str, subject_id: str, label: str) -> None:
+    # simulate Priya entering a real-data label into the generated worksheet (all other columns preserved)
+    path = out_dir / "lf6t3n-labels-judgment.csv"
+    reader = list(csv.DictReader(io.StringIO(path.read_text(encoding="utf-8"))))
+    fieldnames = list(reader[0].keys())
+    for r in reader:
+        if r["tag_id"] == tag_id and r["subject_id"] == subject_id:
+            r["golden_label"] = label
+    buf = io.StringIO()
+    w = csv.DictWriter(buf, fieldnames=fieldnames)
+    w.writeheader()
+    w.writerows(reader)
+    path.write_text(buf.getvalue(), encoding="utf-8")
+
+
 def test_db_path_flags_owner_matches_borrower_never_carries_it(tmp_path: Path) -> None:
     _seed(tmp_path)
     rows = _write(tmp_path, RELABEL_ON_REAL_CONTEXT)
@@ -71,6 +86,29 @@ def test_db_path_flags_owner_matches_borrower_never_carries_it(tmp_path: Path) -
     assert "RE-LABEL" in name_match["labeler_note"]
     # a NORMAL golden on the same subject still carries verbatim (its meaning did not change)
     assert rows[(_NORMAL, _STMT)]["golden_label"] == "no"
+
+
+def test_regeneration_preserves_a_re_judged_label_and_never_doubles_the_flag(
+    tmp_path: Path,
+) -> None:
+    # LP-392 review: the relabel flag is a ONE-TIME fixture->real signal, NOT a permanent per-tag blank. The
+    # first gen blanks + flags the fixture name-match golden; Priya then re-judges it on the REAL document; a
+    # LATER regeneration must CARRY her real-data label (never re-blank it) and must not accumulate the flag —
+    # _existing_labels' "regeneration never clobbers human labels" invariant holds for relabel tags too.
+    _seed(tmp_path)
+    first = _write(tmp_path, RELABEL_ON_REAL_CONTEXT)
+    assert (
+        first[(_NAME_MATCH, _STMT)]["golden_label"] == ""
+    )  # first transition blanks the fixture 'yes'
+    _priya_fills(
+        tmp_path, _NAME_MATCH, _STMT, "no"
+    )  # she re-judges on the real doc (leaving the flag note)
+    second = _write(tmp_path, RELABEL_ON_REAL_CONTEXT)  # regenerate
+    row = second[(_NAME_MATCH, _STMT)]
+    assert (
+        row["golden_label"] == "no"
+    )  # her real-data judgment CARRIES — not wiped by the regeneration
+    assert row["labeler_note"].count("RE-LABEL") == 1  # the one-time flag never doubles
 
 
 def test_fixture_path_carries_everything_when_no_relabel_set(tmp_path: Path) -> None:
