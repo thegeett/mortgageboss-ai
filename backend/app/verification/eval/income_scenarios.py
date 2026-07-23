@@ -32,6 +32,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from pathlib import Path
 from uuid import UUID
 
 from app.verification.snapshot.fields import Field, FieldSource
@@ -405,6 +406,60 @@ def build_income_calibration_snapshot() -> Snapshot:
     )
 
 
+# --------------------------------------------------------------------------- #
+# LP-393-2 — the committable labeling worksheet (invented identities, no PII; unlike the DB worksheet, LP-392).
+# ONLY the tags LP-393-1 unblocked to a viable n get rows: has_2yr_history (n=13), is_declining (n=11),
+# same_line_of_work (n=12), asset.liquidation_terms (n=6). EXCLUDED — reported, not blank rows: continuance_3yr
+# (n=1, only the fixed-term B14 produced — not worth a labeling session) and IN-12's self-employment case
+# (income_stability does not read tax_returns — un-exercisable here). The prompts are NEUTRAL (the tag's own
+# question + its allowed values, mirroring the production prompt) — never leading, so Priya labels BLIND: her
+# label measures independent judgment, not agreement with an answer we showed her (the whole point of the
+# ambiguous scenarios). Predictions / confidence / AI reasoning / CLEARCUT_EXPECTATIONS never touch the sheet —
+# build_worksheet reads ONLY the snapshot's facts (asserted).
+# --------------------------------------------------------------------------- #
+SCENARIO_WORKSHEET_FILE = "income-scenario-labels.csv"
+SCENARIO_WORKSHEET_TAGS: frozenset[str] = frozenset(
+    {
+        "income.has_2yr_history",
+        "income.is_declining",
+        "income.same_line_of_work",
+        "asset.liquidation_terms",
+    }
+)
+SCENARIO_LABEL_PROMPTS: dict[str, str] = {
+    "income.has_2yr_history": (
+        "Do these income documents EVIDENCE this income across at least TWO consecutive years? "
+        "yes / no / unknown"
+    ),
+    "income.is_declining": (
+        "Comparing the documented income across the years shown, is there a year-over-year DECREASE? "
+        "yes / no / unknown"
+    ),
+    "income.same_line_of_work": (
+        "If the documents show an employer or role change, is the new role the SAME line of work? "
+        "(one employer throughout = yes) yes / no / unknown"
+    ),
+    "asset.liquidation_terms": (
+        "Per this statement's own terms, what portion of the account is usable? "
+        "fully_liquid / vested_usable / restricted / unknown"
+    ),
+}
+
+
+def write_income_scenario_worksheet(out_dir: Path) -> Path:
+    """LP-393-2 — generate the committable scenario labeling worksheet for Priya's BLIND labeling. Rows only for
+    the 4 viable tags; NEUTRAL prompts; predictions/expected answers never reach it (build_worksheet reads only
+    the snapshot). Preserves any labels already filled on a re-generation. Returns the written path."""
+    from app.verification.eval.worksheet import write_single_worksheet
+
+    return write_single_worksheet(
+        build_income_calibration_snapshot(),
+        out_dir / SCENARIO_WORKSHEET_FILE,
+        only_tags=SCENARIO_WORKSHEET_TAGS,
+        label_prompts=SCENARIO_LABEL_PROMPTS,
+    )
+
+
 # The clear-cut expectations for the probe + tests (NEVER written to a worksheet — LP-337 anti-anchoring).
 CLEARCUT_EXPECTATIONS: dict[int, dict[str, str]] = {
     sc.n: dict(sc.expected) for sc in _SCENARIOS if sc.expected
@@ -416,5 +471,9 @@ SCENARIO_BORROWER_IDS: frozenset[str] = frozenset(str(_borrower_uuid(sc.n)) for 
 __all__ = [
     "CLEARCUT_EXPECTATIONS",
     "SCENARIO_BORROWER_IDS",
+    "SCENARIO_LABEL_PROMPTS",
+    "SCENARIO_WORKSHEET_FILE",
+    "SCENARIO_WORKSHEET_TAGS",
     "build_income_calibration_snapshot",
+    "write_income_scenario_worksheet",
 ]

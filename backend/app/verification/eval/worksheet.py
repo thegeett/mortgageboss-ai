@@ -490,8 +490,18 @@ def _allowed_str(tag_id: str, decls: dict[str, TagDeclaration]) -> str:
     return "(free text)"
 
 
+def _with_prompt(base_context: str, prompt: str) -> str:
+    """Append a tag's neutral labeling QUESTION after the facts (LP-390-3a: facts first), or the facts alone
+    when there is no prompt — so a row with no declared/overridden prompt is byte-unchanged."""
+    return f"{base_context} | {prompt}" if prompt else base_context
+
+
 def build_worksheet(
-    snapshot: Snapshot, *, document_filenames: Mapping[str, str] | None = None
+    snapshot: Snapshot,
+    *,
+    document_filenames: Mapping[str, str] | None = None,
+    only_tags: frozenset[str] | None = None,
+    label_prompts: Mapping[str, str] | None = None,
 ) -> list[WorksheetRow]:
     """Enumerate every LABELABLE AI-tag instance (subject present + content present) — deterministically,
     from the snapshot (no AI, no key). One row per (tag, subject); document rows carry the document's
@@ -500,8 +510,14 @@ def build_worksheet(
 
     ``document_filenames`` (LP-379-C) is the REAL content-id → original_filename map (what the Document tab
     shows), so ``source_document`` names the actual file a labeler opens. It OVERRIDES the field-derived
-    fallback where present; any document not in it still gets a legible descriptor (never a hash)."""
+    fallback where present; any document not in it still gets a legible descriptor (never a hash).
+
+    ``only_tags`` (LP-393-2) restricts the sheet to those tag ids (default None → every tag, the LF-6T3N
+    path unchanged). ``label_prompts`` (LP-393-2) overrides a tag's ``label_prompt`` per id, so a focused
+    worksheet can carry a neutral question WITHOUT editing the shared ``_TagMeta`` (default {} → the declared
+    prompt, so a tag with none — every tag but has_identified_source — is byte-unchanged)."""
     decls = load_declarations()
+    prompts = label_prompts or {}
     docs_by_type: dict[str, list[DocumentEntry]] = {}
     for d in snapshot.documents.entries:
         docs_by_type.setdefault(d.document_type or "", []).append(d)
@@ -514,6 +530,9 @@ def build_worksheet(
     rows: list[WorksheetRow] = []
     for group in _GROUPS:
         for meta in group.tags:
+            if only_tags is not None and meta.tag_id not in only_tags:
+                continue
+            prompt = prompts.get(meta.tag_id, meta.label_prompt)
             allowed = _allowed_str(meta.tag_id, decls)
             rule_status = (
                 "LIVE" if any(r in ACTIVE_RULE_IDS for r in meta.consuming_rules) else "inert"
@@ -529,11 +548,7 @@ def build_worksheet(
                         # tag with a label_prompt appends its short, distinct question. Leading with the facts
                         # (not 400 chars of boilerplate) is what stops the row reading as a repeat; every other
                         # tag's context is the facts alone (unchanged).
-                        context = (
-                            f"{_txn_context(txn)} | {meta.label_prompt}"
-                            if meta.label_prompt
-                            else _txn_context(txn)
-                        )
+                        context = f"{_txn_context(txn)} | {prompt}" if prompt else _txn_context(txn)
                         rows.append(
                             WorksheetRow(
                                 meta.bucket,
@@ -572,7 +587,7 @@ def build_worksheet(
                             allowed,
                             ", ".join(meta.consuming_rules),
                             rule_status,
-                            _borrower_context_str(income_docs),
+                            _with_prompt(_borrower_context_str(income_docs), prompt),
                             source_document=_borrower_source(
                                 snapshot, borrower_id, group.applicable_types, filenames
                             ),
@@ -594,7 +609,7 @@ def build_worksheet(
                                 allowed,
                                 ", ".join(meta.consuming_rules),
                                 rule_status,
-                                _doc_context(doc),
+                                _with_prompt(_doc_context(doc), prompt),
                                 source_document=_document_source(doc.content_id, filenames),
                             )
                         )
@@ -702,6 +717,30 @@ def write_worksheets(
         path.write_text(render_csv(merged), encoding="utf-8")
         written[bucket] = path
     return written
+
+
+def write_single_worksheet(
+    snapshot: Snapshot,
+    path: Path,
+    *,
+    only_tags: frozenset[str] | None = None,
+    label_prompts: Mapping[str, str] | None = None,
+    document_filenames: Mapping[str, str] | None = None,
+) -> Path:
+    """LP-393-2 — write ONE worksheet CSV (not the mechanical/judgment split) for a FOCUSED tag set,
+    PRESERVING any labels already filled (merge by the stable key). Reuses ``build_worksheet`` (no AI, no key)
+    — so it carries only the snapshot's FACTS + a neutral prompt, never a prediction/expected answer."""
+    rows = build_worksheet(
+        snapshot,
+        document_filenames=document_filenames,
+        only_tags=only_tags,
+        label_prompts=label_prompts,
+    )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    prior = _existing_labels(path)
+    merged = [_merge_label(r, prior, frozenset()) for r in rows]
+    path.write_text(render_csv(merged), encoding="utf-8")
+    return path
 
 
 def coverage_report(snapshot: Snapshot) -> str:
