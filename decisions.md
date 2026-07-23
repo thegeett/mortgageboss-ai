@@ -11451,3 +11451,54 @@ filter (as AS-1 has) would trim that noise — a follow-up, not dangerous (could
 bars), LP-390-5 (has_identified_source measurement), LP-389/389-A (the eligibility gate + the two-step
 activation), LP-380 (the bar mechanism + the loader's validated-only-on-calibratable guard), ADR-302 (the AS-5
 gift-as-conclusion design question).
+
+
+## ADR-312: The third rule state — applicable-but-manual: a blocked-but-applicable rule flags manual review instead of silence (LP-391)
+
+**The problem.** A BLOCKED rule (not in `ACTIVE_RULE_IDS` — uncalibrated tag / missing producer) runs NOTHING,
+so a file that qualifies for it produces SILENCE. For real-file testing (a processor on staging), silence reads
+as "checked, nothing found" when it is really "didn't look" — a real gift / NSF / reserve / income-trend issue
+passes unnoticed. But a blocked rule genuinely cannot ship a TRUSTED verdict (that is why it is blocked).
+
+**The decision — a THIRD rule state.** Between **live** (a trusted verdict) and **inert** (silence) sits
+**applicable-but-manual**: a blocked rule that is APPLICABLE to a file surfaces to Tab 1 (Needs Attention) as an
+explicit `PENDING_AUTOMATION` — "manual review — the automated check is not active yet" — WITHOUT shipping the
+uncalibrated verdict. The honest middle between silence and a wrong finding.
+
+**The applicability-vs-verdict line (the crux).** Applicability ("this file HAS an income trend / reserves /
+gift letter") is safe to detect; the VERDICT ("this income IS stable / these reserves ARE sufficient") is the
+uncalibrated judgment that must NOT ship. LP-391 detects the former and discards the latter.
+
+**The generic, declared mechanism (no per-rule branch).** Evaluate each blocked candidate rule (generic:
+activation-bar candidates minus the active set) with the SAME dispatch the live rules use. Where it reaches a
+VERDICT (satisfied / fired / needs_review — applicable + data present, but untrusted) its would-be verdict is
+DISCARDED and a `PENDING_AUTOMATION` flag ships instead, carrying NO load-bearing tag values (no leak). Where it
+`couldnt_check` (data / producer absent — AS-7's NSF, IN-14's rental support) or `not_applicable` (out of
+scope) it stays honestly DARK — no fabricated flag it cannot support.
+
+**The can-surface vs cannot-surface-yet split (empirical, on LF-6T3N).** Surfacing NOW: the per-borrower income
+rules whose tags are produced — IN-7 (job change), IN-10 (declining), IN-11 (2yr history), and (on the extended
+fixture) IN-8. Staying dark until their producer / data exists: AS-4 (reserves calc gated), AS-7 (no NSF
+producer), IN-13 (continuance unclear), IN-14 (rental_support has no producer — LP-390-2a), and the document
+rules AS-5 / AS-11 / IN-12 (no gift-letter / retirement-account / tax-return document on this file). The line is
+NOT the ticket's per-rule guess — it is whether the rule reaches a verdict, which the gate of record decides.
+
+**Materialization cost, isolated.** A blocked rule can only reach a verdict if its tags are materialized, and
+production materializes only the LIVE rules' AI groups. So the pending-check pass materializes the blocked
+rules' groups too — the deliberate extra AI cost of honest surfacing — but on a THROWAWAY snapshot copy,
+BEST-EFFORT: a blocked/uncalibrated group can never flip `run.degraded` or leak its tags into the persisted
+snapshot, and a failure yields no flags rather than failing the run. The live pass and the persisted snapshot
+are byte-identical to before.
+
+**The house rule holds — this NEVER ships an uncalibrated verdict.** A `PENDING_AUTOMATION` flag is not a
+verdict: it carries no satisfied/open, no confidence, no load-bearing tag values. `ACTIVE_RULE_IDS` is
+unchanged (a blocked rule is NOT activated as trusted) — the third state is distinct from activation.
+
+**The surface.** A new `EvaluationOutcome.PENDING_AUTOMATION` (Verdict + outcome + a Tab-1/YELLOW mapping) and a
+distinct frontend label ("Manual review") — visually unmistakable as "not yet automated", never aliased with a
+real `needs_review` (a judgment worth ratifying) or `couldnt_check` (a data gap) or `satisfied` (a pass).
+
+**Cross-refs.** LP-390-2 (the blocked/wiring audit) and LP-390-5/5a (what is measured) — which rules are
+blocked and why; LP-390-8 (the producers the cannot-surface-yet rules — AS-7's NSF, IN-14's rental support —
+still need); §8 (the outcome model / the tabs). The path to a real verdict replacing a manual-review flag is
+calibration (a Priya-signed bar) or a producer, per each rule's LP-390 status.

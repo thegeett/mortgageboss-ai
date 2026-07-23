@@ -21,6 +21,7 @@ const OUTCOME_TAB: Record<EvaluationOutcome, GovernedTabId> = {
   open: "attention",
   couldnt_check: "attention",
   needs_review: "attention",
+  pending_automation: "attention", // LP-391 — a manual-review flag lives where the work is (Tab 1)
   satisfied: "satisfied",
   no_longer_applies: "no_longer_applies",
 };
@@ -38,6 +39,7 @@ export const ATTENTION_ORDER: readonly EvaluationOutcome[] = [
   "open",
   "couldnt_check",
   "needs_review",
+  "pending_automation",
 ] as const;
 
 export type OutcomeTone = "danger" | "warning" | "info" | "success" | "muted";
@@ -79,6 +81,12 @@ export const OUTCOME_META: Record<EvaluationOutcome, OutcomeMeta> = {
   needs_review: {
     label: "Needs review",
     blurb: "A judgment awaiting human ratification — not a violation.",
+    tone: "info",
+  },
+  pending_automation: {
+    label: "Manual review",
+    blurb:
+      "This file has something in scope, but the automated check isn't active yet — a human must review it. The system has NOT judged it (not a pass/fail).",
     tone: "info",
   },
   satisfied: {

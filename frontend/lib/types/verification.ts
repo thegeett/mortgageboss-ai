@@ -63,6 +63,9 @@ export type EvaluationOutcome =
   | "satisfied"
   | "needs_review"
   | "couldnt_check"
+  // LP-391 — a blocked-but-applicable rule found something in scope but is not yet automated: a manual-review
+  // flag in Tab 1, NEVER a trusted pass/fail.
+  | "pending_automation"
   | "no_longer_applies";
 
 /** One load-bearing tag inline (LP-316) — the provenance a human reads to see WHY a verdict held. */

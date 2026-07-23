@@ -122,6 +122,10 @@ class EvaluationOutcome(StrEnum):
     SATISFIED = "satisfied"  # the check passes — earned, not assumed (§3D)
     NEEDS_REVIEW = "needs_review"  # degraded/ambiguous — a human must look (LP-314a self_asserted, low-conf, contradiction)
     COULDNT_CHECK = "couldnt_check"  # a load-bearing tag was absent/unknown — fail-closed
+    # LP-391 — applicable-but-manual: a BLOCKED rule (uncalibrated / no producer) found something in its
+    # scope but is not yet automated. Surfaces to Tab 1 (Needs Attention) as an explicit "manual review —
+    # automated check not yet active" — NEVER a trusted pass/fail (its would-be verdict is discarded).
+    PENDING_AUTOMATION = "pending_automation"
     NO_LONGER_APPLIES = (
         "no_longer_applies"  # retired across runs (produced by LP-322, not single-run)
     )

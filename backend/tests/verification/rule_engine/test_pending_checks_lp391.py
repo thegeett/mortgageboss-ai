@@ -1,0 +1,134 @@
+"""LP-391 — pending-check surfacing: a blocked-but-applicable rule flags manual review instead of silence.
+
+These pin the third rule state (applicable-but-manual, between live/trusted and inert/silent): a blocked rule
+that reaches a VERDICT (applicable + data present, but untrusted) surfaces a ``PENDING_AUTOMATION`` flag — never
+its verdict; a blocked rule that ``couldnt_check`` (data absent) or ``not_applicable`` stays honestly DARK; the
+flag is a DISTINCT outcome (Tab 1), never mistakable for a trusted pass/fail; and the mechanism is generic
+(bars minus the active set), never a per-rule branch.
+"""
+
+from __future__ import annotations
+
+from datetime import UTC, datetime
+from uuid import UUID, uuid4
+
+import pytest
+from app.models.finding import EvaluationOutcome
+from app.services.rule_findings import outcome_for_verdict
+from app.verification.rule_engine.activation_bars import load_activation_bars
+from app.verification.rule_engine.pending_checks import (
+    blocked_candidate_rule_ids,
+    evaluate_pending_checks,
+)
+from app.verification.rule_engine.registry import ACTIVE_RULE_IDS
+from app.verification.rule_engine.result import Verdict
+from app.verification.snapshot.fields import Field, FieldSource
+from app.verification.snapshot.model import (
+    BorrowerRef,
+    DocumentEntry,
+    DocumentsSection,
+    MismoSection,
+    Snapshot,
+    TagsSection,
+)
+from app.verification.snapshot.tag import Tag, TagProducedBy, TagRole, TagStage
+
+pytestmark = pytest.mark.anyio
+
+_A = UUID("11111111-1111-4111-8111-111111111111")
+_B = UUID("22222222-2222-4222-8222-222222222222")
+
+
+def _f(v: str) -> Field:
+    return Field.present(v, source=FieldSource.EXTRACTED)
+
+
+def _tag(v: str) -> Tag:
+    return Tag(
+        value=v,
+        confidence=0.9,
+        reasoning="fixture",
+        source_facts=("r",),
+        produced_by=TagProducedBy.AI,
+        tag_role=TagRole.STRUCTURAL_FACT,
+        stage=TagStage.A,
+    )
+
+
+def _w2(cid: str, owner: UUID) -> DocumentEntry:
+    # a document each borrower OWNS — the per_borrower enumerator derives borrowers from belongs_to refs
+    return DocumentEntry(
+        content_id=cid,
+        document_type="w2",
+        belongs_to=(BorrowerRef(borrower_id=owner, name="X"),),
+        fields={"tax_year": _f("2024")},
+    )
+
+
+def _snap(by_subject: dict[str, dict[str, Tag]]) -> Snapshot:
+    return Snapshot(
+        loan_file_id=uuid4(),
+        run_id=uuid4(),
+        created_at=datetime(2026, 7, 22, tzinfo=UTC),
+        documents=DocumentsSection.present([_w2("wA", _A), _w2("wB", _B)]),
+        mismo=MismoSection.present(
+            {"borrower.1.borrower_id": _f(str(_A)), "borrower.2.borrower_id": _f(str(_B))}
+        ),
+        tags=TagsSection.present(by_subject),
+    )
+
+
+# --------------------------------------------------------------------------- #
+# GENERIC — the blocked set is bars minus the active set, never a hand-list
+# --------------------------------------------------------------------------- #
+def test_blocked_candidates_are_exactly_bars_minus_active() -> None:
+    blocked = set(blocked_candidate_rule_ids())
+    assert blocked == set(load_activation_bars()) - set(ACTIVE_RULE_IDS)
+    assert not (
+        blocked & set(ACTIVE_RULE_IDS)
+    )  # a live rule is NEVER a pending candidate (disjoint)
+    # the calibratable-but-signed-off rules are live, so NOT pending candidates
+    for live in ("AS-2", "AS-12", "IN-3"):
+        assert live not in blocked
+
+
+# --------------------------------------------------------------------------- #
+# APPLICABLE + DATA → a manual-review flag, never the verdict
+# --------------------------------------------------------------------------- #
+async def test_a_blocked_rule_that_reaches_a_verdict_surfaces_pending_never_the_verdict() -> None:
+    # IN-11 (blocked, per_borrower) reads income.has_2yr_history. Borrower A has it ("yes" → the rule WOULD
+    # be 'satisfied') — an untrusted verdict; borrower B has no tag (→ couldnt_check).
+    snap = _snap({str(_A): {"income.has_2yr_history": _tag("yes")}})
+    pending = await evaluate_pending_checks(snap)
+    in11 = [p for p in pending if p.rule_id == "IN-11"]
+    assert len(in11) == 1 and in11[0].subject_id == str(
+        _A
+    )  # A surfaces; B (couldnt_check) stays DARK
+    flag = in11[0]
+    # THE NO-LEAK GUARANTEE: the would-be 'satisfied' is discarded — never shipped.
+    assert flag.verdict is Verdict.PENDING_AUTOMATION
+    assert flag.load_bearing_tags == ()  # the uncalibrated tag VALUE never rides along
+    assert flag.verdict_confidence is None
+    assert "manual review" in flag.reasoning.lower()
+    # every surfaced flag across ALL blocked rules is a pending flag — no satisfied/fired/needs_review escapes
+    assert all(p.verdict is Verdict.PENDING_AUTOMATION and not p.load_bearing_tags for p in pending)
+
+
+async def test_a_blocked_rule_with_no_data_stays_dark_no_fabricated_flag() -> None:
+    # No income tags at all → IN-11 couldnt_checks for both borrowers → NOTHING surfaces (honest silence,
+    # not a fabricated "manual review" the rule cannot support).
+    snap = _snap({})
+    pending = await evaluate_pending_checks(snap)
+    assert [p for p in pending if p.rule_id == "IN-11"] == []
+
+
+# --------------------------------------------------------------------------- #
+# DISTINCT — the pending flag is its own outcome, never a trusted pass/fail
+# --------------------------------------------------------------------------- #
+def test_pending_maps_to_a_distinct_outcome_not_satisfied_or_open() -> None:
+    outcome = outcome_for_verdict(Verdict.PENDING_AUTOMATION)
+    assert outcome is EvaluationOutcome.PENDING_AUTOMATION
+    assert outcome not in (EvaluationOutcome.SATISFIED, EvaluationOutcome.OPEN)
+    # satisfied/open (trusted verdicts) map to their OWN distinct outcomes — no aliasing with pending.
+    assert outcome_for_verdict(Verdict.SATISFIED) is EvaluationOutcome.SATISFIED
+    assert outcome_for_verdict(Verdict.FIRED) is EvaluationOutcome.OPEN

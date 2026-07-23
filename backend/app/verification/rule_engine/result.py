@@ -15,13 +15,18 @@ from enum import StrEnum
 
 
 class Verdict(StrEnum):
-    """The five verdicts a rule can reach for one subject (§3D fail-closed lifecycle)."""
+    """The verdicts a rule can reach for one subject (§3D fail-closed lifecycle)."""
 
     FIRED = "fired"  # the rule's condition is met (e.g. an unsourced large deposit)
     SATISFIED = "satisfied"  # earned a pass — present, confident, non-firing
     COULDNT_CHECK = "couldnt_check"  # a required input was absent/unknown — cannot judge
     NEEDS_REVIEW = "needs_review"  # a load-bearing tag is low-confidence / contradictory
     NOT_APPLICABLE = "not_applicable"  # this subject is outside the rule's scope
+    # LP-391 — the THIRD rule state (applicable-but-manual): a BLOCKED rule is applicable to a subject and
+    # its data is present, but it is not activated (no trusted verdict). Its would-be verdict is DISCARDED
+    # and this manual-review flag ships instead — never the untrusted satisfied/fired. Only the pending-check
+    # pass produces it; no spec authors it (like NOT_APPLICABLE, it is derived, absent from VERDICT_BY_NAME).
+    PENDING_AUTOMATION = "pending_automation"
 
 
 # The spec-outcome verdict names → Verdict, shared by every generic evaluator that reads a declared

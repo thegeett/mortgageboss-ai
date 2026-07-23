@@ -144,6 +144,32 @@ def _required_ai_groups() -> frozenset[str]:
 required_ai_groups = _required_ai_groups
 
 
+@cache
+def _pending_check_ai_groups() -> frozenset[str]:
+    """LP-391 — the AI groups the BLOCKED candidate rules need, materialized IN ADDITION to the live set so a
+    blocked-but-applicable rule can be evaluated (and surface a manual-review flag) instead of couldnt_checking
+    for lack of its own tag. This is the deliberate extra AI cost of honest pending-check surfacing — the
+    uncalibrated groups run so a qualifying file no longer reads as 'checked, clean'. Same derivation as
+    ``_required_ai_groups`` (spec load-bearing tags + the bar's declared upstream AI tags), over blocked rules.
+    """
+    from app.verification.rule_engine.activation_bars import load_activation_bars
+    from app.verification.rule_engine.pending_checks import blocked_candidate_rule_ids
+
+    declarations = load_declarations()
+    bars = load_activation_bars()
+    needed: set[str] = set()
+    for rule_id in blocked_candidate_rule_ids():
+        tag_ids = set(_load_bearing_tag_ids(rule_id))
+        bar = bars.get(rule_id)
+        if bar is not None:
+            tag_ids |= set(bar.load_bearing_ai_tags)
+        for tag_id in tag_ids:
+            decl = declarations.get(tag_id)
+            if decl is not None and decl.mode is ProductionMode.AI:
+                needed.add(decl.data)
+    return frozenset(needed)
+
+
 logger = get_logger(__name__)
 
 # The rule → finding-category map (which area of the file each rule concerns), a display lookup only.
@@ -310,6 +336,48 @@ async def _evaluate_rules(
     )
 
 
+async def _evaluate_pending_checks(
+    snapshot: Snapshot,
+    *,
+    materialization_reasoners: dict[str, AiGroupReasoner] | None,
+    materialization_cache: AiTagCache | None,
+    oc2_reasoner: Oc2Reasoner | None,
+    consistency_reasoners: dict[str, ConsistencyReasoner] | None,
+    confidence_floor: float,
+) -> list[RuleEvaluation]:
+    """LP-391 — evaluate the BLOCKED candidate rules and surface a manual-review flag where each is
+    applicable-with-data. Returns only ``PENDING_AUTOMATION`` evaluations (never an uncalibrated verdict);
+    a DISJOINT rule set from the live pass, so the live results are untouched.
+
+    BEST-EFFORT + ISOLATED: the blocked rules' AI groups are materialized on a THROWAWAY snapshot copy — never
+    the persisted one — and any failure yields no pending flags rather than degrading the main run. So a
+    blocked/uncalibrated group can never flip ``run.degraded`` or leak its tags into the stored snapshot."""
+    from app.verification.rule_engine.pending_checks import evaluate_pending_checks
+
+    pending_groups = _pending_check_ai_groups()
+    try:
+        pending_snapshot = (
+            await materialize_tags(
+                snapshot,
+                ai_reasoners=materialization_reasoners,
+                ai_cache=materialization_cache,
+                only_subjects=_MATERIALIZED_SUBJECTS,
+                only_groups=pending_groups,
+            )
+            if pending_groups
+            else snapshot
+        )
+        return await evaluate_pending_checks(
+            pending_snapshot,
+            judgment_reasoners={"OC-2": oc2_reasoner} if oc2_reasoner is not None else {},
+            consistency_reasoners=consistency_reasoners or {},
+            confidence_floor=confidence_floor,
+        )
+    except Exception as exc:
+        logger.warning("pending_check_surfacing_failed", error=str(exc))
+        return []
+
+
 def _merge_judgment_tags(snapshot: Snapshot, judgment_tags: dict[str, dict[str, Tag]]) -> Snapshot:
     """Write the rule_judgment tags into the tags layer, each under ITS subject (frozen-safe copy).
 
@@ -452,6 +520,8 @@ async def run_verification(
                 only_subjects=_MATERIALIZED_SUBJECTS,
                 # Run ONLY the AI groups a live rule consumes — no dead structuring pass (Opus cost)
                 # for an id.* family whose rule has not activated yet. Parsed/derived tags always run.
+                # (LP-391's pending-check groups materialize SEPARATELY, best-effort, so a blocked group
+                # never degrades this run or enters the persisted snapshot.)
                 only_groups=_required_ai_groups(),
             ),
             snapshot,
@@ -471,6 +541,17 @@ async def run_verification(
         confidence_floor=confidence_floor,
     )
     snapshot = _merge_judgment_tags(snapshot, judgment_tags)
+    # 6b. LP-391 — pending-check surfacing (ADDITIVE, a DISJOINT rule set): a blocked-but-applicable rule
+    #     emits a manual-review flag to Tab 1 instead of silence. Never ships an uncalibrated verdict; the
+    #     live results above are untouched (blocked ≠ active).
+    results = results + await _evaluate_pending_checks(
+        snapshot,
+        materialization_reasoners=reasoners.materialization,
+        materialization_cache=caches.materialization,
+        oc2_reasoner=reasoners.oc2,
+        consistency_reasoners=reasoners.consistency,
+        confidence_floor=confidence_floor,
+    )
     reconciliation = await _persist(
         db,
         loan_file_id=loan_file_id,

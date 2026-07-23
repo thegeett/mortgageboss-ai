@@ -50,6 +50,9 @@ _OUTCOME_BY_VERDICT: dict[Verdict, tuple[EvaluationOutcome, FindingStatus]] = {
     Verdict.SATISFIED: (EvaluationOutcome.SATISFIED, FindingStatus.GREEN),
     Verdict.NEEDS_REVIEW: (EvaluationOutcome.NEEDS_REVIEW, FindingStatus.YELLOW),
     Verdict.COULDNT_CHECK: (EvaluationOutcome.COULDNT_CHECK, FindingStatus.YELLOW),
+    # LP-391 — a blocked-but-applicable rule's manual-review flag (Tab 1, YELLOW). Its would-be verdict was
+    # discarded upstream, so this never carries a satisfied/open — it is not a trusted pass/fail.
+    Verdict.PENDING_AUTOMATION: (EvaluationOutcome.PENDING_AUTOMATION, FindingStatus.YELLOW),
 }
 
 # The color a retired finding wears — no_longer_applies is not a live concern (green triage).
