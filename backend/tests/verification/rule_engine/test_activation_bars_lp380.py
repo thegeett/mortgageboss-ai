@@ -45,17 +45,25 @@ def test_bars_cover_exactly_the_inert_rules() -> None:
 
 
 def test_the_honest_activation_state_is_reported() -> None:
-    # 5 of 23 are calibratable-now; the rest are blocked on calibration / a producer / a wiring decision
+    # 9 of 23 are calibratable-now; the rest are blocked on calibration / a producer / a wiring decision
     bars = load_activation_bars()
     by = {
         s: sum(1 for b in bars.values() if b.status == s) for s in {b.status for b in bars.values()}
     }
-    # IN-1, IN-5, IN-3 + AS-2, AS-12 (both their load-bearing AI tags measured — apparent_category re-scored
-    # 100% concrete LP-390-5a + has_identified_source 93.8%).
-    assert by["calibratable-now"] == 5
+    # 5 SIGNED OFF (IN-1, IN-5, IN-3 + AS-2, AS-12) + 4 PROPOSED-but-unvalidated (LP-393-5: IN-7, IN-10, IN-11,
+    # AS-11 — their load-bearing tags scored on the LP-393-1 scenario fixture, validated:false pending Priya).
+    assert by["calibratable-now"] == 9
     assert by.get("not-calibratable-yet", 0) >= 1 and by.get("no-ai-dependency", 0) >= 1
-    # LP-390-7 signed off AS-2 + AS-12; LP-390-9 signed off IN-3 — all 5 calibratable rules are now validated.
+    # LP-390-7 signed off AS-2 + AS-12; LP-390-9 signed off IN-3 — those 5 calibratable rules are validated.
     assert all(bars[r].validated for r in ("IN-1", "IN-5", "AS-2", "AS-12", "IN-3"))
+    # LP-393-5 PROPOSES four more (calibratable-now with a real threshold) but validates NONE — proposing a bar
+    # is not activating it (validated stays Priya's sign-off).
+    assert all(
+        bars[r].status == "calibratable-now"
+        and bars[r].threshold is not None
+        and not bars[r].validated
+        for r in ("IN-7", "IN-10", "IN-11", "AS-11")
+    )
 
 
 # --------------------------------------------------------------------------- #
