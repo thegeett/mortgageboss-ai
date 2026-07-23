@@ -250,3 +250,116 @@ IN-3 — bar reclassification (LP-384 found it mislabeled no-AI)
 AS-2 / AS-5 — widened-category data gap (redacted memos can't exercise loan_proceeds/gift — LP-379-F)
 Any prompt-bug fix from LP-390-5
 Any subject-mismatch fix from LP-390-2
+
+
+
+===========
+STORY LP-393-1 — Build the standalone income-scenario snapshot builder
+
+Type: Story · Points: 5 · Priority: High · Depends on: LP-385, LP-390-1
+
+Description: Create build_income_calibration_snapshot() — a standalone fixture with ~11 synthetic borrowers, each carrying the minimum document set its scenario needs. No bank statements, DLs, or MISMO beyond borrower identity unless a scenario requires it.
+
+Scenarios — clear-cut (expected answer known):
+
+id	scenario	tag exercised	expected
+B3	2024 $80k → 2025 $60k, same employer	is_declining	yes
+B4	2024 $60k → 2025 $75k, same employer	is_declining	no
+B5	One W-2 (2025 only)	has_2yr_history	no
+B6	2023 + 2024 + 2025 W-2s, same employer	has_2yr_history	yes
+B7	Nurse (Hospital A) → Nurse (Hospital B)	same_line_of_work	yes
+B8	Warehouse picker → Office administrator	same_line_of_work	no
+
+Scenarios — ambiguous (built, NOT pre-answered; Priya labels blind):
+
+id	scenario	the open question
+B9	2024 $70k → 2025 $68.5k (−2%)	is a small drop "declining"?
+B10	18 months of history (mid-2024 start)	does a partial 2nd year count?
+B11	Retail cashier → Retail supervisor	promotion = same line of work?
+B12	Base declined, bonus rose, total flat	is income declining?
+B13	2 years across 2 different employers	2yr history of income, or does employer continuity matter?
+
+Asset scenarios (for AS-11 liquidation_terms): regular brokerage, 401(k) with vesting, Roth IRA.
+
+Acceptance criteria:
+
+build_income_calibration_snapshot() exists in its own module; never imported by the LF-6T3N builders (assert)
+Own loan id / borrower ids / content ids — no collision with LF-6T3N (assert)
+Each borrower carries the minimum documents its scenario needs (no unnecessary docs)
+income_stability + asset_facts materialize on it; each target tag reaches n≥6
+LF-6T3N fixtures byte-unchanged; ACTIVE_RULE_IDS unchanged (20); full suite green
+
+Not in scope: generating PDFs (Level 1 only); labeling; calibrating; activating.
+
+STORY LP-393-2 — Generate the scenario worksheet for Priya
+
+Type: Story · Points: 2 · Priority: High · Depends on: LP-393-1
+
+Description: Generate a labeling worksheet from the scenario snapshot, reusing the LP-390-3 generator (SOURCE-TRACE prompts, source_document, orphan rows excluded, predictions excluded / anti-anchoring).
+
+Acceptance criteria:
+
+Every scenario borrower has a labelable row per target tag, at per-borrower granularity
+Predictions excluded — the ambiguous cases must be labeled blind (no anchoring)
+The clear-cut scenarios' expected answers are recorded separately (not in the sheet) so they can be checked without anchoring Priya
+Committable — synthetic data, no PII, lives in docs/calibration/
+Row counts per tag reported (the session agenda)
+STORY LP-393-3 — Priya labels the scenario worksheet
+
+Type: Story · Points: 3 · Priority: High · Depends on: LP-393-2 · Assignee: Priya (+ you)
+
+Description: Priya labels all ~11 borrowers × 4 income tags + 3 asset accounts. The ambiguous cases (B9–B13) are the point — her labels become the definition for "declining," "2-year history," "same line of work."
+
+Acceptance criteria:
+
+Every scenario row labeled, or unknown where she genuinely can't tell
+Her reasoning captured in notes on the ambiguous cases (that's the domain knowledge being encoded)
+The clear-cut cases match expectation, or a mismatch is investigated (either the scenario is wrong or our assumption was)
+STORY LP-393-4 — Calibrate the income + asset tags against the scenario labels
+
+Type: Story · Points: 3 · Priority: High · Depends on: LP-393-3
+
+Description: Score is_declining, has_2yr_history, same_line_of_work, continuance_3yr, liquidation_terms against Priya's scenario labels. Report accuracy + n + every disagreement with the AI's reasoning.
+
+Acceptance criteria:
+
+Per-tag accuracy at the new n (≥6), with per-scenario breakdown
+Clear-cut vs ambiguous scored separately — clear-cut failures = a real bug; ambiguous disagreements = the interesting signal
+Any prompt bug flagged as its own ticket
+Explicitly stated: these are synthetic-scenario results — they measure reasoning, not robustness to real-document messiness (LF-6T3N covers that)
+STORY LP-393-5 — Propose bars & activate what clears
+
+Type: Story · Points: 3 · Priority: High · Depends on: LP-393-4 · Assignee: you + Priya
+
+Description: Propose bars for IN-7/10/11/12/13 and AS-11 from the scenario calibration; Priya signs off; activate via the eligibility gate.
+
+Acceptance criteria:
+
+A bar per rule with rationale + FP/FN cost + the synthetic-data caveat (reasoning validated, robustness not)
+Priya's confirmed values recorded, validated: true
+Rules clearing their bar activate via the gate; below-bar → needs_review
+New ACTIVE_RULE_IDS count reported; the 20 prior rules identical
+STORY LP-393-6 — (Optional) Extend the pattern for future waves
+
+Type: Story · Points: TBD · Priority: Low · Depends on: LP-393-1
+
+Description: The scenario-fixture pattern is reusable. Document it so DTI, Condo, Credit, etc. each get their own standalone scenario snapshot rather than polluting LF-6T3N.
+
+Acceptance criteria:
+
+A short pattern doc: how to build a scenario fixture (standalone, minimal docs, own ids, never merged)
+Noted as the template for future waves
+Board summary
+ticket	type	pts	gated on	lane
+LP-393-1	Story	5	—	Eng
+LP-393-2	Story	2	393-1	Eng
+LP-393-3	Story	3	393-2	Priya
+LP-393-4	Story	3	393-3	Eng
+LP-393-5	Story	3	393-4	Priya
+LP-393-6	Story	TBD	393-1	Eng (low)
+
+Critical path: 1 → 2 → [Priya] 3 → 4 → [Priya] 5. Two human gates.
+
+What it unblocks: IN-7, IN-10, IN-11, IN-12, IN-13, AS-11 — six rules, all currently stuck purely on sample size.
+
+Start: LP-393-1 — pure engineering, no gates, and it's the reusable pattern for every future wave.
