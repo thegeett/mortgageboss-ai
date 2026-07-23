@@ -30,6 +30,8 @@ scenarios vary EXACTLY those fields (D2, verified against the prompt, not assume
 
 from __future__ import annotations
 
+import csv
+import io
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -119,8 +121,18 @@ _SCENARIOS: tuple[_Scenario, ...] = (
         "declining income (same employer)",
         "income.is_declining",
         (
-            _w2(year="2024", employer="Acme Freight Co", wages="80000"),
-            _w2(year="2025", employer="Acme Freight Co", wages="60000"),
+            _w2(
+                year="2024",
+                employer="Acme Freight Co",
+                wages="80000",
+                occupation="Freight Coordinator",
+            ),
+            _w2(
+                year="2025",
+                employer="Acme Freight Co",
+                wages="60000",
+                occupation="Freight Coordinator",
+            ),
         ),
         {"income.is_declining": "yes"},
     ),
@@ -129,8 +141,8 @@ _SCENARIOS: tuple[_Scenario, ...] = (
         "rising income (same employer)",
         "income.is_declining",
         (
-            _w2(year="2024", employer="Acme Freight Co", wages="60000"),
-            _w2(year="2025", employer="Acme Freight Co", wages="75000"),
+            _w2(year="2024", employer="Acme Freight Co", wages="60000", occupation="Dispatcher"),
+            _w2(year="2025", employer="Acme Freight Co", wages="75000", occupation="Dispatcher"),
         ),
         {"income.is_declining": "no"},
     ),
@@ -138,7 +150,14 @@ _SCENARIOS: tuple[_Scenario, ...] = (
         5,
         "one year only",
         "income.has_2yr_history",
-        (_w2(year="2025", employer="Bright Retail LLC", wages="52000"),),
+        (
+            _w2(
+                year="2025",
+                employer="Bright Retail LLC",
+                wages="52000",
+                occupation="Sales Associate",
+            ),
+        ),
         {"income.has_2yr_history": "no"},
     ),
     _Scenario(
@@ -146,9 +165,24 @@ _SCENARIOS: tuple[_Scenario, ...] = (
         "three consecutive years (same employer)",
         "income.has_2yr_history",
         (
-            _w2(year="2023", employer="Cedar Manufacturing", wages="58000"),
-            _w2(year="2024", employer="Cedar Manufacturing", wages="60000"),
-            _w2(year="2025", employer="Cedar Manufacturing", wages="61500"),
+            _w2(
+                year="2023",
+                employer="Cedar Manufacturing",
+                wages="58000",
+                occupation="Machine Operator",
+            ),
+            _w2(
+                year="2024",
+                employer="Cedar Manufacturing",
+                wages="60000",
+                occupation="Machine Operator",
+            ),
+            _w2(
+                year="2025",
+                employer="Cedar Manufacturing",
+                wages="61500",
+                occupation="Machine Operator",
+            ),
         ),
         {"income.has_2yr_history": "yes"},
     ),
@@ -198,8 +232,18 @@ _SCENARIOS: tuple[_Scenario, ...] = (
         "small 2% drop",
         "income.is_declining",
         (
-            _w2(year="2024", employer="Harbor Foods Inc", wages="70000"),
-            _w2(year="2025", employer="Harbor Foods Inc", wages="68500"),
+            _w2(
+                year="2024",
+                employer="Harbor Foods Inc",
+                wages="70000",
+                occupation="Production Worker",
+            ),
+            _w2(
+                year="2025",
+                employer="Harbor Foods Inc",
+                wages="68500",
+                occupation="Production Worker",
+            ),
         ),
     ),
     _Scenario(
@@ -207,8 +251,13 @@ _SCENARIOS: tuple[_Scenario, ...] = (
         "18 months of history (mid-2024 start)",
         "income.has_2yr_history",
         (
-            _voe(employer="Lakeside Systems", start="2024-07-01"),
-            _w2(year="2025", employer="Lakeside Systems", wages="63000"),
+            _voe(employer="Lakeside Systems", start="2024-07-01", occupation="Systems Analyst"),
+            _w2(
+                year="2025",
+                employer="Lakeside Systems",
+                wages="63000",
+                occupation="Systems Analyst",
+            ),
         ),
     ),
     _Scenario(
@@ -232,6 +281,7 @@ _SCENARIOS: tuple[_Scenario, ...] = (
                 {
                     "tax_year": "2024",
                     "employer_name": "Vertex Capital",
+                    "occupation": "Financial Analyst",
                     "base_salary": "90000",
                     "bonus": "10000",
                     "wages_tips_other_comp": "100000",
@@ -242,6 +292,7 @@ _SCENARIOS: tuple[_Scenario, ...] = (
                 {
                     "tax_year": "2025",
                     "employer_name": "Vertex Capital",
+                    "occupation": "Financial Analyst",
                     "base_salary": "78000",
                     "bonus": "22000",
                     "wages_tips_other_comp": "100000",
@@ -254,8 +305,18 @@ _SCENARIOS: tuple[_Scenario, ...] = (
         "two full years, two different employers",
         "income.has_2yr_history",
         (
-            _w2(year="2024", employer="Northwind Logistics", wages="64000"),
-            _w2(year="2025", employer="Crestline Freight", wages="66000"),
+            _w2(
+                year="2024",
+                employer="Northwind Logistics",
+                wages="64000",
+                occupation="Logistics Coordinator",
+            ),
+            _w2(
+                year="2025",
+                employer="Crestline Freight",
+                wages="66000",
+                occupation="Logistics Coordinator",
+            ),
         ),
     ),
     # ----- D4: continuance_3yr probes — a STATED income end is the only thing continuance_3yr can read.
@@ -271,8 +332,18 @@ _SCENARIOS: tuple[_Scenario, ...] = (
                 end="2026-06-30",
                 occupation="Project Analyst",
             ),
-            _w2(year="2024", employer="Beacon Contract Staffing", wages="70000"),
-            _w2(year="2025", employer="Beacon Contract Staffing", wages="71000"),
+            _w2(
+                year="2024",
+                employer="Beacon Contract Staffing",
+                wages="70000",
+                occupation="Project Analyst",
+            ),
+            _w2(
+                year="2025",
+                employer="Beacon Contract Staffing",
+                wages="71000",
+                occupation="Project Analyst",
+            ),
         ),
     ),
     _Scenario(
@@ -285,8 +356,18 @@ _SCENARIOS: tuple[_Scenario, ...] = (
                 start="2019-03-01",
                 occupation="Operations Specialist",
             ),
-            _w2(year="2024", employer="Evergreen Utilities", wages="82000"),
-            _w2(year="2025", employer="Evergreen Utilities", wages="84000"),
+            _w2(
+                year="2024",
+                employer="Evergreen Utilities",
+                wages="82000",
+                occupation="Operations Specialist",
+            ),
+            _w2(
+                year="2025",
+                employer="Evergreen Utilities",
+                wages="84000",
+                occupation="Operations Specialist",
+            ),
         ),
     ),
 )
@@ -460,6 +541,63 @@ def write_income_scenario_worksheet(out_dir: Path) -> Path:
     )
 
 
+# LP-393-2a — a same_line_of_work label is STALE when its note is Priya's evidence that the `unknown` was a
+# DATA gap (occupation absent), not a judgment — the fixture fix (LP-393-4a) added the occupation, so the cell
+# must be re-judged. A decisively-answered row (no such note) is a real judgment and is PRESERVED.
+_STALE_NOTE_MARKER = "no occupation given"
+_RELABEL_NOTE = (
+    "RE-LABEL: occupation is now shown above (LP-393-4a) - please judge same-line-of-work afresh"
+)
+
+
+def _is_stale_same_line_cell(row: dict[str, str]) -> bool:
+    return (
+        row.get("tag_id") == "income.same_line_of_work"
+        and _STALE_NOTE_MARKER in (row.get("Note") or "").lower()
+    )
+
+
+def regenerate_income_scenario_worksheet(out_dir: Path) -> dict[str, int]:
+    """LP-393-2a — regenerate the scenario worksheet from the FIXED fixture (occupation now in the context
+    column), PRESERVING every still-valid label + note and BLANKING only the stale same_line_of_work cells
+    (Priya's 'no occupation given' rows) for a BLIND re-label. Her original note is KEPT (the record of WHY the
+    row is redone) with a re-label marker appended. The context is regenerated from the snapshot (no AI, no
+    expectations reach it). Returns ``{"preserved": n, "blanked": n}``."""
+    from app.verification.eval.worksheet import build_worksheet
+
+    path = out_dir / SCENARIO_WORKSHEET_FILE
+    existing = list(csv.DictReader(io.StringIO(path.read_text(encoding="utf-8"))))
+    fieldnames = list(existing[0].keys())
+    # the FIXED context (occupation now present) per (tag, subject) — built from the snapshot ONLY
+    fresh_context = {
+        (r.tag_id, r.subject_id): r.context
+        for r in build_worksheet(
+            build_income_calibration_snapshot(),
+            only_tags=SCENARIO_WORKSHEET_TAGS,
+            label_prompts=SCENARIO_LABEL_PROMPTS,
+        )
+    }
+    preserved = blanked = 0
+    for row in existing:
+        key = (row["tag_id"], row["subject_id"])
+        if key in fresh_context:
+            row["context"] = fresh_context[key]  # occupation now renders; no prediction ever added
+        if _is_stale_same_line_cell(row):
+            row["golden_label"] = ""  # blank the stale cell for a fresh, blind judgment
+            note = row.get("Note") or ""
+            row["Note"] = note if _RELABEL_NOTE in note else f"{note} | {_RELABEL_NOTE}".strip(" |")
+            blanked += 1
+        elif (row.get("golden_label") or "").strip():
+            preserved += 1
+
+    buf = io.StringIO()
+    writer = csv.DictWriter(buf, fieldnames=fieldnames, lineterminator="\n")
+    writer.writeheader()
+    writer.writerows(existing)
+    path.write_text(buf.getvalue(), encoding="utf-8")
+    return {"preserved": preserved, "blanked": blanked}
+
+
 # The clear-cut expectations for the probe + tests (NEVER written to a worksheet — LP-337 anti-anchoring).
 CLEARCUT_EXPECTATIONS: dict[int, dict[str, str]] = {
     sc.n: dict(sc.expected) for sc in _SCENARIOS if sc.expected
@@ -475,5 +613,6 @@ __all__ = [
     "SCENARIO_WORKSHEET_FILE",
     "SCENARIO_WORKSHEET_TAGS",
     "build_income_calibration_snapshot",
+    "regenerate_income_scenario_worksheet",
     "write_income_scenario_worksheet",
 ]

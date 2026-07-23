@@ -11591,3 +11591,58 @@ checks PASSED (B3 declining=yes, B4 no, B5 history=no, B6 yes, B7 same-line=yes,
 **Cross-refs.** LP-390-5 (the thin-n finding), LP-392 (the ceiling confirmed on real data), LP-384 (the
 scenario-extended-fixture precedent, `build_lf6t3n_plus`), LP-385 (the per-borrower income producer + its
 context builder), LP-337 (anti-anchoring), LP-390-2a (the IN-12 producer gap).
+
+## ADR-315: Priya's scenario corrections — two prompt/label fixes, one confirmed-correct prompt, and the stale-golden trap (LP-393-4 / 4a)
+
+**Context.** LP-393-4 scored the AI against Priya's blind scenario labels and drew three "definitional
+divergence" findings. On review she CORRECTED them: two were label slips / an inverted reading, one was a
+FIXTURE defect. LP-393-4a applied her 5 label corrections, fixed the fixture + one prompt, and re-scored.
+**LP-393-4's scores are SUPERSEDED by the re-score below.**
+
+**is_declining — no materiality gap; it was a label slip → 100%.** LP-393-4 read B9 (−2%) as "the AI over-calls
+any drop declining." Priya's B9 label was a SLIP (`no` → **`yes`**): she agrees any year-over-year decrease is
+declining. Corrected + re-scored, is_declining is **100% (13/13)**, clear-cut passes. No prompt change. →
+**IN-10 ready for a bar.**
+
+**asset.liquidation_terms — the finding was INVERTED; the AI UNDER-restricts → 100% after the prompt fix.**
+LP-393-4 read "the AI over-discounts, Priya says fully_liquid." **Backwards.** Priya says a retirement account
+with early-withdrawal PENALTIES — 401(k), IRA, Roth, INCLUDING a fully-vested one — is `restricted`, not usable
+at face for reserves; the AI was calling those `vested_usable` (UNDER-restricting) and she had 3 labels slipped
+to `fully_liquid`. **Her precedence rule (the tag's definition):** (1) PARTIAL vesting present → `vested_usable`
+(the partial vesting governs); (2) else PENALTIES present (even fully vested) → `restricted`; (3) else →
+`fully_liquid` (brokerage/taxable). LP-393-4a encoded this in the `asset_facts` prompt and corrected the 3
+labels; re-scored, liquidation_terms is **100% (6/6)** — restricted (2 Roth + the fully-vested 401(k)),
+fully_liquid (2 brokerages), vested_usable (the graded 401(k)). → **AS-11 ready for a bar.** (This explains the
+LP-390-5 Roth signal: the AI was under-restricting all along.)
+
+**same_line_of_work — a FIXTURE defect, not a definitional divergence; the prompt was RIGHT.** LP-393-4's 38%
+was because 7 scenario borrowers had NO `occupation` field — Priya marked those rows `unknown` "No occupation
+given." Her rule confirms the prompt: **"no job change → yes"** (one employer AND unchanged occupation = `yes`).
+LP-393-4a added a realistic, unchanged occupation to every such borrower — **no prompt change** (the prompt was
+correct).
+
+**THE STALE-GOLDEN TRAP (a real finding — reported, not explained away).** After the fixture fix,
+same_line_of_work did NOT improve — it went 38% → **31%**. Root cause: Priya's goldens were labeled on the
+occupation-LESS worksheet (her `unknown` = "no occupation given"), but the re-score runs the AI on the
+occupation-PRESENT fixture. So the fixed AI (now `yes`, "same employer + same occupation, no job change" — which
+MATCHES her stated rule) is scored against her STALE `unknown` labels. The number is invalid: fixing the
+fixture invalidated the labels made on the old one. **same_line_of_work needs a RE-LABEL round on the
+occupation-present worksheet before it can be measured** — its prompt is confirmed correct, and by her rule the
+AI's no-change→`yes` answers are likely right, but that is HER call, not a re-derivation here. → **IN-7 stays
+blocked on a re-label**, not a prompt fix. (Process lesson: a fixture fix mid-calibration stales the goldens
+labeled on the old fixture — re-label before re-scoring.)
+
+**The one OPEN framing question (has_2yr_history / B14) — her call, unchanged here.** B14 (Beacon, contract
+ENDED 2026-06-30, two W-2s present): AI=`yes` (two years of history exist), Priya=`no` ("looks like currently
+unemployed… need a new offer letter + a paystub"). Strictly the tag asks HISTORY (which exists); she answered
+CONTINUATION. Both readings recorded; B14's label left AS SHE WROTE IT (`no`); the has_2yr_history prompt is NOT
+changed — it needs her explicit ruling ("does a terminated job's two years still count as history?"). Otherwise
+has_2yr_history is **85%**, clear-cut passes (B12 is her pay-stub-only-needs-a-W-2/1099 nuance). → **IN-11 ready
+for a bar**, with B14 flagged.
+
+**THE SYNTHETIC-DATA CAVEAT (LP-393-5's bars must carry it).** These validate the AI's REASONING on CLEAN
+scenario data, NOT robustness to real-document messiness — pair any bar with the LF-6T3N real-data result (n=2,
+indicative).
+
+**Cross-refs.** LP-393-1 (the fixture), LP-393-2 (the blind-labeling instrument), LP-393-4 (the superseded
+first scoring), LP-390-5 (the harness + the now-explained Roth signal), LP-337 (anti-anchoring).
