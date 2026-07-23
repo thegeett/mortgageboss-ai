@@ -239,4 +239,8 @@ def test_registry_drift_guard_and_activation_unchanged() -> None:
         "AS-2",
         "AS-12",
         "IN-3",
+        "IN-7",
+        "IN-10",
+        "IN-11",
+        "AS-11",
     )

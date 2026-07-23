@@ -127,6 +127,11 @@ async def test_registry_dispatches_the_active_rule_set_by_kind() -> None:
             "AS-2",  # LP-390-7 — EMD sourcing (auto), Priya signed off the 0.90 bar
             "AS-12",  # LP-390-7 — borrowed-funds (ratify)
             "IN-3",  # LP-390-9 — YTD-annualized shortfall (auto), same tag+evidence as IN-1
+            # LP-393-6 — the scenario-calibrated income/asset rules (Priya signed off her heights + chose AUTO):
+            "IN-7",  # same_line_of_work 100% — JUDGMENTAL, so ships RATIFY despite the AUTO sign-off (LP-376-B)
+            "IN-10",  # is_declining 100%
+            "IN-11",  # has_2yr_history 100% (RE-SCORED after Priya's B14 ruling)
+            "AS-11",  # liquidation_terms 100% (6/6) after LP-393-4a's precedence-rule prompt fix
         }
     )
     snapshot = _loan_snapshot(None)  # no occupancy/txn tags → everything fail-closes honestly

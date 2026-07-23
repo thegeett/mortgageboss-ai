@@ -11646,3 +11646,57 @@ indicative).
 
 **Cross-refs.** LP-393-1 (the fixture), LP-393-2 (the blind-labeling instrument), LP-393-4 (the superseded
 first scoring), LP-390-5 (the harness + the now-explained Roth signal), LP-337 (anti-anchoring).
+
+## ADR-316: Priya's four rulings settle the scenario tags; validating a bar activates it (no decouple); a judgmental rule ships ratify despite an AUTO sign-off (LP-393-6)
+
+**Context.** LP-393-5 proposed bars for the four scenario-calibrated rules (IN-7, IN-10, IN-11, AS-11) and left
+four open items for Priya. She settled all four; applying them forced two structural decisions this ADR records.
+
+**Ruling 1 — B14 framing (a definitional change to what `has_2yr_history` means).** *A TERMINATED job's two
+years DOES still count as HISTORY.* `has_2yr_history` asks about HISTORY only; whether an ended job's income
+CONTINUES is a different question. **Ruling 2 — the documentation standard is a SEPARATE check.** The
+W-2/1099/offer-letter requirement (pay-stub-only needs a W-2/1099; a lapsed VOE needs an offer letter + a
+paystub) is NOT part of `has_2yr_history`. These two rulings make IN-11's two recorded "misses" (B12, B14)
+OUT-OF-SCOPE for the tag — the AI answered the tag's actual question correctly both times.
+
+**Re-scored, never hand-edited.** At `measured_accuracy 0.85` vs a `0.90` bar, IN-11 failed its own gate. The
+principled fix under the ruling: update B12 + B14's `has_2yr_history` goldens to `yes` (history exists in both),
+**preserving her originals in the worksheet Note as the record of why they changed**, then RE-SCORE with the
+real reasoner. It came out **100% (13/13)** — the number changed BY MEASUREMENT, not by asserting 0.85 → 1.0.
+Editing a measurement by assertion is exactly the dishonesty the calibration system exists to prevent; had the
+re-score not delivered, the lower number would stand (a finding, not a forced value).
+
+**Ruling 3 — the four heights + the AUTO call, a named trust decision.** Priya confirmed IN-7 0.90 / IN-10 0.95
+/ IN-11 0.90 / AS-11 0.90 and chose **AUTO for all four**, KNOWINGLY overriding the ratify-only recommendation
+**on a synthetic-only basis** (measured on the clean LP-393-1 fixture; the only real-data check is LF-6T3N,
+n=2). Each rationale records this as her deliberate override, with the synthetic caveat she accepted.
+
+**Validating a bar ACTIVATES it — there is no validate-without-activate in this gate.** In this system
+`is_eligible` is `validated ∧ measured ≥ threshold`, and `test_activation_gate_lp389` enforces `ACTIVE_RULE_IDS
+− _BASE_ACTIVE == eligible_rule_ids()`. So flipping `validated:true` on the four (with measured ≥ bar) makes
+them eligible, and the invariant requires eligible == active. Every prior sign-off (LP-390-7, LP-390-9)
+validated + activated in one step for this reason. Geet chose to **validate + activate now** (ACTIVE 20 → 24 via
+`registry._LP393_ACTIVATED`) rather than defer validation or redesign the gate to decouple approval from
+eligibility. Their AI groups (`income_stability`, `asset_facts`) fold into `_required_ai_groups` automatically
+(it derives from `ACTIVE_RULE_IDS`), so every run now materializes them.
+
+**The IN-7 judgmental-vs-AUTO conflict — reported, not forced.** `ships` derives from a rule's KIND, and
+LP-376-B's armor is enforced at EVALUATION time (`judgment.py` hard-codes `ratification_pending` for a judgment
+rule) — a judgment rule NEVER auto-ships. IN-7 is judgmental. Priya asked for AUTO, but a judgment rule cannot
+be trusted to auto-ship, so **IN-7 stays `ships: ratify`**: it is active and surfaces every verdict to
+needs_review for human ratification, regardless of the AUTO request. Making IN-7 truly auto would require
+RECLASSIFYING its kind (`rule_kinds.csv` + the spec + LP-376-B's armor) — a separate ticket, NOT silently
+bypassed here. The three calculative rules (IN-10, IN-11, AS-11) ship auto, matching both their kind and her
+call.
+
+**Two new candidate rules Priya's ruling spun off** (their own tickets, NOT built here): (1) *pay-stub-only →
+require a W-2/1099* before using the income; (2) *lapsed/terminated employment → require an offer letter + a
+pay stub* (the continuation check B14 pointed at). These are the "separate check" that Ruling 2 carved out of
+`has_2yr_history`.
+
+**Consequences.** `has_2yr_history` re-scored 100%; IN-11 clears its 0.90 bar; the four are validated + live
+(ACTIVE 24). IN-7 ships ratify (surfaces, never auto) pending a kind reclassification. The synthetic-data caveat
+rides every bar. The B12/B14 golden change is recorded with her originals preserved.
+
+**Cross-refs.** LP-393-5 (the proposals), LP-393-4b (the measurements), LP-376-B (the ratification armor),
+LP-390-7 / LP-390-9 (the validate+activate precedent), LP-389 (the eligibility gate + its invariant).

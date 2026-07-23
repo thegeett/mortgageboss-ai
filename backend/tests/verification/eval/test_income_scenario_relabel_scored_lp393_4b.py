@@ -96,14 +96,16 @@ def test_untouched_same_line_rows_unchanged_and_two_were_revised() -> None:
 
 def test_other_three_tags_goldens_untouched_by_the_relabel() -> None:
     g = _goldens()
-    # has_2yr_history — the two divergence rows (the open framing item + her pay-stub nuance) as she wrote them
+    # has_2yr_history — B14/B12 were LP-393-4b's two divergences; LP-393-6 UPDATED both to `yes` under Priya's
+    # settled ruling (a terminated job's two years DOES count as history; the documentation standard is a
+    # SEPARATE check) and RE-SCORED. Their originals are preserved in the worksheet Note (see the 4b relabel).
     assert (
-        g[("income.has_2yr_history", _B + "14")] == "no"
-    )  # B14 framing question — left `no`, unsettled
+        g[("income.has_2yr_history", _B + "14")] == "yes"
+    )  # LP-393-6: terminated job still counts as history
     assert (
-        g[("income.has_2yr_history", _B + "12")] == "unknown"
-    )  # pay-stub-only, her documentation standard
-    assert g[("income.has_2yr_history", _B + "05")] == "no"  # single year
+        g[("income.has_2yr_history", _B + "12")] == "yes"
+    )  # LP-393-6: pay-stub-only doc standard is separate
+    assert g[("income.has_2yr_history", _B + "05")] == "no"  # single year — unchanged
     # is_declining — the two LP-393-4a corrections stand
     assert g[("income.is_declining", _B + "09")] == "yes"
     assert g[("income.is_declining", _B + "15")] == "no"

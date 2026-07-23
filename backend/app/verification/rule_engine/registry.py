@@ -97,6 +97,16 @@ _LP390_ACTIVATED: tuple[str, ...] = ("AS-2", "AS-12")
 # it does not couldnt_check for a missing tag (an honest no-stated-income abstain is a different, correct thing).
 _LP390_9_ACTIVATED: tuple[str, ...] = ("IN-3",)
 
+# LP-393-6 — Priya signed off the four scenario-calibrated income/asset bars after their load-bearing tags
+# scored on the LP-393-1 fixture (LP-393-4b): IN-7 same_line_of_work 100%, IN-10 is_declining 100%, IN-11
+# has_2yr_history 100% (RE-SCORED after her B14 ruling — a terminated job's two years DOES count as history),
+# AS-11 liquidation_terms 100%. She set the heights (0.90/0.95/0.90/0.90) and chose AUTO, KNOWINGLY overriding
+# the ratify-only recommendation on a synthetic-only basis. Their AI groups (income_stability / asset_facts)
+# fold into _required_ai_groups automatically because it derives from ACTIVE_RULE_IDS. ⚠️ IN-7 is JUDGMENTAL,
+# so despite the AUTO sign-off it ships RATIFY (LP-376-B armor in judgment.py) — active, but surfaces to
+# needs_review, never an auto verdict; truly-auto needs a kind reclassification (a separate ticket, ADR-316).
+_LP393_ACTIVATED: tuple[str, ...] = ("IN-7", "IN-10", "IN-11", "AS-11")
+
 # The gate is the source of truth: test_activation_gate_lp389 asserts ACTIVE_RULE_IDS - _BASE_ACTIVE ==
 # eligible_rule_ids() — a rule CANNOT enter this set without meeting the eligibility gate (not a hand-list).
 ACTIVE_RULE_IDS: tuple[str, ...] = (
@@ -105,6 +115,7 @@ ACTIVE_RULE_IDS: tuple[str, ...] = (
     *_LP384_ACTIVATED,
     *_LP390_ACTIVATED,
     *_LP390_9_ACTIVATED,
+    *_LP393_ACTIVATED,
 )
 
 

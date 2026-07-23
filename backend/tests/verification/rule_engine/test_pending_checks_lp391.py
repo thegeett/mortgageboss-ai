@@ -65,12 +65,25 @@ def _w2(cid: str, owner: UUID) -> DocumentEntry:
     )
 
 
-def _snap(by_subject: dict[str, dict[str, Tag]]) -> Snapshot:
+def _tax_return(cid: str, owner: UUID) -> DocumentEntry:
+    # a tax_return doc — IN-12 (per_document, still BLOCKED after LP-393-6) only applies to this type; its
+    # subject is the content_id, so its gated tag is read at ``cid`` (not the borrower).
+    return DocumentEntry(
+        content_id=cid,
+        document_type="tax_return",
+        belongs_to=(BorrowerRef(borrower_id=owner, name="X"),),
+        fields={"tax_year": _f("2024")},
+    )
+
+
+def _snap(
+    by_subject: dict[str, dict[str, Tag]], extra_docs: tuple[DocumentEntry, ...] = ()
+) -> Snapshot:
     return Snapshot(
         loan_file_id=uuid4(),
         run_id=uuid4(),
         created_at=datetime(2026, 7, 22, tzinfo=UTC),
-        documents=DocumentsSection.present([_w2("wA", _A), _w2("wB", _B)]),
+        documents=DocumentsSection.present([_w2("wA", _A), _w2("wB", _B), *extra_docs]),
         mismo=MismoSection.present(
             {"borrower.1.borrower_id": _f(str(_A)), "borrower.2.borrower_id": _f(str(_B))}
         ),
@@ -96,16 +109,18 @@ def test_blocked_candidates_are_exactly_bars_minus_active() -> None:
 # APPLICABLE + DATA → a manual-review flag, never the verdict
 # --------------------------------------------------------------------------- #
 async def test_a_blocked_rule_that_reaches_a_verdict_surfaces_pending_never_the_verdict() -> None:
-    # IN-11 (blocked, per_borrower) reads income.has_2yr_history. Borrower A has it ("yes" → the rule WOULD
-    # be 'satisfied') — an untrusted verdict; borrower B has no tag (→ couldnt_check).
-    snap = _snap({str(_A): {"income.has_2yr_history": _tag("yes")}})
+    # IN-12 (blocked after LP-393-6, per_document, tax_return only) reads income.has_2yr_history at the DOCUMENT
+    # subject. Doc trA has it ("no" → the rule WOULD 'fire') — an untrusted verdict; trB has no tag (→
+    # couldnt_check). (IN-10/IN-11 used to demo this but went live in LP-393-6; IN-12 stays blocked.)
+    trA, trB = _tax_return("trA", _A), _tax_return("trB", _B)
+    snap = _snap({"trA": {"income.has_2yr_history": _tag("no")}}, extra_docs=(trA, trB))
     pending = await evaluate_pending_checks(snap)
-    in11 = [p for p in pending if p.rule_id == "IN-11"]
-    assert len(in11) == 1 and in11[0].subject_id == str(
-        _A
-    )  # A surfaces; B (couldnt_check) stays DARK
-    flag = in11[0]
-    # THE NO-LEAK GUARANTEE: the would-be 'satisfied' is discarded — never shipped.
+    in12 = [p for p in pending if p.rule_id == "IN-12"]
+    assert (
+        len(in12) == 1 and in12[0].subject_id == "trA"
+    )  # trA surfaces; trB (couldnt_check) stays DARK
+    flag = in12[0]
+    # THE NO-LEAK GUARANTEE: the would-be 'fired' is discarded — never shipped.
     assert flag.verdict is Verdict.PENDING_AUTOMATION
     assert flag.load_bearing_tags == ()  # the uncalibrated tag VALUE never rides along
     assert flag.verdict_confidence is None
@@ -115,31 +130,33 @@ async def test_a_blocked_rule_that_reaches_a_verdict_surfaces_pending_never_the_
 
 
 async def test_a_blocked_rule_with_no_data_stays_dark_no_fabricated_flag() -> None:
-    # No income tags at all → IN-11 couldnt_checks for both borrowers → NOTHING surfaces (honest silence,
-    # not a fabricated "manual review" the rule cannot support).
-    snap = _snap({})
+    # IN-12 is APPLICABLE (a tax_return doc is present) but has NO income.has_2yr_history tag → couldnt_checks →
+    # NOTHING surfaces (honest silence, not a fabricated "manual review" the rule cannot support).
+    trA = _tax_return("trA", _A)
+    snap = _snap({}, extra_docs=(trA,))
     pending = await evaluate_pending_checks(snap)
-    assert [p for p in pending if p.rule_id == "IN-11"] == []
+    assert [p for p in pending if p.rule_id == "IN-12"] == []
 
 
 async def test_a_blocked_JUDGMENT_rule_surfaces_through_the_stub_no_api_call() -> None:
-    # The judgment path (the reason _discarded_judgment_stub exists): IN-7 is a BLOCKED per_borrower JUDGMENT
-    # rule reading income.same_line_of_work. Borrower A has it → applicable + gate-passes → the stub drives it
+    # The judgment path (the reason _discarded_judgment_stub exists): IN-13 is a BLOCKED per_borrower JUDGMENT
+    # rule reading income.continuance_3yr. Borrower A has it → applicable + gate-passes → the stub drives it
     # to needs_review (a judgment rule ALWAYS reaches needs_review when applicable — never auto) → surfaces as
     # PENDING. No real model call: evaluate_pending_checks binds the discarded stub for every blocked judgment
     # rule (no reasoner is passed here). Borrower B has no tag → couldnt_check → DARK. If the judgment evaluator
-    # ever routed an unknown/stubbed answer to couldnt_check, IN-7 would go dark and THIS test would fail.
-    snap = _snap({str(_A): {"income.same_line_of_work": _tag("yes")}})
+    # ever routed an unknown/stubbed answer to couldnt_check, IN-13 would go dark and THIS test would fail.
+    # (IN-7 used to demo this but went live in LP-393-6; IN-13 stays blocked.)
+    snap = _snap({str(_A): {"income.continuance_3yr": _tag("yes")}})
     pending = await evaluate_pending_checks(snap)
-    in7 = [p for p in pending if p.rule_id == "IN-7"]
-    assert len(in7) == 1 and in7[0].subject_id == str(
+    in13 = [p for p in pending if p.rule_id == "IN-13"]
+    assert len(in13) == 1 and in13[0].subject_id == str(
         _A
     )  # A surfaces; B (couldnt_check) stays dark
-    assert in7[0].verdict is Verdict.PENDING_AUTOMATION
+    assert in13[0].verdict is Verdict.PENDING_AUTOMATION
     assert (
-        in7[0].load_bearing_tags == () and in7[0].verdict_confidence is None
-    )  # no-leak, same as IN-11
-    assert "manual review" in in7[0].reasoning.lower()
+        in13[0].load_bearing_tags == () and in13[0].verdict_confidence is None
+    )  # no-leak, same as IN-12
+    assert "manual review" in in13[0].reasoning.lower()
 
 
 # --------------------------------------------------------------------------- #

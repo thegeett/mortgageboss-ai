@@ -39,13 +39,12 @@ from app.verification.tag_materialization.declarations import load_ai_groups
 pytestmark = pytest.mark.anyio
 
 # LP-389 activated IN-1 (needs income_amounts, via the derived shortfall its bar declares) and IN-5 (needs
-# income_employer) — both moved from dormant to live; ID-5 is no-AI and pulls no group.
+# income_employer) — both moved from dormant to live; ID-5 is no-AI and pulls no group. LP-393-6 activated
+# IN-7/IN-10/IN-11 (income_stability) and AS-11 (asset_facts) — both groups moved from dormant to live.
 _DORMANT_EXPECTED = frozenset(
     {
         "income_docs",
-        "income_stability",
         "stmt_facts",
-        "asset_facts",
     }
 )
 _LIVE_EXPECTED = frozenset(
@@ -56,6 +55,8 @@ _LIVE_EXPECTED = frozenset(
         "id_title",
         "income_amounts",
         "income_employer",
+        "income_stability",
+        "asset_facts",
         "occupancy",
         "txn_stage_a",
     }

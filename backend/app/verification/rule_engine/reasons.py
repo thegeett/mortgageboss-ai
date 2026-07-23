@@ -55,6 +55,11 @@ _FACT_LABELS: dict[str, str] = {
     "txn.has_identified_source": "deposit's source",
     "txn.source_strength": "deposit's source strength",
     "txn.apparent_category": "deposit category",  # LP-390-7: AS-12 (live) reads it — a curated reason label
+    # LP-393-6 — the scenario-calibrated income/asset rules went live; their couldnt_check reasons read these.
+    "income.same_line_of_work": "same line of work (job-change continuity)",  # IN-7
+    "income.is_declining": "year-over-year income trend",  # IN-10
+    "income.has_2yr_history": "two-year income history",  # IN-11
+    "asset.liquidation_terms": "account's liquidation terms",  # AS-11
 }
 
 

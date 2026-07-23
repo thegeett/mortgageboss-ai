@@ -32,8 +32,25 @@ from app.verification.rule_engine.activation_bars import (
 from app.verification.rule_engine.registry import _BASE_ACTIVE, ACTIVE_RULE_IDS
 
 # LP-389 activated IN-1/IN-5; LP-389-A added ID-5; LP-384 added AS-9/IN-4/AS-10 (the stuck deterministic rules);
-# LP-390-7 added AS-2/AS-12 (the first income-wave AI rules); LP-390-9 added IN-3 (same tag+evidence as IN-1).
-_ACTIVATED = frozenset({"IN-1", "IN-5", "ID-5", "AS-9", "IN-4", "AS-10", "AS-2", "AS-12", "IN-3"})
+# LP-390-7 added AS-2/AS-12 (the first income-wave AI rules); LP-390-9 added IN-3 (same tag+evidence as IN-1);
+# LP-393-6 added IN-7/IN-10/IN-11/AS-11 (the scenario-calibrated income/asset rules, signed off by Priya).
+_ACTIVATED = frozenset(
+    {
+        "IN-1",
+        "IN-5",
+        "ID-5",
+        "AS-9",
+        "IN-4",
+        "AS-10",
+        "AS-2",
+        "AS-12",
+        "IN-3",
+        "IN-7",
+        "IN-10",
+        "IN-11",
+        "AS-11",
+    }
+)
 
 
 def _specs() -> set[str]:
@@ -49,20 +66,24 @@ def test_exactly_the_eligible_candidates_pass() -> None:
     held = set(bars) - eligible
     # IN-1/IN-5/AS-2/AS-12/IN-3 (AI, validated, measured >= bar); ID-5 + AS-9/IN-4/AS-10 (no-AI, input resolves).
     assert eligible == set(_ACTIVATED)
-    assert len(held) == 14 and not (held & _ACTIVATED)  # every other candidate is held
+    assert len(held) == 10 and not (held & _ACTIVATED)  # every other candidate is held
 
 
 def test_eligible_rule_ids_is_sorted_and_matches() -> None:
     assert eligible_rule_ids() == (
         "AS-10",
+        "AS-11",
         "AS-12",
         "AS-2",
         "AS-9",
         "ID-5",
         "IN-1",
+        "IN-10",
+        "IN-11",
         "IN-3",
         "IN-4",
         "IN-5",
+        "IN-7",
     )  # sorted
 
 
@@ -98,7 +119,7 @@ def test_the_held_rules_each_fail_for_a_named_reason() -> None:
 def test_active_set_is_exactly_base_plus_eligible() -> None:
     # the invariant that keeps a rule from being activated without passing the gate
     assert set(ACTIVE_RULE_IDS) - set(_BASE_ACTIVE) == set(eligible_rule_ids()) == set(_ACTIVATED)
-    assert len(ACTIVE_RULE_IDS) == 20 and len(_BASE_ACTIVE) == 11
+    assert len(ACTIVE_RULE_IDS) == 24 and len(_BASE_ACTIVE) == 11
     assert set(_BASE_ACTIVE) < set(ACTIVE_RULE_IDS)  # the original 11 are intact, none dropped
     # no duplicates crept in when concatenating base + activated
     assert len(set(ACTIVE_RULE_IDS)) == len(ACTIVE_RULE_IDS)

@@ -225,7 +225,7 @@ def test_the_three_stuck_rules_activated_and_the_blocked_two_did_not() -> None:
     assert (
         "IN-3" in ACTIVE_RULE_IDS
     )  # LP-390-9 activated it (Priya signed off; same tag+evidence as IN-1)
-    assert len(ACTIVE_RULE_IDS) == 20
+    assert len(ACTIVE_RULE_IDS) == 24  # LP-393-6 added IN-7/IN-10/IN-11/AS-11
 
 
 async def test_the_activated_rules_reach_real_verdicts_through_the_orchestrator() -> None:

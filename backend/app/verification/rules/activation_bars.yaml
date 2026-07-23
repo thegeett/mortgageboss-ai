@@ -31,11 +31,13 @@
 #               input is VERIFIED to resolve to real values on a real file (LP-381/382). False by default =
 #               held. Meaningless (and rejected) for any status but no-ai-dependency.
 #
-# THE HONEST STATE (report, not a pass): of 23 candidate rules, 9 are now calibratable-now. 5 are SIGNED OFF
-# and live (IN-1, IN-5 in LP-389; AS-2, AS-12 in LP-390-7; IN-3 in LP-390-9). 4 are PROPOSED but NOT yet signed
-# off (LP-393-5: IN-7, IN-10, IN-11, AS-11 — their load-bearing tags scored on the LP-393-1 scenario fixture;
-# validated:false, so nothing new is eligible/activated — the bars are flagged for Priya). The rest are blocked
-# on calibration / a producer / a wiring decision — reported so a rule never ships on a tag nobody measured.
+# THE HONEST STATE (report, not a pass): of 23 candidate rules, 9 are calibratable-now and ALL NINE are now
+# SIGNED OFF + live: IN-1, IN-5 (LP-389); AS-2, AS-12 (LP-390-7); IN-3 (LP-390-9); and IN-7, IN-10, IN-11,
+# AS-11 (LP-393-6 — scored on the LP-393-1 scenario fixture, Priya signed off her heights + chose AUTO,
+# overriding the ratify-only recommendation on a synthetic-only basis). NOTE: IN-7 is JUDGMENTAL, so despite
+# her AUTO request it ships RATIFY (LP-376-B armor in judgment.py) — surfaces to needs_review; truly-auto needs
+# a kind reclassification (a separate ticket, ADR-316). The rest are blocked on calibration / a producer / a
+# wiring decision — reported so a rule never ships on a tag nobody measured.
 #
 # LP-389 — the FIRST activation pass reads THIS file through activation_bars.is_eligible: IN-1 + IN-5 (AI,
 # validated, measured 100% >= bar) pass the gate and go live; the other 21 stay held. ID-5 was PROPOSED but
@@ -151,11 +153,12 @@ AS-7:
 AS-11:
   # LP-393-5: liquidation_terms re-scored on the LP-393-1 income-scenario fixture — 100% (6/6) after LP-393-4a
   # encoded Priya's liquidation PRECEDENCE (the old 66.7% miss under-restricted a fully-vested account) ->
-  # calibratable-now. PROPOSED 0.90 auto bar, validated:false (Priya signs off). n=6 + synthetic-only — thin.
+  # calibratable-now. LP-393-6: Priya SIGNED OFF the 0.90 bar and chose AUTO, knowingly OVERRIDING the
+  # ratify-only recommendation on a synthetic-only basis (validated:true; ACTIVE via registry _LP393_ACTIVATED).
   status: calibratable-now
   ships: auto
   threshold: 0.90
-  validated: false
+  validated: true
   measured_accuracy: 1.0   # asset.liquidation_terms 6/6 on the scenario fixture (LP-393-4b); n=6 — thin.
   load_bearing_ai_tags: [asset.liquidation_terms]
   fp_fn: "FN (counts restricted retirement funds as usable) > FP"
@@ -164,11 +167,11 @@ AS-11:
     precedence rule (partial vesting -> vested_usable; any penalized retirement account, even fully vested ->
     restricted; brokerage -> fully_liquid) — the earlier LP-390-6 66.7% was the AI UNDER-restricting a
     fully-vested 401(k), a prompt gap now fixed. Calculative -> ships AUTO. FN-dangerous (a restricted
-    retirement account counted at full value overstates reserves) -> a HIGH bar; PROPOSED 0.90 AUTO. ⚠️
-    SYNTHETIC-DATA CAVEAT: measured on CLEAN scenario data (LP-393-1) — this validates the REASONING, not
-    robustness to real-document messiness; the only real-data check is LF-6T3N (n=2, indicative), and n=6 is
-    thin. Priya: consider RATIFY-ONLY until more/real files confirm; below-bar/unknown -> needs_review
-    (LP-376-B). She sets the height + the auto-vs-ratify call.
+    retirement account counted at full value overstates reserves) -> a HIGH bar. LP-393-6: Priya SIGNED OFF
+    0.90 AUTO — she OVERRODE the ratify-only recommendation KNOWINGLY (a named trust decision). ⚠️
+    SYNTHETIC-DATA CAVEAT (recorded, accepted by her): measured on CLEAN scenario data (LP-393-1) — this
+    validates the REASONING, not robustness to real-document messiness; the only real-data check is LF-6T3N
+    (n=2, indicative), and n=6 is thin. Below-bar/unknown -> needs_review (LP-376-B).
 
 AS-12:
   # LP-390-5a: both load-bearing AI tags now measured -> calibratable-now. Judgmental -> ships RATIFY, so a
@@ -192,13 +195,16 @@ AS-12:
     Priya confirms. Still one-file n — she weighs that before sign-off.
 
 IN-7:
-  # LP-393-5: same_line_of_work re-scored 100% (13/13) on the LP-393-1 fixture (LP-393-4b, after the LP-393-2a
-  # occupation re-label) -> calibratable-now. Judgmental -> ships RATIFY (a human ratifies EVERY verdict,
-  # LP-376-B); the threshold is a SURFACING floor, not an auto-trust gate. PROPOSED 0.90, validated:false.
+  # LP-393-5: same_line_of_work re-scored 100% (13/13) on the LP-393-1 fixture (LP-393-4b) -> calibratable-now.
+  # LP-393-6: Priya SIGNED OFF the 0.90 bar (validated:true; ACTIVE via _LP393_ACTIVATED). ⚠️ CONFLICT: she
+  # asked for AUTO, but IN-7 is JUDGMENTAL (rule_kinds.csv: ai_judgment) and LP-376-B's armor is enforced at
+  # EVALUATION time (judgment.py hard-codes ratification_pending) — a judgment rule NEVER auto-ships. So ships
+  # stays RATIFY: IN-7 surfaces to needs_review for human ratification regardless of any 'auto' request. Making
+  # IN-7 truly auto would require RECLASSIFYING its kind (a separate ticket) — NOT bypassed here. See ADR-316.
   status: calibratable-now
   ships: ratify
   threshold: 0.90
-  validated: false
+  validated: true
   measured_accuracy: 1.0   # income.same_line_of_work 13/13 (LP-393-4b); zero disagreements, clear-cut B7/B8 pass.
   load_bearing_ai_tags: [income.same_line_of_work]
   fp_fn: "FP (false-flags a same-line change -> a human ratifies, mostly noise) < FN (accepts a bad change) — but judgmental, ratified"
@@ -207,11 +213,13 @@ IN-7:
     fix + the LP-393-2a blind re-label; the interim 31% was the stale-golden trap, not the prompt). Judgmental
     -> ships RATIFY: a human ratifies every verdict regardless of the number, so the bar is the SURFACING floor
     (cf. AS-12). FP (a false same-line flag) is mostly noise — a human ratifies; the FN (accepting a
-    disqualifying job change) is caught at ratification. PROPOSED 0.90 surfacing floor. reasoned_over also reads
-    income.employment_start as CONTEXT — it is NOT load-bearing (only same_line_of_work gates), so it does not
-    block calibratable-now (the LP-390-6 / txn.counterparty precedent). ⚠️ SYNTHETIC-DATA CAVEAT: measured on
+    disqualifying job change) is caught at ratification. LP-393-6: Priya SIGNED OFF the 0.90 floor. ⚠️ She
+    asked for AUTO — but IN-7 is JUDGMENTAL and LP-376-B forbids a judgment rule from auto-shipping (enforced in
+    judgment.py, not this bar), so ships STAYS ratify and IN-7 surfaces to needs_review; her 'auto' is NOT
+    achievable without reclassifying IN-7's kind (a separate ticket — ADR-316). Not silently forced. reasoned_over
+    also reads income.employment_start as CONTEXT — NOT load-bearing (only same_line_of_work gates), so it does
+    not block calibratable-now (the LP-390-6 / txn.counterparty precedent). ⚠️ SYNTHETIC-DATA CAVEAT: measured on
     CLEAN scenario data (LP-393-1) — validates REASONING, not real-document robustness (LF-6T3N n=2 only).
-    Priya sets the floor.
 
 IN-8:
   status: not-calibratable-yet
@@ -233,47 +241,49 @@ IN-9:
 
 IN-10:
   # LP-393-5: is_declining re-scored 100% (13/13) on the LP-393-1 fixture (LP-393-4b) -> calibratable-now.
-  # Calculative -> ships AUTO. FN-dangerous -> a HIGH bar. PROPOSED 0.95, validated:false (Priya signs off).
+  # LP-393-6: Priya SIGNED OFF 0.95 AUTO — she OVERRODE the ratify-only recommendation on a synthetic-only
+  # basis (validated:true; ACTIVE via _LP393_ACTIVATED). Calculative -> auto matches its kind (no armor conflict).
   status: calibratable-now
   ships: auto
   threshold: 0.95
-  validated: false
+  validated: true
   measured_accuracy: 1.0   # income.is_declining 13/13 (LP-393-4b); zero disagreements (>= the 0.95 bar).
   load_bearing_ai_tags: [income.is_declining]
   fp_fn: "FN (uses declining income at face value -> a bad loan ships) >> FP (a false decline -> a human glances)"
   rationale: >-
     is_declining re-scored 100% (13/13, n=13, LP-393-4b) — the per-borrower re-scope (LP-390-1) landed and the
     tag now reaches the rule. Calculative -> ships AUTO. FN-dangerous (missing a real year-over-year decline
-    uses unstable income at face value) -> a HIGH bar; PROPOSED 0.95 AUTO (measured 1.0 >= 0.95). ⚠️
-    SYNTHETIC-DATA CAVEAT: measured on CLEAN scenario data (LP-393-1) — validates the REASONING, not robustness
-    to real-document messiness; the only real-data check is LF-6T3N (n=2, indicative). Priya: consider
-    RATIFY-ONLY until real files confirm; below-bar/unknown -> needs_review (LP-376-B). She sets the height.
+    uses unstable income at face value) -> a HIGH bar. LP-393-6: Priya SIGNED OFF 0.95 AUTO (measured 1.0 >=
+    0.95) — she OVERRODE the ratify-only recommendation KNOWINGLY (a named trust decision). ⚠️ SYNTHETIC-DATA
+    CAVEAT (recorded, accepted by her): measured on CLEAN scenario data (LP-393-1) — validates the REASONING,
+    not robustness to real-document messiness; the only real-data check is LF-6T3N (n=2, indicative).
+    Below-bar/unknown -> needs_review (LP-376-B).
 
 IN-11:
-  # LP-393-5: has_2yr_history re-scored 85% (11/13) on the LP-393-1 fixture (LP-393-4b) -> calibratable-now.
-  # The 85% UNDERSTATES it: the 2 "misses" are Priya applying a documentation standard the tag does NOT model,
-  # NOT reasoning errors (on the tag's question — IS THERE 2yr history — the AI is right both times). PROPOSED
-  # 0.90; measured 0.85 is BELOW it — the gap is those 2 rows + the OPEN B14 framing question. validated:false.
+  # LP-393-5 PROPOSED 0.90 at a measured 0.85 (below bar) with B14 open. LP-393-6: Priya SETTLED B14 — a
+  # TERMINATED job's two years DOES count as HISTORY; has_2yr_history is about HISTORY only, and the
+  # W-2/1099/offer-letter documentation standard is a SEPARATE check. Under that ruling B12 + B14's goldens
+  # became 'yes' and has_2yr_history was RE-SCORED (not hand-edited) to 100% (13/13). She SIGNED OFF 0.90 AUTO
+  # (validated:true; ACTIVE via _LP393_ACTIVATED). See ADR-316.
   status: calibratable-now
   ships: auto
   threshold: 0.90
-  validated: false
-  measured_accuracy: 0.85   # has_2yr_history 11/13 (LP-393-4b) — reported HONESTLY, NOT rounded up; see rationale.
+  validated: true
+  measured_accuracy: 1.0   # has_2yr_history 13/13 — RE-SCORED (LP-393-6) after Priya's B14 ruling, NOT asserted.
   load_bearing_ai_tags: [income.has_2yr_history]
   fp_fn: "FN (qualifies variable income without the required 2-year history) >> FP (a false 'no history' -> a human checks)"
   rationale: >-
-    has_2yr_history re-scored 85% (11/13, n=13, LP-393-4b). The 85% UNDERSTATES the tag: BOTH misses are Priya
-    applying documentation standards the tag does NOT model, not reasoning errors — B14 (VOE contract ended
-    2026-06-30, two W-2s present: AI 'yes' history exists; Priya 'no', wants a new offer letter + a paystub) and
-    B12 (pay-stub-only, no W-2: AI 'yes'; Priya wants a W-2/1099 check first). On the CORE question the tag asks
-    — is there two years of history — the AI is right BOTH times (100% on what the tag models). Calculative,
-    FN-dangerous -> PROPOSED 0.90 AUTO; measured 0.85 sits BELOW the proposed bar — the entire 15-pt gap is
-    those two documentation-standard rows. ⚠️ OPEN DEFINITIONAL QUESTION (B14) that GATES this bar: does a
-    TERMINATED job's two years still count as HISTORY? The tag asks history (it exists); Priya read continuation
-    ('no'). Her ruling changes what the tag MEANS on every file — and thus whether 0.85 is effectively 100% —
-    so she must settle B14 WITH the bar. ⚠️ SYNTHETIC-DATA CAVEAT: measured on CLEAN scenario data (LP-393-1) —
-    validates REASONING, not real-document robustness (LF-6T3N n=2 only). Priya sets the height, settles B14,
-    and decides whether the documentation standard belongs in this tag or a separate check.
+    has_2yr_history measured 85% (11/13) in LP-393-4b, but the two "misses" were Priya applying a documentation
+    standard the tag does NOT model, not reasoning errors — B14 (terminated VOE contract, two W-2s) and B12
+    (pay-stub-only). LP-393-6: Priya SETTLED the framing — a TERMINATED job's two years DOES still count as
+    HISTORY (the tag asks history, which exists), and the W-2/1099/offer-letter requirement is a SEPARATE check
+    (two new candidate rules). Under that ruling B12 + B14's goldens became 'yes' (their originals preserved in
+    the worksheet note) and has_2yr_history was RE-SCORED with the real reasoner to 100% (13/13, n=13) — the
+    number CHANGED BY RE-SCORING, never by editing 0.85 -> 1.0. Calculative, FN-dangerous -> she SIGNED OFF 0.90
+    AUTO (measured 1.0 >= 0.90), OVERRIDING the ratify-only recommendation KNOWINGLY. ⚠️ SYNTHETIC-DATA CAVEAT
+    (recorded, accepted by her): measured on CLEAN scenario data (LP-393-1) — validates REASONING, not
+    real-document robustness (LF-6T3N n=2 only). NOTE: the spec's over-fire limitation (fires on any income
+    lacking history, not just variable) is a separate ticket. Below-bar/unknown -> needs_review (LP-376-B).
 
 IN-12:
   status: not-calibratable-yet

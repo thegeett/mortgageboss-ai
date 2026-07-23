@@ -443,13 +443,13 @@ def test_pin2_in11_overfires_on_salaried_income() -> None:
     )
 
 
-def test_in10_11_inert_but_now_reach_the_rule() -> None:
-    # LP-390-1 does NOT activate: IN-10/IN-11 stay inert (AI-uncalibrated; the income wave calibrates them).
-    # But the input now REACHES the rule (per-borrower), so they are calibratable — no longer structurally
-    # dead. (Their bars are AI, not-calibratable-yet — the gate holds them on calibration, not the mismatch.)
+def test_in10_11_reach_the_rule_and_are_active_after_lp393_6() -> None:
+    # LP-390-1 re-scoped IN-10/IN-11 to per_borrower so the input REACHES the rule (no longer structurally
+    # dead); LP-393-6 then calibrated them on the LP-393-1 scenario fixture (is_declining 100%,
+    # has_2yr_history 100% after Priya's B14 ruling) and Priya signed off their bars -> both are now ACTIVE.
     from app.verification.rule_engine.registry import ACTIVE_RULE_IDS
 
-    assert "IN-10" not in ACTIVE_RULE_IDS and "IN-11" not in ACTIVE_RULE_IDS
+    assert "IN-10" in ACTIVE_RULE_IDS and "IN-11" in ACTIVE_RULE_IDS
     for rid in ("IN-10", "IN-11"):
         assert load_rule_spec(rid).subject_enumeration == "per_borrower"
 

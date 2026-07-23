@@ -104,4 +104,8 @@ def test_no_rule_activation_changed() -> None:
         "AS-2",
         "AS-12",
         "IN-3",
+        "IN-7",
+        "IN-10",
+        "IN-11",
+        "AS-11",
     )

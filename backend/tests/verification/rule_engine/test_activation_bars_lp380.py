@@ -54,14 +54,14 @@ def test_the_honest_activation_state_is_reported() -> None:
     # AS-11 — their load-bearing tags scored on the LP-393-1 scenario fixture, validated:false pending Priya).
     assert by["calibratable-now"] == 9
     assert by.get("not-calibratable-yet", 0) >= 1 and by.get("no-ai-dependency", 0) >= 1
-    # LP-390-7 signed off AS-2 + AS-12; LP-390-9 signed off IN-3 — those 5 calibratable rules are validated.
-    assert all(bars[r].validated for r in ("IN-1", "IN-5", "AS-2", "AS-12", "IN-3"))
-    # LP-393-5 PROPOSES four more (calibratable-now with a real threshold) but validates NONE — proposing a bar
-    # is not activating it (validated stays Priya's sign-off).
+    # LP-390-7 signed off AS-2 + AS-12; LP-390-9 signed off IN-3; LP-393-6 signed off IN-7/IN-10/IN-11/AS-11 —
+    # ALL NINE calibratable rules are now validated.
     assert all(
-        bars[r].status == "calibratable-now"
-        and bars[r].threshold is not None
-        and not bars[r].validated
+        bars[r].validated
+        for r in ("IN-1", "IN-5", "AS-2", "AS-12", "IN-3", "IN-7", "IN-10", "IN-11", "AS-11")
+    )
+    assert all(
+        bars[r].status == "calibratable-now" and bars[r].threshold is not None
         for r in ("IN-7", "IN-10", "IN-11", "AS-11")
     )
 
@@ -148,8 +148,19 @@ def test_loader_rejects_non_bool_validated() -> None:
 def test_exactly_the_signed_off_bars_are_validated() -> None:
     bars = load_activation_bars()
     validated = {rid for rid, b in bars.items() if b.validated}
-    # IN-1/IN-5 (LP-389) + AS-2/AS-12 (LP-390-7) + IN-3 (LP-390-9) — every calibratable rule is signed off now.
-    assert validated == {"IN-1", "IN-5", "AS-2", "AS-12", "IN-3"}
+    # IN-1/IN-5 (LP-389) + AS-2/AS-12 (LP-390-7) + IN-3 (LP-390-9) + IN-7/IN-10/IN-11/AS-11 (LP-393-6) — every
+    # calibratable rule is signed off now.
+    assert validated == {
+        "IN-1",
+        "IN-5",
+        "AS-2",
+        "AS-12",
+        "IN-3",
+        "IN-7",
+        "IN-10",
+        "IN-11",
+        "AS-11",
+    }
     assert all(b.validated is False for rid, b in bars.items() if rid not in validated)
     # a validated bar is always calibratable-now with a real threshold (never a blocked rule — loader invariant)
     for rid in validated:
@@ -212,6 +223,13 @@ def test_active_set_is_base_plus_lp389() -> None:
             "AS-2",
             "AS-12",
             "IN-3",  # LP-390-9 — YTD-annualized shortfall (auto), Priya signed off the 0.98 bar (same tag as IN-1)
+            # LP-393-6 — the scenario-calibrated income/asset rules; Priya signed off her heights + chose AUTO
+            # (IN-7 still ships RATIFY by kind — LP-376-B armor). is_declining/has_2yr_history/liquidation scored
+            # on the LP-393-1 fixture; has_2yr_history RE-SCORED after her B14 ruling.
+            "IN-7",
+            "IN-10",
+            "IN-11",
+            "AS-11",
         )
     )
     # A bar persists after activation as the record of WHY the rule went live, so the bars now intersect the
@@ -226,5 +244,9 @@ def test_active_set_is_base_plus_lp389() -> None:
         "AS-2",
         "AS-12",
         "IN-3",
+        "IN-7",
+        "IN-10",
+        "IN-11",
+        "AS-11",
     }
     assert not (set(load_activation_bars()) & set(_BASE_ACTIVE))
