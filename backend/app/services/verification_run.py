@@ -28,7 +28,7 @@ Deferred to LP-322: matching findings ACROSS runs (this ticket runs ONE verifica
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Iterable
 from dataclasses import dataclass, field
 from functools import cache
 from uuid import UUID
@@ -105,38 +105,41 @@ def _load_bearing_tag_ids(rule_id: str) -> set[str]:
     return set()
 
 
-@cache
-def _required_ai_groups() -> frozenset[str]:
-    """The AI groups the ACTIVE rule set actually consumes (LP-326) — so the materialization stage
-    runs ONLY those, never an AI structuring pass for a family no live rule reads yet.
+def _ai_groups_for_rules(rule_ids: Iterable[str]) -> frozenset[str]:
+    """The AI groups a set of rules consumes (LP-326) — the shared derivation behind BOTH the live
+    ``_required_ai_groups`` (active rules) and the pending ``_pending_check_ai_groups`` (blocked rules).
 
-    Derived generically from each active rule's load-bearing tags → their production declarations →
-    the AI group each declares. A parsed/derived load-bearing tag contributes no AI group DIRECTLY —
-    but a DERIVED load-bearing tag still rests on the AI tag(s) that feed it, and those must materialize
-    or the rule couldnt_checks forever. The activation bar declares exactly those upstream AI tags
-    (LP-380/389: IN-1 rests on income.documented_monthly via the derived shortfall), so an activated
-    rule's bar tags are folded in — the group runs, the derived input resolves, the verdict is real.
+    Generic: each rule's load-bearing tags → their production declarations → the AI group each declares. A
+    parsed/derived load-bearing tag contributes no AI group DIRECTLY — but a DERIVED load-bearing tag still
+    rests on the AI tag(s) that feed it, and those must materialize or the rule couldnt_checks forever. The
+    activation bar declares exactly those upstream AI tags (LP-380/389: IN-1 rests on
+    income.documented_monthly via the derived shortfall), so a rule's bar AI tags are folded in too — the
+    group runs, the derived input resolves, the verdict is real. A base-active rule has no bar (skipped).
+    ``load_activation_bars`` is imported lazily to keep the registry → activation_bars → registry edge
+    one-directional at module load.
     """
+    from app.verification.rule_engine.activation_bars import load_activation_bars
+
     declarations = load_declarations()
+    bars = load_activation_bars()
     needed: set[str] = set()
-    for rule_id in ACTIVE_RULE_IDS:
-        for tag_id in _load_bearing_tag_ids(rule_id):
+    for rule_id in rule_ids:
+        tag_ids = set(_load_bearing_tag_ids(rule_id))
+        bar = bars.get(rule_id)
+        if bar is not None:
+            tag_ids |= set(bar.load_bearing_ai_tags)
+        for tag_id in tag_ids:
             decl = declarations.get(tag_id)
             if decl is not None and decl.mode is ProductionMode.AI:
                 needed.add(decl.data)  # the AI group key
-    # LP-389 — fold in each ACTIVE rule's activation-bar AI tags (the upstream AI a derived load-bearing
-    # tag rests on; base-active rules have no bar and are unaffected). Imported lazily to keep the
-    # registry → activation_bars → registry edge one-directional at module load.
-    from app.verification.rule_engine.activation_bars import load_activation_bars
-
-    active = set(ACTIVE_RULE_IDS)
-    for rule_id, bar in load_activation_bars().items():
-        if rule_id in active:
-            for tag_id in bar.load_bearing_ai_tags:
-                decl = declarations.get(tag_id)
-                if decl is not None and decl.mode is ProductionMode.AI:
-                    needed.add(decl.data)
     return frozenset(needed)
+
+
+@cache
+def _required_ai_groups() -> frozenset[str]:
+    """The AI groups the ACTIVE rule set actually consumes (LP-326) — so the materialization stage runs
+    ONLY those, never an AI structuring pass for a family no live rule reads yet."""
+    return _ai_groups_for_rules(ACTIVE_RULE_IDS)
 
 
 # Public name for out-of-orchestrator callers (the dormant-probe diagnostic, LP-378) — the live AI-group
@@ -152,22 +155,9 @@ def _pending_check_ai_groups() -> frozenset[str]:
     uncalibrated groups run so a qualifying file no longer reads as 'checked, clean'. Same derivation as
     ``_required_ai_groups`` (spec load-bearing tags + the bar's declared upstream AI tags), over blocked rules.
     """
-    from app.verification.rule_engine.activation_bars import load_activation_bars
     from app.verification.rule_engine.pending_checks import blocked_candidate_rule_ids
 
-    declarations = load_declarations()
-    bars = load_activation_bars()
-    needed: set[str] = set()
-    for rule_id in blocked_candidate_rule_ids():
-        tag_ids = set(_load_bearing_tag_ids(rule_id))
-        bar = bars.get(rule_id)
-        if bar is not None:
-            tag_ids |= set(bar.load_bearing_ai_tags)
-        for tag_id in tag_ids:
-            decl = declarations.get(tag_id)
-            if decl is not None and decl.mode is ProductionMode.AI:
-                needed.add(decl.data)
-    return frozenset(needed)
+    return _ai_groups_for_rules(blocked_candidate_rule_ids())
 
 
 logger = get_logger(__name__)
@@ -341,7 +331,6 @@ async def _evaluate_pending_checks(
     *,
     materialization_reasoners: dict[str, AiGroupReasoner] | None,
     materialization_cache: AiTagCache | None,
-    oc2_reasoner: Oc2Reasoner | None,
     consistency_reasoners: dict[str, ConsistencyReasoner] | None,
     confidence_floor: float,
 ) -> list[RuleEvaluation]:
@@ -367,9 +356,11 @@ async def _evaluate_pending_checks(
             if pending_groups
             else snapshot
         )
+        # No judgment_reasoners: every blocked JUDGMENT rule is stubbed inside evaluate_pending_checks (it
+        # always reaches needs_review when applicable, so a real model call would be spent on a discarded
+        # verdict). No base-active rule (e.g. OC-2) is ever a blocked candidate, so none needs a real reasoner.
         return await evaluate_pending_checks(
             pending_snapshot,
-            judgment_reasoners={"OC-2": oc2_reasoner} if oc2_reasoner is not None else {},
             consistency_reasoners=consistency_reasoners or {},
             confidence_floor=confidence_floor,
         )
@@ -543,15 +534,17 @@ async def run_verification(
     snapshot = _merge_judgment_tags(snapshot, judgment_tags)
     # 6b. LP-391 — pending-check surfacing (ADDITIVE, a DISJOINT rule set): a blocked-but-applicable rule
     #     emits a manual-review flag to Tab 1 instead of silence. Never ships an uncalibrated verdict; the
-    #     live results above are untouched (blocked ≠ active).
-    results = results + await _evaluate_pending_checks(
-        snapshot,
-        materialization_reasoners=reasoners.materialization,
-        materialization_cache=caches.materialization,
-        oc2_reasoner=reasoners.oc2,
-        consistency_reasoners=reasoners.consistency,
-        confidence_floor=confidence_floor,
-    )
+    #     live results above are untouched (blocked ≠ active). Gated (settings.pending_checks_enabled) because
+    #     it materializes the BLOCKED rules' uncalibrated AI groups every run — real extra cost a
+    #     cost-sensitive deployment can turn off; ON by default (the honest-surfacing behavior).
+    if settings.pending_checks_enabled:
+        results = results + await _evaluate_pending_checks(
+            snapshot,
+            materialization_reasoners=reasoners.materialization,
+            materialization_cache=caches.materialization,
+            consistency_reasoners=reasoners.consistency,
+            confidence_floor=confidence_floor,
+        )
     reconciliation = await _persist(
         db,
         loan_file_id=loan_file_id,

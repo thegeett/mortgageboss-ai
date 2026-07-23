@@ -77,6 +77,12 @@ class Settings(BaseSettings):
     # GATE_AI_GROUPS=0 to instantly restore brute-force (run every group on every document) with no redeploy
     # — the safety net if a tag ever goes missing on a file shape the equivalence proof did not cover.
     gate_ai_groups: bool = True
+    # Pending-check surfacing (LP-391): a blocked-but-applicable rule emits a manual-review flag instead of
+    # silence, so a qualifying file no longer reads as "checked, clean". This materializes the BLOCKED rules'
+    # UNCALIBRATED AI groups on a throwaway snapshot every run — real extra AI cost (latency + tokens) that
+    # scales with the blocked-rule count. Gated so a cost-sensitive deployment can turn the whole pass off
+    # with no redeploy; ON by default (the honest-surfacing behavior the live/persisted snapshot is unaffected by).
+    pending_checks_enabled: bool = True
 
     # JWT / Auth
     jwt_secret_key: str = Field(

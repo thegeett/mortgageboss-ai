@@ -122,6 +122,26 @@ async def test_a_blocked_rule_with_no_data_stays_dark_no_fabricated_flag() -> No
     assert [p for p in pending if p.rule_id == "IN-11"] == []
 
 
+async def test_a_blocked_JUDGMENT_rule_surfaces_through_the_stub_no_api_call() -> None:
+    # The judgment path (the reason _discarded_judgment_stub exists): IN-7 is a BLOCKED per_borrower JUDGMENT
+    # rule reading income.same_line_of_work. Borrower A has it → applicable + gate-passes → the stub drives it
+    # to needs_review (a judgment rule ALWAYS reaches needs_review when applicable — never auto) → surfaces as
+    # PENDING. No real model call: evaluate_pending_checks binds the discarded stub for every blocked judgment
+    # rule (no reasoner is passed here). Borrower B has no tag → couldnt_check → DARK. If the judgment evaluator
+    # ever routed an unknown/stubbed answer to couldnt_check, IN-7 would go dark and THIS test would fail.
+    snap = _snap({str(_A): {"income.same_line_of_work": _tag("yes")}})
+    pending = await evaluate_pending_checks(snap)
+    in7 = [p for p in pending if p.rule_id == "IN-7"]
+    assert len(in7) == 1 and in7[0].subject_id == str(
+        _A
+    )  # A surfaces; B (couldnt_check) stays dark
+    assert in7[0].verdict is Verdict.PENDING_AUTOMATION
+    assert (
+        in7[0].load_bearing_tags == () and in7[0].verdict_confidence is None
+    )  # no-leak, same as IN-11
+    assert "manual review" in in7[0].reasoning.lower()
+
+
 # --------------------------------------------------------------------------- #
 # DISTINCT — the pending flag is its own outcome, never a trusted pass/fail
 # --------------------------------------------------------------------------- #
