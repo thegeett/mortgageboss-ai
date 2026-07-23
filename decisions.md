@@ -11540,3 +11540,54 @@ the identity, so it is the one that must be actively re-flagged.
 **Cross-refs.** LP-379-D (the DB worksheet path + the PII guard), LP-390-3/3a (the worksheet finalization +
 the prior 71-label DB copy), LP-390-5/6 (the `owner_matches_borrower` measurement + the AS-6 producer/context
 finding this partly rests on), the LP-210 PII posture (real-loan artifacts generated locally, gitignored).
+
+
+## ADR-314: The scenario-fixture pattern — a standalone, scenario-driven snapshot for thin-n calibration, never merged into the realism anchor (LP-393-1)
+
+**The problem.** Six rules (IN-7, IN-10, IN-11, IN-12, IN-13, AS-11) are blocked purely on SAMPLE SIZE: their
+tags are per-borrower and LF-6T3N has only 2 borrowers, so each caps at n=2 (AS-11 at n=3) — a smoke test, not
+a measurement (LP-390-5/6, confirmed on real data by LP-392). The wiring is fixed and the tags produce; the
+ceiling is the FILE, not the code.
+
+**The pattern.** Build a STANDALONE, scenario-driven snapshot per calibration wave —
+`income_scenarios.build_income_calibration_snapshot`: ~11 scenario borrowers (+ D4 continuance probes) and 6
+asset accounts, each at the MINIMUM viable structure for the tag it exercises. It is COMPLETELY SEPARATE from
+LF-6T3N: own loan / borrower / content ids, never imported by (or importing) the LF-6T3N builders, asserted
+both ways; LF-6T3N stays byte-unchanged. The two fixtures answer different questions — LF-6T3N = "do rules work
+on realistic data (real transactions, real structure)"; this = "scenario variety for measurement" — and
+keeping them apart lets each number be reported separately (more informative than one blended one). Merging
+scenario borrowers into the realism anchor would destroy its realism and break its frozen tests.
+
+**Why Level 1 (a synthetic snapshot, not generated PDFs).** What is blocked is the AI's REASONING about income
+scenarios (a 2-year trend, a decline, a line-of-work change). Document EXTRACTION is separately calibrated
+(documented_monthly / employer_normalized both 100%, LP-379-D), so re-testing it through fake PDFs buys nothing
+here. The snapshot varies EXACTLY the fields the group reads (`tax_year` + `wages_tips_other_comp` for
+history/decline; `employer_name` + an occupation field for same_line_of_work; a stated income END for
+continuance_3yr), verified against the prompt/context builder, not assumed.
+
+**The synthetic-data caveat.** A tag validated on this fixture is validated for REASONING, not for robustness
+to real-document messiness (OCR noise, odd layouts, missing fields). LF-6T3N covers realism; this covers
+scenario breadth. **A bar set on a number measured here must carry that caveat** — pair it with the LF-6T3N
+smoke result, never treat the scenario n as a full production validation.
+
+**Clear-cut vs ambiguous (anti-anchoring, LP-337).** The clear-cut scenarios (B3-B8) have a KNOWN expected
+answer, recorded in `CLEARCUT_EXPECTATIONS` for the probe + tests — NEVER written to a worksheet. The ambiguous
+scenarios (B9-B13) carry NO encoded answer anywhere a labeling worksheet could surface it: Priya labels them
+blind and HER label becomes the definition (is a 2% drop "declining"? is a promotion "same line of work"? does
+a partial 2nd year count?).
+
+**The probe (real model, off-path, reported not asserted — the model is non-deterministic).** Per-tag
+non-unknown n on the scenario snapshot: `has_2yr_history` 13, `is_declining` 11, `same_line_of_work` 12,
+`asset.liquidation_terms` 6 — all >= 6, the thin-n ceiling broken for IN-7/IN-10/IN-11/AS-11. All six clear-cut
+checks PASSED (B3 declining=yes, B4 no, B5 history=no, B6 yes, B7 same-line=yes, B8 no). TWO honest gaps remain
+(NOT solved by n):
+- **continuance_3yr stays thin (n=1).** Standard W-2 employment honestly yields `unknown` (LP-385); only a
+  fixed-term VOE with a stated end (B14) produced `no`. So IN-13 is blocked on more than sample size — it needs
+  fixed-term/other-income variety AND `income.type` (a different producer, income_amounts), not just borrowers.
+- **IN-12 is not exercisable here.** It needs `has_2yr_history` for a SELF-EMPLOYMENT (tax_return) borrower,
+  but income_stability reads only w2/pay_stub/voe/1003 — a tax-return-only borrower yields `unknown`. IN-12
+  stays blocked on the producer gap (LP-390-2a), not on n.
+
+**Cross-refs.** LP-390-5 (the thin-n finding), LP-392 (the ceiling confirmed on real data), LP-384 (the
+scenario-extended-fixture precedent, `build_lf6t3n_plus`), LP-385 (the per-borrower income producer + its
+context builder), LP-337 (anti-anchoring), LP-390-2a (the IN-12 producer gap).
