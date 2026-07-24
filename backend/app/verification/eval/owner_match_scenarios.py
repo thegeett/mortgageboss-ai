@@ -21,8 +21,9 @@ definition (anti-anchoring, LP-337).
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
+from pathlib import Path
 from uuid import UUID
 
 from app.verification.snapshot.fields import Field, FieldSource
@@ -153,9 +154,61 @@ def build_owner_match_scenario_snapshot() -> Snapshot:
     )
 
 
+# --------------------------------------------------------------------------- #
+# LP-399 — the BLIND labeling worksheet
+# --------------------------------------------------------------------------- #
+OWNER_MATCH_WORKSHEET_FILE = "owner-match-scenario-labels.csv"
+_OWNER_TAG = "stmt.owner_matches_borrower"
+
+# The NEUTRAL label question. It asks ONLY the core question (holder-vs-roster) and deliberately does NOT
+# restate the AI's tolerance clauses ("be tolerant of middle initials / nicknames / maiden names") — restating
+# them would hand Priya the answer key (she must judge blind whether "Jordan M Rivera" is the borrower). The
+# "yes / no / unknown" are the tag's allowed values, not a prediction.
+_OWNER_LABEL_PROMPT = (
+    "Does the account holder on this statement match one of the loan's borrowers listed above? "
+    "yes / no / unknown"
+)
+
+# A DETERMINISTIC order that does NOT group the negatives (N*) then the positives (P*) — else the sheet would
+# telegraph which rows are which. The two positive controls sit at positions 2 and 5, interspersed among the
+# negatives; no run of the 6 negatives is contiguous. (Anti-anchoring, LP-337 — the order must reveal nothing.)
+_ROW_ORDER: tuple[str, ...] = ("N3", "P1", "N1", "N6", "P2", "N2", "N5", "N4")
+
+
+def write_owner_match_worksheet(out_dir: Path) -> Path:
+    """LP-399 — generate the committable BLIND labeling worksheet for ``stmt.owner_matches_borrower``. One row
+    per statement (8), context = the statement's own fields PLUS the loan's borrower roster (she must see BOTH
+    to judge a match — an absent roster would make every row unjudgeable, the LP-390-3 missing-field lesson),
+    then the neutral question. Predictions / expected answers / AI reasoning NEVER reach it: the context is
+    built by ``build_worksheet`` from the snapshot ONLY (no AI), the roster is a snapshot fact, and the two
+    ambiguous cases (N1/N5) carry no encoded answer. Deterministic + keyless. Returns the written path."""
+    from app.verification.eval.worksheet import build_worksheet, render_csv
+    from app.verification.tag_materialization.subjects import loan_borrower_roster
+
+    snap = build_owner_match_scenario_snapshot()
+    roster_line = "loan_borrowers: " + "; ".join(
+        loan_borrower_roster(snap)
+    )  # she compares against these
+    by_key = {
+        r.subject_id.rsplit("-", 1)[1].upper(): r
+        for r in build_worksheet(snap, only_tags=frozenset({_OWNER_TAG}))
+    }
+    ordered = [
+        replace(
+            by_key[key], context=f"{by_key[key].context} || {roster_line} | {_OWNER_LABEL_PROMPT}"
+        )
+        for key in _ROW_ORDER
+    ]
+    path = out_dir / OWNER_MATCH_WORKSHEET_FILE
+    path.write_text(render_csv(ordered), encoding="utf-8")
+    return path
+
+
 __all__ = [
     "AMBIGUOUS_CASES",
     "CLEARCUT_EXPECTATIONS",
+    "OWNER_MATCH_WORKSHEET_FILE",
     "OwnerCase",
     "build_owner_match_scenario_snapshot",
+    "write_owner_match_worksheet",
 ]
