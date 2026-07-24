@@ -11789,3 +11789,40 @@ that is its own ticket (a doc-type scope decision), not done here.
 **Cross-refs.** LP-390-5 (the original 100%-abstain finding), LP-396 (the live re-verification that this ticket
 never landed), LP-385/332 (the borrower resolution reused), LP-335 (report-what's-shown, matched against the
 given context). AS-4's `is_reserve_eligible` domain disagreement is separate and untouched.
+
+## ADR-319: Surface name discrepancies + non-borrower co-holders as SEPARATE fact-tags, not a widened enum — the tag describes, the rule judges (LP-400)
+
+**Priya's ruling (the driver).** A name difference on a bank statement (e.g. a middle initial) should NOT reject
+the statement — the account IS the borrower's; it should FLAG for human attention while the document still
+COUNTS. A joint account should flag that a co-holder is not a borrower. Neither is a rejection. But
+`stmt.owner_matches_borrower`'s `yes/no/unknown` enum cannot express *"matches, but with a discrepancy worth a
+look"* — it collapsed an exact match and a differing-middle-initial match into the same `yes` (LP-398's N1), and
+had no way at all to say *"there is an extra, non-borrower holder"* (N5). Where a tag cannot express a risk, no
+rule can catch it — the information dies at the tag layer (the `apparent_category` / LP-379-E enum-gap lesson).
+
+**Separate tags, not a widened enum.** Added two document-subject AI tags to the existing `stmt_facts` group
+(same one call — no per-document cost, D5): `stmt.holder_name_variance` (HOW the name differs, when it matches)
+and `stmt.non_borrower_co_holder` (is there an additional holder who is not a borrower). Rejected widening
+`owner_matches_borrower`'s enum: (1) it would STALE that tag's hard-won goldens (the LP-393-4a stale-golden
+trap); (2) the two discrepancies are ORTHOGONAL — a joint account can MATCH and ALSO have a non-borrower
+co-holder, which one enum can't say at once. `owner_matches_borrower` keeps answering only the match question,
+semantically UNCHANGED (its 5 LF-6T3N goldens verified still `yes` after the prompt extension).
+
+**The describe-vs-judge line.** The tags report the OBSERVABLE — the KIND of difference — not a verdict. The
+value set is `none | middle_absent | middle_differs | nickname | surname_differs | other | unknown`, deliberately
+**SPLITTING `middle_differs` (a DIFFERENT middle — LP-398 N1, the risky "relative?" case) from `middle_absent` (a
+DROPPED middle — LP-398 P1, benign)**. Collapsing them into one `middle_name` value (the ticket's initial
+proposal) would re-create the exact problem at a finer grain — the rule could not tell N1 from P1. The
+differs-vs-absent distinction is a FACT about the names, so it belongs in the tag; **WHICH kinds warrant
+attention is the RULE's decision (Priya's)**, not the tag's. The live probe confirmed the split works: N1 →
+`middle_differs`, P1 → `middle_absent`, P2 → `nickname`, N3/N4/N6 → `none`, N5 → co_holder `yes` (naming the
+non-borrower). Value-set questions flagged for Priya: which variances flag; the `surname_differs` value has no
+scenario yet (n=0 — a fixture gap).
+
+**AS-6's consumption is DEFERRED.** These tags are UNCALIBRATED. Making AS-6 (or any rule) flag on them now is
+exactly the thing the three-bucket architecture forbids — consuming an unmeasured AI tag. AS-6's spec is
+untouched; a worksheet → Priya's labels → a score come first, THEN a rule change.
+
+**Cross-refs.** LP-398 (N1/N5 — the discrepancies the enum swallowed), LP-399 (the blind worksheet),
+LP-390-8a (the borrower roster both new tags reuse), LP-379-E (the `apparent_category` enum-gap precedent),
+LP-393-4a (the stale-golden trap the separate-tag design avoids).

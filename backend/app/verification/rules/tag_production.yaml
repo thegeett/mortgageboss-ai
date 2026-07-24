@@ -115,6 +115,8 @@ tags:
   stmt.page_count_present: {mode: parsed, subject: document, data: page_count_present}
   stmt.owner_matches_borrower: {mode: ai, subject: document, data: stmt_facts}
   stmt.is_reserve_eligible: {mode: ai, subject: document, data: stmt_facts}
+  stmt.holder_name_variance: {mode: ai, subject: document, data: stmt_facts}   # LP-400
+  stmt.non_borrower_co_holder: {mode: ai, subject: document, data: stmt_facts}  # LP-400
   asset.liquidation_terms: {mode: ai, subject: document, data: asset_facts}
   asset.usable_value: {mode: ai, subject: document, data: asset_facts}
   reserves.required_months: {mode: derived, subject: loan, data: reserves_required_months}
@@ -407,7 +409,7 @@ ai_groups:
     context_builder: document
     applies_to: [bank_statement, money_market_statement]
     include_borrower_roster: true   # LP-390-8a: owner_matches_borrower needs the loan's borrowers to compare against
-    tags: [stmt.owner_matches_borrower, stmt.is_reserve_eligible]
+    tags: [stmt.owner_matches_borrower, stmt.is_reserve_eligible, stmt.holder_name_variance, stmt.non_borrower_co_holder]
     system_prompt: |
       You are a mortgage loan processor STRUCTURING one depository (bank) statement into clean facts —
       describe what the document SHOWS; do NOT evaluate rules. Produce:
@@ -426,10 +428,31 @@ ai_groups:
          them (a normal checking/savings balance), vs restricted or a retirement/discounted account?
          "yes" | "no" | "partial" | "unknown". (This is about the ACCOUNT TYPE/BALANCE only — ignore
          "loan_borrowers", which is not relevant to reserve-eligibility.)
-      Judge ONLY from this document's own fields (and "loan_borrowers" for tag 1); never invent. Return ONLY a
-      JSON array, one object per document, echoing the given "index":
+      3. holder_name_variance — WHEN owner_matches_borrower is "yes", DESCRIBE how the stated holder name
+         DIFFERS from the borrower it matched. This is a factual description of the KIND of difference — do
+         NOT judge whether it matters (a rule decides that). Values:
+         "none" — no meaningful difference (an exact / format-only match), OR the holder is not a borrower
+                (there is no borrower to differ from — owner_matches_borrower carries the non-match);
+         "middle_absent" — a middle name/initial is present on ONE side and absent on the other ("Jordan
+                Rivera" vs "Jordan A Rivera") — a DROPPED middle, not a different one;
+         "middle_differs" — a DIFFERENT middle name/initial ("Jordan M Rivera" vs "Jordan A Rivera") — the
+                middles conflict;
+         "nickname" — a common diminutive ("Bob" for "Robert");
+         "surname_differs" — the surname differs (a maiden vs married name, or another last-name difference);
+         "other" — a difference not covered above;
+         "unknown" — cannot tell.
+         Report the OBSERVED difference only; NEVER guess an identity not in "loan_borrowers".
+      4. non_borrower_co_holder — is there an ADDITIONAL account holder on this statement (a joint account)
+         who is NOT one of the loan_borrowers? "yes" (name the non-borrower holder in the reasoning) | "no"
+         (a single holder, or every holder is a borrower) | "unknown". This is ORTHOGONAL to
+         owner_matches_borrower: a joint account can MATCH (a borrower is a holder) AND still have a
+         non-borrower co-holder.
+      Judge ONLY from this document's own fields (and "loan_borrowers" for tags 1/3/4); never invent. Return
+      ONLY a JSON array, one object per document, echoing the given "index":
       [{"index": <i>, "owner_matches_borrower": {"value","confidence","reasoning"},
-        "is_reserve_eligible": {"value","confidence","reasoning"}}]
+        "is_reserve_eligible": {"value","confidence","reasoning"},
+        "holder_name_variance": {"value","confidence","reasoning"},
+        "non_borrower_co_holder": {"value","confidence","reasoning"}}]
 
   asset_facts:
     subject: document

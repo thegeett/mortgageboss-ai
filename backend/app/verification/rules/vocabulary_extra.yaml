@@ -178,3 +178,30 @@ tags:
     allowed_values: ["yes", "no", "unknown"]
     description: Do deposit patterns suggest an undisclosed borrowed-funds source (AS-12 judgment verdict)?
     produced_by: AI
+  # LP-400 — surface name discrepancies + non-borrower co-holders instead of swallowing them (Priya's ruling:
+  # a name variance FLAGS for attention but the document still COUNTS; a joint account flags a non-borrower
+  # co-holder). Separate from stmt.owner_matches_borrower (whose yes/no/unknown + 13 goldens are UNCHANGED):
+  # these DESCRIBE the observable (what KIND of difference / is there an extra holder); a RULE decides which
+  # warrant attention (Priya's, later — this ticket only makes them produce). See ADR-319.
+  stmt.holder_name_variance:
+    entity: statement
+    value_type: enum
+    # DESCRIPTIVE taxonomy (not verdicts): middle_differs is a DIFFERENT middle (the risky "relative?" case,
+    # LP-398 N1) — deliberately SPLIT from middle_absent (a dropped middle, benign, LP-398 P1), else the tag
+    # would re-collapse them. `none` = no meaningful person-name difference (an exact match, OR the holder is
+    # not a borrower at all — owner_matches_borrower carries that). WHICH kinds flag is the RULE's call (Priya).
+    allowed_values:
+      ["none", "middle_absent", "middle_differs", "nickname", "surname_differs", "other", "unknown"]
+    description: >-
+      When the account holder resolves to a borrower, HOW the stated name differs from that borrower's name
+      (a describe-only observable; the rule decides which kinds warrant attention). `none` when there is no
+      meaningful difference or the holder is not a borrower.
+    produced_by: AI
+  stmt.non_borrower_co_holder:
+    entity: statement
+    value_type: enum
+    allowed_values: ["yes", "no", "unknown"]
+    description: >-
+      Is there an ADDITIONAL account holder on the statement (a joint account) who is NOT a borrower on the
+      loan (LP-398 N5)? The reasoning names the non-borrower holder. `no` for a single-holder account.
+    produced_by: AI
