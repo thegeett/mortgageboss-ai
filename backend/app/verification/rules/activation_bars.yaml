@@ -31,13 +31,14 @@
 #               input is VERIFIED to resolve to real values on a real file (LP-381/382). False by default =
 #               held. Meaningless (and rejected) for any status but no-ai-dependency.
 #
-# THE HONEST STATE (report, not a pass): of 23 candidate rules, 9 are calibratable-now and ALL NINE are now
-# SIGNED OFF + live: IN-1, IN-5 (LP-389); AS-2, AS-12 (LP-390-7); IN-3 (LP-390-9); and IN-7, IN-10, IN-11,
-# AS-11 (LP-393-6 — scored on the LP-393-1 scenario fixture, Priya signed off her heights + chose AUTO,
-# overriding the ratify-only recommendation on a synthetic-only basis). NOTE: IN-7 is JUDGMENTAL, so despite
-# her AUTO request it ships RATIFY (LP-376-B armor in judgment.py) — surfaces to needs_review; truly-auto needs
-# a kind reclassification (a separate ticket, ADR-316). The rest are blocked on calibration / a producer / a
-# wiring decision — reported so a rule never ships on a tag nobody measured.
+# THE HONEST STATE (report, not a pass): of 23 candidate rules, 10 are calibratable-now. 9 are SIGNED OFF +
+# live: IN-1, IN-5 (LP-389); AS-2, AS-12 (LP-390-7); IN-3 (LP-390-9); and IN-7, IN-10, IN-11, AS-11 (LP-393-6 —
+# scored on the LP-393-1 scenario fixture, Priya signed off her heights + chose AUTO, overriding the ratify-only
+# recommendation on a synthetic-only basis). 1 is PROPOSED but NOT yet signed off (LP-397: AS-6 — its tag now
+# produces after LP-390-8a, scored 100% but ONE-SIDED n=5; validated:false pending Priya). NOTE: IN-7 is
+# JUDGMENTAL, so despite her AUTO request it ships RATIFY (LP-376-B armor in judgment.py) — surfaces to
+# needs_review; truly-auto needs a kind reclassification (a separate ticket, ADR-316). The rest are blocked on
+# calibration / a producer / a wiring decision — reported so a rule never ships on a tag nobody measured.
 #
 # LP-389 — the FIRST activation pass reads THIS file through activation_bars.is_eligible: IN-1 + IN-5 (AI,
 # validated, measured 100% >= bar) pass the gate and go live; the other 21 stay held. ID-5 was PROPOSED but
@@ -127,17 +128,33 @@ AS-5:
     n=0 coverage gap. Held (not calibratable) until that design call is made — not a calibration gap. No bar.
 
 AS-6:
-  status: not-calibratable-yet
+  # LP-397: owner_matches_borrower now PRODUCES (LP-390-8a fed stmt_facts the borrower roster) and scored 100%
+  # (5/5) on the LF-6T3N bank statements -> calibratable-now. PROPOSED 0.95 auto, validated:false. ⚠️ The 5 are
+  # ALL `yes` (ONE-SIDED): the DANGEROUS FN direction (a non-borrower statement) is UNTESTED — Priya weighs
+  # ratify-only + the name-match strictness before sign-off. Validating IS activating (the LP-393-6 coupling).
+  status: calibratable-now
   ships: auto
-  threshold: null
+  threshold: 0.95
   validated: false
+  measured_accuracy: 1.0   # stmt.owner_matches_borrower 5/5 (LP-390-8a) — but ONE-SIDED (all `yes`); see caveat.
   load_bearing_ai_tags: [stmt.owner_matches_borrower]
-  fp_fn: "FN (accepts a statement not owned by the borrower) >> FP"
+  fp_fn: "FN (accepts a statement NOT owned by the borrower -> someone else's assets counted) >> FP (a false 'not the borrower's account' -> a human re-checks a legit statement)"
   rationale: >-
-    LP-390-6: owner_matches_borrower now MEASURED — 100% abstain (5/5 'unknown', n=5, LP-390-5): the
-    stmt_facts group is given only the statement, never the borrower names, so it CANNOT compare and correctly
-    abstains on every file. Blocked on a PRODUCER/CONTEXT fix (feed the group the borrower identity), not on
-    scoring. No bar until it can produce a real value.
+    owner_matches_borrower now PRODUCES real comparisons (LP-390-8a fed stmt_facts the loan's borrower roster;
+    BEFORE: 5/5 structural `unknown` "no borrower names provided"; AFTER: e.g. "'Jordan A Rivera' matches
+    borrower 'Jordan Rivera' - the middle initial"). Scored 100% (5/5) vs Priya's goldens. Structural -> ships
+    AUTO; FN-dangerous (a statement not owned by the borrower accepted as the borrower's assets) -> a HIGH bar;
+    PROPOSED 0.95. ⚠️ ONE-SIDED n: the real n is 5 (3 of the 8 goldens are UNSCORABLE — the D5 gap below), and
+    ALL 5 are `yes`. The tag has NEVER been tested on a NEGATIVE case (a statement that does NOT belong to the
+    borrower) — which is EXACTLY what AS-6 exists to catch, and exactly the DANGEROUS FN direction. 100% on 5
+    same-direction cases is NOT proof it can spot a mismatch (the AS-2 untested-trigger shape). Priya: consider
+    RATIFY-ONLY until a negative-case scenario exists. ⚠️ NAME-MATCH STRICTNESS is her call: LP-390-8a chose
+    TOLERANT (middle-initial, nickname Bob/Robert, maiden vs married, joint-account match-if-either) — the SAFE
+    direction (over-strict false-flags a borrower's own account) — but HOW tolerant (a bare initial "J. Rivera";
+    a trust/LLC in the borrower's name) is an underwriting judgment. ⚠️ D5 COVERAGE GAP: stmt_facts runs only on
+    bank_statement/money_market, so the 3 investment_account goldens are unscorable AND investment/brokerage
+    statements are NOT ownership-checked at all — its own ticket (widen stmt_facts' applicability). Validating
+    this bar ACTIVATES the rule (LP-393-6 coupling) — the sign-off IS the activation.
 
 AS-7:
   status: not-calibratable-yet

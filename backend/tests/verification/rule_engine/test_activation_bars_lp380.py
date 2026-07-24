@@ -45,25 +45,25 @@ def test_bars_cover_exactly_the_inert_rules() -> None:
 
 
 def test_the_honest_activation_state_is_reported() -> None:
-    # 9 of 23 are calibratable-now; the rest are blocked on calibration / a producer / a wiring decision
+    # 10 of 23 are calibratable-now; the rest are blocked on calibration / a producer / a wiring decision
     bars = load_activation_bars()
     by = {
         s: sum(1 for b in bars.values() if b.status == s) for s in {b.status for b in bars.values()}
     }
-    # 5 SIGNED OFF (IN-1, IN-5, IN-3 + AS-2, AS-12) + 4 PROPOSED-but-unvalidated (LP-393-5: IN-7, IN-10, IN-11,
-    # AS-11 — their load-bearing tags scored on the LP-393-1 scenario fixture, validated:false pending Priya).
-    assert by["calibratable-now"] == 9
+    # 9 SIGNED OFF (IN-1, IN-5, IN-3 + AS-2, AS-12 + IN-7, IN-10, IN-11, AS-11) + 1 PROPOSED-but-unvalidated
+    # (LP-397: AS-6 — its tag produces after LP-390-8a, scored 100% but one-sided n=5, validated:false).
+    assert by["calibratable-now"] == 10
     assert by.get("not-calibratable-yet", 0) >= 1 and by.get("no-ai-dependency", 0) >= 1
     # LP-390-7 signed off AS-2 + AS-12; LP-390-9 signed off IN-3; LP-393-6 signed off IN-7/IN-10/IN-11/AS-11 —
-    # ALL NINE calibratable rules are now validated.
+    # those NINE calibratable rules are validated; AS-6 (LP-397) is calibratable but NOT yet validated.
     assert all(
         bars[r].validated
         for r in ("IN-1", "IN-5", "AS-2", "AS-12", "IN-3", "IN-7", "IN-10", "IN-11", "AS-11")
     )
-    assert all(
-        bars[r].status == "calibratable-now" and bars[r].threshold is not None
-        for r in ("IN-7", "IN-10", "IN-11", "AS-11")
-    )
+    assert bars["AS-6"].status == "calibratable-now" and bars["AS-6"].threshold is not None
+    assert not bars[
+        "AS-6"
+    ].validated  # proposed, not signed off — validating it would activate it (LP-393-6)
 
 
 # --------------------------------------------------------------------------- #
