@@ -286,13 +286,30 @@ IN-11:
     lacking history, not just variable) is a separate ticket. Below-bar/unknown -> needs_review (LP-376-B).
 
 IN-12:
-  status: not-calibratable-yet
+  # LP-396 corrected the STALE text: has_2yr_history is now MEASURED 100% (LP-393-6) — NOT unscored, so this is
+  # not a calibration block. IN-12's real blocker is WIRING + a missing PRODUCER: it enumerates per_document
+  # (tax_return) while has_2yr_history is produced per_borrower, so the rule can't consume it (structurally
+  # dead — the IN-10/IN-11 class). The naive per_borrower re-scope is FORBIDDEN (LP-390-2a / ADR-310): it
+  # collapses IN-12 into IN-11 (both read the income-type-agnostic tag). Keeping IN-12 self-employment-specific
+  # needs a BORROWER-LEVEL self-employment signal that does NOT exist (income.type is subject:document;
+  # income_stability produces no income-type tag). -> needs-producer, not not-calibratable-yet.
+  status: needs-producer
   ships: auto
   threshold: null
   validated: false
   load_bearing_ai_tags: [income.has_2yr_history]
   fp_fn: "FN (self-employment without history) >> FP"
-  rationale: "has_2yr_history PRODUCED (LP-385) but UNSCORED. Blocked on calibration."
+  rationale: >-
+    has_2yr_history is MEASURED (100%, LP-393-6) — the tag is NOT unscored, so IN-12 is not calibration-blocked
+    (the LP-394 finding: the old 'UNSCORED, blocked on calibration' text was stale). The real blocker is a
+    subject WIRING mismatch: IN-12 reads has_2yr_history per_document (tax_return) but it is produced
+    per_borrower, so on a real file IN-12 couldnt_checks (structurally dead). LP-390-2a established the fix is
+    NOT a subject re-scope (a naive per_borrower copy collapses IN-12 into IN-11 — both read the
+    income-type-agnostic has_2yr_history, destroying IN-12's self-employment specificity). Keeping it specific
+    needs a BORROWER-LEVEL self-employment signal that does not exist (income.type is subject:document;
+    income_stability produces no income-type tag). BLOCKED ON A PRODUCER (ADR-310) — a borrower-level
+    self-employment tag — its own ticket; not fixable by wiring here. The strict xfail
+    (test_in12_self_employment_history_is_structurally_dead_pending_a_producer) keeps this visible.
 
 IN-13:
   status: not-calibratable-yet
