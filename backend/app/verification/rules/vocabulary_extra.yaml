@@ -195,7 +195,9 @@ tags:
     description: >-
       When the account holder resolves to a borrower, HOW the stated name differs from that borrower's name
       (a describe-only observable; the rule decides which kinds warrant attention). `none` when there is no
-      meaningful difference or the holder is not a borrower.
+      meaningful difference or the holder is not a borrower. NOTE: `none` is overloaded (exact match vs holder
+      is not a borrower) — a consuming rule MUST co-read stmt.owner_matches_borrower to disambiguate the two
+      (owner=yes+none = clean match; owner=no+none = not a borrower).
     produced_by: AI
   stmt.non_borrower_co_holder:
     entity: statement
