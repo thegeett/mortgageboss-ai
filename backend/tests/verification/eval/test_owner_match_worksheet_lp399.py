@@ -24,18 +24,21 @@ from app.verification.eval.owner_match_scenarios import (
 
 _COMMITTED = Path(__file__).resolve().parents[4] / "docs/calibration" / OWNER_MATCH_WORKSHEET_FILE
 
-# distinctive phrases from LP-398's PUBLISHED probe reasoning — none may appear in the blind sheet.
+# distinctive phrases from LP-398's AND LP-400's PUBLISHED probe reasoning — none may appear in the blind sheet.
 _AI_REASONING = (
-    "matches borrower",
-    "trust entity",
-    "limited liability",
-    "could potentially",
-    "joint account with",
-    "does not match either",
-    "'bob' = 'robert'",
+    "matches borrower",  # LP-398/400 owner_matches reasoning
+    "trust entity",  # LP-398 N3
+    "limited liability",  # LP-398 N6
+    "could potentially",  # LP-398 N2 hedge
+    "does not match either",  # LP-398 N4
+    "a common feminine",  # LP-401 N2 (Roberta reasoning)
+    "co-holder, who is not among",  # LP-400/401 co_holder reasoning
+    "the middles conflict",  # variance reasoning
 )
-# the AI's tolerance clauses — the prompt must NOT restate them (it would teach her the answer key).
-_TOLERANCE_WORDS = ("middle initial", "nickname", "maiden", "tolerant")
+# the AI's SELECTION RULES — the prompt must not restate HOW to choose a value (it would teach her the answer
+# key). NOTE: the VALUE names (middle_absent / nickname / surname_differs) legitimately appear — she picks from
+# them (D3). These are the model's RULE phrases, which are NOT value names.
+_TOLERANCE_WORDS = ("middle initial", "maiden", "be tolerant", "tolerant of")
 
 
 def _rows(text: str) -> list[dict[str, str]]:
@@ -50,9 +53,15 @@ def test_generation_is_deterministic_and_matches_the_committed_file(tmp_path: Pa
     assert _COMMITTED.read_text(encoding="utf-8") == fresh  # the committed sheet is in sync
 
 
-def test_all_eight_rows_blind_no_golden_or_prediction() -> None:
+def test_thirtythree_rows_blind_no_golden_or_prediction() -> None:
     rows = _rows(_COMMITTED.read_text(encoding="utf-8"))
-    assert len(rows) == 8 and {r["tag_id"] for r in rows} == {"stmt.owner_matches_borrower"}
+    # LP-401: 11 statements x 3 tags = 33 blind rows
+    assert len(rows) == 33
+    assert {r["tag_id"] for r in rows} == {
+        "stmt.owner_matches_borrower",
+        "stmt.holder_name_variance",
+        "stmt.non_borrower_co_holder",
+    }
     # every golden is EMPTY (she fills it) — no per-row answer anchors her
     assert all(not (r["golden_label"] or "").strip() for r in rows)
     assert all(not (r["labeler_note"] or "").strip() for r in rows)
@@ -76,24 +85,33 @@ def test_context_shows_both_the_holder_and_the_roster() -> None:
     for r in _rows(_COMMITTED.read_text(encoding="utf-8")):
         ctx = r["context"]
         assert "account_holder_name=" in ctx  # the holder on the statement
-        assert (
-            "loan_borrowers: Jordan A Rivera; Robert Chen" in ctx
-        )  # the roster to compare against
+        # the full roster (LP-401 added Sarah Chen) — she compares against all borrowers
+        assert "loan_borrowers: Jordan A Rivera; Robert Chen; Sarah Chen" in ctx
 
 
-def test_the_prompt_does_not_restate_the_ai_tolerance_rules() -> None:
+def test_the_prompt_shows_values_but_not_the_models_selection_rules() -> None:
     low = _COMMITTED.read_text(encoding="utf-8").lower()
     for word in _TOLERANCE_WORDS:
         assert word not in low, f"the prompt teaches the AI's answer key: {word!r}"
-    # it DOES ask the neutral core question with the allowed values
-    assert "match one of the loan's borrowers" in low and "yes / no / unknown" in low
+    # the neutral questions ARE asked, and the variance VALUES are shown (D3 — she can't pick blind otherwise)
+    assert "match one of the loan's borrowers" in low
+    assert "how does the name differ" in low
+    assert (
+        "middle_absent / middle_differs / nickname / surname_differs" in low
+    )  # the taxonomy, as options
+    assert "additional account holder who is not" in low  # the co-holder question
 
 
-def test_row_order_does_not_group_negatives_then_positives() -> None:
-    order = [r["subject_id"] for r in _rows(_COMMITTED.read_text(encoding="utf-8"))]
-    positives = [i for i, s in enumerate(order) if s in ("own-p1", "own-p2")]
-    # the two positives are INTERSPERSED — not both at the end, and they split the run of negatives.
-    assert positives == [1, 4]  # own-p1 at index 1, own-p2 at index 4 (deterministic, non-grouping)
-    assert order[0].startswith("own-n") and order[-1].startswith(
-        "own-n"
-    )  # not a positives block at an edge
+def test_row_order_groups_by_tag_and_does_not_cluster_positives() -> None:
+    rows = _rows(_COMMITTED.read_text(encoding="utf-8"))
+    # GROUP BY TAG (D4): a scenario's 3 rows sit 11 apart, so one answer can't bias the same scenario's next tag
+    tags_in_order = [r["tag_id"] for r in rows]
+    assert tags_in_order[:11] == ["stmt.owner_matches_borrower"] * 11
+    assert tags_in_order[11:22] == ["stmt.holder_name_variance"] * 11
+    assert tags_in_order[22:] == ["stmt.non_borrower_co_holder"] * 11
+    # within each tag block, the positives are interspersed (P1 at index 1, P2 at index 5 — not grouped)
+    for block_start in (0, 11, 22):
+        block = [rows[block_start + i]["subject_id"] for i in range(11)]
+        positives = [i for i, s in enumerate(block) if s in ("own-p1", "own-p2")]
+        assert positives == [1, 5]  # deterministic, non-grouping
+        assert block[0].startswith("own-n") and block[-1].startswith("own-n")

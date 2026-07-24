@@ -64,23 +64,22 @@ def test_the_other_fixtures_are_byte_unchanged() -> None:
 
 def test_the_roster_is_non_empty_so_the_group_can_compare() -> None:
     # D2 — the whole probe depends on this: an empty roster would make every case abstain structurally.
-    assert loan_borrower_roster(_SNAP) == ["Jordan A Rivera", "Robert Chen"]
+    # LP-401 added Sarah Chen (for N7's surname case); the original two are unchanged (D1).
+    assert loan_borrower_roster(_SNAP) == ["Jordan A Rivera", "Robert Chen", "Sarah Chen"]
 
 
 def test_clearcut_and_ambiguous_are_split_and_the_ambiguous_ones_are_unanchored() -> None:
-    # clear-cut expectations live HERE (asserted); the two ambiguous cases carry NO expected answer anywhere.
+    # clear-cut owner_matches expectations live HERE (asserted); the ambiguous cases carry NO answer anywhere.
+    # LP-401: +N9 (both-borrowers control -> yes); N2 RECLASSIFIED to ambiguous (3-run instability); +N7/N8.
     assert CLEARCUT_EXPECTATIONS == {
-        "N2": "no",
         "N3": "no",
         "N4": "no",
         "N6": "no",
         "P1": "yes",
         "P2": "yes",
+        "N9": "yes",
     }
-    assert set(AMBIGUOUS_CASES) == {
-        "N1",
-        "N5",
-    }  # the different-middle-initial + joint-account cases
+    assert set(AMBIGUOUS_CASES) == {"N1", "N2", "N5", "N7", "N8"}
     assert not (set(AMBIGUOUS_CASES) & set(CLEARCUT_EXPECTATIONS))  # never both — no leaked answer
 
 
@@ -120,6 +119,8 @@ async def test_all_eight_statements_materialize_against_this_fixtures_roster() -
     produced = [
         sid for sid, tags in out.tags.by_subject.items() if "stmt.owner_matches_borrower" in tags
     ]
-    assert len(produced) == 8  # all 6 negative + 2 positive statements produced a comparison
+    assert len(produced) == 11  # LP-401: 8 original + N7/N8/N9 statements all produced a comparison
     # per-scenario isolation: every statement was compared against THIS fixture's roster, nothing else.
-    assert stub.rosters and all(r == ["Jordan A Rivera", "Robert Chen"] for r in stub.rosters)
+    assert stub.rosters and all(
+        r == ["Jordan A Rivera", "Robert Chen", "Sarah Chen"] for r in stub.rosters
+    )

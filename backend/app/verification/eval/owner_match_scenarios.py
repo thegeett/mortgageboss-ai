@@ -48,6 +48,9 @@ _B1 = UUID(
 _B2 = UUID(
     "94000000-0000-4000-8000-000000000002"
 )  # Robert Chen (for the nickname/one-letter cases N2/P2)
+_B3 = UUID(
+    "94000000-0000-4000-8000-000000000003"
+)  # Sarah Chen (LP-401 — for N7's surname_differs: holder "Sarah Nguyen")
 
 
 def _f(value: str) -> Field:
@@ -65,10 +68,12 @@ class OwnerCase:
     expected: str | None  # "yes" | "no" (clear-cut), or None (ambiguous — never anchored)
 
 
-# The two borrowers on the loan (the comparison roster): Jordan A Rivera + Robert Chen.
+# The borrowers on the loan (the comparison roster). LP-401 added Sarah Chen for N7's surname case; D1 verified
+# the addition does NOT disturb the original 8's results (they compare against Jordan A Rivera / Robert Chen).
 _ROSTER = {
     _B1: ("Jordan", "A", "Rivera"),
     _B2: ("Robert", "", "Chen"),
+    _B3: ("Sarah", "", "Chen"),
 }
 
 # 6 negatives (resembling a borrower in one specific way) + 2 positive controls.
@@ -78,8 +83,16 @@ _CASES: tuple[OwnerCase, ...] = (
     OwnerCase(
         "N1", "Jordan M Rivera", "middle-name clause: a DIFFERENT middle initial (M vs A)", None
     ),
-    # CLEAR-CUT no — Roberta is a different given name than Robert (one letter, a different person).
-    OwnerCase("N2", "Roberta Chen", "nickname/variant clause: Roberta is NOT Robert", "no"),
+    # AMBIGUOUS (LP-401 reclassified from clear-cut `no`) — "Roberta Chen" vs "Robert Chen" is GENUINELY
+    # ambiguous: the model flipped across three runs (LP-398 unknown -> LP-400 no -> LP-401 yes "a common
+    # feminine variant"). A different person, or a variant? Its instability is N2's OWN (the roster change did
+    # not cause it — it moved in LP-400 with no roster change; N9 proves the roster works). Priya's call.
+    OwnerCase(
+        "N2",
+        "Roberta Chen",
+        "given-name clause: Roberta vs Robert (a variant, or a different person?)",
+        None,
+    ),
     # CLEAR-CUT no — a name-containing TRUST is a different legal entity, not the person.
     OwnerCase("N3", "The Rivera Family Trust", "entity clause: a name-containing trust", "no"),
     # CLEAR-CUT no — a completely unrelated name; the sanity check. If this matches, tolerance is badly broken.
@@ -100,13 +113,50 @@ _CASES: tuple[OwnerCase, ...] = (
     ),
     # CLEAR-CUT yes (control) — a nickname the tolerance SHOULD accept; guards over-strictness.
     OwnerCase("P2", "Bob Chen", "control: nickname (Bob = Robert)", "yes"),
+    # LP-401 — the two-gap fillers. `expected` is the OWNER_MATCHES clear-cut only (None = ambiguous).
+    # AMBIGUOUS owner_matches — "Sarah Nguyen" vs borrower "Sarah Chen": a maiden/married surname change, or a
+    # different person? Its holder_name_variance (surname_differs) gives that value its FIRST case (was n=0).
+    OwnerCase("N7", "Sarah Nguyen", "surname clause: Sarah Nguyen vs borrower Sarah Chen", None),
+    # AMBIGUOUS owner_matches — a JOINT account with a spouse-shaped non-borrower co-holder (Linda Chen). Its
+    # non_borrower_co_holder (yes) is the SECOND `yes` case (was n=1, N5 only). Robert Chen IS a borrower.
+    OwnerCase(
+        "N8",
+        "ROBERT CHEN AND LINDA CHEN",
+        "joint clause: a spouse-shaped non-borrower co-holder",
+        None,
+    ),
+    # CLEAR-CUT owner_matches yes — a JOINT account where BOTH holders are borrowers. The DISCRIMINATING control
+    # for non_borrower_co_holder (clear-cut `no`): joint is not automatically a problem. Without it the tag
+    # could pass by answering "is this joint?" instead of "is a holder a non-borrower?".
+    OwnerCase(
+        "N9",
+        "JORDAN A RIVERA AND ROBERT CHEN",
+        "joint clause: BOTH holders are borrowers (control)",
+        "yes",
+    ),
 )
 
 # The clear-cut expectations — recorded HERE / in tests only, NEVER a worksheet (anti-anchoring, LP-337).
+# owner_matches: derived from OwnerCase.expected (adds N9=yes; N7/N8 stay ambiguous with N1/N5).
 CLEARCUT_EXPECTATIONS: dict[str, str] = {
     c.key: c.expected for c in _CASES if c.expected is not None
 }
-AMBIGUOUS_CASES: tuple[str, ...] = tuple(c.key for c in _CASES if c.expected is None)  # N1, N5
+AMBIGUOUS_CASES: tuple[str, ...] = tuple(c.key for c in _CASES if c.expected is None)  # N1,N5,N7,N8
+# non_borrower_co_holder is DETERMINABLE for every case (a describe fact, not a judgment): single-holder → no;
+# N5/N8 have a non-borrower co-holder → yes; N9 (both borrowers) → no — THE discriminating control.
+CLEARCUT_CO_HOLDER: dict[str, str] = {
+    "N1": "no",
+    "N2": "no",
+    "N3": "no",
+    "N4": "no",
+    "N6": "no",
+    "N7": "no",
+    "P1": "no",
+    "P2": "no",
+    "N5": "yes",
+    "N8": "yes",
+    "N9": "no",
+}
 
 
 def _roster_mismo() -> dict[str, SnapshotField]:
@@ -155,57 +205,92 @@ def build_owner_match_scenario_snapshot() -> Snapshot:
 
 
 # --------------------------------------------------------------------------- #
-# LP-399 — the BLIND labeling worksheet
+# LP-399 / LP-401 — the BLIND labeling worksheet (LP-401: all THREE tags, 11 statements = 33 rows)
 # --------------------------------------------------------------------------- #
 OWNER_MATCH_WORKSHEET_FILE = "owner-match-scenario-labels.csv"
 _OWNER_TAG = "stmt.owner_matches_borrower"
+_VARIANCE_TAG = "stmt.holder_name_variance"
+_CO_HOLDER_TAG = "stmt.non_borrower_co_holder"
 
-# The NEUTRAL label question. It asks ONLY the core question (holder-vs-roster) and deliberately does NOT
-# restate the AI's tolerance clauses ("be tolerant of middle initials / nicknames / maiden names") — restating
-# them would hand Priya the answer key (she must judge blind whether "Jordan M Rivera" is the borrower). The
-# "yes / no / unknown" are the tag's allowed values, not a prediction.
-_OWNER_LABEL_PROMPT = (
-    "Does the account holder on this statement match one of the loan's borrowers listed above? "
-    "yes / no / unknown"
+# NEUTRAL questions — each asks ONLY its core question and does NOT restate the AI's selection rules (LP-399:
+# the sheet omits "be tolerant of middle initials / nicknames / maiden names" — that would hand her the answer
+# key). D3: holder_name_variance NEEDS its allowed VALUES shown (she can't pick from a taxonomy she can't see) —
+# so the values are listed, but NOT the model's rules for CHOOSING one (e.g. never "a dropped middle = absent").
+_LABEL_PROMPTS: dict[str, str] = {
+    _OWNER_TAG: (
+        "Does the account holder on this statement match one of the loan's borrowers listed above? "
+        "yes / no / unknown"
+    ),
+    _VARIANCE_TAG: (
+        "If the holder matches a borrower but the name is not identical, how does the name DIFFER? "
+        "Choose one: none / middle_absent / middle_differs / nickname / surname_differs / other / unknown"
+    ),
+    _CO_HOLDER_TAG: (
+        "Is there an ADDITIONAL account holder who is NOT one of the loan's borrowers (a joint account)? "
+        "yes / no / unknown"
+    ),
+}
+
+# D4 — the row order. GROUP BY TAG (all match rows, then all variance, then all co-holder) so a scenario's THREE
+# rows sit 11 apart — a labeler's answer on one tag can't reflexively bias the same scenario's next tag. Within
+# each tag, a DETERMINISTIC statement order that does NOT cluster the positives (P1 at index 1, P2 at index 5)
+# — the LP-399 anti-grouping principle, extended to 11.
+_TAG_ORDER: tuple[str, ...] = (_OWNER_TAG, _VARIANCE_TAG, _CO_HOLDER_TAG)
+_STATEMENT_ORDER: tuple[str, ...] = (
+    "N3",
+    "P1",
+    "N1",
+    "N8",
+    "N6",
+    "P2",
+    "N7",
+    "N2",
+    "N5",
+    "N9",
+    "N4",
 )
-
-# A DETERMINISTIC order that does NOT group the negatives (N*) then the positives (P*) — else the sheet would
-# telegraph which rows are which. The two positive controls sit at positions 2 and 5, interspersed among the
-# negatives; no run of the 6 negatives is contiguous. (Anti-anchoring, LP-337 — the order must reveal nothing.)
-_ROW_ORDER: tuple[str, ...] = ("N3", "P1", "N1", "N6", "P2", "N2", "N5", "N4")
 
 
 def write_owner_match_worksheet(out_dir: Path) -> Path:
-    """LP-399 — generate the committable BLIND labeling worksheet for ``stmt.owner_matches_borrower``. One row
-    per statement (8), context = the statement's own fields PLUS the loan's borrower roster (she must see BOTH
-    to judge a match — an absent roster would make every row unjudgeable, the LP-390-3 missing-field lesson),
-    then the neutral question. Predictions / expected answers / AI reasoning NEVER reach it: the context is
-    built by ``build_worksheet`` from the snapshot ONLY (no AI), the roster is a snapshot fact, and the two
-    ambiguous cases (N1/N5) carry no encoded answer. Deterministic + keyless. Returns the written path."""
+    """LP-399 / LP-401 — generate the committable BLIND labeling worksheet for the three statement-holder tags
+    (owner_matches_borrower / holder_name_variance / non_borrower_co_holder), one row per (tag, statement) = 33.
+    Context = the statement's own fields PLUS the loan's borrower roster (she must see BOTH — an absent roster is
+    the LP-390-3 missing-field trap), then the tag's neutral question. Predictions / expected answers / AI
+    reasoning NEVER reach it (LP-398 AND LP-400 both published the AI's answers): the context is built by
+    ``build_worksheet`` from the snapshot ONLY, the roster is a snapshot fact, the golden column is blank, and
+    the ambiguous cases carry no encoded answer. Deterministic + keyless. Returns the written path."""
     from app.verification.eval.worksheet import build_worksheet, render_csv
+    from app.verification.tag_materialization.declarations import _allowed_values_by_tag
     from app.verification.tag_materialization.subjects import loan_borrower_roster
 
     snap = build_owner_match_scenario_snapshot()
-    roster_line = "loan_borrowers: " + "; ".join(
-        loan_borrower_roster(snap)
-    )  # she compares against these
-    by_key = {
+    roster_line = "loan_borrowers: " + "; ".join(loan_borrower_roster(snap))
+    allowed = _allowed_values_by_tag()
+    # base rows carry the statement facts + source_document (no prompt — owner_matches declares none); reused for
+    # every tag on that statement, with the tag id / allowed values / prompt swapped.
+    base = {
         r.subject_id.rsplit("-", 1)[1].upper(): r
         for r in build_worksheet(snap, only_tags=frozenset({_OWNER_TAG}))
     }
-    ordered = [
+    rows = [
         replace(
-            by_key[key], context=f"{by_key[key].context} || {roster_line} | {_OWNER_LABEL_PROMPT}"
+            base[key],
+            tag_id=tag,
+            allowed_values=" | ".join(allowed[tag] or ()),
+            consuming_rules="",  # LP-400 deferred AS-6's consumption — no rule reads these yet
+            context=f"{base[key].context} || {roster_line} | {_LABEL_PROMPTS[tag]}",
         )
-        for key in _ROW_ORDER
+        for tag in _TAG_ORDER
+        for key in _STATEMENT_ORDER
     ]
     path = out_dir / OWNER_MATCH_WORKSHEET_FILE
-    path.write_text(render_csv(ordered), encoding="utf-8")
+    path.write_text(render_csv(rows), encoding="utf-8")
     return path
 
 
 __all__ = [
     "AMBIGUOUS_CASES",
+    "CLEARCUT_CO_HOLDER",
     "CLEARCUT_EXPECTATIONS",
     "OWNER_MATCH_WORKSHEET_FILE",
     "OwnerCase",
