@@ -11745,3 +11745,47 @@ next income-family progress needs a small other-income + VOE + offer-letter scen
 **Cross-refs.** LP-394 (the census this corrects), LP-390-2 (the original AS-7 orphan finding), LP-390-3 (the
 IN-8/IN-9 zero-rows-on-LF-6T3N finding), LP-393-1 (the continuance n=1 finding + the scenario-fixture pattern),
 LP-393's thin-n discipline.
+
+## ADR-318: stmt_facts never saw the borrower roster — owner_matches_borrower abstained on every file; a declared roster fixes it (LP-390-8a)
+
+**The context gap (verified, not assumed).** `stmt.owner_matches_borrower` (AS-6's load-bearing tag) asks *does
+this statement's account holder match a borrower on the loan?* — a COMPARISON. But the `stmt_facts` group runs
+under the `document` context builder (`_doc_context`), which sends only the statement's OWN fields. It was never
+given the loan's borrowers, so it **structurally could not compare** and abstained `unknown` on every file —
+LP-390-5 measured it (5/5 abstain) and LP-396 re-verified it live (5/5 `unknown`, the AI's own reason: *"no
+borrower names were provided in the loan"*). The abstention was the fail-safe working, not an AI error; the fix
+is to supply the comparison data.
+
+**The fix — a DECLARED roster, not a per-group branch.** A document group that must compare a document's stated
+party against the borrowers declares `include_borrower_roster: true` (a new `AiGroup` field, guarded to
+document-subject groups). The producer then computes the loan's borrower roster ONCE per run (reusing the LP-332
+borrower resolution — `_borrower_enumerate` + PII-safe field reads, no second identity path) and merges
+`loan_borrowers: [...]` into each subject's context, part of the content fingerprint. Only `stmt_facts` declares
+it, so every other group's context is byte-unchanged (no `if group == stmt_facts` anywhere — the LP-326
+vocabulary-driven discipline).
+
+**The comparison shape (D2) — tolerant, flagged for Priya.** The prompt compares the holder against
+`loan_borrowers` and is TOLERANT of harmless variation: a middle initial vs full/absent middle name ("Jordan A
+Rivera" = "Jordan Rivera"), a nickname (Bob/Robert), a maiden vs married surname, and a JOINT account listing two
+holders (a match if EITHER is a borrower). It answers `yes` (matches), `no` (a clearly different party — an
+unrelated name, or a trust/LLC/estate not on the loan), or `unknown` WITH A REASON (ambiguous, or an empty/absent
+roster — nothing to compare). **Over-strict is the DANGEROUS direction** (a false "not the borrower's account" on
+a borrower's own joint statement), so the default leans tolerant; the exact strictness is a Priya call, not a
+value set here.
+
+**This makes the tag PRODUCE — correctness is the score.** The live re-score on LF-6T3N confirmed it now
+produces a real comparison: BEFORE 5/5 `unknown` → AFTER **5/5 `yes` (100% vs the 8 existing goldens on the 5
+bank statements)**, reasoning *"Account holder 'Jordan A Rivera' matches borrower 'Jordan Rivera' — the middle
+initial…"*. `is_reserve_eligible` (the group's other tag, AS-4's own separate problem) was UNAFFECTED (the
+roster is additive context, explicitly irrelevant to it — D4). **AS-6 is NOT activated** — it is now bar-ready;
+a bar + Priya's sign-off + the gate activate it, not this ticket.
+
+**The D5 scope mismatch (reported, not fixed).** The worksheet labels `owner_matches_borrower` on
+`investment_account` docs (inv1–3), but `stmt_facts` runs only on `bank_statement`/`money_market` — so those 3
+goldens are `unmatched` and can never be scored. The right fix is likely to widen `stmt_facts`' applicability to
+the investment/brokerage statement types (they have an account holder too), NOT to narrow the worksheet — but
+that is its own ticket (a doc-type scope decision), not done here.
+
+**Cross-refs.** LP-390-5 (the original 100%-abstain finding), LP-396 (the live re-verification that this ticket
+never landed), LP-385/332 (the borrower resolution reused), LP-335 (report-what's-shown, matched against the
+given context). AS-4's `is_reserve_eligible` domain disagreement is separate and untouched.

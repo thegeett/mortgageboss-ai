@@ -241,6 +241,29 @@ def _borrower_context(raw: object, applies_to: frozenset[str] | None) -> dict[st
     return {"borrower_mismo": mismo, "documents": documents}
 
 
+def loan_borrower_roster(snapshot: Snapshot) -> list[str]:
+    """The loan's borrower display names (LP-390-8a) — the comparison roster a DOCUMENT group needs to judge
+    whether a document's stated party is a borrower on the loan (``stmt.owner_matches_borrower``: the
+    ``_doc_context`` sends only the statement's OWN fields, so without this the group had no names to compare
+    against and abstained structurally on every file — LP-390-5/LP-396's 5/5 ``unknown``).
+
+    REUSES the LP-332 borrower resolution (``_borrower_enumerate`` + ``_borrower_read_field``) — no second
+    identity path — and the PII-safe ``_field_value`` (a masked PiiField contributes only its masked display,
+    never raw PII; a fully-masked name simply gives the model less to match on, an honest degrade to
+    abstention, never a leak). A borrower with no readable name is skipped. Order follows the MISMO index."""
+    names: list[str] = []
+    for _borrower_id, subject in _borrower_enumerate(snapshot):
+        parts = [
+            _field_value(field)
+            for name in ("first_name", "middle_name", "last_name")
+            if (field := _borrower_read_field(subject, name)) is not None
+        ]
+        full = " ".join(str(p) for p in parts if p not in (None, ""))
+        if full:
+            names.append(full)
+    return names
+
+
 _SUBJECT_TYPES: dict[str, SubjectType] = {
     "transaction": SubjectType(_txn_enumerate, _txn_read_field, _txn_context),
     "document": SubjectType(_doc_enumerate, _doc_read_field, _doc_context),
@@ -265,5 +288,6 @@ __all__ = [
     "RawField",
     "Subject",
     "SubjectType",
+    "loan_borrower_roster",
     "subject_type",
 ]

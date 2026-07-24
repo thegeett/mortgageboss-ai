@@ -28,7 +28,7 @@ from app.verification.snapshot.content_id import content_fingerprint
 from app.verification.snapshot.model import DocumentEntry, Snapshot
 from app.verification.snapshot.tag import Tag, TagProducedBy, TagRole, TagStage
 from app.verification.tag_materialization.declarations import AiGroup
-from app.verification.tag_materialization.subjects import subject_type
+from app.verification.tag_materialization.subjects import loan_borrower_roster, subject_type
 
 logger = get_logger(__name__)
 
@@ -285,6 +285,16 @@ async def produce_ai_group_tags(
     group_cache = cache.setdefault(group.key, {}) if cache is not None else {}
     st = subject_type(group.subject)
 
+    # LP-390-8a — a group that DECLARES it gets the loan's borrower roster added to each subject's context (a
+    # document group comparing its stated party against the borrowers, owner_matches_borrower). Computed ONCE
+    # per run (per-loan), merged per subject so it is part of the fingerprint (a roster change re-judges). A
+    # group that does not declare it is byte-unchanged. Reuses the LP-332 borrower resolution — no second path.
+    roster = loan_borrower_roster(snapshot) if group.include_borrower_roster else None
+
+    def _context(raw: object) -> dict[str, object]:
+        ctx = st.build_context(raw, group.applies_to)
+        return {**ctx, "loan_borrowers": roster} if roster is not None else ctx
+
     subjects = _gate_subjects(
         group, st.enumerate(snapshot)
     )  # LP-377-D: skip inapplicable docs (fail-open)
@@ -292,8 +302,7 @@ async def produce_ai_group_tags(
         return {}
 
     fingerprinted: list[tuple[str, str, object]] = [
-        (content_fingerprint(st.build_context(raw, group.applies_to)), sid, raw)
-        for sid, raw in subjects
+        (content_fingerprint(_context(raw)), sid, raw) for sid, raw in subjects
     ]
 
     representatives: list[tuple[str, object]] = []
@@ -310,10 +319,7 @@ async def produce_ai_group_tags(
 
     for batch in _chunks(representatives, _BATCH_SIZE):
         context = {
-            "subjects": [
-                {"index": i, **st.build_context(raw, group.applies_to)}
-                for i, (_fp, raw) in enumerate(batch, 1)
-            ]
+            "subjects": [{"index": i, **_context(raw)} for i, (_fp, raw) in enumerate(batch, 1)]
         }
         try:
             result = await reason_fn(json.dumps(context))

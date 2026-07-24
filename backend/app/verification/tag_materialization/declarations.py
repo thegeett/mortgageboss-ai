@@ -86,6 +86,10 @@ class AiGroup:
     tag_ids: tuple[str, ...]
     system_prompt: str
     applies_to: frozenset[str] | None = None  # None = all document types (fail-open default)
+    # LP-390-8a — a DOCUMENT group that must compare a document's stated party against the loan's borrowers
+    # (stmt.owner_matches_borrower) declares this; the producer then adds the loan's borrower roster to the
+    # group's context. DECLARED (not a per-group code branch): a group that does not set it is byte-unchanged.
+    include_borrower_roster: bool = False
 
 
 def _parse_allowed(raw: str) -> tuple[str, ...] | None:
@@ -190,6 +194,16 @@ def load_ai_groups() -> dict[str, AiGroup]:
             raise DeclarationError(f"ai group {key!r}: `tags` must be a non-empty list")
         if not isinstance(prompt, str) or not prompt.strip():
             raise DeclarationError(f"ai group {key!r}: `system_prompt` is required")
+        roster = body.get("include_borrower_roster", False)
+        if not isinstance(roster, bool):
+            raise DeclarationError(
+                f"ai group {key!r}: `include_borrower_roster` must be a boolean, got {roster!r}"
+            )
+        if roster and subject != "document":
+            raise DeclarationError(
+                f"ai group {key!r}: `include_borrower_roster` is only for a document-subject group "
+                f"(the roster is the comparison context for a document's stated party), got subject={subject!r}"
+            )
         groups[key] = AiGroup(
             key=key,
             subject=subject,
@@ -197,6 +211,7 @@ def load_ai_groups() -> dict[str, AiGroup]:
             tag_ids=tuple(str(t) for t in tags),
             system_prompt=prompt,
             applies_to=_parse_applies_to(key, subject, body.get("applies_to")),
+            include_borrower_roster=roster,
         )
     return groups
 
