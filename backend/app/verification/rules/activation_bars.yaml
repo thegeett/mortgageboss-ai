@@ -110,6 +110,26 @@ AS-4:
     SYSTEMATIC domain disagreement (not noise). Blocked now NOT on scoring but on a DOMAIN/PROMPT fix — a
     Priya-confirmed reserve-eligible definition, then a prompt alignment (its own follow-up). No bar.
 
+OC-1:
+  # LP-406-4 — the first Bucket 2 rule, WRITTEN this ticket, HELD here. OC-1 is deterministic (structural), so
+  # it ships AUTO — but its verdict rests on occupancy.consistent_with_signals (AI), which is UNSCORED: no
+  # measured accuracy, no bar. LIVE OC-2 rides the SAME tag but RATIFIES every verdict (a human signs each), so
+  # OC-2 never needed the tag CALIBRATED; OC-1's auto-ship does. So it is not-calibratable-yet (produced but
+  # unscored), threshold null, validated false → is_eligible=false → NOT activated. Calibrating the tag against
+  # Priya's occupancy labels is a separate ticket; until then OC-1 is written + producing, held.
+  status: not-calibratable-yet
+  ships: auto
+  threshold: null
+  validated: false
+  load_bearing_ai_tags: [occupancy.consistent_with_signals]
+  fp_fn: "FN (clears a file whose occupancy declarations conflict) >> FP (a false conflict -> a human re-checks)"
+  rationale: >-
+    OC-1 reads occupancy.consistent_with_signals (AI) — the SAME tag LIVE OC-2 rides — plus the derived
+    occupancy.stated. The tag is PRODUCED (OC-2 requires the occupancy AI group) but UNSCORED: it has no
+    measured accuracy and no Priya bar, because OC-2 ratifies every verdict and so never needed it calibrated.
+    OC-1 would auto-ship, so it cannot go live until the tag is scored against Priya's occupancy labels and she
+    sets a bar. Blocked on calibration, not a producer — the inputs already materialize at the loan subject.
+
 AS-5:
   # LP-390-7 fail-closed check: validated MUST stay false here — AS-5 is not-calibratable-yet with a null
   # threshold, so the loader REJECTS validated:true on it (parse_bar: "only a calibratable-now rule may be

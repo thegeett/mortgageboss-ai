@@ -66,7 +66,8 @@ def test_exactly_the_eligible_candidates_pass() -> None:
     held = set(bars) - eligible
     # IN-1/IN-5/AS-2/AS-12/IN-3 (AI, validated, measured >= bar); ID-5 + AS-9/IN-4/AS-10 (no-AI, input resolves).
     assert eligible == set(_ACTIVATED)
-    assert len(held) == 10 and not (held & _ACTIVATED)  # every other candidate is held
+    # 11 held: the 10 pre-LP-406 candidates + OC-1 (LP-406-4 — written, but its AI tag is unscored, so held).
+    assert len(held) == 11 and not (held & _ACTIVATED)  # every other candidate is held
 
 
 def test_eligible_rule_ids_is_sorted_and_matches() -> None:

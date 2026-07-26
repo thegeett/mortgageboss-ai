@@ -70,7 +70,8 @@ async def test_as1_projects_priya_validated_false_with_spec(db_session: AsyncSes
     with_spec = await db_session.scalar(
         select(func.count()).select_from(Rule).where(Rule.spec.isnot(None))
     )
-    assert with_spec == 34  # +10 AS-2..AS-12 specs (AS-8 deferred) — LP-323-AS-B
+    # 34 = +10 AS-2..AS-12 specs (AS-8 deferred, LP-323-AS-B); +1 = OC-1 (LP-406-4, the first Bucket 2 rule).
+    assert with_spec == 35
 
 
 async def test_db_loses_to_files(db_session: AsyncSession) -> None:

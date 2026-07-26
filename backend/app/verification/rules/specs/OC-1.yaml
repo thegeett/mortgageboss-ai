@@ -1,0 +1,104 @@
+# OC-1 — Occupancy consistency — DETERMINISTIC structural rule SPEC (LP-406-4, Bucket 2).
+#
+# The FIRST Bucket 2 rule written from scratch. It reads two ALREADY-PRODUCED loan-level tags (the same
+# occupancy.consistent_with_signals that LIVE OC-2 rides) and reaches a verdict with ZERO new producer.
+#
+# ⚠️ SPEC-WORDING (the LP-405 / LP-371 D3 trap, verified in Phase 0): the produced tag
+# occupancy.consistent_with_signals measures whether the borrower's OTHER 1003/MISMO DECLARATIONS
+# (intent-to-occupy, the FHA second-residence indicator, the financed-unit count) agree with the stated
+# occupancy — NOT the "address signals" the rule's NAME/rationale implies. The loan/MISMO context that
+# produces the tag carries NO borrower residence address (LP-371 D3), so this rule is worded to
+# DECLARATION consistency. The address-signal dimension is a separate follow-up (a new producer), not
+# this rule.
+#
+# ⚠️ NOT ACTIVATED by this ticket (held). OC-1 is deterministic in FORM but its verdict rests on an AI
+# tag (occupancy.consistent_with_signals) that is UNSCORED — no measured accuracy, no Priya bar. LIVE
+# OC-2 rides the same tag but RATIFIES every verdict (a human signs each), so it never needed the tag
+# CALIBRATED; OC-1 would AUTO-ship, which does. So OC-1 ships "written + producing", HELD on calibration
+# (activation_bars.yaml: not-calibratable-yet). See LP-406-4.
+
+rule_id: OC-1
+name: Occupancy consistency
+category: Occupancy
+
+kind: structural          # must equal rule_kinds.csv (OC-1 = structural)
+numeric_check: false      # no numeric bookend — an enum-agreement check, not a ratio
+
+criteria: >-
+  The borrower's STATED occupancy for the subject property (primary residence / second home /
+  investment) must be consistent with the borrower's OTHER stated occupancy declarations on the 1003 —
+  the intent-to-occupy declaration, the FHA second-residence indicator, and the financed-unit count. A
+  stated primary residence that those declarations contradict (e.g. a borrower whose intent-to-occupy is
+  "No", or a second-residence indicator of "true") is an inconsistency a processor must reconcile before
+  submission. This reads the loan-level occupancy.consistent_with_signals structural fact, which encodes
+  that DECLARATION agreement; it does NOT assess address signals (the produced tag has no residence
+  address to reason over — LP-371 D3). Absent/unclear signals → couldnt_check, never a guessed pass.
+
+applicability:
+  scope: >-
+    Any loan file with a stated occupancy and the occupancy structural-fact tags produced
+    (occupancy.stated + occupancy.consistent_with_signals). Every loan declares an occupancy, so there is
+    no document-type gate; absent structural tags → couldnt_check.
+  trigger: >-
+    Evaluated once per loan (the loan-level occupancy subject), after the occupancy structural tags are
+    produced.
+
+required_inputs:
+  - name: stated_occupancy
+    snapshot_path: 'tags.by_subject["loan"]["occupancy.stated"]'
+    description: The occupancy the borrower stated (primary / second / investment).
+  - name: consistency_signal
+    snapshot_path: 'tags.by_subject["loan"]["occupancy.consistent_with_signals"]'
+    description: >-
+      Whether the borrower's other 1003 declarations (intent-to-occupy, FHA second-residence indicator,
+      financed-unit count) agree with the stated occupancy (yes / no / unknown).
+
+# A structural enum-agreement check carries no numeric threshold. priya_validated / threshold_needs_signoff
+# mirror rule_kinds.csv (both false for OC-1).
+reference_values:
+  priya_validated: false
+  threshold_needs_signoff: false
+
+subject_enumeration: loan          # the loan-level subject (both tags materialize here — LP-406-4 D4)
+subject_key_fields: [loan]
+
+evidence_required: >-
+  The stated occupancy + the consistency signal the verdict used, inline on the finding, so the processor
+  sees WHICH declaration disagreed.
+
+guideline_reference: "Fannie Mae Selling Guide B2-1.1 (Occupancy Types) — occupancy must be consistent across the file."
+
+# LP-324 — the MACHINE-READABLE deterministic body. A structural rule may carry a deterministic block; the
+# generic deterministic evaluator runs THIS with zero per-rule Python. The decision is a pure enum branch on
+# occupancy.consistent_with_signals: the gate turns absent/unknown/low-confidence into couldnt_check (the
+# three D5 states), so only a confident "yes"/"no" reaches the outcomes.
+deterministic:
+  load_bearing_tags:
+    - occupancy.stated
+    - occupancy.consistent_with_signals
+  gated_tags:
+    - occupancy.stated
+    - occupancy.consistent_with_signals
+  # No operands: the verdict is an enum branch via when_tags (occupancy.consistent_with_signals is already
+  # the structured yes/no/unknown answer), not a numeric/date comparison — so there is nothing to resolve.
+  operands: {}
+  outcomes:
+    - verdict: fired
+      # consistent_with_signals == "no": at least one other declaration contradicts the stated occupancy.
+      # "unknown"/absent never reach here (the gate couldnt_checks them first), so OC-1 fires ONLY on a
+      # confident, real inconsistency.
+      when_tags:
+        - {tag: occupancy.consistent_with_signals, op: "eq", value: "no"}
+      reasoning: >-
+        the borrower's stated occupancy does not agree with the other occupancy declarations in the file
+        (intent to occupy, the second-home indicator, and the financed-unit count) — reconcile the
+        conflict before submission
+      how_to_fix: >-
+        Confirm the stated occupancy against the borrower's 1003 declarations (intent to occupy, the
+        second-home indicator, the unit count) and correct whichever is wrong.
+    - verdict: satisfied
+      default: true
+      reasoning: >-
+        the borrower's stated occupancy agrees with the file's other occupancy declarations
+
+spec_version: 1
