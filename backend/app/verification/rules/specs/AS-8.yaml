@@ -14,6 +14,13 @@
 # number of recent consecutive MONTHS is AS-10 (statement recency completeness). AS-8 must NOT report a
 # "missing month" — that is AS-10's finding; two rules firing on one gap is noise. LP-410 scoped
 # stmt.continuity to the balance dimension for exactly this reason (LP-406-2 D4).
+#
+# REGISTRY DRIFT (LP-406-2b review): this spec's load_bearing_tags is `stmt.continuity`, but rule_tags.csv
+# still maps AS-8 to its Phase-0 PLANNED inputs (stmt.beginning_balance / stmt.ending_balance /
+# stmt.account_masked / txn.*), NOT stmt.continuity — a stale planning artifact. The evaluator uses THIS
+# spec, so nothing breaks, but the rule_tags projection is wrong (AS-8 lists facts it doesn't read;
+# stmt.continuity has no consumer there). rule_tags.csv is generated from docs/snapshot-fact-tags.xlsx —
+# reconcile AS-8's "Rule -> Tags" row UPSTREAM in the xlsx (editing the CSV reverts on regen).
 
 rule_id: AS-8
 name: Statement chaining (continuity)

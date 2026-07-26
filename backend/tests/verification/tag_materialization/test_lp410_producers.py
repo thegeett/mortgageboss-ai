@@ -164,6 +164,9 @@ def test_continuity_broken_when_balances_do_not_carry() -> None:
     }
     value, reason = _stmt_continuity(_snap(docs=docs, tags=tags), "loan", None)
     assert value == "broken" and "carry" in reason
+    # LP-406-2b review: the reason must LOCATE the break (account + the two mismatched balances) so AS-8's
+    # fired finding is actionable — not a generic "some account doesn't chain".
+    assert "****1" in reason and "1200" in reason and "1250" in reason
 
 
 def test_continuity_single_statement_is_nothing_to_chain_not_couldnt_check() -> None:
@@ -232,6 +235,38 @@ def test_continuity_break_in_one_account_is_surfaced_fire_if_any() -> None:
     }
     value, _ = _stmt_continuity(_snap(docs=docs, tags=tags), "loan", None)
     assert value == "broken"
+
+
+def test_continuity_per_borrower_isolation_colliding_last4_not_merged() -> None:
+    # LP-406-2b review: two DIFFERENT borrowers whose accounts COLLIDE on the same institution + masked
+    # last-4 must NOT be chained against each other. Each chains cleanly on its OWN statements; a global
+    # (institution, masked) merge would pair borrower A's ending balance against borrower B's opening and
+    # FABRICATE a break. Per-borrower sub-grouping (belongs_to) keeps them separate → "chained".
+    a, b = str(uuid4()), str(uuid4())
+
+    def _bs(cid: str, owner: str) -> DocumentEntry:
+        return DocumentEntry(
+            content_id=cid,
+            document_type="bank_statement",
+            belongs_to=(BorrowerRef(borrower_id=UUID(owner), name="X"),),
+            fields={"bank_name": _f("Chase"), "account_number_masked": _f("****1234")},
+        )
+
+    docs = [
+        _bs("a1", a),
+        _bs("a2", a),
+        _bs("b1", b),
+        _bs("b2", b),
+    ]  # same bank + last-4, two borrowers
+    tags = {
+        **_stmt_tags("a1", start="2026-01-01", begin="1000", end="1200"),
+        **_stmt_tags("a2", start="2026-02-01", begin="1200", end="1300"),  # A chains 1200 -> 1200
+        **_stmt_tags("b1", start="2026-01-01", begin="5000", end="5200"),
+        **_stmt_tags("b2", start="2026-02-01", begin="5200", end="5400"),  # B chains 5200 -> 5200
+    }
+    value, _ = _stmt_continuity(_snap(docs=docs, tags=tags), "loan", None)
+    # A merged chain would pair A-Jan-end (1200) with B-Jan-begin (5000) -> a false "broken". Isolated: chained.
+    assert value == "chained"
 
 
 def test_continuity_all_periods_unreadable_on_a_multi_statement_account_is_unknown() -> None:

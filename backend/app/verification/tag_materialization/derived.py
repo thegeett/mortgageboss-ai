@@ -780,7 +780,9 @@ def _stmt_continuity(
     statement N+1's beginning balance)? Unblocks AS-8.
 
     Grouped PER ACCOUNT via resolve_accounts (LP-336: institution + masked last-4, fail-closed — a
-    guessed merge could fabricate or hide a break), ordered by statement period. DESCRIPTIVE enum:
+    guessed merge could fabricate or hide a break) AND PER BORROWER (sub-grouped by each statement's
+    belongs_to, so two different borrowers whose accounts collide on the same institution + last-4 never
+    chain against each other — the ID-5/IN-6 isolation class), ordered by statement period. DESCRIPTIVE enum:
       * "chained"          — every account with ≥2 statements carries each ending balance into the next
                              opening balance.
       * "broken"           — some account's consecutive balances do NOT carry over (fire-if-any — a break
@@ -805,9 +807,36 @@ def _stmt_continuity(
             )
         return "nothing_to_chain", "no bank statements in the file — nothing to chain"
 
+    # PER-BORROWER isolation: chain only WITHIN a single borrower's statements. resolve_accounts groups by
+    # (institution, masked last-4) alone, so two DIFFERENT borrowers whose accounts collide on the same
+    # last-4 at the same institution would otherwise merge — chaining one borrower's balances against
+    # another's (a false break/chain). We sub-group each account by the statement's belongs_to attribution
+    # (bank statements carry it, LP-202): a statement chains only against statements with the SAME account
+    # AND the same borrower attribution. Unattributed statements share a bucket of their own (never merged
+    # with an attributed one). A consistently-attributed joint account (belongs_to {A,B} on every statement)
+    # stays one group and still chains. The account_key is retained for the human-readable break locator.
+    entries_by_id = (
+        {} if snapshot.documents.absent else {e.content_id: e for e in snapshot.documents.entries}
+    )
+
+    def _borrower_key(cid: str) -> frozenset[str]:
+        entry = entries_by_id.get(cid)
+        if entry is None or entry.belongs_to is None:
+            return frozenset()
+        return frozenset(str(ref.borrower_id) for ref in entry.belongs_to)
+
+    groups: dict[tuple[str, frozenset[str]], list[str]] = {}
+    for account_key, content_ids in resolved.items():
+        for cid in content_ids:
+            groups.setdefault((account_key, _borrower_key(cid)), []).append(cid)
+
     by_subject = {} if snapshot.tags.absent else snapshot.tags.by_subject
     saw_break = saw_unknown = saw_chained = False
-    for content_ids in resolved.values():
+    break_detail: str | None = (
+        None  # the FIRST break's account + balances — an ACTIONABLE reason (AS-8 fires
+    )
+    # on this, and its finding carries this as provenance, so the processor knows WHICH account/gap to fix).
+    for (account_key, _borrower), content_ids in groups.items():
         stmts: list[tuple[date, Decimal | None, Decimal | None]] = []
         period_unreadable = False
         for cid in content_ids:
@@ -847,6 +876,16 @@ def _stmt_continuity(
                 break
             if end_n != begin_n1:
                 account_result = "broken"
+                if break_detail is None:
+                    # account_key is "account:{institution}:{masked}" — display-safe by construction (no raw
+                    # PII: bank name + masked last-4). Surface a locator + the two mismatched balances so the
+                    # processor knows WHICH account and WHERE the chain breaks, not just "some account".
+                    parts = account_key.split(":")
+                    locator = f"{parts[1]} {parts[-1]}" if len(parts) >= 3 else account_key
+                    break_detail = (
+                        f"the {locator} account's statements do not chain — an ending balance of {end_n} "
+                        f"does not carry into the next statement's opening balance of {begin_n1}"
+                    )
                 break
         if account_result == "broken":
             saw_break = True
@@ -858,8 +897,11 @@ def _stmt_continuity(
     if saw_break:
         return (
             "broken",
-            "an account's consecutive statements do not chain — an ending balance does not carry into "
-            "the next statement's opening balance",
+            (
+                break_detail  # the specific account + balances (always set when saw_break); fallback defensive
+                or "an account's consecutive statements do not chain — an ending balance does not carry into "
+                "the next statement's opening balance"
+            ),
         )
     if saw_unknown:
         return _UNKNOWN, (
