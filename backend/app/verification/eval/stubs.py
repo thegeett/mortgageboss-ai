@@ -159,12 +159,17 @@ class _StubAiGroupReasoner:
         )
 
 
-def stub_materialization_reasoners(subject: str = "document") -> dict[str, AiGroupReasoner]:
-    """A keyless materialization seam (LP-326) — one honest-unknown stub per declared AI group of the
-    given subject, so the orchestrator's materialization stage never hits the network in a test."""
+def stub_materialization_reasoners(subject: str | None = None) -> dict[str, AiGroupReasoner]:
+    """A keyless materialization seam (LP-326) — one honest-unknown stub per declared AI group, so the
+    orchestrator's materialization stage never hits the network in a test.
+
+    ``subject=None`` (the default) stubs EVERY declared group regardless of subject family — the
+    orchestrator materializes all of them (``document`` AND ``loan``-subject groups like ``occupancy``),
+    so a document-only seam would leave the loan-subject groups to fall through to the real model. Pass a
+    specific subject to scope the seam to one family."""
     reasoners: dict[str, AiGroupReasoner] = {}
     for key, group in load_ai_groups().items():
-        if group.subject != subject:
+        if subject is not None and group.subject != subject:
             continue
         shorts = tuple(tag_id.rsplit(".", 1)[-1] for tag_id in group.tag_ids)
         reasoners[key] = _StubAiGroupReasoner(shorts)
