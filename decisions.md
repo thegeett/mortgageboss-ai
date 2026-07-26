@@ -12011,3 +12011,48 @@ calibration); PC-7, AS-8, IN-6 each need one small derived producer (`contract.d
 ADR-322 (ordered-pairwise), LP-406-1 (PC-7's `today` stop), LP-406-4 (OC-1's calibration hold), LP-405 (the
 census that measured "inputs produced" but not "check expressible"), `consistency.py` (the all-equal comparison),
 IN-5.yaml (the deferral). `ACTIVE_RULE_IDS` = 24 (unchanged; no rule written).
+
+## ADR-324: The derived-producer wave — derive the fact, let a trivial rule branch on it (the resolution to ADR-322/323); tags describe, rules judge (LP-410)
+
+**Decision.** The relations the DSL cannot express natively (ADR-322 ordered-pairwise; ADR-323 set-coverage; and
+PC-7's date-vs-`today`) are resolved by a single pattern: **compute the fact in a small derived producer and let
+a trivial deterministic rule branch on the result.** LP-410 builds the three producers that unblock PC-7, AS-8,
+and IN-6 — `contract.days_until_closing` (loan), `stmt.continuity` (loan, per-account internally), and
+`income.employer_coverage` (borrower) — additively (no rule written; `ACTIVE_RULE_IDS` = 24).
+
+**Tags describe, rules judge (LP-400).** Each tag emits an OBSERVED STATE, never a verdict:
+`days_until_closing` emits a signed NUMBER (PC-7's realistic-window threshold stays in the rule, Priya-validated,
+never the tag); `stmt.continuity` and `income.employer_coverage` emit descriptive enums (chained/broken/…,
+covered/uncovered/…). **No threshold or policy lives inside a producer** — so changing Priya's mind later changes
+a rule, not a producer.
+
+**The `not_applicable`-enabling design (a distinct, load-bearing decision).** `not_applicable` is NOT a
+deterministic OUTCOME verdict (those are fired/satisfied/needs_review/couldnt_check); it comes from the
+applicability layer. A "nothing to check" state therefore must be **distinguishable in the tag** from "cannot
+check", or the rule can only ever reach `couldnt_check` and looks broken on ordinary files (the AS-8
+one-statement trap, LP-406-2). So each producer emits a dedicated value: `stmt.continuity = "nothing_to_chain"`
+when no account has ≥2 statements; `income.employer_coverage = "one_sided"` when a borrower lacks one of the two
+document types. The rule maps that value to `not_applicable` via an applicability predicate; `"unknown"` remains
+the honest couldnt_check.
+
+**Calibration inheritance (per tag).** `days_until_closing` and `stmt.continuity` read only PARSED data — no AI,
+nothing to calibrate. `income.employer_coverage` derives from `income.employer_normalized` (AI, measured 100%
+via live IN-5) and matches employers **reusing IN-5's exact-bookend normalizers** (casefold / drop_punct /
+collapse_ws / strip / drop_entity_suffix). Because it reuses the ALREADY-MEASURED normalization and adds **no**
+new judgment (it does NOT invoke IN-5's AI fuzzy-residue judge), **IN-6 inherits IN-5's calibration and is not
+held like OC-1.** The cost: a word-level short-form the normalizer cannot reduce ("Acme" vs "Acme Freight")
+reports `uncovered` where the AI might forgive it — a DOCUMENTED limitation (the fuzzy-residue is a later
+refinement), never a silent false "covered".
+
+**Multi-account representation (the subtle subject decision).** `stmt.continuity` is loan-level but computes
+per-account (via `resolve_accounts`, LP-336) and aggregates with precedence **broken > unknown > chained >
+nothing_to_chain**: a break in ONE account surfaces (never masked by a clean sibling — fire-if-any), an unread
+account never passes as chained (fail-closed). AS-8 then reads one loan-level value. Per-account grouping also
+prevents the false global gap (checking-Jan / savings-Feb / checking-Mar is not a "missing month").
+
+**Consequences.** PC-7 / AS-8 / IN-6 each become a trivial deterministic spec over one tag (their own tickets).
+PC-7 additionally needs Priya's closing window (ships `validated=false`); AS-8 and IN-6 carry no threshold. The
+three producers mirror existing ones (`income.days_since_most_recent_pay`, `_stmt_min_account_months` +
+`resolve_accounts`, `_borrower_attributed_documents` + the consistency normalizers) — no new mechanism.
+**Cross-refs.** ADR-322 / ADR-323 (the relations), LP-406-1/2/3/4 (the four stops + OC-1), LP-400 (describe vs
+judge), LP-336 (`resolve_accounts`). Additive; `ACTIVE_RULE_IDS` = 24.

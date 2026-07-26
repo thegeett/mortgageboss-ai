@@ -128,6 +128,42 @@ tags:
       date is present.
     produced_by: derived
 
+  # --- LP-410 — the derived-producer wave: three descriptive tags that unblock PC-7 / AS-8 / IN-6. The
+  #     rules were blocked not on inputs but on EXPRESSIBILITY (PC-7 no `today`; AS-8 ordered-pairwise,
+  #     ADR-322; IN-6 set-coverage, ADR-323). These DERIVE the fact so a trivial rule branches on it. The
+  #     tags DESCRIBE (a number / an observed-state enum); the rules JUDGE — no threshold lives here. ---- #
+  contract.days_until_closing:
+    entity: loan
+    value_type: number
+    allowed_values: null
+    description: >-
+      Signed days from the file (snapshot) date to the loan's closing date (negative = the closing date
+      is in the past). Feeds PC-7 (whose realistic-window judgment is the rule's, not the tag's).
+      "unknown" when no parseable closing date is stated, or documents disagree on it.
+    produced_by: derived
+  stmt.continuity:
+    entity: loan
+    value_type: enum
+    allowed_values: ["chained", "broken", "nothing_to_chain", "unknown"]
+    description: >-
+      Do each account's consecutive statements chain (ending balance == next opening balance)? Grouped
+      per account via resolve_accounts, fire-if-any. Feeds AS-8. "chained" all carry over; "broken" some
+      account's do not; "nothing_to_chain" no account has >=2 statements (lets AS-8 reach not_applicable);
+      "unknown" a balance/period is unreadable or statements cannot be grouped. Balance-carryover only
+      (the missing-period dimension is AS-10's).
+    produced_by: derived
+  income.employer_coverage:
+    entity: borrower
+    value_type: enum
+    allowed_values: ["covered", "uncovered", "one_sided", "unknown"]
+    description: >-
+      PER BORROWER: do the borrower's pay-stub employers and W-2 employers cover each other? Feeds IN-6.
+      "covered" both types present and their normalized employer sets cover each other; "uncovered" a
+      normalized employer on one side has no match on the other; "one_sided" the borrower lacks pay stubs
+      OR W-2s (lets IN-6 reach not_applicable); "unknown" an employer name is unreadable. Matches with
+      IN-5's measured normalizers (no new judgment); the AI fuzzy-residue is a documented refinement.
+    produced_by: derived
+
   # --- LP-323-IN-B — the income JUDGMENT verdict tags (the rule_judgment output the judgment evaluator
   #     writes; NOT materialized by a producer, so declared here only, like id.residency_eligible). ---- #
   income.job_change_acceptable:

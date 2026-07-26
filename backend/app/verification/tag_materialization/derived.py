@@ -11,6 +11,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from datetime import date
 from decimal import Decimal, InvalidOperation
+from itertools import pairwise
 
 from pydantic import JsonValue
 
@@ -711,6 +712,241 @@ def _loan_closing_date(
     return closing, f"the loan's closing date {closing} (from the contract document)"
 
 
+# --------------------------------------------------------------------------- #
+# LP-410 — the derived-producer wave: three tags that unblock PC-7 / AS-8 / IN-6.
+# Four Bucket 2 Phase 0s established these rules' inputs are produced but their CHECKS are not
+# expressible in the DSL (PC-7: no `today` operand; AS-8: ordered-pairwise, ADR-322; IN-6: set-coverage,
+# ADR-323). Each is answered by DERIVING the fact here, so a trivial rule can branch on it. THE TAGS
+# DESCRIBE (a number / an observed-state enum); the RULES JUDGE — no threshold/policy lives in a
+# producer (LP-400). Each fail-closes to "unknown"; each emits a value that lets its rule reach
+# not_applicable where there is nothing to check. All are DERIVED (no AI call) and ADDITIVE.
+# --------------------------------------------------------------------------- #
+
+
+def _contract_days_until_closing(
+    snapshot: Snapshot, _subject_id: str, _subject_raw: object
+) -> tuple[JsonValue, str]:
+    """contract.days_until_closing — SIGNED days from the file (snapshot) date to the loan's closing date.
+
+    Positive = the closing date is in the FUTURE; negative = it is in the PAST (a stale/past closing
+    date). Unblocks PC-7. Mirrors income.days_since_most_recent_pay for the snapshot-date arithmetic
+    (recency against ``snapshot.created_at`` — deterministic, never a wall-clock ``now()``) and
+    _loan_closing_date for gathering the single closing date (dedup by parsed date; documents that
+    DISAGREE → unknown). DESCRIPTIVE — it emits the NUMBER; PC-7's 'realistic window' (how far past/future
+    is acceptable) is the RULE's, Priya-validated, never the tag's (LP-400). FAIL-CLOSED to unknown."""
+    if snapshot.tags.absent:
+        return _UNKNOWN, "no tags materialized to read a closing date from"
+    # Only PARSEABLE closing dates (a number needs a real date for the arithmetic), deduped by the parsed
+    # date so one date rendered two ways is ONE value; >1 distinct parsed date → the documents disagree.
+    dates: dict[date, str] = {}
+    for tags in snapshot.tags.by_subject.values():
+        tag = tags.get("contract.closing_date")
+        if tag is None or str(tag.value) == _UNKNOWN:
+            continue
+        raw = str(tag.value)
+        parsed = coerce_date(raw)
+        if parsed is not None:
+            dates[parsed] = raw
+    if not dates:
+        return _UNKNOWN, "no (parseable) closing date is stated in the file"
+    if len(dates) > 1:
+        return _UNKNOWN, (
+            f"the file's documents disagree on the closing date "
+            f"({', '.join(sorted(dates.values()))}) — ambiguous"
+        )
+    closing = next(iter(dates))
+    days = (closing - snapshot.created_at.date()).days
+    return (
+        str(days),
+        f"the closing date {closing.isoformat()} is {days} day(s) from the file date "
+        f"({'future' if days >= 0 else 'past'})",
+    )
+
+
+def _decimal_or_none(tag: Tag | None) -> Decimal | None:
+    """A statement balance tag's value as a Decimal, or None (absent / unknown / unparseable)."""
+    if tag is None or str(tag.value) == _UNKNOWN:
+        return None
+    try:
+        return Decimal(str(tag.value))
+    except (InvalidOperation, ValueError):
+        return None
+
+
+def _stmt_continuity(
+    snapshot: Snapshot, _subject_id: str, _subject_raw: object
+) -> tuple[JsonValue, str]:
+    """stmt.continuity — do each account's consecutive statements CHAIN (statement N's ending balance ==
+    statement N+1's beginning balance)? Unblocks AS-8.
+
+    Grouped PER ACCOUNT via resolve_accounts (LP-336: institution + masked last-4, fail-closed — a
+    guessed merge could fabricate or hide a break), ordered by statement period. DESCRIPTIVE enum:
+      * "chained"          — every account with ≥2 statements carries each ending balance into the next
+                             opening balance.
+      * "broken"           — some account's consecutive balances do NOT carry over (fire-if-any — a break
+                             in one account is never masked by a clean one, the _stmt_min_account_months
+                             discipline).
+      * "nothing_to_chain" — no account has ≥2 statements (a single statement / no statements) → NOTHING
+                             to check → lets AS-8 reach not_applicable (NOT couldnt_check — the LP-406-2 trap).
+      * "unknown"          — a needed balance/period is unreadable, or statements exist but cannot be
+                             grouped to an account → fail-closed (never a false "chained").
+    Precedence broken > unknown > chained > nothing_to_chain: a real break is surfaced; an unread account
+    never passes as chained. BALANCE-carryover ONLY — the missing-PERIOD dimension is AS-10's (LP-406-2 D4).
+    NO threshold: an exact-equality carryover, no tolerance (statement N's ending IS N+1's opening)."""
+    # LAZY import (init-order — mirrors _stmt_min_account_months; rule_engine ↔ tag_materialization).
+    from app.verification.rule_engine.enumerators import resolve_accounts
+
+    resolved, unresolvable = resolve_accounts(snapshot)
+    if not resolved:
+        if unresolvable:
+            return _UNKNOWN, (
+                "bank statements are present but none could be grouped to an account (missing "
+                "institution and/or masked account number) — cannot check chaining"
+            )
+        return "nothing_to_chain", "no bank statements in the file — nothing to chain"
+
+    by_subject = {} if snapshot.tags.absent else snapshot.tags.by_subject
+    saw_break = saw_unknown = saw_chained = False
+    for content_ids in resolved.values():
+        stmts: list[tuple[date, Decimal | None, Decimal | None]] = []
+        period_unreadable = False
+        for cid in content_ids:
+            tags = by_subject.get(cid, {})
+            ps = tags.get("stmt.period_start")
+            start = (
+                coerce_date(str(ps.value)) if ps is not None and str(ps.value) != _UNKNOWN else None
+            )
+            if start is None:
+                period_unreadable = True
+                continue
+            stmts.append(
+                (
+                    start,
+                    _decimal_or_none(tags.get("stmt.beginning_balance")),
+                    _decimal_or_none(tags.get("stmt.ending_balance")),
+                )
+            )
+        if len(stmts) < 2 and not (period_unreadable and (len(stmts) + 1) >= 2):
+            # <2 orderable statements for this account: nothing to chain here (a single statement is not a
+            # gap — the LP-406-2 not_applicable case). (A period we could not read on a would-be-multi
+            # account is handled just below as unknown, never silently as nothing-to-chain.)
+            if period_unreadable and stmts:
+                saw_unknown = True
+            continue
+        if period_unreadable:
+            saw_unknown = True  # cannot order this account reliably → cannot confirm it chains
+            continue
+        stmts.sort(key=lambda s: s[0])
+        account_result: str | None = None
+        for (_s0, _b0, end_n), (_s1, begin_n1, _e1) in pairwise(stmts):
+            if end_n is None or begin_n1 is None:
+                account_result = "unknown"  # a balance we could not read → cannot confirm the chain
+                break
+            if end_n != begin_n1:
+                account_result = "broken"
+                break
+        if account_result == "broken":
+            saw_break = True
+        elif account_result == "unknown":
+            saw_unknown = True
+        else:
+            saw_chained = True
+
+    if saw_break:
+        return (
+            "broken",
+            "an account's consecutive statements do not chain — an ending balance does not carry into "
+            "the next statement's opening balance",
+        )
+    if saw_unknown:
+        return _UNKNOWN, (
+            "a statement's period or balance could not be read (or an account could not be ordered) — "
+            "cannot confirm the statements chain"
+        )
+    if saw_chained:
+        return (
+            "chained",
+            "every account's consecutive statements chain — each ending balance carries into the next "
+            "statement's opening balance",
+        )
+    return "nothing_to_chain", "no account has two or more statements — nothing to chain"
+
+
+def _income_employer_coverage(
+    snapshot: Snapshot, subject_id: str, subject_raw: object
+) -> tuple[JsonValue, str]:
+    """income.employer_coverage — PER BORROWER: do this borrower's PAY-STUB employers and W-2 employers
+    cover each other (every pay-stub employer has a matching W-2 and vice-versa)? Unblocks IN-6.
+
+    Reads the borrower's OWN income documents (belongs_to, via _borrower_attributed_documents — the shared
+    per-borrower primitive, LP-385) and partitions income.employer_normalized by document_type. Matching
+    uses the SAME deterministic normalization IN-5's exact bookend uses (casefold / drop_punct /
+    collapse_ws / strip / drop_entity_suffix — the consistency normalizers), so it introduces NO new
+    unmeasured judgment: IN-6 inherits IN-5's MEASURED employer_normalized (100%, LP-379-D). It does NOT
+    invoke IN-5's AI fuzzy-residue judge — a DOCUMENTED limitation (a legal-vs-common variance the
+    normalizer cannot reduce, e.g. "Acme" vs "Acme Freight", reports "uncovered" where the AI might
+    forgive it; that residue is a later refinement — LP-406-3). DESCRIPTIVE enum:
+      * "covered"    — both document types present and their normalized employer sets cover each other.
+      * "uncovered"  — both present, but a normalized employer on one side has no match on the other.
+      * "one_sided"  — the borrower lacks pay stubs OR W-2s (or has neither) → nothing to cross-check →
+                       lets IN-6 reach not_applicable (NOT a finding, NOT couldnt_check — the LP-406-2 trap).
+      * "unknown"    — an employer name on a relevant document is unreadable → fail-closed.
+    NO threshold. Per-borrower: borrower A's documents never cover borrower B's (belongs_to attribution)."""
+    # The MISMO index (on subject_raw) is unused — attribution is by the borrower_id (subject_id); the
+    # guard mirrors _income_documented_shortfall (a borrower recipe needs a borrower subject).
+    if not isinstance(subject_raw, BorrowerSubject):
+        return _UNKNOWN, "employer coverage is a per-borrower recipe (needs a borrower subject)"
+    if snapshot.tags.absent or snapshot.documents.absent:
+        return (
+            "one_sided",
+            "no income documents attributed to this borrower — nothing to cross-check",
+        )
+    # LAZY import (init-order — rule_engine ↔ tag_materialization, as _stmt_min_account_months does).
+    from app.verification.rule_engine.consistency import _normalize
+
+    norm = ("casefold", "drop_punct", "collapse_ws", "strip", "drop_entity_suffix")
+    paystub: dict[
+        str, str
+    ] = {}  # normalized -> an original rendering (for a human-readable reason)
+    w2: dict[str, str] = {}
+    paystub_docs = w2_docs = 0
+    any_unreadable = False
+    for entry in _borrower_attributed_documents(snapshot, subject_id):
+        if entry.document_type not in ("pay_stub", "w2"):
+            continue
+        bucket = paystub if entry.document_type == "pay_stub" else w2
+        if entry.document_type == "pay_stub":
+            paystub_docs += 1
+        else:
+            w2_docs += 1
+        tag = snapshot.tags.by_subject.get(entry.content_id, {}).get("income.employer_normalized")
+        if tag is None or str(tag.value) == _UNKNOWN:
+            any_unreadable = True
+            continue
+        original = str(tag.value)
+        bucket[_normalize(original, norm)] = original
+
+    if paystub_docs == 0 or w2_docs == 0:
+        return "one_sided", (
+            "this borrower has only one of pay stubs / W-2s (or neither) — nothing to cross-check "
+            "between the two"
+        )
+    if any_unreadable or not paystub or not w2:
+        return _UNKNOWN, (
+            "an employer name on one of this borrower's income documents could not be read — cannot "
+            "confirm coverage"
+        )
+    uncovered = sorted((set(paystub) - set(w2)) | (set(w2) - set(paystub)))
+    if uncovered:
+        shown = (paystub | w2)[uncovered[0]]
+        return "uncovered", (
+            f"employer '{shown}' appears on one of the borrower's pay stubs / W-2s but not the other"
+        )
+    return "covered", (
+        "every employer on this borrower's pay stubs also appears on a W-2 and vice-versa"
+    )
+
+
 _RECIPES: dict[str, Recipe] = {
     "app_required_fields_present": _app_required_fields_present,
     # LP-323-IN-B — the income family's loan-level arithmetic (per-borrower granularity is deferred:
@@ -737,6 +973,10 @@ _RECIPES: dict[str, Recipe] = {
     "stmt_nsf_count": _stmt_nsf_count,
     "stmt_min_account_months": _stmt_min_account_months,
     "cash_to_close_shortfall": _cash_to_close_shortfall,
+    # LP-410 — the derived-producer wave (unblocks PC-7 / AS-8 / IN-6; tags describe, rules judge).
+    "contract_days_until_closing": _contract_days_until_closing,
+    "stmt_continuity": _stmt_continuity,
+    "income_employer_coverage": _income_employer_coverage,
 }
 
 KNOWN_RECIPES = frozenset(_RECIPES)

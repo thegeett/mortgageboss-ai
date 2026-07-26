@@ -37,9 +37,8 @@ async def test_projection_counts_match_files(db_session: AsyncSession) -> None:
 
     # First run inserts everything, removes nothing.
     assert result.rules.inserted == 133
-    assert (
-        result.tags.inserted == 160
-    )  # +4 assets (LP-323-AS-B) +2 ID-5 (LP-389-A) +2 stmt variance/co-holder (LP-400)
+    assert result.tags.inserted == 163  # +4 assets (LP-323-AS-B) +2 ID-5 (LP-389-A) +2 stmt
+    # variance/co-holder (LP-400) +3 LP-410 derived-producer wave (days_until_closing / continuity / coverage)
     assert result.rule_tags.inserted == 203
     assert result.rules.deleted == result.tags.deleted == 0
 

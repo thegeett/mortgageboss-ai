@@ -44,6 +44,9 @@ tags:
   # contract.closing_date above (which stays a document fact). ID-5 reads this loan-level tag so every
   # borrower's ID is checked against ONE closing date (mirrors housing.insurance_monthly's promotion).
   contract.loan_closing_date: {mode: derived, subject: loan, data: loan_closing_date}
+  # LP-410 — signed days from the file (snapshot) date to the loan's closing date. DESCRIPTIVE number
+  # (past = negative); PC-7's realistic-window judgment lives in the rule, not here. Fail-closed to unknown.
+  contract.days_until_closing: {mode: derived, subject: loan, data: contract_days_until_closing}
   id.app_required_fields_present: {mode: derived, subject: loan, data: app_required_fields_present}
   id.name_normalized: {mode: ai, subject: document, data: id_name}
   # address_normalized + current_address_type share ONE group → co-located on the same document
@@ -85,6 +88,10 @@ tags:
   # LP-332 (fixes PIN #1): PER-BORROWER now — the recipe reads THIS borrower's stated (MISMO) + its own
   # documents' documented income, so borrower A's inflated income is no longer masked by borrower B.
   income.documented_income_shortfall_pct: {mode: derived, subject: borrower, data: income_documented_shortfall}
+  # LP-410 — PER BORROWER: do the borrower's pay-stub employers and W-2 employers cover each other?
+  # DESCRIPTIVE enum; one_sided (only one doc type) lets IN-6 reach not_applicable. Reuses IN-5's
+  # measured normalizers (no new judgment — IN-6 inherits IN-5's calibration). Fail-closed to unknown.
+  income.employer_coverage: {mode: derived, subject: borrower, data: income_employer_coverage}
   income.ytd_annualized_shortfall_pct: {mode: derived, subject: loan, data: income_ytd_annualized_shortfall}
   income.max_employment_gap_days: {mode: derived, subject: loan, data: income_max_employment_gap}
   income.days_since_most_recent_pay: {mode: derived, subject: loan, data: income_days_since_recent_pay}
@@ -123,6 +130,9 @@ tags:
   stmt.nsf_count: {mode: derived, subject: loan, data: stmt_nsf_count}
   stmt.min_account_months: {mode: derived, subject: loan, data: stmt_min_account_months}
   calc.cash_to_close: {mode: derived, subject: loan, data: cash_to_close_shortfall}
+  # LP-410 — do each account's consecutive statements chain (ending == next beginning)? DESCRIPTIVE enum;
+  # nothing_to_chain (≤1 statement) lets AS-8 reach not_applicable. Balance-carryover only. Fail-closed.
+  stmt.continuity: {mode: derived, subject: loan, data: stmt_continuity}
 
   # --- housing.insurance_monthly — the DTI's LAST vocabulary orphan (LP-374). Declared in fact_tags.csv
   #     with a producer (produced_by=AI) but nothing wrote it → LP-373's guard exempted it. DERIVED (not
