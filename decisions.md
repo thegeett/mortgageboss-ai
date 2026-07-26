@@ -11826,3 +11826,45 @@ untouched; a worksheet → Priya's labels → a score come first, THEN a rule ch
 **Cross-refs.** LP-398 (N1/N5 — the discrepancies the enum swallowed), LP-399 (the blind worksheet),
 LP-390-8a (the borrower roster both new tags reuse), LP-379-E (the `apparent_category` enum-gap precedent),
 LP-393-4a (the stale-golden trap the separate-tag design avoids).
+
+## ADR-320: Priya's owner_matches rule — yes=certain / unknown=flag-for-evidence / no=non-person — reversing LP-390-8a's tolerance; and the co-holder wording resolution (LP-402)
+
+**Priya's owner_matches rule (the refinement).** `stmt.owner_matches_borrower` reports the CONFIDENCE of the
+identity match, and only that (the specific name difference lives in `stmt.holder_name_variance`):
+- **`yes` ONLY when essentially CERTAIN** — an exact name, a DROPPED middle ("Jordan Rivera" = "Jordan A
+  Rivera", less detail not a conflict), or a joint account listing a borrower.
+- **`unknown` when PLAUSIBLE but the identity needs EVIDENCE** — a nickname (Bob/Robert), a possible
+  maiden/married surname change, an uncertain given-name variant. This is "FLAG FOR EVIDENCE": **the document
+  still COUNTS** (the difference is recorded in `holder_name_variance`); do not force `yes`, do not reject `no`.
+- **`no` for a genuine NON-match** — a non-person entity (trust/LLC/estate), an unrelated name, OR a CONFLICTING
+  middle name/initial that points to a DIFFERENT person ("Jordan M" vs "Jordan A" — a likely relative).
+
+**This REVERSES LP-390-8a's tolerance.** LP-390-8a made `owner_matches` tolerant (nickname/middle/maiden →
+`yes`). Priya's rule makes it CONSERVATIVE: tolerance now yields `unknown`, not `yes`. The re-score confirmed the
+refined prompt produces her exact shape — **owner_matches 11/11** on the LP-401 fixture (yes=P1/N5/N8/N9,
+unknown=N2/N7/P2, no=N1/N3/N4/N6). **The 5 REAL LF-6T3N goldens stayed `yes`** (exact matches — the conservative
+rule does not disturb genuine matches; the equivalence that mattered), and `is_reserve_eligible` was unchanged.
+
+**N1 (a different middle initial) → `no`.** Her ruling: a conflicting middle (Jordan M vs Jordan A) is a likely
+different person (a relative), not a soft flag — distinct from `unknown` cases (nickname/surname) that are
+plausibly the same person.
+
+**The non_borrower_co_holder wording resolution.** The AI's reading was correct — the tag asks *"is there a
+SECOND, extra holder who is NOT a borrower?"*, so a single-holder account is `no`. Priya's first-pass `yes`/
+`unknown` labels on the single-holder cases were the mismatch. Her clarified rule required correcting **6**
+single-holder cells to `no` (n1/n3/n4/n6/n7/p2 — the relayed ticket enumerated only 3; the rule + the AI she
+agreed with cover all 6). After correction, **non_borrower_co_holder scored 11/11** (single `no`, N5/N8 `yes`,
+N9 `no` — the discriminating control).
+
+**⚠️ The coupling finding (a REGRESSION the conservative change surfaced).** `holder_name_variance`'s prompt
+GATES on `owner_matches == "yes"` ("WHEN owner_matches is yes, describe how the name differs"). With
+owner_matches now `unknown`/`no` for the flag cases, the variance tag reports `none` for N1/N2/N7/P2 — the very
+cases whose difference must be surfaced so "the document still counts." Variance re-scored **4/11** (down from
+LP-401). This BREAKS the three-tag design's purpose for the flag-for-evidence cases. **The fix — widen the
+variance gate from `yes` to `yes OR unknown` — is a follow-up ticket** (LP-402 scoped the variance prompt OUT).
+Until then, `owner_matches` + `non_borrower_co_holder` are calibration-passed; `holder_name_variance` is BLOCKED
+on the gate widening.
+
+**AS-6's consumption stays deferred** (its rule change is the next step); the synthetic-data caveat still
+applies (validated on scenarios, not real-document messiness). **Cross-refs.** LP-390-8a (the tolerance this
+reverses), LP-400 (the three-tag design), LP-401 (the labels + the fixture), LP-335 (report-what's-shown).

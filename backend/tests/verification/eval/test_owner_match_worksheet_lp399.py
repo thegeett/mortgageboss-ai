@@ -13,16 +13,18 @@ from __future__ import annotations
 
 import csv
 import io
+import tempfile
 from pathlib import Path
 
 from app.verification.eval.owner_match_scenarios import (
     AMBIGUOUS_CASES,
     CLEARCUT_EXPECTATIONS,
-    OWNER_MATCH_WORKSHEET_FILE,
     write_owner_match_worksheet,
 )
 
-_COMMITTED = Path(__file__).resolve().parents[4] / "docs/calibration" / OWNER_MATCH_WORKSHEET_FILE
+# The GENERATOR produces a BLANK labeling template; once Priya labels the committed CSV it is the golden set
+# (LP-402), no longer a fresh generation. So the generator tests read a FRESH generation, not the committed file.
+_FRESH = write_owner_match_worksheet(Path(tempfile.mkdtemp())).read_text(encoding="utf-8")
 
 # distinctive phrases from LP-398's AND LP-400's PUBLISHED probe reasoning — none may appear in the blind sheet.
 _AI_REASONING = (
@@ -45,16 +47,16 @@ def _rows(text: str) -> list[dict[str, str]]:
     return list(csv.DictReader(io.StringIO(text)))
 
 
-def test_generation_is_deterministic_and_matches_the_committed_file(tmp_path: Path) -> None:
-    fresh = write_owner_match_worksheet(tmp_path).read_text(encoding="utf-8")
-    assert (
-        write_owner_match_worksheet(tmp_path).read_text(encoding="utf-8") == fresh
-    )  # deterministic
-    assert _COMMITTED.read_text(encoding="utf-8") == fresh  # the committed sheet is in sync
+def test_generation_is_deterministic_and_blank(tmp_path: Path) -> None:
+    a = write_owner_match_worksheet(tmp_path).read_text(encoding="utf-8")
+    b = write_owner_match_worksheet(tmp_path).read_text(encoding="utf-8")
+    assert a == b == _FRESH  # deterministic
+    # the GENERATOR emits a blank template (golden empty); Priya's labels live in the committed CSV (LP-402)
+    assert all(not (r["golden_label"] or "").strip() for r in _rows(a))
 
 
-def test_thirtythree_rows_blind_no_golden_or_prediction() -> None:
-    rows = _rows(_COMMITTED.read_text(encoding="utf-8"))
+def test_the_generated_template_is_33_blank_rows() -> None:
+    rows = _rows(_FRESH)
     # LP-401: 11 statements x 3 tags = 33 blind rows
     assert len(rows) == 33
     assert {r["tag_id"] for r in rows} == {
@@ -68,12 +70,12 @@ def test_thirtythree_rows_blind_no_golden_or_prediction() -> None:
 
 
 def test_no_ai_reasoning_or_clearcut_answer_reaches_the_sheet() -> None:
-    low = _COMMITTED.read_text(encoding="utf-8").lower()
+    low = _FRESH.lower()
     for phrase in _AI_REASONING:
         assert phrase not in low, f"AI reasoning leaked into the sheet: {phrase!r}"
     # the clear-cut constants exist in code; assert they are NOT encoded per-row (golden blank already proves
     # it, but pin that no row's context carries a bare "answer: yes/no" style leak beyond the allowed-values).
-    for r in _rows(_COMMITTED.read_text(encoding="utf-8")):
+    for r in _rows(_FRESH):
         assert "expected" not in r["context"].lower() and "clear-cut" not in r["context"].lower()
     # the constants themselves are not empty (they DO exist in code — this is where they legitimately live)
     assert CLEARCUT_EXPECTATIONS and AMBIGUOUS_CASES
@@ -82,7 +84,7 @@ def test_no_ai_reasoning_or_clearcut_answer_reaches_the_sheet() -> None:
 def test_context_shows_both_the_holder_and_the_roster() -> None:
     # judgeability (D-critical): without the roster she cannot compare, and would label `unknown` meaning
     # "I can't tell" (the LP-390-3 missing-field lesson) rather than a real judgment.
-    for r in _rows(_COMMITTED.read_text(encoding="utf-8")):
+    for r in _rows(_FRESH):
         ctx = r["context"]
         assert "account_holder_name=" in ctx  # the holder on the statement
         # the full roster (LP-401 added Sarah Chen) — she compares against all borrowers
@@ -90,7 +92,7 @@ def test_context_shows_both_the_holder_and_the_roster() -> None:
 
 
 def test_the_prompt_shows_values_but_not_the_models_selection_rules() -> None:
-    low = _COMMITTED.read_text(encoding="utf-8").lower()
+    low = _FRESH.lower()
     for word in _TOLERANCE_WORDS:
         assert word not in low, f"the prompt teaches the AI's answer key: {word!r}"
     # the neutral questions ARE asked, and the variance VALUES are shown (D3 — she can't pick blind otherwise)
@@ -103,7 +105,7 @@ def test_the_prompt_shows_values_but_not_the_models_selection_rules() -> None:
 
 
 def test_row_order_groups_by_tag_and_does_not_cluster_positives() -> None:
-    rows = _rows(_COMMITTED.read_text(encoding="utf-8"))
+    rows = _rows(_FRESH)
     # GROUP BY TAG (D4): a scenario's 3 rows sit 11 apart, so one answer can't bias the same scenario's next tag
     tags_in_order = [r["tag_id"] for r in rows]
     assert tags_in_order[:11] == ["stmt.owner_matches_borrower"] * 11

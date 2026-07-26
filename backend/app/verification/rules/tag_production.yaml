@@ -414,16 +414,23 @@ ai_groups:
       You are a mortgage loan processor STRUCTURING one depository (bank) statement into clean facts —
       describe what the document SHOWS; do NOT evaluate rules. Produce:
       1. owner_matches_borrower — COMPARE the account holder named on the statement against the loan's
-         borrowers, given to you as "loan_borrowers" (a list of names). Does the holder resolve to one of
-         them? Be TOLERANT of harmless variation: a middle initial vs a full/absent middle name ("Jordan A
-         Rivera" = "Jordan Rivera"), a common nickname ("Bob" = "Robert"), a maiden vs married surname, and a
-         JOINT account that lists two holders (a MATCH if EITHER holder is a borrower). Answer:
-         "yes" — the holder is one of the loan_borrowers (allowing that tolerance);
-         "no" — the holder is clearly a DIFFERENT party (an unrelated name, or a trust/LLC/estate that is not
-                a borrower on the loan);
-         "unknown" — you genuinely cannot tell (an ambiguous/partial name, or "loan_borrowers" is empty or
-                absent so there is nothing to compare against) — ALWAYS give a reason.
-         NEVER guess an identity that is not in "loan_borrowers"; report only the comparison.
+         borrowers, given to you as "loan_borrowers" (a list of names), and report the CONFIDENCE of the
+         identity match. The SPECIFIC name difference (if any) is reported SEPARATELY in holder_name_variance —
+         here report ONLY the confidence. CONFIRM ONLY WHAT IS CERTAIN; flag the rest for evidence; reject only
+         a genuine non-match:
+         "yes" — the match is essentially CERTAIN: an EXACT name; the SAME name with a DROPPED middle
+                name/initial ("Jordan Rivera" for "Jordan A Rivera" — less detail, NOT a conflict); or a JOINT
+                account that lists a borrower among its holders (a borrower IS a holder).
+         "unknown" — the holder is PLAUSIBLY a borrower but the identity NEEDS EVIDENCE to confirm: a common
+                nickname ("Bob" for "Robert"), a possible maiden vs married SURNAME change, or an uncertain
+                given-name variant you cannot confirm. This is "FLAG FOR EVIDENCE" — the document still counts
+                (the difference is recorded in holder_name_variance) — so do NOT force it to "yes", and do NOT
+                reject it as "no".
+         "no" — a genuine NON-match: a non-person entity (a trust, an LLC, an estate), an unrelated name, OR a
+                CONFLICTING middle name/initial that points to a DIFFERENT person ("Jordan M Rivera" vs
+                "Jordan A Rivera" — the middles conflict, likely a relative, not the borrower).
+         Keep "unknown" first-class (also when "loan_borrowers" is empty/absent — nothing to compare). ALWAYS
+         give a reason. NEVER guess an identity that is not in "loan_borrowers".
       2. is_reserve_eligible — are the funds in this account usable as reserves as the statement shows
          them (a normal checking/savings balance), vs restricted or a retirement/discounted account?
          "yes" | "no" | "partial" | "unknown". (This is about the ACCOUNT TYPE/BALANCE only — ignore

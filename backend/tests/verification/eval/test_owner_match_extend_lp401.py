@@ -12,19 +12,21 @@ from __future__ import annotations
 
 import csv
 import io
+import tempfile
 from pathlib import Path
 
 from app.verification.eval.owner_match_scenarios import (
     AMBIGUOUS_CASES,
     CLEARCUT_CO_HOLDER,
     CLEARCUT_EXPECTATIONS,
-    OWNER_MATCH_WORKSHEET_FILE,
     build_owner_match_scenario_snapshot,
+    write_owner_match_worksheet,
 )
 from app.verification.snapshot.fields import Field
 from app.verification.tag_materialization.subjects import loan_borrower_roster
 
-_COMMITTED = Path(__file__).resolve().parents[4] / "docs/calibration" / OWNER_MATCH_WORKSHEET_FILE
+# the GENERATOR's blank template (the committed CSV is now Priya's labeled golden set, LP-402)
+_FRESH = write_owner_match_worksheet(Path(tempfile.mkdtemp())).read_text(encoding="utf-8")
 _SNAP = build_owner_match_scenario_snapshot()
 _HOLDERS = {
     e.content_id: f.value
@@ -66,7 +68,7 @@ def test_n2_is_reclassified_to_ambiguous() -> None:
 
 
 def test_the_worksheet_carries_the_new_scenarios_blind_for_all_three_tags() -> None:
-    rows = list(csv.DictReader(io.StringIO(_COMMITTED.read_text(encoding="utf-8"))))
+    rows = list(csv.DictReader(io.StringIO(_FRESH)))
     for new in ("own-n7", "own-n8", "own-n9"):
         tags = {r["tag_id"] for r in rows if r["subject_id"] == new}
         assert tags == {
