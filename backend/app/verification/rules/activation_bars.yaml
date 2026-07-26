@@ -129,6 +129,10 @@ OC-1:
     measured accuracy and no Priya bar, because OC-2 ratifies every verdict and so never needed it calibrated.
     OC-1 would auto-ship, so it cannot go live until the tag is scored against Priya's occupancy labels and she
     sets a bar. Blocked on calibration, not a producer — the inputs already materialize at the loan subject.
+    ACTIVATION PRECONDITION (LP-406-4 review): OC-1 and LIVE OC-2 both consume occupancy.consistent_with_signals
+    (OC-2 reasons over it, OC-1 fires on "no"), so activating OC-1 double-surfaces a "no" file (OC-1 auto + OC-2
+    ratify). Reconcile the overlap before activation — either OC-1 supersedes OC-2's consistency dimension (drop
+    it from OC-2's reasoned_over) or the double-surface is intended; changing the LIVE OC-2 is a domain call.
 
 AS-5:
   # LP-390-7 fail-closed check: validated MUST stay false here — AS-5 is not-calibratable-yet with a null

@@ -10,12 +10,25 @@
 # produces the tag carries NO borrower residence address (LP-371 D3), so this rule is worded to
 # DECLARATION consistency. The address-signal dimension is a separate follow-up (a new producer), not
 # this rule.
+#   Census drift (LP-406-4 review): rule_kinds.csv still describes OC-1 as "Stated occupancy vs address
+#   signals — compare; inference → AI", which this spec deliberately diverges from (declaration
+#   consistency, deterministic). rule_kinds.csv is GENERATED from docs/snapshot-fact-tags.xlsx, so the
+#   census row must be reconciled UPSTREAM in the xlsx (editing the CSV is reverted on regen) — tracked.
 #
 # ⚠️ NOT ACTIVATED by this ticket (held). OC-1 is deterministic in FORM but its verdict rests on an AI
 # tag (occupancy.consistent_with_signals) that is UNSCORED — no measured accuracy, no Priya bar. LIVE
 # OC-2 rides the same tag but RATIFIES every verdict (a human signs each), so it never needed the tag
 # CALIBRATED; OC-1 would AUTO-ship, which does. So OC-1 ships "written + producing", HELD on calibration
 # (activation_bars.yaml: not-calibratable-yet). See LP-406-4.
+#
+# ⚠️ ACTIVATION PRECONDITION (LP-406-4 review): OC-1 and LIVE OC-2 BOTH consume
+# occupancy.consistent_with_signals (OC-2 reasons over it; OC-1 fires deterministically on "no"), so once
+# OC-1 is activated a "no" file surfaces TWICE — OC-1 auto ("declarations conflict") AND OC-2 ratify
+# ("occupancy implausible"). Before activating OC-1, reconcile the overlap: decide whether OC-1's
+# deterministic check SUPERSEDES OC-2's consistency dimension (e.g. drop consistent_with_signals from
+# OC-2's reasoned_over so OC-2 judges only the address/plausibility signals OC-1 does not), or whether the
+# double-surfacing is intended defense-in-depth. Changing OC-2 (a LIVE ratify rule) is a domain call — not
+# done here; the calibration/activation ticket must resolve it.
 
 rule_id: OC-1
 name: Occupancy consistency
