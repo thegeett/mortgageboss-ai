@@ -826,11 +826,14 @@ def _stmt_continuity(
                     _decimal_or_none(tags.get("stmt.ending_balance")),
                 )
             )
-        if len(stmts) < 2 and not (period_unreadable and (len(stmts) + 1) >= 2):
-            # <2 orderable statements for this account: nothing to chain here (a single statement is not a
-            # gap — the LP-406-2 not_applicable case). (A period we could not read on a would-be-multi
-            # account is handled just below as unknown, never silently as nothing-to-chain.)
-            if period_unreadable and stmts:
+        if len(stmts) < 2:
+            # Fewer than two ORDERABLE statements. If the account actually HAS >= 2 statements but their
+            # periods were unreadable (so we could not order them), we cannot confirm chaining → unknown
+            # (fail-closed) — including when EVERY period was unreadable (stmts is empty). Only a genuinely
+            # single/absent-statement account is nothing-to-chain (the LP-406-2 not_applicable case). Keyed
+            # on len(content_ids), NOT len(stmts): the readable count alone cannot tell a 1-statement
+            # account from a 2-statement account whose periods were all unreadable.
+            if period_unreadable and len(content_ids) >= 2:
                 saw_unknown = True
             continue
         if period_unreadable:
@@ -896,15 +899,31 @@ def _income_employer_coverage(
     # guard mirrors _income_documented_shortfall (a borrower recipe needs a borrower subject).
     if not isinstance(subject_raw, BorrowerSubject):
         return _UNKNOWN, "employer coverage is a per-borrower recipe (needs a borrower subject)"
-    if snapshot.tags.absent or snapshot.documents.absent:
+    if snapshot.documents.absent:
         return (
             "one_sided",
             "no income documents attributed to this borrower — nothing to cross-check",
         )
-    # LAZY import (init-order — rule_engine ↔ tag_materialization, as _stmt_min_account_months does).
+    if snapshot.tags.absent:
+        # Documents may exist but no tags materialized → we could not read any employer → couldnt_check,
+        # NOT one_sided (never claim "nothing to cross-check" when we simply could not read the employers).
+        return (
+            _UNKNOWN,
+            "no tags materialized — cannot read this borrower's income-document employers",
+        )
+    # LAZY imports (init-order — rule_engine/rules ↔ tag_materialization, as _stmt_min_account_months does).
     from app.verification.rule_engine.consistency import _normalize
+    from app.verification.rules.specs import load_rule_spec
 
-    norm = ("casefold", "drop_punct", "collapse_ws", "strip", "drop_entity_suffix")
+    # Reuse IN-5's EXACT normalizer chain — SOURCED from IN-5's spec, never a hardcoded copy that could
+    # silently drift (IN-5.yaml documents a path to change it: dropping drop_entity_suffix). This keeps
+    # IN-6's coverage matching identical to IN-5's measured employer_normalized exact bookend, so IN-6
+    # inherits IN-5's calibration (LP-410) with no divergence possible.
+    in5_consistency = load_rule_spec("IN-5").consistency
+    assert in5_consistency is not None, (
+        "IN-6 employer_coverage reuses IN-5's normalizers — IN-5 must remain a consistency rule"
+    )
+    norm = in5_consistency.normalization
     paystub: dict[
         str, str
     ] = {}  # normalized -> an original rendering (for a human-readable reason)

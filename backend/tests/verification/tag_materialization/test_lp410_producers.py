@@ -234,6 +234,31 @@ def test_continuity_break_in_one_account_is_surfaced_fire_if_any() -> None:
     assert value == "broken"
 
 
+def test_continuity_all_periods_unreadable_on_a_multi_statement_account_is_unknown() -> None:
+    # LP-410 review (fail-open fix): an account with TWO statements whose period_start is unreadable on BOTH
+    # (neither orderable) must be UNKNOWN, never a silent "nothing_to_chain". Balances are readable; only the
+    # periods are not, so we cannot order/confirm the chain → fail-closed. Pre-fix this returned
+    # "nothing_to_chain" (→ AS-8 would not_applicable on two statements it never actually checked).
+    docs = [
+        _stmt("s1", bank="Chase", masked="****1", start="x", begin="1000", end="1200"),
+        _stmt("s2", bank="Chase", masked="****1", start="x", begin="1200", end="1300"),
+    ]
+    tags = {
+        "s1": {
+            "stmt.period_start": _tag("unknown"),  # unreadable period on BOTH
+            "stmt.beginning_balance": _tag("1000"),
+            "stmt.ending_balance": _tag("1200"),
+        },
+        "s2": {
+            "stmt.period_start": _tag("unknown"),
+            "stmt.beginning_balance": _tag("1200"),
+            "stmt.ending_balance": _tag("1300"),
+        },
+    }
+    value, _ = _stmt_continuity(_snap(docs=docs, tags=tags), "loan", None)
+    assert value == "unknown"
+
+
 # --------------------------------------------------------------------------- #
 # income.employer_coverage — per-borrower set coverage, one_sided, isolation
 # --------------------------------------------------------------------------- #
@@ -303,6 +328,25 @@ def test_coverage_unreadable_employer_is_unknown() -> None:
     bid = str(uuid4())
     docs = [_income_doc("p1", "pay_stub", bid), _income_doc("w1", "w2", bid)]
     assert _cov(docs, {"p1": "unknown", "w1": "Acme"}, bid) == "unknown"
+
+
+def test_coverage_tags_absent_with_documents_is_unknown_not_one_sided() -> None:
+    # LP-410 review (fail-open fix): the borrower HAS both a pay stub and a W-2, but no tags materialized
+    # (a degraded/no-AI run). We could not read any employer → UNKNOWN, never "one_sided" (which would
+    # falsely claim there was nothing to cross-check). documents.absent stays one_sided; only tags.absent-
+    # with-documents is unknown.
+    bid = str(uuid4())
+    docs = [_income_doc("p1", "pay_stub", bid), _income_doc("w1", "w2", bid)]
+    snap = Snapshot(
+        loan_file_id=uuid4(),
+        run_id=uuid4(),
+        created_at=_FILE_DATE,
+        documents=DocumentsSection.present(docs),
+        mismo=MismoSection.present({"borrower.1.borrower_id": _f(bid)}),
+        tags=TagsSection.missing(),  # documents present, but the tags layer never materialized
+    )
+    value, _ = _income_employer_coverage(snap, bid, BorrowerSubject(bid, 1, snap))
+    assert value == "unknown"
 
 
 def test_coverage_per_borrower_isolation() -> None:
