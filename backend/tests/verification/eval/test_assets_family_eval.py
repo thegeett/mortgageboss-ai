@@ -225,39 +225,46 @@ def test_as7_fire_clean_boundaries_and_absent() -> None:
 # ================================================================================================= #
 # AS-6 / AS-11 — per_document + applicability (scope + fire)
 # ================================================================================================= #
+def _bs(owner: str, variance: str = "none", co_holder: str = "no"):
+    # LP-404: AS-6 reads all three statement-holder tags on the bank_statement subject.
+    return {
+        "bs": {
+            "stmt.owner_matches_borrower": _tag(owner),
+            "stmt.holder_name_variance": _tag(variance),
+            "stmt.non_borrower_co_holder": _tag(co_holder),
+        }
+    }
+
+
 def test_as6_owner_mismatch_fires_scoped() -> None:
+    # LP-404 — Priya's three outcomes: a `no` fires (an open finding); a non-statement is out of scope.
     docs = [_doc("bs", "bank_statement"), _doc("dl", "drivers_license")]
     by = {
         r.subject_id: r.verdict
-        for r in _det(
-            "AS-6", _snap(docs=docs, by_subject={"bs": {"stmt.owner_matches_borrower": _tag("no")}})
-        )
+        for r in _det("AS-6", _snap(docs=docs, by_subject=_bs("no", "middle_differs")))
     }
-    assert by["bs"] is Verdict.FIRED and by["dl"] is Verdict.NOT_APPLICABLE  # 1 + scope
-    ok = _det(
-        "AS-6",
-        _snap(
-            docs=[_doc("bs", "bank_statement")],
-            by_subject={"bs": {"stmt.owner_matches_borrower": _tag("yes")}},
-        ),
+    assert by["bs"] is Verdict.FIRED and by["dl"] is Verdict.NOT_APPLICABLE  # non-match + scope
+    bs = [_doc("bs", "bank_statement")]
+    # a CERTAIN match (incl. a benign dropped middle) with no co-holder counts silently
+    assert _det("AS-6", _snap(docs=bs, by_subject=_bs("yes", "middle_absent")))[0].verdict is (
+        Verdict.SATISFIED
     )
-    assert ok[0].verdict is Verdict.SATISFIED  # 2
-    unk = _det(
-        "AS-6",
-        _snap(
-            docs=[_doc("bs", "bank_statement")],
-            by_subject={"bs": {"stmt.owner_matches_borrower": _tag("unknown")}},
-        ),
+    # PLAUSIBLE but unconfirmed → surfaced (needs_review) while the statement still counts
+    assert _det("AS-6", _snap(docs=bs, by_subject=_bs("unknown", "nickname")))[0].verdict is (
+        Verdict.NEEDS_REVIEW
     )
-    assert unk[0].verdict is Verdict.COULDNT_CHECK  # 6 unknown → couldnt_check
-    low = _det(
-        "AS-6",
-        _snap(
-            docs=[_doc("bs", "bank_statement")],
-            by_subject={"bs": {"stmt.owner_matches_borrower": _tag("no", conf=0.2)}},
-        ),
+    # a joint account with a non-borrower co-holder → surfaced while the statement still counts
+    assert _det("AS-6", _snap(docs=bs, by_subject=_bs("yes", "none", "yes")))[0].verdict is (
+        Verdict.NEEDS_REVIEW
     )
-    assert low[0].verdict is Verdict.NEEDS_REVIEW  # 7 low-confidence → needs_review
+    # the holder facts were unreadable (variance absent) → honest abstention
+    assert (
+        _det(
+            "AS-6",
+            _snap(docs=bs, by_subject={"bs": {"stmt.owner_matches_borrower": _tag("no")}}),
+        )[0].verdict
+        is Verdict.COULDNT_CHECK
+    )
 
 
 def test_as11_restricted_fires_scoped() -> None:

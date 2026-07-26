@@ -64,11 +64,16 @@ def test_the_variance_values_are_descriptive_observables_not_verdicts() -> None:
     assert av["stmt.non_borrower_co_holder"] == ("yes", "no", "unknown")
 
 
-def test_as6_is_untouched_and_nothing_activated() -> None:
-    # consuming these uncalibrated tags is a LATER ticket — AS-6's spec still rests on only owner_matches.
+def test_as6_is_not_activated_by_this_ticket() -> None:
+    # LP-400 declared the variance/co_holder tags but AS-6 did not yet consume them. (LP-404 later made
+    # AS-6 read all three statement-holder tags — but still did not activate it.)
     spec = load_rule_spec("AS-6")
     assert spec.deterministic is not None
-    assert list(spec.deterministic.load_bearing_tags) == ["stmt.owner_matches_borrower"]
+    assert set(spec.deterministic.load_bearing_tags) == {
+        "stmt.owner_matches_borrower",
+        "stmt.holder_name_variance",
+        "stmt.non_borrower_co_holder",
+    }
     assert len(ACTIVE_RULE_IDS) == 24  # nothing activated
 
 

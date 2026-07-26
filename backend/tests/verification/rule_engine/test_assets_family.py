@@ -211,11 +211,21 @@ def test_as10_short_account_fires() -> None:
 
 def test_as6_owner_mismatch_fires_scoped_to_statements() -> None:
     docs = [_doc("bs", "bank_statement"), _doc("dl", "drivers_license")]
+    # LP-404: AS-6 now reads all three statement-holder tags; a `no` match still fires (an open finding).
     by = {
         r.subject_id: r.verdict
         for r in evaluate_deterministic_rule(
             load_rule_spec("AS-6"),
-            _snap(docs=docs, by_subject={"bs": {"stmt.owner_matches_borrower": _tag("no")}}),
+            _snap(
+                docs=docs,
+                by_subject={
+                    "bs": {
+                        "stmt.owner_matches_borrower": _tag("no"),
+                        "stmt.holder_name_variance": _tag("middle_differs"),
+                        "stmt.non_borrower_co_holder": _tag("no"),
+                    }
+                },
+            ),
         )
     }
     assert (

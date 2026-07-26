@@ -11868,3 +11868,65 @@ on the gate widening.
 **AS-6's consumption stays deferred** (its rule change is the next step); the synthetic-data caveat still
 applies (validated on scenarios, not real-document messiness). **Cross-refs.** LP-390-8a (the tolerance this
 reverses), LP-400 (the three-tag design), LP-401 (the labels + the fixture), LP-335 (report-what's-shown).
+
+## ADR-321: AS-6 as the first MULTI-TAG rule — Priya's three-outcome ruling (surface, don't reject; the flagged document COUNTS) (LP-404)
+
+**The finale of the owner-match thread** (LP-390-8a → LP-403). AS-6 was a single-tag rule (`owner_matches=no`
+→ fired, else satisfied). LP-404 makes it the FIRST rule to read THREE calibrated tags — `owner_matches_borrower`
+(the confidence), `holder_name_variance` (the specific difference), `non_borrower_co_holder` (an extra holder),
+all on the document subject, produced together by the `stmt_facts` group — and combine them into Priya's three
+outcomes:
+
+| condition (per statement) | verdict | the document |
+|---|---|---|
+| `owner_matches=yes`, no non-borrower co-holder | **satisfied** | counts silently |
+| `owner_matches=unknown` (plausible, unconfirmed) | **needs_review** | **STILL COUNTS**, surfaced |
+| a non-borrower co-holder (`co_holder=yes`) on a `yes` match | **needs_review** | **STILL COUNTS**, surfaced |
+| `owner_matches=no` (a genuine non-match) | **fired** | an OPEN finding — does NOT count |
+| the holder facts absent / unreadable | **couldnt_check** | honest abstention |
+
+**The "counts but surfaces" outcome is `needs_review`, and this is deliberate (D2).** Priya's middle row —
+"surface for a human WHILE THE DOCUMENT COUNTS" — is NOT a normal open finding (`fired` is AS-6's exclude
+verdict: a third-party account that does not count). It is also NOT `couldnt_check` (a data gap — "we couldn't
+read it"). `needs_review` is the verdict that routes a subject to human review WITHOUT excluding it: the
+plausible match / the non-borrower co-holder is a real judgment the processor confirms, and the statement
+stays in the borrower's assets pending that confirmation. It is NOT `PENDING_AUTOMATION` either — that is for a
+BLOCKED (uncalibrated) rule; AS-6's tags are calibrated (LP-403), so AS-6 RUNS and reaches a real verdict.
+
+**Route on the match CONFIDENCE (owner_matches) + the co-holder — NOT on the variance value (D3, and a
+correction of the ticket's own table).** The ticket's proposed table listed `holder_name_variance ∈
+{middle_absent, …}` as an independent needs_review trigger. That would FALSE-FLAG the benign dropped middle —
+which is exactly the 5 REAL LF-6T3N goldens (holder "Jordan A Rivera" vs roster "Jordan Rivera" → owner=yes,
+variance=middle_absent). Routing on the variance would surface a genuine borrower's own account for review — the
+FP harm AS-6 exists to avoid. So AS-6 routes on `owner_matches` (yes→counts, unknown→surface, no→open) plus
+`co_holder=yes`→surface; the variance tag NAMES the reason a flag was raised (it is in the finding's load-bearing
+provenance), it does not independently trigger. Consequence: **N1 (a conflicting middle, owner=`no`) → fired**
+(an open finding, like the trust/LLC/unrelated cases), NOT needs_review as the ticket's Phase-2 example said —
+because Priya's own `owner_matches` label for N1 is `no` (ADR-320: a conflicting middle = a likely different
+person). Her label + the FP-harm requirement (the gate of record) beat the ticket text.
+
+**The gate does NOT gate on owner_matches (D3, a DSL constraint).** The generic fail-closed gate (LP-315)
+treats ANY `unknown` load-bearing tag as `couldnt_check`. But Priya's `owner_matches=unknown` is a meaningful
+FLAG value that must reach `needs_review`, not `couldnt_check`. So AS-6 gates on `holder_name_variance` instead
+(the "was the holder name read & compared" presence check — absent/`unknown` → couldnt_check) and routes
+`owner_matches` through the ordered outcomes. `gated_tags` cannot be empty (schema `min_length=1`), so a
+non-owner gated tag was required; variance is the natural choice (its presence signals the group ran and the
+name was compared). The empty-roster `owner=unknown` (a data-gap Priya's table also maps to couldnt_check) is
+subsumed into `needs_review` — the tag value cannot distinguish it from the flag, and needs_review (a human
+reviews and sees "no borrowers on the loan") is not a false green.
+
+**The reason strings name the cause in plain language (D4, LP-376-C).** Each surfaced verdict carries a
+processor-facing reason — "plausibly matches a borrower but the match is not certain … the statement still
+counts", "a joint account with an additional holder who is not a borrower … still counts", "does not resolve to
+a borrower … a third-party account". The SPECIFIC (the co-holder's name, the variance kind) lives in the
+finding's load-bearing tag provenance (the co_holder / variance tag reasoning), not interpolated into the static
+reason — a rule-as-data limitation (the reasoning template interpolates only numeric operands), accepted rather
+than adding a bespoke reasoning-interpolation combinator.
+
+**The proof (real reasoner, reported).** On the LP-401 scenario fixture (11 statements): **4 fired** (N1/N3/N4/N6
+— non-matches), **5 needs_review** (N2/N7/P2 owner=unknown flags + N5/N8 non-borrower co-holders), **2 satisfied**
+(N9 both-borrowers, P1 dropped-middle) — EXACTLY Priya's ruling. On the 5 REAL LF-6T3N bank statements: **all 5
+satisfied** (no false flag on a genuine match). AS-6 is NOT activated by this change — its bar stays
+`validated:false` (Priya's sign-off, LP-397); `ACTIVE_RULE_IDS` = 24. **Cross-refs.** LP-390-8a / LP-397 / LP-400
+/ LP-402 / LP-403 (the thread), LP-391 (the manual-review surface), LP-376-C (human reasons), §8 (the outcome
+model), ADR-319 / ADR-320.
