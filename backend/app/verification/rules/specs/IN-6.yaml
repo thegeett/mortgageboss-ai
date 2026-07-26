@@ -1,0 +1,118 @@
+# IN-6 — Pay-stub <-> W-2 employer coverage — DETERMINISTIC structural rule SPEC (LP-406-3b).
+#
+# LP-406-3 STOPPED IN-6 at Phase 0: its two-way employer SET-COVERAGE relation (does every pay-stub employer
+# have a matching W-2 and vice-versa?) is not expressible in the DSL — ConsistencyEval is all-equal, not
+# set-coverage (ADR-323). LP-410 built the derived PER-BORROWER tag income.employer_coverage that computes it.
+# IN-6 is now a trivial deterministic rule branching on that one enum (the AS-8 pattern + an applicability
+# predicate for not_applicable).
+#
+# ⚠️ THE `uncovered` ROUTING (D2 — the substance of this ticket): income.employer_coverage does the
+# DETERMINISTIC half of IN-5's employer comparison (the exact-normalized bookend) but NOT IN-5's AI
+# fuzzy-residue judge (LP-410 limitation). A pay stub's short form ("Acme") vs a W-2's legal name ("Acme
+# Freight Co") normalizes to "acme" vs "acme freight" -> reports "uncovered" when it is very likely the SAME
+# employer. Short-form employer names on pay stubs are COMMON, so "uncovered" has a KNOWN false-positive
+# source. So "uncovered" routes to NEEDS_REVIEW (surface for a human to confirm), NOT `fired` (a confident
+# finding would be noisy). needs_review still surfaces a GENUINE gap to a human, so it dominates `fired`
+# until the fuzzy residue is closed (a later refinement). See ADR-325.
+#
+# ⚠️ HELD pending Priya (D3 — the transitive AI dependency): income.employer_coverage is DERIVED, but it reads
+# income.employer_normalized — an AI tag (measured 100%, LP-379-D, via live IN-5). That is the IN-3 case
+# (LP-384 reclassified from no-ai to calibratable-now): IN-6's bar declares load_bearing_ai_tags:
+# [income.employer_normalized] with the 100% measurement and a PROPOSED 0.95 threshold (IN-5's precedent —
+# same tag, same evidence Priya already approved), but validated: false. So IN-6 is written + producing, HELD
+# on Priya's sign-off (activation_bars.yaml); ACTIVE_RULE_IDS stays 25.
+#
+# SCOPE (the IN-5 boundary, D5): IN-5 checks employer NAME CONSISTENCY (do all the mentions of the employer
+# agree, tolerant of legal-vs-common variance). IN-6 checks COVERAGE ACROSS DOCUMENT TYPES (is each employer
+# documented by both a pay stub and a W-2). Distinct concerns on the same underlying tag — IN-6's reason names
+# a missing counterpart, never "the employer differs".
+#
+# REGISTRY DRIFT (mirrors AS-8): rule_tags.csv maps IN-6 -> income.employer_normalized (the Phase-0 planned
+# input), NOT income.employer_coverage. The evaluator uses THIS spec; the rule_tags projection is a stale
+# planning artifact — reconcile the "Rule -> Tags" row upstream in docs/snapshot-fact-tags.xlsx on the next regen.
+
+rule_id: IN-6
+name: Pay-stub <-> W-2 coverage
+category: Income
+
+kind: structural          # must equal rule_kinds.csv (IN-6 = structural)
+numeric_check: false      # an enum branch on a coverage state, not a ratio
+
+criteria: >-
+  For each borrower, the employers evidenced by the borrower's PAY STUBS and the employers evidenced by the
+  borrower's W-2s must COVER EACH OTHER — every pay-stub employer should have a corresponding W-2 and every
+  W-2 employer should have a corresponding pay stub. A missing counterpart (a W-2 employer with no current
+  pay stub, or a pay-stub employer with no W-2) is a coverage gap to resolve. Employer names are matched with
+  the SAME tolerant normalization IN-5 uses (legal-vs-common variance). Because that deterministic
+  normalization cannot resolve every short-form name, a reported gap is surfaced for HUMAN CONFIRMATION
+  (needs_review), not fired as a certain finding. A borrower with only one document type (or none) has
+  nothing to cross-check — not_applicable.
+
+applicability:
+  scope: each borrower's pay-stub employers vs W-2 employers (the derived income.employer_coverage tag)
+  trigger: >-
+    Evaluated once per borrower, on whether the borrower's pay-stub and W-2 employer sets cover each other.
+    When only one document type (or neither) is present there is nothing to cross-check (not_applicable).
+
+required_inputs:
+  - name: coverage
+    snapshot_path: 'tags.by_subject[<borrower_id>]["income.employer_coverage"]'
+    description: >-
+      the per-borrower two-way employer coverage state, derived (LP-410) from the borrower's pay-stub vs W-2
+      income.employer_normalized sets (matched with IN-5's normalizers) — one of: covered / uncovered /
+      one_sided / unknown.
+
+# No numeric threshold in the SPEC (an enum branch). priya_validated / threshold_needs_signoff mirror
+# rule_kinds.csv (both false). NOTE: the ACTIVATION bar (activation_bars.yaml) carries a separate, unvalidated
+# AI-accuracy threshold (0.95) pending Priya — that is the activation gate, not a spec threshold.
+reference_values:
+  priya_validated: false
+  threshold_needs_signoff: false
+
+subject_enumeration: per_borrower   # income.employer_coverage is produced at the borrower subject (LP-410 / D1)
+subject_key_fields: [borrower]
+
+evidence_required: >-
+  The borrower's coverage state and, on a gap, which employer lacks a counterpart (surfaced from the
+  income.employer_coverage provenance the finding carries).
+
+guideline_reference: "Fannie Mae Selling Guide B3-3.1-01 — income must be documented across the required period (pay stubs + W-2s)."
+
+spec_version: 1
+
+# LP-324 — the MACHINE-READABLE deterministic body (the generic evaluator runs THIS, zero per-rule Python).
+# The decision is an enum branch on income.employer_coverage, with not_applicable handled by the applicability
+# layer at the BORROWER subject (a one-sided borrower is SCOPE-FALSE, not a gap — resolve_applicability, §8 Tab 4):
+#   one_sided -> applicability predicate is false -> NOT_APPLICABLE (no finding).
+#   unknown   -> resolve_applicability treats the predicate tag's "unknown" as couldnt_check (Tab 1).
+#   covered / uncovered -> the predicate holds -> the rule proceeds to the outcomes.
+deterministic:
+  applicability:
+    tag: income.employer_coverage
+    op: ne
+    value: one_sided
+  load_bearing_tags:
+    - income.employer_coverage
+  gated_tags:
+    - income.employer_coverage
+  # No operands: the verdict is an enum branch via when_tags (income.employer_coverage is already the
+  # observed-state answer) — nothing to resolve.
+  operands: {}
+  outcomes:
+    - verdict: needs_review
+      # uncovered -> NEEDS_REVIEW (not fired): the deterministic normalizer cannot resolve every short-form
+      # employer name, so a gap is surfaced for a human to CONFIRM rather than fired as certain (D2, ADR-325).
+      # "unknown"/absent never reach here (applicability couldnt_checks them first).
+      when_tags:
+        - {tag: income.employer_coverage, op: "eq", value: "uncovered"}
+      reasoning: >-
+        an employer appears on this borrower's pay stubs or W-2s but not both — confirm it is the same
+        employer (a name written differently) or obtain the missing document to cover the employment
+      how_to_fix: >-
+        Confirm whether the pay-stub and W-2 employers are the same employer named differently; if they are
+        genuinely different, obtain the missing pay stub or W-2 so each employer is documented across both.
+    - verdict: satisfied
+      default: true
+      reasoning: >-
+        every employer on this borrower's pay stubs also appears on a W-2 and vice-versa — the employment is
+        documented across both document types

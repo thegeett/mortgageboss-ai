@@ -12056,3 +12056,36 @@ three producers mirror existing ones (`income.days_since_most_recent_pay`, `_stm
 `resolve_accounts`, `_borrower_attributed_documents` + the consistency normalizers) — no new mechanism.
 **Cross-refs.** ADR-322 / ADR-323 (the relations), LP-406-1/2/3/4 (the four stops + OC-1), LP-400 (describe vs
 judge), LP-336 (`resolve_accounts`). Additive; `ACTIVE_RULE_IDS` = 24.
+
+## ADR-325: A deterministic rule whose input carries a KNOWN false-positive residue routes that branch to needs_review, not fired (LP-406-3b)
+
+**Decision.** When a deterministic rule branches on a derived tag whose value has a **known, structural
+false-positive source**, the uncertain branch ships **`needs_review`** (surface for human confirmation), not
+**`fired`** (a confident finding). This is a per-branch OUTCOME verdict (`needs_review` is in `VERDICT_BY_NAME`,
+authored directly in the spec's `outcomes`), NOT a rule-wide `ships: ratify` mode. First applied to IN-6
+(LP-406-3b): its `income.employer_coverage == uncovered` branch → `needs_review`.
+
+**Why (IN-6's case).** `income.employer_coverage` (LP-410) does the DETERMINISTIC half of IN-5's employer
+comparison (the exact-normalized bookend) but NOT IN-5's AI fuzzy-residue judge. A pay stub's short form
+("Acme") vs a W-2's legal name ("Acme Freight Co") normalizes to "acme" vs "acme freight" → `uncovered` — when
+it is very likely the SAME employer. Short-form employer names on pay stubs are COMMON, so `uncovered` has a
+KNOWN false-positive source. The FP/FN calculus: `fired` false-fires on common short forms (noise, processor
+distrust); `needs_review` surfaces the uncertain case to a human AND still reaches a human for a GENUINE gap —
+so it **strictly dominates `fired`** until the fuzzy residue is closed (a later refinement). The error cost
+either way is a human confirmation, never a false auto-verdict.
+
+**The mechanism (why per-branch, not ships:ratify).** The deterministic evaluator's outcome verdicts include
+`needs_review` (`VERDICT_BY_NAME`), so a spec can declare `uncovered → needs_review` while `covered → satisfied`
+— only the uncertain branch goes to a human, and the certain branch still auto-ships. `ships: ratify` is a
+rule-WIDE mode (it would ratify the satisfied branch too), and whether the runtime honors `ratify` on a
+structural rule is an unresolved question (the IN-7/LP-393-6 kind-reclassification issue, ADR-316). A per-branch
+`needs_review` outcome is the precise, already-supported tool.
+
+**Consequences.** (1) A reusable precedent: future rules on derived tags with a documented FP residue route the
+uncertain branch to `needs_review` (and close the residue as a separate refinement). (2) IN-6 is written +
+producing but **HELD** — a transitive AI dependency (employer_coverage reads AI `income.employer_normalized`,
+100% via IN-5), so its bar is `calibratable-now` (the IN-3 shape) with a PROPOSED 0.95 threshold (IN-5's
+precedent — same tag, same evidence) and `validated: false`, pending Priya; `ACTIVE_RULE_IDS` stays 25.
+**Cross-refs.** LP-406-3b (this ticket), LP-406-3 (the ADR-323 set-coverage stop), LP-410 (the producer +
+the documented fuzzy-residue limitation), IN-3 (the transitive-AI bar precedent), ADR-316 (the ratify-mode
+question), LP-400 (describe vs judge).

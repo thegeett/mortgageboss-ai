@@ -10,7 +10,7 @@ case 12 (a derived tag abstaining → couldnt_check, the path ID could never tes
 explicitly. This eval is INDEPENDENT of activation — each rule is exercised by calling its evaluator
 directly (activation gates the orchestrator, not the evaluator), so it holds whether or not a rule is in
 ACTIVE_RULE_IDS (IN-2 is active as of LP-333; IN-1 was activated by LP-332, then de-activated by LP-333).
-IN-6 is DEFERRED (no spec).
+IN-6 is now WRITTEN (LP-406-3b) on the derived income.employer_coverage tag; held pending Priya.
 
 THREE KNOWN-WRONG behaviours are PINNED here (asserting the CURRENT behaviour, documented in the doc, NOT
 fixed): (1) loan-level aggregate MASKING of per-borrower income fraud — the #1 false-green; (2) IN-11
@@ -29,7 +29,7 @@ from app.verification.rule_engine.consistency import evaluate_consistency_rule
 from app.verification.rule_engine.deterministic import evaluate_deterministic_rule
 from app.verification.rule_engine.judgment import evaluate_judgment_rule
 from app.verification.rule_engine.result import RuleEvaluation, Verdict
-from app.verification.rules.specs import RuleSpecNotFound, load_rule_spec
+from app.verification.rules.specs import load_rule_spec
 from app.verification.snapshot.fields import Field, FieldSource
 from app.verification.snapshot.model import (
     BorrowerRef,
@@ -625,11 +625,13 @@ async def test_in7_case13_same_field_vs_unrelated() -> None:
 
 
 # ================================================================================================= #
-# IN-6 — DEFERRED (D3: needs LP-331's multi-value gather leg) — assert only that it has no spec
+# IN-6 — now WRITTEN (LP-406-3b) on the derived income.employer_coverage tag (LP-410); HELD pending Priya.
+# Its uncertain branch ships needs_review (not fired — ADR-325), so it has no must-fire case here by design.
 # ================================================================================================= #
-def test_in6_is_deferred_no_spec() -> None:
-    with pytest.raises(RuleSpecNotFound):
-        load_rule_spec("IN-6")
+def test_in6_is_written_on_the_coverage_tag() -> None:
+    spec = load_rule_spec("IN-6")
+    assert spec.deterministic is not None
+    assert spec.deterministic.load_bearing_tags == ("income.employer_coverage",)
 
 
 # ================================================================================================= #

@@ -47,6 +47,7 @@ _FACT_LABELS: dict[str, str] = {
     "income.max_employment_gap_days": "largest employment gap",  # IN-4
     "stmt.min_account_months": "months of statements on file per account",  # AS-10
     "stmt.continuity": "statement balance continuity across the account",  # AS-8 (LP-410 / LP-406-2b)
+    "income.employer_coverage": "pay-stub / W-2 employer coverage",  # IN-6 (LP-410 / LP-406-3b)
     "dti.qualifying_income_monthly": "qualifying income",
     "housing.insurance_monthly": "homeowners insurance",
     "housing.taxes_monthly": "property taxes",

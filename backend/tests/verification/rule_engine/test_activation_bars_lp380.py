@@ -36,8 +36,8 @@ def test_bars_cover_exactly_the_inert_rules() -> None:
         p.stem for p in (Path(ab.__file__).resolve().parents[1] / "rules/specs").glob("*.yaml")
     }
     # Anchored to _BASE_ACTIVE, not the live set: a rule LP-389 activated (IN-1/IN-5) KEEPS its bar as the
-    # record of why it went live, so the candidate set stays a stable 25 (23 + OC-1 LP-406-4 + AS-8 LP-406-2b)
-    # rather than shrinking on activation.
+    # record of why it went live, so the candidate set stays a stable 26 (23 + OC-1 LP-406-4 + AS-8 LP-406-2b
+    # + IN-6 LP-406-3b) rather than shrinking on activation.
     candidates = specs - set(_BASE_ACTIVE)
     assert set(bars) == candidates  # no candidate rule missing, no base-active rule sneaking in
     assert all(
@@ -46,16 +46,18 @@ def test_bars_cover_exactly_the_inert_rules() -> None:
 
 
 def test_the_honest_activation_state_is_reported() -> None:
-    # 10 of 25 are calibratable-now; the rest are blocked on calibration / a producer / a wiring decision
-    # (OC-1, LP-406-4, is not-calibratable-yet; AS-8, LP-406-2b, is no-ai-dependency and LIVE — neither adds to
-    # the calibratable-now count)
+    # 11 of 26 are calibratable-now; the rest are blocked on calibration / a producer / a wiring decision.
+    # OC-1 (LP-406-4) is not-calibratable-yet; AS-8 (LP-406-2b) is no-ai-dependency + LIVE; IN-6 (LP-406-3b) IS
+    # calibratable-now (transitive AI dependency on employer_normalized) — proposed 0.95, validated:false, held.
     bars = load_activation_bars()
     by = {
         s: sum(1 for b in bars.values() if b.status == s) for s in {b.status for b in bars.values()}
     }
-    # 9 SIGNED OFF (IN-1, IN-5, IN-3 + AS-2, AS-12 + IN-7, IN-10, IN-11, AS-11) + 1 PROPOSED-but-unvalidated
-    # (LP-397: AS-6 — its tag produces after LP-390-8a, scored 100% but one-sided n=5, validated:false).
-    assert by["calibratable-now"] == 10
+    # 9 SIGNED OFF (IN-1, IN-5, IN-3 + AS-2, AS-12 + IN-7, IN-10, IN-11, AS-11) + 2 PROPOSED-but-unvalidated
+    # (AS-6, LP-397 — one-sided n=5; IN-6, LP-406-3b — proposed IN-5's 0.95, pending Priya).
+    assert (
+        by["calibratable-now"] == 11
+    )  # +IN-6 (LP-406-3b, transitive AI dependency, proposed 0.95, held)
     assert by.get("not-calibratable-yet", 0) >= 1 and by.get("no-ai-dependency", 0) >= 1
     # LP-390-7 signed off AS-2 + AS-12; LP-390-9 signed off IN-3; LP-393-6 signed off IN-7/IN-10/IN-11/AS-11 —
     # those NINE calibratable rules are validated; AS-6 (LP-397) is calibratable but NOT yet validated.

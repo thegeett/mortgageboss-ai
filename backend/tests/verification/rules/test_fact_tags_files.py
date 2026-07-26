@@ -76,10 +76,12 @@ def test_as1_gate_is_files_truth_not_seed() -> None:
     rules = load_desired_rules()
     assert rules["AS-1"]["priya_validated"] is False
     assert rules["AS-1"]["threshold_needs_signoff"] is True
-    # AS-1 + OC-2 + the ID family + the IN family carry specs; IN-6 (deferred, LP-323-IN-B) does not.
+    # AS-1 + OC-2 + the ID family + the IN family carry specs.
     assert rules["AS-1"]["spec"] is not None
     assert rules["IN-1"]["spec"] is not None  # authored by LP-323-IN-B
-    assert rules["IN-6"]["spec"] is None  # deferred (set-coverage shape — see LP-323-IN-B D3)
+    assert (
+        rules["IN-6"]["spec"] is not None
+    )  # LP-406-3b — written on the derived employer_coverage tag (LP-410)
     assert rules["IN-6"]["priya_validated"] is False
 
 

@@ -469,6 +469,33 @@ IN-3:
     income_amounts wave runs; its shortfall bar (0.98, via documented_monthly's 100% measurement) is signed off
     by Priya (LP-390-9) — the same tag + evidence as IN-1. ACTIVE.
 
+IN-6:
+  # LP-406-3b — written on the derived income.employer_coverage tag (LP-410, unblocking the LP-406-3/ADR-323
+  # set-coverage stop). A TRANSITIVE AI dependency, the IN-3 shape: employer_coverage is derived, but it reads
+  # income.employer_normalized (AI, income_employer group) to build the pay-stub vs W-2 employer sets — so this
+  # is calibratable-now (NOT no-ai; the declared AI tag folds income_employer into _required_ai_groups and the
+  # LP-389 guard sees the real dependency; the loader rejects input_resolves here). PROPOSED for Priya: a 0.95
+  # AUTO bar — IN-5's exact precedent (SAME tag income.employer_normalized, measured 100% LP-379-D, the 0.95
+  # height she already signed off for IN-5). validated:false — HELD pending her sign-off; ACTIVE stays 25.
+  status: calibratable-now
+  ships: auto
+  threshold: 0.95
+  validated: false
+  load_bearing_ai_tags:
+    - income.employer_normalized
+  measured_accuracy: 1.0   # LP-379-D: income.employer_normalized 100% (the same measurement live IN-5 rests on)
+  fp_fn: >-
+    FP (a short-form employer name reads as an uncovered gap) is the KNOWN residue — so `uncovered` routes to
+    needs_review, NOT fired (a human confirms). FN (a genuine missing W-2/pay stub) still reaches the human via
+    needs_review. So the error cost is a human confirmation, not a false auto-verdict either way.
+  rationale: >-
+    an AI rule (transitive dependency on income.employer_normalized, the IN-3 shape), not no-ai. The coverage
+    matching reuses IN-5's MEASURED normalizers (100%, LP-379-D) — no new judgment — so the natural bar is
+    IN-5's own 0.95 (same tag, same evidence Priya approved for IN-5). PROPOSED validated:false, pending her
+    sign-off. ⚠️ The `uncovered` branch ships NEEDS_REVIEW, not fired (LP-406-3b D2 / ADR-325): the deterministic
+    normalizer cannot resolve every short-form employer name, so a reported gap is surfaced for human
+    confirmation rather than asserted — the honest routing until the AI fuzzy-residue is closed (a refinement).
+
 IN-4:
   status: no-ai-dependency
   ships: auto

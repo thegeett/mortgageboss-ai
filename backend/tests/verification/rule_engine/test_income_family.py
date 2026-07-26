@@ -313,6 +313,7 @@ def test_all_authored_in_rules_load_and_route_to_a_generic_evaluator() -> None:
         "IN-3",
         "IN-4",
         "IN-5",
+        "IN-6",  # LP-406-3b — set-coverage now computed by the derived income.employer_coverage tag (LP-410)
         "IN-7",
         "IN-8",
         "IN-9",
@@ -327,8 +328,3 @@ def test_all_authored_in_rules_load_and_route_to_a_generic_evaluator() -> None:
         assert (
             sum(x is not None for x in (spec.deterministic, spec.consistency, spec.judgment)) == 1
         )
-    # IN-6 is deferred (D3) — no spec.
-    from app.verification.rules.specs import RuleSpecNotFound
-
-    with pytest.raises(RuleSpecNotFound):
-        load_rule_spec("IN-6")
