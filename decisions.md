@@ -11970,3 +11970,44 @@ be expressible; AS-8's inputs are all produced, yet it needs a producer for the 
 (this ticket), LP-406-1 (PC-7's analogous `today`-operand stop), LP-405 (the census), LP-336 (`resolve_accounts`),
 `_stmt_min_account_months` / `_income_max_employment_gap` (the precedents). `ACTIVE_RULE_IDS` = 24 (unchanged; no
 rule written).
+
+## ADR-323: Cross-document rule RELATION classes — the DSL expresses only all-equal natively; ordered-pairwise AND set-coverage each need a derived producer (LP-406-3, extends ADR-322)
+
+**Decision.** A cross-document verification rule's **relation** determines whether it is expressible. There are
+three classes, and only the first is native:
+- **all-equal** ("do all sources agree on fact T?") — expressed natively by **`ConsistencyEval`** (gather T
+  across sources, compare after normalization, AI-judge the differing residue). ID-1/2/3/4/7, IN-5.
+- **ordered-pairwise** ("does record N relate to record N+1?" — statement chaining, employment gaps) — **NOT
+  native**; a derived producer computes it and exposes a loan/borrower tag a rule reads (ADR-322).
+- **set-coverage** ("does every element of set A have a match in set B, both ways?" — pay-stub↔W-2 employer
+  coverage, tradeline↔liability reconciliation) — **NOT native**; also a derived producer.
+
+**Why set-coverage is not `ConsistencyEval` (read from the code).** `consistency.py`'s entire comparison is
+`len({normalize(v) for v in gathered}) == 1` → AGREE. That is **all-equal**. It gathers ONE undifferentiated
+multiset and cannot (a) **partition** it into set A (pay stubs) vs set B (W-2s) — its `gather_filter` restricts
+to one type, it does not compare two — nor (b) express **coverage** ("every A has a matching B"). A legitimate
+two-employer borrower normalizes to `{A, B}`, `len == 2` → the evaluator calls it a **disagreement and fires**,
+which is exactly wrong for a coverage rule (both employers ARE covered → satisfied). IN-5's own spec confirms
+the split: *"a borrower with two legitimate jobs shows two employers — the set-coverage case is IN-6, deferred."*
+The deterministic DSL resolves one value per subject, so it cannot gather a set either.
+
+**The mechanism for the non-native classes.** Compute the relation in a **derived producer** (the established
+"compute in Python over the snapshot, expose a tag" pattern) and let a trivial deterministic rule read the
+result. For set-coverage: a per-borrower producer that reuses `_index_borrower_documents` (the `belongs_to`
+attribution) + the consistency normalizers (`_normalize` / `drop_entity_suffix`), partitions
+`income.employer_normalized` by document type, checks bidirectional coverage, and emits
+`covered`/`uncovered`/`n/a`/`unknown` (proposed `income.employer_coverage`, LP-406-3). The one-side-empty case
+must map to **not_applicable** (an applicability predicate), never couldnt_check — the AS-8 one-statement trap
+in another form. The AI-fuzzy residue ("is this DBA the same employer?") that a pure derived producer cannot
+resolve is either a follow-up or a new `ConsistencyEval` `compare_mode: coverage` (an evaluator change, the
+heavier alternative).
+
+**Consequences.** (1) IN-6 is NOT writable-now — it is `needs-producer` (`income.employer_coverage`); LP-406-3
+stopped and proposed rather than built. (2) **Before writing any cross-document rule, classify its relation** —
+only all-equal is a straight `ConsistencyEval` write; ordered-pairwise and set-coverage need a producer first.
+(3) The Bucket 2 epic reality: of four "zero-dependency" rules, only OC-1 was writable (and it is held on
+calibration); PC-7, AS-8, IN-6 each need one small derived producer (`contract.days_until_closing` /
+`stmt.continuity` / `income.employer_coverage`) — a single producer wave. **Cross-refs.** LP-406-3 (this ticket),
+ADR-322 (ordered-pairwise), LP-406-1 (PC-7's `today` stop), LP-406-4 (OC-1's calibration hold), LP-405 (the
+census that measured "inputs produced" but not "check expressible"), `consistency.py` (the all-equal comparison),
+IN-5.yaml (the deferral). `ACTIVE_RULE_IDS` = 24 (unchanged; no rule written).
