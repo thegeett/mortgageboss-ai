@@ -74,7 +74,7 @@ def test_as6_is_not_activated_by_this_ticket() -> None:
         "stmt.holder_name_variance",
         "stmt.non_borrower_co_holder",
     }
-    assert len(ACTIVE_RULE_IDS) == 24  # nothing activated
+    assert "AS-6" not in ACTIVE_RULE_IDS  # AS-6 not activated by this ticket (still held)
 
 
 # --------------------------------------------------------------------------- #

@@ -49,6 +49,7 @@ _ACTIVATED = frozenset(
         "IN-10",
         "IN-11",
         "AS-11",
+        "AS-8",  # LP-406-2b — the first Bucket 2 rule live (no-ai-dependency; stmt.continuity resolves)
     }
 )
 
@@ -76,6 +77,7 @@ def test_eligible_rule_ids_is_sorted_and_matches() -> None:
         "AS-11",
         "AS-12",
         "AS-2",
+        "AS-8",  # LP-406-2b
         "AS-9",
         "ID-5",
         "IN-1",
@@ -120,7 +122,9 @@ def test_the_held_rules_each_fail_for_a_named_reason() -> None:
 def test_active_set_is_exactly_base_plus_eligible() -> None:
     # the invariant that keeps a rule from being activated without passing the gate
     assert set(ACTIVE_RULE_IDS) - set(_BASE_ACTIVE) == set(eligible_rule_ids()) == set(_ACTIVATED)
-    assert len(ACTIVE_RULE_IDS) == 24 and len(_BASE_ACTIVE) == 11
+    assert (
+        len(ACTIVE_RULE_IDS) == 25 and len(_BASE_ACTIVE) == 11
+    )  # +AS-8 (LP-406-2b, first Bucket 2 live)
     assert set(_BASE_ACTIVE) < set(ACTIVE_RULE_IDS)  # the original 11 are intact, none dropped
     # no duplicates crept in when concatenating base + activated
     assert len(set(ACTIVE_RULE_IDS)) == len(ACTIVE_RULE_IDS)

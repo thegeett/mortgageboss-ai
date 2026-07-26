@@ -1,0 +1,98 @@
+# AS-8 — Statement chaining (continuity) — DETERMINISTIC structural rule SPEC (LP-406-2b).
+#
+# LP-406-2 STOPPED AS-8 at Phase 0: its ordered-pairwise check (statement N's ending balance == statement
+# N+1's beginning balance, per account) is not expressible in the deterministic DSL (ADR-322). LP-410 built
+# the derived loan-level tag stmt.continuity that computes it. AS-8 is now a trivial deterministic rule that
+# branches on that one enum — the OC-1/AS-4 "deterministic rule reading an already-produced tag" pattern, plus
+# an applicability predicate for the not_applicable case.
+#
+# NO AI dependency (stmt.continuity is derived from PARSED statement data) and NO Priya threshold (an exact
+# balance carryover, no tolerance). So — unlike OC-1 (held on calibration) and PC-7 (needs a Priya window) —
+# AS-8 clears the no-AI-dependency gate and ACTIVATES (its input resolves to "chained" on LF-6T3N, LP-410).
+#
+# SCOPE (the AS-10 boundary): AS-8 checks the BALANCE carryover ONLY. Whether an account has the required
+# number of recent consecutive MONTHS is AS-10 (statement recency completeness). AS-8 must NOT report a
+# "missing month" — that is AS-10's finding; two rules firing on one gap is noise. LP-410 scoped
+# stmt.continuity to the balance dimension for exactly this reason (LP-406-2 D4).
+
+rule_id: AS-8
+name: Statement chaining (continuity)
+category: Assets
+
+kind: structural          # must equal rule_kinds.csv (AS-8 = structural, deterministic_only)
+numeric_check: false      # an equality/enum check per account, not a ratio
+
+criteria: >-
+  Within each bank account, a borrower's consecutive statements must CHAIN — each statement's ending
+  balance must carry into the next statement's opening (beginning) balance. A break (an ending balance
+  that does not equal the next statement's opening balance) is an unexplained gap in the account history a
+  processor must reconcile. Grouped PER ACCOUNT (a checking statement and a savings statement never chain
+  to each other). This checks the BALANCE carryover ONLY; whether an account has the required number of
+  recent months is a SEPARATE check (AS-10, statement recency completeness). An account with a single
+  statement has nothing to chain — not_applicable, never a false finding.
+
+applicability:
+  scope: the loan file's bank statements, grouped per account (via the derived stmt.continuity tag)
+  trigger: >-
+    Evaluated once per loan, on whether every account's consecutive statements carry balance. When no
+    account has two or more statements there is nothing to chain (not_applicable).
+
+required_inputs:
+  - name: continuity
+    snapshot_path: 'tags.by_subject["loan"]["stmt.continuity"]'
+    description: >-
+      the per-account statement-chaining state, derived (LP-410) from resolve_accounts + each statement's
+      beginning/ending balance — one of: chained / broken / nothing_to_chain / unknown.
+
+# A structural equality check carries no numeric threshold (exact balance carryover). priya_validated /
+# threshold_needs_signoff mirror rule_kinds.csv (both false for AS-8).
+reference_values:
+  priya_validated: false
+  threshold_needs_signoff: false
+
+subject_enumeration: loan          # the loan-level subject (stmt.continuity is produced here — LP-410 / D1)
+subject_key_fields: [loan]
+
+evidence_required: >-
+  The per-account chaining state, and on a break which account's balances do not carry (surfaced from the
+  stmt.continuity provenance the finding carries).
+
+guideline_reference: "Fannie Mae Selling Guide B3-4.2-01 — bank statements must be complete and consecutive."
+
+spec_version: 1
+
+# LP-324 — the MACHINE-READABLE deterministic body (the generic evaluator runs THIS, zero per-rule Python).
+# The decision is an enum branch on stmt.continuity, with the not_applicable case handled by the applicability
+# layer (a nothing-to-chain file is SCOPE-FALSE, not a gap — resolve_applicability, §8 Tab 4):
+#   nothing_to_chain -> applicability predicate is false -> NOT_APPLICABLE (no finding).
+#   unknown          -> resolve_applicability treats the predicate tag's "unknown" as couldnt_check (Tab 1).
+#   broken / chained -> the predicate holds -> the rule proceeds to the outcomes.
+deterministic:
+  applicability:
+    tag: stmt.continuity
+    op: ne
+    value: nothing_to_chain
+  load_bearing_tags:
+    - stmt.continuity
+  gated_tags:
+    - stmt.continuity
+  # No operands: the verdict is an enum branch via when_tags (stmt.continuity is already the observed-state
+  # answer), not a numeric/date comparison — nothing to resolve.
+  operands: {}
+  outcomes:
+    - verdict: fired
+      # stmt.continuity == "broken": some account's consecutive balances do not carry. "unknown"/absent never
+      # reach here (applicability couldnt_checks them first), so AS-8 fires ONLY on a confident, real break.
+      when_tags:
+        - {tag: stmt.continuity, op: "eq", value: "broken"}
+      reasoning: >-
+        an account's bank statements do not chain — a statement's ending balance does not carry into the
+        next statement's opening balance; reconcile the account's history before submission
+      how_to_fix: >-
+        Obtain the missing or corrected statement so each statement's ending balance matches the next
+        statement's opening balance, or document why the balances do not carry.
+    - verdict: satisfied
+      default: true
+      reasoning: >-
+        every account's consecutive bank statements chain — each ending balance carries into the next
+        statement's opening balance

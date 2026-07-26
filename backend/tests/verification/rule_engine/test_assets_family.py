@@ -341,12 +341,22 @@ async def test_as12_judgment_is_ratification_pending() -> None:
 # The criterion — every authored AS rule loads + routes to a generic evaluator (no engine change)
 # --------------------------------------------------------------------------- #
 def test_all_authored_as_rules_load_and_route() -> None:
-    for rid in ["AS-2", "AS-3", "AS-4", "AS-5", "AS-6", "AS-7", "AS-9", "AS-10", "AS-11", "AS-12"]:
+    # AS-8 now HAS a spec (LP-406-2b): its ordered-pairwise shape (deferred at LP-323-AS-A) is computed by the
+    # derived stmt.continuity tag (LP-410), so AS-8 is a trivial deterministic rule branching on that enum.
+    for rid in [
+        "AS-2",
+        "AS-3",
+        "AS-4",
+        "AS-5",
+        "AS-6",
+        "AS-7",
+        "AS-8",
+        "AS-9",
+        "AS-10",
+        "AS-11",
+        "AS-12",
+    ]:
         spec = load_rule_spec(rid)
         assert (
             sum(x is not None for x in (spec.deterministic, spec.consistency, spec.judgment)) == 1
         )
-    from app.verification.rules.specs import RuleSpecNotFound
-
-    with pytest.raises(RuleSpecNotFound):
-        load_rule_spec("AS-8")  # deferred (pairwise-sequential shape — LP-323-AS-A)

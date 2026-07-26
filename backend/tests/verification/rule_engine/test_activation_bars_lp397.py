@@ -34,8 +34,8 @@ def test_proposing_the_bar_activates_nothing() -> None:
     bars = load_activation_bars()
     assert not is_eligible(bars["AS-6"])
     assert "AS-6" not in ACTIVE_RULE_IDS
-    assert len(eligible_rule_ids()) == 13
-    assert len(ACTIVE_RULE_IDS) == 24
+    assert len(eligible_rule_ids()) == 14  # +AS-8 (LP-406-2b, no-ai-dependency, input resolves)
+    assert len(ACTIVE_RULE_IDS) == 25
 
 
 def test_the_rationale_states_the_one_sided_n_and_the_name_match_strictness() -> None:

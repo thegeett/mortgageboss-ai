@@ -36,8 +36,8 @@ def test_bars_cover_exactly_the_inert_rules() -> None:
         p.stem for p in (Path(ab.__file__).resolve().parents[1] / "rules/specs").glob("*.yaml")
     }
     # Anchored to _BASE_ACTIVE, not the live set: a rule LP-389 activated (IN-1/IN-5) KEEPS its bar as the
-    # record of why it went live, so the candidate set stays a stable 24 (23 + OC-1, LP-406-4) rather than
-    # shrinking on activation.
+    # record of why it went live, so the candidate set stays a stable 25 (23 + OC-1 LP-406-4 + AS-8 LP-406-2b)
+    # rather than shrinking on activation.
     candidates = specs - set(_BASE_ACTIVE)
     assert set(bars) == candidates  # no candidate rule missing, no base-active rule sneaking in
     assert all(
@@ -46,8 +46,9 @@ def test_bars_cover_exactly_the_inert_rules() -> None:
 
 
 def test_the_honest_activation_state_is_reported() -> None:
-    # 10 of 24 are calibratable-now; the rest are blocked on calibration / a producer / a wiring decision
-    # (OC-1, LP-406-4, is not-calibratable-yet — its AI tag occupancy.consistent_with_signals is unscored)
+    # 10 of 25 are calibratable-now; the rest are blocked on calibration / a producer / a wiring decision
+    # (OC-1, LP-406-4, is not-calibratable-yet; AS-8, LP-406-2b, is no-ai-dependency and LIVE — neither adds to
+    # the calibratable-now count)
     bars = load_activation_bars()
     by = {
         s: sum(1 for b in bars.values() if b.status == s) for s in {b.status for b in bars.values()}
@@ -232,6 +233,9 @@ def test_active_set_is_base_plus_lp389() -> None:
             "IN-10",
             "IN-11",
             "AS-11",
+            # LP-406-2b — the first Bucket 2 rule live: AS-8 (statement chaining) on the derived stmt.continuity
+            # tag; no-ai-dependency, input resolves ("chained" on LF-6T3N).
+            "AS-8",
         )
     )
     # A bar persists after activation as the record of WHY the rule went live, so the bars now intersect the
@@ -250,5 +254,6 @@ def test_active_set_is_base_plus_lp389() -> None:
         "IN-10",
         "IN-11",
         "AS-11",
+        "AS-8",  # LP-406-2b — live via its bar (no-ai-dependency, input resolves)
     }
     assert not (set(load_activation_bars()) & set(_BASE_ACTIVE))

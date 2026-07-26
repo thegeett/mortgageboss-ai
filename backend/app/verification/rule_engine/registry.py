@@ -107,6 +107,13 @@ _LP390_9_ACTIVATED: tuple[str, ...] = ("IN-3",)
 # needs_review, never an auto verdict; truly-auto needs a kind reclassification (a separate ticket, ADR-316).
 _LP393_ACTIVATED: tuple[str, ...] = ("IN-7", "IN-10", "IN-11", "AS-11")
 
+# LP-406-2b — the FIRST Bucket 2 rule to go LIVE. AS-8 (statement chaining) reads the derived stmt.continuity
+# tag (LP-410, which unblocked the LP-406-2/ADR-322 ordered-pairwise stop). NO AI dependency (derived from
+# parsed statement balances) and NO Priya threshold (exact carryover) → it clears the no-ai-dependency gate
+# (input_resolves: stmt.continuity == "chained" on LF-6T3N → AS-8 SATISFIED). Its "broken" finding path ships
+# unexercised on real data (LF-6T3N chains cleanly) — the AS-2 one-sided-trigger caveat (activation_bars.yaml).
+_LP406_ACTIVATED: tuple[str, ...] = ("AS-8",)
+
 # The gate is the source of truth: test_activation_gate_lp389 asserts ACTIVE_RULE_IDS - _BASE_ACTIVE ==
 # eligible_rule_ids() — a rule CANNOT enter this set without meeting the eligibility gate (not a hand-list).
 ACTIVE_RULE_IDS: tuple[str, ...] = (
@@ -116,6 +123,7 @@ ACTIVE_RULE_IDS: tuple[str, ...] = (
     *_LP390_ACTIVATED,
     *_LP390_9_ACTIVATED,
     *_LP393_ACTIVATED,
+    *_LP406_ACTIVATED,
 )
 
 

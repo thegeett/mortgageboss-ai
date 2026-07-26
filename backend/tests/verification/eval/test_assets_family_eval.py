@@ -22,7 +22,7 @@ from app.verification.rule_engine.enumerators import resolve_accounts
 from app.verification.rule_engine.judgment import evaluate_judgment_rule
 from app.verification.rule_engine.registry import ACTIVE_RULE_IDS
 from app.verification.rule_engine.result import Verdict
-from app.verification.rules.specs import RuleSpecNotFound, load_rule_spec
+from app.verification.rules.specs import load_rule_spec
 from app.verification.snapshot.fields import Field, FieldSource
 from app.verification.snapshot.model import (
     BorrowerRef,
@@ -462,11 +462,14 @@ def test_per_account_ambiguous_identity_not_grouped() -> None:
 
 
 # ================================================================================================= #
-# AS-8 — DEFERRED (no spec); AS-1 — LIVE (unchanged)
+# AS-8 — now LIVE (LP-406-2b, on the derived stmt.continuity tag); AS-1 — LIVE (unchanged)
 # ================================================================================================= #
-def test_as8_deferred_and_as1_unchanged() -> None:
-    with pytest.raises(RuleSpecNotFound):
-        load_rule_spec("AS-8")  # deferred (pairwise-sequential shape — LP-323-AS-A)
+def test_as8_live_on_stmt_continuity_and_as1_unchanged() -> None:
+    # AS-8's pairwise-sequential shape (deferred at LP-323-AS-A) is computed by the derived stmt.continuity
+    # tag (LP-410), so AS-8 is a trivial deterministic rule that branches on it — and LIVE (LP-406-2b:
+    # no-ai-dependency, its input resolves to "chained" on LF-6T3N → SATISFIED).
+    as8 = load_rule_spec("AS-8")
+    assert as8.deterministic is not None and "AS-8" in ACTIVE_RULE_IDS
     assert (
         load_rule_spec("AS-1").subject_enumeration == "per_deposit" and "AS-1" in ACTIVE_RULE_IDS
     )  # live, unchanged

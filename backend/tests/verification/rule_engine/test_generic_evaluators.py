@@ -132,6 +132,7 @@ async def test_registry_dispatches_the_active_rule_set_by_kind() -> None:
             "IN-10",  # is_declining 100%
             "IN-11",  # has_2yr_history 100% (RE-SCORED after Priya's B14 ruling)
             "AS-11",  # liquidation_terms 100% (6/6) after LP-393-4a's precedence-rule prompt fix
+            "AS-8",  # LP-406-2b — statement chaining on the derived stmt.continuity tag (first Bucket 2 live)
         }
     )
     snapshot = _loan_snapshot(None)  # no occupancy/txn tags → everything fail-closes honestly

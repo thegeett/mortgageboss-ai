@@ -46,6 +46,7 @@ _FACT_LABELS: dict[str, str] = {
     "stmt.page_count_present": "pages actually present",  # AS-9
     "income.max_employment_gap_days": "largest employment gap",  # IN-4
     "stmt.min_account_months": "months of statements on file per account",  # AS-10
+    "stmt.continuity": "statement balance continuity across the account",  # AS-8 (LP-410 / LP-406-2b)
     "dti.qualifying_income_monthly": "qualifying income",
     "housing.insurance_monthly": "homeowners insurance",
     "housing.taxes_monthly": "property taxes",

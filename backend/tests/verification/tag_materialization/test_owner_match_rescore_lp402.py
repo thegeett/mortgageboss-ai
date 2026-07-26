@@ -88,4 +88,4 @@ def test_as6_not_activated_by_this_ticket() -> None:
     spec = load_rule_spec("AS-6")
     assert spec.deterministic is not None
     assert "stmt.owner_matches_borrower" in spec.deterministic.load_bearing_tags
-    assert len(ACTIVE_RULE_IDS) == 24
+    assert "AS-6" not in ACTIVE_RULE_IDS  # AS-6 not activated by this ticket (still held)

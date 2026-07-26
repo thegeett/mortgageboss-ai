@@ -410,6 +410,24 @@ AS-10:
     grown the statement account identity + period dates: LP-384 VERIFIED stmt.min_account_months resolves on
     the BASE LF-6T3N (AS-10 SATISFIED — every account has >= 2 months). The input resolves — eligible.
 
+AS-8:
+  status: no-ai-dependency
+  ships: auto
+  threshold: null
+  validated: false
+  input_resolves: true    # LP-406-2b: stmt.continuity resolves to "chained" on the base LF-6T3N (LP-410) → AS-8 SATISFIED → ELIGIBLE
+  load_bearing_ai_tags: []
+  fp_fn: "FN (misses a real balance break — an unexplained account gap) >> FP (a false break → a human re-checks)"
+  rationale: >-
+    no AI load-bearing tag; the check is an EXACT balance carryover on parsed statement balances, computed by
+    the derived stmt.continuity tag (LP-410, unblocking the LP-406-2/ADR-322 stop). LP-410 VERIFIED it resolves
+    on the BASE LF-6T3N: stmt.continuity == "chained" → AS-8 SATISFIED. The input resolves — eligible. No Priya
+    threshold (exact equality — statement N's ending balance IS N+1's opening balance; no tolerance).
+    ⚠️ CAVEAT (the AS-2 one-sided-trigger shape): LF-6T3N's 5 real statements CHAIN cleanly, so AS-8's FIRED
+    ("broken") path ships UNEXERCISED on real data. A statement series with a deliberate balance break (a
+    fixture ticket, the LP-393-1 pattern) would exercise the finding path and strengthen this; the branch is
+    proven on constructed snapshots (LP-406-2b tests). AS-8 must not falsely fire on a clean file — Phase-2 verified.
+
 ID-5:
   status: no-ai-dependency
   ships: auto

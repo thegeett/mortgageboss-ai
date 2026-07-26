@@ -187,6 +187,7 @@ def test_no_rule_activation_changed() -> None:
         "IN-10",
         "IN-11",
         "AS-11",
+        "AS-8",  # LP-406-2b — the first Bucket 2 rule live (statement chaining on stmt.continuity)
     )
 
 
