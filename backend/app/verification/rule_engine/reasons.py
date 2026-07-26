@@ -41,6 +41,7 @@ _FACT_LABELS: dict[str, str] = {
     # LP-389-A — ID-5 went live per-borrower; its couldnt_check reads on these two derived inputs.
     "id.borrower_id_expiration": "borrower's government ID expiration date",  # ID-5
     "contract.loan_closing_date": "loan's closing date",  # ID-5
+    "contract.days_until_closing": "days from the file date to the closing date",  # PC-7 (LP-410 / LP-406-1b)
     # LP-384 — the second activation pass (AS-9 / IN-4 / AS-10 went live).
     "stmt.page_count_declared": "declared page count (the statement's 'of N')",  # AS-9
     "stmt.page_count_present": "pages actually present",  # AS-9

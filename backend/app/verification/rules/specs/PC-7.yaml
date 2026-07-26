@@ -1,0 +1,120 @@
+# PC-7 — Closing date realistic / current — DETERMINISTIC structural rule SPEC (LP-406-1b).
+#
+# LP-406-1 STOPPED PC-7 at Phase 0: its "closing date vs today" check needed a `today` operand the resolver
+# has no source for. LP-410 built the derived loan-level tag contract.days_until_closing — a SIGNED integer
+# (positive = future, negative = the closing date has PASSED, "unknown" = no parseable/agreed closing date).
+# PC-7 is now a deterministic rule that compares that NUMBER to a window (the IN-2 number-vs-threshold shape).
+#
+# ⚠️ UNLIKE AS-8 / IN-6, this rule compares a NUMBER to a THRESHOLD (it uses the operand path, not an enum
+# branch), and its window is TWO-SIDED with ASYMMETRIC meaning (LP-406-1b D2, ADR-326):
+#   * PAST side  — the closing date is BEHIND the file date. A purchase cannot close in the past, so this is a
+#                  finding at (almost) any magnitude. Default past_grace_days = 0 (any strictly-past date fires).
+#   * FUTURE side — a closing date implausibly far ahead is premature for a file in pre-submission processing.
+#                  Default far_future_days = 90.
+# BOTH windows are DEFENSIBLE DEFAULTS, PRIYA'S TO DECIDE — the rule ships with its bar HELD (pending her
+# sign-off, activation_bars.yaml). The window lives HERE, never in the tag (LP-410 left it out — tags describe,
+# rules judge). WHAT PRIYA MUST DECIDE (plain language): (1) is a closing date even 1-2 days in the past
+# acceptable (a timing grace), or does ANY past date warrant a flag? (2) how many days ahead is "unrealistically
+# far" for a file still in processing — 90? 120?
+#
+# ⚠️ SCOPE (D4): PC-7 is LOAN-WIDE, not applicability-scoped. There is NO loan-purpose / transaction-type tag
+# to scope it purchase-only, so a REFINANCE (which has no purchase agreement → no contract.closing_date →
+# contract.days_until_closing == "unknown") resolves to COULDNT_CHECK, not not_applicable. That is honest (it
+# genuinely cannot check without a contract closing date) but not ideal; a loan.purpose tag would let a refi be
+# not_applicable instead (a reported gap — LP-406-1b).
+#
+# REGISTRY DRIFT (mirrors AS-8/IN-6): rule_tags.csv maps PC-7 -> contract.closing_date (the Phase-0 planned
+# input), NOT contract.days_until_closing. The evaluator uses THIS spec; reconcile the row upstream in the xlsx.
+
+rule_id: PC-7
+name: Closing date realistic/current
+category: Contract
+
+kind: structural          # must equal rule_kinds.csv (PC-7 = structural, deterministic_only)
+numeric_check: false      # a date-window comparison, not a ratio (mirrors rule_kinds numeric_check=false)
+
+criteria: >-
+  The purchase contract's closing date must be CURRENT and REALISTIC for a file in pre-submission processing:
+  not already in the PAST (a purchase cannot close before the file date — the date moved and the contract was
+  not updated, or it expired), and not implausibly FAR in the future (premature for a file being processed).
+  This compares the derived contract.days_until_closing (signed days from the file date to the closing date)
+  against a two-sided window. Both window sides are DEFAULTS pending the domain expert: how many days in the
+  past (if any) are tolerated, and how many days ahead is "too far". Absent/unparseable closing date →
+  couldnt_check, never a guessed pass.
+
+applicability:
+  scope: the loan's purchase-contract closing date vs the file (snapshot) date
+  trigger: >-
+    Evaluated once per loan, comparing contract.days_until_closing to the past/far-future window. A file with
+    no contract closing date (e.g. a refinance, or a missing purchase agreement) couldnt_checks — there is no
+    loan-purpose tag to scope it not_applicable (a reported gap).
+
+required_inputs:
+  - name: days_until_closing
+    snapshot_path: 'tags.by_subject["loan"]["contract.days_until_closing"]'
+    description: >-
+      signed days from the file (snapshot) date to the loan's closing date (derived, LP-410): positive =
+      future, negative = the closing date has passed, "unknown" = no parseable/agreed closing date.
+
+# The two window sides are DATA (reference values), each a DEFAULT flagged for Priya. priya_validated /
+# threshold_needs_signoff mirror rule_kinds.csv (both false — the CSV predates PC-7 carrying a window; the
+# ACTIVATION bar, not this field, is what holds PC-7 pending her sign-off, see activation_bars.yaml + D7).
+reference_values:
+  priya_validated: false
+  threshold_needs_signoff: false
+  values:
+    past_grace_days: "0"        # fire when days_until_closing < 0 (any strictly-past closing date). Priya: a grace?
+    far_future_days: "90"       # fire when days_until_closing > 90 (implausibly far ahead). Priya: 90 / 120 / …?
+  guideline_text: >-
+    Loan-processing documentation standard — the purchase contract's closing date must be current (not passed)
+    and realistic for a file in pre-submission processing. The past-grace (default 0 days) and far-future
+    (default 90 days) windows are DEFAULTS pending the domain expert's confirmation.
+
+subject_enumeration: loan          # contract.days_until_closing is produced at the loan subject (LP-410 / D1)
+subject_key_fields: [loan]
+
+evidence_required: >-
+  The signed days from the file date to the closing date, and which side of the window it fell outside (past
+  or far-future) — inline on the finding.
+
+guideline_reference: "Loan-processing documentation standard — the purchase-contract closing date must be current (not passed) and realistic; the past-grace and far-future windows are Priya-pending."
+
+spec_version: 1
+
+# LP-324 — the MACHINE-READABLE deterministic body (the generic evaluator runs THIS, zero per-rule Python).
+# The NUMBER-vs-THRESHOLD (operand) path, not an enum branch. contract.days_until_closing "unknown" → the
+# operand coerces to None → couldnt_check (the gate catches it first, over gated_tags). TWO fired outcomes with
+# DIFFERENT reasons (past vs far-future are different problems for a processor), ordered first-match-wins.
+deterministic:
+  load_bearing_tags:
+    - contract.days_until_closing
+  gated_tags:
+    - contract.days_until_closing
+  operands:
+    days: {tag: contract.days_until_closing}       # signed days (decimal); negatives coerce cleanly (D3)
+    past_grace: {reference: past_grace_days}
+    far_future: {reference: far_future_days}
+  outcomes:
+    - verdict: fired
+      # PAST: the closing date is behind the file date (days < past_grace, default 0 → any strictly-past date).
+      when_compare: {op: "<", left: days, right: past_grace}
+      reasoning: >-
+        the loan's closing date has already passed — it is {days} day(s) from the file date; a purchase
+        cannot close in the past, so confirm the current closing date with the borrower or settlement agent
+      how_to_fix: >-
+        Obtain the updated purchase contract (or an addendum) with the current closing date, or confirm the
+        loan is closing on the stated date.
+    - verdict: fired
+      # FAR FUTURE: the closing date is implausibly far ahead (days > far_future, default 90).
+      when_compare: {op: ">", left: days, right: far_future}
+      reasoning: >-
+        the loan's closing date is {days} day(s) out — unusually far ahead for a file in processing; confirm
+        the closing date on the contract is current and not a stale or placeholder date
+      how_to_fix: >-
+        Confirm the contract's closing date is current; if the file will not close for that long, verify the
+        timeline with the borrower or settlement agent.
+    - verdict: satisfied
+      default: true
+      reasoning: >-
+        the loan's closing date is within a realistic window of the file date (not passed, not implausibly
+        far ahead)

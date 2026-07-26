@@ -36,8 +36,8 @@ def test_bars_cover_exactly_the_inert_rules() -> None:
         p.stem for p in (Path(ab.__file__).resolve().parents[1] / "rules/specs").glob("*.yaml")
     }
     # Anchored to _BASE_ACTIVE, not the live set: a rule LP-389 activated (IN-1/IN-5) KEEPS its bar as the
-    # record of why it went live, so the candidate set stays a stable 26 (23 + OC-1 LP-406-4 + AS-8 LP-406-2b
-    # + IN-6 LP-406-3b) rather than shrinking on activation.
+    # record of why it went live, so the candidate set stays a stable 27 (23 + OC-1 LP-406-4 + AS-8 LP-406-2b
+    # + IN-6 LP-406-3b + PC-7 LP-406-1b) rather than shrinking on activation.
     candidates = specs - set(_BASE_ACTIVE)
     assert set(bars) == candidates  # no candidate rule missing, no base-active rule sneaking in
     assert all(
@@ -46,9 +46,9 @@ def test_bars_cover_exactly_the_inert_rules() -> None:
 
 
 def test_the_honest_activation_state_is_reported() -> None:
-    # 11 of 26 are calibratable-now; the rest are blocked on calibration / a producer / a wiring decision.
-    # OC-1 (LP-406-4) is not-calibratable-yet; AS-8 (LP-406-2b) is no-ai-dependency + LIVE; IN-6 (LP-406-3b) IS
-    # calibratable-now (transitive AI dependency on employer_normalized) — proposed 0.95, validated:false, held.
+    # 11 of 27 are calibratable-now; the rest are blocked on calibration / a producer / a wiring decision.
+    # OC-1 (LP-406-4) not-calibratable-yet; AS-8 (LP-406-2b) no-ai + LIVE; IN-6 (LP-406-3b) calibratable-now
+    # (transitive AI, proposed 0.95, held); PC-7 (LP-406-1b) no-ai but HELD (its window is an unvalidated default).
     bars = load_activation_bars()
     by = {
         s: sum(1 for b in bars.values() if b.status == s) for s in {b.status for b in bars.values()}

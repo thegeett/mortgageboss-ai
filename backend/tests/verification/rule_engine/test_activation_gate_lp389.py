@@ -67,9 +67,10 @@ def test_exactly_the_eligible_candidates_pass() -> None:
     held = set(bars) - eligible
     # IN-1/IN-5/AS-2/AS-12/IN-3 (AI, validated, measured >= bar); ID-5 + AS-9/IN-4/AS-10 (no-AI, input resolves).
     assert eligible == set(_ACTIVATED)
-    # 12 held: the 10 pre-LP-406 candidates + OC-1 (LP-406-4, AI tag unscored) + IN-6 (LP-406-3b, bar proposed
-    # but validated:false pending Priya). AS-8 (LP-406-2b) is NOT held — it went live.
-    assert len(held) == 12 and not (held & _ACTIVATED)  # every other candidate is held
+    # 13 held: the 10 pre-LP-406 candidates + OC-1 (LP-406-4, AI tag unscored) + IN-6 (LP-406-3b, bar proposed,
+    # pending Priya) + PC-7 (LP-406-1b, no-ai but its window is an unvalidated Priya default, held). AS-8
+    # (LP-406-2b) is NOT held — it went live.
+    assert len(held) == 13 and not (held & _ACTIVATED)  # every other candidate is held
 
 
 def test_eligible_rule_ids_is_sorted_and_matches() -> None:

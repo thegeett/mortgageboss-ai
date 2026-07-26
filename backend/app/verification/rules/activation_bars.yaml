@@ -428,6 +428,36 @@ AS-8:
     fixture ticket, the LP-393-1 pattern) would exercise the finding path and strengthen this; the branch is
     proven on constructed snapshots (LP-406-2b tests). AS-8 must not falsely fire on a clean file — Phase-2 verified.
 
+PC-7:
+  # LP-406-1b — written on the derived contract.days_until_closing tag (LP-410, unblocking the LP-406-1 stop).
+  # NO AI dependency (the tag is derived from a PARSED closing date), so this is no-ai-dependency — BUT unlike
+  # AS-8 it carries a PRIYA THRESHOLD: a two-sided past/far-future window (defaults 0 / 90 days), her domain
+  # call. ⚠️ MODEL GAP (reported, LP-406-1b D7): the no-ai-dependency gate is `input_resolves` and has NO
+  # threshold-signoff step — validated:false does NOT hold a no-ai rule. The input DOES resolve numerically
+  # (days_until_closing == "1" on LF-6T3N → SATISFIED), but PC-7 AUTO-SHIPS a fired verdict on an UNVALIDATED
+  # window, which a sign-off gate should prevent. So input_resolves is left FALSE to HOLD it pending Priya's
+  # window — the honest reason is "the window is a default", not "the input doesn't resolve". A follow-up should
+  # give the model a real "no-ai + threshold-pending" hold (e.g. gate no-ai eligibility on threshold_needs_signoff).
+  status: no-ai-dependency
+  ships: auto
+  threshold: null
+  validated: false
+  input_resolves: false   # HELD: the input resolves, but the two-sided window is an unvalidated Priya default (see above)
+  load_bearing_ai_tags: []
+  fp_fn: >-
+    FN (misses a stale/expired or implausibly-far closing date) vs FP (a false flag on a legitimately far-out
+    or same-day-timing closing date — a human re-checks). The two window sides set the balance, Priya's call.
+  rationale: >-
+    no AI load-bearing tag; a deterministic date-window comparison on the derived contract.days_until_closing
+    (LP-410). WHAT PRIYA MUST DECIDE (plain): (1) is a closing date 1-2 days in the PAST acceptable (a timing
+    grace), or does ANY past date warrant a flag? default past_grace_days=0 (any strictly-past date fires);
+    (2) how many days AHEAD is "unrealistically far" for a file in processing — default far_future_days=90.
+    HELD pending her sign-off of the window (validated:false + input_resolves:false — see the model-gap note).
+    ⚠️ CAVEAT (the AS-2/AS-8 one-sided-trigger shape): LF-6T3N closes in 1 day (SATISFIED), so BOTH fired paths
+    (past + far-future) ship UNEXERCISED on real data. A fixture with a past closing date and one with a far-out
+    date (a fixture ticket, LP-393-1 pattern) would exercise them; the branches are proven on constructed
+    snapshots (LP-406-1b tests). PC-7 must not falsely fire on a near-term closing — Phase-2 verified.
+
 ID-5:
   status: no-ai-dependency
   ships: auto

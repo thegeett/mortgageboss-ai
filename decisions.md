@@ -12089,3 +12089,32 @@ precedent — same tag, same evidence) and `validated: false`, pending Priya; `A
 **Cross-refs.** LP-406-3b (this ticket), LP-406-3 (the ADR-323 set-coverage stop), LP-410 (the producer +
 the documented fuzzy-residue limitation), IN-3 (the transitive-AI bar precedent), ADR-316 (the ratify-mode
 question), LP-400 (describe vs judge).
+
+## ADR-326: A two-sided date window is TWO asymmetric outcomes (past-fires vs a future-threshold); and a no-AI rule with a Priya threshold has no clean hold in the activation model (LP-406-1b)
+
+**Decision (the rule shape).** A "date realism" rule over a signed day-count (e.g. `contract.days_until_closing`,
+LP-410) is **two asymmetric outcomes, not one symmetric tolerance**:
+- **PAST side** (the date is behind the file date) — a finding at (almost) any magnitude; the default is
+  `past_grace_days = 0` (any strictly-past date fires). The question is only whether a small *grace* is allowed.
+- **FUTURE side** (the date is implausibly far ahead) — a genuine *threshold* (default `far_future_days = 90`).
+
+They are **different problems for a processor** (a passed/expired date vs a premature/placeholder one), so they
+get **separate `fired` outcomes with distinct reasons** (ordered, first-match-wins), and — because the operand
+is a real number — the reason **interpolates the day count** ("the closing date is {days} days from the file
+date"), unlike the enum rules (AS-8/IN-6) whose reasons are static. First applied to PC-7 (LP-406-1b). This
+shapes every future date-window rule (appraisal validity PR-6, credit-report validity CR-13, rate-lock CL-1):
+specify past and future as separate outcomes, not one ± window.
+
+**Finding (the model gap).** The activation-bar model has **no clean hold for a NO-AI rule that carries a Priya
+THRESHOLD.** Its statuses assume: `no-ai-dependency` → activation is a wiring decision gated only by
+`input_resolves` (no threshold sign-off); `calibratable-now` → an AI-accuracy sign-off. PC-7 is neither — no AI
+tag, but a domain **window** Priya must confirm. Its input *does* resolve (`days_until_closing == "1"` on
+LF-6T3N → SATISFIED), so `input_resolves: true` would ACTIVATE it auto-shipping fired verdicts on an
+**unvalidated** window — exactly what a sign-off gate should prevent; and `validated: false` does nothing on a
+no-ai bar (`is_eligible` reads `input_resolves`, not `validated`). So PC-7 is held by leaving
+`input_resolves: false` with an explicit rationale that the true reason is "the window is a default", not "the
+input doesn't resolve". **Reported as a gap, not fixed here:** a real hold would gate no-ai eligibility on
+`threshold_needs_signoff` (or add a `no-ai-threshold-pending` status), so a no-ai rule with a Priya threshold is
+held natively rather than via the `input_resolves` stand-in. `ACTIVE_RULE_IDS` stays 25 (PC-7 held). **Cross-refs.**
+LP-406-1b (this ticket), LP-410 (the signed-day tag; window deliberately left out — tags describe, rules judge,
+LP-400), IN-2 (the number-vs-threshold mirror), ADR-324 (the derive-then-branch pattern).
