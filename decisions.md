@@ -11930,3 +11930,43 @@ satisfied** (no false flag on a genuine match). AS-6 is NOT activated by this ch
 `validated:false` (Priya's sign-off, LP-397); `ACTIVE_RULE_IDS` = 24. **Cross-refs.** LP-390-8a / LP-397 / LP-400
 / LP-402 / LP-403 (the thread), LP-391 (the manual-review surface), LP-376-C (human reasons), §8 (the outcome
 model), ADR-319 / ADR-320.
+
+## ADR-322: The deterministic DSL cannot express cross-document / ordered-pairwise checks — per-account (and per-sequence) continuity is a DERIVED producer, read as a loan tag (LP-406-2)
+
+**Decision.** A verification rule whose logic is an **ordered, cross-document, pairwise** relation — statement N's
+ending balance vs statement N+1's beginning balance; a "no missing period" gap between consecutive statements;
+any "the next record in the series" comparison — is **NOT expressible in the deterministic rule DSL**, and must
+instead be computed in a **derived tag producer** that emits a loan-level result a trivial deterministic rule
+reads. This was found writing AS-8 (statement chaining / continuity, LP-406-2) and shapes every future
+statement-sequence / continuity rule.
+
+**Why (read from the code, not asserted).** Three mechanisms could conceivably express a pairwise sequence
+compare; none does:
+- **The deterministic operand resolver** (`rule_engine/deterministic.py`) resolves each operand to ONE typed
+  value per subject (`tag`/`loan_tag`/`reference`/`calc`/`product`). There is no "next-in-series" / index / pair
+  operand — a comparison is `left <op> right` over two single values, never a fold over an ordered series.
+- **The `per_account` enumerator** (`rule_engine/enumerators.py`) merges an account's statements into one tag
+  map and, by design, **DROPS any per-statement tag whose value differs across statements** (each statement's
+  own ending/beginning balance and period) — so a `per_account` deterministic rule literally cannot see the pair
+  it must compare (it couldnt_checks). Its own comment directs: *"a rule that needs the per-statement series uses
+  resolve_accounts directly"* — i.e. a derived producer.
+- **`ConsistencyEval`** (`rules/specs.py`) checks that gathered values are **all equal** after normalization —
+  not an **ordered pairwise** relation between *different* values (`ending[N] == beginning[N+1]`) and not a gap
+  check. It cannot express order or the pair.
+
+**The pattern (already established, not new).** `tag_materialization/derived.py` already computes cross-document,
+per-group results in Python and exposes them as loan-level tags a deterministic rule reads: `_stmt_min_account_months`
+(groups statements per account via `resolve_accounts`, fail-closed) and `_income_max_employment_gap` (consecutive
+pairing within a group, never across groups). A continuity producer (proposed `stmt.continuity`) is the same
+footprint (~40–60 lines). The rule then reads it: `broken → fired`, `ok → satisfied`, `unknown → couldnt_check`,
+`n/a → not_applicable` (the last via an applicability predicate, because `not_applicable` is not a deterministic
+outcome verdict — a one-statement account has nothing to chain and must NOT couldnt_check).
+
+**Consequences.** (1) AS-8 is NOT writable-now — it is `needs-producer` (a `stmt.continuity` derived tag), not a
+straight rule-write; LP-406-2 stopped and proposed rather than built (the PC-7 / LP-406-1 precedent). (2) Any
+future sequence/continuity rule (per-account or otherwise) should assume a derived producer from the start.
+(3) This refines LP-405's Bucket 2: "inputs produced" was necessary but not sufficient — the *check* must also
+be expressible; AS-8's inputs are all produced, yet it needs a producer for the pairing. **Cross-refs.** LP-406-2
+(this ticket), LP-406-1 (PC-7's analogous `today`-operand stop), LP-405 (the census), LP-336 (`resolve_accounts`),
+`_stmt_min_account_months` / `_income_max_employment_gap` (the precedents). `ACTIVE_RULE_IDS` = 24 (unchanged; no
+rule written).
