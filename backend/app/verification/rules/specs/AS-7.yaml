@@ -1,0 +1,45 @@
+rule_id: AS-7
+name: NSF / overdraft flag
+category: Assets
+kind: structural
+numeric_check: false
+criteria: >-
+  Repeated NSF / overdraft activity across the borrower's statements is a red flag for financial
+  management and may require an explanation. The count of NSF/overdraft items is compared to a tolerance.
+applicability:
+  scope: the loan file's bank-statement transactions
+  trigger: once per loan, on the count of NSF/overdraft items
+required_inputs:
+  - name: nsf_count
+    snapshot_path: 'tags.by_subject["loan"]["stmt.nsf_count"]'
+    description: the count of NSF/overdraft transactions across the file (derived)
+reference_values:
+  priya_validated: false
+  threshold_needs_signoff: false
+  values:
+    nsf_tolerance: "3"
+  guideline_text: >-
+    There is no single agency NSF count — this is a LENDER OVERLAY. The encoded tolerance (>3 items) is a
+    conservative default PENDING Priya; confirm the lender's threshold.
+subject_enumeration: loan
+subject_key_fields:
+  - loan
+evidence_required: the count of NSF/overdraft items and the tolerance the comparison used
+guideline_reference: "Lender overlay (no single agency NSF standard) — pending Priya."
+spec_version: 1
+deterministic:
+  load_bearing_tags:
+    - stmt.nsf_count
+  gated_tags:
+    - stmt.nsf_count
+  operands:
+    count: {tag: stmt.nsf_count}
+    tolerance: {reference: nsf_tolerance}
+  outcomes:
+    - verdict: fired
+      when_compare: {op: ">", left: count, right: tolerance}
+      reasoning: "the file shows {count} NSF/overdraft items, beyond the tolerance of {tolerance}"
+      how_to_fix: Obtain a letter of explanation for the NSF/overdraft activity, or confirm the lender's tolerance.
+    - verdict: satisfied
+      default: true
+      reasoning: the NSF/overdraft count is within tolerance

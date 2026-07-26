@@ -1,0 +1,52 @@
+rule_id: IN-4
+name: Employment gap
+category: Income
+kind: structural         # rule_kinds.csv: IN-4 = structural, exact_match=true (deterministic_only)
+numeric_check: false
+criteria: >-
+  A gap between consecutive employment records beyond the window needs a letter of explanation. The
+  largest gap between a prior job's end and the next job's start is compared to the window. Measured
+  loan-level (the largest gap across the file's employment records); per-borrower is a deferred
+  refinement (LP-323-IN-B).
+applicability:
+  scope: the loan file's employment records
+  trigger: once per loan, on the largest gap between consecutive employment records
+required_inputs:
+  - name: max_gap_days
+    snapshot_path: 'tags.by_subject["loan"]["income.max_employment_gap_days"]'
+    description: the largest gap in days between consecutive employment records (derived)
+reference_values:
+  priya_validated: false
+  threshold_needs_signoff: false
+  values:
+    employment_gap_window_days: "30"
+  guideline_text: >-
+    Fannie Mae Selling Guide B3-3.1-01/02 — an employment gap generally needs a written explanation; a
+    gap beyond ~30 days is the encoded default (a gap over 6 months also breaks the 2-year history).
+    The exact window is an agency default pending Priya confirmation.
+subject_enumeration: loan
+subject_key_fields:
+  - loan
+evidence_required: the largest employment gap in days and the window the comparison used
+guideline_reference: "Fannie Mae Selling Guide B3-3.1-01/02 (Employment/Income history)."
+spec_version: 1
+deterministic:
+  load_bearing_tags:
+    - income.max_employment_gap_days
+  gated_tags:
+    - income.max_employment_gap_days
+  operands:
+    gap: {tag: income.max_employment_gap_days}
+    window: {reference: employment_gap_window_days}
+  outcomes:
+    - verdict: fired
+      when_compare: {op: ">", left: gap, right: window}
+      reasoning: >-
+        the largest employment gap is {gap} days, beyond the {window}-day window — a letter of
+        explanation is needed
+      how_to_fix: >-
+        Obtain a written letter of explanation for the employment gap (and confirm the gap does not
+        break the 2-year income history the program requires).
+    - verdict: satisfied
+      default: true
+      reasoning: no employment gap exceeds the {window}-day window

@@ -1,0 +1,77 @@
+rule_id: ID-8
+name: Citizenship / residency eligibility
+category: Identity
+kind: judgmental
+numeric_check: false
+criteria: >-
+  Is each borrower's citizenship / residency status eligible for THIS loan program? US citizens and
+  permanent residents are generally eligible; non-permanent residents are eligible for many programs
+  with valid work authorization, but investor overlays vary and some statuses (e.g. DACA) are
+  evolving. The AI judges eligibility against the program; a human ratifies EVERY verdict. Evaluated
+  per borrower (a multi-borrower file judges each borrower independently).
+applicability:
+  scope: every borrower on the loan
+  trigger: once per borrower, judged against the loan program
+required_inputs:
+  - name: citizenship
+    snapshot_path: 'tags.by_subject[<borrower_id>]["id.citizenship"]'
+    description: the borrower's citizenship / residency status (borrower-level, from the 1003 / MISMO)
+  - name: program_type
+    snapshot_path: 'tags.by_subject["loan"]["program.type"]'
+    description: the loan program (loan-level, shared into each borrower's context — LP-331)
+reference_values:
+  priya_validated: false
+  # PRIYA / HUMAN-VERIFY (FAIR-LENDING-SENSITIVE — do NOT guess as fact): the eligibility rules for
+  # non-permanent residents (work-authorization requirements), DACA recipients (evolving), and the
+  # per-investor OVERLAY set are UNSURE guideline values. The prompt encodes a DEFENSIBLE DEFAULT; the
+  # authoritative rules are in LP-331's Priya list. A wrong encoded eligibility rule is a serious,
+  # silent, permanent fair-lending error.
+  threshold_needs_signoff: false
+  guideline_text: >-
+    Fannie Mae Selling Guide B2-2-01 / B2-2-02 (borrower eligibility; non-US-citizen borrowers) — US
+    citizens and lawful permanent residents are eligible; non-permanent residents are eligible with
+    valid work authorization, subject to investor overlays. DACA / evolving statuses and the overlay
+    set are pending the domain expert's confirmation — the judgment must reason against the program
+    and flag overlay uncertainty, never auto-clear.
+subject_enumeration: per_borrower
+subject_key_fields:
+  - borrower
+evidence_required: the borrower's citizenship status + the loan program the eligibility judgment cited
+guideline_reference: >-
+  Fannie Mae Selling Guide B2-2-01/02 (borrower eligibility / non-US-citizen borrowers). Investor
+  overlays + evolving statuses (DACA) are pending Priya.
+judgment:
+  subject: per_borrower
+  # Gated (fail-closed) inputs — without a citizenship status AND the program there is nothing to
+  # judge (absent/unknown → couldnt_check for THAT borrower).
+  load_bearing_tags: [id.citizenship, program.type]
+  # The AI reasons over the borrower's citizenship + the loan program (never raw docs). LP-331: the
+  # per_borrower map is assembled from the borrower's OWN facts + the loan-level shared facts.
+  reasoned_over: [id.citizenship, program.type]
+  output_tag: id.residency_eligible
+  value_domain: ["yes", "no", "unknown"]
+  confidence_floor: 0.5
+  system_prompt: |
+    You are a senior mortgage underwriter making a REASONED JUDGMENT about ONE question: is THIS
+    borrower's citizenship / residency status eligible for THIS loan program?
+
+    You reason ONLY over the STRUCTURED TAGS handed to you below — never raw documents. The tags are
+    clean facts other checks produced: the borrower's citizenship/residency status and the loan
+    program. Judge eligibility the way an underwriter would, against a DEFENSIBLE DEFAULT:
+    - US CITIZEN → eligible for every program.
+    - PERMANENT RESIDENT (lawful) → eligible for every program.
+    - NON-PERMANENT RESIDENT → eligible for many programs WITH valid work authorization, but INVESTOR
+      OVERLAYS VARY and some statuses (e.g. DACA) are evolving — do NOT treat as automatically
+      eligible or ineligible; judge against the program and FLAG the overlay/status uncertainty.
+
+    BE HONEST AND FAIR. If the tags do not support a confident judgment — the status is missing,
+    unknown, or the eligibility genuinely depends on an investor overlay you cannot see — answer
+    "unknown". NEVER guess, and NEVER auto-clear a borrower. This is a fair-lending-sensitive
+    judgment: a human ratifies every verdict.
+
+    Your reasoning MUST cite the specific tags you relied on (by their tag id — id.citizenship,
+    program.type) and what each implied. Give a confidence that reflects genuine certainty.
+
+    STRICT OUTPUT — return ONLY a JSON OBJECT (no markdown fences, no prose):
+    {"value": "yes|no|unknown", "confidence": <0.0-1.0>, "reasoning": "<why — cite the tags>"}
+spec_version: 1

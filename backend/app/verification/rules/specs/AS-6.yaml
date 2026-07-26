@@ -1,0 +1,109 @@
+rule_id: AS-6
+name: Account ownership
+category: Assets
+kind: structural
+numeric_check: false
+criteria: >-
+  A bank statement used for assets must belong to a borrower on the loan. A CERTAIN match counts. A
+  PLAUSIBLE-but-unconfirmed match (a nickname, a possible former surname), OR a joint account with a
+  non-borrower co-holder, still counts but is SURFACED for a human to confirm with evidence. A holder
+  that does NOT resolve to a borrower is a third-party account and cannot be used without further
+  documentation.
+applicability:
+  scope: the loan file's bank statements
+  trigger: once per bank statement, on the account holder(s) vs the borrowers
+required_inputs:
+  - name: owner_matches_borrower
+    snapshot_path: tags.by_subject[<statement content_id>]["stmt.owner_matches_borrower"]
+    description: >-
+      the CONFIDENCE the account holder resolves to a borrower — yes (essentially certain) / unknown
+      (plausible, needs evidence) / no (a genuine non-match) (AI, tolerant of naming)
+  - name: holder_name_variance
+    snapshot_path: tags.by_subject[<statement content_id>]["stmt.holder_name_variance"]
+    description: >-
+      HOW the holder name differs from the borrower it matches — names the specific reason a plausible
+      match is surfaced (AI)
+  - name: non_borrower_co_holder
+    snapshot_path: tags.by_subject[<statement content_id>]["stmt.non_borrower_co_holder"]
+    description: >-
+      whether a joint account lists an ADDITIONAL holder who is not a borrower on the loan (AI)
+reference_values:
+  priya_validated: false
+  threshold_needs_signoff: false
+subject_enumeration: per_document
+subject_key_fields:
+  - content_id
+evidence_required: the account holder name(s) and whether they resolve to a borrower on the loan
+guideline_reference: "Fannie Mae Selling Guide B3-4.2-01 (Verification of Deposits and Assets)."
+spec_version: 2
+deterministic:
+  applicability:
+    tag: document.document_type
+    op: eq
+    value: bank_statement
+  # LP-404 — the FIRST multi-tag rule: it reads all THREE statement-holder tags (all on the document
+  # subject, produced together by the stmt_facts AI group) and combines them into Priya's three
+  # outcomes.
+  load_bearing_tags:
+    - stmt.owner_matches_borrower
+    - stmt.holder_name_variance
+    - stmt.non_borrower_co_holder
+  # The gate checks whether the statement's holder facts were READ at all — an absent/unreadable
+  # (`unknown`) holder_name_variance means the name could not be compared → couldnt_check. It
+  # DELIBERATELY does not gate on owner_matches: its `unknown` is Priya's FLAG-FOR-EVIDENCE value
+  # (routed to needs_review below), but the generic gate treats ANY `unknown` as couldnt_check, so
+  # gating on owner_matches would swallow the flag. (LP-404 — see docs/tickets/LP-404.md, D2/D3.)
+  gated_tags:
+    - stmt.holder_name_variance
+  outcomes:
+    # A genuine NON-match — a third-party account (a trust/LLC/estate, an unrelated person, or a
+    # CONFLICTING middle name = a likely different person). An OPEN finding — it does NOT count as the
+    # borrower's assets.
+    - verdict: fired
+      when_tags:
+        - {tag: stmt.owner_matches_borrower, op: eq, value: "no"}
+      reasoning: >-
+        the account holder does not resolve to a borrower on the loan — this appears to be a
+        third-party account (for example a trust, an LLC, or an unrelated person), not the borrower's
+      how_to_fix: >-
+        Confirm the account belongs to a borrower (a joint account with a borrower is acceptable), or
+        document the third party per the program's rules.
+    # PLAUSIBLE but not certain (a nickname, a possible maiden/married surname, an uncertain given-name
+    # variant). SURFACE for a human to confirm with evidence — the statement STILL COUNTS. The specific
+    # difference is on the holder_name_variance tag, shown with this finding.
+    - verdict: needs_review
+      when_tags:
+        - {tag: stmt.owner_matches_borrower, op: eq, value: "unknown"}
+      reasoning: >-
+        the account holder plausibly matches a borrower but the match is not certain (for example a
+        nickname or a possible former surname) — confirm the identity with supporting evidence. The
+        statement still counts as the borrower's assets pending that confirmation
+      how_to_fix: >-
+        Obtain evidence linking the account holder to the borrower (for example a document showing the
+        nickname or a prior name).
+    # A joint account whose ADDITIONAL holder is NOT a borrower (owner_matches is already yes here — a
+    # no/unknown matched an earlier branch). SURFACE for a human — the statement STILL COUNTS. The
+    # co-holder's name is on the non_borrower_co_holder tag, shown with this finding.
+    - verdict: needs_review
+      when_tags:
+        - {tag: stmt.non_borrower_co_holder, op: eq, value: "yes"}
+      reasoning: >-
+        this is a joint account with an additional holder who is not a borrower on the loan — confirm
+        the arrangement. The statement still counts as the borrower's assets
+      how_to_fix: >-
+        Confirm the non-borrower co-holder's relationship to the borrower, or document the account per
+        the program's rules.
+    # A CERTAIN match (exact, or a benign dropped middle) with no non-borrower co-holder — counts
+    # silently. A name variance on a `yes` match (a dropped middle) is benign and does NOT surface:
+    # routing on the match confidence keeps a genuine borrower's own account from being false-flagged.
+    - verdict: satisfied
+      when_tags:
+        - {tag: stmt.owner_matches_borrower, op: eq, value: "yes"}
+      reasoning: the account holder resolves to a borrower on the loan
+    # The holder facts passed the gate but no branch matched (owner_matches is neither yes/no/unknown,
+    # or absent) — fail closed, never a silent pass.
+    - verdict: couldnt_check
+      default: true
+      reasoning: >-
+        the account ownership for this statement could not be determined — the account-holder facts
+        were incomplete

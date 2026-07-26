@@ -1,0 +1,51 @@
+rule_id: ID-3
+name: DOB consistency
+category: Identity
+kind: structural
+numeric_check: false
+criteria: >-
+  A borrower's date of birth must be identical across every source that states it, after
+  normalizing the date FORMAT (03/04/1985 and 1985-03-04 are the same date). A differing DOB is a
+  discrepancy — a data-integrity or identity red flag.
+applicability:
+  scope: every borrower on the loan
+  trigger: once per borrower, comparing the DOB across all sources that state it
+required_inputs:
+  - name: dob
+    snapshot_path: tags.by_subject[<source content_id>]["id.dob"]
+    description: the borrower's date of birth as stated on each source document (parsed date)
+reference_values:
+  priya_validated: false
+  threshold_needs_signoff: false
+  guideline_text: >-
+    Fannie Mae Selling Guide B3-3.1 / general identity documentation — the borrower's date of birth
+    must be consistent across the application, credit, and identity documents. A differing DOB (beyond
+    a pure format difference) must be resolved before submission.
+subject_enumeration: per_borrower
+subject_key_fields:
+  - borrower
+evidence_required: the borrower's date of birth as stated on each source
+guideline_reference: >-
+  Identity verification — a borrower's DOB must match across the file. No single Selling-Guide
+  numeric threshold; normalize the date format and compare exactly.
+spec_version: 1
+consistency:
+  subject: per_borrower
+  gather_tag: id.dob
+  source_scope: borrower_documents
+  compare_mode: exact
+  normalization:
+    - date
+    - strip
+  confidence_floor: 0.5
+  on_agree:
+    verdict: satisfied
+    reasoning: "the date of birth matches across all {count} sources ({sources}) after date-format normalization"
+  on_disagree:
+    verdict: fired
+    reasoning: >-
+      the date of birth differs across sources ({sources}) — a differing DOB is a discrepancy to resolve
+    how_to_fix: >-
+      Confirm the borrower's date of birth and correct the source(s) that disagree. A genuine
+      mismatch across the 1003, credit report, or ID may indicate a data-entry error or identity
+      fraud and must be escalated.

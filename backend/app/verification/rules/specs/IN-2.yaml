@@ -1,0 +1,50 @@
+rule_id: IN-2
+name: Pay stub recency
+category: Income
+kind: structural         # rule_kinds.csv: IN-2 = structural, exact_match=true (deterministic_only)
+numeric_check: false
+criteria: >-
+  The most recent pay stub in the file must be recent enough to support current employment/income — its
+  pay date must be within the recency window of the file date. A stale most-recent pay stub means the
+  income evidence is out of date. Measured loan-level on the most recent pay date across the file.
+applicability:
+  scope: the loan file's pay stubs
+  trigger: once per loan, on the age of the most recent pay date
+required_inputs:
+  - name: days_since_pay
+    snapshot_path: 'tags.by_subject["loan"]["income.days_since_most_recent_pay"]'
+    description: days from the most recent pay date to the file (snapshot) date (derived)
+reference_values:
+  priya_validated: false
+  # IN-2 is structural, so threshold_needs_signoff MUST be false (the gate is calculative-only). The
+  # 30-day window is encoded as an agency default; confirm the exact window with Priya (Priya list).
+  threshold_needs_signoff: false
+  values:
+    paystub_recency_days: "30"
+  guideline_text: >-
+    Fannie Mae Selling Guide B3-3.1-02 — the most recent pay stub is generally dated within 30 days of
+    the application. The exact window is an agency default pending Priya confirmation.
+subject_enumeration: loan
+subject_key_fields:
+  - loan
+evidence_required: the most recent pay date and the recency window the comparison used
+guideline_reference: "Fannie Mae Selling Guide B3-3.1-02 (Standards for Employment Documentation)."
+spec_version: 1
+deterministic:
+  load_bearing_tags:
+    - income.days_since_most_recent_pay
+  gated_tags:
+    - income.days_since_most_recent_pay
+  operands:
+    age: {tag: income.days_since_most_recent_pay}
+    window: {reference: paystub_recency_days}
+  outcomes:
+    - verdict: fired
+      when_compare: {op: ">", left: age, right: window}
+      reasoning: >-
+        the most recent pay stub is {age} days old, beyond the {window}-day recency window — the income
+        evidence is out of date
+      how_to_fix: Obtain a current pay stub dated within the recency window before submission.
+    - verdict: satisfied
+      default: true
+      reasoning: the most recent pay stub is within the {window}-day recency window

@@ -1,0 +1,53 @@
+rule_id: IN-14
+name: Rental income support
+category: Income
+kind: judgmental         # rule_kinds.csv: IN-14 = judgmental (ai_judgment)
+numeric_check: false
+criteria: >-
+  Rental income used to qualify must be SUPPORTED — by the documents (lease / Schedule E / appraisal
+  rent schedule) and by a continuance + a vacancy/expense adjustment (gross rent is not net qualifying
+  income). The AI judges support + adjustment; a human ratifies EVERY verdict. Evaluated per borrower.
+applicability:
+  scope: every borrower using rental income
+  trigger: once per borrower, judged on documentation + the vacancy/expense adjustment
+required_inputs:
+  - name: continuance_3yr
+    snapshot_path: 'tags.by_subject[<borrower_id>]["income.continuance_3yr"]'
+    description: whether the rental income is likely to continue (AI)
+  - name: rental_support
+    snapshot_path: 'tags.by_subject["loan"]["occupancy.rental_support"]'
+    description: whether rental support docs are adequate (loan-level, shared into the borrower context)
+reference_values:
+  priya_validated: false
+  threshold_needs_signoff: false
+  guideline_text: >-
+    Fannie Mae Selling Guide B3-3.1-08 — rental income requires supporting documents and a vacancy/
+    expense adjustment (e.g. 75% of gross rent, or Schedule E net). Gross rent is not qualifying income.
+    The adjustment factor is a program value pending Priya.
+subject_enumeration: per_borrower
+subject_key_fields:
+  - borrower
+evidence_required: the rental income's supporting docs + the vacancy/expense adjustment and the judgment cited
+guideline_reference: "Fannie Mae Selling Guide B3-3.1-08 (rental income)."
+judgment:
+  subject: per_borrower
+  load_bearing_tags: [income.continuance_3yr, occupancy.rental_support]
+  reasoned_over: [income.continuance_3yr, occupancy.rental_support]
+  output_tag: income.rental_income_supportable
+  value_domain: ["yes", "no", "unknown"]
+  confidence_floor: 0.5
+  system_prompt: |
+    You are a senior mortgage underwriter making ONE reasoned judgment: is THIS borrower's rental income
+    SUPPORTED enough to use for qualifying?
+
+    You reason ONLY over the STRUCTURED TAGS below — never raw documents. The tags are clean facts (the
+    rental-support adequacy and the continuance signal). Judge the way an underwriter would: adequate
+    support (a lease / Schedule E / appraisal rent schedule) WITH a vacancy/expense adjustment and a
+    likely continuance qualifies; inadequate support, gross-rent-only with no adjustment, or an unclear
+    continuance does not.
+
+    BE HONEST. If the tags do not support a judgment, answer "unknown". NEVER guess. Cite the tags.
+
+    STRICT OUTPUT — return ONLY a JSON OBJECT:
+    {"value": "yes|no|unknown", "confidence": <0.0-1.0>, "reasoning": "<why — cite the tags>"}
+spec_version: 1

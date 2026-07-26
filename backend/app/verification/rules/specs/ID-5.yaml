@@ -1,0 +1,80 @@
+rule_id: ID-5
+name: ID expiration
+category: Identity
+kind: structural
+numeric_check: false
+criteria: >-
+  EACH borrower's government photo ID must be UNEXPIRED at closing: its expiration date must be on or
+  after the loan's closing date. An ID that expires before closing is not acceptable evidence of
+  identity. Evaluated PER BORROWER (LP-389-A) — one verdict per borrower, comparing THAT borrower's
+  attributed-ID expiration to the loan's single closing date; one borrower's ID never covers another's.
+  A borrower with no attributable ID cannot be judged — that is couldnt_check (with a reason), never a
+  fired finding and never a guessed pass.
+applicability:
+  scope: every borrower's government photo ID + the loan's closing date
+  trigger: once per borrower, comparing that borrower's ID expiration to the closing date
+required_inputs:
+  - name: id_expiration
+    snapshot_path: 'tags.by_subject[<borrower_id>]["id.borrower_id_expiration"]'
+    description: >-
+      the borrower's government-ID expiration date (derived PER BORROWER from the driver's-licence
+      belongs_to-attributed to them — the document-subject id.id_expiration promoted to the borrower,
+      LP-389-A)
+  - name: closing_date
+    snapshot_path: 'tags.by_subject["loan"]["contract.loan_closing_date"]'
+    description: >-
+      the loan's single closing date (derived at loan level from the contract document's
+      contract.closing_date, LP-389-A)
+reference_values:
+  priya_validated: false
+  # PRIYA / HUMAN-VERIFY: the `>=` vs `>` boundary at closing (is an ID expiring ON the closing date
+  # valid?) and any acceptable grace period are UNSURE guideline values. The encoded DEFAULT is
+  # `>=` (valid ON the closing date); it is documented in guideline_text + LP-328's Priya list.
+  # threshold_needs_signoff mirrors rule_kinds.csv (false — ID-5 carries no NUMERIC threshold to
+  # sign off; its unsure value is the date-operator boundary, tracked in the Priya list, not here).
+  threshold_needs_signoff: false
+  guideline_text: >-
+    Government photo identity documents must be unexpired at closing. The encoded rule is
+    id_expiration >= closing_date (an ID valid ON the closing date is accepted) — a DEFAULT pending
+    the domain expert's confirmation of the >=/> boundary and any grace period. No single
+    Selling-Guide numeric threshold; identity-evidence acceptability is lender/investor-doc-driven.
+subject_enumeration: per_borrower
+subject_key_fields:
+  - borrower
+evidence_required: the borrower's ID expiration date and the closing date the comparison used
+guideline_reference: >-
+  Identity documentation — a government photo ID must be unexpired at closing (id_expiration >=
+  closing_date). The >=/> boundary + any grace period are a lender/investor documentation standard
+  pending Priya (threshold_needs_signoff).
+spec_version: 1
+deterministic:
+  load_bearing_tags:
+    - id.borrower_id_expiration
+    - contract.loan_closing_date
+  gated_tags:
+    - id.borrower_id_expiration
+    - contract.loan_closing_date
+  operands:
+    id_expiration:
+      tag: id.borrower_id_expiration        # PER BORROWER (from the enumerated borrower's tag map)
+      type: date
+    closing_date:
+      loan_tag: contract.loan_closing_date  # the loan's ONE closing date (always loan-level)
+      type: date
+  outcomes:
+    - verdict: fired
+      # Expired at closing: expiration strictly BEFORE the closing date. `>=` is the encoded validity
+      # rule, so `==` closing is NOT fired (valid on the day) — the Priya-pending boundary.
+      when_compare:
+        op: "<"
+        left: id_expiration
+        right: closing_date
+      reasoning: >-
+        the ID expiration {id_expiration} is before the closing date {closing_date} — the ID is
+        expired at closing
+      how_to_fix: >-
+        Obtain a current, unexpired government photo ID for the borrower before closing (or confirm
+        the closing date).
+    - verdict: satisfied
+      default: true
+      reasoning: the ID is unexpired at closing (expiration is on or after the closing date)

@@ -26,6 +26,7 @@ _TASK_MODULES = [
     "app.tasks.document_processing",
     "app.tasks.needs",
     "app.tasks.cross_source",
+    "app.tasks.verification_rules",  # LP-365 — the governed snapshot/rules pass
 ]
 
 celery_app = Celery(

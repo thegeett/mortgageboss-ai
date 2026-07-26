@@ -1,0 +1,90 @@
+# OC-2 — Occupancy reasonableness — AI-at-rule-time JUDGMENT rule SPEC (LP-319 → LP-324)
+#
+# OC-2 is now DATA: the generic judgment evaluator runs THIS spec (no per-rule Python). The
+# procedural armor (reason over tags, MANDATORY ratification, confidence-gated, fail-closed) lives
+# in the evaluator; this spec supplies the question + the tags it reasons over.
+
+rule_id: OC-2
+name: Occupancy reasonableness
+category: Occupancy
+
+kind: judgmental          # must equal rule_kinds.csv (OC-2 = judgmental)
+numeric_check: false      # a judgment rule has no deterministic numeric bookend
+
+criteria: >-
+  Is the borrower's STATED occupancy (primary / second home / investment) plausible for this loan,
+  judged against the structured signals — address consistency, the type of the current address, and
+  the subject-property address consistency across the file? A stated primary the signals contradict
+  is not reasonable; a stated occupancy the signals support is. The AI judges plausibility; a human
+  ratifies every verdict.
+
+applicability:
+  scope: >-
+    Any loan file with a stated occupancy and the occupancy structural-fact tags produced
+    (occupancy.stated + at least the consistency signal). Absent structural tags → couldnt_check.
+  trigger: >-
+    Evaluated once per loan (the loan-level occupancy subject), after the occupancy structural tags
+    are produced.
+
+required_inputs:
+  - name: stated_occupancy
+    snapshot_path: 'tags.by_subject["loan"]["occupancy.stated"]'
+    description: The occupancy the borrower stated (primary / second / investment).
+  - name: consistency_signal
+    snapshot_path: 'tags.by_subject["loan"]["occupancy.consistent_with_signals"]'
+    description: Whether address/other signals are consistent with the stated occupancy.
+
+# A judgment rule has no numeric threshold. priya_validated / threshold_needs_signoff mirror
+# rule_kinds.csv (both false for OC-2).
+reference_values:
+  priya_validated: false
+  threshold_needs_signoff: false
+
+subject_enumeration: loan          # the loan-level subject (LP-324 executable key)
+subject_key_fields: [loan]
+
+evidence_required: >-
+  The stated occupancy + the consistency signals the judgment cited, inline on the finding, so the
+  ratifying human sees WHY the AI judged reasonable / not reasonable.
+
+guideline_reference: "Fannie Mae Selling Guide B2-1.1 (Occupancy Types) — occupancy must be reasonable and consistent with the file."
+
+# LP-324 / LP-319 — the MACHINE-READABLE judgment body. The generic judgment evaluator runs THIS.
+judgment:
+  subject: loan                    # the tags-layer subject the loan-level tags live under
+  # Gated (fail-closed) structural inputs — without a stated occupancy + a consistency signal there
+  # is nothing to judge (absent/unknown → couldnt_check).
+  load_bearing_tags: [occupancy.stated, occupancy.consistent_with_signals]
+  # The structural-fact tags the AI reasons over (never raw docs).
+  reasoned_over: [occupancy.stated, occupancy.consistent_with_signals, id.current_address_type, property.address_normalized_match]
+  output_tag: occupancy.reasonable     # the rule_judgment tag produced
+  value_domain: ["yes", "no", "unknown"]     # ALWAYS includes unknown (quoted: YAML reads bare yes/no as bool)
+  confidence_floor: 0.5
+  system_prompt: |
+    You are a senior mortgage underwriter making a REASONED JUDGMENT about ONE question: is the
+    borrower's STATED occupancy plausible for this loan?
+
+    You reason ONLY over the STRUCTURED TAGS handed to you below — never raw documents. The tags are
+    clean facts other checks already produced: what occupancy the borrower stated, whether address and
+    other signals are consistent with it, the type of the borrower's current address, and whether the
+    subject-property address is consistent across the file. Judge plausibility the way an underwriter
+    would: a stated PRIMARY residence that the signals contradict (e.g. the address signals point
+    elsewhere, or the subject looks like a second home / investment) is NOT reasonable; a stated
+    occupancy the signals support IS reasonable.
+
+    BE HONEST. If the tags do not support a judgment — they are missing, unknown, or genuinely
+    ambiguous — answer "unknown". NEVER guess, and NEVER treat a stated value as self-proving (the
+    borrower's claim is the thing under scrutiny, not the evidence).
+
+    Your reasoning MUST cite the SPECIFIC tags you relied on (by their tag id) and say what each
+    implied. Give a confidence that reflects genuine certainty.
+
+    STRICT OUTPUT — return ONLY a JSON OBJECT (no markdown fences, no prose before or after):
+    {
+      "value": "yes|no|unknown",
+      "confidence": <0.0-1.0>,
+      "reasoning": "<why — cite the specific tags (occupancy.stated, occupancy.consistent_with_signals,
+                     …) and what each implied>"
+    }
+
+spec_version: 1

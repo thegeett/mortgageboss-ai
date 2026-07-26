@@ -6,6 +6,7 @@ the cross-source findings. Cross-company → 404.
 """
 
 from collections.abc import AsyncIterator
+from uuid import uuid4
 
 import pytest_asyncio
 from app.core.database import get_db
@@ -13,6 +14,7 @@ from app.core.jwt import create_access_token
 from app.core.security import hash_password
 from app.main import app
 from app.models import (
+    Borrower,
     Company,
     Finding,
     FindingCategory,
@@ -23,11 +25,14 @@ from app.models import (
     UserRole,
 )
 from app.models.base import utcnow
+from app.models.finding import EvaluationOutcome
 from app.models.verification import Verification, VerificationStatus, VerificationTrigger
 from app.services.cross_source import assemble_cross_source_context, compute_input_fingerprint
+from app.services.documents import create_document
 from app.services.loan_files import create_loan_file
 from app.services.verifications import mark_verification_stale
 from app.verification.confidence import AggressionLevel
+from app.verification.snapshot.documents_section import document_filenames_by_content_id
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
@@ -196,6 +201,291 @@ async def test_get_status_reports_staleness_and_findings(
     assert f["source_page"] == 1
 
 
+def _rule_finding(
+    loan_file: LoanFile,
+    *,
+    rule_id: str,
+    outcome: EvaluationOutcome,
+    status: FindingStatus,
+    message: str,
+    subject_key: str,
+    ratification_pending: bool = False,
+) -> Finding:
+    """A GOVERNED rule-engine finding (evaluation_outcome present + inline provenance) — LP-316/375."""
+    return Finding(
+        loan_file_id=loan_file.id,
+        rule_id=rule_id,
+        origin=FindingOrigin.DETERMINISTIC_RULE,
+        confidence=1.0,
+        status=status,
+        category=FindingCategory.CROSS_SOURCE,
+        message=message,
+        evaluation_outcome=outcome,
+        subject_key=subject_key,
+        load_bearing_tags=[
+            {
+                "tag_id": "id.current_address_type",
+                "value": "unknown",
+                "confidence": 0.9,
+                "reasoning": "the doc states no type",
+                "source_facts": ["doc1"],
+            }
+        ],
+        details={"gated_pending_signoff": ratification_pending, "subject_key": subject_key},
+    )
+
+
+async def test_rule_findings_separate_and_satisfied_is_reachable(
+    client: AsyncClient, db: AsyncSession
+) -> None:
+    """LP-375 — governed rule findings surface in a SEPARATE typed list (incl. `satisfied`, previously
+    dropped by the RED/YELLOW filter); the legacy sweep stays in `findings`; the two never merge/sum."""
+    company, _user, token = await _user_and_token(db, slug="acme", email="u@acme.com")
+    loan_file = await create_loan_file(db, company_id=company.id)
+    # A LEGACY sweep finding (ai_cross_source, no evaluation_outcome) → Tab 5 / `findings`.
+    await _add_finding(db, loan_file, confidence=0.8)
+    # GOVERNED rule findings (deterministic_rule, evaluation_outcome present) → Tabs 1-4 / `rule_findings`.
+    db.add(
+        _rule_finding(
+            loan_file,
+            rule_id="ID-4",
+            outcome=EvaluationOutcome.SATISFIED,
+            status=FindingStatus.GREEN,
+            message="the address agrees across sources",
+            subject_key="b1",
+        )
+    )
+    db.add(
+        _rule_finding(
+            loan_file,
+            rule_id="ID-4",
+            outcome=EvaluationOutcome.COULDNT_CHECK,
+            status=FindingStatus.YELLOW,
+            message="the address-type classification is unknown",
+            subject_key="b2",
+            ratification_pending=True,
+        )
+    )
+    await db.commit()
+
+    body = (
+        await client.get(f"{API}/{loan_file.display_id}/verification", headers=_auth(token))
+    ).json()
+
+    # TWO typed lists → structurally unmergeable. The sweep stays put; the governed findings are elsewhere.
+    assert "findings" in body and "rule_findings" in body
+    assert [f["origin"] for f in body["findings"]] == [
+        "ai_cross_source"
+    ]  # legacy only — no rule findings
+    assert len(body["findings"]) == 1  # the rule findings are NOT summed into this count
+
+    outcomes = {rf["evaluation_outcome"] for rf in body["rule_findings"]}
+    assert outcomes == {"satisfied", "couldnt_check"}  # Tab 2 (`satisfied`) is REACHABLE
+
+    # The honesty contract: couldnt_check carries its REASON and is NOT typed satisfied / not_applicable.
+    cc = next(rf for rf in body["rule_findings"] if rf["evaluation_outcome"] == "couldnt_check")
+    assert cc["message"] and cc["evaluation_outcome"] not in ("satisfied", "not_applicable")
+    # The governed shape carries the SPEC guideline (never AI-recalled) + inline provenance.
+    assert cc["guideline"]  # loaded from ID-4's spec at read time
+    assert cc["load_bearing_tags"][0]["tag_id"] == "id.current_address_type"
+    # LP-376-B: ID-4 is a CONSISTENCY rule, and this is a couldnt_check — no AI verdict was made, so the
+    # ratification badge is FALSE (it is NOT derived from gated_pending_signoff = not priya_validated).
+    assert cc["ratification_pending"] is False
+    assert cc["subject_key"] == "b2"  # the stable content-id (human legibility is LP-376's)
+
+
+# --- LP-377-B: the subject label — a finding names its subject, never a content-id ---------------
+
+
+async def _governed_finding_label(client: AsyncClient, token: str, loan_file: LoanFile) -> str:
+    """GET the file's status and return the single governed finding's subject_label."""
+    body = (
+        await client.get(f"{API}/{loan_file.display_id}/verification", headers=_auth(token))
+    ).json()
+    return body["rule_findings"][0]["subject_label"]
+
+
+async def test_loan_subject_reads_loan_level(client: AsyncClient, db: AsyncSession) -> None:
+    company, _user, token = await _user_and_token(db, slug="acme", email="u@acme.com")
+    loan_file = await create_loan_file(db, company_id=company.id)
+    db.add(
+        _rule_finding(
+            loan_file,
+            rule_id="OC-2",
+            outcome=EvaluationOutcome.COULDNT_CHECK,
+            status=FindingStatus.YELLOW,
+            message="occupancy could not be determined",
+            subject_key="loan",
+        )
+    )
+    await db.commit()
+    assert await _governed_finding_label(client, token, loan_file) == "Loan-level"
+
+
+async def test_borrower_subject_reads_the_name(client: AsyncClient, db: AsyncSession) -> None:
+    company, _user, token = await _user_and_token(db, slug="acme", email="u@acme.com")
+    loan_file = await create_loan_file(db, company_id=company.id)
+    borrower = Borrower(
+        loan_file_id=loan_file.id, first_name="Dana", last_name="Sample", is_primary=True
+    )
+    db.add(borrower)
+    await db.flush()
+    db.add(
+        _rule_finding(
+            loan_file,
+            rule_id="ID-8",
+            outcome=EvaluationOutcome.NEEDS_REVIEW,
+            status=FindingStatus.YELLOW,
+            message="citizenship needs review",
+            subject_key=str(borrower.id),
+        )
+    )
+    await db.commit()
+    # The borrower's UUID resolves to their name — never the raw id.
+    assert await _governed_finding_label(client, token, loan_file) == "Dana Sample"
+
+
+async def test_document_subject_reads_the_filename_via_the_content_id_bridge(
+    client: AsyncClient, db: AsyncSession
+) -> None:
+    """THE BRIDGE, end-to-end (LP-377-B): a governed per-document finding whose subject_key is a document
+    content-id resolves — through the read-path rebuild of ``{content_id → filename}`` — to the actual
+    filename a processor recognises, never the raw hash."""
+    company, _user, token = await _user_and_token(db, slug="acme", email="u@acme.com")
+    loan_file = await create_loan_file(db, company_id=company.id)
+    await create_document(
+        db,
+        loan_file=loan_file,
+        document_id=uuid4(),
+        filename="Statement_Mar2026.pdf",
+        mime_type="application/pdf",
+        size=1024,
+        storage_path="acme/lf/doc.pdf",
+        uploaded_by_user_id=None,
+    )
+    await db.flush()
+    # Learn the content-id this document gets (the SAME derivation the read path uses).
+    cid_map = await document_filenames_by_content_id(db, loan_file)
+    (content_id,) = list(cid_map)  # exactly one document on the file
+    db.add(
+        _rule_finding(
+            loan_file,
+            rule_id="ID-7",
+            outcome=EvaluationOutcome.COULDNT_CHECK,
+            status=FindingStatus.YELLOW,
+            message="a document in the file could not be classified",
+            subject_key=content_id,
+        )
+    )
+    await db.commit()
+
+    body = (
+        await client.get(f"{API}/{loan_file.display_id}/verification", headers=_auth(token))
+    ).json()
+    rf = body["rule_findings"][0]
+    assert rf["subject_label"] == "Statement_Mar2026.pdf"  # the filename, resolved via the bridge
+    assert rf["subject_key"] == content_id  # the KEY is untouched (LP-322's reconciler identity)
+    assert content_id not in rf["subject_label"]  # the hash never reaches the label
+
+
+async def test_document_subject_gone_reads_honestly_not_a_hash(
+    client: AsyncClient, db: AsyncSession
+) -> None:
+    """A per-document finding whose content-id is not among the file's current documents (removed / a
+    Tab-3 no_longer_applies subject) reads honestly — never the raw hash."""
+    company, _user, token = await _user_and_token(db, slug="acme", email="u@acme.com")
+    loan_file = await create_loan_file(db, company_id=company.id)
+    db.add(
+        _rule_finding(
+            loan_file,
+            rule_id="ID-9",
+            outcome=EvaluationOutcome.NO_LONGER_APPLIES,
+            status=FindingStatus.GREEN,
+            message="the power of attorney is no longer in the file",
+            subject_key="doc067c28e496b10b5f",  # a content-id with no current document
+        )
+    )
+    await db.commit()
+    label = await _governed_finding_label(client, token, loan_file)
+    assert label == "a document no longer in this file"
+    assert "doc067c" not in label
+
+
+# --- LP-377-C Fix 3: governed findings coupled to their run's completion ------------------------
+
+
+async def _add_run(
+    db: AsyncSession, loan_file: LoanFile, *, status: VerificationStatus
+) -> Verification:
+    run = Verification(
+        loan_file_id=loan_file.id,
+        status=status,
+        trigger=VerificationTrigger.MANUAL,
+        started_at=utcnow(),
+        completed_at=utcnow() if status is not VerificationStatus.RUNNING else None,
+    )
+    db.add(run)
+    await db.flush()
+    return run
+
+
+async def test_rule_findings_flagged_stale_when_latest_run_did_not_complete(
+    client: AsyncClient, db: AsyncSession
+) -> None:
+    """LP-377-C Fix 3 — the fourth fail-open's tell: governed findings shown while the LATEST run's rule
+    engine did not complete (it FAILED) are flagged stale, AND still shown (LP-322 carry-forward preserved —
+    NOT a verification_id filter, which would gut the reconciler)."""
+    company, _user, token = await _user_and_token(db, slug="acme", email="u@acme.com")
+    loan_file = await create_loan_file(db, company_id=company.id)
+    # A governed finding carried forward from an earlier run.
+    db.add(
+        _rule_finding(
+            loan_file,
+            rule_id="ID-7",
+            outcome=EvaluationOutcome.COULDNT_CHECK,
+            status=FindingStatus.YELLOW,
+            message="a document in the file could not be classified",
+            subject_key="doc1",
+        )
+    )
+    # The LATEST run FAILED — its governed pass never completed (the LP-377-C scenario).
+    await _add_run(db, loan_file, status=VerificationStatus.FAILED)
+    await db.commit()
+
+    body = (
+        await client.get(f"{API}/{loan_file.display_id}/verification", headers=_auth(token))
+    ).json()
+    assert (
+        body["rule_findings_stale"] is True
+    )  # the surface says the findings are from an earlier run
+    assert len(body["rule_findings"]) == 1  # ...and STILL shows them (carry-forward is not broken)
+
+
+async def test_rule_findings_not_stale_when_latest_run_completed(
+    client: AsyncClient, db: AsyncSession
+) -> None:
+    """A COMPLETED latest run means the governed pass finished — the findings are current, not stale."""
+    company, _user, token = await _user_and_token(db, slug="acme", email="u@acme.com")
+    loan_file = await create_loan_file(db, company_id=company.id)
+    db.add(
+        _rule_finding(
+            loan_file,
+            rule_id="ID-7",
+            outcome=EvaluationOutcome.COULDNT_CHECK,
+            status=FindingStatus.YELLOW,
+            message="a document in the file could not be classified",
+            subject_key="doc1",
+        )
+    )
+    await _add_run(db, loan_file, status=VerificationStatus.COMPLETED)
+    await db.commit()
+
+    body = (
+        await client.get(f"{API}/{loan_file.display_id}/verification", headers=_auth(token))
+    ).json()
+    assert body["rule_findings_stale"] is False
+
+
 async def test_verification_is_tenant_scoped(client: AsyncClient, db: AsyncSession) -> None:
     _company_a, _ua, token_a = await _user_and_token(db, slug="acme", email="a@acme.com")
     company_b, _ub, _tb = await _user_and_token(db, slug="other", email="b@other.com")
@@ -293,6 +583,70 @@ async def test_cached_return_reconciles_staleness(
         await client.get(f"{API}/{loan_file.display_id}/verification", headers=_auth(token))
     ).json()
     assert status["stale"] is False  # reconciled — matching inputs means not stale
+
+
+def _spy_both_delays(monkeypatch, calls: list) -> None:
+    """Spy BOTH worker enqueues (the AI sweep + the governed rule pass) — LP-377 asserts the GOVERNED
+    pass re-runs on a rule-relevant change, so both are captured."""
+    monkeypatch.setattr(
+        "app.tasks.cross_source.run_cross_source_pass.delay",
+        lambda *a: calls.append(("sweep", *a)),
+        raising=True,
+    )
+    monkeypatch.setattr(
+        "app.tasks.verification_rules.run_rule_engine_pass.delay",
+        lambda *a: calls.append(("rules", *a)),
+        raising=True,
+    )
+
+
+async def test_rule_relevant_change_reruns_the_governed_pass(
+    client: AsyncClient, db: AsyncSession, monkeypatch
+) -> None:
+    """LP-377 BUG 3 — the one that already bit. A RULE/spec/tag change with UNCHANGED documents must
+    re-run the governed pass, not serve a prior run's findings from a version of the engine that no
+    longer exists. Seed a completed run whose stored fingerprint matches the current inputs under the
+    CURRENT engine, then change the ENGINE (a rule edit) → the POST must MISS the cache and enqueue BOTH
+    passes on a fresh RUNNING run. On the pre-fix code (the engine ignored in the key) this HIT the
+    cache and NEITHER pass ran — exactly the ~12-hour-stale render that cost a human an afternoon."""
+    calls: list = []
+    _spy_both_delays(monkeypatch, calls)
+    company, _user, token = await _user_and_token(db, slug="acme", email="u@acme.com")
+    loan_file = await create_loan_file(db, company_id=company.id)
+    # The stored fingerprint matches the current inputs UNDER THE CURRENT ENGINE (a genuine no-op today).
+    await _seed_completed_run(db, loan_file, fingerprint=await _current_fingerprint(db, loan_file))
+    await db.commit()
+
+    # The engine changes (a rule/spec/tag edit) while the documents do NOT.
+    monkeypatch.setattr(
+        "app.services.cross_source.engine_fingerprint",
+        lambda: "engine-token-after-a-rule-change",
+        raising=True,
+    )
+    resp = await client.post(f"{API}/{loan_file.display_id}/verification/run", headers=_auth(token))
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "running"  # a FRESH run — the cache MISSED on the engine change
+    assert {c[0] for c in calls} == {
+        "sweep",
+        "rules",
+    }  # BOTH re-ran — the governed pass is not stale
+
+
+async def test_governed_pass_enqueued_alongside_the_sweep_on_a_miss(
+    client: AsyncClient, db: AsyncSession, monkeypatch
+) -> None:
+    """A cache miss (no prior run) enqueues the governed pass ALONGSIDE the sweep — so the cache never
+    skips the rule engine on a real re-run (the fail-open the LP-377 key closes)."""
+    calls: list = []
+    _spy_both_delays(monkeypatch, calls)
+    company, _user, token = await _user_and_token(db, slug="acme", email="u@acme.com")
+    loan_file = await create_loan_file(db, company_id=company.id)
+    await db.commit()
+
+    resp = await client.post(f"{API}/{loan_file.display_id}/verification/run", headers=_auth(token))
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "running"
+    assert {c[0] for c in calls} == {"sweep", "rules"}
 
 
 # --- The aggression dial (LP-79) ---------------------------------------------
@@ -525,12 +879,14 @@ async def test_stuck_running_run_is_reconciled_to_failed_on_read(
 
     company, _user, token = await _user_and_token(db, slug="acme", email="u@acme.com")
     loan_file = await create_loan_file(db, company_id=company.id)
-    # A run that started 10 minutes ago and never finished (the worker died).
+    # A run RUNNING far past the watchdog timeout (LP-377-C raised it to 1500s so it clears the governed
+    # pass's 1200s hard limit) — the governed pass was hard-killed and could not commit its own FAILED, so
+    # the watchdog is the only thing that can fail it.
     stuck = Verification(
         loan_file_id=loan_file.id,
         status=VerificationStatus.RUNNING,
         trigger=VerificationTrigger.MANUAL,
-        started_at=utcnow() - timedelta(minutes=10),
+        started_at=utcnow() - timedelta(minutes=30),
     )
     db.add(stuck)
     await db.flush()
@@ -547,14 +903,17 @@ async def test_stuck_running_run_is_reconciled_to_failed_on_read(
 
 
 async def test_a_recent_running_run_is_left_alone(client: AsyncClient, db: AsyncSession) -> None:
-    """A run RUNNING within the timeout is NOT touched (the watchdog never races a healthy run)."""
+    """A run RUNNING within the timeout is NOT touched — critically, LP-377-C's governed pass legitimately
+    runs ~282s (and a large file longer), so a run RUNNING for 10 minutes must NOT be raced to FAILED."""
+    from datetime import timedelta
+
     company, _user, token = await _user_and_token(db, slug="acme", email="u@acme.com")
     loan_file = await create_loan_file(db, company_id=company.id)
     fresh = Verification(
         loan_file_id=loan_file.id,
         status=VerificationStatus.RUNNING,
         trigger=VerificationTrigger.MANUAL,
-        started_at=utcnow(),
+        started_at=utcnow() - timedelta(minutes=10),
     )
     db.add(fresh)
     await db.flush()

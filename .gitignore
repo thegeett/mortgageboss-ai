@@ -61,3 +61,14 @@ logs/
 *.db
 *.sqlite
 *.sqlite3
+
+# ---- PII artifacts (LP-210) ----
+# Generated real-loan-file snapshot artifacts contain borrower NPI (names, DOB,
+# financial profile) — never commit them. Generate locally for review only.
+/docs/tickets/LP-210-*-snapshot.json
+
+# ---- DB-sourced calibration worksheets (LP-379-D) ----
+# write_db_worksheets() generates the calibration worksheet from a REAL DB loan file for a
+# human labeling round — it carries real borrower PII (names, addresses). NEVER commit it.
+# The generator's guard only writes outside the repo or under a calibration-local/ dir.
+calibration-local/

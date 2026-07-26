@@ -71,7 +71,9 @@ class Form1099Extraction(BaseModel):
     # --- Typed core (value + source) ---------------------------------------- #
     form_subtype: TypedField[str] = Field(default_factory=TypedField)  # NEC/INT/DIV/MISC/R
     payer_name: TypedField[str] = Field(default_factory=TypedField)
-    payer_tin: TypedField[str] = Field(default_factory=TypedField)
+    payer_tin: TypedField[str] = Field(
+        default_factory=TypedField
+    )  # SENSITIVE — masked in snapshot (LP-206)
     recipient_name: TypedField[str] = Field(default_factory=TypedField)
     recipient_tin: TypedField[str] = Field(default_factory=TypedField)  # SENSITIVE
     tax_year: TypedField[int] = Field(default_factory=TypedField)

@@ -1,0 +1,53 @@
+rule_id: IN-13
+name: Other income continuance
+category: Income
+kind: judgmental         # rule_kinds.csv: IN-13 = judgmental (ai_judgment)
+numeric_check: false
+criteria: >-
+  "Other" income (e.g. child support, alimony, a pension, an award) may be used only if it is likely to
+  CONTINUE at least 3 years and is documented (receipt history + the award/order). The AI judges
+  continuance + documentation against the income type; a human ratifies EVERY verdict. Evaluated per
+  borrower.
+applicability:
+  scope: every borrower with "other" income
+  trigger: once per borrower, judged on continuance + documentation
+required_inputs:
+  - name: continuance_3yr
+    snapshot_path: 'tags.by_subject[<borrower_id>]["income.continuance_3yr"]'
+    description: whether the income is likely to continue 3+ years (AI)
+  - name: income_type
+    snapshot_path: 'tags.by_subject[<borrower_id>]["income.type"]'
+    description: the income category (context — "other", "rental", etc.)
+reference_values:
+  priya_validated: false
+  threshold_needs_signoff: false
+  guideline_text: >-
+    Fannie Mae Selling Guide B3-3.1-09 — non-employment income must be likely to continue for at least 3
+    years and be documented (the source, the receipt history, and any ending date). The judgment flags
+    uncertainty and never auto-clears.
+subject_enumeration: per_borrower
+subject_key_fields:
+  - borrower
+evidence_required: the other income's continuance + documentation and the judgment cited
+guideline_reference: "Fannie Mae Selling Guide B3-3.1-09 (other sources of income / continuance)."
+judgment:
+  subject: per_borrower
+  load_bearing_tags: [income.continuance_3yr]
+  reasoned_over: [income.continuance_3yr, income.type]
+  output_tag: income.other_income_continues
+  value_domain: ["yes", "no", "unknown"]
+  confidence_floor: 0.5
+  system_prompt: |
+    You are a senior mortgage underwriter making ONE reasoned judgment: may THIS borrower's "other"
+    income be used — is it likely to CONTINUE 3+ years and documented?
+
+    You reason ONLY over the STRUCTURED TAGS below — never raw documents. The tags are clean facts (the
+    continuance signal and the income type). Judge the way an underwriter would: income with a defined
+    end inside 3 years (e.g. child support ending in 18 months) does NOT qualify; stable, documented,
+    continuing income does. Missing documentation or an unclear end date is uncertainty, not a pass.
+
+    BE HONEST. If the tags do not support a judgment, answer "unknown". NEVER guess. Cite the tags.
+
+    STRICT OUTPUT — return ONLY a JSON OBJECT:
+    {"value": "yes|no|unknown", "confidence": <0.0-1.0>, "reasoning": "<why — cite the tags>"}
+spec_version: 1

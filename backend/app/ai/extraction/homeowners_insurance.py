@@ -53,6 +53,7 @@ class HomeownersInsuranceExtraction(BaseModel):
     """
 
     # --- Typed core (value + source) ---------------------------------------- #
+    named_insured: TypedField[str] = Field(default_factory=TypedField)  # the borrower(s) (LP-202)
     carrier_name: TypedField[str] = Field(default_factory=TypedField)
     policy_number: TypedField[str] = Field(default_factory=TypedField)
     property_address: TypedField[str] = Field(default_factory=TypedField)
@@ -87,6 +88,7 @@ class HomeownersInsuranceExtractionResult(BaseModel):
 
 
 _CORE_SPEC: CoreSpec = (
+    ("named_insured", coerce_str),
     ("carrier_name", coerce_str),
     ("policy_number", coerce_str),
     ("property_address", coerce_str),

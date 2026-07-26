@@ -1,0 +1,89 @@
+rule_id: ID-4
+name: Current address consistency
+category: Identity
+kind: structural
+numeric_check: false
+criteria: >-
+  A borrower's CURRENT RESIDENCE address must agree across every source that states it, tolerant
+  of formatting / abbreviation variance. Compare residence-to-residence only: a mailing / PO-box or
+  an explicitly-former (prior) address is not a discrepancy. A driver's licence STATES the holder's
+  residence of record (LP-335 — it is NOT presumed stale), so a DL address that genuinely differs
+  from the 1003 residence SURFACES for reconciliation rather than being silently dropped. NOTE:
+  whether an outdated DL should FIRE vs route to review is pending Priya sign-off (priya_validated
+  is false) — the current behavior surfaces the mismatch (fail toward catching, not masking).
+applicability:
+  scope: every borrower on the loan
+  trigger: once per borrower, comparing residence-typed addresses across sources
+required_inputs:
+  - name: address_normalized
+    snapshot_path: tags.by_subject[<source content_id>]["id.address_normalized"]
+    description: the canonicalized address as stated on each source document (AI)
+  - name: current_address_type
+    snapshot_path: tags.by_subject[<source content_id>]["id.current_address_type"]
+    description: >-
+      the type of each stated address (residence / mailing / prior) — the gather filter that keeps
+      the compare residence-to-residence (the absent-not-empty address trap)
+reference_values:
+  priya_validated: false
+  threshold_needs_signoff: false
+subject_enumeration: per_borrower
+subject_key_fields:
+  - borrower
+evidence_required: the borrower's current residence address as stated on each source
+guideline_reference: >-
+  Identity verification — the borrower's current residence must be consistent across the file. No
+  single Selling-Guide numeric threshold; compare residence-to-residence, tolerant of formatting.
+spec_version: 1
+consistency:
+  subject: per_borrower
+  gather_tag: id.address_normalized
+  source_scope: borrower_documents
+  gather_filter:
+    tag: id.current_address_type
+    op: eq
+    value: residence
+  compare_mode: fuzzy
+  normalization:
+    - casefold
+    - drop_punct
+    - collapse_ws
+    - strip
+  confidence_floor: 0.5
+  judge:
+    system_prompt: |-
+      You are a mortgage loan processor comparing a single borrower's CURRENT RESIDENCE address as
+      stated on multiple source documents. The addresses have already been canonicalized and did NOT
+      match exactly. Decide whether the differences are a BENIGN VARIANCE (the same physical
+      residence written differently — abbreviations like "St" vs "Street" or "N" vs "North", unit
+      formats like "Apt 4" vs "#4", ZIP+4 vs 5-digit, minor typos) or a REAL DISCREPANCY (a
+      genuinely different residence — different street number, street name, city, or state).
+
+      You are given ONLY the differing address values and their source ids — never the rest of the
+      file. Do not speculate beyond the addresses shown.
+
+      Respond with ONLY a JSON object:
+      {"value": "agree" | "disagree" | "unknown", "confidence": <0..1>, "reasoning": "<one sentence>"}
+      "agree" = the same residence (benign variance); "disagree" = a real discrepancy;
+      "unknown" = you cannot tell from the values shown.
+    value_domain:
+      - agree
+      - disagree
+      - unknown
+    consistent_value: agree
+    inconsistent_value: disagree
+  on_agree:
+    verdict: satisfied
+    reasoning: >-
+      the borrower's current residence agrees across all {count} sources ({sources}) after tolerant
+      comparison
+  on_disagree:
+    verdict: fired
+    reasoning: >-
+      the borrower's current residence differs across sources ({sources}) — a real discrepancy
+    how_to_fix: >-
+      Confirm the borrower's current residence address and reconcile the source(s) that disagree. A
+      mailing or prior address should be typed accordingly, not compared as the current residence.
+  on_cannot_tell:
+    verdict: couldnt_check
+    reasoning: >-
+      the borrower's current residence could not be judged from the differing values ({values})

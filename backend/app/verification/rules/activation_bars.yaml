@@ -1,0 +1,441 @@
+# LP-380 — ACTIVATION BARS: the decision surface for which INERT rules may go live.
+#
+# A rule's activation bar is the accuracy its load-bearing AI tags must reach before the rule ships a TRUSTED
+# (auto, non-ratified) verdict. It CANNOT be computed — the height depends on the COST OF ERROR for that rule,
+# which is DOMAIN judgment. THIS FILE PROPOSES a defensible default per rule and flags it for Priya
+# (validated: false). It sets no real bar and activates nothing (that is LP-389).
+#
+# Fields per rule:
+#   status  — calibratable-now | not-calibratable-yet | needs-producer | no-ai-dependency
+#             * calibratable-now      : every load-bearing AI tag has a MEASURED accuracy (LP-379) → a bar can
+#                                       be set and met.
+#             * not-calibratable-yet  : a load-bearing AI tag is PRODUCED but UNSCORED (or measured only in a
+#                                       different context) → BLOCKED ON CALIBRATION, not "bar unmet". No number.
+#             * needs-producer        : a load-bearing tag does not materialize at all → blocked on a producer.
+#             * no-ai-dependency      : no AI load-bearing tag (parsed/deterministic) → no calibration gate;
+#                                       activation is a wiring decision, not a bar (cf. active IN-2 / ID-8).
+#   ships   — auto | ratify. From the rule's KIND (rule_kinds.csv): judgmental → ratify (LP-376-B: a judgment
+#             rule NEVER auto-ships, a human ratifies); structural/calculative → auto.
+#   threshold — the PROPOSED default bar in [0,1], or null when no bar can apply (any status but
+#               calibratable-now). A DEFAULT flagged for Priya, never a decision.
+#   validated — False by default (proposed). Priya's sign-off flips it (the LP-379 priya_validated pattern).
+#               CONFIRMED by Priya: IN-1 (0.98, auto) and IN-5 (0.95, auto). All others remain false. Only a
+#               calibratable-now rule may be validated — a blocked rule cannot be signed off as live-able.
+#   load_bearing_ai_tags — the AI tags whose accuracy gates the rule (direct, or a noted derived upstream).
+#   fp_fn   — the false-positive-vs-false-negative asymmetry (Priya's to confirm) — what sets the bar height.
+#   rationale — why this default, from ships + fp_fn + the measured numbers.
+#   measured_accuracy — LP-389 eligibility evidence for an AI rule: the load-bearing tags' MEASURED accuracy
+#               (LP-379). A calibratable-now rule is ELIGIBLE only when validated AND measured_accuracy >=
+#               threshold. Null/absent = unmeasured = held (fail-closed).
+#   input_resolves — LP-389 eligibility evidence for a no-ai-dependency rule: True only when the rule's parsed
+#               input is VERIFIED to resolve to real values on a real file (LP-381/382). False by default =
+#               held. Meaningless (and rejected) for any status but no-ai-dependency.
+#
+# THE HONEST STATE (report, not a pass): of 23 candidate rules, 10 are calibratable-now. 9 are SIGNED OFF +
+# live: IN-1, IN-5 (LP-389); AS-2, AS-12 (LP-390-7); IN-3 (LP-390-9); and IN-7, IN-10, IN-11, AS-11 (LP-393-6 —
+# scored on the LP-393-1 scenario fixture, Priya signed off her heights + chose AUTO, overriding the ratify-only
+# recommendation on a synthetic-only basis). 1 is PROPOSED but NOT yet signed off (LP-397: AS-6 — its tag now
+# produces after LP-390-8a, scored 100% but ONE-SIDED n=5; validated:false pending Priya). NOTE: IN-7 is
+# JUDGMENTAL, so despite her AUTO request it ships RATIFY (LP-376-B armor in judgment.py) — surfaces to
+# needs_review; truly-auto needs a kind reclassification (a separate ticket, ADR-316). The rest are blocked on
+# calibration / a producer / a wiring decision — reported so a rule never ships on a tag nobody measured.
+#
+# LP-389 — the FIRST activation pass reads THIS file through activation_bars.is_eligible: IN-1 + IN-5 (AI,
+# validated, measured 100% >= bar) pass the gate and go live; the other 21 stay held. ID-5 was PROPOSED but
+# HELD: its parsed inputs resolve at the DOCUMENT subject, not the "loan" subject ID-5 reads (a producer/
+# consumer mismatch), so input_resolves is false and the gate holds it — the safety working as designed. The
+# bars persist after activation as the record of WHY each rule went live (or why it was held).
+
+# ===================== calibratable-now (a bar can be set + met) ===================================
+IN-1:
+  status: calibratable-now
+  ships: auto
+  threshold: 0.98
+  validated: true
+  measured_accuracy: 1.0   # LP-379-D: income.documented_monthly 100% (>= the 0.98 bar) → ELIGIBLE (LP-389)
+  load_bearing_ai_tags: [income.documented_monthly]   # via the derived income.documented_income_shortfall_pct
+  fp_fn: "FN (misses an income overstatement -> a bad loan ships) >> FP (a false variance -> a human glances)"
+  rationale: >-
+    documented_monthly measured 100% (LP-379-D). Calculative + FRAUD-adjacent (feeds a deterministic
+    variance verdict) -> a HIGH bar; consider RATIFY-ONLY until measured on more files (one file, one label
+    set). Priya sets the height + the ratify-vs-auto call.
+
+IN-5:
+  status: calibratable-now
+  ships: auto
+  threshold: 0.95
+  validated: true
+  measured_accuracy: 1.0   # LP-379-D: income.employer_normalized 100% (>= the 0.95 bar) → ELIGIBLE (LP-389)
+  load_bearing_ai_tags: [income.employer_normalized]
+  fp_fn: "FP (a false employer-mismatch flag -> a human compares two names) > FN, but both low stakes"
+  rationale: >-
+    employer_normalized measured 100% (LP-379-D). Structural consistency check, low error cost either way ->
+    a moderate bar. Priya confirms.
+
+# ===================== not-calibratable-yet (BLOCKED ON CALIBRATION — no bar, not "bar unmet") ======
+AS-2:
+  # LP-390-5a: BOTH load-bearing AI tags MEASURED -> calibratable-now. apparent_category re-scored 100% concrete
+  # (16/16, n=17) mapped free-text->enum (the LP-390-5 24.5% was a byte-compare artifact); has_identified_source
+  # 93.8% (n=16). LP-390-7: Priya SIGNED OFF the 0.90 auto bar (validated:true); the rule is now ACTIVE
+  # (registry _LP390_ACTIVATED). 0.938 >= 0.90 -> is_eligible -> LIVE. See the loan_proceeds n=0 caveat below.
+  status: calibratable-now
+  ships: auto
+  threshold: 0.90
+  validated: true
+  measured_accuracy: 0.938   # the WEAKEST measured load-bearing tag (has_identified_source); apparent_category
+                             # is 1.0-concrete but see the loan_proceeds n=0 caveat below — the honest floor.
+  load_bearing_ai_tags: [txn.apparent_category, txn.has_identified_source]
+  fp_fn: "FN (misses undisclosed loan proceeds funding the deal) >> FP"
+  rationale: >-
+    LP-390-5a: apparent_category re-scored 100% concrete (16/16, n=17) after the LP-379-F free-text->enum
+    mapping (the 24.5% was a scoring artifact, NOT the model); has_identified_source 93.8% (n=16, its one miss
+    the SAFE over-flag direction). Both AS-2 gates now measured -> calibratable-now. PROPOSED for Priya: a ~0.90
+    AUTO bar, or ratify-only while this is one file; below-bar/unknown -> needs_review (LP-376-B).
+    ⚠️ CAVEAT (Priya weighs before sign-off): AS-2 FIRES on apparent_category == loan_proceeds, and LF-6T3N has
+    ZERO loan_proceeds transactions (n=17 covered payroll/interest/transfer_own/third_party) — the tag is
+    measured broadly but its loan_proceeds VALUE is untested; a file with a loan-proceeds deposit would
+    strengthen this. measured_accuracy is set to has_identified_source's 0.938 (the weaker MEASURED gate), not
+    apparent_category's 1.0, so the number does not over-read the untested trigger.
+
+AS-4:
+  status: not-calibratable-yet
+  ships: auto
+  threshold: null
+  validated: false
+  load_bearing_ai_tags: [stmt.is_reserve_eligible]   # via the reserves calculator (months_available)
+  fp_fn: "FN (clears a file with insufficient reserves) >> FP (a false shortfall -> a human re-checks)"
+  rationale: >-
+    the reserves calc is fed by stmt.is_reserve_eligible (AI). LP-390-6: now MEASURED — 0% (0/5, n=5,
+    LP-390-5): the model calls standard checking/savings reserve-eligible where Priya labels 'no' — a
+    SYSTEMATIC domain disagreement (not noise). Blocked now NOT on scoring but on a DOMAIN/PROMPT fix — a
+    Priya-confirmed reserve-eligible definition, then a prompt alignment (its own follow-up). No bar.
+
+AS-5:
+  # LP-390-7 fail-closed check: validated MUST stay false here — AS-5 is not-calibratable-yet with a null
+  # threshold, so the loader REJECTS validated:true on it (parse_bar: "only a calibratable-now rule may be
+  # validated"). A mis-set flag cannot leak AS-5 live; the gate holds it even were the flag true.
+  status: not-calibratable-yet
+  ships: auto
+  threshold: null
+  validated: false
+  load_bearing_ai_tags: [txn.apparent_category]
+  fp_fn: "FN (accepts an undocumented gift) > FP"
+  rationale: >-
+    LP-390-5a: apparent_category is now MEASURED (100% concrete, n=17) — but AS-5 gates on apparent_category ==
+    gift, and LF-6T3N has ZERO gift transactions (n=0 on the trigger value), AND the LP-335 / ADR-302 D2
+    question stands: 'gift' is arguably a rule CONCLUSION, not a tag value. So AS-5's blocker is no longer
+    'apparent_category unscored' — it is a DESIGN question (should AS-5 fire on a gift tag at all?) plus a gift
+    n=0 coverage gap. Held (not calibratable) until that design call is made — not a calibration gap. No bar.
+
+AS-6:
+  # LP-397: owner_matches_borrower now PRODUCES (LP-390-8a fed stmt_facts the borrower roster) and scored 100%
+  # (5/5) on the LF-6T3N bank statements -> calibratable-now. PROPOSED 0.95 auto, validated:false. ⚠️ The 5 are
+  # ALL `yes` (ONE-SIDED): the DANGEROUS FN direction (a non-borrower statement) is UNTESTED — Priya weighs
+  # ratify-only + the name-match strictness before sign-off. Validating IS activating (the LP-393-6 coupling).
+  status: calibratable-now
+  ships: auto
+  threshold: 0.95
+  validated: false
+  measured_accuracy: 1.0   # stmt.owner_matches_borrower 5/5 (LP-390-8a) — but ONE-SIDED (all `yes`); see caveat.
+  load_bearing_ai_tags: [stmt.owner_matches_borrower]
+  fp_fn: "FN (accepts a statement NOT owned by the borrower -> someone else's assets counted) >> FP (a false 'not the borrower's account' -> a human re-checks a legit statement)"
+  rationale: >-
+    owner_matches_borrower now PRODUCES real comparisons (LP-390-8a fed stmt_facts the loan's borrower roster;
+    BEFORE: 5/5 structural `unknown` "no borrower names provided"; AFTER: e.g. "'Jordan A Rivera' matches
+    borrower 'Jordan Rivera' - the middle initial"). Scored 100% (5/5) vs Priya's goldens. Structural -> ships
+    AUTO; FN-dangerous (a statement not owned by the borrower accepted as the borrower's assets) -> a HIGH bar;
+    PROPOSED 0.95. ⚠️ ONE-SIDED n: the real n is 5 (3 of the 8 goldens are UNSCORABLE — the D5 gap below), and
+    ALL 5 are `yes`. The tag has NEVER been tested on a NEGATIVE case (a statement that does NOT belong to the
+    borrower) — which is EXACTLY what AS-6 exists to catch, and exactly the DANGEROUS FN direction. 100% on 5
+    same-direction cases is NOT proof it can spot a mismatch (the AS-2 untested-trigger shape). Priya: consider
+    RATIFY-ONLY until a negative-case scenario exists. ⚠️ NAME-MATCH STRICTNESS is her call: LP-390-8a chose
+    TOLERANT (middle-initial, nickname Bob/Robert, maiden vs married, joint-account match-if-either) — the SAFE
+    direction (over-strict false-flags a borrower's own account) — but HOW tolerant (a bare initial "J. Rivera";
+    a trust/LLC in the borrower's name) is an underwriting judgment. ⚠️ D5 COVERAGE GAP: stmt_facts runs only on
+    bank_statement/money_market, so the 3 investment_account goldens are unscorable AND investment/brokerage
+    statements are NOT ownership-checked at all — its own ticket (widen stmt_facts' applicability). Validating
+    this bar ACTIVATES the rule (LP-393-6 coupling) — the sign-off IS the activation.
+
+AS-7:
+  status: not-calibratable-yet
+  ships: auto
+  threshold: null
+  validated: false
+  load_bearing_ai_tags: [txn.is_nsf_or_overdraft]   # via the derived stmt.nsf_count — verify the chain
+  fp_fn: "FP (a false NSF flag) > FN, low stakes"
+  rationale: >-
+    reads the derived stmt.nsf_count, aggregated from txn.is_nsf_or_overdraft (AI), UNSCORED. Blocked on
+    calibration (verify the derived chain when calibrating).
+
+AS-11:
+  # LP-393-5: liquidation_terms re-scored on the LP-393-1 income-scenario fixture — 100% (6/6) after LP-393-4a
+  # encoded Priya's liquidation PRECEDENCE (the old 66.7% miss under-restricted a fully-vested account) ->
+  # calibratable-now. LP-393-6: Priya SIGNED OFF the 0.90 bar and chose AUTO, knowingly OVERRIDING the
+  # ratify-only recommendation on a synthetic-only basis (validated:true; ACTIVE via registry _LP393_ACTIVATED).
+  status: calibratable-now
+  ships: auto
+  threshold: 0.90
+  validated: true
+  measured_accuracy: 1.0   # asset.liquidation_terms 6/6 on the scenario fixture (LP-393-4b); n=6 — thin.
+  load_bearing_ai_tags: [asset.liquidation_terms]
+  fp_fn: "FN (counts restricted retirement funds as usable) > FP"
+  rationale: >-
+    liquidation_terms re-scored 100% (6/6, n=6, LP-393-4a/4b) once the asset_facts prompt encoded Priya's
+    precedence rule (partial vesting -> vested_usable; any penalized retirement account, even fully vested ->
+    restricted; brokerage -> fully_liquid) — the earlier LP-390-6 66.7% was the AI UNDER-restricting a
+    fully-vested 401(k), a prompt gap now fixed. Calculative -> ships AUTO. FN-dangerous (a restricted
+    retirement account counted at full value overstates reserves) -> a HIGH bar. LP-393-6: Priya SIGNED OFF
+    0.90 AUTO — she OVERRODE the ratify-only recommendation KNOWINGLY (a named trust decision). ⚠️
+    SYNTHETIC-DATA CAVEAT (recorded, accepted by her): measured on CLEAN scenario data (LP-393-1) — this
+    validates the REASONING, not robustness to real-document messiness; the only real-data check is LF-6T3N
+    (n=2, indicative), and n=6 is thin. Below-bar/unknown -> needs_review (LP-376-B).
+
+AS-12:
+  # LP-390-5a: both load-bearing AI tags now measured -> calibratable-now. Judgmental -> ships RATIFY, so a
+  # human ratifies every verdict regardless of the number (activation_mode returns 'ratify' for ships:ratify);
+  # the threshold is the SURFACING floor. LP-390-7: Priya SIGNED OFF (validated:true); ACTIVE (_LP390_ACTIVATED)
+  # — it surfaces to needs_review for human ratification, never an auto verdict.
+  status: calibratable-now
+  ships: ratify
+  threshold: 0.90
+  validated: true
+  measured_accuracy: 0.938   # weakest measured load-bearing tag (has_identified_source); apparent_category 1.0-concrete
+  load_bearing_ai_tags: [txn.apparent_category, txn.has_identified_source]
+  fp_fn: "FN (misses a borrowed-funds pattern) >> FP — but judgmental, a human ratifies"
+  rationale: >-
+    LP-390-6 fixed the load-bearing list (dropped txn.counterparty — reasoned_over context + an orphan, not
+    load-bearing per the spec). LP-390-5a: apparent_category re-scored 100% concrete (n=17, the 24.5% was an
+    artifact) + has_identified_source 93.8% (n=16) -> both gates measured -> calibratable-now. Judgmental ->
+    ships RATIFY (a human ratifies EVERY verdict, LP-376-B), so 100%/93.8% is far more than enough for the
+    tags to SURFACE a pattern for human judgment; unlike AS-2, AS-12 reasons over apparent_category BROADLY
+    (no single trigger value), so the loan_proceeds n=0 caveat does not bind it. PROPOSED 0.90 surfacing floor;
+    Priya confirms. Still one-file n — she weighs that before sign-off.
+
+IN-7:
+  # LP-393-5: same_line_of_work re-scored 100% (13/13) on the LP-393-1 fixture (LP-393-4b) -> calibratable-now.
+  # LP-393-6: Priya SIGNED OFF the 0.90 bar (validated:true; ACTIVE via _LP393_ACTIVATED). ⚠️ CONFLICT: she
+  # asked for AUTO, but IN-7 is JUDGMENTAL (rule_kinds.csv: ai_judgment) and LP-376-B's armor is enforced at
+  # EVALUATION time (judgment.py hard-codes ratification_pending) — a judgment rule NEVER auto-ships. So ships
+  # stays RATIFY: IN-7 surfaces to needs_review for human ratification regardless of any 'auto' request. Making
+  # IN-7 truly auto would require RECLASSIFYING its kind (a separate ticket) — NOT bypassed here. See ADR-316.
+  status: calibratable-now
+  ships: ratify
+  threshold: 0.90
+  validated: true
+  measured_accuracy: 1.0   # income.same_line_of_work 13/13 (LP-393-4b); zero disagreements, clear-cut B7/B8 pass.
+  load_bearing_ai_tags: [income.same_line_of_work]
+  fp_fn: "FP (false-flags a same-line change -> a human ratifies, mostly noise) < FN (accepts a bad change) — but judgmental, ratified"
+  rationale: >-
+    same_line_of_work re-scored 100% (13/13, n=13, LP-393-4b) once occupation was in the fixture (the LP-393-4a
+    fix + the LP-393-2a blind re-label; the interim 31% was the stale-golden trap, not the prompt). Judgmental
+    -> ships RATIFY: a human ratifies every verdict regardless of the number, so the bar is the SURFACING floor
+    (cf. AS-12). FP (a false same-line flag) is mostly noise — a human ratifies; the FN (accepting a
+    disqualifying job change) is caught at ratification. LP-393-6: Priya SIGNED OFF the 0.90 floor. ⚠️ She
+    asked for AUTO — but IN-7 is JUDGMENTAL and LP-376-B forbids a judgment rule from auto-shipping (enforced in
+    judgment.py, not this bar), so ships STAYS ratify and IN-7 surfaces to needs_review; her 'auto' is NOT
+    achievable without reclassifying IN-7's kind (a separate ticket — ADR-316). Not silently forced. reasoned_over
+    also reads income.employment_start as CONTEXT — NOT load-bearing (only same_line_of_work gates), so it does
+    not block calibratable-now (the LP-390-6 / txn.counterparty precedent). ⚠️ SYNTHETIC-DATA CAVEAT: measured on
+    CLEAN scenario data (LP-393-1) — validates REASONING, not real-document robustness (LF-6T3N n=2 only).
+
+IN-8:
+  status: not-calibratable-yet
+  ships: auto
+  threshold: null
+  validated: false
+  load_bearing_ai_tags: [income.voe_present]
+  fp_fn: "FP (a false 'VOE missing' -> a human checks) > FN, low stakes"
+  rationale: "voe_present PRODUCED (LP-378) but UNSCORED. Blocked on calibration."
+
+IN-9:
+  status: not-calibratable-yet
+  ships: auto
+  threshold: null
+  validated: false
+  load_bearing_ai_tags: [income.offer_letter_present]
+  fp_fn: "FP > FN, low stakes"
+  rationale: "offer_letter_present PRODUCED (LP-378) but UNSCORED. Blocked on calibration."
+
+IN-10:
+  # LP-393-5: is_declining re-scored 100% (13/13) on the LP-393-1 fixture (LP-393-4b) -> calibratable-now.
+  # LP-393-6: Priya SIGNED OFF 0.95 AUTO — she OVERRODE the ratify-only recommendation on a synthetic-only
+  # basis (validated:true; ACTIVE via _LP393_ACTIVATED). Calculative -> auto matches its kind (no armor conflict).
+  status: calibratable-now
+  ships: auto
+  threshold: 0.95
+  validated: true
+  measured_accuracy: 1.0   # income.is_declining 13/13 (LP-393-4b); zero disagreements (>= the 0.95 bar).
+  load_bearing_ai_tags: [income.is_declining]
+  fp_fn: "FN (uses declining income at face value -> a bad loan ships) >> FP (a false decline -> a human glances)"
+  rationale: >-
+    is_declining re-scored 100% (13/13, n=13, LP-393-4b) — the per-borrower re-scope (LP-390-1) landed and the
+    tag now reaches the rule. Calculative -> ships AUTO. FN-dangerous (missing a real year-over-year decline
+    uses unstable income at face value) -> a HIGH bar. LP-393-6: Priya SIGNED OFF 0.95 AUTO (measured 1.0 >=
+    0.95) — she OVERRODE the ratify-only recommendation KNOWINGLY (a named trust decision). ⚠️ SYNTHETIC-DATA
+    CAVEAT (recorded, accepted by her): measured on CLEAN scenario data (LP-393-1) — validates the REASONING,
+    not robustness to real-document messiness; the only real-data check is LF-6T3N (n=2, indicative).
+    Below-bar/unknown -> needs_review (LP-376-B).
+
+IN-11:
+  # LP-393-5 PROPOSED 0.90 at a measured 0.85 (below bar) with B14 open. LP-393-6: Priya SETTLED B14 — a
+  # TERMINATED job's two years DOES count as HISTORY; has_2yr_history is about HISTORY only, and the
+  # W-2/1099/offer-letter documentation standard is a SEPARATE check. Under that ruling B12 + B14's goldens
+  # became 'yes' and has_2yr_history was RE-SCORED (not hand-edited) to 100% (13/13). She SIGNED OFF 0.90 AUTO
+  # (validated:true; ACTIVE via _LP393_ACTIVATED). See ADR-316.
+  status: calibratable-now
+  ships: auto
+  threshold: 0.90
+  validated: true
+  measured_accuracy: 1.0   # has_2yr_history 13/13 — RE-SCORED (LP-393-6) after Priya's B14 ruling, NOT asserted.
+  load_bearing_ai_tags: [income.has_2yr_history]
+  fp_fn: "FN (qualifies variable income without the required 2-year history) >> FP (a false 'no history' -> a human checks)"
+  rationale: >-
+    has_2yr_history measured 85% (11/13) in LP-393-4b, but the two "misses" were Priya applying a documentation
+    standard the tag does NOT model, not reasoning errors — B14 (terminated VOE contract, two W-2s) and B12
+    (pay-stub-only). LP-393-6: Priya SETTLED the framing — a TERMINATED job's two years DOES still count as
+    HISTORY (the tag asks history, which exists), and the W-2/1099/offer-letter requirement is a SEPARATE check
+    (two new candidate rules). Under that ruling B12 + B14's goldens became 'yes' (their originals preserved in
+    the worksheet note) and has_2yr_history was RE-SCORED with the real reasoner to 100% (13/13, n=13) — the
+    number CHANGED BY RE-SCORING, never by editing 0.85 -> 1.0. Calculative, FN-dangerous -> she SIGNED OFF 0.90
+    AUTO (measured 1.0 >= 0.90), OVERRIDING the ratify-only recommendation KNOWINGLY. ⚠️ SYNTHETIC-DATA CAVEAT
+    (recorded, accepted by her): measured on CLEAN scenario data (LP-393-1) — validates REASONING, not
+    real-document robustness (LF-6T3N n=2 only). NOTE: the spec's over-fire limitation (fires on any income
+    lacking history, not just variable) is a separate ticket. Below-bar/unknown -> needs_review (LP-376-B).
+
+IN-12:
+  # LP-396 corrected the STALE text: has_2yr_history is now MEASURED 100% (LP-393-6) — NOT unscored, so this is
+  # not a calibration block. IN-12's real blocker is WIRING + a missing PRODUCER: it enumerates per_document
+  # (tax_return) while has_2yr_history is produced per_borrower, so the rule can't consume it (structurally
+  # dead — the IN-10/IN-11 class). The naive per_borrower re-scope is FORBIDDEN (LP-390-2a / ADR-310): it
+  # collapses IN-12 into IN-11 (both read the income-type-agnostic tag). Keeping IN-12 self-employment-specific
+  # needs a BORROWER-LEVEL self-employment signal that does NOT exist (income.type is subject:document;
+  # income_stability produces no income-type tag). -> needs-producer, not not-calibratable-yet.
+  status: needs-producer
+  ships: auto
+  threshold: null
+  validated: false
+  load_bearing_ai_tags: [income.has_2yr_history]
+  fp_fn: "FN (self-employment without history) >> FP"
+  rationale: >-
+    has_2yr_history is MEASURED (100%, LP-393-6) — the tag is NOT unscored, so IN-12 is not calibration-blocked
+    (the LP-394 finding: the old 'UNSCORED, blocked on calibration' text was stale). The real blocker is a
+    subject WIRING mismatch: IN-12 reads has_2yr_history per_document (tax_return) but it is produced
+    per_borrower, so on a real file IN-12 couldnt_checks (structurally dead). LP-390-2a established the fix is
+    NOT a subject re-scope (a naive per_borrower copy collapses IN-12 into IN-11 — both read the
+    income-type-agnostic has_2yr_history, destroying IN-12's self-employment specificity). Keeping it specific
+    needs a BORROWER-LEVEL self-employment signal that does not exist (income.type is subject:document;
+    income_stability produces no income-type tag). BLOCKED ON A PRODUCER (ADR-310) — a borrower-level
+    self-employment tag — its own ticket; not fixable by wiring here. The strict xfail
+    (test_in12_self_employment_history_is_structurally_dead_pending_a_producer) keeps this visible.
+
+IN-13:
+  status: not-calibratable-yet
+  ships: ratify
+  threshold: null
+  validated: false
+  load_bearing_ai_tags: [income.continuance_3yr, income.type]
+  fp_fn: "FN (counts non-continuing other income) >> FP — judgmental, a human ratifies"
+  rationale: "continuance_3yr PRODUCED (LP-385) + income.type UNSCORED. Blocked on calibration."
+
+# ===================== needs-producer (the tag does not materialize) ===============================
+IN-14:
+  status: needs-producer
+  ships: ratify
+  threshold: null
+  validated: false
+  load_bearing_ai_tags: [income.continuance_3yr, occupancy.rental_support]
+  fp_fn: "FN (counts unsupported rental income) >> FP — judgmental, a human ratifies"
+  rationale: >-
+    occupancy.rental_support has NO declared producer (not in tag_production.yaml) — it does not materialize.
+    Blocked on a PRODUCER before any calibration.
+
+# ===================== no-ai-dependency (no AI gate — activation is a wiring/deterministic call) ====
+AS-3:
+  status: no-ai-dependency
+  ships: auto
+  threshold: null
+  validated: false
+  input_resolves: false   # LP-381: calc.cash_to_close resolves `unknown` on LF-6T3N (inputs absent) — HELD
+  load_bearing_ai_tags: []
+  fp_fn: "n/a — deterministic (calc.cash_to_close from parsed figures)"
+  rationale: "no AI load-bearing tag; a wiring decision. Input does NOT resolve yet (LP-381 derived-4) — held."
+
+AS-9:
+  status: no-ai-dependency
+  ships: auto
+  threshold: null
+  validated: false
+  input_resolves: true    # LP-384: verified on build_lf6t3n_plus — a statement declaring 5/present 4 → FIRES → ELIGIBLE
+  load_bearing_ai_tags: []
+  fp_fn: "n/a — deterministic (statement page counts, parsed)"
+  rationale: >-
+    no AI load-bearing tag; a wiring decision. LP-381 unblocked the producer (page_count_declared model-read +
+    page_count_present deterministic); LP-384 VERIFIED it on a real statement (build_lf6t3n_plus: declared 5,
+    present 4 → AS-9 FIRES; a complete statement satisfies). The input resolves — eligible.
+
+AS-10:
+  status: no-ai-dependency
+  ships: auto
+  threshold: null
+  validated: false
+  input_resolves: true    # LP-384: ALREADY resolves on the base LF-6T3N (statements carry account id + period dates) → ELIGIBLE
+  load_bearing_ai_tags: []
+  fp_fn: "n/a — deterministic (min account months, parsed)"
+  rationale: >-
+    no AI load-bearing tag; a wiring decision. LP-381 reported the input absent, but the fixture has since
+    grown the statement account identity + period dates: LP-384 VERIFIED stmt.min_account_months resolves on
+    the BASE LF-6T3N (AS-10 SATISFIED — every account has >= 2 months). The input resolves — eligible.
+
+ID-5:
+  status: no-ai-dependency
+  ships: auto
+  threshold: null
+  validated: false
+  input_resolves: true    # LP-389-A: the subject mismatch is FIXED (per-borrower) — the input now resolves → ELIGIBLE
+  load_bearing_ai_tags: []
+  fp_fn: "n/a — deterministic (per-borrower ID expiration vs the loan's closing date)"
+  rationale: >-
+    no AI load-bearing tag; a wiring decision (cf. active ID-8, parsed-only). LP-389 HELD ID-5: a producer/
+    consumer subject mismatch (inputs on the DOCUMENT subject, rule read at "loan") → couldnt_check on every
+    file. LP-389-A FIXED it — ID-5 is now PER BORROWER, reading the borrower's belongs_to-attributed ID
+    expiration (id.borrower_id_expiration, derived) against the loan's closing date (contract.loan_closing_date,
+    derived). The input now RESOLVES at the subject the rule reads (verified on LF-6T3N: SATISFIED for both
+    borrowers), so input_resolves is true and the gate lets ID-5 through.
+
+IN-3:
+  # RECLASSIFIED (LP-384 review fix): IN-3 is an AI rule, NOT no-ai. income.ytd_annualized_shortfall_pct is
+  # derived, but its recipe reads income.documented_monthly (AI, income_amounts) alongside the parsed
+  # ytd_gross/pay_date — the SAME transitive AI dependency as IN-1. Encoding it as no-ai left a latent trap:
+  # a future input_resolves:true would ADMIT it via the no-AI gate, and — its bar declaring no AI tag — the
+  # income_amounts group would never fold into _required_ai_groups, so IN-3 would couldnt_check FOREVER,
+  # invisible to the LP-389 guard (which only inspects declared load_bearing_ai_tags). As calibratable-now the
+  # loader now REJECTS any input_resolves on it (that gate is no-ai-only), and the declared AI tag makes the
+  # fold-in + guard see the real dependency. LP-390-9: Priya SIGNED OFF the 0.98 auto bar (validated:true);
+  # documented_monthly is measured 100% (LP-379-D, the same evidence IN-1 rests on) >= 0.98 -> is_eligible ->
+  # ACTIVE (registry _LP390_9_ACTIVATED).
+  status: calibratable-now
+  ships: auto
+  threshold: 0.98
+  validated: true
+  load_bearing_ai_tags:
+    - income.documented_monthly
+  measured_accuracy: 1.0
+  fp_fn: "false-fire if documented monthly income is over-read; the YTD-annualized comparison is deterministic"
+  rationale: >-
+    an AI rule (transitive dependency on income.documented_monthly, the SAME shape as IN-1), not the no-ai it
+    was first filed as (LP-384 review finding). It abstains on "documented monthly income is absent" until the
+    income_amounts wave runs; its shortfall bar (0.98, via documented_monthly's 100% measurement) is signed off
+    by Priya (LP-390-9) — the same tag + evidence as IN-1. ACTIVE.
+
+IN-4:
+  status: no-ai-dependency
+  ships: auto
+  threshold: null
+  validated: false
+  input_resolves: true    # LP-384: build_lf6t3n_plus adds 2 VOEs (77-day gap) → the gap producer resolves → ELIGIBLE
+  load_bearing_ai_tags: []
+  fp_fn: "n/a — deterministic (employment gap from parsed dates)"
+  rationale: >-
+    no AI load-bearing tag; a wiring decision. LP-382 proved the chain computes given >= 2 dated records;
+    LP-384 adds them to the fixture (build_lf6t3n_plus: two VOEs with a deliberate 77-day gap → IN-4 FIRES;
+    a no-gap variant satisfies). The input resolves — eligible.

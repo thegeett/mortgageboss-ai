@@ -1,0 +1,53 @@
+rule_id: IN-12
+name: Self-employment income analysis
+category: Income
+kind: calculative        # rule_kinds.csv: IN-12 = calculative
+numeric_check: true
+criteria: >-
+  Self-employment income requires 2 years of returns and a Form-1084-style analysis (net profit + add-
+  backs). This rule flags self-employment income that lacks a 2-year return history. NOTE (LP-323-IN-B):
+  the CSV marks this calculative and its rationale names a DEDICATED self-employment CALCULATOR — that
+  calculator exists in services (compute_self_employed_income) but is NOT wired into snapshot.calculations,
+  so a full 1084 analysis is not yet available. The current spec is a MINIMAL history check scoped to
+  tax-return documents (reported as a limitation; the calculator wiring is a follow-on, NOT this ticket).
+applicability:
+  scope: the loan file's tax-return documents
+  trigger: once per tax-return document, on the self-employment income history
+required_inputs:
+  - name: has_2yr_history
+    snapshot_path: tags.by_subject[<tax_return content_id>]["income.has_2yr_history"]
+    description: whether a 2-year history of self-employment income is evidenced (yes/no/unknown)
+reference_values:
+  priya_validated: false
+  threshold_needs_signoff: true
+  # The 1084 add-back method is Priya-validated per the CSV rationale; the calculator is not yet wired.
+  guideline_text: >-
+    Fannie Mae Selling Guide B3-3.2 — self-employment income needs 2 years of returns and a cash-flow
+    analysis (Form 1084: net profit + add-backs). The method is Priya-validated; the calculator wiring
+    is a follow-on.
+subject_enumeration: per_document
+subject_key_fields:
+  - content_id
+evidence_required: whether the self-employment income has a 2-year return history
+guideline_reference: "Fannie Mae Selling Guide B3-3.2 (self-employment income; Form 1084)."
+spec_version: 1
+deterministic:
+  applicability:
+    tag: document.document_type
+    op: eq
+    value: tax_return
+  load_bearing_tags:
+    - income.has_2yr_history
+  gated_tags:
+    - income.has_2yr_history
+  outcomes:
+    - verdict: fired
+      when_tags:
+        - {tag: income.has_2yr_history, op: eq, value: "no"}
+      reasoning: self-employment income lacks a 2-year return history — a full analysis cannot be supported
+      how_to_fix: >-
+        Obtain 2 years of business/personal tax returns and complete a cash-flow (Form 1084) analysis
+        before using the self-employment income to qualify.
+    - verdict: satisfied
+      default: true
+      reasoning: a 2-year self-employment return history is present (a full 1084 analysis is a follow-on)

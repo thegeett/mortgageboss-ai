@@ -29,12 +29,24 @@ from enum import StrEnum
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
-from sqlalchemy import JSON, CheckConstraint, DateTime, Float, ForeignKey, Integer, Text
+from sqlalchemy import (
+    JSON,
+    CheckConstraint,
+    DateTime,
+    Float,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+    text,
+)
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, SoftDeleteMixin, TimestampMixin, UUIDMixin
 from app.models.enums import str_enum
-from app.models.types import MediumStr
+from app.models.types import MEDIUM_STRING, MediumStr
 
 if TYPE_CHECKING:
     from app.models.document import Document
@@ -95,6 +107,30 @@ class FindingResolutionStatus(StrEnum):
         return self is not FindingResolutionStatus.OPEN
 
 
+class EvaluationOutcome(StrEnum):
+    """What a rule evaluation CONCLUDED for one subject (LP-316) — a NEW, orthogonal axis.
+
+    Distinct from :class:`FindingStatus` (the severity color a processor triages on) and
+    :class:`FindingResolutionStatus` (where a human is in resolving it): this records the
+    verification OUTCOME itself (§3D's fail-closed states). It maps from LP-315's ``Verdict``
+    (fired→open, satisfied→satisfied, needs_review→needs_review, couldnt_check→couldnt_check;
+    ``not_applicable`` subjects are not persisted). ``couldnt_check`` now PERSISTS a record —
+    "we looked and could not check this, here is why" — where before it left none.
+    """
+
+    OPEN = "open"  # fired — a real, unresolved finding needing attention
+    SATISFIED = "satisfied"  # the check passes — earned, not assumed (§3D)
+    NEEDS_REVIEW = "needs_review"  # degraded/ambiguous — a human must look (LP-314a self_asserted, low-conf, contradiction)
+    COULDNT_CHECK = "couldnt_check"  # a load-bearing tag was absent/unknown — fail-closed
+    # LP-391 — applicable-but-manual: a BLOCKED rule (uncalibrated / no producer) found something in its
+    # scope but is not yet automated. Surfaces to Tab 1 (Needs Attention) as an explicit "manual review —
+    # automated check not yet active" — NEVER a trusted pass/fail (its would-be verdict is discarded).
+    PENDING_AUTOMATION = "pending_automation"
+    NO_LONGER_APPLIES = (
+        "no_longer_applies"  # retired across runs (produced by LP-322, not single-run)
+    )
+
+
 class FindingOrigin(StrEnum):
     """Which generator produced a finding (the *two-generator* seam, LP-74).
 
@@ -117,11 +153,19 @@ class Finding(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     """A single verification result against a loan file."""
 
     __tablename__ = "findings"
-    # Confidence is a probability in [0, 1] (LP-75) — guarded at the DB.
     __table_args__ = (
-        CheckConstraint(
-            "confidence >= 0 AND confidence <= 1",
-            name="confidence_range",
+        # Confidence is a probability in [0, 1] (LP-75) — guarded at the DB.
+        CheckConstraint("confidence >= 0 AND confidence <= 1", name="confidence_range"),
+        # A subject is ONE live finding per rule (LP-316). PARTIAL: only among live (non-deleted)
+        # findings that HAVE a subject_key — so soft-deleted rows (the current reconcile's retire)
+        # and legacy null-subject_key findings do not participate.
+        Index(
+            "uq_findings_loan_file_rule_subject",
+            "loan_file_id",
+            "rule_id",
+            "subject_key",
+            unique=True,
+            postgresql_where=text("deleted_at IS NULL AND subject_key IS NOT NULL"),
         ),
     )
 
@@ -225,6 +269,27 @@ class Finding(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
         nullable=True,
     )
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    # --- Evaluation outcome + subject identity + provenance (LP-316) --------
+    # The NEW outcome axis (open / satisfied / needs_review / couldnt_check / no_longer_applies).
+    # Nullable — only tag-rule findings (AS-1) carry it; existing cross-source/document findings
+    # leave it null (backward-compatible).
+    evaluation_outcome: Mapped[EvaluationOutcome | None] = mapped_column(
+        str_enum(EvaluationOutcome), index=True, nullable=True
+    )
+    # The STABLE per-subject identity: for a per-deposit rule this is the deposit's content_id
+    # (LP-312) — never re-extracted amount/date, which drift across runs (§3D: subject_key from
+    # stable tag values). Promoted from ``details`` JSON to a column so a subject is one finding
+    # (the partial-unique index above). ``details.subject_key`` is still written for the existing
+    # ``finding_identity`` reconcile substrate.
+    subject_key: Mapped[str | None] = mapped_column(
+        String(MEDIUM_STRING), index=True, nullable=True
+    )
+    # The load-bearing tags the verdict rested on, inline (§3D Move 1 — provenance tag→finding):
+    # each ``{tag_id, value, confidence, reasoning, source_facts}``. A human reading the finding
+    # sees WHY (e.g. the sourcing tag's "no matching debit, description-only" reasoning), never a
+    # bare number. Null on non-tag-rule findings.
+    load_bearing_tags: Mapped[list[dict[str, Any]] | None] = mapped_column(JSONB, nullable=True)
 
     # --- Relationships -----------------------------------------------------
     loan_file: Mapped["LoanFile"] = relationship(back_populates="findings")

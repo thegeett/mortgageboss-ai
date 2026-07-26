@@ -7672,3 +7672,4261 @@ their pay-stub + W-2 sources (precisely — no coincidental savings statements),
 their one document. Empty when no distinctive locatable value (graceful). One JSON column + a matching service + a card
 list; no migration on the primary FK; ``source_document_id`` kept. Composes with LP-114 (generalizes single → set) /
 LP-109 / LP-110 / LP-113. The viewer + page deep-link + transaction highlight remain V2 (no viewer, no bbox data).
+
+## ADR-238: Extraction confidence — honest, never fabricated; per-field number in JSON, doc-level in a CHECK-constrained column (LP-201)
+
+- **Date:** 2026-07-09
+- **Status:** Accepted
+
+**Context:** LP-201 threads a confidence signal from the document extractors to storage as a prerequisite for the Stage-1
+snapshot work (nothing consumes it yet). Two questions had to be answered honestly, because a *fabricated* confidence is
+worse than none — a downstream trust gate that reads a made-up ``1.0`` or a defaulted ``0.0`` mislabelled as a real model
+rating makes exactly the wrong call. (a) **Per-field**: the LP-39a extraction shape (``TypedField`` = ``{value, source}``,
+governed by ADR-144/145) carried no per-field confidence, and the only honest source of a per-field number is the model
+self-rating each field. (b) **Document-level**: the model already returns one overall ``confidence`` used for the review
+gate (LP-42), but it was dropped at storage; the ``coerce_confidence`` coercer collapses a *missing/garbage/failed* value
+to ``0.0``, so a persisted ``0.0`` cannot be distinguished from a genuine model ``0.0``.
+
+**Decision:**
+
+- **Per-field confidence: extend the extraction prompts (overrides the ticket's "no prompt redesign" default).** Each of
+  the 18 extraction prompt files now asks the model for one top-level ``field_confidence`` map (``field name → 0.0–1.0 |
+  null``) — a single uniform per-prompt edit, robust to the heterogeneous (some nested) prompt shapes, rather than
+  interleaving a key into every field object. ``parse_typed_core`` reads that map and stores a nullable ``confidence``
+  number **inside ``extracted_data``** (additive JSON key — no column; consumers still read ``value``). This deliberately
+  overrides the ticket's "no prompt redesign" guidance (explicitly approved), because the model self-rating is the only
+  genuine per-field signal available today.
+- **Honesty over completeness — never fabricate.** ``coerce_optional_confidence`` returns ``None`` (not ``0.0``) for a
+  missing / non-numeric / boolean / non-finite (``NaN``/``Infinity``) / out-of-range value — a field the model did not
+  honestly rate in ``[0, 1]`` is "no confidence", never a fake number. This is distinct from the document-level
+  ``coerce_confidence`` (the review gate), which keeps its legacy behavior — default to ``0.0`` and **clamp** an
+  out-of-range number — because classification, cross-source, and the gate all depend on a plain clamped float. Both share
+  one private ``_parse_confidence`` primitive; the only fix to the gate coercer is that ``NaN``/``Infinity`` now collapse
+  to ``0.0`` instead of a fabricated ``1.0``.
+- **The provenance tag is DERIVED, never stored beside the number.** A ``confidence_source`` is
+  ``model_self_reported`` iff a number is present, else ``not_provided`` — a pure function of the number. Storing both
+  invites a contradictory ``confidence=0.9 / source=not_provided`` record with no source of truth, so per-field storage
+  keeps only the number and readers derive the tag via ``ConfidenceSource.for_confidence``. The enum has exactly the two
+  states that exist; no speculative ``structural`` / ``field_presence`` values are reserved until the ticket that first
+  emits them.
+- **Document-level: rescue the signal into a CHECK-constrained column, honestly.** Nullable ``extractions.confidence``
+  (Float) + ``confidence_source`` (a ``str_enum(ConfidenceSource)`` VARCHAR+CHECK, ADR-037 — not a free string, so the
+  vocabulary can't drift and a bad literal can't persist). ``ConfidenceSource`` lives next to the model that owns the
+  column (``app/models/extraction.py``, beside ``ExtractionStatus``); the AI layer imports it (an already-permitted
+  ``ai → models`` direction). The pipeline stores the value through ``document_confidence_provenance``: only a **positive**
+  confidence is a genuine self-report — a failed extraction or a defaulted/garbled ``0.0`` is stored as ``NULL`` /
+  ``not_provided``, so a defaulted 0.0 is never mislabelled ``model_self_reported``.
+
+**Consequences:** additive & non-breaking — the extraction shape stays backward-compatible (consumers read ``value``); old
+rows and failed/low-signal extractions carry honest ``NULL`` / ``not_provided``. Because the prompts changed, extracted
+*values* are no longer guaranteed byte-identical going forward (LLM output isn't deterministic once the contract changes);
+the regression guarantee is shape-compat + no fabrication, not identical values. Trade-off: the document-level path cannot
+distinguish a genuine model ``0.0`` from a defaulted ``0.0`` (``coerce_confidence`` is lossy for the gate), so a
+non-positive doc-level confidence is conservatively stored as ``not_provided`` — the safe, never-fabricate direction; the
+per-field path *does* distinguish them (explicit ``0.0`` kept, absence → ``None``). Extends ADR-144/145 (the extraction
+shape) and reuses ADR-037 (str_enum) / ADR-057 (JSON storage). Deferred: consuming the confidence (Stage-1 snapshot),
+prompt calibration, and any structural/field-presence signal; the 18 identical prompt blocks → a shared injected partial is
+a follow-up refactor.
+
+## ADR-239: Document→borrower link — deterministic (not AI) name matching into a separate one-to-many table (LP-202)
+
+- **Date:** 2026-07-09
+- **Status:** Accepted
+
+**Context:** The Stage-1 snapshot (and later ``belongsTo``, LP-206) needs to know which borrower(s) a document is about.
+On this branch a ``Document`` has no borrower link at all (the equivalent ``document_borrower_links`` built on
+``phase3_5_1`` is deliberately not in use here). Documents already assert a person's name — a pay stub's ``employee_name``,
+a bank statement's ``account_holder_name``, etc. Resolving that asserted name to a file's borrowers is **enumerable,
+reproducible logic**, exactly the kind of thing that must NOT be AI: a flickering, non-deterministic link is worse than
+none (the same lesson as the cross-source "graduation", ADR — known cross-checks belong in deterministic code).
+
+**Decision:**
+
+- **Deterministic, not AI.** A pure ``normalize + score`` matcher (``app/services/borrower_name_matching.py``): accents
+  stripped, ``"Last, First"`` reordered, suffixes/connectors dropped, tokenized; the **last name is the anchor** (no
+  surname match → no link, a shared first name is never enough), then the first name matches by exact / nickname (a small,
+  high-precision common-nickname map) / fuzzy (stdlib ``difflib``). Same inputs → same links, every run. (See the
+  post-review amendment below: bare initials no longer match, short names require exact match, and a failed component
+  scores zero.)
+- **A configurable no-match threshold.** ``NAME_MATCH_THRESHOLD = 0.80``, a named, documented constant. Below it **zero
+  links** are emitted — a low-similarity near-miss (a one-letter surname typo, a same-surname different person) is a
+  correct no-match, never forced to the "closest" borrower. Precision over recall by design.
+- **One-to-many via a link table, not a ``Document.borrower_id`` column.** ``document_borrower_links`` with
+  ``UNIQUE (document_id, borrower_id)`` + a ``[0,1]`` CHECK on ``confidence`` (cf. the findings confidence guard). A joint
+  document (joint bank statement, joint tax return) links **both** borrowers — the asserted string is scored against each
+  borrower independently.
+- **Raw name on the document, resolved link in a separate table.** The asserted name stays inside the document's
+  extraction (``extracted_data``); the *correlation* — borrower id + ``confidence`` + ``method`` (``exact`` /
+  ``normalized`` / ``fuzzy``) — lives ONLY in ``document_borrower_links``. This keeps the document facts raw and
+  uncorrelated (the snapshot's document section stays honest); the resolved link is a separate, recomputable artifact.
+- **Honest no-match = zero rows**, never an error and never a null-borrower row. Re-matching replaces a document's links
+  wholesale (idempotent).
+- **Name extraction added only where a document clearly asserts a borrower name but didn't capture it:**
+  ``homeowners_insurance.named_insured``, ``mortgage_statement.borrower_name``, ``property_tax_bill.owner_name``,
+  ``hoa_statement.owner_name`` — ordinary extracted fields carrying LP-201's nullable per-field confidence. The 10 types
+  that already extract a usable name are untouched. Counterparties (a gift letter's ``donor_name``, a purchase
+  agreement's ``seller_name``) are **excluded** from the borrower-name registry so they never mislink.
+
+**Consequences:** additive & non-breaking; nothing consumes the link yet (LP-206). Deterministic + thresholded means
+precision over recall — the honest cost is that a genuine borrower whose name is badly mangled on a document yields no
+link rather than a guessed one. Known limits (documented in the ticket): the nickname map is small and high-precision (not
+exhaustive); a compound/hyphenated surname anchors on its last token (a simplification); ``property_tax_bill`` /
+``hoa_statement`` name the current *owner*, who on a purchase is the seller — the threshold simply won't link a seller to
+a borrower, so extracting the owner name stays honest. No pipeline trigger is wired — links are recomputed on demand via
+``assign_document_borrower_links``; auto-invocation on document processing is deferred to the consuming ticket. Reuses
+ADR-052 (transitive company scope via document → loan file) and ADR-057. Implemented fresh on this branch, mirroring the
+concept on ``phase3_5_1`` but not depending on it.
+
+**Amendment (2026-07-09, post code-review — precision hardening before LP-206 wires this up).** A review found the matcher
+produced FALSE links between same-surname family members (the common mortgage case); a wrong link is a fabricated fact
+that would propagate into ``belongsTo``. Precision fixes applied:
+
+- **A non-matching name component now contributes ZERO, not a partial score.** Previously a component that failed its own
+  bar still fed its raw ``difflib`` ratio into ``0.5·last + 0.5·first``, so a strong surname dragged a failed first name
+  over the threshold. ``_best_token_match`` now returns ``0.0`` / ``"none"`` for a non-match, so a failed component can
+  neither clear the surname anchor nor pad the combined score. Concretely: ``John Smith`` no longer links to a document
+  asserting ``"Johnson Smith"``.
+- **A bare initial confers no match.** The single-letter "initial" branch (score 0.8) was removed: a stray middle initial
+  (``"Robert A. Smith"``) no longer links co-borrower ``Andrew Smith``, and a first name given only as an initial
+  (``"A. Patel"``) no longer links ``Akash Patel``. An initial is not evidence that two full names are the same person.
+- **Short surnames must match exactly, not fuzzily** (``_FUZZY_MIN_LEN``). ``difflib`` inflates the ratio of short
+  near-misses (Han/Hahn, Lee/Li) above the anchor on a single edit, so fuzzy only counts when both tokens are ≥ 5 chars.
+- **Nicknames map to a SET of canonicals.** A nickname shared by two canonicals (``steve`` → {steven, stephen}; ``kate`` →
+  {katherine, catherine}) previously dropped the second (a ``setdefault`` collision), so ``Stephen``/``Catherine`` never
+  matched ``Steve``/``Kate``. Two names now nickname-match iff their canonical sets intersect.
+- **The honest cost is recall, in the safe direction.** These all trade recall for precision — a genuinely ambiguous or
+  badly-mangled document now yields no link (``belongsTo: null``, a safe miss) rather than a fabricated one.
+- **``method`` is now a CHECK-constrained ``str_enum`` (``MatchMethod``: exact/normalized/fuzzy), mirroring LP-201's
+  ``confidence_source`` and ADR-037** — the value LP-206 branches on can't drift or typo silently. ``MatchResult.method``
+  is typed ``Literal["exact","normalized","fuzzy"]`` so mypy enforces the three literals at every assignment.
+- **Soft-deleted parents no longer leak links.** ``DocumentBorrowerLink`` has no soft-delete of its own and its
+  ``ondelete=CASCADE`` FKs never fire on a soft delete, so a borrower removed from a file after matching would strand a
+  link. ``get_document_borrower_links`` now joins the (soft-delete-aware) document + borrower via ``only_active``, so a
+  link to a soft-deleted parent is never returned. (Read-filter chosen over adding ``SoftDeleteMixin`` because the link
+  table is hard-delete-and-replace by design.)
+- **``BORROWER_NAME_FIELDS`` is a deliberate parallel list — and a known fragility root cause.** It had already drifted:
+  the 1099 mapping was keyed ``"form_1099"`` while ``Document.document_type`` holds the ``EXTRACTORS``/catalog slug
+  ``"1099"``, so **every 1099 silently produced zero links**. Fixed the key, and added a test asserting
+  ``set(BORROWER_NAME_FIELDS) ⊆ set(EXTRACTORS)`` so the drift can't recur. The map stays explicit (rather than derived
+  from the registry) because it also encodes the counterparty-exclusion knowledge the registry doesn't have, and keeping
+  the matcher import-pure (no AI dependency) is worth more than eliminating the parallel list; the drift-guard test is the
+  chosen safety net.
+
+Deferred (recorded in the ticket): compound/hyphenated surnames still anchor only on the last token (a safe miss, left
+until precision is proven); three small helper duplications (typed-cell accessor, current-extraction query dropping
+``only_active``, active-borrowers query) route through existing helpers as a follow-up; per-borrower normalization is
+recomputed in the inner loop (hoist as a follow-up).
+
+## ADR-240: Snapshot field primitives — absent≠empty marker + an app-secret-keyed PII match-hash (LP-203)
+
+- **Date:** 2026-07-09
+- **Status:** Accepted
+
+**Context:** The Stage-1 snapshot needs a shared field shape for every fact plus a way to carry PII (SSNs, account
+numbers) without ever storing the raw value, while still letting deterministic rules match same-value fields (a bank
+statement's account == a MISMO asset's account). Two decisions are load-bearing and must be made here: (a) how to
+distinguish a fact *no source supplied* (absent) from a fact a source supplied as null/empty (present-but-empty), and
+(b) the match-hash construction — because SSNs (~10^9) and account numbers are **low-entropy**, a naive hash of a
+low-entropy value keyed only by the non-secret ``loan_file_id`` is trivially brute-forced by anyone holding the hash.
+
+**Decision:**
+
+- **Two frozen, closed Pydantic v2 models** (``model_config = {"frozen": True, "extra": "forbid"}``), in
+  ``app/verification/snapshot/``. ``Field`` = ``{value, confidence, source}``; ``PiiField`` = ``{display, match_hash,
+  confidence, source}`` with **no raw-value field** — ``extra="forbid"`` structurally prevents attaching one, and the
+  ``PiiField.from_raw(...)`` factory masks + hashes internally so a caller never hand-stores the raw value.
+- **Reuse LP-201's confidence model exactly (ADR-238).** ``confidence: float | None`` (never a fabricated default;
+  ``None`` is the honest state) and the provenance tag is **derived, not stored** — a ``confidence_source`` property over
+  ``ConfidenceSource.for_confidence`` — so the number and its tag can never disagree.
+- **Absent ≠ empty via an explicit ``absent`` marker**, not a null value. ``Field.missing()`` (absent: no source, no
+  value, no confidence) is structurally distinct from ``Field.present(None, source=…)`` (a source supplied an explicit
+  null/empty). A model validator enforces the two states never blur (an absent field carries nothing; a present field
+  must carry a source). Chosen over a sentinel object (awkward to JSON-serialize) and over "absence = key omitted"
+  (can't record an *explicit* "we looked, nothing there"); the boolean serializes cleanly and is unambiguous.
+- **``source`` (``FieldSource`` = parsed | extracted)** is the fact's DATA ORIGIN — distinct from ``confidence_source``
+  (the LP-201 confidence provenance). Two different "source" concepts, deliberately kept separate.
+- **PII display: last-4 masking only**, honest on every edge — ``mask(value, kind)`` returns ``***-**-1234`` (SSN) /
+  ``****3312`` (account); a null / empty / malformed / too-short value returns a fully-masked placeholder
+  (``***-**-****`` / ``****``), never the raw value, never a crash.
+- **Match-hash construction (the security crux):**
+  ``match_hash = HMAC-SHA256(key=K, msg=f"{loan_file_id}:{normalized_value}")`` where
+  ``K = SHA256(b"snapshot-pii-match-hash-v1:" + settings.encryption_key)`` and ``normalized_value`` is the value's
+  lowercased alphanumerics (so ``123-45-6789`` == ``123456789``). Properties: **per-loan-file salt** — ``loan_file_id``
+  in the message means the same SSN in two files hashes differently (no cross-file correlation), while it stays
+  consistent within a file so matching works; **application secret** — keying the HMAC with a secret derived from the
+  existing Fernet ``encryption_key`` (ADR-051) makes the hash reproducible only by the system, so a low-entropy input
+  can't be brute-forced by a party holding the hash + the (non-secret) ``loan_file_id``; **key separation** — ``K`` is a
+  purpose-derived subkey (``SHA256(purpose ‖ encryption_key)``), not the raw Fernet key, so the HMAC key is
+  cryptographically distinct from the encryption key and reuses no new secret store.
+
+**Consequences:** pure primitives; nothing consumes them yet (the snapshot model is LP-204, assemblers later). The
+match-hash is a **keyed pseudonym**, not encryption — it is one-way and un-reversible even by the system (there is no
+"unhash"); its sole purpose is equality-matching within a loan file. Rotating ``encryption_key`` (or bumping the
+``v1`` purpose label) changes all match-hashes — acceptable because nothing persists them yet and a snapshot is rebuilt
+per run; a future ticket that persists snapshots must treat a key rotation as a rebuild trigger. The key is derived per
+call (not cached) so rotation and tests both see the current secret. Reuses ADR-051 (Fernet ``encryption_key`` / secret
+management) and ADR-238 (the LP-201 nullable-confidence model + derived source); no new secret store is introduced.
+Deferred: which fields *are* PII (per-assembler, later tickets), the snapshot model + persistence, and any UI.
+
+**Amendment (2026-07-09, post code-review — the match-hash fabricated "these two values match" facts).** A review
+found the primitive minted a real, matchable hash for empty/absent inputs and collided values across kinds — the same
+fabricated-fact / absent≠empty class of bug as LP-201/LP-202. Fixes:
+
+- **Empty/absent → NON-matchable.** ``match_hash`` returns ``None`` when the value normalizes to fewer than
+  ``_MIN_MATCH_LEN`` (4) characters (``""`` / whitespace / punctuation / ``None`` — and ``None`` now normalizes to ``""``,
+  not the token ``"none"``). Two blank/absent PII values can never "match". ``PiiField.match_hash`` is now ``str | None``.
+- **Kind-bound.** The ``PiiKind`` is folded into the HMAC message (``f"{kind}:{loan_file_id}:{value}"``), so an SSN and
+  an account that share a digit-string (``123-45-6789`` / ``123456789``) no longer collide into a cross-kind match.
+- **``loan_file_id`` canonicalized + empty rejected.** Parsed to canonical UUID form (so ``str(uuid)`` and an upper-cased
+  rendering of the same id match), and an empty/falsy id raises — it would collapse the per-file salt and reintroduce the
+  cross-file correlation the salt exists to prevent.
+- **Versioned output.** The hash carries its version (``v1:<hex>``), so once snapshots persist (LP-204) a construction
+  bump is an incremental, detectable migration rather than a silent global match failure. Supersedes the original
+  "rotation = full rebuild" deferral.
+- **``PiiField.missing()`` — absent PII, first-class.** No display, no hash — distinct from a source-supplied blank
+  (present-but-empty: a masked placeholder display + ``None`` hash). PII now honors the absent≠empty distinction ``Field``
+  already enforced, via an ``absent`` marker + validator mirroring ``Field``.
+- **Raw value structurally rejected.** A validator rejects an unmasked ``display`` (must start with a mask shape), so
+  ``PiiField(display=raw_ssn, …)`` fails — the "never stores the raw value even by accident" guarantee is now enforced,
+  not just documented. This also corrects the earlier "un-reversible even by the system" overstatement: the hash is
+  un-computable by any party *without* the secret, but a holder of the snapshot AND the secret could still brute-force a
+  low-entropy input — no weaker than the encryption-at-rest boundary, but not absolutely irreversible.
+- **Key access centralized (ADR-051).** The purpose-separated subkey is derived via a new
+  ``app.core.encryption.derive_key(purpose)`` — all ``encryption_key`` access stays in ``encryption.py``.
+- **``Field.value`` rejects non-JSON-scalars.** A ``Decimal`` (money) or ``date`` now raises at the primitive instead of
+  silently coercing to ``float`` (precision loss); assemblers must stringify first, and a violation fails loudly here.
+- **Also:** ``mask()`` masks an exactly-4-character value (``> 4`` to reveal last-4, was ``>= 4``), and its kind→shape
+  dispatch uses ``assert_never`` so a new ``PiiKind`` is a hard failure, not a silent account-shape fallthrough.
+
+Deferred (follow-ups, in the ticket): a shared ``mask_last4``/``mask_ssn`` helper (``mask()``'s SSN branch duplicates
+``Borrower.masked_ssn``); a shared ``ConfidenceCarrier`` base (the confidence + derived ``confidence_source`` is
+copy-pasted across ``Field`` / ``PiiField`` / ``TypedField`` — relates to ADR-238).
+
+## ADR-241: Snapshot container — frozen three-section model, un-linkable by construction, resolved belongsTo (LP-204)
+
+- **Date:** 2026-07-09
+- **Status:** Accepted
+
+**Context:** The Stage-1 snapshot needs a container the assemblers code against and that persists as a JSON blob
+(LP-209). It must hold the three sections (MISMO facts, extracted documents, the four calculators' output) built on
+LP-203's ``Field``/``PiiField`` primitives, reference LP-202's resolved document→borrower links, and — the load-bearing
+constraint — keep the sections **independent** so no cross-section correlation can be baked in (that is a deliberate
+downstream job; a snapshot must present raw, uncorrelated facts).
+
+**Decision:**
+
+- **Frozen Pydantic v2 models, top to leaf** (``model_config = {"frozen": True}``): ``Snapshot`` →
+  ``MismoSection`` / ``DocumentsSection`` / ``CalculationsSection`` → ``DocumentEntry`` / ``CalculationEntry`` /
+  ``CalcBreakdownLine`` / ``BorrowerLink``, over LP-203 ``Field``/``PiiField``. Attribute reassignment at any level
+  raises. (Caveat, documented: ``frozen`` does not deep-freeze a contained ``dict``/``list`` — Pydantic can't; the maps
+  are immutable by construction, built once by the builder and never mutated. A ``frozendict`` would fight JSON
+  round-trip and is not worth it.)
+- **The ``Field | PiiField`` union needs no discriminator.** LP-203's ``extra="forbid"`` makes the two structurally
+  mutually exclusive (``value`` only on ``Field``; ``display``/``match_hash`` only on ``PiiField``), so a dumped cell
+  validates back to exactly one — round-trip is lossless without adding a ``kind`` tag to the primitives (which would
+  have meant re-touching LP-203).
+- **``belongsTo`` = the RESOLVED link, list-capable, ``None`` when unresolved; the raw name stays in ``fields``.** A
+  ``DocumentEntry`` carries ``belongs_to: list[BorrowerLink] | None`` where ``BorrowerLink`` = ``(borrower_id,
+  confidence, method)`` from LP-202 (self-describing, no DB join at read time); ``None`` = no borrower resolved, a
+  **non-empty** list = one (or many, for a joint document). A validator rejects ``[]`` so "resolved to nobody" can't
+  masquerade as empty. The document's raw asserted name is an ordinary ``Field`` in ``fields`` — the resolved reference
+  and the raw claim are kept separate (mirrors ADR-239's raw-name-vs-resolved-link split). ``belongs_to`` references a
+  borrower *entity*, not another snapshot section, so it is not a cross-section link.
+- **No cross-section correlation — enforced structurally, not by convention.** There is simply no field anywhere that
+  references another section's keys/entries, so a MISMO↔document correlation cannot even be *expressed* in the type. The
+  MISMO map's keys are free strings, not anchors anything else can point at.
+- **Absent ≠ empty at the section level too.** Each section carries an ``absent`` marker with ``present()`` / ``missing()``
+  factories and a validator (mirroring LP-203's ``Field``), so "no documents yet" (present, empty ``entries``) is
+  distinct from "documents section not built/failed" (``absent``). Both survive JSON round-trip.
+- **Calculations shaped to FIT, not call.** Each of dti/ltv/mi/reserves is a ``CalculationEntry`` = ``{value:
+  dict[str, str|bool|None], breakdown: list[CalcBreakdownLine]}`` where ``CalcBreakdownLine.source`` is a **free string**
+  (the calculator vocabulary ``stated``/``computed``/``extracted``/``manual``/``override`` — distinct from
+  ``FieldSource``), so any calculator line round-trips with its tag. Money is stringified for exact JSON. Cash-to-close
+  is deliberately absent (not a field).
+- **Versioned + extensible.** ``snapshot_version`` (an int; ``SNAPSHOT_VERSION = 1``) is stored so a reader always knows
+  the shape. The field maps are open ``dict[str, …]`` (new keys need no schema change) and container models keep
+  Pydantic's default ``extra`` (not ``forbid``) so a future field is forward-compatible for an older reader — only the
+  ``Field``/``PiiField`` primitives forbid extras (needed for the union).
+
+**Consequences:** pure schema — nothing populates it yet (assemblers LP-205/206/207, builder LP-208, persistence LP-209).
+JSON round-trip is lossless (the acceptance bar for LP-209), preserving PII as ``display`` + versioned ``match_hash``
+(``str | None``, no raw value), nullable confidence + derived source, calculator source tags, and the absent≠empty
+distinction at field and section level. Reuses ADR-240 (LP-203 primitives), ADR-239 (LP-202 links + raw-vs-resolved
+split), and ADR-238 (LP-201 confidence). Deferred: the collection deep-immutability caveat above; populating any section;
+and everything downstream (assemblers/builder/persistence/UI).
+
+## ADR-242: MISMO section assembler — stable dotted-key flattening + null-omits-absent (LP-205)
+
+- **Date:** 2026-07-09
+- **Status:** Accepted
+
+**Context:** The first Stage-1 assembler (LP-205) reads the already-parsed, persisted 1003/MISMO data and reshapes it
+into LP-204's flat ``mismo`` section (``dict[str, Field | PiiField]``). It does not parse MISMO. Two real decisions:
+the flat-key convention (and its *stable* index basis — the same fact must land at the same key across runs) and which
+MISMO fields are PII.
+
+**Decision:**
+
+- **Stable dotted-key convention:** ``loan.<field>``, ``property.<field>``, ``borrower.<n>.<field>``,
+  ``borrower.<n>.income.<m>.<field>``, ``borrower.<n>.employer.<m>.<field>``, ``borrower.<n>.declaration.<slug>``,
+  ``liability.<k>.<field>``, ``asset.<k>.<field>`` — a flat map (no nesting) as LP-204 requires.
+- **Indices derive from a deterministic ordering, never raw list position:** borrowers by ``borrower_position``
+  (tie-break on id); nested (income/employer) and file-level (liability/asset) collections by ascending row ``id``.
+  The same *input rows* always produce the same keys — deterministic **within** a run. The order is deterministic, not
+  semantic (``income.1`` is the lowest-id item, not "the base income") — a rule reads a *set* of ``borrower.N.income.*``
+  keys, not "the first" one. **Correction (post-review):** the positional index is NOT a durable per-row identity across
+  runs — soft-deleting or inserting a lower-ordered sibling shifts every later index (``income.3`` → ``income.2``), so a
+  cross-run key diff would misattribute. A per-run snapshot doesn't rely on cross-run key identity today; if that need
+  arises, key by the immutable row id. (The original "same fact → same key on every run" overstated this.)
+- **``NULL`` → absent → OMIT the key.** A value the MISMO didn't carry (a null column or a missing sub-entity) is
+  absent: its key simply doesn't appear. A non-null value is present, *including an empty string* (present-but-empty).
+  So "not in MISMO" (key absent) is structurally distinct from "carried as blank" (key present, value ``""``), honoring
+  LP-203's absent≠empty without emitting a present-null placeholder. An index gap is legitimate and stable — e.g. an
+  all-null asset row (LF-6T3N's known silently-empty asset) yields no ``asset.3.*`` keys, an honest absence.
+- **``source = parsed``; ``confidence = null`` on every field.** The MISMO parse is deterministic — ``source=parsed``
+  conveys the certainty and confidence stays ``None`` (never a fabricated ``1.0``), reusing LP-201/ADR-238's rule.
+- **PII = borrower SSN only, via ``PiiField.from_raw(kind=ssn, loan_file_id=…)``** — masked display + per-file
+  match-hash, raw never stored. On this branch the Stated asset/liability tables carry **no account-number column**, so
+  there is no account PII to route (a documented completeness gap — a fuller MISMO would). Contact PII (email/phone) is
+  deliberately **not surfaced** (not a verification fact; avoids unnecessary PII surface); DOB *is* surfaced (identity
+  cross-checks; already plaintext at rest).
+- **Values are stringified to JSON scalars** (``Decimal`` → exact string, ``date`` → ISO, ``StrEnum`` → its value)
+  because LP-204 hardened ``Field.value`` to reject ``Decimal``/``date`` (no silent precision loss).
+
+**Consequences:** a pure read + reshape (``build_mismo_section`` over loaded ORM rows; ``load_mismo_section`` queries
+with ``only_active``); no mutation, no correlation with other sections. Verified on the real file LF-6T3N (122 keys, both
+SSNs masked, all ``parsed``/null-confidence, the empty asset correctly absent). Reuses ADR-240 (Field/PiiField), ADR-238
+(confidence). **Documented completeness gaps (not backfilled here):** account-number PII, borrower ``current_address_*``
+and property ``county`` (parsed-but-dropped store-everything fields that live only on ``phase3_5_1``), and any raw
+MISMO catch-all; there is also no transaction data in persisted typed MISMO (transactions live in bank-statement
+extractions), so no ``transaction.*`` keys. Deferred: those gaps, and the other sections (documents LP-206,
+calculations LP-207), the builder (LP-208), and persistence (LP-209).
+
+**Amendment (2026-07-10, post code-review).** Fixes applied to the assembler:
+
+- **Cross-run key stability was overstated** — corrected to "deterministic within a run" (see the indices bullet above);
+  positional indices shift on a sibling soft-delete/insert.
+- **Uniform soft-delete filtering.** ``build_mismo_section`` is pure + public, but only filtered income/employers via
+  ``_active()`` while trusting the caller's SQL ``only_active`` for borrowers/liabilities/assets — a leak if a caller
+  built from unfiltered rows. It now applies ``_active()`` to *every* child collection, and ``_active`` uses the shared
+  ``SoftDeleteMixin.is_deleted`` (not a hand-rolled ``getattr(deleted_at)``).
+- **Absent ≠ empty for the SSN.** The SSN was gated by truthiness (``if borrower.ssn:``), dropping a present-but-empty
+  SSN as absent. It now routes through the ``put`` PII path, whose absent test is ``value is None`` — a blank SSN stays
+  present-but-empty (masked placeholder, non-matchable hash).
+- **PII is declared per key.** PII routing moved from a bespoke ``if borrower.ssn`` branch into ``put(key, value,
+  pii=PiiKind.…)``, so a future sensitive column (an account number) is one ``pii=`` argument away and can't be emitted
+  as a plaintext ``Field`` by pattern-matching.
+- **Unhandled types fail loud.** ``_scalar`` now *raises* on an unanticipated type instead of ``str()``-fabricating a
+  Python repr (which defeated ``Field.value``'s guard).
+- **Malformed declarations degrade gracefully.** A non-dict ``declarations`` JSON value is skipped (no declarations)
+  rather than raising ``AttributeError`` on ``.items()`` and failing the whole section.
+- **Cleanup:** the four child loaders collapse to a ``_by_loan_file`` helper; ``load_mismo_section`` documents that the
+  caller must pass a company-scoped ``loan_file`` (transitive scope, ADR-052).
+
+Deferred follow-ups: ``_slug`` declaration-name collisions (two names → one key, last wins) — left as-is; and extracting
+the cross-module duplicates (``_slug`` vs ``documents.naming._slug``, ``_scalar`` money vs ``cross_source._money``) into
+shared helpers.
+
+## ADR-243: Documents section assembler — option-2 belongsTo (resolved id+name) + LP-204 amendment (LP-206)
+
+- **Date:** 2026-07-10
+- **Status:** Accepted
+
+**Context:** The second Stage-1 assembler (LP-206) reads each ACTIVE document's already-extracted facts (LP-201
+confidence) and its already-stored borrower links (LP-202) into the ``documents`` section. It does not extract and does
+not run matching. The load-bearing decision is the ``belongsTo`` shape; reality also forced two corrections to the
+ticket's premises (recorded below).
+
+**Decision:**
+
+- **belongsTo = option-2: a resolved-reference list of ``{borrower_id, name}``, read from the stored links.** Amends
+  LP-204: ``DocumentEntry.belongs_to`` changes from ``list[BorrowerLink]`` (``{borrower_id, confidence, method}``, the
+  LP-204 shape) to ``tuple[BorrowerRef, ...] | None`` where ``BorrowerRef = {borrower_id, name}``. A ``tuple`` so a
+  built entry's resolved list is itself immutable (LP-204's nested-freeze lesson). ``None`` = no borrower resolved
+  (appraisal / no-match / unprocessable); a non-empty tuple = one (or many, joint). A validator still rejects an empty
+  tuple and a repeated ``borrower_id``. The **match provenance (confidence/method) is dropped** from the snapshot
+  reference — it stays in the ``document_borrower_links`` row; the snapshot carries the resolved *identity*. The RAW
+  asserted name the document printed stays as an ordinary ``fields["asserted_name"]`` entry — resolved reference and raw
+  claim are kept separate (mirrors ADR-239/241).
+- **Soft-delete honesty:** only active, current documents are assembled; ``belongsTo`` reads via LP-202's
+  ``get_document_borrower_links`` (which already excludes a link to a soft-deleted document/borrower), and a ref is
+  emitted only for a borrower still active on the file — a borrower removed after matching drops out of ``belongsTo``.
+- **Confidence surfaced FAITHFULLY:** each extracted field carries LP-201's nullable ``confidence`` exactly — a genuine
+  number stays, ``None`` stays ``None``; the assembler never fabricates one (a non-numeric confidence coerces to
+  ``None``, not a default). This is the first place confidence reaches the snapshot; it stays honest end to end.
+- **Absent ≠ empty:** an extracted field whose ``value`` is null (or absent) is omitted; a present empty string is kept.
+  Nested/non-scalar extracted values (e.g. bank-statement transaction lists) are not surfaced as fields here (deferred).
+
+**Corrections to the ticket's premises (reality, flagged in Phase 0):**
+
+- **belongsTo was NOT ``str|None``.** LP-204 (post its own review) already typed it ``list[BorrowerLink] | None``; the
+  amendment is a *reshape* to ``BorrowerRef`` id+name, not a widening from a string.
+- **PII is routed through ``PiiField`` per an explicit ``_PII_FIELDS`` registry — never a plain ``Field``.** Two cases:
+  a field the extractor stored **already masked** (``account_number_masked`` / ``id_number_masked`` /
+  ``taxpayer_ssn_masked``) → ``PiiField.pre_masked`` (canonical last-4 display, ``match_hash=None``); a field the
+  extractor stored **RAW** ("as written" — W-2 ``employee_ssn``, 1099 ``recipient_tin``) → ``PiiField.from_raw`` (masked
+  here + a per-file match-hash; the raw is discarded). ``social_security_wages`` / ``_tax_withheld`` are dollar amounts,
+  not SSNs. Institution tax ids (W-2 ``employer_ein`` / 1099 ``payer_tin``) — an employer/payer id, not borrower PII —
+  ARE routed too (``PiiKind.ACCOUNT`` → ``****NNNN`` + per-file hash): a 9-digit tax id is exactly what the LP-209
+  at-rest guard treats as a possible unmasked SSN, so masking them keeps that guard strong instead of exempting a tax
+  id (see the 2026-07-10 amendment). The registry is drift-guarded by a test (any ``# SENSITIVE`` extractor field must
+  be routed, except the date-typed ``date_of_birth``).
+  **[Corrected post-review — see the amendment; the original claim "extraction PII is already masked, no raw to route"
+  was FALSE for W-2/1099, which store the SSN/TIN raw.]**
+
+**Consequences:** a pure read + reshape (``build_documents_section(db, loan_file)``; ``build_document_fields`` pure).
+Covered by a DB-backed pytest suite (test DB via ``create_all`` = this branch's schema) exercising single / joint /
+no-match belongsTo, soft-deleted document + soft-deleted borrower exclusion, honest confidence, PII masking, and
+absent≠empty. Reuses ADR-238 (confidence), ADR-239 (LP-202 links), ADR-240 (Field/PiiField), ADR-241 (the container).
+**Known limitations / divergences (documented, not resolved here):** (a) **JSON key casing** — the target example is
+camelCase (``documentType`` / ``borrowerId`` / ``matchHash``) but the committed snapshot (LP-203/204/205) is
+snake_case; a wholesale camelCase pass touches the LP-203 primitives + serialization config, so LP-206 stays snake_case
+for consistency and the pass is deferred to its own cross-cutting change (the *structure* matches the target). (b)
+**Real-file smoke** — LF-6T3N has zero stored links (the LP-202 matcher was never run — out of scope) and the dev DB is
+stamped at a ``phase3_5_1`` Alembic revision lacking LP-201's ``extractions.confidence`` columns, so
+``documents_section_smoke`` can't run there; the schema-correct coverage is the DB-backed test suite. Deferred:
+nested/non-scalar extracted values, catch-all fields, and the camelCase pass.
+
+**Amendment (2026-07-10, post code-review).** The review found a **raw-PII leak**: the PII allowlist was
+``{account_number_masked, taxpayer_ssn_masked}``, but W-2 stores ``employee_ssn`` and 1099 stores ``recipient_tin`` RAW
+("as written" per the prompts), so those fell through to ``Field.present(raw_ssn)`` — a plaintext SSN/TIN in the
+snapshot blob. Fixes:
+
+- **Complete, typed PII routing.** ``_PII_FIELDS`` now maps each sensitive field to ``(PiiKind, pre_masked)``: raw fields
+  (``employee_ssn`` / ``recipient_tin``) go through ``PiiField.from_raw`` (masked + per-file hash, raw discarded);
+  pre-masked fields (incl. ``id_number_masked``, previously mis-typed as a plain ``Field``) through the new
+  ``PiiField.pre_masked`` classmethod (which owns the last-4 display shape + ``assert_never`` on kind, replacing the
+  assembler's hand-rolled copy). ``build_document_fields`` now takes ``loan_file_id`` to salt the raw-PII hash.
+- **Drift guard.** A test scans the extractors for ``# SENSITIVE`` typed fields and asserts each is PII-routed
+  (``date_of_birth`` excluded — a date, surfaced as an ordinary field as MISMO does); a new raw-SSN/account field can no
+  longer be missed silently. The PII test now seeds a raw ``employee_ssn`` / ``recipient_tin`` and asserts no raw value
+  (dashed or undashed) appears; the smoke/test tripwire regex now also catches an SSN-shaped ``\d{3}-\d{2}-\d{4}``.
+  **(Amended 2026-07-10 — see the EIN/TIN follow-up below: the guard originally scraped ``# SENSITIVE`` + ``TypedField``
+  on ONE line, so a ruff-wrapped multi-line field (``employer_ein`` / ``payer_tin``) slipped it silently. It now
+  attributes the comment to the nearest preceding ``<name>: TypedField`` declaration, and self-checks that those fields
+  are detected — a comment-scrape guard, still deferring the structural fix of a typed ``PiiKind`` marker on the field.)**
+- **Confidence honesty.** ``_confidence`` was replaced by ``coerce_optional_confidence`` (LP-201), restoring the ``[0,1]``
+  guard the hand-rolled copy dropped.
+- **N+1 fixed.** Borrower links are loaded in ONE ``document_id IN (…)`` query and grouped, replacing a per-document call.
+  The eager extraction load is filtered to the current version (``selectinload(...).and_(Extraction.is_current)``).
+- **``asserted_name`` de-duplicated.** It now aliases the SAME already-built name Field (a pointer, not a second copy
+  re-normalized with ``.strip()`` — the two could disagree on whitespace) and never clobbers a real extracted field.
+
+**Resolved (2026-07-10): keep ``belongs_to=None``.** The earlier deferral — that ``None`` can't distinguish
+"matched borrowers later removed" from "never resolved" (nor no-match from never-attempted) — is decided as
+**keep-``None``, accepted lossy-by-design**. ``None`` means "no borrower attached"; ``fields.asserted_name`` already lets
+a consumer split "named someone but unresolved" from "named no one," which is the only distinction any consumer needs
+today. The finer reasons (no-match / not-attempted / removed) are intentionally NOT represented — the root cause is
+LP-202 storing positive links only (zero rows = both "no match" and "never ran"), so surfacing the distinction would
+need an upstream match-attempt record. No consumer requires it, so no marker is added; revisit only if a verification
+rule concretely needs it (YAGNI).
+
+Deferred: schema-declared PII (annotate ``PiiKind`` on the extraction ``TypedField`` so the assembler reads
+it instead of a parallel registry) — the drift-guard test is the interim; and the ``_scalar`` naming/dedup across the two
+assemblers.
+
+**Amendment (2026-07-10): mask employer EIN / payer TIN (surfaced by real-file smokes).** Reconciling the dev DB let the
+Stage-1 smokes run on real LF-6T3N, which caught W-2 ``employer_ein`` and 1099 ``payer_tin`` (9-digit business tax ids)
+landing as plaintext ``Field``s and tripping the LP-209 PII-at-rest guard. Decision (overriding the original "institution
+ids not routed"): route both through ``PiiField.from_raw`` (``PiiKind.ACCOUNT`` → ``****NNNN`` + per-file hash) in
+``_PII_FIELDS`` and mark them ``# SENSITIVE`` in the extractors so the drift-guard keeps them synced. A 9-digit tax id is
+indistinguishable from a bare SSN to the guard, so masking preserves the strong guard rather than exempting it. Verified
+on real LF-6T3N (``employer_ein`` → ``****NNNN``; whole snapshot builds + persists + loads with no raw PII at rest).
+**(Follow-up review, 2026-07-10 — the drift guard did NOT actually keep them synced at first: ruff wrapped both fields
+across lines, putting ``# SENSITIVE`` on the closing ``)`` where the same-line scrape couldn't see it, so the guard was
+silently blind to the two fields this decision added. Fixed the guard to attribute the comment to the nearest preceding
+``TypedField`` declaration + self-check those fields; the module docstring was reconciled; the EIN/TIN test now strips
+``match_hash`` and checks the dashed form too. Held for a later decision: whether match-hashing a shared institution id
+under ``ACCOUNT`` kind is meaningful, and whether the LP-209 at-rest guard should learn to tell an EIN from an SSN rather
+than have this layer mask a non-borrower id.)**
+
+## ADR-244: Calculations section assembler — invoke-and-map, source-tags passed through, not-computed=None (LP-207)
+
+- **Date:** 2026-07-10
+- **Status:** Accepted
+
+**Context:** The third Stage-1 assembler (LP-207) fills the ``calculations`` section by CALLING the four existing
+calculators (DTI/LTV/MI/reserves) and mapping each native return shape into LP-204's uniform ``CalculationEntry
+{value, breakdown}``. Lighter than the prior assemblers (it's a mapping), but three choices are worth recording.
+
+**Decision:**
+
+- **Invoke, don't reimplement.** ``build_calculations_section`` awaits ``build_dti_calculation`` /
+  ``build_ltv_calculation`` / ``compute_loan_mi`` / ``build_reserves_view`` and maps their results — **zero calculation
+  math is duplicated** (the calculators are the source of truth; a re-derivation would be a divergence bug). A test mocks
+  the four entry points and asserts they are invoked.
+- **Source tags are passed through verbatim, never re-derived.** Each breakdown line copies the calculator's own
+  ``source`` (``stated`` / ``computed`` / ``extracted`` / ``manual`` / ``override``) straight onto
+  ``CalcBreakdownLine.source``. Because that field is a **free string** (LP-204), the calculator's ``override`` tag — a
+  5th value beyond the four the ticket named — survives losslessly with no enum coercion. (The ticket's premise of a
+  ``CalcSource`` enum / a ``CalculationLine`` type does not match the committed model, which is ``CalcBreakdownLine`` with
+  a string ``source``; reused as-is.)
+- **Not-computed = ``None``, never a fabricated 0.0.** When a calculator can't produce its headline it maps to ``None``
+  (LP-204: ``CalculationEntry | None``): DTI when ``back_end_dti`` is ``None`` (no income); LTV when ``ltv`` is ``None``
+  (no value basis — the refi/no-valuation case); reserves when the view's ``computed`` flag is ``False``
+  (``months_available`` ``None`` — no PITI divisor; see the post-review amendment — this was originally a fragile
+  ``headline == "—"`` display-string match). **MI is always present** — ``required`` is always determined, and a
+  "not required / premium ``None``" answer is *computed*, not missing.
+- **DTI uses STATED (MISMO) income — surfaced transparently.** The calculators compute DTI from stated income; the income
+  breakdown line carries ``source=stated``, making the input visible. LP-207 does NOT pick a different income or reconcile
+  a stated-vs-extracted disagreement — that is a downstream finding; the snapshot shows the calc + its source tag.
+- **Money is stringified exactly** (``Decimal`` → string) for both ``value`` headline numbers and breakdown ``amount``,
+  honoring LP-204's guard against a silent float. Reserves' ``value`` is the calculator's formatted ``headline`` string
+  (the ``CalculatorView`` doesn't expose the raw months number).
+
+**Consequences:** a pure invoke + map (``build_calculations_section(db, loan_file) -> CalculationsSection``; ``map_dti`` /
+``map_ltv`` / ``map_mi`` / ``map_reserves`` pure). Covered by mapper unit tests (source pass-through, no line dropped,
+not-computed=None, money precision), an invoke-mock test (entry points called), and DB-backed tests running the real
+calculators (all-four map; LTV=None on a refi with no valuation). Reuses ADR-241 (the container) and the LP-76/77/87/91
+calculators. Cash-to-close is deliberately **out** (not a field). **Limitations (documented):** the real-file smoke
+can't run on the dev DB (DTI reads extractions; the dev DB lacks LP-201's ``extractions.confidence`` columns) — the
+**Amendment (2026-07-10, post code-review).** The reserves not-computed detection was fragile — it string-matched the
+view's display placeholder (``headline == "—"``) to recover ``months_available is None``, coupling across a module
+boundary with no shared constant and no real test (the unit test hardcoded the same ``"—"``). Fixes:
+
+- **Structured not-computed signal.** ``CalculatorView`` gains ``computed: bool`` (default ``True``); ``build_reserves_view``
+  sets ``computed = result.months_available is not None``. ``map_reserves`` now branches on ``not view.computed`` — a
+  placeholder/format change can no longer turn a not-computed reserves into a fabricated present entry, and a ``None``
+  headline no longer slips through the old ``== "—"`` check.
+- **Typed reserves mapper.** ``map_reserves(view: CalculatorView)`` replaces ``view: object`` + ``getattr`` + a
+  ``# type: ignore``, restoring the mypy coverage its three sibling mappers already had.
+- **Real coverage.** A DB-backed test seeds a no-loan-terms loan (no P&I → no PITI divisor) and asserts
+  ``section.reserves is None`` through the REAL ``build_reserves_view``, so the coupling is exercised end-to-end.
+- **Cleanup:** ``_CalcLineItem`` is now a ``Protocol`` (drops the 3-schema union import).
+
+Deferred: the four calculators transitively recompute each other (per snapshot: LTV ×5, MI ×3, DTI ×2 — an existing
+calculator-layer coupling; the fix is threading precomputed inputs, not the assembler); ``map_dti`` returns ``None`` for
+the whole entry when there is no income (drops the visible housing/debt obligations too — a design choice per this ADR);
+``_money`` is a 5th copy of the Decimal→str helper; and the hand-listed ``value`` dicts can drift from the calculator
+schemas (a parity test would guard it).
+
+DB-backed suite is the schema-correct coverage. Deferred: cash-to-close; the stated-vs-extracted reconciliation (a
+downstream finding, by design); exposing reserves' raw months number if a future need arises.
+
+## ADR-245: Snapshot builder — resilient + honest partial-failure policy; run_id received, not minted (LP-208)
+
+- **Date:** 2026-07-10
+- **Status:** Accepted
+
+**Context:** LP-208 stitches the three Stage-1 assemblers (LP-205 MISMO, LP-206 documents, LP-207 calculations) into one
+frozen LP-204 ``Snapshot``, stamping metadata. The real decision is how to behave when a section can't be fully built —
+the snapshot must be resilient (one section failing can't lose the whole thing) yet honest (a failure is never swallowed
+or faked), consistent with the absent≠empty invariant that governs the whole snapshot.
+
+**Decision:**
+
+- **Three-state, honest section outcome:**
+  - **present + populated** — the assembler built it;
+  - **present + empty** — a genuinely empty section (e.g. a file with no documents) is a *valid, present* empty section
+    (empty ``entries`` tuple), NOT an error and NOT absent;
+  - **absent + reason** — an assembler that **raises** yields ``Section.failed(reason)``: the section is absent and
+    carries a PII-safe explanation, never a fabricated empty section and never a whole-snapshot failure.
+- **Minimal LP-204 amendment (recorded here):** each section model (``MismoSection`` / ``DocumentsSection`` /
+  ``CalculationsSection``) gains ``reason: str | None`` + a ``failed(reason)`` factory; a validator enforces that a
+  *present* section never carries a reason (reason is failure metadata, only valid alongside ``absent``). ``missing()``
+  (absent, no reason) and ``failed(reason)`` (absent, with reason) are distinct — "not built" vs "couldn't build".
+- **The reason is PII-safe by construction** — the exception's *class name only* (``"documents assembler raised
+  ProgrammingError"``), never ``str(exc)`` (which could carry borrower data). The failure is also ``logger.warning``-ed
+  with metadata only.
+- **Resilience is broad but bounded:** each of the three sections is built in its own ``try/except Exception`` (so
+  ``KeyboardInterrupt`` / ``SystemExit`` still propagate). A missing *loan file* (precondition) is a hard
+  ``LoanFileNotFound`` — that is not a section failure, it's "there is nothing to snapshot".
+- **``run_id`` is RECEIVED, not minted.** ``build_snapshot(db, *, loan_file_id, run_id)`` stamps the ``run_id`` it is
+  given; the builder never creates run identity (a verification run supplies it later — the ``Verification`` model exists
+  but is not touched here). ``created_at`` is a tz-aware UTC ``utcnow()``; ``snapshot_version = SNAPSHOT_VERSION`` (the
+  real constant name; the ticket's ``SNAPSHOT_SCHEMA_VERSION`` does not exist).
+- **Stateless, no side effects.** Rebuilt from scratch each call — no caching, no mutation of source data, no DB writes
+  (persistence is LP-209). Verified deterministic (two builds of the same state produce equal sections, modulo
+  ``created_at``).
+
+**Consequences:** the builder is a thin, resilient orchestrator; the assemblers own all logic (not reimplemented). The
+policy shows itself on the real file: the ``snapshot_smoke`` on the dev DB (which lacks LP-201's ``extractions.confidence``
+columns) builds a snapshot with **MISMO present (122 facts)** and **documents + calculations absent-with-reason** — an
+honest partial snapshot instead of a crash. The COMPLETE all-three-present case is covered by the DB-backed happy-path
+test (test DB via ``create_all``). Reuses ADR-241 (the container) and ADR-242/243/244 (the assemblers). The
+``belongs_to=None`` "matched-then-removed vs never-resolved" ambiguity is **resolved: keep ``None``, lossy-by-design**
+(see the ADR-243 resolution note — no consumer needs the finer reasons; revisit only if a rule does). Deferred:
+persistence (LP-209); and triggering / run-creation. Amends LP-204 (ADR-241) with the section ``reason``/``failed``
+addition.
+
+**Amendment (2026-07-10, post code-review).** The partial-failure policy was correct for pure failures but broke for DB
+errors — the three sections shared one ``AsyncSession`` with no rollback, so a DB error in one section poisoned the
+transaction and cascade-failed the later ones with misleading reasons. (The real-file run above likely exhibited this:
+``calculations absent (DBAPIError)`` was probably collateral from documents' ``ProgrammingError`` poisoning the session,
+not an independent failure.) Fixes:
+
+- **Savepoint per section.** Each section now builds inside ``async with db.begin_nested()`` (a shared ``_build_section``
+  helper that collapsed the three copy-pasted wrappers). A DB error rolls back to that section's savepoint only, so the
+  outer transaction and the loaded ``loan_file`` stay valid and the next section runs cleanly and fails (or succeeds) on
+  its own merits. (A full ``db.rollback()`` was avoided — it would expire ``loan_file`` and break the next section's
+  attribute reads.) Failures now log at **ERROR** (a degraded section is alert-worthy), not WARNING.
+- **Company-scoped load.** ``build_snapshot`` now requires ``company_id`` and ``_load_loan_file`` filters by it — the
+  builder is the tenant boundary (it resolves the id itself, so the "caller passes a scoped loan_file" precondition the
+  assemblers assume is now enforced here), closing a cross-tenant leak before LP-209 wires it up.
+- **Dead eager-loads removed.** ``selectinload(borrowers/property/lender)`` were never read (the assemblers re-query;
+  the calculators reach the lender via ``db.get``), so ``_load_loan_file`` is now a bare scoped row fetch.
+- **Nil ``run_id`` rejected** (an un-attributable run is a caller error); the redundant ``snapshot_version=`` kwarg was
+  dropped (the model defaults it).
+
+Deferred: whether a *non-DB* assembler exception (a code bug) should propagate (fail loud) rather than degrade to
+absent-with-reason — kept the broad ``except Exception`` (the tested resilience contract) plus ERROR logging; narrowing
+to fail-loud-on-bugs is a design decision. Also deferred: a shared ``_AbsentableSection`` base for the now-4× absent/
+present/missing/failed pattern (LP-204's deferral, stronger now).
+
+## ADR-246: Snapshot persistence — one immutable JSONB blob per run; write-once; PII-clean-at-rest guard (LP-209)
+
+- **Date:** 2026-07-10
+- **Status:** Accepted
+
+**Context:** The final core Stage-1 ticket persists a built LP-204 ``Snapshot`` (LP-208) as a durable per-run artifact and
+reads it back. Four decisions matter: the storage shape, immutability enforcement, the duplicate-run policy, and — because
+this is the moment the snapshot lands at rest — a PII-clean-at-rest guard.
+
+**Decision:**
+
+- **One full JSONB blob per run, NOT shredded.** A ``snapshot_records`` row stores the whole snapshot verbatim in a single
+  ``snapshot_json`` JSONB column (via ``Snapshot.model_dump(mode="json")``; load reconstructs with
+  ``Snapshot.model_validate`` — proven lossless, preserving PII display+hash, null confidence, source tags, and
+  absent≠empty through the DB). Shredding into per-fact columns / dedup / diffing is explicitly rejected for V1: the blob
+  is simple, the round-trip is guaranteed, and a snapshot is small. **JSONB (not the app's usual ``JSON``)** is chosen
+  deliberately — it validates real JSON at write and stays queryable if a future need arises; the divergence from the
+  ``JSON`` convention (ADR-057) is intentional for this queryable artifact.
+- **Immutable, append-only — enforced in code.** The row has **no ``updated_at`` and no soft-delete** (a ``TimestampMixin``
+  would add ``updated_at``; a ``SoftDeleteMixin`` would allow a mutating delete) — the shape itself is append-only. There
+  is **no update method**; the write path is insert-only. The repo has no DB-level append-only trigger/REVOKE pattern to
+  reuse, so enforcement is in code (documented). Append-only history is the point: a NEW ``run_id`` → a NEW row, prior
+  rows untouched — this is what lets a processor jump back to a previous run's state.
+- **``run_id`` UNIQUE, and a bare UUID — not a FK to ``verifications``.** One snapshot per run (the UNIQUE constraint). It
+  is not a FK because the builder (LP-208) *receives* ``run_id`` and never mints it from a verification row, so no matching
+  row is guaranteed (mirrors how ``findings.verification_id`` began as a bare UUID, ADR-063). ``loan_file_id`` is an
+  indexed FK to the owning loan file (CASCADE, ADR-052) — many runs per file.
+- **Duplicate ``run_id`` → RAISE (``SnapshotAlreadyPersisted``), never overwrite.** Re-persisting a run is a programming
+  error; the DB UNIQUE is the real guard, the raise is the clear signal. Chosen over a silent no-op so a double-write is
+  surfaced, not hidden.
+- **PII-clean-at-rest write guard (the last line of defense).** Before the insert, the serialized snapshot is scanned for
+  RAW PII — a dashed SSN (``\b\d{3}-\d{2}-\d{4}\b``; a masked ``***-**-1234`` never matches) and a bare 9+-digit run
+  (``\b\d{9,}\b`` — an unmasked SSN-without-dashes or account number). The word-boundary anchoring means it does **not**
+  false-positive on a hex ``match_hash`` (digit runs there are surrounded by hex letters — no boundary) nor on money like
+  ``"1160000.00"`` (a decimal breaks the run at 7 digits) — verified against a real built snapshot carrying a masked SSN,
+  a hash, and money. If raw PII is found the write **fails loudly** (``RawPiiAtRestError``) and nothing is inserted: a raw
+  SSN at rest is the worst outcome, so a leaking snapshot is never stored. The guard catches an upstream assembler bug; it
+  does not re-mask (masking is the assemblers' job, LP-203/205/206).
+
+**Consequences:** ``persist_snapshot(db, snapshot)`` (insert-only, flush-only, guard + dup-check) and ``load_snapshot(db,
+run_id)`` / ``load_snapshots_for_loan_file`` reconstruct the frozen snapshot. New table + migration
+(``c4e9a7f2b8d3``, single head; offline DDL verified). Covered by DB-backed tests: lossless round-trip, write-once
+(dup raises, one row), append-only history (two runs → two rows, both loadable), PII-at-rest (masked snapshot stores
+clean; a raw-SSN and a raw-account snapshot are both rejected), and a build→persist→load end-to-end through LP-208.
+Reuses ADR-203 (PII), ADR-241 (the model), ADR-245 (the builder), ADR-052 (owned-child scoping). The real-file smoke
+(``snapshot_persist_smoke``) needs this branch's migrations on the target DB; the dev DB is stamped at a ``phase3_5_1``
+revision, so the DB-backed suite (test DB via ``create_all``) is the schema-correct coverage. **Deferred (future, only
+if storage hurts):** dedup / diffing / delta-encoding across a file's runs — a full blob per run is the V1 decision;
+and a DB-level append-only guard (trigger/REVOKE) if code-level enforcement ever proves insufficient.
+
+## ADR-247: Rule-kind classification — the canonical Stage-2 routing table + Priya-validation gate (LP-301)
+
+- **Date:** 2026-07-10
+- **Status:** Accepted
+
+**Context:** Stage 2 evaluates ~130 verification rules along three paths (architecture v2 §3C). Which path each rule
+takes — and whether it gets the deterministic numeric bookend — must be *machine-readable* and *version-controlled*, not
+locked in a human-facing spreadsheet. LP-301 formalizes the first-pass classification (``docs/stage2-rule-classification.xlsx``)
+into that canonical artifact and stands up the Priya-validation gate. It is data + tracking; no engine logic (the
+evaluator is LP-304+).
+
+**Decision:**
+
+- **Four kinds → routing (architecture v2 §3C):** ``calculative`` (deterministic pre-compute → AI selects inputs →
+  deterministic re-verify — the *bookend*), ``structural`` (deterministic check; AI ONLY for fuzzy entity matches),
+  ``judgmental`` (pure AI + human ratification), ``out_of_scope`` (not evaluated — external/LOS/post-submission/
+  unsupported). Six ``evaluation_path`` values: ``deterministic_bookend+ai`` / ``deterministic_bookend`` (calc, with vs
+  without AI input-selection) / ``deterministic_only`` (structural exact) / ``ai_fuzzy_match`` (structural fuzzy) /
+  ``ai_judgment`` / ``static_filter``.
+- **The structural exact-vs-fuzzy split is made EXPLICIT** — the xlsx prose didn't cleanly separate them. Rule:
+  a structural rule whose eval-path mentions "AI" is **fuzzy** (``exact_match=False`` → ``ai_fuzzy_match``); otherwise it
+  is **exact** (``exact_match=True`` → ``deterministic_only``, NO AI call). This encodes the design principle "AI is spent
+  on judgment and fuzzy matching, not on exact checks (SSN/DOB/price)". Result: 60 structural = 32 exact + 28 fuzzy.
+  ``exact_match`` is ``None`` for non-structural rules.
+- **``calculative`` ⟺ ``numeric_check``.** Every calculative rule (29) gets the deterministic bookend; no other kind
+  does. (Confirmed against the xlsx: 29 numeric-check = 29 calculative.)
+- **Plain-text CSV artifact + thin loader, CSV is source of truth.** ``app/verification/rules/rule_kinds.csv`` (one row
+  per rule, git-diffable line-by-line) is authoritative; ``app/verification/rules/kinds.py`` is a thin cached reader
+  (``load_rule_kinds`` / ``kind_for`` / ``rules_by_kind`` / ``numeric_check_rules`` + gate helpers). **CSV, not YAML**:
+  the schema is a flat 10-column table, stdlib ``csv`` needs no dependency (PyYAML is only transitive here), and a flat
+  CSV diffs cleanly. ``docs/stage2-rule-classification.md`` is a companion table *generated from the CSV*
+  (``app.scripts.generate_rule_kinds_md``), so future tickets read rule_id→kind→path without the xlsx, and it can't drift.
+- **Priya-validation gate (tracking only — LP-301 signs off nothing):** every rule ships ``priya_validated=False``.
+  A calculative rule carrying a **regulatory** threshold/window/limit/factor is ``threshold_needs_signoff=True`` and is a
+  ship-blocker until validated (22 of 29 — DTI limit, conforming limit PE-1, seasoning CR-6, IPC PC-4, large-deposit
+  AS-1, income-variance IN-1, …). Helpers ``unvalidated_rules`` / ``rules_needing_threshold_signoff`` /
+  ``pending_threshold_signoff`` let a later ticket *block* shipping; here they only report.
+
+**Formalization notes / re-tags (flagged for Priya, not silently chosen):**
+
+- **Count is 133, not "130".** The xlsx is titled "130 Rules" but has 133 data rows (29+60+29+15). All 133 are
+  formalized — dropping rows would be worse; the title mismatch is noted.
+- **``threshold_needs_signoff`` defaulted FALSE for 7 self-consistency calculative rules** — CR-2 (HCLTV compute),
+  AS-3 (cash-to-close sufficiency), DT-4 (tax vs assessed), DT-5 (premium vs binder), IH-4 (dup of DT-5), MI-2 (factor
+  vs certificate), PR-2 (appraised vs price lesser-of): they are arithmetic but embed no *regulatory constant* to sign
+  off (they compare two documented values / a min()). Flagged — flip to True if any hides an investor-specific value.
+- **MI-1 kept Calculative** (xlsx tag) though it is a presence-gated-by-LTV check — borderline Structural/Calculative;
+  flagged for Priya.
+- **IH-4 is a literal duplicate of DT-5** (the xlsx "why" says "dup DT-5"); both kept in the 133, dup flagged.
+
+**Consequences:** the CSV is the single source the Stage-2 orchestrator (later) routes from; the ``.md`` companion and the
+loader read it, nothing re-derives from the xlsx at runtime (no openpyxl dependency). Covered by tests (all 133 present,
+counts, structural exact_match explicit, calc⟺numeric, out-of-scope never AI, loader round-trip, gate helpers). No DB
+table (rules-as-data-in-repo, mirroring the existing ``app/verification/rules/`` package). **Deferred:** rule specs
+(LP-303+), the evaluator (LP-304), prompts, the orchestrator, and the actual Priya sign-offs (only the tracking exists).
+The flagged re-tags/dup await Priya's validation pass.
+
+## ADR-248: Surface bank-statement transactions in the snapshot (Option A) — a nested TransactionRecord list (LP-302a)
+
+- **Date:** 2026-07-10
+- **Status:** Accepted
+
+**Context:** The LP-302 recon found a real Stage-1 completeness gap: bank-statement **transactions** (the per-deposit
+inputs AS-1 large-deposit and later NSF/chaining/recurring-debit rules need) live only in the raw
+``extraction.extracted_data`` JSON — the documents assembler skips nested lists (``documents_section.py`` ``_scalar``
+returns ``None`` for a list). So a Stage-2 evaluator that reads *only the snapshot* (the §3C invariant) could not evaluate
+a per-transaction rule. This ticket is **Option A** from that recon: surface transactions IN the snapshot rather than let
+the evaluator read raw extraction (which would break "evaluator reads only the snapshot").
+
+**Decision:**
+
+- **Add a nested ``TransactionRecord`` list to ``DocumentEntry``.** ``DocumentEntry.transactions: tuple[TransactionRecord,
+  ...] | None`` — a ``tuple`` for immutability (the LP-204 frozen-nested lesson). ``TransactionRecord`` is a frozen model
+  whose four attributes are each an ordinary LP-203 ``Field`` (``source=extracted``, nullable confidence, absent≠empty):
+  ``date``, ``amount``, ``direction`` (``credit``/``debit``), ``description``.
+- **Absent ≠ empty for the list:** ``None`` = not surfaced/absent (a non-bank document, or a bank statement whose
+  extraction carried no transaction list); an **empty tuple** = a statement present with **zero** transactions. The two
+  are deliberately distinct and both round-trip.
+- **``account`` on the record as a PRE-MASKED, non-matchable ``PiiField`` — display/context only (amended 2026-07-10;
+  supersedes the original "no account on the record" decision).** Each ``TransactionRecord`` now carries ``account:
+  PiiField`` = the parent statement's masked account (``display`` = ``****NNNN`` from ``account_number_masked``,
+  ``match_hash=None``), resolved once per statement (every row shares it). It is built with ``PiiField.pre_masked`` — **not**
+  ``from_raw``: on this branch the extractor only ever has a pre-masked account (no raw form), so there is nothing to hash,
+  and the mask **must not** be hashed. Hashing ``****5667`` would produce a value that collides with **every** same-last-4
+  account — the LP-203 colliding-hash bug — a false match worse than no match. ``match_hash=None`` is the **honest** value
+  and it is **structurally non-matchable**: a new ``PiiField.matches()`` (added here) treats a ``None`` hash as
+  never-equal, so two ``None``-hash accounts NEVER match each other (a bare ``==`` would wrongly return ``True`` for
+  ``None == None``) and a ``None``-hash never matches a real hash — the absent-is-not-matchable invariant from LP-203, now
+  enforced in one place instead of by every caller. The account is carried for **display/context only** (which account a
+  deposit landed in), never as a cross-section match key.
+  - *Why reversed from "no account":* the account is genuinely useful per-row context for AS-1's finding output ("a
+    $8,076 deposit into ****5667"), and carrying it **honestly** (pre-masked, non-matchable) costs nothing and papers over
+    nothing — the impossibility of the hash match is made explicit in the type (``match_hash=None`` + ``is_matchable``),
+    not hidden by omission.
+  - **KNOWN GAP — the deposit↔MISMO-asset account cross-section match is NOT achievable on this branch, and is not faked.**
+    Two independent reasons: (a) extraction only ever holds a **pre-masked** account (no raw value to hash), and (b) MISMO
+    ``StatedAsset`` has **no account column** (no ``asset.N.account`` fact to match against). Consequence: the
+    deposit↔asset **sourcing-corroboration** path is unavailable — AS-1 still works (it evaluates deposit amount vs a
+    threshold + the AI sourcing judgment; the account match was *corroboration*, not a core input). **Unblock condition:** a
+    future ticket that (1) surfaces a RAW account in extraction and (2) adds a MISMO asset-account column can then produce a
+    real ``match_hash`` (via ``from_raw``) and enable the match — **additive**: the ``PiiField`` shape already supports it and
+    the None-is-unmatchable invariant is already enforced. We deliberately did **not** build speculative raw-account plumbing
+    now (no synthetic-raw hash, no unused code path) — there is no consumer on this branch; that is the unblock ticket's job.
+- **``description`` is redacted, not raw (deviation, forced by a hard constraint).** Real bank descriptions carry payroll
+  IDs / confirmation #s / transfer IDs — on LF-6T3N **37 of 50** descriptions contain a 9+-digit run, exactly what the
+  LP-209 PII-at-rest guard rejects. So "raw and faithful" (surface the description) and "persist/load round-trips" are
+  *incompatible* on real data — a raw description makes the snapshot **unpersistable**. Resolution: surface the
+  description with any ``\d{9,}`` run or ``\d{3}-\d{2}-\d{4}`` SSN pattern (the exact patterns the guard flags) redacted to
+  ``[redacted]``, keeping the **sourcing signal** AS-1 needs (PAYROLL / TRANSFER / VENMO) and short identifiers (SAV 5683,
+  dates, alnum codes). This is the PII-safe-at-rest invariant applied at the assembler (the right layer) rather than
+  weakening the guard. ``direction`` is derived from ``transaction_type`` (deposit/interest → credit; withdrawal/fee →
+  debit) with an amount-sign fallback.
+- **``snapshot_version`` bumped 1 → 2** — the shape genuinely changed. The reader's strict version check (ADR-241) means a
+  persisted **v1** blob no longer loads under the v2 reader; acceptable because nothing in production persists snapshots
+  yet (the only v1 rows are dev/test artifacts). The change is otherwise **additive**: other sections and the round-trip
+  are unaffected; non-bank documents simply carry ``transactions=None``.
+
+- **Review amendment (2026-07-10, post-`150ce66`) — the per-row ``account`` was REMOVED (re-reversing back to the original
+  "no account on the record").** A ``/code-review`` found the amended per-row account net-negative: the masked account is a
+  **per-statement** fact already carried **once** on the parent ``DocumentEntry.fields["account_number_masked"]``, so a copy
+  on every ``TransactionRecord`` duplicated it N× in ``snapshot_json`` (LF-6T3N: 50×) for a field **no consumer reads** (the
+  cross-section match is the KNOWN GAP — impossible on this branch). A per-transaction rule reads the account from the entry
+  it iterates; ``_statement_account`` was deleted. This also **removed a version-shape hazard**: the amendment had added a
+  *required* field without bumping ``snapshot_version`` (still 2), which made a pre-``150ce66`` v2 blob fail to load; the
+  shape now reverts to the transactions-only v2. ``PiiField.is_matchable`` / ``matches()`` are **kept** (general primitives)
+  and ``matches()`` was hardened to return ``False`` (not ``AttributeError``) for a non-``PiiField`` argument. Also fixed in
+  the same review pass: **direction** is now classified from ``transaction_type`` **only** — the old positive-amount →
+  ``credit`` fallback forged a deposit on every unlabelled/ambiguous withdrawal (the extractor stores ``amount`` positive), a
+  false AS-1 large-deposit; an unknown/ambiguous type now yields an **absent** direction (never a guess), tagged with a new
+  ``FieldSource.DERIVED`` (not mislabelled ``extracted``). **Redaction** was broadened to also scrub space/dash-grouped
+  accounts/cards (``1234 5678 9012 3456``). The **at-rest guard** now excludes decimal-money (``123456789.00`` no longer
+  aborts a persist) while still flagging a bare-integer id. Supersedes the amended-account bullet and the ``direction …
+  amount-sign fallback`` clause above.
+
+**Consequences:** a pure read + reshape (``build_transactions`` is pure; the assembler surfaces transactions when
+``document_type == "bank_statement"`` and the extraction carried a transaction list). A small **additive** helper landed on the LP-203 primitive — ``PiiField.is_matchable`` /
+``PiiField.matches()`` — enforcing absent-is-not-matchable structurally so no caller re-implements a ``None``-safe hash
+compare. Verified on real LF-6T3N: 50 transactions surfaced across 5 statements, each carrying the statement's ``****NNNN``
+account (``match_hash=None``), descriptions redacted, the LP-209 at-rest guard passes, and persist→load == built (lossless
+v2 round-trip). Reuses ADR-240 (Field), ADR-241 (the container + version discipline), ADR-243/246 (the documents assembler
++ PII-at-rest guard). **Scope note:** only bank-statement transactions are surfaced (the only nested list AS-1 + near-term
+per-transaction rules need); other nested extraction structures are not surfaced (none seen beyond transactions).
+**Deferred / KNOWN GAP:** the deposit↔MISMO-asset account-hash cross-section match — NOT achievable on this branch (needs
+both a RAW account in extraction and a MISMO asset-account column; see the amended account bullet above), so the
+sourcing-corroboration path is unavailable while AS-1's core (amount-vs-threshold + AI sourcing judgment) is unaffected.
+Also deferred: surfacing any future nested list; and (should a real deployment ever hold v1 snapshots) a v1→v2
+migration/back-compat reader.
+
+## ADR-249: AS-1 rule spec + load_rule_spec interface — the first Stage-2 rule artifact (LP-303)
+
+- **Date:** 2026-07-10
+- **Status:** Accepted
+
+**Context:** Stage 2 evaluates each rule by injecting rule-specific DATA into a shared evaluator prompt (the *spine*, with
+slots ``rule.criteria`` / ``rule.applicability`` / ``rule.required_inputs`` / ``rule.reference_values`` /
+``rule.evidence_required`` / ``rule.guideline_reference`` — ``docs/stage2-evaluator-prompts.md``). That data has to live
+*somewhere* the evaluator can load, versioned and reviewable, separate from prompt-assembly code (architecture v2 §3C:
+"rules live as files"). LP-303 writes the FIRST such artifact — AS-1 (large-deposit sourcing sweep) — and the
+``load_rule_spec(rule_id)`` interface. Nothing consumes it yet (the evaluator is LP-304); this is the spec + loader only.
+
+**Decision:**
+
+- **The spec is a version-controlled YAML file** (``app/verification/rules/specs/AS-1.yaml``), one file per ``rule_id``,
+  co-located with the LP-301 kinds table and diffable in review. YAML (pyyaml already a dep) over JSON for comments —
+  the file self-documents the provisional-format caveat inline.
+- **The spec shape was DISCOVERED from this one real rule, and is explicitly PROVISIONAL.** Fields: ``rule_id`` / ``name`` /
+  ``category`` / ``kind`` / ``numeric_check`` / ``criteria`` / ``applicability`` {scope, trigger} / ``required_inputs`` (a
+  structured list of {name, snapshot_path, description}) / ``reference_values`` {large_deposit_threshold, priya_validated,
+  threshold_needs_signoff} / ``subject_enumeration`` / ``subject_key_fields`` / ``evidence_required`` /
+  ``guideline_reference`` / ``spec_version``. It maps 1:1 to the spine slots plus the calculative-body needs (a threshold to
+  surface as operand Y) and the LP-306 finding-identity needs (per-deposit subject key). We did **not** design a general
+  multi-rule schema now — that is LP-308's job (the caveat is stated in the file header, the module docstring, and the
+  ``RuleSpec`` docstring).
+- **RESOLVED input source = the frozen SNAPSHOT, never raw extraction (LP-302 Option A).** Every ``required_inputs`` entry
+  points at a snapshot path: deposits at ``documents.entries[document_type=="bank_statement"].transactions[…]`` (LP-302a
+  ``TransactionRecord`` — amount/date/direction/description), the statement's pre-masked account at
+  ``documents.entries[].fields["account_number_masked"]``, and monthly qualifying income at the mismo per-item fact
+  ``mismo.facts["borrower.<n>.income.<m>.monthly_amount"]`` (computed aggregate available at
+  ``calculations.dti.value["gross_monthly_income"]``). This keeps the LP-302 §3C invariant "the evaluator reads only the
+  snapshot" — a test asserts no path names ``extracted_data``/``extraction``.
+- **``load_rule_spec(rule_id) -> RuleSpec`` is the evaluator's ONLY entry point, and is swappable.** It reads the YAML
+  today, but the signature promises nothing about a file — a DB-backed source later is a drop-in. Returns a frozen,
+  ``extra="forbid"`` pydantic ``RuleSpec`` so a missing slot or an unknown/typo'd key **fails loud at LOAD time**, not deep
+  in an evaluation. A four-exception hierarchy (``RuleSpecNotFound`` / ``RuleSpecInvalid`` / ``RuleSpecInconsistent`` under
+  ``RuleSpecError``) makes each failure mode distinguishable. Cached (``functools.cache``) — specs are immutable artifacts;
+  a private, directory-parameterized ``_load_spec_from(dir, rule_id)`` stays uncached so tests point it at a temp dir.
+- **The spec must AGREE with ``rule_kinds.csv`` (LP-301) — the CSV stays the single gate of record.** ``load_rule_spec``
+  cross-checks ``kind`` and ``numeric_check`` **and** the validation gate (``reference_values.priya_validated`` /
+  ``threshold_needs_signoff``) against the rule's CSV row and raises ``RuleSpecInconsistent`` on any divergence. A spec can
+  never mark a threshold "validated" while the CSV says it is not.
+- **The threshold is recorded as DATA, honestly.** ``reference_values.large_deposit_threshold = "50% of total monthly
+  qualifying income"`` lives in the spec (not in the AI's memory, not hardcoded in code — a test greps ``app/verification``
+  to prove no ``.py`` carries the threshold prose). Its validation status is recorded **as it truly is**: the ticket draft
+  suggested ``priya_validated: true``, but ``rule_kinds.csv`` has AS-1 ``priya_validated=false`` +
+  ``threshold_needs_signoff=true`` — so the spec records ``false`` (the CSV cross-check would reject ``true`` anyway). The
+  50% threshold is honest *proposed* data pending Priya sign-off, not a confirmed value.
+
+**Contradictions resolved (flagged in Phase 0 before building):**
+
+- **Account is no longer on ``TransactionRecord``.** A prior review (commit ``70fac7c`` "LP-302a review: remove per-row
+  account") reverted the account-on-record change; the ticket's sketch (``subject_key_fields: [account, date, amount]`` and
+  transactions "with account") assumed it was there. Resolution: ``required_inputs`` references the account at its ACTUAL
+  location — the parent ``DocumentEntry.fields["account_number_masked"]`` (pre-masked, non-matchable) — and
+  ``subject_key_fields``'s ``account`` resolves from the parent entry, not the transaction. The deposit↔MISMO-asset match
+  remains unavailable (the LP-302a KNOWN GAP), which AS-1's core does not need.
+- **``priya_validated`` true-vs-false.** Resolved in favor of the CSV (``false``) per the ticket's own "record honestly"
+  instruction and the cross-check — see the threshold-as-data decision above.
+
+**Consequences:** ``app/verification/rules/specs/AS-1.yaml`` + ``app/verification/rules/specs.py``
+(``RuleSpec``/``Applicability``/``RequiredInput``/``ReferenceValues`` models, the exception hierarchy, ``load_rule_spec`` +
+``_load_spec_from`` + ``_check_consistency``); 17 tests in ``tests/verification/rules/test_specs.py``. Reuses ADR-247
+(kinds table + gate), ADR-248 (the snapshot transaction/account input path), and the §3C spine-slot contract. **Deferred to
+LP-308:** generalizing the spec format across all ~133 rules (the AS-1 shape is provisional). **Out of scope (later
+tickets):** the evaluator / AI call + prompt assembly (LP-304), the numeric bookend (LP-305), finding output + the four
+states + per-deposit identity (LP-306), other rules' specs, and a DB-backed spec store.
+
+## ADR-250: Rule + fact-tag storage — files-as-source-of-truth, DB-as-projection; retire phase3_5_1's verification_rules (LP-311)
+
+- **Date:** 2026-07-13
+- **Status:** Accepted
+
+**Context:** The fact-tag architecture (§3D) needs rules and the tag vocabulary to be QUERYABLE (the engine must ask "which
+tags does rule X require?", "which rules use tag Y?", "what is the DAG?"). Two forces pull apart. Compliance wants rule
+SCHEMA/POLICY — the Priya-validated thresholds, the tag definitions — to live in git as files, because git history IS the
+audit trail (§3D "Storage": "Files > DB for this"). Runtime wants those same facts in the DB to join and filter. A prior
+attempt, ``verification_rules`` (LP-118 / ADR-238, branch phase3_5_1), made the DB table the primary store with a
+version-controlled seed — but it was shaped for the ABANDONED per-rule code-evaluator engine (columns ``evaluator`` /
+``applicability`` / ``canonical_type`` / ``message_template``), does not fit the tag architecture, and a dev DB migrated on
+that branch carries the table + ``rule_change_audits`` as ORPHANS this branch's Alembic does not track (see LP-310 Phase 0).
+
+**Decision — REPLACE, with files as the single source of truth and the DB a pure projection:**
+
+- **Files are authoritative; the DB is a rebuildable PROJECTION, never hand-edited.** The version-controlled source files —
+  ``rule_kinds.csv`` (identity + kind + the Priya gate, the gate of record), ``specs/<rule_id>.yaml`` (the full ``RuleSpec``),
+  and the fact-tag machine-source CSVs (below) — are the truth. The LP-311 loader
+  (``app.verification.rules.projection.project_files_to_db``) reconciles four DB tables to them (insert new / update changed /
+  remove vanished), so a hand-mutated row is overwritten on the next run. This is the clean §3D separation: SCHEMA/POLICY in
+  git, DATA/RESULTS (tag *values* in snapshots, findings) in the DB. The projection is a queryable read-copy of the policy,
+  not a second source of it.
+- **Vocabulary xlsx → committed machine-source CSVs, mirroring LP-301.** The human/Priya authoring form is
+  ``docs/snapshot-fact-tags.xlsx``; a stdlib generator (``app.scripts.generate_fact_tags``) converts it, once, into committed
+  ``fact_tags.csv`` / ``rule_tags.csv`` / ``tag_dependencies.csv`` under ``app/verification/rules/`` — exactly as LP-301
+  converted a classification xlsx into the committed ``rule_kinds.csv`` that the loader reads (the xlsx is never read at
+  runtime; no ``openpyxl`` runtime dependency). A CI ``--check`` mode guards drift.
+- **Four GLOBAL, un-scoped tables** (reference data identical for every company; NO ``company_id`` — per-tenant overrides are a
+  future ticket): ``rules`` (natural key ``rule_id``, kind/gate columns + a JSONB ``spec`` payload, null when no spec file),
+  ``tags`` (natural key ``tag_id``, entity/value_type/allowed_values/description/produced_by + JSONB ``extras``),
+  ``rule_tags`` (rule → required-tag edges), ``tag_dependencies`` (the tag DAG). UUID pk + natural-key UNIQUE, ``TimestampMixin``,
+  no soft-delete (regenerated data), natural-key FKs on the edge tables. Nullable JSONB uses ``none_as_null=True`` so a missing
+  spec / non-enum tag is SQL NULL, not a JSONB ``'null'``.
+- **Load-time consistency checks fail loud** (``ProjectionError``) before any write: a rule requiring a tag absent from the
+  vocabulary, a dependency edge to a non-existent tag, and a cycle in the tag DAG (topological check). Spec/CSV agreement is
+  enforced by ``load_rule_spec`` itself (``RuleSpecInconsistent``), keeping the CSV the gate of record.
+- **The AS-1 (and IN-1) validation contradiction resolves to the FILES.** LP-118's seed optimistically marked AS-1 and IN-1
+  ``validated=TRUE`` (the only 2 of its 140 rows) — but Priya has not signed off in this branch's governance, so the files win:
+  both stay ``priya_validated=false`` / ``threshold_needs_signoff=true``. The abandoned seed's TRUE is not adopted anywhere; the
+  two threshold rules are flagged for Priya review in the ticket doc. General policy: the files' validation state is
+  authoritative; a seed's TRUE is never auto-adopted.
+- **Retire the orphans in this migration.** The LP-311 migration ``DROP TABLE IF EXISTS`` ``rule_change_audits`` then
+  ``verification_rules`` (CASCADE) so a dev DB migrated on phase3_5_1 converges with a fresh one; on a fresh DB it is a no-op.
+  ``downgrade`` does NOT recreate them (they were never part of this branch's schema). No Alembic fork exists on this branch —
+  the LP-118 revision is absent here, so ``alembic heads`` is the single head ``c4e9a7f2b8d3`` and the new migration simply
+  stacks on it (a merge migration would only be needed if phase3_5_1 were merged, which it is not).
+- **``load_rule_spec`` stays FILE-BACKED, its signature preserved as the swap seam.** LP-311 mirrors the full spec into
+  ``rules.spec`` and adds DB read accessors (``get_rule`` / ``get_tag`` / ``tags_for_rule`` / ``rules_using_tag`` /
+  ``tag_dependencies``) alongside it, so a DB-backed ``load_rule_spec`` is a later drop-in without breaking callers.
+
+**Salvage from the abandoned seed:** ``rule_kinds.csv`` already captures identity (``rule_id`` = playbook id, name, category)
+for all 133 rules; the seed's remaining columns are evaluator-engine-shaped and deliberately NOT resurrected (SCOPE). The only
+genuinely additive datum was IN-1's ``variance_pct=5`` threshold (recorded for the future IN-1 spec + Priya). The old→new
+rule_id map and the 18 message templates are preserved as a reference appendix in ``docs/tickets/LP-311.md``, not in the DB.
+
+**Consequences:** rules and tags are now queryable in the DB while remaining git-governed and Priya-signed in the files — the
+drift ADR-238 warned about is structurally prevented, because there is exactly ONE source of truth (the files) and the DB is a
+disposable projection. ``tag_dependencies`` is empty today (the vocabulary has no ``depends_on`` column yet — LP-311 Phase 0);
+the table + cycle check exist so the DAG is a drop-in once authored. Cross-refs: §3D "Storage", LP-310 (the recon that surfaced
+the orphan table), ADR-238 (LP-118's drift warning — now resolved by single-source-of-truth), ADR-247/248/249 (kinds table,
+snapshot transactions, AS-1 spec). **Out of scope (later tickets):** tag PRODUCTION (Stage A/B), rule EVALUATION, the stable
+content-id snapshot change (LP-312), per-tenant overrides, any hand-edit path to the DB, and a UI.
+
+## ADR-251: The tag object model + two-layer snapshot + stable content-ids (LP-312)
+
+- **Date:** 2026-07-14
+- **Status:** Accepted
+
+**Context:** The fact-tag architecture (§3D) structures raw facts into clean tags that deterministic code queries; a
+tag cites the raw facts it relied on (``source_facts``) and a finding's identity (``subject_key``) is built from stable
+tag values. All of that needs raw facts to be REFERENCEABLE by a stable id. The LP-310 recon flagged this as gap #1: the
+snapshot's only ids were ``borrower_id`` / ``loan_file_id`` / ``run_id`` — transactions and documents were addressable
+only by ARRAY POSITION, which is not stable because the snapshot is rebuilt from scratch each run (a document inserted or
+removed shifts every later index). LP-312 is the load-bearing prerequisite for the whole tag layer: it adds stable
+content-ids AND defines the tag object model + the tags layer — MODEL + SHAPE ONLY (no production, no evaluation).
+
+**Decision:**
+
+- **Stable, content-derived ids on raw facts.** ``TransactionRecord`` and ``DocumentEntry`` gain a required
+  ``content_id`` derived by :mod:`app.verification.snapshot.content_id`: ``"doc"/"txn" + sha256(canonical-content)[:16]``.
+  - *Content-derived, run-independent, position-independent:* the hash input is the fact's own content (a document's
+    type + resolved borrowers + fields + an ORDER-INDEPENDENT fingerprint of its transactions; a transaction's four
+    Fields scoped under its parent document's id), never its array index — so extraction order or an inserted/removed
+    sibling elsewhere does not change another fact's id. Same content → same id, every run.
+  - *Unique per real fact:* genuinely-duplicated content (two identical deposits) would collide, so a deterministic
+    OCCURRENCE TIEBREAK (``#0``, ``#1`` … among byte-identical siblings) is mixed into the hash → distinct ids. Because
+    identical siblings are indistinguishable, which one receives ``#0`` is immaterial — the *set* of ids is stable.
+  - *PII-at-rest safe by construction:* the id is a letter-prefixed hex token with no internal separator, so in the
+    serialized blob it is one ``\w`` run beginning with letters and can NEVER present a ``\b\d{9,}\b`` match to the
+    persistence guard (deterministically, not probabilistically). Ids are hashes — they expose none of the content.
+  - Field-cell ids are DEFERRED (scoped to transactions + documents, the recon's priority).
+- **The tag object model (§3D).** A frozen ``Tag`` (``app/verification/snapshot/tag.py``):
+  ``value`` (``JsonValue`` — any JSON value; its domain always includes ``"unknown"``; never fabricated),
+  ``confidence`` (``float | None`` in [0,1] — null for parsed, a real number for AI, never invented), ``reasoning``,
+  ``source_facts`` (``tuple[str, …]`` of content_ids — never array positions), ``produced_by`` (parsed|ai|derived|spec),
+  ``tag_role`` (structural_fact|rule_judgment), ``tag_version``, ``stage`` (A|B). Type only — no production logic.
+- **Two-layer snapshot, additively.** The existing three sections (``mismo`` / ``documents`` / ``calculations``) are the
+  RAW layer and are UNCHANGED; a new top-level ``tags: TagsSection`` (present-empty, ``by_subject`` keyed by a raw fact's
+  content_id) is the TAGS layer, produced over the raw layer by LP-313/314. Chosen additive (a new sibling section)
+  rather than nesting the raw sections under a ``raw`` key: nesting would move every existing JSON path and ripple
+  through every calculator/consumer, violating "existing content unchanged." ``CalcBreakdownLine`` gains
+  ``from_tag: str | None`` (null now; LP-318 populates it) so a calculator line can trace to the tag behind it.
+- **One version bump, 2 → 3.** Ids + the tags layer + ``from_tag`` ship under a single ``SNAPSHOT_VERSION`` bump (2 → 3)
+  to avoid churn. **v2 is SUPERSEDED, not supported:** no production snapshot was ever persisted (LP-310), so the reader
+  supports only v3; a stray dev-only v2 blob is rejected on load (``_known_snapshot_version``) and simply rebuilt.
+
+**Consequences:** tags and findings can now reference raw facts by a stable id that survives a rebuild — the load-bearing
+gap is closed. The tags layer is present-empty and round-trips losslessly at v3, ready for LP-313/314 to populate;
+``from_tag`` is null, ready for LP-318. The content-id doubles as a content fingerprint (a changed fact → a changed id →
+a dependent tag's cache key changes, §3D). Cross-refs: §3D (the tag contract + two-layer shape), LP-310 (gap #1), LP-204
+(frozen snapshot model), ADR-248 (transactions in the snapshot). **Out of scope (later tickets):** tag PRODUCTION / any
+AI call (LP-313/314), rule evaluation, populating the tags layer or ``from_tag`` (LP-318), findings/subject_key (LP-316),
+field-cell content-ids.
+
+## ADR-252: Stage-A tag production for transactions — structure-not-conclude, passthrough vs judged, fail-closed (LP-313)
+
+- **Date:** 2026-07-14
+- **Status:** Accepted
+
+**Context:** LP-312 built the tags layer + the Tag object; this is the FIRST ticket where the AI actually produces
+fact-tags. Stage A (§3D) turns a SINGLE transaction's raw facts into clean atomic tags — the pattern every later
+production pass (Stage B, other entities) will follow. The original AS-1 bug (a hardcoded ``direction=="credit"`` filter
+that silently dropped ambiguously-labelled deposits) is exactly what the tag architecture exists to prevent, so the
+design must make that class of bug structurally impossible.
+
+**Decision:**
+
+- **Clone the cross-source two-file pattern.** ``ai/tag_production.py`` is the AI boundary (system prompt +
+  ``reason_stage_a_transactions`` — the "perceiver"); ``services/tag_production.py`` is the deterministic orchestrator
+  (context assembly, batching, caching, writing the tags layer — the "wiring"). Reuses ``complete()`` and the defensive
+  array-parser shape (``extract_json_object`` / balanced-span / fenced / wrapped). Does NOT import the stale
+  ``verification/evaluators/``.
+- **"Structure, don't conclude."** The system prompt casts the model as a senior processor STRUCTURING raw facts into
+  tags who does NOT evaluate rules or reach conclusions — north star accuracy + honesty, ``"unknown"`` always available,
+  a wrong tag silently corrupts downstream. It asks only for facts (``txn.is_money_in`` resolved from MEANING tolerating
+  any label; ``txn.apparent_category`` from the vocabulary), each with confidence + reasoning.
+- **Passthrough vs AI-judged.** ``txn.amount`` / ``txn.date`` are already-parsed facts — carried through VERBATIM
+  (``produced_by="parsed"``, ``confidence=None``); the AI never re-reads a number (that invites hallucinated digits).
+  ``txn.is_money_in`` / ``txn.apparent_category`` are AI-judged (``produced_by="ai"``, the model's confidence,
+  ``tag_role="structural_fact"``, ``stage="A"``). Every tag's ``source_facts`` = the transaction's stable ``content_id``
+  (LP-312), never a position; content_ids never reach the AI (the batch addresses transactions by a 1-based index and
+  the id is reattached deterministically).
+- **The direction bug is structurally impossible.** The pass tags EVERY transaction — there is no ``direction=="credit"``
+  filter anywhere; ``is_money_in`` is an AI judgment over meaning, so a "transfer"/"ACH"/unlabelled deposit still gets a
+  proper tag (pinned by a test).
+- **Bounded batches** (15 transactions/call) so position-degradation can't creep in on a long statement.
+- **Honest, fail-closed parse.** An AI failure/timeout, a truncated response (``stop_reason=="max_tokens"``), an omitted
+  transaction, or an off-vocabulary value all yield ``value="unknown"`` WITH a reason — NEVER a defaulted/fabricated
+  value. A genuine AI ``"unknown"`` is preserved as-is (with its confidence + reasoning), distinct from the fallback.
+  The passthroughs still succeed even when the AI call fails.
+- **Timeout added.** ``complete()`` has no timeout; the reasoner wraps it in ``asyncio.wait_for`` (new
+  ``settings.ai_request_timeout_seconds = 60``) → a hung call raises ``AIClientError`` → unknown-with-reason.
+- **Cache-by-content-fingerprint.** AI judgments are keyed by a fingerprint of the transaction's four raw fields, so
+  identical transactions share one call and an unchanged transaction reuses its judgment on a re-run. Only COMPLETE
+  successes are cached (a failed/truncated/partial transaction retries next run). Cost + tokens are logged (metadata
+  only, never content).
+
+**Consequences:** the tags layer is now populated for transactions with honest, provenance-carrying atomic tags; the
+production PATTERN (prompt → bounded batches → honest parse → cache → write-by-content_id) is established for LP-314 and
+beyond. Cross-refs: §3D (staged production + the honesty rules), LP-310 (the cross-source clone target + the direction
+bug), LP-312 (the Tag model + content_ids + the tags layer). **Out of scope:** Stage B / correlation tags
+(``has_identified_source`` — LP-314), other entities, rules, findings, ``from_tag`` population, the discovery lane.
+
+## ADR-253: Stage-B correlation tags via candidate-then-judge — the sourcing tag (LP-314)
+
+- **Date:** 2026-07-14
+- **Status:** Accepted
+
+**Context:** Stage B (§3D) produces CROSS-ENTITY correlation tags — the ones that catch fraud, starting with
+``txn.has_identified_source`` (is a deposit sourced, or an unexplained inflow?). Correlation is where the naive approach
+breaks: asking the AI to search the whole file for a matching source does not scale and degrades on long files. This is
+also the pattern every future correlation tag (undisclosed liability, retained REO) will follow, so the shape matters.
+
+**Decision:**
+
+- **Candidate-then-judge (the scaling split).** Deterministic code does the whole-file SEARCH; the AI only JUDGES a small
+  set. ``services/tag_correlation.py`` (pure code) finds, for each money-in deposit, candidate sources across ALL
+  transactions in ALL accounts; ``ai/tag_correlation.py`` (the judge, cloned from cross-source) sees ONE deposit + its few
+  candidates and returns yes/no/unknown — it NEVER searches and NEVER sees the whole file. Candidate search is
+  O(deposits×transactions) pure code (scales to any file size); AI calls scale with deposits, not (deposit×candidate)
+  pairs and not with a whole-file AI scan.
+- **Candidate-match criteria (PRIYA-CONFIRMABLE).** An own-account transfer = a money-out debit of EXACT amount
+  (tolerance param, default \$0.00 — transfers move exact amounts) within a ±5-day window (param); plus a payroll
+  self-source when the deposit's own Stage-A ``apparent_category == "payroll"`` (its own line is the evidence). The net is
+  deliberately tight because the AI judges genuineness; the thresholds are parameters flagged for Priya. The candidate
+  structure is typed + extensible (gift / liquidation / other-account kinds slot in later).
+- **"No candidate → no, NOT unknown" (the fraud signal).** A money-in deposit with no candidate and no income signal is
+  handed to the judge with an empty candidate set and returns a real ``"no"`` — "looked, found nothing", the
+  unexplained-deposit signal AS-1 fires on. ``"unknown"`` is reserved for genuine can't-determine and is produced by DAG
+  propagation, not by the judge softening a "no". This distinction is load-bearing and pinned by a test.
+- **DAG ordering + confidence propagation.** Stage B runs AFTER Stage A and CONSUMES ``txn.is_money_in`` from the tags
+  layer. ``"in"`` → judged; ``"unknown"`` → an ``"unknown"`` sourcing tag produced DETERMINISTICALLY (``produced_by="derived"``,
+  no AI call — can't source what isn't confirmed money-in); ``"out"`` → not a sourcing subject (no tag). The sourcing
+  confidence is capped at the ``is_money_in`` confidence (a tag is never more confident than its shakiest input).
+- **content-id cross-provenance.** ``source_facts`` cite the deposit's ``content_id`` AND, when sourced by a transfer, the
+  matched debit's ``content_id`` (LP-312 stable ids). content_ids never reach the AI: candidates are numbered 1..N, the
+  model returns a ``source_index``, and the id is reattached here; an out-of-range index fails CLOSED (a "yes" citing a
+  nonexistent candidate is untrustworthy → unknown), reusing the LP-313 index-mismapping hardening.
+- **Fail-closed + cache.** AI failure/timeout/truncation/malformed → ``unknown``-with-reason, never a defaulted ``"yes"``
+  (``complete()`` wrapped in the LP-313 timeout). Judgments are cached by (deposit + candidate-set) content, so an
+  unchanged deposit reuses its verdict across runs; only successes are cached (a failure retries).
+
+**Consequences:** the AS-1-critical sourcing tag now exists, with the fraud signal (unsourced = a real "no") intact, and
+the candidate-then-judge PATTERN is established for all future correlation tags. Cross-refs: §3D (staged production, the
+candidate-then-judge pattern, the honesty rules), LP-312 (content_ids + the Tag model + tags layer), LP-313 (Stage A +
+the fail-closed/cache/index-hardening pattern this reuses). **Out of scope:** AS-1 rule evaluation / findings
+(LP-315/316), other correlation tags, other entities, the discovery lane, ``from_tag`` population.
+
+## ADR-254: Thin deterministic rule engine + fail-closed gate — AS-1 (LP-315)
+
+- **Date:** 2026-07-14
+- **Status:** Accepted
+
+**Context:** The whole fact-tag pivot exists so a rule can be a THIN deterministic query over clean tags —
+no AI in the rule, no ``direction==`` label matching, no drift. This is the payoff: AS-1 finally READS the tags
+(LP-313/314) and produces a verdict. It also introduces the safety core — the fail-closed gate — that keeps a degraded
+input from ever becoming a confident "satisfied". Engine + gate + AS-1 only; the result is in-memory (persistence is
+LP-316).
+
+**Decision:**
+
+- **The generic fail-closed gate (``rule_engine/gate.py``).** Every rule runs it BEFORE its logic. Fixed decision
+  order: (1) a required load-bearing tag ABSENT → ``couldnt_check`` (names the tag); (2) a load-bearing tag value
+  ``"unknown"`` → ``couldnt_check`` (a DISTINCT reason — absent ≠ unknown); (3) a flagged contradiction → ``needs_review``;
+  (4) min load-bearing confidence below the floor → ``needs_review``; (5) else PASS. A degraded input can NEVER reach a
+  confident satisfied/fired. ``verdict_confidence = min`` of the load-bearing tags' NON-None confidences; parsed
+  passthroughs carry ``confidence=None`` (effectively certain, §3D) and are ignored in the min and the floor check.
+- **The thin AS-1 rule (``rule_engine/as1.py``) — query + arithmetic, no AI, no label filter.** Per transaction
+  subject: applicability is decided from the ``txn.is_money_in`` TAG (absent/unknown → ``couldnt_check``; ``!= "in"`` →
+  ``not_applicable``; ``"in"`` → proceed) — a TAG QUERY, never a raw ``direction==`` label, so the original bug cannot
+  recur (a "transfer"/"ACH"/unlabelled deposit the AI judged money-in IS evaluated). After the gate passes, it fires iff
+  ``amount > threshold AND has_identified_source != "yes"``. The comparison REUSES ``satisfies(Condition(GT, threshold),
+  amount)`` — the one place a ``>`` lives (the calculators' re-implement-the-compare drift is not repeated). An
+  ``has_identified_source == "unknown"`` never reaches the fire logic — the gate already routed it to ``couldnt_check``.
+- **Threshold from the spec; income from the calculator.** The multiplier is extracted from the spec's prose
+  ``reference_values.large_deposit_threshold`` ("50% of …" → 0.5) via ``load_rule_spec("AS-1")`` (file-backed, no DB);
+  qualifying income comes from the DTI calculator (``calculations.dti.value["gross_monthly_income"]``). Missing income →
+  ``couldnt_check`` (never a fabricated threshold). The prose threshold is a known spec-shape gap — a structured field
+  would be cleaner (future).
+- **Priya-pending handling.** AS-1's threshold is ``priya_validated=false``, so every AS-1 result is flagged
+  ``gated_pending_signoff=true`` — a later orchestrator withholds it from "shipped"; the engine never silently ships an
+  unvalidated threshold.
+- **The result carries its load-bearing tags inline** (``RuleEvaluation.load_bearing_tags`` — tag id + value +
+  confidence + reasoning), so a verdict never cites a bare number (§3D provenance move) and LP-316 can persist it.
+- **Confidence floor default 0.5** (the spec has no floor field yet) — PRIYA-CONFIRMABLE, like the threshold.
+
+**Consequences:** AS-1 is now a ~arithmetic rule over honest tags, guarded by a reusable fail-closed gate — the
+architecture's payoff realized, and the direction bug made structurally impossible at the rule layer too. The gate +
+result shape generalize to every future rule. Cross-refs: §3D (the thin rule + the armor/gate), LP-311 (the spec +
+declared tags), LP-312/313/314 (the tags the rule reads), ``rules/schema.py`` (the reused ``satisfies``). **Out of
+scope:** finding PERSISTENCE / four-state model / subject_key column / event log (LP-316), any AI, other rules, the
+orchestrator (LP-321).
+
+## ADR-255: Sourcing STRENGTH — matched paper-trail vs self-asserted claim vs intrinsic (LP-314a)
+
+- **Date:** 2026-07-14
+- **Status:** Accepted
+
+**Context:** The LF-6T3N trace exposed that the Stage-B sourcing judge (LP-314) was too generous: it marked a deposit
+``has_identified_source: yes`` when the deposit's OWN DESCRIPTION claimed a source ("ONLINE TRANSFER FROM PATEL A
+BROKERAGE"), even with NO matching debit found — its reasoning literally said "no candidates were provided… the
+description itself establishes this." For a fraud-catching system a description is the borrower's CLAIM, not a verified
+paper trail: a $20k deposit matched to an actual same-day $20k own-account debit and a $12k deposit merely LABELLED
+"transfer from my brokerage" are not the same evidential strength, yet both got ``yes``.
+
+**Decision — a source STRENGTH, derived deterministically, drives the verdict:**
+
+- **A companion tag ``txn.source_strength``** (produced by Stage B alongside ``has_identified_source``), value ∈:
+  - ``verified`` — a matching debit/paper-trail candidate was found (the deterministic candidate-search surfaced an
+    own-account transfer of the same amount within the window, and the judge cited it). Strong.
+  - ``intrinsic`` — sourced by NATURE: payroll / interest / dividend. Legitimately needs no matching debit. Strong.
+  - ``self_asserted`` — the description claims an own-account/gift source but NO matching debit was found. A CLAIM, not
+    proof. Weak.
+  - ``none`` — no source found. Unsourced.
+- **``has_identified_source`` stays yes|no|unknown** and is consistent with the strength (verified/intrinsic/self_asserted
+  → ``yes``; none → ``no``; the unknown/failed paths → ``unknown`` with no strength tag).
+- **Strength is DERIVED deterministically in the orchestrator, NOT taken from the AI's word.** A cited
+  ``own_account_transfer`` candidate ⇒ ``verified`` (a real matched debit is authoritative regardless of how the model
+  phrased it); an intrinsic-income category (payroll/interest/dividend) ⇒ ``intrinsic``; any other ``yes`` with no matched
+  debit ⇒ ``self_asserted`` (conservative default — a claim can never be upgraded to verified without a paper trail).
+  This is exactly the distinction a fraudster exploits, so it does not rest on the AI self-classifying.
+- **The judge PROMPT is updated** so the AI's reasoning is honest: a description-only claim must be reported as ``yes``
+  with ``source_index`` null AND the reasoning must state plainly that no matching debit was found — never described as if
+  a debit had been matched. (The deterministic candidate-search is unchanged; it already finds the debits, which is what
+  makes ``verified`` verifiable.)
+- **AS-1 (LP-315) reads the strength.** A SOURCED deposit AT OR OVER the large-deposit threshold whose strength is
+  ``self_asserted`` → ``needs_review`` (not a clean ``satisfied``), with a how_to_fix telling the processor to obtain the
+  named source account's statement showing the withdrawal — the "show me the debit" discipline. ``verified`` / ``intrinsic``
+  at any size, and ``self_asserted`` UNDER threshold, → ``satisfied`` (a small self-asserted transfer is not worth a manual
+  chase, but the strength is still recorded for audit). ``source_strength`` is an optional refinement input, NOT gated, and
+  is absent-tolerant (older snapshots fall back to the prior sourced→satisfied behavior).
+
+**Consequences:** on LF-6T3N this flips the two brokerage deposits ($12k under threshold → satisfied but recorded
+self_asserted; a $12k-style deposit AT/OVER threshold would now be ``needs_review``) while keeping the $20k VERIFIED
+(matched debit) satisfied and payroll/interest INTRINSIC satisfied — "correct by design" (the paper trail), not "correct
+by luck" (a believable label). Cross-refs: §3D (the armor — provenance + honest evidence), LP-314 (candidate-then-judge),
+LP-315 (the gate/rule). **Follow-up (documented, out of scope here):** register ``txn.source_strength`` in the fact-tag
+vocabulary source of truth (``docs/snapshot-fact-tags.xlsx`` → ``fact_tags.csv``); it is produced but not yet in the
+vocabulary registry.
+
+## ADR-256: Finding output — evaluation-outcome axis + subject_key + provenance + event log (LP-316)
+
+- **Date:** 2026-07-14
+- **Status:** Accepted
+
+**Context:** LP-315 (+ LP-314a) produces in-memory ``RuleEvaluation`` results; they must become durable findings. The
+LP-310 Area-4 recon found the persisted ``Finding`` model has ``open`` but no ``satisfied`` / ``couldnt_check`` /
+``no_longer_applies`` as states, no ``subject_key`` column (only ``details`` JSON), no ``(loan_file, rule, subject)``
+uniqueness, and no per-finding event log; and the current ``reconcile_findings`` mutates-in-place / soft-deletes. This
+persists the results by EXTENDING that model, single-run — cross-run reconciliation is LP-322.
+
+**Decision:**
+
+- **A NEW evaluation-OUTCOME axis, orthogonal to the two existing enums.** ``EvaluationOutcome`` (``open`` / ``satisfied``
+  / ``needs_review`` / ``couldnt_check`` / ``no_longer_applies``) records what the CHECK CONCLUDED — distinct from
+  ``FindingStatus`` (severity red/yellow/green) and ``FindingResolutionStatus`` (the human resolution lifecycle). FIVE
+  states, not the originally-planned four: LP-314a's ``needs_review`` (a self-asserted large transfer) is a real outcome.
+  Verdicts map fired→open, satisfied→satisfied, needs_review→needs_review, couldnt_check→couldnt_check;
+  ``not_applicable`` subjects are NOT persisted. A new nullable column (existing cross-source/document findings leave it
+  null). **``couldnt_check`` now PERSISTS a record** — "we looked and could not check this, here is why" — where before
+  it left none. Severity is a coarse triage color DERIVED from the outcome (open→red, needs_review/couldnt_check→yellow,
+  satisfied→green); the outcome axis carries the precise signal.
+- **``subject_key`` as a first-class column, keyed on the stable content_id.** Promoted from ``details.subject_key`` to a
+  column; for a per-deposit rule it is the deposit's ``content_id`` (LP-312) — NOT re-extracted amount/date, which drift
+  across runs (§3D: subject_key from stable tag values). A PARTIAL unique index ``(loan_file_id, rule_id, subject_key)
+  WHERE deleted_at IS NULL AND subject_key IS NOT NULL`` makes a subject ONE live finding, while leaving soft-deleted
+  rows and legacy null-subject_key findings out of the constraint. ``details.subject_key`` is still written so LP-93's
+  ``finding_identity`` substrate keeps working.
+- **Provenance inline (§3D Move 1).** ``load_bearing_tags`` (JSONB) persists each tag the verdict rested on — ``{tag_id,
+  value, confidence, reasoning, source_facts}`` (``LoadBearingTag`` was extended with ``source_facts`` — the cited LP-312
+  content_ids). A human reading the finding sees WHY (e.g. the sourcing tag's "no matching debit, description-only"
+  reasoning), never a bare number. Refuses to persist a finding with empty reasoning. The evaluation metadata
+  (verdict_confidence, threshold_used, priya_validated, gated_pending_signoff, how_to_fix, and LP-314a's source_strength)
+  lands in ``details``; ``confidence`` = the verdict confidence. Origin is ``deterministic_rule`` (AS-1's rule is
+  deterministic; its tags were ai/derived — recorded faithfully in the inline tags).
+- **An append-only per-finding event log.** New ``finding_events`` table (insert-only, no soft-delete: ``event_type`` in
+  created / outcome_changed / resolved / retired, ``from_outcome`` / ``to_outcome``, ``detail``, ``occurred_at``). It is
+  the substrate for the four-tab lifecycle + retirement + immortality (§3D). SINGLE-RUN: only the ``created`` event (with
+  the initial outcome) is emitted here.
+- **Coexistence with the current reconcile.** LP-316 persists via a direct INSERT service
+  (``persist_evaluation_findings``), reusing ``FindingOrigin`` and keeping ``details.subject_key`` so ``finding_identity``
+  still works; the partial-unique index tolerates soft-delete. It does NOT touch ``reconcile_findings``.
+
+**Consequences:** AS-1's verdicts are now durable, identity-stable, provenance-carrying findings — including the
+previously-recordless ``couldnt_check`` and LP-314a's ``needs_review``. **Deferred to LP-322:** cross-run reconciliation
+(carry-forward / retire → ``no_longer_applies`` / outcome-change), which will drive persistence through
+``reconcile_findings`` using the outcome axis + ``subject_key`` + the event log (this ticket lays all three). Cross-refs:
+§3D (finding states + provenance + subject_key), LP-310 Area 4, LP-312 (content_ids), LP-314a (source strength +
+needs_review), LP-315 (the evaluation result). Migration mirrors the LP-74 add-column+CHECK+index pattern; ``str_enum`` is
+VARCHAR+CHECK so no ``ALTER TYPE``.
+
+## ADR-257: A two-level golden eval harness (tag + finding) with calibration — the GO/NO-GO instrument (LP-317)
+
+**Status:** Accepted. **Context:** Stage 2 (LP-310…316) built the fact-tag pipeline — per-entity tags (LP-313),
+cross-entity sourcing with strength (LP-314/314a), the thin AS-1 rule + fail-closed gate (LP-315), and persisted
+findings with outcome states (LP-316). Before that pipeline can be trusted as a fraud check it needs a labeled,
+automatically-scored instrument that proves it works in BOTH directions — fires when it should, stays quiet when it
+should not — and that the tags underneath are calibrated, not confidently wrong.
+
+**Decision.**
+1. **Score at TWO levels — tag AND finding.** A rule that passes can MASK a systematically-wrong tag underneath it
+   (a mis-classified `is_money_in`, a `verified` strength that never had a matched debit). Scoring findings alone
+   would green-light a broken tag. So the harness scores each per-transaction tag (`is_money_in`,
+   `apparent_category`, `has_identified_source`, `source_strength`) AND the per-subject AS-1 outcome, independently.
+2. **Both directions, explicitly.** The real fraud file (LF-6T3N) is a NO-FALSE-FIRE fixture — it structurally
+   cannot prove the fires-when-it-should direction (it has no unsourced large deposit). So the golden set adds
+   MUST-FIRE cases (1 unsourced large; 5 the regression — a non-`credit` label still fires, so the old
+   `direction=='credit'` bug cannot recur; 7 the intrinsic-not-a-loophole — the word "PAYROLL" without markers is
+   not auto-satisfied), and the harness asserts coverage of both directions.
+3. **The source-strength distinction (LP-314a) is a first-class case.** `verified` (a real matched debit, cited by
+   content_id) vs `self_asserted` (a description-only claim, no debit) vs `intrinsic` (payroll) vs `none` — the
+   fraud-relevant line between a proven paper trail and a borrower's claim — is scored directly (cases 2/3/9/10).
+4. **Calibration measures abstention, doesn't assume it.** Per dimension: the UNKNOWN rate (over-abstention → the
+   tag is useless) and ACCURACY-WHEN-CONCRETE (under-abstention/fabrication → a confident wrong answer, the
+   dangerous direction for a fraud check). Flags are gated to the dimensions where `unknown` is a true abstention.
+5. **Keyless by default, live optional.** The harness injects the LP-313/314 reasoner stub seam and REPLAYS each
+   fixture's labeled AI judgment, so CI scoring is deterministic and needs no API key; everything downstream of the
+   model (candidate search, strength derivation, gate, rule arithmetic) runs for real. A `--live` mode runs the real
+   model for calibration and skips cleanly without a key. The real file (case 12) is a FROZEN tagged snapshot
+   captured from one live post-LP-314a run — deterministic at test time, faithful to the real trace (0 fired).
+6. **Evaluate, don't fix.** The harness never edits rule/tag logic to make a case pass; a mismatch is a REPORTED
+   regression and a revealed bug is a separate fix ticket. This keeps the instrument honest.
+
+**Consequences.** A single `uv run python -m app.scripts.run_eval` (keyless, CI) or `--live` (calibration) prints a
+PASS/FAIL-per-case + both-directions-coverage + calibration report ending in GO / NO-GO. The frozen LF-6T3N fixture
+is committed as the real-data regression guard, but REDUCED + PII-SCRUBBED: the raw snapshot is a whole loan file (W2s
+with SSNs, licenses with DOB/address, etc.), and the AS-1 scorer reads only the transaction-bearing documents' tags +
+the DTI income, so the fixture is stripped to exactly that — the real trace (amounts, dates, tag VALUES, income; verdict
+counts byte-for-byte real) with every identity/free-text surface removed (a name/SSN/DOB token sweep returns zero). The
+set is AS-1-only by design; scaling to other rules is a later wave. Cross-refs: §3D (tag-level eval + calibration + fail-closed states),
+LP-313/314/314a (tags + strength), LP-315 (rule + gate), LP-316 (finding outcomes + provenance).
+
+## ADR-258: Calculators as structured tags — from_tag lineage + fail-closed THROUGH the calc (LP-318)
+
+**Status:** Accepted. **Context:** The snapshot's four calculators (DTI / LTV / MI / reserves) each emit a
+`{value, breakdown[]}` where every breakdown line carries a `source` (stated/extracted/computed/manual/override)
+but nothing tracing it to the fact-tag behind it, and no confidence. Worse, each calculator collapses a
+non-derivable input to `0` (`effective = override ?? auto ?? 0`) — the "absent≠0" trap the fact-tag vocab
+explicitly warns about — so a DTI missing a hazard binder emits a confident, too-low ratio a rule would trust.
+LP-312 added a null `from_tag` on `CalcBreakdownLine` for exactly this ticket to populate.
+
+**Decision.**
+1. **Wrap at the service/snapshot layer, never the pure arithmetic.** `calculations_section.map_*` / `_line`
+   populate `from_tag` and compute gating/confidence; the pure calculators are untouched (they remain the single
+   source of truth for the math).
+2. **`from_tag` = the canonical fact-tag id (a lineage LABEL).** The referenced tags (`housing.insurance_monthly`,
+   `dti.qualifying_income_monthly`, `loan.amount`, `asset.usable_value`, …) are a defined vocabulary in
+   `fact_tags.csv` but are NOT materialized in the snapshot's tags layer (only `txn.*` Stage-A/B tags are). So
+   `from_tag` names WHICH tag produced a line, keyed by the line's stable `key`. A computed subtotal / a line with
+   no fact-tag behind it → `"derived"` — NEVER a fabricated tag id.
+3. **Fail-closed THROUGH the calc.** An input is UNKNOWN when `auto_amount is None and not overridden` (the
+   calculator couldn't derive it and defaulted to 0; an override means a human vouched for it). Such a line
+   surfaces `amount=None` (honest, not a fabricated 0). If a REQUIRED feeding tag is unknown OR absent, the calc is
+   `gated`: its headline ratio is nulled and `gate_reason` names the tag (unknown vs absent — distinct reasons),
+   so it emits a couldnt_check-equivalent marker, NOT a confident-but-wrong number. For DTI the required set is
+   `{housing.insurance_monthly, housing.taxes_monthly}` (a missing binder/tax understates the payment); `hoa`/`mi`
+   are legitimately 0 → not required. LTV/MI/reserves already return `None` when their core input is missing.
+   The canonical case: LF-6T3N has no binder → the insurance line is unknown → the DTI gates → couldnt_check.
+4. **A rule reading a gated calc → couldnt_check.** AS-1's income read returns None when the DTI is gated (none of
+   a gated calc's numbers are trusted), so it degrades exactly as it gates on any other unknown load-bearing input.
+5. **`confidence` = min of feeding tags' confidences, ignoring parsed/derived passthroughs (LP-315 convention).**
+   The mechanism is built and unit-tested, but is DORMANT today (`None`): every current calc input is
+   parsed/extracted/computed/derived (no AI-confidence tag feeds a calc). It activates when Hybrid tags
+   (`income.qualifying_monthly`, `liab.dti_payment`) are materialized and wired.
+6. **Defer max_loan + self_employed.** They are API-only (LP-310 Area 3) — NOT in the snapshot, no rule reads them
+   from it — so tagging them now would be dead lineage. Only the 4 in-snapshot calcs are tagged.
+
+**Consequences.** `CalculationEntry` gains `gated` / `gate_reason` / `confidence`; `SNAPSHOT_VERSION` 3→4 (the frozen
+LF-6T3N eval fixture re-stamped; new optional fields default, so old blobs stay readable in shape). A file missing a
+required housing input now yields a gated DTI (couldnt_check) instead of a confident too-low ratio — a deliberate,
+honest behavior change (the DB-backed calculators test now asserts the gated path on the incomplete seed). Cross-refs:
+§3D (calculators as structured tags), LP-310 Area 3, LP-312 (from_tag), LP-315 (the gate + confidence convention).
+
+**KNOWN LIMITATION (deferred).** The gating is LIVE for the ABSENT-input case but works via the calc's own
+`auto_amount is None` presence signal, NOT the tag layer: `from_tag` is a label only (no consumer reads it),
+`calc_confidence` is always None (`_no_tag_confidence`), and the `housing.*` input tags are never materialized/consulted.
+The gap: gating fires on ABSENT inputs but NOT on PRESENT-BUT-LOW-CONFIDENCE ones (a low-confidence extraction →
+`auto_amount` non-None → no gate). Deferred because the absent case is the common one (and is covered), and tag-driven
+gating before LP-317 calibrates those confidences risks over-gating. Revisit once the input tags are materialized +
+calibrated. Full write-up: [`docs/tickets/LP-318.md`](docs/tickets/LP-318.md) "Known limitation" + [LP-321a](docs/tickets/LP-321a.md)
+(the fixture that had masked this).
+
+## ADR-259: AI-at-rule-time judgment rules — procedural armor, proven with OC-2 (LP-319)
+
+**Status:** Accepted. **Context:** ~36 of the rule set are JUDGMENT rules — their verdict cannot reduce to a
+deterministic query over structural-fact tags; the AI IS the evaluator (e.g. OC-2 "is the stated occupancy
+plausible?"). These are the highest-stakes AND least-structurally-armored rules: there is no arithmetic to check the
+AI against. Left naive they would auto-ship an AI opinion as a verdict.
+
+**Decision — give the judgment rules PROCEDURAL armor, enforced in the evaluator (not the prompt).**
+1. **Two tag ROLES, made real.** A `structural_fact` tag is produced once (Stage A/B), shared/cached, read by many
+   rules. A `rule_judgment` tag (`tag_role=rule_judgment`) is produced at rule-time for ONE rule, IS that rule's
+   verdict in tag shape, carries the AI's value + confidence + reasoning + the structural subjects it reasoned over
+   (`source_facts`), and NEVER auto-ships. OC-2 produces `occupancy.reasonable` as a `rule_judgment` tag.
+2. **Reason over TAGS, not raw docs.** The judgment context is assembled ONLY from the loan's structural-fact tags
+   (`occupancy.stated`, `occupancy.consistent_with_signals`, address signals) — no document is read — so the
+   judgment is grounded in the same clean facts everything else uses and is reviewable. This is the discipline that
+   keeps a judgment rule from becoming an opaque "ask the LLM about the PDF" call.
+3. **MANDATORY human ratification.** A judgment rule's verdict is ALWAYS ratification-pending: its only terminal
+   verdicts are `needs_review` (a judgment was reached — a human must confirm) and `couldnt_check` (couldn't judge).
+   It NEVER reaches a confident `satisfied`/`fired`, regardless of the AI's yes/no or its confidence. Represented by
+   reusing LP-316's `needs_review` + a new `RuleEvaluation.ratification_pending` flag (deterministic rules leave it
+   False). This is the core armor: for the least-checkable rules, a human is always in the loop.
+4. **Confidence-gated + fail-closed on the inputs (LP-315).** The generic gate runs over the load-bearing structural
+   tags BEFORE the AI is called — absent/unknown → `couldnt_check` (we don't ask the AI to judge over a hole), shaky
+   → needs_review. The AI's own low confidence folds into the needs_review reasoning. AIClientError / truncation →
+   the judgment tag is absent-with-reason + `couldnt_check`; a malformed / off-vocabulary response → `unknown` →
+   needs_review — never a defaulted verdict.
+5. **Provenance for the ratifier.** The result carries the structural-fact tags it reasoned over inline, so the human
+   sees WHY the AI judged as it did.
+
+**Consequences.** OC-2 is the reference implementation; the other ~36 judgment rules follow the same shape — assemble
+tag context → gate → AI judge (the reused Stage-A/B clone: injected Reasoner seam, truncation guard, honest parse) →
+ratification-pending verdict + a `rule_judgment` tag. Only the prompt and the tag set change per rule. The occupancy
+structural-fact tags OC-2 reads (`occupancy.stated`, etc.) are produced by OC-1/ID-4 (out of scope here) and land
+under a loan-level subject (`by_subject["loan"]`) — a documented convention this ticket introduces; keyless tests
+inject them. Cross-refs: §3D (rule_judgment role + the judgment-rule armor), LP-313/314 (the AI-call clone), LP-315
+(the gate + result), LP-316 (needs_review as the ratification-pending outcome).
+
+## ADR-260: The observation channel + graduation log — safety for the unbounded real world (LP-320)
+
+**Status:** Accepted. **Context:** The tag vocabulary is finite; the real world is not. The AI constantly meets
+documents/facts the vocabulary does NOT enumerate — a gift letter, a divorce decree, a trust agreement, an unusual
+credit. Two failure modes must both be avoided: (a) DROPPING the information (a silent false-green — the file looks
+clean because the system had no slot for what it saw), and (b) letting the AI INVENT a formal tag / resolve a finding
+off an un-governed judgment (extensibility becomes a false-green vector — an ungoverned AI opinion silently clears a
+red flag).
+
+**Decision.**
+1. **A structured-but-schemaless Observation.** When the AI can't map to a known tag, it records an `Observation`
+   (envelope: about, type [a free AI-chosen label], value [natural language], structured [schemaless JSONB],
+   relates_to [finding/subject], confidence, reasoning, needs_tag, run_id) instead of inventing a tag or dropping the
+   fact. File-owned, append-only.
+2. **The INFORM-not-RESOLVE boundary, enforced STRUCTURALLY.** An observation may INFORM (surface to a human, feed
+   graduation) but can NEVER drive an automated finding resolution — only governed tags + rules resolve findings.
+   This is enforced by construction: observations live in their own table + service, and the rule engine never reads
+   them, so an observation physically cannot flip a verdict (the rules read the snapshot tags, a different data path).
+   This is the line that keeps extensibility from becoming a false-green vector.
+3. **Fail-closed to human review.** An observation that `needs_tag` or `relates_to` a finding surfaces via a query
+   (`pending_review_observations`) — the processor sees the structured context even though no formal tag/rule handles
+   it yet. A novel/unclassified document ALWAYS yields at least one observation (a fallback flagged `needs_tag` even
+   when the AI call fails) — never silently dropped (§7 discovery output).
+4. **A PII-safe graduation log — the self-improving loop.** Each observation bumps a `GraduationCandidate` tally by a
+   normalized signature (case/space-insensitive type). `top_graduation_candidates` ranks by frequency — production
+   frequency IS the signal for what the vocabulary is missing most, i.e. which unknowns a human (with Priya) should
+   formalize next into a tag+rule. The candidate row holds type + signature + count + timestamps ONLY — never raw
+   values — so it is safe as a system-wide (cross-file/tenant) signal.
+
+**Consequences.** The gift-letter trace works day one: a gift letter (not yet a formal tag) → an observation that
+relates to the AS-1 finding and FAILS CLOSED to human review — it does NOT auto-resolve AS-1 (only a future governed
+`gift.*` tag+rule would). The graduation log accumulates the recurring unknowns for formalization. Deferred: the human
+formalization WORKFLOW (turning a candidate into a committed tag+rule — a governed UI task), and the concrete wiring
+of the channel into a document classifier (no producer of document-level tags exists yet; the channel + AI step +
+`observe_unmapped` seam ship here). Cross-refs: §3D (the unbounded real world), §7 (the discovery lane), LP-313/314
+(tag production — the channel runs alongside it), LP-316 (findings — attach, never resolve).
+
+## ADR-261: The verification orchestrator + partial-snapshot semantics (LP-321)
+
+**Status:** Accepted. **Context:** All the Stage-2 pieces exist independently — raw snapshot (LP-312), Stage-A/B tag
+production (LP-313/314), calculators-as-tags (LP-318), the fail-closed gate + rules (LP-315), judgment rules
+(LP-319), finding persistence (LP-316). Something must ASSEMBLE them into one full run, in dependency order, that
+degrades gracefully and caches. This is that assembly — it owns ORDER, DEGRADATION, and CACHING only; it re-implements
+none of the pieces.
+
+**Decision.**
+1. **Dependency-ordered stage sequence.** `run_verification` runs: raw snapshot (calculators built inside it) →
+   Stage A (per-entity atomic tags) → Stage B (cross-entity sourcing, consuming A's `is_money_in`) → rules (the
+   fail-closed gate + AS-1 deterministic + OC-2 judgment) → findings (persisted with outcome/subject_key/provenance).
+   It CALLS each existing entry point; the DAG is honored by A-before-B (B reads A's tags).
+2. **Partial-snapshot semantics — the system-level fail-closed.** A stage/step failure NEVER fails the whole run:
+   the tag producers already fail-close per call (a bad AI response → unknown-with-reason tags, not a crash), and the
+   orchestrator adds a BACKSTOP (a wholesale stage exception is caught, the pre-stage snapshot kept, a degradation
+   recorded). Rules whose load-bearing tags are now degraded → the LP-315 gate routes them to couldnt_check; rules
+   that do NOT depend on the failed tags STILL RUN (the orchestrator lets every rule run and gate — it never skips a
+   rule silently). The run ALWAYS completes with a coherent result set.
+3. **Degradation visibility.** What degraded is RECORDED on the result (`VerificationRun.degradations`): absent-with-
+   reason raw sections, unknown-with-reason production markers scanned from the tags, and any backstopped stage
+   exception — visible, never a silent gap.
+4. **Cache-by-content-fingerprint reuse.** Tag production is cached (LP-313/314) via a `TagCaches` bundle threaded
+   across runs: a tag whose source raw facts are unchanged (by fingerprint) is REUSED, not re-produced. The snapshot
+   is rebuilt each run (stateless); only changed inputs re-produce. The run records the model + vocab version for
+   reproducibility, and the frozen snapshot is persisted (best-effort).
+5. **Assemble, don't reimplement.** No new tag/rule/calculator/finding logic. Two slots are intentionally inert
+   today: the CALCULATORS run inside `build_snapshot` (their inputs are stated financials, not Stage-A/B tags, so they
+   need no separate post-tag step), and the CONTRADICTION AUDIT has no deterministic cross-checks wired yet (the gate
+   takes a `contradiction` flag; the orchestrator passes False — the audit itself is a future ticket).
+
+**Consequences.** One entry point runs a full verification and returns the snapshot + findings + degradations +
+reproducibility metadata. It runs ONE verification — matching findings ACROSS runs (carry-forward / retire) is
+LP-322; re-running into the SAME loan file collides on the finding uniqueness index by design (that is the signal
+LP-322 reconciles). The occupancy structural tags OC-2 needs are not produced by any stage yet (OC-1/ID-4), so OC-2
+couldnt_checks on a snapshot lacking them (honest fail-closed). Cross-refs: §3A (pipeline stages / run model), §3D
+(partial-snapshot semantics + fail-closed), LP-312/313/314/315/316/318/319.
+
+## ADR-262: The LF-6T3N regression fixture asserted a fiction — corrected to live DTI gating (LP-321a)
+
+**Status:** Accepted. **Context:** A read-only investigation of LP-318's calculator gating found that the
+orchestrator's `test_lf6t3n_full_run_zero_fired` was GREEN on behavior that does not match the live pipeline. The
+frozen LF-6T3N fixture's `calc.dti` had `gated=False` with `breakdown=[]` — a byproduct of LP-317's PII reduction,
+which rebuilt calculations as `CalculationsSection.present(dti=CalculationEntry(value={"gross_monthly_income": …},
+breakdown=[]))`, dropping the breakdown so `gated` fell back to its `False` default. With no breakdown to gate on and
+income present, AS-1 evaluated normally and the test asserted "0 fired." But LIVE on the real LF-6T3N file (no
+insurance binder → `housing.insurance_monthly` unknown → `auto_amount` None → LP-318 gates the DTI), `calc.dti` is
+`gated=True` / `back_end_dti=None`, and AS-1's `_qualifying_income` returns None on a gated DTI → AS-1 couldnt_checks.
+The fixture and the live pipeline disagreed; a green test on a fiction is worse than no test — it hides a future break
+of the live gating.
+
+**Decision.** The LIVE gating is correct; the FIXTURE was wrong (not the reverse). Corrected:
+1. **Fixture** — spliced the LIVE gated `calc.dti` into the frozen snapshot (`gated=True`, the real
+   `gate_reason` naming the insurance input, `front/back_end_dti=None`, the housing breakdown present with the
+   insurance line `amount=None`). PII-safe: the DTI line KEYS were genericized and the LABELS (which live-produce
+   borrower + creditor names) were replaced with generic `from_tag`-derived labels; amounts-without-identity are the
+   fixture's established posture (LP-317 kept amounts, stripped names), and the gating signal is presence/None, not a
+   raw value. A name/creditor sweep on the fixture returns zero.
+2. **Test** — renamed to `test_lf6t3n_dti_gated_forces_as1_couldnt_check` and rewritten to assert the LIVE outcome:
+   the DTI is gated (`back_end_dti` None, reason names insurance, insurance line `amount=None`); AS-1 subjects are
+   COULDNT_CHECK — explicitly NOT satisfied and NOT fired (the deposits are unevaluated-for-threshold, not cleared);
+   and the Stage-A/B sourcing distinction (verified / self_asserted) is asserted separately (unaffected by the DTI
+   gate).
+3. **Guard** — the test now asserts `dti.gated is True` + `back_end_dti is None`, so a future PII-reduction that
+   silently strips the DTI back to `gated=False` FAILS instead of passing on a fiction.
+
+**Consequences.** The regression test now matches what the live orchestrated run produces on real LF-6T3N. The
+eval-harness case 12 (which shares the fixture) still passes — it asserts `fired==0` (couldnt_check is fail-closed, not
+fired) + the strength-tag counts (unaffected by the gate), both still true. NOT changed here: the live calculator/gating
+logic (it is correct), and the separate Caveat-A gap the investigation noted (the calc's tag-confidence propagation is
+inert — `confidence` always None, the `housing.*` tags are never consulted; `from_tag` is a label only) — documented,
+deferred. Cross-refs: LP-317 (the PII stripping that introduced the fiction), LP-318 (the gating), LP-321 (the
+orchestrator + its test), and the LP-318-gating investigation.
+
+## ADR-263: Cross-run finding reconciliation + the immortal lifecycle (LP-322)
+
+**Status:** Accepted. **Context:** LP-321's orchestrator runs ONE verification; re-running the same loan file
+COLLIDED on the `(loan_file, rule, subject_key)` uniqueness index by design — that collision is the signal this
+ticket reconciles. §8 (the five outcome states / four tabs) and §9 (identity, immortality, reconciliation) require a
+finding to have a stable identity, to persist across runs keeping its history, and to NEVER leave the surface silently.
+
+**Decision.**
+1. **Identity = `(rule_id, subject_key)`, resting on STABLE content-ids (LP-312).** Verified: identical raw facts →
+   identical content_id (a re-run matches); a changed amount → a different content_id (a changed deposit is a new
+   subject). Reconciliation is only sound because subject_key is stable; a re-extracted-but-unchanged transaction
+   reconciles to the same finding.
+2. **`reconcile_evaluation_findings` matches this run against the prior run and applies five transitions.**
+   CARRY-FORWARD (detected both runs → same finding id + history, state refreshed), MINT (new subject → new finding),
+   RETIRE (a prior open finding not detected this run → `no_longer_applies`), RESOLVE (a carried-forward finding whose
+   outcome goes open→satisfied because a sourcing tag flipped — the gift-letter loop), REVIVE (a retired finding whose
+   subject reappears by exact subject_key → the same row, back on the surface). It replaces the single-run insert in
+   the orchestrator, so a re-run no longer collides.
+3. **RESOLVE ≠ RETIRE — different states, different events, not collapsed.** RESOLVE = the subject is still here and
+   the rule now PASSES (`satisfied`, a `resolved` event citing the flipped tag). RETIRE = the SUBJECT left the file (or
+   the rule no longer applies to it), `no_longer_applies`, a `retired` event with a reason. One is "it was addressed,"
+   the other is "it's not there anymore."
+4. **Immortality (§9): never a silent delete.** A no-longer-detected finding is RETIRED to `no_longer_applies`
+   (visible, labeled, reason + run_id + timestamp), `deleted_at` stays NULL — it is NOT soft-deleted. A retired finding
+   stays retired until an exact subject_key match REVIVES it (keeping the original identity). A human-resolved finding
+   (`resolution_status != OPEN`) is RETAINED, not retired (Undo/audit depend on it). Retiring subject X never suppresses
+   the rule firing on a new subject Y (different subject_key → its own finding).
+5. **Append-only cross-run event log.** LP-316's `finding_events` records each transition — `carried_forward` /
+   `outcome_changed` / `resolved` / `retired` / `revived` (two new event types added via a CHECK-widening migration),
+   each carrying the run_id in `detail`; a resolve also cites the flipped sourcing tag. History is never rewritten.
+6. **Tag-flip resolves; an observation only surfaces (the LP-320 boundary).** RESOLVE is driven by the sourcing tag
+   flipping (`has_identified_source` no→yes → the rule returns satisfied). An observation (a gift letter, LP-320) only
+   informs a human — reconcile never reads observations, so an observation alone can never flip a finding's state.
+
+**Consequences.** Re-runs are idempotent-safe and cumulative: the surface reflects the current state while preserving
+every finding's identity + history. The four-tab UI that DISPLAYS this lifecycle is deferred (frontend). The old LP-94
+`reconcile_findings` (normalized-substance identity, soft-deletes) is the pre-fact-tag pipeline's and is untouched;
+this is the subject_key-keyed, retire-not-delete reconcile for LP-316 fact-tag findings. Cross-refs: §8, §9,
+LP-312 (content-ids), LP-316 (finding + event log), LP-320 (observation boundary), LP-321 (the orchestrator).
+
+## ADR-264: Generalize the rule engine — rules become SPECS run by GENERIC evaluators (LP-324)
+
+**Status:** Accepted. **Context:** LP-323-ID-A's gate found the wave BLOCKED: AS-1 and OC-2 were per-rule Python
+modules dispatched by two hardcoded calls, and `RuleSpec`/`ReferenceValues` were AS-1-shaped (a `large_deposit_threshold`
+field; a PROSE `subject_enumeration`) — a spec literally could not express another rule. This is the deferred LP-308
+debt: authoring ~125 more rules on that base would fork `as1.py`/`oc2.py` across the family and kill the tag
+architecture's scalability. **The safety property of this ticket is EQUIVALENCE:** AS-1 + OC-2 must produce identical
+results after the refactor as before — same verdicts, confidences, gate routing, provenance, threshold_used — but
+driven by their SPECS through generic evaluators.
+
+**Decision.**
+1. **A machine-readable spec schema.** `RuleSpec` gains an `evaluation` body — `deterministic` (calculative/structural)
+   or `judgment` (judgmental), exactly one per the kind; `out_of_scope` carries neither. `subject_enumeration` becomes
+   an EXECUTABLE key (`per_deposit`/`loan`) resolved by an enumerator registry. `reference_values` gains a
+   generically-keyed `values` mapping (AS-1's 50% → `large_deposit_threshold_pct`) + a `guideline_text` authority slot;
+   the old `large_deposit_threshold` prose is retained but now optional. The deterministic body declares
+   `load_bearing_tags` + `gated_tags`, a tag `applicability`, `operands` (tag / reference / calc / product — AS-1's
+   `threshold = multiplier × qualifying_income` as DATA, the calc operand honoring the LP-318 gated flag), and ordered
+   `outcomes` (each a guard of tag predicates + an optional declared `Comparison` run through `satisfies`, first match
+   wins). **No schema gap:** AS-1's LP-314a self_asserted→needs_review nudge — including its GE-vs-GT boundary — is
+   just an outcome whose guard is `has_source==yes ∧ source_strength==self_asserted ∧ observed ≥ threshold`.
+2. **Two generic evaluators, reusing what was already generic.** `evaluate_deterministic_rule(spec, snapshot)` and
+   `evaluate_judgment_rule(spec, snapshot, reasoner)` run ANY rule from its spec — reusing `evaluate_gate`,
+   `satisfies`/`Condition`/`Operator`, `RuleEvaluation`, and (generalized to `reason_rule_judgment`) the LP-313/314 AI
+   clone + LP-319's ratification armor, unchanged.
+3. **A rule registry + generic dispatch.** `ACTIVE_RULE_IDS` + `evaluate_rules` dispatch the rule set by KIND; the
+   orchestrator's two hardcoded calls are replaced by that loop. Adding a rule is a SPEC (+ a registry line + its
+   tags), never new evaluation Python. Out-of-scope → not_applicable (no evaluation).
+4. **AS-1 + OC-2 re-expressed as DATA, with EQUIVALENCE the proof.** `AS-1.yaml`'s `deterministic` block and a new
+   `OC-2.yaml` `judgment` block carry the logic; `as1.py`/`oc2.py` keep only spec-derived identifiers + thin
+   `evaluate_as1_rule`/`evaluate_oc2` wrappers (same signatures, so the eval harness/orchestrator/tests are unchanged).
+   The former decision-tree + flow code is deleted. The existing AS-1/OC-2 suites + the frozen LF-6T3N trace pass
+   unchanged; a synthetic brand-new deterministic rule runs from a spec ONLY (no Python) — the proof the waves can
+   proceed.
+
+**Consequences.** The deferred LP-308 debt is paid; the ~130-rule waves are unblocked (a rule = a spec + its tags).
+NOT changed: rule/tag/finding BEHAVIOR (equivalence), and gate.py / satisfies / RuleEvaluation / LP-316/317/319's armor
+(reused). Deferred (separate tickets): the CROSS-SOURCE consistency primitive (ID-1/2/3/4/7 — the third rule shape) and
+`id.*` tag materialization. Cross-refs: §3D, LP-303 (the AS-1 spec), LP-308 (never landed — now paid), LP-311 (rule
+kinds/projection), LP-315 (gate), LP-319 (judgment armor), LP-323-ID-A §0.
+
+## ADR-265: The cross-source consistency primitive — the third rule shape (LP-325)
+
+**Status:** Accepted. **Context:** LP-324 gave the engine two rule shapes: AS-1 (per-transaction,
+deterministic) and OC-2 (loan-level, judgment). But LP-323-ID-A found a THIRD shape the ID family is
+dominated by and neither existing evaluator models: *"gather fact T for subject S across ALL sources,
+compare them, judge agreement"* (ID-1 name, ID-2 SSN, ID-3 DOB, ID-4 address, ID-7 marital/title; and
+later IN-1/IN-3 stated-vs-documented income, CR-1 app-vs-credit-report liabilities, PC-3/PR-7 property
+address). Building it as a third hardcoded evaluator would refork the per-rule trajectory LP-324 just
+paid off.
+
+**Decision.**
+1. **A DECLARED spec shape, not a third evaluator** (LP-324's model preserved). `RuleSpec` gains a
+   `consistency` evaluation block (mutually exclusive with `deterministic`/`judgment`; a STRUCTURAL
+   rule may now carry either a `deterministic` OR a `consistency` body). It DECLARES: the `subject`
+   (the `per_borrower` enumerator this ticket adds), the `gather_tag`, the `source_scope` (a gather
+   registry key), a `gather_filter` (a `TagCondition` on each source), the `compare_mode`
+   (`exact`|`fuzzy`), the `normalization` chain (DATA — declared normalizer keys, not code-per-rule),
+   the fuzzy `judge` (prompt + `value_domain` + declared `consistent_value`/`inconsistent_value`), and
+   `on_agree`/`on_disagree`/`on_cannot_tell` outcomes.
+2. **THE EXACT BOOKEND → AI-FUZZY RESIDUE design** (mirrors LP-314 candidate-then-judge — the cost +
+   certainty property). One generic `evaluate_consistency_rule` does the mechanical part
+   deterministically: gather across sources → exact-compare after normalization → **all equal → AGREE,
+   NO AI CALL** (most files match exactly — cheap and certain). Only when values DIFFER, and only in
+   `fuzzy` mode, does the AI judge — and it sees **ONLY the small differing set** (the values + their
+   sources), never the file. `exact`-only rules (ID-2 SSN, ID-3 DOB) NEVER call AI: a difference IS a
+   discrepancy.
+3. **ABSENT ≠ DISAGREEING, and a single source is not agreement.** A source that simply LACKS the fact
+   is EXCLUDED from the compare (not a mismatch). After filtering, **fewer than two instances →
+   couldnt_check** (one source cannot "agree"). An `"unknown"` gathered value → couldnt_check (never a
+   value that agrees/disagrees). The declared `gather_filter` is the **mailing-vs-residence trap** fix
+   (ID-4): compare residence↔residence only, so a driver's-licence prior/mailing address is not a
+   false discrepancy. Reuses `evaluate_gate` (unknown/below-floor over the gathered instances) +
+   `reason_rule_judgment` + the LP-319 armor — no new AI layer.
+4. **The fuzzy leg is ratification-pending; the exact bookend is not.** A `consistency` verdict the AI
+   produced (benign variance → satisfied, or real discrepancy → fired) is `ratification_pending` —
+   an AI made the call. The exact bookend's satisfied and exact-mode's fired are NOT pending (a
+   deterministic decision). This REFINES LP-319's invariant from universal to per-path: OC-2's judgment
+   path forces every verdict to needs_review, but a consistency rule's deterministic bookend legitimately
+   lands `satisfied`/`fired` while its fuzzy residue is pending. `result.py`'s docstring is updated to
+   record this; nothing reads the flag yet (a future ratification consumer will), so no behavior changed.
+5. **Registry dispatch by evaluation BLOCK, not bare kind** (a structural rule may be deterministic OR
+   consistency). ID-2 (exact) and ID-4 (fuzzy) are re-expressed AS DATA (`ID-2.yaml`/`ID-4.yaml`) with
+   ZERO per-rule Python — the proof the shape generalizes. They stay OUT of `ACTIVE_RULE_IDS` (the live
+   set) until the `id.*` producers materialize (LP-323-ID-A §0) — else every run would couldnt_check them.
+
+**Consequences.** The third rule shape is unblocked for the ID wave and every cross-source family (income
+stated-vs-documented, credit app-vs-report, property address) as SPECS. NOT changed: AS-1/OC-2 behavior
+(dispatch is byte-identical), and `evaluate_gate`/`satisfies`/`RuleEvaluation`/the LP-313/314 AI machinery
+(reused). **No schema gap found** — the gather filter, normalization, exact/fuzzy split, and outcomes are
+all DATA. **Gather model (a note for the -B materialization ticket):** the gather tag and its filter tag
+are read from the SAME source subject (each document that states an address carries both its
+`id.address_normalized` and that address's `id.current_address_type`) — the coherent shape the `id.*`
+producers must target. Deferred (separate tickets): the `id.*` tag producers; the -B wave authoring the
+remaining ID rules on this primitive; the consistency-verdict-tag modeling question (LP-323-ID-A §2).
+Cross-refs: §3D; ADR-264; LP-314 (candidate-then-judge), LP-315 (gate), LP-319 (judgment armor), LP-324
+(rules as specs), LP-323-ID-A §0/§2/§4.
+
+## ADR-266: Generic vocabulary-driven tag materialization — production is a declaration (LP-326)
+
+**Status:** Accepted. **Context:** the fact-tag vocabulary defines ~140 tags across 10 entities, but
+the pipeline materialized ONLY the 4 ``txn.*`` Stage-A tags (via a bespoke producer). This systemic
+gap — vocabulary ≠ production — has now blocked three tickets (LP-318's inert calculator ``from_tag``,
+LP-319's occupancy tags, LP-323-ID-A's ``id.*``) and would block EVERY wave: a rule can require a tag
+the pipeline never produces, so it uniformly ``couldnt_check``. Ten bespoke per-family producers would
+reintroduce exactly the per-family Python coupling LP-324 eliminated for rules.
+
+**Decision.** Production becomes a PROPERTY OF THE TAG, declared in the vocabulary and resolved by
+GENERIC producers — adding a family's tags is declarations, never new producer Python (mirroring
+LP-324's rules-as-data).
+
+1. **The declaration** (``tag_production.yaml``, a companion to the vocabulary — ``fact_tags.csv`` is
+   GENERATED from the xlsx, so a hand-edited column there would be overwritten). Each materialized tag
+   declares its MODE (``parsed`` / ``derived`` / ``ai``), the SUBJECT it is keyed under (``transaction``
+   / ``document`` / ``loan`` — distinct from the logical ``entity``), and mode DATA (a field / a recipe
+   key / an AI-group key). A tag with no entry is not-yet-materialized; a declared tag that cannot
+   resolve to a real producer FAILS LOUD at projection time (``ProjectionError`` — no
+   silently-unproducible tag).
+2. **The SUBJECT is the LP-325 keying lever.** ``id.ssn_hash`` / ``id.address_normalized`` /
+   ``id.current_address_type`` are logically borrower/doc facts but are declared under the DOCUMENT
+   subject so a source's gather-tag and its filter-tag CO-LOCATE on the same subject — ID-4's residence
+   filter works only because the ``id_address`` AI group emits both address + type on the same document.
+3. **Three generic producers, registry-resolved, ZERO per-family branches.** ``parsed`` maps a declared
+   extraction field (``produced_by=parsed``, ``confidence=None``, NEVER AI-re-typed — LP-313's
+   discipline; an ABSENT field → an ABSENT tag, absent≠unknown≠empty; a non-matchable hash → absent so a
+   gather excludes it). ``derived`` resolves a recipe key to a deterministic function (recipe registry).
+   ``ai`` reuses the LP-313 machinery — bounded ≤15 batches, index-echo integrity, honest/fail-closed
+   parse ("unknown" always legal & never coerced; off-vocabulary → unknown; failure/truncation/omission
+   → unknown-with-reason), cache-by-content-fingerprint, the injected Reasoner stub — parameterized by an
+   AI-group declaration + a per-subject-type context-builder. A new AI family on an existing subject type
+   is a declaration only.
+4. **Equivalence (risk-controlled).** The live ``txn.*`` Stage-A/B producers are UNTOUCHED, so the
+   LP-313/314 suites + the frozen LF-6T3N trace pass unchanged (zero regression by construction). The
+   ``txn.*`` tags carry declarations and a ROUND-TRIP test proves the generic AI producer reproduces the
+   legacy Stage-A tags byte-for-byte (value/confidence/reasoning/provenance/stage). Migrating the live
+   ``txn`` path onto the generic producer is a noted low-risk follow-on.
+5. **Wiring + activation.** A new orchestrator stage (after Stage B) materializes the declared ``id.*``
+   families (document / loan subjects); ``only_subjects`` / ``only_groups`` scope it. With their tags now
+   materialized, **ID-2 and ID-4 join ``ACTIVE_RULE_IDS``** (LP-325 held them out pending producers) and
+   evaluate end-to-end.
+
+**Consequences.** Every wave's tags are unblocked as declarations. NOT changed: the ``txn.*`` live path
+(equivalence), rule/gate/evaluator logic, the LP-313/314 AI machinery (reused). **Schema gaps found:**
+none — mode + subject + mode-data express every id.* tag. **LP-318 Caveat A** (inert calculator
+``from_tag`` / ``calc_confidence``) is now newly WIREABLE — a calculator's input facts can be declared +
+materialized as tags the calculators consume — but that wiring is deferred (out of scope here).
+Deferred: the calculator ``from_tag`` wiring; migrating live ``txn`` onto the generic producer; the -B
+ID rules; other families' declarations (income/credit/property — their waves). Cross-refs: §3D; ADR-266;
+LP-311 (projection), LP-312 (Tag + content_ids), LP-313/314 (Stage A/B machinery), LP-318 (Caveat A),
+LP-319 (occupancy gap), LP-324 (rules-as-data), LP-325 (the gather contract), LP-323-ID-A §0/§2.
+
+## ADR-267: Cross-source consistency verdicts are RULE OUTPUTS, not verdict tags (LP-323-ID-B, D2)
+
+**Status:** Accepted. **Context:** LP-325's consistency primitive gathers a fact across sources and
+produces the agree/disagree verdict. The vocabulary is inconsistent about how a cross-source
+consistency check is represented: some rules would compare RAW tags (`id.name_normalized`, `id.dob`),
+while a few tags bake the verdict IN (`id.title_vesting_consistent`, `property.address_normalized_match`).
+Authoring the ID family forced a decision: does a consistency rule read raw tags and produce the
+verdict itself, or does it read a pre-computed `id.name_consistent` / `id.address_consistent` verdict tag?
+
+**Decision — RAW-COMPARE-IN-RULE (no verdict tags minted).** The consistency evaluator (LP-325) already
+performs the comparison; a verdict tag would DUPLICATE that machinery in two places that can disagree,
+and it makes the compare IMPLICIT (buried in a producer prompt) rather than DECLARED (the spec's
+`compare_mode` + `normalization` + `gather_filter`). So ID-1 gathers raw `id.name_normalized` and ID-3
+gathers raw `id.dob`; NO `id.name_consistent` / `id.address_consistent` tags are minted. This keeps the
+comparison declarative and single-sourced, and avoids inflating the (generated) vocabulary.
+
+**Consequences.**
+- Every cross-source family (income stated-vs-documented, credit app-vs-report, property address)
+  follows the same pattern: gather the RAW fact, declare the compare — no per-family verdict tag.
+- `id.title_vesting_consistent` and `property.address_normalized_match` are the ODD ONES OUT — a verdict
+  baked into an AI tag. They are NOT collapsed into each other (borrower identity/title vs subject-property
+  address are different facts). A rule reading them is a thin structural check, not a consistency gather.
+- ID-7 (marital/title) would read `id.title_vesting_consistent` as-is (option i) rather than re-express
+  the marital-vs-vesting reconciliation as a consistency gather — but ID-7 is deferred as a generalization
+  gap (per-document structural rule with document-type applicability; see LP-323-ID-B.md).
+
+Cross-refs: §3D; ADR-265 (the consistency primitive); LP-324 (rules as data), LP-325, LP-326;
+LP-323-ID-A §2 (the verdict-modeling question this resolves).
+
+## ADR-268: Judgment generalized to declared subject enumeration — multi-subject (LP-327, GAP-B)
+
+**Status:** Accepted. **Context:** LP-323-ID-B's GAP-B: `judgment.py` was STRICTLY single-subject (it
+failed loud on ≠1 subject — the OC-2 loan shape it was built for), so most of the ~36 judgment rules —
+per-borrower (citizenship eligibility) and per-document (POA acceptability, altered-document detection,
+appraisal condition) — were blocked. `judgment.py` was the ODD ONE OUT: its siblings `deterministic.py`
+(LP-324) and `consistency.py` (LP-325) already enumerate subjects from the spec's executable
+`subject_enumeration` via the enumerators registry.
+
+**Decision.** Make `judgment.py` use the mechanism its siblings already use — DECLARED subject
+enumeration — rather than invent a new one.
+1. **Multi-subject loop.** `evaluate_judgment_rule` returns `list[JudgmentEvaluation]` — one per
+   enumerated subject. The per-subject armor (`_evaluate_one_subject`) is the former single-subject body
+   verbatim: gate the subject's load-bearing tags (fail-closed, BEFORE any AI call — no AI/no tag on a
+   gated subject) → reason over that subject's declared TAGS (never raw docs) → emit the `rule_judgment`
+   tag KEYED TO THAT SUBJECT (`source_facts=(subject_id,)`) → ALWAYS ratification-pending (LP-319) →
+   one RuleEvaluation. The ≠1 fail-loud is removed.
+2. **Per-subject fail-closed** (LP-321's partial-snapshot discipline, at the rule level). Each subject
+   is self-contained: one subject's gate/AI failure/truncation/malformed degrades ONLY that subject
+   (couldnt_check / unknown-with-reason); the others still evaluate. Never a wholesale rule failure.
+3. **One AI call PER subject** (cost, stated honestly). A judgment is a reasoned verdict per subject;
+   batching N subjects into one call risks the position-degradation LP-313 guards against. So a
+   per-document rule over N docs = N AI calls. (The `_required_ai_groups` gating already prevents
+   running AI families no active rule reads.)
+4. **Per-subject tag keying.** The registry returns `{subject_id: {tag_id: Tag}}` and the orchestrator
+   merges each verdict tag under ITS subject — OC-2's `loan` subject lands under `LOAN_SUBJECT` exactly
+   as before.
+5. **OC-2 equivalence is the proof.** OC-2 declares `subject_enumeration: loan` → exactly one subject →
+   identical verdict/confidence/gate routing/provenance/ratification-pending/tag keying. `evaluate_oc2`
+   keeps its single-return signature (returns the one-element list's `[0]`). The OC-2 suite passes
+   UNCHANGED.
+
+**Consequences.** Per-document and per-deposit judgments are unblocked (a rule = a spec). Added the
+`per_document` enumerator (returns each doc's populated tag map). NOT changed: deterministic/consistency/
+gate/producers; the LP-313/314 AI machinery + LP-319 armor (reused). **Two follow-on gaps surfaced (NOT
+patched):** (i) **per-BORROWER judgment** — the `per_borrower` enumerator returns EMPTY tag maps (LP-325
+consistency gathers across docs; borrower facts key under document content_ids), so a per-borrower
+judgment reads nothing → needs a borrower-tag-keyed enumerator + producer (blocks ID-8); (ii) ID-9's
+per-document POA rule needs GAP-C (document-type applicability) to avoid couldnt_check-flooding non-POA
+docs, plus a NEW vocabulary output tag (the vocabulary CSV is generated from the xlsx). So ID-8/ID-9 are
+authored-in-principle but UNACTIVATED; the new shape is proven data-only via a synthetic per-document
+judgment. Cross-refs: §3D; ADR-268; LP-319 (armor), LP-321 (partial-snapshot), LP-324/325 (the sibling
+evaluators), LP-326 (SUBJECT keying), LP-323-ID-B GAP-B.
+
+## ADR-269: Typed operands (GAP-A) + a hand-editable vocabulary (GAP-E) (LP-328)
+
+**Status:** Accepted. **Context:** two gaps blocking the waves.
+- **GAP-A** (LP-323-ID-B): `deterministic.py` coerced EVERY operand to `Decimal`, so a date inequality
+  between two fact-tags was inexpressible — blocking ID-5 and every date rule (IN-2, PR-6, CL-1, CR-6,
+  CR-13).
+- **GAP-E** (LP-326/LP-327): the vocabulary (`fact_tags.csv`) is GENERATED from a binary xlsx, so a wave
+  could not add a tag in a reviewed PR (the generator would overwrite a hand-added row). It blocked twice.
+
+**Decision — GAP-A: TYPED operands via a declared type + a registry** (the pattern that held for
+enumerators / normalizers / production modes — NOT a date special-case). An `Operand` declares a `type`
+(default `decimal`, new `date`); a COERCER registry (`{decimal: coerce_decimal, date: coerce_date}`)
+resolves it, and ONE type-agnostic comparator serves every type — `compare_values(op, left, right)` in
+`schema.py` applies the operator, which is already generic (`<=`/`<`/`==` work for Decimal, date, str).
+`satisfies` is now a thin Decimal wrapper over `compare_values` (not forked). Adding a type = one
+registry entry + one key in `KNOWN_OPERAND_TYPES`.
+- **`decimal` is the default → every existing spec is unchanged** (AS-1's operands declare no type; the
+  comparison is byte-identical to the former `satisfies(...)`). Equivalence proven by the AS-1/ID-3/ID-6
+  suites + the frozen LF-6T3N trace passing UNCHANGED.
+- **Coercion failure / absent operand → couldnt_check, never a fabricated value.** An absent tag → None →
+  couldnt_check with that reason (ID-5's non-expiring-state-ID edge: no expiration ≠ expired). An
+  unparseable/ambiguous date → None → couldnt_check — never a silent epoch/0.
+- **ONE shared date parser.** The `date` coercer REUSES `coerce_date` — the SAME parser the LP-323-ID-B
+  consistency normalizer uses, so the two evaluators can never disagree, and neither guesses an ambiguous
+  date. A load-time validator rejects a comparison whose two operands are different types.
+
+**Decision — GAP-E: a hand-editable vocabulary overlay** (`vocabulary_extra.yaml`). `fact_tags.csv` stays
+the xlsx-generated bulk vocabulary; a NEW tag is ADDED to the overlay — a version-controlled YAML,
+reviewed in a PR, that the generator NEVER touches (so it cannot silently overwrite a hand-added tag).
+The projection merges the overlay (a tag_id already in the vocabulary fails loud); the LP-326 allowed-values
+lookup reads it too, so a new tag also MATERIALIZES. This is the "otherwise reconciled" approach — small,
+additive, zero-risk to the xlsx pipeline — that unblocks the waves NOW (and ID-9's output tag). **The
+fuller inversion** (make ALL of `fact_tags.csv` hand-editable + retire the xlsx as a generated view) is a
+larger migration recommended as its own ticket; the overlay meets the requirement without it.
+
+**Consequences.** Every date rule is unblocked as data (ID-5 authored; IN-2/PR-6/CL-1/CR-6/CR-13 follow),
+and every wave can add a tag in a PR. NOT changed: consistency/judgment/gate logic, the producers (GAP-A
+touched only `deterministic.py` + the shared `compare_values`; the date parser is shared, not forked).
+**ID-5 authored but UNACTIVATED:** it needs both date tags under ONE subject, but LP-326 keys
+`id.id_expiration` + `contract.closing_date` under DOCUMENT subjects (a deterministic loan rule reads one
+subject's map). Co-locating them under the loan subject (with a single-ID caveat) is a materialization
+follow-on. **PRIYA:** ID-5's `>=` vs `>` at closing (encoded default `>=` — an ID valid ON the closing date
+is valid) + any grace period. **New gap surfaced (reported):** cross-subject operands (a per-document/
+borrower rule reading a loan-level fact) — the reason ID-5 can't yet be a per-borrower rule. Cross-refs:
+§3D; ADR-269; LP-311 (projection), LP-324 (Operand/Comparison), LP-325 (the normalizer registry + date
+discipline), LP-326 (tag_production.yaml + the CSV-from-xlsx problem), LP-327, LP-323-ID-A §3/§4, -ID-B GAP-A.
+
+## ADR-270: Document-type applicability — not_applicable ≠ couldnt_check (LP-329, GAP-C)
+
+**Status:** Accepted. **Context:** LP-323-ID-B's GAP-C: a per-document rule had to enumerate EVERY
+document, flooding ``couldnt_check`` across every non-matching one (ID-7's title rule on a paystub;
+ID-9's POA rule on a W-2) — because a non-title/non-POA document has no title/POA tag, so the gate
+couldnt_checked it. This blocked ID-7 and left ID-9 unactivated (LP-327).
+
+**Decision — a DECLARED subject predicate resolved by shared machinery** (the sixth application of
+declared-key-resolved-generically, after LP-324 enumerators, LP-325 normalizers + gather filter,
+LP-326 production modes, LP-328 operand types). A spec declares an ``applicability: TagCondition`` — a
+predicate over the subject's own tags (e.g. ``document.document_type == "power_of_attorney"``); the
+deterministic evaluator already had it, and it is added to ``JudgmentEval``. A shared
+``resolve_applicability`` (extracted from the deterministic evaluator — behaviour-identical, so AS-1
+and every existing rule are unchanged) is called by BOTH evaluators. **No document types in any
+evaluator** — the value is spec data. The document's intrinsic type (``DocumentEntry.document_type`` —
+the classifier's known vocabulary) is injected by the ``per_document`` enumerator as a structural
+subject tag ``document.document_type`` (like the content_id), so the predicate is a plain tag compare.
+
+**THE §8 HONESTY CONTRACT — the heart.** ``not_applicable`` (scope-false) must NEVER absorb
+``couldnt_check`` (data-missing). The resolution is filter-BEFORE-gate, per subject:
+- out-of-scope (a paystub for the POA rule) → **not_applicable** (Tab 4) — NO gate, NO AI call, NO tag
+  emitted; and ``rule_findings`` DROPS not_applicable (no finding). Out-of-scope costs nothing and the
+  flood is gone (29 non-POA docs → 29 not_applicable → zero findings, not 29 couldnt_check yellows).
+- in-scope but degraded (a title commitment PRESENT, its tag ``"unknown"``) → the gate →
+  **couldnt_check** (Tab 1) — which PERSISTS as a yellow finding. It IS a gap and it blocks.
+- the predicate tag itself ABSENT/``"unknown"`` → couldnt_check (cannot tell if it applies), never
+  not_applicable. These must never collapse — a false "not applicable" would hide a real gap.
+
+**THE ABSENT-DOCUMENT decision.** Non-matching subjects each emit a not_applicable RuleEvaluation
+(VISIBLE in results, dropped only at persistence — never a silent vanish). A file with zero documents
+of the type → the existing docs are all not_applicable; the rule genuinely doesn't apply. The distinct
+"a REQUIRED document is missing → couldnt_check (Tab 1)" case (e.g. a title commitment expected on a
+purchase) is DECLARED-per-rule (whether title is required is itself a Priya question); it is
+RECOMMENDED as a future ``expected: true`` flag and DEFERRED here (ID-7/ID-9 are not always-required —
+POA/title absence is genuinely not_applicable), so no rule silently vanishes today.
+
+**Consequences.** ID-7 (deterministic per_document, scoped to ``title_commitment``) and ID-9 (judgment
+per_document, scoped to ``power_of_attorney``) are ACTIVATED as data; ID-9's output tag
+``id.poa_acceptable`` was added via LP-328's hand-editable vocabulary overlay (proving that fix). Every
+document-scoped rule is unblocked (condo questionnaire, appraisal condition, title). NOT changed: the
+gate / producers / consistency evaluator; the LP-319/327 judgment armor (every ID-9 verdict stays
+ratification-pending). **PRIYA:** ID-7's community-property + married-after-commitment nuances; ID-9's
+investor POA acceptability rules. **Recommendation (not a gap):** persist not_applicable as a visible
+Tab-4 finding (today it is dropped at persistence) — a separate UI/findings concern. Cross-refs: §8;
+ADR-270; LP-324/325 (the declared-filter pattern), LP-326, LP-327 (per_document + the armor), LP-328
+(GAP-E overlay), LP-323-ID-A §1/§4, -ID-B GAP-C.
+
+## ADR-271: Declared absent-document resolution — should this document EXIST for this file? (LP-330)
+
+**Status:** Accepted. **Context:** LP-329 (ADR-270) resolved EVERY zero-in-scope per_document rule to
+`not_applicable`, justified as "a rule whose scope matched nothing was never in scope for that file."
+That reasoning is CIRCULAR: ID-7's scope is "title documents"; the FILE is a purchase; title documents
+ARE in scope for a purchase — what matched nothing is the DATA, not the scope. Consequence: ID-7 is
+LIVE, so a purchase with NO title commitment sat in Tab 4 (`not_applicable`, doesn't block) instead of
+Tab 1 (`couldnt_check`, blocks) — a live FALSE-GREEN. §8 is explicit: a missing document that the rule
+applies to is LOST VISIBILITY (Tab 1), not scope-false (Tab 4); "visible in Tab 4 with a reason" is the
+exact false-green §8 warns against (Tab 4 is the doesn't-block tab).
+
+**Decision.** The question is NOT "did the filter match anything" — it is **"SHOULD this document exist
+for this file?"**. Only the rule knows, so it is DECLARED (the seventh application of
+declared-key-resolved-generically, after LP-324/325/326/328/329): `applicability_expected: bool` on the
+eval block (a sibling of LP-329's `applicability`). A shared `absent_document_couldnt_check` resolves it:
+- `expected` AND the applicability-scoped document is CONFIDENTLY ABSENT (every enumerated subject is
+  clearly out of scope — all `not_applicable`; none in scope, none ambiguous `couldnt_check`-from-unknown-
+  type) → **couldnt_check** (Tab 1, BLOCKS), a reason NAMING the missing type, under a stable
+  `missing:<type>` subject id (for cross-run reconciliation).
+- default `false` / any subject in scope (the document EXISTS) / any unknown-type subject (cannot claim
+  absence) → **not_applicable** (LP-329's behavior). Default `false` → EVERY existing spec is unchanged
+  (equivalence).
+The three §8 "not firing" cases stay DISTINCT: in-scope-but-degraded (title present, tag `"unknown"`) →
+`couldnt_check` "present but unreadable"; confidently-absent-but-expected → `couldnt_check` "no
+title_commitment in file"; not-expected-absent (ID-9 POA) → `not_applicable`. Same mechanism, opposite
+answers for ID-7 vs ID-9 — the DECLARATION is the only difference, no rule-id branch.
+
+**Consequences.** ID-7 declares `applicability_expected: true` → the live false-green is CLOSED (a
+title-less file now blocks). ID-9 keeps the default → a POA-less file stays `not_applicable` (unchanged).
+**Conditional-on-purchase is NOT supportable yet (reported, not invented):** the general form
+(`expected when loan.purpose == purchase`) needs a loan-purpose TAG; none exists (only the `LoanFile`
+DB field, not a snapshot tag). So ID-7 is encoded UNCONDITIONALLY expected — defensible (a lender needs
+title insurance on a purchase AND a refinance; a rare title-less refinance → `couldnt_check` is safe, not
+a false-green) — with the conditional a follow-on + a Priya question. **The cross-cutting invariant:**
+`absent ≠ empty` has now needed explicit handling at the TAG (LP-326), OPERAND (LP-328), GATHER (LP-325),
+and RULE (this) levels — it is a structural principle, not a one-off. Cross-refs: §8; ADR-270 (the
+decision this corrects); LP-325/326/328/329.
+
+## ADR-272: Borrower-keyed facts for per-borrower judgment — declared-keying assembly (LP-331, GAP-D)
+
+**Status:** Accepted. **Context:** LP-327's GAP-D: the `per_borrower` enumerator returned EMPTY tag maps
+(it exists for LP-325 CONSISTENCY, which uses it as a grouping key and gathers document-keyed facts
+itself). A per-borrower JUDGMENT reads the subject's tag map → empty → always couldnt_check. This blocks
+ID-8 and every per-borrower judgment (~a large slice of the ~36 judgment rules). The choice propagates,
+so it was argued on code evidence.
+
+**The evidence that decided it.** ID-8's inputs are NOT document-sourced: `id.citizenship` is
+`borrower.citizenship` (`models/borrower.py`) → MISMO `borrower.N.citizenship` (`mismo_section.py`) — a
+borrower-level 1003/MISMO fact keyed by borrower INDEX; `program.type` is loan-level and unmaterialized.
+NO consistency rule gathers `id.citizenship` (its only consumer is ID-8). And `consistency.py` DISCARDS
+the enumerated tag map (it gathers via its own doc index).
+
+**The design argument.**
+- **Option 2 (judgment declares a gather over the borrower's documents) — REJECTED for ID-8.** Its facts
+  are not on documents; gathering `belongs_to` documents would find neither. This is exactly the "some
+  borrower facts are genuinely borrower-level from the 1003/MISMO" case the gap-owner flagged — verified.
+- **Option 1 (borrower-keyed facts) — ADOPTED, its stated AGAINST rebutted by evidence.** The divergence
+  objection ("the same fact in two keyings that can disagree, resolving which IS a consistency rule
+  hidden in the producer") does NOT apply here: `id.citizenship` has ONE source per borrower and NO
+  document-keyed consumer — no duplicate keying to diverge. (LP-326's `parsed/document` declaration for
+  `id.citizenship` was aspirational and wrong; it never materialized. It must be re-keyed to a borrower
+  subject when the producer lands.)
+- **Third option (make ID-8 a loan-level judgment) — rejected:** collapses per-borrower eligibility into
+  one loan verdict, wrong for multi-borrower files.
+
+**Decision — a DECLARED-keying assembly (the eighth application of declared-key-resolved-generically).**
+The `per_borrower` enumerator now ASSEMBLES each borrower's subject map: the borrower's OWN facts
+(`by_subject[borrower_id]`) + the LOAN-LEVEL shared facts (`by_subject["loan"]`) merged in (borrower-own
+overrides), each fact from its ONE declared keying (LP-326 production subject) — no duplication, no
+divergence. This reconciles `per_borrower`'s two meanings with ONE enumerator: still a grouping key for
+CONSISTENCY (which discards the map → ID-1/2/3/4 and LP-326's document keying are UNTOUCHED, equivalence
+free), now a populated subject map for JUDGMENT. Per-subject fail-closed (LP-327), gate-before-AI, and the
+ratification armor (LP-319) apply per borrower; borrower isolation holds (each map has only that
+borrower's own tags + shared loan tags). Multiple values (the same document-sourced fact from N docs) is
+NOT ID-8's case (one MISMO value per borrower); a FUTURE per-borrower judgment over a document-sourced +
+multi-valued fact (e.g. income used by both a consistency rule and a judgment) would add the LP-325 gather
+LEG reasoning over the SET (disagreement visible to the AI — resolving it is a consistency rule's job),
+NOT built now (YAGNI, reported).
+
+**Consequences.** Per-borrower judgment is unblocked; ID-8 is authored + its mechanism proven (its output
+tag `id.residency_eligible` added via the LP-328 hand-editable overlay). **ID-8 is NOT activated:** a
+producer that materializes `id.citizenship` under `borrower_id` from MISMO needs a `borrower_id ↔
+MISMO-index` resolution, and `program.type` is unmaterialized — a **new reported gap** (not patched). The
+cross-cutting invariant `absent ≠ empty` has now needed explicit handling at the TAG (LP-326), OPERAND
+(LP-328), GATHER (LP-325), RULE (LP-330), and SUBJECT (this) levels — a structural principle. **PRIYA
+(fair-lending-sensitive):** ID-8's non-permanent-resident / DACA eligibility + investor overlays are
+UNSURE; the prompt encodes a defensible default, `priya_validated: false`; the authoritative rules are in
+LP-331's list. Cross-refs: §3D/§8; ADR-272; LP-319/325/326/327/328/329/330, LP-327's GAP-D.
+
+## ADR-273: Income arithmetic is a DERIVED TAG (loan-level), not a calculator or a new operand (LP-323-IN-B)
+
+**Context.** Wave 2 (Income) needs three arithmetic checks the operand algebra cannot express (it is
+`tag | reference | calc | product` — multiply only, no subtract/divide/abs): IN-1 stated-vs-documented
+variance `(stated − documented)/stated`, IN-3 YTD-annualized shortfall, IN-4 employment-gap days. LP-323-IN-A
+predicted a "calculator-operand primitive" gap; the recon REFUTED it (the `calc` operand already
+generalizes) and recommended DERIVED TAGS. This ADR records the mechanism, confirmed in implementation, as
+the pattern for every future family's arithmetic.
+
+**Decision — the computed figure is a DERIVED TAG (LP-326), produced by a loan-level recipe.** Each
+arithmetic check becomes a `derived` tag whose recipe (a registry entry in `tag_materialization/derived.py`,
+like `_app_required_fields_present`) reads the snapshot, does the arithmetic, and **abstains to `"unknown"`
+with a reason** when a feeding tag is absent/unknown (never a fabricated number). A rule then reads the
+derived tag as a plain `tag` operand vs a `reference` threshold — all existing mechanisms, **ZERO engine
+Python** (the generic producer, evaluators, and gate are untouched; only recipe entries are added). Two
+properties follow:
+
+* **Caveat A (LP-318) stays deferred.** A derived tag's confidence/abstention flows through the ordinary
+  tag GATE (absent/unknown → couldnt_check; below-floor → needs_review), which already handles
+  present-but-low-confidence. A CALCULATOR would have revived Caveat A (`_calc_operand` reads
+  `entry.value` and ignores `entry.confidence`), so the calculator path is deliberately NOT taken.
+* **SIGNED semantics, not abs.** IN-1's tag is a SHORTFALL `(stated − documented)/stated`, not an abs
+  variance — a raise (documented > stated) is a NEGATIVE shortfall and must never fire (the domain edge).
+
+**Constraint — the derived producer is LOAN-ONLY today.** `produce_derived_tags` supports only
+`subject == "loan"` (a snapshot → one value), and `validate_declarations` rejects a non-loan derived
+declaration at load. So the income arithmetic tags are **loan-level aggregates** (a recipe sums the file's
+documents, exactly as the DTI calculator aggregates income). This HOLDS the zero-engine-Python criterion
+(loan-level recipes are registry entries; per-borrower would have forced an edit to the generic producer,
+which was NOT done). It is a v1 with a KNOWN LIMITATION: per-borrower granularity (catching one borrower's
+inflated income in a multi-borrower file) needs a **per-borrower derived producer** — the same
+`borrower_id ↔ MISMO-index` / borrower-keyed materialization work ID-8 waits on (a shared follow-on, not a
+per-wave cost).
+
+**Consequences.** Income authoring was pure DATA + recipe entries — the first wave to hold the
+zero-engine-Python criterion, validating the ~3-tickets/wave steady-state claim. The pattern generalizes:
+any future family's arithmetic is a derived recipe, not a new operand or calculator. Deferred by this
+decision (their own tickets): the per-borrower derived producer; IN-6's set-coverage shape (needs LP-331's
+multi-value gather leg); IN-11's set-membership operand or judgment reframe; IN-12's self-employment
+calculator wiring. Cross-refs: §3D/§8; LP-323-IN-A (the recon), LP-318 (Caveat A), LP-324 (operands),
+LP-326 (derived recipes — the extension point), LP-331 (borrower-keyed facts).
+
+## ADR-274: Borrower-keyed materialization + the borrower_id ↔ MISMO-index resolution (LP-332)
+
+**Context.** Per-borrower rules (ID-8 citizenship, IN-1 income shortfall, ~9 income rules) were authored +
+evaluated but could not ACTIVATE: LP-331 built the JUDGMENT consumer (`_per_borrower` reads
+`by_subject[borrower_id]`) but nothing PRODUCED borrower-keyed tags, and `produce_derived_tags` was
+loan-only. LP-323-IN-C pinned the #1 false-green this causes: IN-1's loan-level aggregate MASKS
+per-borrower income fraud (a 2-borrower file where borrower A's income is inflated 40% nets to ~0 → IN-1
+satisfied). The prerequisite is a resolution: **no code mapped a `belongs_to` UUID to a MISMO
+`borrower.{n}` index** — MISMO's `n` is a re-derived sort position and the snapshot carried no link back.
+
+**Decision — three parts, all DECLARED, no rule-id/family branch:**
+
+1. **The resolution (a schema FIX, not a work-around).** `mismo_section.py` now emits
+   `borrower.{n}.borrower_id` (`str(borrower.id)`) — a deterministic, snapshot-internal, PII-safe (a UUID,
+   not identity data) link from the `belongs_to` UUID back to the MISMO group. This is the ONLY
+   non-name-matching resolution: `BorrowerRef`'s docstring explicitly rejects cross-section name-matching
+   as an anti-pattern, so name-matching was NOT an option. **THE FAILURE MODE is the heart of the
+   decision:** a borrower group with no id link, or a DUPLICATE/blank id, is SKIPPED — its borrower-keyed
+   tags stay absent → the rule **couldnt_checks**, NEVER a guessed attribution. Misattributing a fact to
+   the wrong borrower would fabricate a discrepancy (or hide one) — strictly worse than not attributing it.
+
+2. **The mechanism — generalize `produce_derived_tags` to the declared subject (REUSE, not a parallel
+   mechanism).** Evidence: the parsed/AI producers ALREADY enumerate the subject registry
+   (`producer.py`); only the derived producer was loan-special-cased. So the derived producer now
+   enumerates the declared subject via the SAME registry (mirroring how LP-327 generalized judgment from
+   single-subject to declared enumeration). A new `borrower` subject type (`subjects.py`) enumerates
+   borrowers by the id link, reads `borrower.{n}.*`, and lets a borrower recipe gather that borrower's
+   `belongs_to` documents. Option (b) — a bespoke gather-for-recipes — was REJECTED: it invents a second
+   mechanism where generalizing the existing one suffices (the divergence risk LP-331 rejected).
+
+3. **The recipe contract** changed `(snapshot) → (v, r)` to `(snapshot, subject_id, subject_raw) → (v,
+   r)`. Loan recipes accept + ignore the two new args — logic identical (`_app_required_fields_present`
+   is the regression canary, asserted unchanged). Loan- and borrower-level recipes coexist.
+
+**How it reconciles with LP-326's SUBJECT ≠ entity keying (WITHOUT breaking the consistency gather).** The
+document keying is UNTOUCHED: `id.address_normalized` + its filter, `income.employer_normalized` still key
+under the DOCUMENT subject, so ID-4's residence filter and IN-5's employer gather work identically
+(asserted — equivalence held, the LF-6T3N trace unchanged). The crossing (a per-borrower DERIVED tag reads
+DOCUMENT-keyed facts and emits a BORROWER-keyed tag) lives entirely in the borrower recipe: it gathers the
+borrower's `belongs_to` documents' `income.documented_monthly` and its own MISMO stated income, emitting
+one borrower-keyed shortfall. The consistency gather never sees a borrower-keyed tag.
+
+**PIN #1 FIXED.** `income.documented_income_shortfall_pct` is now per-borrower: borrower A's 40% shortfall
+FIRES; borrower B's raise is satisfied — no masking. LP-323-IN-C's pinned test now asserts FIRING (the one
+place a pinned known-wrong SHOULD change — its fix ticket landed). **IN-1 and IN-3 are now PER-BORROWER
+checks, not file-level screens** (IN-3's per-borrower re-key is a small reported follow-on; IN-2/IN-4 stay
+legitimately loan-level — recency/gap are file-level).
+
+**Consequences.** ACTIVATED (added to `ACTIVE_RULE_IDS`, and `borrower` added to the orchestrator's
+`_MATERIALIZED_SUBJECTS`): **ID-8** (Wave-1's outstanding debt — its `id.citizenship` now materializes
+under `borrower_id` from MISMO, `program.type` from `loan.program`) and **IN-1** (per-borrower shortfall).
+Every FUTURE family's per-borrower rules now activate for free — the lever LP-323-IN-C named. Per-subject
+fail-closed (LP-327) holds: one borrower's missing data abstains only that borrower. **PRIYA (unchanged):**
+ID-8's non-permanent-resident / DACA eligibility + overlays remain UNSURE (`priya_validated: false`, the
+conservative default, the armor). **New gap reported (not patched):** a `belongs_to` borrower not present
+in MISMO (or vice versa) is not evaluated for per-borrower income — a borrower-set reconciliation edge, a
+small follow-on. Cross-refs: §3D/§8; LP-325/326 (keying), LP-327 (the generalization pattern + per-subject
+fail-closed), LP-331 (GAP-D, the consumer), LP-323-IN-B/-IN-C (PIN #1), LP-323-ID-B (GAP-D).
+
+## ADR-275: Derived tags materialize LAST (data-flow), and IN-1 is de-activated pending calibration (LP-333)
+
+**Context.** LP-333's diagnosis of the inert Income rules found two things the code — not the ticket text
+— revealed. (1) A DATA-FLOW gap: `materialize_tags` ran derived recipes (step 2) against the ORIGINAL,
+pre-materialization snapshot, so a recipe that AGGREGATES other materialized tags (all four income
+recipes sum a borrower's documented income across its documents) read an EMPTY tags layer → every income
+derived tag abstained → the rule couldnt_checked LIVE. (2) IN-1 — which LP-332 added to `ACTIVE_RULE_IDS`
+— therefore couldnt_checked on every real file, AND its feed (`income.documented_monthly`) is an
+UNCALIBRATED AI structuring tag not even wired into the orchestrator's `_required_ai_groups`.
+
+**Decision 1 — derived runs LAST, against the freshly-materialized snapshot.** `materialize_tags` now
+orders parsed → ai → DERIVED, and passes the derived producer a snapshot carrying the parsed + AI tags
+built this run. A recipe that reads only raw MISMO (`id.app_required_fields_present`) is unaffected
+(identical output either order — the regression canary, asserted). No AI group reads a derived tag, so the
+reorder introduces no cycle; equivalence holds (the full suite + LF-6T3N trace unchanged). This is the
+generic fix that unblocks EVERY aggregate-derived tag, not a per-rule patch.
+
+**Decision 2 — activate ONLY what genuinely materializes AND is trustworthy; de-activate IN-1.** The
+discipline (LP-325/326/331): a rule that uniformly couldnt_checks fills Tab 1 with noise and trains
+processors to ignore the tab where real blockers live. IN-1 did exactly that live. Even with the data-flow
+fix, activating IN-1 would require wiring its uncalibrated AI feed into a deterministic FRAUD verdict —
+the precise "ship an uncalibrated tag into a live verdict" risk the wave has flagged since LP-317
+(calibration is keyless — no income AI tag has been scored against real content). So **IN-1 is REMOVED
+from `ACTIVE_RULE_IDS`**: its PIN #1 mechanism (LP-332) is proven and unchanged; live activation is
+DEFERRED until `income.documented_monthly` is calibrated and its recipe dependency is declared/wired.
+Correcting LP-332's premature activation is the honest call — the code is the gate of record.
+
+**What activated instead: IN-2** (pay-stub recency). Its chain is `income.pay_date` (PARSED, a
+deterministic passthrough — no calibration risk) → the loan-level `income.days_since_most_recent_pay`
+(derived). With the data-flow fix it produces REAL verdicts end-to-end with ZERO AI groups run (asserted:
+fires for a stale stub, satisfied for a recent one, couldnt_check with no pay date). Loan-level recency is
+correct (the file's most-recent stub — no per-borrower masking, unlike IN-1/IN-3).
+
+**Consequences.** A newly-surfaced generalization gap (REPORTED, not patched): `_required_ai_groups`
+traces a rule's DIRECT load-bearing tags, so a DERIVED load-bearing tag's feeding AI groups are never
+required — an UNDECLARED recipe dependency. This blocks the live wiring of IN-1/IN-3/IN-5/IN-10 (their
+derived/AI feeds), and its fix is a declared `depends_on` on derived tags (a follow-on). Two spec data
+fixes landed (bucket A): IN-8's applicability `verification_of_employment` → `voe` and IN-9's
+`offer_letter` → `employment_offer_letter` (the classifier's `DOCUMENT_TYPE_INDICATORS` emits `voe` /
+`employment_offer_letter`; the specs referenced types the classifier never produces, so the rules were
+silently `not_applicable` on every file). The remaining Income rules stay INERT with precise causes (the
+LP-333 bucket table): missing extraction fields (IN-4/7), uncalibrated AI feeds (IN-5/10), the
+undeclared-recipe-dependency + calibration (IN-1/3), per-borrower-with-document-context AI (IN-7/13/14),
+and PIN #2/#3 (IN-11/12). Cross-refs: LP-317 (calibration is keyless), LP-326 (the producers), LP-331/332
+(borrower keying), LP-323-IN-B/-C (the rules + the PINs).
+
+## ADR-276: Live calibration — the content source is a swappable seam; the activation bar is risk-weighted (LP-334)
+
+**Context.** The architecture's thesis (§3D) is that AI structures messy reality into honest fact-tags and
+deterministic code queries them. Every gate/floor assumes the structuring is good enough and honestly
+abstaining — an assumption NEVER tested: calibration was keyless (labels replayed, trivially perfect). Five
+Income rules are gated on this (LP-333), and ID-1/4/7/8/9 are LIVE producing verdicts on unmeasured tags.
+LP-334 takes the first real measurement. Two decisions were forced but are NOT Claude Code's to settle.
+
+**Decision 1 (recorded as a decision-to-be-made — awaits Geet's privacy call). The content source is a
+SWAPPABLE SEAM.** A code finding reframes the privacy trade-off: the tag reasoners consume EXTRACTED
+FIELDS, not raw scans (`_doc_context` sends `document.fields`), so "messy real scans" is an EXTRACTION-stage
+risk, upstream of the tag reasoner. The harness (`live_calibration.calibrate(docs, reasoner=...)`) takes any
+iterable of `LabeledDoc`; the in-repo `LABELED_DOCS` is clean-field content that measures the fields→tags
+reasoning faithfully. Options for the truth set: (a) synthetic/labeled fields (safe, runnable now — this
+ticket); (b) local Qwen over real files (measures Qwen, not production); (c) de-identified real → Anthropic
+(real + production model, but LF-6T3N is a *tagged* snapshot with NO golden labels and rests on
+de-identification trust). **Recommendation: a hybrid** — synthetic now for breadth/regression + a small
+hand-labeled de-identified real set for truth, **pending Geet's privacy approval** (privacy-first: local
+models for real PII, cloud for non-PII). The seam makes the source swappable without touching the harness.
+
+**Decision 2 (recorded as a decision-to-be-made — a PRIYA question). The activation bar is RISK-WEIGHTED,
+not one number.** Risk differs by what the tag FEEDS: `id.title_vesting_consistent` → ID-7's DETERMINISTIC
+auto-shipping verdict (a wrong tag → a wrong confident finding) and `income.documented_monthly` → IN-1's
+deterministic FRAUD verdict need a HIGH bar (proposal: ≥95% concrete-accuracy, ≤15% unknown-rate);
+`id.name_normalized` → ID-1's fuzzy leg is RATIFICATION-PENDING (a human sees every verdict) → a lower bar.
+The proposal is encoded in the doc and marked UNCONFIRMED: *"how often can this be wrong before you'd stop
+trusting it?"* is a domain judgment, Priya's, not engineering's. This ticket MEASURES; activation decisions
+follow separately with the numbers + Priya's bar in hand — no rule was activated/de-activated here.
+
+**Consequences (the first real numbers, on clean synthetic fields — plumbing + obvious biases, NOT
+real-scan messiness or true fuzzy-tag accuracy).** Enum tags scored well (title/poa/income.type 100%). Two
+findings, REPORTED not fixed (evaluate-don't-fix — tuning a prompt to the eval destroys the measurement):
+(1) `id.current_address_type` defaults a driver's-license address to `prior` ("DLs are often not current")
+→ under-includes DL residences in ID-4's residence filter → couldnt_check — a live-rule bias, its own fix
+ticket; (2) fuzzy free-text tags (`id.name_normalized` / `id.address_normalized`) CANNOT be scored by
+string comparison (valid renderings differ: hyphen vs space, suffix retention) — the raw % under-measures
+them; they need human review of the harness's failing-case DETAIL (which it records) or an AI-judge
+comparison. The harness records predicted/golden/confidence/reasoning per case so a wrong tag is
+inspectable. Cost: ~4s + ~270 tokens per call (claude-sonnet-4-5); keyless CI unchanged (live is gated on
+an explicit `LP334_LIVE=1` flag, never the mere presence of a key). No rule/tag/engine/spec logic changed.
+Cross-refs: LP-317 (DimensionCalibration + the live seam), LP-333 (calibration as the activation blocker),
+LP-313/326 (the Reasoner seam + AI producers), LP-323-ID-C/-IN-C (the keyless family suites, unchanged).
+
+## ADR-277: per_account is an ENUMERATION concern (not a keying one), with a fail-closed identity (LP-336)
+
+**Context.** LP-323-AS-A found AS-6/AS-8/AS-10 group a borrower's bank-statement documents by ACCOUNT, but
+no `per_account` enumerator exists. The account identity available today — `stmt.account_masked` — is
+`fact_tags.csv`-flagged *"display only, non-matchable"*: `****1234` at Chase and `****1234` at Wells Fargo
+look IDENTICAL. A guessed grouping is dangerous: MIS-GROUPING two accounts FABRICATES a statement-chaining
+break (a false positive on fraud), and OVER-SPLITTING one HIDES a real break (a false-green) — PIN #1's
+cousin at the account level, the same danger LP-332's `borrower_id ↔ MISMO-index` resolution guarded.
+
+**Decision 1 — `per_account` is an ENUMERATOR, NOT a SubjectType.** LP-323-AS-A refuted the SubjectType
+option with evidence: a bank statement IS a `document`, so `stmt.*` facts key under the existing DOCUMENT
+subject; grouping by account is an ENUMERATION concern, not a second keying. **No fact keys under both
+document and account** (the divergence risk LP-331/332 repeatedly rejected). So `per_account` is one
+registry entry in `enumerators.py` (`subjects.py` is UNTOUCHED — no `account` SubjectType).
+
+**Decision 2 — the identity is `(institution, masked-number)`, both DETERMINISTIC, and the resolution is
+FAIL-CLOSED.** The masked number alone collides across institutions, so the institution is required. Both
+are parsed extraction fields — `bank_name` (a `Field`) + `account_number_masked` (a `PiiField`, masked
+last-4) — already landing in `DocumentEntry.fields` (`documents_section.py`). So **`stmt.institution` did
+NOT need to be added** (no new tag, no declaration, no uncalibrated AI): the enumerator reads `bank_name`
+directly, the same way `_per_borrower` reads `belongs_to`. **THE INVARIANT (mirroring LP-332):** a
+statement missing EITHER identifier is UNRESOLVABLE — SURFACED as its own subject with an
+`account.unresolved` marker (a non-vocabulary structural tag, the `DOC_TYPE_TAG` precedent), never grouped,
+never dropped — so a per_account rule couldnt_checks it WITH A REASON. A guessed grouping is worse than
+abstaining: abstaining says "I can't tell"; a guess makes a confident, wrong claim. The `account_key`
+(`account:{institution.casefold()}:{masked-last4}`) is stable across runs (LP-312 spirit → LP-322
+reconciliation) and carries only display-safe values (bank name + masked last-4, the AS-1 subject-key
+precedent — no raw PII).
+
+**Consequences.** Unblocks AS-6 (ownership), AS-8 (chaining — its enumerator; its pairwise-sequential
+EVALUATOR is a DEFERRED shape, the IN-6 precedent, NOT built here), AS-10 (recency), and every future
+per-account rule — from a spec's `subject_enumeration: per_account`, no new Python. `resolve_accounts` is
+exported so AS-8's future evaluator gets the grouping (and the ordered statements it needs). `per_account`
+was added to `_DOCUMENT_DERIVED_ENUMERATIONS` (zero accounts = no statements resolved, a degraded reason →
+not retire-eligible). **NEW residual limitation REPORTED (not patched):** the identity is the MASKED
+last-4, so two DISTINCT accounts at the SAME institution with the SAME last-4 mask identically → they would
+mis-group, and this is UNDETECTABLE from the masked display (raw account numbers are never stored,
+ADR-149). Rare, but real — a follow-on could add a fuller (still-masked) discriminator if extraction
+surfaces one. Equivalence held (every live rule identical; the LF-6T3N trace unchanged; per_account is
+additive). Cross-refs: LP-332 (the mirrored borrower_id resolution + its fail-closed failure mode),
+LP-323-AS-A (the recon + the SubjectType refutation), LP-325/326 (keying + gather), LP-312 (stable
+content-ids), ADR-149 (masked account numbers, never raw).
+
+## ADR-278: A conditional (matrix) threshold is a DERIVED TAG, not a structured reference (LP-323-AS-B)
+
+**Context.** AS-4 (reserves adequacy) compares reserve months available to a REQUIRED number that is a
+MATRIX — occupancy × property-type × units × program (Fannie B3-4.1-01). `reference_values.values` is a
+flat `dict[str, str]` and an operand reads ONE `reference` key, so it cannot do the CONDITIONAL lookup
+(pick the cell). This recurs wherever agency requirements are a matrix (LTV tiers, MI factors, DTI limits).
+
+**Decision — the conditional threshold is a DERIVED TAG whose recipe selects the cell from the loan's
+attributes (the ADR-273 pattern extended).** `reserves.required_months` is a `derived` loan tag; its recipe
+reads `property.occupancy` (MISMO) and returns the months for that cell. AS-4 then reads it as an ordinary
+`tag` operand — no engine change, no schema addition. **Two properties, both critical:**
+- **Un-encoded cells ABSTAIN, never guess.** The recipe encodes ONLY the agency-standard occupancy cells
+  (investment 6 / second-home 2 / 1-unit primary 0, cited); any other cell (2-4 units, LTV tiers, multiple
+  financed properties, FHA/VA overlays) returns `"unknown"` → the tag gate → AS-4 couldnt_checks. A wrong
+  reserve requirement is a silent, permanent error; the full matrix is Priya's.
+- **The recipe's confidence/abstention flows through the ordinary tag gate** (ADR-273) — a matrix in
+  `reference_values` (the alternative, a schema addition) would need a new operand type AND would not
+  degrade to couldnt_check on an un-encoded cell. The derived-tag route reuses everything.
+
+**Consequences.** Any future matrix threshold is a derived recipe reading the conditioning facts +
+abstaining on un-encoded cells — the pattern is set. **The Assets wave held the zero-engine-Python
+criterion** (like Income): all 10 rules (AS-2..AS-12 minus the deferred AS-8) are DATA + declarations +
+recipe registry entries; no evaluator/gate/producer-core changed. **NO Assets threshold is Priya-validated**
+(AS-1's 50% is `priya_validated:false` — no validated precedent row exists, AS-A's correction confirmed);
+everything is authored `priya_validated:false`. Cross-refs: ADR-273 (arithmetic as derived tags), LP-323-AS-A
+(the recon + the matrix-shape question), LP-318/324 (the calc operand + its gate — AS-4's case-12 path),
+LP-336 (per_account + resolve_accounts, used inside the AS-10 recency recipe).
+
+## ADR-279: Calibrate the shipped path against de-identified real content via the Anthropic API — a bias hunt, not validation (LP-337)
+
+**Context.** Calibration was keyless (labels replayed, trivially perfect — a plumbing check). LP-334 added a
+LIVE seam and, at n=2, found a real systematic bias (`id.current_address_type` presumed a driver's-licence
+address `prior` — *because our own prompt exemplar taught it*; LP-335 fixed it). Keyless calibration
+STRUCTURALLY cannot catch that class (replayed labels agree with the prompt that produced them). LP-334's D1
+left the content source open (option 1 synthetic-equivalent / option 2 hand-built real-shaped / **option 3
+de-identified real content → the real API**). The AI tags feed LIVE AS-1 (whose accuracy had never been
+checked) and gate the inert Assets rules; the `txn_stage_a` / sourcing / income / asset prompts are all
+UNAUDITED — exactly the kind that taught the FINDING-1 bias.
+
+**Decision — DECIDED by Geet: execute option 3. Calibrate against LF-6T3N (real, de-identified) through the
+Anthropic production model**, because it measures the path actually shipped (real messiness + the real
+model), not a proxy. **Privacy posture, recorded as a deliberate decision (not a drift):** LF-6T3N is
+de-identified, and the SAME API already processes real files in production; the calibration adds no new data
+exposure. Because LF-6T3N has NO ground-truth labels, the first deliverable is the INSTRUMENT — a labeling
+worksheet a human fills in — generated deterministically from the snapshot (keyless), split MECHANICAL
+(factual reads — Geet) vs JUDGMENT (domain calls — Priya), carrying document context and EXCLUDING the AI's
+prediction (so a labeler cannot anchor). The scoring run reuses LP-317's `DimensionCalibration` and LP-334's
+`ScoredTag`/`summarize` UNCHANGED; it is opt-in (`LP334_LIVE=1`), never key-presence gated.
+
+**What this measurement CAN and CANNOT establish.** It finds **BIASES, not RATES** — one conventional
+purchase file gives most tags n≤6. **The one exception is `txn.*`:** LF-6T3N's 5 statements carry 50
+transactions, so `txn.is_money_in` / `txn.apparent_category` reach **n=50** — the system's first candidate
+for a real rate measurement (scoped: on ONE conventional purchase). ~~Everything else (`id.*`, `income.*`,
+`asset.*`) is n=0 UNMEASURABLE on this file~~ **[CORRECTED BY LP-338 / ADR-280: that was a bug + a stripped
+fixture — the real LF-6T3N supports `id.*` n=2, `income.*` n=8, `asset.*` n=3, a bias hunt at n=2-8; only
+`txn.*` reaches a rate at n=50].** **A clean result does NOT unblock the ~15 inert rules** — activation still requires n≥20 across VARIED files (FHA /
+refi / condo / self-employed) + Priya's D2 bars. Free-text tags (`txn.counterparty` / `source_reference`)
+are NOT string-scored (FINDING-2) — captured for human review, deferred to the fuzzy-scoring method.
+
+**Consequences.** EVALUATE, DON'T FIX: a bad number is a reported finding + its own fix ticket — no prompt is
+tuned in the measuring pass (LP-335's discipline: one principled change, measure once, never iterate against
+the numbers). The worksheet generator + scoring live in the eval harness only; no rule/tag/engine/spec
+behavior changed. Cross-refs: LP-334 (the harness + D1/D2 + FINDING-2), LP-335 (FINDING-1's fix + the
+anti-fit-to-eval discipline), LP-317 (`DimensionCalibration`), LP-313/314 (the txn Stage-A + sourcing
+producers being audited).
+
+## ADR-280: The LF-6T3N eval fixture was a stripped subset; replace it + separate file-capacity from pipeline-yield in coverage (LP-338)
+
+**Context.** LP-337 measured calibration coverage on `lf6t3n_tagged_snapshot.json` and concluded the
+project's calibration ceiling on existing files was `txn.*`, and that an n≥20 rate for other families
+"needs varied real files that don't exist in the repo yet." That conclusion was WRONG on two counts, and it
+had begun to propagate (the plan briefly treated acquiring synthetic files as the blocker to ~15 rules):
+
+1. **The fixture is a STRIPPED SUBSET.** `lf6t3n_tagged_snapshot.json` is 5 bank statements with empty
+   `fields` — not the real ~30-document LF-6T3N (2 driver's licences, 4 pay-stubs, 4 W-2s, 3 investment
+   accounts, a brokerage statement, mortgage statements, a purchase agreement, …). This is the LP-321a
+   problem one layer up: the central eval fixture under-represented the real file, so a conclusion drawn
+   from it was a fiction.
+2. **The coverage function CONFLATED two numbers.** It statically hardcoded the `txn.*` family and declared
+   `id.*` / `income.*` / `asset.*` "UNMEASURABLE" — reporting *what the wired pipeline + that fixture
+   happened to yield* while LABELLING it the file's inherent *capacity*.
+
+**Decision.**
+- **Replace the fixture** with a representative, de-identified 30-document synthetic snapshot with POPULATED
+  fields — built IN CODE by `build_lf6t3n_snapshot()` (`app/verification/eval/lf6t3n_fixture.py`), NOT a
+  committed snapshot JSON (a deliberate constraint: no snapshot JSONs enter the repo). It reads the
+  already-committed `lf6t3n_tagged_snapshot.json` for the 5 bank statements + 50 transactions verbatim (so
+  `txn.*` labels/subject-ids are stable) and appends the other 25 documents in code. The OLD fixture stays
+  for the frozen golden-eval trace (unchanged — the equivalence property).
+- **Coverage reports THREE separate facts** per AI tag, never conflated (the *absent ≠ empty ≠ unwired*
+  invariant this project already handles at the tag / operand / gather / rule / subject levels, now at the
+  COVERAGE level): **file_capacity** (subjects + content the snapshot supports for the tag's declared
+  subject — the labeling ceiling, independent of wiring) · **pipeline_yield** (what the wired pipeline
+  produces today — a declared AI tag runs; a vocabulary tag with no declaration does not) · **content_empty**
+  (a subject that exists but is field-empty — a brokerage_statement with `fields={}`). Status: `labelable` /
+  `wiring_gap` (capacity>0, yield=0 — LP-333 bucket B, surfaced not hidden) / `content_empty` / `no_subject`.
+
+**Consequences.** The honest calibration position: **LF-6T3N supports a BIAS HUNT across `id.*` (n=2) /
+`income.*` (n=8) / `asset.*` (n=3) TODAY**, and a real RATE only for `txn.*` (n=50). Varied files (FHA /
+refi / condo / self-employed) are still needed for RATES on the other families — that part of LP-337 stands;
+the "n=0 / files don't exist" framing does not. LP-335's `id.current_address_type` fix can now be checked
+against a REAL driver's licence (n=2) rather than the synthetic n=2 it was measured on. The corrected report
+also surfaces the Stage-B sourcing tags as WIRING GAPS (capacity>0, yield=0) — reported, not fixed (their
+own follow-in). EVALUATE, DON'T FIX held: no rule/tag/engine/spec behavior changed, `ACTIVE_RULE_IDS`
+unchanged, the frozen trace unchanged. Corrects ADR-279 (which repeated the n=0 claim). Cross-refs: LP-337
+(the bug's origin), LP-321a (the stripped-fixture-fiction precedent), LP-333 (bucket B wiring gaps), LP-334
+(the harness + FINDING-2), LP-335 (FINDING-1).
+
+## ADR-281: The `*_normalized` tag convention — normalize FORMAT not CONTENT; strip entity suffixes in the RULE (LP-340)
+
+**Context.** LP-337's first real live calibration measured `income.employer_normalized` at 25% (6/8) and
+`id.name_normalized` at 50% — but the model was NOT wrong. It stripped the entity suffix (`Acme Logistics`
+vs the golden `Acme Logistics Inc`) and chose the fuller `asserted_name` over `full_name`, both consistent,
+reasoned behaviours against a tag the vocabulary never defined. **The silence was the bug:** "normalized"
+had no stated meaning, so the model chose one convention and the human labeler another. The `income_employer`
+prompt even hedged — *"drop 'Inc'/'LLC' noise where it aids matching"* — smuggling a downstream MATCHING
+concern into a tag exemplar (FINDING-1's exact class, LP-335).
+
+**Decision.** Define the `*_normalized` convention once, for every such tag present and future:
+- **General rule (D3): normalize FORMAT, not CONTENT.** A `*_normalized` tag reports the value the document
+  STATES, canonicalized for format only (casing, whitespace, punctuation, abbreviation expansion). Content
+  differences are the SIGNAL the consistency rules exist to catch — a tag must never erase them. The TAG
+  reports; the RULE decides how to compare (LP-335's principle).
+- **Recorded exception (D1, Geet's decision): strip the corporate ENTITY SUFFIX** (Inc/LLC/Corp/Co/Ltd) —
+  declared to be FORMAT, not content, for employer matching (a suffix change is a restructuring, not an
+  employer change). **Implemented in the RULE, not the tag:** a new declared normalizer `drop_entity_suffix`
+  on IN-5's `normalization` chain (the LP-325 registry's sanctioned extension — a registry entry, like the
+  LP-328 date coercer, not evaluator logic). The tag keeps reporting `Acme Logistics Inc` in full; IN-5
+  strips at the exact bookend. **Scoped to IN-5 (INERT) only — ID-1 and ID-4 (LIVE) chains untouched.**
+- **Name (D2): report the document's PRIMARY printed name of record** (not a fuller asserted/alternate
+  form); ID-1's fuzzy judge reconciles genuine variants. Argued (not a Geet decision) — a defensible
+  default, Priya-confirmable.
+- **Scoring (D4):** genuine content variance (nicknames, maiden vs married) still can't be string-equality
+  scored — FINDING-2's fuzzy-scoring method, its own ticket. Not this convention's job.
+
+**Consequences.**
+- **ACCEPTED TRADE-OFF (the PRIYA item):** IN-5's exact bookend now treats `Acme Logistics Inc` and
+  `Acme Logistics LLC` as identical → they match, and the fuzzy leg never runs. Those are different legal
+  entities; a real Inc→LLC change passes silently. Accepted because a suffix change on the same base name is
+  a restructuring, not an employer change. **PRIYA:** *"Across a pay-stub and a W-2, is `Acme Inc` vs
+  `Acme LLC` worth flagging as an employer change?"* If yes, **reverse by deleting the one `drop_entity_suffix`
+  line from IN-5's chain** — the named test `test_in5_inc_vs_llc_matches_THE_ACCEPTED_TRADEOFF` flips and is
+  the findable anchor. The countervailing benefit: no AI call + no ratification-pending finding on the COMMON
+  benign `Inc`-vs-no-suffix formatting difference.
+- **The golden labels' status flips:** Geet's `Acme Logistics Inc` labels are now CORRECT (the tag preserves
+  the full stated form); the model's stripping became the RULE's job. So a better `employer_normalized`
+  number after this is the GOLDEN matching the convention, NOT the model improving. No re-measure was done
+  here (LP-335 discipline: one principled change, measure once — the re-run waits for the judgment CSV).
+- Every FUTURE `*_normalized` tag (assets/credit/property waves) inherits this convention, recorded in the
+  vocabulary overlay's header. No live rule changed; `ACTIVE_RULE_IDS` unchanged; the declared-normalizer
+  registry is the DATA extension point (drift-guard `set(_NORMALIZERS) == KNOWN_NORMALIZERS` intact).
+
+Cross-refs: LP-325 (the exact bookend + the declared-normalizer registry this extends), LP-328 (the date
+coercer — the registry-entry precedent), LP-334 (FINDING-2), LP-335 (FINDING-1 + the tag-reports/rule-
+compares principle), LP-337 (the measurement that found this).
+
+## ADR-282: Fuzzy scoring for free-text calibration — declared per tag; normalize FORMAT; the ruler must fail things (LP-342)
+
+**Context.** Calibration scored a tag by string equality (after a light `_norm`). That is correct for enums/
+numbers and STRUCTURALLY WRONG for free text: LP-334's FINDING-2 measured `id.name_normalized` at 33% where
+the "failures" were `Maria Garcia-Lopez` vs the golden `Maria Garcia Lopez` — a valid rendering. **The model
+was right; the ruler was wrong.** ID-1 itself uses an AI FUZZY leg to compare names precisely because string
+equality does not work — and then the harness scored names by string equality.
+
+**Empirical finding that steered the method (the code beat the ticket).** The ticket proposed reusing the
+consuming rule's declared normalizer chain, assuming `drop_punct` would make the hyphen case equal. It does
+NOT: `drop_punct` DELETES the hyphen without a space (`Garcia-Lopez` → `garcialopez` ≠ `garcia lopez`), so
+reusing ID-1's exact chain would STILL score the FINDING-2 headline wrong. The fix is to treat punctuation as
+a WORD BOUNDARY, not as noise to delete.
+
+**Decision.** A tag DECLARES its scoring method (in `calibration.py`, beside `_ABSTAINING_DIMENSIONS`); the
+comparator dispatches by METHOD, never by tag-id (add a tag = one line):
+- **`exact`** (default) — the enum/number path, BYTE-IDENTICAL to pre-LP-342 (numeric Decimal tolerance +
+  `_norm` string equality). Every enum/number tag is unchanged (`txn.is_money_in` 98%/n=50,
+  `income.documented_monthly` 100% do not move).
+- **`normalized`** — casefold + every run of non-word chars → ONE space + strip, then equality. Reuses the
+  registry's philosophy (casefold + collapse) but CORRECTS punctuation to a word boundary. Applied to
+  `id.name_normalized` / `id.address_normalized`.
+- **`human_review`** — a tag with NO defensible canonical golden (a free-form bank wire memo:
+  `txn.counterparty`, `txn.source_reference`) — its cases are recorded with per-case detail and NEVER
+  %-scored (a forced number would be a fiction). `DimensionCalibration` gained a `review` count (default 0).
+
+**What the `normalized` score MEANS (say it plainly):** *"the tag matches the golden as the consuming rule's
+DETERMINISTIC bookend would see it"* — NOT *"the tag is objectively correct."* It does NOT reproduce the
+rule's AI fuzzy judge, so abbreviation/initial/generational variance (`Ave`↔`Avenue`, `M`↔`Marie`,
+`Jr`↔`III`) is NOT collapsed — that residue is surfaced in the per-case detail (human review) and resolved at
+SOURCE by LP-340's convention (expand abbreviations; report the name of record) + consistent golden labeling.
+An AI-judge scorer (rejected: it puts a second, uncalibrated AI inside the measurement of an AI — who
+calibrates the judge?) is the only thing that would collapse that residue; a validated distance threshold
+(rejected: an unvalidated threshold is exactly the number this project refuses to guess) is the other
+alternative. Deterministic normalized comparison + human-review residue is the chosen, free, defensible ruler.
+
+**The leniency boundary (the heart of it).** A ruler that fails nothing is worthless. The method is proven
+BOTH DIRECTIONS by MATCH/MISMATCH sets chosen INDEPENDENTLY of any tag's performance (never iterated against
+the numbers — the LP-335 discipline applied to the scorer): valid renderings score EQUAL; genuinely different
+values (`Jordan Rivera` vs `Taylor Nguyen`; right street/wrong number) score WRONG; a not-inert guard asserts
+a wrong-by-construction distribution fires the fabrication flag.
+
+**Interaction with LP-340 (no hidden leniency).** The name/address scorer must NOT strip entity suffixes —
+`drop_entity_suffix` is IN-5's RULE-declared normalizer, deliberately scoped there. `Acme Inc` vs `Acme LLC`
+scores WRONG under the name scorer (asserted), so the scorer never hides a difference the convention decides
+elsewhere, keeping LP-340 testable.
+
+**Consequences.** Two LIVE-rule free-text tags (`id.name_normalized` → ID-1, `id.address_normalized` → ID-4)
+become honestly measurable; two provenance tags stay human-review. **Risk note:** all four feed
+ratification-pending verdicts a human already reviews — lower-risk than a wrong enum feeding an auto-shipping
+deterministic verdict; this makes them MEASURABLE, it does not imply they are the urgent risk. **No re-score
+was run here** (LP-335: measure once, with Priya's judgment rows, LP-341). A better `id.name_normalized`
+number under this scorer means the RULER now matches what the system cares about — NOT that the tag got
+better. No rule/tag/engine/spec behaviour changed; `ACTIVE_RULE_IDS` unchanged. Cross-refs: LP-334
+(FINDING-2), LP-337 (`_FREE_TEXT` / `calibrate_lf6t3n`), LP-340 (the convention + `drop_entity_suffix`),
+LP-325 (the normalizer registry), LP-317 (`DimensionCalibration`, extended not replaced).
+
+## ADR-283: Converge the two txn Stage-A prompts — one text, guarded; the calibration measured the wrong prompt (LP-344)
+
+**Context.** LP-343's audit found TWO prompts producing the same `txn.*` tags: the standalone
+`STAGE_A_TRANSACTION_SYSTEM_PROMPT` (`app/ai/tag_production.py`) that **LIVE AS-1 actually runs** (via
+`produce_stage_a_transaction_tags`), and the generic `txn_stage_a` group (`tag_production.yaml`, LP-326's
+re-implementation). **LP-337's live calibration (98%, n=50 on `txn.is_money_in`) measured the YAML group —
+NOT the prompt AS-1 uses.** The two had already DRIFTED (the standalone defines `apparent_category`'s enum
+values; the YAML listed them undefined — LP-343 F5). This is a measurement-validity bug: the audited,
+measured, and shipped prompts were not guaranteed to be the same text, and were not.
+
+**The code decided the direction (verified, not assumed).** A live run produces `txn.*` via a dedicated
+`stage_a` step calling the standalone producer; `materialize_tags` (the generic path) is invoked with
+`only_subjects={document, loan, borrower}` — deliberately EXCLUDING `transaction`. The generic path never
+produces txn tags live. Migrating the live path onto the generic producer (option a) is blocked by the
+two-stage txn flow (Stage-A → Stage-B sourcing is not a single generic group — exactly why LP-326 deferred
+the migration), and would touch LIVE AS-1 for no measurement benefit.
+
+**Decision — (c): one text, single-sourced by a guard; the live path untouched.**
+- The **standalone constant is the canonical text** (it lives in `app/ai`, the clean lower layer;
+  `app/ai` does NOT import `app/verification`, and must not). The generic `txn_stage_a` group's YAML
+  `system_prompt` is set **byte-identical** to it.
+- A **TEXT DRIFT GUARD** (`test_txn_stage_a_prompt_convergence`) fails if the two ever diverge — so the
+  measured prompt and the shipped prompt can never silently differ again.
+- The **PRODUCER equivalence is already guarded** (the pre-existing
+  `test_txn_roundtrip_through_the_generic_producer_is_equivalent`: given identical judgments, the generic
+  and standalone producers assemble IDENTICAL tags). Text-identical + producer-equivalent → the calibration
+  (generic path) measures exactly what LIVE AS-1 (standalone path) ships. Rewiring `calibrate_lf6t3n` to
+  literally call the standalone was REJECTED: it would break the keyless stub harness and cross the
+  `app/ai ⊥ app/verification` layering, for a guarantee the two guards already give.
+- The surviving TEXT is the standalone's — LP-343 called it exemplary (states the §3D principle, defines
+  every category, anti-biases direction, makes `unknown` first-class). No text was IMPROVED here (the
+  shipped standalone is unchanged); the thin YAML copy was converged UP to match it. One change at a time.
+
+**D2 — LP-337's 98% is VOID and must be RE-EARNED.** It measured the OLD thin YAML `is_money_in`
+instruction via the generic producer; AS-1 ships the richer standalone text (label-tolerant, anti-bias).
+Different prompt → the number does not transfer. **The project currently has NO valid accuracy measurement
+of the shipped `txn.*` prompt.** It gets one in LP-345 (re-run against the converged prompt, with Priya's
+judgment rows, so the whole picture is measured once). The 98% is NOT quietly inherited.
+
+**Consequences.** The drift CLASS (two producers for one tag, silently divergent, unnoticed for months) is
+closed by the two standing guards. A duplicate-producer survey found **txn Stage-A is the ONLY dual case**
+(Stage-B sourcing produces its tags but they are not declared as a generic group — one producer, a
+different gap: LP-343 F1). No live rule moved; `ACTIVE_RULE_IDS` unchanged; the frozen LF-6T3N trace and
+AS-1's suite unchanged; the standalone's batching is untouched (no call-count regression). LP-326's
+deferred migration has come due — and the code shows full migration is still blocked by the two-stage flow,
+so the guard, not a migration, is the fix. Cross-refs: LP-326 (the deferred migration + the producer
+equivalence proof this leans on), LP-343 (the drift finding), LP-337 (the measurement it voids), LP-313/314/
+314a (the txn producers), LP-345 (where the number is re-earned).
+
+## ADR-284: Wire the snapshot/rules orchestrator into the real run — two tasks, one run row, fail-closed (LP-365)
+
+**Context.** The LP-316/321 fact-tag architecture — the orchestrator (`verification_run.run_verification`),
+the reconciler (`reconcile_evaluation_findings`, LP-322), the snapshot table (`snapshot_records`, LP-209) —
+was built, tested, and migrated over ~20 tickets and **never executed on a real loan file.** The Run button
+enqueued exactly one task: the AI cross-source sweep (LP-78). Neither rule engine was wired (LP-364-B's
+diagnosis confirmed it). The tests asserted every part; none asserted the path. This ADR records the first
+wiring and the decisions it forced.
+
+**Decision — a second Celery task (`run_rule_engine_pass`) runs the governed pass ALONGSIDE the sweep on the
+same run row.**
+- **Run status is FAIL-CLOSED.** Two tasks now write one `Verification` row. The rule task marks the run
+  FAILED on exhaustion; the sweep's `COMPLETED` set is guarded to **never overwrite a FAILED**
+  (`cross_source.py`). So a run reads COMPLETED **only if BOTH passes completed**; if either failed, it
+  reads FAILED. *A run marked COMPLETED while the governed engine silently failed is a run-level
+  false-green — the exact class this architecture exists to prevent.* The normal path is behaviour-identical.
+- **Counts are NEVER summed.** The sweep keeps sole ownership of `red_count`/`yellow_count` — an ungoverned
+  75%-confidence AI observation and a governed, gated, provenance-carrying rule finding are **not the same
+  kind of thing**; summing them makes the §8 honesty contract meaningless. The rule findings carry their
+  own `evaluation_outcome` axis and are counted separately at read time (LP-369).
+- **The LP-78.1 input-fingerprint cache is inherited, and REPORTED as mis-keyed.** It is computed from the
+  cross-source inputs; the rule engine reads a SUPERSET (all documents), so a cache-hit could skip a rule
+  run a rule-relevant-only change should have triggered. The rule task rides the same cache-miss trigger as
+  the sweep for now; a rule-aware fingerprint is its own follow-up. Not silently inherited — flagged.
+- **A real run uses the REAL model** (the task passes no reasoners → `reasoners=None`), never a stub.
+
+**Consequences — the engine's first contact with a real file (DB LF-6T3N, 30 documents, 282s, sonnet-4-5):**
+- **38 governed findings persisted** (origin `DETERMINISTIC_RULE`, `evaluation_outcome` set, provenance):
+  `couldnt_check` 30, `needs_review` 4, `satisfied` 2, **`open` 2** — the first real rule VIOLATIONS ever
+  produced (ID-6, IN-2). Separation held: the sweep's `ai_cross_source` findings kept `evaluation_outcome`
+  null; nothing merged.
+- **The fixture numbers SURVIVED** (they were expected to break): AS-1 = 15 `couldnt_check` + 2
+  `needs_review`, identical to the stripped-fixture claim — because the insurance-orphan bug (LP-367) gates
+  the DTI on the real file too (`housing.insurance_monthly` unknown; `gross_monthly_income` resolves to
+  $28,168.80 but is trapped behind the gate). AS-1's DTI dependency (LP-366) is real on the real file.
+- **Run #2 exercised the reconciler for the first time ever**: 38 carried_forward, 0 minted, 0 retired, 0
+  resolved — LP-322 reconciles correctly (no duplicate mint on the uniqueness index, no false retirement).
+- **95 `tag_production` degradations** on the real run — reported for its own ticket, not fixed here.
+- **9 stale `xsrc.*` `deterministic_rule` findings** (2026-07-08) with `evaluation_outcome` null — pre-wiring
+  artifacts of the older LP-74 engine; the five-tab read (LP-370) must place null-outcome deterministic
+  findings deliberately.
+
+**REPORT, don't fix.** Every surprise is its own ticket (LP-366 AS-1's DTI dep, LP-367 the insurance orphan,
+the 95 degradations, the stale xsrc findings). No engine/rule/tag/spec change; `ACTIVE_RULE_IDS` unchanged;
+the AI sweep behaviour-identical; the frozen fixture trace unchanged. Cross-refs: LP-316/321 (the
+architecture), LP-322 (the reconciler), LP-209 (snapshot_records), LP-364-B (the diagnosis that found it
+unplugged), LP-78 (the sweep it coexists with).
+
+## ADR-285: The `loan_tag` operand — a rule reads a LOAN-level tag from any subject, without a calculator (LP-366-A)
+
+**Context.** LP-366 set out to fix AS-1's false DTI dependency as a **pure DATA change**: swap AS-1's income
+operand from `{calc: [dti, gross_monthly_income]}` (which fail-closes on `housing.insurance_monthly`, an
+input AS-1 never uses — LP-367) to a direct income read. Phase 0 proved the pure-data fix is **impossible**:
+`_resolve_operand` reads a `tag` operand from `subject_tags`, and the `per_deposit` enumerator hands each
+transaction ONLY its own tag map (`by_subject[txn.content_id]`) — never the loan's. A per-deposit rule
+therefore **cannot** read a loan-level fact through a `tag` operand; the ONLY operand that reaches loan-level
+is `calc`, which is exactly what drags in the calculator's gate. The blocker is a **missing operand kind**,
+not a data typo — so it splits out as its own ticket (LP-366-A, engine), leaving LP-366 as the trivial
+data swap that consumes it.
+
+**Decision — add a declared `loan_tag` operand: a LOAN-subject tag read from ANY rule, whatever its subject.**
+- **Mechanism.** `_resolve_operand` gains one branch: a `loan_tag` operand reads
+  `snapshot.tags.by_subject[LOAN_SUBJECT]` directly (the same access the loan enumerator uses), bypassing
+  `subject_tags`. It is coerced through the SAME `_COERCERS[type]` registry as `tag` (so `date`/`decimal`
+  work identically), and is a first-class member of the Operand's exactly-one-source set.
+- **Fail-closed, never 0.** Absent loan subject / absent tag / unparseable value → `None` → `couldnt_check`.
+  Never a fabricated `0` (a `0` income would size AS-1's threshold to `0` and fire on every deposit — the
+  precise false-positive the fact-tag discipline exists to prevent).
+- **Why it BEATS a `calc` — independent of AS-1.** A `calc` operand ignores the calculator's confidence
+  (LP-318 Caveat A: `_calc_operand` never reads `entry.confidence`); a `loan_tag` flows the tag's confidence
+  through the ordinary tag gate, like every other governed fact. Reading a loan-level fact as a *governed
+  tag* rather than an *opaque calculator number* is strictly more honest — a general property, not an AS-1
+  special case.
+- **Generic — no rule-id branch.** A new rule opts in with a SPEC line (`{loan_tag: <tag>}`); zero engine
+  code per rule. This is the eleventh application of the declared-key-registry pattern.
+- **Equivalence.** Every live rule is byte-identical: AS-1 still reads `{calc: [dti, ...]}` (its swap to
+  `loan_tag` is LP-366, a separate data change), and the `calc` operand is UNTOUCHED — AS-4 keeps it, because
+  its reserves→PITI→insurance dependency is legitimate (a reserves rule genuinely needs the housing expense).
+  `ACTIVE_RULE_IDS` unchanged.
+
+**The income tag it reads — `dti.qualifying_income_monthly` (D1, argued not assumed).** The tag already
+exists in `fact_tags.csv` (mode `derived`, subject `loan`, consumers `DT-1, AS-1, AS-3`) but was **never
+declared in `tag_production.yaml` and had no recipe**, so it never materialized. LP-366-A declares it and adds
+the recipe: it sums the borrowers' **MISMO STATED income lines** (`borrower.<n>.income.<m>.monthly_amount`),
+the SAME income the DTI qualifies on (its income lines are `source='stated'`). This is the right tag — not a
+newly-minted second income figure (which LP-323-IN-A warns against) — because AS-1's threshold is
+definitionally "50% of total monthly qualifying income," and the stated 1003 total IS what the DTI qualifies.
+On the real file it materializes to **$28,168.80**, matching LP-365's reported `gross_monthly_income` exactly.
+
+**F2 (recorded prominently).** AS-1's income is the **MISMO stated 1003 total** (`source='parsed'`), NOT the
+AI `income.qualifying_monthly` tag — which did **not** materialize on the real run (one of the 95
+degradations) and whose continuity/averaging convention is underspecified (LP-343 F2). Reading the stated
+total keeps F2 entirely OFF AS-1's path: AS-1 never depends on the AI qualifying-income judgment.
+
+**Consequences / reported, not fixed.**
+- The **95 `tag_production` degradations** (LP-365) remain their own ticket — NOT investigated here; whether
+  `income.qualifying_monthly` *should* materialize is orthogonal to AS-1 reading the stated total.
+- **Pre-existing flaky test discovered (its own ticket):** `test_no_raw_pii_in_stored_json` trips the
+  `_LONG_DIGITS` at-rest guard (`\b\d{9,}\b`) ~0.6%/persisted-PiiField because a salted `match_hash` hex
+  occasionally contains a quote-bounded 12-digit run. Independent of LP-366-A (that test hand-builds its
+  snapshot; no recipe runs). Flagged, not fixed.
+- LP-366 now becomes the one-line data swap; LP-367 (the insurance orphan) is still needed for the DTI/AS-4,
+  but no longer blocks AS-1. Cross-refs: LP-366 (the data swap), LP-367 (insurance orphan), LP-318 (the calc
+  gate + Caveat A), LP-328 (typed operands / the coercer registry), LP-343 (F2), LP-365 (the real run).
+
+## ADR-286: The declared-key-with-no-member class — validate what declarations POINT AT, not just that they exist (LP-369)
+
+**Context.** A recurring, high-severity bug has now been found FOUR times, each at a different seam but with one
+shape: **a declaration names a key that resolves against a registry/field-set with no such member, and the
+system resolves the miss to ABSENT rather than ERROR. Absent is indistinguishable from "the input genuinely
+doesn't have this," so the consuming rule couldnt_checks — silently, on every file, forever, with every test
+green.**
+- **AS-1** (LP-366): read income through a DTI calc gated on `housing.insurance_monthly` — an input AS-1 never
+  uses. The calc gated → the threshold never resolved → AS-1 never evaluated a deposit.
+- **IN-8 / IN-9** (LP-333): applicability named document types the classifier doesn't emit
+  (`verification_of_employment` vs `voe`) → `not_applicable` on every file.
+- **The orphaned tags** (LP-366-A / LP-367): `housing.insurance_monthly` / `dti.qualifying_income_monthly`
+  declared with a `producer` in the vocabulary but NO producer anywhere in `app/`.
+- **Parsed field-name mismatches** (LP-368 / this ticket): parsed declarations named extraction fields that
+  don't exist — `id.dob` read `dob` (it is `date_of_birth`), `id.ssn_hash` read `ssn` (it is `employee_ssn`),
+  `id.marital_status` read a document field that lives on the borrower in MISMO. **Two LIVE rules (ID-3 DOB,
+  ID-2 SSN) had never evaluated anything.**
+
+**The root, named:** *the loader validates declarations that EXIST; it does not validate that what they POINT
+AT exists.* A declared key with no member → absent → silent. The four instances are one class at four seams
+(calc input, classifier document type, tag producer, extraction field).
+
+**Decision — fix the parsed field mismatches (DATA) and add a GUARD that closes the parsed seam.**
+- **The fixes (tag_production.yaml, declaration edits only — no engine Python):** `id.dob` → `date_of_birth`;
+  `id.ssn_hash` → `employee_ssn:hash`; `id.id_expiration` → `expiration_date`; `income.employment_start` →
+  `start_date`; `income.employment_end` → `end_date` (all real extraction field names). `id.marital_status`
+  was wrong on BOTH axes (a document field named `marital_status` that no document has, and it lives on the
+  BORROWER in MISMO) → re-keyed to `{subject: borrower, data: marital_status}`.
+- **The SUBJECT decision, driven by the rule's read pattern (not the field's logical owner).** `id.dob` feeds
+  ID-3, a CONSISTENCY rule that GATHERS a document-keyed fact across the borrower's sources
+  (`source_scope: borrower_documents`) and compares. A borrower-keyed tag would give ONE value → nothing to
+  compare → uniformly couldnt_check (a lateral move). So `id.dob` stays `subject: document` — only the field
+  name was wrong. Same for `id.ssn_hash` → ID-2. Conversely `id.marital_status` is NOT gathered by any live
+  rule (ID-7 reads only `id.title_vesting_consistent`, into which the marital/vesting judgment is baked), so
+  its correct home is the borrower subject. **The subject must match how the rule READS the tag.**
+- **The GUARD (the durable deliverable — worth more than the fixes):** a test asserting every `mode: parsed`
+  declaration names a field that EXISTS in its subject's resolution universe — `subject: document` → an
+  extraction model's field name (the `DocumentEntry.fields` key space, introspected from `app.ai.extraction.*`
+  + the `asserted_name` alias); `subject: transaction` → a `_TXN_FIELDS` key. It **fails loud** on the exact
+  pre-fix shape (proven by a self-test: `data: "dob"` → flagged; `data: "date_of_birth"` → passes), splitting
+  the `:hash` suffix as the producer does.
+
+**What the guard COVERS and does NOT.**
+- COVERS: `subject: document` and `subject: transaction` parsed declarations — a static, complete field
+  universe from the models. This is where all four parsed mismatches lived.
+- DOES NOT: `subject: borrower` / `loan` declarations read MISMO facts, whose keys are DATA-DEPENDENT
+  (`borrower.{n}.<field>` / a full key) and cannot be enumerated from the models — the guard SKIPS them and
+  says so. Nor does it cover the OTHER three seams of the class (calc inputs, classifier types, tag producers)
+  — each needs its own analogous guard (the classifier seam already has LP-333's).
+- **Two declarations are EXEMPTED, loudly:** `income.stated_monthly` (stated income is MISMO-indexed, not a
+  document field — needs a derived source) and `stmt.page_count_declared` (no extractor emits a page count).
+  Both feed DORMANT rules; the exemption lists them with a reason and a test asserts each is STILL a genuine
+  mismatch, so the allow-list cannot rot into hiding a now-resolvable declaration.
+
+**Why a TEST, not a load-time check.** The authoritative field universe lives in `app.ai.extraction.*`. A
+load-time validation would force the deterministic tag-vocabulary loader (`declarations.py`) to import the AI
+extraction layer — a layering inversion. The test fails CI just as loudly without that coupling; promoting it
+to a loader validation is a small follow-up if the layering is ever resolved.
+
+**Consequences (deterministic replay on the persisted LF-6T3N snapshot).**
+- **ID-2 (SSN) resurrected:** before, both borrowers couldnt_check ("0 sources carry id.ssn_hash" — the tag
+  was absent); after, borrower A → **satisfied** ("SSN matches across all 2 sources", two W2s), borrower B →
+  couldnt_check ("only 1 source" — one W2's SSN was non-matchable). A real verdict where there was silent death.
+- **ID-3 (DOB): the tag is fixed and materializes (2 driver's licences), but ID-3 still couldnt_checks** —
+  because each borrower has exactly ONE document stating DOB (the DL; no 1003/URLA document is in the file), so
+  there is nothing to compare. The reason improved from "0 sources (tag broken)" to "1 source (genuinely one)".
+  This is CORRECT (a file limitation, not the bug) and, crucially, NOT the lateral move — document-keying means
+  a file WITH a second DOB source would now compare; borrower-keying never could.
+- **ID-7 unchanged:** not_applicable on non-title documents, couldnt_check on the untyped ones — blocked by the
+  absent title document (correct). `id.marital_status` now materializes but no live rule reads it as a tag.
+- Every other live rule identical; the full suite passes (2338). No rule spec, vocabulary meaning, or allowed
+  value changed — the declarations were wrong; the tags were not.
+
+**Still open (reported, not done here):** the live-rule materialization audit (each of the 11 live rules'
+load-bearing tags checked on a real file — this ticket did ID-2/ID-3/ID-7); the dormant tag-layer smoke test
+(income/asset AI groups have never run); `income.stated_monthly` re-architecture as a derived tag; the page-
+count extraction gap (AS-9). Cross-refs: LP-368 (the diagnosis that found the parsed class), LP-333 (the
+classifier-mismatch analogue + `_required_ai_groups`), LP-326 (the declaration/producer model), LP-366 (AS-1,
+the first instance of the class), LP-367 (the orphaned insurance producer).
+
+## ADR-287: Wire OC-2's occupancy tags — the third orphan; the first loan-subject AI group; defining "the signals" (LP-371)
+
+**Context.** OC-2 (occupancy reasonableness) is LIVE (`ACTIVE_RULE_IDS`) but had **never assessed a single
+file.** Its two load-bearing judgment tags — `occupancy.stated` and `occupancy.consistent_with_signals` —
+were in `fact_tags.csv` WITH producers named, but **neither was declared in `tag_production.yaml` and nothing
+wrote them** (`grep` → 0; 0 instances in the persisted snapshot). A judgment rule gates its load-bearing tags
+fail-closed BEFORE any AI call (`gate.py:56`), so OC-2 couldnt_checked on **every file, structurally** — an
+occupancy-fraud signal silently unchecked since the beginning. This is **the third orphan** of a class:
+*a tag declared in the vocabulary with a producer, but with no declaration and nothing writing it, resolves to
+ABSENT; absent is indistinguishable from "the document genuinely doesn't have this", so the rule couldnt_checks
+silently, forever, with every test green.* Prior instances: `housing.insurance_monthly` (LP-367, still open),
+`dti.qualifying_income_monthly` (LP-366-A, fixed). **LP-373 will GUARD the class** (a vocabulary tag with a
+producer must HAVE a declaration) — not built here.
+
+**Decision — wire both tags as data/declaration/recipe/prompt; no engine change.** The AI materialization path
+is already subject-generic (`ai.py` uses `subject_type(group.subject).enumerate/.build_context`) and
+`_MATERIALIZED_SUBJECTS` includes `loan`, so a loan-subject AI group runs without new Python.
+
+**D1 — `occupancy.stated` is DERIVED, not parsed.** MISMO's `property.occupancy` = `"primary_residence"`; the
+tag's declared `allowed_values` are the shorthand `[primary, second, investment]`. A parsed tag is never
+re-typed, so a raw passthrough (LP-370's suggestion) would emit the out-of-enum `"primary_residence"`. Wired
+as a **derived recipe** mapping MISMO→enum (`primary_residence→primary`, `second_home→second`,
+`investment[_property]→investment`), abstaining to `unknown` on absent/unmapped — never a guessed occupancy.
+This is a reported change of production mode, NOT a change to the tag's meaning or allowed_values. (Contrast:
+`program.type`'s MISMO `loan.program` is already `"conventional"`, matching its enum — occupancy is the
+exception that needs a mapping.)
+
+**D2/D3 — "the signals," and whether the AI can SEE them (the durable part).** `occupancy.consistent_with_signals`
+is the FIRST loan-subject AI group. A loan-subject AI's context (`_loan_context`) is the loan's **MISMO facts
+ONLY** — NOT the tag layer, NOT the documents. MISMO carries **no borrower residence address** (only
+`property.address` = the subject). So the *address*-consistency signals the vocabulary's one-line description
+hints at ("address/other signals") are **invisible** to this tag — an AI told to check them would be judging on
+nothing (the LP-368/370 "wrong subject's context" trap, avoided). What MISMO DOES carry, and what the tag is
+therefore DEFINED to use, are the 1003 **declaration** signals: `property.occupancy` (the claim),
+`borrower.<n>.declaration.intenttooccupytype`, `borrower.<n>.declaration.fhasecondaryresidenceindicator`, and
+`property.financed_unit_count`. **The tag reports whether the borrower's OTHER declarations AGREE with the
+stated occupancy — a structural FACT, not OC-2's reasonableness judgment.** Defining "the signals" concretely
+is the antidote to LP-340's root cause (an undefined term the model and the labeler read differently). **LIMIT
+(reported, not fixed):** the address-consistency dimension needs a borrower-residence-address MISMO fact
+(absent) or surfacing per-document address tags into the loan context (an engine/context change) — a follow-up.
+
+**The prompt (LP-335/340 class avoided).** Copies `STAGE_A_TRANSACTION_SYSTEM_PROMPT`'s §3D framing verbatim in
+spirit: STATES that the model structures a fact and does NOT judge rules/approvability/fraud ("Downstream
+deterministic code and a human reviewer do all judgement; they can only be correct if your fact is accurate");
+NAMES the exact MISMO signals; DEFINES every value (yes/no/unknown) with examples of what the DECLARATIONS
+STATE (not what a rule should conclude); makes `unknown` first-class and reachable; and says **nothing** about
+OC-2, rules, purpose, or reliability. No exemplar encodes a downstream assumption; no purpose hedge ("so the
+rule can…", "where it aids matching" — LP-340/F5); no reliability speculation ("often stale" — LP-335). **The
+honest limit: this prompt is UNMEASURED** — LP-335/340 were found by MEASUREMENT, not reading (LP-343's own
+stated limit). It must join the calibration worksheet (LP-379).
+
+**D4 — cost.** One added AI call per run (the loan-subject `occupancy` group, 1 subject), plus OC-2's existing
+judgment call. Small; runs on every file.
+
+**Consequences (real run on DB LF-6T3N — reported, not predicted).** `occupancy.stated` materializes to
+`primary`; the `occupancy` AI group produced `occupancy.consistent_with_signals = yes` (conf 1.0), reasoning
+precisely over the named signals ("both borrowers intent-to-occupy 'Yes', secondary-residence 'false',
+financed_unit_count 1 — all support primary_residence"); OC-2 then produced a real judgment: **needs_review,
+ratification_pending=True** ("occupancy is reasonable … 'yes' is an AI judgment and must be ratified by a
+human"). **OC-2 went from couldnt_check-forever to producing a ratification-pending judgment.** `needs_review`
+is the correct terminal state for a judgment rule — it never auto-ships; a human ratifies. Fail-closed
+preserved: absent occupancy → `occupancy.stated` unknown / `occupancy.consistent_with_signals` absent → the
+gate couldnt_checks with a reason (no fabricated verdict). Every other live rule identical; full suite green.
+
+**No fourth orphan surfaced** in this ticket. Cross-refs: LP-370 (the audit that found OC-2 dead), LP-366-A/367
+(the orphan class), LP-373 (the orphan guard, deferred), LP-326 (declarations/producers), LP-335/340/343 (the
+prompt-bug class this prompt must not join), LP-379 (calibration — this prompt is unmeasured).
+
+## ADR-288: An AI `unknown` gather-filter type is absent-for-comparison — exclude + surface, not veto (LP-372)
+
+**Context — the NEW shape.** ID-4 (current-address consistency, an identity-fraud signal, LIVE + auto-shipping)
+gathers `id.address_normalized` filtered by `id.current_address_type == residence`. When ≥2 address candidates
+exist, the consistency engine gated the filter tags' confidence/known-ness (`consistency.py`, LP-325 review):
+**if ANY candidate's `current_address_type` was `unknown`, the whole per-borrower comparison was VETOED →
+couldnt_check.** LP-370 flagged this UNCERTAIN and refused to call it correct ("exactly the call that let
+AS-1/ID-2/ID-3 survive"). The shape is genuinely new: not an absent tag, not a wrong field — **a present,
+materialized filter tag whose `unknown` value on ONE candidate vetoes an entire per-subject comparison.**
+
+**Evidence (real run 01039e93, LF-6T3N — reasoning strings read, not trusted).** The address-bearing sources
+typed `unknown` are the **subject-property documents** — the purchase agreement (`"This is the subject property
+being purchased, not the buyer's residence address"`), mortgage statements, property-tax bills. Their `unknown`
+is **honest and CORRECT**: a property address is genuinely not the holder's residence. `absent ≠ unknown` holds;
+the **producer is innocent** (D1/D2 — not a producer bug; the bank statements typed `address_normalized=unknown`
+and dropped out one step earlier, never reaching the gate — LP-370's "bank statements poison it" premise is not
+what happens). Each borrower has exactly ONE residence-typed source (their DL) and no 1003, so ID-4 couldnt_checks
+on this file for **thin data** — and would do so under EITHER policy (excluding the unknown leaves 1 residence).
+**LF-6T3N cannot by itself exercise the veto-vs-exclude choice** (that needs ≥2 confidently-typed residences +
+an `unknown` candidate) — the honest limit. But the choice is decidable **on principle**, and that is D3.
+
+**Decision — treat an AI `unknown` filter-type as ABSENT-FOR-COMPARISON: exclude the source, keep it out of the
+veto gate, and SURFACE the exclusion count in the finding's reason.** This restores the codebase's own invariant,
+which the veto violated: a gather-tag `unknown` is *already* "absent-for-comparison → exclude" (`consistency.py`,
+the `_UNKNOWN` skip), and an **absent** filter tag is *already* silently excluded with no veto. Only a *present*
+filter tag valued `unknown` vetoed — so **"honest unknown" was punished more harshly than "absent"**, an inversion
+of `absent ≠ unknown`. The veto's rationale ("the classifier is untrustworthy here, so distrust its `residence`
+labels too") is refuted by the reasoning strings: the classifier is *confidently, correctly* declining to call a
+property address a residence — that is it WORKING. And because the purchase agreement is in **every purchase file**
+and correctly typed `unknown`, the veto made ID-4 **uniformly couldnt_check** on realistic files (LP-333: a rule
+that uniformly couldnt_checks is a FAILURE). **KEPT:** the confidence gate for a present, CONCRETE-but-shaky type
+(a `residence`/`mailing` label below the floor) — that IS a genuine shaky inclusion decision.
+
+**Why not (a) keep the veto, or (b) plain-exclude.** (a) VETO → uniform couldnt_check → Tab 1 noise → the tab that
+matters gets ignored, and ID-4 never protects anything. (b) PLAIN-EXCLUDE → a disagreeing residence hiding behind
+an `unknown` type is silently dropped → an auto-shipped false-green on identity fraud. **(c) EXCLUDE + SURFACE**
+takes exclude's usability and closes plain-exclude's gap: the finding's reason names the count of address-bearing
+sources that could not be typed and were excluded, so a human can look. **ACCEPTED TRADE-OFF (named in a test so a
+reversal is findable — the LP-340 precedent):** if the ONLY disagreeing residence were hidden behind `unknown`,
+the discrepancy surfaces only as an exclusion count, not as a `fired`. We accept that over couldnt_checking every
+file. Reversible by restoring the veto.
+
+**Generic, no rule-id branch.** The change lives in the generic `_borrower_documents` gather + the evaluator's
+reason assembly; it is DECLARED-behavior over any rule's `gather_filter`. **ID-4 is the only spec with a
+`gather_filter`**, so no other live rule's behavior changes (ID-1/2/3, IN-5 have `gather_filter=None` and skip the
+branch — their reasons are byte-identical). The pattern of keeping engine code rule-generic holds.
+
+**Consequences (real run, reported not predicted).** ID-4 on LF-6T3N: **before** = 2 couldnt_check with the
+misleading veto reason (`"… classification … is not trustworthy: … is unknown"`, blaming `doc067c2` = the purchase
+agreement); **after** = still 2 couldnt_check, now with the HONEST root (`"only 1 source … of type 'residence' …
+nothing to compare (1 other address-bearing source could not be typed as 'residence' and were excluded)"`). Same
+verdict, truthful reason. On a richer file (DL + 1003 both residence + an `unknown` candidate) ID-4 now COMPARES
+and satisfies/fires — which the veto previously blocked (pinned by new both-direction tests). The `id_address`
+prompt remains UNMEASURED and should join LP-379's worksheet. **Priya item:** is a bank statement's stated address
+a `residence`? (Here they typed `address_normalized=unknown`; not decided.) Cross-refs: LP-370 (the audit that
+refused to call ID-4 correct), LP-325 (the gather contract — ABSENT≠DISAGREEING, `<2`→couldnt_check), LP-335
+(FINDING-1, the same tag's last bug), LP-333 (uniform couldnt_check is a failure), LP-343/334 (the prompt is
+unmeasured), LP-379 (calibration).
+
+## ADR-289: The vocabulary orphan guard — fail loud when a live consumer reads a tag nobody produces (LP-373)
+
+**The class.** *A tag declared in the vocabulary (`fact_tags.csv`) with a producer named, but with no
+declaration in `tag_production.yaml` and nothing in `app/` writing it, resolves to ABSENT; absent is
+indistinguishable from "the document genuinely doesn't have this", so the rule reading it couldnt_checks
+silently, forever, with every test green.* Found THREE times, each by accident after a LIVE rule was already
+dead: `dti.qualifying_income_monthly` (LP-366-A — AS-1 never evaluated a deposit); `housing.insurance_monthly`
+(LP-367, open — the DTI calc can never compute on any file, UI shows a fabricated $0.00);
+`occupancy.stated`/`occupancy.consistent_with_signals` (LP-371 — OC-2 dead since the beginning). **The root:**
+the loader validates declarations that EXIST; it never checks that a vocabulary tag with a producer HAS one.
+
+**Decision — a guard (a TEST) that fails when a LIVE consumer HARD-reads an unproduced vocabulary tag.**
+Sibling to LP-369's declaration→field guard, one seam earlier (vocabulary→producer).
+
+**D1 — "produced" has THREE sources, not one.** A definition checking only `tag_production.yaml` is wrong:
+(1) a declaration there (54 tags); (2) the **hardcoded transaction path** — `services/tag_production.py`
+(Stage A) + `tag_correlation.py` (Stage B, `txn.has_identified_source`), which the live orchestrator leaves
+alone (`producer.py`); (3) a live judgment rule's `output_tag`. Missing (2) would false-positive on
+`txn.has_identified_source` (read by LIVE AS-1) — D1's trap.
+
+**D2 — the severity model (the census decided it, not the framing).** A guard that fires on every
+authored-ahead tag is noise and gets muted within a week (LP-333's dynamic); one that misses a live rule's
+orphan is worthless. So an unproduced tag FAILS the build only when a LIVE consumer **hard-reads** it — a live
+rule reads it as a gated input (load-bearing / operand / gather / applicability / when-tag → absence =
+couldnt_check), OR it is a required input to the always-computed DTI calculator (`_REQUIRED_DTI_TAGS`, the only
+tag-gated calc, on the live path, rendered in the UI — LP-367's shape). All three instances were this. Read
+only by INERT rules, by NO rule, or **softly** (a judgment rule's `reasoned_over` — not gated, so absence only
+thins the AI's context) → reported, not failed. Real census (156 tags): 58 fine, 73 inert-orphan, 22
+no-rule-orphan, **2 live DTI-calc orphans**, 1 live-soft orphan. **Zero live-rule HARD orphans remain** (the
+three fixes closed them); every `id.*` tag is produced.
+
+**D3 — where it lives: a TEST, not load-time.** The guard needs `ACTIVE_RULE_IDS`, the rule specs, and the
+calc layer. Running it at load would force the tag-vocabulary loader to import the rule engine — inverting the
+dependency (the vocabulary is read BY the rule engine). Same argument, same conclusion as LP-369; a CI test
+fails just as loudly.
+
+**D4 — what it does NOT cover (the seam map).** A declared producer that never RUNS (`_required_ai_groups`,
+LP-333/368 — unguarded); a declaration naming a nonexistent field (LP-369, document/transaction only); a tag
+that materializes but is WRONG (calibration, LP-379); a live-rule SOFT `reasoned_over` orphan (reported); a
+produced+consumed tag ABSENT from the vocabulary (`txn.source_strength` — read by live AS-1, produced by Stage
+B, not in `fact_tags.csv` — invisible to a vocabulary scan). This is ONE seam of several — the class is not
+"closed", it is now GUARDED at this seam.
+
+**`housing.insurance_monthly` (LP-367 open) is handled, not fixed.** The guard would fail on it today (correct
+— it IS a live orphan). It is a LOUD exemption in `_KNOWN_LIVE_ORPHANS` naming LP-367, with a test asserting it
+is STILL a genuine orphan (unproduced AND live-consumed), so the exemption cannot rot — LP-369's discipline.
+
+**Fourth orphans found (reported, not fixed — the first complete scan).** `housing.taxes_monthly` — a SECOND
+DTI-calc orphan (LP-367 named only insurance; the calc needs both); `property.address_normalized_match` — a
+live SOFT orphan (OC-2 `reasoned_over`, ADR-287's documented address follow-up); `txn.source_strength` — a
+produced+consumed tag missing from the vocabulary.
+
+**Consequences.** No engine/rule/vocabulary change; `ACTIVE_RULE_IDS` unchanged; full suite green (2357).
+`test_guard_fires_on_a_synthetic_live_rule_orphan` proves it can fail; `test_guard_catches_the_dti_calc_orphans_when_not_exempted`
+proves it fires on the real open orphans. Cross-refs: LP-366-A/367/370/371 (the instances), LP-369 (the sibling
+guard), LP-326 (declarations), LP-333 (the `_required_ai_groups` seam), LP-379 (calibration).
+
+## ADR-290: Wire homeowners insurance as a derived tag — the last orphan, and the DTI-read-path finding (LP-374)
+
+**The third orphan, closed.** `housing.insurance_monthly` was declared in `fact_tags.csv` (`produced_by=AI`)
+but nothing produced it — the last instance of the ADR-289 class. Wired as a **derived** recipe reading the
+`homeowners_insurance` binder's extracted `annual_premium ÷ 12`. LP-373's guard now PASSES on it (removed from
+`_KNOWN_LIVE_ORPHANS`); `housing.taxes_monthly` remains the one exempted DTI-required orphan (a follow-up).
+
+**D1 — the finding that overturned the ticket's premise (the code is the gate of record).** The ticket held
+that the DTI "can never compute on any file" because this tag never materializes. **False.** The DTI reads
+insurance DIRECTLY from the extraction — `services/dti.py` `_extracted_monthly(homeowners_insurance,
+annual_premium) ÷ 12` — and the `_REQUIRED_DTI_TAGS` gate checks the calc LINE (grouped by `from_tag`
+*lineage*), never the tag layer. So **the DTI already computes on any file with a binder, independent of this
+tag.** `housing.insurance_monthly` (vocab `subject=loan`) is consumed only by INERT rules (DT-1/DT-5/IH-1) — it
+is really an inert orphan; ADR-289's "live-orphan(dti-calc)" label rested on reading `_REQUIRED_DTI_TAGS`
+membership as a tag read, but it is lineage. **Wiring the tag does NOT unblock the DTI** (nothing was blocked);
+it closes the orphan, materializes the tag on a binder file, ALIGNS it with the same `annual_premium ÷ 12` the
+DTI computes, and serves the tag's own consumers. Recorded here so the record is honest rather than echoing the
+premise.
+
+**D1 subject.** `subject: loan, mode: derived` — matching the vocabulary + the loan-level consumers (a
+document-keyed tag would be a lateral move: orphan → present-but-unreadable). A derived recipe reads the whole
+snapshot, and `annual_premium` IS in the snapshot's document fields (`build_document_fields`), so — unlike
+LP-371's loan-subject AI *context* (MISMO-only) — the recipe can see the binder. Mirrors `occupancy_stated` /
+`qualifying_income_monthly`.
+
+**D2 — multiple binders → `unknown` with a reason, never a guessed premium.** The recipe takes the DISTINCT
+`annual_premium`; conflicting binders → abstain naming the conflict (the LP-332/LP-336 fail-closed-on-ambiguity
+precedent); identical duplicates → the one value. The DTI's `_extracted_monthly` takes the single current binder
+without this check, so the tag is STRICTER on ambiguity — deliberate and reported (the DTI is out of scope).
+
+**Absent ≠ 0, and why.** No binder / no premium / non-positive / unparseable → `unknown` with a reason, NEVER
+0. A 0 premium makes the DTI confidently too-low — the exact false-green the DTI's gate exists to prevent.
+
+**What this does NOT fix.** LF-6T3N has no binder, so the tag is `unknown` and the DTI stays gated there — the
+correct, honest outcome, UNCHANGED by this ticket (the gate is extraction-driven). The UI DTI card's fabricated
+"$0.00 Extracted" (the display `DtiCalculation` collapses the unknown insurance input to 0 while the snapshot
+calc correctly gates) is LP-375's — reported precisely, not fixed here, and independent of the tag wiring.
+
+**Consequences.** No engine change (a declaration + a recipe-registry entry; `produce_derived_tags` untouched).
+Real run (`01039e93`): tag = `unknown` ("no homeowners insurance binder in the file"); DTI `gated=True`
+("housing.insurance_monthly is unknown"). Full suite green (2367). Cross-refs: LP-318 (the calc gate), LP-326
+(derived recipes + abstention), LP-366-A/370/371/373 (the orphan class + its guard), LP-364 (the UI that exposed
+the $0.00), LP-375 (the display fix).
+
+## ADR-291: The read path — surface `satisfied`, separate the two systems' counts structurally, stop the DTI card fabricating 0 (LP-375)
+
+**Why GREEN/`satisfied` must be returned.** `_build_status` filtered findings to `status IN (RED, YELLOW)`,
+dropping GREEN — where `satisfied` (and `no_longer_applies`) land. §8 makes `satisfied` FIRST-CLASS: it is how
+a human knows a rule RAN and PASSED rather than silently not running. This project found FOUR live rules that
+were silently not running (AS-1, ID-2, ID-3, OC-2), each with every test green — a visible `satisfied` is what
+makes that difference legible. On LF-6T3N there are 2 `satisfied` rule findings that were unreachable; now they
+surface (Tab 2). Fix: `rule_findings` is returned with NO status filter (all outcomes).
+
+**Why the two systems' counts are STRUCTURALLY separate.** An ungoverned 75%-confidence AI sweep observation
+(no gated tags, no provenance, no outcome state) and a governed rule finding (gated load-bearing tags, inline
+provenance, a spec-cited guideline, a §8 outcome) are not the same kind of thing; summing them makes the §8
+honesty contract meaningless. The response returns TWO DIFFERENT TYPES — `findings: list[FindingPublic]`
+(legacy) and `rule_findings: list[RuleFindingPublic]` (governed). Different types cannot be concatenated or
+their counts summed — structural, not merely conventional. **The discriminator is `evaluation_outcome IS NOT
+NULL`, not `origin`:** confirmed on real data, `origin=deterministic_rule` spans BOTH the governed engine AND
+retired `xsrc.*` findings (outcome null, stale). So "Tab 5 — Old Findings" is TWO legacy systems (the
+`ai_cross_source` sweep + the `xsrc` deterministic rows) = 16 on LF-6T3N; `rule_findings` = 38 (30 couldnt_check
+· 4 needs_review · 2 open · 2 satisfied). The guideline citation is read from the SPEC
+(`load_rule_spec(rule_id).guideline_reference`), never AI-recalled.
+
+**The $0.00 fix — display layer, and the coupling that shaped it.** The display path collapsed an absent input
+to 0 (`_to_items`: `auto.auto or Decimal(0)`) and computed a confident ratio on it, while the snapshot path
+(`calculations_section.map_dti`) GATED on the same `auto_amount=None` — two paths contradicting each other on
+one page. **Absent ≠ 0: a 0 premium makes the DTI confidently too-low, the exact false-green the gate exists to
+prevent.** A subtlety: `build_calculations_section` calls the SAME `build_dti_calculation`, and `map_dti`
+returns `None` (absent DTI) when `back_end_dti is None` — so nulling the ratio inside `build_dti_calculation`
+would have flipped the snapshot's honest *gated* entry to *absent*, changing the path I was told not to touch.
+The fix therefore keeps the ratio computed in `build_dti_calculation` (adding `gated`/`gate_reason` + an
+`unknown` line flag) and nulls the ratio at the API boundary (`gate_display_ratios`), so the DISPLAY agrees
+with the engine WITHOUT altering the snapshot path or any gate / `_REQUIRED_DTI_TAGS`.
+
+**What this does NOT change.** The sweep's `findings`, counts, and banner are identical (its filter is
+unchanged; GREEN is not un-dropped for it). The submission gate (`blocked`/`in_scope_open_count`, LP-75) still
+spans both systems — the display lists are separated, but a per-system BLOCKING split is a policy question
+(LP-377). `calculations_section.py`, `_REQUIRED_DTI_TAGS`, every gate, and every rule/tag/spec are untouched;
+`ACTIVE_RULE_IDS` unchanged; full suite green (2371). Reported for LP-376: `subject_key` is not human-legible
+(a compact subject label needs per-family logic — a finding, not faked); Tab 5 is two legacy systems; Tab 4
+(`not_applicable`) has no persisted rows. Cross-refs: §8, LP-316 (the Finding model), LP-364-B (the
+discriminator), LP-374 (the traced $0.00 + DTI-reads-the-extraction), LP-318 (the gate), LP-376 (the UI),
+LP-377 (§10 actions / blocking policy).
+
+## ADR-292: The five §8 tabs + the provenance card — the subject-label + Tab-4 decisions (LP-376)
+
+The §8 mapping (five outcomes → four governed tabs + the legacy quarantine) is the architecture, implemented,
+not a decision. Two real decisions were forced in rendering it, recorded here.
+
+**The subject label — the message is the identity; the raw content-id is never shown.** `subject_key` is an
+opaque content-id (`txn54c6…`, a borrower UUID, or `"loan"`). A row nobody can identify is a row nobody can
+action (LP-376), and a hash is not an identity. Decision: render the **message** as the row's identity (it is
+ALWAYS present — the backend refuses to persist a reasonless verdict — and it differs per subject, so rows are
+distinguishable), plus a compact **subject chip** derived from the load-bearing tags where a recognisable
+value exists (`ruleSubjectChip`: AS-1's txn.amount+txn.date → "$20,000 · date"; a name/address tag; `"loan"` →
+"Loan-level"), and NEVER the raw content-id. **Surfaced gap:** the rule NAME (`spec.name`) is not in the
+payload — rows show `rule_id` ("ID-4"), not "Current address consistency". Reported for LP-377 (a small
+`RuleFindingPublic` addition), not worked around by reaching into the backend.
+
+**Tab 4 (Not applicable) is structurally empty — kept, explained, never fabricated.** `not_applicable`
+subjects are not persisted (LP-375), so Tab 4 renders empty on every file. Decision: keep the tab (count 0)
+with an honest empty state explaining WHY — because dropping it would let "not applicable" quietly absorb a
+"couldn't check", which is the exact honesty violation §8's five-outcome split exists to prevent. Not
+fabricated rows, not a hidden tab. This surfaced a model choice: because n/a isn't persisted, the UI cannot
+show what a rule found irrelevant; if that ever matters, the backend must persist n/a — a decision, not a bug.
+
+**Everything else is enforcement, not decision.** couldnt_check → Tab 1 only; Tab 3 ≠ Tab 4 (distinct empty
+states); needs_review ≠ open (own group + a ratification marker); the two systems are two typed lists into two
+tab sets, counts per-list and never summed; Tab 1 groups `open` first so 2 violations don't drown in 30
+couldnt_check; the DTI card renders its gate ("Gated", the reason, "Unknown" lines) so the display agrees with
+the engine; NO §10 actions on tabs 1-4 (LP-377). Frontend only — zero backend change; `ACTIVE_RULE_IDS` and
+the legacy sweep untouched. Cross-refs: §8, LP-316, LP-375 (the two lists + the DTI gate), LP-329/330 (the
+honesty contract), LP-333 (uniform couldnt_check), LP-377 (§10 actions).
+
+## ADR-293: Governed rule findings carry their OWN category taxonomy, not the legacy sweep's (LP-376-B)
+
+**Context.** The first human view of the LP-376 tabs showed ID-8 (a citizenship/eligibility rule) as
+"Assets" and IN-2 (a pay-stub recency rule) as "Assets". Root cause: a governed rule finding's `category`
+was the persisted legacy `FindingCategory` enum — `income/assets/credit/property/documentation/cross_source/
+regulatory` — the AI cross-source SWEEP's taxonomy (it drives the legacy filter chips). That enum has **no
+Identity and no Occupancy**, so a rule whose real family is Identity/Occupancy (from `rule_kinds.csv`) was
+coerced into it, defaulting to `ASSETS`.
+
+**Decision.** `RuleFindingPublic.category` is the rule's OWN category from its SPEC / `rule_kinds.csv` (the
+gate of record) — Identity / Income / Occupancy / Assets / … — read at load time, NOT the coerced legacy
+`FindingCategory`. The persisted column and the legacy sweep's use of it are unchanged.
+
+**Why — the two systems are different things down to their vocabularies.** LP-375 quarantined the governed
+rule engine from the legacy sweep as two distinct TYPES so their lists and counts can never merge. Their
+CATEGORY taxonomies are just as distinct: the sweep classifies AI observations into a fixed handful of areas;
+the rule engine has its own rule families (Identity, Income, Assets, Occupancy, Credit, Property, …). Forcing
+the sweep's enum onto rule findings is the same merge LP-375 forbade, one field down — and it is exactly how
+ID-8 became "Assets". So the governed findings carry their own family; the legacy findings keep theirs. A
+shared `FindingCategory` enum with Identity/Occupancy added would be the alternative, but that couples the two
+taxonomies again and touches the sweep — rejected in favour of reading the rule's own category from the gate
+of record. Frontend renders whichever the API sends (no UI change).
+
+Cross-refs: LP-375 (the two-type quarantine), LP-376/376-B (the tabs + the bug), `rule_kinds.csv` (the gate of
+record for a rule's category + kind).
+
+## ADR-294: couldnt_check reasons speak mortgage — a declared tag-label registry; the action's home; the untyped-doc collapse (LP-376-C)
+
+**Context.** The first human view of the tabs (LP-376) surfaced right verdicts in unreadable words: every
+`couldnt_check` reason was hardcoded in an evaluator interpolating an ENGINE id — a tag (`id.dob`), an
+operand, a content-id hash — plus "source"/"subject"/"load-bearing tag". A loan processor reads these and
+cannot act on them. The engine was honest; its vocabulary was not.
+
+**Where human text lives (D1).** The evaluator (generic, one place per failure SHAPE) knows a fact is
+missing; the DOMAIN (that the fix is "request the 1003") it does not know. Decision: a **declared
+`tag_id → mortgage-noun-phrase` registry** (`rule_engine/reasons.py`, keyed by tag — the sanctioned
+declared-key-resolved-by-registry pattern, never a per-rule-id branch) lets the evaluator name WHAT is
+missing generically ("the borrower's date of birth could not be found in the file"); an unmapped tag
+degrades to a humanized stem, so a raw dotted id or hash can never reach a processor. The ACTION stays
+SHAPE-derived and honest — "classify it" (untyped document), "a consistency check needs at least two"
+(<2 sources), "review it" (low confidence) — and is NOT invented where unknown (the <2-sources reason does
+not guess which document to fetch). **An evaluator cannot name an action it has no domain knowledge of;**
+per-rule domain actions belong in a spec's `how_to_fix` (precedent exists), authored as a scoped follow-up
+for ~130 rules, not here. The tag id remains only in the provenance card (the engineer's view, LP-376).
+
+**The engine was already right, and already knew the good sentence.** `absent_document_couldnt_check` already
+composes "no title commitment is in the file — the rule requires one," and is SUPPRESSED, correctly, when ≥1
+document is unclassified (LP-330: an untyped doc might BE the title commitment; claiming it is absent would be
+a false-negative). The engine was being honest in a sentence nobody could act on, four times. This ticket
+humanized that sentence; it did not touch the suppression.
+
+**The untyped-document collapse: UI, not engine (D3).** Four unclassified documents each spawn a distinct
+`(rule_id, subject_key)` couldnt_check for ID-7 and ID-9 (8 rows), and LP-322's reconciler keys on exactly
+`(rule_id, subject_key)`. Collapsing in the engine would change those keys and break carry-forward/retire.
+So the collapse is DISPLAY-ONLY: the UI groups findings sharing `(rule_id, message)` into one summary row
+(expandable to the members). The model, the reconciler, and every verdict are untouched — this ticket changes
+WORDS, not VERDICTS (audited; the failing tests were all string assertions).
+
+**Cost / what's still open.** The subject a summary expands to is still a content-id, not a document a
+processor recognises (LP-375's subject-label finding — mitigated, not solved). The 4 unclassified documents
+are ONE root with THREE symptoms (ID-7/ID-9 noise, the suppressed good sentence, ID-4's poisoned filter,
+LP-372) — the classifier gap is its own ticket; fixing it collapses all three at the source. Cross-refs:
+LP-330 (absent-document contract), LP-375 (subject label + the two-type quarantine), LP-376/376-B (the surface
++ message-states-the-verdict), LP-372 (ID-4's gate), LP-322 (the reconciler key).
+
+## ADR-295: The run wrapper's honesty — atomic status, visible enqueue failure, and an engine-aware cache key (LP-377)
+
+**Context — the class.** The architecture spent ~20 tickets making every FINDING honest: gates, confidence
+floors, `couldnt_check`, fail-closed calculators, `absent ≠ 0`. Then the RUN WRAPPER — the layer that reports
+a verification COMPLETED — did not carry the contract up. LP-365 wired the governed rule pass alongside the AI
+sweep on one run row, and its own review found three run-level fail-opens: (1) a "never overwrite FAILED"
+guard that read a stale in-memory ORM `run.status` across sessions (a no-op); (2) a swallowed rule-pass
+enqueue failure (a run reads COMPLETED with the governed pass never enqueued); (3) a cache keyed only on the
+cross-source inputs, so a rule/spec/tag change with unchanged documents served a prior run's findings from a
+version of the engine that no longer existed. **All three are run-level false-greens — the honesty contract
+does not survive one layer up.** #3 already cost real time: LP-366/369/371/372/374 all landed after run
+`01039e93`, documents unchanged → fingerprint matched → cache hit → neither pass re-ran → ~20 of 30
+`couldnt_check` rows were already-fixed bugs, and a human concluded the engine was broken.
+
+**#1 and #2 were already fixed (gate of record).** The LP-365 REVIEW commit (`0000088`, after the original
+`a697cbb`) already made the status atomic and the enqueue failure visible. This ADR records the decisions;
+LP-377's implementation is #3.
+
+**Atomic status + the partial-failure status (#1).** An ORM in-memory `run.status` check cannot work: the
+sweep and the rule pass write the row in SEPARATE task sessions, and SQLAlchemy does not auto-refresh across
+sessions, so the sweep's in-memory status is stale (still RUNNING) even after the rule pass committed FAILED.
+Decision: the sweep re-reads status under a ROW LOCK (`SELECT status ... FOR UPDATE`) immediately before its
+write and sets COMPLETED only if the fresh DB value is not FAILED; the lock is held to commit, so the rule
+pass's unconditional `UPDATE status=FAILED` serializes AFTER and stays sticky. **FAILED wins regardless of
+commit order.** The run's status on partial failure IS **FAILED** — a run reads COMPLETED only if BOTH passes
+completed. A COMPLETED run atop a dead governed engine is the false-green; the sweep's valid findings do not
+rescue the wrapper's contract ("COMPLETED = the engine ran"). No new PARTIAL status is introduced (it would
+touch the UI, the watchdog, `_build_status`, the version selector for no gain today) and **no UI change is
+forced** — the existing FAILED surface + the force-run link handle it.
+
+**Visible enqueue failure (#2).** The task's own fail-closed FAILED only fires if the task RUNS; an
+un-enqueued rule pass (broker/worker down) never marks FAILED, so the sweep would complete the run with no
+governed verification. Decision: `_enqueue_rule_engine` returns a bool and the handler marks the run FAILED on
+an enqueue failure — mirroring `_enqueue_cross_source`. The two paths must fail in the SAME direction (toward
+visible), never the direction that hides the problem.
+
+**The engine-aware cache key (#3 — this ticket's build).** The fingerprint must bind the ENGINE's version,
+not just the file inputs. Decision: fold an `engine_fingerprint()` into `compute_input_fingerprint` —
+`sha256(engine_fingerprint ⊕ canonicalized cross-source context)`, where `engine_fingerprint()` hashes
+`sorted(ACTIVE_RULE_IDS)` + the content bytes of every declarative artifact under `app/verification/rules/`
+(the rule specs, `tag_production.yaml`, the fact/rule/tag/dependency CSVs, `vocabulary_extra.yaml`), cached
+per process. A cache HIT now means "inputs AND engine unchanged → the prior run's findings are genuinely
+current"; ANY declarative engine change misses and re-runs the governed pass.
+
+**Why not the alternatives.** *Always-enqueue the rule pass:* rejected — LP-365 measured the rule pass at
+~282s and ~$0.15–0.30 of AI per run (Stage A/B + materialization), and the task builds a fresh `TagCaches()`
+every invocation (the tag cache does not persist across task runs), so re-running is full cost. Always-enqueue
+would DOUBLE AI spend on every no-op Run — exactly what the cache exists to prevent. The rule pass cost is not
+small; the ticket's "if it's cheap, always-enqueue" premise is falsified by the code. *A manual ENGINE_VERSION
+constant / `app_version`:* rejected — `app_version` is a static `"0.1.0"`, never bumped; a manual constant
+relies on a human remembering to bump it, the discipline that already failed five times. A key that can be
+forgotten re-introduces the exact silent miss. **A cache MISS is cheap; a cache HIT that serves stale governed
+findings is a false-green. The cache was built to avoid re-paying for the AI sweep; the rule engine has a
+different cost profile. Caching two systems on one key was always going to break. Fail toward re-running.**
+
+**The reported residual (not worked around).** The engine's Python-resident logic and the AI-group / judgment
+prompts that live as Python constants (`tag_materialization/ai.py`, `subjects.py`, `ai/rule_judgment.py`) are
+NOT hashed — a change to those with zero declarative edit would not invalidate. Mitigations: such changes
+nearly always co-ship a spec/tag/registry edit (which does invalidate); the force-run link (LP-376-A) is the
+manual escape hatch; and it is closable later by wiring `app_version` to the build/git-SHA or moving the
+Python-resident prompts to files. This residual is strictly SMALLER than the prior behaviour, which ignored
+the engine version entirely. Old runs' engine-unaware fingerprints will not match the new key → the next Run
+re-runs, which is correct (they were computed under an old engine).
+
+**The test that could not fail.** `test_sweep_completion_never_overwrites_a_failed_run` pinned #1 with a single
+in-memory `SimpleNamespace(status=FAILED)` — a state that cannot occur cross-session — so it asserted a
+scenario that can't happen and missed the one that can (the bug shipped WITH a green test). The review commit
+replaced it with a test that models the guard as a function of the LOCKED DB value. LP-377 adds, for #3, a unit
+test asserting the same inputs under a different engine hash to a DIFFERENT fingerprint and an endpoint test
+that a rule-relevant change re-runs BOTH passes — both verified to FAIL on the pre-fix code (the endpoint
+returns `completed`, the stale hit, instead of `running`).
+
+**Cross-refs.** LP-365 (where all three shipped; the two-task wiring, the cost measurement), the LP-365 review
+`0000088` (#1/#2 fixed + the masking test replaced), LP-376/376-C (the stale render that exposed #3), LP-78.1
+(the original cross-source cache), LP-376-A (the force-run escape hatch), LP-322 (the reconciler keyed on
+`(rule_id, subject_key)`).
+
+## ADR-296: A finding names its subject — the label resolves in the read path, declared per subject type (LP-377-B)
+
+**Context.** A governed finding's row identity was its ``subject_key`` — a stable content-id (LP-312): a
+document ``doc067c…``, a transaction ``txn…``, a borrower UUID, or ``"loan"``. LP-376's provenance card
+rendered ``Subject id: 59e173ce-…`` verbatim. A processor reads *"a document in the file could not be
+classified"* — over 30 documents, WHICH one? The finding model knows exactly which; it just never said. Both
+LP-375 (*"a legible subject label needs per-family logic, not uniformly derivable from the stored data"*) and
+LP-376-C (*"the FILENAME is not reachable — subject_key is a content-id; no doc index at the reason site"*)
+reported this wall and stopped at it. This ticket goes through it.
+
+**Where the label resolves (D1) — the READ PATH, not the evaluator.** The deciding fact: the filename is NOT
+in the snapshot. ``DocumentEntry`` carries ``content_id`` / ``document_type`` / ``belongs_to`` (borrower refs
+with names) / extraction ``fields`` — but not ``original_filename`` (which lives only in DB
+``Document.original_filename``). The evaluator holds only the snapshot and is DB-free, so option (a) — naming
+the document in the evaluator's reason string — is impossible without plumbing a filename through the whole
+tag/rule pipeline. The read path (``_build_status``) has DB access and the finding's ``subject_key``, so the
+label resolves there: ``RuleFindingPublic`` gains a ``subject_label``, resolved once per finding with the
+file's borrower + document maps. This fixes the row AND the card in one place, for ALL findings (old and new),
+with nothing persisted.
+
+**Declared per SUBJECT TYPE, dispatched on the key's SHAPE (D2) — no rule-id branch.** The subject TYPE is
+the key, not the rule id, and the content-id prefixes are designed for exactly this dispatch:
+``"loan"`` → "Loan-level"; ``txn…`` → "Deposit of $20,000 on 3/27" (from the inline ``txn.amount`` /
+``txn.date`` tags — generalising LP-376's amount chip into ONE mechanism, retiring the frontend
+``ruleSubjectChip``); ``doc…`` → the filename; a UUID → the borrower's name; ``account:…`` → "a bank account".
+This is ``declared-key-resolved-by-registry`` again — a per-rule-id branch would be the anti-pattern.
+
+**The document bridge — a shared derivation, never duplicated.** A document's content-id is a content hash
+(irreversible), so the read path recovers ``{content_id → filename}`` by REBUILDING it from the current
+documents via the SAME reshape+assign the snapshot uses (``documents_section._reshape_and_assign_ids`` —
+extracted so ``build_documents_section`` and the map share it; duplicating it would let the ids drift and
+silently resolve to nothing). Built only when a governed finding actually has a ``doc…`` subject.
+
+**The honest fallback (D3) — never a hash.** A content-id rebuilt from the CURRENT documents will not contain
+a removed or re-extracted document's id (a Tab-3 ``no_longer_applies`` finding's subject is gone BY
+DEFINITION) → the label reads *"a document no longer in this file"*; a borrower who left → *"a borrower no
+longer on this file"*. Never a fabricated name, never the id. This falls out of the rebuild naturally.
+
+**PII posture (D4) — read-time, not persisted.** A filename can carry a borrower's name
+(``Bansari_Patel_W2.pdf``). Resolving the label at read time means it is NEVER written into the finding row —
+consistent with the existing posture (borrower names already appear in read-time finding messages;
+``BorrowerRef.name`` is in the snapshot). This is the argument FOR the read-path option and against persisting
+the label.
+
+**The label is cosmetic; the key is identity.** ``subject_key`` stays the reconciler's key (LP-322 matches on
+``(rule_id, subject_key)``) and is unchanged — the LABEL must never become the KEY. No verdict, outcome, tab,
+or count changed; this ticket changes LABELS.
+
+**Reported cost.** Resolving document labels rebuilds the documents section at read time (the only honest way
+to recover a content-id → filename — the id is a content hash). Gated on a ``doc…`` subject being present.
+
+**Cross-refs.** LP-312 (``subject_key`` / content-ids), LP-375 + LP-376-C (both reported this wall and
+stopped), LP-376 (the provenance card + the amount chip generalised here), LP-322 (the reconciler key — the
+label must not touch it), LP-330 (the absent-document contract behind the honest fallback).
+
+## ADR-297: The LF-6T3N "classifier gap" was not one — 4 untyped documents, three unrelated roots (LP-377-A)
+
+**Context.** LP-368 flagged (recommendation 5) that 4 documents on LF-6T3N were typed `unknown` and starved the
+per-document `id.*` tags, and asked *"what those 4 are and why the classifier abstained."* LP-377-A framed them
+as the single root behind ID-7/ID-9's 8 `couldnt_check` rows, the suppressed *"no title commitment is in the
+file"* sentence, and ID-4's poisoned filter — *"fix the classification and all three collapse."*
+
+**Decision: no classifier / catalog / prompt change — the premise was falsified by the data.** Reading the 4
+documents from the live DB (with the classifier's confidence and the generic-analyzer's own words): (1) **"Akash
+W2 Wells 2024.pdf"** produced **0 characters** of text → short-circuited to `unknown` at conf 0.0 without an API
+call — an **extraction/OCR failure**, not a classifier one. (2) **"EMD wire receipt.pdf"** is a Wells Fargo wire
+*request* for a *due-diligence fee* — `earnest_money_receipt` exists in the catalog but the match is
+domain-ambiguous, and it is irrelevant to the three symptoms. (3)+(4) the two **"Home Value estimate"** files are
+UWM **lender-dashboard screenshots** the model itself flagged as *"NOT a loan document or financial record for a
+borrower"* — genuinely not borrower documents, for which `unknown` is correct and no catalog type should exist.
+**None of the four is a title commitment, deed, or POA** — the documents ID-7/ID-9 need — and LF-6T3N genuinely
+has none (verified: `title_commitment`/`power_of_attorney` absent). So typing the four resolves none of the three
+symptoms, and for two of them it would require fabricating a type that should not exist.
+
+**The asymmetric risk (the reason not to guess).** `unknown` is honest and BLOCKS — a `couldnt_check` a human
+sees. A WRONG type is SILENT — it routes a rule at the wrong document and produces a confident verdict from the
+wrong source, with nothing to catch it (LP-333's IN-8/IN-9 class). Eliminating `unknown` by guessing trades an
+honest blocker for a false-green — strictly worse. **A classifier that never abstains fabricates.** `unknown`
+stays first-class and reachable (already guarded by five tests).
+
+**The suppression was NOT touched.** *"No title commitment is in the file"* is suppressed while any document is
+untyped because an untyped document might BE the title commitment (LP-330). Two of the four are lender
+screenshots that cannot be legitimately typed, so the suppression correctly persists. The engine's honesty was
+never the bug.
+
+**One root, three symptoms — disproven.** The three symptoms have three different, unrelated roots: (1) ID-7/ID-9
+`couldnt_check` because the file genuinely lacks title/POA documents (not because of the untyped four); (2) the
+suppressed sentence is correctly suppressed (LP-330); (3) ID-4's filter was settled by LP-372 —
+`id.current_address_type = unknown` on **correctly-typed** property documents, not the untyped four.
+
+**New gaps reported (each its own ticket, none fixed here):** the extraction/OCR failure on the text-less W2; the
+real design question of a *"confidently not a borrower document"* state distinct from `unknown` (so a screenshot
+does not masquerade as *"might be the title commitment"* and block a rule forever); and the domain (sister)
+question of whether a due-diligence-fee wire request is an `earnest_money_receipt`.
+
+**Cross-refs.** LP-368 (the census / recommendation 5), LP-372 (ID-4's gate — symptom #3, unrelated), LP-330 (the
+absent-document contract), LP-333 (the wrong-type silent-failure class), LP-335/340/343 (the prompt-bug class — why
+an unmeasured indicator change was not made), LP-376-C (the reason text that made the rows legible).
+
+## ADR-298: The fourth fail-open — the governed pass has never been allowed to finish (LP-377-C)
+
+**Context — the number was always there.** LP-365 measured the governed rule pass at **~282s** on a 30-document
+file; `celery_app.py` set `task_soft_time_limit=120`. **Nobody put 282 next to 120.** Every normal run: the AI
+sweep succeeds in ~65s and marked the run COMPLETED; the rule pass was killed at the 120s soft limit, retried
+(each retry also timing out), exhausted, and its FAILED marker never landed. The result was a **COMPLETED run
+with no governed output**, displaying stale findings from a prior FAILED run as current — and **every governed
+count from LP-376 onward (the per-tab numbers, "AS-1's 15 couldnt_check cleared", LP-376-C's before/after,
+LP-377-B's labels) was read off run `96f55e9d`, killed mid-flight.** Nobody has ever seen a complete run.
+
+**Why every guard was individually correct and collectively blind.** LP-377 fixed three run-level fail-opens;
+none models a timeout mid-execution. BUG 1 (the sweep's atomic status re-read won't overwrite FAILED) is
+**moot** — nothing ever set FAILED, because the pass was killed before `_mark_failed` could commit. BUG 2 (a
+failed enqueue marks FAILED) is **moot** — `.delay()` **succeeded**; the task was received and ran. The
+`retry_or_terminal` → `_mark_failed` exhaustion path runs in **borrowed time after the soft limit already
+fired**, so the hard limit kills the worker child before its commit lands. The stuck-RUNNING watchdog only
+fired on a **RUNNING** run — which the sweep had already flipped to **COMPLETED**. And the read path showed
+governed findings with **no run filter, no status filter**, under the latest run's status. Five correct
+pieces, one invisible failure.
+
+**Fix 1 — the runtime/limit mismatch (D1).** The ~282s is dominated by **sequential AI calls**: `materialize_tags`
+awaits each of 6 AI groups in a `for` loop, each batching its subjects sequentially, run across every document
+(the per-document id.* groups), plus Stage A/B. Reducing it (parallelize / gate groups to relevant doc-types,
+LP-368 rec 4) is an ENGINE change — out of scope. So the lever is TIME: `run_rule_engine_pass` gets its OWN
+`soft_time_limit=900` / `time_limit=1200` (the 65s sweep keeps the short global 120/180). Threading `TagCaches`
+across task runs (LP-377's aside) was rejected — it dedupes only within a run, so the FIRST run pays full cost
+regardless; not the lever. A file large enough to exceed even 1200s needs the engine-level fix (reported).
+
+**Fix 2 — the run's status must depend on the governed pass (D2).** The **rule pass is now the completion
+authority**: the sweep records its findings/counts/fingerprint and **leaves the run RUNNING** (it cannot know
+the other half finished — marking COMPLETED alone was the fail-open); the rule pass marks COMPLETED **on its
+success path**, under the LP-377 row lock (only if not already FAILED). A pass killed by the time limit never
+reaches that line → the run stays RUNNING → the **watchdog** (timeout raised to **1500s**, above the rule
+pass's hard limit) fails it. **Detection does not depend on the dying task committing anything** — the watchdog
+owns it. A new `PARTIAL` status (the sweep's findings are valid) was **rejected** for blast radius (an enum
+value rippling through the UI, the watchdog, `_build_status`, the version selector); instead the run reads
+FAILED, the sweep's findings remain readable (LP-322 immortality), and Fix 3 makes the surface honest. No
+schema migration.
+
+**Fix 3 — the read path couples findings to run success (D3).** `_build_status` still shows ALL governed
+findings (a `verification_id` filter would **gut LP-322's carry-forward** — a finding minted in run 1 and
+carried into run 5 legitimately belongs to run 5). One honest signal is added: `rule_findings_stale` = the
+latest run is not COMPLETED AND governed findings exist. The surface then says *"these rule-engine findings are
+from an earlier run; the latest run's rule engine did not complete."* This forces a minimal frontend notice
+(the D3 honesty; reported and built).
+
+**What this invalidates.** Every governed count from LP-376 onward was partial-run output. The first complete
+run's real numbers are recorded in `docs/tickets/LP-377-C.md` (reported, not predicted); LP-377-A survives
+(it read the documents + classifier directly, not the findings).
+
+**Cross-refs.** LP-365 (the ~282s measurement nobody compared to 120), LP-377 (the three blind guards + the
+row-lock pattern moved here), LP-322 (the reconciler carry-forward Fix 3 preserves), LP-368 (the per-document
+AI cost — rec 4, the engine-level capacity fix), LP-89 (the watchdog), LP-376/376-C/377-B (counts read off the
+failed run).
+
+## ADR-299: The dormant income/asset producers mostly work — except income_stability, which reorders Epic 1 (LP-378)
+
+**Context.** The ~15 dormant income/asset rules (LP-333 bucket D) were believed "gated on calibration." But
+calibration measures a tag's ACCURACY, presupposing it MATERIALIZES — and the income/asset AI groups had never
+once run on real data (`_required_ai_groups()` requests only the groups a LIVE rule reads, and none of these is
+live). LP-368 warned: *"calibration is necessary but may not be sufficient — the producers are unproven on real
+data."* LP-378 forced the 6 dormant groups to run once on LF-6T3N (real sonnet-4-5, off-path, persisting
+nothing) to find out.
+
+**Finding — the pipe carries water on 5 of 6.** `income_amounts`, `income_employer`, `income_docs`,
+`stmt_facts`, and `asset_facts` all materialize real, structured values on the doc-types they apply to (W-2 →
+`$18,697.06` monthly; W-2 → `Wells Fargo Bank, N.A.`; bank statement → owner-match + reserve-eligible;
+investment account → `$211,688.19` usable). Their dormant rules are **genuinely calibration-ready** — LP-379 is
+well-aimed at them.
+
+**Decision — `income_stability` is blocked on a PRODUCER GAP, not calibration, so it precedes LP-379.** It
+produced **0 real values on 120 observations** — a 100% abstention. The cause is architectural, not a bug: it
+is asked **per-document** a **cross-document** question (2-year history / decline / same-line-of-work / 3-year
+continuance need the borrower's income documents across years, seen together), and a single W-2 or paystub
+cannot evidence it (*"a single year does not evidence 2-year history"*). Calibrating a uniformly-`unknown` tag
+measures nothing. **The 5 rules that read it (IN-7, IN-10, IN-11, IN-13, IN-14) need a per-borrower,
+multi-document income-stability producer BEFORE Priya's time — this reorders Epic 1.** A second, smaller
+finding: `income_amounts` **over-produces** a `documented_monthly` on non-income documents (mortgage statement,
+property-tax bill, bank statement) — materializing ≠ correct; LP-379 must catch it or LP-377-D must gate the
+group to income doc-types.
+
+**Honesty preserved.** This proved the producers RUN and emit values on real data; it did NOT prove those
+values are RIGHT (that is LP-379). A uniform-`unknown` group is reported as a finding, not a pass. The probe is
+off the normal path (never imported by `verification_run`), used the real model, and persisted nothing — a
+diagnostic, not an activation.
+
+**Cross-refs.** LP-368 (the census / the warning this confirms), LP-333 (the dormant bucket), LP-377-C (the
+first complete run — the baseline), LP-379 (Priya's calibration — well-aimed for 5 of 6, premature for
+income_stability), LP-377-D (the per-document-group gate — fed this probe's doc-type data), LP-377-A (the
+brokerage_statement extraction gap that starves asset_facts on that one doc).
+
+## ADR-300: Per-document AI groups declare their doc-types and the dispatcher gates on them — fail-open (LP-377-D)
+
+**Context.** A per-document AI structuring group runs on EVERY document and abstains where it doesn't apply
+(LP-368: 95 abstention instances — each a paid call returning "no"). LP-378 upgraded this from a cost problem
+to a CORRECTNESS one: `income_amounts` OVER-PRODUCED a confident `documented_monthly` on mortgage statements,
+property-tax bills, and bank statements — documents with no income emitting income figures. If such a value
+reaches IN-1 (stated-vs-documented income), it fabricates a discrepancy.
+
+**Decision — declare `applies_to` per group; gate the dispatcher on it; FAIL OPEN.** Each per-document group
+declares `applies_to: [doc_types]` (or `all`) in `tag_production.yaml` — the applicability that was always
+IMPLICIT in the prompt's runtime "not my document" abstention, now DECLARED (the 13th
+declared-key-resolved-by-registry). The materializer (`produce_ai_group_tags`) skips a document a group's
+`applies_to` excludes — a redundant call, and for income_amounts a fabricated value. Generic: keyed only on
+`group.applies_to` + the document's type, with **no group-id or doc-type branch** (a test asserts the gate's
+source is free of both).
+
+**The gate FAILS OPEN, layered — the only failure mode is a silently-dead tag, so every uncertainty runs the
+group:** the reversibility flag is off (`GATE_AI_GROUPS=0`), the group is not document-subject, `applies_to`
+is `all`, the document is typed `unknown`/`None` (LP-377-A's untyped documents — the classifier abstained),
+or the type IS in `applies_to`. It ONLY removes a document whose KNOWN, confident type the group's list does
+not contain. **The asymmetry is total: a redundant call costs a fraction of a cent; a skipped one costs a
+silent-dead rule — the AS-1 / ID-2 / OC-2 class, four times this session. When unsure, wider.** The prompt's
+own abstention remains the backstop on every kept document — the gate is an optimization ON TOP of the
+existing safety, never a replacement (a test pins that a fail-open document the group shouldn't read still
+gets an abstention, not a wrong value).
+
+**`applies_to` derived from each prompt, verified against LP-378's real-value map.** `income_amounts` →
+`[pay_stub, w2, uniform_residential_loan_application]`; `income_employer` → +`voe`; `stmt_facts` →
+`[bank_statement, money_market_statement]`; `asset_facts` → `[investment_account, brokerage_statement,
+retirement_account]`; `id_title`/`id_poa` → their narrow title/POA types. Deliberately kept `all`:
+`id_name`/`id_address` (broad — any document with a name/address; feed LIVE auto-shipping ID-1/ID-4;
+narrowing them is the silent-death risk), `income_docs` (presence signals), `txn_stage_a`/`occupancy`
+(not document-subject), and **`income_stability`** (LP-378: it produces NOTHING per-document — gating masks
+its real problem; LP-385 fixes the producer first).
+
+**The confident-mistype residual (reported, not hidden).** The snapshot carries no per-document
+classification CONFIDENCE (it lives on the DB `Document`, not `DocumentEntry` — plumbing it is a v5 snapshot
+bump that breaks persisted v4, out of scope), so a document CONFIDENTLY mis-typed (a title document typed
+`w2`) is gated by its wrong type and its group is skipped. Mitigated by the unknown fail-open + deliberately
+wide lists; named in a test as the accepted residual, not silently absorbed.
+
+**Cost & correctness.** The gate removes redundant CALLS and, for income_amounts, the OVER-PRODUCED GARBAGE —
+never a legitimate verdict, tag, or confidence (equivalence-except-garbage, proven on LF-6T3N: every
+legitimate tag identical, income_amounts' non-income `documented_monthly` gone). Single-file guarantee
+(LF-6T3N is the only seeded real file) with the `GATE_AI_GROUPS=0` reversibility net for uncovered shapes.
+
+**Cross-refs.** LP-368 (the 95 abstentions), LP-378 (the gate spec + the over-production), LP-377-A (the
+classifier's failure modes + the no-confidence-in-snapshot gap), LP-377-C (the baseline), LP-334 (the
+harness), LP-326 (declared production), LP-385 (the income_stability producer fix — why it is NOT gated).
+
+## ADR-301: income_stability is a per-BORROWER group, not per-document — the subject was the bug (LP-385)
+
+**Context.** LP-378 measured `income_stability` producing **0 / 120** on real LF-6T3N — a 100% abstention,
+alone among the six dormant income/asset groups. ADR-299 diagnosed the cause as architectural, not a bug, and
+reordered it ahead of LP-379's calibration: its four tags (`has_2yr_history`, `is_declining`,
+`same_line_of_work`, `continuance_3yr`) each ask a **cross-document** question — an income TREND across years —
+but the group was declared `subject: document`, so the producer saw **one document at a time**. A single W-2
+cannot evidence a two-year trend. 0/120 was the honest producer being correct about a structurally impossible
+question.
+
+**Decision — move the group and its four tags to the `borrower` subject, and teach the borrower context to
+gather the borrower's documents.** The LP-332 `borrower` subject already enumerates one subject per MISMO
+borrower (keyed by the evidence-based `borrower.{n}.borrower_id` link) and already carries the whole snapshot.
+The fix was one context-builder: `_borrower_context` now returns `{borrower_mismo, documents}` — this
+borrower's MISMO facts PLUS every document **attributed to them by `belongs_to`** (the LP-202 evidence link).
+The group sees ONE borrower's income documents **together**, which is exactly what a trend/decline/continuance
+question needs. This is a generic **per-borrower-over-documents** primitive: any future borrower group asking a
+cross-document question inherits it, with no new plumbing.
+
+**Attribution is by evidence, never a guess (the LP-332/LP-336 invariant, preserved).** A document is gathered
+for a borrower only if its `belongs_to` names that borrower_id. A document with no `belongs_to` is gathered for
+**nobody** — the context is honestly incomplete and the tag abstains with a reason, rather than a trend
+fabricated from a mis-attributed document. Each borrower's AI call carries ONLY that borrower's documents (a
+test and the real probe both confirm no cross-feed — the masking class). PiiField values contribute masked
+displays only; no raw PII enters the prompt.
+
+**This is a PRODUCTION fix, not a CORRECTNESS one — the boundary held.** The rewritten prompt DEFINES the four
+terms (`has_2yr_history` = ≥2 consecutive years evidenced; `is_declining` = a year-over-year decrease;
+`same_line_of_work` = same field after a job change, single-employer → "yes"; `continuance_3yr` = likely to
+continue 3+ years) with `unknown` first-class. **These definitions are defensible defaults flagged for Priya
+(LP-379), NOT validated.** The Phase-3 probe (off-path, real sonnet-4-5, persisting nothing, on LF-6T3N) proved
+production: `income_stability` went from 0/120 to **6 real / 8** — both borrowers got `has_2yr_history=yes`,
+`is_declining=no`, `same_line_of_work=yes` from their own two W-2s, and `continuance_3yr=unknown` (correct —
+W-2 employment states no horizon). Whether those judgments match a human golden is LP-379's job, unmeasured
+here. A group that materialises is reported as materialising, not as passing.
+
+**Reconciles with LP-377-D, does not contradict it.** ADR-300 deliberately left `income_stability` OUT of the
+per-document `applies_to` gate ("gating masks its real problem; LP-385 fixes the producer first"). Now that the
+group is `subject: borrower`, `applies_to` is dropped entirely — it is a per-document concept and the validator
+rejects it on a non-document group. The document-type filtering `income_stability` needs happens inside
+`_borrower_context` (it only reasons over the income doc-types among a borrower's attributed docs, per the
+prompt), not via the dispatcher gate.
+
+**The IN-10/IN-11 consumption gap (reported, not fixed).** Five dormant rules read these tags. IN-7/IN-13/IN-14
+read them **per_borrower** — satisfied directly by the borrower-keyed tags. IN-10/IN-11 read `is_declining` /
+`has_2yr_history` **per_document** — they now read a subject that no longer carries the tag, so they need a
+per_borrower spec change to consume it. Out of scope (all five rules dormant); named for the rule owner, not
+silently absorbed.
+
+**Cross-refs.** LP-378 / ADR-299 (the 0/120 finding + the reorder this executes), LP-332 (the borrower subject
++ the evidence-attribution invariant), LP-202 (the `belongs_to` document→borrower link), LP-336 (never a
+guessed attribution), LP-377-D / ADR-300 (why income_stability was left un-gated), LP-379 (the calibration that
+validates the term definitions this ticket only defaults), LP-368 (the census that first flagged the borrower
+context reading MISMO only).
+
+## ADR-302: A tag that cannot express a risk makes the risk uncatchable — widen txn.apparent_category (LP-379-E)
+
+**Context.** Calibrating LF-6T3N (LP-379), Priya labeled `txn.apparent_category` and reached for values the
+enum (`payroll | transfer_own | gift | loan_proceeds | refund | interest | fee | vendor | unknown`) could not
+hold: **third-party transfers** (*"Ravi transferred money to Akash"*, *"Akash transferred money to Anand
+Patel"* — the enum has only `transfer_own`, the borrower's OWN accounts) and **payments to a creditor**
+(*"Must be American Express CC payment"*, *"Some kind of mortgage payment — make sure this is not a monthly
+obligation, if so should flag?"* — lumped into `fee`/`vendor`). Her *"should flag?"* is an underwriter
+spotting a risk the system is STRUCTURALLY BLIND TO. **Where a tag cannot express a risk, no downstream rule
+can ever catch it — the information dies at the tag layer.** This is a hole in what the system can PERCEIVE,
+not how accurately it perceives.
+
+**Decision — widen the enum with three Priya-PENDING defaults, defined once in the converged prompt.**
+`transfer_third_party_in` (money in from a named third party), `transfer_third_party_out` (money out to a
+named person/entity that is not a merchant or creditor), and `debt_payment` (a payment to an apparent
+creditor). **These are DEFAULTS to confirm, not decisions taken** — an undefined category is LP-340's exact
+bug (the model picks one meaning, the labeler another), so each is DEFINED in the prompt and every one is
+flagged as a Priya item. The vocabulary lives in three places kept in sync: `fact_tags.csv` `allowed_values`
+(generic-producer coercion), `APPARENT_CATEGORY_VALUES` (standalone-producer coercion), and the prompt; the
+two prompt copies stay byte-identical under the LP-344 convergence guard (a test would go red on drift).
+
+**D1 — the tag reports the OBSERVABLE; recurrence is a RULE's job.** *"Recurring obligation"* needs MULTIPLE
+statements — a single-statement AI cannot see recurrence, and Priya's ground-truth descriptions were generic
+(*"CARD PURCHASE / PAYMENT"* $14,316 → she inferred "American Express" from the AMOUNT + judgment, not the
+text). So the honest tag is **`debt_payment`** — "a payment to an apparent creditor," observable when the
+description names a lender/card/servicer — NOT the ticket's proposed `recurring_obligation`. A **future DTI
+rule** detects recurrence across statements and sizes the undisclosed monthly obligation (noted here, NOT
+built). The tag reports the payee-is-a-creditor fact; the rule judges recurrence (LP-335).
+
+**D2 — gift/loan_proceeds are RULE conclusions, but they are load-bearing for dormant rules → kept, with the
+simplification flagged.** A bank statement rarely SAYS "gift"/"loan_proceeds" — those are conclusions after
+sourcing (AS-5 needs a signed gift letter; AS-2 an undisclosed-loan finding). By LP-335 the honest tag for an
+inbound is `transfer_third_party_in`, and a rule decides gift-vs-loan. **But dormant AS-2 (`==loan_proceeds`),
+AS-5 (`==gift`), and AS-12 read these values;** removing them would break those specs (out of scope). So they
+are KEPT, the prompt reserves them for when the description ITSELF states a gift/loan (rare), and the full
+simplification (gift/loan → rule conclusions, rewire AS-2/AS-5) is recorded as a Priya-item + future ticket —
+a smaller, honest enum, once its dormant consumers are re-architected.
+
+**D3 — no LIVE rule reads apparent_category, so widening shifts NOTHING live (structural, not just tested).**
+The ticket's premise that `apparent_category` "feeds AS-1" is refuted by the gate of record: AS-1's
+deterministic body reads `[is_money_in, amount, has_identified_source, source_strength]` and **never
+`apparent_category`** (fact_tags.csv's optimistic "used_by_rules: AS-1,…" notwithstanding). Only DORMANT
+AS-2/AS-5/AS-12 consume it. A test asserts no `ACTIVE_RULE_IDS` spec references the tag. The committed frozen
+fixture tags are unchanged (the AI is NOT re-run here); a real off-path probe confirmed the AI now emits
+`transfer_third_party_in` / `transfer_third_party_out` / `debt_payment` on named-payee descriptions (perception
+gap closed) while `payroll` etc. are unaffected.
+
+**Honesty preserved.** New categories are DEFAULTS flagged for Priya (not decided); recurrence detection is a
+future rule (not built); gift/loan kept because their dormant consumers still need them (the simplification is
+recommended, not forced); `unknown` stays first-class; the worksheet is NOT regenerated (it would destroy
+Priya's in-progress notes — LP-379-D re-scores). This changes what the system can PERCEIVE, nothing it decides.
+
+**Cross-refs.** LP-379 (Priya's calibration session — the source of the finding), LP-340 (undefined-term =
+the model-vs-labeler bug these definitions avoid), LP-343 (the prompt-bug class + the exemplary Stage-A
+prompt), LP-344 (the convergence guard the two prompt copies stay under), LP-314a (AS-1's source-strength
+ladder — what AS-1 actually reads), LP-335 (the tag reports what the document SHOWS; the rule judges).
+
+## ADR-303: A DB-sourced calibration worksheet for the human, alongside the fixture for CI (LP-379-D)
+
+**Context.** The ticket's premise was that Priya labeled the REAL DB file (Akash Patel, real BofA statements)
+while the harness scores the de-identified FIXTURE (Jordan/Taylor), so her labels share no `subject_id`s and
+are unscorable. **The gate of record REFUTED this:** all 122 of her filled goldens join to the FIXTURE
+worksheet 100% — she labeled the COMMITTED fixture CSVs, so her `subject_id`s ARE the fixture's. Two facts make
+them scorable against the fixture: her TRANSACTION labels sit on VERBATIM transactions (the fixture reuses the
+DB's real transactions unchanged — same content-ids, date/amount/description; only statement-level fields were
+de-identified), and her DOCUMENT labels use the fixture CONTEXT (`id.name_normalized="Jordan A Rivera"`,
+`documented_monthly=6500` = Jordan's data). Her notes name real people because she recognized them, not because
+the row keys are the DB's.
+
+**Decision — score her labels against the fixture NOW, and ADD a DB-sourced path for FUTURE real-document
+rounds (never replacing the fixture path).** Scoring the stable-vocabulary tags against the fixture (real
+reasoner): `txn.is_money_in` **98%** (49/50 — one real `in`-vs-`out` review case); `id.name_normalized`,
+`id.current_address_type`, `income.documented_monthly`, `income.employer_normalized` **100%**;
+`id.address_normalized` 0% — **not a model miss** but Priya's data-entry error (names typed into the address
+column, already flagged in LP-379-A; the model output the correct addresses). This is the first REAL
+calibration signal off a domain expert's labels.
+
+**Held, explicitly.** `txn.apparent_category` (50 labels) and `txn.has_identified_source` (0) are HELD from
+scoring via a named set (`HELD_FOR_RELABELING`), reported — never a silent skip. Her apparent_category labels
+are FREE TEXT ("transfer to some one", "Credit card payment"); LP-379-E widened the enum (already committed),
+so they can now be re-labeled to enum values — a mapping pass — before scoring. (The ticket's "hold until
+LP-379-E lands" is moot — it landed; the hold is now for the re-label.)
+
+**Two paths, clearly separated.** The FIXTURE path (`worksheet.py` + `build_lf6t3n_snapshot`) is the
+deterministic, keyless CI path — UNTOUCHED (a new module carries the DB path, importing the same generator).
+The DB path (`db_worksheet.write_db_worksheets`) reuses `build_snapshot` + the governed
+`document_filenames_by_content_id` + `write_worksheets` — same generator, different snapshot source — for a
+future round that labels the real DOCUMENTS (income/id), where the fixture is synthetic and her fixture-context
+labels don't transfer. It is DELIBERATE: never called by CI or a normal run.
+
+**PII containment (the serious constraint) — fail-closed, following LP-210.** A DB worksheet carries real
+borrower NPI (names, addresses; accounts/SSNs are PiiField-masked). It MUST NEVER be committed. A guard
+(`guard_pii_safe_out_dir`) refuses any output path inside the repo tree unless it is under a gitignored
+`calibration-local/` segment — outside-repo or gitignored only, raising rather than writing PII to a
+committable path; `.gitignore` covers `calibration-local/`. The generator only WRITES to that `out_dir`;
+`build_snapshot`'s own logging is the app's existing behaviour (masked fields). A test proves the guard
+rejects `docs/calibration/` and the write lands only under the given PII-safe dir.
+
+**Honesty preserved.** The premise refutation is reported, not hidden (a test pins the 122/122 fixture join);
+the held tags are held by a named set, not silently; `id.address_normalized` 0% is attributed to the labeler's
+data-entry error, not the model; the DB worksheet is never committed and never the CI path.
+
+**Cross-refs.** LP-345 (the live-reasoner path — scores real AI against fixtures/cases, does NOT build a DB
+snapshot, so this reuses `build_snapshot` directly), LP-379-A/B/C (the fixture chain + the real-filename
+`source_document` column she labeled against), LP-379-E (the widened enum the held apparent_category labels
+await a re-map onto), LP-210 (the real-PII generated-locally posture this follows), LP-334 (the calibration
+harness whose `summarize`/`failing_cases` produced these numbers).
+
+## ADR-304: apparent_category is measurable only where the memo carries a payee — not a prompt bug (LP-379-F)
+
+**Context.** LP-379-F mapped Priya's 50 free-text `apparent_category` labels onto the LP-379-E enum and scored
+them — the tag's FIRST measurement against a domain expert's labels. The gate of record surfaced a decisive
+constraint: **30 of the 50 labels sit on the SAME transaction memo — "CARD PURCHASE / PAYMENT"** — which
+carries no payee. Priya gave those 30 eight different categories (credit-card payment, mortgage, a transfer to
+a friend, an At&t bill, a fee…) from the AMOUNTS + the un-redacted file she opened via LP-379-C's real
+filenames. LP-379-E's prompt CORRECTLY tells the AI to categorize from the payee in the description, NOT the
+amount — so the AI cannot (and must not) reproduce her call. The memos are the AS-1 "PII-redacted transaction
+memo": the redaction that protects PII also removes the payee signal apparent_category needs.
+
+**Decision — score only where the DESCRIPTION supports the category; hold the rest, never guess.** The
+mapping (`apparent_category_relabel.relabel`) is CONFIRMED only for description-supported labels and HELD
+otherwise: 17 confirmed (payroll ×8 on "PAYROLL DIRECT DEPOSIT", interest ×4 on "INTEREST EARNED",
+transfer_own ×4 on "ONLINE TRANSFER … OWN ACCOUNT", one inbound), 33 held (30 generic-memo, 2 uncertain, 1
+typo). Scored: **accuracy 100% when concrete (16/16)** — the structuring layer is exactly right on the
+categories the memo supports. The 17th (an inbound Priya knew was from "Ravi") the AI **abstained** on —
+*"INBOUND PAYMENT RECEIVED is generic, provides no information about the sender"* — an HONEST abstention, not a
+miss: the prompt working as designed.
+
+**The finding: NO prompt bug — a DATA limitation.** apparent_category is unmeasurable on this file's redacted
+memos for the widened categories (`debt_payment`, `transfer_third_party_*`); the AI correctly abstains rather
+than guessing from the amount. Calibrating those categories needs transactions whose memos NAME the payee
+(real bank descriptions like "AMEX EPAYMENT", "ZELLE TO ANAND") — which LP-379-E's own probe confirmed the AI
+categorizes correctly. That is a calibration-DATA gap (a future ticket: descriptive-memo transactions, weighed
+against the PII the redaction removes), not a prompt or model fix.
+
+**Uncertainty preserved; her words preserved.** Where Priya wrote "not sure it's own transfer", the mapping
+returns `unknown`, held — a golden never more certain than the labeler. The mapping is a scoring-time
+TRANSLATION LAYER (`relabel`), applied to a copy at scoring; her committed free-text golden column is
+UNTOUCHED — the strongest form of "preserve her words" (a test pins that "transfer to some one" etc. remain
+verbatim in the worksheet). The proposed mapping is Priya's to confirm; the non-obvious 33 stay flagged.
+
+**Cross-refs.** LP-379-E / ADR-302 (the widened enum + the "categorize from the payee, not the amount"
+principle this validates), LP-379-D (the held 50 this scores; the fixture-join finding), LP-379-C (the real
+`source_document` filenames Priya labeled against — how she saw the un-redacted payees), LP-335/340/343 (the
+prompt discipline the 100%/honest-abstention result confirms is intact), AS-1 (the "PII-redacted memo" whose
+redaction removes the payee signal).
+
+## ADR-305: Activation bars — a declared, Priya-set decision surface; unmeasured ≠ low bar (LP-380)
+
+**What an activation bar is.** The accuracy a rule's load-bearing AI tags must reach before the rule ships a
+TRUSTED (auto, non-ratified) verdict. **It cannot be computed.** `is_money_in` at 98% may be plenty for a
+large-deposit FLAG (a false flag → a human glances) and nowhere near enough for a rule that AUTO-APPROVES (a
+false approval → a bad loan ships). The height is the COST OF ERROR for THAT rule — the FP-vs-FN asymmetry —
+which is DOMAIN judgment. **Priya's.** LP-380 builds the decision surface and PROPOSES a defensible default per
+rule (`validated: false`, the LP-379 priya_validated pattern); it sets no bar and activates nothing (LP-389).
+
+**The honest state (reported, not a pass): of 23 inert rules, only 2 are calibratable-now.** `activation_bars.yaml`
+classifies every inert rule: **calibratable-now (2)** — IN-1 (documented_monthly 100%), IN-5 (employer_normalized
+100%) — a bar can be set + met; **not-calibratable-yet (14)** — a load-bearing AI tag is PRODUCED but UNSCORED
+(income_stability, stmt/asset facts) or measured only in a different context (apparent_category is measured for
+payroll/interest/transfer_own but UNMEASURED for the gift/loan_proceeds/third-party categories AS-2/AS-5/AS-12
+actually read — LP-379-F); **needs-producer (1)** — IN-14's `occupancy.rental_support` has no declared producer;
+**no-ai-dependency (6)** — parsed/deterministic rules with no AI gate (activation is a wiring decision, cf. active
+IN-2/ID-8). The bar can be SET for 2 rules today; the rest are blocked.
+
+**Unmeasured ≠ low bar — the load-bearing distinction.** A rule with an unmeasured tag is **BLOCKED ON
+CALIBRATION**, not "sitting under a high bar it hasn't cleared." Conflating them ships a rule on a tag nobody
+measured — the AS-1/ID-2 silent-death class, one level up. So `not-calibratable-yet` carries `threshold: null`
+(the loader REJECTS a threshold on a non-calibratable rule) and `activation_mode` returns `blocked`, distinct
+from a calibratable rule below its bar (`needs_review`). The two are behaviourally and visibly separate.
+
+**Declared, not branched — the ~15th declared-key-resolved-by-registry.** A bar is a value attached to a rule
+in `activation_bars.yaml`, loaded + validated once, resolved by data. `activation_mode(bar, accuracy)` is pure
+and depends only on the bar's status/ships/threshold — NO per-rule-id branch in any evaluator (a test pins that
+two rules with identical bar data get identical modes).
+
+**One safety with LP-376-B, not a parallel one.** The bar and the ratification armor are the same guard, two
+settings. `activation_mode` reconciles them: a judgment rule (`ships: ratify`) NEVER auto-ships (LP-376-B — a
+human ratifies even at 100%); a calibratable auto-ship rule BELOW its bar routes to `needs_review`, not an
+untrusted auto-ship; an unmeasured rule is `blocked`. LP-389 wires this into activation; LP-380 only declares it.
+
+**Every default is Priya's to confirm** — the FP-vs-FN cost calls, the thresholds (0.98 for the fraud-adjacent
+IN-1, 0.95 for IN-5), and the ratify-vs-auto question (IN-1 may warrant ratify-only despite 100% — one file,
+one label set). `validated: false` on all; this ticket flips none. **A real finding for LP-389: only 2 rules
+have a settable bar; the activation surface is mostly blocked on calibration, not on Priya's bars.**
+
+**Cross-refs.** LP-379-D/F (the measured numbers + the apparent_category-unmeasured-for-gift finding this
+consumes), LP-376-B (the ratification armor this reconciles with), LP-385/LP-378 (why income_stability /
+stmt / asset tags are produced-but-unscored), LP-333 (the dormant-rule buckets), LP-389 (the activation pass
+this feeds), the priya_validated threshold discipline (rule_kinds.csv) the `validated:false` pattern follows.
+
+## ADR-306: The first activation pass is a DECLARED gate, not a list edit; ID-5 held on a subject mismatch (LP-389)
+
+**What activated.** Two inert rules went live: **IN-1** (documented-vs-stated income shortfall; bar 0.98 auto,
+Priya-validated; `income.documented_monthly` measured 100% at LP-379-D) and **IN-5** (employer consistency; bar
+0.95 auto, validated; `income.employer_normalized` measured 100%). `ACTIVE_RULE_IDS` goes 11 → 13. This
+SUPERSEDES the LP-333 IN-1 deferral (documented_monthly is now calibrated and the derived per-borrower producer
+is fixed).
+
+**Activation is a gate, not a hand-list — the load-bearing decision.** A rule goes live ONLY by passing
+`activation_bars.is_eligible(bar)`, fail-closed: an AI rule needs a Priya-VALIDATED bar its MEASURED accuracy
+clears (`measured_accuracy >= threshold`); a no-AI rule needs its parsed input VERIFIED to resolve to real
+values **at the subject the rule reads**. Everything else — an unmeasured tag, an unvalidated bar, a missing
+accuracy, an unresolved input, `needs-producer` — is HELD. `ACTIVE_RULE_IDS` stays an explicit list (the
+foundational registry must not import the bar loader — a circular edge), but a test pins `set(ACTIVE_RULE_IDS) -
+_BASE_ACTIVE == eligible_rule_ids()`, so a rule CANNOT enter the live set without meeting the gate, and the list
+can never silently drift from the declared evidence. The bars carry two new fields — `measured_accuracy` (the
+LP-379 number) and `input_resolves` (the verified-on-a-real-file bit) — both fail-closed defaults (None/False).
+
+**ID-5 was PROPOSED and HELD — the gate caught a producer/consumer subject mismatch.** LP-381 reported ID-5's
+parsed inputs (`id.id_expiration`, `contract.closing_date`) "resolve on LF-6T3N" — but at the **document**
+subject: both are declared `subject: document` and materialize on the ID/contract documents (`dl1`/`dl2`/`pa1`).
+ID-5 READS them at `tags.by_subject["loan"]`, so they never reach it and ID-5 couldnt_checks on **every** file,
+not just LF-6T3N (its existing tests only pass because they hand-place the tags at `loan`). So `input_resolves`
+is honestly **false**, the gate holds ID-5, and its subject model is a flagged follow-up — with two borrowers,
+"which ID is the loan-level expiration" is a Priya call, out of scope for a deliberately small pass. This is the
+declared gate earning its keep: a blind list edit would have shipped a rule that never checks anything.
+
+**A derived load-bearing tag pulls its upstream AI group (the second wiring fix).** IN-1's load-bearing tag is
+the DERIVED `income.documented_income_shortfall_pct`, which rests on the AI `income.documented_monthly`
+(group `income_amounts`). `_required_ai_groups` previously pulled a group only when the DIRECT load-bearing tag
+was AI — so IN-1 would have couldnt_checked forever (its AI input group never ran). Fix: an active rule's
+activation-bar `load_bearing_ai_tags` (which declare exactly the upstream AI a derived tag rests on — IN-1's bar
+names `income.documented_monthly`) are folded into the required set. `income_amounts` + `income_employer` move
+from dormant to live; the dormant probe's set shrinks 6 → 4 accordingly.
+
+**Phase 2 — the real run on LF-6T3N (reported, not predicted).** IN-5 → **SATISFIED** on both borrowers (resolves
+end-to-end). IN-1 → **couldnt_check**, root: that fixture's MISMO carries no borrower STATED income; the AI
+documented side is calibrated and the chain is correct, so it resolves on a file that states income — a DATA
+gap (the LP-381/382 derived-input-absent class), not a defect, and not a bar to activating an AI-accuracy-gated
+rule. ID-5 → couldnt_check, root: the subject mismatch above (held).
+
+**Cross-refs.** LP-380/ADR-305 (the bars this reads through `is_eligible`), LP-379-D (the 100% measurements that
+clear IN-1/IN-5's bars), LP-381 (the ID-5 "input resolves" claim this refines to the subject level; the no-AI
+input-resolves pattern), LP-382 (the derived-input-absent-on-LF-6T3N class IN-1's couldnt_check belongs to),
+LP-333 (the IN-1 deferral this supersedes), LP-376-B (the ratification armor `activation_mode` reconciles with).
+
+## ADR-307: ID-5's structural-dead subject mismatch — fixed per-borrower; the fifth instance (LP-389-A)
+
+**The bug (a fifth structural-dead instance — the AS-1/ID-2/OC-2/LP-321a class).** ID-5 ("the government photo
+ID must be unexpired at closing") read `id.id_expiration` + `contract.closing_date` at
+`tags.by_subject["loan"]`, but both are declared `subject: document` and materialize on the ID/contract
+DOCUMENTS (`dl1`/`dl2`/`pa1`). They never reach `"loan"`, so ID-5 couldnt_checked on **every** file — LP-389
+found this and held it. Its tests were green only because they **hand-placed the tags at `"loan"`** (a fixture
+asserting a fiction, LP-321a): the rule "passed tests" and was structurally dead.
+
+**Priya's decision: ID-5 checks EVERY borrower's ID — per-borrower, one verdict each** (a file with 2 borrowers
+→ 2 ID-5 findings, one per driver's licence). Not "the earliest expiration," not loan-level — per-borrower,
+mirroring LP-385's income move (document→borrower).
+
+**The shape: reuse LP-385's per-borrower-over-documents attribution — the tag stays a document fact, the
+CONSUMPTION becomes per-borrower.** `id.id_expiration` STAYS `subject: document` (a DL's expiration *is* a
+document fact). A new derived **borrower**-subject tag `id.borrower_id_expiration` promotes it: the recipe reads
+`id.id_expiration` from the driver's-licence `belongs_to`-ATTRIBUTED to that borrower (LP-202/332), reusing the
+extracted `_borrower_attributed_documents` primitive shared with `_borrower_documented_monthly` — one
+attribution mechanism, not two. ID-5 re-scopes to `subject_enumeration: per_borrower` and reads that
+borrower-subject tag against the loan's closing date.
+
+**The closing date — a gate-of-record correction.** The ticket assumed `contract.closing_date` was loan-level;
+it is `subject: document` (materializes on the purchase agreement). To honor both the intent (one loan-level
+closing date each borrower is checked against) and "do not change `contract.closing_date`," a new derived
+**loan**-subject tag `contract.loan_closing_date` promotes it (mirroring `housing.insurance_monthly`'s
+document→loan promotion); ID-5 reads it via a `loan_tag` operand. `contract.closing_date` itself is untouched.
+
+**Fail-closed, per-borrower isolation, doc-type scoping.** A borrower with no attributable driver's licence →
+`unknown` ("no driver's licence found for this borrower") → couldnt_check, never a guessed pass; ID documents
+that disagree on the expiration → `unknown` (ambiguous), never a silently-picked date. One borrower's ID never
+satisfies another's check (the LP-332 masking class). The promotion is scoped to `drivers_license` — because
+`id.id_expiration` is not doc-type-scoped (`homeowners_insurance` also emits an `expiration_date` field), an
+unscoped read would leak a policy's expiry into an ID check.
+
+**The fiction-asserting tests rewritten to the true path (LP-321a).** `test_typed_operands` and
+`test_identity_family_eval` placed ID-5's tags at `"loan"`; both now place the derived tags at the TRUE subjects
+(borrower + loan) with a `belongs_to` document so the per-borrower enumerator yields the borrower. A new
+`test_id5_per_borrower_lp389a` pins the full documents→`materialize_tags`→per-borrower-ID-5 path, the isolation,
+the fail-closed reasons, and the doc-type scoping. A test that places a tag where the rule wrongly reads it hid
+this bug for five rule-generations — it is worse than no test.
+
+**Activation (earned this time): 13 → 14.** ID-5's input now resolves at the subject it reads, so its bar's
+`input_resolves` flips true and the SAME LP-389 gate (`is_eligible`) admits it — the gate never changed, only
+the evidence did. Phase 2 real run on LF-6T3N: **both borrowers SATISFIED** (DLs expire 2029-06-12 / 2028-02-28,
+both after the 2026-07-15 closing). NB the ticket predicted a fire from different dates (2026-06-26 / 2027-08-03)
+that the fixture does not carry; the fire path is proven with a synthetic expired DL instead.
+
+**A reported limitation.** The per-borrower rule enumerates borrowers from documents' `belongs_to`, so a
+borrower with ZERO attributed documents is not enumerated and gets no ID-5 verdict (inherent to LP-385's
+document-driven shape). A borrower with *any* document but no DL IS checked (couldnt_check). Closing the
+zero-document gap would need a MISMO-borrower-driven rule enumerator — a separate change.
+
+**Cross-refs.** LP-389/ADR-306 (the mismatch this fixes + the gate that admits ID-5), LP-385 (the per-borrower
+document→borrower shape reused), LP-321a (fiction-asserting tests), LP-332/LP-202 (borrower attribution /
+`belongs_to`), LP-328 (the `date` typed operand + `loan_tag` operand ID-5 uses), LP-374 (`housing.insurance_monthly`,
+the document→loan promotion precedent).
+
+## ADR-308: A frozen base fixture + an extended sibling; the second activation pass; IN-3's misclassification (LP-384)
+
+**The problem.** Five no-AI deterministic rules (AS-9, IN-4, AS-3, AS-10, IN-3) resolved `unknown` because
+LF-6T3N lacked the documents they read — not because they are broken (LP-381/382/383 established the pattern).
+LP-384 adds those documents, proves each rule's verdict, and activates what passes the eligibility gate.
+
+**Decision 1 — a frozen base + an extended sibling, not a mutated base.** `build_lf6t3n_snapshot` is consumed
+by many frozen tests (worksheet / eval traces that assert its exact 30-document shape). Mutating it to add
+documents would break those consumers for reasons unrelated to what they test. So LP-384 adds a SIBLING
+`build_lf6t3n_plus()` = the base snapshot + exactly three appended documents, each carrying a KNOWN, asserted
+answer (the fixture has asserted a fiction five times — LP-321a/337/365/379-A/ID-5 — so every addition is
+built to a provable catch, never "it resolved"):
+* two VOEs with a DELIBERATE 77-day employment gap → **IN-4 FIRES** (beyond the 30-day window); a no-gap
+  variant satisfies.
+* one bank statement declaring "Page 1 of 5" with only 4 present → **AS-9 FIRES** ("a page is missing"); a
+  complete statement satisfies. It joins an EXISTING account + month, so **AS-10 is undisturbed** (this
+  document exercises AS-9 only).
+The base is byte-identical; the extension only appends (a test pins that no existing document's tags change).
+
+**Decision 2 — activate the three that resolve; the gate admits them.** AS-9, IN-4, and AS-10 pass the
+eligibility gate (`input_resolves` flips true, verified on the fixture), so they enter `ACTIVE_RULE_IDS` via the
+declared gate (not a hand-list): **14 → 17**. AS-10 needed no fixture change — it ALREADY resolves on the base
+(the statements grew account identity + period dates as the fixture matured; LP-381's "input absent" went
+stale). AS-3 stays HELD, fail-closed: its `calc.cash_to_close` recipe is a stub with no §3B cash-to-close
+calculator (LP-383) — data cannot unblock it.
+
+**Decision 3 (reported, not fixed) — IN-3 is misclassified as no-AI.** IN-3's load-bearing tag is the derived
+`income.ytd_annualized_shortfall_pct`, but that recipe reads `income.documented_monthly` (AI, income_amounts)
+alongside the parsed ytd_gross/pay_date. So IN-3 has a TRANSITIVE AI dependency — the same shape as IN-1 — and
+cannot resolve from fixture documents alone (it abstains on "documented monthly income is absent"). Its
+`no-ai-dependency` bar is wrong; it is an income-wave rule. LP-384 holds it (fail-closed) and its bar's
+rationale now records the misclassification, to be reclassified (calibratable, via documented_monthly's 100%
+measurement) when the income wave activates it. Not corrected here — reclassification is that wave's Priya call.
+
+**Cross-refs.** LP-381/382/383 (the five stuck rules + their inputs), LP-389/ADR-306 (the eligibility gate this
+activates through), LP-379-B (the fixture growth that made AS-10 already-resolve), LP-323-AS-B (the §3B
+cash-to-close calculator AS-3 waits on), LP-333/369 (the field-name trap the added documents close).
+
+## ADR-309: IN-10/IN-11 re-scoped per-borrower — the sixth structural-dead instance; a direct read, no recipe (LP-390-1)
+
+**The bug (a sixth structural-dead instance — AS-1/ID-2/OC-2/ID-5/IN-12-class).** LP-385 moved the
+income_stability tags (`income.is_declining`, `income.has_2yr_history`) to `subject: borrower` — income trend
+is a cross-document question the AI answers over a borrower's income documents (LP-378 measured per-document at
+0/120). But IN-10 (`is_declining`) and IN-11 (`has_2yr_history`) still read them `per_document` at the W-2
+subject, where the borrower-subject tag never lives → **couldnt_check on every file, silently**, every test
+green. LP-385 flagged it as its own ticket; this is it.
+
+**The fix — a DIRECT read, simpler than ID-5 (no promotion recipe).** ID-5 (LP-389-A) needed a promotion
+recipe because its source tag was `subject: document` and had to be lifted to the borrower. Here the tag is
+ALREADY at the borrower subject (LP-385 put it there) — so the fix is a pure SPEC re-scope: IN-10/IN-11 become
+`subject_enumeration: per_borrower`, drop the `document.document_type == w2` applicability, and read the
+borrower-subject tag directly through the per_borrower enumerator's merged map (exactly how IN-1 reads its
+borrower-subject shortfall). No new code, no recipe, no producer change. Fail-closed (a borrower with no
+evidenced trend → the tag is absent/unknown → the gate couldnt_checks with a reason), per-borrower isolation
+(one borrower's trend never feeds another's — the LP-332 masking class).
+
+**Verified, still inert.** On the wired fixture with income_stability materialized, IN-10/IN-11 now reach REAL
+per-borrower verdicts (a declining borrower → FIRED; a stable one → SATISFIED; unknown → couldnt_check-with-a-
+reason) — the rule can now DISTINGUISH, where before it always couldnt_checked-because-empty. They stay INERT
+(`ACTIVE_RULE_IDS` unchanged): the tags are AI and UNSCORED, so their bars are `not-calibratable-yet` — held
+on CALIBRATION now (the income wave), not on the subject mismatch. The bar rationales are updated to record the
+mismatch resolved.
+
+**A reported additional instance (deferred, by scope).** IN-12 reads the SAME `income.has_2yr_history`
+(borrower subject) `per_document` at the tax-return subject — the identical latent mismatch. It is out of this
+ticket's scope (LP-390-2 audits the other income rules); reported here and in the ticket doc, its fiction test
+left in place (still hand-placing the tag) until LP-390-2. IN-13 already reads its borrower-subject tag
+per_borrower (correct).
+
+**The fiction-asserting tests rewritten (LP-321a).** IN-10/IN-11's tests hand-placed the tag at the W-2/tax-
+return DOCUMENT subject and asserted FIRED — green only because they wired the tag where the rule wrongly read
+it. Rewritten to the true per-borrower path (the tag at `by_subject[borrower_id]`, a `belongs_to` document so
+the enumerator yields the borrower), plus a test that the same tag at the DOCUMENT subject now couldnt_checks
+(proving the rule no longer reads there) and per-borrower isolation.
+
+**Cross-refs.** LP-385 (moved the tags to the borrower subject — the producer this consumes), LP-389-A/ADR-307
+(the per-borrower fix pattern; ID-5 needed a recipe, this does not), LP-321a (fiction-asserting tests),
+LP-332/LP-202 (borrower attribution), LP-378 (the 0/120 that proved per-document can't answer income trend),
+LP-390-2 (the audit of the remaining income rules — IN-12 confirmed as the same class here).
+
+## ADR-310: IN-12 + AS-5 are blocked-on-producer, not subject fixes; the income wave calibrates 12, not 14 (LP-390-2a)
+
+**The finding.** LP-390-2's audit classed IN-12 and AS-5 as subject-mismatches (structurally dead). LP-390-2a
+tried to fix them and found the gate of record disagrees: **neither is a subject fix — both are blocked on a
+PRODUCER that does not exist.** Per the decision on the ticket, neither is fixed; both become producer subtasks.
+
+**IN-12 — not the IN-11 fix.** IN-12 reads `income.has_2yr_history` per_document (tax_return); the producer is
+at `subject: borrower`. A naive per_borrower re-scope (the IN-10/IN-11 fix) makes IN-12 fire IDENTICALLY to
+IN-11 — both read the borrower's `has_2yr_history`, which is **income-type-agnostic** — collapsing the
+self-employment rule into the variable-income rule. The LP-390-1 reviewer pinned exactly this (a `strict`
+xfail). Keeping IN-12 self-employment-specific needs a **borrower-level self-employment signal**: `income.type`
+has a `self_employment` value but is `subject: document` (not in the per_borrower map), and `income_stability`
+produces no income-type tag. No such signal exists → blocked on a producer.
+
+**AS-5 — a redirection with no linking tag.** AS-5 reads `txn.apparent_category` (a **transaction** fact) at a
+`gift_letter` **document** subject. Its two sides — the gift letter (document) and the gift deposit
+(transaction) — have **no linking tag**: no gift-letter-presence tag exists (only `voe_present` /
+`offer_letter_present`, for income docs), and no loan-level gift-deposit-present signal exists. So no subject
+choice makes both sides readable → blocked on a producer.
+
+**Neither blocks Priya.** `has_2yr_history` already reaches IN-11 and `apparent_category` already reaches AS-2
+(both calibration-ready), so fixing IN-12/AS-5 adds no new calibration target. **The income wave's calibratable
+count stays 12 (LP-390-2), not 14.** The premise "two simple subject fixes" was wrong for both; they join
+IN-14 / AS-7 as producer-blocked in the LP-390-8 fix list.
+
+**Two producer gaps reported (LP-390-8):** (1) a borrower-level self-employment signal (promote `income.type`
+to the borrower, or income-type-specific history) — unblocks IN-12 AND resolves IN-11's pinned over-fire (a
+shared fix); (2) a gift-documentation signal (gift-letter-presence and/or loan-level gift-deposit-present) —
+unblocks AS-5.
+
+**Cross-refs.** LP-390-2 (the audit that flagged them), LP-390-1 (the reviewer xfail that pinned IN-12's
+non-triviality; the IN-10/IN-11 fix this does NOT transfer), LP-385 (the borrower-subject income producer),
+LP-379-E/F (the `apparent_category` widening + `gift` unmeasured on LF-6T3N), LP-323-IN-B (IN-11's pinned
+set-membership over-fire, the same income-type gap).
+
+
+## ADR-311: The first income-wave activation — AS-2 (auto) + AS-12 (ratify) go live; the AS-5 stray-flag fail-closed hardening (LP-390-7)
+
+**The decision.** Activate exactly two AI rules through the eligibility gate: **AS-2** (earnest-money sourcing,
+ships auto) and **AS-12** (borrowed-funds detection, ships ratify). Both had their load-bearing tags measured
+against Priya's labels — `apparent_category` re-scored **100% concrete (n=17, LP-390-5a)** once the free-text
+goldens were mapped to the enum, and `has_identified_source` **93.8% (n=16, LP-390-5)** — and Priya signed off
+the proposed 0.90 bars. `measured_accuracy 0.938 >= 0.90` → the gate admits both. `ACTIVE_RULE_IDS` 17 → 19.
+
+**Via the gate, not a hand-list.** Activation is `validated: true` in `activation_bars.yaml` PLUS the id in
+`registry._LP390_ACTIVATED` — kept in sync by `test_activation_gate_lp389` (`ACTIVE_RULE_IDS − _BASE_ACTIVE ==
+eligible_rule_ids()`). A rule cannot enter the live set without passing `is_eligible`.
+
+**The real run (reported, not predicted; a point-in-time live run on LF-6T3N).**
+- **AS-2 (auto): 0 FIRED** — it does NOT falsely fire (LF-6T3N has no `loan_proceeds` deposit, AS-2's trigger).
+  15 satisfied + 2 needs_review on the 17 money-in deposits; 33 couldnt_check on the money-out transactions
+  (Stage-B produces `has_identified_source` only for money-in, so a sourcing rule has nothing to check on an
+  outflow — couldnt_check is the safe non-verdict, not a false pass).
+- **AS-12 (ratify): 0 auto** — 16 needs_review (surfaced for human ratification, LP-376-B) + 34 couldnt_check.
+  Every verdict routes to a human or is a non-verdict; it never auto-ships.
+
+**The loan_proceeds n=0 caveat AS-2 ships with.** AS-2 fires on `apparent_category == loan_proceeds`, a value
+that does not occur on LF-6T3N — so its specific trigger is UNTESTED. `apparent_category` is measured broadly
+(100% concrete across payroll/interest/transfer_own/third_party), and `measured_accuracy` is recorded as the
+weaker MEASURED gate (`has_identified_source` 0.938), not `apparent_category`'s 1.0, so the number does not
+over-read the untested trigger. A file with a loan-proceeds deposit would strengthen it; Priya signed off
+knowing this.
+
+**The AS-5 stray-flag hardening (fail-closed).** The ticket warned of `AS-5: validated: true` while
+`status: not-calibratable-yet, threshold: null` — a contradiction that would sign off a rule with no bar.
+Against the gate of record it was already `validated: false` (LP-390-5a), and the loader ALREADY rejects the
+scenario: `parse_bar` raises "only a calibratable-now rule may be validated" on any non-calibratable rule
+(LP-380). So no data fix and no loader change were needed — the safety already exists. LP-390-7 PROVES it: a
+test asserts AS-5 stays held and that `validated: true` on its null-threshold/not-calibratable state is a LOAD
+ERROR, not silent eligibility. A mis-set sign-off cannot leak a rule live.
+
+**Still held.** AS-5 (a DESIGN question — is `gift` a tag value or a rule conclusion, ADR-302 — plus gift n=0)
+and IN-3 (calibratable-now but Priya has not signed its shortfall bar). Every other candidate fails the gate
+(unmeasured tag / needs-producer / input absent).
+
+**A reported observation (polish, not a blocker).** AS-2/AS-12 enumerate per-transaction and couldnt_check the
+~33 money-out transactions (their sourcing tags exist only for money-in). An `is_money_in == in` applicability
+filter (as AS-1 has) would trim that noise — a follow-up, not dangerous (couldnt_check surfaces nothing false).
+
+**Cross-refs.** LP-390-5a (apparent_category re-score + the calibratable-now flip), LP-390-6 (the proposed
+bars), LP-390-5 (has_identified_source measurement), LP-389/389-A (the eligibility gate + the two-step
+activation), LP-380 (the bar mechanism + the loader's validated-only-on-calibratable guard), ADR-302 (the AS-5
+gift-as-conclusion design question).
+
+
+## ADR-312: The third rule state — applicable-but-manual: a blocked-but-applicable rule flags manual review instead of silence (LP-391)
+
+**The problem.** A BLOCKED rule (not in `ACTIVE_RULE_IDS` — uncalibrated tag / missing producer) runs NOTHING,
+so a file that qualifies for it produces SILENCE. For real-file testing (a processor on staging), silence reads
+as "checked, nothing found" when it is really "didn't look" — a real gift / NSF / reserve / income-trend issue
+passes unnoticed. But a blocked rule genuinely cannot ship a TRUSTED verdict (that is why it is blocked).
+
+**The decision — a THIRD rule state.** Between **live** (a trusted verdict) and **inert** (silence) sits
+**applicable-but-manual**: a blocked rule that is APPLICABLE to a file surfaces to Tab 1 (Needs Attention) as an
+explicit `PENDING_AUTOMATION` — "manual review — the automated check is not active yet" — WITHOUT shipping the
+uncalibrated verdict. The honest middle between silence and a wrong finding.
+
+**The applicability-vs-verdict line (the crux).** Applicability ("this file HAS an income trend / reserves /
+gift letter") is safe to detect; the VERDICT ("this income IS stable / these reserves ARE sufficient") is the
+uncalibrated judgment that must NOT ship. LP-391 detects the former and discards the latter.
+
+**The generic, declared mechanism (no per-rule branch).** Evaluate each blocked candidate rule (generic:
+activation-bar candidates minus the active set) with the SAME dispatch the live rules use. Where it reaches a
+VERDICT (satisfied / fired / needs_review — applicable + data present, but untrusted) its would-be verdict is
+DISCARDED and a `PENDING_AUTOMATION` flag ships instead, carrying NO load-bearing tag values (no leak). Where it
+`couldnt_check` (data / producer absent — AS-7's NSF, IN-14's rental support) or `not_applicable` (out of
+scope) it stays honestly DARK — no fabricated flag it cannot support.
+
+**The can-surface vs cannot-surface-yet split (empirical, on LF-6T3N).** Surfacing NOW: the per-borrower income
+rules whose tags are produced — IN-7 (job change), IN-10 (declining), IN-11 (2yr history), and (on the extended
+fixture) IN-8. Staying dark until their producer / data exists: AS-4 (reserves calc gated), AS-7 (no NSF
+producer), IN-13 (continuance unclear), IN-14 (rental_support has no producer — LP-390-2a), and the document
+rules AS-5 / AS-11 / IN-12 (no gift-letter / retirement-account / tax-return document on this file). The line is
+NOT the ticket's per-rule guess — it is whether the rule reaches a verdict, which the gate of record decides.
+
+**Materialization cost, isolated.** A blocked rule can only reach a verdict if its tags are materialized, and
+production materializes only the LIVE rules' AI groups. So the pending-check pass materializes the blocked
+rules' groups too — the deliberate extra AI cost of honest surfacing — but on a THROWAWAY snapshot copy,
+BEST-EFFORT: a blocked/uncalibrated group can never flip `run.degraded` or leak its tags into the persisted
+snapshot, and a failure yields no flags rather than failing the run. The live pass and the persisted snapshot
+are byte-identical to before.
+
+**The house rule holds — this NEVER ships an uncalibrated verdict.** A `PENDING_AUTOMATION` flag is not a
+verdict: it carries no satisfied/open, no confidence, no load-bearing tag values. `ACTIVE_RULE_IDS` is
+unchanged (a blocked rule is NOT activated as trusted) — the third state is distinct from activation.
+
+**The surface.** A new `EvaluationOutcome.PENDING_AUTOMATION` (Verdict + outcome + a Tab-1/YELLOW mapping) and a
+distinct frontend label ("Manual review") — visually unmistakable as "not yet automated", never aliased with a
+real `needs_review` (a judgment worth ratifying) or `couldnt_check` (a data gap) or `satisfied` (a pass).
+
+**Cross-refs.** LP-390-2 (the blocked/wiring audit) and LP-390-5/5a (what is measured) — which rules are
+blocked and why; LP-390-8 (the producers the cannot-surface-yet rules — AS-7's NSF, IN-14's rental support —
+still need); §8 (the outcome model / the tabs). The path to a real verdict replacing a manual-review flag is
+calibration (a Priya-signed bar) or a producer, per each rule's LP-390 status.
+
+
+## ADR-313: Name-match goldens do not carry from the de-identified fixture to the real-DB worksheet — some of Priya's labels need re-doing on real data (LP-392)
+
+**The context.** LP-392 generates Priya's labeling worksheet from the REAL loan file (real identities, masked
+here), because the committed worksheet's context showed the DE-IDENTIFIED fixture (Jordan A Rivera / First
+Springfield Bank) while she validates against the real PDFs — so the two didn't line up and
+`stmt.owner_matches_borrower` ("does this account holder match the borrower?") was unanswerable. The real-DB worksheet is LOCAL + gitignored (real PII, never committed); the committed fixture
+worksheet is untouched (CI).
+
+**The finding — a name-match golden cannot safely carry.** Priya's 159 committed goldens join to the real-DB
+worksheet by the stable `(tag_id, subject_id)` key: **121 carry** (transaction + bank-statement rows share
+content_ids with the DB), **33 drop** (fixture-only subject_ids — the DL / investment / pay-stub / W2 rows,
+whose DB content_ids differ), and **5 are FLAGGED for re-label**: `stmt.owner_matches_borrower` on the five
+bank statements. Its subject_id MATCHES the DB, so it WOULD silently carry — but its meaning is a name-match,
+and a fixture 'yes' (Jordan==Jordan) is NOT evidence the real account self-matches. Carrying it would ship a
+now-possibly-wrong golden into a real-context row.
+
+**The decision.** A tag whose golden's MEANING depends on the (now-changed) identity context is NOT carried on
+the real-DB path — it is BLANKED and FLAGGED for re-label (`worksheet.write_worksheets`'
+`relabel_on_context_change`; `db_worksheet.RELABEL_ON_REAL_CONTEXT = {stmt.owner_matches_borrower}`). Visible,
+never a silent carry. The fixture path (empty relabel set) is byte-unchanged.
+
+**What it affects.** `stmt.owner_matches_borrower` was MEASURED in LP-390-5 (5 bank statements, 100% abstain —
+the producer can't see the borrower names, LP-390-6's AS-6 finding). Those goldens were labeled on the
+de-identified fixture; on real data Priya must RE-JUDGE them. So the AS-6 calibration record rests on
+fixture-context goldens that need redoing — reported here so a future AS-6 activation does not lean on a golden
+whose real-data answer is unconfirmed. (The 33 dropped rows — DL/investment/income mechanical labels — also
+need filling on the real worksheet; those are absence, not a wrong carry.)
+
+**Scope note.** The de-identified NAME/ADDRESS mechanical goldens (`id.name_normalized`,
+`id.address_normalized`) would ALSO be wrong in a real row, but they DROP anyway (their DL subject_ids don't
+match the DB) — so no carry, no flag needed. Only `owner_matches_borrower` both matches by key AND depends on
+the identity, so it is the one that must be actively re-flagged.
+
+**Cross-refs.** LP-379-D (the DB worksheet path + the PII guard), LP-390-3/3a (the worksheet finalization +
+the prior 71-label DB copy), LP-390-5/6 (the `owner_matches_borrower` measurement + the AS-6 producer/context
+finding this partly rests on), the LP-210 PII posture (real-loan artifacts generated locally, gitignored).
+
+
+## ADR-314: The scenario-fixture pattern — a standalone, scenario-driven snapshot for thin-n calibration, never merged into the realism anchor (LP-393-1)
+
+**The problem.** Six rules (IN-7, IN-10, IN-11, IN-12, IN-13, AS-11) are blocked purely on SAMPLE SIZE: their
+tags are per-borrower and LF-6T3N has only 2 borrowers, so each caps at n=2 (AS-11 at n=3) — a smoke test, not
+a measurement (LP-390-5/6, confirmed on real data by LP-392). The wiring is fixed and the tags produce; the
+ceiling is the FILE, not the code.
+
+**The pattern.** Build a STANDALONE, scenario-driven snapshot per calibration wave —
+`income_scenarios.build_income_calibration_snapshot`: ~11 scenario borrowers (+ D4 continuance probes) and 6
+asset accounts, each at the MINIMUM viable structure for the tag it exercises. It is COMPLETELY SEPARATE from
+LF-6T3N: own loan / borrower / content ids, never imported by (or importing) the LF-6T3N builders, asserted
+both ways; LF-6T3N stays byte-unchanged. The two fixtures answer different questions — LF-6T3N = "do rules work
+on realistic data (real transactions, real structure)"; this = "scenario variety for measurement" — and
+keeping them apart lets each number be reported separately (more informative than one blended one). Merging
+scenario borrowers into the realism anchor would destroy its realism and break its frozen tests.
+
+**Why Level 1 (a synthetic snapshot, not generated PDFs).** What is blocked is the AI's REASONING about income
+scenarios (a 2-year trend, a decline, a line-of-work change). Document EXTRACTION is separately calibrated
+(documented_monthly / employer_normalized both 100%, LP-379-D), so re-testing it through fake PDFs buys nothing
+here. The snapshot varies EXACTLY the fields the group reads (`tax_year` + `wages_tips_other_comp` for
+history/decline; `employer_name` + an occupation field for same_line_of_work; a stated income END for
+continuance_3yr), verified against the prompt/context builder, not assumed.
+
+**The synthetic-data caveat.** A tag validated on this fixture is validated for REASONING, not for robustness
+to real-document messiness (OCR noise, odd layouts, missing fields). LF-6T3N covers realism; this covers
+scenario breadth. **A bar set on a number measured here must carry that caveat** — pair it with the LF-6T3N
+smoke result, never treat the scenario n as a full production validation.
+
+**Clear-cut vs ambiguous (anti-anchoring, LP-337).** The clear-cut scenarios (B3-B8) have a KNOWN expected
+answer, recorded in `CLEARCUT_EXPECTATIONS` for the probe + tests — NEVER written to a worksheet. The ambiguous
+scenarios (B9-B13) carry NO encoded answer anywhere a labeling worksheet could surface it: Priya labels them
+blind and HER label becomes the definition (is a 2% drop "declining"? is a promotion "same line of work"? does
+a partial 2nd year count?).
+
+**The probe (real model, off-path, reported not asserted — the model is non-deterministic).** Per-tag
+non-unknown n on the scenario snapshot: `has_2yr_history` 13, `is_declining` 11, `same_line_of_work` 12,
+`asset.liquidation_terms` 6 — all >= 6, the thin-n ceiling broken for IN-7/IN-10/IN-11/AS-11. All six clear-cut
+checks PASSED (B3 declining=yes, B4 no, B5 history=no, B6 yes, B7 same-line=yes, B8 no). TWO honest gaps remain
+(NOT solved by n):
+- **continuance_3yr stays thin (n=1).** Standard W-2 employment honestly yields `unknown` (LP-385); only a
+  fixed-term VOE with a stated end (B14) produced `no`. So IN-13 is blocked on more than sample size — it needs
+  fixed-term/other-income variety AND `income.type` (a different producer, income_amounts), not just borrowers.
+- **IN-12 is not exercisable here.** It needs `has_2yr_history` for a SELF-EMPLOYMENT (tax_return) borrower,
+  but income_stability reads only w2/pay_stub/voe/1003 — a tax-return-only borrower yields `unknown`. IN-12
+  stays blocked on the producer gap (LP-390-2a), not on n.
+
+**Cross-refs.** LP-390-5 (the thin-n finding), LP-392 (the ceiling confirmed on real data), LP-384 (the
+scenario-extended-fixture precedent, `build_lf6t3n_plus`), LP-385 (the per-borrower income producer + its
+context builder), LP-337 (anti-anchoring), LP-390-2a (the IN-12 producer gap).
+
+## ADR-315: Priya's scenario corrections — two prompt/label fixes, one confirmed-correct prompt, and the stale-golden trap (LP-393-4 / 4a)
+
+**Context.** LP-393-4 scored the AI against Priya's blind scenario labels and drew three "definitional
+divergence" findings. On review she CORRECTED them: two were label slips / an inverted reading, one was a
+FIXTURE defect. LP-393-4a applied her 5 label corrections, fixed the fixture + one prompt, and re-scored.
+**LP-393-4's scores are SUPERSEDED by the re-score below.**
+
+**is_declining — no materiality gap; it was a label slip → 100%.** LP-393-4 read B9 (−2%) as "the AI over-calls
+any drop declining." Priya's B9 label was a SLIP (`no` → **`yes`**): she agrees any year-over-year decrease is
+declining. Corrected + re-scored, is_declining is **100% (13/13)**, clear-cut passes. No prompt change. →
+**IN-10 ready for a bar.**
+
+**asset.liquidation_terms — the finding was INVERTED; the AI UNDER-restricts → 100% after the prompt fix.**
+LP-393-4 read "the AI over-discounts, Priya says fully_liquid." **Backwards.** Priya says a retirement account
+with early-withdrawal PENALTIES — 401(k), IRA, Roth, INCLUDING a fully-vested one — is `restricted`, not usable
+at face for reserves; the AI was calling those `vested_usable` (UNDER-restricting) and she had 3 labels slipped
+to `fully_liquid`. **Her precedence rule (the tag's definition):** (1) PARTIAL vesting present → `vested_usable`
+(the partial vesting governs); (2) else PENALTIES present (even fully vested) → `restricted`; (3) else →
+`fully_liquid` (brokerage/taxable). LP-393-4a encoded this in the `asset_facts` prompt and corrected the 3
+labels; re-scored, liquidation_terms is **100% (6/6)** — restricted (2 Roth + the fully-vested 401(k)),
+fully_liquid (2 brokerages), vested_usable (the graded 401(k)). → **AS-11 ready for a bar.** (This explains the
+LP-390-5 Roth signal: the AI was under-restricting all along.)
+
+**same_line_of_work — a FIXTURE defect, not a definitional divergence; the prompt was RIGHT.** LP-393-4's 38%
+was because 7 scenario borrowers had NO `occupation` field — Priya marked those rows `unknown` "No occupation
+given." Her rule confirms the prompt: **"no job change → yes"** (one employer AND unchanged occupation = `yes`).
+LP-393-4a added a realistic, unchanged occupation to every such borrower — **no prompt change** (the prompt was
+correct).
+
+**THE STALE-GOLDEN TRAP (a real finding — reported, not explained away).** After the fixture fix,
+same_line_of_work did NOT improve — it went 38% → **31%**. Root cause: Priya's goldens were labeled on the
+occupation-LESS worksheet (her `unknown` = "no occupation given"), but the re-score runs the AI on the
+occupation-PRESENT fixture. So the fixed AI (now `yes`, "same employer + same occupation, no job change" — which
+MATCHES her stated rule) is scored against her STALE `unknown` labels. The number is invalid: fixing the
+fixture invalidated the labels made on the old one. **same_line_of_work needs a RE-LABEL round on the
+occupation-present worksheet before it can be measured** — its prompt is confirmed correct, and by her rule the
+AI's no-change→`yes` answers are likely right, but that is HER call, not a re-derivation here. → **IN-7 stays
+blocked on a re-label**, not a prompt fix. (Process lesson: a fixture fix mid-calibration stales the goldens
+labeled on the old fixture — re-label before re-scoring.)
+
+**The one OPEN framing question (has_2yr_history / B14) — her call, unchanged here.** B14 (Beacon, contract
+ENDED 2026-06-30, two W-2s present): AI=`yes` (two years of history exist), Priya=`no` ("looks like currently
+unemployed… need a new offer letter + a paystub"). Strictly the tag asks HISTORY (which exists); she answered
+CONTINUATION. Both readings recorded; B14's label left AS SHE WROTE IT (`no`); the has_2yr_history prompt is NOT
+changed — it needs her explicit ruling ("does a terminated job's two years still count as history?"). Otherwise
+has_2yr_history is **85%**, clear-cut passes (B12 is her pay-stub-only-needs-a-W-2/1099 nuance). → **IN-11 ready
+for a bar**, with B14 flagged.
+
+**THE SYNTHETIC-DATA CAVEAT (LP-393-5's bars must carry it).** These validate the AI's REASONING on CLEAN
+scenario data, NOT robustness to real-document messiness — pair any bar with the LF-6T3N real-data result (n=2,
+indicative).
+
+**Cross-refs.** LP-393-1 (the fixture), LP-393-2 (the blind-labeling instrument), LP-393-4 (the superseded
+first scoring), LP-390-5 (the harness + the now-explained Roth signal), LP-337 (anti-anchoring).
+
+## ADR-316: Priya's four rulings settle the scenario tags; validating a bar activates it (no decouple); a judgmental rule ships ratify despite an AUTO sign-off (LP-393-6)
+
+**Context.** LP-393-5 proposed bars for the four scenario-calibrated rules (IN-7, IN-10, IN-11, AS-11) and left
+four open items for Priya. She settled all four; applying them forced two structural decisions this ADR records.
+
+**Ruling 1 — B14 framing (a definitional change to what `has_2yr_history` means).** *A TERMINATED job's two
+years DOES still count as HISTORY.* `has_2yr_history` asks about HISTORY only; whether an ended job's income
+CONTINUES is a different question. **Ruling 2 — the documentation standard is a SEPARATE check.** The
+W-2/1099/offer-letter requirement (pay-stub-only needs a W-2/1099; a lapsed VOE needs an offer letter + a
+paystub) is NOT part of `has_2yr_history`. These two rulings make IN-11's two recorded "misses" (B12, B14)
+OUT-OF-SCOPE for the tag — the AI answered the tag's actual question correctly both times.
+
+**Re-scored, never hand-edited.** At `measured_accuracy 0.85` vs a `0.90` bar, IN-11 failed its own gate. The
+principled fix under the ruling: update B12 + B14's `has_2yr_history` goldens to `yes` (history exists in both),
+**preserving her originals in the worksheet Note as the record of why they changed**, then RE-SCORE with the
+real reasoner. It came out **100% (13/13)** — the number changed BY MEASUREMENT, not by asserting 0.85 → 1.0.
+Editing a measurement by assertion is exactly the dishonesty the calibration system exists to prevent; had the
+re-score not delivered, the lower number would stand (a finding, not a forced value).
+
+**Ruling 3 — the four heights + the AUTO call, a named trust decision.** Priya confirmed IN-7 0.90 / IN-10 0.95
+/ IN-11 0.90 / AS-11 0.90 and chose **AUTO for all four**, KNOWINGLY overriding the ratify-only recommendation
+**on a synthetic-only basis** (measured on the clean LP-393-1 fixture; the only real-data check is LF-6T3N,
+n=2). Each rationale records this as her deliberate override, with the synthetic caveat she accepted.
+
+**Validating a bar ACTIVATES it — there is no validate-without-activate in this gate.** In this system
+`is_eligible` is `validated ∧ measured ≥ threshold`, and `test_activation_gate_lp389` enforces `ACTIVE_RULE_IDS
+− _BASE_ACTIVE == eligible_rule_ids()`. So flipping `validated:true` on the four (with measured ≥ bar) makes
+them eligible, and the invariant requires eligible == active. Every prior sign-off (LP-390-7, LP-390-9)
+validated + activated in one step for this reason. Geet chose to **validate + activate now** (ACTIVE 20 → 24 via
+`registry._LP393_ACTIVATED`) rather than defer validation or redesign the gate to decouple approval from
+eligibility. Their AI groups (`income_stability`, `asset_facts`) fold into `_required_ai_groups` automatically
+(it derives from `ACTIVE_RULE_IDS`), so every run now materializes them.
+
+**The IN-7 judgmental-vs-AUTO conflict — reported, not forced.** `ships` derives from a rule's KIND, and
+LP-376-B's armor is enforced at EVALUATION time (`judgment.py` hard-codes `ratification_pending` for a judgment
+rule) — a judgment rule NEVER auto-ships. IN-7 is judgmental. Priya asked for AUTO, but a judgment rule cannot
+be trusted to auto-ship, so **IN-7 stays `ships: ratify`**: it is active and surfaces every verdict to
+needs_review for human ratification, regardless of the AUTO request. Making IN-7 truly auto would require
+RECLASSIFYING its kind (`rule_kinds.csv` + the spec + LP-376-B's armor) — a separate ticket, NOT silently
+bypassed here. The three calculative rules (IN-10, IN-11, AS-11) ship auto, matching both their kind and her
+call.
+
+**Two new candidate rules Priya's ruling spun off** (their own tickets, NOT built here): (1) *pay-stub-only →
+require a W-2/1099* before using the income; (2) *lapsed/terminated employment → require an offer letter + a
+pay stub* (the continuation check B14 pointed at). These are the "separate check" that Ruling 2 carved out of
+`has_2yr_history`.
+
+**Consequences.** `has_2yr_history` re-scored 100%; IN-11 clears its 0.90 bar; the four are validated + live
+(ACTIVE 24). IN-7 ships ratify (surfaces, never auto) pending a kind reclassification. The synthetic-data caveat
+rides every bar. The B12/B14 golden change is recorded with her originals preserved.
+
+**Cross-refs.** LP-393-5 (the proposals), LP-393-4b (the measurements), LP-376-B (the ratification armor),
+LP-390-7 / LP-390-9 (the validate+activate precedent), LP-389 (the eligibility gate + its invariant).
+
+## ADR-317: The calibration wave found 0 of 4 calibratable — AS-7 is an orphan (needs-producer), and IN-8/IN-9/IN-13 need scenarios, not scoring (LP-395)
+
+**Context.** LP-394's census classified IN-8, IN-9, IN-13, AS-7 as `needs-calibration` — "the cheapest remaining
+rules-per-ticket win." LP-395's Phase 0 (establish the achievable n BEFORE labeling) found that **none of the
+four is calibratable now**, correcting the census. No worksheet was generated; nothing was scored.
+
+**AS-7 is a true ORPHAN → needs-producer (census wrong; LP-390-2 vindicated).** `txn.is_nsf_or_overdraft` is in
+the vocabulary (`fact_tags.csv`, mode=AI) and is READ by the derived `stmt.nsf_count` recipe (`derived.py:558`,
+which ABSTAINS when the tag is on no transaction) — but it is produced by **no path**: not in
+`tag_production.yaml` (the declared layer), and not in Stage-B (`tag_correlation` emits only
+`txn.has_identified_source` / `txn.source_strength`). The AS-7 bar's own rationale hedged ("aggregated from
+txn.is_nsf_or_overdraft (AI), UNSCORED — verify the derived chain when calibrating"); the chain is broken at the
+leaf. **AS-7's real blocker is a MISSING PRODUCER for `txn.is_nsf_or_overdraft`, not calibration.** This confirms
+LP-390-2's orphan finding and reclassifies AS-7 `needs-calibration → needs-producer`.
+
+**IN-8 / IN-9 / IN-13 are `needs-more-scenarios`, not `needs-calibration`.** Their tags produce, but no fixture
+carries the discriminating scenario at n≥6 (the LP-393 thin-n discipline):
+- **IN-8 `income.voe_present`** — labelable only on VOE / offer-letter documents (the worksheet capacity model);
+  the scenario fixture has **3** VOE docs (lf6t3n 0, lf6t3n_plus 2), so **n=3 < 6**. Thin. (A secondary finding:
+  the producer runs `voe_present` on ALL documents but the worksheet only labels VOE/offer-letter types, so the
+  precision direction — does the AI false-tag a W-2 as a VOE — is not even in the labelable set.)
+- **IN-9 `income.offer_letter_present`** — **no offer-letter document exists in any fixture**, so its positive
+  class is empty (one-sided, like the AS-5 gift n=0 case). Not measurable until a scenario carries one.
+- **IN-13 `income.continuance_3yr`** — produces 13 rows (enough by count), but every borrower carries only
+  EMPLOYMENT income, where continuance is honestly `unknown` (LP-393-1 reached n=1 meaningful). The tag is about
+  OTHER income (pension / child support / alimony — B3-3.1-09); no such borrower exists. Its second input
+  `income.type` is also thinly measured (n=2, all `base`, in the LP-334 set) — though `income.type` is context,
+  not the binding load-bearing tag.
+
+**The fixture gaps this spins off (their own tickets, the LP-393-1 pattern — NOT built here):** (1) ≥3 more VOE
+documents (and non-VOE income docs for precision) to lift IN-8 to n≥6; (2) an `employment_offer_letter` document
+to give IN-9 a positive class; (3) other-income borrowers (pension, child support, alimony, award) to give
+IN-13 a discriminating continuance signal. And separately, (4) a PRODUCER for `txn.is_nsf_or_overdraft` (a
+Stage-B / statement AI classifier) to unblock AS-7.
+
+**Consequences for the plan.** LP-394's roll-up said one calibration wave clears IN-8/IN-9/IN-13/AS-7 — the
+cheapest written-rule win. **That win does not exist:** each of the four needs upstream work (a producer or a
+scenario fixture) before any scoring. The corrected blocker classes: AS-7 → needs-producer; IN-8/IN-9/IN-13 →
+needs-more-scenarios. The genuinely cheap calibration win among written-inert rules is now: **none** — the
+next income-family progress needs a small other-income + VOE + offer-letter scenario fixture first, then a score.
+
+**Cross-refs.** LP-394 (the census this corrects), LP-390-2 (the original AS-7 orphan finding), LP-390-3 (the
+IN-8/IN-9 zero-rows-on-LF-6T3N finding), LP-393-1 (the continuance n=1 finding + the scenario-fixture pattern),
+LP-393's thin-n discipline.
+
+## ADR-318: stmt_facts never saw the borrower roster — owner_matches_borrower abstained on every file; a declared roster fixes it (LP-390-8a)
+
+**The context gap (verified, not assumed).** `stmt.owner_matches_borrower` (AS-6's load-bearing tag) asks *does
+this statement's account holder match a borrower on the loan?* — a COMPARISON. But the `stmt_facts` group runs
+under the `document` context builder (`_doc_context`), which sends only the statement's OWN fields. It was never
+given the loan's borrowers, so it **structurally could not compare** and abstained `unknown` on every file —
+LP-390-5 measured it (5/5 abstain) and LP-396 re-verified it live (5/5 `unknown`, the AI's own reason: *"no
+borrower names were provided in the loan"*). The abstention was the fail-safe working, not an AI error; the fix
+is to supply the comparison data.
+
+**The fix — a DECLARED roster, not a per-group branch.** A document group that must compare a document's stated
+party against the borrowers declares `include_borrower_roster: true` (a new `AiGroup` field, guarded to
+document-subject groups). The producer then computes the loan's borrower roster ONCE per run (reusing the LP-332
+borrower resolution — `_borrower_enumerate` + PII-safe field reads, no second identity path) and merges
+`loan_borrowers: [...]` into each subject's context, part of the content fingerprint. Only `stmt_facts` declares
+it, so every other group's context is byte-unchanged (no `if group == stmt_facts` anywhere — the LP-326
+vocabulary-driven discipline).
+
+**The comparison shape (D2) — tolerant, flagged for Priya.** The prompt compares the holder against
+`loan_borrowers` and is TOLERANT of harmless variation: a middle initial vs full/absent middle name ("Jordan A
+Rivera" = "Jordan Rivera"), a nickname (Bob/Robert), a maiden vs married surname, and a JOINT account listing two
+holders (a match if EITHER is a borrower). It answers `yes` (matches), `no` (a clearly different party — an
+unrelated name, or a trust/LLC/estate not on the loan), or `unknown` WITH A REASON (ambiguous, or an empty/absent
+roster — nothing to compare). **Over-strict is the DANGEROUS direction** (a false "not the borrower's account" on
+a borrower's own joint statement), so the default leans tolerant; the exact strictness is a Priya call, not a
+value set here.
+
+**This makes the tag PRODUCE — correctness is the score.** The live re-score on LF-6T3N confirmed it now
+produces a real comparison: BEFORE 5/5 `unknown` → AFTER **5/5 `yes` (100% vs the 8 existing goldens on the 5
+bank statements)**, reasoning *"Account holder 'Jordan A Rivera' matches borrower 'Jordan Rivera' — the middle
+initial…"*. `is_reserve_eligible` (the group's other tag, AS-4's own separate problem) was UNAFFECTED (the
+roster is additive context, explicitly irrelevant to it — D4). **AS-6 is NOT activated** — it is now bar-ready;
+a bar + Priya's sign-off + the gate activate it, not this ticket.
+
+**The D5 scope mismatch (reported, not fixed).** The worksheet labels `owner_matches_borrower` on
+`investment_account` docs (inv1–3), but `stmt_facts` runs only on `bank_statement`/`money_market` — so those 3
+goldens are `unmatched` and can never be scored. The right fix is likely to widen `stmt_facts`' applicability to
+the investment/brokerage statement types (they have an account holder too), NOT to narrow the worksheet — but
+that is its own ticket (a doc-type scope decision), not done here.
+
+**Cross-refs.** LP-390-5 (the original 100%-abstain finding), LP-396 (the live re-verification that this ticket
+never landed), LP-385/332 (the borrower resolution reused), LP-335 (report-what's-shown, matched against the
+given context). AS-4's `is_reserve_eligible` domain disagreement is separate and untouched.
+
+## ADR-319: Surface name discrepancies + non-borrower co-holders as SEPARATE fact-tags, not a widened enum — the tag describes, the rule judges (LP-400)
+
+**Priya's ruling (the driver).** A name difference on a bank statement (e.g. a middle initial) should NOT reject
+the statement — the account IS the borrower's; it should FLAG for human attention while the document still
+COUNTS. A joint account should flag that a co-holder is not a borrower. Neither is a rejection. But
+`stmt.owner_matches_borrower`'s `yes/no/unknown` enum cannot express *"matches, but with a discrepancy worth a
+look"* — it collapsed an exact match and a differing-middle-initial match into the same `yes` (LP-398's N1), and
+had no way at all to say *"there is an extra, non-borrower holder"* (N5). Where a tag cannot express a risk, no
+rule can catch it — the information dies at the tag layer (the `apparent_category` / LP-379-E enum-gap lesson).
+
+**Separate tags, not a widened enum.** Added two document-subject AI tags to the existing `stmt_facts` group
+(same one call — no per-document cost, D5): `stmt.holder_name_variance` (HOW the name differs, when it matches)
+and `stmt.non_borrower_co_holder` (is there an additional holder who is not a borrower). Rejected widening
+`owner_matches_borrower`'s enum: (1) it would STALE that tag's hard-won goldens (the LP-393-4a stale-golden
+trap); (2) the two discrepancies are ORTHOGONAL — a joint account can MATCH and ALSO have a non-borrower
+co-holder, which one enum can't say at once. `owner_matches_borrower` keeps answering only the match question,
+semantically UNCHANGED (its 5 LF-6T3N goldens verified still `yes` after the prompt extension).
+
+**The describe-vs-judge line.** The tags report the OBSERVABLE — the KIND of difference — not a verdict. The
+value set is `none | middle_absent | middle_differs | nickname | surname_differs | other | unknown`, deliberately
+**SPLITTING `middle_differs` (a DIFFERENT middle — LP-398 N1, the risky "relative?" case) from `middle_absent` (a
+DROPPED middle — LP-398 P1, benign)**. Collapsing them into one `middle_name` value (the ticket's initial
+proposal) would re-create the exact problem at a finer grain — the rule could not tell N1 from P1. The
+differs-vs-absent distinction is a FACT about the names, so it belongs in the tag; **WHICH kinds warrant
+attention is the RULE's decision (Priya's)**, not the tag's. The live probe confirmed the split works: N1 →
+`middle_differs`, P1 → `middle_absent`, P2 → `nickname`, N3/N4/N6 → `none`, N5 → co_holder `yes` (naming the
+non-borrower). Value-set questions flagged for Priya: which variances flag; the `surname_differs` value has no
+scenario yet (n=0 — a fixture gap).
+
+**AS-6's consumption is DEFERRED.** These tags are UNCALIBRATED. Making AS-6 (or any rule) flag on them now is
+exactly the thing the three-bucket architecture forbids — consuming an unmeasured AI tag. AS-6's spec is
+untouched; a worksheet → Priya's labels → a score come first, THEN a rule change.
+
+**Cross-refs.** LP-398 (N1/N5 — the discrepancies the enum swallowed), LP-399 (the blind worksheet),
+LP-390-8a (the borrower roster both new tags reuse), LP-379-E (the `apparent_category` enum-gap precedent),
+LP-393-4a (the stale-golden trap the separate-tag design avoids).
+
+## ADR-320: Priya's owner_matches rule — yes=certain / unknown=flag-for-evidence / no=non-person — reversing LP-390-8a's tolerance; and the co-holder wording resolution (LP-402)
+
+**Priya's owner_matches rule (the refinement).** `stmt.owner_matches_borrower` reports the CONFIDENCE of the
+identity match, and only that (the specific name difference lives in `stmt.holder_name_variance`):
+- **`yes` ONLY when essentially CERTAIN** — an exact name, a DROPPED middle ("Jordan Rivera" = "Jordan A
+  Rivera", less detail not a conflict), or a joint account listing a borrower.
+- **`unknown` when PLAUSIBLE but the identity needs EVIDENCE** — a nickname (Bob/Robert), a possible
+  maiden/married surname change, an uncertain given-name variant. This is "FLAG FOR EVIDENCE": **the document
+  still COUNTS** (the difference is recorded in `holder_name_variance`); do not force `yes`, do not reject `no`.
+- **`no` for a genuine NON-match** — a non-person entity (trust/LLC/estate), an unrelated name, OR a CONFLICTING
+  middle name/initial that points to a DIFFERENT person ("Jordan M" vs "Jordan A" — a likely relative).
+
+**This REVERSES LP-390-8a's tolerance.** LP-390-8a made `owner_matches` tolerant (nickname/middle/maiden →
+`yes`). Priya's rule makes it CONSERVATIVE: tolerance now yields `unknown`, not `yes`. The re-score confirmed the
+refined prompt produces her exact shape — **owner_matches 11/11** on the LP-401 fixture (yes=P1/N5/N8/N9,
+unknown=N2/N7/P2, no=N1/N3/N4/N6). **The 5 REAL LF-6T3N goldens stayed `yes`** (exact matches — the conservative
+rule does not disturb genuine matches; the equivalence that mattered), and `is_reserve_eligible` was unchanged.
+
+**N1 (a different middle initial) → `no`.** Her ruling: a conflicting middle (Jordan M vs Jordan A) is a likely
+different person (a relative), not a soft flag — distinct from `unknown` cases (nickname/surname) that are
+plausibly the same person.
+
+**The non_borrower_co_holder wording resolution.** The AI's reading was correct — the tag asks *"is there a
+SECOND, extra holder who is NOT a borrower?"*, so a single-holder account is `no`. Priya's first-pass `yes`/
+`unknown` labels on the single-holder cases were the mismatch. Her clarified rule required correcting **6**
+single-holder cells to `no` (n1/n3/n4/n6/n7/p2 — the relayed ticket enumerated only 3; the rule + the AI she
+agreed with cover all 6). After correction, **non_borrower_co_holder scored 11/11** (single `no`, N5/N8 `yes`,
+N9 `no` — the discriminating control).
+
+**⚠️ The coupling finding (a REGRESSION the conservative change surfaced).** `holder_name_variance`'s prompt
+GATES on `owner_matches == "yes"` ("WHEN owner_matches is yes, describe how the name differs"). With
+owner_matches now `unknown`/`no` for the flag cases, the variance tag reports `none` for N1/N2/N7/P2 — the very
+cases whose difference must be surfaced so "the document still counts." Variance re-scored **4/11** (down from
+LP-401). This BREAKS the three-tag design's purpose for the flag-for-evidence cases. **The fix — widen the
+variance gate from `yes` to `yes OR unknown` — is a follow-up ticket** (LP-402 scoped the variance prompt OUT).
+Until then, `owner_matches` + `non_borrower_co_holder` are calibration-passed; `holder_name_variance` is BLOCKED
+on the gate widening.
+
+**AS-6's consumption stays deferred** (its rule change is the next step); the synthetic-data caveat still
+applies (validated on scenarios, not real-document messiness). **Cross-refs.** LP-390-8a (the tolerance this
+reverses), LP-400 (the three-tag design), LP-401 (the labels + the fixture), LP-335 (report-what's-shown).
+
+## ADR-321: AS-6 as the first MULTI-TAG rule — Priya's three-outcome ruling (surface, don't reject; the flagged document COUNTS) (LP-404)
+
+**The finale of the owner-match thread** (LP-390-8a → LP-403). AS-6 was a single-tag rule (`owner_matches=no`
+→ fired, else satisfied). LP-404 makes it the FIRST rule to read THREE calibrated tags — `owner_matches_borrower`
+(the confidence), `holder_name_variance` (the specific difference), `non_borrower_co_holder` (an extra holder),
+all on the document subject, produced together by the `stmt_facts` group — and combine them into Priya's three
+outcomes:
+
+| condition (per statement) | verdict | the document |
+|---|---|---|
+| `owner_matches=yes`, no non-borrower co-holder | **satisfied** | counts silently |
+| `owner_matches=unknown` (plausible, unconfirmed) | **needs_review** | **STILL COUNTS**, surfaced |
+| a non-borrower co-holder (`co_holder=yes`) on a `yes` match | **needs_review** | **STILL COUNTS**, surfaced |
+| `owner_matches=no` (a genuine non-match) | **fired** | an OPEN finding — does NOT count |
+| the holder facts absent / unreadable | **couldnt_check** | honest abstention |
+
+**The "counts but surfaces" outcome is `needs_review`, and this is deliberate (D2).** Priya's middle row —
+"surface for a human WHILE THE DOCUMENT COUNTS" — is NOT a normal open finding (`fired` is AS-6's exclude
+verdict: a third-party account that does not count). It is also NOT `couldnt_check` (a data gap — "we couldn't
+read it"). `needs_review` is the verdict that routes a subject to human review WITHOUT excluding it: the
+plausible match / the non-borrower co-holder is a real judgment the processor confirms, and the statement
+stays in the borrower's assets pending that confirmation. It is NOT `PENDING_AUTOMATION` either — that is for a
+BLOCKED (uncalibrated) rule; AS-6's tags are calibrated (LP-403), so AS-6 RUNS and reaches a real verdict.
+
+**Route on the match CONFIDENCE (owner_matches) + the co-holder — NOT on the variance value (D3, and a
+correction of the ticket's own table).** The ticket's proposed table listed `holder_name_variance ∈
+{middle_absent, …}` as an independent needs_review trigger. That would FALSE-FLAG the benign dropped middle —
+which is exactly the 5 REAL LF-6T3N goldens (holder "Jordan A Rivera" vs roster "Jordan Rivera" → owner=yes,
+variance=middle_absent). Routing on the variance would surface a genuine borrower's own account for review — the
+FP harm AS-6 exists to avoid. So AS-6 routes on `owner_matches` (yes→counts, unknown→surface, no→open) plus
+`co_holder=yes`→surface; the variance tag NAMES the reason a flag was raised (it is in the finding's load-bearing
+provenance), it does not independently trigger. Consequence: **N1 (a conflicting middle, owner=`no`) → fired**
+(an open finding, like the trust/LLC/unrelated cases), NOT needs_review as the ticket's Phase-2 example said —
+because Priya's own `owner_matches` label for N1 is `no` (ADR-320: a conflicting middle = a likely different
+person). Her label + the FP-harm requirement (the gate of record) beat the ticket text.
+
+**The gate does NOT gate on owner_matches (D3, a DSL constraint).** The generic fail-closed gate (LP-315)
+treats ANY `unknown` load-bearing tag as `couldnt_check`. But Priya's `owner_matches=unknown` is a meaningful
+FLAG value that must reach `needs_review`, not `couldnt_check`. So AS-6 gates on `holder_name_variance` instead
+(the "was the holder name read & compared" presence check — absent/`unknown` → couldnt_check) and routes
+`owner_matches` through the ordered outcomes. `gated_tags` cannot be empty (schema `min_length=1`), so a
+non-owner gated tag was required; variance is the natural choice (its presence signals the group ran and the
+name was compared). The empty-roster `owner=unknown` (a data-gap Priya's table also maps to couldnt_check) is
+subsumed into `needs_review` — the tag value cannot distinguish it from the flag, and needs_review (a human
+reviews and sees "no borrowers on the loan") is not a false green.
+
+**The reason strings name the cause in plain language (D4, LP-376-C).** Each surfaced verdict carries a
+processor-facing reason — "plausibly matches a borrower but the match is not certain … the statement still
+counts", "a joint account with an additional holder who is not a borrower … still counts", "does not resolve to
+a borrower … a third-party account". The SPECIFIC (the co-holder's name, the variance kind) lives in the
+finding's load-bearing tag provenance (the co_holder / variance tag reasoning), not interpolated into the static
+reason — a rule-as-data limitation (the reasoning template interpolates only numeric operands), accepted rather
+than adding a bespoke reasoning-interpolation combinator.
+
+**The proof (real reasoner, reported).** On the LP-401 scenario fixture (11 statements): **4 fired** (N1/N3/N4/N6
+— non-matches), **5 needs_review** (N2/N7/P2 owner=unknown flags + N5/N8 non-borrower co-holders), **2 satisfied**
+(N9 both-borrowers, P1 dropped-middle) — EXACTLY Priya's ruling. On the 5 REAL LF-6T3N bank statements: **all 5
+satisfied** (no false flag on a genuine match). AS-6 is NOT activated by this change — its bar stays
+`validated:false` (Priya's sign-off, LP-397); `ACTIVE_RULE_IDS` = 24. **Cross-refs.** LP-390-8a / LP-397 / LP-400
+/ LP-402 / LP-403 (the thread), LP-391 (the manual-review surface), LP-376-C (human reasons), §8 (the outcome
+model), ADR-319 / ADR-320.

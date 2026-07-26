@@ -1,0 +1,61 @@
+rule_id: AS-12
+name: Borrowed funds detection
+category: Assets
+kind: judgmental
+numeric_check: false
+criteria: >-
+  Do the borrower's deposit patterns suggest an undisclosed BORROWED source (a large round-dollar deposit
+  with no payroll/transfer trace, a wire from an unverified party, a rapid liquidation)? The AI reasons
+  over the transaction tags; a human ratifies EVERY verdict. Borrowed funds not disclosed as a loan can
+  understate the DTI and misstate the source of funds.
+applicability:
+  scope: the loan file's bank-statement deposits
+  trigger: per deposit, judged for a borrowed-funds pattern
+required_inputs:
+  - name: apparent_category
+    snapshot_path: tags.by_subject[<txn content_id>]["txn.apparent_category"]
+    description: the AI's classification of the deposit (payroll / gift / loan_proceeds / …)
+  - name: has_identified_source
+    snapshot_path: tags.by_subject[<txn content_id>]["txn.has_identified_source"]
+    description: whether the deposit has a traceable source
+  - name: counterparty
+    snapshot_path: tags.by_subject[<txn content_id>]["txn.counterparty"]
+    description: the other party, if visible (context)
+reference_values:
+  priya_validated: false
+  threshold_needs_signoff: false
+  guideline_text: >-
+    Fannie Mae Selling Guide B3-4.2 / B3-6 — undisclosed borrowed funds must be identified and their
+    payment counted in the DTI. The judgment flags a pattern; a human confirms. No numeric threshold.
+subject_enumeration: per_deposit
+subject_key_fields:
+  - account
+  - date
+  - amount
+evidence_required: the deposit pattern and why it suggests (or does not) a borrowed source
+guideline_reference: "Fannie Mae Selling Guide B3-4.2 / B3-6 (source of funds / undisclosed debt)."
+judgment:
+  subject: per_deposit
+  load_bearing_tags: [txn.apparent_category, txn.has_identified_source]
+  reasoned_over: [txn.apparent_category, txn.has_identified_source, txn.counterparty]
+  output_tag: as.borrowed_funds
+  value_domain: ["yes", "no", "unknown"]
+  confidence_floor: 0.5
+  system_prompt: |
+    You are a senior mortgage underwriter making ONE reasoned judgment about a single bank-statement
+    deposit: do its characteristics suggest an UNDISCLOSED BORROWED source?
+
+    You reason ONLY over the STRUCTURED TAGS below — never raw documents. The tags are clean facts other
+    checks produced (the deposit's category, whether it has a traceable source, the counterparty). Judge
+    the way an underwriter would: a large round-dollar deposit with no payroll/transfer trace, a wire from
+    an unverified or interested party, or funds appearing just before closing with no source are
+    borrowed-funds signals; a payroll deposit, a documented transfer from the borrower's own account, or a
+    small ordinary credit are not.
+
+    BE HONEST. If the tags do not support a judgment — missing, unknown, or genuinely ordinary — answer
+    "no" or "unknown". NEVER guess, and NEVER treat an unlabeled deposit as automatically borrowed. Cite
+    the tags you relied on.
+
+    STRICT OUTPUT — return ONLY a JSON OBJECT:
+    {"value": "yes|no|unknown", "confidence": <0.0-1.0>, "reasoning": "<why — cite the tags>"}
+spec_version: 1

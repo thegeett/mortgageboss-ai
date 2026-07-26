@@ -1,0 +1,442 @@
+"""Persist + reconcile rule-engine evaluations as durable findings (LP-316 + LP-322).
+
+Takes LP-315's in-memory :class:`RuleEvaluation` results (as refined by LP-314a) and writes them as
+:class:`Finding` rows on the EXISTING shared model — not a fork. It maps the verdict onto the
+evaluation-OUTCOME axis, promotes ``subject_key`` to a stable content-id column (LP-312), carries the
+load-bearing tags inline (the §3D provenance move), and drives the per-finding event log.
+
+* **Single-run (LP-316):** :func:`persist_evaluation_findings` INSERTs a finding per evaluated
+  subject + a ``created`` event.
+* **Cross-run (LP-322):** :func:`reconcile_evaluation_findings` matches THIS run's results against the
+  loan file's prior findings by the STABLE identity ``(rule_id, subject_key)`` and reconciles — a
+  re-run no longer collides on the uniqueness index; it carries-forward / mints / retires / resolves
+  / revives, appending an event for each transition. IMMORTALITY (§9): a no-longer-detected finding
+  is RETIRED to ``no_longer_applies`` (visible, labeled, reasoned) — NEVER soft-deleted.
+
+Flush-only; the caller owns the transaction.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from uuid import UUID
+
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.models.finding import (
+    EvaluationOutcome,
+    Finding,
+    FindingCategory,
+    FindingOrigin,
+    FindingResolutionStatus,
+    FindingStatus,
+)
+from app.models.finding_event import FindingEvent, FindingEventType
+from app.verification.rule_engine.result import LoadBearingTag, RuleEvaluation, Verdict
+
+_SOURCE_STRENGTH_TAG = "txn.source_strength"
+_HAS_SOURCE_TAG = "txn.has_identified_source"
+# The sourcing tags whose flip resolves an AS-1 finding (the gift-letter loop) — cited in the
+# ``resolved`` event so the history says WHY the rule now passes. A resolve is driven by a TAG flip,
+# never by an observation (the LP-320 boundary): an observation only surfaces to a human.
+_RESOLVING_TAGS = (_HAS_SOURCE_TAG, _SOURCE_STRENGTH_TAG)
+
+# Verdict → (evaluation outcome, severity color). NOT_APPLICABLE is absent → not persisted (the
+# rule does not apply to that subject). Severity is a COARSE triage color derived from the outcome;
+# the evaluation_outcome axis carries the precise signal.
+_OUTCOME_BY_VERDICT: dict[Verdict, tuple[EvaluationOutcome, FindingStatus]] = {
+    Verdict.FIRED: (EvaluationOutcome.OPEN, FindingStatus.RED),
+    Verdict.SATISFIED: (EvaluationOutcome.SATISFIED, FindingStatus.GREEN),
+    Verdict.NEEDS_REVIEW: (EvaluationOutcome.NEEDS_REVIEW, FindingStatus.YELLOW),
+    Verdict.COULDNT_CHECK: (EvaluationOutcome.COULDNT_CHECK, FindingStatus.YELLOW),
+    # LP-391 — a blocked-but-applicable rule's manual-review flag (Tab 1, YELLOW). Its would-be verdict was
+    # discarded upstream, so this never carries a satisfied/open — it is not a trusted pass/fail.
+    Verdict.PENDING_AUTOMATION: (EvaluationOutcome.PENDING_AUTOMATION, FindingStatus.YELLOW),
+}
+
+# The color a retired finding wears — no_longer_applies is not a live concern (green triage).
+_RETIRED_STATUS = FindingStatus.GREEN
+
+
+def outcome_for_verdict(verdict: Verdict) -> EvaluationOutcome | None:
+    """The persisted evaluation-outcome for a verdict, or ``None`` when no finding is persisted
+    (``not_applicable``). The SINGLE source of truth for the verdict→outcome mapping — the eval
+    harness scores against this, so a change here can never silently diverge from what persists.
+    """
+    mapping = _OUTCOME_BY_VERDICT.get(verdict)
+    return mapping[0] if mapping is not None else None
+
+
+def _tag_dict(tag: LoadBearingTag) -> dict[str, object]:
+    """One load-bearing tag as inline provenance JSON (id + value + confidence + reasoning + facts)."""
+    return {
+        "tag_id": tag.tag_id,
+        "value": tag.value,
+        "confidence": tag.confidence,
+        "reasoning": tag.reasoning,
+        "source_facts": list(tag.source_facts),
+    }
+
+
+def _source_strength(result: RuleEvaluation) -> str | None:
+    """The source-strength value (LP-314a) if this evaluation carried one, else None."""
+    for tag in result.load_bearing_tags:
+        if tag.tag_id == _SOURCE_STRENGTH_TAG and tag.value is not None:
+            return str(tag.value)
+    return None
+
+
+def _details(result: RuleEvaluation) -> dict[str, object]:
+    """The evaluation metadata + the subject_key the ``finding_identity`` substrate still reads."""
+    return {
+        "verdict": result.verdict.value,
+        "verdict_confidence": result.verdict_confidence,
+        "threshold_used": str(result.threshold_used) if result.threshold_used is not None else None,
+        "priya_validated": result.priya_validated,
+        "gated_pending_signoff": result.gated_pending_signoff,
+        # LP-376-B: the engine's authoritative per-finding AI-ratification signal — TRUE for a judgment
+        # verdict AND a fuzzy-consistency AI verdict, FALSE for a deterministic/exact-bookend/gate-fail.
+        # The public schema reads THIS rather than re-deriving a judgment-only approximation.
+        "ratification_pending": result.ratification_pending,
+        "how_to_fix": result.how_to_fix,
+        "source_strength": _source_strength(result),
+        # Duplicated into details ONLY so LP-93's finding_identity() (which reads details.subject_key)
+        # keeps working alongside the new indexed column. Both are written from the SAME
+        # result.subject_id here, so they cannot diverge; this copy is transitional — drop it once
+        # finding_identity() reads Finding.subject_key directly. Do NOT set one without the other.
+        "subject_key": result.subject_id,
+    }
+
+
+def _resolving_tags(result: RuleEvaluation) -> list[dict[str, object]]:
+    """The sourcing tags that explain a resolve (open→satisfied) — PII-safe (tag id + enum value)."""
+    return [
+        {"tag_id": tag.tag_id, "value": tag.value}
+        for tag in result.load_bearing_tags
+        if tag.tag_id in _RESOLVING_TAGS
+    ]
+
+
+# The validated (result, outcome, severity, message) tuples ready to persist (not_applicable skipped).
+_Persistable = tuple[RuleEvaluation, EvaluationOutcome, FindingStatus, str]
+
+
+def _persistable(results: list[RuleEvaluation]) -> list[_Persistable]:
+    """Resolve + validate each result BEFORE any db write, refusing an empty-reasoning verdict.
+
+    A single empty-reasoning verdict (§3D: a verdict must say WHY) refuses the whole batch cleanly
+    rather than after partially populating the session. ``not_applicable`` results are dropped (the
+    rule does not apply to that subject → no finding).
+    """
+    persistable: list[_Persistable] = []
+    for result in results:
+        mapping = _OUTCOME_BY_VERDICT.get(result.verdict)
+        if mapping is None:
+            continue
+        outcome, severity = mapping
+        message = (result.reasoning or "").strip()
+        if not message:
+            raise ValueError(
+                f"refusing to persist a finding with empty reasoning "
+                f"(rule {result.rule_id}, subject {result.subject_id})"
+            )
+        persistable.append((result, outcome, severity, message))
+    return persistable
+
+
+def _build_finding(
+    *,
+    loan_file_id: UUID,
+    verification_id: UUID | None,
+    result: RuleEvaluation,
+    outcome: EvaluationOutcome,
+    severity: FindingStatus,
+    message: str,
+    category: FindingCategory,
+) -> Finding:
+    """A fresh Finding for one evaluated subject (its content-id ``subject_key`` is its identity)."""
+    return Finding(
+        loan_file_id=loan_file_id,
+        verification_id=verification_id,
+        rule_id=result.rule_id,
+        origin=FindingOrigin.DETERMINISTIC_RULE,  # the rule is deterministic; its tags are ai/derived
+        status=severity,
+        category=category,
+        message=message,
+        details=_details(result),
+        # None for a deterministic pass AND for a couldnt_check with an absent tag; default 1.0 so a
+        # fail-closed outcome is never HIDDEN by a confidence cutoff (open/needs_review/couldnt_check
+        # must stay visible). Coarse column; evaluation_outcome carries the precise signal.
+        confidence=result.verdict_confidence if result.verdict_confidence is not None else 1.0,
+        evaluation_outcome=outcome,
+        subject_key=result.subject_id,  # the deposit's stable content_id (LP-312)
+        load_bearing_tags=[_tag_dict(tag) for tag in result.load_bearing_tags],
+        resolution_status=FindingResolutionStatus.OPEN,
+    )
+
+
+def _update_finding(
+    finding: Finding,
+    *,
+    verification_id: UUID | None,
+    result: RuleEvaluation,
+    outcome: EvaluationOutcome,
+    severity: FindingStatus,
+    message: str,
+) -> None:
+    """Carry a finding forward: refresh its state to THIS run's, keeping its id + resolution history."""
+    finding.verification_id = verification_id
+    finding.status = severity
+    finding.message = message
+    finding.details = _details(result)
+    finding.confidence = result.verdict_confidence if result.verdict_confidence is not None else 1.0
+    finding.evaluation_outcome = outcome
+    finding.load_bearing_tags = [_tag_dict(tag) for tag in result.load_bearing_tags]
+    # resolution_status (the HUMAN lifecycle) + subject_key (the identity) are NOT touched here.
+
+
+async def persist_evaluation_findings(
+    db: AsyncSession,
+    *,
+    loan_file_id: UUID,
+    verification_id: UUID | None,
+    results: list[RuleEvaluation],
+    category: FindingCategory = FindingCategory.ASSETS,
+) -> list[Finding]:
+    """Persist evaluated subjects as findings + a ``created`` event each (single-run, LP-316).
+
+    One finding per subject whose verdict is persisted (``not_applicable`` is skipped). ``open`` /
+    ``satisfied`` / ``needs_review`` / ``couldnt_check`` all persist. Refuses empty reasoning. This
+    is the SINGLE-RUN path; a re-run into the same loan file collides on the uniqueness index — use
+    :func:`reconcile_evaluation_findings` for cross-run runs (LP-322).
+    """
+    outcomes: list[tuple[Finding, EvaluationOutcome]] = []
+    for result, outcome, severity, message in _persistable(results):
+        finding = _build_finding(
+            loan_file_id=loan_file_id,
+            verification_id=verification_id,
+            result=result,
+            outcome=outcome,
+            severity=severity,
+            message=message,
+            category=category,
+        )
+        db.add(finding)
+        outcomes.append((finding, outcome))
+
+    await db.flush()  # assign finding ids before logging their creation
+    for finding, outcome in outcomes:
+        db.add(
+            FindingEvent(
+                finding_id=finding.id,
+                event_type=FindingEventType.CREATED,
+                from_outcome=None,
+                to_outcome=outcome,
+                detail={},
+            )
+        )
+    await db.flush()
+    return [finding for finding, _ in outcomes]
+
+
+# --------------------------------------------------------------------------- #
+# Cross-run reconciliation (LP-322)
+# --------------------------------------------------------------------------- #
+
+
+@dataclass
+class ReconcileRunResult:
+    """The transitions one cross-run reconcile produced (§8/§9 lifecycle)."""
+
+    minted: list[Finding] = field(default_factory=list)  # new subject → new finding
+    carried_forward: list[Finding] = field(default_factory=list)  # re-detected, outcome unchanged
+    resolved: list[Finding] = field(default_factory=list)  # open → satisfied (rule now passes)
+    outcome_changed: list[Finding] = field(default_factory=list)  # other outcome change
+    revived: list[Finding] = field(default_factory=list)  # no_longer_applies → detected again
+    retired: list[Finding] = field(default_factory=list)  # not detected → no_longer_applies
+
+    @property
+    def detected(self) -> list[Finding]:
+        """The findings THIS run detected (everything but the retired)."""
+        return [
+            *self.minted,
+            *self.carried_forward,
+            *self.resolved,
+            *self.outcome_changed,
+            *self.revived,
+        ]
+
+
+async def _load_prior_findings(
+    db: AsyncSession, loan_file_id: UUID, rule_ids: frozenset[str]
+) -> list[Finding]:
+    """The loan file's live, subject-keyed findings for the evaluated rules (incl. retired ones).
+
+    Retired findings are still live (``deleted_at`` NULL — immortality never soft-deletes), so they
+    are loaded here: a subject that reappears matches its retired finding and REVIVES the same row.
+    """
+    result = await db.execute(
+        select(Finding).where(
+            Finding.loan_file_id == loan_file_id,
+            Finding.rule_id.in_(rule_ids),
+            Finding.subject_key.isnot(None),
+            Finding.deleted_at.is_(None),
+        )
+    )
+    return list(result.scalars().all())
+
+
+async def reconcile_evaluation_findings(
+    db: AsyncSession,
+    *,
+    loan_file_id: UUID,
+    verification_id: UUID | None,
+    run_id: UUID,
+    results: list[RuleEvaluation],
+    evaluated_rule_ids: frozenset[str],
+    category_by_rule: dict[str, FindingCategory],
+    default_category: FindingCategory = FindingCategory.ASSETS,
+    retire_eligible_rule_ids: frozenset[str] | None = None,
+) -> ReconcileRunResult:
+    """Reconcile THIS run's evaluations against the loan file's prior findings (LP-322, §9).
+
+    Matches by the STABLE identity ``(rule_id, subject_key)``. For each subject detected this run:
+    CARRY-FORWARD the prior finding (keep id + history; REVIVE if it was retired; RESOLVE if
+    open→satisfied; OUTCOME_CHANGED otherwise) or MINT a new one. Each prior finding of a
+    RETIRE-ELIGIBLE rule that is NOT detected this run and is still OPEN (no human action) is RETIRED
+    to ``no_longer_applies`` — VISIBLE, labeled, reasoned; NEVER soft-deleted (immortality). Every
+    transition appends an event carrying the run_id. Flush-only.
+
+    ``retire_eligible_rule_ids`` (default: every evaluated rule) is the subset whose subject domain
+    was HEALTHILY enumerated this run. A rule whose enumeration input DEGRADED (e.g. AS-1 when the
+    documents section is absent, so it saw zero transactions) must be EXCLUDED: a degraded run is not
+    "the subject is gone", and retiring on it would flip real open findings to green (false-closed).
+    """
+    retire_eligible = (
+        retire_eligible_rule_ids if retire_eligible_rule_ids is not None else evaluated_rule_ids
+    )
+    persistable = _persistable(results)  # validate all BEFORE any write (empty-reasoning refusal)
+    this_by_identity: dict[tuple[str, str], _Persistable] = {
+        (result.rule_id, result.subject_id): (result, outcome, severity, message)
+        for result, outcome, severity, message in persistable
+    }
+
+    prior = await _load_prior_findings(db, loan_file_id, evaluated_rule_ids)
+    prior_by_identity = {(f.rule_id, str(f.subject_key)): f for f in prior}
+
+    res = ReconcileRunResult()
+    # (finding, event_type, from_outcome, to_outcome, detail) — minted findings get ids on the flush.
+    events: list[
+        tuple[
+            Finding,
+            FindingEventType,
+            EvaluationOutcome | None,
+            EvaluationOutcome,
+            dict[str, object],
+        ]
+    ] = []
+    run_detail: dict[str, object] = {"run_id": str(run_id)}
+
+    # --- detected this run: carry-forward / mint / resolve / revive ---------- #
+    for identity, (result, outcome, severity, message) in this_by_identity.items():
+        prior_finding = prior_by_identity.get(identity)
+        if prior_finding is None:
+            category = category_by_rule.get(result.rule_id, default_category)
+            finding = _build_finding(
+                loan_file_id=loan_file_id,
+                verification_id=verification_id,
+                result=result,
+                outcome=outcome,
+                severity=severity,
+                message=message,
+                category=category,
+            )
+            db.add(finding)
+            res.minted.append(finding)
+            events.append((finding, FindingEventType.CREATED, None, outcome, dict(run_detail)))
+            continue
+
+        was = prior_finding.evaluation_outcome
+        _update_finding(
+            prior_finding,
+            verification_id=verification_id,
+            result=result,
+            outcome=outcome,
+            severity=severity,
+            message=message,
+        )
+        if was is EvaluationOutcome.NO_LONGER_APPLIES:
+            res.revived.append(prior_finding)
+            events.append((prior_finding, FindingEventType.REVIVED, was, outcome, dict(run_detail)))
+        elif was == outcome:
+            res.carried_forward.append(prior_finding)
+            events.append(
+                (prior_finding, FindingEventType.CARRIED_FORWARD, was, outcome, dict(run_detail))
+            )
+        elif was is EvaluationOutcome.OPEN and outcome is EvaluationOutcome.SATISFIED:
+            # RESOLVE (the gift-letter loop): the rule now PASSES for this subject — driven by the
+            # sourcing tag flip, cited in the event. Distinct from RETIRE (the subject is still here).
+            res.resolved.append(prior_finding)
+            events.append(
+                (
+                    prior_finding,
+                    FindingEventType.RESOLVED,
+                    was,
+                    outcome,
+                    {**run_detail, "resolving_tags": _resolving_tags(result)},
+                )
+            )
+        else:
+            res.outcome_changed.append(prior_finding)
+            events.append(
+                (prior_finding, FindingEventType.OUTCOME_CHANGED, was, outcome, dict(run_detail))
+            )
+
+    # --- not detected this run: RETIRE (never delete) ------------------------ #
+    for identity, prior_finding in prior_by_identity.items():
+        if identity in this_by_identity:
+            continue  # matched above
+        if prior_finding.rule_id not in retire_eligible:
+            continue  # this rule's domain was NOT healthily enumerated → a degraded run must not
+            # retire (that would flip a real open finding to green); leave the prior untouched
+        if prior_finding.evaluation_outcome is EvaluationOutcome.NO_LONGER_APPLIES:
+            continue  # already retired — stays retired (immortality)
+        if prior_finding.resolution_status.is_resolved:
+            continue  # a completed human action → RETAIN (Undo/audit depend on it), do not retire
+        was = prior_finding.evaluation_outcome or EvaluationOutcome.OPEN
+        prior_finding.evaluation_outcome = EvaluationOutcome.NO_LONGER_APPLIES
+        prior_finding.status = _RETIRED_STATUS
+        prior_finding.verification_id = verification_id
+        res.retired.append(prior_finding)
+        events.append(
+            (
+                prior_finding,
+                FindingEventType.RETIRED,
+                was,
+                EvaluationOutcome.NO_LONGER_APPLIES,
+                {**run_detail, "reason": "subject no longer detected in this run"},
+            )
+        )
+
+    await db.flush()  # assign ids to minted findings before logging their events
+    for finding, event_type, from_outcome, to_outcome, detail in events:
+        db.add(
+            FindingEvent(
+                finding_id=finding.id,
+                event_type=event_type,
+                from_outcome=from_outcome,
+                to_outcome=to_outcome,
+                detail=detail,
+            )
+        )
+    await db.flush()
+    return res
+
+
+__all__ = [
+    "ReconcileRunResult",
+    "outcome_for_verdict",
+    "persist_evaluation_findings",
+    "reconcile_evaluation_findings",
+]

@@ -56,6 +56,11 @@ class CalculatorView(BaseModel):
 
     calculator: str  # "mortgage_insurance" | "self_employed" | "reserves" | "max_loan"
     title: str
+    # Did the calculator produce its result? False when a required input was missing
+    # (e.g. reserves with no PITI divisor → months not computable). The structured
+    # not-computed signal, so readers never have to string-match the ``headline``
+    # placeholder. Defaults True — most views always produce a result.
+    computed: bool = True
     headline: str | None  # the key number, pre-formatted (e.g. "$125.00 / mo")
     headline_label: str
     status: str | None  # "pass" / "over" / "required" / "not_required" / "sufficient" / ...

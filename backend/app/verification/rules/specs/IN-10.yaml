@@ -1,0 +1,54 @@
+rule_id: IN-10
+name: Declining income
+category: Income
+kind: calculative        # rule_kinds.csv: IN-10 = calculative (the AI's year-over-year computation is
+numeric_check: true      # materialized into income.is_declining; this rule reads that structured fact)
+criteria: >-
+  A year-over-year DECLINE in income is a red flag even if the file still qualifies — declining income
+  may not be stable/continuing and its treatment needs review. Evaluated PER BORROWER (LP-390-1): income
+  trend is a cross-document question the AI answers over that borrower's income documents (LP-385), so it
+  is read at the borrower subject, one verdict each — NOT per document (where the tag no longer lives).
+  NOTE (LP-323-IN-B): the CSV marks this calculative; the numeric year-over-year computation is done by
+  the AI into income.is_declining, so this rule is a deterministic read of that fact (see the doc).
+applicability:
+  scope: each borrower's income trend
+  trigger: once per borrower, on the declining-income signal
+required_inputs:
+  - name: is_declining
+    snapshot_path: tags.by_subject[<borrower_id>]["income.is_declining"]
+    description: whether a year-over-year decline is evident for the borrower (yes/no/unknown; per-borrower)
+reference_values:
+  priya_validated: false
+  threshold_needs_signoff: true
+  # The DECLINE magnitude/treatment is Priya-validated per the CSV rationale; encoded here as "any
+  # decline flags" (a conservative default). Confirm the treatment (e.g. use the lower year, require a
+  # 2-year average, or decline the income) with Priya.
+  guideline_text: >-
+    Fannie Mae Selling Guide B3-3.1 — declining income must be analyzed; income that is not stable or
+    continuing may not be used. The decline treatment is Priya-validated (pending confirmation).
+subject_enumeration: per_borrower
+subject_key_fields:
+  - borrower
+evidence_required: whether the borrower's income is declining year-over-year
+guideline_reference: "Fannie Mae Selling Guide B3-3.1 (income stability / declining income)."
+spec_version: 1
+deterministic:
+  # LP-390-1: no document-type applicability — the rule enumerates per BORROWER and reads that borrower's
+  # income.is_declining (produced at the borrower subject by income_stability, LP-385). The producer already
+  # scopes the signal to a borrower's income documents; a borrower without an evidenced trend → the tag is
+  # absent/unknown → the fail-closed gate couldnt_checks (never a guessed verdict).
+  load_bearing_tags:
+    - income.is_declining
+  gated_tags:
+    - income.is_declining
+  outcomes:
+    - verdict: fired
+      when_tags:
+        - {tag: income.is_declining, op: eq, value: "yes"}
+      reasoning: the income is declining year-over-year — stability/continuance must be reviewed
+      how_to_fix: >-
+        Analyze the declining income per the program (use the lower/most-recent year or a conservative
+        average, or document why the income is stable and continuing) before using it to qualify.
+    - verdict: satisfied
+      default: true
+      reasoning: no year-over-year income decline is evident

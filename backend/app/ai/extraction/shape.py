@@ -14,6 +14,14 @@ Every document extraction shares one shape so the pieces downstream are uniform:
 
 These types are reused by W-2 (LP-39b) and bank statement (LP-39c). Catch-all values
 stay **strings** (not coerced); only the typed core is coerced. See ADR-144/145.
+
+**Per-field confidence (LP-201).** Each typed-core field can carry a nullable
+``confidence`` (0..1): the model's self-rating for that field, or ``None`` when the
+model gave no number — **never a fabricated default**. The provenance tag is *not*
+stored beside it; it is derived at read time from whether ``confidence`` is present
+(:meth:`ConfidenceSource.for_confidence`), so the number and its tag can never
+disagree. The slot is additive and nullable, so existing readers of ``value`` are
+unaffected.
 """
 
 from pydantic import BaseModel, Field
@@ -27,15 +35,22 @@ class SourceLocation(BaseModel):
 
 
 class TypedField[T](BaseModel):
-    """A typed-core value plus where it came from.
+    """A typed-core value plus where it came from and how sure the model was.
 
     ``value`` is ``None`` when the field is absent/illegible (honest null, never
     fabricated) or when a present value couldn't be coerced — in the latter case
     ``source`` is still kept so the processor can see what the model read.
+
+    ``confidence`` (LP-201) is the model's per-field certainty in ``[0, 1]``, or
+    ``None`` when the model gave none. A ``None`` confidence is a legitimate,
+    correct state — nothing is defaulted. The provenance tag is derived from this
+    value at read time via :meth:`ConfidenceSource.for_confidence`, not stored, so
+    there is no second field that could contradict it.
     """
 
     value: T | None = None
     source: SourceLocation | None = None
+    confidence: float | None = None
 
 
 class CatchAllField(BaseModel):

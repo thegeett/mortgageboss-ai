@@ -13,6 +13,7 @@
 import { FindingFilterPills } from "@/components/file/verification/finding-filters";
 import { FindingsList } from "@/components/file/verification/findings-list";
 import { NeedsCompleteness } from "@/components/file/verification/needs-completeness";
+import { RuleFindingsTabs } from "@/components/file/verification/rule-findings-tabs";
 import { VerificationStats } from "@/components/file/verification/verification-stats";
 import { VersionSelector } from "@/components/file/verification/version-selector";
 import { Badge } from "@/components/ui/badge";
@@ -192,9 +193,12 @@ export function VerificationPanel({ fileId }: { fileId: string }) {
             {running ? <Spinner className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5" />}
             {running ? "Running…" : "Run verification"}
           </Button>
-          {/* Escape hatch: re-run the AI even when inputs are unchanged. The default
-              button returns the cached result instantly when nothing changed. */}
-          {data?.latest_run?.status === "completed" && !running && (
+          {/* Escape hatch (LP-376-A): force a run past the fingerprint cache, enqueuing BOTH passes. Shown
+              whenever a prior run exists and we're not currently running — INCLUDING a failed run, which is
+              exactly when you need it (the default button caches against the last COMPLETED run, so a failed
+              or stale run leaves no other way to force). Gating this on status === "completed" hid the hatch
+              after a failure — the bug this restores. The cache being blind to engine changes is LP-377. */}
+          {data?.latest_run != null && !running && (
             <button
               type="button"
               onClick={() => run.mutate(true)}
@@ -258,6 +262,64 @@ function VerificationBody({
   onDismissConsequence: () => void;
   running: boolean;
 }) {
+  // The file-level chrome sits ABOVE the tabs; the governed §8 tabs (1-4) render the rule engine's
+  // output; the LEGACY body (the dial + stats + AI-sweep findings list) is quarantined into Tab 5, its
+  // behaviour unchanged. The two systems' lists + counts are never merged (LP-375/376).
+  return (
+    <div className="space-y-4">
+      {data.stale && !running && <StaleBanner />}
+      <NeedsCompleteness fileId={fileId} />
+      <RuleFindingsTabs
+        // `?? []` guards a stale/version-skewed response missing the newly-added field — degrade to the
+        // empty-state tabs rather than throwing in bucketRuleFindings and blanking the whole panel.
+        ruleFindings={data.rule_findings ?? []}
+        // LP-377-C: the latest run's rule engine did not complete → these findings are from an earlier run.
+        ruleFindingsStale={data.rule_findings_stale ?? false}
+        legacyCount={data.findings.length}
+        legacy={
+          <LegacyBody
+            fileId={fileId}
+            data={data}
+            running={running}
+            activeLevel={activeLevel}
+            dialBusy={dialBusy}
+            consequence={consequence}
+            onPick={onPick}
+            onResetToDefault={onResetToDefault}
+            onSetAsDefault={onSetAsDefault}
+            onDismissConsequence={onDismissConsequence}
+          />
+        }
+      />
+    </div>
+  );
+}
+
+/** Tab 5 — the LEGACY quarantine: the AI cross-source sweep (+ retired xsrc rows) with its dial, stats,
+ * filters, list, and actions UNCHANGED (LP-376 keeps the sweep identical). */
+function LegacyBody({
+  fileId,
+  data,
+  running,
+  activeLevel,
+  dialBusy,
+  consequence,
+  onPick,
+  onResetToDefault,
+  onSetAsDefault,
+  onDismissConsequence,
+}: {
+  fileId: string;
+  data: VerificationStatus;
+  activeLevel: AggressionLevel;
+  dialBusy: boolean;
+  consequence: Consequence | null;
+  onPick: (level: AggressionLevel) => void;
+  onResetToDefault: () => void;
+  onSetAsDefault: () => void;
+  onDismissConsequence: () => void;
+  running: boolean;
+}) {
   // The dial filters the OPEN findings by the active cutoff (a read-time view filter —
   // never re-fetched/re-run); resolved findings are kept in their own group below.
   const cutoff = data.aggression.cutoffs[activeLevel];
@@ -271,9 +333,6 @@ function VerificationBody({
 
   return (
     <div className="space-y-4">
-      {data.stale && !running && <StaleBanner />}
-      <NeedsCompleteness fileId={fileId} />
-
       {/* At-a-glance stats (LP-88) — where does this file stand. */}
       <VerificationStats fileId={fileId} data={data} activeLevel={activeLevel} />
 

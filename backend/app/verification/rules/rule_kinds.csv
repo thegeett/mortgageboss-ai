@@ -1,0 +1,134 @@
+rule_id,name,category,kind,evaluation_path,numeric_check,exact_match,priya_validated,threshold_needs_signoff,rationale
+ID-1,Borrower name consistency,Identity,structural,ai_fuzzy_match,false,false,false,false,"Name compare across sources; exact is deterministic, nickname/maiden variance needs AI fuzzy match."
+ID-2,SSN consistency,Identity,structural,deterministic_only,false,true,false,false,Exact SSN match — no AI needed; deterministic is exact and better.
+ID-3,DOB consistency,Identity,structural,deterministic_only,false,true,false,false,"Normalize date format, compare — pure deterministic."
+ID-4,Current address consistency,Identity,structural,ai_fuzzy_match,false,false,false,false,Address canonicalize + tolerant match; fuzzy cases → AI.
+ID-5,ID expiration,Identity,structural,deterministic_only,false,true,false,false,"expiration_date >= closing_date — pure date math, no ratio."
+ID-6,Application completeness (1003),Identity,structural,deterministic_only,false,true,false,false,Presence/non-blank check on required MISMO fields.
+ID-7,Marital status / title consistency,Identity,structural,ai_fuzzy_match,false,false,false,false,Stated side deterministic; title-vesting reconciliation needs AI when title present.
+ID-8,Citizenship / residency eligibility,Identity,judgmental,ai_judgment,false,,false,false,Visa/residency interpretation against program rules is judgment.
+ID-9,Power of attorney acceptability,Identity,judgmental,ai_judgment,false,,false,false,Interpretive review of POA against investor rules.
+ID-10,OFAC / fraud / sanctions,Identity,out_of_scope,static_filter,false,,false,false,External watchlist service — not computed here.
+CR-1,Undisclosed liability (MISMO vs app),Credit,structural,ai_fuzzy_match,false,false,false,false,Reconcile each liability into DTI or excluded flag; presence/match logic.
+CR-2,HELOC in HCLTV,Credit,calculative,deterministic_bookend+ai,true,,false,false,"HCLTV must use HELOC credit LIMIT; arithmetic — deterministic computes, verify."
+CR-3,Paid-to-qualify verification,Credit,structural,deterministic_only,false,true,false,false,Excluded/paid-off flag → payoff doc present? presence check.
+CR-4,Undisclosed tradeline (report vs app),Credit,structural,ai_fuzzy_match,false,false,false,false,Match report tradelines to stated liabilities; fuzzy creditor match → AI.
+CR-5,Credit inquiry LOE,Credit,structural,ai_fuzzy_match,false,false,false,false,Inquiry → matching new tradeline OR LOE present; presence/match.
+CR-6,Derogatory seasoning,Credit,calculative,deterministic_bookend+ai,true,,false,true,event-date to today vs program seasoning window — date arithmetic.
+CR-7,Minimum credit score,Credit,calculative,deterministic_bookend,true,,false,true,Representative score vs minimum — numeric compare (exact).
+CR-8,Mortgage payment history,Credit,judgmental,ai_judgment,false,,false,false,Interpret lates against program tolerance — judgment.
+CR-9,Student loan payment calc,Credit,calculative,deterministic_bookend+ai,true,,false,true,Program calc method (% of balance vs actual) — arithmetic + method judgment.
+CR-10,Collections / charge-offs treatment,Credit,judgmental,ai_judgment,false,,false,false,Program-specific nuanced treatment — judgment.
+CR-11,Judgments / liens resolution,Credit,structural,deterministic_only,false,true,false,false,Open judgment/lien present & unresolved? presence check.
+CR-12,Disputed accounts,Credit,structural,deterministic_only,false,true,false,false,Detect dispute flag on tradeline — presence.
+CR-13,Credit report validity at closing,Credit,calculative,deterministic_bookend,true,,false,true,closing - report_date vs validity window — date arithmetic.
+IN-1,Stated vs documented income variance,Income,calculative,deterministic_bookend+ai,true,,false,true,abs(computed-stated)/stated vs threshold — arithmetic; AI picks qualifying income.
+IN-2,Pay stub recency,Income,structural,deterministic_only,false,true,false,false,most-recent pay date age vs window — date compare.
+IN-3,YTD income consistency,Income,calculative,deterministic_bookend+ai,true,,false,true,YTD/periods vs stated monthly — arithmetic.
+IN-4,Employment gap,Income,structural,deterministic_only,false,true,false,false,"Gap between employment records vs threshold — date math, no ratio."
+IN-5,Employer name consistency,Income,structural,ai_fuzzy_match,false,false,false,false,Canonicalize + containment match; legal-vs-common name → AI fuzzy.
+IN-6,Pay-stub <-> W-2 coverage,Income,structural,ai_fuzzy_match,false,false,false,false,Set match of employers both ways; fuzzy names → AI.
+IN-7,Same line of work (job change),Income,judgmental,ai_judgment,false,,false,false,Is new role same field/stability — judgment.
+IN-8,VOE present,Income,structural,deterministic_only,false,true,false,false,VOE document present? presence.
+IN-9,Future employment (offer letter),Income,structural,deterministic_only,false,true,false,false,Future job → offer letter + start date present? presence.
+IN-10,Declining income,Income,calculative,deterministic_bookend+ai,true,,false,true,most-recent vs prior year income — compare; treatment=Priya-validated.
+IN-11,Variable income averaging / history,Income,calculative,deterministic_bookend+ai,true,,false,true,History length + averaging vs annualization — arithmetic + method.
+IN-12,Self-employment income analysis,Income,calculative,deterministic_bookend+ai,true,,false,true,Net + add-backs + K-1 — dedicated calculator; method=Priya-validated.
+IN-13,Other income continuance,Income,judgmental,ai_judgment,false,,false,false,Continuance (3yr) + receipt — interpret award/order.
+IN-14,Rental income support,Income,judgmental,ai_judgment,false,,false,false,Support docs + vacancy/expense adjustment — judgment.
+AS-1,Large-deposit sourcing sweep,Assets,calculative,deterministic_bookend+ai,true,,false,true,Each deposit vs income-derived threshold — arithmetic; AI recognizes payroll/transfers + per-deposit subject enum.
+AS-2,Earnest money deposit sourcing,Assets,structural,ai_fuzzy_match,false,false,false,false,Match contract EMD to a debit in verified account — match; sourcing judgment → AI.
+AS-3,Cash-to-close sufficiency,Assets,calculative,deterministic_bookend+ai,true,,false,false,assets vs down+costs+reserves — arithmetic.
+AS-4,Reserves adequacy,Assets,calculative,deterministic_bookend+ai,true,,false,true,reserve-eligible assets in months PITIA vs required — arithmetic; eligibility judgment.
+AS-5,Gift-fund documentation chain,Assets,structural,ai_fuzzy_match,false,false,false,false,Three-link presence (letter/donor/transfer); deposit-match → AI.
+AS-6,Account ownership,Assets,structural,ai_fuzzy_match,false,false,false,false,Holder name vs borrower — tolerant match.
+AS-7,NSF / overdraft flag,Assets,structural,ai_fuzzy_match,false,false,false,false,Detect NSF/overdraft count vs tolerance; ambiguous labels → AI.
+AS-8,Statement chaining (continuity),Assets,structural,deterministic_only,false,true,false,false,ending == next beginning — equality check per pair (not a ratio).
+AS-9,Missing pages,Assets,structural,deterministic_only,false,true,false,false,declared page count vs actual — count compare.
+AS-10,Statement recency completeness,Assets,structural,deterministic_only,false,true,false,false,N consecutive months present vs required — count.
+AS-11,Retirement/stock liquidation terms,Assets,calculative,deterministic_bookend+ai,true,,false,true,Vested/usable portion — arithmetic; terms judgment.
+AS-12,Borrowed funds detection,Assets,judgmental,ai_judgment,false,,false,false,Interpret deposit patterns suggesting a loan — judgment.
+DT-1,DTI ratio vs limit,DTI,calculative,deterministic_bookend+ai,true,,false,true,back-end DTI vs program limit — the core arithmetic; AI selects inputs.
+DT-2,HOA dues in DTI,DTI,structural,deterministic_only,false,true,false,false,HOA detected → dues in payment? presence in the computation.
+DT-3,Mortgage insurance in DTI,DTI,structural,deterministic_only,false,true,false,false,MI required → in payment? presence (the requirement is calc-driven).
+DT-4,Property taxes estimate,DTI,calculative,deterministic_bookend+ai,true,,false,false,tax used vs assessed/estimated — compare; new-construction reassessment → AI.
+DT-5,Insurance premium in DTI,DTI,calculative,deterministic_bookend,true,,false,false,premium used vs binder — numeric compare.
+DT-6,Retained-property PITIA,DTI,structural,ai_fuzzy_match,false,false,false,false,Each retained property PITIA (or net rental) in DTI — reconcile/presence; REO reasoning → AI.
+DT-7,ATR documentation completeness,DTI,judgmental,ai_judgment,false,,false,false,All ATR factors documented — completeness judgment.
+PR-1,LTV / CLTV / HCLTV limits,Property,calculative,deterministic_bookend+ai,true,,false,true,each ratio vs purpose-aware limit — arithmetic.
+PR-2,Appraised value vs purchase price,Property,calculative,deterministic_bookend,true,,false,false,lesser-of + gap — arithmetic compare.
+PR-3,Property type eligibility,Property,judgmental,ai_judgment,false,,false,false,Classify property type vs allowed — AI-assist classification.
+PR-4,Appraisal completeness,Property,judgmental,ai_judgment,false,,false,false,Required sections/fields present + match — report-structure judgment.
+PR-5,Appraisal condition rating,Property,judgmental,ai_judgment,false,,false,false,Detect C5/C6/repairs — interpretive.
+PR-6,Appraisal validity at closing,Property,calculative,deterministic_bookend,true,,false,true,closing - appraisal_date vs window — date arithmetic.
+PR-7,Appraisal address matches,Property,structural,ai_fuzzy_match,false,false,false,false,Tolerant address match across sources.
+PR-8,Disaster-area reinspection,Property,judgmental,ai_judgment,false,,false,false,Cross-ref disaster declaration + date/location — judgment.
+OC-1,Occupancy consistency,Occupancy,structural,ai_fuzzy_match,false,false,false,false,Stated occupancy vs address signals — compare; inference → AI.
+OC-2,Occupancy reasonableness,Occupancy,judgmental,ai_judgment,false,,false,false,Distance/existing-primary/address patterns — fraud-signal judgment.
+OC-3,Investment rental support,Occupancy,judgmental,ai_judgment,false,,false,false,Rental support docs for investment — judgment.
+TI-1,Title commitment parties,Title,structural,ai_fuzzy_match,false,false,false,false,Tolerant party+property match title vs file.
+TI-2,Legal description match,Title,judgmental,ai_judgment,false,,false,false,Compare legal descriptions across sources — parse judgment.
+TI-3,Existing liens / unreleased mortgage,Title,structural,ai_fuzzy_match,false,false,false,false,Detect open liens + payoff plan — presence; interpretation → AI.
+TI-4,Judgments / tax liens on title,Title,structural,deterministic_only,false,true,false,false,Detect judgments/liens on title — presence.
+TI-5,Vesting,Title,judgmental,ai_judgment,false,,false,false,Vesting vs borrower/marital — judgment.
+TI-6,Chain of title / rapid transfer,Title,judgmental,ai_judgment,false,,false,false,Recent transfers/price jumps — flip/fraud judgment.
+IH-1,Insurance adequacy,Insurance,calculative,deterministic_bookend,true,,false,true,dwelling coverage vs loan amount/replacement — numeric compare.
+IH-2,Mortgagee clause,Insurance,structural,ai_fuzzy_match,false,false,false,false,Clause names correct lender — presence/parse (AI for clause text).
+IH-3,Insurance effective date,Insurance,structural,deterministic_only,false,true,false,false,effective date <= closing — date compare.
+IH-4,Premium matches DTI,Insurance,calculative,deterministic_bookend,true,,false,false,premium used vs binder — numeric compare (dup DT-5).
+IH-5,Flood zone determination,Insurance,structural,deterministic_only,false,true,false,false,Flood determination present + zone extracted — presence.
+IH-6,Flood insurance required/present,Insurance,structural,ai_fuzzy_match,false,false,false,false,If SFHA → adequate flood policy present — presence + adequacy.
+IH-7,Condo master policy,Insurance,structural,deterministic_only,false,true,false,false,Condo → master policy present + adequate — presence.
+IH-8,Wind/hail coverage,Insurance,judgmental,ai_judgment,false,,false,false,State/property applicability + policy parse — judgment.
+CO-1,Condo questionnaire present,Condo,structural,deterministic_only,false,true,false,false,Condo → questionnaire present — presence.
+CO-2,HOA dues in DTI,Condo,structural,deterministic_only,false,true,false,false,HOA detected → dues in payment — presence (overlaps DT-2).
+CO-3,Master insurance / fidelity,Condo,judgmental,ai_judgment,false,,false,false,Master + fidelity adequacy vs requirements — judgment.
+CO-4,HOA budget / reserves,Condo,calculative,deterministic_bookend+ai,true,,false,true,reserve % vs requirement (>=10%) — arithmetic; budget parse → AI.
+CO-5,Litigation / delinquency / concentration,Condo,judgmental,ai_judgment,false,,false,false,Surface litigation/delinquency/concentration — judgment.
+PC-1,Contract parties match,Contract,structural,ai_fuzzy_match,false,false,false,false,Tolerant party match contract vs file/title.
+PC-2,Purchase price matches loan terms,Contract,structural,deterministic_only,false,true,false,false,contract price == MISMO price — exact compare.
+PC-3,Property address matches,Contract,structural,ai_fuzzy_match,false,false,false,false,Tolerant address match across sources.
+PC-4,Seller credit / IPC limit,Contract,calculative,deterministic_bookend,true,,false,true,credit as % of price vs IPC cap — arithmetic.
+PC-5,EMD amount & source,Contract,structural,ai_fuzzy_match,false,false,false,false,EMD from contract + sourced debit (ties AS-2).
+PC-6,Addenda signed,Contract,structural,ai_fuzzy_match,false,false,false,false,Addendum present+dated (DET); signature-present (AI for scans).
+PC-7,Closing date realistic/current,Contract,structural,deterministic_only,false,true,false,false,closing date vs today — date compare.
+PC-8,Personal property not inflating value,Contract,judgmental,ai_judgment,false,,false,false,Surface included personal property — judgment.
+PC-9,Financing contingency dates,Contract,structural,deterministic_only,false,true,false,false,Extract + flag contingency dates — date.
+MI-1,PMI required (Conv >80% LTV),MI,calculative,deterministic_bookend,true,,false,true,LTV>80 test + PMI present — arithmetic-gated presence.
+MI-2,MI factor correct,MI,calculative,deterministic_bookend,true,,false,false,MI factor used vs certificate — numeric compare.
+MI-3,MI certificate present,MI,structural,deterministic_only,false,true,false,false,MI required → certificate present — presence.
+MI-4,FHA MIP (upfront + monthly),MI,calculative,deterministic_bookend,true,,false,true,UFMIP financed + monthly MIP at factor — arithmetic.
+MI-5,Borrower-paid vs lender-paid MI,MI,structural,deterministic_only,false,true,false,false,MI structure used vs certificate/pricing — match.
+PE-1,Conventional eligibility,Program,calculative,deterministic_bookend+ai,true,,false,true,Eligibility matrix incl. CONFORMING LIMIT check (the jumbo catch) — reference values in spec; AI assembles.
+PE-2,FHA case number,Program,structural,deterministic_only,false,true,false,false,FHA → case number present — presence.
+PE-3,FHA minimum required investment,Program,calculative,deterministic_bookend,true,,false,true,borrower investment vs 3.5% of price — arithmetic.
+PE-4,FHA property condition,Program,judgmental,ai_judgment,false,,false,false,FHA condition callouts — interpretive.
+PE-5,VA / USDA / Jumbo / Non-QM,Program,out_of_scope,static_filter,false,,false,false,Out of scope (Conv+FHA only).
+AU-1,AUS data matches documents,AUS,structural,ai_fuzzy_match,false,false,false,false,AUS inputs vs documented values — compare; material-diff judgment → AI.
+AU-2,AUS required conditions collected,AUS,structural,ai_fuzzy_match,false,false,false,false,"Parse AUS conditions, reconcile vs collected — match."
+AU-3,AUS recommendation status,AUS,structural,deterministic_only,false,true,false,false,Extract + surface recommendation — presence/extract.
+AU-4,AUS rerun needed,AUS,structural,deterministic_only,false,true,false,false,Compare current data vs last-run values — change detect.
+DC-1,Loan Estimate timely,Compliance,out_of_scope,static_filter,false,,false,false,"TRID timing — likely LOS function, confirm scope."
+DC-2,Intent to proceed,Compliance,out_of_scope,static_filter,false,,false,false,Compliance record — LOS.
+DC-3,Closing Disclosure 3-day timing,Compliance,out_of_scope,static_filter,false,,false,false,TRID timing — LOS.
+DC-4,Fee tolerance (0%/10%),Compliance,out_of_scope,static_filter,false,,false,false,LE→CD fee buckets — LOS.
+DC-5,APR change threshold,Compliance,out_of_scope,static_filter,false,,false,false,APR tolerance — LOS.
+DC-6,Appraisal delivery (ECOA),Compliance,out_of_scope,static_filter,false,,false,false,Delivery timing — LOS.
+DC-7,Changed-circumstance validity,Compliance,out_of_scope,static_filter,false,,false,false,Revised-LE justification — LOS.
+RE-1,REO reconciliation,REO,structural,ai_fuzzy_match,false,false,false,false,Cross-ref owned properties across sources — tolerant match; undisclosed-REO reasoning → AI.
+RE-2,Retained-property tax & insurance,REO,structural,deterministic_only,false,true,false,false,Retained property → tax/insurance docs present — presence.
+CL-1,Rate lock expiration,Closing,structural,deterministic_only,false,true,false,false,lock expiration vs closing — date compare.
+CL-2,Clear-to-close conditions,Closing,out_of_scope,static_filter,false,,false,false,Out of pre-submission scope.
+CL-3,Final CD accuracy,Closing,out_of_scope,static_filter,false,,false,false,Out of scope.
+CL-4,Final VOE,Closing,out_of_scope,static_filter,false,,false,false,Out of scope.
+CL-5,Final credit refresh,Closing,out_of_scope,static_filter,false,,false,false,Out of scope.
+CL-6,Signed docs / notarization / recording,Closing,out_of_scope,static_filter,false,,false,false,Out of scope.
+CL-7,Right of rescission (refi),Closing,out_of_scope,static_filter,false,,false,false,Out of scope; refi-only.
+FR-1,Altered-document appearance,Fraud,judgmental,ai_judgment,false,,false,false,Formatting/consistency anomalies — interpretive.
+FR-2,Non-arm's-length / flip,Fraud,judgmental,ai_judgment,false,,false,false,Related-party/rapid-transfer signals — judgment.
+FR-3,Unusual seller credits / side agreements,Fraud,judgmental,ai_judgment,false,,false,false,Credits beyond norms / side deals — judgment.
+FR-4,Garnishment on paystub,Fraud,judgmental,ai_judgment,false,,false,false,Deduction implies obligation — interpretive.
+FR-5,Recurring undisclosed debit,Fraud,judgmental,ai_judgment,false,,false,false,Recurring debit resembling loan payment — judgment.
+FR-6,Novel cross-source discrepancy,Fraud,judgmental,ai_judgment,false,,false,false,Open-ended cross-source discovery — THE discovery lane.
+LO-1,LOE required-and-present,LOE,structural,ai_fuzzy_match,false,false,false,false,Each LOE-triggering condition → matching LOE present — presence/match.
+LO-2,LOE completeness,LOE,structural,ai_fuzzy_match,false,false,false,false,Explanation+date+amount (DET); signature (AI for scans).

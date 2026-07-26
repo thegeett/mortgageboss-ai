@@ -1,0 +1,46 @@
+rule_id: AS-5
+name: Gift-fund documentation chain
+category: Assets
+kind: structural
+numeric_check: false
+criteria: >-
+  A gift used for funds must have a complete documentation chain: a signed gift letter (donor, amount,
+  no-repayment) AND a traceable transfer. This is scoped to gift-letter documents — when NO gift was used,
+  the rule is not_applicable (a gift rule is irrelevant absent a gift — the ID-9 scoping precedent).
+applicability:
+  scope: the loan file's gift-letter documents
+  trigger: once per gift letter, on the documentation chain
+required_inputs:
+  - name: apparent_category
+    snapshot_path: tags.by_subject[<gift content_id>]["txn.apparent_category"]
+    description: whether a gift is evidenced (reused from AS-1's txn vocabulary)
+reference_values:
+  priya_validated: false
+  threshold_needs_signoff: false
+  guideline_text: >-
+    Fannie Mae Selling Guide B3-4.3-04 — a gift needs a signed gift letter (donor, relationship, amount,
+    no repayment) and evidence the funds transferred. Agency-default; confirm the required chain with Priya.
+subject_enumeration: per_document
+subject_key_fields:
+  - content_id
+evidence_required: the gift letter, the donor, and the transfer trace
+guideline_reference: "Fannie Mae Selling Guide B3-4.3-04 (Gifts)."
+spec_version: 1
+deterministic:
+  applicability:
+    tag: document.document_type
+    op: eq
+    value: gift_letter
+  load_bearing_tags:
+    - txn.apparent_category
+  gated_tags:
+    - txn.apparent_category
+  outcomes:
+    - verdict: fired
+      when_tags:
+        - {tag: txn.apparent_category, op: ne, value: gift}
+      reasoning: a gift letter is present but the gift's transfer is not evidenced in the file — the chain is incomplete
+      how_to_fix: Document the gift transfer (the donor's withdrawal + the borrower's matching deposit).
+    - verdict: satisfied
+      default: true
+      reasoning: the gift documentation chain is complete

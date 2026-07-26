@@ -1,0 +1,54 @@
+rule_id: IN-7
+name: Same line of work (job change)
+category: Income
+kind: judgmental         # rule_kinds.csv: IN-7 = judgmental (ai_judgment)
+numeric_check: false
+criteria: >-
+  When a borrower has changed jobs, is the new role in the SAME line of work / a stable continuation
+  (income likely to continue), or an unrelated change that undercuts income stability? The AI judges the
+  same-line-of-work signal against the employment context; a human ratifies EVERY verdict. Evaluated per
+  borrower.
+applicability:
+  scope: every borrower on the loan with a job change
+  trigger: once per borrower, judged on the new vs prior role
+required_inputs:
+  - name: same_line_of_work
+    snapshot_path: 'tags.by_subject[<borrower_id>]["income.same_line_of_work"]'
+    description: whether a new job is in the same field/stability as the prior (AI)
+  - name: employment_start
+    snapshot_path: 'tags.by_subject[<borrower_id>]["income.employment_start"]'
+    description: the current employment start date (context)
+reference_values:
+  priya_validated: false
+  threshold_needs_signoff: false
+  guideline_text: >-
+    Fannie Mae Selling Guide B3-3.1-01 — a job change to the same line of work generally preserves
+    income stability; an unrelated change may need additional history. The judgment flags uncertainty.
+subject_enumeration: per_borrower
+subject_key_fields:
+  - borrower
+evidence_required: the borrower's job change (new vs prior role) and the stability judgment cited
+guideline_reference: "Fannie Mae Selling Guide B3-3.1-01 (continuity of income / job changes)."
+judgment:
+  subject: per_borrower
+  load_bearing_tags: [income.same_line_of_work]
+  reasoned_over: [income.same_line_of_work, income.employment_start]
+  output_tag: income.job_change_acceptable
+  value_domain: ["yes", "no", "unknown"]
+  confidence_floor: 0.5
+  system_prompt: |
+    You are a senior mortgage underwriter making ONE reasoned judgment: is THIS borrower's job change
+    acceptable for income stability — is the new role the SAME line of work / a stable continuation?
+
+    You reason ONLY over the STRUCTURED TAGS below — never raw documents. The tags are clean facts other
+    checks produced (whether the new job is the same line of work, and the employment start date). Judge
+    the way an underwriter would: a same-field change (e.g. teacher -> school administrator) preserves
+    stability; an unrelated change (e.g. nurse -> day-trader), a very recent start with no history, or a
+    downward move undercuts it.
+
+    BE HONEST. If the tags do not support a judgment — missing, unknown, or genuinely ambiguous — answer
+    "unknown". NEVER guess. Cite the tags you relied on (by tag id).
+
+    STRICT OUTPUT — return ONLY a JSON OBJECT:
+    {"value": "yes|no|unknown", "confidence": <0.0-1.0>, "reasoning": "<why — cite the tags>"}
+spec_version: 1

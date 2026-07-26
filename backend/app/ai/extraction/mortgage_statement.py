@@ -54,6 +54,7 @@ class MortgageStatementExtraction(BaseModel):
     """
 
     # --- Typed core (value + source) ---------------------------------------- #
+    borrower_name: TypedField[str] = Field(default_factory=TypedField)  # the borrower(s) (LP-202)
     lender_name: TypedField[str] = Field(default_factory=TypedField)
     property_address: TypedField[str] = Field(default_factory=TypedField)  # subject-vs-other: P3
     monthly_payment: TypedField[Decimal] = Field(default_factory=TypedField)  # DTI obligation
@@ -87,6 +88,7 @@ class MortgageStatementExtractionResult(BaseModel):
 
 
 _CORE_SPEC: CoreSpec = (
+    ("borrower_name", coerce_str),
     ("lender_name", coerce_str),
     ("property_address", coerce_str),
     ("monthly_payment", coerce_decimal),

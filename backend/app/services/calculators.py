@@ -430,6 +430,7 @@ async def build_reserves_view(
     return CalculatorView(
         calculator="reserves",
         title="Reserves",
+        computed=result.months_available is not None,  # False → no PITI divisor
         headline="—" if result.months_available is None else f"{result.months_available} months",
         headline_label="Reserves available",
         status=status,

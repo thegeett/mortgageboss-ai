@@ -38,6 +38,12 @@ CRITICAL RULES:
     child support into one).
   - Money may include "$"/commas (they will be parsed). Dates in any common format.
 
+PER-FIELD CONFIDENCE — in addition to the per-document "confidence" below, return a
+"field_confidence" object mapping EACH typed-core field name to your certainty
+(a number 0.0-1.0) that THAT field's value is correct. Use null for any field you
+cannot assess (absent, illegible, or uncertain). Rate each field independently and
+never inflate. Example: "field_confidence": {"<field_a>": 0.95, "<field_b>": 0.7}.
+
 Respond with ONLY a single JSON object, no markdown fences and no prose, exactly:
 {
   "typed_core": {
@@ -57,6 +63,7 @@ Respond with ONLY a single JSON object, no markdown fences and no prose, exactly
       {"label": "<field label>", "value": <string|null>, "page": <int|null>, "snippet": <string|null>}
     ]}
   ],
+  "field_confidence": {"<typed_core field name>": <0.0-1.0|null>, "...": <0.0-1.0|null>},
   "confidence": <number 0.0-1.0>,
   "reasoning": "<one short sentence describing the document>"
 }

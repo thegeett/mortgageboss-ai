@@ -18,6 +18,7 @@ from sqlalchemy.orm import selectinload
 from app.api.dependencies import CurrentUser
 from app.core.database import DbSession
 from app.models.base import utcnow
+from app.models.borrower import Borrower
 from app.models.document import Document
 from app.models.finding import Finding, FindingOrigin, FindingStatus
 from app.models.helpers import only_active
@@ -33,6 +34,7 @@ from app.schemas.verification import (
     NoteRequest,
     OverrideRequest,
     RequestDocsRequest,
+    RuleFindingPublic,
     VerificationRunPublic,
     VerificationStatusPublic,
 )
@@ -54,8 +56,11 @@ from app.services.finding_resolution import (
     undo_finding,
 )
 from app.services.loan_files import get_loan_file
+from app.services.rule_subject_label import resolve_subject_label
 from app.services.verifications import create_verification_run, mark_verification_current
 from app.verification.confidence import CONFIDENCE_CUTOFFS
+from app.verification.snapshot.content_id import DOC_PREFIX
+from app.verification.snapshot.documents_section import document_filenames_by_content_id
 
 log = structlog.get_logger(__name__)
 
@@ -70,11 +75,16 @@ _FINDING_NOT_FOUND = HTTPException(
 # uniformly (the origin distinguishes provenance). Green passes are not findings.
 _SHOWN_ORIGINS = (FindingOrigin.AI_CROSS_SOURCE, FindingOrigin.DETERMINISTIC_RULE)
 
-# The stuck-RUNNING watchdog (LP-89): a run RUNNING longer than this is treated as
-# dead (the worker died mid-run / the broker dropped the task) and reconciled to FAILED
-# on read, so the UI never spins forever with no recovery. Sized above the task hard
-# limit (180s) + queue/start slack — generous, never racing a healthy run.
-_STUCK_RUN_TIMEOUT_SECONDS = 300
+# The stuck-RUNNING watchdog (LP-89): a run RUNNING longer than this is treated as dead (the worker died
+# mid-run / the broker dropped the task / a pass was hard-killed and could not commit its own FAILED) and
+# reconciled to FAILED on read, so the UI never spins forever with no recovery.
+#
+# LP-377-C: this is the BACKSTOP for the fourth fail-open. The governed rule pass is now the run's completion
+# authority (it needs ~282s; the sweep leaves the run RUNNING), and a pass killed at its hard limit (1200s,
+# ``RULE_ENGINE_HARD_LIMIT_SECONDS``) cannot commit its own FAILED marker — so detection must NOT depend on
+# the dying task. This timeout is sized ABOVE that hard limit (+ queue/start slack) so a healthy long run is
+# never raced, but a run whose governed pass never finished is reliably failed here.
+_STUCK_RUN_TIMEOUT_SECONDS = 1500
 
 
 async def _reconcile_stuck_run(db: DbSession, loan_file: LoanFile) -> None:
@@ -104,6 +114,22 @@ async def _reconcile_stuck_run(db: DbSession, loan_file: LoanFile) -> None:
     log.warning("verification_run_watchdog_failed", run_id=str(latest.id))
 
 
+async def _borrower_names(db: DbSession, loan_file_id: UUID) -> dict[str, str]:
+    """The file's active borrowers as ``str(id) → "First Last"`` (LP-377-B), so a per-borrower finding's
+    subject resolves to a name a processor recognises rather than the borrower's UUID."""
+    rows = (
+        await db.execute(
+            only_active(
+                select(Borrower.id, Borrower.first_name, Borrower.last_name).where(
+                    Borrower.loan_file_id == loan_file_id
+                ),
+                Borrower,
+            )
+        )
+    ).all()
+    return {str(r.id): f"{r.first_name} {r.last_name}".strip() for r in rows}
+
+
 async def _get_finding(db: DbSession, *, loan_file: LoanFile, finding_id: UUID) -> Finding | None:
     """Resolve a finding by id within a (already company-scoped) file — tenant-safe."""
     stmt = only_active(
@@ -127,6 +153,22 @@ def _enqueue_cross_source(loan_file_id: UUID, run_id: UUID) -> bool:
         return True
     except Exception:
         log.warning("cross_source_enqueue_failed", loan_file_id=str(loan_file_id))
+        return False
+
+
+def _enqueue_rule_engine(loan_file_id: UUID, run_id: UUID) -> bool:
+    """Enqueue the governed snapshot/rules pass (LP-365) ALONGSIDE the sweep, on the same run. Returns
+    False on an enqueue failure (broker/worker unavailable) so the caller can mark the run FAILED — the
+    task's own fail-closed FAILED only fires if the task RUNS, so an UN-enqueued pass must fail the run
+    here, else the sweep would mark it COMPLETED with the governed pass never having run (a false-green).
+    Never raises."""
+    try:
+        from app.tasks.verification_rules import run_rule_engine_pass
+
+        run_rule_engine_pass.delay(str(loan_file_id), str(run_id))
+        return True
+    except Exception:
+        log.warning("rule_engine_enqueue_failed", loan_file_id=str(loan_file_id))
         return False
 
 
@@ -173,6 +215,20 @@ async def run_verification(
         run.error_detail = "Could not enqueue the verification pass (worker/broker unavailable)."
         await db.commit()
 
+    # LP-365: the governed snapshot/rules pass runs ALONGSIDE the sweep on the same run. Enqueued on the
+    # cache-MISS path only (a new run). A failed enqueue marks the run FAILED (fail-closed: the governed
+    # pass must run, or the run must NOT read COMPLETED). NOTE (reported, not fixed): the LP-78.1
+    # fingerprint above is keyed on the CROSS-SOURCE inputs; the rule engine reads a SUPERSET (all
+    # documents), so a cache-hit could skip a rule run a rule-relevant-only change should have triggered —
+    # the cache needs a rule-aware key (its own ticket). Here it simply rides the same trigger as the sweep.
+    if not _enqueue_rule_engine(loan_file.id, run.id):
+        run.status = VerificationStatus.FAILED
+        run.completed_at = utcnow()
+        run.error_detail = (
+            "Could not enqueue the governed rule-engine pass (worker/broker unavailable)."
+        )
+        await db.commit()
+
     return VerificationRunPublic.from_model(run)
 
 
@@ -196,12 +252,19 @@ async def _build_status(
     )
     latest = (await db.execute(latest_stmt)).scalars().first()
 
+    # LP-375 — the two finding systems are split STRUCTURALLY by ``evaluation_outcome`` (the discriminator;
+    # ``origin`` does NOT work — ``deterministic_rule`` spans BOTH the governed rule engine AND retired
+    # ``xsrc`` findings). ``findings`` is the LEGACY quarantine (evaluation_outcome null: the AI sweep +
+    # the retired xsrc deterministic findings) — RED/YELLOW, unchanged, so the sweep behaves identically.
     findings_stmt = (
         only_active(
             select(Finding).where(
                 Finding.loan_file_id == loan_file.id,
                 Finding.origin.in_(_SHOWN_ORIGINS),
                 Finding.status.in_((FindingStatus.RED, FindingStatus.YELLOW)),
+                Finding.evaluation_outcome.is_(
+                    None
+                ),  # legacy only — governed findings go to rule_findings
             ),
             Finding,
         )
@@ -209,6 +272,22 @@ async def _build_status(
         .order_by(Finding.created_at.desc())
     )
     findings = (await db.execute(findings_stmt)).scalars().all()
+
+    # The GOVERNED rule-engine findings (evaluation_outcome present) — ALL outcomes, NO status filter, so
+    # ``satisfied`` (Tab 2, previously dropped by the RED/YELLOW filter) and ``no_longer_applies`` (Tab 3)
+    # are reachable. A SEPARATE list of a SEPARATE type → the two systems' counts can never be summed.
+    rule_findings_stmt = only_active(
+        select(Finding).where(
+            Finding.loan_file_id == loan_file.id,
+            Finding.evaluation_outcome.is_not(None),
+            # Parity with the legacy query's exposure gate: a finding of a non-shown origin is not
+            # surfaced by EITHER system. Governed findings are DETERMINISTIC_RULE (in _SHOWN_ORIGINS),
+            # so this is a no-op today and a guard against a future non-shown-origin governed finding.
+            Finding.origin.in_(_SHOWN_ORIGINS),
+        ),
+        Finding,
+    ).order_by(Finding.created_at.desc())
+    rule_findings = (await db.execute(rule_findings_stmt)).scalars().all()
 
     # LP-114.1: the file's document names, loaded ONCE, to name every finding's source-document set
     # (no N+1). Keyed by id → readable filename.
@@ -222,7 +301,19 @@ async def _build_status(
             )
         )
     ).all()
-    document_names = dict(doc_rows)
+    document_names: dict[UUID, str] = {row.id: row.original_filename for row in doc_rows}
+
+    # LP-377-B — the processor-facing SUBJECT LABEL for each governed finding (a filename / amount /
+    # borrower / "Loan-level"), resolved read-time per subject TYPE so a row names its subject, never a
+    # content-id hash. The borrower map is cheap; the document content-id → filename map is built ONLY
+    # when a governed finding actually has a document subject (it rebuilds the documents section — the
+    # single honest way to recover a content-id → filename, LP-312 ids being content hashes).
+    borrower_names = await _borrower_names(db, loan_file.id) if rule_findings else {}
+    document_filenames = (
+        await document_filenames_by_content_id(db, loan_file)
+        if any((f.subject_key or "").startswith(DOC_PREFIX) for f in rule_findings)
+        else {}
+    )
 
     level = resolve_aggression_level(loan_file, user)
     cutoff = active_cutoff(loan_file, user)
@@ -233,6 +324,27 @@ async def _build_status(
         program=loan_file.loan_program.value if loan_file.loan_program else None,
         latest_run=VerificationRunPublic.from_model(latest) if latest else None,
         findings=[FindingPublic.from_model(f, document_names=document_names) for f in findings],
+        rule_findings=[
+            RuleFindingPublic.from_model(
+                f,
+                subject_label=resolve_subject_label(
+                    f.subject_key,
+                    f.load_bearing_tags or [],
+                    borrower_names=borrower_names,
+                    document_filenames=document_filenames,
+                ),
+            )
+            for f in rule_findings
+        ],
+        # LP-377-C Fix 3: the latest run did not complete (still RUNNING, or FAILED / killed) yet governed
+        # findings exist — so they MAY be carried forward from an earlier run (LP-322). Keyed on RUN status,
+        # not "the rule engine failed" (a run can fail on the SWEEP while the rule pass succeeded, so the
+        # findings can even be fresh) — the surface just flags possible staleness, never claims which half failed.
+        rule_findings_stale=(
+            latest is not None
+            and latest.status is not VerificationStatus.COMPLETED
+            and len(rule_findings) > 0
+        ),
         aggression=AggressionPublic(
             level=level.value,
             default=user.default_aggression_level.value,

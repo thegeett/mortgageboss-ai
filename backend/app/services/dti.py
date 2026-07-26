@@ -70,6 +70,13 @@ HOUSING_INSURANCE = "housing.insurance"
 HOUSING_MORTGAGE_INSURANCE = "housing.mortgage_insurance"
 HOUSING_HOA = "housing.hoa"
 
+# LP-375 — the REQUIRED housing inputs whose absence must FAIL-CLOSED (absent≠0), mirroring the snapshot
+# path's ``_REQUIRED_DTI_TAGS`` (calculations_section.py): a missing tax figure or hazard binder understates
+# the housing payment → the DTI would be confidently too-low. HOA/MI legitimately 0 → NOT required. Kept as
+# the line KEYS here (the display path's currency) so services/dti.py needs no import from the snapshot
+# layer (which imports THIS module — the dependency is one-directional).
+_REQUIRED_HOUSING_KEYS = frozenset({HOUSING_TAXES, HOUSING_INSURANCE})
+
 _BACK_END_RULE_IDS = {
     LoanProgram.CONVENTIONAL: "conv.dti.back_end_max",
     LoanProgram.FHA: "fha.dti.back_end_max",
@@ -208,9 +215,17 @@ def _typed_value(data: dict[str, Any] | None, field: str) -> Decimal | None:
 async def _extracted_monthly(
     db: AsyncSession, loan_file_id: UUID, document_type: str, field: str, *, annual: bool
 ) -> Decimal | None:
-    """A monthly amount from an extracted (possibly annual) figure, or None."""
+    """A monthly amount from an extracted (possibly annual) figure, or None.
+
+    A NON-POSITIVE figure is NOT derivable → None (LP-375). This feeds only the REQUIRED housing inputs
+    (property taxes / homeowners insurance), where a $0 is implausible and — exactly like an ABSENT
+    figure (absent≠0) — must FAIL-CLOSED to "unknown", never a confident too-low DTI resting on a
+    fabricated 0. This is the single source both gates read: the display ``unknown`` flag and the
+    snapshot ``_is_unknown`` both key off ``auto_amount is None``, so returning None here gates BOTH.
+    A processor who knows a figure is genuinely 0 can still override the line explicitly (an override
+    is trusted)."""
     value = _typed_value(await _current_extracted_data(db, loan_file_id, document_type), field)
-    if value is None:
+    if value is None or value <= 0:
         return None
     return (value / Decimal(12)) if annual else value
 
@@ -266,6 +281,11 @@ def _to_items(
                 amount=effective,
                 source="override" if override is not None else auto.source,
                 overridden=override is not None,
+                # LP-375: a REQUIRED input that could not be derived and was not overridden → its ``amount``
+                # of 0 is a fail-closed placeholder, NOT an extracted $0.00. The display renders "unknown".
+                unknown=(
+                    auto.auto is None and override is None and auto.key in _REQUIRED_HOUSING_KEYS
+                ),
             )
         )
         engine_lines.append(DtiLine(key=auto.key, label=auto.label, amount=effective))
@@ -296,6 +316,21 @@ async def build_dti_calculation(
 
     result = compute_dti(income_lines, housing_lines, debt_lines)
 
+    # LP-375 — FAIL-CLOSED gating: a REQUIRED housing input (taxes/insurance) unknown (auto None, not
+    # overridden) marks the calc GATED. The ratios are LEFT computed here on purpose — the snapshot path
+    # (calculations_section.map_dti) re-derives the gate from the line amounts and would treat a None
+    # back-end ratio as "no income" (its short-circuit), flipping its honest gated entry to ABSENT. The
+    # DISPLAY nulls the ratios instead (``gate_display_ratios`` at the API boundary), so the /dti card
+    # agrees with the engine WITHOUT this shared function altering the snapshot path.
+    gated_labels = [item.label for item in housing_items if item.unknown]
+    gated = bool(gated_labels)
+    gate_reason = (
+        "calculation gated (fail-closed): "
+        + "; ".join(f"{label} is unknown" for label in gated_labels)
+        if gated
+        else None
+    )
+
     lender_slug = await _lender_slug(db, loan_file)
     limit = _resolve_limit(loan_file.loan_program, lender_slug, result.back_end_pct)
 
@@ -306,6 +341,8 @@ async def build_dti_calculation(
     return DtiCalculation(
         front_end_dti=result.front_end_pct,
         back_end_dti=result.back_end_pct,
+        gated=gated,
+        gate_reason=gate_reason,
         gross_monthly_income=result.gross_monthly_income,
         housing_payment=result.housing_payment,
         monthly_debts=result.monthly_debts,
@@ -318,6 +355,24 @@ async def build_dti_calculation(
         program=loan_file.loan_program.value if loan_file.loan_program else None,
         limit=limit,
         findings=DtiFindingsStatus(unresolved=len(in_scope) > 0, open_in_scope_count=len(in_scope)),
+    )
+
+
+def gate_display_ratios(calc: DtiCalculation) -> DtiCalculation:
+    """The DISPLAY view of a gated DTI (LP-375): NULL the headline ratios (never a confident number
+    resting on a fabricated 0) and mark the limit ``unknown``, so the /dti card agrees with the honest
+    snapshot gate. Applied at the API boundary rather than in :func:`build_dti_calculation` because the
+    snapshot path (``calculations_section.map_dti``) re-gates from the line amounts and needs the computed
+    ratio to reach it (its ``back_end_dti is None`` guard means "no income", not "gated"). A no-op when
+    the calc is not gated."""
+    if not calc.gated:
+        return calc
+    return calc.model_copy(
+        update={
+            "front_end_dti": None,
+            "back_end_dti": None,
+            "limit": calc.limit.model_copy(update={"status": "unknown"}),
+        }
     )
 
 

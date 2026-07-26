@@ -14,6 +14,9 @@ export interface DtiLineItem {
   amount: string;
   source: string;
   overridden: boolean;
+  /** LP-375: a REQUIRED input (taxes/insurance) that could not be derived and was not overridden — its
+   * `amount` of 0 is a fail-closed placeholder, NOT an extracted $0.00 (absent≠0). Render as "Unknown". */
+  unknown?: boolean;
 }
 
 export type DtiLimitStatus = "pass" | "over" | "unknown";
@@ -34,6 +37,10 @@ export interface DtiFindingsStatus {
 export interface DtiCalculation {
   front_end_dti: string | null;
   back_end_dti: string | null;
+  /** LP-375: fail-closed — a REQUIRED housing input (taxes/insurance) is unknown, so the ratios are
+   * nulled (never a confident number on a fabricated 0) and `gate_reason` names the unknown input(s). */
+  gated?: boolean;
+  gate_reason?: string | null;
   gross_monthly_income: string;
   housing_payment: string;
   monthly_debts: string;

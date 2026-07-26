@@ -1,0 +1,839 @@
+"""LF-6T3N labeling worksheet generator + scoring run (LP-337, corrected by LP-338).
+
+**THIS IS A BIAS HUNT, NOT VALIDATION.** A clean result does NOT unblock the inert rules — activation needs
+RATES across VARIED files + Priya's bars (see docs/tickets/LP-337.md / LP-338.md).
+
+LP-338 fixed a conflation bug. LP-337's coverage function statically hardcoded the txn.* family and
+declared id.* / income.* / asset.* "UNMEASURABLE" — it measured *what the fixture happened to contain*
+(and even that only for txn.*), then LABELLED that as the file's inherent capacity and drew a false
+conclusion (*"txn.* is the calibration ceiling; other families need files that don't exist"*). Two distinct
+numbers were conflated. This module now reports THREE separate facts per AI tag (absent != empty != unwired
+— the invariant this project handles at every other level, now at the coverage level):
+
+1. **FILE CAPACITY** — how many instances the SNAPSHOT could support for the tag's DECLARED subject
+   (`tag_production.yaml`). The labeling ceiling. Independent of wiring / ACTIVE_RULE_IDS.
+2. **PIPELINE YIELD** — how many the wired pipeline produces today (a declared AI tag runs; a vocabulary
+   tag with no tag_production declaration does not). A wiring fact, not a file fact.
+3. **CONTENT-EMPTINESS** — a subject that EXISTS but carries no usable fields (a brokerage_statement with
+   `fields = {}`) genuinely cannot be labeled — distinct from "no subject" and from "not wired".
+
+Status per tag: ``labelable`` (capacity>0, wired) · ``wiring_gap`` (capacity>0, yield=0 — LP-333 bucket B,
+reported not fixed) · ``content_empty`` (subjects exist but all field-empty) · ``no_subject`` (0 subjects).
+
+Both halves reuse existing machinery UNCHANGED (LP-317 ``DimensionCalibration``; LP-334 ``ScoredTag`` /
+``summarize``). Deterministic + KEYLESS for generation; the live scoring run is opt-in (``LP334_LIVE=1``).
+"""
+
+from __future__ import annotations
+
+import csv
+import io
+from collections.abc import Mapping
+from dataclasses import dataclass, replace
+from pathlib import Path
+
+from app.services.rule_subject_label import resolve_subject_label
+from app.verification.eval.live_calibration import ScoredTag
+from app.verification.rule_engine.registry import ACTIVE_RULE_IDS
+from app.verification.snapshot.fields import Field
+from app.verification.snapshot.model import DocumentEntry, Snapshot, TransactionRecord
+from app.verification.snapshot.pii import PiiField
+from app.verification.snapshot.tag import Tag
+from app.verification.tag_materialization.ai import Reasoner, produce_ai_group_tags
+from app.verification.tag_materialization.declarations import (
+    ProductionMode,
+    TagDeclaration,
+    load_ai_groups,
+    load_declarations,
+)
+from app.verification.tag_materialization.subjects import subject_type
+
+_CREDIT = "credit"
+_FREE_TEXT = frozenset({"txn.counterparty", "txn.source_reference"})
+
+# income_stability (LP-385) is a per-BORROWER group: its context is the income documents ATTRIBUTED to a
+# borrower, seen TOGETHER (a 2-year trend / decline / continuance is a cross-document question a single
+# document cannot answer — LP-378 measured 0/120 per-document). These are the doc types that feed that
+# per-borrower income context (mirrors the group's prompt: "the W-2s, pay stubs, VOE, and 1003").
+_INCOME_STABILITY_DOCS = ("w2", "pay_stub", "voe", "uniform_residential_loan_application")
+
+
+@dataclass(frozen=True)
+class _TagMeta:
+    """Per-tag eval metadata (bucket + scoring + rules). ``wired`` marks a tag the DECLARED tag-production
+    pipeline produces; a vocabulary AI tag with no declaration (the Stage-B sourcing tags) is wired=False
+    -> a wiring gap, not an unmeasurable tag."""
+
+    tag_id: str
+    scoring: str  # "enum" | "string" | "free_text_deferred"
+    bucket: str  # "mechanical" | "judgment"
+    consuming_rules: tuple[str, ...]
+    money_in_only: bool = False
+    wired: bool = True
+    # LP-390-3: an explicit labeling QUESTION prepended to the row's context, for a tag whose question a
+    # labeler could misread as a duplicate of another tag on the same subject. Priya skipped EVERY
+    # has_identified_source row (LP-379-D) reading it as a repeat of apparent_category on the same
+    # transaction — same facts, different tag. The prompt frames the DISTINCT question so the row is
+    # answerable on its own. Empty = the context is just the facts (the default, unchanged for every other tag).
+    label_prompt: str = ""
+
+
+# LP-390-3 / 3a — the SOURCE-TRACE question (LP-314a), distinct from txn.apparent_category (WHAT the deposit
+# is). has_identified_source asks whether the deposit's ORIGIN is verifiable to an underwriter's standard. It
+# is appended AFTER the transaction facts (LP-390-3a: the identity leads, like apparent_category, so no row
+# opens with identical boilerplate) and is PLAIN ASCII (LP-390-3a: em-dashes rendered as mojibake in the CSV).
+_SOURCE_TRACE_PROMPT = (
+    "SOURCE-TRACE: is this money-in's ORIGIN traceable to a verifiable source (a named payer/employer, the "
+    "borrower's own verified account, an itemized proceeds line) vs an unexplained deposit? yes/no/unknown "
+    "(distinct from the category = what the deposit is)."
+)
+
+
+@dataclass(frozen=True)
+class _Group:
+    """An AI group's coverage metadata: its subject kind + (for document / borrower tags) the document_types
+    whose content the group's tags can be labeled from. The doc-type applicability is eval metadata — the
+    architecture keys AI groups by subject only and relies on the prompt to abstain off-type.
+
+    ``subject_kind`` is "transaction" | "document" | "borrower". A BORROWER group (income_stability, LP-385)
+    produces one row per borrower per tag; ``applicable_types`` are the income doc types whose attributed
+    content forms that borrower's context. A borrower with NO attributed income document is not labelable
+    (the tag abstains) — so, like a content-empty document, it yields no row."""
+
+    subject_kind: str  # "transaction" | "document" | "borrower"
+    applicable_types: tuple[str, ...]  # () for transaction (all txns)
+    tags: tuple[_TagMeta, ...]
+
+
+# The coverage map. Document-subject applicability is the honest capacity proxy (which doc types carry the
+# fields a tag is labeled from). Buckets: MECHANICAL = a factual read (Geet); JUDGMENT = a domain call
+# (Priya) — incl. id.current_address_type, the REAL-DL check of LP-335's FINDING-1 fix.
+_GROUPS: tuple[_Group, ...] = (
+    _Group(
+        "transaction",
+        (),
+        (
+            _TagMeta("txn.is_money_in", "enum", "mechanical", ("AS-1", "AS-7", "AS-8", "AS-12")),
+            _TagMeta(
+                "txn.apparent_category",
+                "enum",
+                "judgment",
+                ("AS-1", "AS-2", "AS-5", "AS-12", "IN-1"),
+            ),
+        ),
+    ),
+    # Stage-B sourcing: txn.has_identified_source is a vocabulary AI tag with NO tag_production declaration
+    # (produced by the separate tag_correlation pass, not the generic pipeline) -> wired=False. It is an
+    # enum-scored, producer-backed JUDGMENT tag Priya labels. LP-390-3a DROPPED its two siblings —
+    # txn.counterparty and txn.source_reference — from the worksheet: both are free_text_deferred (nothing
+    # to score) AND orphans (no producer, LP-390-2), so they are non-labelable and only added noise.
+    _Group(
+        "transaction",
+        (),
+        (
+            _TagMeta(
+                "txn.has_identified_source",
+                "enum",
+                "judgment",
+                ("AS-1", "AS-2", "AS-5"),
+                money_in_only=True,
+                wired=False,
+                label_prompt=_SOURCE_TRACE_PROMPT,  # LP-390-3: the distinct SOURCE-TRACE question
+            ),
+        ),
+    ),
+    _Group(
+        "document",
+        ("drivers_license", "passport", "state_id"),
+        (_TagMeta("id.name_normalized", "string", "mechanical", ("ID-1",)),),
+    ),
+    _Group(
+        "document",
+        ("drivers_license", "passport", "state_id"),
+        (
+            _TagMeta("id.address_normalized", "string", "mechanical", ("ID-4",)),
+            _TagMeta(
+                "id.current_address_type", "enum", "judgment", ("ID-4",)
+            ),  # LP-335 real-DL check (high value)
+        ),
+    ),
+    _Group(
+        "document",
+        ("title_commitment",),
+        (_TagMeta("id.title_vesting_consistent", "enum", "judgment", ("ID-7",)),),
+    ),
+    _Group(
+        "document",
+        ("power_of_attorney",),
+        (_TagMeta("id.poa_present_and_acceptable", "enum", "judgment", ("ID-9",)),),
+    ),
+    _Group(
+        "document",
+        ("pay_stub", "w2"),
+        (
+            _TagMeta("income.type", "enum", "judgment", ("IN-1",)),
+            _TagMeta("income.documented_monthly", "string", "mechanical", ("IN-1",)),
+            _TagMeta("income.qualifying_monthly", "string", "judgment", ("IN-1",)),
+        ),
+    ),
+    _Group(
+        "document",
+        ("pay_stub", "w2", "voe", "employment_offer_letter"),
+        (_TagMeta("income.employer_normalized", "string", "mechanical", ("IN-5",)),),
+    ),
+    _Group(
+        "document",
+        ("voe", "employment_offer_letter"),
+        (
+            _TagMeta("income.voe_present", "enum", "judgment", ("IN-2",)),
+            _TagMeta("income.future_employment", "enum", "judgment", ("IN-2",)),
+            _TagMeta("income.offer_letter_present", "enum", "judgment", ("IN-2",)),
+        ),
+    ),
+    # income_stability — PER-BORROWER as of LP-385 (was per-document; it produced 0/120 because a 2-year
+    # trend is a cross-document question). One row per borrower per tag; context = the borrower's attributed
+    # income documents. On a fixture with no wired borrowers (belongs_to / MISMO borrower_id) this yields
+    # NO rows — the honest state, distinct from the stale per-document capacity it used to report (LP-379-A).
+    _Group(
+        "borrower",
+        _INCOME_STABILITY_DOCS,
+        (
+            _TagMeta("income.has_2yr_history", "enum", "judgment", ("IN-3",)),
+            _TagMeta("income.is_declining", "enum", "judgment", ("IN-1",)),
+            _TagMeta("income.same_line_of_work", "enum", "judgment", ("IN-3",)),
+            _TagMeta("income.continuance_3yr", "enum", "judgment", ("IN-4",)),
+        ),
+    ),
+    _Group(
+        "document",
+        ("bank_statement", "investment_account", "brokerage_statement"),
+        (
+            _TagMeta("stmt.owner_matches_borrower", "enum", "judgment", ("AS-6",)),
+            _TagMeta("stmt.is_reserve_eligible", "enum", "judgment", ("AS-4",)),
+        ),
+    ),
+    _Group(
+        "document",
+        ("investment_account", "brokerage_statement", "retirement_account"),
+        (
+            _TagMeta("asset.liquidation_terms", "enum", "judgment", ("AS-11",)),
+            _TagMeta("asset.usable_value", "string", "judgment", ("AS-4",)),
+        ),
+    ),
+)
+
+
+def _fv(field: object) -> str:
+    # A PiiField contributes only its MASKED display (never a raw value) — safe context for the labeler,
+    # not dropped. A plain Field contributes its value; absent/None → "".
+    if isinstance(field, PiiField):
+        return (field.display or "") if field.is_present else ""
+    if not isinstance(field, Field) or field.absent or field.value is None:
+        return ""
+    return str(field.value)
+
+
+def _doc_has_content(doc: DocumentEntry) -> bool:
+    return bool(doc.fields)
+
+
+def _txn_context(txn: TransactionRecord) -> str:
+    parts = {
+        "date": txn.date,
+        "amount": txn.amount,
+        "direction": txn.direction,
+        "description": txn.description,
+    }
+    return "; ".join(f"{k}={_fv(v)}" for k, v in parts.items())
+
+
+def _doc_context(doc: DocumentEntry) -> str:
+    return "; ".join(f"{k}={_fv(v)}" for k, v in doc.fields.items())
+
+
+# --------------------------------------------------------------------------- #
+# The SOURCE DOCUMENT of a row (LP-379-C) — so a labeler never hunts for which document a row came from.
+# We REUSE LP-377-B's resolve_subject_label (subject-key → human label): borrower rows go through its UUID
+# branch, and a document/transaction row's SOURCE DOCUMENT key goes through its document_filenames map. The
+# fixture has no real filenames, so we POPULATE that map (its contract: content-id → filename) from each
+# document's own identifying fields — a legible descriptor, never a hash.
+# --------------------------------------------------------------------------- #
+_HUMAN_TYPE = {
+    "bank_statement": "Bank statement",
+    "drivers_license": "Driver's license",
+    "pay_stub": "Pay stub",
+    "w2": "W-2",
+    "voe": "VOE",
+    "investment_account": "Investment account",
+    "brokerage_statement": "Brokerage statement",
+    "mortgage_statement": "Mortgage statement",
+    "property_tax_bill": "Property-tax bill",
+    "purchase_agreement": "Purchase agreement",
+}
+# The identity fields that make a document locatable in the file (never PII beyond what the row already shows).
+_SOURCE_IDENTITY = {
+    "bank_statement": (
+        "bank_name",
+        "account_number_masked",
+        "statement_period_start",
+        "statement_period_end",
+    ),
+    "drivers_license": ("full_name",),
+    "pay_stub": ("employer_name", "pay_date"),
+    "w2": ("employer_name", "tax_year"),
+    "voe": ("employer_name",),
+    "investment_account": ("institution_name", "account_number_masked"),
+    "mortgage_statement": ("servicer_name", "loan_number_masked", "statement_date"),
+    "property_tax_bill": ("parcel_number", "tax_year"),
+    "purchase_agreement": ("property_address",),
+}
+
+
+def _document_descriptor(entry: DocumentEntry) -> str:
+    """A legible source-document label from a document's own fields (the fixture has no real filename). Never a
+    hash: worst case the human document type alone (e.g. an empty brokerage_statement → "Brokerage statement")."""
+    dtype = entry.document_type or "document"
+    human = _HUMAN_TYPE.get(dtype, dtype.replace("_", " ").capitalize())
+    vals = [v for f in _SOURCE_IDENTITY.get(dtype, ()) if (v := _fv(entry.fields.get(f)))]
+    return f"{human}: {' '.join(vals)}" if vals else human
+
+
+def _document_filenames(snapshot: Snapshot) -> dict[str, str]:
+    """resolve_subject_label's document_filenames map, POPULATED for the fixture (content-id → descriptor)."""
+    return {e.content_id: _document_descriptor(e) for e in snapshot.documents.entries}
+
+
+def _txn_parent(snapshot: Snapshot) -> dict[str, str]:
+    """transaction content-id → its parent DOCUMENT content-id (the snapshot nests txns under documents)."""
+    return {
+        txn.content_id: doc.content_id
+        for doc in snapshot.documents.entries
+        for txn in (doc.transactions or ())
+    }
+
+
+def _document_source(source_key: str, document_filenames: dict[str, str]) -> str:
+    """The source document's label for a document/transaction row. resolve_subject_label routes doc-PREFIXED
+    keys (the bank statements — the transaction parents) through document_filenames; the fixture's synthetic
+    non-bank ids are not prefixed, so we supplement with the SAME map (no branch added to the resolver)."""
+    label = resolve_subject_label(source_key, (), document_filenames=document_filenames)
+    return document_filenames.get(source_key, label)
+
+
+def _borrower_source(
+    snapshot: Snapshot,
+    borrower_id: str,
+    applicable: tuple[str, ...],
+    document_filenames: dict[str, str],
+) -> str:
+    """A borrower (income_stability) row aggregates several documents — so its source is the real filenames of
+    the borrower's ATTRIBUTED income documents (what the labeler opens to judge the trend), semicolon-joined
+    and sorted for determinism. Never a hash: an un-mapped document falls back to its descriptor."""
+    files = sorted(
+        document_filenames.get(e.content_id) or _document_descriptor(e)
+        for e in snapshot.documents.entries
+        if e.document_type in applicable
+        and e.belongs_to is not None
+        and any(str(ref.borrower_id) == borrower_id for ref in e.belongs_to)
+    )
+    return "; ".join(files)
+
+
+def _borrower_income_docs(
+    context: dict[str, object], applicable: tuple[str, ...]
+) -> list[dict[str, object]]:
+    """The income documents (of the applicable types) attributed to one borrower — from the borrower subject's
+    context ({borrower_mismo, documents}); the documents already carry only PII-masked field displays."""
+    docs = context.get("documents") or []
+    assert isinstance(docs, list)
+    return [d for d in docs if isinstance(d, dict) and d.get("document_type") in applicable]
+
+
+def _borrower_context_str(income_docs: list[dict[str, object]]) -> str:
+    """A per-borrower context string: each attributed income document as ``[type] k=v; k=v`` joined by
+    `` || ``, so the labeler sees the whole income picture (all years/employers) without opening the file."""
+    parts: list[str] = []
+    for d in income_docs:
+        fields = d.get("fields") or {}
+        assert isinstance(fields, dict)
+        body = "; ".join(f"{k}={v}" for k, v in fields.items() if v not in (None, ""))
+        parts.append(f"[{d.get('document_type')}] {body}")
+    return " || ".join(parts)
+
+
+@dataclass(frozen=True)
+class TagCapacity:
+    """The three facts for one AI tag on this file — never conflated (LP-338)."""
+
+    tag_id: str
+    subject_kind: str
+    scoring: str
+    bucket: str
+    consuming_rules: tuple[str, ...]
+    capacity: int  # labelable instances (subject present + content present)
+    content_empty: int  # subjects present but field-empty (cannot be labeled)
+    wired: bool  # produced by the declared tag-production pipeline today
+
+    @property
+    def rule_live(self) -> bool:
+        return any(r in ACTIVE_RULE_IDS for r in self.consuming_rules)
+
+    @property
+    def pipeline_yield(self) -> int:
+        return self.capacity if self.wired else 0
+
+    @property
+    def status(self) -> str:
+        if self.capacity > 0:
+            return "labelable" if self.wired else "wiring_gap"
+        if self.content_empty > 0:
+            return "content_empty"
+        return "no_subject"
+
+
+def _transactions(snapshot: Snapshot) -> list[TransactionRecord]:
+    return [t for doc in snapshot.documents.entries for t in (doc.transactions or ())]
+
+
+def compute_capacity(snapshot: Snapshot) -> list[TagCapacity]:
+    """Per AI tag: file_capacity (labelable subjects) · content_empty (subjects present but field-empty) ·
+    wired. Deterministic + KEYLESS (from the snapshot + the declared subjects; no AI, no key). Capacity is
+    a FILE fact (does the subject + its content exist), yield a WIRING fact — never conflated."""
+    docs_by_type: dict[str, list[DocumentEntry]] = {}
+    for d in snapshot.documents.entries:
+        docs_by_type.setdefault(d.document_type or "", []).append(d)
+    txns = _transactions(snapshot)
+    credits = [t for t in txns if _fv(t.direction) == _CREDIT]
+
+    # Borrower subjects (LP-385): one per MISMO borrower carrying the LP-332 id link; a borrower is labelable
+    # for a borrower-group tag iff at least one income document is ATTRIBUTED to them (else the tag abstains).
+    borrower_income_counts = [
+        len(
+            _borrower_income_docs(
+                subject_type("borrower").build_context(bsub, None), _INCOME_STABILITY_DOCS
+            )
+        )
+        for _bid, bsub in subject_type("borrower").enumerate(snapshot)
+    ]
+
+    out: list[TagCapacity] = []
+    for group in _GROUPS:
+        for meta in group.tags:
+            if group.subject_kind == "transaction":
+                pool = credits if meta.money_in_only else txns
+                cap = sum(1 for t in pool if _fv(t.description) or _fv(t.amount))
+                empty = len(pool) - cap
+            elif group.subject_kind == "borrower":
+                cap = sum(1 for n in borrower_income_counts if n > 0)
+                empty = sum(1 for n in borrower_income_counts if n == 0)
+            else:
+                applicable = [d for t in group.applicable_types for d in docs_by_type.get(t, [])]
+                cap = sum(1 for d in applicable if _doc_has_content(d))
+                empty = sum(1 for d in applicable if not _doc_has_content(d))
+            out.append(
+                TagCapacity(
+                    meta.tag_id,
+                    group.subject_kind,
+                    meta.scoring,
+                    meta.bucket,
+                    meta.consuming_rules,
+                    cap,
+                    empty,
+                    meta.wired,
+                )
+            )
+    return out
+
+
+# --------------------------------------------------------------------------- #
+# The worksheet rows (one per labelable instance) — context-bearing, prediction-free
+# --------------------------------------------------------------------------- #
+@dataclass(frozen=True)
+class WorksheetRow:
+    bucket: str
+    tag_id: str
+    subject_id: str
+    subject_kind: str
+    document_type: str
+    scoring: str
+    allowed_values: str
+    consuming_rules: str
+    rule_status: str  # "LIVE" | "inert"
+    context: str  # enough to label WITHOUT the file
+    source_document: str = (
+        ""  # LP-379-C — which document the row came from (or "borrower: …"/"Loan-level")
+    )
+    golden_label: str = ""
+    labeler_note: str = ""
+
+
+_HEADERS = (
+    "tag_id",
+    "subject_id",
+    "subject_kind",
+    "document_type",
+    "source_document",
+    "scoring",
+    "allowed_values",
+    "consuming_rules",
+    "rule_status",
+    "context",
+    "golden_label",
+    "labeler_note",
+)
+
+
+def _allowed_str(tag_id: str, decls: dict[str, TagDeclaration]) -> str:
+    decl = decls.get(tag_id)
+    if decl is not None and decl.allowed_values:
+        return " | ".join(decl.allowed_values)
+    return "(free text)"
+
+
+def _with_prompt(base_context: str, prompt: str) -> str:
+    """Append a tag's neutral labeling QUESTION after the facts (LP-390-3a: facts first), or the facts alone
+    when there is no prompt — so a row with no declared/overridden prompt is byte-unchanged."""
+    return f"{base_context} | {prompt}" if prompt else base_context
+
+
+def build_worksheet(
+    snapshot: Snapshot,
+    *,
+    document_filenames: Mapping[str, str] | None = None,
+    only_tags: frozenset[str] | None = None,
+    label_prompts: Mapping[str, str] | None = None,
+) -> list[WorksheetRow]:
+    """Enumerate every LABELABLE AI-tag instance (subject present + content present) — deterministically,
+    from the snapshot (no AI, no key). One row per (tag, subject); document rows carry the document's
+    fields as context, txn rows carry date/amount/direction/description. Content-empty subjects (a
+    brokerage_statement with no fields) are NOT rows — they cannot be labeled (reported in the coverage).
+
+    ``document_filenames`` (LP-379-C) is the REAL content-id → original_filename map (what the Document tab
+    shows), so ``source_document`` names the actual file a labeler opens. It OVERRIDES the field-derived
+    fallback where present; any document not in it still gets a legible descriptor (never a hash).
+
+    ``only_tags`` (LP-393-2) restricts the sheet to those tag ids (default None → every tag, the LF-6T3N
+    path unchanged). ``label_prompts`` (LP-393-2) overrides a tag's ``label_prompt`` per id, so a focused
+    worksheet can carry a neutral question WITHOUT editing the shared ``_TagMeta`` (default {} → the declared
+    prompt, so a tag with none — every tag but has_identified_source — is byte-unchanged)."""
+    decls = load_declarations()
+    prompts = label_prompts or {}
+    docs_by_type: dict[str, list[DocumentEntry]] = {}
+    for d in snapshot.documents.entries:
+        docs_by_type.setdefault(d.document_type or "", []).append(d)
+
+    # LP-379-C source-document resolution maps (reused by resolve_subject_label), built once. Real filenames
+    # override the field-derived descriptor fallback so every row still resolves to something legible.
+    filenames = {**_document_filenames(snapshot), **(document_filenames or {})}
+    txn_parent = _txn_parent(snapshot)
+
+    rows: list[WorksheetRow] = []
+    for group in _GROUPS:
+        for meta in group.tags:
+            if only_tags is not None and meta.tag_id not in only_tags:
+                continue
+            prompt = prompts.get(meta.tag_id, meta.label_prompt)
+            allowed = _allowed_str(meta.tag_id, decls)
+            rule_status = (
+                "LIVE" if any(r in ACTIVE_RULE_IDS for r in meta.consuming_rules) else "inert"
+            )
+            if group.subject_kind == "transaction":
+                for doc in snapshot.documents.entries:
+                    for txn in doc.transactions or ():
+                        if meta.money_in_only and _fv(txn.direction) != _CREDIT:
+                            continue
+                        if not (_fv(txn.description) or _fv(txn.amount)):
+                            continue
+                        # LP-390-3a: the transaction IDENTITY leads (exactly like apparent_category), THEN a
+                        # tag with a label_prompt appends its short, distinct question. Leading with the facts
+                        # (not 400 chars of boilerplate) is what stops the row reading as a repeat; every other
+                        # tag's context is the facts alone (unchanged).
+                        context = f"{_txn_context(txn)} | {prompt}" if prompt else _txn_context(txn)
+                        rows.append(
+                            WorksheetRow(
+                                meta.bucket,
+                                meta.tag_id,
+                                txn.content_id,
+                                "transaction",
+                                doc.document_type or "",
+                                meta.scoring,
+                                allowed,
+                                ", ".join(meta.consuming_rules),
+                                rule_status,
+                                context,
+                                source_document=_document_source(
+                                    txn_parent.get(txn.content_id, doc.content_id), filenames
+                                ),
+                            )
+                        )
+            elif group.subject_kind == "borrower":
+                # One row per borrower (keyed by borrower_id — the LP-332/LP-385 subject key), not per
+                # document; context aggregates that borrower's attributed income documents. A borrower with
+                # none is skipped (the tag would abstain) — no un-labelable rows.
+                for borrower_id, bsub in subject_type("borrower").enumerate(snapshot):
+                    income_docs = _borrower_income_docs(
+                        subject_type("borrower").build_context(bsub, None), group.applicable_types
+                    )
+                    if not income_docs:
+                        continue
+                    rows.append(
+                        WorksheetRow(
+                            meta.bucket,
+                            meta.tag_id,
+                            borrower_id,
+                            "borrower",
+                            "borrower",
+                            meta.scoring,
+                            allowed,
+                            ", ".join(meta.consuming_rules),
+                            rule_status,
+                            _with_prompt(_borrower_context_str(income_docs), prompt),
+                            source_document=_borrower_source(
+                                snapshot, borrower_id, group.applicable_types, filenames
+                            ),
+                        )
+                    )
+            else:
+                for dtype in group.applicable_types:
+                    for doc in docs_by_type.get(dtype, []):
+                        if not _doc_has_content(doc):
+                            continue
+                        rows.append(
+                            WorksheetRow(
+                                meta.bucket,
+                                meta.tag_id,
+                                doc.content_id,
+                                "document",
+                                dtype,
+                                meta.scoring,
+                                allowed,
+                                ", ".join(meta.consuming_rules),
+                                rule_status,
+                                _with_prompt(_doc_context(doc), prompt),
+                                source_document=_document_source(doc.content_id, filenames),
+                            )
+                        )
+    return rows
+
+
+def render_csv(rows: list[WorksheetRow]) -> str:
+    buf = io.StringIO()
+    writer = csv.writer(
+        buf, lineterminator="\n"
+    )  # "\n" — matches the repo's mixed-line-ending hook
+    writer.writerow(_HEADERS)
+    for r in rows:
+        writer.writerow(
+            [
+                r.tag_id,
+                r.subject_id,
+                r.subject_kind,
+                r.document_type,
+                r.source_document,
+                r.scoring,
+                r.allowed_values,
+                r.consuming_rules,
+                r.rule_status,
+                r.context,
+                r.golden_label,
+                r.labeler_note,
+            ]
+        )
+    return buf.getvalue()
+
+
+def _existing_labels(path: Path) -> dict[tuple[str, str], tuple[str, str]]:
+    """Read a previously-written worksheet -> {(tag_id, subject_id): (golden_label, labeler_note)} for the
+    FILLED rows, so a regeneration never clobbers human labels already entered."""
+    if not path.is_file():
+        return {}
+    kept: dict[tuple[str, str], tuple[str, str]] = {}
+    for row in csv.DictReader(io.StringIO(path.read_text(encoding="utf-8"))):
+        label = (row.get("golden_label") or "").strip()
+        note = (row.get("labeler_note") or "").strip()
+        if label or note:
+            kept[(row["tag_id"].strip(), row["subject_id"].strip())] = (label, note)
+    return kept
+
+
+# LP-392 — the note a re-label-flagged row carries: its prior golden was labeled against a DIFFERENT context
+# (the de-identified fixture) and its MEANING depends on that context (a name-match), so it must be RE-JUDGED
+# on the real document rather than carried. Plain ASCII (readable in Excel/Sheets) — its presence in a row's
+# note also MARKS the row as already-transitioned, so a later regeneration carries instead of re-blanking.
+_RELABEL_FLAG = "RE-LABEL on the real document -- this row's answer depends on the real identity (do not assume the prior label)"
+
+
+def _merge_label(
+    row: WorksheetRow,
+    prior: dict[tuple[str, str], tuple[str, str]],
+    relabel_on_context_change: frozenset[str],
+) -> WorksheetRow:
+    """Merge one prior label into a freshly-generated row by the stable (tag_id, subject_id) key.
+
+    A tag in ``relabel_on_context_change`` is NOT carried ON THE FIRST CONTEXT CHANGE: its prior (fixture)
+    golden was judged against a different (de-identified) context and its meaning depends on it (a name-match),
+    so carrying it would ship a now-possibly-wrong golden. Instead the label is BLANKED and the row is FLAGGED
+    for re-label — visible, never a silent carry (LP-392).
+
+    The flag is a ONE-TIME signal. Once a row's prior note already carries ``_RELABEL_FLAG`` (a later
+    regeneration, or Priya has since re-judged it on the real document), we CARRY what is there rather than
+    re-blanking her real-data label and doubling the flag — ``_existing_labels``' "regeneration never clobbers
+    human labels" invariant must hold here too."""
+    key = (row.tag_id, row.subject_id)
+    if key not in prior:
+        return row
+    label, note = prior[key]
+    if row.tag_id in relabel_on_context_change and _RELABEL_FLAG not in note:
+        flag = _RELABEL_FLAG if not note else f"{note} | {_RELABEL_FLAG}"
+        return replace(row, golden_label="", labeler_note=flag)
+    return replace(row, golden_label=label, labeler_note=note)
+
+
+def write_worksheets(
+    snapshot: Snapshot,
+    out_dir: Path,
+    *,
+    document_filenames: Mapping[str, str] | None = None,
+    relabel_on_context_change: frozenset[str] = frozenset(),
+) -> dict[str, Path]:
+    """Write the split worksheets (mechanical = Geet, judgment = Priya), PRESERVING any labels already
+    filled in the existing files (merge by the stable (tag_id, subject_id) key). ``document_filenames``
+    (LP-379-C) names each row's real source document (the Document tab's original_filename).
+    ``relabel_on_context_change`` (LP-392) names tags whose prior golden must NOT carry when the context
+    changes (the real-DB path re-flags the name-match ``stmt.owner_matches_borrower``) — default empty, so the
+    fixture path is byte-unchanged."""
+    rows = build_worksheet(snapshot, document_filenames=document_filenames)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    written: dict[str, Path] = {}
+    for bucket, name in (
+        ("mechanical", "lf6t3n-labels-mechanical.csv"),
+        ("judgment", "lf6t3n-labels-judgment.csv"),
+    ):
+        path = out_dir / name
+        prior = _existing_labels(path)
+        merged = [
+            _merge_label(r, prior, relabel_on_context_change) for r in rows if r.bucket == bucket
+        ]
+        path.write_text(render_csv(merged), encoding="utf-8")
+        written[bucket] = path
+    return written
+
+
+def write_single_worksheet(
+    snapshot: Snapshot,
+    path: Path,
+    *,
+    only_tags: frozenset[str] | None = None,
+    label_prompts: Mapping[str, str] | None = None,
+    document_filenames: Mapping[str, str] | None = None,
+) -> Path:
+    """LP-393-2 — write ONE worksheet CSV (not the mechanical/judgment split) for a FOCUSED tag set,
+    PRESERVING any labels already filled (merge by the stable key). Reuses ``build_worksheet`` (no AI, no key)
+    — so it carries only the snapshot's FACTS + a neutral prompt, never a prediction/expected answer."""
+    rows = build_worksheet(
+        snapshot,
+        document_filenames=document_filenames,
+        only_tags=only_tags,
+        label_prompts=label_prompts,
+    )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    prior = _existing_labels(path)
+    merged = [_merge_label(r, prior, frozenset()) for r in rows]
+    path.write_text(render_csv(merged), encoding="utf-8")
+    return path
+
+
+def coverage_report(snapshot: Snapshot) -> str:
+    """The corrected coverage: per AI tag -> capacity | yield | status | scoring | live? -- capacity and
+    yield NEVER conflated. Deterministic (from the snapshot; no AI)."""
+    lines = [
+        "=" * 104,
+        "LF-6T3N COVERAGE (LP-338) — capacity != yield != content-empty. A BIAS HUNT, not validation.",
+        "=" * 104,
+    ]
+    lines.append(
+        f"{'tag':<30} {'cap':>4} {'yield':>6} {'empty':>6}  {'status':<13} {'scoring':<18} {'live?':<6} rules"
+    )
+    for c in sorted(compute_capacity(snapshot), key=lambda x: x.tag_id):
+        lines.append(
+            f"{c.tag_id:<30} {c.capacity:>4} {c.pipeline_yield:>6} {c.content_empty:>6}  "
+            f"{c.status:<13} {c.scoring:<18} {('LIVE' if c.rule_live else 'inert'):<6} {', '.join(c.consuming_rules)}"
+        )
+    lines.append("-" * 104)
+    lines.append(
+        "capacity>0 & yield=0 = WIRING GAP (LP-333 bucket B — reported, not fixed). "
+        "capacity=0 & empty>0 = content-empty (e.g. brokerage_statement fields={})."
+    )
+    return "\n".join(lines)
+
+
+# --------------------------------------------------------------------------- #
+# PHASE 2 — the scoring run (live, opt-in; keyless via stub). Reuses LP-334's ScoredTag/summarize.
+# --------------------------------------------------------------------------- #
+def load_golden(csv_text: str) -> dict[tuple[str, str], str]:
+    """A FILLED worksheet -> {(tag_id, subject_id): golden_label}; unlabeled rows skipped."""
+    golden: dict[tuple[str, str], str] = {}
+    for row in csv.DictReader(io.StringIO(csv_text)):
+        label = (row.get("golden_label") or "").strip()
+        if label:
+            golden[(row["tag_id"].strip(), row["subject_id"].strip())] = label
+    return golden
+
+
+async def calibrate_lf6t3n(
+    snapshot: Snapshot,
+    golden: dict[tuple[str, str], str],
+    *,
+    reasoner: Reasoner | None = None,
+) -> list[ScoredTag]:
+    """Score the REAL reasoner over LF-6T3N against the filled worksheet — for every DECLARED AI enum/
+    string tag with labels (not just txn.*: id/income/stmt/asset too, now the fixture supports them).
+    Returns [] with no such labels (the correct outcome for an unfilled worksheet — NOT a crash). Free-text
+    (FINDING-2) and Stage-B tags (not declared -> a separate producer) are NOT %-scored here."""
+    decls = load_declarations()
+    scorable = {
+        t
+        for (t, _s) in golden
+        if t in decls and decls[t].mode is ProductionMode.AI and t not in _FREE_TEXT
+    }
+    if not scorable:
+        return []
+    groups = load_ai_groups()
+    produced: dict[str, dict[str, Tag]] = {}
+    for group_key in sorted({decls[t].data for t in scorable}):
+        group = groups[group_key]
+        allowed = {t: decls[t].allowed_values for t in group.tag_ids if t in decls}
+        for sid, tags in (
+            await produce_ai_group_tags(snapshot, group, allowed, reasoner=reasoner)
+        ).items():
+            produced.setdefault(sid, {}).update(tags)
+
+    scored: list[ScoredTag] = []
+    for (tag_id, subject_id), gold in sorted(golden.items()):
+        if tag_id not in scorable:
+            continue
+        tag = produced.get(subject_id, {}).get(tag_id)
+        scored.append(
+            ScoredTag(
+                doc_id=subject_id,
+                tag_id=tag_id,
+                golden=gold,
+                predicted=None if tag is None else str(tag.value),
+                confidence=None if tag is None else tag.confidence,
+                reasoning=None if tag is None else tag.reasoning,
+            )
+        )
+    return scored
+
+
+__all__ = [
+    "TagCapacity",
+    "WorksheetRow",
+    "build_worksheet",
+    "calibrate_lf6t3n",
+    "compute_capacity",
+    "coverage_report",
+    "load_golden",
+    "render_csv",
+    "write_worksheets",
+]

@@ -24,6 +24,10 @@ class DtiLineItem(BaseModel):
     amount: Decimal  # the effective value used in the math (override ?? auto ?? 0)
     source: str  # stated / computed / extracted / manual / override
     overridden: bool
+    # LP-375: a REQUIRED input (taxes/insurance) that could NOT be derived and was NOT overridden — i.e.
+    # its ``amount`` of 0 is a FAIL-CLOSED placeholder, NOT an extracted $0.00 (absent≠0). The display must
+    # render this as "unknown", never "$0.00 Extracted". False for a legitimately-zero input (HOA/MI).
+    unknown: bool = False
 
 
 class DtiLimit(BaseModel):
@@ -46,9 +50,16 @@ class DtiFindingsStatus(BaseModel):
 class DtiCalculation(BaseModel):
     """The full DTI calculation for a loan file — transparent + itemized."""
 
-    # The headline ratios (percent, 2 dp; None when income is zero).
+    # The headline ratios (percent, 2 dp; None when income is zero OR the calc is GATED).
     front_end_dti: Decimal | None
     back_end_dti: Decimal | None
+
+    # LP-375 — fail-closed GATING, catching the DISPLAY path up to the snapshot path (calculations_section):
+    # when a REQUIRED housing input (taxes/insurance) is unknown, the ratios are NULLED (not a confident
+    # number resting on a fabricated 0) and ``gate_reason`` names the unknown input(s). The snapshot path
+    # already did this; the display path used to collapse the absent input to 0 and show a confident ratio.
+    gated: bool = False
+    gate_reason: str | None = None
 
     # The totals.
     gross_monthly_income: Decimal

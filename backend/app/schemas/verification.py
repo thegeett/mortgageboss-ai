@@ -14,10 +14,53 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field
 
-from app.models.finding import Finding
+from app.models.finding import EvaluationOutcome, Finding
 from app.models.verification import Verification
 from app.verification.confidence import AggressionLevel
 from app.verification.finding_guidance import resolve_guidance
+from app.verification.rules.specs import RuleSpec, load_rule_spec
+
+
+def _rule_spec(rule_id: str) -> RuleSpec | None:
+    """The rule's SPEC — the gate of record for its guideline + category — or None for a retired/legacy
+    rule_id with no spec file."""
+    try:
+        return load_rule_spec(rule_id)
+    except (OSError, KeyError, ValueError):
+        return None
+
+
+def _ratification_pending(finding: Finding, spec: RuleSpec | None) -> bool:
+    """Whether this finding's verdict rests on an AI JUDGMENT a human must ratify (LP-376-B).
+
+    Prefers the ENGINE's own per-finding signal (``details.ratification_pending``) — authoritative for
+    BOTH a judgment verdict AND a fuzzy-consistency AI verdict (the engine set it; the schema does not
+    re-derive it). Falls back to the judgment heuristic ONLY for a legacy finding persisted before that
+    field existed (it is re-persisted on the next run).
+
+    NOT ``details.gated_pending_signoff`` — that is ``not priya_validated`` (the rule's THRESHOLDS await
+    domain sign-off; true for nearly every rule) and has nothing to do with AI ratification."""
+    details = finding.details or {}
+    persisted = details.get("ratification_pending")
+    if isinstance(persisted, bool):
+        return persisted
+    # Legacy fallback: a JUDGMENT rule that actually reached its verdict (always needs_review; a
+    # couldnt_check/gate-fail never invoked the AI, so it does not ratify).
+    return (
+        spec is not None
+        and spec.judgment is not None
+        and finding.evaluation_outcome is EvaluationOutcome.NEEDS_REVIEW
+    )
+
+
+def _rule_category(finding: Finding, spec: RuleSpec | None) -> str:
+    """The rule's OWN category (Identity / Income / Occupancy / …) from its SPEC — the gate of record
+    (``rule_kinds.csv``). NOT the persisted ``FindingCategory`` enum, which lacks Identity/Occupancy and
+    coerces them to the wrong legacy value (ID-8 Identity → 'assets'). The two systems' taxonomies are
+    separate (LP-375); the governed findings carry their own family, not the sweep's."""
+    if spec is not None and spec.category:
+        return spec.category
+    return finding.category.value  # a legacy/retired rule with no spec → its stored category
 
 
 def _as_uuid(value: str) -> UUID | None:
@@ -172,6 +215,83 @@ class FindingPublic(BaseModel):
         )
 
 
+class RuleFindingPublic(BaseModel):
+    """One GOVERNED rule-engine finding (LP-316/375) — a DISTINCT shape from :class:`FindingPublic`.
+
+    The rule engine's findings carry an ``evaluation_outcome`` (the §8 axis) and inline provenance; the
+    legacy AI sweep / xsrc findings (``FindingPublic``, ``evaluation_outcome`` null) do not. Keeping them
+    two DIFFERENT types is the structural guarantee that the two systems' findings cannot be concatenated
+    into one list or their counts summed (LP-375 §3 — an ungoverned 75%-confidence AI observation and a
+    governed, gated, provenance-carrying rule finding are not the same kind of thing).
+
+    Carries what LP-376 needs to render §8's tabs + a provenance card: the OUTCOME (the tab discriminator),
+    the reason, the SPEC's guideline citation (read-time, NEVER AI-recalled), each load-bearing tag with its
+    value/confidence/reasoning, and the ratification-pending marker. ``subject_key`` is the STABLE
+    content-id (LP-312) — not yet human-legible (a compact "Deposit of $X on D" label needs per-family
+    logic that is not uniformly derivable from the stored data; that is a finding for LP-376, not faked)."""
+
+    id: UUID
+    rule_id: str
+    evaluation_outcome: (
+        str  # open | satisfied | needs_review | couldnt_check | no_longer_applies — the tab
+    )
+    status: str  # the severity color (red / yellow / green) — orthogonal to the outcome
+    category: str
+    message: str  # the reason — EVERY non-satisfied outcome carries one (§8's honesty contract)
+    subject_key: (
+        str | None
+    )  # the stable per-subject content-id (LP-312) — the reconciler's KEY (LP-322), NOT for display
+    subject_label: (
+        str  # the processor-facing subject name (LP-377-B) — a filename / amount / borrower /
+    )
+    # "Loan-level", resolved read-time per subject TYPE; NEVER a content-id, UUID, or dotted tag id
+    guideline: str | None  # the rule's guideline citation, from the SPEC (never AI-recalled)
+    # Inline provenance (§3D): each {tag_id, value, confidence, reasoning, source_facts} — a human sees WHY.
+    load_bearing_tags: list[dict[str, Any]]
+    ratification_pending: (
+        bool  # a judgment/AI verdict awaits human ratification (gated_pending_signoff)
+    )
+    how_to_fix: str | None
+    confidence: float
+    resolution_status: str
+
+    @classmethod
+    def from_model(cls, finding: Finding, *, subject_label: str) -> RuleFindingPublic:
+        details = finding.details or {}
+        spec = _rule_spec(
+            finding.rule_id
+        )  # the gate of record for category + ratification (LP-376-B)
+        return cls(
+            id=finding.id,
+            rule_id=finding.rule_id,
+            # Guaranteed present by the caller's ``evaluation_outcome IS NOT NULL`` filter; empty only if a
+            # future caller passes a legacy finding (which would not belong here).
+            evaluation_outcome=(
+                finding.evaluation_outcome.value if finding.evaluation_outcome is not None else ""
+            ),
+            status=finding.status.value,
+            category=_rule_category(
+                finding, spec
+            ),  # the rule's OWN family, not the legacy enum (Bug 3)
+            message=finding.message,
+            subject_key=finding.subject_key,
+            # The processor-facing label is resolved by the READ PATH (the one place with the borrower /
+            # document DB maps) and passed in — the schema never guesses it from a maps-free subject_key
+            # (which could only claim "no longer in this file"). NEVER the raw subject_key (LP-377-B).
+            subject_label=subject_label,
+            guideline=spec.guideline_reference if spec is not None else None,
+            load_bearing_tags=finding.load_bearing_tags or [],
+            # An AI judgment verdict a human must ratify — NOT gated_pending_signoff (= not priya_validated;
+            # true for nearly every rule). See _ratification_pending (Bug 1).
+            ratification_pending=_ratification_pending(finding, spec),
+            how_to_fix=details.get("how_to_fix")
+            if isinstance(details.get("how_to_fix"), str)
+            else None,
+            confidence=finding.confidence,
+            resolution_status=finding.resolution_status.value,
+        )
+
+
 class AggressionPublic(BaseModel):
     """The aggression dial's state for a file (LP-79) — the confidence-cutoff filter.
 
@@ -202,7 +322,20 @@ class VerificationStatusPublic(BaseModel):
     stale: bool
     program: str | None  # the file's loan program (conventional / fha) — drives the rule set
     latest_run: VerificationRunPublic | None
+    # The LEGACY quarantine (Tab 5) — the AI cross-source sweep AND the retired xsrc deterministic findings
+    # (both carry a null evaluation_outcome). Unchanged shape + behaviour (LP-375 keeps the sweep identical).
     findings: list[FindingPublic]
+    # The GOVERNED rule-engine findings (LP-316), a SEPARATE typed list (LP-375) so tabs 1-4 — including
+    # `satisfied` (Tab 2, previously dropped) — are reachable and can never be summed with `findings`.
+    rule_findings: list[RuleFindingPublic]
+    # LP-377-C Fix 3: the latest run did NOT complete (still RUNNING, or FAILED / killed) yet governed
+    # findings exist — so they MAY be from an earlier run (carried forward, LP-322). True when the latest run
+    # is not COMPLETED AND governed findings exist. Keyed on RUN status (not "the rule engine failed"): a run
+    # can also FAIL because the SWEEP failed while the rule pass succeeded, so the findings can even be fresh
+    # — the honest statement is "the run didn't complete; results may be out of date, re-run", not a claim
+    # about which half failed. NOT a verification_id filter (that would gut carry-forward — all findings still
+    # show); this only flags possible staleness.
+    rule_findings_stale: bool
     aggression: AggressionPublic
     blocked: bool
     in_scope_open_count: int

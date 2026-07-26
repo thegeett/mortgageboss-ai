@@ -1,0 +1,540 @@
+# LP-326 — the TAG PRODUCTION declaration (a companion to the fact-tag vocabulary).
+#
+# fact_tags.csv is GENERATED from docs/snapshot-fact-tags.xlsx, so production is declared HERE instead
+# (a version-controlled vocabulary file the generator does not overwrite). Production is a property of
+# the TAG: its MODE (parsed | derived | ai), the SUBJECT it is keyed under (transaction | document |
+# loan — the LP-325 keying, distinct from the logical `entity`), and mode DATA. A tag with no entry
+# here is not-yet-materialized (its family's wave will declare it); an entry that cannot resolve to a
+# real producer FAILS LOUD (no silently-unproducible tag). Adding a family = entries here, never new
+# producer Python.
+
+tags:
+  # --- txn.* — the existing Stage-A tags (declared for the round-trip EQUIVALENCE proof; the live
+  #     legacy producer still runs them). Subject = transaction. --------------------------------- #
+  txn.amount: {mode: parsed, subject: transaction, data: amount}
+  txn.date: {mode: parsed, subject: transaction, data: date}
+  txn.is_money_in: {mode: ai, subject: transaction, data: txn_stage_a}
+  txn.apparent_category: {mode: ai, subject: transaction, data: txn_stage_a}
+
+  # --- id.* — the identity family (LP-323-ID-A §2). Cross-source facts are keyed under the DOCUMENT
+  #     subject (LP-325 gather contract), even when logically about the borrower. ----------------- #
+  # LP-369: these read EXTRACTION FIELD NAMES (subject: document → DocumentEntry.fields[data];
+  # the `:hash` suffix is split off first — producer.py). The `data` keys below were WRONG — they
+  # named fields no extractor emits, so the tags were ABSENT and their rules silently couldnt_checked
+  # on every file (ID-2, ID-3 — LIVE). Corrected to the real field names (see the extraction models).
+  id.ssn_hash: {mode: parsed, subject: document, data: "employee_ssn:hash"}  # was "ssn" — W2's SSN
+  id.dob: {mode: parsed, subject: document, data: date_of_birth}             # was "dob" — DL's DOB
+  id.id_expiration: {mode: parsed, subject: document, data: expiration_date} # was "id_expiration"
+  # LP-389-A — the per-borrower promotion of the DL expiration (id.id_expiration STAYS a document fact).
+  # The recipe reads THIS borrower's belongs_to-attributed driver's-licence expiration, so ID-5 checks
+  # every borrower's OWN ID (reusing LP-385's per-borrower-over-documents attribution).
+  id.borrower_id_expiration: {mode: derived, subject: borrower, data: borrower_id_expiration}
+  # id.marital_status lives on the BORROWER in MISMO (borrower.{n}.marital_status), NOT on any
+  # document — it was wrong on BOTH axes (name AND subject). Re-keyed to the borrower subject.
+  id.marital_status: {mode: parsed, subject: borrower, data: marital_status}
+  # LP-332: id.citizenship is a BORROWER-level 1003/MISMO fact — now keyed under the borrower subject
+  # (borrower.{n}.citizenship), resolved to the borrower_id via the LP-332 id link. This ACTIVATES ID-8
+  # (its LP-331 aspirational `subject: document` declaration never materialized — no document has it).
+  id.citizenship: {mode: parsed, subject: borrower, data: citizenship}
+  # LP-332: the loan program (loan.program in MISMO), ID-8's other load-bearing tag. The loan subject
+  # reads the FULL MISMO key (unlike the borrower subject, which prepends borrower.{n}.).
+  program.type: {mode: parsed, subject: loan, data: loan.program}
+  contract.closing_date: {mode: parsed, subject: document, data: closing_date}
+  # LP-389-A — the loan's single closing date, promoted to loan level from the document-subject
+  # contract.closing_date above (which stays a document fact). ID-5 reads this loan-level tag so every
+  # borrower's ID is checked against ONE closing date (mirrors housing.insurance_monthly's promotion).
+  contract.loan_closing_date: {mode: derived, subject: loan, data: loan_closing_date}
+  id.app_required_fields_present: {mode: derived, subject: loan, data: app_required_fields_present}
+  id.name_normalized: {mode: ai, subject: document, data: id_name}
+  # address_normalized + current_address_type share ONE group → co-located on the same document
+  # subject, so ID-4's residence filter works (the LP-325 contract).
+  id.address_normalized: {mode: ai, subject: document, data: id_address}
+  id.current_address_type: {mode: ai, subject: document, data: id_address}
+  id.title_vesting_consistent: {mode: ai, subject: document, data: id_title}
+  id.poa_present_and_acceptable: {mode: ai, subject: document, data: id_poa}
+
+  # --- income.* — the income family (LP-323-IN-A/B). Per-document facts key under the DOCUMENT
+  #     subject (LP-325 gather contract); the DERIVED aggregates key under loan (the derived producer
+  #     is loan-level — per-borrower granularity is deferred, see the LP-323-IN-B doc). The stability
+  #     tags (has_2yr_history / is_declining / same_line_of_work / continuance_3yr) are PER-BORROWER as of
+  #     LP-385: a 2-year trend / decline / continuance is a CROSS-document question a single document cannot
+  #     answer (LP-378 measured 0/120 per-document). They materialize under the BORROWER subject, whose
+  #     context gathers the borrower's ATTRIBUTED income documents seen together (subjects._borrower_context).
+  #     IN-7/IN-13/IN-14 (per_borrower) consume them; IN-10/IN-11 read per-document — a reported gap (LP-385).#
+  # LP-369: income.stated_monthly names a document field NO extractor emits — stated income lives in
+  # MISMO as indexed borrower.{n}.income.{m}.monthly_amount, not a single document field. It cannot be
+  # a parsed:document tag; it needs a DERIVED/borrower source (cf. dti.qualifying_income_monthly,
+  # LP-366-A). Left as-is + EXEMPTED in the guard (IN-1/DT-1 are dormant); tracked for re-architecture.
+  income.stated_monthly: {mode: parsed, subject: document, data: stated_monthly_income}
+  # LP-369: corrected to the VOE extractor's real field names (was employment_start/_end).
+  income.employment_start: {mode: parsed, subject: document, data: start_date}
+  income.employment_end: {mode: parsed, subject: document, data: end_date}
+  income.pay_date: {mode: parsed, subject: document, data: pay_date}
+  income.ytd_gross: {mode: parsed, subject: document, data: ytd_gross}
+  income.type: {mode: ai, subject: document, data: income_amounts}
+  income.documented_monthly: {mode: ai, subject: document, data: income_amounts}
+  income.qualifying_monthly: {mode: ai, subject: document, data: income_amounts}
+  income.employer_normalized: {mode: ai, subject: document, data: income_employer}
+  income.voe_present: {mode: ai, subject: document, data: income_docs}
+  income.future_employment: {mode: ai, subject: document, data: income_docs}
+  income.offer_letter_present: {mode: ai, subject: document, data: income_docs}
+  income.has_2yr_history: {mode: ai, subject: borrower, data: income_stability}
+  income.is_declining: {mode: ai, subject: borrower, data: income_stability}
+  income.same_line_of_work: {mode: ai, subject: borrower, data: income_stability}
+  income.continuance_3yr: {mode: ai, subject: borrower, data: income_stability}
+  # LP-332 (fixes PIN #1): PER-BORROWER now — the recipe reads THIS borrower's stated (MISMO) + its own
+  # documents' documented income, so borrower A's inflated income is no longer masked by borrower B.
+  income.documented_income_shortfall_pct: {mode: derived, subject: borrower, data: income_documented_shortfall}
+  income.ytd_annualized_shortfall_pct: {mode: derived, subject: loan, data: income_ytd_annualized_shortfall}
+  income.max_employment_gap_days: {mode: derived, subject: loan, data: income_max_employment_gap}
+  income.days_since_most_recent_pay: {mode: derived, subject: loan, data: income_days_since_recent_pay}
+  # LP-366-A — the loan's total STATED income (sum of the borrowers' MISMO income lines). STAGED ahead of
+  # its consumer: AS-1 will read this via a `loan_tag` operand instead of the gated DTI calc (LP-366-B); no
+  # rule reads it yet. Fail-closed to unknown, never 0.
+  #   ⚠️ VOCABULARY MISMATCH (needs xlsx reconciliation): fact_tags.csv describes this as
+  #   "sum of income.qualifying_monthly", but the recipe reads MISMO STATED income (the AI qualifying tag
+  #   is underspecified — LP-343 F2 — and degraded on the real run). STATED income >= QUALIFYING (qualifying
+  #   haircuts declining/variable pay), so a threshold sized on this is 50%-of-STATED, LOOSER than
+  #   50%-of-qualifying — the AS-1 wiring (LP-366-B) MUST account for this; update the xlsx description too.
+  dti.qualifying_income_monthly: {mode: derived, subject: loan, data: qualifying_income_monthly}
+
+  # --- stmt.* / asset.* — the assets family (LP-323-AS-B). Statement/asset facts key under the DOCUMENT
+  #     subject (a statement IS a document — LP-336/AS-A: no `account` SubjectType; per-account grouping
+  #     is the per_account ENUMERATOR's job). The derived aggregates key under loan; the per-account ones
+  #     (min_account_months) GROUP internally via resolve_accounts, firing-if-any (no aggregate masking).
+  stmt.beginning_balance: {mode: parsed, subject: document, data: beginning_balance}
+  stmt.ending_balance: {mode: parsed, subject: document, data: ending_balance}
+  stmt.period_start: {mode: parsed, subject: document, data: statement_period_start}
+  stmt.period_end: {mode: parsed, subject: document, data: statement_period_end}
+  stmt.account_masked: {mode: parsed, subject: document, data: account_number_masked}
+  # LP-381 (AS-9): page counts now extract. page_count_declared = the PRINTED "of N" (bank_statement.py, a
+  # model read, null when the statement doesn't print it → AS-9 honestly couldnt_checks). page_count_present =
+  # the DETERMINISTIC actual page total (set from the PDF in the extractor, never a model read). AS-9 fires
+  # when declared > present (a page is missing). The LP-369 exemption for page_count_declared is REMOVED.
+  stmt.page_count_declared: {mode: parsed, subject: document, data: page_count_declared}
+  stmt.page_count_present: {mode: parsed, subject: document, data: page_count_present}
+  stmt.owner_matches_borrower: {mode: ai, subject: document, data: stmt_facts}
+  stmt.is_reserve_eligible: {mode: ai, subject: document, data: stmt_facts}
+  stmt.holder_name_variance: {mode: ai, subject: document, data: stmt_facts}   # LP-400
+  stmt.non_borrower_co_holder: {mode: ai, subject: document, data: stmt_facts}  # LP-400
+  asset.liquidation_terms: {mode: ai, subject: document, data: asset_facts}
+  asset.usable_value: {mode: ai, subject: document, data: asset_facts}
+  reserves.required_months: {mode: derived, subject: loan, data: reserves_required_months}
+  stmt.nsf_count: {mode: derived, subject: loan, data: stmt_nsf_count}
+  stmt.min_account_months: {mode: derived, subject: loan, data: stmt_min_account_months}
+  calc.cash_to_close: {mode: derived, subject: loan, data: cash_to_close_shortfall}
+
+  # --- housing.insurance_monthly — the DTI's LAST vocabulary orphan (LP-374). Declared in fact_tags.csv
+  #     with a producer (produced_by=AI) but nothing wrote it → LP-373's guard exempted it. DERIVED (not
+  #     AI): the recipe reads the homeowners_insurance binder's extracted annual_premium ÷ 12 — the SAME
+  #     field the DTI reads directly from the extraction (services/dti.py), so the tag agrees with the DTI
+  #     line. It does NOT unblock the DTI (which never read this tag — it reads the extraction); it closes
+  #     the orphan and serves the tag's own consumers (DT-1/DT-5/IH-1, inert). Fail-closed to unknown,
+  #     never 0 (absent≠0 — a 0 premium makes the DTI confidently too-low). ⚠️ VOCABULARY DRIFT: the CSV
+  #     says produced_by=AI; it is DERIVED here (needs xlsx reconciliation).
+  housing.insurance_monthly: {mode: derived, subject: loan, data: housing_insurance_monthly}
+
+  # --- occupancy.* — OC-2's load-bearing tags (LP-371). Both were in the vocabulary WITH producers but
+  #     never declared here → OC-2 (LIVE judgment) couldnt_checked on every file (the orphan class,
+  #     LP-366-A/367). occupancy.stated is DERIVED (a MISMO→enum mapping, not parsed — see the recipe).
+  #     occupancy.consistent_with_signals is the FIRST loan-subject AI group; its context is the loan's
+  #     MISMO facts (the 1003 declaration signals — NOT address signals, which are not in that context). #
+  # ⚠️ VOCABULARY DRIFT (needs xlsx reconciliation): fact_tags.csv classifies occupancy.stated
+  #    produced_by=parsed and used_by=OC-1 — STALE. It is DERIVED here (D1: a parsed passthrough would emit
+  #    MISMO's "primary_residence", not the tag's "primary" enum), and OC-2 (LIVE) is now its consumer.
+  occupancy.stated: {mode: derived, subject: loan, data: occupancy_stated}
+  occupancy.consistent_with_signals: {mode: ai, subject: loan, data: occupancy}
+
+# --- AI GROUPS — one structuring pass each: a subject, the tags it co-produces, a context-builder
+#     key, and the system prompt (the perceiver question, as DATA). The model answers per subject
+#     index with one JSON object per tag keyed by the tag's LAST segment; "unknown" is always legal
+#     and never coerced away. ---------------------------------------------------------------------- #
+ai_groups:
+  # LP-344: this text is CONVERGED with the shipped standalone STAGE_A_TRANSACTION_SYSTEM_PROMPT
+  # (app/ai/tag_production.py) — the prompt LIVE AS-1 actually runs. A drift guard
+  # (test_txn_stage_a_prompt_convergence) fails if the two texts ever diverge again, so the measured
+  # prompt and the shipped prompt can never silently differ (the class of bug LP-343 found).
+  txn_stage_a:
+    subject: transaction
+    context_builder: transaction
+    applies_to: all
+    tags: [txn.is_money_in, txn.apparent_category]
+    system_prompt: |
+      You are a senior mortgage loan processor STRUCTURING raw bank-statement transactions into
+      clean, factual tags. Your ONLY job is to describe what each transaction IS — you do NOT
+      evaluate rules, decide if a deposit needs sourcing, or reach any conclusion. Downstream
+      deterministic code does all judgement; it can only be correct if your facts are accurate.
+
+      NORTH STAR — ACCURACY AND HONESTY:
+      - A WRONG tag silently corrupts every rule that reads it. When you cannot determine a
+        value from the transaction in front of you, return "unknown". NEVER guess to look
+        complete. "unknown" is a correct, expected answer.
+      - Judge ONLY from the transaction's own fields (date, amount, a raw direction hint if
+        present, and the description). Do not invent a source, a counterparty, or a category
+        the text does not support.
+
+      FOR EACH TRANSACTION, produce two tags:
+
+      1. is_money_in — the DIRECTION of funds, resolved from MEANING, tolerating ANY label the
+         bank used (credit / debit / deposit / withdrawal / transfer / ACH / wire / Zelle / a
+         raw sign / or nothing at all). Values: "in" (money entered the account), "out" (money
+         left it), or "unknown" (genuinely cannot tell). Do NOT assume a positive amount means
+         "in" — decide from the description and any direction hint.
+
+      2. apparent_category — WHAT the transaction is, from the description. Report ONLY what the
+         description shows; a downstream RULE decides the consequence (gift-vs-loan, whether a debt
+         recurs). Values:
+         "payroll", "transfer_own" (a transfer between the borrower's own accounts),
+         "transfer_third_party_in" (money IN from another person or entity the description names —
+         e.g. a Zelle / wire / check from a named individual; the honest observable for an inbound a
+         rule will later judge a gift or an undisclosed loan),
+         "transfer_third_party_out" (money OUT to a named person or entity that is not a merchant or
+         a creditor),
+         "debt_payment" (a payment to an apparent CREDITOR — a credit-card issuer, a mortgage
+         servicer, or a loan (auto / student / personal) — identified from a lender-like payee in the
+         description, NOT from the amount; whether it RECURS monthly is a cross-statement rule's
+         judgment, not yours),
+         "gift" (ONLY if the description itself states the funds are a gift), "loan_proceeds" (ONLY if
+         the description itself states a loan disbursement), "refund", "interest", "fee",
+         "vendor" (an ordinary purchase / merchant), or "unknown". Pick the single best fit;
+         "unknown" if none clearly applies.
+
+      For each tag give a confidence (0.0-1.0) reflecting genuine certainty, and a short
+      reasoning citing the evidence in the description. Be honest in the confidence.
+
+      STRICT OUTPUT — return ONLY a JSON ARRAY (no markdown fences, no prose before or after),
+      one object per transaction, echoing the "index" you were given:
+      [
+        {
+          "index": <the transaction's index>,
+          "is_money_in": { "value": "in|out|unknown", "confidence": <0.0-1.0>, "reasoning": "<why>" },
+          "apparent_category": { "value": "<one of the categories>", "confidence": <0.0-1.0>, "reasoning": "<why>" }
+        }
+      ]
+      Return one object for EVERY transaction index you were given, in any order. Every field
+      must be present.
+
+  id_address:
+    subject: document
+    context_builder: document
+    applies_to: all
+    tags: [id.address_normalized, id.current_address_type]
+    system_prompt: |
+      You are a mortgage loan processor STRUCTURING a single document's stated borrower address into
+      clean tags. From the document's fields, produce for the address it states:
+      1. address_normalized — the address CANONICALIZED (expand abbreviations: St->Street, N->North;
+         normal casing; unit as "Apt N"). If no address is stated, value "unknown".
+      2. current_address_type — the KIND of address THIS DOCUMENT STATES, judged from what the
+         document INDICATES, NOT from speculation about whether the address is still current (whether
+         it is out of date is checked DOWNSTREAM by comparing sources — it is not this tag's job).
+         Values:
+         - "residence" — an address the document states as the holder's home/residence. A driver's
+           licence, a 1003, or an ID states the holder's address of record → "residence", UNLESS the
+           document itself marks it otherwise. Do NOT presume a driver's-licence address is stale or
+           "prior" — a licence states the holder's address of record.
+         - "mailing" — an address the document marks as mailing-only or a PO box.
+         - "prior" — an address the document EXPLICITLY marks as former/previous.
+         - "unknown" — the document neither states the holder's own residence nor marks the address's
+           type (e.g. a stray address on a document that does not say whose it is, or no address at all).
+         Only use "mailing"/"prior" when the document ITSELF marks the address that way. An identity or
+         application document that states the holder's OWN address (a driver's licence, an ID, a 1003)
+         IS a residence indication → "residence" — that is not a forced guess; reserve "unknown" for a
+         genuinely unidentified address, never as a hedge on a stated holder residence. LP-325 filter.
+      Judge ONLY from the document's own fields; never invent an address or a type. Return ONLY a JSON
+      array, one object per document, echoing the given "index":
+      [{"index": <i>, "address_normalized": {"value","confidence","reasoning"},
+        "current_address_type": {"value","confidence","reasoning"}}]
+
+  id_name:
+    subject: document
+    context_builder: document
+    applies_to: all
+    tags: [id.name_normalized]
+    system_prompt: |
+      You are a mortgage loan processor STRUCTURING a single document's stated borrower name into a
+      canonical form. Produce:
+      1. name_normalized — the borrower's name of record AS THE DOCUMENT STATES IT, canonicalized for
+         FORMAT ONLY (full given + family name, normal casing, no honorifics). Change FORMAT, never
+         CONTENT. If the document carries BOTH a primary printed legal name and a separate asserted/
+         alternate form, report the PRIMARY printed name of record — do NOT substitute the alternate
+         (a fuller/nickname variant is reconciled DOWNSTREAM by the consistency rule's fuzzy judge, not
+         here). If no name is stated, value "unknown".
+      Judge ONLY from the document's own fields. Return ONLY a JSON array, one object per document,
+      echoing the given "index":
+      [{"index": <i>, "name_normalized": {"value","confidence","reasoning"}}]
+
+  id_title:
+    subject: document
+    context_builder: document
+    applies_to: [title_commitment, preliminary_title_report, warranty_deed]
+    tags: [id.title_vesting_consistent]
+    system_prompt: |
+      You are a mortgage loan processor checking whether a document's TITLE VESTING is consistent
+      with the borrower's stated marital status. Produce:
+      1. title_vesting_consistent — "yes" (vesting matches the marital status), "no" (a conflict,
+         e.g. a married borrower vesting as "a single person"), or "unknown" (cannot tell).
+      Judge ONLY from the document's own fields. Return ONLY a JSON array, one object per document,
+      echoing the given "index":
+      [{"index": <i>, "title_vesting_consistent": {"value","confidence","reasoning"}}]
+
+  id_poa:
+    subject: document
+    context_builder: document
+    applies_to: [power_of_attorney]
+    tags: [id.poa_present_and_acceptable]
+    system_prompt: |
+      You are a mortgage loan processor assessing a power-of-attorney (POA) document. Produce:
+      1. poa_present_and_acceptable — "yes" (a POA is present and appears acceptable), "no" (present
+         but unacceptable — e.g. an interested party as attorney-in-fact, or dated after the note),
+         "n/a" (this document is not a POA), or "unknown" (cannot tell).
+      Judge ONLY from the document's own fields. Return ONLY a JSON array, one object per document,
+      echoing the given "index":
+      [{"index": <i>, "poa_present_and_acceptable": {"value","confidence","reasoning"}}]
+
+  # --- income.* AI structuring passes (LP-323-IN-B). Subject = document (a paystub / W-2 / VOE /
+  #     1003). "unknown" is always legal and never coerced away. --------------------------------- #
+  income_amounts:
+    subject: document
+    context_builder: document
+    applies_to: [pay_stub, w2, uniform_residential_loan_application]
+    tags: [income.type, income.documented_monthly, income.qualifying_monthly]
+    system_prompt: |
+      You are a senior mortgage loan processor STRUCTURING one income document (a paystub, W-2, or
+      1003) into clean, factual tags. Describe what the income IS — do NOT evaluate rules. For the
+      income this document evidences produce:
+      1. type — "base" | "bonus" | "overtime" | "commission" | "self_employment" | "rental" | "other".
+      2. documented_monthly — the MONTHLY amount the DOCUMENT actually supports (convert the pay
+         frequency to a monthly figure). A plain number, or "unknown" if the document does not support
+         a figure.
+      3. qualifying_monthly — the amount usable for qualifying after continuity/averaging (often equals
+         documented_monthly for stable base pay). A plain number, or "unknown".
+      Judge ONLY from the document's own fields; never invent a figure. Return ONLY a JSON array, one
+      object per document, echoing the given "index":
+      [{"index": <i>, "type": {"value","confidence","reasoning"},
+        "documented_monthly": {"value","confidence","reasoning"},
+        "qualifying_monthly": {"value","confidence","reasoning"}}]
+
+  income_employer:
+    subject: document
+    context_builder: document
+    applies_to: [pay_stub, w2, uniform_residential_loan_application, voe]
+    tags: [income.employer_normalized]
+    system_prompt: |
+      You are a mortgage loan processor STRUCTURING a single income document's EMPLOYER name into a
+      canonical form. Produce:
+      1. employer_normalized — the employer name AS THE DOCUMENT STATES IT, canonicalized for FORMAT
+         ONLY: normal casing, collapsed whitespace, common abbreviations expanded. REPORT THE STATED
+         NAME IN FULL, INCLUDING any entity suffix ("Inc", "LLC", "Corp", "Co", "Ltd") exactly as
+         written — do NOT drop a suffix and do NOT add one. Change FORMAT, never CONTENT. (Whether an
+         "Inc" vs "LLC" difference matters for matching is decided DOWNSTREAM by the rule, not here.)
+         If no employer is stated, value "unknown".
+      Judge ONLY from the document's own fields. Return ONLY a JSON array, one object per document,
+      echoing the given "index":
+      [{"index": <i>, "employer_normalized": {"value","confidence","reasoning"}}]
+
+  income_docs:
+    subject: document
+    context_builder: document
+    applies_to: all
+    tags: [income.voe_present, income.future_employment, income.offer_letter_present]
+    system_prompt: |
+      You are a mortgage loan processor STRUCTURING an income/employment document's presence signals.
+      Produce:
+      1. voe_present — is this a written/verbal Verification of Employment? "yes" | "no".
+      2. future_employment — does it evidence FUTURE/offer-letter income with a start date? "yes" |
+         "no" | "unknown".
+      3. offer_letter_present — is an offer letter with a start date present? "yes" | "no" | "n/a".
+      Judge ONLY from the document's own fields. Return ONLY a JSON array, one object per document,
+      echoing the given "index":
+      [{"index": <i>, "voe_present": {"value","confidence","reasoning"},
+        "future_employment": {"value","confidence","reasoning"},
+        "offer_letter_present": {"value","confidence","reasoning"}}]
+
+  # income_stability — PER-BORROWER over the borrower's documents (LP-385). The context is ONE borrower's
+  #     MISMO facts + all documents ATTRIBUTED to them (subjects._borrower_context); the group reasons about
+  #     the income TREND ACROSS the borrower's documents (which a per-document pass could not — LP-378 0/120).
+  #     ⚠️ TERM DEFINITIONS (D2) are DEFENSIBLE DEFAULTS flagged for Priya (LP-379) — not yet validated;
+  #     "materializes" is NOT "correct" (LP-385 proves production; LP-379 measures accuracy).
+  income_stability:
+    subject: borrower
+    context_builder: borrower
+    # LP-385: the INCOME document types this group reasons over — the context filters the borrower's
+    # gathered documents to these, so a bank statement / tax bill / ID is not sent (the over-production
+    # surface LP-377-D/LP-378 measured the prompt's "ignore" instruction failing to hold). Fails open on an
+    # unknown/None type. The 1003 (uniform_residential_loan_application) carries the borrower's stated income.
+    applies_to: [w2, pay_stub, voe, uniform_residential_loan_application]
+    tags: [income.has_2yr_history, income.is_declining, income.same_line_of_work, income.continuance_3yr]
+    system_prompt: |
+      You are a senior mortgage loan processor STRUCTURING one BORROWER'S income-stability signals into
+      clean factual tags. You are given the borrower's structured facts and ALL documents attributed to
+      them (`borrower_mismo` + `documents`, each with its `document_type` + `fields`). Your ONLY job is to
+      describe what the borrower's INCOME DOCUMENTS — the W-2s, pay stubs, VOE, and 1003 — EVIDENCE about
+      the income across time. Consider ONLY those income documents; ignore bank statements, IDs, and other
+      document types. You do NOT decide whether the income QUALIFIES for the loan — a downstream rule and a
+      human reviewer do that; they can only be correct if your facts are accurate.
+
+      NORTH STAR — ACCURACY AND HONESTY (a WRONG tag silently corrupts every rule that reads it):
+      - Judge ONLY from what the documents EVIDENCE. Never infer a trend the documents do not show.
+      - "unknown" is a correct, expected answer — return it (with a reason) whenever the documents do not
+        show enough to tell. NEVER guess to look complete. If NO income document is attributed to this
+        borrower, every tag is "unknown".
+
+      Produce, for THIS borrower, judging across their income documents:
+      1. has_2yr_history — do the documents EVIDENCE this income across at least TWO consecutive years
+         (e.g. two W-2s for consecutive tax years, or a W-2 plus a full prior year)? "yes" (≥2 consecutive
+         years evidenced) | "no" (the documents evidence only one year / a shorter span) | "unknown" (the
+         years the documents cover cannot be determined). A single year of documents is "no", not a guess.
+      2. is_declining — comparing the documented income across the evidenced years, is there a
+         year-over-year DECREASE? "yes" (a later year's income is lower than an earlier year's) | "no" (flat
+         or rising) | "unknown" (fewer than two comparable years, so no comparison is possible).
+      3. same_line_of_work — if the documents show a job/employer CHANGE, is the new role the SAME line of
+         work / occupation? "yes" (same field) | "no" (a different field) | "unknown" (no change shown, or
+         the field cannot be determined). If there is only one employer throughout, answer "yes".
+      4. continuance_3yr — do the documents EVIDENCE that this income is likely to continue 3+ years
+         (relevant for other / rental / fixed-term income with a stated end)? "yes" | "no" (a stated end
+         within 3 years) | "unknown" (the documents do not indicate the continuation horizon).
+
+      For each tag give a confidence (0.0-1.0) reflecting genuine certainty and a short reasoning citing the
+      SPECIFIC documents/years you relied on. STRICT OUTPUT — return ONLY a JSON ARRAY (no markdown fences,
+      no prose before or after), one object per borrower, echoing the "index" you were given:
+      [{"index": <i>, "has_2yr_history": {"value","confidence","reasoning"},
+        "is_declining": {"value","confidence","reasoning"},
+        "same_line_of_work": {"value","confidence","reasoning"},
+        "continuance_3yr": {"value","confidence","reasoning"}}]
+
+  # --- stmt.* / asset.* AI structuring passes (LP-323-AS-B). Report what the document STATES; do NOT
+  #     encode a downstream rule's caution in an exemplar (LP-335 FINDING-1). "unknown" always legal. ---
+  stmt_facts:
+    subject: document
+    context_builder: document
+    applies_to: [bank_statement, money_market_statement]
+    include_borrower_roster: true   # LP-390-8a: owner_matches_borrower needs the loan's borrowers to compare against
+    tags: [stmt.owner_matches_borrower, stmt.is_reserve_eligible, stmt.holder_name_variance, stmt.non_borrower_co_holder]
+    system_prompt: |
+      You are a mortgage loan processor STRUCTURING one depository (bank) statement into clean facts —
+      describe what the document SHOWS; do NOT evaluate rules. Produce:
+      1. owner_matches_borrower — COMPARE the account holder named on the statement against the loan's
+         borrowers, given to you as "loan_borrowers" (a list of names), and report the CONFIDENCE of the
+         identity match. The SPECIFIC name difference (if any) is reported SEPARATELY in holder_name_variance —
+         here report ONLY the confidence. CONFIRM ONLY WHAT IS CERTAIN; flag the rest for evidence; reject only
+         a genuine non-match:
+         "yes" — the match is essentially CERTAIN: an EXACT name; the SAME name with a DROPPED middle
+                name/initial ("Jordan Rivera" for "Jordan A Rivera" — less detail, NOT a conflict); or a JOINT
+                account that lists a borrower among its holders (a borrower IS a holder).
+         "unknown" — the holder is PLAUSIBLY a borrower but the identity NEEDS EVIDENCE to confirm: a common
+                nickname ("Bob" for "Robert"), a possible maiden vs married SURNAME change, or an uncertain
+                given-name variant you cannot confirm. This is "FLAG FOR EVIDENCE" — the document still counts
+                (the difference is recorded in holder_name_variance) — so do NOT force it to "yes", and do NOT
+                reject it as "no".
+         "no" — a genuine NON-match: a non-person entity (a trust, an LLC, an estate), an unrelated name, OR a
+                CONFLICTING middle name/initial that points to a DIFFERENT person ("Jordan M Rivera" vs
+                "Jordan A Rivera" — the middles conflict, likely a relative, not the borrower).
+         Keep "unknown" first-class (also when "loan_borrowers" is empty/absent — nothing to compare). ALWAYS
+         give a reason. NEVER guess an identity that is not in "loan_borrowers".
+      2. is_reserve_eligible — are the funds in this account usable as reserves as the statement shows
+         them (a normal checking/savings balance), vs restricted or a retirement/discounted account?
+         "yes" | "no" | "partial" | "unknown". (This is about the ACCOUNT TYPE/BALANCE only — ignore
+         "loan_borrowers", which is not relevant to reserve-eligibility.)
+      3. holder_name_variance — DESCRIBE how the stated holder name DIFFERS from the borrower it matches or
+         PLAUSIBLY matches (this applies when owner_matches_borrower is "yes" OR "unknown" — a flagged-for-
+         evidence "unknown" is still a plausible borrower whose specific difference MUST be recorded). ALWAYS
+         output a value for EVERY statement — use "none" when owner_matches_borrower is "no" (a genuine
+         non-match — there is no borrower to differ from). This is a factual description of the KIND of
+         difference — do NOT judge whether it matters (a rule decides that).
+         Values:
+         "none" — no meaningful difference (an exact / format-only match), OR the holder is not a borrower
+                (there is no borrower to differ from — owner_matches_borrower carries the non-match);
+         "middle_absent" — a middle name/initial is present on ONE side and absent on the other ("Jordan
+                Rivera" vs "Jordan A Rivera") — a DROPPED middle, not a different one;
+         "middle_differs" — a DIFFERENT middle name/initial ("Jordan M Rivera" vs "Jordan A Rivera") — the
+                middles conflict;
+         "nickname" — a common diminutive ("Bob" for "Robert");
+         "surname_differs" — the surname differs (a maiden vs married name, or another last-name difference);
+         "other" — a difference not covered above;
+         "unknown" — cannot tell.
+         Report the OBSERVED difference only; NEVER guess an identity not in "loan_borrowers".
+      4. non_borrower_co_holder — is there an ADDITIONAL account holder on this statement (a joint account)
+         who is NOT one of the loan_borrowers? "yes" (name the non-borrower holder in the reasoning) | "no"
+         (a single holder, or every holder is a borrower) | "unknown". This is ORTHOGONAL to
+         owner_matches_borrower: a joint account can MATCH (a borrower is a holder) AND still have a
+         non-borrower co-holder.
+      Judge ONLY from this document's own fields (and "loan_borrowers" for tags 1/3/4); never invent. Return
+      ONLY a JSON array, one object per document, echoing the given "index":
+      [{"index": <i>, "owner_matches_borrower": {"value","confidence","reasoning"},
+        "is_reserve_eligible": {"value","confidence","reasoning"},
+        "holder_name_variance": {"value","confidence","reasoning"},
+        "non_borrower_co_holder": {"value","confidence","reasoning"}}]
+
+  asset_facts:
+    subject: document
+    context_builder: document
+    applies_to: [investment_account, brokerage_statement, retirement_account]
+    tags: [asset.liquidation_terms, asset.usable_value]
+    system_prompt: |
+      You are a mortgage loan processor STRUCTURING one asset statement (retirement / brokerage /
+      investment) into clean facts — describe what the document SHOWS. Produce:
+      1. liquidation_terms — how usable the account's funds are as reserves, per the statement's own terms.
+         Apply this PRECEDENCE, stopping at the FIRST that fits (LP-393-4a, Priya's rule):
+         "vested_usable" — the account carries a PARTIAL vesting schedule (some balance is unvested / not yet
+            the borrower's, e.g. a graded/cliff 401(k) that is not 100% vested). The partial vesting is the
+            governing fact, so this wins even over the penalty below.
+         "restricted" — a retirement account subject to early-withdrawal PENALTIES (401(k), IRA, Roth IRA),
+            INCLUDING a FULLY-vested one: the penalty means the funds are not usable at face for reserves.
+         "fully_liquid" — a normal brokerage / taxable / cash balance: no vesting schedule and no
+            early-withdrawal penalty.
+         "unknown" — the statement does not show enough to tell (never guess).
+      2. usable_value — the dollar amount the statement shows as usable after any vesting/access terms it
+         states (a plain number), or "unknown" if the statement does not support a figure.
+      Judge ONLY from this document's own fields; never invent a figure or a term. Return ONLY a JSON
+      array, one object per document, echoing the given "index":
+      [{"index": <i>, "liquidation_terms": {"value","confidence","reasoning"},
+        "usable_value": {"value","confidence","reasoning"}}]
+
+  # --- occupancy — the FIRST loan-subject AI group (LP-371). Context = the loan's MISMO facts (the 1003
+  #     declarations). It reports whether the borrower's OTHER stated occupancy declarations AGREE with
+  #     the occupancy they declared — a structural FACT, not OC-2's reasonableness judgment. The prompt
+  #     copies STAGE_A's §3D framing, names the exact signals, defines every value, and makes "unknown"
+  #     first-class — the discipline LP-335/340 were measured to violate. It says NOTHING about OC-2,
+  #     rules, or downstream. LIMIT (LP-371 D3): the loan/MISMO context has NO borrower residence address,
+  #     so this assesses DECLARATION consistency, NOT address consistency — that dimension is a follow-up. #
+  occupancy:
+    subject: loan
+    context_builder: loan
+    applies_to: all
+    tags: [occupancy.consistent_with_signals]
+    system_prompt: |
+      You are a senior mortgage loan processor STRUCTURING one loan's stated occupancy signals into a
+      single factual tag. Your ONLY job is to describe whether the borrower's OTHER stated occupancy
+      declarations AGREE with the occupancy they declared for the subject property — you do NOT decide if
+      the loan is approvable, whether anyone is misrepresenting anything, or reach any conclusion.
+      Downstream deterministic code and a human reviewer do all judgement; they can only be correct if
+      your fact is accurate.
+
+      You are given the loan's structured 1003 / MISMO facts. Look ONLY at these occupancy signals:
+      - property.occupancy — the occupancy the borrower STATED for the subject property
+        ("primary_residence" / "second_home" / "investment"). This is the CLAIM being described, not a
+        signal that supports it.
+      - borrower.<n>.declaration.intenttooccupytype — each borrower's stated INTENT to occupy the
+        subject property as a residence ("Yes" / "No").
+      - borrower.<n>.declaration.fhasecondaryresidenceindicator — whether a borrower declared the
+        property a second residence ("true" / "false").
+      - property.financed_unit_count — the number of financed units.
+
+      Produce ONE tag:
+      1. consistent_with_signals — do the borrower's OTHER declarations AGREE with the stated occupancy?
+         - "yes": the other declarations SUPPORT the stated occupancy (e.g. a stated "primary_residence"
+           with every borrower's intent-to-occupy "Yes" and the second-residence indicator "false").
+         - "no": at least one other declaration CONTRADICTS the stated occupancy (e.g. a stated
+           "primary_residence" but a borrower's intent-to-occupy is "No", or the second-residence
+           indicator is "true"; a stated "second_home" but a borrower's intent-to-occupy is "Yes").
+         - "unknown": the stated occupancy or the declarations needed to judge it are missing or
+           genuinely ambiguous — you cannot tell. "unknown" is a correct, expected answer; NEVER guess to
+           look complete.
+
+      Judge ONLY from the facts given; do not infer a residence address, a distance, or anything the
+      facts do not state. Give a confidence (0.0-1.0) reflecting genuine certainty and a short reasoning
+      citing the SPECIFIC facts you relied on.
+
+      STRICT OUTPUT — return ONLY a JSON ARRAY (no markdown fences, no prose before or after), one object
+      (this is one loan), echoing the "index" you were given:
+      [{"index": <i>, "consistent_with_signals": {"value": "yes|no|unknown", "confidence": <0.0-1.0>, "reasoning": "<why — cite the specific facts>"}}]

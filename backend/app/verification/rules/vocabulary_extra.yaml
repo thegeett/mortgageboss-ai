@@ -1,0 +1,209 @@
+# LP-328 (GAP-E) — the HAND-EDITABLE fact-tag vocabulary overlay.
+#
+# `fact_tags.csv` is GENERATED from `docs/snapshot-fact-tags.xlsx` (the human/Priya authoring form) —
+# a binary a PR cannot review, and re-running the generator would OVERWRITE a hand-added row. So the
+# waves ADD a NEW tag HERE instead: a version-controlled YAML, reviewed in a PR, that the generator
+# never touches. This is the vocabulary's hand-editable source of truth for wave-added tags; the xlsx
+# remains the bulk-authoring view. A tag_id declared here that already exists in fact_tags.csv fails
+# loud (never shadow an xlsx tag). Pair a new tag with its production declaration in
+# `tag_production.yaml` (LP-326) so it also MATERIALIZES.
+#
+# Each entry (keyed by tag_id under `tags:`):
+#   entity:        the logical entity (borrower | doc | loan | transaction | property | …) — REQUIRED
+#   value_type:    number | date | string | enum | match_hash | object — REQUIRED
+#   allowed_values: a list (for enum) or null
+#   description:   one line
+#   produced_by:   parsed | derived | AI (documentation; production MODE is in tag_production.yaml)
+#
+# Example (commented — a real add just uncomments + fills it in):
+#   id.residency_eligible:
+#     entity: borrower
+#     value_type: enum
+#     allowed_values: ["yes", "no", "unknown"]
+#     description: Is the borrower's residency status eligible for the loan program (ID-8 verdict).
+#     produced_by: AI
+#
+# =============================================================================================
+# THE `*_normalized` TAG CONVENTION (LP-340 / ADR-281) — binds EVERY `*_normalized` tag, present
+# and future (employer, name, address, and every family's future ones). Read this before minting a
+# new one; do not re-decide it by accident.
+#
+#   GENERAL RULE (D3): a `*_normalized` tag reports the value THE DOCUMENT STATES, canonicalized for
+#   FORMAT ONLY — casing, whitespace, punctuation, abbreviation expansion (St->Street). Normalize
+#   FORMAT, NOT CONTENT: content differences (a different name, a different street) are the SIGNAL the
+#   consistency rules exist to catch — never erase them in the tag. The tag reports; the RULE decides
+#   how to compare (LP-335's principle — no downstream-matching concern in a tag prompt/exemplar).
+#
+#   RECORDED EXCEPTION (D1, Geet's decision): a corporate ENTITY SUFFIX (Inc/LLC/Corp/Co/Ltd) is
+#   declared to be FORMAT, not content, for EMPLOYER matching — a suffix change is a restructuring,
+#   not an employer change. It is stripped by the RULE via the declared `drop_entity_suffix` normalizer
+#   (currently IN-5 only), NOT by the tag — the tag still reports `Acme Logistics Inc` in full. This
+#   is a deliberate, recorded exception to the general rule, chosen (not overlooked). ACCEPTED
+#   TRADE-OFF / PRIYA ITEM: `Acme Inc` and `Acme LLC` then compare equal — reversible by removing the
+#   one `drop_entity_suffix` line from the rule's chain.
+#
+#   NAME (D2): a name `*_normalized` tag reports the document's PRIMARY printed name of record; it does
+#   NOT prefer a fuller asserted/alternate form (the fuzzy consistency judge reconciles variants).
+#
+#   SCORING (D4): genuine content variance (nicknames, maiden vs married) still cannot be string-equality
+#   scored (FINDING-2) — that is the fuzzy-scoring method's own ticket, not this convention.
+# =============================================================================================
+
+tags:
+  # ID-9's rule_judgment output tag (LP-329). A NEW verdict tag added via the hand-editable overlay —
+  # the GAP-E fix (LP-328) makes this possible without editing the generated fact_tags.csv / xlsx.
+  id.poa_acceptable:
+    entity: doc
+    value_type: enum
+    allowed_values: ["yes", "no", "unknown"]
+    description: Is the power of attorney acceptable under investor rules (ID-9 judgment verdict).
+    produced_by: AI
+  # ID-8's rule_judgment output tag (LP-331, per-borrower citizenship/residency eligibility). Added
+  # via the hand-editable overlay (the GAP-E fix, LP-328).
+  id.residency_eligible:
+    entity: borrower
+    value_type: enum
+    allowed_values: ["yes", "no", "unknown"]
+    description: Is the borrower's citizenship/residency eligible for the loan program (ID-8 verdict).
+    produced_by: AI
+
+  # --- LP-389-A — ID-5's per-borrower inputs (the fix for the document→loan subject mismatch). The DL
+  #     expiration STAYS a document fact (id.id_expiration, document subject); these two DERIVED tags
+  #     promote it to the subjects ID-5 actually reads — the borrower's attributed ID, and the file's
+  #     one closing date — reusing LP-385's per-borrower-over-documents shape (belongs_to). "unknown"
+  #     always legal (the recipes abstain, never fabricate). --------------------------------------- #
+  id.borrower_id_expiration:
+    entity: borrower
+    value_type: date
+    allowed_values: null
+    description: >-
+      The borrower's government photo ID expiration date, resolved from the driver's-licence
+      ATTRIBUTED to that borrower (belongs_to) — the per-borrower promotion of the document-subject
+      id.id_expiration (LP-389-A). Feeds ID-5. "unknown" when the borrower has no attributable ID, or
+      its ID documents disagree on the expiration.
+    produced_by: derived
+  contract.loan_closing_date:
+    entity: loan
+    value_type: date
+    allowed_values: null
+    description: >-
+      The loan's single closing date, promoted to loan level from the contract document's
+      contract.closing_date (LP-389-A — contract.closing_date itself stays a document fact). Feeds
+      ID-5. "unknown" when no closing date is in the file, or documents disagree on it.
+    produced_by: derived
+
+  # --- LP-323-IN-B — the income family's DERIVED arithmetic tags (loan-level aggregates; the derived
+  #     producer is loan-only, so per-borrower granularity is deferred — see the LP-323-IN-B doc).
+  #     value_type number, "unknown" always legal (the derived recipe abstains, never fabricates). --- #
+  income.documented_income_shortfall_pct:
+    entity: loan
+    value_type: number
+    allowed_values: null
+    description: >-
+      (stated − documented) monthly income / stated, loan-level. SIGNED — negative = documented
+      exceeds stated (a raise, not a shortfall). Feeds IN-1. "unknown" when inputs are absent/incomplete.
+    produced_by: derived
+  income.ytd_annualized_shortfall_pct:
+    entity: loan
+    value_type: number
+    allowed_values: null
+    description: >-
+      (documented − YTD-annualized-monthly) / documented, loan-level. Positive = the paystub YTD does
+      not support the documented monthly income. Feeds IN-3. "unknown" when inputs are missing.
+    produced_by: derived
+  income.max_employment_gap_days:
+    entity: loan
+    value_type: number
+    allowed_values: null
+    description: >-
+      Largest gap in days between consecutive employment records. Feeds IN-4. "unknown" when fewer than
+      two dated records exist.
+    produced_by: derived
+  income.days_since_most_recent_pay:
+    entity: loan
+    value_type: number
+    allowed_values: null
+    description: >-
+      Days from the most recent pay date to the file (snapshot) date. Feeds IN-2. "unknown" when no pay
+      date is present.
+    produced_by: derived
+
+  # --- LP-323-IN-B — the income JUDGMENT verdict tags (the rule_judgment output the judgment evaluator
+  #     writes; NOT materialized by a producer, so declared here only, like id.residency_eligible). ---- #
+  income.job_change_acceptable:
+    entity: borrower
+    value_type: enum
+    allowed_values: ["yes", "no", "unknown"]
+    description: Is a borrower's job change to the same line of work / stable (IN-7 judgment verdict).
+    produced_by: AI
+  income.other_income_continues:
+    entity: borrower
+    value_type: enum
+    allowed_values: ["yes", "no", "unknown"]
+    description: Will other income (e.g. support, award) continue 3+ years and is documented (IN-13 verdict).
+    produced_by: AI
+  income.rental_income_supportable:
+    entity: borrower
+    value_type: enum
+    allowed_values: ["yes", "no", "unknown"]
+    description: Is claimed rental income supported by docs + a continuance/vacancy adjustment (IN-14 verdict).
+    produced_by: AI
+
+  # --- LP-323-AS-B — the assets family's NEW derived + judgment tags (not in fact_tags.csv). ----------
+  reserves.required_months:
+    entity: loan
+    value_type: number
+    allowed_values: null
+    description: >-
+      Required reserves in months of PITIA, selected from occupancy (AS-4 threshold). Derived; abstains
+      ("unknown") for any occupancy/property cell not in the agency-standard map (the full matrix is Priya's).
+    produced_by: derived
+  stmt.nsf_count:
+    entity: loan
+    value_type: number
+    allowed_values: null
+    description: The count of NSF/overdraft transactions across the file's statements (AS-7). Derived.
+    produced_by: derived
+  stmt.min_account_months:
+    entity: loan
+    value_type: number
+    allowed_values: null
+    description: >-
+      The fewest distinct statement months any ONE account has (AS-10 recency) — grouped per account via
+      resolve_accounts, min across accounts (a short account is never masked by a well-documented one).
+    produced_by: derived
+  as.borrowed_funds:
+    entity: loan
+    value_type: enum
+    allowed_values: ["yes", "no", "unknown"]
+    description: Do deposit patterns suggest an undisclosed borrowed-funds source (AS-12 judgment verdict)?
+    produced_by: AI
+  # LP-400 — surface name discrepancies + non-borrower co-holders instead of swallowing them (Priya's ruling:
+  # a name variance FLAGS for attention but the document still COUNTS; a joint account flags a non-borrower
+  # co-holder). Separate from stmt.owner_matches_borrower (whose yes/no/unknown + 13 goldens are UNCHANGED):
+  # these DESCRIBE the observable (what KIND of difference / is there an extra holder); a RULE decides which
+  # warrant attention (Priya's, later — this ticket only makes them produce). See ADR-319.
+  stmt.holder_name_variance:
+    entity: statement
+    value_type: enum
+    # DESCRIPTIVE taxonomy (not verdicts): middle_differs is a DIFFERENT middle (the risky "relative?" case,
+    # LP-398 N1) — deliberately SPLIT from middle_absent (a dropped middle, benign, LP-398 P1), else the tag
+    # would re-collapse them. `none` = no meaningful person-name difference (an exact match, OR the holder is
+    # not a borrower at all — owner_matches_borrower carries that). WHICH kinds flag is the RULE's call (Priya).
+    allowed_values:
+      ["none", "middle_absent", "middle_differs", "nickname", "surname_differs", "other", "unknown"]
+    description: >-
+      When the account holder resolves to a borrower, HOW the stated name differs from that borrower's name
+      (a describe-only observable; the rule decides which kinds warrant attention). `none` when there is no
+      meaningful difference or the holder is not a borrower. NOTE: `none` is overloaded (exact match vs holder
+      is not a borrower) — a consuming rule MUST co-read stmt.owner_matches_borrower to disambiguate the two
+      (owner=yes+none = clean match; owner=no+none = not a borrower).
+    produced_by: AI
+  stmt.non_borrower_co_holder:
+    entity: statement
+    value_type: enum
+    allowed_values: ["yes", "no", "unknown"]
+    description: >-
+      Is there an ADDITIONAL account holder on the statement (a joint account) who is NOT a borrower on the
+      loan (LP-398 N5)? The reasoning names the non-borrower holder. `no` for a single-holder account.
+    produced_by: AI

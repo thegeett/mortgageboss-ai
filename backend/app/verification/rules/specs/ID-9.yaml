@@ -1,0 +1,69 @@
+rule_id: ID-9
+name: Power of attorney acceptability
+category: Identity
+kind: judgmental
+numeric_check: false
+criteria: >-
+  When a power of attorney is used, it must meet investor rules — an acceptable attorney-in-fact
+  (not an interested party such as the loan officer or realtor), a durable/specific form that covers
+  the transaction, and dating consistent with the note. The AI judges acceptability; a human ratifies
+  every verdict. Scoped to POWER-OF-ATTORNEY documents (a W-2 is not in scope → not_applicable).
+applicability:
+  scope: power-of-attorney documents in the file
+  trigger: once per POA document, judged for acceptability
+required_inputs:
+  - name: poa_present_and_acceptable
+    snapshot_path: 'tags.by_subject[<POA doc content_id>]["id.poa_present_and_acceptable"]'
+    description: whether a POA is present and meets investor rules (AI enum)
+reference_values:
+  priya_validated: false
+  # PRIYA / HUMAN-VERIFY: the investor POA acceptability rules (occupancy limits, interested-party
+  # prohibition, durable vs specific, dating vs the note) are UNSURE guideline values — the judgment
+  # prompt encodes a defensible default; the authoritative rules are in LP-329's Priya list.
+  threshold_needs_signoff: false
+  guideline_text: >-
+    Fannie Mae Selling Guide B8-5-05 (Power of Attorney) — a POA must be acceptable under investor
+    rules (attorney-in-fact not an interested party; durable/specific form covering the transaction;
+    dating consistent with the note). The specifics are pending the domain expert's confirmation.
+subject_enumeration: per_document
+subject_key_fields:
+  - document
+evidence_required: the POA acceptability signal the judgment cited, inline for the ratifying human
+guideline_reference: >-
+  Fannie Mae Selling Guide B8-5-05 (Power of Attorney) — POA must meet investor rules. The specifics
+  are a lender/investor standard pending Priya.
+judgment:
+  subject: per_document
+  # LP-329 (GAP-C): scope to POA documents. A non-POA document → not_applicable (§8 Tab 4, no AI, no
+  # finding); a POA document whose acceptability tag is absent/"unknown" → couldnt_check (Tab 1).
+  applicability:
+    tag: document.document_type
+    op: eq
+    value: power_of_attorney
+  load_bearing_tags:
+    - id.poa_present_and_acceptable
+  reasoned_over:
+    - id.poa_present_and_acceptable
+  output_tag: id.poa_acceptable
+  value_domain: ["yes", "no", "unknown"]
+  confidence_floor: 0.5
+  system_prompt: |
+    You are a senior mortgage underwriter making a REASONED JUDGMENT about ONE question: is the power
+    of attorney used in this file ACCEPTABLE under investor rules?
+
+    You reason ONLY over the STRUCTURED TAGS handed to you below — never the raw document. The tags are
+    clean facts other checks produced (whether a POA is present and appears to meet investor rules).
+    Judge acceptability the way an underwriter would: an acceptable POA has an attorney-in-fact who is
+    NOT an interested party (not the loan officer, realtor, or seller), is durable or specific in a
+    form that COVERS this transaction, and is dated consistently with the note. A POA failing any of
+    these is NOT acceptable.
+
+    BE HONEST. If the tags do not support a judgment — missing, unknown, or genuinely ambiguous —
+    answer "unknown". NEVER guess, and NEVER treat "a POA exists" as self-approving.
+
+    Your reasoning MUST cite the specific tags you relied on (by their tag id) and what each implied.
+    Give a confidence that reflects genuine certainty.
+
+    STRICT OUTPUT — return ONLY a JSON OBJECT (no markdown fences, no prose):
+    {"value": "yes|no|unknown", "confidence": <0.0-1.0>, "reasoning": "<why — cite the tags>"}
+spec_version: 1

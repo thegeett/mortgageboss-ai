@@ -51,20 +51,38 @@ class Settings(BaseSettings):
     # used by the app/ai client wrapper (LP-37). These are CONFIGURATION, not baked-in
     # facts — model strings change over time.
     # TODO(models): verify against the current Anthropic docs before relying on these.
-    # The extraction/reasoning tier runs on Opus 4.8 — the highest-capability model,
-    # for document extraction, cross-source reasoning, and needs/guidance. The cheap
-    # high-volume classification/summarization tier stays on Haiku. Both are
-    # env-overridable (ANTHROPIC_MODEL_CLASSIFICATION / ANTHROPIC_MODEL_EXTRACTION).
+    # The extraction/reasoning tier runs on Sonnet 4.5 (document extraction, cross-source
+    # reasoning, needs/guidance) — the cost/quality default; a deployment can dial up to
+    # Opus via env for more capability. The cheap high-volume classification/summarization
+    # tier stays on Haiku. Both are env-overridable (ANTHROPIC_MODEL_CLASSIFICATION /
+    # ANTHROPIC_MODEL_EXTRACTION); the default is the safe value, so a missing env var
+    # degrades to Sonnet (correct + cheap), never silently to a 5x-cost Opus fallback.
     anthropic_model_classification: str = "claude-haiku-4-5"
-    anthropic_model_extraction: str = "claude-opus-4-8"
+    anthropic_model_extraction: str = "claude-sonnet-4-5"
     # AI retry policy (LP-37): transient failures (429/5xx/connection) are retried with
     # exponential backoff + jitter, capped at this many attempts.
     ai_max_retries: int = 3
     ai_base_retry_delay_seconds: float = 1.0
+    # Wall-clock ceiling for one AI reasoning call (LP-313). ``complete()`` itself has no
+    # timeout; tag production wraps its call so a hung request fails closed (the affected
+    # tags become unknown-with-reason) instead of blocking a run indefinitely.
+    ai_request_timeout_seconds: float = 60.0
     # Needs consolidation (LP-111): after the deterministic collapse, an AI pass FLAGS the
     # semantic-duplicate residue for the processor to confirm (never a silent delete). Gated so the
     # extra per-run classification call can be turned off; the deterministic layers run regardless.
     needs_duplicate_flagging_enabled: bool = True
+    # Per-document AI-group gating (LP-377-D): skip an AI structuring group on a document its declared
+    # `applies_to` doc-types exclude — a paid call the group would only abstain on (and, for income_amounts,
+    # over-produce on). ALWAYS fails open (unknown / no-match document → runs every group). Set
+    # GATE_AI_GROUPS=0 to instantly restore brute-force (run every group on every document) with no redeploy
+    # — the safety net if a tag ever goes missing on a file shape the equivalence proof did not cover.
+    gate_ai_groups: bool = True
+    # Pending-check surfacing (LP-391): a blocked-but-applicable rule emits a manual-review flag instead of
+    # silence, so a qualifying file no longer reads as "checked, clean". This materializes the BLOCKED rules'
+    # UNCALIBRATED AI groups on a throwaway snapshot every run — real extra AI cost (latency + tokens) that
+    # scales with the blocked-rule count. Gated so a cost-sensitive deployment can turn the whole pass off
+    # with no redeploy; ON by default (the honest-surfacing behavior the live/persisted snapshot is unaffected by).
+    pending_checks_enabled: bool = True
 
     # JWT / Auth
     jwt_secret_key: str = Field(

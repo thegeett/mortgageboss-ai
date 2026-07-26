@@ -1,0 +1,163 @@
+# AS-1 — Large-deposit sourcing sweep — Stage-2 rule SPEC (LP-303)
+#
+# The version-controlled DATA the evaluator prompt injects (the spine's slots:
+# criteria / applicability / required_inputs / reference_values / evidence_required /
+# guideline_reference — see docs/stage2-evaluator-prompts.md). Nothing consumes this
+# yet; the evaluator is LP-304.
+#
+# ⚠️ FORMAT IS PROVISIONAL. These fields were DISCOVERED from this one real rule (AS-1).
+# The general spec schema is generalized in LP-308 — do not treat this shape as final.
+#
+# Consistency: `kind` / `numeric_check` and the validation gate
+# (reference_values.priya_validated / threshold_needs_signoff) MUST agree with this
+# rule's row in app/verification/rules/rule_kinds.csv (LP-301). load_rule_spec()
+# cross-checks and raises on any mismatch, so the CSV stays the single gate of record.
+
+rule_id: AS-1
+name: Large-deposit sourcing sweep
+category: Assets
+
+kind: calculative        # must equal rule_kinds.csv (AS-1 = calculative)
+numeric_check: true      # calculative rule carries the deterministic numeric bookend (LP-305)
+
+# What the AI judges against (spine: rule.criteria).
+criteria: >-
+  A single deposit on a bank statement whose amount exceeds the large-deposit threshold
+  (50% of the borrower(s)' total monthly qualifying income) must be sourced and explained.
+  Ordinary, already-sourced credits — payroll / direct deposit, a documented transfer
+  between the borrower's own accounts, an earnest-money or escrow return — are not
+  concerns. An unsourced large deposit that could be an undisclosed loan or an unallowed
+  gift must be documented before the file is complete. The threshold is arithmetic (a
+  deterministic calculator owns it); the AI owns WHICH income qualifies and WHETHER a
+  given deposit is already sourced.
+
+# Scope + trigger (spine: rule.applicability). Three-valued-friendly: an empty scope →
+# not_applicable; an ambiguous file → cant_tell (the spine decides, not this file).
+applicability:
+  scope: >-
+    Loan files that have at least one bank statement with surfaced transactions
+    (a documents entry with document_type == "bank_statement" and a non-empty
+    transactions list). No bank-statement transactions → not_applicable.
+  trigger: >-
+    Evaluated per qualifying deposit — each credit (money-in) transaction is a candidate;
+    the deterministic bookend flags those at or above the threshold for AI sourcing
+    judgment.
+
+# What is needed to evaluate it (spine: rule.required_inputs). RESOLVED input source =
+# the frozen SNAPSHOT's transactions (LP-302 Option A), never raw extraction. Paths are
+# the post-LP-302a snapshot shape (see LP-302a / ADR-248).
+required_inputs:
+  - name: deposit_transactions
+    snapshot_path: 'documents.entries[document_type=="bank_statement"].transactions[direction=="credit"]'
+    description: >-
+      Each credit (money-in) transaction on a bank statement — the candidate deposits.
+      Per LP-302a TransactionRecord: amount, date, direction, description.
+  - name: deposit_amount
+    snapshot_path: 'documents.entries[].transactions[].amount'
+    description: The deposit's dollar amount — operand X in the threshold comparison.
+  - name: monthly_qualifying_income
+    snapshot_path: 'mismo.facts["borrower.<n>.income.<m>.monthly_amount"]'
+    description: >-
+      The stated monthly income lines the AI judges for qualifying income (alongside
+      income_type / employment_income at the sibling keys). The deterministic pre-compute
+      may use the computed aggregate at calculations.dti.value["gross_monthly_income"].
+      Feeds operand Y (threshold = 50% of total monthly qualifying income).
+  - name: deposit_account
+    snapshot_path: 'documents.entries[].fields["account_number_masked"]'
+    description: >-
+      The statement's PRE-MASKED account (display/context only; match_hash=None,
+      structurally non-matchable — LP-302a review / ADR-248). Part of a deposit's subject
+      key. NOT a cross-section match key (deposit↔MISMO-asset matching is unavailable on
+      this branch — see the LP-302a KNOWN GAP).
+  - name: deposit_description
+    snapshot_path: 'documents.entries[].transactions[].description'
+    description: >-
+      The PII-redacted transaction memo — the AI's sourcing signal (PAYROLL / TRANSFER /
+      VENMO) for judging whether a large deposit is already sourced.
+
+# The threshold lives HERE as DATA, not in the AI's memory (spine: rule.reference_values).
+# priya_validated / threshold_needs_signoff mirror rule_kinds.csv and are cross-checked
+# by the loader — recorded HONESTLY: the 50% threshold is NOT yet Priya-confirmed.
+reference_values:
+  large_deposit_threshold: "50% of total monthly qualifying income"   # prose (prompt spine slot)
+  priya_validated: false          # rule_kinds.csv: AS-1 priya_validated=false (NOT confirmed)
+  threshold_needs_signoff: true   # regulatory threshold — sign off before ship
+  # LP-324: the threshold as MACHINE DATA the generic evaluator reads (generically keyed — no
+  # rule-named field). The 50% multiplier the deterministic block's `threshold` operand consumes.
+  values:
+    large_deposit_threshold_pct: "50%"
+  guideline_text: "Fannie Mae Selling Guide B3-4.2-02 — a large deposit (> 50% of monthly qualifying income) must be sourced."
+
+# Per-deposit subject enumeration → each qualifying transaction is its own subject
+# (feeds LP-306 finding identity). `account` resolves from the parent bank-statement
+# entry's fields["account_number_masked"] (it is not on the TransactionRecord — see the
+# LP-302a review), together with the transaction's own date + amount.
+subject_enumeration: per_deposit
+subject_key_fields: [account, date, amount]
+
+# What counts as evidence (spine: rule.evidence_required).
+evidence_required: >-
+  For each deposit at or above the threshold: the deposit amount, its date, the statement
+  account it landed in, and whether a source/explanation is present (a payroll / direct-
+  deposit match, a documented transfer, a gift or large-deposit letter) or NOT found. A
+  deposit below the threshold, or one already sourced, is not a finding.
+
+guideline_reference: "Fannie Mae Selling Guide B3-4.2-02 (Depository Accounts) — large deposits"
+
+# LP-324 — the MACHINE-READABLE deterministic body. The generic evaluator runs THIS; there is no
+# per-rule Python. Reproduces AS-1's decision tree exactly (LP-315 + LP-314a): applicability via the
+# is_money_in tag (never a raw label) → the fail-closed gate over the gated tags → the operand
+# arithmetic (threshold = 50% × qualifying income from the DTI calc) → the ordered outcomes.
+deterministic:
+  # Provenance (inline on every verdict). source_strength refines a sourced verdict but is NOT gated
+  # (LP-314a: provenance-only; its absence must never force couldnt_check).
+  load_bearing_tags: [txn.is_money_in, txn.amount, txn.has_identified_source, txn.source_strength]
+  gated_tags: [txn.is_money_in, txn.amount, txn.has_identified_source]
+
+  # Applicability from the AI-resolved TAG (the direction== bug cannot recur): != in → not_applicable;
+  # absent/unknown → couldnt_check.
+  applicability: {tag: txn.is_money_in, op: eq, value: in}
+
+  operands:
+    observed: {tag: txn.amount}                       # the deposit amount (operand X)
+    threshold:                                         # 50% × income (operand Y) — see the caveat below
+      product:
+        - {reference: large_deposit_threshold_pct}     # 0.5 (parsed from "50%")
+        # LP-366: read income DIRECTLY as a loan-level tag (LP-366-A's `loan_tag` operand), NOT through
+        # the DTI calc. AS-1 asks "is this deposit large vs. what the borrower earns?" — it needs income,
+        # nothing else. The DTI calc fail-closed on housing.insurance_monthly (an input AS-1 never uses,
+        # and an orphaned tag — LP-367), so the threshold never resolved and EVERY money-in deposit was an
+        # unresolved candidate regardless of size. This wiring makes AS-1 EVALUATE (previously it
+        # couldnt_checked every deposit — a strict improvement). Fail-closed: absent/unknown income → None
+        # → couldnt_check (never 0 — a 0 threshold would fire on every deposit).
+        #   ⚠️ STATED, NOT QUALIFYING (priya_validated:false — needs sign-off): dti.qualifying_income_monthly
+        #   sums the MISMO STATED 1003 income, but the guideline below is 50% of QUALIFYING income. STATED >=
+        #   QUALIFYING (qualifying haircuts declining/variable pay), so this threshold is LOOSER than the
+        #   guideline: a deposit between 50%×qualifying and 50%×stated now reads SATISFIED (before: the gated
+        #   calc made it couldnt_check → surfaced) — a false-green BAND for variable-income files. Accepted
+        #   provisionally (the qualifying tag is underspecified — LP-343 F2 — and degraded live); resolve by
+        #   sizing on qualifying once F2 lands, or by Priya confirming stated is an acceptable proxy.
+        - {loan_tag: dti.qualifying_income_monthly}
+
+  outcomes:
+    # 1. Unsourced large deposit → FIRED (strict GT "exceeds").
+    - verdict: fired
+      when_tags: [{tag: txn.has_identified_source, op: ne, value: "yes"}]
+      when_compare: {op: ">", left: observed, right: threshold}
+      reasoning: "deposit {observed} exceeds the large-deposit threshold {threshold} and is not sourced (has_identified_source=no)"
+      how_to_fix: "Document this deposit's source — a payroll/direct-deposit match, a transfer from the borrower's own account, or a gift / large-deposit letter — before the file is complete."
+    # 2. Sourced but SELF-ASSERTED at/over threshold → NEEDS_REVIEW (GE — the soft nudge is more
+    #    inclusive at the boundary than the hard fire's GT). LP-314a "show me the debit" discipline.
+    - verdict: needs_review
+      when_tags:
+        - {tag: txn.has_identified_source, op: eq, value: "yes"}
+        - {tag: txn.source_strength, op: eq, value: self_asserted}
+      when_compare: {op: ">=", left: observed, right: threshold}
+      reasoning: "deposit {observed} is at or over the large-deposit threshold {threshold} and claims an own-account/gift source, but no matching debit was found in the file (self_asserted) — a verified paper trail is needed"
+      how_to_fix: "This large deposit claims an own-account or gift source in its description, but no matching withdrawal was found in the file. Obtain the statement for the source account named in the deposit's description showing the corresponding withdrawal (the paper trail)."
+    # 3. Everything else (below threshold, or verified/intrinsic source) → SATISFIED.
+    - verdict: satisfied
+      default: true
+      reasoning: "deposit {observed} is at or below the large-deposit threshold {threshold}, or is already sourced"
+
+spec_version: 2

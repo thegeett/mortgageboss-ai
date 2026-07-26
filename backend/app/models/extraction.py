@@ -63,6 +63,31 @@ class ExtractionStatus(StrEnum):
     PARTIAL = "partial"
 
 
+class ConfidenceSource(StrEnum):
+    """Where a confidence number came from (LP-201).
+
+    Lives here (next to the model that owns the ``confidence_source`` column) so the
+    same closed vocabulary governs both the persisted document-level column and the
+    per-field tags derived over ``extracted_data`` in the AI layer. Only the two
+    genuine states exist today; a structural/field-presence signal, if one ever
+    lands, gets its own value in the ticket that first emits it — not speculatively
+    reserved here.
+    """
+
+    MODEL_SELF_REPORTED = "model_self_reported"  # a genuine model-provided number
+    NOT_PROVIDED = "not_provided"  # no confidence available — absence is a legitimate state
+
+    @classmethod
+    def for_confidence(cls, confidence: float | None) -> "ConfidenceSource":
+        """Derive the provenance tag from a confidence value (the read-time rule).
+
+        A present number is a genuine model self-report; ``None`` is the honest
+        ``not_provided`` state. Keeping this the *single* derivation rule means the
+        tag is never persisted alongside the number (so the two can never disagree).
+        """
+        return cls.MODEL_SELF_REPORTED if confidence is not None else cls.NOT_PROVIDED
+
+
 class Extraction(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     """A versioned set of structured data extracted from a document."""
 
@@ -109,6 +134,18 @@ class Extraction(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     # estimate for tracking, not a ledger amount, so float precision is fine.
     cost_estimate: Mapped[float | None] = mapped_column(Float, nullable=True)
     error_detail: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # --- Document-level confidence (LP-201) --------------------------------
+    # The model's self-reported confidence for the extraction as a WHOLE (not per
+    # field — per-field confidence rides inside extracted_data). Nullable: old rows,
+    # a failed extraction, or any extractor that yields no genuine number carry NULL
+    # + ``not_provided``, never a fabricated default. ``confidence_source`` is a
+    # CHECK-constrained enum so a defaulted 0.0 can never be mislabelled as a real
+    # model rating, and the vocabulary cannot drift from the per-field tags.
+    confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
+    confidence_source: Mapped[ConfidenceSource | None] = mapped_column(
+        str_enum(ConfidenceSource, length=SHORT_STRING), nullable=True
+    )
 
     # --- Relationships -----------------------------------------------------
     document: Mapped["Document"] = relationship(back_populates="extractions")

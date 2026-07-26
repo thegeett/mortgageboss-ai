@@ -144,14 +144,15 @@ class CrossSourceResult:
 async def reason_cross_source(context_json: str) -> CrossSourceResult:
     """Run one general AI pass over the assembled stated-vs-verified context.
 
-    Calls Opus with the cross-source system prompt and the context as the user
+    Calls the extraction/reasoning tier (Sonnet by default, env-overridable) with the
+    cross-source system prompt and the context as the user
     message, then parses the structured findings defensively (never raises on bad
     JSON — a malformed response yields no findings). Raises
     :class:`~app.ai.client.AIClientError` on a transport failure (the caller marks
     the run FAILED). **Never logs the context or the response** — only counts.
     """
     result = await complete(
-        model=settings.anthropic_model_extraction,  # Opus — real reasoning over context
+        model=settings.anthropic_model_extraction,  # Sonnet by default — real reasoning over context
         system=CROSS_SOURCE_SYSTEM_PROMPT,
         messages=[{"role": "user", "content": context_json}],
         max_tokens=_MAX_TOKENS,

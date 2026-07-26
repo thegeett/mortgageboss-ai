@@ -1,0 +1,44 @@
+rule_id: AS-3
+name: Cash-to-close sufficiency
+category: Assets
+kind: calculative
+numeric_check: true
+criteria: >-
+  The borrower's available funds must cover the cash needed to close (down payment + closing costs +
+  required reserves − credits). A shortfall means the file lacks sufficient funds. NOTE (LP-323-AS-B):
+  there is NO cash-to-close calculator and closing_costs is not extracted today (no Loan-Estimate /
+  Closing-Disclosure extraction) — so the derived tag abstains and AS-3 couldnt_checks (bucket C).
+applicability:
+  scope: the loan file's available funds vs cash needed to close
+  trigger: once per loan
+required_inputs:
+  - name: cash_to_close_shortfall
+    snapshot_path: 'tags.by_subject["loan"]["calc.cash_to_close"]'
+    description: the cash-to-close shortfall, need − available (derived; abstains until closing_costs exists)
+reference_values:
+  priya_validated: false
+  threshold_needs_signoff: false
+  values:
+    zero: "0"
+subject_enumeration: loan
+subject_key_fields:
+  - loan
+evidence_required: the cash needed to close vs the available funds and the shortfall
+guideline_reference: "Fannie Mae Selling Guide B3-4.1 (Asset requirements) — sufficient funds to close."
+spec_version: 1
+deterministic:
+  load_bearing_tags:
+    - calc.cash_to_close
+  gated_tags:
+    - calc.cash_to_close
+  operands:
+    shortfall: {tag: calc.cash_to_close}
+    zero: {reference: zero}
+  outcomes:
+    - verdict: fired
+      when_compare: {op: ">", left: shortfall, right: zero}
+      reasoning: "the file is short {shortfall} of the cash needed to close"
+      how_to_fix: Document additional funds, or reduce the cash needed (a larger credit / seller concession).
+    - verdict: satisfied
+      default: true
+      reasoning: available funds cover the cash needed to close

@@ -1,0 +1,45 @@
+rule_id: ID-2
+name: SSN consistency
+category: Identity
+kind: structural
+numeric_check: false
+criteria: >-
+  A borrower's Social Security Number must be identical across every source that states it
+  (1003, credit report, government ID). A differing SSN is a discrepancy to resolve and a
+  classic identity-theft / synthetic-fraud signal.
+applicability:
+  scope: every borrower on the loan
+  trigger: once per borrower, comparing the SSN across all sources that state it
+required_inputs:
+  - name: ssn_hash
+    snapshot_path: tags.by_subject[<source content_id>]["id.ssn_hash"]
+    description: the borrower's hashed SSN as stated on each source document (parsed match_hash)
+reference_values:
+  priya_validated: false
+  threshold_needs_signoff: false
+subject_enumeration: per_borrower
+subject_key_fields:
+  - borrower
+evidence_required: the SSN as stated on each source (compared as a salted hash, never in the clear)
+guideline_reference: >-
+  Identity verification — a borrower's SSN must match across the file. There is no single
+  Selling-Guide numeric threshold; an exact-hash mismatch is a discrepancy to resolve.
+spec_version: 1
+consistency:
+  subject: per_borrower
+  gather_tag: id.ssn_hash
+  source_scope: borrower_documents
+  compare_mode: exact
+  normalization:
+    - strip
+  confidence_floor: 0.5
+  on_agree:
+    verdict: satisfied
+    reasoning: "the SSN matches across all {count} sources ({sources})"
+  on_disagree:
+    verdict: fired
+    reasoning: >-
+      the SSN differs across sources ({sources}) — a differing SSN is a discrepancy to resolve
+    how_to_fix: >-
+      Confirm the borrower's SSN and correct the source(s) that disagree. A genuine mismatch
+      across the 1003, credit report, or ID may indicate identity fraud and must be escalated.

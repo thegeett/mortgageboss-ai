@@ -1,0 +1,49 @@
+rule_id: IN-9
+name: Future employment (offer letter)
+category: Income
+kind: structural         # rule_kinds.csv: IN-9 = structural, exact_match=true (deterministic_only)
+numeric_check: false
+criteria: >-
+  Income from FUTURE employment must be supported by an offer/employment letter with a start date.
+  Scoped to offer-letter documents (LP-329): an offer-letter document without a valid start-date offer
+  fires. A file with no offer-letter document is not_applicable (future employment is the exception, not
+  every file has it) — the conditional-on-future-employment scoping is a deferred refinement (IN-B).
+applicability:
+  scope: the loan file's offer-letter / future-employment documents
+  trigger: once per offer-letter document
+required_inputs:
+  - name: offer_letter_present
+    snapshot_path: tags.by_subject[<offer content_id>]["income.offer_letter_present"]
+    description: whether an offer letter with a start date is present (yes/no/n/a)
+reference_values:
+  priya_validated: false
+  threshold_needs_signoff: false
+  guideline_text: >-
+    Fannie Mae Selling Guide B3-3.1-09 — income from employment starting after closing may be used only
+    with an offer letter, a start date, and program-specific conditions (e.g. a first-paystub condition).
+subject_enumeration: per_document
+subject_key_fields:
+  - content_id
+evidence_required: whether an offer letter with a start date is present for future employment
+guideline_reference: "Fannie Mae Selling Guide B3-3.1-09 (future/offer-letter employment)."
+spec_version: 1
+deterministic:
+  applicability:
+    tag: document.document_type
+    op: eq
+    value: employment_offer_letter  # LP-333: the classifier emits "employment_offer_letter"
+  load_bearing_tags:
+    - income.offer_letter_present
+  gated_tags:
+    - income.offer_letter_present
+  outcomes:
+    - verdict: fired
+      when_tags:
+        - {tag: income.offer_letter_present, op: eq, value: "no"}
+      reasoning: future employment is claimed but a valid offer letter with a start date is not present
+      how_to_fix: >-
+        Obtain an offer/employment letter stating the position and start date (and confirm the program's
+        future-income conditions, e.g. a paystub before or shortly after closing).
+    - verdict: satisfied
+      default: true
+      reasoning: an offer letter with a start date is present for the future employment

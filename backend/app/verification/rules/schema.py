@@ -30,6 +30,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from decimal import Decimal
 from enum import StrEnum
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, model_validator
 
@@ -256,7 +257,11 @@ class VerificationRule(BaseModel):
 
 # --- The deterministic comparison primitive (the rule LOGIC, fixed) ----------
 
-_COMPARATORS: dict[Operator, Callable[[Decimal, Decimal], bool]] = {
+# The operators are TYPE-AGNOSTIC — ``<=`` / ``<`` / ``==`` … work identically for Decimal, date, and
+# str (any totally-ordered type). So ONE comparator table serves every typed operand (LP-328): a
+# ``decimal`` rule and a ``date`` rule run through the SAME primitive; a new type needs a coercer, not
+# a new comparator. ``Any`` (not ``Decimal``) because the operands are typed by the caller.
+_COMPARATORS: dict[Operator, Callable[[Any, Any], bool]] = {
     Operator.LE: lambda observed, threshold: observed <= threshold,
     Operator.LT: lambda observed, threshold: observed < threshold,
     Operator.GE: lambda observed, threshold: observed >= threshold,
@@ -266,11 +271,20 @@ _COMPARATORS: dict[Operator, Callable[[Decimal, Decimal], bool]] = {
 }
 
 
-def satisfies(condition: Condition, observed: Decimal) -> bool:
-    """Evaluate ``observed <op> condition.value`` — the fixed rule logic.
+def compare_values(op: Operator, left: Any, right: Any) -> bool:
+    """Evaluate ``left <op> right`` — the fixed, TYPE-AGNOSTIC comparison primitive (LP-328).
 
-    This is the *only* place a threshold comparison happens. It reads the
-    threshold from the :class:`Condition` data, so the identical call evaluates a
-    base rule and an overlay-patched rule alike. Pure and deterministic.
+    The single place an operator is applied. ``left`` / ``right`` must be the SAME totally-ordered
+    type (both Decimal, both ``date``, …); the caller coerces + type-matches them. Pure.
     """
-    return _COMPARATORS[condition.op](observed, condition.value)
+    return _COMPARATORS[op](left, right)
+
+
+def satisfies(condition: Condition, observed: Decimal) -> bool:
+    """Evaluate ``observed <op> condition.value`` — the fixed rule logic (a Decimal-threshold wrapper
+    over :func:`compare_values`, so the numeric path is unchanged).
+
+    Reads the threshold from the :class:`Condition` data, so the identical call evaluates a base rule
+    and an overlay-patched rule alike. Pure and deterministic.
+    """
+    return compare_values(condition.op, observed, condition.value)

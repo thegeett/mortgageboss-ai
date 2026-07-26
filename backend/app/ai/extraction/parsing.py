@@ -13,10 +13,26 @@ from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
-from app.models.extraction import ExtractionStatus
+from app.ai.parsing import coerce_optional_confidence
+from app.models.extraction import ConfidenceSource, ExtractionStatus
 
 # A typed-core spec is a sequence of (field_name, value-coercer) pairs.
 CoreSpec = tuple[tuple[str, Callable[[Any], Any]], ...]
+
+
+def document_confidence_provenance(confidence: float) -> tuple[float | None, ConfidenceSource]:
+    """Honest ``(value, source)`` for the persisted DOCUMENT-level confidence (LP-201).
+
+    ``coerce_confidence`` collapses a failed extraction — or a model that omitted or
+    garbled the number — to ``0.0``, so a non-positive value carries no usable signal
+    and must be stored as ``None`` / ``not_provided``. Tagging it
+    ``model_self_reported`` would fabricate provenance (the exact thing LP-201 exists
+    to prevent) and make a defaulted 0.0 indistinguishable from a real model rating.
+    Only a positive confidence is treated as a genuine self-report.
+    """
+    reported = confidence if confidence > 0.0 else None
+    return reported, ConfidenceSource.for_confidence(reported)
+
 
 # Date formats accepted from the model, tried in order (ISO first).
 _DATE_FORMATS = (
@@ -134,13 +150,25 @@ def parse_typed_core(
     """Coerce the typed core; return ``(core_payload, non_null_count, coercion_lost)``.
 
     Reads ``payload["typed_core"]`` (falling back to ``payload`` for a flat
-    response). Each field becomes ``{"value": <coerced|None>, "source": <dict|None>}``;
-    a present-but-uncoercible value → ``None`` (source kept) and flags
-    ``coercion_lost``. The dict is ready for ``Model.model_validate``.
+    response). Each field becomes ``{"value": <coerced|None>, "source": <dict|None>,
+    "confidence": <float|None>}``; a present-but-uncoercible value → ``None``
+    (source kept) and flags ``coercion_lost``. The dict is ready for
+    ``Model.model_validate``.
+
+    Per-field confidence (LP-201) comes from an optional top-level
+    ``payload["field_confidence"]`` map (field name → 0..1) the model returns. A
+    field the model rated gets that number; a field with no number (or a garbage /
+    out-of-range one) is ``None`` — never a fabricated default. The provenance tag
+    (``model_self_reported`` / ``not_provided``) is not stored; a reader derives it
+    from ``confidence`` via :meth:`ConfidenceSource.for_confidence`.
     """
     core = payload.get("typed_core")
     if not isinstance(core, dict):
         core = payload
+
+    field_confidence = payload.get("field_confidence")
+    if not isinstance(field_confidence, dict):
+        field_confidence = {}
 
     core_payload: dict[str, Any] = {}
     non_null = 0
@@ -158,7 +186,11 @@ def parse_typed_core(
             coercion_lost = True  # a present value we couldn't coerce → data loss
         if coerced is not None:
             non_null += 1
-        core_payload[key] = {"value": coerced, "source": source}
+        core_payload[key] = {
+            "value": coerced,
+            "source": source,
+            "confidence": coerce_optional_confidence(field_confidence.get(key)),
+        }
     return core_payload, non_null, coercion_lost
 
 

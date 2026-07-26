@@ -75,7 +75,9 @@ class W2Extraction(BaseModel):
     employee_name: TypedField[str] = Field(default_factory=TypedField)
     employee_ssn: TypedField[str] = Field(default_factory=TypedField)  # SENSITIVE
     employer_name: TypedField[str] = Field(default_factory=TypedField)
-    employer_ein: TypedField[str] = Field(default_factory=TypedField)
+    employer_ein: TypedField[str] = Field(
+        default_factory=TypedField
+    )  # SENSITIVE — masked in snapshot (LP-206)
     wages_tips_other_comp: TypedField[Decimal] = Field(default_factory=TypedField)  # Box 1
     federal_income_tax_withheld: TypedField[Decimal] = Field(default_factory=TypedField)  # Box 2
     social_security_wages: TypedField[Decimal] = Field(default_factory=TypedField)  # Box 3

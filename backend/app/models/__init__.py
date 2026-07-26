@@ -29,6 +29,7 @@ from app.models.document import (
     Tier,
     UploadSource,
 )
+from app.models.document_borrower_link import DocumentBorrowerLink
 from app.models.document_finding import (
     DocumentFinding,
     DocumentFindingStatus,
@@ -39,12 +40,14 @@ from app.models.encrypted_types import EncryptedString
 from app.models.enums import RecordStatus, str_enum
 from app.models.extraction import Extraction, ExtractionStatus
 from app.models.finding import (
+    EvaluationOutcome,
     Finding,
     FindingCategory,
     FindingOrigin,
     FindingResolutionStatus,
     FindingStatus,
 )
+from app.models.finding_event import FindingEvent, FindingEventType
 from app.models.helpers import only_active, scope_to_company
 from app.models.lender import Lender, LoanProgram
 from app.models.loan_file import LoanFile, LoanFileStatus, LoanPurpose, RefinanceType
@@ -57,13 +60,17 @@ from app.models.needs_item import (
     NeedsItemPriority,
     NeedsItemStatus,
 )
+from app.models.observation import GraduationCandidate, Observation
 from app.models.property import OccupancyType, Property, PropertyType
+from app.models.rule import Rule
+from app.models.snapshot_record import SnapshotRecord
 from app.models.stated_financials import (
     StatedAsset,
     StatedEmployer,
     StatedIncomeItem,
     StatedLiability,
 )
+from app.models.tag import RuleTag, Tag, TagDependency
 from app.models.types import (
     LongStr,
     MediumStr,
@@ -90,6 +97,7 @@ __all__ = [
     "CommunicationStatus",
     "Company",
     "Document",
+    "DocumentBorrowerLink",
     "DocumentCategory",
     "DocumentFinding",
     "DocumentFindingStatus",
@@ -97,13 +105,17 @@ __all__ = [
     "DocumentStatus",
     "DtiOverride",
     "EncryptedString",
+    "EvaluationOutcome",
     "Extraction",
     "ExtractionStatus",
     "Finding",
     "FindingCategory",
+    "FindingEvent",
+    "FindingEventType",
     "FindingOrigin",
     "FindingResolutionStatus",
     "FindingStatus",
+    "GraduationCandidate",
     "Lender",
     "LoanFile",
     "LoanFileStatus",
@@ -121,17 +133,23 @@ __all__ = [
     "NeedsItemOrigin",
     "NeedsItemPriority",
     "NeedsItemStatus",
+    "Observation",
     "OccupancyType",
     "Property",
     "PropertyType",
     "RecordStatus",
     "RefinanceType",
+    "Rule",
+    "RuleTag",
     "ShortStr",
+    "SnapshotRecord",
     "SoftDeleteMixin",
     "StatedAsset",
     "StatedEmployer",
     "StatedIncomeItem",
     "StatedLiability",
+    "Tag",
+    "TagDependency",
     "Tier",
     "TimestampMixin",
     "UUIDMixin",

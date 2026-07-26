@@ -3,7 +3,8 @@
 The worker-seam bugs (task-not-registered, the profile-gate, the Redis-loop) ALL passed unit
 tests but failed in the real stack. This exercises the actual Celery task entrypoint the worker
 calls (``app.tasks.cross_source._run``) end-to-end: the run is picked up, the pass runs (the AI
-is stubbed — no key needed), the findings persist, and the run transitions RUNNING → COMPLETED.
+is stubbed — no key needed), the findings persist, and the run stays RUNNING (LP-377-C: the sweep no longer
+completes a run alone — the governed rule pass is the completion authority).
 Paired with the task-registration guard (tests/tasks/test_task_registration.py), this closes the
 worker-seam lesson: the registered task body works when invoked as the worker invokes it.
 """
@@ -71,9 +72,11 @@ async def test_cross_source_task_runs_end_to_end_and_persists_findings(
 
     await _run(str(loan_file.id), str(run.id))
 
-    # The run completed and the finding persisted (visible to the status endpoint).
+    # LP-377-C: the sweep persists its findings but NO LONGER completes the run alone — the governed rule
+    # pass is the completion authority, so the run stays RUNNING after the sweep (a full run completes when
+    # the rule pass finishes; a run that only ran the sweep is failed by the watchdog).
     await db.refresh(run)
-    assert run.status is VerificationStatus.COMPLETED
+    assert run.status is VerificationStatus.RUNNING
     findings = (
         (
             await db.execute(
