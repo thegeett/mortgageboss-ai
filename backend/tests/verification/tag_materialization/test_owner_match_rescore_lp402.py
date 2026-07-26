@@ -75,13 +75,9 @@ def test_owner_matches_prompt_is_conservative_reversing_tolerance() -> None:
 
 
 def test_the_other_stmt_facts_prompts_are_unchanged() -> None:
-    # only owner_matches' prompt changed; variance / co_holder / is_reserve clauses are untouched (their goldens
-    # + design stay valid). The variance clause still gates on owner_matches == "yes" (the LP-402 coupling
-    # finding — its widening is a follow-up ticket, NOT done here).
+    # LP-402 changed ONLY the owner_matches prompt. (LP-403 later widened the variance gate to yes/unknown —
+    # so the variance gate is no longer asserted here; co_holder + is_reserve stay untouched.)
     low = load_ai_groups()["stmt_facts"].system_prompt.lower()
-    # the variance clause still GATES on owner_matches == "yes" (the coupling finding — un-gating it is a
-    # follow-up ticket, not done here)
-    assert 'when owner_matches_borrower is "yes"' in low
     assert "is there an additional account holder" in low  # co_holder clause, unchanged
     assert "usable as reserves" in low  # is_reserve clause, unchanged
 

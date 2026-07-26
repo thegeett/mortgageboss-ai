@@ -435,10 +435,12 @@ ai_groups:
          them (a normal checking/savings balance), vs restricted or a retirement/discounted account?
          "yes" | "no" | "partial" | "unknown". (This is about the ACCOUNT TYPE/BALANCE only — ignore
          "loan_borrowers", which is not relevant to reserve-eligibility.)
-      3. holder_name_variance — DESCRIBE how the stated holder name DIFFERS from the borrower it matched
-         (this applies when owner_matches_borrower is "yes"). ALWAYS output a value for EVERY statement — use
-         "none" when owner_matches_borrower is not "yes" (there is no borrower to differ from). This is a
-         factual description of the KIND of difference — do NOT judge whether it matters (a rule decides that).
+      3. holder_name_variance — DESCRIBE how the stated holder name DIFFERS from the borrower it matches or
+         PLAUSIBLY matches (this applies when owner_matches_borrower is "yes" OR "unknown" — a flagged-for-
+         evidence "unknown" is still a plausible borrower whose specific difference MUST be recorded). ALWAYS
+         output a value for EVERY statement — use "none" when owner_matches_borrower is "no" (a genuine
+         non-match — there is no borrower to differ from). This is a factual description of the KIND of
+         difference — do NOT judge whether it matters (a rule decides that).
          Values:
          "none" — no meaningful difference (an exact / format-only match), OR the holder is not a borrower
                 (there is no borrower to differ from — owner_matches_borrower carries the non-match);
