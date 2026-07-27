@@ -81,10 +81,10 @@ _PRODUCED_OUTSIDE_DECLARATIONS: frozenset[str] = frozenset(
 # a genuine orphan TODAY (asserted below, so the exemption cannot rot into hiding a resolved tag). Removing
 # a tag's producer gap is what clears it from here.
 _KNOWN_LIVE_ORPHANS: dict[str, str] = {
-    # housing.insurance_monthly was here (LP-367); LP-374 wired its derived producer, so it is now PRODUCED
-    # and no longer exempted (the guard closing on the instance it flagged). housing.taxes_monthly remains:
-    # the DTI calc requires it too and nothing produces it (no tax-figure producer wired — a follow-up).
-    "housing.taxes_monthly": "LP-367 (open) — the DTI calc's required property-tax input has no producer",
+    # housing.insurance_monthly was here (LP-367); LP-374 wired its derived producer. housing.taxes_monthly
+    # was here too (LP-367 open) until LP-407-2 wired its monthly-conversion producer — both DTI required-input
+    # orphans are now PRODUCED, so this allow-list is empty (no known LIVE orphan remains). A new entry belongs
+    # here only with a fix ticket, and test_exemptions_are_still_genuine_live_orphans keeps it from rotting.
 }
 
 
@@ -243,10 +243,11 @@ def test_guard_fires_on_a_synthetic_dti_calc_orphan() -> None:
     }
 
 
-def test_guard_catches_the_dti_calc_orphans_when_not_exempted() -> None:
-    # Proof the guard FIRES on a real open orphan — without the exemption, housing.taxes_monthly (the DTI's
-    # remaining unproduced required input) is caught. housing.insurance_monthly is no longer here: LP-374
-    # wired its producer, so it is PRODUCED and drops out of the fatal set entirely.
+def test_the_dti_calc_required_inputs_are_all_produced() -> None:
+    # Both REQUIRED DTI inputs now have producers (housing.insurance_monthly — LP-374; housing.taxes_monthly —
+    # LP-407-2), so even WITHOUT any exemption the guard finds NO DTI-calc orphan. (The guard still FIRES on a
+    # synthetic DTI orphan — test_guard_fires_on_a_synthetic_dti_calc_orphan — so this closing does not blunt
+    # it.)
     fatal = _fatal_orphans(
         set(_vocabulary()),
         _produced(),
@@ -254,7 +255,8 @@ def test_guard_catches_the_dti_calc_orphans_when_not_exempted() -> None:
         set(_REQUIRED_DTI_TAGS),
         exempt=set(),
     )
-    assert set(fatal) == {"housing.taxes_monthly"}
+    assert set(fatal) == set()
+    assert "housing.taxes_monthly" not in fatal  # LP-407-2 produced it
     assert "housing.insurance_monthly" not in fatal  # LP-374 produced it
 
 

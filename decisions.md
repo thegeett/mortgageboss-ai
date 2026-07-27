@@ -12161,3 +12161,26 @@ holds. No live rule was deactivated. **Supersedes** ADR-326's `input_resolves`-s
 window decision stands). **Cross-refs.** LP-406-1b (D7 — the gap), LP-390-7 (the AS-5 loader hardening), LP-393-6
 (the IN-7 "a bar that lies" refusal), LP-394 (the census that reads this file), `kinds.py` (the calc-only
 `threshold_needs_signoff`).
+
+## ADR-328: A monthly-conversion tag fails closed to `unknown` on an unstated/unrecognized periodicity — it must not assume the period the way the DTI display does (LP-407-2)
+
+**Decision.** A derived tag that converts a periodic housing amount to a monthly figure (`housing.hoa_monthly`,
+the DT-2 input) maps only the **recognized** frequencies (monthly/quarterly/semiannual/annual) and **fails closed
+to `unknown` on an unstated or unrecognized `dues_frequency`** — it never assumes a period. `housing.taxes_monthly`
+and `housing.insurance_monthly` have no periodicity axis (their fields are annual by definition → ÷12).
+
+**Why.** The DTI calculator's `_extracted_hoa_monthly` (`services/dti.py`) DEFAULTS an unmapped frequency to
+monthly (`divisor.get(frequency, 1)`) — acceptable for a *display* line a processor can override, but a
+verification **tag** that silently reads a quarterly/annual due as monthly is a **12× / 4× miscalculation** a rule
+would then judge as fact. The tag abstains instead. This keeps the tag **stricter-than-or-equal-to the DTI**
+(it emits `unknown` where the DTI assumes a value) — the same "agree-or-abstain, never LOOSER than the DTI"
+contract `housing.insurance_monthly` (LP-374) established, and the absent≠0 fail-closed discipline (LP-318/375):
+a fabricated or assumed figure makes a downstream DTI/compare confidently wrong.
+
+**Scope note (D5, reported not decided).** `housing.hoa_monthly` is a **number** tag, so it cannot carry a
+`not_applicable` enum — it collapses "no HOA on this property" and "HOA unreadable" into `unknown`. DT-2's
+`not_applicable` on a genuinely no-HOA property therefore needs a **presence** gate (its applicability keyed on
+HOA-statement presence), NOT this amount tag. Left for LP-407-3; no presence tag was invented here.
+
+**Cross-refs.** LP-407-2 (D3/D5), LP-374 (`housing.insurance_monthly` agree-or-abstain), ADR-324 (tags describe,
+rules judge), `services/dti.py` `_extracted_hoa_monthly` (the assume-monthly default this diverges from).

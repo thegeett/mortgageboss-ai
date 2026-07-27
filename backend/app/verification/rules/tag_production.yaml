@@ -143,6 +143,27 @@ tags:
   #     never 0 (absent≠0 — a 0 premium makes the DTI confidently too-low). ⚠️ VOCABULARY DRIFT: the CSV
   #     says produced_by=AI; it is DERIVED here (needs xlsx reconciliation).
   housing.insurance_monthly: {mode: derived, subject: loan, data: housing_insurance_monthly}
+  # LP-407-2 — the DT-2/DT-4 monthly-conversion producers, the housing.insurance_monthly shape. Both read the
+  # SAME extracted fields the DTI reads directly (services/dti.py), so each agrees with (or, on ambiguity,
+  # abstains stricter than) the DTI line. Fail-closed to unknown, never 0 (absent≠0). housing.taxes_monthly
+  # ALSO closes the DTI's last required-input orphan (it was _KNOWN_LIVE_ORPHANS — now produced).
+  #   ⚠️ VOCABULARY DRIFT (needs xlsx reconciliation): fact_tags.csv says produced_by=parsed/AI (taxes) and
+  #   =AI (hoa); both are DERIVED here (a monthly conversion, no AI call) — the housing.insurance_monthly case.
+  #   ⚠️ HOA PERIODICITY (LP-407-2 D3 / ADR): an unstated/unrecognized dues_frequency FAILS CLOSED to unknown
+  #   here, DIVERGING from the DTI's _extracted_hoa_monthly (which defaults to monthly) — a tag must not assume
+  #   a periodicity (a 12x silent error); it abstains, stricter-or-equal to the DTI.
+  housing.taxes_monthly: {mode: derived, subject: loan, data: housing_taxes_monthly}
+  housing.hoa_monthly: {mode: derived, subject: loan, data: housing_hoa_monthly}
+
+  # --- contract.* / property.* — PC-2's inputs (LP-407-2). PC-2 compares the CONTRACT's sales price (from the
+  #     purchase_agreement DOCUMENT) to the 1003/MISMO purchase price (loan). contract.sales_price is a document
+  #     fact; PC-2 enumerates the LOAN subject, which cannot read a per-document tag, so contract.loan_sales_price
+  #     PROMOTES it to loan level (mirrors contract.loan_closing_date, LP-389-A). property.purchase_price reads
+  #     the MISMO fact (mismo_section property.purchase_price), like program.type reads loan.program. All DESCRIBE
+  #     a number; whether the two match is PC-2's judgment (LP-407-3), not a tag's. ------------------------- #
+  contract.sales_price: {mode: parsed, subject: document, data: sales_price}
+  contract.loan_sales_price: {mode: derived, subject: loan, data: loan_sales_price}
+  property.purchase_price: {mode: parsed, subject: loan, data: property.purchase_price}
 
   # --- occupancy.* — OC-2's load-bearing tags (LP-371). Both were in the vocabulary WITH producers but
   #     never declared here → OC-2 (LIVE judgment) couldnt_checked on every file (the orphan class,

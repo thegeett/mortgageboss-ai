@@ -1008,6 +1008,190 @@ def _income_employer_coverage(
     )
 
 
+# --------------------------------------------------------------------------- #
+# LP-407-2 — the cheap Bucket 2.5 sub-wave: the loan-level tags PC-2 / DT-2 / DT-4 need, all mirroring
+# existing producers (no new mechanism). PC-2 gets a document→loan promotion of the contract sales price
+# (the contract.loan_closing_date shape); DT-2 / DT-4 get monthly-conversion producers (the
+# housing.insurance_monthly shape). THE TAGS DESCRIBE (a number); the rules JUDGE (LP-400). Each fail-
+# closes to "unknown" (absent≠0 — a fabricated 0 makes a downstream DTI/compare confidently wrong).
+# DT-5 is NOT here: "premium used vs binder" resolves to the binder's annual_premium on BOTH sides (the
+# DTI's insurance line and housing.insurance_monthly read the same field), so it is a vacuous self-compare
+# with no independent operand today — not wired (LP-407-2 D1).
+# --------------------------------------------------------------------------- #
+
+
+def _loan_sales_price(
+    snapshot: Snapshot, _subject_id: str, _subject_raw: object
+) -> tuple[JsonValue, str]:
+    """contract.loan_sales_price — the loan's single contract sales price, promoted to LOAN level from the
+    document-subject contract.sales_price (contract.sales_price itself stays a document fact). Mirrors
+    _loan_closing_date (LP-389-A): a loan-enumerated rule cannot read a per-document tag, so PC-2 reads THIS
+    loan-level promotion and compares it to the MISMO property.purchase_price. FAIL-CLOSED: no contract sales
+    price in the file → unknown; documents that DISAGREE on it → unknown (ambiguous), never a picked value.
+    DESCRIPTIVE — the number only; whether it matches the 1003 is PC-2's judgment."""
+    if snapshot.tags.absent:
+        return _UNKNOWN, "no tags materialized to read a contract sales price from"
+    # Dedup by the parsed Decimal (Decimal("365000") == Decimal("365000.00")), so one price rendered two
+    # ways is ONE value; >1 distinct value → the documents disagree.
+    values: dict[Decimal, str] = {}
+    for tags in snapshot.tags.by_subject.values():
+        tag = tags.get("contract.sales_price")
+        parsed = _decimal_or_none(tag)
+        if parsed is not None:
+            values[parsed] = str(tag.value)  # type: ignore[union-attr]  # _decimal_or_none None-guards tag
+    if not values:
+        return _UNKNOWN, "no contract sales price is stated in the file"
+    if len(values) > 1:
+        return _UNKNOWN, (
+            f"the file's documents disagree on the contract sales price "
+            f"({', '.join(sorted(values.values()))}) — ambiguous"
+        )
+    price = next(iter(values))
+    return str(price), f"the loan's contract sales price {price} (from the purchase agreement)"
+
+
+def _housing_taxes_monthly(
+    snapshot: Snapshot, _subject_id: str, _subject_raw: object
+) -> tuple[JsonValue, str]:
+    """housing.taxes_monthly — the loan's monthly property taxes = the extracted ``annual_tax_amount`` on the
+    file's property-tax bill ÷ 12. A DERIVED loan recipe mirroring housing.insurance_monthly (LP-374): it
+    reads the property_tax_bill DOCUMENT's extracted ``annual_tax_amount`` — the SAME field the DTI reads
+    directly (services/dti.py ``_extracted_monthly``). Closes the DTI's last required-input orphan (LP-367 —
+    the vocabulary-orphan guard's ``_REQUIRED_DTI_TAGS``); it does NOT feed the DTI (which reads the
+    extraction), it closes the orphan and serves the tag's own (inert) consumers DT-1/DT-4.
+
+    AGREES-OR-ABSTAINS (never LOOSER than the DTI): the DTI takes the SINGLE NEWEST bill
+    (``created_at`` desc, limit 1); the snapshot exposes no ``created_at`` on a document entry, so we ABSTAIN
+    on ANY multi-bill ambiguity — stricter-than-or-equal-to the DTI in every case. (Property-tax bills are
+    commonly present for MORE than one property — the subject plus a retained one — and this recipe has no
+    subject-property match, so two bills → unknown; a subject-address match is a later refinement, not a new
+    mechanism to add here.) FAIL-CLOSED (absent≠0 — the fact-tag vocab note): unknown when no property-tax
+    bill; the (only) bill states no or a non-positive annual tax; or multiple bills state CONFLICTING amounts.
+    Reads ONLY ``property_tax_bill``."""
+    if snapshot.documents.absent:
+        return _UNKNOWN, "no documents in the file — no property-tax bill to read"
+    annuals: set[Decimal] = set()
+    bill_count = 0
+    unparseable = missing_amount = False
+    for entry in snapshot.documents.entries:
+        if entry.document_type != "property_tax_bill":
+            continue
+        bill_count += 1
+        field = entry.fields.get("annual_tax_amount")
+        if not isinstance(field, Field) or not field.is_present:
+            missing_amount = True
+            continue
+        try:
+            annuals.add(Decimal(str(field.value)))
+        except (InvalidOperation, ValueError):
+            unparseable = True
+    if bill_count == 0:
+        return _UNKNOWN, "no property-tax bill in the file — property taxes are unknown, not 0"
+    if unparseable:
+        return _UNKNOWN, "a property-tax bill states an unparseable annual tax amount"
+    if len(annuals) > 1:
+        return (
+            _UNKNOWN,
+            f"{bill_count} property-tax bills state conflicting annual tax amounts "
+            f"({', '.join(str(a) for a in sorted(annuals))}) — cannot tell which is the subject property's",
+        )
+    if not annuals:
+        return _UNKNOWN, "a property-tax bill is present but states no annual tax amount"
+    # Exactly one distinct amount, but a SECOND bill stated none → cannot tell which is current/subject →
+    # abstain (mirrors housing.insurance_monthly's missing-premium-with-a-second-doc case).
+    if missing_amount:
+        return (
+            _UNKNOWN,
+            f"{bill_count} property-tax bills are present but at least one states no annual tax amount — "
+            "cannot tell which is the subject property's",
+        )
+    annual = next(iter(annuals))
+    if annual <= 0:
+        return _UNKNOWN, f"the property-tax bill states a non-positive annual tax amount ({annual})"
+    monthly = annual / Decimal(12)
+    return str(monthly), f"monthly property taxes {monthly} (annual tax {annual} ÷ 12)"
+
+
+# HOA dues frequency → the number of MONTHS it covers (the divisor to a monthly figure). This mirrors the
+# DTI's _extracted_hoa_monthly map (dti.py) EXCEPT the default: the DTI defaults an unstated/unrecognized
+# frequency to monthly (divisor 1); this recipe has NO default — an unmapped frequency FAILS CLOSED to
+# unknown (LP-407-2 D3 / ADR). An assumed periodicity is a silent 12x miscalculation, so the tag abstains
+# rather than assume (stricter-or-equal to the DTI, the housing.insurance_monthly discipline).
+_HOA_FREQUENCY_MONTHS = {
+    "monthly": 1,
+    "quarterly": 3,
+    "semiannual": 6,
+    "semi-annual": 6,
+    "annual": 12,
+    "annually": 12,
+}
+
+
+def _housing_hoa_monthly(
+    snapshot: Snapshot, _subject_id: str, _subject_raw: object
+) -> tuple[JsonValue, str]:
+    """housing.hoa_monthly — the loan's monthly HOA dues = the extracted ``dues_amount`` on the file's HOA
+    statement, normalized to monthly by the stated ``dues_frequency``. A DERIVED loan recipe mirroring
+    housing.insurance_monthly's document→loan read + fail-closed shape, with the frequency conversion the
+    DTI's ``_extracted_hoa_monthly`` uses — EXCEPT the unstated/unrecognized-frequency case: the DTI DEFAULTS
+    it to monthly (divisor 1); this tag FAILS CLOSED to unknown (an ASSUMED periodicity is a silent 12x
+    miscalculation — LP-407-2 D3). Stricter-than-or-equal-to the DTI (abstains where the DTI assumes).
+
+    FAIL-CLOSED (absent≠0): unknown when no HOA statement (a NO-HOA property's not_applicable is DT-2's
+    applicability call — a NUMBER tag cannot carry a not_applicable enum, LP-407-2 D5); the statement states
+    no or a non-positive dues amount; the dues frequency is unstated or unrecognized; or multiple statements
+    state CONFLICTING monthly dues. Reads ONLY ``hoa_statement``."""
+    if snapshot.documents.absent:
+        return _UNKNOWN, "no documents in the file — no HOA statement to read"
+    monthlies: set[Decimal] = set()
+    stmt_count = 0
+    problem: str | None = None
+    for entry in snapshot.documents.entries:
+        if entry.document_type != "hoa_statement":
+            continue
+        stmt_count += 1
+        dues_field = entry.fields.get("dues_amount")
+        if not isinstance(dues_field, Field) or not dues_field.is_present:
+            problem = "an HOA statement states no dues amount"
+            continue
+        try:
+            dues = Decimal(str(dues_field.value))
+        except (InvalidOperation, ValueError):
+            problem = "an HOA statement states an unparseable dues amount"
+            continue
+        if dues <= 0:
+            problem = f"an HOA statement states a non-positive dues amount ({dues})"
+            continue
+        freq_field = entry.fields.get("dues_frequency")
+        freq = (
+            str(freq_field.value).strip().lower()
+            if isinstance(freq_field, Field) and freq_field.is_present
+            else ""
+        )
+        months = _HOA_FREQUENCY_MONTHS.get(freq)
+        if months is None:
+            problem = (
+                f"an HOA statement's dues frequency is unstated or unrecognized ({freq or 'absent'!r}) — "
+                "cannot convert to monthly without assuming a periodicity"
+            )
+            continue
+        monthlies.add(dues / Decimal(months))
+    if stmt_count == 0:
+        return _UNKNOWN, "no HOA statement in the file — HOA dues are unknown, not 0"
+    if problem is not None:
+        return _UNKNOWN, problem
+    if len(monthlies) > 1:
+        return (
+            _UNKNOWN,
+            f"{stmt_count} HOA statements state conflicting monthly dues "
+            f"({', '.join(str(m) for m in sorted(monthlies))}) — cannot tell which applies",
+        )
+    monthly = next(iter(monthlies))
+    return str(
+        monthly
+    ), f"monthly HOA dues {monthly} (from the HOA statement's stated dues and frequency)"
+
+
 _RECIPES: dict[str, Recipe] = {
     "app_required_fields_present": _app_required_fields_present,
     # LP-323-IN-B — the income family's loan-level arithmetic (per-borrower granularity is deferred:
@@ -1038,6 +1222,12 @@ _RECIPES: dict[str, Recipe] = {
     "contract_days_until_closing": _contract_days_until_closing,
     "stmt_continuity": _stmt_continuity,
     "income_employer_coverage": _income_employer_coverage,
+    # LP-407-2 — the cheap Bucket 2.5 sub-wave: the loan-level promotion PC-2 needs + the DT-2/DT-4
+    # monthly-conversion producers (all mirror existing recipes; tags describe, rules judge). DT-5 is NOT
+    # here — it is a vacuous self-compare with no independent operand today (LP-407-2 D1).
+    "loan_sales_price": _loan_sales_price,
+    "housing_taxes_monthly": _housing_taxes_monthly,
+    "housing_hoa_monthly": _housing_hoa_monthly,
 }
 
 KNOWN_RECIPES = frozenset(_RECIPES)

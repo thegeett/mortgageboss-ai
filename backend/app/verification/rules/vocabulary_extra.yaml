@@ -91,6 +91,18 @@ tags:
       contract.closing_date (LP-389-A — contract.closing_date itself stays a document fact). Feeds
       ID-5. "unknown" when no closing date is in the file, or documents disagree on it.
     produced_by: derived
+  # LP-407-2 — the loan-level promotion of the contract SALES PRICE (contract.sales_price stays a document
+  # fact). PC-2 enumerates the loan subject and cannot read a per-document tag, so it reads THIS and compares
+  # it to the MISMO property.purchase_price. Mirrors contract.loan_closing_date exactly.
+  contract.loan_sales_price:
+    entity: loan
+    value_type: number
+    allowed_values: null
+    description: >-
+      The loan's single contract sales price, promoted to loan level from the purchase-agreement document's
+      contract.sales_price (LP-407-2 — contract.sales_price itself stays a document fact). Feeds PC-2.
+      "unknown" when no contract sales price is in the file, or documents disagree on it.
+    produced_by: derived
 
   # --- LP-323-IN-B — the income family's DERIVED arithmetic tags (loan-level aggregates; the derived
   #     producer is loan-only, so per-borrower granularity is deferred — see the LP-323-IN-B doc).
