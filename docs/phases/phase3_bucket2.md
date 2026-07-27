@@ -88,3 +88,81 @@ LP-409 roadmap fix	1	—	—
 ~34 points, ~10 tickets, ~16 rules — taking you from 24 → ~40 live (~34% of in-scope) with no new extractor.
 
 Start with LP-409 (1 pt — stops you building against a stale plan), then LP-406-1/2 in parallel with LP-407-1's audit.
+
+
+
+
+
+
+=======
+
+EPIC LP-407 — Bucket 2.5: wire the rules whose extractors already exist
+
+Audit outcome (LP-407-1): the true wire-and-write count is ~2, not ~10. Four rules need small derived producers; four need an extractor extension; two are confirmed Bucket 4.
+Revised DoD: each of the 8 reachable rules live, or held with a named blocker. PC-1/DT-1 excluded (Bucket 4).
+
+✅ LP-407-1 — The four-gate audit · 3 pts · DONE
+Audited all 12 candidates against inputs / expressibility / AI-calibration / threshold
+Found: ~2 wire-and-write, 4 needs-derived-producer, 4 needs-extractor-extension, 2 Bucket 4
+Confirmed the catch-all fields are real; confirmed DT-1 credit-gated; found PC-1 partly reachable
+LP-407-2 — Wire tags + build the monthly-conversion producer · 5 pts · NEXT
+
+Unblocks: PC-2, DT-5, DT-2, DT-4
+
+Resolve DT-5's "redundancy caveat" from the audit first — if it duplicates a live rule, that's a boundary to draw, not a free rule
+Wire PC-2's tags (contract sale price vs the loan file) from the live purchase_agreement extractor
+Wire DT-5's tags from the housing-expense extractors
+Build the monthly-conversion producer for DT-2/DT-4 (housing-expense components) — mirrors housing.insurance_monthly
+Tags describe, rules judge — no threshold inside a producer (the LP-410 discipline)
+Prove each tag materializes at the subject its rule will read (the ID-5 check, before any spec exists)
+Report each tag's real value on a fixture
+No rules written; additive only
+LP-407-3 — Write PC-2, DT-5, DT-2, DT-4 · 5 pts · depends on 407-2
+Four trivial deterministic specs branching on the wired/derived tags
+Apply the Bucket 2 patterns: applicability predicate for any not_applicable case; per-branch needs_review if an input carries a known FP residue (ADR-325)
+Plain-language reasons; interpolate numbers where there's a real operand (the PC-7 pattern)
+Report each rule's real verdict on a fixture; activate what clears the gate
+Expected: 27 → ~31
+LP-407-4 — PC-3: address-normalize tag + rule · 3 pts
+
+Unblocks: PC-3 (does the contract's property address match the file?)
+
+Build the address-normalize derived tag — mirrors id.address_normalized
+Watch the known address trap: MISMO stores the first ADDRESS regardless of type, so current_address_line can hold a mailing address. Consult current_address_type; never compare against a mailing address
+Write PC-3's spec; activate if it clears
+LP-407-5 — Settle the AS-2 / PC-5 boundary, then write PC-5 · 5 pts
+
+Unblocks: PC-5 (does the contract's earnest money match the bank-statement deposit?)
+
+First: the boundary. Live AS-2 currently approximates this cross-document EMD match, and its own spec says the real check is "not cleanly expressible today"
+Decide: does PC-5 replace AS-2's approximation, complement it, or does AS-2 narrow its scope? Two rules firing on one finding is processor noise
+Then build the EMD-match derived producer and write PC-5
+⚠️ Touches a live rule — any AS-2 change needs its own equivalence proof
+LP-407-6 — Extend the purchase_agreement extractor · 5 pts · ⚠️ Bucket 4 discipline
+
+Unblocks: PC-4, PC-6, PC-8, PC-9
+
+The audit confirmed seller credit, addenda, personal property, and contingency dates are catch-all only (additional_sections) — not typed-core
+Add typed extraction for the four fields
+This is an extractor change: there is no independent source-of-truth to catch a misread. Requires a golden-file eval (LP-143 pattern) — non-negotiable
+Report extraction accuracy per field before anything consumes it
+LP-407-7 — Write PC-4, PC-6, PC-8, PC-9 · 5 pts · depends on 407-6
+Four Contract rules (seller credit, addenda, personal property, contingency dates)
+Re-run gates 2–4 per rule before writing (relation class, any AI tag, any Priya threshold)
+Activate what clears
+Expected: ~31 → ~35 if all four clear
+Board
+ticket	pts	rules	depends on	risk
+✅ LP-407-1 audit	3	—	—	done
+LP-407-2 wire + producer	5	(unblocks 4)	407-1	low
+LP-407-3 write the 4 rules	5	+4	407-2	low
+LP-407-4 PC-3	3	+1	—	low-med
+LP-407-5 PC-5 + AS-2 boundary	5	+1	—	med — touches a live rule
+LP-407-6 extractor extension	5	—	—	high — golden-file needed
+LP-407-7 PC-4/6/8/9	5	+4	407-6	med
+
+~31 points, 6 tickets, up to 10 rules → 27 → ~37 live.
+
+Start: LP-407-2. Lowest risk, unblocks four rules, no extractor change, and it follows the LP-410 → rule-ticket shape that worked cleanly in Bucket 2.
+
+Not started yet and deliberately later: LP-407-6, because a mis-read extractor field silently corrupts every rule downstream of it — the exact reason Bucket 4 needs golden-file evals.
