@@ -8,9 +8,12 @@
 # ⚠️ UNLIKE AS-8 / IN-6, this rule compares a NUMBER to a THRESHOLD (it uses the operand path, not an enum
 # branch), and its window is TWO-SIDED with ASYMMETRIC meaning (LP-406-1b D2, ADR-326):
 #   * PAST side  — the closing date is BEHIND the file date. A purchase cannot close in the past, so this is a
-#                  finding at (almost) any magnitude. Default past_grace_days = 0 (any strictly-past date fires).
+#                  finding at (almost) any magnitude. Fires when days_until_closing < min_days_until_closing
+#                  (default 0 → any strictly-past date fires). ⚠️ SIGNED BOUND, NOT a "grace count": to
+#                  TOLERATE a closing up to N days past, LOWER the bound to -N (e.g. -2), never set a positive
+#                  value (a positive bound would fire on realistic NEAR-FUTURE closings, e.g. 0/1 days out).
 #   * FUTURE side — a closing date implausibly far ahead is premature for a file in pre-submission processing.
-#                  Default far_future_days = 90.
+#                  Fires when days_until_closing > max_days_until_closing (default 90).
 # BOTH windows are DEFENSIBLE DEFAULTS, PRIYA'S TO DECIDE — the rule ships with its bar HELD (pending her
 # sign-off, activation_bars.yaml). The window lives HERE, never in the tag (LP-410 left it out — tags describe,
 # rules judge). WHAT PRIYA MUST DECIDE (plain language): (1) is a closing date even 1-2 days in the past
@@ -63,12 +66,15 @@ reference_values:
   priya_validated: false
   threshold_needs_signoff: false
   values:
-    past_grace_days: "0"        # fire when days_until_closing < 0 (any strictly-past closing date). Priya: a grace?
-    far_future_days: "90"       # fire when days_until_closing > 90 (implausibly far ahead). Priya: 90 / 120 / …?
+    # SIGNED days-until-closing BOUNDS (not directional day-counts): the PAST outcome fires below min, the
+    # FAR-FUTURE outcome fires above max. For an N-day past grace set min to -N (e.g. -2); a POSITIVE min
+    # would wrongly fire on near-future closings (LP-406-1b review). Both are Priya's defaults to confirm.
+    min_days_until_closing: "0"   # fire the PAST outcome when days_until_closing < 0 (any strictly-past date)
+    max_days_until_closing: "90"  # fire the FAR-FUTURE outcome when days_until_closing > 90. Priya: 90 / 120 / …?
   guideline_text: >-
     Loan-processing documentation standard — the purchase contract's closing date must be current (not passed)
-    and realistic for a file in pre-submission processing. The past-grace (default 0 days) and far-future
-    (default 90 days) windows are DEFAULTS pending the domain expert's confirmation.
+    and realistic for a file in pre-submission processing. The min (default 0) and max (default 90)
+    days-until-closing bounds are DEFAULTS pending the domain expert's confirmation.
 
 subject_enumeration: loan          # contract.days_until_closing is produced at the loan subject (LP-410 / D1)
 subject_key_fields: [loan]
@@ -92,12 +98,12 @@ deterministic:
     - contract.days_until_closing
   operands:
     days: {tag: contract.days_until_closing}       # signed days (decimal); negatives coerce cleanly (D3)
-    past_grace: {reference: past_grace_days}
-    far_future: {reference: far_future_days}
+    min_days: {reference: min_days_until_closing}  # signed lower bound (fire the PAST outcome below it)
+    max_days: {reference: max_days_until_closing}  # signed upper bound (fire the FAR-FUTURE outcome above it)
   outcomes:
     - verdict: fired
-      # PAST: the closing date is behind the file date (days < past_grace, default 0 → any strictly-past date).
-      when_compare: {op: "<", left: days, right: past_grace}
+      # PAST: the closing date is behind the file date (days < min_days, default 0 → any strictly-past date).
+      when_compare: {op: "<", left: days, right: min_days}
       reasoning: >-
         the loan's closing date has already passed — it is {days} day(s) from the file date; a purchase
         cannot close in the past, so confirm the current closing date with the borrower or settlement agent
@@ -105,8 +111,8 @@ deterministic:
         Obtain the updated purchase contract (or an addendum) with the current closing date, or confirm the
         loan is closing on the stated date.
     - verdict: fired
-      # FAR FUTURE: the closing date is implausibly far ahead (days > far_future, default 90).
-      when_compare: {op: ">", left: days, right: far_future}
+      # FAR FUTURE: the closing date is implausibly far ahead (days > max_days, default 90).
+      when_compare: {op: ">", left: days, right: max_days}
       reasoning: >-
         the loan's closing date is {days} day(s) out — unusually far ahead for a file in processing; confirm
         the closing date on the contract is current and not a stale or placeholder date
