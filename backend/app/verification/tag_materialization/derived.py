@@ -1114,11 +1114,12 @@ def _housing_taxes_monthly(
     return str(monthly), f"monthly property taxes {monthly} (annual tax {annual} ÷ 12)"
 
 
-# HOA dues frequency → the number of MONTHS it covers (the divisor to a monthly figure). This mirrors the
-# DTI's _extracted_hoa_monthly map (dti.py) EXCEPT the default: the DTI defaults an unstated/unrecognized
-# frequency to monthly (divisor 1); this recipe has NO default — an unmapped frequency FAILS CLOSED to
-# unknown (LP-407-2 D3 / ADR). An assumed periodicity is a silent 12x miscalculation, so the tag abstains
-# rather than assume (stricter-or-equal to the DTI, the housing.insurance_monthly discipline).
+# HOA dues frequency → the number of MONTHS it covers (the divisor to a monthly figure). Kept byte-identical
+# to the DTI's _extracted_hoa_monthly map (dti.py). This recipe has NO default — an unmapped frequency FAILS
+# CLOSED to unknown (LP-407-2 D3 / ADR-328). An assumed periodicity is a silent 12x miscalculation, so the tag
+# abstains rather than assume. NOTE: the DTI ORIGINALLY defaulted an unmapped frequency to monthly (the LP-407-2
+# finding); LP-413 fixed that — the DTI now fails closed (gates) on the same input, so the two AGREE (a
+# drift-guard test keeps the maps equal). The tag is still stricter-or-equal to the DTI by construction.
 _HOA_FREQUENCY_MONTHS = {
     "monthly": 1,
     "quarterly": 3,
@@ -1134,10 +1135,11 @@ def _housing_hoa_monthly(
 ) -> tuple[JsonValue, str]:
     """housing.hoa_monthly — the loan's monthly HOA dues = the extracted ``dues_amount`` on the file's HOA
     statement, normalized to monthly by the stated ``dues_frequency``. A DERIVED loan recipe mirroring
-    housing.insurance_monthly's document→loan read + fail-closed shape, with the frequency conversion the
-    DTI's ``_extracted_hoa_monthly`` uses — EXCEPT the unstated/unrecognized-frequency case: the DTI DEFAULTS
-    it to monthly (divisor 1); this tag FAILS CLOSED to unknown (an ASSUMED periodicity is a silent 12x
-    miscalculation — LP-407-2 D3). Stricter-than-or-equal-to the DTI (abstains where the DTI assumes).
+    housing.insurance_monthly's document→loan read + fail-closed shape, with the same frequency conversion
+    the DTI's ``_extracted_hoa_monthly`` uses. On an unstated/unrecognized frequency this tag FAILS CLOSED to
+    unknown (an ASSUMED periodicity is a silent 12x miscalculation — LP-407-2 D3). The DTI ORIGINALLY defaulted
+    that case to monthly (the LP-407-2 finding); LP-413 fixed it so the DTI now gates too — the two AGREE, the
+    tag being stricter-or-equal to the DTI by construction (ADR-328/329).
 
     FAIL-CLOSED (absent≠0): unknown when no HOA statement (a NO-HOA property's not_applicable is DT-2's
     applicability call — a NUMBER tag cannot carry a not_applicable enum, LP-407-2 D5); the statement states

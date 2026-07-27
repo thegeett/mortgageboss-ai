@@ -149,9 +149,9 @@ tags:
   # ALSO closes the DTI's last required-input orphan (it was _KNOWN_LIVE_ORPHANS — now produced).
   #   ⚠️ VOCABULARY DRIFT (needs xlsx reconciliation): fact_tags.csv says produced_by=parsed/AI (taxes) and
   #   =AI (hoa); both are DERIVED here (a monthly conversion, no AI call) — the housing.insurance_monthly case.
-  #   ⚠️ HOA PERIODICITY (LP-407-2 D3 / ADR): an unstated/unrecognized dues_frequency FAILS CLOSED to unknown
-  #   here, DIVERGING from the DTI's _extracted_hoa_monthly (which defaults to monthly) — a tag must not assume
-  #   a periodicity (a 12x silent error); it abstains, stricter-or-equal to the DTI.
+  #   ⚠️ HOA PERIODICITY (LP-407-2 D3 / ADR-328): an unstated/unrecognized dues_frequency FAILS CLOSED to
+  #   unknown here — a tag must not assume a periodicity (a 12x silent error). The DTI originally defaulted that
+  #   case to monthly (the LP-407-2 finding); LP-413/ADR-329 fixed it so the DTI now gates too — the two agree.
   housing.taxes_monthly: {mode: derived, subject: loan, data: housing_taxes_monthly}
   housing.hoa_monthly: {mode: derived, subject: loan, data: housing_hoa_monthly}
 

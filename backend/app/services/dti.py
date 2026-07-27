@@ -89,15 +89,24 @@ _BACK_END_RULE_IDS = {
 
 
 class _AutoLine:
-    """An auto-populated input line (key, label, auto amount, source) pre-override."""
+    """An auto-populated input line (key, label, auto amount, source) pre-override.
 
-    __slots__ = ("auto", "key", "label", "source")
+    ``unknown`` (LP-413): the input's figure could not be derived AND the line must FAIL-CLOSED (gate the
+    calc), NOT default to 0. It carries the gate for a line that is NOT a static ``_REQUIRED_HOUSING_KEYS``
+    member but is unknown on THIS file — an HOA statement present with a dues amount but an unstated /
+    unrecognized frequency (we must not assume monthly, the 12x risk, nor drop it to 0, an understatement).
+    Absent-HOA (no dues) stays ``unknown=False`` → a legitimate $0 line."""
 
-    def __init__(self, key: str, label: str, auto: Decimal | None, source: str) -> None:
+    __slots__ = ("auto", "key", "label", "source", "unknown")
+
+    def __init__(
+        self, key: str, label: str, auto: Decimal | None, source: str, *, unknown: bool = False
+    ) -> None:
         self.key = key
         self.label = label
         self.auto = auto
         self.source = source
+        self.unknown = unknown
 
 
 async def _auto_income_lines(db: AsyncSession, loan_file_id: UUID) -> list[_AutoLine]:
@@ -156,7 +165,10 @@ async def _auto_housing_lines(
     insurance = await _extracted_monthly(
         db, loan_file.id, "homeowners_insurance", "annual_premium", annual=True
     )
-    hoa = await _extracted_hoa_monthly(db, loan_file.id)
+    # LP-413: (monthly | None, present_but_unconvertible). The second flag GATES the HOA line when a dues
+    # amount is present but its frequency is unstated/unrecognized — never a silent monthly assumption
+    # (a 12x overstatement) and never a silent drop to 0 (an understatement, the worse failure mode).
+    hoa, hoa_unconvertible = await _extracted_hoa_monthly(db, loan_file.id)
     mi = await compute_loan_mi(db, loan_file=loan_file, confidence_cutoff=confidence_cutoff)
     return [
         _AutoLine(HOUSING_PRINCIPAL_INTEREST, "Principal & interest", pi, "computed"),
@@ -170,7 +182,7 @@ async def _auto_housing_lines(
             mi.result.monthly_premium,
             "computed",
         ),
-        _AutoLine(HOUSING_HOA, "HOA dues", hoa, "extracted"),
+        _AutoLine(HOUSING_HOA, "HOA dues", hoa, "extracted", unknown=hoa_unconvertible),
     ]
 
 
@@ -230,25 +242,57 @@ async def _extracted_monthly(
     return (value / Decimal(12)) if annual else value
 
 
-async def _extracted_hoa_monthly(db: AsyncSession, loan_file_id: UUID) -> Decimal | None:
-    """HOA dues normalized to monthly using the stated dues frequency."""
+# LP-413 — the HOA dues-frequency → months-covered map (the divisor to a monthly figure). Kept BYTE-
+# IDENTICAL to the housing.hoa_monthly TAG's map (tag_materialization/derived.py ``_HOA_FREQUENCY_MONTHS``,
+# ADR-328) so this calculation is never LOOSER than the tag: both recognize exactly this set and both fail
+# closed on everything else. A drift-guard test asserts the two stay equal (widen them TOGETHER, or the calc
+# would compute where the tag abstains). NO default entry — an unmapped frequency is NOT silently monthly.
+_HOA_FREQUENCY_MONTHS = {
+    "monthly": 1,
+    "quarterly": 3,
+    "semiannual": 6,
+    "semi-annual": 6,
+    "annual": 12,
+    "annually": 12,
+}
+
+
+async def _extracted_hoa_monthly(
+    db: AsyncSession, loan_file_id: UUID
+) -> tuple[Decimal | None, bool]:
+    """HOA dues normalized to monthly using the stated dues frequency → (monthly | None, unconvertible).
+
+    LP-413 — the fix for a LIVE 12x miscalculation. The old code did ``divisor.get(frequency, 1)``: an
+    unstated or unrecognized frequency silently became MONTHLY, so a "600" that is actually annual entered
+    the DTI as $600/mo — a 12x overstatement of housing expense in a number that drives qualification, with
+    no cross-check. It now maps ONLY the recognized frequencies and, for a dues amount present with an
+    unstated/unrecognized frequency, returns ``(None, True)`` — a signal the caller uses to GATE the calc
+    (the LP-375 fail-closed channel). In a CALCULATION "fail closed" cannot be an unknown number, so it is
+    the degraded/gated state, NOT a smaller number (ADR-329):
+
+      * NO dues amount            → (None, False): there is no HOA figure → a legitimate $0 HOA line (a
+                                    no-HOA property), never a gate.
+      * dues + recognized freq    → (dues ÷ months, False): the normal path, UNCHANGED for every recognized
+                                    frequency.
+      * dues + unstated/unknown   → (None, True): DO NOT assume monthly (the 12x overstatement) and DO NOT
+        freq                        drop to 0 (an understatement — the worse failure mode, which makes a
+                                    borrower look MORE qualified); GATE instead (honest / degraded).
+
+    A processor who knows the true amount can still override the HOA line (an override is trusted, clears
+    the gate). Never LOOSER than the housing.hoa_monthly tag (same map, both fail closed — ADR-328/329)."""
     data = await _current_extracted_data(db, loan_file_id, "hoa_statement")
     dues = _typed_value(data, "dues_amount")
     if dues is None:
-        return None
+        return None, False  # no HOA figure — a legitimate $0 line, not a gate
     frequency = ""
     node = (data or {}).get("dues_frequency")
     if isinstance(node, dict) and isinstance(node.get("value"), str):
         frequency = node["value"].strip().lower()
-    divisor = {
-        "monthly": 1,
-        "quarterly": 3,
-        "semiannual": 6,
-        "semi-annual": 6,
-        "annual": 12,
-        "annually": 12,
-    }
-    return dues / Decimal(divisor.get(frequency, 1))
+    months = _HOA_FREQUENCY_MONTHS.get(frequency)
+    if months is None:
+        # Present dues, unconvertible frequency: fail closed (gate), never assume monthly, never drop to 0.
+        return None, True
+    return dues / Decimal(months), False
 
 
 # --------------------------------------------------------------------------- #
@@ -283,8 +327,12 @@ def _to_items(
                 overridden=override is not None,
                 # LP-375: a REQUIRED input that could not be derived and was not overridden → its ``amount``
                 # of 0 is a fail-closed placeholder, NOT an extracted $0.00. The display renders "unknown".
+                # LP-413 extends this to a line the auto-populator explicitly marked ``unknown`` on THIS file
+                # (a present-but-unconvertible HOA) — a data-driven gate, not static key membership. An
+                # override on the line clears the gate (a processor-supplied figure is trusted).
                 unknown=(
-                    auto.auto is None and override is None and auto.key in _REQUIRED_HOUSING_KEYS
+                    override is None
+                    and (auto.unknown or (auto.auto is None and auto.key in _REQUIRED_HOUSING_KEYS))
                 ),
             )
         )

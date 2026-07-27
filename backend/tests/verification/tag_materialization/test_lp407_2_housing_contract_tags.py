@@ -7,7 +7,8 @@ read the same field), a vacuous self-compare with no independent operand today (
 
   * each producer's conversion + fail-closed unknown (absent≠0 — never a fabricated 0),
   * the HOA periodicity conversion across frequencies AND fail-closed on an unstated/unrecognized one (D3 —
-    the tag must NOT assume a periodicity the way the DTI's _extracted_hoa_monthly defaults to monthly),
+    the tag must NOT assume a periodicity; the DTI's _extracted_hoa_monthly originally defaulted to monthly,
+    fixed to gate by LP-413),
   * the SUBJECT of each tag == the LOAN subject its rule (PC-2/DT-2/DT-4) enumerates (anti-structural-death,
     the ID-5 class — D4), with contract.sales_price the document fact its loan promotion reads,
   * additivity — DT-5's ins.premium_annual is NOT declared; ACTIVE_RULE_IDS is unchanged.
@@ -158,8 +159,9 @@ def test_hoa_monthly_converts_each_recognized_frequency() -> None:
 
 
 def test_hoa_monthly_fails_closed_on_unstated_or_unrecognized_frequency() -> None:
-    # The D3 discipline — the tag must NOT assume monthly (the DTI's _extracted_hoa_monthly default) on an
-    # unstated / unrecognized frequency; that is a silent 12x miscalculation. It abstains instead.
+    # The D3 discipline — the tag must NOT assume monthly on an unstated / unrecognized frequency; that is a
+    # silent 12x miscalculation. It abstains instead. (The DTI's _extracted_hoa_monthly once defaulted to
+    # monthly here — fixed to gate by LP-413.)
     unrecognized = _housing_hoa_monthly(
         _snapshot([_doc("h", "hoa_statement", dues_amount="600.00", dues_frequency="biweekly")]),
         _LOAN,

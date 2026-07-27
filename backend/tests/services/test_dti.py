@@ -104,6 +104,43 @@ async def _seed_housing(
     await db.flush()
 
 
+async def _seed_hoa(
+    db: AsyncSession,
+    loan_file,
+    *,
+    dues_amount: str = "600",
+    frequency: str | None = "monthly",
+) -> None:
+    """Seed an ``hoa_statement`` extraction (LP-413). ``frequency=None`` OMITS the field entirely (an
+    UNSTATED frequency); a non-None value sets it verbatim (recognized or not). The DTI reads the
+    extraction, not the bytes."""
+    extracted: dict[str, dict[str, str]] = {"dues_amount": {"value": dues_amount}}
+    if frequency is not None:
+        extracted["dues_frequency"] = {"value": frequency}
+    doc = Document(
+        loan_file_id=loan_file.id,
+        original_filename="hoa_statement.pdf",
+        mime_type="application/pdf",
+        file_size_bytes=1,
+        storage_path="seed/hoa_statement",
+        document_type="hoa_statement",
+        status=DocumentStatus.COMPLETED,
+        upload_source=UploadSource.USER_UPLOAD,
+    )
+    db.add(doc)
+    await db.flush()
+    db.add(
+        Extraction(
+            document_id=doc.id,
+            version=1,
+            is_current=True,
+            extracted_data=extracted,
+            extraction_status=ExtractionStatus.SUCCEEDED,
+        )
+    )
+    await db.flush()
+
+
 async def _file_with_financials(
     db: AsyncSession,
     company: Company,
@@ -407,3 +444,117 @@ def test_display_and_snapshot_required_gates_stay_in_sync() -> None:
     from app.verification.snapshot.calculations_section import _DTI_FROM_TAG, _REQUIRED_DTI_TAGS
 
     assert {_DTI_FROM_TAG[key] for key in _REQUIRED_HOUSING_KEYS} == _REQUIRED_DTI_TAGS
+
+
+# --------------------------------------------------------------------------- #
+# LP-413 — the DTI must not assume monthly on an unrecognized/unstated HOA frequency (a live 12x risk)
+# --------------------------------------------------------------------------- #
+async def test_hoa_recognized_frequencies_convert_unchanged(db_session: AsyncSession) -> None:
+    # Every RECOGNIZED frequency converts as before — the fix moves ONLY the unrecognized/unstated path.
+    company = await _company(db_session, "acme")
+    for freq, monthly in (
+        ("monthly", "600"),
+        ("quarterly", "200"),
+        ("semiannual", "100"),
+        ("annual", "50"),
+    ):
+        loan_file = await _file_with_financials(db_session, company)
+        await _seed_hoa(db_session, loan_file, dues_amount="600", frequency=freq)
+        calc = await build_dti_calculation(db_session, loan_file=loan_file)
+        hoa = next(i for i in calc.housing_items if i.key == "housing.hoa")
+        assert hoa.auto_amount == Decimal(monthly), freq
+        assert hoa.unknown is False
+        assert calc.gated is False  # a recognized HOA does not gate
+
+
+async def test_hoa_unrecognized_frequency_gates_not_monthly(db_session: AsyncSession) -> None:
+    # THE FIX. A dues amount present with an unrecognized frequency must NOT become monthly (600 — a 12x
+    # overstatement if it is really annual) and must NOT drop to 0 (an understatement). It GATES.
+    company = await _company(db_session, "acme")
+    loan_file = await _file_with_financials(db_session, company)
+    await _seed_hoa(
+        db_session, loan_file, dues_amount="600", frequency="per annum"
+    )  # unrecognized string
+    calc = await build_dti_calculation(db_session, loan_file=loan_file)
+
+    hoa = next(i for i in calc.housing_items if i.key == "housing.hoa")
+    assert hoa.unknown is True
+    assert hoa.auto_amount is None  # not 600 (the old monthly assumption), not a fabricated figure
+    assert calc.gated is True
+    assert calc.gate_reason is not None and "HOA dues is unknown" in calc.gate_reason
+    # The DISPLAY view nulls the ratios — never a confident number resting on an assumed periodicity.
+    display = gate_display_ratios(calc)
+    assert display.front_end_dti is None and display.back_end_dti is None
+
+
+async def test_hoa_unstated_frequency_gates(db_session: AsyncSession) -> None:
+    # An UNSTATED frequency (the field absent) is treated the same as unrecognized — gate, never assume.
+    company = await _company(db_session, "acme")
+    loan_file = await _file_with_financials(db_session, company)
+    await _seed_hoa(db_session, loan_file, dues_amount="600", frequency=None)
+    calc = await build_dti_calculation(db_session, loan_file=loan_file)
+
+    hoa = next(i for i in calc.housing_items if i.key == "housing.hoa")
+    assert hoa.unknown is True and hoa.auto_amount is None
+    assert calc.gated is True
+
+
+async def test_hoa_unconvertible_never_silently_smaller_housing_expense(
+    db_session: AsyncSession,
+) -> None:
+    # The DANGEROUS direction guard. The old code turned an unrecognized frequency into monthly, so an
+    # unconvertible file's housing_payment matched a KNOWN-monthly file (a 12x risk if the dues were
+    # annual). The fix must NOT instead silently DROP the HOA to 0 (a smaller housing expense that makes a
+    # borrower look more qualified) — it gates. So the unconvertible calc yields NO confident ratio at all.
+    company = await _company(db_session, "acme")
+    monthly_file = await _file_with_financials(db_session, company)
+    await _seed_hoa(db_session, monthly_file, dues_amount="600", frequency="monthly")
+    monthly_calc = await build_dti_calculation(db_session, loan_file=monthly_file)
+    assert monthly_calc.gated is False and monthly_calc.back_end_dti is not None
+
+    unconv_file = await _file_with_financials(db_session, company)
+    await _seed_hoa(db_session, unconv_file, dues_amount="600", frequency="whenever")
+    unconv_calc = await build_dti_calculation(db_session, loan_file=unconv_file)
+    # Not a confident, smaller number (the understatement direction) and not the monthly assumption — gated.
+    assert unconv_calc.gated is True
+    assert gate_display_ratios(unconv_calc).back_end_dti is None
+
+
+async def test_hoa_override_clears_the_unconvertible_gate(db_session: AsyncSession) -> None:
+    # A processor who knows the true monthly figure can override the HOA line — an override is trusted and
+    # clears the gate (the LP-375 escape hatch, preserved).
+    company = await _company(db_session, "acme")
+    user = await _user(db_session, company)
+    loan_file = await _file_with_financials(db_session, company)
+    await _seed_hoa(
+        db_session, loan_file, dues_amount="600", frequency="fortnightly"
+    )  # unrecognized
+    assert (await build_dti_calculation(db_session, loan_file=loan_file)).gated is True
+
+    calc = await set_dti_override(
+        db_session,
+        loan_file=loan_file,
+        field_key="housing.hoa",
+        data=DtiOverrideInput(amount=Decimal("50"), note="stated annual 600 ÷ 12"),
+        actor_user_id=user.id,
+    )
+    hoa = next(i for i in calc.housing_items if i.key == "housing.hoa")
+    assert hoa.unknown is False and hoa.amount == Decimal("50")
+    assert calc.gated is False
+
+
+def test_dti_hoa_frequency_map_matches_the_tag_map() -> None:
+    # DRIFT GUARD (ADR-328/329): the DTI's HOA frequency map must stay byte-identical to the
+    # housing.hoa_monthly TAG's map, so the calculation is never LOOSER than the tag (both recognize the
+    # same set, both fail closed on the rest). Widen them TOGETHER or not at all.
+    from app.services.dti import _HOA_FREQUENCY_MONTHS as dti_map
+    from app.verification.tag_materialization.derived import _HOA_FREQUENCY_MONTHS as tag_map
+
+    assert dti_map == tag_map
+
+
+def test_hoa_fix_touches_no_rule_activation() -> None:
+    # This is a service change — the rule engine is untouched (no tag/producer/rule/prompt change).
+    from app.verification.rule_engine.registry import ACTIVE_RULE_IDS
+
+    assert len(ACTIVE_RULE_IDS) == 27

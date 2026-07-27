@@ -12183,4 +12183,47 @@ a fabricated or assumed figure makes a downstream DTI/compare confidently wrong.
 HOA-statement presence), NOT this amount tag. Left for LP-407-3; no presence tag was invented here.
 
 **Cross-refs.** LP-407-2 (D3/D5), LP-374 (`housing.insurance_monthly` agree-or-abstain), ADR-324 (tags describe,
-rules judge), `services/dti.py` `_extracted_hoa_monthly` (the assume-monthly default this diverges from).
+rules judge), `services/dti.py` `_extracted_hoa_monthly` (the assume-monthly default this diverges from —
+**now fixed by LP-413/ADR-329**, so the tag and the calculation agree).
+
+## ADR-329: "Fail closed" in a CALCULATION is the gated/degraded state, not a smaller number — the DTI gates on an unconvertible HOA rather than assume monthly or drop to 0 (LP-413)
+
+**Decision.** `services/dti.py` `_extracted_hoa_monthly` no longer defaults an unstated/unrecognized HOA
+`dues_frequency` to monthly (`divisor.get(frequency, 1)`). When a dues amount is present but its frequency is
+not in the recognized map, the HOA line is marked **unknown**, which routes into the existing LP-375 gate
+(`_AutoLine.unknown` → `DtiLineItem.unknown` → `gated_labels` → `DtiCalculation.gated` → `gate_display_ratios`
+nulls the headline ratios). A recognized frequency is UNCHANGED; a genuinely **absent** HOA (no dues) stays a
+legitimate `$0` line (not a gate). A processor override on the line is trusted and clears the gate.
+
+**Why — the calculation-vs-tag distinction.** ADR-328 established that the `housing.hoa_monthly` **tag** fails
+closed to `unknown` on an unconvertible frequency. A tag can answer `unknown`; a **calculation cannot emit an
+unknown number**, so "fail closed" here had to be *defined*. The old default was a **live 12× miscalculation**:
+a "600" that is actually annual entered the DTI as $600/mo — an overstatement of housing expense in a number
+that drives qualification, with no cross-check. The naive fix (return `None`) is **worse**: HOA is not a
+`_REQUIRED_HOUSING_KEYS` member, so `_to_items` would fall to `auto or 0` → a silently **smaller** housing
+expense → the borrower looks **more** qualified. **Understating is invisible and dangerous; overstating is
+visible and conservative; the honest answer is neither — it is the gated/degraded state** (the ratio is
+withheld, not fabricated smaller). The chosen behaviour is the third option: mark the DTI gated.
+
+**The direction that must not happen (recorded).** A missing/unrecognized frequency must NEVER silently produce
+a *smaller* housing expense. The fix is guarded by a test asserting exactly this (an unconvertible HOA yields no
+confident ratio, not a reduced one).
+
+**Never looser than the tag.** The DTI's frequency map is kept **byte-identical** to the tag's
+`_HOA_FREQUENCY_MONTHS` (a drift-guard test asserts equality), so the calculation recognizes exactly the set the
+tag does and fails closed on the rest — the LP-374 "agree-or-abstain, never looser" discipline, extended from a
+tag to a calculation. Widen the two together or not at all.
+
+**Scope / siblings (D4).** The HOA line is the ONLY DTI input that defaulted a periodicity. `_extracted_monthly`
+(taxes/insurance) uses `annual=True`, but that is the **field's contract** (`annual_tax_amount` / `annual_premium`
+are annual by name — ÷12 is definitional, not a guessed default); P&I is computed, MI comes from the MI
+calculator (already monthly), income/debt are monthly columns. No sibling assume-a-periodicity site. **Reported
+but out of scope:** `calculators.build_reserves_view` reads `dti.housing_payment` without honoring `.gated`
+(a pre-existing pattern that also applies to absent taxes/insurance), and `calculations_section.map_dti` gates
+the SNAPSHOT DTI only on `_REQUIRED_DTI_TAGS` (HOA not among them), so the snapshot DTI would not gate on an
+unconvertible HOA — but no LIVE rule reads `calculations.dti` (only AS-4 reads `calculations.reserves`), and
+this ticket is scoped to the DTI service. Both are recorded gaps, not fixed here.
+
+**Cross-refs.** ADR-328 (the tag's fail-closed rule), LP-407-2 (the finding), LP-374 (`housing.insurance_monthly`
+"agree-or-abstain"), LP-375 (the `unknown`→gated machinery this reuses), `services/dti.py` (`_extracted_hoa_monthly`,
+`_to_items`).
