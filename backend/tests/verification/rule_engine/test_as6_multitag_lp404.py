@@ -180,7 +180,7 @@ def test_the_real_lf6t3n_shape_stays_satisfied_no_false_flag() -> None:
 def test_as6_is_not_active_only_the_rule_changed() -> None:
     # LP-404 changes the RULE, not the activation bar (validated:false → inert). ACTIVE stays 24.
     assert "AS-6" not in ACTIVE_RULE_IDS
-    assert len(ACTIVE_RULE_IDS) == 25  # +AS-8 (LP-406-2b); AS-6 still not active (asserted above)
+    assert len(ACTIVE_RULE_IDS) == 27  # +AS-8 (LP-406-2b); AS-6 still not active (asserted above)
 
 
 def test_the_fired_branch_scopes_to_bank_statements_only() -> None:

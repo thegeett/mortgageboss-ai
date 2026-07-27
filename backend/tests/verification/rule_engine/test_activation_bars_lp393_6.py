@@ -76,7 +76,7 @@ def test_validating_activated_the_four() -> None:
     for rid in _FOUR:
         assert is_eligible(bars[rid]), rid
         assert rid in ACTIVE_RULE_IDS, rid
-    assert len(ACTIVE_RULE_IDS) == 25  # +AS-8 (LP-406-2b)
+    assert len(ACTIVE_RULE_IDS) == 27  # +AS-8 (LP-406-2b) +IN-6/PC-7 (LP-412)
 
 
 def test_in7_ships_ratify_despite_the_auto_signoff() -> None:

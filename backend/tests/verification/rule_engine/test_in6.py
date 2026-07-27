@@ -190,15 +190,16 @@ def test_coverage_tag_is_produced_at_the_subject_in6_reads() -> None:
     assert load_declarations()["income.employer_coverage"].subject == "borrower"
 
 
-def test_in6_is_written_but_held_pending_priya() -> None:
-    # Transitive AI dependency (employer_coverage reads AI employer_normalized) → calibratable-now, not no-ai.
-    # The bar proposes IN-5's 0.95 (same tag, measured 100%) but validated:false → NOT eligible → held.
+def test_in6_is_live_after_priya_signoff() -> None:
+    # LP-412: Priya signed off the 0.95 bar ("same as IN-5"). Transitive AI dependency
+    # (employer_coverage reads AI employer_normalized, measured 100%) → calibratable-now, validated, 1.0 >= 0.95
+    # → eligible → ACTIVE.
     bar = load_activation_bars()["IN-6"]
     assert bar.status == "calibratable-now"
     assert bar.load_bearing_ai_tags == ("income.employer_normalized",)
     assert bar.threshold == 0.95 and bar.measured_accuracy == 1.0
-    assert bar.validated is False and is_eligible(bar) is False
-    assert "IN-6" not in ACTIVE_RULE_IDS
+    assert bar.validated is True and is_eligible(bar) is True
+    assert "IN-6" in ACTIVE_RULE_IDS
 
 
 async def test_in6_couldnt_checks_on_lf6t3n_no_ai_run() -> None:

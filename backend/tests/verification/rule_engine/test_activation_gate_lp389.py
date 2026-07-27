@@ -50,6 +50,8 @@ _ACTIVATED = frozenset(
         "IN-11",
         "AS-11",
         "AS-8",  # LP-406-2b — the first Bucket 2 rule live (no-ai-dependency; stmt.continuity resolves)
+        "IN-6",  # LP-412 — Priya signed off the 0.95 bar (calibratable-now, same tag/evidence as IN-5)
+        "PC-7",  # LP-412 — Priya signed off the closing window (first rule live via no-ai-threshold-pending)
     }
 )
 
@@ -67,10 +69,9 @@ def test_exactly_the_eligible_candidates_pass() -> None:
     held = set(bars) - eligible
     # IN-1/IN-5/AS-2/AS-12/IN-3 (AI, validated, measured >= bar); ID-5 + AS-9/IN-4/AS-10 (no-AI, input resolves).
     assert eligible == set(_ACTIVATED)
-    # 13 held: the 10 pre-LP-406 candidates + OC-1 (LP-406-4, AI tag unscored) + IN-6 (LP-406-3b, bar proposed,
-    # pending Priya) + PC-7 (LP-406-1b, no-ai but its window is an unvalidated Priya default, held). AS-8
-    # (LP-406-2b) is NOT held — it went live.
-    assert len(held) == 13 and not (held & _ACTIVATED)  # every other candidate is held
+    # 11 held after LP-412: the 10 pre-LP-406 candidates + OC-1 (still held on calibration — its AI tag is
+    # unscored). AS-8/IN-6/PC-7 are all live now (LP-406-2b / LP-412).
+    assert len(held) == 11 and not (held & _ACTIVATED)  # every other candidate is held
 
 
 def test_eligible_rule_ids_is_sorted_and_matches() -> None:
@@ -88,7 +89,9 @@ def test_eligible_rule_ids_is_sorted_and_matches() -> None:
         "IN-3",
         "IN-4",
         "IN-5",
+        "IN-6",  # LP-412
         "IN-7",
+        "PC-7",  # LP-412
     )  # sorted
 
 
@@ -113,10 +116,10 @@ def test_the_held_rules_each_fail_for_a_named_reason() -> None:
     assert not is_eligible(bars["IN-14"]) and bars["IN-14"].status == "needs-producer"
     # AS-3 — no-ai but its recipe is a STUB (no §3B cash-to-close calculator): the input never resolves → held
     assert not is_eligible(bars["AS-3"]) and not bars["AS-3"].input_resolves
-    # PC-7 (LP-411) — the third case: no-ai-threshold-pending, its input RESOLVES (input_resolves true) but its
-    # Priya window is unvalidated → held by validated:false, NOT by a false input_resolves. The honest hold.
-    assert not is_eligible(bars["PC-7"]) and bars["PC-7"].status == "no-ai-threshold-pending"
-    assert bars["PC-7"].input_resolves and not bars["PC-7"].validated
+    # OC-1 — the LP-406-4 rule STILL held: its AI tag occupancy.consistent_with_signals is unscored
+    # (not-calibratable-yet). (PC-7 was the no-ai-threshold-pending held example through LP-411; LP-412 signed
+    # off its window, so it is now live — see test_pc7_is_live_via_no_ai_threshold_pending_after_signoff.)
+    assert not is_eligible(bars["OC-1"]) and bars["OC-1"].status == "not-calibratable-yet"
     # (IN-3 was the "calibratable but not-yet-signed" held example through LP-390-7; LP-390-9 signed off its bar,
     # so it is now eligible + active — see test_in3_is_live_after_priya_signoff. Every remaining held rule fails
     # for one of the reasons above.)
@@ -157,8 +160,8 @@ def test_active_set_is_exactly_base_plus_eligible() -> None:
     # the invariant that keeps a rule from being activated without passing the gate
     assert set(ACTIVE_RULE_IDS) - set(_BASE_ACTIVE) == set(eligible_rule_ids()) == set(_ACTIVATED)
     assert (
-        len(ACTIVE_RULE_IDS) == 25 and len(_BASE_ACTIVE) == 11
-    )  # +AS-8 (LP-406-2b, first Bucket 2 live)
+        len(ACTIVE_RULE_IDS) == 27 and len(_BASE_ACTIVE) == 11
+    )  # +AS-8 (LP-406-2b) +IN-6/PC-7 (LP-412) — all three Bucket 2 rules with signed-off bars are live
     assert set(_BASE_ACTIVE) < set(ACTIVE_RULE_IDS)  # the original 11 are intact, none dropped
     # no duplicates crept in when concatenating base + activated
     assert len(set(ACTIVE_RULE_IDS)) == len(ACTIVE_RULE_IDS)

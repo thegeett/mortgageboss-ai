@@ -436,15 +436,15 @@ AS-8:
 PC-7:
   # LP-406-1b — written on the derived contract.days_until_closing tag (LP-410, unblocking the LP-406-1 stop).
   # NO AI dependency (the tag is derived from a PARSED closing date) — BUT unlike AS-8 it carries a PRIYA
-  # THRESHOLD: a two-sided past/far-future window (defaults 0 / 90 days), her domain call. That is the THIRD
-  # eligibility case (LP-411): no-ai-threshold-pending — held until BOTH the input resolves AND she validates
-  # the window. input_resolves is TRUE (honest: days_until_closing == "1" on LF-6T3N → SATISFIED); the real
-  # hold is validated:false (her window sign-off). This REPLACES LP-406-1b's stand-in (a FALSE input_resolves:
-  # false on a resolving input — the AS-5 stray-value class, corrected here). See ADR-327.
+  # THRESHOLD: a two-sided past/far-future window (0 / 90 days), her domain call. That is the THIRD eligibility
+  # case (LP-411): no-ai-threshold-pending — eligible when BOTH the input resolves AND she validates the window.
+  # input_resolves is TRUE (honest: days_until_closing == "1" on LF-6T3N → SATISFIED); LP-412 flipped
+  # validated:true on her sign-off → ACTIVE. (LP-411 REPLACED LP-406-1b's stand-in — a FALSE input_resolves:false
+  # on a resolving input, the AS-5 stray-value class; ADR-327.)
   status: no-ai-threshold-pending
   ships: auto
   threshold: null
-  validated: false        # HELD: Priya has not signed off the two-sided window (the real reason). To activate: true.
+  validated: true         # LP-412: PRIYA SIGNED OFF the two-sided window (see her two rulings below). input_resolves ∧ validated -> ACTIVE.
   input_resolves: true    # HONEST: contract.days_until_closing resolves on LF-6T3N (== "1" → SATISFIED, LP-410)
   load_bearing_ai_tags: []
   fp_fn: >-
@@ -452,12 +452,13 @@ PC-7:
     or same-day-timing closing date — a human re-checks). The two window sides set the balance, Priya's call.
   rationale: >-
     no AI load-bearing tag; a deterministic date-window comparison on the derived contract.days_until_closing
-    (LP-410). WHAT PRIYA MUST DECIDE (plain): (1) is a closing date 1-2 days in the PAST acceptable (a timing
-    grace), or does ANY past date warrant a flag? default past_grace_days=0 (any strictly-past date fires);
-    (2) how many days AHEAD is "unrealistically far" for a file in processing — default far_future_days=90.
-    HELD by validated:false — the no-ai-threshold-pending gate (LP-411): input_resolves is TRUE, so the ONLY
-    thing holding PC-7 is her window sign-off (to activate: flip validated:true). This corrects LP-406-1b's
-    stand-in, which held PC-7 with a FALSE input_resolves:false on a resolving input (ADR-327).
+    (LP-410). LP-412: PRIYA SIGNED OFF the two-sided window — HER TWO RULINGS (recorded, not unreviewed
+    defaults): (Q1, past) "FLAG ANY PAST DATE" → min_days_until_closing=0 (fire on any strictly-past closing);
+    (Q2, far-future) "90 DAYS" → max_days_until_closing=90. Both match the proposed defaults, now confirmed by
+    her. is_eligible via the no-ai-threshold-pending gate (LP-411): input_resolves ∧ validated -> ACTIVE
+    (registry _LP412_ACTIVATED). PC-7 is the FIRST rule live via the no-ai-threshold-pending status (LP-411).
+    ⚠️ CAVEAT (the AS-2/AS-8 one-sided-trigger shape): LF-6T3N closes in 1 day (SATISFIED), so BOTH fired paths
+    (past + far-future) ship UNEXERCISED on real data. A fixture with a past closing date and one with a far-out
     ⚠️ CAVEAT (the AS-2/AS-8 one-sided-trigger shape): LF-6T3N closes in 1 day (SATISFIED), so BOTH fired paths
     (past + far-future) ship UNEXERCISED on real data. A fixture with a past closing date and one with a far-out
     date (a fixture ticket, LP-393-1 pattern) would exercise them; the branches are proven on constructed
@@ -515,7 +516,7 @@ IN-6:
   status: calibratable-now
   ships: auto
   threshold: 0.95
-  validated: false
+  validated: true          # LP-412: PRIYA SIGNED OFF — "approve at 0.95, same as IN-5". 1.0 >= 0.95 -> is_eligible -> ACTIVE.
   load_bearing_ai_tags:
     - income.employer_normalized
   measured_accuracy: 1.0   # LP-379-D: income.employer_normalized 100% (the same measurement live IN-5 rests on)
@@ -525,11 +526,13 @@ IN-6:
     needs_review. So the error cost is a human confirmation, not a false auto-verdict either way.
   rationale: >-
     an AI rule (transitive dependency on income.employer_normalized, the IN-3 shape), not no-ai. The coverage
-    matching reuses IN-5's MEASURED normalizers (100%, LP-379-D) — no new judgment — so the natural bar is
-    IN-5's own 0.95 (same tag, same evidence Priya approved for IN-5). PROPOSED validated:false, pending her
-    sign-off. ⚠️ The `uncovered` branch ships NEEDS_REVIEW, not fired (LP-406-3b D2 / ADR-325): the deterministic
-    normalizer cannot resolve every short-form employer name, so a reported gap is surfaced for human
-    confirmation rather than asserted — the honest routing until the AI fuzzy-residue is closed (a refinement).
+    matching reuses IN-5's MEASURED normalizers (100%, LP-379-D) — no new judgment — so the bar is IN-5's own
+    0.95 (same tag, same evidence). LP-412: PRIYA SIGNED OFF at 0.95 — HER RULING was "same as IN-5" (the same
+    tag income.employer_normalized and the same 100% measurement she already approved for IN-5's 0.95 bar); NOT
+    an unreviewed default. 1.0 >= 0.95 -> is_eligible -> ACTIVE (registry _LP412_ACTIVATED). ⚠️ The `uncovered`
+    branch ships NEEDS_REVIEW, not fired (LP-406-3b D2 / ADR-325): the deterministic normalizer cannot resolve
+    every short-form employer name, so a reported gap is surfaced for human confirmation rather than asserted —
+    the honest routing until the AI fuzzy-residue is closed (a refinement, a caveat IN-6 ships live with).
 
 IN-4:
   status: no-ai-dependency

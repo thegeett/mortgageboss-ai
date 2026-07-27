@@ -114,6 +114,14 @@ _LP393_ACTIVATED: tuple[str, ...] = ("IN-7", "IN-10", "IN-11", "AS-11")
 # unexercised on real data (LF-6T3N chains cleanly) — the AS-2 one-sided-trigger caveat (activation_bars.yaml).
 _LP406_ACTIVATED: tuple[str, ...] = ("AS-8",)
 
+# LP-412 — Priya signed off both remaining Bucket 2 bars, so they clear the gate and go live (25 → 27):
+#   IN-6 — employer coverage. She approved the 0.95 bar, "same as IN-5" (same tag income.employer_normalized,
+#          same 100% measurement). calibratable-now + validated + 1.0 >= 0.95 → eligible. Its `uncovered` branch
+#          ships needs_review (ADR-325); its transitive AI tag folds in via live IN-5 (income_employer required).
+#   PC-7 — closing-date realism. She signed off the two-sided window (any past date fires; 90-day far-future
+#          limit). The FIRST rule live via LP-411's no-ai-threshold-pending status: input_resolves ∧ validated.
+_LP412_ACTIVATED: tuple[str, ...] = ("IN-6", "PC-7")
+
 # The gate is the source of truth: test_activation_gate_lp389 asserts ACTIVE_RULE_IDS - _BASE_ACTIVE ==
 # eligible_rule_ids() — a rule CANNOT enter this set without meeting the eligibility gate (not a hand-list).
 ACTIVE_RULE_IDS: tuple[str, ...] = (
@@ -124,6 +132,7 @@ ACTIVE_RULE_IDS: tuple[str, ...] = (
     *_LP390_9_ACTIVATED,
     *_LP393_ACTIVATED,
     *_LP406_ACTIVATED,
+    *_LP412_ACTIVATED,
 )
 
 

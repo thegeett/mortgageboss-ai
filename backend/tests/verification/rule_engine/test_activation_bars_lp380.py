@@ -47,8 +47,8 @@ def test_bars_cover_exactly_the_inert_rules() -> None:
 
 def test_the_honest_activation_state_is_reported() -> None:
     # 11 of 27 are calibratable-now; the rest are blocked on calibration / a producer / a wiring decision.
-    # OC-1 (LP-406-4) not-calibratable-yet; AS-8 (LP-406-2b) no-ai + LIVE; IN-6 (LP-406-3b) calibratable-now
-    # (transitive AI, proposed 0.95, held); PC-7 (LP-406-1b) no-ai but HELD (its window is an unvalidated default).
+    # OC-1 (LP-406-4) not-calibratable-yet + HELD; AS-8/IN-6/PC-7 are all LIVE now (AS-8 no-ai, LP-406-2b;
+    # IN-6 calibratable-now validated + PC-7 no-ai-threshold-pending validated, both LP-412).
     bars = load_activation_bars()
     by = {
         s: sum(1 for b in bars.values() if b.status == s) for s in {b.status for b in bars.values()}
@@ -156,8 +156,8 @@ def test_loader_rejects_non_bool_validated() -> None:
 def test_exactly_the_signed_off_bars_are_validated() -> None:
     bars = load_activation_bars()
     validated = {rid for rid, b in bars.items() if b.validated}
-    # IN-1/IN-5 (LP-389) + AS-2/AS-12 (LP-390-7) + IN-3 (LP-390-9) + IN-7/IN-10/IN-11/AS-11 (LP-393-6) — every
-    # calibratable rule is signed off now.
+    # IN-1/IN-5 (LP-389) + AS-2/AS-12 (LP-390-7) + IN-3 (LP-390-9) + IN-7/IN-10/IN-11/AS-11 (LP-393-6) +
+    # IN-6 (calibratable) + PC-7 (no-ai-threshold-pending) — LP-412 signed off the last two.
     assert validated == {
         "IN-1",
         "IN-5",
@@ -168,11 +168,19 @@ def test_exactly_the_signed_off_bars_are_validated() -> None:
         "IN-10",
         "IN-11",
         "AS-11",
+        "IN-6",  # LP-412 — 0.95, "same as IN-5"
+        "PC-7",  # LP-412 — the two-sided window (any past date; 90-day far-future)
     }
     assert all(b.validated is False for rid, b in bars.items() if rid not in validated)
-    # a validated bar is always calibratable-now with a real threshold (never a blocked rule — loader invariant)
+    # A validated bar is one the loader PERMITS `validated: true` on — calibratable-now (an AI-accuracy bar,
+    # real threshold) OR no-ai-threshold-pending (LP-411 — a Priya window sign-off, null threshold, e.g. PC-7).
+    # Never a blocked rule (the loader rejects that — the AS-5 invariant).
     for rid in validated:
-        assert bars[rid].status == "calibratable-now" and bars[rid].threshold is not None
+        b = bars[rid]
+        if b.status == "calibratable-now":
+            assert b.threshold is not None
+        else:
+            assert b.status == "no-ai-threshold-pending" and b.threshold is None
 
 
 def test_thresholds_exist_only_where_calibratable() -> None:
@@ -241,6 +249,10 @@ def test_active_set_is_base_plus_lp389() -> None:
             # LP-406-2b — the first Bucket 2 rule live: AS-8 (statement chaining) on the derived stmt.continuity
             # tag; no-ai-dependency, input resolves ("chained" on LF-6T3N).
             "AS-8",
+            # LP-412 — Priya signed off the last two Bucket 2 bars: IN-6 (0.95, "same as IN-5") and PC-7 (the
+            # closing window). PC-7 is the first rule live via LP-411's no-ai-threshold-pending status.
+            "IN-6",
+            "PC-7",
         )
     )
     # A bar persists after activation as the record of WHY the rule went live, so the bars now intersect the
@@ -260,5 +272,7 @@ def test_active_set_is_base_plus_lp389() -> None:
         "IN-11",
         "AS-11",
         "AS-8",  # LP-406-2b — live via its bar (no-ai-dependency, input resolves)
+        "IN-6",  # LP-412 — live via its bar (calibratable-now, validated)
+        "PC-7",  # LP-412 — live via its bar (no-ai-threshold-pending, validated)
     }
     assert not (set(load_activation_bars()) & set(_BASE_ACTIVE))
