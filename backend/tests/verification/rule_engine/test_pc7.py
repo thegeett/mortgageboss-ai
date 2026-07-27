@@ -122,13 +122,17 @@ def test_days_until_closing_is_produced_at_the_subject_pc7_reads() -> None:
     assert load_declarations()["contract.days_until_closing"].subject == _LOAN
 
 
-def test_pc7_is_written_but_held_no_ai_window_pending_priya() -> None:
-    # no-ai (the tag is derived from a PARSED closing date) — but its two-sided window is an unvalidated
-    # Priya default, so it is HELD via input_resolves:false (the model-gap note in the bar). Not active.
+def test_pc7_is_written_but_held_honestly_no_ai_threshold_pending() -> None:
+    # LP-411: PC-7 is the THIRD eligibility case — no-ai-threshold-pending. The tag is derived from a PARSED
+    # closing date (no AI), but its two-sided window is a Priya threshold. HELD by validated:false (her window
+    # sign-off), NOT by a FALSE input_resolves — input_resolves is TRUE (it resolves: days == "1" on LF-6T3N).
     bar = load_activation_bars()["PC-7"]
-    assert bar.status == "no-ai-dependency"
+    assert bar.status == "no-ai-threshold-pending"
     assert bar.load_bearing_ai_tags == ()  # no AI tag
-    assert bar.input_resolves is False and is_eligible(bar) is False
+    assert (
+        bar.input_resolves is True
+    )  # HONEST — the input resolves (was a false `False` before LP-411)
+    assert bar.validated is False and is_eligible(bar) is False  # held by the unvalidated window
     assert "PC-7" not in ACTIVE_RULE_IDS
 
 

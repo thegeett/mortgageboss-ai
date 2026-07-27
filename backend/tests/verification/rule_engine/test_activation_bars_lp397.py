@@ -59,7 +59,7 @@ def test_as6_has_a_single_load_bearing_tag_no_second_tag_trap() -> None:
 def test_loader_reject_rule_still_fires_the_as5_guard() -> None:
     # the fail-closed invariant is UNBROKEN: a validated bar on a non-calibratable rule (null threshold) is
     # rejected, so a stray validated:true can never leak a blocked rule live (the AS-5 protection).
-    with pytest.raises(ActivationBarError, match="only a calibratable-now rule may be validated"):
+    with pytest.raises(ActivationBarError, match="cannot be signed off as live-able"):
         parse_bar(
             "AS-6",
             {

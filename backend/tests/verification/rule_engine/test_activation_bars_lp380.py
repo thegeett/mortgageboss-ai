@@ -59,6 +59,9 @@ def test_the_honest_activation_state_is_reported() -> None:
         by["calibratable-now"] == 11
     )  # +IN-6 (LP-406-3b, transitive AI dependency, proposed 0.95, held)
     assert by.get("not-calibratable-yet", 0) >= 1 and by.get("no-ai-dependency", 0) >= 1
+    assert (
+        by.get("no-ai-threshold-pending", 0) == 1
+    )  # PC-7 (LP-411 — the third case, held on Priya's window)
     # LP-390-7 signed off AS-2 + AS-12; LP-390-9 signed off IN-3; LP-393-6 signed off IN-7/IN-10/IN-11/AS-11 —
     # those NINE calibratable rules are validated; AS-6 (LP-397) is calibratable but NOT yet validated.
     assert all(
@@ -120,7 +123,7 @@ def test_loader_rejects_a_boolean_threshold() -> None:
 def test_loader_rejects_validating_a_non_calibratable_rule() -> None:
     # Priya can sign off a bar, but NOT on a rule blocked on calibration — that would sign off a tag nobody
     # measured. Only calibratable-now may be validated.
-    with pytest.raises(ActivationBarError, match="only a calibratable-now rule may be validated"):
+    with pytest.raises(ActivationBarError, match="cannot be signed off as live-able"):
         ab.parse_bar(
             "X-1",
             {

@@ -12105,7 +12105,9 @@ date"), unlike the enum rules (AS-8/IN-6) whose reasons are static. First applie
 shapes every future date-window rule (appraisal validity PR-6, credit-report validity CR-13, rate-lock CL-1):
 specify past and future as separate outcomes, not one ± window.
 
-**Finding (the model gap).** The activation-bar model has **no clean hold for a NO-AI rule that carries a Priya
+**Finding (the model gap).** *(The `input_resolves: false` stand-in below is SUPERSEDED by ADR-327 / LP-411,
+which added the `no-ai-threshold-pending` status so PC-7 is held honestly on `validated: false` with
+`input_resolves: true`. The two-sided-window decision in this ADR still stands.)* The activation-bar model has **no clean hold for a NO-AI rule that carries a Priya
 THRESHOLD.** Its statuses assume: `no-ai-dependency` → activation is a wiring decision gated only by
 `input_resolves` (no threshold sign-off); `calibratable-now` → an AI-accuracy sign-off. PC-7 is neither — no AI
 tag, but a domain **window** Priya must confirm. Its input *does* resolve (`days_until_closing == "1"` on
@@ -12118,3 +12120,44 @@ input doesn't resolve". **Reported as a gap, not fixed here:** a real hold would
 held natively rather than via the `input_resolves` stand-in. `ACTIVE_RULE_IDS` stays 25 (PC-7 held). **Cross-refs.**
 LP-406-1b (this ticket), LP-410 (the signed-day tag; window deliberately left out — tags describe, rules judge,
 LP-400), IN-2 (the number-vs-threshold mirror), ADR-324 (the derive-then-branch pattern).
+
+## ADR-327: The third eligibility case — `no-ai-threshold-pending` (no AI to calibrate, but a Priya threshold to sign off); the gate of record must not hold a value the system's own proof contradicts (LP-411)
+
+**Decision.** The activation model gains a **third eligibility status**, `no-ai-threshold-pending`:
+`is_eligible = input_resolves AND validated`. It sits between the two prior paths — `no-ai-dependency`
+(eligible on `input_resolves` alone; nothing to sign off) and `calibratable-now` (eligible on an AI
+`measured_accuracy >= threshold` + `validated`). It exists for a rule with **no AI tag to calibrate but a
+domain THRESHOLD (a window/limit) Priya must sign off** — first, PC-7's two-sided closing window (LP-406-1b).
+
+**Why a status, not the `threshold_needs_signoff` flag (the code decided).** LP-406-1b's D7 proposed gating
+no-AI eligibility on `threshold_needs_signoff`. But that flag is **calculative-only** — `kinds.py` rejects it on
+a structural rule, and PC-7 is structural — so PC-7 could not declare its sign-off there. And a plain
+`no-ai-dependency` bar cannot be held by `validated` at all: `parse_bar` **forbids `validated: true` on any
+non-`calibratable-now` status** ("a blocked rule cannot be signed off as live-able"), and `is_eligible` ignores
+`validated` on a no-AI bar. So the only lever LP-406-1b had was `input_resolves: false` — **a value that same
+ticket's own proof showed is FALSE** (PC-7's input resolves; `days == "1"` → SATISFIED). A new status is the
+minimal honest fix: it makes `validated` meaningful and permitted for exactly this case (the loader now allows
+`validated` on `calibratable-now` OR `no-ai-threshold-pending`), so PC-7 is held on `validated: false` with
+`input_resolves: true` — honest and held.
+
+**The principle (the AS-5 / IN-7 lineage).** *The gate of record must not contain a value the system's own proof
+contradicts.* A false value in `activation_bars.yaml` is trusted by whoever reads the file rather than the
+rationale (a future census — LP-394 read this file to classify rules — would report PC-7 as "input doesn't
+resolve"). This is the class LP-390-7 hardened against (AS-5's stray `validated: true`) and LP-393-6 refused
+(IN-7's `ships: auto` — "the bar would be a lie"). LP-411 removes PC-7's false `input_resolves` and, in the same
+LP-390-7 fail-loud spirit, adds a loader guard: a `validated` `no-ai-threshold-pending` bar **must** have
+`input_resolves: true` (you cannot sign off a threshold to activate a rule whose input does not resolve).
+
+**The predicate change (before → after).** Only the no-AI side gains a case; the AI side is byte-identical:
+- `calibratable-now`: `validated AND threshold != None AND measured_accuracy >= threshold` — **unchanged**.
+- `no-ai-dependency`: `input_resolves` — **unchanged**.
+- `no-ai-threshold-pending` (**new**): `input_resolves AND validated`.
+
+**Blast radius: ZERO.** The change is purely additive (a new status branch); no existing bar's eligibility moves.
+`eligible_rule_ids()` is byte-identical (the same 14); PC-7 was held before (`input_resolves: false`) and is held
+after (`validated: false`); **AS-8** (the live no-AI rule) has no threshold, so the new case is a no-op for it —
+it stays live. `ACTIVE_RULE_IDS` stays **25**; the LP-389 invariant (`ACTIVE − BASE == eligible_rule_ids()`)
+holds. No live rule was deactivated. **Supersedes** ADR-326's `input_resolves`-stand-in note (its two-sided
+window decision stands). **Cross-refs.** LP-406-1b (D7 — the gap), LP-390-7 (the AS-5 loader hardening), LP-393-6
+(the IN-7 "a bar that lies" refusal), LP-394 (the census that reads this file), `kinds.py` (the calc-only
+`threshold_needs_signoff`).

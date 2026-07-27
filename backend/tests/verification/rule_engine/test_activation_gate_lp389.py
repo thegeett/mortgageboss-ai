@@ -113,9 +113,41 @@ def test_the_held_rules_each_fail_for_a_named_reason() -> None:
     assert not is_eligible(bars["IN-14"]) and bars["IN-14"].status == "needs-producer"
     # AS-3 — no-ai but its recipe is a STUB (no §3B cash-to-close calculator): the input never resolves → held
     assert not is_eligible(bars["AS-3"]) and not bars["AS-3"].input_resolves
+    # PC-7 (LP-411) — the third case: no-ai-threshold-pending, its input RESOLVES (input_resolves true) but its
+    # Priya window is unvalidated → held by validated:false, NOT by a false input_resolves. The honest hold.
+    assert not is_eligible(bars["PC-7"]) and bars["PC-7"].status == "no-ai-threshold-pending"
+    assert bars["PC-7"].input_resolves and not bars["PC-7"].validated
     # (IN-3 was the "calibratable but not-yet-signed" held example through LP-390-7; LP-390-9 signed off its bar,
     # so it is now eligible + active — see test_in3_is_live_after_priya_signoff. Every remaining held rule fails
     # for one of the reasons above.)
+
+
+def test_lp411_no_ai_threshold_pending_gate_both_ways_and_the_guard() -> None:
+    # The THIRD eligibility case: no AI to calibrate, but a Priya threshold to sign off. Eligible iff the input
+    # resolves AND the threshold is validated; the calibratable-now and no-ai-dependency paths are UNCHANGED.
+    def _ntp(**kw: object):
+        body = {
+            "status": "no-ai-threshold-pending",
+            "ships": "auto",
+            "threshold": None,
+            "validated": False,
+            "input_resolves": True,
+            "rationale": "t",
+        }
+        body.update(kw)
+        return parse_bar("X-1", body)
+
+    assert is_eligible(_ntp(validated=True))  # input resolves + window signed off → eligible
+    assert not is_eligible(_ntp(validated=False))  # window not signed off → held
+    # THE GUARD (the LP-390-7 fail-loud pattern): validated but the input does not resolve → loader rejects
+    # (you cannot sign off a threshold to activate a rule whose input does not resolve).
+    with pytest.raises(ActivationBarError, match="must have input_resolves"):
+        _ntp(validated=True, input_resolves=False)
+    # AS-8 (the LIVE no-ai-dependency rule) is UNAFFECTED — it has no threshold, so the new case is a no-op for it.
+    bars = load_activation_bars()
+    assert bars["AS-8"].status == "no-ai-dependency" and is_eligible(bars["AS-8"])
+    # activation_mode is unchanged: a no-ai status (incl. the new one) is 'blocked' (it gates via is_eligible).
+    assert activation_mode(_ntp(validated=True), None) == "blocked"
 
 
 # --------------------------------------------------------------------------- #
@@ -242,7 +274,7 @@ def test_as5_stays_held_and_a_stray_validated_flag_is_a_load_error() -> None:
     assert bars["AS-5"].status == "not-calibratable-yet" and not bars["AS-5"].validated
     assert bars["AS-5"].threshold is None and not is_eligible(bars["AS-5"])
     assert "AS-5" not in ACTIVE_RULE_IDS
-    with pytest.raises(ActivationBarError, match="only a calibratable-now rule may be validated"):
+    with pytest.raises(ActivationBarError, match="cannot be signed off as live-able"):
         parse_bar(
             "AS-5",
             {

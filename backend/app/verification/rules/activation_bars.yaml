@@ -6,14 +6,19 @@
 # (validated: false). It sets no real bar and activates nothing (that is LP-389).
 #
 # Fields per rule:
-#   status  — calibratable-now | not-calibratable-yet | needs-producer | no-ai-dependency
+#   status  — calibratable-now | not-calibratable-yet | needs-producer | no-ai-dependency | no-ai-threshold-pending
 #             * calibratable-now      : every load-bearing AI tag has a MEASURED accuracy (LP-379) → a bar can
 #                                       be set and met.
 #             * not-calibratable-yet  : a load-bearing AI tag is PRODUCED but UNSCORED (or measured only in a
 #                                       different context) → BLOCKED ON CALIBRATION, not "bar unmet". No number.
 #             * needs-producer        : a load-bearing tag does not materialize at all → blocked on a producer.
-#             * no-ai-dependency      : no AI load-bearing tag (parsed/deterministic) → no calibration gate;
-#                                       activation is a wiring decision, not a bar (cf. active IN-2 / ID-8).
+#             * no-ai-dependency      : no AI load-bearing tag (parsed/deterministic) AND no threshold to sign off
+#                                       → eligible on input_resolves alone (cf. active AS-8 / IN-2 / ID-8).
+#             * no-ai-threshold-pending: no AI to calibrate, but a Priya THRESHOLD (a window/limit, not an AI
+#                                       accuracy) still needs sign-off → eligible on input_resolves AND validated
+#                                       (LP-411, the third case; cf. PC-7's closing window). Uses `validated` as
+#                                       the sign-off because the spec/CSV threshold_needs_signoff flag is
+#                                       calculative-only (kinds.py rejects it on a structural rule).
 #   ships   — auto | ratify. From the rule's KIND (rule_kinds.csv): judgmental → ratify (LP-376-B: a judgment
 #             rule NEVER auto-ships, a human ratifies); structural/calculative → auto.
 #   threshold — the PROPOSED default bar in [0,1], or null when no bar can apply (any status but
@@ -430,19 +435,17 @@ AS-8:
 
 PC-7:
   # LP-406-1b — written on the derived contract.days_until_closing tag (LP-410, unblocking the LP-406-1 stop).
-  # NO AI dependency (the tag is derived from a PARSED closing date), so this is no-ai-dependency — BUT unlike
-  # AS-8 it carries a PRIYA THRESHOLD: a two-sided past/far-future window (defaults 0 / 90 days), her domain
-  # call. ⚠️ MODEL GAP (reported, LP-406-1b D7): the no-ai-dependency gate is `input_resolves` and has NO
-  # threshold-signoff step — validated:false does NOT hold a no-ai rule. The input DOES resolve numerically
-  # (days_until_closing == "1" on LF-6T3N → SATISFIED), but PC-7 AUTO-SHIPS a fired verdict on an UNVALIDATED
-  # window, which a sign-off gate should prevent. So input_resolves is left FALSE to HOLD it pending Priya's
-  # window — the honest reason is "the window is a default", not "the input doesn't resolve". A follow-up should
-  # give the model a real "no-ai + threshold-pending" hold (e.g. gate no-ai eligibility on threshold_needs_signoff).
-  status: no-ai-dependency
+  # NO AI dependency (the tag is derived from a PARSED closing date) — BUT unlike AS-8 it carries a PRIYA
+  # THRESHOLD: a two-sided past/far-future window (defaults 0 / 90 days), her domain call. That is the THIRD
+  # eligibility case (LP-411): no-ai-threshold-pending — held until BOTH the input resolves AND she validates
+  # the window. input_resolves is TRUE (honest: days_until_closing == "1" on LF-6T3N → SATISFIED); the real
+  # hold is validated:false (her window sign-off). This REPLACES LP-406-1b's stand-in (a FALSE input_resolves:
+  # false on a resolving input — the AS-5 stray-value class, corrected here). See ADR-327.
+  status: no-ai-threshold-pending
   ships: auto
   threshold: null
-  validated: false
-  input_resolves: false   # HELD: the input resolves, but the two-sided window is an unvalidated Priya default (see above)
+  validated: false        # HELD: Priya has not signed off the two-sided window (the real reason). To activate: true.
+  input_resolves: true    # HONEST: contract.days_until_closing resolves on LF-6T3N (== "1" → SATISFIED, LP-410)
   load_bearing_ai_tags: []
   fp_fn: >-
     FN (misses a stale/expired or implausibly-far closing date) vs FP (a false flag on a legitimately far-out
@@ -452,7 +455,9 @@ PC-7:
     (LP-410). WHAT PRIYA MUST DECIDE (plain): (1) is a closing date 1-2 days in the PAST acceptable (a timing
     grace), or does ANY past date warrant a flag? default past_grace_days=0 (any strictly-past date fires);
     (2) how many days AHEAD is "unrealistically far" for a file in processing — default far_future_days=90.
-    HELD pending her sign-off of the window (validated:false + input_resolves:false — see the model-gap note).
+    HELD by validated:false — the no-ai-threshold-pending gate (LP-411): input_resolves is TRUE, so the ONLY
+    thing holding PC-7 is her window sign-off (to activate: flip validated:true). This corrects LP-406-1b's
+    stand-in, which held PC-7 with a FALSE input_resolves:false on a resolving input (ADR-327).
     ⚠️ CAVEAT (the AS-2/AS-8 one-sided-trigger shape): LF-6T3N closes in 1 day (SATISFIED), so BOTH fired paths
     (past + far-future) ship UNEXERCISED on real data. A fixture with a past closing date and one with a far-out
     date (a fixture ticket, LP-393-1 pattern) would exercise them; the branches are proven on constructed

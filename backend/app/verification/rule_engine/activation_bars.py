@@ -25,8 +25,21 @@ from app.verification.rule_engine.registry import _BASE_ACTIVE
 _BARS_YAML = Path(__file__).resolve().parents[1] / "rules" / "activation_bars.yaml"
 _SPECS_DIR = Path(__file__).resolve().parents[1] / "rules" / "specs"
 
+# LP-411 — "no-ai-threshold-pending" is the THIRD eligibility case: no AI tag to calibrate, but a Priya
+# THRESHOLD (a window/limit, not an AI accuracy) still needs sign-off. no-ai-dependency activates on
+# input_resolves alone (nothing to sign off); no-ai-threshold-pending ALSO requires `validated` (her threshold
+# sign-off). It exists because the SPEC/CSV `threshold_needs_signoff` flag is CALCULATIVE-ONLY (kinds.py rejects
+# it on a structural rule), so PC-7 (structural, with a closing window) could not declare its sign-off there —
+# and holding it on a plain no-ai bar required a FALSE `input_resolves: false` (LP-406-1b's stand-in). This
+# status lets `validated` gate a no-AI rule honestly (input_resolves stays TRUE). See ADR-327.
 _STATUSES = frozenset(
-    {"calibratable-now", "not-calibratable-yet", "needs-producer", "no-ai-dependency"}
+    {
+        "calibratable-now",
+        "not-calibratable-yet",
+        "needs-producer",
+        "no-ai-dependency",
+        "no-ai-threshold-pending",
+    }
 )
 _SHIPS = frozenset({"auto", "ratify"})
 
@@ -115,10 +128,12 @@ def parse_bar(rule_id: str, body: object) -> ActivationBar:
             raise ActivationBarError(
                 f"{rule_id}: calibratable-now needs a proposed threshold in [0,1], got {threshold!r}"
             )
-    elif validated:
+    elif validated and status != "no-ai-threshold-pending":
+        # LP-411: no-ai-threshold-pending MAY be validated (Priya's threshold sign-off is what activates it).
+        # Every OTHER non-calibratable status is BLOCKED and cannot be signed off as live-able.
         raise ActivationBarError(
-            f"{rule_id}: only a calibratable-now rule may be validated (status={status}) — a rule blocked "
-            f"on calibration cannot be signed off as live-able"
+            f"{rule_id}: only a calibratable-now or no-ai-threshold-pending rule may be validated "
+            f"(status={status}) — a rule blocked on calibration/a producer cannot be signed off as live-able"
         )
     elif threshold is not None:
         raise ActivationBarError(
@@ -150,9 +165,19 @@ def parse_bar(rule_id: str, body: object) -> ActivationBar:
         raise ActivationBarError(
             f"{rule_id}: input_resolves must be a boolean, got {input_resolves!r}"
         )
-    if input_resolves and status != "no-ai-dependency":
+    # LP-411: input_resolves is the parsed-input evidence for BOTH no-ai statuses (no-ai-dependency gates on it
+    # alone; no-ai-threshold-pending gates on it AND validated).
+    if input_resolves and status not in ("no-ai-dependency", "no-ai-threshold-pending"):
         raise ActivationBarError(
-            f"{rule_id}: input_resolves is the gate ONLY for a no-ai-dependency rule (status={status})"
+            f"{rule_id}: input_resolves is the gate ONLY for a no-ai rule (status={status})"
+        )
+    # LP-411 (the LP-390-7 fail-loud pattern): a no-ai-threshold-pending bar SIGNED OFF (validated) to go live
+    # must have a RESOLVING input — you cannot sign off a threshold to activate a rule whose input does not
+    # resolve. Reject the contradiction at LOAD rather than let is_eligible silently hold it.
+    if status == "no-ai-threshold-pending" and validated and not input_resolves:
+        raise ActivationBarError(
+            f"{rule_id}: a validated no-ai-threshold-pending bar must have input_resolves: true — a threshold "
+            f"sign-off cannot activate a rule whose parsed input does not resolve"
         )
     return ActivationBar(
         rule_id=rule_id,
@@ -173,7 +198,9 @@ def is_eligible(bar: ActivationBar) -> bool:
 
     * (AI rule) it is ``calibratable-now``, its bar is Priya-``validated``, and its MEASURED accuracy meets
       the bar (accuracy >= threshold — which is exactly ``activation_mode`` == auto/ratify); OR
-    * (no-AI rule) it is ``no-ai-dependency`` and its parsed ``input_resolves`` to real values (verified).
+    * (no-AI rule, no threshold) it is ``no-ai-dependency`` and its parsed ``input_resolves`` (verified); OR
+    * (no-AI rule, threshold) it is ``no-ai-threshold-pending`` and its input ``input_resolves`` AND its
+      threshold (a window/limit) is Priya-``validated`` (LP-411 — the third case).
 
     Every other state — an unmeasured tag (``not-calibratable-yet``), an unvalidated bar, a missing accuracy,
     an absent input, or ``needs-producer`` — is NOT eligible. When in doubt, hold. This is the inverse of the
@@ -187,6 +214,10 @@ def is_eligible(bar: ActivationBar) -> bool:
         )
     if bar.status == "no-ai-dependency":
         return bar.input_resolves
+    if bar.status == "no-ai-threshold-pending":
+        # LP-411: no AI to measure, but a domain threshold to sign off — held until BOTH the input resolves
+        # AND Priya validates the window. (input_resolves stays honest; `validated` is the real hold.)
+        return bar.input_resolves and bar.validated
     return False
 
 
