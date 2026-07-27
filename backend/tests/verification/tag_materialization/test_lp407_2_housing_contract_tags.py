@@ -116,7 +116,27 @@ def test_taxes_monthly_unknown_on_nonpositive_and_conflicting() -> None:
         _LOAN,
         None,
     )
-    assert conflict[0] == "unknown"  # two bills, no created_at → cannot tell which is the subject's
+    assert (
+        conflict[0] == "unknown"
+    )  # two bills DISAGREE on the amount → cannot tell which is the subject's
+    # NOTE: two bills that AGREE on the amount pass through as that amount (dedup by value, mirroring the DTI's
+    # newest-bill when values agree) — the same-amount-different-property residual is the DTI's no-subject-match
+    # limitation, a later refinement; see _housing_taxes_monthly's docstring.
+    agree = _housing_taxes_monthly(
+        _snapshot(
+            [
+                _doc("t1", "property_tax_bill", annual_tax_amount="3600.00"),
+                _doc(
+                    "t2", "property_tax_bill", annual_tax_amount="3600"
+                ),  # same amount, different rendering
+            ]
+        ),
+        _LOAN,
+        None,
+    )
+    assert (
+        agree[0] == "300.00"
+    )  # 3600 / 12 — agreeing bills (different renderings) dedup to one value
 
 
 # --------------------------------------------------------------------------- #

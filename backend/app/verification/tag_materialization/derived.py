@@ -1061,11 +1061,13 @@ def _housing_taxes_monthly(
     extraction), it closes the orphan and serves the tag's own (inert) consumers DT-1/DT-4.
 
     AGREES-OR-ABSTAINS (never LOOSER than the DTI): the DTI takes the SINGLE NEWEST bill
-    (``created_at`` desc, limit 1); the snapshot exposes no ``created_at`` on a document entry, so we ABSTAIN
-    on ANY multi-bill ambiguity — stricter-than-or-equal-to the DTI in every case. (Property-tax bills are
-    commonly present for MORE than one property — the subject plus a retained one — and this recipe has no
-    subject-property match, so two bills → unknown; a subject-address match is a later refinement, not a new
-    mechanism to add here.) FAIL-CLOSED (absent≠0 — the fact-tag vocab note): unknown when no property-tax
+    (``created_at`` desc, limit 1); the snapshot exposes no ``created_at`` on a document entry, so we cannot
+    replicate its recency pick. We DEDUP by amount instead: bills that AGREE on the annual tax → that amount
+    (a re-uploaded bill, or the DTI's value when the newest agrees); bills that DISAGREE (or one states no
+    amount) → unknown — cannot tell which is current/subject. RESIDUAL LIMITATION, SHARED WITH THE DTI: with
+    no subject-property match, two DIFFERENT properties billed the SAME annual tax both pass through as that
+    amount (as the DTI would — it does not subject-match either); a subject-address match is a later
+    refinement, not a new mechanism to add here. FAIL-CLOSED (absent≠0 — the fact-tag vocab note): unknown when no property-tax
     bill; the (only) bill states no or a non-positive annual tax; or multiple bills state CONFLICTING amounts.
     Reads ONLY ``property_tax_bill``."""
     if snapshot.documents.absent:
@@ -1145,22 +1147,24 @@ def _housing_hoa_monthly(
         return _UNKNOWN, "no documents in the file — no HOA statement to read"
     monthlies: set[Decimal] = set()
     stmt_count = 0
-    problem: str | None = None
+    problem: str | None = (
+        None  # the FIRST problem encountered (kept via `problem or …`), a stable reason
+    )
     for entry in snapshot.documents.entries:
         if entry.document_type != "hoa_statement":
             continue
         stmt_count += 1
         dues_field = entry.fields.get("dues_amount")
         if not isinstance(dues_field, Field) or not dues_field.is_present:
-            problem = "an HOA statement states no dues amount"
+            problem = problem or "an HOA statement states no dues amount"
             continue
         try:
             dues = Decimal(str(dues_field.value))
         except (InvalidOperation, ValueError):
-            problem = "an HOA statement states an unparseable dues amount"
+            problem = problem or "an HOA statement states an unparseable dues amount"
             continue
         if dues <= 0:
-            problem = f"an HOA statement states a non-positive dues amount ({dues})"
+            problem = problem or f"an HOA statement states a non-positive dues amount ({dues})"
             continue
         freq_field = entry.fields.get("dues_frequency")
         freq = (
@@ -1170,7 +1174,7 @@ def _housing_hoa_monthly(
         )
         months = _HOA_FREQUENCY_MONTHS.get(freq)
         if months is None:
-            problem = (
+            problem = problem or (
                 f"an HOA statement's dues frequency is unstated or unrecognized ({freq or 'absent'!r}) — "
                 "cannot convert to monthly without assuming a periodicity"
             )
