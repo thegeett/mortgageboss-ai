@@ -1210,6 +1210,50 @@ def _income_employer_coverage(
     )
 
 
+def _income_is_self_employed(
+    snapshot: Snapshot, subject_id: str, subject_raw: object
+) -> tuple[JsonValue, str]:
+    """income.is_self_employed — PER BORROWER: does this borrower have self-employment income? Unblocks IN-12.
+
+    IN-12 (self-employed borrower needs 2 years' history) enumerates per-borrower but needs a BORROWER-LEVEL
+    self-employment signal that did not exist — income.type is subject:document (LP-396 IN-12 bar). This is
+    that signal: a DETERMINISTIC promotion of the already-produced income.type (an AI tag, MEASURED via IN-11)
+    to the borrower — NO new AI, NO calibration round (the win: it reads the borrower's OWN income documents'
+    income.type via _borrower_attributed_documents, the shared per-borrower primitive, LP-385). DESCRIPTIVE
+    enum:
+      * "yes"     — at least one of the borrower's income documents states income.type == "self_employment".
+      * "no"      — the borrower has income documents with a readable type, but NONE is self-employment ->
+                    lets IN-12 reach not_applicable (a non-self-employed borrower is out of scope for the
+                    2-year self-employment history requirement — the AS-8 not_applicable lesson; an ENUM can
+                    carry this, unlike a NUMBER tag — the LP-407-2 D5 gap).
+      * "unknown" — no income document is attributed to the borrower, or none carries a readable income.type
+                    -> fail-closed (never a fabricated "no").
+    NO threshold. Per-borrower: borrower A's documents never speak for borrower B (belongs_to attribution)."""
+    if not isinstance(subject_raw, BorrowerSubject):
+        return _UNKNOWN, "self-employment is a per-borrower recipe (needs a borrower subject)"
+    if snapshot.documents.absent or snapshot.tags.absent:
+        return _UNKNOWN, f"borrower {subject_id}: no documents/tags to read an income type from"
+    any_type_seen = False
+    for entry in _borrower_attributed_documents(snapshot, subject_id):
+        tag = snapshot.tags.by_subject.get(entry.content_id, {}).get("income.type")
+        if tag is None or str(tag.value) == _UNKNOWN:
+            continue
+        any_type_seen = True
+        if str(tag.value) == "self_employment":
+            return "yes", (
+                f"borrower {subject_id}: an income document states self-employment income "
+                "(2-year self-employment history applies)"
+            )
+    if not any_type_seen:
+        return _UNKNOWN, (
+            f"borrower {subject_id}: no attributed income document carries a readable income type"
+        )
+    return "no", (
+        f"borrower {subject_id}: the borrower's income documents carry income types, none self-employment "
+        "(the 2-year self-employment requirement is not applicable)"
+    )
+
+
 # --------------------------------------------------------------------------- #
 # LP-407-2 — the cheap Bucket 2.5 sub-wave: the loan-level tags PC-2 / DT-2 / DT-4 need, all mirroring
 # existing producers (no new mechanism). PC-2 gets a document→loan promotion of the contract sales price
@@ -1437,6 +1481,9 @@ _RECIPES: dict[str, Recipe] = {
     "contract_days_until_closing": _contract_days_until_closing,
     "stmt_continuity": _stmt_continuity,
     "income_employer_coverage": _income_employer_coverage,
+    # LP-418 — a DETERMINISTIC per-borrower self-employment signal (promotes the measured income.type), for
+    # IN-12. No new AI, no calibration round (the win). "no" lets IN-12 reach not_applicable.
+    "income_is_self_employed": _income_is_self_employed,
     # LP-407-2 — the cheap Bucket 2.5 sub-wave: the loan-level promotion PC-2 needs + the DT-2/DT-4
     # monthly-conversion producers (all mirror existing recipes; tags describe, rules judge). DT-5 is NOT
     # here — it is a vacuous self-compare with no independent operand today (LP-407-2 D1).

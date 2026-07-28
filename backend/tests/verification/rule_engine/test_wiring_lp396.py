@@ -45,17 +45,21 @@ def test_in12_bar_is_needs_producer_naming_the_real_blocker() -> None:
     assert "producer" in low  # names the real fix — a borrower-level self-employment producer
 
 
-def test_in12_cannot_be_fixed_no_borrower_level_self_employment_signal_exists() -> None:
-    # the reason the naive re-scope is forbidden: income.type (the self-employment discriminator) is a
-    # DOCUMENT-subject tag, and income_stability (the per_borrower group) produces no income-type tag.
+def test_in12_borrower_level_self_employment_signal_now_exists_lp418() -> None:
+    # LP-396 pinned the IN-12 gap: income.type (the self-employment discriminator) is a DOCUMENT-subject tag, so
+    # no BORROWER-level self-employment signal existed and IN-12 could not be re-scoped. LP-418 closed it WITHOUT
+    # a naive re-scope: income.is_self_employed (subject:borrower) is a DETERMINISTIC promotion of income.type —
+    # it reads the borrower's own attributed income documents. income.type stays document-subject (that is WHY a
+    # promotion, not a re-scope, was the right build).
     decls = load_declarations()
-    assert decls["income.type"].subject == "document"  # not borrower-level
-    borrower_income = {
-        t for t, d in decls.items() if t.startswith("income.") and d.subject == "borrower"
-    }
-    assert not any(
-        "type" in t or "self" in t for t in borrower_income
-    )  # no borrower self-employment signal
+    assert (
+        decls["income.type"].subject == "document"
+    )  # unchanged — the promotion source, not re-scoped
+    signal = decls["income.is_self_employed"]
+    assert (
+        signal.subject == "borrower"
+    )  # LP-418 — the borrower-level signal IN-12's bar said was missing
+    assert signal.mode == "derived"  # a deterministic promotion — NO new AI, NO calibration round
 
 
 # --------------------------------------------------------------------------- #

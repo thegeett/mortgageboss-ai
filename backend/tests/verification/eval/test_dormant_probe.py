@@ -45,6 +45,11 @@ _DORMANT_EXPECTED = frozenset(
     {
         "income_docs",
         "stmt_facts",
+        # LP-418 — the producer batch declared two AI groups whose rules are not yet written/live, so they
+        # join the dormant set: txn_nsf (AS-7's producer, transaction-subject) and occupancy_rental (IN-14's
+        # producer, loan-subject). They activate with their OWN later tickets; until then they are dormant.
+        "txn_nsf",
+        "occupancy_rental",
     }
 )
 _LIVE_EXPECTED = frozenset(
@@ -71,7 +76,7 @@ def test_dormant_set_is_all_declared_groups_minus_the_live_ones() -> None:
     dormant = dormant_ai_groups()
     assert (
         dormant == _DORMANT_EXPECTED
-    )  # the 4 remaining income/asset groups (2 went live with LP-389)
+    )  # income_docs + stmt_facts, plus LP-418's two new producer groups (txn_nsf, occupancy_rental)
     assert (
         _required_ai_groups() == _LIVE_EXPECTED
     )  # the normal run's set is unchanged (byte-identical)

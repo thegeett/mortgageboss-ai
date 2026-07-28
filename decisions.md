@@ -12288,3 +12288,54 @@ rule from a vacuous one.
 **Cross-refs.** LP-407-2 (DT-5, the first instance; the D2 number-tag gap), LP-407-3 (DT-2 vacuous, DT-4
 unwired, PC-2 written), `rule_tags.csv` (the one-operand maps for DT-2/DT-4), `services/dti.py` (the DTI's
 HOA/tax lines — the self-source trace), ADR-324 (tags describe, rules judge).
+
+## ADR-331: A borrower-level signal an activation bar declares "missing" is often a DETERMINISTIC promotion of an existing document-subject AI tag — not a new AI producer; and the third redundancy-driven producer abandonment (LP-418)
+
+**The context.** LP-418 was a PRODUCER batch: build the small producers that unblock rules written-but-inert
+for lack of an input — no rules written. The interesting decision was HOW to build the borrower-level
+self-employment signal IN-12's activation bar named as missing, and WHICH candidate producers to refuse.
+
+**The pattern (named) — promote, don't re-perceive.** IN-12 ("a self-employed borrower needs two years'
+history") enumerates per **borrower**, but its bar said the self-employment signal "does not exist —
+`income.type` is subject:**document**." The naive reading is "add an AI producer that judges self-employment
+per borrower." That is wasteful and worse: it re-perceives, from scratch and with a fresh calibration round, a
+fact the pipeline ALREADY extracts. `income.type` is measured per income document (via IN-11's AI). The
+borrower-level signal is a **deterministic promotion** of it: `income.is_self_employed` (subject:borrower)
+reads the borrower's OWN attributed income documents (`_borrower_attributed_documents`, the LP-385 per-borrower
+primitive) and reports `yes` if any states `self_employment`, `no` if types are present but none is, `unknown`
+if none is readable. **No new AI, no calibration round.** The derived-last order (ADR/LP-333) is what makes
+this legal: a derived recipe runs AFTER the AI stage, so it sees the AI-produced `income.type`.
+
+**Why the `no` branch matters (the enum affordance, cf. ADR-330).** The promotion is an ENUM, so it can carry
+`no` — "this borrower has readable income types, none self-employment" — which lets IN-12 reach
+`not_applicable` (a non-self-employed borrower is out of scope for the two-year rule, the AS-8
+not_applicable lesson). A NUMBER tag could not (ADR-330's corollary). The signal fails **closed** to `unknown`,
+never a fabricated `no`.
+
+**The third redundancy abandonment (D0 STOP).** The batch also considered an MI producer. **Refused as
+redundant:** the loan product already surfaces mortgage insurance — `calculations_section.map_mi` maps
+`compute_loan_mi`, and "MI always determines required," so `housing.mi_monthly` / `mi.required` are already
+produced. A new MI producer would re-derive what the product surfaces. This is the **third** time a census
+candidate has been abandoned for redundancy against an existing surface rather than built — the standing
+discipline: before building a producer, check whether the fact is ALREADY produced (by the product, by an AI
+tag, by an existing derived recipe) and promotable, not just whether it is "missing" from the consuming rule's
+subject.
+
+**The subject-shape rule (a load-bearing constraint the batch re-hit).** A transaction-subject AI group
+(`txn_nsf`, producing `txn.is_nsf_or_overdraft`) must NOT set `applies_to` — that key gates/gathers documents
+and is meaningful ONLY for a document- or borrower-subject group. A transaction- or loan-subject group uses
+`applies_to: all` / omits it. The declaration loader enforces this (a `DeclarationError`); recorded here so the
+next transaction/loan-subject producer does not re-trip it.
+
+**What shipped.** Three producers, zero rules: `income.is_self_employed` (#1, deterministic promotion, the ONE
+new vocabulary tag), `txn.is_nsf_or_overdraft` (#2, AI/transaction — AS-7's rule HELD on calibration and only
+lacked the producer), `occupancy.rental_support` (#3, AI/loan — IN-14 ships ratify and only lacked the
+producer); the latter two already existed in `fact_tags.csv`, so they add production wiring but no vocab tag.
+Plus two standalone labeling fixtures supplying the positive classes LP-395 measured as too thin: six VOE + six
+offer-letter docs (`offer_letter_present` had n=0), and six other-income borrowers (`continuance_3yr` had n=1).
+The rules those producers unblock (IN-12 / AS-7 / IN-14) activate in their OWN later tickets — a producer batch
+activates nothing.
+
+**Cross-refs.** LP-396 (the IN-12 / IN-14 activation bars), LP-385 (`_borrower_attributed_documents`), LP-333
+(derived-last, why a derived recipe sees AI tags), ADR-330 (the enum-vs-number affordance for `not_applicable`),
+LP-395 (the calibration-n measurements the fixtures raise).

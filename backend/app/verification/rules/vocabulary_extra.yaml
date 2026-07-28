@@ -176,6 +176,18 @@ tags:
       "unknown" a balance/period is unreadable or statements cannot be grouped. Balance-carryover only
       (the missing-period dimension is AS-10's).
     produced_by: derived
+  # LP-418 — a DETERMINISTIC per-borrower self-employment signal (promotes the measured income.type), for
+  # IN-12. "yes" = the borrower has self-employment income; "no" = income documents but none self-employment
+  # (lets IN-12 reach not_applicable); "unknown" = no readable income type. No new AI — no calibration round.
+  income.is_self_employed:
+    entity: borrower
+    value_type: enum
+    allowed_values: ["yes", "no", "unknown"]
+    description: >-
+      PER BORROWER: does the borrower have self-employment income (any attributed income document's
+      income.type == "self_employment")? A derived promotion of income.type for IN-12. "no" (income but none
+      self-employment) lets IN-12 reach not_applicable; "unknown" when no income type is readable.
+    produced_by: derived
   income.employer_coverage:
     entity: borrower
     value_type: enum

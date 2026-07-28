@@ -26,6 +26,7 @@ from uuid import UUID
 
 from app.verification.snapshot.fields import Field, FieldSource
 from app.verification.snapshot.model import (
+    BorrowerRef,
     DocumentEntry,
     DocumentsSection,
     MismoSection,
@@ -65,6 +66,12 @@ _LOAN_ADDR_MAILING = UUID(
 _LOAN_ADDR_UNIT = UUID(
     "95000000-0000-4000-8000-00000000000e"
 )  # LP-407-4 review — a unit-designator residue the canonicalizer leaves (→ needs_review)
+_LOAN_VOE_OFFER = UUID(
+    "95000000-0000-4000-8000-00000000000f"
+)  # LP-418 — VOE + offer-letter labeling n
+_LOAN_OTHER_INCOME = UUID(
+    "95000000-0000-4000-8000-000000000010"
+)  # LP-418 — other-income continuance n
 _RUN = UUID("95000000-0000-4000-8000-0000000000ff")
 # The file (snapshot) date every closing date is measured against (deterministic — never a wall-clock now()).
 _FILE_DATE = datetime(2026, 7, 1, tzinfo=UTC)
@@ -393,6 +400,109 @@ def build_address_mailing_only_snapshot() -> Snapshot:
     )
 
 
+# --------------------------------------------------------------------------- #
+# LP-418 #5 — a VOE + offer-letter LABELING fixture. income_docs (subject:document, applies_to:None → EVERY
+# document) perceives income.voe_present / income.offer_letter_present / income.future_employment per document.
+# LP-395 measured voe_present n=3 and offer_letter_present n=0 (an EMPTY positive class → IN-9 uncalibratable).
+# This standalone file supplies a positive class for both: six VOE docs + six employment_offer_letter docs, so
+# each tag has ≥6 labelable rows on ONE fixture. The values are the AI's to assign at calibration; the fixture's
+# job is to guarantee the ROWS exist. Documents need no borrower attribution here (income_docs is per-document).
+# --------------------------------------------------------------------------- #
+_VOE_EMPLOYERS = (
+    "Lakeside Systems",
+    "Cedar Analytics",
+    "Birch Media",
+    "Rivertown Foods",
+    "Oak Freight",
+    "Elm Retail",
+)
+_OFFER_EMPLOYERS = (
+    "Summit Robotics",
+    "Harbor Logistics",
+    "Vista Health",
+    "Delta Print",
+    "Nova Legal",
+    "Pine Foundry",
+)
+
+
+def build_voe_offer_labeling_snapshot() -> Snapshot:
+    """Six verification-of-employment forms + six employment offer letters (each with a future start date), so
+    income_docs has a real positive class for BOTH income.voe_present and income.offer_letter_present — the
+    LP-395 gap (offer_letter_present had zero positives → IN-9 could not calibrate). Standalone (95… namespace,
+    its own loan); the AI assigns the labels, the fixture guarantees ≥6 labelable rows per tag."""
+    docs: list[DocumentEntry] = []
+    for i, emp in enumerate(_VOE_EMPLOYERS):
+        docs.append(
+            _doc(
+                f"95-voe-{i}",
+                "voe",
+                employer_name=emp,
+                employee_name="Dana Brooks",
+                position="Analyst",
+                start_date="2024-07-01",
+                employment_status="active",
+            )
+        )
+    for i, emp in enumerate(_OFFER_EMPLOYERS):
+        docs.append(
+            _doc(
+                f"95-offer-{i}",
+                "employment_offer_letter",
+                employer_name=emp,
+                candidate_name="Dana Brooks",
+                position="Analyst",
+                start_date="2026-09-01",  # a FUTURE start date — the offer_letter_present signal
+                annual_salary="95000.00",
+            )
+        )
+    return _snapshot(_LOAN_VOE_OFFER, docs)
+
+
+# --------------------------------------------------------------------------- #
+# LP-418 #6 — an OTHER-INCOME continuance fixture. income_stability (subject:borrower, applies_to includes the
+# 1003) perceives income.continuance_3yr per borrower — "does this income continue 3+ years?", the question that
+# only bites for fixed-term / other income (pension, alimony, child support, disability, note). LP-395 measured
+# continuance_3yr all-unknown (n=1) because no fixture stated other income with a continuance horizon. This
+# supplies six borrowers, each a 1003 declaring a different other-income type, so continuance_3yr has ≥6
+# labelable rows. Per-borrower → each doc is attributed (belongs_to) and each borrower has a MISMO id.
+# --------------------------------------------------------------------------- #
+_OTHER_INCOME = (
+    ("pension", "Retirement pension, $1,800/mo, no stated end"),
+    ("alimony", "Alimony, $1,200/mo, court-ordered through 2031"),
+    ("child_support", "Child support, $900/mo, youngest child age 9"),
+    ("disability", "Long-term disability, $1,500/mo, permanent rating"),
+    ("social_security", "Social Security retirement, $2,100/mo"),
+    ("note_receivable", "Installment note income, $700/mo, matures 2027"),
+)
+
+
+def build_other_income_continuance_snapshot() -> Snapshot:
+    """Six borrowers, each a 1003 (uniform_residential_loan_application) declaring one other-income type with a
+    continuance horizon (pension / alimony / child support / disability / Social Security / a maturing note), so
+    income_stability produces income.continuance_3yr for six borrowers — the positive class LP-395 lacked (it
+    read all-unknown, n=1). Standalone; per-borrower attribution + MISMO ids so BorrowerSubject enumerates six."""
+    docs: list[DocumentEntry] = []
+    mismo: dict[str, SnapshotField] = {}
+    for i, (kind, description) in enumerate(_OTHER_INCOME, start=1):
+        bid = UUID(f"95000000-0000-4000-8000-0000000001{i:02d}")
+        name = f"Borrower {i}"
+        mismo[f"borrower.{i}.borrower_id"] = _f(str(bid))
+        mismo[f"borrower.{i}.first_name"] = _f(name)
+        docs.append(
+            DocumentEntry(
+                content_id=f"95-1003-{i}",
+                document_type="uniform_residential_loan_application",
+                belongs_to=(BorrowerRef(borrower_id=bid, name=name),),
+                fields={
+                    "other_income_type": _f(kind),
+                    "other_income_description": _f(description),
+                },
+            )
+        )
+    return _snapshot(_LOAN_OTHER_INCOME, docs, mismo)
+
+
 # The expected fired/materialized outcomes — recorded HERE / in tests, never predicted in prose (LP-337).
 EXPECTED_TAXES_MONTHLY = "500.00"  # 6000 / 12
 EXPECTED_HOA_MONTHLY = "300.00"  # 300 monthly
@@ -415,7 +525,9 @@ __all__ = [
     "build_insurance_in_force_snapshot",
     "build_insurance_late_snapshot",
     "build_insurance_two_binder_snapshot",
+    "build_other_income_continuance_snapshot",
     "build_past_closing_snapshot",
     "build_statement_break_snapshot",
     "build_subject_housing_snapshot",
+    "build_voe_offer_labeling_snapshot",
 ]

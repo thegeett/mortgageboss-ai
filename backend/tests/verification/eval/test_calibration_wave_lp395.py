@@ -30,20 +30,20 @@ def _rows(tag: str) -> int:
     )
 
 
-def test_as7_tag_has_no_declared_producer() -> None:
-    # the orphan: is_nsf_or_overdraft is in the VOCABULARY (fact_tags.csv) but has NO producer declaration.
-    # Stage-B (tag_correlation) produces txn.has_identified_source / txn.source_strength but NOT this tag —
-    # verified by inspection; here we pin the declared-layer absence (the machine-checkable half).
+def test_as7_tag_now_has_a_declared_producer_lp418() -> None:
+    # LP-395 pinned txn.is_nsf_or_overdraft as an ORPHAN — in the VOCABULARY (fact_tags.csv) but with NO producer
+    # declaration, so AS-7 was needs-producer. LP-418 (the producer batch) declared the producer: an AI group
+    # (txn_nsf, transaction-subject). AS-7's rule HELD on calibration and only lacked this input; the rule itself
+    # is written/activated by its OWN later ticket — LP-418 supplies the producer, not the rule.
     decls = load_declarations()
-    assert "txn.is_nsf_or_overdraft" not in decls  # no declared producer → AS-7 is needs-producer
-    # contrast: a Stage-B tag is ALSO absent from the declared layer but IS produced (LP-390-2) — so declared
-    # absence alone is not proof; the proof is that NO path produces is_nsf_or_overdraft (inspection).
+    assert decls["txn.is_nsf_or_overdraft"].mode == "ai"  # LP-418 — the orphan now has a producer
+    assert decls["txn.is_nsf_or_overdraft"].subject == "transaction"
+    # contrast unchanged: a Stage-B tag is absent from the declared layer but IS produced (LP-390-2) — declared
+    # absence alone was never the proof.
     assert (
         "txn.has_identified_source" not in decls
     )  # Stage-B tag, produced elsewhere — the contrast case
-    assert (
-        "stmt.nsf_count" in decls
-    )  # the derived aggregate IS declared — but its leaf input is the orphan
+    assert "stmt.nsf_count" in decls  # the derived aggregate; its leaf input is no longer an orphan
 
 
 def test_in8_voe_present_is_thin_below_the_calibratable_floor() -> None:

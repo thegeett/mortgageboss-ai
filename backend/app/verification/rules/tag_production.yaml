@@ -15,6 +15,10 @@ tags:
   txn.date: {mode: parsed, subject: transaction, data: date}
   txn.is_money_in: {mode: ai, subject: transaction, data: txn_stage_a}
   txn.apparent_category: {mode: ai, subject: transaction, data: txn_stage_a}
+  # LP-418 — is this transaction an NSF / overdraft / returned item? An AI perception of the description (its own
+  # group, not txn_stage_a, so it is scoped to depository statements). Unblocks stmt.nsf_count → AS-7. AS-7 auto-
+  # ships, so it is HELD on calibration (this tag is unscored) until a labeling round + Priya's bar (the OC-1 position).
+  txn.is_nsf_or_overdraft: {mode: ai, subject: transaction, data: txn_nsf}
 
   # --- id.* — the identity family (LP-323-ID-A §2). Cross-source facts are keyed under the DOCUMENT
   #     subject (LP-325 gather contract), even when logically about the borrower. ----------------- #
@@ -92,6 +96,10 @@ tags:
   # DESCRIPTIVE enum; one_sided (only one doc type) lets IN-6 reach not_applicable. Reuses IN-5's
   # measured normalizers (no new judgment — IN-6 inherits IN-5's calibration). Fail-closed to unknown.
   income.employer_coverage: {mode: derived, subject: borrower, data: income_employer_coverage}
+  # LP-418 — PER BORROWER: does the borrower have self-employment income? A DETERMINISTIC promotion of the
+  # measured income.type (no new AI), for IN-12 — the borrower-level self-employment signal its bar said was
+  # missing (income.type is subject:document). "no" lets IN-12 reach not_applicable (an enum can, unlike a number).
+  income.is_self_employed: {mode: derived, subject: borrower, data: income_is_self_employed}
   income.ytd_annualized_shortfall_pct: {mode: derived, subject: loan, data: income_ytd_annualized_shortfall}
   income.max_employment_gap_days: {mode: derived, subject: loan, data: income_max_employment_gap}
   income.days_since_most_recent_pay: {mode: derived, subject: loan, data: income_days_since_recent_pay}
@@ -198,6 +206,10 @@ tags:
   #    MISMO's "primary_residence", not the tag's "primary" enum), and OC-2 (LIVE) is now its consumer.
   occupancy.stated: {mode: derived, subject: loan, data: occupancy_stated}
   occupancy.consistent_with_signals: {mode: ai, subject: loan, data: occupancy}
+  # LP-418 — are the rental-income supporting documents adequate (leases, occupancy)? An AI perception at the
+  # LOAN subject (the occupancy group's shape). Unblocks IN-14 (which ships RATIFY — a human ratifies, so its
+  # rule does not need this tag calibrated for auto-ship) and OC-3. Fail-closed: n/a when not investment/rental.
+  occupancy.rental_support: {mode: ai, subject: loan, data: occupancy_rental}
 
 # --- AI GROUPS — one structuring pass each: a subject, the tags it co-produces, a context-builder
 #     key, and the system prompt (the perceiver question, as DATA). The model answers per subject
@@ -592,3 +604,64 @@ ai_groups:
       STRICT OUTPUT — return ONLY a JSON ARRAY (no markdown fences, no prose before or after), one object
       (this is one loan), echoing the "index" you were given:
       [{"index": <i>, "consistent_with_signals": {"value": "yes|no|unknown", "confidence": <0.0-1.0>, "reasoning": "<why — cite the specific facts>"}}]
+
+  # LP-418 — NSF / overdraft detection per transaction (unblocks stmt.nsf_count → AS-7). Its OWN group (not
+  # txn_stage_a), scoped to depository statements. DESCRIBE what the line is; a downstream rule (AS-7) counts +
+  # judges the tolerance. AS-7 is HELD on calibration (this tag is unscored) until a labeling round + Priya's bar.
+  txn_nsf:
+    subject: transaction
+    context_builder: transaction
+    applies_to: all   # a transaction subject cannot gate by document type (like txn_stage_a); transactions
+                      # only exist on depository statements anyway.
+    tags: [txn.is_nsf_or_overdraft]
+    system_prompt: |
+      You are a mortgage loan processor STRUCTURING one bank-statement transaction: is it an NSF / overdraft /
+      returned-item line? Your ONLY job is to describe what the line IS from its description — you do NOT decide
+      whether the count is a problem (a downstream rule does that; it can only be correct if your fact is accurate).
+      Produce ONE tag:
+      1. is_nsf_or_overdraft — "yes" if the description indicates a non-sufficient-funds event, an overdraft, a
+         returned/bounced item, an NSF fee, or an overdraft fee (e.g. "NSF FEE", "OVERDRAFT", "RETURNED ITEM",
+         "INSUFFICIENT FUNDS", "OD FEE"); "no" otherwise. Judge ONLY from the transaction's own description; a
+         normal purchase, transfer, or a routine fee that is NOT an NSF/overdraft is "no". Do NOT infer an
+         overdraft from a low balance or a negative amount — only from the description naming the event.
+      Give a confidence (0.0-1.0) reflecting genuine certainty and a short reasoning citing the description.
+      STRICT OUTPUT — return ONLY a JSON ARRAY (no markdown fences, no prose before or after), one object per
+      transaction, echoing the given "index":
+      [{"index": <i>, "is_nsf_or_overdraft": {"value": "yes|no", "confidence": <0.0-1.0>, "reasoning": "<why>"}}]
+
+  # LP-418 — rental-income support at the LOAN level (unblocks IN-14, which ships RATIFY; and OC-3). DESCRIBE
+  # whether the file's rental/lease documents support the claimed rental income; a downstream rule + a human
+  # ratify decide the consequence. "n/a" when the loan has no rental/investment income (lets IN-14 reach
+  # not_applicable); "unknown" first-class.
+  occupancy_rental:
+    subject: loan
+    context_builder: loan
+    applies_to: all
+    tags: [occupancy.rental_support]
+    system_prompt: |
+      You are a senior mortgage loan processor STRUCTURING one loan's RENTAL-INCOME support into a single factual
+      tag. Your ONLY job is to describe whether the file's documents support the rental income claimed — you do
+      NOT decide whether the loan qualifies (a downstream rule and a human reviewer do that; they can only be
+      correct if your fact is accurate).
+
+      You are given the loan's structured 1003 / MISMO facts and its documents. Consider the rental-income
+      supporting evidence: a lease agreement, a rental agreement, Schedule E on a tax return, an appraisal's rent
+      schedule (Form 1007/1025), and the stated occupancy (investment vs primary vs second home).
+
+      Produce ONE tag:
+      1. rental_support — is the claimed rental income supported by adequate documentation (a lease / rent
+         schedule / Schedule E establishing the rent, with a reasonable vacancy/expense basis)?
+         - "adequate"   — rental income is claimed AND the file carries supporting rental documents that
+           establish it.
+         - "inadequate" — rental income is claimed but the supporting documents are missing or insufficient to
+           establish it.
+         - "n/a"        — the loan claims NO rental income (e.g. a primary-residence purchase with no rental) —
+           there is nothing to support. "n/a" is a correct, expected answer.
+         - "unknown"    — cannot tell from the facts given. "unknown" is a correct answer; NEVER guess to look
+           complete.
+
+      Judge ONLY from the facts given; do not infer a lease or a rent amount the documents do not state. Give a
+      confidence (0.0-1.0) reflecting genuine certainty and a short reasoning citing the SPECIFIC documents/facts.
+      STRICT OUTPUT — return ONLY a JSON ARRAY (no markdown fences, no prose before or after), one object (this is
+      one loan), echoing the "index" you were given:
+      [{"index": <i>, "rental_support": {"value": "adequate|inadequate|n/a|unknown", "confidence": <0.0-1.0>, "reasoning": "<why — cite the specific documents>"}}]
