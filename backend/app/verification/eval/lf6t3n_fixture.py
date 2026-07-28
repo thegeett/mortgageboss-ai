@@ -73,6 +73,11 @@ _BORROWER_MISMO: dict[str, SnapshotField] = {
     "borrower.2.is_primary": _f("false"),
     "borrower.2.employer.1.name": _f("Sterling Retail LLC"),
     "borrower.2.employer.2.name": _f("Cafe Bluebird"),
+    # LP-414: the subject property's stated 1003/MISMO purchase price (was ABSENT — the LP-407-2 gap), so
+    # property.purchase_price READS it. It matches the purchase agreement's sales_price (365000), so a future
+    # PC-2 SATISFIES on this clean anchor. NOT an occupancy signal — the occupancy AI group reasons only over
+    # property.occupancy + the declarations (none present here), so OC-2 stays couldnt_check (LP-414 A2).
+    "property.purchase_price": _f("365000.00"),
 }
 
 # Attribution by the RESOLVED holder name (LP-202: belongs_to is the evidence-based link). A document is
@@ -431,7 +436,12 @@ def build_lf6t3n_snapshot() -> Snapshot:
             )
         )
 
-    # 8) property_tax_bill x2
+    # 8) property_tax_bill x2. LP-414: the field names now match the property_tax_bill EXTRACTOR
+    # (annual_tax_amount / due_dates), not the placeholders (amount_due / due_date) LP-407-2 found — so
+    # housing.taxes_monthly READS the figure instead of seeing an absent field. (Two bills for two DIFFERENT
+    # properties — the borrowers' residences, not the subject 789 Birchwood — so the recipe still ABSTAINS on
+    # the conflict; the VALUE stays "unknown", now for the honest reason. A single-bill scenario materializes
+    # a real figure — see fire_path_scenarios.build_subject_tax_snapshot.)
     for i, (parcel, addr, amt) in enumerate(
         [
             ("14-22-301-004", "123 Maple Ave, Springfield IL 62704", "4820.00"),
@@ -447,18 +457,20 @@ def build_lf6t3n_snapshot() -> Snapshot:
                 property_address=addr,
                 tax_year="2025",
                 assessed_value="240000.00",
-                amount_due=amt,
-                due_date="2026-08-01",
+                annual_tax_amount=amt,
+                due_dates="2026-08-01",
             )
         )
 
-    # 9) purchase_agreement x1
+    # 9) purchase_agreement x1. LP-414: sales_price (the purchase_agreement EXTRACTOR's field), not the
+    # placeholder purchase_price LP-407-2 found — so contract.sales_price READS it. closing_date is UNCHANGED
+    # (PC-7's contract.days_until_closing == "1" is the realism anchor that must not move).
     entries.append(
         _doc(
             "pa1",
             "purchase_agreement",
             property_address="789 Birchwood Ln, Springfield IL 62711",
-            purchase_price="365000.00",
+            sales_price="365000.00",
             earnest_money_amount="7300.00",
             closing_date="2026-07-15",
             buyer_name="Jordan A Rivera",
