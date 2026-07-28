@@ -53,6 +53,12 @@ from app.verification.snapshot.tag import Tag
 #   supported — no production snapshot was ever persisted (LP-310), so a clean bump is safe.
 # v4 (LP-318) — ``CalcBreakdownLine.from_tag`` is populated (calc lineage); ``CalculationEntry``
 #   gains ``gated`` / ``gate_reason`` / ``confidence`` (fail-closed through the calculators).
+# LP-421 — DocumentEntry gains nested ``schedule_c`` / ``schedule_e`` (tax returns), the ADR-061
+#   first-class-typed-path pattern. This is a BACKWARD-COMPATIBLE ADDITIVE change (both fields default
+#   ``None``), so the version is NOT bumped: a v4 snapshot without the fields still validates (they default
+#   absent), and — unlike the v2 transactions bump — a committed golden fixture (lf6t3n_tagged_snapshot.json,
+#   v4) must keep loading. Bumping would trip the strict version validator on it, and the additive change
+#   preserves the byte-identical equivalence (D6) that a bump would break.
 SNAPSHOT_VERSION = 4
 
 # A snapshot cell is either a plain fact or a masked PII fact. The two are
@@ -159,6 +165,58 @@ class TransactionRecord(BaseModel):
     description: Field
 
 
+class ScheduleCRecord(BaseModel):
+    """One Schedule C (self-employment business) surfaced into the snapshot (LP-421).
+
+    The tax-return extractor already produces Schedule C as TYPED CORE
+    (``ScheduleC`` / ``_SCHEDULE_C_SPEC``), but ``build_document_fields`` dropped it
+    (a nested structure ``_scalar`` can't flatten). This is the first-class typed path
+    (ADR-061, as bank-statement transactions got), so a producer can read the
+    self-employment signal (IN-12) from the snapshot. Each field is an ordinary
+    :class:`Field` (nullable confidence, absent≠empty) — ``business_name`` /
+    ``net_profit`` are the consumer-relevant figures; ``gross_receipts`` /
+    ``total_expenses`` complete the record (the extractor's spec). No ``content_id``:
+    a schedule is document-level (read off the parent :class:`DocumentEntry`), not a
+    subject a rule enumerates — unlike a transaction.
+    """
+
+    model_config = {"frozen": True}
+
+    business_name: Field
+    gross_receipts: Field
+    total_expenses: Field
+    net_profit: Field  # the self-employment heart (IN-12)
+
+
+class ScheduleEPropertyRecord(BaseModel):
+    """One rental property on Schedule E (LP-421) — the inner level of the two-level shape."""
+
+    model_config = {"frozen": True}
+
+    address: Field
+    rents_received: Field  # the rental signal (IN-13)
+    total_expenses: Field
+    net_income: Field
+
+
+class ScheduleERecord(BaseModel):
+    """Schedule E (rental / supplemental income) surfaced into the snapshot (LP-421).
+
+    The TWO-LEVEL shape (the one most likely to be flattened): a ``properties`` tuple
+    of :class:`ScheduleEPropertyRecord` PLUS scalar totals. ``properties`` is a
+    ``tuple`` for immutability (the LP-204 frozen-nested lesson); it may be **empty**
+    (a Schedule E present with per-property detail absent) — distinct from the whole
+    Schedule E being absent (then ``DocumentEntry.schedule_e`` is ``None``, never a
+    fabricated empty record). Feeds the rental signal (IN-13).
+    """
+
+    model_config = {"frozen": True}
+
+    properties: tuple[ScheduleEPropertyRecord, ...]
+    total_net_rental_income: Field
+    depreciation: Field
+
+
 class DocumentEntry(BaseModel):
     """One document's contribution: type + resolved borrower(s) + extracted fields.
 
@@ -187,6 +245,14 @@ class DocumentEntry(BaseModel):
     belongs_to: tuple[BorrowerRef, ...] | None = None
     fields: dict[str, SnapshotField] = PydField(default_factory=dict)
     transactions: tuple[TransactionRecord, ...] | None = None
+    # LP-421 — tax-return schedules, surfaced via the ADR-061 typed path (dropped by
+    # ``build_document_fields`` before). ``None`` = absent (not a tax return, or the return
+    # carried no such schedule) — NEVER a fabricated empty record (absent≠empty). ``schedule_c``
+    # is a non-empty tuple when present (the self-employment signal, IN-12); ``schedule_e`` a
+    # single record whose own ``properties`` may be empty (the rental signal, IN-13). ``k1s`` is
+    # NOT surfaced — no consumer today (LP-421 D2).
+    schedule_c: tuple[ScheduleCRecord, ...] | None = None
+    schedule_e: ScheduleERecord | None = None
 
     @model_validator(mode="after")
     def _belongs_to_null_or_nonempty(self) -> DocumentEntry:

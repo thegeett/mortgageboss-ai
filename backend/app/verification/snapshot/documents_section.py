@@ -72,6 +72,9 @@ from app.verification.snapshot.fields import Field, FieldSource
 from app.verification.snapshot.model import (
     BorrowerRef,
     DocumentEntry,
+    ScheduleCRecord,
+    ScheduleEPropertyRecord,
+    ScheduleERecord,
     SnapshotField,
     TransactionRecord,
 )
@@ -82,6 +85,11 @@ _EXTRACTED = FieldSource.EXTRACTED
 # Document types that carry a nested transaction list (only bank statements today).
 _TRANSACTION_DOC_TYPES = frozenset({"bank_statement"})
 _TRANSACTIONS_KEY = "transactions"
+
+# LP-421 — document types that carry nested tax-return schedules (only tax returns today).
+_SCHEDULE_DOC_TYPES = frozenset({"tax_return"})
+_SCHEDULE_C_KEY = "schedule_c"
+_SCHEDULE_E_KEY = "schedule_e"
 
 # Extraction transaction_type values → credit (money in) / debit (money out). The
 # extractor's vocabulary is "deposit / withdrawal / fee / interest / transfer / ..."
@@ -337,6 +345,110 @@ def build_transactions(
     )
 
 
+# --------------------------------------------------------------------------- #
+# LP-421 — tax-return Schedule C / Schedule E surfacing (the ADR-061 typed path).
+# The extractor produces these as TYPED CORE, but build_document_fields drops them (a
+# nested structure _scalar can't flatten). These reshape the stored extraction's typed
+# schedule sub-structures into the snapshot's frozen record models — same coercion as the
+# flat core (a {value, source, confidence} entry → a Field), so a producer can read the
+# self-employment / rental signal FROM THE SNAPSHOT. Absent≠empty: nothing read → None
+# (never a fabricated empty record). No content_id: a schedule is document-level, not a
+# rule-enumerated subject (unlike a transaction), so it needs no id / fingerprint — which is
+# also why _document_base is left untouched and every content_id stays byte-identical.
+# --------------------------------------------------------------------------- #
+def _typed_field(entry: Any) -> Field:
+    """One extraction TypedField (``{value, source, confidence}``) → a snapshot ``Field``.
+
+    Mirrors ``build_document_fields``' non-PII branch: an absent/None/uncoercible value → an
+    absent ``Field`` (source/page dropped exactly as the flat core drops it, keeping only
+    ``FieldSource.EXTRACTED``); a present scalar → a ``Field`` carrying the model's nullable
+    per-field confidence FAITHFULLY. A schedule field is never PII (business name / amounts),
+    so no ``PiiField`` routing is needed.
+    """
+    if not isinstance(entry, dict):
+        return Field.missing()
+    scalar = _scalar(entry.get("value"))
+    if scalar is None:
+        return Field.missing()
+    return Field.present(
+        scalar, source=_EXTRACTED, confidence=coerce_optional_confidence(entry.get("confidence"))
+    )
+
+
+def build_schedule_c(
+    extracted: dict[str, Any], document_type: str | None
+) -> tuple[ScheduleCRecord, ...] | None:
+    """The tax return's Schedule C rows reshaped to :class:`ScheduleCRecord`\\s, or ``None``.
+
+    ``None`` = absent (not a tax return, no ``schedule_c`` list, or every entry empty) — the
+    self-employment signal is simply not present; NEVER a fabricated empty list. A non-empty
+    tuple otherwise. A fully-empty entry is dropped (mirrors the extractor's own
+    ``_parse_schedule_list`` — no hallucinated schedule)."""
+    if document_type not in _SCHEDULE_DOC_TYPES:
+        return None
+    raw = extracted.get(_SCHEDULE_C_KEY)
+    if not isinstance(raw, list):
+        return None
+    records: list[ScheduleCRecord] = []
+    for entry in raw:
+        if not isinstance(entry, dict):
+            continue
+        rec = ScheduleCRecord(
+            business_name=_typed_field(entry.get("business_name")),
+            gross_receipts=_typed_field(entry.get("gross_receipts")),
+            total_expenses=_typed_field(entry.get("total_expenses")),
+            net_profit=_typed_field(entry.get("net_profit")),
+        )
+        if not _all_absent(
+            rec.business_name, rec.gross_receipts, rec.total_expenses, rec.net_profit
+        ):
+            records.append(rec)
+    return tuple(records) or None  # empty → absent (None), never a fabricated empty tuple
+
+
+def build_schedule_e(
+    extracted: dict[str, Any], document_type: str | None
+) -> ScheduleERecord | None:
+    """The tax return's Schedule E reshaped to a :class:`ScheduleERecord`, or ``None``.
+
+    The two-level shape: a ``properties`` tuple + scalar totals. ``None`` = absent (not a tax
+    return, no ``schedule_e``, or nothing read) — NEVER a fabricated empty record. A present
+    Schedule E with no per-property detail keeps ``properties=()`` (empty, distinct from the
+    whole schedule being absent). A fully-empty property is dropped."""
+    if document_type not in _SCHEDULE_DOC_TYPES:
+        return None
+    raw = extracted.get(_SCHEDULE_E_KEY)
+    if not isinstance(raw, dict):
+        return None
+    properties: list[ScheduleEPropertyRecord] = []
+    raw_props = raw.get("properties")
+    if isinstance(raw_props, list):
+        for prop in raw_props:
+            if not isinstance(prop, dict):
+                continue
+            rec = ScheduleEPropertyRecord(
+                address=_typed_field(prop.get("address")),
+                rents_received=_typed_field(prop.get("rents_received")),
+                total_expenses=_typed_field(prop.get("total_expenses")),
+                net_income=_typed_field(prop.get("net_income")),
+            )
+            if not _all_absent(rec.address, rec.rents_received, rec.total_expenses, rec.net_income):
+                properties.append(rec)
+    total = _typed_field(raw.get("total_net_rental_income"))
+    depreciation = _typed_field(raw.get("depreciation"))
+    if not properties and total.absent and depreciation.absent:
+        return None  # nothing read anywhere → absent, not a fabricated empty record
+    return ScheduleERecord(
+        properties=tuple(properties),
+        total_net_rental_income=total,
+        depreciation=depreciation,
+    )
+
+
+def _all_absent(*fields: Field) -> bool:
+    return all(f.absent for f in fields)
+
+
 def _document_base(
     document_type: str | None,
     refs: tuple[BorrowerRef, ...],
@@ -395,6 +507,11 @@ class _ReshapedDoc:
     fields: dict[str, SnapshotField]
     field_sets: list[TransactionFieldSet] | None
     txn_contents: list[dict[str, Any]] | None
+    # LP-421 — tax-return schedules (None for every other document type). They need no
+    # content_id, so they are carried straight through to the DocumentEntry (not folded into
+    # the id fingerprint — content_ids stay byte-identical).
+    schedule_c: tuple[ScheduleCRecord, ...] | None
+    schedule_e: ScheduleERecord | None
 
 
 async def _reshape_and_assign_ids(
@@ -447,7 +564,15 @@ async def _reshape_and_assign_ids(
         field_sets = transaction_field_sets(extracted, document.document_type)
         txn_contents = None if field_sets is None else [_txn_content(fs) for fs in field_sets]
         reshaped.append(
-            _ReshapedDoc(document.document_type, refs, fields, field_sets, txn_contents)
+            _ReshapedDoc(
+                document.document_type,
+                refs,
+                fields,
+                field_sets,
+                txn_contents,
+                build_schedule_c(extracted, document.document_type),
+                build_schedule_e(extracted, document.document_type),
+            )
         )
 
     # Pass 2: assign stable, content-derived document ids (with a duplicate tiebreak), aligned to the
@@ -484,6 +609,8 @@ async def build_documents_section(db: AsyncSession, loan_file: LoanFile) -> list
                 transactions=build_transactions(
                     d.field_sets, document_content_id=doc_id, txn_contents=d.txn_contents
                 ),
+                schedule_c=d.schedule_c,  # LP-421 — None for every non-tax-return document
+                schedule_e=d.schedule_e,
             )
         )
     return entries

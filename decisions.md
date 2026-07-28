@@ -12388,3 +12388,55 @@ silently rot back into "just run a labeling round."
 **Cross-refs.** LP-395 (thin-n / empty-class), LP-398/399/401 (the blind-worksheet pattern and legitimate
 invented ambiguity), LP-406-4 (OC-1's tag measures declaration consistency; LF-6T3N states no occupancy), LP-418
 (the voe/offer/continuance fixtures), LP-419 (`income.type` unscored; IN-12's self-employment gate).
+
+## ADR-333: The extraction→snapshot boundary is lossy for nested typed structures — a signal can be extracted correctly and still be invisible to every producer (LP-421)
+
+**The finding (named).** A document type's extractor can produce a field as fully TYPED CORE and that field can
+still never reach a rule — because the extraction→snapshot mapping (`documents_section.build_document_fields`)
+flattens each field through `_scalar`, which returns `None` for any nested structure (a list or object) and the
+loop `continue`s. So `tax_return`'s `schedule_c` / `schedule_e` (self-employment / rental — typed, coerced,
+correct at extraction) were **dropped at the snapshot boundary**; every producer reads the snapshot, so the
+signal was gone before any producer ran. Extraction correctness is necessary but NOT sufficient for a signal to
+be usable — it must also be SURFACED.
+
+**The third instance of "built but not connected."** This is now a recognizable class:
+1. `DtiOverride` — applied in the DTI calculation but not a snapshot fact, so no rule could see the overridden
+   line (the LP-416 vacuity-sweep finding).
+2. `compute_self_employed_income` — a real, transparent calculator in services, never wired into
+   `snapshot.calculations`, so nothing feeds it (LP-323-IN-B).
+3. `schedule_c` / `schedule_e` — extracted as typed core, dropped by `_scalar` at the snapshot boundary (this
+   ticket).
+The pattern: a component is BUILT and CORRECT in its own layer, but the connective tissue to the layer that
+consumes it was never laid. The census lesson generalizes — "is it produced?" is the wrong question; "is it
+reachable by the consumer?" is the right one.
+
+**The fix pattern (ADR-061, reused not reinvented).** `bank_statement` transactions were the same shape of
+problem — a nested list `_scalar` can't flatten — solved by a FIRST-CLASS TYPED PATH: a frozen record model
+(`TransactionRecord`), an optional field on `DocumentEntry`, a reshape gated on `document_type`, and the same
+per-field coercion the flat core uses. LP-421 extends exactly this: `ScheduleCRecord` (a list, like transactions)
+and `ScheduleERecord` (the two-level shape — an object carrying a `properties` tuple), reshaped by
+`build_schedule_c` / `build_schedule_e`, surfaced as `DocumentEntry.schedule_c` / `.schedule_e`. No new
+nested-data mechanism was introduced (the standing stop condition). Two deliberate differences from transactions:
+schedules carry **no `content_id`** (a schedule is document-level, not a rule-enumerated subject), and are **not
+folded into the document content-id fingerprint** (`_document_base` untouched) — so every existing document's
+`fields` and `content_id` stay byte-identical (the equivalence that mattered most, `build_document_fields` being
+shared by every type).
+
+**What was surfaced, for which consumer.** `schedule_c` (business_name / gross_receipts / total_expenses /
+**net_profit**) for the self-employment signal (IN-12); `schedule_e` (total_net_rental_income / depreciation +
+**properties**[address / **rents_received** / total_expenses / net_income]) for the rental signal (IN-13). `k1s`
+was NOT surfaced — no consumer today (surfacing unused structure is cost with no benefit). Absent≠empty: no
+schedule → `None`, never a fabricated empty record.
+
+**The STARTER-extractor caveat the downstream rules inherit.** `tax_return`'s prompt is explicitly a
+`STARTER PROMPT — REPLACE WITH / MERGE INTO THE POC + PRIYA TAX-RETURN PROMPT`, and a tax return is "the most
+varied, multi-schedule … tested only against constructed inputs is especially risky." **This plumbing makes the
+schedules REACHABLE; it does NOT make them TRUSTWORTHY.** A rule that gates on Schedule C presence would rest on
+an extractor never validated against a real return. The honest ending is *reachable now; trustworthy after golden
+files* — the producer (income.type / is_self_employed mapping) and the golden-file validation are their own later
+tickets; LP-421 surfaced the structure only.
+
+**Cross-refs.** ADR-061 (the transactions typed path), LP-302a (`DocumentEntry.transactions`), the LP-420
+follow-up investigation (income.type's self_employment/rental structurally unreachable — this is its plumbing
+half), LP-419 (`build_self_employed_no_history_snapshot`, a flat stub, left alone), ADR-330/LP-416 (`DtiOverride`
+not a snapshot fact), LP-323-IN-B (`compute_self_employed_income` unwired).

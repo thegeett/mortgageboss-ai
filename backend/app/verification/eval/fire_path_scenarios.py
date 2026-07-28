@@ -78,6 +78,10 @@ _LOAN_SELF_EMPLOYED = UUID(
 _SE_BORROWER = UUID(
     "95000000-0000-4000-8000-0000000001aa"
 )  # LP-419 — the self-employed borrower id
+_LOAN_SCHEDULES = UUID(
+    "95000000-0000-4000-8000-000000000012"
+)  # LP-421 — a tax return with real Schedule C / E
+_SCHED_BORROWER = UUID("95000000-0000-4000-8000-0000000001bb")  # LP-421 — the schedules borrower id
 _RUN = UUID("95000000-0000-4000-8000-0000000000ff")
 # The file (snapshot) date every closing date is measured against (deterministic — never a wall-clock now()).
 _FILE_DATE = datetime(2026, 7, 1, tzinfo=UTC)
@@ -551,6 +555,76 @@ def build_self_employed_no_history_snapshot() -> Snapshot:
     )
 
 
+# --------------------------------------------------------------------------- #
+# LP-421 — a tax return carrying REAL nested Schedule C (self-employment) + Schedule E (rental, 2 properties),
+# surfaced THROUGH the extraction→snapshot mapping (build_schedule_c / build_schedule_e). LP-419's stub baked
+# FLAT fields (no schedules, materialized via a stub reasoner); this proves the two-level structure survives the
+# real mapping into the snapshot — the input a future producer (IN-12 / IN-13's next ticket) would read.
+# Standalone (95…), NOT LF-6T3N. The `extracted` dict below is the exact stored shape the tax-return extractor
+# produces (each field a {value, source, confidence} TypedField dump).
+# --------------------------------------------------------------------------- #
+def build_tax_return_with_schedules_snapshot() -> Snapshot:
+    """One borrower with a tax_return whose Schedule C (net_profit 82000) and Schedule E (2 properties, rents
+    18000 / 9600) reach the snapshot via build_schedule_c / build_schedule_e — the LP-421 typed path proven end
+    to end. The flat 1040 core (tax_year / filing_status) surfaces as ordinary fields, unchanged."""
+    from app.verification.snapshot.documents_section import build_schedule_c, build_schedule_e
+
+    extracted = {
+        "tax_year": {"value": "2025", "source": None, "confidence": None},
+        "filing_status": {"value": "single", "source": None, "confidence": None},
+        "schedule_c": [
+            {
+                "business_name": {
+                    "value": "Enterline Woodworks",
+                    "source": None,
+                    "confidence": 0.9,
+                },
+                "gross_receipts": {"value": "140000.00", "source": None, "confidence": None},
+                "total_expenses": {"value": "58000.00", "source": None, "confidence": None},
+                "net_profit": {"value": "82000.00", "source": None, "confidence": 0.9},
+            }
+        ],
+        "schedule_e": {
+            "total_net_rental_income": {"value": "21000.00", "source": None, "confidence": None},
+            "depreciation": {"value": "6600.00", "source": None, "confidence": None},
+            "properties": [
+                {
+                    "address": {
+                        "value": "12 Oak St, Rivertown IL",
+                        "source": None,
+                        "confidence": None,
+                    },
+                    "rents_received": {"value": "18000.00", "source": None, "confidence": None},
+                    "total_expenses": {"value": "7200.00", "source": None, "confidence": None},
+                    "net_income": {"value": "10800.00", "source": None, "confidence": None},
+                },
+                {
+                    "address": {
+                        "value": "9 Elm Ave, Rivertown IL",
+                        "source": None,
+                        "confidence": None,
+                    },
+                    "rents_received": {"value": "9600.00", "source": None, "confidence": None},
+                    "total_expenses": {"value": "3400.00", "source": None, "confidence": None},
+                    "net_income": {"value": "6200.00", "source": None, "confidence": None},
+                },
+            ],
+        },
+    }
+    ref = BorrowerRef(borrower_id=_SCHED_BORROWER, name="Sam Enterline")
+    tax_doc = DocumentEntry(
+        content_id="95-1040-sched",
+        document_type="tax_return",
+        belongs_to=(ref,),
+        fields={"tax_year": _f("2025"), "filing_status": _f("single")},  # the flat core, unchanged
+        schedule_c=build_schedule_c(extracted, "tax_return"),
+        schedule_e=build_schedule_e(extracted, "tax_return"),
+    )
+    return _snapshot(
+        _LOAN_SCHEDULES, [tax_doc], {"borrower.1.borrower_id": _f(str(_SCHED_BORROWER))}
+    )
+
+
 # The expected fired/materialized outcomes — recorded HERE / in tests, never predicted in prose (LP-337).
 EXPECTED_TAXES_MONTHLY = "500.00"  # 6000 / 12
 EXPECTED_HOA_MONTHLY = "300.00"  # 300 monthly
@@ -578,5 +652,6 @@ __all__ = [
     "build_self_employed_no_history_snapshot",
     "build_statement_break_snapshot",
     "build_subject_housing_snapshot",
+    "build_tax_return_with_schedules_snapshot",
     "build_voe_offer_labeling_snapshot",
 ]
