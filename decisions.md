@@ -12440,3 +12440,46 @@ tickets; LP-421 surfaced the structure only.
 follow-up investigation (income.type's self_employment/rental structurally unreachable — this is its plumbing
 half), LP-419 (`build_self_employed_no_history_snapshot`, a flat stub, left alone), ADR-330/LP-416 (`DtiOverride`
 not a snapshot fact), LP-323-IN-B (`compute_self_employed_income` unwired).
+
+## ADR-334: A tag has exactly one producer — a schedule signal cannot feed an AI-only tag; and a DETERMINISTIC producer is the escape hatch from ADR-332's synthetic-calibration limit (LP-422)
+
+**Two findings from wiring the LP-421 schedules to a consumable tag.**
+
+**1. A tag has exactly one producer — so a fact cannot join an AI-produced tag.** `tag_production.yaml` is a
+`dict[tag_id → one declaration]` with a single `mode`; `load_declarations()` keys one `TagDeclaration` per
+tag_id. So a tag is EITHER `ai` OR `derived` OR `parsed` — never mixed, never two producers on different document
+types. `income.type` is `ai` (`income_amounts`, reading pay_stub/w2/1003). The natural instinct — "add a
+deterministic producer that sets `income.type = self_employment` / `rental` from a tax return's schedules" — is
+therefore **structurally impossible**, not merely inadvisable. The consequence for any future mixed-source
+signal: a deterministic fact that wants to reinforce or stand in for an AI tag needs its OWN tag (at the subject
+the consumer reads), not a second producer on the AI tag. LP-422 did exactly this: it did not touch
+`income.type`; it extended the borrower-level derived `income.is_self_employed` (Schedule C presence, reusing the
+LP-418 tag IN-12 already gates on) and added a new borrower-level derived `income.has_rental_income` (Schedule E
+presence, the same shape, for IN-13's rental scope).
+
+**2. A DETERMINISTIC producer is the escape hatch from ADR-332.** ADR-332 named the limit of synthetic
+calibration: an AI JUDGMENT tag whose correct label is determined by the fixture we invent cannot be calibrated
+on synthetic data (income.type's self_employment/rental were excluded from labeling for exactly this). The escape
+hatch, named here: **where a FACT can substitute for the judgment, no labeling round is needed at all.** Schedule
+C / Schedule E PRESENCE is a fact (a form is attached or not), not a judgment — so a deterministic producer reads
+it with no AI, no worksheet, no Priya bar. This is why LP-422 unblocks the self-employment / rental scope that
+LP-420 could not calibrate: it replaced the un-calibratable judgment (what income TYPE is this?) with a
+calibration-free fact (is a Schedule C/E present?). The reusable rule: before commissioning a calibration round
+for a scope signal, ask whether a surfaced structural FACT already answers it deterministically.
+
+**Presence, not value (ADR-324 reaffirmed).** The producer gates on PRESENCE, never a threshold: a Schedule C
+showing a LOSS is still self-employment; a Schedule E for a zero-rent year is still rental. "Is $X of net profit
+enough to count" is a RULE question, not a tag question. Fail closed: no schedule → `unknown` (or, for a filed
+return with no Schedule E, `no`) — NEVER a fabricated `base` (a tax return without a Schedule C does not make the
+borrower a wage earner; it says nothing).
+
+**The STARTER-extractor caveat the consuming rules inherit (surfaced, not decided — LP-421/ADR-333).** The
+tax-return extractor is a self-declared STARTER, never validated against a real return. This producer faithfully
+translates whatever it surfaces, so IN-12 / IN-13 would activate on an UNVALIDATED extraction path. The failure
+mode is milder than a misread number — a wrong SCOPE (a rule applies or not) rather than a wrong figure — but no
+golden files exist. LP-422 surfaces this as the open question the RULE ticket must answer; it writes no rule and
+decides no activation.
+
+**Cross-refs.** ADR-332 (synthetic-calibration limit — this is its escape hatch), ADR-333 / LP-421 (the surfaced
+schedules), LP-418 (`income.is_self_employed`, the reused tag), LP-419 (IN-12 gates on it), ADR-324 (tags
+describe, rules judge), LP-420 (why income.type couldn't be calibrated).

@@ -1237,11 +1237,29 @@ def _income_is_self_employed(
                     carry this, unlike a NUMBER tag — the LP-407-2 D5 gap).
       * "unknown" — no income document is attributed to the borrower, or none carries a readable income.type
                     -> fail-closed (never a fabricated "no").
+    LP-422: a SECOND, stronger deterministic source — Schedule C PRESENCE on the borrower's attributed tax
+    returns (the LP-421 surfaced DocumentEntry.schedule_c). This is the signal income.type structurally cannot
+    carry: self-employment lives on a tax return, which income_amounts (income.type's producer) does not read.
+    Presence, NOT net_profit — a Schedule C showing a LOSS is still self-employment (ADR-324: tags describe,
+    rules judge; no threshold). Checked FIRST (it needs only the documents, not the tags layer).
+
     NO threshold. Per-borrower: borrower A's documents never speak for borrower B (belongs_to attribution)."""
     if not isinstance(subject_raw, BorrowerSubject):
         return _UNKNOWN, "self-employment is a per-borrower recipe (needs a borrower subject)"
-    if snapshot.documents.absent or snapshot.tags.absent:
-        return _UNKNOWN, f"borrower {subject_id}: no documents/tags to read an income type from"
+    if snapshot.documents.absent:
+        return (
+            _UNKNOWN,
+            f"borrower {subject_id}: no documents to read a self-employment signal from",
+        )
+    # LP-422 — Schedule C presence is a DETERMINISTIC self-employment FACT (a filed Schedule C business).
+    for entry in _borrower_attributed_documents(snapshot, subject_id):
+        if entry.schedule_c:
+            return "yes", (
+                f"borrower {subject_id}: an attributed tax return has a Schedule C (a self-employment "
+                "business) — presence, not amount (a loss still counts)"
+            )
+    if snapshot.tags.absent:
+        return _UNKNOWN, f"borrower {subject_id}: no tags to read an income type from"
     any_type_seen = False
     for entry in _borrower_attributed_documents(snapshot, subject_id):
         tag = snapshot.tags.by_subject.get(entry.content_id, {}).get("income.type")
@@ -1260,6 +1278,47 @@ def _income_is_self_employed(
     return "no", (
         f"borrower {subject_id}: the borrower's income documents carry income types, none self-employment "
         "(the 2-year self-employment requirement is not applicable)"
+    )
+
+
+def _income_has_rental_income(
+    snapshot: Snapshot, subject_id: str, subject_raw: object
+) -> tuple[JsonValue, str]:
+    """income.has_rental_income — PER BORROWER: does this borrower have rental income? For IN-13's rental scope.
+
+    The rental analog of income.is_self_employed (LP-418), and the SAME ADR-332 escape hatch: a DETERMINISTIC
+    read of Schedule E PRESENCE (the LP-421 surfaced DocumentEntry.schedule_e) on the borrower's attributed tax
+    returns — NO AI, NO calibration round (rental presence is a FACT, not a judgment). income.type cannot carry
+    this: rental income lives on Schedule E, which income_amounts (income.type's producer) does not read, and a
+    tag has exactly one producer (income.type is AI-only) — so this is a distinct borrower-level tag, not a
+    second producer for income.type. Presence, NOT rents_received: a Schedule E can exist for a property with no
+    rents in a given year and it is still rental activity (ADR-324: tags describe, rules judge; no threshold).
+    DESCRIPTIVE enum:
+      * "yes"     — an attributed tax return carries a Schedule E.
+      * "no"      — the borrower has an attributed tax return, but NONE carries a Schedule E (filed, no rental)
+                    -> lets IN-13 reach not_applicable for a non-rental borrower (an enum can carry this).
+      * "unknown" — no tax return is attributed to the borrower -> fail-closed (never a fabricated "no").
+    Per-borrower: borrower A's documents never speak for borrower B (belongs_to attribution)."""
+    if not isinstance(subject_raw, BorrowerSubject):
+        return _UNKNOWN, "rental income is a per-borrower recipe (needs a borrower subject)"
+    if snapshot.documents.absent:
+        return _UNKNOWN, f"borrower {subject_id}: no documents to read a rental signal from"
+    saw_tax_return = False
+    for entry in _borrower_attributed_documents(snapshot, subject_id):
+        if entry.document_type == "tax_return":
+            saw_tax_return = True
+            if entry.schedule_e is not None:
+                return "yes", (
+                    f"borrower {subject_id}: an attributed tax return has a Schedule E (rental income) — "
+                    "presence, not amount (a zero-rent year still counts)"
+                )
+    if saw_tax_return:
+        return "no", (
+            f"borrower {subject_id}: the borrower's tax return(s) carry no Schedule E "
+            "(no rental income reported)"
+        )
+    return _UNKNOWN, (
+        f"borrower {subject_id}: no tax return is attributed to the borrower to read a rental schedule from"
     )
 
 
@@ -1491,8 +1550,12 @@ _RECIPES: dict[str, Recipe] = {
     "stmt_continuity": _stmt_continuity,
     "income_employer_coverage": _income_employer_coverage,
     # LP-418 — a DETERMINISTIC per-borrower self-employment signal (promotes the measured income.type), for
-    # IN-12. No new AI, no calibration round (the win). "no" lets IN-12 reach not_applicable.
+    # IN-12. No new AI, no calibration round (the win). "no" lets IN-12 reach not_applicable. LP-422 extended
+    # it: Schedule C presence (LP-421) is a second, stronger deterministic source income.type cannot carry.
     "income_is_self_employed": _income_is_self_employed,
+    # LP-422 — the rental analog for IN-13: Schedule E presence -> a per-borrower rental fact (the ADR-332
+    # escape hatch — a fact substitutes for a judgment, so no labeling round). Presence, not amount.
+    "income_has_rental_income": _income_has_rental_income,
     # LP-407-2 — the cheap Bucket 2.5 sub-wave: the loan-level promotion PC-2 needs + the DT-2/DT-4
     # monthly-conversion producers (all mirror existing recipes; tags describe, rules judge). DT-5 is NOT
     # here — it is a vacuous self-compare with no independent operand today (LP-407-2 D1).
