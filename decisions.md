@@ -12354,11 +12354,16 @@ a GENUINE judgment the labeler uniquely settles (does "Jordan M Rivera" match bo
 NOT legitimate when the invented content DETERMINES its own label — then Priya would be "labeling our own
 invention," measuring nothing. Four tags fall on the wrong side:
 
-- **`income.type` (IN-12, IN-13).** 25 rows but one-sided (23/25 base wage), and — decisively — the values its
-  consuming rules need are STRUCTURALLY unreachable: its producer `income_amounts` reads only `pay_stub`/`w2`,
-  so `self_employment` (IN-12's gate) lives on tax returns it never sees, and `rental` (IN-13) on Schedule E /
-  leases. A varied worksheet would require inventing pay-stubs pre-stamped "bonus"/"commission" (the type IS the
-  label) — or a producer change (read tax returns). Not a labeling round.
+- **`income.type` (IN-12, IN-13).** 25 rows but one-sided (23/25 base wage), with an EMPTY positive class for
+  `self_employment` (IN-12's gate) and `rental` (IN-13). Correction (LP-420 review): this is a FIXTURE gap, not
+  a structural one — `income_amounts.applies_to` is `[pay_stub, w2, uniform_residential_loan_application]` and
+  its `type` value space already includes `self_employment`/`rental`, so a self-employed / rental **1003** (the
+  shape LP-419's self-employed fixture uses, `employment_type=self_employed`) WOULD produce those values; the
+  producer need not be changed to read tax returns. The reason to exclude it is the ADR's OWN thesis: authoring
+  such a 1003 STAMPS the income type, so labeling `income.type` on it reads back our invention (the type IS the
+  label) — a labeling-our-own-invention exclusion, not a reachability one. The genuine unblock is a REAL file
+  carrying a self-employment / rental income document, or a materially different fixture whose type is not the
+  authored field.
 - **`txn.is_nsf_or_overdraft` (AS-7).** n=0 anywhere. A line reading "NSF FEE" pre-answers itself; the only
   genuinely-ambiguous cases (an overdraft-protection transfer, an unlabeled $35 fee) turn on how the tag is
   DEFINED — a prompt question, not an accuracy measurement. Needs REAL bank statements with genuine NSF activity.
@@ -12368,16 +12373,17 @@ invention," measuring nothing. Four tags fall on the wrong side:
 
 **The rule (named).** Before generating a calibration worksheet, ask not only "is n>=6?" but "would the labeler
 be judging a GENUINE ambiguity, or reading back the content we authored?" A tag whose correct label is
-determined by the fixture we invent is **not calibratable on synthetic data** — it needs real files (or, for
-`income.type`, a producer that reads the document types the value actually lives on). This is the counterpart to
+determined by the fixture we invent is **not calibratable on synthetic data** — it needs real files (for
+`income.type`, a real self-employment / rental income document, since authoring one stamps the type we would be
+"measuring" — NOT a producer change; `income_amounts` already reads the 1003 where those types can appear). This is the counterpart to
 LP-395's thin-n / empty-class lesson: n can be sufficient and the tag still un-calibratable, because the
 DISTRIBUTION is authored, not observed.
 
 **What shipped.** Worksheets for the three tags that pass (a genuine two/multi-sided distribution on LP-418's
 committed fixtures): `income.voe_present`, `income.offer_letter_present` (IN-8, IN-9) and `income.continuance_3yr`
-(advances IN-13). The four exclusions are reported with what each actually needs (a producer change / real bank
-statements / real occupancy files), and pinned by census-guard tests so they cannot silently rot back into "just
-run a labeling round."
+(advances IN-13). The four exclusions are reported with what each actually needs (a real self-employment/rental
+income file / real bank statements / real occupancy files), and pinned by census-guard tests so they cannot
+silently rot back into "just run a labeling round."
 
 **Cross-refs.** LP-395 (thin-n / empty-class), LP-398/399/401 (the blind-worksheet pattern and legitimate
 invented ambiguity), LP-406-4 (OC-1's tag measures declaration consistency; LF-6T3N states no occupancy), LP-418

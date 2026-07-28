@@ -4,8 +4,13 @@ The plan was ONE Priya session for the six/seven tags blocking IN-8, IN-9, IN-12
 The D1 labelability census (docs/tickets/LP-420.md) EXCLUDED four of them — never spend her time on a thin or
 one-sided tag (the LP-395 / AS-6 lesson):
 
-  * income.type — 25 rows but one-sided (23/25 base wage); its consuming values self_employment (IN-12) and
-    rental (IN-13) are STRUCTURALLY unreachable (income_amounts reads only pay_stub/w2, never tax returns).
+  * income.type — 25 rows but one-sided (23/25 base wage): the consuming values self_employment (IN-12) and
+    rental (IN-13) have NO positive class in the current fixtures (n=0 each). NB this is a FIXTURE gap, not a
+    structural one — income_amounts.applies_to is [pay_stub, w2, uniform_residential_loan_application] and its
+    `type` value space includes self_employment/rental, so a self-employed / rental 1003 (the shape LP-419's
+    build_self_employed_no_history_snapshot already uses, employment_type=self_employed) WOULD produce those
+    values. Excluded because the labelable positive class does not exist YET; the remedy is a self-employed /
+    rental 1003 fixture (validated against the real income_amounts perception), NOT a producer change.
   * txn.is_nsf_or_overdraft — n=0; per-transaction; building means inventing bank lines whose NSF label we'd
     then "judge" (labeling our own invention).
   * occupancy.rental_support / occupancy.consistent_with_signals — n=0 and LOAN-subject (one row per loan);

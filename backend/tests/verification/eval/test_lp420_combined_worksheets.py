@@ -1,7 +1,8 @@
 """LP-420 — the combined blind labeling worksheets (the three income-docs tags that passed the D1 census).
 
-Four of the seven blocking tags were EXCLUDED (income.type one-sided + its consuming values structurally
-unreachable; txn.is_nsf_or_overdraft n=0; the two loan-subject occupancy tags needing invented loans). Three
+Four of the seven blocking tags were EXCLUDED (income.type one-sided — its self_employment/rental positive class
+is a FIXTURE gap, not structural; txn.is_nsf_or_overdraft n=0; the two loan-subject occupancy tags needing
+invented loans). Three
 passed with a genuine two/multi-sided distribution on LP-418's committed fixtures. These pin: the sheets are
 BLIND (no golden/prediction/AI-reasoning), show the allowed VALUES but not the model's decision rules, order the
 rows so answers do not cluster, are deterministic + keyless, and are committable (synthetic, no PII). Plus the D1
@@ -177,9 +178,12 @@ def test_no_real_pii_markers() -> None:
 # D1 CENSUS GUARDS — the four exclusions, pinned so they cannot silently rot
 # ======================================================================= #
 def test_income_type_is_one_sided_on_the_fixtures() -> None:
-    # income.type has rows, but they are one-sided base wage — self_employment (IN-12) and rental (IN-13) are
-    # STRUCTURALLY unreachable from pay_stub/w2 (income_amounts' only doc types). So it was EXCLUDED; a base-only
-    # worksheet would not unblock IN-12/IN-13. If a future fixture adds typed income docs this guard flips.
+    # income.type has rows, but they are one-sided base wage: the current calibration fixture declares no
+    # self-employment, so the self_employment (IN-12) / rental (IN-13) positive class is empty. This is a FIXTURE
+    # gap, NOT structural — income_amounts.applies_to includes uniform_residential_loan_application and its
+    # `type` value space includes self_employment/rental, so a self-employed / rental 1003 WOULD produce them.
+    # So income.type was excluded because the positive class does not exist YET; a self-employed 1003 fixture (the
+    # LP-419 shape) flips this guard — the remedy is a fixture, not a producer change.
     from app.verification.eval.income_scenarios import build_income_calibration_snapshot
 
     rows = [
@@ -187,7 +191,9 @@ def test_income_type_is_one_sided_on_the_fixtures() -> None:
     ]
     assert len(rows) >= 6  # enough by COUNT — but...
     has_self_employment = any("self_employ" in r.context.lower() for r in rows)
-    assert not has_self_employment  # ...the value IN-12 needs cannot appear here
+    assert (
+        not has_self_employment
+    )  # ...this fixture declares no self-employment (the empty positive class)
 
 
 def test_the_two_occupancy_tags_are_loan_subject_and_have_no_fixture_rows() -> None:
