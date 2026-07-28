@@ -31,18 +31,24 @@ _JUDGMENT_CSV = Path(__file__).resolve().parents[4] / "docs/calibration/lf6t3n-l
 
 
 # --------------------------------------------------------------------------- #
-# A) IN-12 — the stale bar is corrected; the rule stays needs-producer
+# A) IN-12 — the producer blocker is RESOLVED (LP-419); a calibration blocker remains
 # --------------------------------------------------------------------------- #
-def test_in12_bar_is_needs_producer_naming_the_real_blocker() -> None:
+def test_in12_bar_producer_blocker_resolved_calibration_blocker_remains_lp419() -> None:
+    # LP-396 pinned IN-12 as needs-producer (no borrower-level self-employment signal). LP-418 shipped the
+    # producer and LP-419 re-scoped IN-12 to per_borrower + gated it on income.is_self_employed. So the bar is
+    # no longer needs-producer — it is not-calibratable-yet: the self-employment SCOPE gate rests on income.type,
+    # which is still unscored (the IN-13 blocker). Still not validated, still held.
     bar = load_activation_bars()["IN-12"]
-    assert bar.status == "needs-producer"  # was the stale not-calibratable-yet
+    assert (
+        bar.status == "not-calibratable-yet"
+    )  # was needs-producer; the producer blocker is resolved
     assert bar.threshold is None and not bar.validated
     low = bar.rationale.lower()
-    assert "self-employment" in low and "per_borrower" in low  # the wiring + specificity blocker
-    assert "measured" in low  # explicitly says the tag IS measured (not the stale "unscored")
-    # the corrected text asserts the blocker is NOT calibration (it may quote the old stale wording to explain)
-    assert "not calibration-blocked" in low
-    assert "producer" in low  # names the real fix — a borrower-level self-employment producer
+    assert (
+        "self-employment" in low and "per_borrower" in low
+    )  # the gate that distinguishes IN-12 from IN-11
+    assert "income.type" in low and "unscored" in low  # the REMAINING blocker, named
+    assert "resolved" in low  # the producer/structural-death blocker is explicitly resolved
 
 
 def test_in12_borrower_level_self_employment_signal_now_exists_lp418() -> None:

@@ -332,30 +332,35 @@ IN-11:
     lacking history, not just variable) is a separate ticket. Below-bar/unknown -> needs_review (LP-376-B).
 
 IN-12:
-  # LP-396 corrected the STALE text: has_2yr_history is now MEASURED 100% (LP-393-6) — NOT unscored, so this is
-  # not a calibration block. IN-12's real blocker is WIRING + a missing PRODUCER: it enumerates per_document
-  # (tax_return) while has_2yr_history is produced per_borrower, so the rule can't consume it (structurally
-  # dead — the IN-10/IN-11 class). The naive per_borrower re-scope is FORBIDDEN (LP-390-2a / ADR-310): it
-  # collapses IN-12 into IN-11 (both read the income-type-agnostic tag). Keeping IN-12 self-employment-specific
-  # needs a BORROWER-LEVEL self-employment signal that does NOT exist (income.type is subject:document;
-  # income_stability produces no income-type tag). -> needs-producer, not not-calibratable-yet.
-  status: needs-producer
+  # LP-419 — the PRODUCER blocker is RESOLVED. LP-418 shipped income.is_self_employed (borrower-subject,
+  # deterministic promotion of income.type) and LP-419 re-scoped IN-12 to per_borrower with an applicability
+  # gate on income.is_self_employed == yes. That gate is what distinguishes IN-12 from IN-11 (has_2yr_history
+  # is income-type-agnostic; the forbidden bare re-scope would fire IDENTICALLY to IN-11 — ADR-310). So IN-12
+  # is no longer needs-producer / structurally dead. A CALIBRATION blocker remains: the self-employment SCOPE
+  # gate rests on income.type, which is THINLY MEASURED (n=2, LP-395) / UNSCORED (LP-380/LP-394) — the EXACT
+  # IN-13 blocker (IN-13 also reads income.type -> not-calibratable-yet). LP-394: income.type "clears IN-8,
+  # IN-9, IN-13 in one pass" — IN-12 joins that wave. Fail-closed: hold until income.type is scored + signed
+  # off. So needs-producer -> not-calibratable-yet; still is_eligible=False (ACTIVE unchanged).
+  status: not-calibratable-yet
   ships: auto
   threshold: null
   validated: false
-  load_bearing_ai_tags: [income.has_2yr_history]
+  # has_2yr_history (the VERDICT tag) is measured 100% / Priya-validated at 0.9 via IN-11; income.type (the
+  # SCOPE gate, transitively via the derived is_self_employed) is the unscored input that holds IN-12.
+  load_bearing_ai_tags: [income.has_2yr_history, income.type]
   fp_fn: "FN (self-employment without history) >> FP"
   rationale: >-
-    has_2yr_history is MEASURED (100%, LP-393-6) — the tag is NOT unscored, so IN-12 is not calibration-blocked
-    (the LP-394 finding: the old 'UNSCORED, blocked on calibration' text was stale). The real blocker is a
-    subject WIRING mismatch: IN-12 reads has_2yr_history per_document (tax_return) but it is produced
-    per_borrower, so on a real file IN-12 couldnt_checks (structurally dead). LP-390-2a established the fix is
-    NOT a subject re-scope (a naive per_borrower copy collapses IN-12 into IN-11 — both read the
-    income-type-agnostic has_2yr_history, destroying IN-12's self-employment specificity). Keeping it specific
-    needs a BORROWER-LEVEL self-employment signal that does not exist (income.type is subject:document;
-    income_stability produces no income-type tag). BLOCKED ON A PRODUCER (ADR-310) — a borrower-level
-    self-employment tag — its own ticket; not fixable by wiring here. The strict xfail
-    (test_in12_self_employment_history_is_structurally_dead_pending_a_producer) keeps this visible.
+    LP-419 resolved the LP-390-2a producer/structural-death blocker: IN-12 now enumerates per_borrower and
+    gates on income.is_self_employed == yes (LP-418's deterministic promotion of income.type), then checks the
+    borrower's income.has_2yr_history. The applicability gate is what keeps IN-12 self-employment-specific — the
+    forbidden bare per_borrower re-scope (ADR-310) would fire identically to IN-11 (both read the
+    income-type-agnostic has_2yr_history). The VERDICT tag has_2yr_history is measured 100% (LP-393-6) and
+    Priya-validated at 0.9 via IN-11 (LP-393-6 settled its meaning). The remaining blocker is the SCOPE gate:
+    income.is_self_employed promotes income.type, which is thinly measured (n=2, LP-395) / unscored (LP-380,
+    LP-394) — the same input that holds IN-13 (not-calibratable-yet). Until income.type is scored (the LP-394
+    wave that clears IN-8/IN-9/IN-13) and the bar is signed off, IN-12 holds (fail-closed). The former strict
+    xfail (test_in12_self_employment_history_is_structurally_dead_pending_a_producer) is now a passing FIRE
+    assertion (LP-419) — the debt ADR-310 deferred is delivered.
 
 IN-13:
   status: not-calibratable-yet

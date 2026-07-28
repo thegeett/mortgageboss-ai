@@ -531,45 +531,39 @@ async def test_in10_fires_end_to_end_through_real_income_stability_materializati
 # PIN #3 — IN-12 is a MINIMAL 2-year-return check, not a 1084 analysis
 # ================================================================================================= #
 def test_pin3_in12_minimal_check_only() -> None:
-    # What it DOES mechanically: fires on self-employment lacking a 2-year return history. NB (LP-390-1
-    # review): this hand-places has_2yr_history at the tax_return DOCUMENT subject — the path PRODUCTION no
-    # longer feeds, since LP-385 moved the tag to subject:borrower. So this asserts IN-12's evaluator wiring,
-    # NOT that IN-12 works on a real file; the structural-death guard is
-    # test_in12_..._structurally_dead_pending_a_producer below (LP-390-2a: blocked on a producer, ADR-310).
-    fire = _det_doc("IN-12", {"tr": ("tax_return", {"income.has_2yr_history": _tag("no")})})
-    assert fire[0].verdict is Verdict.FIRED
+    # LP-419: IN-12 is now per_borrower + gated on income.is_self_employed == yes (the TRUE path — _det_borrower
+    # puts both tags at the borrower subject, where the producers put them). What it DOES: a self-employed
+    # borrower lacking a 2-year history → FIRES.
+    se = {"income.is_self_employed": _tag("yes"), "income.has_2yr_history": _tag("no")}
+    assert _det_borrower("IN-12", se)[0].verdict is Verdict.FIRED
     # What it does NOT do: a 2-year history present → SATISFIED, even with declining net / missing add-backs
     # (K-1/1099/P&L). The real Form-1084 cash-flow analysis is NOT modeled (compute_self_employed_income
     # is unwired). PINNED (a separate ticket: wire the self-employment calculator).
-    passes = _det_doc("IN-12", {"tr": ("tax_return", {"income.has_2yr_history": _tag("yes")})})
-    assert passes[0].verdict is Verdict.SATISFIED  # no 1084 analysis — under-covers
+    passes = {"income.is_self_employed": _tag("yes"), "income.has_2yr_history": _tag("yes")}
+    assert _det_borrower("IN-12", passes)[0].verdict is Verdict.SATISFIED  # no 1084 — under-covers
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="IN-12 reads income.has_2yr_history per_document at the tax_return subject, but LP-385 produces that "
-    "tag at subject:borrower — so on a REAL file IN-12 is structurally dead (couldnt_check), the IN-10/IN-11 "
-    "class. LP-390-2a INVESTIGATED the fix and found it is NOT a subject re-scope: a naive per_borrower copy "
-    "collapses IN-12 into IN-11 (both read the income-type-agnostic has_2yr_history), and keeping it "
-    "self-employment-specific needs a BORROWER-LEVEL self-employment signal that does not exist (income.type "
-    "is subject:document; income_stability produces no income-type tag). So IN-12 is BLOCKED-ON-A-PRODUCER "
-    "(ADR-310), deferred to a producer subtask under LP-390-8 — NOT fixed by re-scoping. This stays xfail "
-    "(still dead) until that producer lands; XPASS ⇒ a real fix arrived and this must be rewritten.",
-)
-def test_in12_self_employment_history_is_structurally_dead_pending_a_producer() -> None:
-    # DESIRED production behavior: a self-employed borrower whose tax returns lack a 2-year history → IN-12
-    # FIRES. ACTUAL today: has_2yr_history lives at the BORROWER subject (LP-385), invisible to IN-12's
-    # per_document tax_return read → couldnt_check. LP-390-2a confirmed the fix is producer-first (a
-    # borrower-level self-employment signal), not a subject re-scope (that would duplicate IN-11). This pin
-    # keeps the deferred debt VISIBLE and fails loudly (XPASS) the moment IN-12 is genuinely fixed.
-    docs = [_doc("tr", dtype="tax_return", borrower=_B1)]
-    by_subject = {str(_B1): {"income.has_2yr_history": _tag("no")}}
-    verdicts = evaluate_deterministic_rule(
-        load_rule_spec("IN-12"), _snap(docs=docs, by_subject=by_subject)
-    )
-    assert any(
-        v.verdict is Verdict.FIRED for v in verdicts
-    )  # xfails today; XPASS ⇒ a producer-based fix landed
+def test_in12_self_employment_history_fires_the_debt_is_paid_lp419() -> None:
+    # LP-419 — the former strict xfail (test_in12_..._structurally_dead_pending_a_producer), RESOLVED.
+    # LP-418 shipped income.is_self_employed (borrower-subject, deterministic promotion of income.type) and
+    # LP-419 re-scoped IN-12 to per_borrower + gated it on that signal. So the DESIRED behavior is now real: a
+    # SELF-EMPLOYED borrower whose income lacks a 2-year history → IN-12 FIRES. This is a genuine passing
+    # assertion, NOT the old couldnt_check.
+    #
+    # THE FORBIDDEN-FIX GUARD (D1): the fire REQUIRES income.is_self_employed == yes. Without it (the old xfail
+    # body, has_2yr_history alone), IN-12 does NOT fire — it couldnt_checks (the gate is absent). If it fired on
+    # has_2yr_history alone, IN-12 would be firing IDENTICALLY to IN-11 — the ADR-310 forbidden re-scope. Both
+    # directions are asserted below, so the self-employment gate can never be silently dropped.
+    se_no_history = {
+        "income.is_self_employed": _tag("yes"),
+        "income.has_2yr_history": _tag("no"),
+    }
+    assert _det_borrower("IN-12", se_no_history)[0].verdict is Verdict.FIRED  # the debt is paid
+
+    # The gate is load-bearing: the SAME history, but WITHOUT the self-employment signal → NOT fired. This is
+    # precisely the state the old xfail encoded (couldnt_check); firing here would be the forbidden fix.
+    history_only = {"income.has_2yr_history": _tag("no")}
+    assert _det_borrower("IN-12", history_only)[0].verdict is Verdict.COULDNT_CHECK
 
 
 # ================================================================================================= #

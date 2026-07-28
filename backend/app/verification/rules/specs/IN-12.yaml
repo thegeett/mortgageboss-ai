@@ -5,37 +5,54 @@ kind: calculative        # rule_kinds.csv: IN-12 = calculative
 numeric_check: true
 criteria: >-
   Self-employment income requires 2 years of returns and a Form-1084-style analysis (net profit + add-
-  backs). This rule flags self-employment income that lacks a 2-year return history. NOTE (LP-323-IN-B):
-  the CSV marks this calculative and its rationale names a DEDICATED self-employment CALCULATOR — that
-  calculator exists in services (compute_self_employed_income) but is NOT wired into snapshot.calculations,
-  so a full 1084 analysis is not yet available. The current spec is a MINIMAL history check scoped to
-  tax-return documents (reported as a limitation; the calculator wiring is a follow-on, NOT this ticket).
+  backs). This rule flags a SELF-EMPLOYED borrower whose income lacks a 2-year history. LP-419: the rule
+  is GATED on self-employment (applicability predicate income.is_self_employed == yes) and then checks the
+  borrower's income.has_2yr_history. The gate is what distinguishes IN-12 from IN-11: has_2yr_history is
+  income-type-AGNOSTIC, so a bare per-borrower history read would fire IDENTICALLY to IN-11 (the forbidden
+  re-scope, ADR-310) — the self-employment applicability gate is the rule. A W-2 borrower (is_self_employed
+  == no) is NOT_APPLICABLE (out of scope, not a gap). NOTE (LP-323-IN-B): the CSV marks this calculative and
+  its rationale names a DEDICATED self-employment CALCULATOR — compute_self_employed_income exists in
+  services but is NOT wired into snapshot.calculations, so a full 1084 analysis is not yet available. The
+  current spec is a MINIMAL history check (reported as a limitation; the calculator wiring is a follow-on).
 applicability:
-  scope: the loan file's tax-return documents
-  trigger: once per tax-return document, on the self-employment income history
+  scope: each SELF-EMPLOYED borrower's income history
+  trigger: once per borrower whose income is self-employment, on the 2-year history
 required_inputs:
+  - name: is_self_employed
+    snapshot_path: tags.by_subject[<borrower_id>]["income.is_self_employed"]
+    description: >-
+      whether this borrower has self-employment income (yes/no/unknown; the applicability gate — LP-418
+      derived promotion of the per-document income.type to the borrower). yes → the rule applies; no →
+      not_applicable (a W-2 borrower is out of scope); absent/unknown → couldnt_check.
   - name: has_2yr_history
-    snapshot_path: tags.by_subject[<tax_return content_id>]["income.has_2yr_history"]
-    description: whether a 2-year history of self-employment income is evidenced (yes/no/unknown)
+    snapshot_path: tags.by_subject[<borrower_id>]["income.has_2yr_history"]
+    description: whether a 2-year history of the borrower's income is evidenced (yes/no/unknown; per-borrower)
 reference_values:
   priya_validated: false
-  threshold_needs_signoff: true
-  # The 1084 add-back method is Priya-validated per the CSV rationale; the calculator is not yet wired.
+  threshold_needs_signoff: true   # matches rule_kinds.csv (the gate of record)
+  # The "2 years" HISTORY test is a fixed Fannie B3-3.2 agency rule and Priya already settled has_2yr_history's
+  # meaning (LP-393-6: a terminated job's two years still counts). The sign-off the CSV flags is the 1084
+  # add-back METHOD (the follow-on calculator), not this history check — see the activation bar (LP-419): the
+  # hold is income.type scoring, not a threshold window.
   guideline_text: >-
     Fannie Mae Selling Guide B3-3.2 — self-employment income needs 2 years of returns and a cash-flow
-    analysis (Form 1084: net profit + add-backs). The method is Priya-validated; the calculator wiring
-    is a follow-on.
-subject_enumeration: per_document
+    analysis (Form 1084: net profit + add-backs). The 2-year standard is a fixed agency rule; the
+    1084 add-back method / calculator wiring is a follow-on.
+subject_enumeration: per_borrower
 subject_key_fields:
-  - content_id
-evidence_required: whether the self-employment income has a 2-year return history
+  - borrower
+evidence_required: whether the self-employed borrower's income has a 2-year history
 guideline_reference: "Fannie Mae Selling Guide B3-3.2 (self-employment income; Form 1084)."
 spec_version: 1
 deterministic:
+  # LP-419: the applicability gate on income.is_self_employed is what makes IN-12 != IN-11. It is a TAG
+  # predicate (the AS-8 pattern), NOT a document-type predicate — so it is not applicability_expected (a
+  # missing self-employment signal is couldnt_check via the fail-closed resolver, never a missing-document
+  # gap). is_self_employed == no → not_applicable (W-2, out of scope); absent/"unknown" → couldnt_check.
   applicability:
-    tag: document.document_type
+    tag: income.is_self_employed
     op: eq
-    value: tax_return
+    value: "yes"
   load_bearing_tags:
     - income.has_2yr_history
   gated_tags:
@@ -44,10 +61,13 @@ deterministic:
     - verdict: fired
       when_tags:
         - {tag: income.has_2yr_history, op: eq, value: "no"}
-      reasoning: self-employment income lacks a 2-year return history — a full analysis cannot be supported
+      reasoning: >-
+        self-employment income lacks a 2-year return history — a Form-1084 cash-flow analysis needs two
+        years of returns and cannot be supported
       how_to_fix: >-
         Obtain 2 years of business/personal tax returns and complete a cash-flow (Form 1084) analysis
         before using the self-employment income to qualify.
     - verdict: satisfied
       default: true
-      reasoning: a 2-year self-employment return history is present (a full 1084 analysis is a follow-on)
+      reasoning: >-
+        this self-employed borrower has a 2-year income history (a full 1084 analysis is a follow-on)

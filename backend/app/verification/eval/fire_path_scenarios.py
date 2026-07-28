@@ -72,6 +72,12 @@ _LOAN_VOE_OFFER = UUID(
 _LOAN_OTHER_INCOME = UUID(
     "95000000-0000-4000-8000-000000000010"
 )  # LP-418 — other-income continuance n
+_LOAN_SELF_EMPLOYED = UUID(
+    "95000000-0000-4000-8000-000000000011"
+)  # LP-419 — a self-employed borrower (IN-12 fire path)
+_SE_BORROWER = UUID(
+    "95000000-0000-4000-8000-0000000001aa"
+)  # LP-419 — the self-employed borrower id
 _RUN = UUID("95000000-0000-4000-8000-0000000000ff")
 # The file (snapshot) date every closing date is measured against (deterministic — never a wall-clock now()).
 _FILE_DATE = datetime(2026, 7, 1, tzinfo=UTC)
@@ -503,6 +509,48 @@ def build_other_income_continuance_snapshot() -> Snapshot:
     return _snapshot(_LOAN_OTHER_INCOME, docs, mismo)
 
 
+# --------------------------------------------------------------------------- #
+# LP-419 #D5 — a SELF-EMPLOYED borrower (the IN-12 fire path). LP-393-1 found the income-scenario fixture is
+# all-employment (income_stability does not read tax_returns, so IN-12's self-employment case is un-exercisable
+# there). This standalone scenario gives ONE self-employed borrower with a tax return, so — once the income AI
+# group perceives income.type == self_employment — the derived income.is_self_employed (LP-418) promotes to
+# "yes" at the borrower, IN-12's applicability gate opens, and (with no 2-year history) IN-12 FIRES. Per-borrower
+# → the tax_return is attributed (belongs_to) and the borrower has a MISMO id so BorrowerSubject enumerates it.
+# --------------------------------------------------------------------------- #
+def build_self_employed_no_history_snapshot() -> Snapshot:
+    """One self-employed borrower: a tax_return (self-employment income) + a 1003, attributed to the borrower,
+    with a MISMO borrower id. The documents carry NO tags of their own — the test materializes income.type ==
+    self_employment (income AI group) and income.has_2yr_history == no (income_stability) via a stub, then the
+    LP-418 derived income.is_self_employed promotes to "yes" and IN-12 FIRES (LP-419). Standalone (95… loan)."""
+    ref = BorrowerRef(borrower_id=_SE_BORROWER, name="Sam Enterline")
+    docs = [
+        DocumentEntry(
+            content_id="95-se-1040",
+            document_type="tax_return",
+            belongs_to=(ref,),
+            fields={
+                "tax_year": _f("2025"),
+                "business_name": _f("Enterline Woodworks (Schedule C)"),
+                "net_profit": _f("82000.00"),
+            },
+        ),
+        DocumentEntry(
+            content_id="95-se-1003",
+            document_type="uniform_residential_loan_application",
+            belongs_to=(ref,),
+            fields={"employment_type": _f("self_employed")},
+        ),
+    ]
+    return _snapshot(
+        _LOAN_SELF_EMPLOYED,
+        docs,
+        {
+            "borrower.1.borrower_id": _f(str(_SE_BORROWER)),
+            "borrower.1.first_name": _f("Sam"),
+        },
+    )
+
+
 # The expected fired/materialized outcomes — recorded HERE / in tests, never predicted in prose (LP-337).
 EXPECTED_TAXES_MONTHLY = "500.00"  # 6000 / 12
 EXPECTED_HOA_MONTHLY = "300.00"  # 300 monthly
@@ -527,6 +575,7 @@ __all__ = [
     "build_insurance_two_binder_snapshot",
     "build_other_income_continuance_snapshot",
     "build_past_closing_snapshot",
+    "build_self_employed_no_history_snapshot",
     "build_statement_break_snapshot",
     "build_subject_housing_snapshot",
     "build_voe_offer_labeling_snapshot",

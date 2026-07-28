@@ -65,17 +65,6 @@ def _w2(cid: str, owner: UUID) -> DocumentEntry:
     )
 
 
-def _tax_return(cid: str, owner: UUID) -> DocumentEntry:
-    # a tax_return doc — IN-12 (per_document, still BLOCKED after LP-393-6) only applies to this type; its
-    # subject is the content_id, so its gated tag is read at ``cid`` (not the borrower).
-    return DocumentEntry(
-        content_id=cid,
-        document_type="tax_return",
-        belongs_to=(BorrowerRef(borrower_id=owner, name="X"),),
-        fields={"tax_year": _f("2024")},
-    )
-
-
 def _snap(
     by_subject: dict[str, dict[str, Tag]], extra_docs: tuple[DocumentEntry, ...] = ()
 ) -> Snapshot:
@@ -109,16 +98,18 @@ def test_blocked_candidates_are_exactly_bars_minus_active() -> None:
 # APPLICABLE + DATA → a manual-review flag, never the verdict
 # --------------------------------------------------------------------------- #
 async def test_a_blocked_rule_that_reaches_a_verdict_surfaces_pending_never_the_verdict() -> None:
-    # IN-12 (blocked after LP-393-6, per_document, tax_return only) reads income.has_2yr_history at the DOCUMENT
-    # subject. Doc trA has it ("no" → the rule WOULD 'fire') — an untrusted verdict; trB has no tag (→
-    # couldnt_check). (IN-10/IN-11 used to demo this but went live in LP-393-6; IN-12 stays blocked.)
-    trA, trB = _tax_return("trA", _A), _tax_return("trB", _B)
-    snap = _snap({"trA": {"income.has_2yr_history": _tag("no")}}, extra_docs=(trA, trB))
+    # IN-12 (blocked; LP-419 re-scoped it to per_borrower + gated on income.is_self_employed == yes) reads its
+    # tags at the BORROWER subject. Borrower A is self-employed with no history ("yes"/"no" → the rule WOULD
+    # 'fire') — an untrusted verdict; borrower B has no self-employment signal (→ couldnt_check). Still BLOCKED
+    # (not-calibratable-yet), so the would-be fire surfaces as PENDING, never the verdict.
+    snap = _snap(
+        {str(_A): {"income.is_self_employed": _tag("yes"), "income.has_2yr_history": _tag("no")}}
+    )
     pending = await evaluate_pending_checks(snap)
     in12 = [p for p in pending if p.rule_id == "IN-12"]
-    assert (
-        len(in12) == 1 and in12[0].subject_id == "trA"
-    )  # trA surfaces; trB (couldnt_check) stays DARK
+    assert len(in12) == 1 and in12[0].subject_id == str(
+        _A
+    )  # A surfaces; B (couldnt_check — no self-employment signal) stays DARK
     flag = in12[0]
     # THE NO-LEAK GUARANTEE: the would-be 'fired' is discarded — never shipped.
     assert flag.verdict is Verdict.PENDING_AUTOMATION
@@ -130,10 +121,11 @@ async def test_a_blocked_rule_that_reaches_a_verdict_surfaces_pending_never_the_
 
 
 async def test_a_blocked_rule_with_no_data_stays_dark_no_fabricated_flag() -> None:
-    # IN-12 is APPLICABLE (a tax_return doc is present) but has NO income.has_2yr_history tag → couldnt_checks →
-    # NOTHING surfaces (honest silence, not a fabricated "manual review" the rule cannot support).
-    trA = _tax_return("trA", _A)
-    snap = _snap({}, extra_docs=(trA,))
+    # IN-12 is APPLICABLE for borrower A (self-employed: income.is_self_employed == yes) but has NO
+    # income.has_2yr_history tag → couldnt_checks → NOTHING surfaces (honest silence, not a fabricated "manual
+    # review" the rule cannot support). LP-419: the applicability gate is the self-employment signal, not a
+    # tax_return document.
+    snap = _snap({str(_A): {"income.is_self_employed": _tag("yes")}})
     pending = await evaluate_pending_checks(snap)
     assert [p for p in pending if p.rule_id == "IN-12"] == []
 
