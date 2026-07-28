@@ -553,8 +553,13 @@ def test_dti_hoa_frequency_map_matches_the_tag_map() -> None:
     assert dti_map == tag_map
 
 
-def test_hoa_fix_touches_no_rule_activation() -> None:
-    # This is a service change — the rule engine is untouched (no tag/producer/rule/prompt change).
+def test_active_rule_count_matches_the_central_expectation() -> None:
+    # A smoke check that this suite sees the same live-rule COUNT as the central expectation — NOT proof that
+    # the DTI/HOA service change is what left activation unchanged. That count moves for UNRELATED activation
+    # tickets (it is 28 today because LP-407-3 activated PC-2, nothing to do with the HOA fix), so this
+    # assertion cannot independently attribute "no activation" to a service change. The AUTHORITATIVE guard
+    # against an unauthorized activation is test_activation_gate_lp389 (ACTIVE_RULE_IDS - _BASE_ACTIVE ==
+    # eligible_rule_ids()) — a rule cannot enter the live set without clearing the eligibility gate.
     from app.verification.rule_engine.registry import ACTIVE_RULE_IDS
     from tests.expected_active import EXPECTED_ACTIVE_RULE_COUNT
 
