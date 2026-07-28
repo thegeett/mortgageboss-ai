@@ -75,8 +75,13 @@ _BORROWER_MISMO: dict[str, SnapshotField] = {
     "borrower.2.employer.2.name": _f("Cafe Bluebird"),
     # LP-414: the subject property's stated 1003/MISMO purchase price (was ABSENT — the LP-407-2 gap), so
     # property.purchase_price READS it. It matches the purchase agreement's sales_price (365000), so a future
-    # PC-2 SATISFIES on this clean anchor. NOT an occupancy signal — the occupancy AI group reasons only over
-    # property.occupancy + the declarations (none present here), so OC-2 stays couldnt_check (LP-414 A2).
+    # PC-2 SATISFIES on this clean anchor. NOTE on the occupancy AI group (LP-414 A2, corrected): _loan_context
+    # (subjects.py) sends EVERY MISMO fact to the occupancy group (context_builder: loan), so this price DOES
+    # reach the occupancy AI's context — it is not filtered out. OC-2 stays verdict-safe not because the model
+    # can't see the price, but because its load-bearing occupancy.stated is ABSENT on LF-6T3N → OC-2
+    # couldnt_checks regardless of what consistent_with_signals returns (and OC-2 is human-ratified besides).
+    # The equivalence test pins this with stubbed reasoners (fixed output), so it proves DETERMINISTIC stability,
+    # not that a live occupancy model ignores the added fact.
     "property.purchase_price": _f("365000.00"),
 }
 
