@@ -58,10 +58,13 @@ _LOAN_ADDR_MATCH = UUID(
 _LOAN_ADDR_MISMATCH = UUID("95000000-0000-4000-8000-00000000000b")  # LP-407-4 — different property
 _LOAN_ADDR_ABBREV = UUID(
     "95000000-0000-4000-8000-00000000000c"
-)  # LP-407-4 — "Ln" vs "Lane" (the FP case)
+)  # LP-407-4 review — suffix/state/ZIP+4 variants the canonicalizer NOW resolves (→ satisfied)
 _LOAN_ADDR_MAILING = UUID(
     "95000000-0000-4000-8000-00000000000d"
 )  # LP-407-4 — only a mailing address (trap)
+_LOAN_ADDR_UNIT = UUID(
+    "95000000-0000-4000-8000-00000000000e"
+)  # LP-407-4 review — a unit-designator residue the canonicalizer leaves (→ needs_review)
 _RUN = UUID("95000000-0000-4000-8000-0000000000ff")
 # The file (snapshot) date every closing date is measured against (deterministic — never a wall-clock now()).
 _FILE_DATE = datetime(2026, 7, 1, tzinfo=UTC)
@@ -344,14 +347,36 @@ def build_address_mismatch_snapshot() -> Snapshot:
 
 
 def build_address_abbrev_snapshot() -> Snapshot:
-    """The FALSE-POSITIVE case: same property, "Lane" on the contract vs "Ln" in the file. The deterministic
-    normalizers cannot expand the abbreviation, so it reads as a mismatch → PC-3 NEEDS_REVIEW (NOT fired — the
-    whole point of the ADR-325 routing: a human clears the abbreviation, the rule never falsely asserts a
-    different property)."""
+    """The former FALSE-POSITIVE case, now RESOLVED deterministically (LP-407-4 review): same property, but the
+    contract writes "Lane" / "Illinois" / a ZIP+4 while the file has "Ln" / "IL" / ZIP5. The address
+    canonicalizer (_norm_address: street suffixes + state names + ZIP+4→ZIP5) unifies all three, so PC-3 now
+    SATISFIES instead of routing this common same-property rendering to needs_review noise."""
     return _snapshot(
         _LOAN_ADDR_ABBREV,
-        [_addr_contract("95-pa-addr-abbrev", "789 Birchwood Lane, Springfield IL 62711")],
+        [
+            _addr_contract(
+                "95-pa-addr-abbrev", "789 Birchwood Lane, Springfield Illinois 62711-0142"
+            )
+        ],
         _subject_mismo("789 Birchwood Ln", "Springfield", "IL", "62711"),
+    )
+
+
+def build_address_unit_variant_snapshot() -> Snapshot:
+    """THE RESIDUE the canonicalizer deliberately leaves (LP-407-4 review): the SAME property, but the unit is
+    written "Apt 2" on the contract vs "Unit 2" in the file. Unit designators are NOT canonicalized (too varied
+    to unify safely), so this still reads as a mismatch → PC-3 NEEDS_REVIEW (surfaced for a human, never
+    fired) — the ADR-325 routing survives for the surface forms the deterministic matcher cannot resolve."""
+    return _snapshot(
+        _LOAN_ADDR_UNIT,
+        [_addr_contract("95-pa-addr-unit", "789 Birchwood Ln Apt 2, Springfield IL 62711")],
+        {
+            "property.address_line": _f("789 Birchwood Ln"),
+            "property.address_line_2": _f("Unit 2"),
+            "property.city": _f("Springfield"),
+            "property.state": _f("IL"),
+            "property.postal_code": _f("62711"),
+        },
     )
 
 
@@ -383,6 +408,7 @@ __all__ = [
     "build_address_mailing_only_snapshot",
     "build_address_match_snapshot",
     "build_address_mismatch_snapshot",
+    "build_address_unit_variant_snapshot",
     "build_far_future_closing_snapshot",
     "build_insurance_binder_plus_decree_snapshot",
     "build_insurance_decree_only_snapshot",

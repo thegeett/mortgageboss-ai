@@ -8,6 +8,7 @@ its subject. A recipe that cannot compute returns ``("unknown", reason)`` — ho
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable
 from datetime import date
 from decimal import Decimal, InvalidOperation
@@ -759,8 +760,7 @@ def _loan_effective_date(
 
 # The address normalizer chain for property-address matching (LP-407-4) — the consistency normalizers
 # (casefold / drop_punct / collapse_ws), REUSED, never a new fuzzy matcher. NOT drop_entity_suffix (that is
-# for company names). These do NOT expand St->Street / Apt<->#, so a mismatch is surfaced as needs_review by
-# PC-3 (ADR-325), never fired as certain — the deterministic-residue-routes-to-a-human discipline.
+# for company names).
 _ADDRESS_NORMALIZERS = ("casefold", "drop_punct", "collapse_ws")
 
 _MISMO_PROPERTY_ADDRESS_KEYS = (
@@ -771,6 +771,82 @@ _MISMO_PROPERTY_ADDRESS_KEYS = (
     "property.postal_code",
 )
 
+# LP-407-4 review — deterministic address canonicalization, applied AFTER the base normalizers. A freeform
+# contract ``property_address`` and the component-assembled MISMO address legitimately differ, for the SAME
+# property, on standard surface forms the base normalizers leave untouched — USPS street suffixes, US state
+# names, and ZIP+4 vs ZIP5. Canonicalizing those (below) stops PC-3 from routing the common same-property file
+# to needs_review just because one side wrote "Street"/"Illinois"/"62711-1234". SAFETY: each map unifies ONLY
+# true synonyms of ONE token, and the SAME transform runs on both sides — so two GENUINELY different addresses
+# cannot be merged (they still differ on house number / street name / city), and a semantically-off mapping
+# (e.g. a city named like a state) still transforms both sides identically, so it never fabricates a mismatch.
+# Unit designators (apt / # / unit / suite) and directionals (N / North) are DELIBERATELY not canonicalized —
+# their surface forms are too varied to unify safely; those residues still route to needs_review (ADR-325 — the
+# deferred AI-tolerant match handles them).
+_STREET_SUFFIX_CANON = {
+    "street": "st", "st": "st",
+    "avenue": "ave", "ave": "ave", "av": "ave",
+    "road": "rd", "rd": "rd",
+    "lane": "ln", "ln": "ln",
+    "drive": "dr", "dr": "dr",
+    "boulevard": "blvd", "blvd": "blvd",
+    "court": "ct", "ct": "ct",
+    "circle": "cir", "cir": "cir",
+    "place": "pl", "pl": "pl",
+    "terrace": "ter", "ter": "ter",
+    "parkway": "pkwy", "pkwy": "pkwy",
+    "highway": "hwy", "hwy": "hwy",
+    "trail": "trl", "trl": "trl",
+    "square": "sq", "sq": "sq",
+    "loop": "loop",
+    "way": "way",
+}  # fmt: skip
+# US state / territory names -> the USPS 2-letter code. Multi-word names are replaced as PHRASES first (below),
+# so "north carolina" is not mistaken for the directional "north" + "carolina".
+_STATE_CANON = {
+    "alabama": "al", "alaska": "ak", "arizona": "az", "arkansas": "ar", "california": "ca",
+    "colorado": "co", "connecticut": "ct", "delaware": "de", "florida": "fl", "georgia": "ga",
+    "hawaii": "hi", "idaho": "id", "illinois": "il", "indiana": "in", "iowa": "ia",
+    "kansas": "ks", "kentucky": "ky", "louisiana": "la", "maine": "me", "maryland": "md",
+    "massachusetts": "ma", "michigan": "mi", "minnesota": "mn", "mississippi": "ms", "missouri": "mo",
+    "montana": "mt", "nebraska": "ne", "nevada": "nv", "new hampshire": "nh", "new jersey": "nj",
+    "new mexico": "nm", "new york": "ny", "north carolina": "nc", "north dakota": "nd", "ohio": "oh",
+    "oklahoma": "ok", "oregon": "or", "pennsylvania": "pa", "rhode island": "ri", "south carolina": "sc",
+    "south dakota": "sd", "tennessee": "tn", "texas": "tx", "utah": "ut", "vermont": "vt",
+    "virginia": "va", "washington": "wa", "west virginia": "wv", "wisconsin": "wi", "wyoming": "wy",
+    "district of columbia": "dc", "puerto rico": "pr",
+}  # fmt: skip
+_MULTIWORD_STATE_PATTERNS = tuple(
+    (re.compile(rf"\b{re.escape(name)}\b"), code)
+    for name, code in _STATE_CANON.items()
+    if " " in name
+)
+
+
+def _norm_address(raw: str) -> str:
+    """Base-normalize (casefold / drop_punct / collapse_ws) then canonicalize the standard surface forms two
+    renderings of the SAME property differ on — street suffixes, US state names, ZIP+4 -> ZIP5 — so PC-3's
+    equality compare stops flagging them (see the table comment for the safety argument)."""
+    # LAZY import (init-order — rule_engine <-> tag_materialization, as income_employer_coverage does).
+    from app.verification.rule_engine.consistency import _normalize
+
+    text = _normalize(raw, _ADDRESS_NORMALIZERS)
+    for (
+        pattern,
+        code,
+    ) in _MULTIWORD_STATE_PATTERNS:  # multi-word states as phrases, before tokenizing
+        text = pattern.sub(code, text)
+    out: list[str] = []
+    for tok in text.split():
+        if tok.isdigit() and len(tok) == 9:  # ZIP+4 (drop_punct removed the hyphen) -> ZIP5
+            out.append(tok[:5])
+        elif tok in _STREET_SUFFIX_CANON:
+            out.append(_STREET_SUFFIX_CANON[tok])
+        elif tok in _STATE_CANON:  # single-word state name -> code
+            out.append(_STATE_CANON[tok])
+        else:
+            out.append(tok)
+    return " ".join(out)
+
 
 def _property_address_match(
     snapshot: Snapshot, _subject_id: str, _subject_raw: object
@@ -779,10 +855,11 @@ def _property_address_match(
     file's (1003/MISMO) subject-property address? Unblocks PC-3.
 
     Compares the purchase_agreement's typed-core ``property_address`` against the MISMO SUBJECT-property address
-    (property.address_line [+ _2] + city + state + postal_code), after the consistency normalizers (casefold /
-    drop_punct / collapse_ws — REUSED, never a new matcher). DESCRIPTIVE enum yes/no/unknown; PC-3 JUDGES (no ->
-    needs_review, ADR-325 — the normalizers cannot expand St->Street, so a mismatch is surfaced for a human, not
-    fired as certain).
+    (property.address_line [+ _2] + city + state + postal_code), after the consistency normalizers PLUS the
+    deterministic address canonicalization (_norm_address: street suffixes / US state names / ZIP+4 -> ZIP5 —
+    REUSED normalizers, no fuzzy matcher). DESCRIPTIVE enum yes/no/unknown; PC-3 JUDGES (no -> needs_review,
+    ADR-325 — the canonicalizer does not resolve EVERY surface form, e.g. unit designators, so a residual
+    mismatch is surfaced for a human, not fired as certain).
 
     ⚠️ THE MAILING-ADDRESS TRAP (LP-407-4 D1): reads the MISMO SUBJECT-property address (property.address_*), NEVER
     the borrower's ``current_address`` (which the MISMO parser can fill with a MAILING address) and NEVER a
@@ -793,9 +870,6 @@ def _property_address_match(
     unknown. The reasoning names BOTH addresses (the finding's provenance — the AS-8 break_detail pattern; the
     operand path is decimal/date only and cannot string-compare, so this is an enum branch, not an interpolated
     operand)."""
-    # LAZY import (init-order — rule_engine <-> tag_materialization, as income_employer_coverage does).
-    from app.verification.rule_engine.consistency import _normalize
-
     if snapshot.documents.absent:
         return (
             _UNKNOWN,
@@ -808,7 +882,7 @@ def _property_address_match(
         field = entry.fields.get("property_address")
         if isinstance(field, Field) and field.is_present and str(field.value).strip():
             raw = str(field.value).strip()
-            contract_addrs[_normalize(raw, _ADDRESS_NORMALIZERS)] = raw
+            contract_addrs[_norm_address(raw)] = raw
     if not contract_addrs:
         return _UNKNOWN, "no purchase contract states a property address"
     if len(contract_addrs) > 1:
@@ -829,7 +903,7 @@ def _property_address_match(
             "(never a comparison against a partial or mailing address)"
         )
     file_raw = " ".join(p for p in (line, line2, city, state, postal) if p)
-    if contract_norm == _normalize(file_raw, _ADDRESS_NORMALIZERS):
+    if contract_norm == _norm_address(file_raw):
         return "yes", (
             f"the purchase contract's property address matches the loan file's subject property "
             f"('{contract_raw}' vs the file's '{file_raw}')"
