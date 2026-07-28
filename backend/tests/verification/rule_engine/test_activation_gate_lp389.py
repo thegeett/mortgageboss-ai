@@ -55,6 +55,8 @@ _ACTIVATED = frozenset(
         "PC-2",  # LP-407-3 — purchase price matches loan terms (no-ai-dependency, exact compare, no threshold)
         "IH-3",  # LP-417 — insurance effective date vs closing (no-ai-dependency, native date compare)
         "PC-3",  # LP-407-4 — contract property address vs the loan file (no-ai-dependency, needs_review route)
+        "IN-12",  # LP-423 — self-employed 2yr history (calibratable-now; verdict inherits IN-11's validated 0.9,
+        # the gate is a deterministic Schedule-C fact — LP-422)
     }
 )
 
@@ -72,9 +74,9 @@ def test_exactly_the_eligible_candidates_pass() -> None:
     held = set(bars) - eligible
     # IN-1/IN-5/AS-2/AS-12/IN-3 (AI, validated, measured >= bar); ID-5 + AS-9/IN-4/AS-10 (no-AI, input resolves).
     assert eligible == set(_ACTIVATED)
-    # 11 held after LP-412: the 10 pre-LP-406 candidates + OC-1 (still held on calibration — its AI tag is
-    # unscored). AS-8/IN-6/PC-7 are all live now (LP-406-2b / LP-412).
-    assert len(held) == 11 and not (held & _ACTIVATED)  # every other candidate is held
+    # 10 held after LP-423 (was 11): IN-12 moved held → eligible (its gate became a deterministic Schedule-C
+    # fact, LP-422; verdict inherits IN-11's validated 0.9). The rest — incl. OC-1 / IN-13 — stay held.
+    assert len(held) == 10 and not (held & _ACTIVATED)  # every other candidate is held
 
 
 def test_eligible_rule_ids_is_sorted_and_matches() -> None:
@@ -90,6 +92,7 @@ def test_eligible_rule_ids_is_sorted_and_matches() -> None:
         "IN-1",
         "IN-10",
         "IN-11",
+        "IN-12",  # LP-423 (sorts between IN-11 and IN-3)
         "IN-3",
         "IN-4",
         "IN-5",

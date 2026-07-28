@@ -146,6 +146,16 @@ _LP417_ACTIVATED: tuple[str, ...] = ("IH-3",)
 # subject address → PC-3 couldnt_checks there (an honest absence — LP-414).
 _LP4074_ACTIVATED: tuple[str, ...] = ("PC-3",)
 
+# LP-423 — IN-12 goes live (31). Its self-employment SCOPE gate (income.is_self_employed) became a DETERMINISTIC
+# read of Schedule C presence (LP-422), resolving the LP-419 income.type-unscored blocker; income.type is dropped
+# as load-bearing. The VERDICT tag has_2yr_history is measured 100% + Priya-validated at 0.9 via IN-11 (the IN-6
+# inherit pattern), so the bar is calibratable-now / validated / 1.0 >= 0.9 -> eligible. ⚠️ ACCEPTED RISK (D3,
+# ADR-335): the gate rests on the STARTER tax-return extractor (no golden files) — accepted because a missed
+# Schedule C is a wrong SCOPE (not_applicable, visible) IN-11 still backstops, not a false verdict. IN-13 is NOT
+# activated (D1: "other income continuance" is broader than rental — gating on rental would narrow it; and its
+# verdict tag continuance_3yr is uncalibrated).
+_LP423_ACTIVATED: tuple[str, ...] = ("IN-12",)
+
 # The gate is the source of truth: test_activation_gate_lp389 asserts ACTIVE_RULE_IDS - _BASE_ACTIVE ==
 # eligible_rule_ids() — a rule CANNOT enter this set without meeting the eligibility gate (not a hand-list).
 ACTIVE_RULE_IDS: tuple[str, ...] = (
@@ -160,6 +170,7 @@ ACTIVE_RULE_IDS: tuple[str, ...] = (
     *_LP407_ACTIVATED,
     *_LP417_ACTIVATED,
     *_LP4074_ACTIVATED,
+    *_LP423_ACTIVATED,
 )
 
 

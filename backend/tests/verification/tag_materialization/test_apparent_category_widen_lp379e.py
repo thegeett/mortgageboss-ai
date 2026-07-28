@@ -154,37 +154,41 @@ def test_as1_does_not_read_apparent_category() -> None:
 
 
 def test_no_rule_activation_changed() -> None:
-    assert ACTIVE_RULE_IDS == (
-        "AS-1",
-        "OC-2",
-        "ID-2",
-        "ID-4",
-        "ID-1",
-        "ID-3",
-        "ID-6",
-        "ID-7",
-        "ID-9",
-        "ID-8",
-        "IN-2",
-        # LP-389 — the first activation pass, via the eligibility gate (activation_bars.is_eligible)
-        "IN-1",
-        "IN-5",
-        "ID-5",  # LP-389-A — the subject mismatch fixed (per-borrower), input now resolves
-        # LP-384 — the second activation pass: the stuck deterministic rules, verified on build_lf6t3n_plus
-        "AS-9",
-        "IN-4",
-        "AS-10",
-        "AS-2",
-        "AS-12",
-        "IN-3",
-        "IN-7",
-        "IN-10",
-        "IN-11",
-        "AS-11",
-        "AS-8",  # LP-406-2b — the first Bucket 2 rule live (statement chaining on stmt.continuity)
-        "IN-6",  # LP-412 — Priya signed off the 0.95 bar (calibratable-now, same as IN-5)
-        "PC-7",  # LP-412 — Priya signed off the closing window (no-ai-threshold-pending)
-        "PC-2",  # LP-407-3 — purchase price matches loan terms
-        "IH-3",  # LP-417 — insurance effective date vs closing
-        "PC-3",  # LP-407-4 — contract property address vs the loan file
+    assert (
+        ACTIVE_RULE_IDS
+        == (
+            "AS-1",
+            "OC-2",
+            "ID-2",
+            "ID-4",
+            "ID-1",
+            "ID-3",
+            "ID-6",
+            "ID-7",
+            "ID-9",
+            "ID-8",
+            "IN-2",
+            # LP-389 — the first activation pass, via the eligibility gate (activation_bars.is_eligible)
+            "IN-1",
+            "IN-5",
+            "ID-5",  # LP-389-A — the subject mismatch fixed (per-borrower), input now resolves
+            # LP-384 — the second activation pass: the stuck deterministic rules, verified on build_lf6t3n_plus
+            "AS-9",
+            "IN-4",
+            "AS-10",
+            "AS-2",
+            "AS-12",
+            "IN-3",
+            "IN-7",
+            "IN-10",
+            "IN-11",
+            "AS-11",
+            "AS-8",  # LP-406-2b — the first Bucket 2 rule live (statement chaining on stmt.continuity)
+            "IN-6",  # LP-412 — Priya signed off the 0.95 bar (calibratable-now, same as IN-5)
+            "PC-7",  # LP-412 — Priya signed off the closing window (no-ai-threshold-pending)
+            "PC-2",  # LP-407-3 — purchase price matches loan terms
+            "IH-3",  # LP-417 — insurance effective date vs closing
+            "PC-3",  # LP-407-4 — contract property address vs the loan file
+            "IN-12",  # LP-423 — self-employed 2yr history (activated on the deterministic Schedule-C gate)
+        )
     )

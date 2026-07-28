@@ -92,18 +92,19 @@ def test_no_live_rule_read_a_repaired_tag_when_lp414_shipped() -> None:
 
 async def test_lf6t3n_full_verdict_distribution_is_stable() -> None:
     # The equivalence gate as a regression lock. LP-414: 302 evals; LP-407-3 +PC-2 (satisfied); LP-417 +IH-3
-    # (couldnt_check — no binder); LP-407-4 +PC-3, which COULDNT_CHECKS on LF-6T3N (no MISMO subject-property
-    # address — LP-414 added only property.purchase_price). The lock is now 305 evals / couldnt_check 181, with
-    # PC-3 in the loan verdicts. Any OTHER movement would be a repair regression.
+    # (couldnt_check); LP-407-4 +PC-3 (couldnt_check). LP-423 ACTIVATED IN-12 (per_borrower) → +2 evals, both
+    # COULDNT_CHECK (LF-6T3N's two W-2 borrowers: income.type is honest-unknown under the keyless stub → the
+    # derived income.is_self_employed gate is unknown → couldnt_check; a real AI would read income.type=base →
+    # not_applicable). The lock is now 307 evals / couldnt_check 183. Any OTHER movement would be a regression.
     mat = await materialize_tags(
         build_lf6t3n_snapshot(), ai_reasoners=stub_materialization_reasoners()
     )
     results, _ = await evaluate_rules(mat)
-    assert len(results) == 305
+    assert len(results) == 307
     assert (
         Counter(r.verdict.value for r in results)
         == {
-            "couldnt_check": 181,  # +IH-3 (LP-417) +PC-3 (LP-407-4): no binder / no MISMO subject address on LF-6T3N
+            "couldnt_check": 183,  # +IH-3 +PC-3 +IN-12 x2 (LP-423 — the self-employment gate unknown under the stub)
             "not_applicable": 99,
             "satisfied": 21,  # +PC-2 (LP-407-3): both prices 365000 → satisfied
             "fired": 2,

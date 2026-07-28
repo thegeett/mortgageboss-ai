@@ -12486,3 +12486,45 @@ decides no activation.
 **Cross-refs.** ADR-332 (synthetic-calibration limit — this is its escape hatch), ADR-333 / LP-421 (the surfaced
 schedules), LP-418 (`income.is_self_employed`, the reused tag), LP-419 (IN-12 gates on it), ADR-324 (tags
 describe, rules judge), LP-420 (why income.type couldn't be calibrated).
+
+## ADR-335: A rule's available gate can be narrower than its intent (never narrow the rule to fit the tag); and the standing rule for ACTIVATING on an unvalidated extractor — when the failure mode is a backstopped wrong-scope (LP-423)
+
+**Two decisions from settling IN-12 / IN-13's activation.**
+
+**1. The available gate is narrower than the rule's intent — do NOT narrow the rule to fit the tag.** LP-422
+proposed re-scoping IN-13 onto `income.has_rental_income`. But IN-13 is "Other income continuance" — its scope
+is EVERY borrower with non-employment income (child support, alimony, pension, an award, Social Security, notes,
+AND rental — LP-420's continuance worksheet built six distinct types). Rental is ONE. Gating IN-13 on the rental
+tag would SILENTLY NARROW it, dropping five of six income types — a coverage regression disguised as a fix. The
+tag we happened to build (rental presence) is narrower than the rule's intent (all other income). The rule:
+when the only available gate is a proper subset of a rule's scope, gating on it is a silent under-coverage bug,
+not a fix — STOP and report; the real gate (here, a borrower-level "has other income" signal) may not exist and
+becomes its own ticket. IN-13 was NOT re-scoped; it stays held (and independently, its verdict tag
+`income.continuance_3yr` is uncalibrated — LP-420's worksheet is unlabeled — so it would stay held regardless).
+
+**2. Activating on an UNVALIDATED extractor — the standing precedent.** Both IN-12 and IN-13's scope gates now
+rest on the tax-return extractor, a self-declared STARTER (ADR-333) with NO golden files. The activation decision
+turns on the FAILURE MODE, and the two rules differ decisively:
+- **IN-12 (activated).** A missed Schedule C → `is_self_employed` no/unknown → IN-12 `not_applicable`. That is a
+  wrong SCOPE, VISIBLE as absence — and the borrower's 2-year-history gap is STILL surfaced by IN-11 (live,
+  income-type-agnostic), so no finding is lost. A hallucinated Schedule C → IN-12 applies to a wage earner →
+  noise IN-11 already makes, not a false green. The verdict tag (`has_2yr_history`) is Priya-validated at 0.9 /
+  measured 100% (inherited from IN-11, the IN-6 same-tag-same-evidence pattern), and the gate is a DETERMINISTIC
+  fact (ADR-334), so there is no un-calibrated judgment. → **ACTIVATED** (calibratable-now, validated, eligible).
+- **IN-13 (held).** A missed Schedule E (were it gated on rental) → `not_applicable` → the rule SILENTLY decides
+  it does not apply and never checks a borrower who does have that income. Silent UNDER-coverage — the kind a
+  processor would not notice. Plus its verdict tag is uncalibrated. → **HELD.**
+
+**The standing rule (Credit will face this 13 times).** A rule fed by an unvalidated extractor MAY activate when
+its failure mode is a WRONG SCOPE that a live rule BACKSTOPS (visible under-coverage that loses no finding) AND
+its verdict is independently validated; it must NOT activate when the failure mode is SILENT under-coverage (a
+`not_applicable` nobody notices) or when the verdict itself is uncalibrated. The activation basis — and the
+accepted risk (the unvalidated extractor) — is recorded in the bar rationale (the LP-412 discipline), not just
+the flag. Geet's call to activate IN-12 on the starter extractor; Priya's view on the real-world Schedule-C
+miss-rate is the follow-up refinement, and golden-file validation of the tax-return extractor remains its own
+ticket (the honest ending: LIVE now on a coarse deterministic gate, sharper once the extractor is validated).
+
+**Cross-refs.** ADR-333 (the STARTER tax-return extractor), ADR-334 (the deterministic gate / ADR-332 escape
+hatch), LP-419 (IN-12 written + held), LP-422 (the schedule-presence producer), LP-420 (the continuance worksheet
++ the six other-income types), IN-11 (the live backstop for a missed IN-12 scope), IN-6/LP-412 (inherit the
+verdict tag's validated bar).

@@ -97,20 +97,25 @@ def test_blocked_candidates_are_exactly_bars_minus_active() -> None:
 # --------------------------------------------------------------------------- #
 # APPLICABLE + DATA → a manual-review flag, never the verdict
 # --------------------------------------------------------------------------- #
-async def test_a_blocked_rule_that_reaches_a_verdict_surfaces_pending_never_the_verdict() -> None:
-    # IN-12 (blocked; LP-419 re-scoped it to per_borrower + gated on income.is_self_employed == yes) reads its
-    # tags at the BORROWER subject. Borrower A is self-employed with no history ("yes"/"no" → the rule WOULD
-    # 'fire') — an untrusted verdict; borrower B has no self-employment signal (→ couldnt_check). Still BLOCKED
-    # (not-calibratable-yet), so the would-be fire surfaces as PENDING, never the verdict.
-    snap = _snap(
-        {str(_A): {"income.is_self_employed": _tag("yes"), "income.has_2yr_history": _tag("no")}}
+def _voe(cid: str, owner: UUID) -> DocumentEntry:
+    # a VOE document (IN-8's applicability type) attributed to a borrower.
+    return DocumentEntry(
+        content_id=cid,
+        document_type="voe",
+        belongs_to=(BorrowerRef(borrower_id=owner, name="X"),),
+        fields={"employer_name": _f("Acme")},
     )
+
+
+async def test_a_blocked_rule_that_reaches_a_verdict_surfaces_pending_never_the_verdict() -> None:
+    # IN-8 (blocked: income.voe_present uncalibrated) is per_document on a voe. The voe carries voe_present="no"
+    # → the rule WOULD 'fire' (an untrusted verdict). Still BLOCKED, so the would-be fire surfaces as PENDING,
+    # never the verdict. (IN-12 demonstrated this before LP-423 activated it.)
+    snap = _snap({"voeA": {"income.voe_present": _tag("no")}}, extra_docs=(_voe("voeA", _A),))
     pending = await evaluate_pending_checks(snap)
-    in12 = [p for p in pending if p.rule_id == "IN-12"]
-    assert len(in12) == 1 and in12[0].subject_id == str(
-        _A
-    )  # A surfaces; B (couldnt_check — no self-employment signal) stays DARK
-    flag = in12[0]
+    in8 = [p for p in pending if p.rule_id == "IN-8"]
+    assert len(in8) == 1 and in8[0].subject_id == "voeA"  # the voe document surfaces
+    flag = in8[0]
     # THE NO-LEAK GUARANTEE: the would-be 'fired' is discarded — never shipped.
     assert flag.verdict is Verdict.PENDING_AUTOMATION
     assert flag.load_bearing_tags == ()  # the uncalibrated tag VALUE never rides along
@@ -121,13 +126,11 @@ async def test_a_blocked_rule_that_reaches_a_verdict_surfaces_pending_never_the_
 
 
 async def test_a_blocked_rule_with_no_data_stays_dark_no_fabricated_flag() -> None:
-    # IN-12 is APPLICABLE for borrower A (self-employed: income.is_self_employed == yes) but has NO
-    # income.has_2yr_history tag → couldnt_checks → NOTHING surfaces (honest silence, not a fabricated "manual
-    # review" the rule cannot support). LP-419: the applicability gate is the self-employment signal, not a
-    # tax_return document.
-    snap = _snap({str(_A): {"income.is_self_employed": _tag("yes")}})
+    # IN-8 is APPLICABLE (a voe document is present) but has NO income.voe_present tag → couldnt_checks →
+    # NOTHING surfaces (honest silence, not a fabricated "manual review" the rule cannot support).
+    snap = _snap({}, extra_docs=(_voe("voeA", _A),))
     pending = await evaluate_pending_checks(snap)
-    assert [p for p in pending if p.rule_id == "IN-12"] == []
+    assert [p for p in pending if p.rule_id == "IN-8"] == []
 
 
 async def test_a_blocked_JUDGMENT_rule_surfaces_through_the_stub_no_api_call() -> None:

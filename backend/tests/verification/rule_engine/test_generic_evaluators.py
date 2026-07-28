@@ -138,6 +138,7 @@ async def test_registry_dispatches_the_active_rule_set_by_kind() -> None:
             "PC-2",  # LP-407-3 — purchase price matches loan terms
             "IH-3",  # LP-417 — insurance effective date vs closing
             "PC-3",  # LP-407-4 — contract property address vs the loan file
+            "IN-12",  # LP-423 — self-employed 2yr history (deterministic Schedule-C gate)
         }
     )
     snapshot = _loan_snapshot(None)  # no occupancy/txn tags → everything fail-closes honestly

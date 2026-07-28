@@ -67,6 +67,7 @@ _FACT_LABELS: dict[str, str] = {
     "income.is_declining": "year-over-year income trend",  # IN-10
     "income.has_2yr_history": "two-year income history",  # IN-11
     "asset.liquidation_terms": "account's liquidation terms",  # AS-11
+    "income.is_self_employed": "self-employment income status",  # IN-12 (LP-423 — its applicability gate)
 }
 
 

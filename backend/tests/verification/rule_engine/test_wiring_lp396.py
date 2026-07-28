@@ -31,24 +31,22 @@ _JUDGMENT_CSV = Path(__file__).resolve().parents[4] / "docs/calibration/lf6t3n-l
 
 
 # --------------------------------------------------------------------------- #
-# A) IN-12 — the producer blocker is RESOLVED (LP-419); a calibration blocker remains
+# A) IN-12 — the full arc: needs-producer (LP-396) → held (LP-419) → ACTIVATED (LP-423)
 # --------------------------------------------------------------------------- #
-def test_in12_bar_producer_blocker_resolved_calibration_blocker_remains_lp419() -> None:
-    # LP-396 pinned IN-12 as needs-producer (no borrower-level self-employment signal). LP-418 shipped the
-    # producer and LP-419 re-scoped IN-12 to per_borrower + gated it on income.is_self_employed. So the bar is
-    # no longer needs-producer — it is not-calibratable-yet: the self-employment SCOPE gate rests on income.type,
-    # which is still unscored (the IN-13 blocker). Still not validated, still held.
+def test_in12_bar_activated_on_the_deterministic_gate_lp423() -> None:
+    # LP-396 pinned IN-12 as needs-producer; LP-419 held it (calibration blocker on the unscored income.type);
+    # LP-422 made the self-employment gate a DETERMINISTIC Schedule-C fact, resolving that blocker; LP-423
+    # ACTIVATED it — calibratable-now, validated (the verdict tag has_2yr_history inherits IN-11's 0.9), eligible.
     bar = load_activation_bars()["IN-12"]
-    assert (
-        bar.status == "not-calibratable-yet"
-    )  # was needs-producer; the producer blocker is resolved
-    assert bar.threshold is None and not bar.validated
+    assert bar.status == "calibratable-now" and bar.threshold == 0.9 and bar.validated
+    assert bar.load_bearing_ai_tags == (
+        "income.has_2yr_history",
+    )  # income.type dropped (the gate is a fact)
     low = bar.rationale.lower()
     assert (
-        "self-employment" in low and "per_borrower" in low
-    )  # the gate that distinguishes IN-12 from IN-11
-    assert "income.type" in low and "unscored" in low  # the REMAINING blocker, named
-    assert "resolved" in low  # the producer/structural-death blocker is explicitly resolved
+        "self-employment" in low and "schedule c" in low
+    )  # the deterministic gate that unblocked it
+    assert "starter" in low  # the accepted-risk caveat (the unvalidated extractor) is named
 
 
 def test_in12_borrower_level_self_employment_signal_now_exists_lp418() -> None:

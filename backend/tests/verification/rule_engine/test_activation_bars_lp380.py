@@ -56,8 +56,8 @@ def test_the_honest_activation_state_is_reported() -> None:
     # 9 SIGNED OFF (IN-1, IN-5, IN-3 + AS-2, AS-12 + IN-7, IN-10, IN-11, AS-11) + 2 PROPOSED-but-unvalidated
     # (AS-6, LP-397 — one-sided n=5; IN-6, LP-406-3b — proposed IN-5's 0.95, pending Priya).
     assert (
-        by["calibratable-now"] == 11
-    )  # +IN-6 (LP-406-3b, transitive AI dependency, proposed 0.95, held)
+        by["calibratable-now"] == 12
+    )  # +IN-6 (LP-406-3b) +IN-12 (LP-423 — verdict inherits IN-11's 0.9, deterministic Schedule-C gate)
     assert by.get("not-calibratable-yet", 0) >= 1 and by.get("no-ai-dependency", 0) >= 1
     assert (
         by.get("no-ai-threshold-pending", 0) == 1
@@ -172,6 +172,7 @@ def test_exactly_the_signed_off_bars_are_validated() -> None:
             "AS-11",
             "IN-6",  # LP-412 — 0.95, "same as IN-5"
             "PC-7",  # LP-412 — the two-sided window (any past date; 90-day far-future)
+            "IN-12",  # LP-423 — inherits IN-11's validated 0.9 (deterministic Schedule-C gate)
         }
     )  # NOTE: PC-2 (LP-407-3) is no-ai-dependency with validated:false — it is NOT in this signed-off set.
     assert all(b.validated is False for rid, b in bars.items() if rid not in validated)
@@ -265,29 +266,36 @@ def test_active_set_is_base_plus_lp389() -> None:
             # LP-407-4 — the last blocker-free rule: PC-3 (contract property address vs the loan file), a
             # deterministic address compare; no-ai-dependency, mismatch routes to needs_review (ADR-325).
             "PC-3",
+            # LP-423 — IN-12 (self-employed 2yr history): calibratable-now, verdict inherits IN-11's validated
+            # 0.9, gate is a deterministic Schedule-C fact (LP-422).
+            "IN-12",
         )
     )
     # A bar persists after activation as the record of WHY the rule went live, so the bars now intersect the
     # active set at EXACTLY the activated candidates — never a base-active rule (those never had a bar).
-    assert set(load_activation_bars()) & set(ACTIVE_RULE_IDS) == {
-        "IN-1",
-        "IN-5",
-        "ID-5",
-        "AS-9",
-        "IN-4",
-        "AS-10",
-        "AS-2",
-        "AS-12",
-        "IN-3",
-        "IN-7",
-        "IN-10",
-        "IN-11",
-        "AS-11",
-        "AS-8",  # LP-406-2b — live via its bar (no-ai-dependency, input resolves)
-        "IN-6",  # LP-412 — live via its bar (calibratable-now, validated)
-        "PC-7",  # LP-412 — live via its bar (no-ai-threshold-pending, validated)
-        "PC-2",  # LP-407-3 — live via its bar (no-ai-dependency, input resolves)
-        "IH-3",  # LP-417 — live via its bar (no-ai-dependency, native date compare)
-        "PC-3",  # LP-407-4 — live via its bar (no-ai-dependency, needs_review route)
-    }
+    assert (
+        set(load_activation_bars()) & set(ACTIVE_RULE_IDS)
+        == {
+            "IN-1",
+            "IN-5",
+            "ID-5",
+            "AS-9",
+            "IN-4",
+            "AS-10",
+            "AS-2",
+            "AS-12",
+            "IN-3",
+            "IN-7",
+            "IN-10",
+            "IN-11",
+            "AS-11",
+            "AS-8",  # LP-406-2b — live via its bar (no-ai-dependency, input resolves)
+            "IN-6",  # LP-412 — live via its bar (calibratable-now, validated)
+            "PC-7",  # LP-412 — live via its bar (no-ai-threshold-pending, validated)
+            "PC-2",  # LP-407-3 — live via its bar (no-ai-dependency, input resolves)
+            "IH-3",  # LP-417 — live via its bar (no-ai-dependency, native date compare)
+            "PC-3",  # LP-407-4 — live via its bar (no-ai-dependency, needs_review route)
+            "IN-12",  # LP-423 — live via its bar (calibratable-now, validated; deterministic Schedule-C gate)
+        }
+    )
     assert not (set(load_activation_bars()) & set(_BASE_ACTIVE))

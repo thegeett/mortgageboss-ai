@@ -220,17 +220,18 @@ async def test_lf6t3n_w2_borrowers_are_not_applicable_for_in12() -> None:
 
 
 # ======================================================================= #
-# D3 — the honest activation ending: HELD (not activated)
+# Activation — LP-419 HELD it; LP-423 ACTIVATED it (its gate became a deterministic Schedule-C fact)
 # ======================================================================= #
-def test_in12_is_held_not_activated() -> None:
-    # The producer/structural-death blocker is resolved, but the self-employment SCOPE gate rests on income.type,
-    # which is thinly measured (n=2, LP-395) / unscored (LP-380/394) — the IN-13 blocker. So IN-12 holds:
-    # not-calibratable-yet, not eligible. ACTIVE_RULE_IDS is UNCHANGED (no 30 → 31 this ticket).
+def test_in12_is_activated_lp423() -> None:
+    # LP-419 held IN-12 because its self-employment scope gate rested on the unscored income.type. LP-422 made
+    # the gate a DETERMINISTIC read of Schedule C presence (LP-421), so LP-423 activated it: the verdict tag
+    # has_2yr_history inherits IN-11's Priya-validated 0.9 (measured 100%), so the bar is calibratable-now /
+    # validated / eligible. income.type is dropped as load-bearing (the deterministic gate supersedes it).
     bar = load_activation_bars()["IN-12"]
-    assert bar.status == "not-calibratable-yet"  # was needs-producer (LP-419 resolved that)
-    assert not is_eligible(bar)
-    assert "IN-12" not in ACTIVE_RULE_IDS
-    assert (
-        len(ACTIVE_RULE_IDS) == EXPECTED_ACTIVE_RULE_COUNT
-    )  # 30 — unchanged; IN-11 especially still live
-    assert "IN-11" in ACTIVE_RULE_IDS
+    assert bar.status == "calibratable-now" and bar.validated and is_eligible(bar)
+    assert bar.load_bearing_ai_tags == (
+        "income.has_2yr_history",
+    )  # income.type dropped (LP-422 gate)
+    assert "IN-12" in ACTIVE_RULE_IDS
+    assert len(ACTIVE_RULE_IDS) == EXPECTED_ACTIVE_RULE_COUNT  # 31 — IN-12 added
+    assert "IN-11" in ACTIVE_RULE_IDS  # IN-11 still live (unchanged)
