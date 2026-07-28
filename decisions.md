@@ -12339,3 +12339,46 @@ activates nothing.
 **Cross-refs.** LP-396 (the IN-12 / IN-14 activation bars), LP-385 (`_borrower_attributed_documents`), LP-333
 (derived-last, why a derived recipe sees AI tags), ADR-330 (the enum-vs-number affordance for `not_applicable`),
 LP-395 (the calibration-n measurements the fixtures raise).
+
+## ADR-332: The limit of synthetic calibration — four of seven blocking tags are NOT labelable on invented fixtures without labeling our own invention; some tags need REAL files (LP-420)
+
+**The context.** LP-420 set out to generate ONE Priya labeling session unblocking seven rules (IN-8, IN-9,
+IN-12, IN-13, IN-14, AS-7, OC-1) by writing blind worksheets for the six/seven AI tags each blocks — the OC-1
+economics lesson (never run a calibration wave for a single rule). The D1 labelability census (the ticket's own
+gate: "never spend her time on a thin or one-sided tag") found only THREE of the seven pass. The other four are
+not a scheduling problem — they are a **structural** one, and naming it is the ADR.
+
+**The finding — a synthetic fixture cannot calibrate a tag whose correct label IS the content we invent.** The
+owner-match precedent (LP-398/399) established that inventing a fixture is legitimate when the invention creates
+a GENUINE judgment the labeler uniquely settles (does "Jordan M Rivera" match borrower "Jordan A Rivera"?). It is
+NOT legitimate when the invented content DETERMINES its own label — then Priya would be "labeling our own
+invention," measuring nothing. Four tags fall on the wrong side:
+
+- **`income.type` (IN-12, IN-13).** 25 rows but one-sided (23/25 base wage), and — decisively — the values its
+  consuming rules need are STRUCTURALLY unreachable: its producer `income_amounts` reads only `pay_stub`/`w2`,
+  so `self_employment` (IN-12's gate) lives on tax returns it never sees, and `rental` (IN-13) on Schedule E /
+  leases. A varied worksheet would require inventing pay-stubs pre-stamped "bonus"/"commission" (the type IS the
+  label) — or a producer change (read tax returns). Not a labeling round.
+- **`txn.is_nsf_or_overdraft` (AS-7).** n=0 anywhere. A line reading "NSF FEE" pre-answers itself; the only
+  genuinely-ambiguous cases (an overdraft-protection transfer, an unlabeled $35 fee) turn on how the tag is
+  DEFINED — a prompt question, not an accuracy measurement. Needs REAL bank statements with genuine NSF activity.
+- **`occupancy.rental_support` (IN-14) + `occupancy.consistent_with_signals` (OC-1).** Both LOAN-subject — ONE
+  row per loan. Reaching n>=6 means authoring 6+ whole loan files whose declaration-vs-signal (in)consistency, or
+  lease-vs-rental adequacy, is the exact thing being judged. The invention authors the answer.
+
+**The rule (named).** Before generating a calibration worksheet, ask not only "is n>=6?" but "would the labeler
+be judging a GENUINE ambiguity, or reading back the content we authored?" A tag whose correct label is
+determined by the fixture we invent is **not calibratable on synthetic data** — it needs real files (or, for
+`income.type`, a producer that reads the document types the value actually lives on). This is the counterpart to
+LP-395's thin-n / empty-class lesson: n can be sufficient and the tag still un-calibratable, because the
+DISTRIBUTION is authored, not observed.
+
+**What shipped.** Worksheets for the three tags that pass (a genuine two/multi-sided distribution on LP-418's
+committed fixtures): `income.voe_present`, `income.offer_letter_present` (IN-8, IN-9) and `income.continuance_3yr`
+(advances IN-13). The four exclusions are reported with what each actually needs (a producer change / real bank
+statements / real occupancy files), and pinned by census-guard tests so they cannot silently rot back into "just
+run a labeling round."
+
+**Cross-refs.** LP-395 (thin-n / empty-class), LP-398/399/401 (the blind-worksheet pattern and legitimate
+invented ambiguity), LP-406-4 (OC-1's tag measures declaration consistency; LF-6T3N states no occupancy), LP-418
+(the voe/offer/continuance fixtures), LP-419 (`income.type` unscored; IN-12's self-employment gate).
