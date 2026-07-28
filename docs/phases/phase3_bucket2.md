@@ -105,6 +105,7 @@ Revised DoD: each of the 8 reachable rules live, or held with a named blocker. P
 Audited all 12 candidates against inputs / expressibility / AI-calibration / threshold
 Found: ~2 wire-and-write, 4 needs-derived-producer, 4 needs-extractor-extension, 2 Bucket 4
 Confirmed the catch-all fields are real; confirmed DT-1 credit-gated; found PC-1 partly reachable
+
 LP-407-2 — Wire tags + build the monthly-conversion producer · 5 pts · NEXT
 
 Unblocks: PC-2, DT-5, DT-2, DT-4
@@ -117,6 +118,7 @@ Tags describe, rules judge — no threshold inside a producer (the LP-410 discip
 Prove each tag materializes at the subject its rule will read (the ID-5 check, before any spec exists)
 Report each tag's real value on a fixture
 No rules written; additive only
+
 LP-407-3 — Write PC-2, DT-5, DT-2, DT-4 · 5 pts · depends on 407-2
 Four trivial deterministic specs branching on the wired/derived tags
 Apply the Bucket 2 patterns: applicability predicate for any not_applicable case; per-branch needs_review if an input carries a known FP residue (ADR-325)
