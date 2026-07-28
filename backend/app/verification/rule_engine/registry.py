@@ -138,6 +138,14 @@ _LP407_ACTIVATED: tuple[str, ...] = ("PC-2",)
 # has no binder → IH-3 couldnt_checks there (an honest absence, not a bug — LP-414 A3).
 _LP417_ACTIVATED: tuple[str, ...] = ("IH-3",)
 
+# LP-407-4 — the LAST blocker-free rule (30). PC-3 (property address matches) branches on the derived
+# property.address_normalized_match (a deterministic contract-vs-MISMO subject-address compare with the
+# consistency normalizers). NO AI dependency and NO threshold → the no-ai-dependency gate; input resolves on
+# the address scenarios. A mismatch routes to needs_review (ADR-325 — the deterministic normalizers cannot
+# expand abbreviations, so a possible variant is surfaced for a human, never auto-fired). LF-6T3N has no MISMO
+# subject address → PC-3 couldnt_checks there (an honest absence — LP-414).
+_LP4074_ACTIVATED: tuple[str, ...] = ("PC-3",)
+
 # The gate is the source of truth: test_activation_gate_lp389 asserts ACTIVE_RULE_IDS - _BASE_ACTIVE ==
 # eligible_rule_ids() — a rule CANNOT enter this set without meeting the eligibility gate (not a hand-list).
 ACTIVE_RULE_IDS: tuple[str, ...] = (
@@ -151,6 +159,7 @@ ACTIVE_RULE_IDS: tuple[str, ...] = (
     *_LP412_ACTIVATED,
     *_LP407_ACTIVATED,
     *_LP417_ACTIVATED,
+    *_LP4074_ACTIVATED,
 )
 
 

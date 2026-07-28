@@ -12090,6 +12090,23 @@ precedent — same tag, same evidence) and `validated: false`, pending Priya; `A
 the documented fuzzy-residue limitation), IN-3 (the transitive-AI bar precedent), ADR-316 (the ratify-mode
 question), LP-400 (describe vs judge).
 
+**EXTENSION — PC-3 (LP-407-4), the SECOND instance → this is now a PATTERN, not a one-off.** PC-3 (property
+address matches) compares the purchase contract's subject-property address against the loan file's (MISMO)
+subject-property address via a derived tag using the **consistency normalizers** (casefold / drop_punct /
+collapse_ws). Those normalizers **cannot expand `St`→`Street` / `Apt`↔`#`↔`Unit`**, so an exact-after-normalize
+mismatch carries a known FP residue (an abbreviation variant looks like a different property). A confident
+"different property" FIRING on that residue would be noisy and alarming, so — exactly as IN-6 — the mismatch
+branch (`property.address_normalized_match == "no"`) routes to **`needs_review`**, never fired: a human confirms
+same-vs-different, the rule never asserts. UNLIKE IN-6, PC-3 has **no transitive AI dependency** (the compare is
+fully deterministic), so it is NOT held on calibration — it ships **no-ai-dependency** and ACTIVATES (29 → 30).
+The residue-closing refinement here is the AI-tolerant `property.address_normalized_match` (its `fact_tags.csv`
+design: AI-at-rule-time, "tolerant") — a future calibration ticket that would reduce the `needs_review` noise.
+**The pattern, stated generally:** a deterministic rule whose comparison uses normalizers that cannot resolve
+every legitimate surface variant routes the mismatch to `needs_review` and defers the tolerant matcher to a
+calibration follow-up — rather than firing on the residue or inventing a fuzzy matcher inline. (IN-6: employer
+short-forms; PC-3: address abbreviations.) **Cross-refs.** LP-407-4 (PC-3), LP-415 (the audit row), LP-416 (the
+redundancy lesson applied at D0).
+
 ## ADR-326: A two-sided date window is TWO asymmetric outcomes (past-fires vs a future-threshold); and a no-AI rule with a Priya threshold has no clean hold in the activation model (LP-406-1b)
 
 **Decision (the rule shape).** A "date realism" rule over a signed day-count (e.g. `contract.days_until_closing`,

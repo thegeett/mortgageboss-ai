@@ -177,6 +177,17 @@ tags:
   ins.effective_date: {mode: parsed, subject: document, data: effective_date}
   ins.loan_effective_date: {mode: derived, subject: loan, data: loan_effective_date}
 
+  # --- property.address_normalized_match — PC-3's input (LP-407-4). Does the purchase contract's subject-property
+  #     address match the loan file's (MISMO) subject-property address? DERIVED (a deterministic compare using the
+  #     consistency normalizers), NOT the AI-at-rule-time the CSV plans — so PC-3 routes "no" to needs_review
+  #     (ADR-325: the normalizers cannot expand St->Street). Reads the MISMO SUBJECT address (property.address_*),
+  #     NEVER the borrower's mailing address or a retained-property tax bill (the D1 trap). Fail-closed to unknown.
+  #   ⚠️ VOCABULARY DRIFT (needs xlsx reconciliation): fact_tags.csv says produced_by=AI (AI-at-rule-time,
+  #   "tolerant"); it is DERIVED here (deterministic, less tolerant). The AI-tolerant version is the future
+  #   refinement that would reduce PC-3's needs_review noise (a calibration ticket) — the housing.insurance_monthly
+  #   drift precedent. -------------------------------------------------------------------------------------------- #
+  property.address_normalized_match: {mode: derived, subject: loan, data: property_address_match}
+
   # --- occupancy.* — OC-2's load-bearing tags (LP-371). Both were in the vocabulary WITH producers but
   #     never declared here → OC-2 (LIVE judgment) couldnt_checked on every file (the orphan class,
   #     LP-366-A/367). occupancy.stated is DERIVED (a MISMO→enum mapping, not parsed — see the recipe).

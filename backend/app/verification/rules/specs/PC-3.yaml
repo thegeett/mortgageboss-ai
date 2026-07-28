@@ -1,0 +1,110 @@
+# PC-3 — Property address matches — DETERMINISTIC structural rule SPEC (LP-407-4).
+#
+# The LAST blocker-free rule (LP-415/LP-416 re-plan): compares the purchase contract's subject-property address
+# against the loan file's (1003/MISMO) subject-property address. A mismatch means the contract and the
+# application describe DIFFERENT properties — a real and serious finding. It branches on the derived
+# property.address_normalized_match enum (LP-407-4), which does the compare with the consistency normalizers.
+#
+# ⚠️ needs_review, NOT fired (LP-407-4 D2, ADR-325 — the SECOND instance after IN-6): the deterministic
+# normalizers (casefold / drop_punct / collapse_ws) cannot expand "St" -> "Street" or "Apt" <-> "#" <-> "Unit",
+# so an exact-after-normalize mismatch carries a known false-positive residue (an abbreviation variant looks like
+# a mismatch). A confident "different property" FIRING on that residue would be noisy and alarming, so a mismatch
+# is routed to NEEDS_REVIEW — surfaced for a human to confirm same-vs-different property — never auto-fired. (The
+# AI-tolerant match, property.address_normalized_match's fact_tags design, is the future refinement that reduces
+# this needs_review noise; it needs a calibration round — deferred.)
+#
+# ⚠️ THE MAILING-ADDRESS TRAP (LP-407-4 D1): the tag compares the MISMO SUBJECT-property address
+# (property.address_*), NEVER the borrower's current/mailing address and NEVER a retained-property tax bill (a
+# different property). A file without a complete subject-property address -> the tag is "unknown" -> couldnt_check
+# (never a comparison against the wrong address type).
+#
+# ⚠️ NO AI dependency (the tag is DERIVED, deterministic — not the AI-at-rule-time the CSV plans) and NO threshold
+# -> the no-ai-dependency gate; it ACTIVATES. Its input resolves on the address scenarios (LP-407-4). LF-6T3N has
+# no MISMO subject address (LP-414 added only property.purchase_price) -> PC-3 couldnt_checks there — an honest
+# absence, not a bug.
+#
+# ⚠️ SCOPE (D6): PC-3 compares the SUBJECT-PROPERTY address (contract vs 1003). ID-4 compares the BORROWER's
+# RESIDENCE address across sources — a DIFFERENT comparison. No double-fire.
+#
+# REGISTRY DRIFT: rule_kinds.csv classifies PC-3 ai_fuzzy_match; it is built DETERMINISTIC here (the derived tag
+# does the compare, PC-3 routes the residue to needs_review) — the evaluator uses THIS spec.
+
+rule_id: PC-3
+name: Property address matches
+category: Contract
+
+kind: structural          # must equal rule_kinds.csv (PC-3 = structural)
+numeric_check: false      # an address-agreement enum branch, not a ratio
+
+criteria: >-
+  The subject-property address on the purchase contract must match the subject-property address stated in the
+  loan file (the 1003 / MISMO). A mismatch — the contract describes one property, the application another — is a
+  serious discrepancy the processor must reconcile before submission. This reads the derived
+  property.address_normalized_match fact (a deterministic comparison of the contract's property address against
+  the MISMO SUBJECT-property address, after the consistency normalizers). Because those normalizers cannot
+  resolve every abbreviation ("St" vs "Street"), a mismatch is SURFACED FOR REVIEW rather than asserted. Absent
+  on either side (no contract, or no complete subject-property address in the file) → couldnt_check, never a
+  comparison against a mailing address or a guessed pass.
+
+applicability:
+  scope: the purchase contract's subject-property address vs the loan file's (1003/MISMO) subject-property address
+  trigger: >-
+    Evaluated once per loan, comparing the contract's property address to the file's subject-property address. A
+    file with no purchase contract, or no complete MISMO subject-property address, couldnt_checks (never a
+    comparison against the borrower's mailing address or a retained-property tax bill).
+
+required_inputs:
+  - name: address_match
+    snapshot_path: 'tags.by_subject["loan"]["property.address_normalized_match"]'
+    description: >-
+      whether the contract's property address matches the loan file's subject-property address (derived,
+      LP-407-4): "yes" (match), "no" (differ — surfaced for review), "unknown" (either side absent/incomplete,
+      or contracts disagree).
+
+reference_values:
+  priya_validated: false
+  threshold_needs_signoff: false
+
+subject_enumeration: loan          # the loan-level subject (property.address_normalized_match is produced here — D4)
+subject_key_fields: [loan]
+
+evidence_required: >-
+  The contract property address and the file's subject-property address the verdict compared, inline on the
+  finding (carried in the property.address_normalized_match provenance), so the processor sees BOTH addresses.
+
+guideline_reference: "Fannie Mae Selling Guide B2-1 / the 1003 — the subject property on the sales contract must match the property in the application."
+
+spec_version: 1
+
+# LP-324 — the MACHINE-READABLE deterministic body (the generic evaluator runs THIS, zero per-rule Python). An
+# enum branch on property.address_normalized_match (already the observed yes/no/unknown answer), mirroring OC-1 /
+# IN-6. The gate turns "unknown"/absent into couldnt_check (over gated_tags); "no" routes to needs_review (ADR-325),
+# never fired; "yes" satisfies. The specific addresses live in the tag's provenance (an enum branch cannot
+# interpolate an operand — the operand path is decimal/date only).
+deterministic:
+  load_bearing_tags:
+    - property.address_normalized_match
+  gated_tags:
+    - property.address_normalized_match
+  # No operands: the verdict is an enum branch via when_tags (the tag is already the yes/no/unknown answer).
+  operands: {}
+  outcomes:
+    - verdict: needs_review
+      # "no": the addresses differ AFTER normalization. Routed to needs_review, NOT fired (ADR-325): the
+      # deterministic normalizers cannot resolve abbreviation variants, so a human confirms same-vs-different
+      # property rather than the rule asserting a "different property" on a possible abbreviation difference.
+      # "unknown"/absent never reach here (the gate couldnt_checks them first).
+      when_tags:
+        - {tag: property.address_normalized_match, op: "eq", value: "no"}
+      reasoning: >-
+        the purchase contract's subject-property address does not match the property address stated in the loan
+        file — confirm whether they describe the same property (an address written differently) or reconcile the
+        discrepancy before submission
+      how_to_fix: >-
+        Compare the property address on the purchase contract against the subject property on the 1003; if they
+        are the same property written differently, no action is needed — if genuinely different, correct
+        whichever is wrong (or obtain the correct contract).
+    - verdict: satisfied
+      default: true
+      reasoning: >-
+        the purchase contract's subject-property address matches the property address stated in the loan file

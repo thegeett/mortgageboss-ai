@@ -262,6 +262,9 @@ def test_active_set_is_base_plus_lp389() -> None:
             # LP-417 — the first Bucket 3 rule live: IH-3 (insurance effective date vs closing), a native
             # date compare off the already-extracted homeowners binder; no-ai-dependency, no threshold.
             "IH-3",
+            # LP-407-4 — the last blocker-free rule: PC-3 (contract property address vs the loan file), a
+            # deterministic address compare; no-ai-dependency, mismatch routes to needs_review (ADR-325).
+            "PC-3",
         )
     )
     # A bar persists after activation as the record of WHY the rule went live, so the bars now intersect the
@@ -285,5 +288,6 @@ def test_active_set_is_base_plus_lp389() -> None:
         "PC-7",  # LP-412 — live via its bar (no-ai-threshold-pending, validated)
         "PC-2",  # LP-407-3 — live via its bar (no-ai-dependency, input resolves)
         "IH-3",  # LP-417 — live via its bar (no-ai-dependency, native date compare)
+        "PC-3",  # LP-407-4 — live via its bar (no-ai-dependency, needs_review route)
     }
     assert not (set(load_activation_bars()) & set(_BASE_ACTIVE))

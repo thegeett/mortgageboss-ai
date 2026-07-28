@@ -757,6 +757,89 @@ def _loan_effective_date(
     )
 
 
+# The address normalizer chain for property-address matching (LP-407-4) — the consistency normalizers
+# (casefold / drop_punct / collapse_ws), REUSED, never a new fuzzy matcher. NOT drop_entity_suffix (that is
+# for company names). These do NOT expand St->Street / Apt<->#, so a mismatch is surfaced as needs_review by
+# PC-3 (ADR-325), never fired as certain — the deterministic-residue-routes-to-a-human discipline.
+_ADDRESS_NORMALIZERS = ("casefold", "drop_punct", "collapse_ws")
+
+_MISMO_PROPERTY_ADDRESS_KEYS = (
+    "property.address_line",
+    "property.address_line_2",
+    "property.city",
+    "property.state",
+    "property.postal_code",
+)
+
+
+def _property_address_match(
+    snapshot: Snapshot, _subject_id: str, _subject_raw: object
+) -> tuple[JsonValue, str]:
+    """property.address_normalized_match — does the purchase contract's SUBJECT-PROPERTY address match the loan
+    file's (1003/MISMO) subject-property address? Unblocks PC-3.
+
+    Compares the purchase_agreement's typed-core ``property_address`` against the MISMO SUBJECT-property address
+    (property.address_line [+ _2] + city + state + postal_code), after the consistency normalizers (casefold /
+    drop_punct / collapse_ws — REUSED, never a new matcher). DESCRIPTIVE enum yes/no/unknown; PC-3 JUDGES (no ->
+    needs_review, ADR-325 — the normalizers cannot expand St->Street, so a mismatch is surfaced for a human, not
+    fired as certain).
+
+    ⚠️ THE MAILING-ADDRESS TRAP (LP-407-4 D1): reads the MISMO SUBJECT-property address (property.address_*), NEVER
+    the borrower's ``current_address`` (which the MISMO parser can fill with a MAILING address) and NEVER a
+    retained-property tax bill (a different property). A file lacking a complete subject-property address ->
+    unknown (couldnt_check), never a comparison against the wrong address type.
+
+    FAIL-CLOSED: no purchase contract / contracts DISAGREE on the address / no complete MISMO subject address ->
+    unknown. The reasoning names BOTH addresses (the finding's provenance — the AS-8 break_detail pattern; the
+    operand path is decimal/date only and cannot string-compare, so this is an enum branch, not an interpolated
+    operand)."""
+    # LAZY import (init-order — rule_engine <-> tag_materialization, as income_employer_coverage does).
+    from app.verification.rule_engine.consistency import _normalize
+
+    if snapshot.documents.absent:
+        return (
+            _UNKNOWN,
+            "no documents in the file — no purchase contract to read a property address from",
+        )
+    contract_addrs: dict[str, str] = {}  # normalized -> an original rendering (for the reason)
+    for entry in snapshot.documents.entries:
+        if entry.document_type != "purchase_agreement":
+            continue
+        field = entry.fields.get("property_address")
+        if isinstance(field, Field) and field.is_present and str(field.value).strip():
+            raw = str(field.value).strip()
+            contract_addrs[_normalize(raw, _ADDRESS_NORMALIZERS)] = raw
+    if not contract_addrs:
+        return _UNKNOWN, "no purchase contract states a property address"
+    if len(contract_addrs) > 1:
+        return _UNKNOWN, (
+            "the file's purchase contracts disagree on the property address "
+            f"({', '.join(sorted(contract_addrs.values()))}) — ambiguous"
+        )
+    contract_norm, contract_raw = next(iter(contract_addrs.items()))
+
+    # The file's SUBJECT-property address from MISMO — require the street line + city + state + postal so a
+    # PARTIAL address is never compared (fail-closed; postal_code alone or a mailing fragment must not match).
+    line, line2, city, state, postal = (
+        _mismo_str(snapshot, k) for k in _MISMO_PROPERTY_ADDRESS_KEYS
+    )
+    if not (line and city and state and postal):
+        return _UNKNOWN, (
+            "the loan file (1003/MISMO) does not state a complete subject-property address — cannot compare "
+            "(never a comparison against a partial or mailing address)"
+        )
+    file_raw = " ".join(p for p in (line, line2, city, state, postal) if p)
+    if contract_norm == _normalize(file_raw, _ADDRESS_NORMALIZERS):
+        return "yes", (
+            f"the purchase contract's property address matches the loan file's subject property "
+            f"('{contract_raw}' vs the file's '{file_raw}')"
+        )
+    return "no", (
+        f"the purchase contract is for '{contract_raw}' but the loan file states the subject property is "
+        f"'{file_raw}' — confirm they describe the same property"
+    )
+
+
 # --------------------------------------------------------------------------- #
 # LP-410 — the derived-producer wave: three tags that unblock PC-7 / AS-8 / IN-6.
 # Four Bucket 2 Phase 0s established these rules' inputs are produced but their CHECKS are not
@@ -1257,6 +1340,10 @@ _RECIPES: dict[str, Recipe] = {
     # LP-417 — the loan's homeowners-insurance effective date (promoted from the document-subject
     # ins.effective_date), for IH-3 (effective <= closing). Mirrors loan_closing_date + the multi-binder abstain.
     "loan_effective_date": _loan_effective_date,
+    # LP-407-4 — does the purchase contract's subject-property address match the loan file's (MISMO)? For PC-3.
+    # DESCRIPTIVE enum (yes/no/unknown); PC-3 routes "no" to needs_review (ADR-325). Reuses the consistency
+    # normalizers; reads the MISMO SUBJECT address (never a mailing address / a retained-property tax bill).
+    "property_address_match": _property_address_match,
     # LP-366-A — the loan's total stated qualifying income, read by AS-1 via a `loan_tag` operand
     # (instead of the gated DTI calc). Fail-closed to unknown, never 0.
     "qualifying_income_monthly": _qualifying_income_monthly,

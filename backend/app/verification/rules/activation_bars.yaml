@@ -493,6 +493,35 @@ IH-3:
     IH-3 COULDNT_CHECKS there — an honest absence, not a bug; the branches are proven on the binder scenarios
     (LP-417 tests). A missing binder is couldnt_check, not not_applicable (insurance is required — D5).
 
+PC-3:
+  # LP-407-4 — the LAST blocker-free rule (LP-415/LP-416 re-plan). It branches on the DERIVED
+  # property.address_normalized_match (a deterministic contract-vs-MISMO subject-address compare using the
+  # consistency normalizers — NOT the AI-at-rule-time the CSV plans). NO AI dependency and NO threshold → the
+  # no-ai-dependency gate. A mismatch routes to needs_review (ADR-325), never auto-fired.
+  status: no-ai-dependency
+  ships: auto
+  threshold: null
+  validated: false
+  input_resolves: true    # LP-407-4: resolves on the address scenarios (build_address_match → SATISFIED;
+                          # build_address_mismatch / _abbrev → NEEDS_REVIEW). LF-6T3N has no MISMO subject
+                          # address (LP-414 added only property.purchase_price) → couldnt_checks there.
+  load_bearing_ai_tags: []
+  fp_fn: >-
+    FN (misses a genuine different-property contract) vs FP (an abbreviation variant read as a mismatch). The
+    FP is why the mismatch routes to NEEDS_REVIEW, not fired (ADR-325) — a human confirms, the rule never
+    falsely asserts a different property. A missed genuine mismatch still SURFACES (as needs_review).
+  rationale: >-
+    no AI load-bearing tag; a DETERMINISTIC enum branch on property.address_normalized_match (LP-407-4), which
+    compares the purchase contract's property_address against the MISMO SUBJECT-property address (never the
+    borrower's mailing address, never a retained-property tax bill — the D1 trap) after the consistency
+    normalizers. Because those normalizers cannot expand "St"->"Street", a mismatch is routed to NEEDS_REVIEW
+    (ADR-325, the second instance after IN-6) — surfaced for a human, never auto-fired as a "different property".
+    The input resolves on the address scenarios (build_address_*), so it is eligible; no Priya threshold.
+    ⚠️ CAVEAT: LF-6T3N has no MISMO subject-property address (LP-414 added only property.purchase_price) → PC-3
+    COULDNT_CHECKS there — an honest absence, not a bug; the branches are proven on the address scenarios
+    (LP-407-4 tests). The AI-tolerant match (property.address_normalized_match's fact_tags design) is the future
+    refinement that reduces the needs_review noise — a calibration ticket, deferred.
+
 PC-2:
   # LP-407-3 — the ONE surviving Bucket 2.5 wire-and-write rule. It compares two INDEPENDENT loan-level tags
   # (contract.loan_sales_price ← the purchase agreement; property.purchase_price ← the 1003/MISMO) — NOT the

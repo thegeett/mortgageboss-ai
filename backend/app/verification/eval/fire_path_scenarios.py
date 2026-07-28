@@ -30,6 +30,7 @@ from app.verification.snapshot.model import (
     DocumentsSection,
     MismoSection,
     Snapshot,
+    SnapshotField,
     TagsSection,
 )
 
@@ -51,6 +52,16 @@ _LOAN_INS_DECREE_ONLY = UUID(
 _LOAN_INS_DECREE_PLUS = UUID(
     "95000000-0000-4000-8000-000000000009"
 )  # LP-417 review — binder + a decree with a different effective_date (must resolve to the binder)
+_LOAN_ADDR_MATCH = UUID(
+    "95000000-0000-4000-8000-00000000000a"
+)  # LP-407-4 — contract addr == file addr
+_LOAN_ADDR_MISMATCH = UUID("95000000-0000-4000-8000-00000000000b")  # LP-407-4 — different property
+_LOAN_ADDR_ABBREV = UUID(
+    "95000000-0000-4000-8000-00000000000c"
+)  # LP-407-4 — "Ln" vs "Lane" (the FP case)
+_LOAN_ADDR_MAILING = UUID(
+    "95000000-0000-4000-8000-00000000000d"
+)  # LP-407-4 — only a mailing address (trap)
 _RUN = UUID("95000000-0000-4000-8000-0000000000ff")
 # The file (snapshot) date every closing date is measured against (deterministic — never a wall-clock now()).
 _FILE_DATE = datetime(2026, 7, 1, tzinfo=UTC)
@@ -69,13 +80,15 @@ def _doc(cid: str, dtype: str, **fields: str) -> DocumentEntry:
     )
 
 
-def _snapshot(loan_id: UUID, docs: list[DocumentEntry]) -> Snapshot:
+def _snapshot(
+    loan_id: UUID, docs: list[DocumentEntry], mismo: dict[str, SnapshotField] | None = None
+) -> Snapshot:
     return Snapshot(
         loan_file_id=loan_id,
         run_id=_RUN,
         created_at=_FILE_DATE,
         documents=DocumentsSection.present(docs),
-        mismo=MismoSection.present({}),
+        mismo=MismoSection.present(mismo or {}),
         tags=TagsSection.present({}),
     )
 
@@ -289,6 +302,72 @@ def build_insurance_binder_plus_decree_snapshot() -> Snapshot:
     )
 
 
+# --------------------------------------------------------------------------- #
+# PC-3 (LP-407-4) — the purchase contract's subject-property address vs the loan file's (MISMO) subject-property
+# address. Each carries a purchase_agreement (property_address) + the MISMO SUBJECT address (property.address_*).
+# PC-3 is loan-enumerated; property.address_normalized_match is loan-level. "no" routes to needs_review (ADR-325).
+# --------------------------------------------------------------------------- #
+def _addr_contract(cid: str, property_address: str) -> DocumentEntry:
+    return _doc(
+        cid, "purchase_agreement", property_address=property_address, closing_date="2026-07-15"
+    )
+
+
+def _subject_mismo(line: str, city: str, state: str, postal: str) -> dict[str, SnapshotField]:
+    """The MISMO SUBJECT-property address (property.address_* — NOT a mailing address)."""
+    return {
+        "property.address_line": _f(line),
+        "property.city": _f(city),
+        "property.state": _f(state),
+        "property.postal_code": _f(postal),
+    }
+
+
+def build_address_match_snapshot() -> Snapshot:
+    """The contract's property address == the file's MISMO subject address (after normalization) → PC-3
+    SATISFIED. The clean case."""
+    return _snapshot(
+        _LOAN_ADDR_MATCH,
+        [_addr_contract("95-pa-addr-ok", "789 Birchwood Ln, Springfield IL 62711")],
+        _subject_mismo("789 Birchwood Ln", "Springfield", "IL", "62711"),
+    )
+
+
+def build_address_mismatch_snapshot() -> Snapshot:
+    """The contract is for one property, the file states a DIFFERENT one → PC-3 NEEDS_REVIEW (surfaced for a
+    human, never auto-fired — ADR-325)."""
+    return _snapshot(
+        _LOAN_ADDR_MISMATCH,
+        [_addr_contract("95-pa-addr-diff", "789 Birchwood Ln, Springfield IL 62711")],
+        _subject_mismo("456 Oak Street", "Rivertown", "IL", "60000"),
+    )
+
+
+def build_address_abbrev_snapshot() -> Snapshot:
+    """The FALSE-POSITIVE case: same property, "Lane" on the contract vs "Ln" in the file. The deterministic
+    normalizers cannot expand the abbreviation, so it reads as a mismatch → PC-3 NEEDS_REVIEW (NOT fired — the
+    whole point of the ADR-325 routing: a human clears the abbreviation, the rule never falsely asserts a
+    different property)."""
+    return _snapshot(
+        _LOAN_ADDR_ABBREV,
+        [_addr_contract("95-pa-addr-abbrev", "789 Birchwood Lane, Springfield IL 62711")],
+        _subject_mismo("789 Birchwood Ln", "Springfield", "IL", "62711"),
+    )
+
+
+def build_address_mailing_only_snapshot() -> Snapshot:
+    """THE MAILING-ADDRESS TRAP (D1): the file has a borrower MAILING address but NO subject-property address
+    (property.address_* absent). PC-3 must COULDNT_CHECK — never compare the contract against the mailing
+    address as a substitute."""
+    return _snapshot(
+        _LOAN_ADDR_MAILING,
+        [_addr_contract("95-pa-addr-mailing", "789 Birchwood Ln, Springfield IL 62711")],
+        {
+            "borrower.1.current_address_line": _f("PO Box 55, Elsewhere IL 60000")
+        },  # mailing, NOT property.*
+    )
+
+
 # The expected fired/materialized outcomes — recorded HERE / in tests, never predicted in prose (LP-337).
 EXPECTED_TAXES_MONTHLY = "500.00"  # 6000 / 12
 EXPECTED_HOA_MONTHLY = "300.00"  # 300 monthly
@@ -300,6 +379,10 @@ __all__ = [
     "EXPECTED_INS_EFFECTIVE_IN_FORCE",
     "EXPECTED_INS_EFFECTIVE_LATE",
     "EXPECTED_TAXES_MONTHLY",
+    "build_address_abbrev_snapshot",
+    "build_address_mailing_only_snapshot",
+    "build_address_match_snapshot",
+    "build_address_mismatch_snapshot",
     "build_far_future_closing_snapshot",
     "build_insurance_binder_plus_decree_snapshot",
     "build_insurance_decree_only_snapshot",

@@ -186,4 +186,5 @@ def test_no_rule_activation_changed() -> None:
         "PC-7",  # LP-412 — Priya signed off the closing window (no-ai-threshold-pending)
         "PC-2",  # LP-407-3 — purchase price matches loan terms
         "IH-3",  # LP-417 — insurance effective date vs closing
+        "PC-3",  # LP-407-4 — contract property address vs the loan file
     )

@@ -91,22 +91,25 @@ def test_no_live_rule_read_a_repaired_tag_when_lp414_shipped() -> None:
 
 
 async def test_lf6t3n_full_verdict_distribution_is_stable() -> None:
-    # The equivalence gate as a regression lock. LP-414 established 302 evals; LP-407-3 added the live PC-2
-    # (SATISFIED); LP-417 added the live IH-3, which COULDNT_CHECKS on LF-6T3N (no homeowners binder — LP-414 A3
-    # kept it off), so the lock is now 304 evals / couldnt_check 180, with IH-3 in the loan verdicts. Any OTHER
-    # movement would be a repair regression.
+    # The equivalence gate as a regression lock. LP-414: 302 evals; LP-407-3 +PC-2 (satisfied); LP-417 +IH-3
+    # (couldnt_check — no binder); LP-407-4 +PC-3, which COULDNT_CHECKS on LF-6T3N (no MISMO subject-property
+    # address — LP-414 added only property.purchase_price). The lock is now 305 evals / couldnt_check 181, with
+    # PC-3 in the loan verdicts. Any OTHER movement would be a repair regression.
     mat = await materialize_tags(
         build_lf6t3n_snapshot(), ai_reasoners=stub_materialization_reasoners()
     )
     results, _ = await evaluate_rules(mat)
-    assert len(results) == 304
-    assert Counter(r.verdict.value for r in results) == {
-        "couldnt_check": 180,  # +IH-3 (LP-417): no binder on LF-6T3N → couldnt_check
-        "not_applicable": 99,
-        "satisfied": 21,  # +PC-2 (LP-407-3): both prices 365000 → satisfied
-        "fired": 2,
-        "needs_review": 2,
-    }
+    assert len(results) == 305
+    assert (
+        Counter(r.verdict.value for r in results)
+        == {
+            "couldnt_check": 181,  # +IH-3 (LP-417) +PC-3 (LP-407-4): no binder / no MISMO subject address on LF-6T3N
+            "not_applicable": 99,
+            "satisfied": 21,  # +PC-2 (LP-407-3): both prices 365000 → satisfied
+            "fired": 2,
+            "needs_review": 2,
+        }
+    )
     loan_verdicts = {r.rule_id: r.verdict.value for r in results if r.subject_id == _LOAN}
     assert loan_verdicts == {
         "AS-8": "satisfied",
@@ -114,6 +117,7 @@ async def test_lf6t3n_full_verdict_distribution_is_stable() -> None:
         "PC-7": "satisfied",
         "PC-2": "satisfied",  # LP-407-3 — the contract price matches the 1003 (365000)
         "IH-3": "couldnt_check",  # LP-417 — no homeowners binder on LF-6T3N (an honest absence)
+        "PC-3": "couldnt_check",  # LP-407-4 — no MISMO subject-property address on LF-6T3N
         "ID-6": "fired",
         "IN-2": "fired",
         "IN-3": "couldnt_check",
