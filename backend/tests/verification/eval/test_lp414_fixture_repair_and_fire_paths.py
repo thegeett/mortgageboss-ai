@@ -72,35 +72,37 @@ async def test_pc7_realism_anchor_did_not_move() -> None:
     assert [r.verdict for r in evaluate_deterministic_rule(_PC7, mat)] == [Verdict.SATISFIED]
 
 
-def test_no_live_rule_reads_a_repaired_tag() -> None:
-    # WHY the repair is verdict-safe by construction (not luck): none of the repaired/gained tags is read by
-    # ANY live rule. Reuses the vocabulary-orphan guard's own "hard read" machinery as the source of truth.
+def test_no_live_rule_read_a_repaired_tag_when_lp414_shipped() -> None:
+    # WHY the LP-414 repair was verdict-safe by construction (not luck): at the time, no live rule read any
+    # repaired/gained tag. (LP-407-3 LATER made PC-2 live, which reads property.purchase_price +
+    # contract.loan_sales_price — an intended NEW rule, not a repair regression; those two are excluded here.)
+    # The rest are still read by no live rule. Reuses the orphan guard's own "hard read" machinery.
     from tests.verification.tag_materialization.test_vocabulary_orphans import _live_hard_reads
 
     live_reads = _live_hard_reads()
     for tag_id in (
-        "contract.sales_price",
-        "property.purchase_price",
-        "contract.loan_sales_price",
+        "contract.sales_price",  # PC-2 reads the loan-level PROMOTION, not this per-document tag
         "housing.taxes_monthly",
         "housing.hoa_monthly",
     ):
         assert tag_id not in live_reads, tag_id
+    # LP-407-3: PC-2 (live) now reads these two — documented so this test stays honest, not stale.
+    assert {"property.purchase_price", "contract.loan_sales_price"} <= live_reads
 
 
 async def test_lf6t3n_full_verdict_distribution_is_stable() -> None:
-    # The equivalence gate as a regression lock: the full 27-rule evaluation on the REPAIRED LF-6T3N yields
-    # exactly the verdict multiset the pre-repair fixture did (302 evals; captured before/after in the ticket).
-    # A repaired tag that silently fed a rule would move a count here.
+    # The equivalence gate as a regression lock. LP-414 established 302 evals; LP-407-3 added the live PC-2
+    # (one loan-subject SATISFIED — both prices 365000 on the repaired anchor), so the lock is now 303 evals /
+    # satisfied 21, with PC-2 in the loan verdicts. Any OTHER movement would be a repair regression.
     mat = await materialize_tags(
         build_lf6t3n_snapshot(), ai_reasoners=stub_materialization_reasoners()
     )
     results, _ = await evaluate_rules(mat)
-    assert len(results) == 302
+    assert len(results) == 303
     assert Counter(r.verdict.value for r in results) == {
         "couldnt_check": 179,
         "not_applicable": 99,
-        "satisfied": 20,
+        "satisfied": 21,  # +PC-2 (LP-407-3): both prices 365000 → satisfied
         "fired": 2,
         "needs_review": 2,
     }
@@ -109,6 +111,7 @@ async def test_lf6t3n_full_verdict_distribution_is_stable() -> None:
         "AS-8": "satisfied",
         "AS-10": "satisfied",
         "PC-7": "satisfied",
+        "PC-2": "satisfied",  # LP-407-3 — the contract price matches the 1003 (365000)
         "ID-6": "fired",
         "IN-2": "fired",
         "IN-3": "couldnt_check",
@@ -178,4 +181,8 @@ def test_scenario_fixtures_are_standalone_and_disjoint() -> None:
 
 
 def test_no_rule_activation_changed() -> None:
-    assert len(ACTIVE_RULE_IDS) == 27  # a fixture ticket — no rule/spec/tag/producer changed
+    from tests.expected_active import EXPECTED_ACTIVE_RULE_COUNT
+
+    assert (
+        len(ACTIVE_RULE_IDS) == EXPECTED_ACTIVE_RULE_COUNT
+    )  # LP-414 fixture-only; PC-2 activated in LP-407-3

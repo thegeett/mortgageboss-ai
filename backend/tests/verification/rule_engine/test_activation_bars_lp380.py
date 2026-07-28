@@ -158,19 +158,22 @@ def test_exactly_the_signed_off_bars_are_validated() -> None:
     validated = {rid for rid, b in bars.items() if b.validated}
     # IN-1/IN-5 (LP-389) + AS-2/AS-12 (LP-390-7) + IN-3 (LP-390-9) + IN-7/IN-10/IN-11/AS-11 (LP-393-6) +
     # IN-6 (calibratable) + PC-7 (no-ai-threshold-pending) — LP-412 signed off the last two.
-    assert validated == {
-        "IN-1",
-        "IN-5",
-        "AS-2",
-        "AS-12",
-        "IN-3",
-        "IN-7",
-        "IN-10",
-        "IN-11",
-        "AS-11",
-        "IN-6",  # LP-412 — 0.95, "same as IN-5"
-        "PC-7",  # LP-412 — the two-sided window (any past date; 90-day far-future)
-    }
+    assert (
+        validated
+        == {
+            "IN-1",
+            "IN-5",
+            "AS-2",
+            "AS-12",
+            "IN-3",
+            "IN-7",
+            "IN-10",
+            "IN-11",
+            "AS-11",
+            "IN-6",  # LP-412 — 0.95, "same as IN-5"
+            "PC-7",  # LP-412 — the two-sided window (any past date; 90-day far-future)
+        }
+    )  # NOTE: PC-2 (LP-407-3) is no-ai-dependency with validated:false — it is NOT in this signed-off set.
     assert all(b.validated is False for rid, b in bars.items() if rid not in validated)
     # A validated bar is one the loader PERMITS `validated: true` on — calibratable-now (an AI-accuracy bar,
     # real threshold) OR no-ai-threshold-pending (LP-411 — a Priya window sign-off, null threshold, e.g. PC-7).
@@ -253,6 +256,9 @@ def test_active_set_is_base_plus_lp389() -> None:
             # closing window). PC-7 is the first rule live via LP-411's no-ai-threshold-pending status.
             "IN-6",
             "PC-7",
+            # LP-407-3 — the one surviving Bucket 2.5 rule: PC-2 (purchase price matches loan terms),
+            # no-ai-dependency + exact compare (no threshold), input resolves (365000 on the repaired LF-6T3N).
+            "PC-2",
         )
     )
     # A bar persists after activation as the record of WHY the rule went live, so the bars now intersect the
@@ -274,5 +280,6 @@ def test_active_set_is_base_plus_lp389() -> None:
         "AS-8",  # LP-406-2b — live via its bar (no-ai-dependency, input resolves)
         "IN-6",  # LP-412 — live via its bar (calibratable-now, validated)
         "PC-7",  # LP-412 — live via its bar (no-ai-threshold-pending, validated)
+        "PC-2",  # LP-407-3 — live via its bar (no-ai-dependency, input resolves)
     }
     assert not (set(load_activation_bars()) & set(_BASE_ACTIVE))

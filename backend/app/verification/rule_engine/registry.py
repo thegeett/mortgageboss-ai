@@ -122,6 +122,15 @@ _LP406_ACTIVATED: tuple[str, ...] = ("AS-8",)
 #          limit). The FIRST rule live via LP-411's no-ai-threshold-pending status: input_resolves ∧ validated.
 _LP412_ACTIVATED: tuple[str, ...] = ("IN-6", "PC-7")
 
+# LP-407-3 — the ONE surviving Bucket 2.5 wire-and-write rule (27 → 28). PC-2 (purchase price matches loan
+# terms) compares two INDEPENDENT loan-level tags — the contract's sale price (contract.loan_sales_price,
+# LP-407-2's promotion) and the 1003/MISMO purchase price (property.purchase_price) — and fires on a mismatch.
+# NO AI dependency (both parsed/derived) and NO threshold (EXACT compare, rule_kinds threshold_needs_signoff=
+# false) → it clears the no-ai-dependency gate (input_resolves: both are 365000 on LF-6T3N post-LP-414 → PC-2
+# SATISFIED). Its sibling census rules were STOPPED: DT-5 vacuous (LP-407-2); DT-2 vacuous + no HOA-presence tag;
+# DT-4 needs an unwired assessed-value producer + a Priya tax rate (LP-407-3 D1 — ADR-330).
+_LP407_ACTIVATED: tuple[str, ...] = ("PC-2",)
+
 # The gate is the source of truth: test_activation_gate_lp389 asserts ACTIVE_RULE_IDS - _BASE_ACTIVE ==
 # eligible_rule_ids() — a rule CANNOT enter this set without meeting the eligibility gate (not a hand-list).
 ACTIVE_RULE_IDS: tuple[str, ...] = (
@@ -133,6 +142,7 @@ ACTIVE_RULE_IDS: tuple[str, ...] = (
     *_LP393_ACTIVATED,
     *_LP406_ACTIVATED,
     *_LP412_ACTIVATED,
+    *_LP407_ACTIVATED,
 )
 
 

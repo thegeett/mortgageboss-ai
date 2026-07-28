@@ -52,6 +52,7 @@ _ACTIVATED = frozenset(
         "AS-8",  # LP-406-2b — the first Bucket 2 rule live (no-ai-dependency; stmt.continuity resolves)
         "IN-6",  # LP-412 — Priya signed off the 0.95 bar (calibratable-now, same tag/evidence as IN-5)
         "PC-7",  # LP-412 — Priya signed off the closing window (first rule live via no-ai-threshold-pending)
+        "PC-2",  # LP-407-3 — purchase price matches loan terms (no-ai-dependency, exact compare, no threshold)
     }
 )
 
@@ -91,6 +92,7 @@ def test_eligible_rule_ids_is_sorted_and_matches() -> None:
         "IN-5",
         "IN-6",  # LP-412
         "IN-7",
+        "PC-2",  # LP-407-3 (sorts before PC-7)
         "PC-7",  # LP-412
     )  # sorted
 
@@ -158,10 +160,12 @@ def test_lp411_no_ai_threshold_pending_gate_both_ways_and_the_guard() -> None:
 # --------------------------------------------------------------------------- #
 def test_active_set_is_exactly_base_plus_eligible() -> None:
     # the invariant that keeps a rule from being activated without passing the gate
+    from tests.expected_active import EXPECTED_ACTIVE_RULE_COUNT
+
     assert set(ACTIVE_RULE_IDS) - set(_BASE_ACTIVE) == set(eligible_rule_ids()) == set(_ACTIVATED)
     assert (
-        len(ACTIVE_RULE_IDS) == 27 and len(_BASE_ACTIVE) == 11
-    )  # +AS-8 (LP-406-2b) +IN-6/PC-7 (LP-412) — all three Bucket 2 rules with signed-off bars are live
+        len(ACTIVE_RULE_IDS) == EXPECTED_ACTIVE_RULE_COUNT and len(_BASE_ACTIVE) == 11
+    )  # the single source of truth for the live count (tests/expected_active.py)
     assert set(_BASE_ACTIVE) < set(ACTIVE_RULE_IDS)  # the original 11 are intact, none dropped
     # no duplicates crept in when concatenating base + activated
     assert len(set(ACTIVE_RULE_IDS)) == len(ACTIVE_RULE_IDS)

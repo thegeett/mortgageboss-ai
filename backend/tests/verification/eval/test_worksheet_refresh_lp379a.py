@@ -190,6 +190,7 @@ def test_no_rule_activation_changed() -> None:
         "AS-8",  # LP-406-2b — the first Bucket 2 rule live (statement chaining on stmt.continuity)
         "IN-6",  # LP-412 — Priya signed off the 0.95 bar (calibratable-now, same as IN-5)
         "PC-7",  # LP-412 — Priya signed off the closing window (no-ai-threshold-pending)
+        "PC-2",  # LP-407-3 — purchase price matches loan terms
     )
 
 

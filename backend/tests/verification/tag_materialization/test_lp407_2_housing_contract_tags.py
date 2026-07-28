@@ -268,4 +268,8 @@ def test_new_tags_are_declared_and_no_rule_activated() -> None:
         "housing.hoa_monthly",
     ):
         assert tag_id in decls
-    assert len(ACTIVE_RULE_IDS) == 27  # tags only — no rule written or activated
+    from tests.expected_active import EXPECTED_ACTIVE_RULE_COUNT
+
+    assert (
+        len(ACTIVE_RULE_IDS) == EXPECTED_ACTIVE_RULE_COUNT
+    )  # LP-407-2 tags only; PC-2 activated in LP-407-3

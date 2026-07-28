@@ -1,0 +1,105 @@
+# PC-2 — Purchase price matches loan terms — DETERMINISTIC structural rule SPEC (LP-407-3).
+#
+# The ONE surviving Bucket 2.5 wire-and-write rule. It compares two ALREADY-PRODUCED loan-level tags — the
+# purchase contract's sale price (contract.loan_sales_price, promoted from the purchase_agreement's sales_price
+# by LP-407-2) and the loan file's stated purchase price (property.purchase_price, the 1003/MISMO figure) — and
+# fires on a mismatch. Two INDEPENDENT sources (the contract DOCUMENT vs the 1003), so it is NOT the DT-5/DT-2
+# self-source vacuity trap: a processor can enter a 1003 price that differs from the contract, and this catches
+# it. Both tags materialize to 365000 on LF-6T3N post-LP-414 → PC-2 SATISFIES the clean anchor.
+#
+# ⚠️ EXACT compare, NO threshold (LP-407-3 D3): the two prices must be equal (Decimal equality, so a trailing-
+# zero rendering 365000 vs 365000.00 is NOT a mismatch). rule_kinds.csv classifies this exact / no-signoff
+# (threshold_needs_signoff=false), so PC-2 ACTIVATES with no Priya bar (the AS-8 no-AI-dependency path), unlike
+# DT-4 (a tolerance rule) which would be held. PRIYA REFINEMENT (optional, not blocking): should a small
+# rounding tolerance ever be allowed (e.g. ignore a sub-dollar difference)? Today: exact, per the classification.
+#
+# ⚠️ SCOPE (mirrors PC-7 D4): PC-2 is LOAN-WIDE, not applicability-scoped. A REFINANCE (no purchase agreement →
+# no contract.sales_price → contract.loan_sales_price == "unknown") resolves to COULDNT_CHECK, not
+# not_applicable — there is no loan.purpose tag to scope it purchase-only (the same reported gap PC-7 carries).
+#
+# REGISTRY DRIFT (mirrors AS-8/IN-6/PC-7): rule_tags.csv maps PC-2 -> contract.sales_price / property.purchase_
+# price (the Phase-0 planned inputs). PC-2 reads property.purchase_price directly but reads the contract price via
+# the loan-level PROMOTION contract.loan_sales_price (a loan-enumerated rule cannot read the per-document
+# contract.sales_price). The evaluator uses THIS spec; reconcile the row upstream in the xlsx.
+
+rule_id: PC-2
+name: Purchase price matches loan terms
+category: Contract
+
+kind: structural          # must equal rule_kinds.csv (PC-2 = structural, deterministic_only)
+numeric_check: false      # an equality compare of two stated prices, not a ratio
+
+criteria: >-
+  The sale price stated on the purchase contract must match the purchase price stated in the loan file (the
+  1003 / MISMO figure). A mismatch — the contract says one price, the application another — is a discrepancy the
+  processor must reconcile before submission (a data-entry error, a stale contract, or a renegotiated price not
+  carried through). This compares the contract's sale price (promoted to loan level from the purchase agreement)
+  against the loan file's stated purchase price, exactly (no tolerance — the two should be the same number).
+  Absent/unreadable on either side (e.g. a refinance with no purchase agreement) → couldnt_check, never a guessed
+  pass.
+
+applicability:
+  scope: the purchase contract's sale price vs the loan file's stated (1003/MISMO) purchase price
+  trigger: >-
+    Evaluated once per loan, comparing the contract sale price to the stated purchase price. A file missing
+    either figure (e.g. a refinance, or a missing purchase agreement) couldnt_checks — there is no loan-purpose
+    tag to scope it not_applicable (a reported gap, shared with PC-7).
+
+required_inputs:
+  - name: contract_price
+    snapshot_path: 'tags.by_subject["loan"]["contract.loan_sales_price"]'
+    description: >-
+      the purchase contract's sale price, promoted to loan level (LP-407-2) from the purchase_agreement's
+      sales_price. "unknown" when no contract sale price is in the file, or documents disagree on it.
+  - name: file_price
+    snapshot_path: 'tags.by_subject["loan"]["property.purchase_price"]'
+    description: the loan file's stated purchase price (the 1003 / MISMO ``property.purchase_price`` figure).
+
+# An exact equality compare carries no numeric threshold. priya_validated / threshold_needs_signoff mirror
+# rule_kinds.csv (both false for PC-2 — exact, no sign-off).
+reference_values:
+  priya_validated: false
+  threshold_needs_signoff: false
+
+subject_enumeration: loan          # the loan-level subject (both tags materialize here — LP-407-2 / D4)
+subject_key_fields: [loan]
+
+evidence_required: >-
+  The contract sale price and the file's stated purchase price the verdict compared, inline on the finding, so
+  the processor sees BOTH figures and which document each came from.
+
+guideline_reference: "Fannie Mae Selling Guide B3-4.1 / the 1003 — the sales contract price must agree with the purchase price stated in the application."
+
+spec_version: 1
+
+# LP-324 — the MACHINE-READABLE deterministic body (the generic evaluator runs THIS, zero per-rule Python).
+# The NUMBER-vs-NUMBER (operand) path, an equality compare (mirrors PC-7's number-vs-threshold shape, with two
+# tag operands instead of a tag + a reference). Either operand "unknown" → the operand coerces to None →
+# couldnt_check (the gate catches it first, over gated_tags). ONE fired outcome (a mismatch), reason interpolates
+# BOTH prices so the processor sees them without opening the documents (the PC-7 interpolation pattern).
+deterministic:
+  load_bearing_tags:
+    - contract.loan_sales_price
+    - property.purchase_price
+  gated_tags:
+    - contract.loan_sales_price
+    - property.purchase_price
+  operands:
+    contract_price: {tag: contract.loan_sales_price}   # decimal (default); the contract's sale price
+    file_price: {tag: property.purchase_price}         # decimal (default); the 1003/MISMO purchase price
+  outcomes:
+    - verdict: fired
+      # The two stated prices differ (contract_price != file_price). Decimal equality, so 365000 vs 365000.00
+      # is NOT a mismatch; a genuine difference (365000 vs 350000) fires.
+      when_compare: {op: "!=", left: contract_price, right: file_price}
+      reasoning: >-
+        the purchase contract's sale price ({contract_price}) does not match the purchase price stated in the
+        loan file ({file_price}) — reconcile the discrepancy before submission (confirm the current contract
+        price and correct whichever figure is wrong)
+      how_to_fix: >-
+        Confirm the sale price on the current purchase contract and the purchase price on the 1003, and correct
+        whichever is out of date (or obtain the updated contract/addendum if the price was renegotiated).
+    - verdict: satisfied
+      default: true
+      reasoning: >-
+        the purchase contract's sale price matches the purchase price stated in the loan file

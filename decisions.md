@@ -12227,3 +12227,47 @@ this ticket is scoped to the DTI service. Both are recorded gaps, not fixed here
 **Cross-refs.** ADR-328 (the tag's fail-closed rule), LP-407-2 (the finding), LP-374 (`housing.insurance_monthly`
 "agree-or-abstain"), LP-375 (the `unknown`→gated machinery this reuses), `services/dti.py` (`_extracted_hoa_monthly`,
 `_to_items`).
+
+## ADR-330: The self-source vacuity pattern — a rule whose operands both trace to ONE extracted field can never fire; and a NUMBER tag cannot carry a `not_applicable` for an optional component (LP-407-3)
+
+**The pattern (named).** A verification rule that compares two operands is only a real check when the operands
+are INDEPENDENT. When both operands reduce to the **same extracted field**, the rule compares a value to
+itself — it is **vacuous**: it can never fire, yet it looks like coverage while checking nothing. This is worse
+than a missing rule (a missing rule is visibly absent; a vacuous one is a false sense of coverage). LP-407-3
+found this a **second** time (LP-407-2 found it first, in DT-5), so it is worth naming as a class to check for.
+
+**Two rules fell to it, one survived (the Bucket 2.5 close-out):**
+- **DT-5** (LP-407-2) — "premium used vs binder": both sides trace to the homeowners binder's `annual_premium`
+  (the DTI insurance line and `housing.insurance_monthly` read the same field). Vacuous. Not written.
+- **DT-2** (LP-407-3) — "HOA dues in the DTI": `rule_tags.csv` maps it to `housing.hoa_monthly` ALONE. "HOA
+  detected" and "the dues in the DTI" both trace to the one `hoa_statement.dues_amount` (the DTI auto-includes
+  what it detects). There is no independent stated-HOA operand. Vacuous → **not written.** (It also has no
+  HOA-presence signal — see below.)
+- **PC-2** (LP-407-3, WRITTEN + LIVE) — "contract price vs 1003 price": `contract.loan_sales_price` (the
+  purchase-agreement document) vs `property.purchase_price` (the 1003/MISMO). **Two genuinely independent
+  sources** — a processor can enter a 1003 price that differs from the contract, and PC-2 catches it. Not
+  vacuous. Exact compare, no threshold → activates via the no-ai-dependency gate.
+- **DT-4** (LP-407-3) — NOT vacuous, but its independent operand (a tax ESTIMATE from `assessed_value`) is
+  **unwired**: no `property.assessed_value` tag is produced, and the estimate needs a jurisdiction tax/mill
+  rate (a Priya value). The DTI reads `annual_tax_amount` directly and computes no estimate. **Stopped:
+  needs-producer + needs-definition** — its own ticket.
+
+**The corollary — a NUMBER tag cannot express `not_applicable` for an optional component.** DT-2's second
+problem (LP-407-2 D2, restated general here): a property with NO HOA should be `not_applicable`, but
+`housing.hoa_monthly` is a **number** tag, and a number has no `not_applicable` enum — "no HOA statement" and
+"HOA unreadable" both collapse to `unknown`. So an optional-component rule keyed on a number tag `couldnt_checks`
+on every file lacking that component (the "looks broken on ordinary files" failure). The general answer (for a
+future producer ticket): an optional-component rule needs a **presence enum** (`present`/`absent`/`unknown`) its
+applicability predicate can gate on — the amount tag alone is insufficient. No presence tag exists today, so
+DT-2 is doubly blocked. (Insurance/taxes are REQUIRED components, so their `unknown → couldnt_check` is correct
+— this gap is specific to OPTIONAL components like HOA.)
+
+**The discipline (the vacuity check, first).** Before writing a compare rule: trace BOTH operands to their
+source fields. If they reduce to one field → STOP (vacuous). If an operand is unwired → STOP (needs-producer).
+Only then write it. Two censuses (LP-405, LP-407-1) over-counted this bucket by asking "are the inputs
+produced?" without asking "are the operands INDEPENDENT?"; this ADR records the question that separates a real
+rule from a vacuous one.
+
+**Cross-refs.** LP-407-2 (DT-5, the first instance; the D2 number-tag gap), LP-407-3 (DT-2 vacuous, DT-4
+unwired, PC-2 written), `rule_tags.csv` (the one-operand maps for DT-2/DT-4), `services/dti.py` (the DTI's
+HOA/tax lines — the self-source trace), ADR-324 (tags describe, rules judge).

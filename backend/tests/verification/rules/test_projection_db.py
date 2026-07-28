@@ -71,7 +71,8 @@ async def test_as1_projects_priya_validated_false_with_spec(db_session: AsyncSes
         select(func.count()).select_from(Rule).where(Rule.spec.isnot(None))
     )
     # 34 = +10 AS-2..AS-12 (LP-323-AS-B); +OC-1 (LP-406-4); +AS-8 (LP-406-2b); +IN-6 (LP-406-3b); +PC-7 (LP-406-1b).
-    assert with_spec == 38
+    # +PC-2 (LP-407-3) = 39.
+    assert with_spec == 39
 
 
 async def test_db_loses_to_files(db_session: AsyncSession) -> None:

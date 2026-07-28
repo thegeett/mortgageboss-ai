@@ -464,6 +464,32 @@ PC-7:
     date (a fixture ticket, LP-393-1 pattern) would exercise them; the branches are proven on constructed
     snapshots (LP-406-1b tests). PC-7 must not falsely fire on a near-term closing — Phase-2 verified.
 
+PC-2:
+  # LP-407-3 — the ONE surviving Bucket 2.5 wire-and-write rule. It compares two INDEPENDENT loan-level tags
+  # (contract.loan_sales_price ← the purchase agreement; property.purchase_price ← the 1003/MISMO) — NOT the
+  # DT-5/DT-2 self-source vacuity trap. NO AI dependency (both parsed/derived) and NO threshold (EXACT compare,
+  # rule_kinds threshold_needs_signoff=false) → the AS-8 no-ai-dependency path, eligible on input_resolves alone.
+  status: no-ai-dependency
+  ships: auto
+  threshold: null
+  validated: false
+  input_resolves: true    # LP-414: both prices are 365000 on the repaired LF-6T3N → PC-2 SATISFIED → ELIGIBLE
+  load_bearing_ai_tags: []
+  fp_fn: >-
+    FN (misses a contract/1003 price discrepancy — a data-entry error or a stale/renegotiated price) vs FP (a
+    false flag — a human re-checks two stated figures). Exact compare, so no tolerance tunes this today.
+  rationale: >-
+    no AI load-bearing tag; an EXACT equality compare of two parsed/derived stated prices (the contract sale
+    price vs the 1003/MISMO purchase price), computed with zero Priya threshold (rule_kinds exact / no-signoff).
+    LP-414 repaired the fixture field names so both tags materialize on the BASE LF-6T3N (contract.loan_sales_
+    price == property.purchase_price == 365000 → PC-2 SATISFIED). The input resolves — eligible (registry
+    _LP407_ACTIVATED). PRIYA REFINEMENT (optional, non-blocking): whether a sub-dollar rounding tolerance should
+    ever be allowed — today exact, per the classification. ⚠️ CAVEAT (the AS-8/PC-7 one-sided-trigger shape):
+    LF-6T3N's prices MATCH (SATISFIED), so PC-2's FIRED (mismatch) path ships UNEXERCISED on real data; a
+    mismatched-price fixture would exercise it — the branch is proven on a constructed snapshot (LP-407-3 tests).
+    A refinance (no purchase agreement → contract.loan_sales_price "unknown") couldnt_checks, not not_applicable
+    (no loan.purpose tag — the PC-7 gap). PC-2 must not falsely fire when the prices agree — Phase-2 verified.
+
 ID-5:
   status: no-ai-dependency
   ships: auto

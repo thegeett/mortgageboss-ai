@@ -556,5 +556,6 @@ def test_dti_hoa_frequency_map_matches_the_tag_map() -> None:
 def test_hoa_fix_touches_no_rule_activation() -> None:
     # This is a service change — the rule engine is untouched (no tag/producer/rule/prompt change).
     from app.verification.rule_engine.registry import ACTIVE_RULE_IDS
+    from tests.expected_active import EXPECTED_ACTIVE_RULE_COUNT
 
-    assert len(ACTIVE_RULE_IDS) == 27
+    assert len(ACTIVE_RULE_IDS) == EXPECTED_ACTIVE_RULE_COUNT
