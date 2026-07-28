@@ -608,6 +608,11 @@ ai_groups:
   # LP-418 — NSF / overdraft detection per transaction (unblocks stmt.nsf_count → AS-7). Its OWN group (not
   # txn_stage_a), scoped to depository statements. DESCRIBE what the line is; a downstream rule (AS-7) counts +
   # judges the tolerance. AS-7 is HELD on calibration (this tag is unscored) until a labeling round + Priya's bar.
+  #   ⚠️ VALUE-SPACE DRIFT (LP-418 review): the prompt offers "unknown" for a genuinely illegible line (so an
+  #   unreadable description does not silently count as "no" → an undercount that false-greens AS-7; stmt.nsf_count
+  #   fail-closes on it). fact_tags.csv still lists ["yes","no"] — a model "unknown" is preserved anyway (ai.py
+  #   coerces an off-vocab value to an "unknown"-valued tag), but the DECLARED value space should gain "unknown"
+  #   at the next docs/snapshot-fact-tags.xlsx reconciliation (the generated CSV cannot be hand-edited).
   txn_nsf:
     subject: transaction
     context_builder: transaction
@@ -621,13 +626,16 @@ ai_groups:
       Produce ONE tag:
       1. is_nsf_or_overdraft — "yes" if the description indicates a non-sufficient-funds event, an overdraft, a
          returned/bounced item, an NSF fee, or an overdraft fee (e.g. "NSF FEE", "OVERDRAFT", "RETURNED ITEM",
-         "INSUFFICIENT FUNDS", "OD FEE"); "no" otherwise. Judge ONLY from the transaction's own description; a
-         normal purchase, transfer, or a routine fee that is NOT an NSF/overdraft is "no". Do NOT infer an
-         overdraft from a low balance or a negative amount — only from the description naming the event.
+         "INSUFFICIENT FUNDS", "OD FEE"); "no" if the description is READABLE and is NOT such an event (a normal
+         purchase, transfer, or a routine non-NSF fee). Judge ONLY from the transaction's own description; do NOT
+         infer an overdraft from a low balance or a negative amount — only from the description naming the event.
+         Use "unknown" ONLY when the description is MISSING, garbled, or truncated so you genuinely cannot tell
+         what the line is — NEVER guess "no" for an unreadable line (a guessed "no" would silently drop a
+         possible NSF from the count). A readable, clearly-non-NSF line is "no", not "unknown".
       Give a confidence (0.0-1.0) reflecting genuine certainty and a short reasoning citing the description.
       STRICT OUTPUT — return ONLY a JSON ARRAY (no markdown fences, no prose before or after), one object per
       transaction, echoing the given "index":
-      [{"index": <i>, "is_nsf_or_overdraft": {"value": "yes|no", "confidence": <0.0-1.0>, "reasoning": "<why>"}}]
+      [{"index": <i>, "is_nsf_or_overdraft": {"value": "yes|no|unknown", "confidence": <0.0-1.0>, "reasoning": "<why>"}}]
 
   # LP-418 — rental-income support at the LOAN level (unblocks IN-14, which ships RATIFY; and OC-3). DESCRIBE
   # whether the file's rental/lease documents support the claimed rental income; a downstream rule + a human

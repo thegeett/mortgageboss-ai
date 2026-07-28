@@ -129,6 +129,20 @@ def test_nsf_count_abstains_when_the_detection_tag_is_absent_everywhere() -> Non
     assert _stmt_nsf_count(clean, "loan", None)[0] == "0"
 
 
+def test_nsf_count_abstains_when_a_transaction_status_is_unreadable() -> None:
+    # LP-418 review: an "unknown" NSF status (an illegible/garbled description) means the count is a LOWER
+    # bound — reporting it as exact could undercount and false-green AS-7. So ANY "unknown" line → couldnt_check,
+    # never a silently-undercounted number (mirrors the absent≠0 discipline). Even with a confirmed "yes" present.
+    mixed = _snap(
+        by_subject={
+            "t1": {"txn.is_nsf_or_overdraft": _tag("yes")},
+            "t2": {"txn.is_nsf_or_overdraft": _tag("unknown")},
+        }
+    )
+    v, r = _stmt_nsf_count(mixed, "loan", None)
+    assert v == "unknown" and "undercount" in r
+
+
 def test_min_account_months_abstains_when_an_account_has_no_parseable_dates() -> None:
     # Account A (Chase) has a dated statement; account B (Wells Fargo) has ONLY an unparseable date. B is
     # uncountable — counting it as 0 months would fire a FALSE recency violation, and the true min is

@@ -551,7 +551,10 @@ def _stmt_nsf_count(
     """stmt.nsf_count — the count of NSF / overdraft transactions across the file (AS-7). Reads the
     per-transaction ``txn.is_nsf_or_overdraft`` tag. ABSTAINS when that tag is present on NO transaction —
     a concrete 0 there would mean "detection ran and found none", but it actually means the detection tag
-    was never materialized (absent≠no); returning 0 would false-green AS-7 (every file reads NSF-clean)."""
+    was never materialized (absent≠no); returning 0 would false-green AS-7 (every file reads NSF-clean).
+    ABSTAINS too when ANY transaction's NSF status is "unknown" (an unreadable/garbled description): the
+    count would then be a LOWER BOUND, and reporting it as exact could undercount — false-greening AS-7 the
+    same way a fabricated 0 would (the perceiver emits "unknown" only for a genuinely illegible line)."""
     if snapshot.tags.absent:
         return _UNKNOWN, "no tags materialized — cannot count NSF/overdraft items"
     count = 0
@@ -561,6 +564,12 @@ def _stmt_nsf_count(
         if tag is None:
             continue
         any_seen = True
+        if str(tag.value) == _UNKNOWN:
+            return (
+                _UNKNOWN,
+                "a transaction's NSF/overdraft status is unreadable (unknown) — the count could be an "
+                "undercount, so it cannot be asserted (never false-green a possibly-missed NSF)",
+            )
         if str(tag.value) == "yes":
             count += 1
     if not any_seen:
