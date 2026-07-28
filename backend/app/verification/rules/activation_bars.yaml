@@ -464,6 +464,35 @@ PC-7:
     date (a fixture ticket, LP-393-1 pattern) would exercise them; the branches are proven on constructed
     snapshots (LP-406-1b tests). PC-7 must not falsely fire on a near-term closing — Phase-2 verified.
 
+IH-3:
+  # LP-417 — the cheapest genuinely-useful Bucket 3 rule (LP-415: Bucket 3 is 0 write-now, mostly extractor-
+  # gated; IH-3 reaches off the ALREADY-EXTRACTED homeowners_insurance binder). A NATIVE date-vs-date compare
+  # (ins.loan_effective_date vs contract.loan_closing_date — the ID-5 shape, verified: type: date, LP-328). NO
+  # AI dependency (both dates parsed/derived) and NO threshold (EXACT — effective ON closing is in force) → the
+  # AS-8 no-ai-dependency path, eligible on input_resolves alone.
+  status: no-ai-dependency
+  ships: auto
+  threshold: null
+  validated: false
+  input_resolves: true    # LP-417: resolves on the binder fixture (build_insurance_*_snapshot) — effective before
+                          # closing → SATISFIED, after → FIRED. (The AS-9 pattern: verified on a scenario fixture,
+                          # not base LF-6T3N, which has no binder — LP-414 A3 kept it off to not move the DTI line.)
+  load_bearing_ai_tags: []
+  fp_fn: >-
+    FN (misses a real coverage gap — a policy effective after closing, leaving the property uninsured) vs FP (a
+    false flag — a human re-checks two dates). Exact compare, so no tolerance tunes this today.
+  rationale: >-
+    no AI load-bearing tag; a NATIVE date comparison (ins.loan_effective_date > contract.loan_closing_date →
+    fired), the ID-5 shape with the direction flipped. The producer (ins.effective_date parsed off the binder's
+    typed-core effective_date, promoted to loan by ins.loan_effective_date — the contract.loan_closing_date
+    template) is LP-417; both operands are loan-subject (D3, no structural death). The input RESOLVES on a binder
+    fixture (build_insurance_in_force → SATISFIED; build_insurance_late → FIRED), so it is eligible. NO Priya
+    threshold (exact — effective ON the closing date is in force; only AFTER fires). PRIYA CONFIRMATION
+    (optional, non-blocking): whether same-day effective is acceptable (today yes — the ID-5 == boundary).
+    ⚠️ CAVEAT: LF-6T3N has NO homeowners binder (LP-414 A3 kept it off to not move the DTI insurance line), so
+    IH-3 COULDNT_CHECKS there — an honest absence, not a bug; the branches are proven on the binder scenarios
+    (LP-417 tests). A missing binder is couldnt_check, not not_applicable (insurance is required — D5).
+
 PC-2:
   # LP-407-3 — the ONE surviving Bucket 2.5 wire-and-write rule. It compares two INDEPENDENT loan-level tags
   # (contract.loan_sales_price ← the purchase agreement; property.purchase_price ← the 1003/MISMO) — NOT the

@@ -37,7 +37,9 @@ async def test_projection_counts_match_files(db_session: AsyncSession) -> None:
 
     # First run inserts everything, removes nothing.
     assert result.rules.inserted == 133
-    assert result.tags.inserted == 164  # +4 assets (LP-323-AS-B) +2 ID-5 (LP-389-A) +2 stmt
+    assert (
+        result.tags.inserted == 165
+    )  # +4 assets (LP-323-AS-B) +2 ID-5 (LP-389-A) +2 stmt +1 LP-417 (ins.loan_effective_date)
     # variance/co-holder (LP-400) +3 LP-410 derived-producer wave (days_until_closing / continuity / coverage)
     # +1 LP-407-2 (contract.loan_sales_price — the PC-2 loan promotion)
     assert result.rule_tags.inserted == 203
@@ -71,8 +73,8 @@ async def test_as1_projects_priya_validated_false_with_spec(db_session: AsyncSes
         select(func.count()).select_from(Rule).where(Rule.spec.isnot(None))
     )
     # 34 = +10 AS-2..AS-12 (LP-323-AS-B); +OC-1 (LP-406-4); +AS-8 (LP-406-2b); +IN-6 (LP-406-3b); +PC-7 (LP-406-1b).
-    # +PC-2 (LP-407-3) = 39.
-    assert with_spec == 39
+    # +PC-2 (LP-407-3) = 39; +IH-3 (LP-417) = 40.
+    assert with_spec == 40
 
 
 async def test_db_loses_to_files(db_session: AsyncSession) -> None:

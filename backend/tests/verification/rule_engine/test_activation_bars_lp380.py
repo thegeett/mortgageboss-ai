@@ -259,6 +259,9 @@ def test_active_set_is_base_plus_lp389() -> None:
             # LP-407-3 — the one surviving Bucket 2.5 rule: PC-2 (purchase price matches loan terms),
             # no-ai-dependency + exact compare (no threshold), input resolves (365000 on the repaired LF-6T3N).
             "PC-2",
+            # LP-417 — the first Bucket 3 rule live: IH-3 (insurance effective date vs closing), a native
+            # date compare off the already-extracted homeowners binder; no-ai-dependency, no threshold.
+            "IH-3",
         )
     )
     # A bar persists after activation as the record of WHY the rule went live, so the bars now intersect the
@@ -281,5 +284,6 @@ def test_active_set_is_base_plus_lp389() -> None:
         "IN-6",  # LP-412 — live via its bar (calibratable-now, validated)
         "PC-7",  # LP-412 — live via its bar (no-ai-threshold-pending, validated)
         "PC-2",  # LP-407-3 — live via its bar (no-ai-dependency, input resolves)
+        "IH-3",  # LP-417 — live via its bar (no-ai-dependency, native date compare)
     }
     assert not (set(load_activation_bars()) & set(_BASE_ACTIVE))

@@ -92,15 +92,16 @@ def test_no_live_rule_read_a_repaired_tag_when_lp414_shipped() -> None:
 
 async def test_lf6t3n_full_verdict_distribution_is_stable() -> None:
     # The equivalence gate as a regression lock. LP-414 established 302 evals; LP-407-3 added the live PC-2
-    # (one loan-subject SATISFIED — both prices 365000 on the repaired anchor), so the lock is now 303 evals /
-    # satisfied 21, with PC-2 in the loan verdicts. Any OTHER movement would be a repair regression.
+    # (SATISFIED); LP-417 added the live IH-3, which COULDNT_CHECKS on LF-6T3N (no homeowners binder — LP-414 A3
+    # kept it off), so the lock is now 304 evals / couldnt_check 180, with IH-3 in the loan verdicts. Any OTHER
+    # movement would be a repair regression.
     mat = await materialize_tags(
         build_lf6t3n_snapshot(), ai_reasoners=stub_materialization_reasoners()
     )
     results, _ = await evaluate_rules(mat)
-    assert len(results) == 303
+    assert len(results) == 304
     assert Counter(r.verdict.value for r in results) == {
-        "couldnt_check": 179,
+        "couldnt_check": 180,  # +IH-3 (LP-417): no binder on LF-6T3N → couldnt_check
         "not_applicable": 99,
         "satisfied": 21,  # +PC-2 (LP-407-3): both prices 365000 → satisfied
         "fired": 2,
@@ -112,6 +113,7 @@ async def test_lf6t3n_full_verdict_distribution_is_stable() -> None:
         "AS-10": "satisfied",
         "PC-7": "satisfied",
         "PC-2": "satisfied",  # LP-407-3 — the contract price matches the 1003 (365000)
+        "IH-3": "couldnt_check",  # LP-417 — no homeowners binder on LF-6T3N (an honest absence)
         "ID-6": "fired",
         "IN-2": "fired",
         "IN-3": "couldnt_check",

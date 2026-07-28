@@ -712,6 +712,42 @@ def _loan_closing_date(
     return closing, f"the loan's closing date {closing} (from the contract document)"
 
 
+def _loan_effective_date(
+    snapshot: Snapshot, _subject_id: str, _subject_raw: object
+) -> tuple[JsonValue, str]:
+    """ins.loan_effective_date — the loan's single homeowners-insurance effective date, promoted to LOAN
+    level from the document-subject ins.effective_date (LP-417; ins.effective_date stays a document fact,
+    read from the homeowners_insurance binder's effective_date). Mirrors _loan_closing_date exactly (and
+    housing.insurance_monthly's multi-binder abstain): IH-3 (loan-enumerated) compares this to
+    contract.loan_closing_date. FAIL-CLOSED: NO binder effective date in the file → unknown; binders that
+    DISAGREE on it → unknown (ambiguous — the multi-binder abstain, LP-374), never a silently-picked date.
+    DESCRIPTIVE — the date only; whether it is after closing is IH-3's judgment (LP-400)."""
+    if snapshot.tags.absent:
+        return _UNKNOWN, "no tags materialized to read an insurance effective date from"
+    # Dedup by the parsed date (coerce_date, mirroring the operand's `type: date`), so one date rendered two
+    # ways is ONE value; >1 distinct date → the binders disagree (the multi-binder abstain). ins.effective_date
+    # is produced only on homeowners_insurance documents, so this ranges over the file's binders.
+    values: dict[object, str] = {}
+    for tags in snapshot.tags.by_subject.values():
+        tag = tags.get("ins.effective_date")
+        if tag is None or str(tag.value) == _UNKNOWN:
+            continue
+        raw = str(tag.value)
+        values[coerce_date(raw) or raw] = raw
+    if not values:
+        return _UNKNOWN, "no homeowners insurance binder states an effective date in the file"
+    if len(values) > 1:
+        return _UNKNOWN, (
+            f"the file's homeowners insurance binders disagree on the effective date "
+            f"({', '.join(sorted(values.values()))}) — ambiguous"
+        )
+    effective = next(iter(values.values()))
+    return (
+        effective,
+        f"the loan's insurance effective date {effective} (from the homeowners binder)",
+    )
+
+
 # --------------------------------------------------------------------------- #
 # LP-410 — the derived-producer wave: three tags that unblock PC-7 / AS-8 / IN-6.
 # Four Bucket 2 Phase 0s established these rules' inputs are produced but their CHECKS are not
@@ -1209,6 +1245,9 @@ _RECIPES: dict[str, Recipe] = {
     # closing date (both promotions of document facts, reusing LP-385's belongs_to attribution).
     "borrower_id_expiration": _borrower_id_expiration,
     "loan_closing_date": _loan_closing_date,
+    # LP-417 — the loan's homeowners-insurance effective date (promoted from the document-subject
+    # ins.effective_date), for IH-3 (effective <= closing). Mirrors loan_closing_date + the multi-binder abstain.
+    "loan_effective_date": _loan_effective_date,
     # LP-366-A — the loan's total stated qualifying income, read by AS-1 via a `loan_tag` operand
     # (instead of the gated DTI calc). Fail-closed to unknown, never 0.
     "qualifying_income_monthly": _qualifying_income_monthly,

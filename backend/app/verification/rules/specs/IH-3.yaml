@@ -1,0 +1,107 @@
+# IH-3 — Insurance effective date vs closing — DETERMINISTIC structural rule SPEC (LP-417).
+#
+# The cheapest genuinely-useful Bucket 3 rule (LP-415's five-gate audit: Bucket 3 is 0 write-now and mostly
+# extractor-gated, but IH-3 reaches off the ALREADY-EXTRACTED homeowners_insurance binder — Tier-1, running).
+# It compares two loan-level DATE tags: the insurance effective date (ins.loan_effective_date, promoted by
+# LP-417 from the binder's typed-core effective_date) and the loan's closing date (contract.loan_closing_date,
+# already produced). A policy effective AFTER closing leaves the property unprotected in the gap.
+#
+# ⚠️ NATIVE DATE COMPARE (LP-417 D1, verified): the deterministic operand path coerces `type: date` via
+# coerce_date (LP-328; KNOWN_OPERAND_TYPES = {decimal, date}), and ID-5 already compares two date operands
+# (id.borrower_id_expiration vs contract.loan_closing_date). So IH-3 needs NO derived day-count tag — it is the
+# ID-5 shape with the direction flipped (fire when effective > closing, vs ID-5's expiration < closing).
+#
+# ⚠️ NO Priya threshold (LP-417 D6): EXACT — effective ON the closing date is in force at closing (satisfied);
+# only effective AFTER closing fires. So IH-3 clears the no-ai-dependency gate and ACTIVATES (its input resolves
+# on a binder fixture — LP-414's fire_path_scenarios). PRIYA CONFIRMATION (optional, non-blocking): is same-day
+# effective acceptable (today: yes, in force on the day) — the ID-5 == boundary, benign here.
+#
+# ⚠️ NO binder → COULDNT_CHECK, not not_applicable (LP-417 D5): insurance is required on every mortgage, so a
+# missing binder is an honest gap, not scope-false. ins.loan_effective_date resolves "unknown" (no binder) → the
+# operand coerces to None → couldnt_check (the gate catches it). No applicability predicate (never hide the gap),
+# and no live rule flags a missing binder today, so IH-3 does not double-fire. LF-6T3N has no binder (LP-414 A3
+# kept it off, to not move the DTI insurance line) → IH-3 couldnt_checks there — an honest absence, not a bug.
+#
+# REGISTRY DRIFT (mirrors PC-2/PC-7): rule_tags.csv maps IH-3 -> ins.effective_date (the DOCUMENT tag). IH-3
+# reads the loan PROMOTION ins.loan_effective_date (a loan-enumerated rule cannot read a per-document tag). The
+# evaluator uses THIS spec; reconcile the row upstream in the xlsx.
+
+rule_id: IH-3
+name: Insurance effective date
+category: Insurance
+
+kind: structural          # must equal rule_kinds.csv (IH-3 = structural, deterministic_only)
+numeric_check: false      # a date comparison, not a ratio
+
+criteria: >-
+  The homeowners insurance must be in force by the loan's closing date: the policy's effective date must be on
+  or before the closing date. A policy effective AFTER closing leaves the property unprotected in the gap between
+  closing and the policy start — a coverage gap the processor must correct before submission. This compares the
+  binder's effective date (promoted to loan level) against the loan's closing date. Absent/unreadable on either
+  side (no binder, no closing date, or binders that disagree on the effective date) → couldnt_check, never a
+  guessed pass.
+
+applicability:
+  scope: the homeowners insurance binder's effective date vs the loan's closing date
+  trigger: >-
+    Evaluated once per loan, comparing the insurance effective date to the closing date. A file with no binder
+    (or no closing date) couldnt_checks — insurance is required on every mortgage, so a missing binder is an
+    honest gap, not not_applicable (there is no loan-purpose/document scoping that makes it scope-false).
+
+required_inputs:
+  - name: effective_date
+    snapshot_path: 'tags.by_subject["loan"]["ins.loan_effective_date"]'
+    description: >-
+      the homeowners insurance policy's effective date, promoted to loan level (LP-417) from the binder's
+      ins.effective_date. "unknown" when no binder states an effective date, or binders disagree on it.
+  - name: closing_date
+    snapshot_path: 'tags.by_subject["loan"]["contract.loan_closing_date"]'
+    description: the loan's single closing date (the same loan-level tag ID-5 reads).
+
+# An exact date comparison carries no numeric threshold. priya_validated / threshold_needs_signoff mirror
+# rule_kinds.csv (both false for IH-3 — exact, no sign-off).
+reference_values:
+  priya_validated: false
+  threshold_needs_signoff: false
+
+subject_enumeration: loan          # the loan-level subject (both date tags materialize here — LP-417 / D3)
+subject_key_fields: [loan]
+
+evidence_required: >-
+  The insurance effective date and the closing date the verdict compared, inline on the finding, so the
+  processor sees BOTH dates and the size of any coverage gap.
+
+guideline_reference: "Fannie Mae Selling Guide B7-3 — hazard insurance must be in effect on the date of the mortgage note / closing."
+
+spec_version: 1
+
+# LP-324 — the MACHINE-READABLE deterministic body (the generic evaluator runs THIS, zero per-rule Python).
+# The DATE-vs-DATE (operand) path, mirroring ID-5 with the direction flipped. Either operand "unknown" → the
+# operand coerces to None → couldnt_check (the gate catches it, over gated_tags). ONE fired outcome (effective
+# strictly AFTER closing), reason interpolates BOTH dates so the processor sees the gap.
+deterministic:
+  load_bearing_tags:
+    - ins.loan_effective_date
+    - contract.loan_closing_date
+  gated_tags:
+    - ins.loan_effective_date
+    - contract.loan_closing_date
+  operands:
+    effective_date: {tag: ins.loan_effective_date, type: date}       # the binder's effective date (loan-level)
+    closing_date: {loan_tag: contract.loan_closing_date, type: date} # the loan's one closing date (as ID-5 reads)
+  outcomes:
+    - verdict: fired
+      # effective STRICTLY AFTER closing: the policy starts too late, leaving a coverage gap. `>`, so effective
+      # ON the closing date is in force at closing (NOT fired) — the same-day boundary (D6, Priya-confirmable).
+      when_compare: {op: ">", left: effective_date, right: closing_date}
+      reasoning: >-
+        the insurance policy takes effect {effective_date}, after the loan's closing date {closing_date} — the
+        property is uninsured in the gap between closing and the policy start; correct the coverage before
+        submission
+      how_to_fix: >-
+        Obtain a homeowners insurance binder effective on or before the closing date (or confirm the closing
+        date), so coverage is in force at closing.
+    - verdict: satisfied
+      default: true
+      reasoning: >-
+        the insurance policy is in force by closing (its effective date is on or before the closing date)

@@ -131,6 +131,13 @@ _LP412_ACTIVATED: tuple[str, ...] = ("IN-6", "PC-7")
 # DT-4 needs an unwired assessed-value producer + a Priya tax rate (LP-407-3 D1 — ADR-330).
 _LP407_ACTIVATED: tuple[str, ...] = ("PC-2",)
 
+# LP-417 — the first Bucket 3 rule live (28 → 29). IH-3 (insurance effective date <= closing) compares two
+# loan-level DATE tags — ins.loan_effective_date (LP-417's promotion off the already-extracted homeowners_
+# insurance binder) and contract.loan_closing_date — natively (the ID-5 date-vs-date shape). NO AI dependency
+# and NO threshold (EXACT) → the no-ai-dependency gate; input_resolves on the binder scenario fixtures. LF-6T3N
+# has no binder → IH-3 couldnt_checks there (an honest absence, not a bug — LP-414 A3).
+_LP417_ACTIVATED: tuple[str, ...] = ("IH-3",)
+
 # The gate is the source of truth: test_activation_gate_lp389 asserts ACTIVE_RULE_IDS - _BASE_ACTIVE ==
 # eligible_rule_ids() — a rule CANNOT enter this set without meeting the eligibility gate (not a hand-list).
 ACTIVE_RULE_IDS: tuple[str, ...] = (
@@ -143,6 +150,7 @@ ACTIVE_RULE_IDS: tuple[str, ...] = (
     *_LP406_ACTIVATED,
     *_LP412_ACTIVATED,
     *_LP407_ACTIVATED,
+    *_LP417_ACTIVATED,
 )
 
 

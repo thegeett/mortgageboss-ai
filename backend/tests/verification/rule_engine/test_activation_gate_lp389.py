@@ -53,6 +53,7 @@ _ACTIVATED = frozenset(
         "IN-6",  # LP-412 — Priya signed off the 0.95 bar (calibratable-now, same tag/evidence as IN-5)
         "PC-7",  # LP-412 — Priya signed off the closing window (first rule live via no-ai-threshold-pending)
         "PC-2",  # LP-407-3 — purchase price matches loan terms (no-ai-dependency, exact compare, no threshold)
+        "IH-3",  # LP-417 — insurance effective date vs closing (no-ai-dependency, native date compare)
     }
 )
 
@@ -84,6 +85,7 @@ def test_eligible_rule_ids_is_sorted_and_matches() -> None:
         "AS-8",  # LP-406-2b
         "AS-9",
         "ID-5",
+        "IH-3",  # LP-417 (sorts between ID-5 and IN-1)
         "IN-1",
         "IN-10",
         "IN-11",

@@ -165,6 +165,14 @@ tags:
   contract.loan_sales_price: {mode: derived, subject: loan, data: loan_sales_price}
   property.purchase_price: {mode: parsed, subject: loan, data: property.purchase_price}
 
+  # --- ins.* — IH-3's input (LP-417). The homeowners_insurance binder's effective_date (typed-core) is read
+  #     as a DOCUMENT parsed tag (ins.effective_date, in fact_tags.csv), then PROMOTED to loan level
+  #     (ins.loan_effective_date) so the loan-enumerated IH-3 can compare it to contract.loan_closing_date —
+  #     the contract.closing_date → contract.loan_closing_date shape (LP-389-A), with housing.insurance_monthly's
+  #     multi-binder abstain (two binders disagree → unknown). Dates compare natively (type: date, ID-5). ------ #
+  ins.effective_date: {mode: parsed, subject: document, data: effective_date}
+  ins.loan_effective_date: {mode: derived, subject: loan, data: loan_effective_date}
+
   # --- occupancy.* — OC-2's load-bearing tags (LP-371). Both were in the vocabulary WITH producers but
   #     never declared here → OC-2 (LIVE judgment) couldnt_checked on every file (the orphan class,
   #     LP-366-A/367). occupancy.stated is DERIVED (a MISMO→enum mapping, not parsed — see the recipe).

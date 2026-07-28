@@ -38,6 +38,13 @@ _LOAN_BREAK = UUID("95000000-0000-4000-8000-000000000001")
 _LOAN_PAST = UUID("95000000-0000-4000-8000-000000000002")
 _LOAN_FUTURE = UUID("95000000-0000-4000-8000-000000000003")
 _LOAN_HOUSING = UUID("95000000-0000-4000-8000-000000000004")
+_LOAN_INS_INFORCE = UUID(
+    "95000000-0000-4000-8000-000000000005"
+)  # LP-417 — binder effective BEFORE closing
+_LOAN_INS_LATE = UUID(
+    "95000000-0000-4000-8000-000000000006"
+)  # LP-417 — binder effective AFTER closing
+_LOAN_INS_AMBIG = UUID("95000000-0000-4000-8000-000000000007")  # LP-417 — two binders disagree
 _RUN = UUID("95000000-0000-4000-8000-0000000000ff")
 # The file (snapshot) date every closing date is measured against (deterministic — never a wall-clock now()).
 _FILE_DATE = datetime(2026, 7, 1, tzinfo=UTC)
@@ -177,14 +184,80 @@ def build_subject_housing_snapshot() -> Snapshot:
     )
 
 
+# --------------------------------------------------------------------------- #
+# IH-3 (LP-417) — insurance effective date vs closing. Each scenario carries a homeowners_insurance binder
+# (the effective date) + a purchase agreement (the closing date, which contract.loan_closing_date promotes).
+# IH-3 is loan-enumerated; ins.loan_effective_date + contract.loan_closing_date are both loan-level.
+# --------------------------------------------------------------------------- #
+def _binder(cid: str, effective_date: str) -> DocumentEntry:
+    return _doc(
+        cid,
+        "homeowners_insurance",
+        carrier_name="Rivertown Mutual",
+        policy_number="RM-0001",
+        coverage_amount="300000.00",
+        annual_premium="1200.00",
+        effective_date=effective_date,
+        expiration_date="2027-06-01",
+    )
+
+
+def _contract(cid: str, closing_date: str) -> DocumentEntry:
+    return _doc(
+        cid,
+        "purchase_agreement",
+        property_address="34 Birch Rd, Rivertown IL 60000",
+        sales_price="300000.00",
+        closing_date=closing_date,
+    )
+
+
+def build_insurance_in_force_snapshot() -> Snapshot:
+    """A binder effective 2026-06-01, BEFORE the 2026-07-15 closing → coverage in force at closing → IH-3
+    SATISFIED. The clean case."""
+    return _snapshot(
+        _LOAN_INS_INFORCE,
+        [_binder("95-binder-ok", "2026-06-01"), _contract("95-pa-ins-ok", "2026-07-15")],
+    )
+
+
+def build_insurance_late_snapshot() -> Snapshot:
+    """A binder effective 2026-08-15, AFTER the 2026-07-15 closing → a coverage gap → IH-3 FIRED (with the two
+    dates interpolated)."""
+    return _snapshot(
+        _LOAN_INS_LATE,
+        [_binder("95-binder-late", "2026-08-15"), _contract("95-pa-ins-late", "2026-07-15")],
+    )
+
+
+def build_insurance_two_binder_snapshot() -> Snapshot:
+    """TWO binders stating DIFFERENT effective dates → the multi-binder abstain → ins.loan_effective_date
+    "unknown" → IH-3 COULDNT_CHECK (never a silently-picked binder)."""
+    return _snapshot(
+        _LOAN_INS_AMBIG,
+        [
+            _binder("95-binder-a", "2026-06-01"),
+            _binder("95-binder-b", "2026-08-15"),
+            _contract("95-pa-ins-ambig", "2026-07-15"),
+        ],
+    )
+
+
 # The expected fired/materialized outcomes — recorded HERE / in tests, never predicted in prose (LP-337).
 EXPECTED_TAXES_MONTHLY = "500.00"  # 6000 / 12
 EXPECTED_HOA_MONTHLY = "300.00"  # 300 monthly
+EXPECTED_INS_EFFECTIVE_IN_FORCE = "2026-06-01"  # <= 2026-07-15 closing → satisfied
+EXPECTED_INS_EFFECTIVE_LATE = "2026-08-15"  # > 2026-07-15 closing → fired
 
 __all__ = [
     "EXPECTED_HOA_MONTHLY",
+    "EXPECTED_INS_EFFECTIVE_IN_FORCE",
+    "EXPECTED_INS_EFFECTIVE_LATE",
     "EXPECTED_TAXES_MONTHLY",
     "build_far_future_closing_snapshot",
+    "build_insurance_in_force_snapshot",
+    "build_insurance_late_snapshot",
+    "build_insurance_two_binder_snapshot",
     "build_past_closing_snapshot",
     "build_statement_break_snapshot",
     "build_subject_housing_snapshot",

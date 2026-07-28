@@ -36,7 +36,9 @@ def test_proposing_the_bar_activates_nothing() -> None:
     assert "AS-6" not in ACTIVE_RULE_IDS
     from tests.expected_active import EXPECTED_ACTIVE_RULE_COUNT
 
-    assert len(eligible_rule_ids()) == 17  # +AS-8 (LP-406-2b) +PC-2 (LP-407-3, no-ai-dependency)
+    assert (
+        len(eligible_rule_ids()) == 18
+    )  # +AS-8 (LP-406-2b) +PC-2 (LP-407-3) +IH-3 (LP-417, no-ai-dependency)
     assert len(ACTIVE_RULE_IDS) == EXPECTED_ACTIVE_RULE_COUNT
 
 
