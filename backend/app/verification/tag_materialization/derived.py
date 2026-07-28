@@ -717,19 +717,28 @@ def _loan_effective_date(
 ) -> tuple[JsonValue, str]:
     """ins.loan_effective_date — the loan's single homeowners-insurance effective date, promoted to LOAN
     level from the document-subject ins.effective_date (LP-417; ins.effective_date stays a document fact,
-    read from the homeowners_insurance binder's effective_date). Mirrors _loan_closing_date exactly (and
-    housing.insurance_monthly's multi-binder abstain): IH-3 (loan-enumerated) compares this to
+    read from the homeowners_insurance binder's effective_date). Mirrors _loan_closing_date's promotion +
+    housing.insurance_monthly's multi-binder abstain: IH-3 (loan-enumerated) compares this to
     contract.loan_closing_date. FAIL-CLOSED: NO binder effective date in the file → unknown; binders that
     DISAGREE on it → unknown (ambiguous — the multi-binder abstain, LP-374), never a silently-picked date.
-    DESCRIPTIVE — the date only; whether it is after closing is IH-3's judgment (LP-400)."""
-    if snapshot.tags.absent:
-        return _UNKNOWN, "no tags materialized to read an insurance effective date from"
+    DESCRIPTIVE — the date only; whether it is after closing is IH-3's judgment (LP-400).
+
+    ⚠️ Scoped to ``homeowners_insurance`` documents ONLY. UNLIKE contract.closing_date — which only the
+    purchase_agreement extractor emits — the ``effective_date`` FIELD is ALSO emitted by the divorce_decree
+    extractor, so the parsed ins.effective_date tag leaks onto a decree (a document tag is scoped by field
+    name, not document type). Reading it from every subject would let a divorce decree's date drive (or, via a
+    false multi-binder disagreement, suppress) the insurance verdict. This is the SAME leak _borrower_id_
+    expiration guards (homeowners_insurance also emits an expiration date)."""
+    if snapshot.documents.absent:
+        return _UNKNOWN, "no documents in the file — no homeowners insurance binder to read"
     # Dedup by the parsed date (coerce_date, mirroring the operand's `type: date`), so one date rendered two
-    # ways is ONE value; >1 distinct date → the binders disagree (the multi-binder abstain). ins.effective_date
-    # is produced only on homeowners_insurance documents, so this ranges over the file's binders.
+    # ways is ONE value; >1 distinct date → the binders disagree (the multi-binder abstain). Scoped to
+    # homeowners_insurance binders — never a divorce_decree that happens to carry an effective_date field.
     values: dict[object, str] = {}
-    for tags in snapshot.tags.by_subject.values():
-        tag = tags.get("ins.effective_date")
+    for entry in snapshot.documents.entries:
+        if entry.document_type != "homeowners_insurance":
+            continue
+        tag = snapshot.tags.by_subject.get(entry.content_id, {}).get("ins.effective_date")
         if tag is None or str(tag.value) == _UNKNOWN:
             continue
         raw = str(tag.value)

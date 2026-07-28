@@ -18,6 +18,8 @@ import pytest
 from app.verification.eval.fire_path_scenarios import (
     EXPECTED_INS_EFFECTIVE_IN_FORCE,
     EXPECTED_INS_EFFECTIVE_LATE,
+    build_insurance_binder_plus_decree_snapshot,
+    build_insurance_decree_only_snapshot,
     build_insurance_in_force_snapshot,
     build_insurance_late_snapshot,
     build_insurance_two_binder_snapshot,
@@ -147,6 +149,30 @@ async def test_two_binder_disagreement_abstains_to_couldnt_check() -> None:
     mat = await _materialize(build_insurance_two_binder_snapshot())
     assert str(mat.tags.by_subject[_LOAN]["ins.loan_effective_date"].value) == "unknown"
     assert [r.verdict for r in evaluate_deterministic_rule(_SPEC, mat)] == [Verdict.COULDNT_CHECK]
+
+
+async def test_a_divorce_decree_effective_date_is_not_an_insurance_binder() -> None:
+    # REGRESSION (LP-417 review): the `effective_date` FIELD is emitted by BOTH homeowners_insurance and
+    # divorce_decree, and a document parsed tag is scoped by field NAME — so ins.effective_date materializes on
+    # a decree too. _loan_effective_date must read ONLY homeowners_insurance documents. With a decree effective
+    # 2026-09-01 (after the 2026-07-15 closing) but NO binder, IH-3 must COULDNT_CHECK (an honest missing-
+    # insurance gap) — NOT fire on the decree's date as though a policy takes effect after closing.
+    mat = await _materialize(build_insurance_decree_only_snapshot())
+    assert str(mat.tags.by_subject[_LOAN]["ins.loan_effective_date"].value) == "unknown"
+    assert [r.verdict for r in evaluate_deterministic_rule(_SPEC, mat)] == [Verdict.COULDNT_CHECK]
+
+
+async def test_a_decree_does_not_shadow_a_real_binder() -> None:
+    # REGRESSION (LP-417 review): a real binder effective 2026-06-01 (before closing) PLUS a divorce_decree with
+    # a DIFFERENT effective_date (2026-09-01) must resolve ins.loan_effective_date to the BINDER's date and
+    # SATISFY — the decree must NOT create a false two-binder disagreement that abstains to couldnt_check (a
+    # missed coverage-gap check).
+    mat = await _materialize(build_insurance_binder_plus_decree_snapshot())
+    assert (
+        mat.tags.by_subject[_LOAN]["ins.loan_effective_date"].value
+        == EXPECTED_INS_EFFECTIVE_IN_FORCE
+    )
+    assert [r.verdict for r in evaluate_deterministic_rule(_SPEC, mat)] == [Verdict.SATISFIED]
 
 
 async def test_lf6t3n_couldnt_checks_no_binder() -> None:

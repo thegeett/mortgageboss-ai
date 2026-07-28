@@ -169,7 +169,11 @@ tags:
   #     as a DOCUMENT parsed tag (ins.effective_date, in fact_tags.csv), then PROMOTED to loan level
   #     (ins.loan_effective_date) so the loan-enumerated IH-3 can compare it to contract.loan_closing_date —
   #     the contract.closing_date → contract.loan_closing_date shape (LP-389-A), with housing.insurance_monthly's
-  #     multi-binder abstain (two binders disagree → unknown). Dates compare natively (type: date, ID-5). ------ #
+  #     multi-binder abstain (two binders disagree → unknown). Dates compare natively (type: date, ID-5).
+  #     ⚠️ ins.effective_date is scoped by FIELD NAME (a document parsed tag), and `effective_date` is ALSO
+  #     emitted by the divorce_decree extractor — so this tag also materializes on a decree. The
+  #     _loan_effective_date recipe therefore reads it ONLY from homeowners_insurance documents (see the recipe;
+  #     the same id.id_expiration leak-guard), never every subject carrying the tag. --------------------------- #
   ins.effective_date: {mode: parsed, subject: document, data: effective_date}
   ins.loan_effective_date: {mode: derived, subject: loan, data: loan_effective_date}
 

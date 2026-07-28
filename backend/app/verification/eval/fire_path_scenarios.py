@@ -45,6 +45,12 @@ _LOAN_INS_LATE = UUID(
     "95000000-0000-4000-8000-000000000006"
 )  # LP-417 — binder effective AFTER closing
 _LOAN_INS_AMBIG = UUID("95000000-0000-4000-8000-000000000007")  # LP-417 — two binders disagree
+_LOAN_INS_DECREE_ONLY = UUID(
+    "95000000-0000-4000-8000-000000000008"
+)  # LP-417 review — a divorce_decree effective_date, NO binder (must couldnt_check)
+_LOAN_INS_DECREE_PLUS = UUID(
+    "95000000-0000-4000-8000-000000000009"
+)  # LP-417 review — binder + a decree with a different effective_date (must resolve to the binder)
 _RUN = UUID("95000000-0000-4000-8000-0000000000ff")
 # The file (snapshot) date every closing date is measured against (deterministic — never a wall-clock now()).
 _FILE_DATE = datetime(2026, 7, 1, tzinfo=UTC)
@@ -243,6 +249,46 @@ def build_insurance_two_binder_snapshot() -> Snapshot:
     )
 
 
+def _divorce_decree(cid: str, effective_date: str) -> DocumentEntry:
+    # A divorce_decree ALSO carries an `effective_date` field (the divorce_decree extractor's typed core) — the
+    # SAME field name the homeowners_insurance binder uses. The parsed ins.effective_date tag is scoped by field
+    # NAME, so it materializes on this decree too; _loan_effective_date must NOT count it as an insurance date.
+    return _doc(
+        cid,
+        "divorce_decree",
+        party_1_name="Dana Brooks",
+        party_2_name="Riley Brooks",
+        effective_date=effective_date,
+    )
+
+
+def build_insurance_decree_only_snapshot() -> Snapshot:
+    """A divorce_decree with an effective_date AFTER closing but NO insurance binder. IH-3 must COULDNT_CHECK
+    (no binder → an honest missing-insurance gap) — NOT fire on the decree's date as if it were a policy.
+    Regression for the effective_date field-name collision (a divorce decree is not an insurance binder)."""
+    return _snapshot(
+        _LOAN_INS_DECREE_ONLY,
+        [
+            _divorce_decree("95-decree-only", "2026-09-01"),
+            _contract("95-pa-decree-only", "2026-07-15"),
+        ],
+    )
+
+
+def build_insurance_binder_plus_decree_snapshot() -> Snapshot:
+    """A real binder effective BEFORE closing PLUS a divorce_decree whose effective_date DIFFERS. IH-3 must
+    resolve to the BINDER's date and SATISFY — the decree must not create a false multi-binder disagreement
+    that abstains to couldnt_check (a false negative). Regression for the effective_date collision."""
+    return _snapshot(
+        _LOAN_INS_DECREE_PLUS,
+        [
+            _binder("95-binder-decree", "2026-06-01"),
+            _divorce_decree("95-decree-plus", "2026-09-01"),
+            _contract("95-pa-decree-plus", "2026-07-15"),
+        ],
+    )
+
+
 # The expected fired/materialized outcomes — recorded HERE / in tests, never predicted in prose (LP-337).
 EXPECTED_TAXES_MONTHLY = "500.00"  # 6000 / 12
 EXPECTED_HOA_MONTHLY = "300.00"  # 300 monthly
@@ -255,6 +301,8 @@ __all__ = [
     "EXPECTED_INS_EFFECTIVE_LATE",
     "EXPECTED_TAXES_MONTHLY",
     "build_far_future_closing_snapshot",
+    "build_insurance_binder_plus_decree_snapshot",
+    "build_insurance_decree_only_snapshot",
     "build_insurance_in_force_snapshot",
     "build_insurance_late_snapshot",
     "build_insurance_two_binder_snapshot",
