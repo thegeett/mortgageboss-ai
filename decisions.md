@@ -12455,7 +12455,10 @@ signal: a deterministic fact that wants to reinforce or stand in for an AI tag n
 the consumer reads), not a second producer on the AI tag. LP-422 did exactly this: it did not touch
 `income.type`; it extended the borrower-level derived `income.is_self_employed` (Schedule C presence, reusing the
 LP-418 tag IN-12 already gates on) and added a new borrower-level derived `income.has_rental_income` (Schedule E
-presence, the same shape, for IN-13's rental scope).
+presence OR `income.type == "rental"` — the same dual-signal shape, for IN-13's rental scope). A new tag is
+needed not because `income.type` "can't carry rental" (it can — `income_amounts` reads the 1003 and its value
+space includes `rental`) but because `income.type` is AI-only, so the deterministic Schedule-E signal cannot be
+a second producer for it.
 
 **2. A DETERMINISTIC producer is the escape hatch from ADR-332.** ADR-332 named the limit of synthetic
 calibration: an AI JUDGMENT tag whose correct label is determined by the fixture we invent cannot be calibrated

@@ -29,6 +29,7 @@ from app.verification.snapshot.model import (
     Snapshot,
     TagsSection,
 )
+from app.verification.snapshot.tag import Tag, TagProducedBy, TagRole, TagStage
 from app.verification.tag_materialization.declarations import ProductionMode, load_declarations
 from app.verification.tag_materialization.derived import produce_derived_tags
 from tests.expected_active import EXPECTED_ACTIVE_RULE_COUNT
@@ -120,11 +121,58 @@ def test_tax_return_with_neither_schedule_fails_closed_never_base() -> None:
     assert _value(_RENTAL, snap) == "no"  # a filed return with no Schedule E → no rental reported
 
 
-def test_no_tax_return_is_unknown_for_rental() -> None:
-    # a borrower with a pay stub but no tax return → we cannot tell about rental (fail closed to unknown).
+def test_no_tax_return_and_no_income_type_is_unknown_for_rental() -> None:
+    # a borrower with a pay stub carrying NO income.type tag, no tax return → no readable signal at all → unknown.
     snap = _snap_from_extraction({}, dtype="pay_stub")
     assert _value(_RENTAL, snap) == "unknown"
     assert _value(_SELF_EMPLOYED, snap) == "unknown"
+
+
+def _snap_with_income_type(income_type: str, *, dtype: str = "pay_stub") -> Snapshot:
+    """One borrower + one income document carrying an income.type tag (no schedules), to exercise the
+    income.type fallback (LP-422 review). income.type is a document-subject tag, keyed at the doc's content_id."""
+    doc = DocumentEntry(
+        content_id="doc1",
+        document_type=dtype,
+        belongs_to=(BorrowerRef(borrower_id=_B, name="X"),),
+        fields={},
+    )
+    tag = Tag(
+        value=income_type,
+        confidence=0.9,
+        reasoning="stub",
+        source_facts=("doc1",),
+        produced_by=TagProducedBy.AI,
+        tag_role=TagRole.STRUCTURAL_FACT,
+        tag_version=1,
+        stage=TagStage.A,
+    )
+    return Snapshot(
+        loan_file_id=uuid4(),
+        run_id=uuid4(),
+        created_at=datetime(2026, 7, 1, tzinfo=UTC),
+        documents=DocumentsSection.present([doc]),
+        mismo=MismoSection.present(
+            {"borrower.1.borrower_id": Field.present(str(_B), source=FieldSource.PARSED)}
+        ),
+        tags=TagsSection.present({"doc1": {"income.type": tag}}),
+    )
+
+
+def test_income_type_rental_is_rental_even_without_a_schedule_e() -> None:
+    # LP-422 review: income.type == "rental" (a 1003/doc-declared rental income_amounts perceives — it reads the
+    # 1003) is a rental signal even with NO Schedule E filed, MIRRORING is_self_employed's self_employment path.
+    snap = _snap_with_income_type("rental")
+    assert _value(_RENTAL, snap) == "yes"
+
+
+def test_readable_non_rental_income_type_is_a_definitive_no() -> None:
+    # LP-422 review: a borrower with a readable income.type that is NOT rental (a W-2 wage earner, no tax return)
+    # reaches "no" — NOT "unknown" — so IN-13 can not_applicable a wage earner instead of couldnt_checking every
+    # no-tax-return file. Symmetric with is_self_employed's "no" (readable types, none self-employment).
+    snap = _snap_with_income_type("base")
+    assert _value(_RENTAL, snap) == "no"
+    assert _value(_SELF_EMPLOYED, snap) == "no"  # the sibling: base wage, not self-employment
 
 
 # ======================================================================= #

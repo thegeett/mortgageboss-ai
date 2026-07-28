@@ -194,10 +194,12 @@ tags:
     value_type: enum
     allowed_values: ["yes", "no", "unknown"]
     description: >-
-      PER BORROWER: does the borrower have rental income (LP-422 — a Schedule E present on an attributed tax
-      return, the LP-421 surfaced structure)? A DETERMINISTIC presence read (no AI, no calibration), the rental
-      analog of income.is_self_employed, for IN-13's rental scope. "no" (a tax return, no Schedule E) lets IN-13
-      reach not_applicable; "unknown" when no tax return is attributed. Presence, not amount (ADR-324).
+      PER BORROWER: does the borrower have rental income? The rental analog of income.is_self_employed (LP-422),
+      for IN-13's rental scope. "yes" = a Schedule E present on an attributed tax return (LP-421 surfaced), OR an
+      attributed income document typed income.type == "rental" (the 1003 can carry it — income_amounts reads the
+      1003). "no" = a rental-relevant signal that is definitively not rental (a tax return with no Schedule E, or
+      readable income types none rental) → lets IN-13 reach not_applicable. "unknown" = no tax return and no
+      readable income type. Presence, not amount (ADR-324).
     produced_by: derived
   income.employer_coverage:
     entity: borrower

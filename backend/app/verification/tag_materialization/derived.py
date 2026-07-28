@@ -1286,23 +1286,29 @@ def _income_has_rental_income(
 ) -> tuple[JsonValue, str]:
     """income.has_rental_income — PER BORROWER: does this borrower have rental income? For IN-13's rental scope.
 
-    The rental analog of income.is_self_employed (LP-418), and the SAME ADR-332 escape hatch: a DETERMINISTIC
-    read of Schedule E PRESENCE (the LP-421 surfaced DocumentEntry.schedule_e) on the borrower's attributed tax
-    returns — NO AI, NO calibration round (rental presence is a FACT, not a judgment). income.type cannot carry
-    this: rental income lives on Schedule E, which income_amounts (income.type's producer) does not read, and a
-    tag has exactly one producer (income.type is AI-only) — so this is a distinct borrower-level tag, not a
-    second producer for income.type. Presence, NOT rents_received: a Schedule E can exist for a property with no
-    rents in a given year and it is still rental activity (ADR-324: tags describe, rules judge; no threshold).
+    The rental analog of income.is_self_employed (LP-418/LP-422), with the SAME dual-signal shape:
+      1. Schedule E PRESENCE (the LP-421 surfaced DocumentEntry.schedule_e) on the borrower's attributed tax
+         returns — the strongest, DETERMINISTIC signal (rental presence is a FACT, not a judgment; ADR-332).
+      2. income.type == "rental" on an attributed income document — the softer signal, MIRRORING
+         is_self_employed's income.type == "self_employment" fallback. income.type CAN be "rental":
+         income_amounts reads the 1003 (applies_to includes uniform_residential_loan_application) and its value
+         space includes "rental", so a 1003-declared rental with no Schedule E in the file is still caught. (This
+         is a distinct borrower-level DERIVED tag, not a second producer for the AI-only income.type — a tag has
+         exactly one producer.) Presence, NOT rents_received / amount: a Schedule E for a property with no rents
+         in a given year is still rental activity (ADR-324: tags describe, rules judge; no threshold).
     DESCRIPTIVE enum:
-      * "yes"     — an attributed tax return carries a Schedule E.
-      * "no"      — the borrower has an attributed tax return, but NONE carries a Schedule E (filed, no rental)
-                    -> lets IN-13 reach not_applicable for a non-rental borrower (an enum can carry this).
-      * "unknown" — no tax return is attributed to the borrower -> fail-closed (never a fabricated "no").
+      * "yes"     — an attributed tax return carries a Schedule E, OR an attributed income document is typed
+                    income.type == "rental".
+      * "no"      — the borrower has a rental-relevant signal that is definitively NOT rental: a filed tax
+                    return with no Schedule E, OR readable income.type(s) none of which is rental -> lets IN-13
+                    reach not_applicable for a non-rental borrower (an enum can carry this).
+      * "unknown" — no tax return AND no readable income type -> fail-closed (never a fabricated "no").
     Per-borrower: borrower A's documents never speak for borrower B (belongs_to attribution)."""
     if not isinstance(subject_raw, BorrowerSubject):
         return _UNKNOWN, "rental income is a per-borrower recipe (needs a borrower subject)"
     if snapshot.documents.absent:
         return _UNKNOWN, f"borrower {subject_id}: no documents to read a rental signal from"
+    # 1. Schedule E presence — the DETERMINISTIC signal (needs only the documents, not the tags layer).
     saw_tax_return = False
     for entry in _borrower_attributed_documents(snapshot, subject_id):
         if entry.document_type == "tax_return":
@@ -1312,13 +1318,29 @@ def _income_has_rental_income(
                     f"borrower {subject_id}: an attributed tax return has a Schedule E (rental income) — "
                     "presence, not amount (a zero-rent year still counts)"
                 )
-    if saw_tax_return:
+    # 2. income.type == "rental" — the softer signal (mirrors is_self_employed's self_employment fallback).
+    any_type_seen = False
+    if not snapshot.tags.absent:
+        for entry in _borrower_attributed_documents(snapshot, subject_id):
+            tag = snapshot.tags.by_subject.get(entry.content_id, {}).get("income.type")
+            if tag is None or str(tag.value) == _UNKNOWN:
+                continue
+            any_type_seen = True
+            if str(tag.value) == "rental":
+                return "yes", (
+                    f"borrower {subject_id}: an income document is typed rental income "
+                    "(rental income is stated even without a Schedule E filed)"
+                )
+    # 3. A definitive "no": a filed tax return with no Schedule E, or readable income types none rental.
+    if saw_tax_return or any_type_seen:
         return "no", (
-            f"borrower {subject_id}: the borrower's tax return(s) carry no Schedule E "
-            "(no rental income reported)"
+            f"borrower {subject_id}: no Schedule E on any attributed tax return and no income document "
+            "typed rental — no rental income evidenced"
         )
+    # 4. Nothing to read → fail-closed (never a fabricated "no").
     return _UNKNOWN, (
-        f"borrower {subject_id}: no tax return is attributed to the borrower to read a rental schedule from"
+        f"borrower {subject_id}: no tax return and no readable income type attributed — "
+        "cannot tell if the borrower has rental income"
     )
 
 
@@ -1553,8 +1575,9 @@ _RECIPES: dict[str, Recipe] = {
     # IN-12. No new AI, no calibration round (the win). "no" lets IN-12 reach not_applicable. LP-422 extended
     # it: Schedule C presence (LP-421) is a second, stronger deterministic source income.type cannot carry.
     "income_is_self_employed": _income_is_self_employed,
-    # LP-422 — the rental analog for IN-13: Schedule E presence -> a per-borrower rental fact (the ADR-332
-    # escape hatch — a fact substitutes for a judgment, so no labeling round). Presence, not amount.
+    # LP-422 — the rental analog for IN-13: Schedule E presence OR income.type == "rental" -> a per-borrower
+    # rental fact (the ADR-332 escape hatch — a fact substitutes for a judgment). Mirrors is_self_employed's
+    # dual-signal shape (Schedule + income.type). Presence, not amount.
     "income_has_rental_income": _income_has_rental_income,
     # LP-407-2 — the cheap Bucket 2.5 sub-wave: the loan-level promotion PC-2 needs + the DT-2/DT-4
     # monthly-conversion producers (all mirror existing recipes; tags describe, rules judge). DT-5 is NOT
