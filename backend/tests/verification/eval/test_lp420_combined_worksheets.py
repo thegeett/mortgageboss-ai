@@ -57,13 +57,42 @@ def test_generation_is_deterministic_and_blank(tmp_path: Path) -> None:
         )  # a BLANK template — every label is hers to fill
 
 
-def test_committed_files_match_a_fresh_generation() -> None:
-    # The committed CSVs are the blank templates (Priya has not labeled yet), so they must equal a fresh
-    # keyless generation byte-for-byte — a regeneration never silently drifts from what is committed.
-    assert (_CALIBRATION_DIR / VOE_OFFER_WORKSHEET_FILE).read_text(encoding="utf-8") == _VOE_OFFER
-    assert (_CALIBRATION_DIR / CONTINUANCE_WORKSHEET_FILE).read_text(
-        encoding="utf-8"
-    ) == _CONTINUANCE
+# The columns the GENERATOR produces (the instrument) — everything except the human-filled golden_label /
+# labeler_note, and NOT any extra column a labeler adds (Priya added a "Note" column to the continuance sheet).
+_INSTRUMENT_COLS = (
+    "tag_id",
+    "subject_id",
+    "subject_kind",
+    "document_type",
+    "source_document",
+    "scoring",
+    "allowed_values",
+    "consuming_rules",
+    "rule_status",
+    "context",
+)
+
+
+def _instrument(text: str) -> dict[tuple[str, str], dict[str, str]]:
+    """The INSTRUMENT keyed by (tag_id, subject_id): the generator's columns only, order-independent and robust
+    to human-added columns (Priya's "Note") + the human-filled golden_label / labeler_note."""
+    return {
+        (r["tag_id"], r["subject_id"]): {c: r[c] for c in _INSTRUMENT_COLS} for r in _rows(text)
+    }
+
+
+def test_committed_files_match_a_fresh_generations_instrument() -> None:
+    # LP-426: Priya has now LABELED both worksheets (the LP-402 transition — a labeled worksheet is the golden
+    # set, no longer a blank template), so the committed CSVs no longer equal a blank generation BYTE-for-byte.
+    # But the INSTRUMENT must not have drifted: the committed files still match a fresh generation on every
+    # generator column. Her human edits — the golden_label / labeler_note she filled, and the extra "Note"
+    # column she added to the continuance sheet — are tolerated; the generated content is guarded.
+    for name, fresh in (
+        (VOE_OFFER_WORKSHEET_FILE, _VOE_OFFER),
+        (CONTINUANCE_WORKSHEET_FILE, _CONTINUANCE),
+    ):
+        committed = (_CALIBRATION_DIR / name).read_text(encoding="utf-8")
+        assert _instrument(committed) == _instrument(fresh), name
 
 
 # ======================================================================= #

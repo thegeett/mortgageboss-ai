@@ -56,8 +56,8 @@ def test_the_honest_activation_state_is_reported() -> None:
     # 9 SIGNED OFF (IN-1, IN-5, IN-3 + AS-2, AS-12 + IN-7, IN-10, IN-11, AS-11) + 2 PROPOSED-but-unvalidated
     # (AS-6, LP-397 — one-sided n=5; IN-6, LP-406-3b — proposed IN-5's 0.95, pending Priya).
     assert (
-        by["calibratable-now"] == 12
-    )  # +IN-6 (LP-406-3b) +IN-12 (LP-423 — verdict inherits IN-11's 0.9, deterministic Schedule-C gate)
+        by["calibratable-now"] == 14
+    )  # +IN-6 (LP-406-3b) +IN-12 (LP-423) +IN-8 +IN-9 (LP-426 — voe/offer scored 100%, proposed 0.95, unvalidated)
     assert by.get("not-calibratable-yet", 0) >= 1 and by.get("no-ai-dependency", 0) >= 1
     assert (
         by.get("no-ai-threshold-pending", 0) == 1
