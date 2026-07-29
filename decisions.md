@@ -12578,3 +12578,47 @@ evaluator reads specs), so the drift is planning-only (pinned by a test).
 **Cross-refs.** LP-389 (the gate + `_BASE_ACTIVE`), LP-406-4 (OC-1 / the unscored occupancy tag), LP-376-B (a
 judgment rule always ratifies), LP-390-7 (the AS-5 fail-loud guard), LP-411 (the calc-only threshold-signoff
 limit — the contrast), LP-406-2b (nothing reads rule_tags.csv at runtime).
+
+### Resolution — the OC-2 acceptance (LP-425)
+
+LP-424 recorded the OC-2 finding and framed it as "Geet's call." LP-425 IS that call — recorded here, in the
+same ADR (rather than a new one), so a reader finds the finding and its resolution together.
+
+**THE DECISION: OC-2 stays LIVE, ratify-only, on the unscored `occupancy.consistent_with_signals` — ACCEPTED,
+deliberately.** Not deactivated.
+
+- **The fact (re-confirmed from the code, LP-425 Phase 0):** OC-2 ∈ `_BASE_ACTIVE`; its kind is JUDGMENTAL, so
+  `judgment.py` hard-codes `ratification_pending=True` — every OC-2 verdict goes to a human (LP-376-B); its
+  load-bearing AI tag `occupancy.consistent_with_signals` is UNSCORED (0 labels — never calibrated; LP-406-4;
+  it measures DECLARATION consistency, not address signals, LP-371-D3). OC-2 predates the LP-389 gate, so it
+  never passed one — it is live by HISTORY, not by a decision.
+- **Why accept, not deactivate:** ratification is real human review — every OC-2 verdict is signed off, so the
+  unmeasured tag CANNOT produce a trusted automated answer (the ships-mode already mitigates the exact risk an
+  unscored tag poses). Deactivating would trade REAL coverage (occupancy consistency, surfaced to a human) for a
+  risk that is already contained. The problem LP-424 found was the ABSENCE OF A DECISION, not the behaviour.
+- **THE EXIT CONDITION:** this acceptance ends when `occupancy.consistent_with_signals` is CALIBRATED (labels →
+  measured accuracy → a Priya bar) — which OC-1 requires anyway (LP-406-4). Calibration needs REAL occupancy
+  files (the tag can't be scored on synthetic data — ADR-332). Once scored, OC-2 can move OUT of `_BASE_ACTIVE`
+  INTO the gate with a real bar, and the whole `_BASE_ACTIVE` set can be reconsidered (the LP-424 item-2
+  re-architecture).
+- **THE GUARD (what the acceptance rests on):** the acceptance is valid ONLY WHILE OC-2 RATIFIES. `test_lp425_
+  oc2_acceptance` pins OC-2 ∈ `_BASE_ACTIVE` + judgmental + ships:ratify, so any future change that made OC-2
+  auto-ship fails loud. Provenance is also left at `_BASE_ACTIVE` in registry.py (the AS-5 lesson: a value with
+  no recorded reason gets mistaken for an oversight).
+
+**THE SCOPE — exactly which rules this covers (the sibling check, LP-425 Phase 0):** the acceptance covers
+**OC-2 ALONE.** OC-2 is the ONLY live rule on a GENUINELY UNSCORED AI tag. The other AI-dependent base rules were
+examined and are NOT in scope:
+- **AS-1** (calculative → auto) reads `txn.is_money_in` — MEASURED 98% (n=50, LP-337/340). Robustly scored; fine.
+- **ID-9** (judgmental → ratify) reads `id.poa_present_and_acceptable` — MEASURED n=2, 100% (LP-334). A close
+  cousin (thinly measured, ratifies) but NOT unscored — not in scope.
+- **ID-7** (structural → AUTO) reads `id.title_vesting_consistent` — MEASURED n=2, 100% (LP-334). NOT unscored,
+  but it auto-ships on a THIN (n=2) measurement — a distinct, milder concern (the LP-395/AS-6 thin-n lesson),
+  NOT the unscored-tag acceptance. Flagged here so it is not silently swept under this decision; its own review
+  (widen n before trusting the auto-ship) is a separate item.
+
+No rule auto-ships on a genuinely unscored tag; the acceptance names its one covered rule and covers no other.
+
+**Cross-refs (acceptance).** LP-424 (the finding), LP-406-4 (OC-1's held state + what the tag measures), ADR-332
+(why the tag can't be calibrated on synthetic data → the exit condition needs real files), LP-376-B (the
+ratification armor the acceptance rests on), LP-334 (the id.* / is_money_in measurements the sibling check reads).

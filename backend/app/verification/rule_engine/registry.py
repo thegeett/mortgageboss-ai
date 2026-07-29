@@ -28,6 +28,11 @@ from app.verification.snapshot.tag import Tag
 # The BASE set — the rules live before LP-389's first activation pass. A wave adds a rule_id + a spec.
 _BASE_ACTIVE: tuple[str, ...] = (
     "AS-1",
+    # OC-2 is live on an UNSCORED AI tag (occupancy.consistent_with_signals) — ACCEPTED, deliberately (LP-425,
+    # ADR-336): safe because OC-2 is judgmental → it RATIFIES every verdict (a human signs each, LP-376-B), so an
+    # unmeasured tag can never auto-ship. NOT an oversight — it predates the gate; the acceptance ends when the
+    # tag is calibrated (OC-1 needs it too), after which OC-2 moves into the gate. The ratify-mode is the guard
+    # (pinned: test_lp425_oc2_acceptance). DO NOT flip OC-2 to auto without calibrating the tag first.
     "OC-2",
     "ID-2",
     "ID-4",
