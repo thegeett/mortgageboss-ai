@@ -93,19 +93,21 @@ def test_no_live_rule_read_a_repaired_tag_when_lp414_shipped() -> None:
 async def test_lf6t3n_full_verdict_distribution_is_stable() -> None:
     # The equivalence gate as a regression lock. LP-414: 302 evals; LP-407-3 +PC-2 (satisfied); LP-417 +IH-3
     # (couldnt_check); LP-407-4 +PC-3 (couldnt_check). LP-423 ACTIVATED IN-12 (per_borrower) → +2 evals, both
-    # COULDNT_CHECK (LF-6T3N's two W-2 borrowers: income.type is honest-unknown under the keyless stub → the
-    # derived income.is_self_employed gate is unknown → couldnt_check; a real AI would read income.type=base →
-    # not_applicable). The lock is now 307 evals / couldnt_check 183. Any OTHER movement would be a regression.
+    # COULDNT_CHECK. LP-428 ACTIVATED IN-8 + IN-9 (both per_document over LF-6T3N's 30 documents) → +60 evals:
+    # each gates to its own doc type (voe / employment_offer_letter), so 26 non-matching docs → not_applicable and
+    # the 4 matching docs → couldnt_check (their presence tag is honest-unknown under the keyless stub; a real AI
+    # would read yes/no). So +52 not_applicable + +8 couldnt_check. The lock is now 367 evals / couldnt_check 191.
+    # Any OTHER movement would be a regression.
     mat = await materialize_tags(
         build_lf6t3n_snapshot(), ai_reasoners=stub_materialization_reasoners()
     )
     results, _ = await evaluate_rules(mat)
-    assert len(results) == 307
+    assert len(results) == 367
     assert (
         Counter(r.verdict.value for r in results)
         == {
-            "couldnt_check": 183,  # +IH-3 +PC-3 +IN-12 x2 (LP-423 — the self-employment gate unknown under the stub)
-            "not_applicable": 99,
+            "couldnt_check": 191,  # +IN-8 x4 +IN-9 x4 (LP-428 — the presence tags unknown under the stub)
+            "not_applicable": 151,  # +IN-8 x26 +IN-9 x26 (LP-428 — non-matching doc types)
             "satisfied": 21,  # +PC-2 (LP-407-3): both prices 365000 → satisfied
             "fired": 2,
             "needs_review": 2,

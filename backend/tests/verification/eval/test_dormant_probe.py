@@ -43,7 +43,6 @@ pytestmark = pytest.mark.anyio
 # IN-7/IN-10/IN-11 (income_stability) and AS-11 (asset_facts) — both groups moved from dormant to live.
 _DORMANT_EXPECTED = frozenset(
     {
-        "income_docs",
         "stmt_facts",
         # LP-418 — the producer batch declared two AI groups whose rules are not yet written/live, so they
         # join the dormant set: txn_nsf (AS-7's producer, transaction-subject) and occupancy_rental (IN-14's
@@ -61,6 +60,7 @@ _LIVE_EXPECTED = frozenset(
         "income_amounts",
         "income_employer",
         "income_stability",
+        "income_docs",  # LP-428 — now LIVE: IN-8 (voe_present) + IN-9 (offer_letter_present) activated
         "asset_facts",
         "occupancy",
         "txn_stage_a",
@@ -138,50 +138,59 @@ def _all_dormant_stubs(**overrides: Reasoner) -> dict[str, Reasoner]:
 
 
 async def test_probe_reports_what_a_dormant_group_produced_per_document() -> None:
-    # income_amounts is now LIVE (IN-1); this probes a STILL-dormant group — income_docs on a VOE.
+    # income_docs is now LIVE (IN-8/IN-9, LP-428); this probes a STILL-dormant group — stmt_facts on a
+    # bank_statement (the recurring swap: as a probed group activates, the example moves to the next dormant one).
     snap = _snapshot(
         [
             DocumentEntry(
-                content_id="voe1",
-                document_type="voe",
-                fields={"employer_name": Field.present("Acme", source=FieldSource.EXTRACTED)},
+                content_id="stmt1",
+                document_type="bank_statement",
+                fields={"account_holder": Field.present("Acme", source=FieldSource.EXTRACTED)},
             )
         ]
     )
-    stub = _AiStub({"voe_present": "yes", "future_employment": "no", "offer_letter_present": "no"})
+    stub = _AiStub(
+        {
+            "owner_matches_borrower": "yes",
+            "is_reserve_eligible": "yes",
+            "holder_name_variance": "none",
+            "non_borrower_co_holder": "no",
+        }
+    )
     report = await probe_dormant_groups_on_snapshot(
-        snap, ai_reasoners=_all_dormant_stubs(income_docs=stub)
+        snap, ai_reasoners=_all_dormant_stubs(stmt_facts=stub)
     )
 
     assert stub.calls == 1  # the injected reasoner was actually invoked
-    grp = next(g for g in report.groups if g.key == "income_docs")
+    grp = next(g for g in report.groups if g.key == "stmt_facts")
     values = {(o.tag_id, o.value, o.document_type) for o in grp.observations}
     assert (
-        "income.voe_present",
+        "stmt.owner_matches_borrower",
         "yes",
-        "voe",
-    ) in values  # produced a real value on the VOE
+        "bank_statement",
+    ) in values  # produced a real value on the bank statement
     assert grp.verdict == "produces_usable"
-    assert grp.doctypes_with_real_value == {"voe"}  # LP-377-D's gating input
+    assert grp.doctypes_with_real_value == {"bank_statement"}  # LP-377-D's gating input
     # The probe covers the WHOLE dormant set, not just the stubbed one.
     assert {g.key for g in report.groups} == _DORMANT_EXPECTED
 
 
 async def test_uniform_unknown_is_reported_as_a_finding_not_a_pass() -> None:
-    # income_amounts is now LIVE (IN-1); probe the still-dormant income_docs group.
-    snap = _snapshot([DocumentEntry(content_id="voe1", document_type="voe", fields={})])
+    # income_docs is now LIVE (LP-428); probe the still-dormant stmt_facts group.
+    snap = _snapshot([DocumentEntry(content_id="stmt1", document_type="bank_statement", fields={})])
     # The stub abstains on every tag — the LP-368 pattern. This must NOT read as "produces_usable".
     stub = _AiStub(
         {
-            "voe_present": "unknown",
-            "future_employment": "unknown",
-            "offer_letter_present": "unknown",
+            "owner_matches_borrower": "unknown",
+            "is_reserve_eligible": "unknown",
+            "holder_name_variance": "unknown",
+            "non_borrower_co_holder": "unknown",
         }
     )
     report = await probe_dormant_groups_on_snapshot(
-        snap, ai_reasoners=_all_dormant_stubs(income_docs=stub)
+        snap, ai_reasoners=_all_dormant_stubs(stmt_facts=stub)
     )
-    grp = next(g for g in report.groups if g.key == "income_docs")
+    grp = next(g for g in report.groups if g.key == "stmt_facts")
     assert grp.real == []  # nothing usable
     assert grp.verdict == "mostly_abstains"  # honest — an abstention is a finding, not a pass
     assert grp.ai_failures == []  # a genuine model abstention is NOT an AI-call failure
@@ -191,11 +200,11 @@ async def test_ai_call_failure_reads_as_ai_failed_not_an_abstention() -> None:
     # materialize_tags degrades a failed AI call to `unknown` (it catches AIClientError), so a transient
     # outage looks like uniform-unknown. The probe MUST surface that as `ai_failed`, never read it as "the
     # producer abstains" (a false producer/applicability gap — the misdiagnosis this probe exists to prevent).
-    snap = _snapshot([DocumentEntry(content_id="voe1", document_type="voe", fields={})])
+    snap = _snapshot([DocumentEntry(content_id="stmt1", document_type="bank_statement", fields={})])
     report = await probe_dormant_groups_on_snapshot(
-        snap, ai_reasoners=_all_dormant_stubs(income_docs=_failing_reasoner)
+        snap, ai_reasoners=_all_dormant_stubs(stmt_facts=_failing_reasoner)
     )
-    grp = next(g for g in report.groups if g.key == "income_docs")
+    grp = next(g for g in report.groups if g.key == "stmt_facts")
     assert grp.real == []
     assert grp.ai_failures  # the failure is surfaced, distinct from an abstention
     assert grp.abstentions == []  # a call failure is not counted as a genuine abstention

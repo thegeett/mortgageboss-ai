@@ -29,7 +29,7 @@ from app.verification.tag_materialization.ai import (
 from app.verification.tag_materialization.ai import (
     Reasoner as AiGroupReasoner,
 )
-from app.verification.tag_materialization.declarations import load_ai_groups
+from app.verification.tag_materialization.declarations import load_ai_groups, load_declarations
 
 # A stub judgment is high-confidence so the fail-closed gate passes on a well-formed fixture (the
 # gate's job is tested by the real pipeline; a fixture that WANTS couldnt_check uses is_money_in
@@ -129,16 +129,27 @@ class StubStageBReasoner:
 
 
 class _StubAiGroupReasoner:
-    """Replays an AI-group structuring pass (LP-326) — an HONEST 'unknown' (WITH confidence, so it is
+    """Replays an AI-group structuring pass (LP-326) — an HONEST abstention (WITH confidence, so it is
     a genuine judgment, NOT a fail-closed degradation) for every subject the group is asked about.
+
+    The abstention value is `unknown` where the tag's vocabulary allows it (or is free-text). For a
+    PRESENCE/boolean check whose enum is a subset of {yes,no,n/a} and has no `unknown` (income.voe_present
+    = yes|no — LP-428), `unknown` is off-vocabulary and would be COERCED to a null-confidence fail-closed
+    tag, spuriously flipping `run.degraded`; there the stub emits the in-vocab honest default `no` (a bank
+    statement is not a VOE — a real model would read the document and return `no` too). A MULTI-category
+    enum with no honest default (income.type = base|bonus|…) keeps abstaining to `unknown` (still coerced
+    to fail-closed — its callers rely on that honest-unknown, e.g. IN-12's self-employment gate).
 
     A fixture built for the txn/AS-1/OC-2 pipeline has no identity documents, so the id.* groups
     correctly perceive nothing — a clean run, not a degraded one. A test that WANTS a real id.* value
     supplies its own reasoner for that group.
     """
 
-    def __init__(self, shorts: tuple[str, ...]) -> None:
+    def __init__(self, shorts: tuple[str, ...], values: dict[str, str] | None = None) -> None:
         self.shorts = shorts
+        self.values = (
+            values or {}
+        )  # short -> the in-vocabulary abstention value (defaults to "unknown")
         self.calls = 0
 
     async def __call__(self, context_json: str) -> AiGroupResult:
@@ -148,7 +159,11 @@ class _StubAiGroupReasoner:
             AiSubjectJudgment(
                 index=int(s["index"]),
                 tags={
-                    short: AiTagJudgment("unknown", _STUB_CONFIDENCE, "not stated in this document")
+                    short: AiTagJudgment(
+                        self.values.get(short, "unknown"),
+                        _STUB_CONFIDENCE,
+                        "not stated in this document",
+                    )
                     for short in self.shorts
                 },
             )
@@ -167,12 +182,29 @@ def stub_materialization_reasoners(subject: str | None = None) -> dict[str, AiGr
     orchestrator materializes all of them (``document`` AND ``loan``-subject groups like ``occupancy``),
     so a document-only seam would leave the loan-subject groups to fall through to the real model. Pass a
     specific subject to scope the seam to one family."""
+    decls = (
+        load_declarations()
+    )  # per-tag allowed_values, to keep the stub's abstention IN-vocabulary
     reasoners: dict[str, AiGroupReasoner] = {}
     for key, group in load_ai_groups().items():
         if subject is not None and group.subject != subject:
             continue
         shorts = tuple(tag_id.rsplit(".", 1)[-1] for tag_id in group.tag_ids)
-        reasoners[key] = _StubAiGroupReasoner(shorts)
+        values: dict[str, str] = {}
+        for tag_id in group.tag_ids:
+            short = tag_id.rsplit(".", 1)[-1]
+            allowed = decls[tag_id].allowed_values if tag_id in decls else None
+            if allowed is None or "unknown" in allowed:
+                values[short] = (
+                    "unknown"  # free-text or an enum that permits it — a genuine abstention
+                )
+            elif set(allowed) <= {"yes", "no", "n/a"}:
+                values[short] = "no"  # a PRESENCE/boolean check — the in-vocab honest "not this"
+            else:
+                values[short] = (
+                    "unknown"  # a multi-category enum, no honest default → abstain (coerced)
+                )
+        reasoners[key] = _StubAiGroupReasoner(shorts, values)
     return reasoners
 
 

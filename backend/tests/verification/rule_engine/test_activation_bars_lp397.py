@@ -37,8 +37,8 @@ def test_proposing_the_bar_activates_nothing() -> None:
     from tests.expected_active import EXPECTED_ACTIVE_RULE_COUNT
 
     assert (
-        len(eligible_rule_ids()) == 20
-    )  # +AS-8 +PC-2 +IH-3 +PC-3 +IN-12 (LP-423 — deterministic Schedule-C gate + IN-11's validated verdict)
+        len(eligible_rule_ids()) == 22
+    )  # +AS-8 +PC-2 +IH-3 +PC-3 +IN-12 (LP-423) +IN-8 +IN-9 (LP-428 — Priya signed off both 0.95 bars)
     assert len(ACTIVE_RULE_IDS) == EXPECTED_ACTIVE_RULE_COUNT
 
 

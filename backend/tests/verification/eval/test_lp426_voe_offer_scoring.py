@@ -83,20 +83,24 @@ def test_unknown_is_a_valid_label_not_a_skipped_blank() -> None:
 
 
 # ======================================================================= #
-# The proposed bars — validated:false, activate nothing (ACTIVE stays 31)
+# The bars — proposed at 0.95 here, SIGNED OFF by Priya in LP-428 (which activated IN-8 + IN-9, 31 -> 33)
 # ======================================================================= #
-def test_bars_are_proposed_but_not_validated_so_nothing_activates() -> None:
+def test_bars_signed_off_by_lp428_and_rules_are_active() -> None:
+    # LP-426 PROPOSED these bars validated:false (nothing activated). LP-428 is Priya's sign-off — she approved
+    # 0.95 for both, weighing the synthetic caveat, so the bars are now validated:true and IN-8/IN-9 are live.
     bars = load_activation_bars()
     for rid in ("IN-8", "IN-9"):
         bar = bars[rid]
-        assert bar.status == "calibratable-now"  # was not-calibratable-yet — the tag is now scored
-        assert bar.threshold == 0.95 and bar.measured_accuracy == 1.0  # 100% two-sided
-        assert not bar.validated  # PROPOSED — Priya's sign-off is the activation (LP-412)
-        assert not is_eligible(bar)  # validated:false -> not eligible
-        assert rid not in ACTIVE_RULE_IDS
+        assert bar.status == "calibratable-now"
+        assert (
+            bar.threshold == 0.95 and bar.measured_accuracy == 1.0
+        )  # LP-426's 100% two-sided score
+        assert bar.validated  # LP-428 — Priya signed off (the proposal became the activation)
+        assert is_eligible(bar)  # validated:true + 1.0 >= 0.95 -> eligible
+        assert rid in ACTIVE_RULE_IDS
 
 
-def test_no_rule_activation_changed() -> None:
+def test_active_count_reflects_the_two_activations() -> None:
     assert (
         len(ACTIVE_RULE_IDS) == EXPECTED_ACTIVE_RULE_COUNT
-    )  # 31 — a bar proposal activates nothing
+    )  # 33 — LP-428 activated IN-8 + IN-9 on Priya's sign-off

@@ -161,6 +161,18 @@ _LP4074_ACTIVATED: tuple[str, ...] = ("PC-3",)
 # verdict tag continuance_3yr is uncalibrated).
 _LP423_ACTIVATED: tuple[str, ...] = ("IN-12",)
 
+# LP-428 — IN-8 (VOE present) + IN-9 (offer letter present) go live (31 -> 33) on Priya's sign-off. LP-426 scored
+# both verdict tags (income.voe_present, income.offer_letter_present) at 100% (12/12), TWO-SIDED (6 yes / 6 no), 0
+# disagreements, on her blind labels over LP-418's fixture, and PROPOSED 0.95 AUTO bars. Priya APPROVED 0.95 for
+# both, weighing the SYNTHETIC caveat (LP-418 scenario docs with hand-set document_type — the report given a
+# correct classification, not real-VOE recognition; recorded in each bar for exactly this). Flipping validated:true
+# clears each calibratable-now gate (1.0 >= 0.95). Both tags come from the income_docs group, which was PENDING-only
+# (materialized on a throwaway snapshot for the blocked-rule check) and now folds into _required_ai_groups — so the
+# tags are PRODUCED on the live snapshot when the rules run (no LP-384 missing-tag trap). IN-13 is NOT activated —
+# the sibling stays HELD on two open blockers (the missing 'has other income' scope gate ADR-335; income.type still
+# unscored — LP-423/LP-427). Structural presence checks → ships auto per their kind.
+_LP428_ACTIVATED: tuple[str, ...] = ("IN-8", "IN-9")
+
 # The gate is the source of truth: test_activation_gate_lp389 asserts ACTIVE_RULE_IDS - _BASE_ACTIVE ==
 # eligible_rule_ids() — a rule CANNOT enter this set without meeting the eligibility gate (not a hand-list).
 ACTIVE_RULE_IDS: tuple[str, ...] = (
@@ -176,6 +188,7 @@ ACTIVE_RULE_IDS: tuple[str, ...] = (
     *_LP417_ACTIVATED,
     *_LP4074_ACTIVATED,
     *_LP423_ACTIVATED,
+    *_LP428_ACTIVATED,
 )
 
 

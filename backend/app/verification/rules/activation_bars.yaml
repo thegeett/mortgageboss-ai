@@ -271,14 +271,15 @@ IN-8:
   # LP-426 — SCORED. income.voe_present scored 100% (12/12), TWO-SIDED (6 yes + 6 no), 0 disagreements, on
   # Priya's blind labels over LP-418's voe/offer fixture (LP-420 worksheet). So calibratable-now, PROPOSED 0.95
   # AUTO bar (structural presence check, low error cost — a false 'VOE missing' costs a human glance; FP > FN).
-  # validated:false — HELD pending Priya's sign-off (LP-412). ⚠️ SYNTHETIC CAVEAT (she weighs before signing):
-  # the fixture is LP-418 SCENARIO documents with HAND-SET document_type (always correct), so this measures
-  # income_docs' report GIVEN a correctly-classified doc — NOT genuine recognition of a real VOE, nor classifier
-  # errors. n=12. Real VOEs are the LP-393 synthetic-data caveat.
+  # LP-428 — VALIDATED. Priya SIGNED OFF the 0.95 bar, weighing the synthetic caveat below (the LP-412 pattern:
+  # her sign-off IS the activation). ⚠️ SYNTHETIC CAVEAT (she weighed it, per LP-426): the fixture is LP-418
+  # SCENARIO documents with HAND-SET document_type (always correct), so this measures income_docs' report GIVEN a
+  # correctly-classified doc — NOT genuine recognition of a real VOE, nor classifier errors. n=12. Real VOEs are
+  # the LP-393 synthetic-data caveat — IN-8 ships with it, on record.
   status: calibratable-now
   ships: auto
   threshold: 0.95
-  validated: false
+  validated: true   # LP-428 — Priya approved 0.95, weighing the synthetic caveat (recorded below)
   measured_accuracy: 1.0   # LP-426: income.voe_present 12/12 = 100%, two-sided (6 yes / 6 no)
   load_bearing_ai_tags: [income.voe_present]
   fp_fn: "FP (a false 'VOE missing' -> a human checks) > FN, low stakes"
@@ -286,23 +287,26 @@ IN-8:
     LP-426 scored income.voe_present at 100% (12/12) on Priya's blind labels — TWO-SIDED (6 yes, 6 no; the AS-6
     one-sided trap avoided), 0 disagreements. PROPOSED a 0.95 AUTO bar: IN-8 is a structural presence check with
     a low error cost either way (a false 'VOE missing' surfaces a doc for a human, an FP that costs a glance;
-    FP > FN). Below-bar/unknown -> needs_review (LP-376-B). validated:false — HELD for Priya. SYNTHETIC CAVEAT:
-    the measurement is on LP-418 scenario docs whose document_type is hand-set (always correct), so it scores
-    income_docs conditional on a correct classification, not recognition of a real VOE or a mis-classification —
-    Priya weighs this synthetic-only basis before signing (the LP-393-6 pattern).
+    FP > FN). Below-bar/unknown -> needs_review (LP-376-B). LP-428: Priya APPROVED 0.95 and IN-8 is now
+    validated:true — she signed KNOWING the SYNTHETIC CAVEAT: the measurement is on LP-418 scenario docs whose
+    document_type is hand-set (always correct), so it scores income_docs conditional on a correct classification,
+    not recognition of a real VOE or a mis-classification. Her ruling weighed this synthetic-only basis (the
+    LP-393-6 pattern); IN-8 ships with the caveat on record, and a real-VOE / classifier-error run remains a
+    follow-up.
 
 IN-9:
   # LP-426 — SCORED. income.offer_letter_present scored 100% (12/12), TWO-SIDED (6 yes + 6 no), 0 disagreements,
   # on Priya's blind labels — the direction LP-395 could NOT measure (its positive class was empty, n=0, before
   # LP-418's fixture; now 6 real 'yes'). So calibratable-now, PROPOSED 0.95 AUTO bar (structural presence check,
-  # low error cost). validated:false — HELD for Priya. ⚠️ TWO caveats she weighs: (1) the SYNTHETIC caveat (as
-  # IN-8 — hand-set document_type; measures the report given a correct classification, not real recognition);
-  # (2) the tag's THIRD value 'n/a' is UNMEASURED (the fixture has no n/a case) — but it is outside IN-9's
-  # decision (IN-9 gates to employment_offer_letter docs, where the call is yes vs no), so not a blocker.
+  # LP-428 — VALIDATED. Priya SIGNED OFF the 0.95 bar (the LP-412 pattern), weighing TWO caveats: (1) the
+  # SYNTHETIC caveat (as IN-8 — hand-set document_type; measures the report given a correct classification, not
+  # real recognition); (2) the tag's THIRD value 'n/a' is UNMEASURED (the fixture has no n/a case) — but it is
+  # outside IN-9's decision (IN-9 gates to employment_offer_letter docs, where the call is yes vs no), so not a
+  # blocker. IN-9 ships with both caveats on record.
   status: calibratable-now
   ships: auto
   threshold: 0.95
-  validated: false
+  validated: true   # LP-428 — Priya approved 0.95, weighing the synthetic + untested-'n/a' caveats (below)
   measured_accuracy: 1.0   # LP-426: income.offer_letter_present 12/12 = 100%, two-sided (6 yes / 6 no)
   load_bearing_ai_tags: [income.offer_letter_present]
   fp_fn: "FP (a false 'offer letter missing' -> a human checks) > FN, low stakes"
@@ -311,9 +315,10 @@ IN-9:
     This is the direction LP-395 could not measure: its positive class was empty (n=0) until LP-418 built a
     fixture with real offer-letter documents, so a bar was premature then and is warranted now. PROPOSED a 0.95
     AUTO bar (structural presence check, low error cost — FP > FN, a false 'missing' costs a human glance).
-    validated:false — HELD for Priya. CAVEATS she weighs: the SYNTHETIC basis (hand-set document_type, as IN-8),
-    and the tag's 'n/a' value is untested (no n/a case in the fixture) though it is outside IN-9's yes/no
-    decision. The LP-393-6 synthetic-fixture pattern applies.
+    LP-428: Priya APPROVED 0.95 and IN-9 is now validated:true — she signed weighing TWO caveats: the SYNTHETIC
+    basis (hand-set document_type, as IN-8), and the tag's 'n/a' value being untested (no n/a case in the
+    fixture) though it is outside IN-9's yes/no decision. The LP-393-6 synthetic-fixture pattern applies; IN-9
+    ships with both caveats on record.
 
 IN-10:
   # LP-393-5: is_declining re-scored 100% (13/13) on the LP-393-1 fixture (LP-393-4b) -> calibratable-now.

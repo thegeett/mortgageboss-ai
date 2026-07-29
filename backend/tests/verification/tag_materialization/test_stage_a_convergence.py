@@ -117,5 +117,7 @@ def test_no_rule_activation_changed() -> None:
             "IH-3",  # LP-417 — insurance effective date vs closing
             "PC-3",  # LP-407-4 — contract property address vs the loan file
             "IN-12",  # LP-423 — self-employed 2yr history (activated on the deterministic Schedule-C gate)
+            "IN-8",  # LP-428 — VOE present (Priya signed off the 0.95 bar)
+            "IN-9",  # LP-428 — offer letter present (Priya signed off the 0.95 bar)
         )
     )

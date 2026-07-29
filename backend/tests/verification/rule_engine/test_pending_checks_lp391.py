@@ -97,25 +97,35 @@ def test_blocked_candidates_are_exactly_bars_minus_active() -> None:
 # --------------------------------------------------------------------------- #
 # APPLICABLE + DATA → a manual-review flag, never the verdict
 # --------------------------------------------------------------------------- #
-def _voe(cid: str, owner: UUID) -> DocumentEntry:
-    # a VOE document (IN-8's applicability type) attributed to a borrower.
+def _stmt(cid: str, owner: UUID) -> DocumentEntry:
+    # a bank_statement document (AS-6's applicability type) attributed to a borrower.
+    # (Was a VOE for IN-8, which went live in LP-428 — AS-6 is now the standing blocked per_document example.)
     return DocumentEntry(
         content_id=cid,
-        document_type="voe",
+        document_type="bank_statement",
         belongs_to=(BorrowerRef(borrower_id=owner, name="X"),),
-        fields={"employer_name": _f("Acme")},
+        fields={"account_holder": _f("Acme")},
     )
 
 
 async def test_a_blocked_rule_that_reaches_a_verdict_surfaces_pending_never_the_verdict() -> None:
-    # IN-8 (blocked: income.voe_present uncalibrated) is per_document on a voe. The voe carries voe_present="no"
-    # → the rule WOULD 'fire' (an untrusted verdict). Still BLOCKED, so the would-be fire surfaces as PENDING,
-    # never the verdict. (IN-12 demonstrated this before LP-423 activated it.)
-    snap = _snap({"voeA": {"income.voe_present": _tag("no")}}, extra_docs=(_voe("voeA", _A),))
+    # AS-6 (blocked: the stmt-holder tags uncalibrated) is per_document on a bank_statement. The statement
+    # carries owner_matches_borrower="no" (holder_name_variance present so it clears the gate) → the rule WOULD
+    # 'fire' a third-party-account finding (an untrusted verdict). Still BLOCKED, so the would-be fire surfaces
+    # as PENDING, never the verdict. (IN-8 demonstrated this before LP-428 activated it; IN-12 before LP-423.)
+    snap = _snap(
+        {
+            "stmtA": {
+                "stmt.owner_matches_borrower": _tag("no"),
+                "stmt.holder_name_variance": _tag("different_surname"),
+            }
+        },
+        extra_docs=(_stmt("stmtA", _A),),
+    )
     pending = await evaluate_pending_checks(snap)
-    in8 = [p for p in pending if p.rule_id == "IN-8"]
-    assert len(in8) == 1 and in8[0].subject_id == "voeA"  # the voe document surfaces
-    flag = in8[0]
+    as6 = [p for p in pending if p.rule_id == "AS-6"]
+    assert len(as6) == 1 and as6[0].subject_id == "stmtA"  # the statement document surfaces
+    flag = as6[0]
     # THE NO-LEAK GUARANTEE: the would-be 'fired' is discarded — never shipped.
     assert flag.verdict is Verdict.PENDING_AUTOMATION
     assert flag.load_bearing_tags == ()  # the uncalibrated tag VALUE never rides along
@@ -126,11 +136,11 @@ async def test_a_blocked_rule_that_reaches_a_verdict_surfaces_pending_never_the_
 
 
 async def test_a_blocked_rule_with_no_data_stays_dark_no_fabricated_flag() -> None:
-    # IN-8 is APPLICABLE (a voe document is present) but has NO income.voe_present tag → couldnt_checks →
-    # NOTHING surfaces (honest silence, not a fabricated "manual review" the rule cannot support).
-    snap = _snap({}, extra_docs=(_voe("voeA", _A),))
+    # AS-6 is APPLICABLE (a bank_statement is present) but has NO stmt.holder_name_variance tag → couldnt_checks
+    # → NOTHING surfaces (honest silence, not a fabricated "manual review" the rule cannot support).
+    snap = _snap({}, extra_docs=(_stmt("stmtA", _A),))
     pending = await evaluate_pending_checks(snap)
-    assert [p for p in pending if p.rule_id == "IN-8"] == []
+    assert [p for p in pending if p.rule_id == "AS-6"] == []
 
 
 async def test_a_blocked_JUDGMENT_rule_surfaces_through_the_stub_no_api_call() -> None:

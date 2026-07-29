@@ -139,6 +139,8 @@ async def test_registry_dispatches_the_active_rule_set_by_kind() -> None:
             "IH-3",  # LP-417 — insurance effective date vs closing
             "PC-3",  # LP-407-4 — contract property address vs the loan file
             "IN-12",  # LP-423 — self-employed 2yr history (deterministic Schedule-C gate)
+            "IN-8",  # LP-428 — VOE present (Priya signed off 0.95; voe_present 100% two-sided)
+            "IN-9",  # LP-428 — offer letter present (Priya signed off 0.95; offer_letter_present 100%)
         }
     )
     snapshot = _loan_snapshot(None)  # no occupancy/txn tags → everything fail-closes honestly

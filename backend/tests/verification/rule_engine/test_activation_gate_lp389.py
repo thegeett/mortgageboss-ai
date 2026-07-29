@@ -57,6 +57,8 @@ _ACTIVATED = frozenset(
         "PC-3",  # LP-407-4 — contract property address vs the loan file (no-ai-dependency, needs_review route)
         "IN-12",  # LP-423 — self-employed 2yr history (calibratable-now; verdict inherits IN-11's validated 0.9,
         # the gate is a deterministic Schedule-C fact — LP-422)
+        "IN-8",  # LP-428 — VOE present (calibratable-now; voe_present 100% two-sided, Priya signed off 0.95)
+        "IN-9",  # LP-428 — offer letter present (calibratable-now; offer_letter_present 100%, Priya 0.95)
     }
 )
 
@@ -74,9 +76,9 @@ def test_exactly_the_eligible_candidates_pass() -> None:
     held = set(bars) - eligible
     # IN-1/IN-5/AS-2/AS-12/IN-3 (AI, validated, measured >= bar); ID-5 + AS-9/IN-4/AS-10 (no-AI, input resolves).
     assert eligible == set(_ACTIVATED)
-    # 10 held after LP-423 (was 11): IN-12 moved held → eligible (its gate became a deterministic Schedule-C
-    # fact, LP-422; verdict inherits IN-11's validated 0.9). The rest — incl. OC-1 / IN-13 — stay held.
-    assert len(held) == 10 and not (held & _ACTIVATED)  # every other candidate is held
+    # 8 held after LP-428 (was 10): IN-8 + IN-9 moved held → eligible (Priya signed off their 0.95 bars, LP-428).
+    # The rest — incl. OC-1 / IN-13 (the sibling that must NOT ride along) / AS-6 (unsigned) — stay held.
+    assert len(held) == 8 and not (held & _ACTIVATED)  # every other candidate is held
 
 
 def test_eligible_rule_ids_is_sorted_and_matches() -> None:
@@ -98,6 +100,8 @@ def test_eligible_rule_ids_is_sorted_and_matches() -> None:
         "IN-5",
         "IN-6",  # LP-412
         "IN-7",
+        "IN-8",  # LP-428 (sorts between IN-7 and IN-9)
+        "IN-9",  # LP-428
         "PC-2",  # LP-407-3 (sorts before PC-7)
         "PC-3",  # LP-407-4 (sorts between PC-2 and PC-7)
         "PC-7",  # LP-412

@@ -173,6 +173,8 @@ def test_exactly_the_signed_off_bars_are_validated() -> None:
             "IN-6",  # LP-412 — 0.95, "same as IN-5"
             "PC-7",  # LP-412 — the two-sided window (any past date; 90-day far-future)
             "IN-12",  # LP-423 — inherits IN-11's validated 0.9 (deterministic Schedule-C gate)
+            "IN-8",  # LP-428 — Priya signed off 0.95 (voe_present 100%, synthetic caveat weighed)
+            "IN-9",  # LP-428 — Priya signed off 0.95 (offer_letter_present 100%, caveats weighed)
         }
     )  # NOTE: PC-2 (LP-407-3) is no-ai-dependency with validated:false — it is NOT in this signed-off set.
     assert all(b.validated is False for rid, b in bars.items() if rid not in validated)
@@ -269,6 +271,11 @@ def test_active_set_is_base_plus_lp389() -> None:
             # LP-423 — IN-12 (self-employed 2yr history): calibratable-now, verdict inherits IN-11's validated
             # 0.9, gate is a deterministic Schedule-C fact (LP-422).
             "IN-12",
+            # LP-428 — IN-8 (VOE present) + IN-9 (offer letter present): calibratable-now, both scored 100%
+            # (12/12, two-sided) on Priya's blind labels (LP-426); she signed off 0.95 for each, weighing the
+            # synthetic caveat. Structural presence checks → ships auto.
+            "IN-8",
+            "IN-9",
         )
     )
     # A bar persists after activation as the record of WHY the rule went live, so the bars now intersect the
@@ -296,6 +303,8 @@ def test_active_set_is_base_plus_lp389() -> None:
             "IH-3",  # LP-417 — live via its bar (no-ai-dependency, native date compare)
             "PC-3",  # LP-407-4 — live via its bar (no-ai-dependency, needs_review route)
             "IN-12",  # LP-423 — live via its bar (calibratable-now, validated; deterministic Schedule-C gate)
+            "IN-8",  # LP-428 — live via its bar (calibratable-now, validated; Priya signed off 0.95)
+            "IN-9",  # LP-428 — live via its bar (calibratable-now, validated; Priya signed off 0.95)
         }
     )
     assert not (set(load_activation_bars()) & set(_BASE_ACTIVE))
