@@ -57,7 +57,7 @@ def test_desired_state_shape() -> None:
     # rule_kinds.csv is 133 rules; the vocabulary is 143 xlsx tags + 1 hand-added overlay tag
     # (id.poa_acceptable LP-329, id.residency_eligible LP-331) = 145.
     assert len(rules) == 133
-    assert len(tags) == 167  # +4 assets (LP-323-AS-B) +2 ID-5 (LP-389-A) +2 stmt variance/co-holder
+    assert len(tags) == 168  # +4 assets (LP-323-AS-B) +2 ID-5 (LP-389-A) +2 stmt variance/co-holder
     # (LP-400) +3 the LP-410 derived-producer wave (days_until_closing / stmt.continuity / employer_coverage)
     # +1 LP-407-2 (contract.loan_sales_price — the PC-2 loan promotion; its 4 other tags already exist in the CSV)
     # +1 LP-417 (ins.loan_effective_date — the IH-3 loan promotion; ins.effective_date already exists in the CSV)
@@ -66,6 +66,9 @@ def test_desired_state_shape() -> None:
     # already exist in the CSV, so they add production wiring but no vocabulary tag).
     # +1 LP-422 (income.has_rental_income — the deterministic per-borrower rental presence read off Schedule E;
     # the self-employment side reuses income.is_self_employed, extended, so it adds no tag).
+    # +1 LP-424 (loan.purpose — the parsed purchase/refinance scope tag). It adds NO rule_tags edge: its
+    # consumer (the PC-2/PC-7 applicability predicate) is deferred (LF-6T3N carries no loan.purpose; no refi
+    # fixture), so rule_tags stays 203 — an intentionally orphan-for-now tag.
     assert len(rule_tags) == 203
     # No depends_on authored yet (LP-311 Phase 0): the DAG is empty.
     assert tag_deps == set()

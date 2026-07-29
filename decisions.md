@@ -12535,3 +12535,46 @@ ticket (the honest ending: LIVE now on a coarse deterministic gate, sharper once
 hatch), LP-419 (IN-12 written + held), LP-422 (the schedule-presence producer), LP-420 (the continuance worksheet
 + the six other-income types), IN-11 (the live backstop for a missed IN-12 scope), IN-6/LP-412 (inherit the
 verdict tag's validated bar).
+
+## ADR-336: A live BASE rule can ride an UNSCORED tag — the gate cannot protect a rule that predates it without deactivating it; and the bar loader CAN see a rule's kind (LP-424)
+
+**Context.** LP-424 item 2 set out to backfill activation bars for the 11 `_BASE_ACTIVE` rules — the rules that
+were activated BEFORE the eligibility gate existed (LP-389) and so carry no bar and no `measured_accuracy`. The
+goal: a future tag/prompt regression would then trip the gate. It STOPPED on a structural wall and a real finding.
+
+**The structural wall.** `load_activation_bars()` fail-louds unless the bars file covers EXACTLY the non-base
+CANDIDATE rules (`specs − _BASE_ACTIVE`); and the activation invariant is `ACTIVE_RULE_IDS = _BASE_ACTIVE ⊎
+eligible_candidates` (base and gated disjoint). A base rule cannot get a bar without either relaxing that
+fail-loud contract (and then a base rule's eligible bar would double-count in `ACTIVE − BASE == eligible`,
+breaking the invariant) or MOVING it out of `_BASE_ACTIVE` into the gated set. Backfilling is therefore a
+re-architecture of the base/gated split, not a bookkeeping fill.
+
+**The finding (named) — a live rule can ride an unscored tag, and the gate cannot retro-protect it.** Moving the
+base rules into the gate would DEACTIVATE any whose tag has no measurement — and **OC-2** is exactly that: it is
+LIVE via `_BASE_ACTIVE`, reads `occupancy.consistent_with_signals` (AI, UNSCORED — the same tag OC-1 is held on),
+and predates the gate, so the gate never checked it. This is safe TODAY only because OC-2 is JUDGMENTAL and so
+RATIFIES every verdict (a human signs each — LP-376-B; already documented in OC-1's bar), never an auto-verdict
+on an unmeasured tag. But it means a live rule rests on something no bar measures, and the gate cannot be
+extended to cover it without deactivating it. **That is Geet's call** (deactivate OC-2 pending calibration, or
+formally accept it as ratify-only on an unscored tag), not a silent change — so item 2 STOPPED and reported it.
+The general rule: a rule activated before the gate can rest on an unmeasured input the gate would reject; giving
+it a bar is a re-activation decision (may deactivate), never a backfill. Pinned by a test so OC-2 can never be
+flipped to auto.
+
+**The counterpart confirmation (item 3).** The bar LOADER CAN see a rule's kind — `rule_kinds.csv` via
+`kind_for()` (no import cycle; kinds.py depends only on stdlib). So the loader now REJECTS `ships: auto` on a
+judgmental rule at load time (a bar that claims auto for a rule the runtime always ratifies is a lie — the
+LP-390-7 AS-5 fail-loud pattern). This is NOT the calc-only limit LP-411 hit (`threshold_needs_signoff`): `kind`
+is available to the loader, so this guarantee IS enforceable at the bar layer. No current bar violates it (all
+four judgmental bars — AS-12, IN-7, IN-13, IN-14 — correctly ratify).
+
+**Also recorded (item 1).** `rule_tags.csv` has drifted, but the drift is STRUCTURAL, not stale-for-a-few-rules:
+the CSV is a DATA-LINEAGE map (rule → its raw INPUT tags — PC-7 → `contract.closing_date`) while the live spec's
+`load_bearing_tags` is the DIRECT-READ set (PC-7 → the derived `contract.days_until_closing`). They differ for
+nearly every rule by design. A spec-driven regeneration would change the artifact's SEMANTICS and fight the
+xlsx-driven generator — a CSV-contract decision, deferred. Nothing reads `rule_tags.csv` at evaluation (the
+evaluator reads specs), so the drift is planning-only (pinned by a test).
+
+**Cross-refs.** LP-389 (the gate + `_BASE_ACTIVE`), LP-406-4 (OC-1 / the unscored occupancy tag), LP-376-B (a
+judgment rule always ratifies), LP-390-7 (the AS-5 fail-loud guard), LP-411 (the calc-only threshold-signoff
+limit — the contrast), LP-406-2b (nothing reads rule_tags.csv at runtime).

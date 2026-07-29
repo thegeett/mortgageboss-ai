@@ -292,3 +292,19 @@ tags:
       Is there an ADDITIONAL account holder on the statement (a joint account) who is NOT a borrower on the
       loan (LP-398 N5)? The reasoning names the non-borrower holder. `no` for a single-holder account.
     produced_by: AI
+  # LP-424 (item 4) — the loan's PURPOSE (purchase vs refinance), a PARSED loan-level scope signal promoted from
+  # the MISMO loan.purpose fact (loan_file.loan_purpose). Mirrors program.type (parsed, subject:loan). Purpose:
+  # let a purchase-only rule (PC-2 contract-price match, PC-7 closing window) scope to not_applicable on a
+  # REFINANCE (no purchase agreement) instead of couldnt_check — the AS-8/PC-3 applicability-predicate pattern.
+  # ⚠️ The predicate is NOT yet wired to PC-2/PC-7 (LP-424 deferred it: LF-6T3N carries no loan.purpose, so the
+  # predicate would regress it to couldnt_check, and no refinance fixture exists in the snapshot path). This
+  # declares the reusable tag; the predicate is a follow-up once those fixtures exist.
+  loan.purpose:
+    entity: loan
+    value_type: enum
+    allowed_values: ["purchase", "refinance"]
+    description: >-
+      Why the loan is being taken out — purchase or refinance (LoanPurpose). A parsed promotion of the MISMO
+      loan.purpose fact to a loan-subject tag, so a purchase-only rule can scope out a refinance. Absent when
+      the file states no purpose.
+    produced_by: parsed

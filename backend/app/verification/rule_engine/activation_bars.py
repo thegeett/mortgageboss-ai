@@ -21,6 +21,7 @@ from pathlib import Path
 import yaml
 
 from app.verification.rule_engine.registry import _BASE_ACTIVE
+from app.verification.rules.kinds import RuleKindName, kind_for
 
 _BARS_YAML = Path(__file__).resolve().parents[1] / "rules" / "activation_bars.yaml"
 _SPECS_DIR = Path(__file__).resolve().parents[1] / "rules" / "specs"
@@ -110,6 +111,18 @@ def parse_bar(rule_id: str, body: object) -> ActivationBar:
         raise ActivationBarError(f"{rule_id}: unknown status {status!r}")
     if ships not in _SHIPS:
         raise ActivationBarError(f"{rule_id}: ships must be auto|ratify, got {ships!r}")
+    # LP-424 (item 3) — a bar's ``ships`` must AGREE with the rule's KIND (rule_kinds.csv). A JUDGMENTAL rule
+    # NEVER auto-ships (LP-376-B: a human ratifies every judgment; judgment.py hard-codes ratification_pending),
+    # so a bar declaring ``ships: auto`` on a judgmental rule is a LIE — the runtime ratifies regardless, and the
+    # bar would mis-state the rule's shipping mode to a reader/census. Fail loud (the LP-390-7 AS-5 pattern), the
+    # same way an out-of-range threshold does. (The loader CAN see the kind — rule_kinds.csv via kind_for — so
+    # this guard is implementable here; it is not a calc-only field like threshold_needs_signoff, LP-411.)
+    kind = kind_for(rule_id)
+    if ships == "auto" and kind is not None and kind.kind is RuleKindName.JUDGMENTAL:
+        raise ActivationBarError(
+            f"{rule_id}: ships=auto contradicts its judgmental kind — a judgment rule never auto-ships "
+            "(a human ratifies every verdict, LP-376-B); the bar must declare ships: ratify"
+        )
     # ``validated`` is Priya's sign-off (LP-380 flipped none; her sign-offs flip specific bars, e.g. IN-1/IN-5).
     # It must be an explicit bool, and only a calibratable-now rule with a real threshold may be validated —
     # a rule blocked on calibration can never be signed off as live-able.
