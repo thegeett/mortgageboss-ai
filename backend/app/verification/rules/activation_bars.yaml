@@ -418,8 +418,12 @@ IN-13:
   # coverage regression disguised as a fix (D1 STOP). The available gate (rental) is narrower than the rule's
   # intent (all other income); the real gate would be a broader "has other income" borrower signal that does NOT
   # exist — a different, larger ticket (ADR-335). (2) VERDICT: even a correct gate leaves IN-13 held on its
-  # verdict tag income.continuance_3yr — LP-420 generated its worksheet (6 rows) but Priya has NOT labeled it, so
-  # it is UNCALIBRATED. Both reasons hold IN-13 independently; the LP-422 rental re-scope is abandoned.
+  # verdict tag income.continuance_3yr — Priya has now LABELED it (LP-427) and it SCORES 5/6. The single miss is
+  # child_support: the AI honestly hedges to `unknown` on the child-age arithmetic Priya computes to `yes` (child
+  # age 9 vs a termination age → years-remaining >= 3) — a candidate DETERMINISTIC child-support rule (ADR-337),
+  # NOT a prompt bug. 5/6 on a thin/skewed n (5 yes / 1 no, the negative one row) clears no bar, AND the OTHER
+  # load-bearing tag income.type is still unscored — so LP-427 removes ONE blocker (the uncalibrated verdict) but
+  # IN-13 stays not-calibratable-yet. Both reasons hold IN-13 independently; the LP-422 rental re-scope is abandoned.
   status: not-calibratable-yet
   ships: ratify
   threshold: null
@@ -430,8 +434,10 @@ IN-13:
     HELD, NOT re-scoped (LP-423). IN-13 is "Other income continuance" — ALL non-employment income (child
     support / alimony / pension / award / Social Security / notes / rental), NOT rental alone; gating it on
     income.has_rental_income (LP-422) would silently narrow it to rental and drop the other five types (a
-    coverage regression — D1 STOP). And its verdict tag income.continuance_3yr is UNCALIBRATED (LP-420's
-    worksheet exists but is unlabeled), so it stays held on calibration regardless. The right gate — a broader
+    coverage regression — D1 STOP). Its verdict tag income.continuance_3yr is now SCORED (LP-427: 5/6; the one
+    miss is child_support, a definitional divergence the AI hedges on and Priya computes — candidate deterministic
+    rule ADR-337), which removes ONE blocker — but 5/6 on a thin/skewed n clears no bar and the other load-bearing
+    tag income.type is still unscored, so it stays held on calibration regardless. The right gate — a broader
     "borrower has other income" signal — does not exist (a separate ticket, ADR-335).
 
 # ===================== needs-producer (the tag does not materialize) ===============================

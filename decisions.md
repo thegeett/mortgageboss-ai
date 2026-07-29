@@ -12622,3 +12622,61 @@ No rule auto-ships on a genuinely unscored tag; the acceptance names its one cov
 **Cross-refs (acceptance).** LP-424 (the finding), LP-406-4 (OC-1's held state + what the tag measures), ADR-332
 (why the tag can't be calibrated on synthetic data → the exit condition needs real files), LP-376-B (the
 ratification armor the acceptance rests on), LP-334 (the id.* / is_money_in measurements the sibling check reads).
+
+## ADR-337: An AI continuance judgment that honestly hedges to `unknown` is the SIGNAL to spin off a DETERMINISTIC producer — the child-support case is arithmetic (child age vs a termination age), not a prompt bug (LP-427)
+
+**Context.** LP-427 scored `income.continuance_3yr` against Priya's six blind labels (`docs/calibration/
+income-continuance-3yr-labels.csv`, LP-420's worksheet). The live sonnet-4-5 reasoner scored **5/6** on a thin,
+skewed n (5 `yes` / 1 `no` — the single negative is `note_receivable`, matures 2027). The one miss is
+**`child_support`**: Priya labeled `yes`, the AI produced **`unknown`** (confidence 0.7). Its reasoning was not
+wrong — it was HONEST: *"the youngest child is age 9. Child support typically continues until age 18, ~9 years
+remaining, but without court orders or other documentation… the exact continuation horizon cannot be determined
+from income documents alone."* Priya's `yes` came with a note: *"Still child reach 16, this is counted yes"* — she
+KNOWS her jurisdiction's termination age and computed 9 → 16 = 7 years > 3.
+
+**The decision — the disagreement is a DEFINITIONAL DIVERGENCE, not a prompt bug; the fix is a deterministic
+child-support producer, NOT a higher AI bar.** Three things follow, all recorded, none built (LP-427 measures and
+records; it changes no tag/prompt/rule):
+
+1. **Why not a prompt fix.** The AI hedged CORRECTLY given its inputs — a continuance *judgment* over free income
+   text cannot fix a termination date it has no court order for, and forcing it to guess `yes` would make it
+   WORSE (it would guess `yes` on a 17-year-old too). Raising IN-13's future bar or "sharpening the prompt" would
+   paper over a computation the model should not be doing by judgment at all. 5/6 here is the model being right
+   about the limit of its own evidence, the same shape as ADR-330's `continuance_3yr=unknown` on a W-2.
+
+2. **Why it IS deterministic (the ADR-334 escape hatch).** Child-support continuance is ARITHMETIC given two
+   facts: the child's age (a 1003 field) and a termination age (a domain constant). `termination_age −
+   child_age >= 3` → continues. Where a FACT substitutes for a judgment, ADR-334 says no labeling round is needed
+   — a deterministic producer sidesteps ADR-332's synthetic-calibration limit. So `child_support` continuance is
+   a candidate deterministic producer, FLAGGED (not built): what it needs is (a) the youngest child's age as an
+   extracted field (today it lives only in the free-text `other_income_description`, an ADR-333 lossy-boundary
+   gap), and (b) the **termination age pinned with Priya** — her note says 16, common defaults are 18, and it is
+   plausibly **state-dependent** (a jurisdiction table, not a scalar). Until (b) is a confirmed domain constant
+   the rule cannot be built; that is a domain question for the sister, not a coding decision.
+
+3. **The second candidate rule is NOT deterministic — it stays a documentation judgment.** Priya's pension and
+   Social Security notes both say *"Need award letter, could be social security award letter, school award
+   letter."* That is the LP-393-6 pattern again: the continuance TAG judges the substance (`yes`, both scored
+   correctly), and a SEPARATE rule enforces the documentation standard — "pension / SS income present ⇒ an award
+   letter must be in the file." Unlike child support, "is an award letter present (in any of its variants)?" is a
+   PERCEPTION over documents (like `voe_present` / `offer_letter_present`), so it needs a producer AND a labeling
+   round — it is not arithmetic. Both candidate rules are recorded in `docs/tickets/LP-427.md`; neither is built.
+
+**What LP-427 did NOT do.** No bar is proposed for `income.continuance_3yr` / IN-13. 5/6 clears no reasonable
+threshold, the miss is a definitional case a bar would not fix, the n is thin and skewed, and — decisively — a
+bar would activate nothing anyway: IN-13 stays **not-calibratable-yet** on its OTHER blockers (the missing "has
+other income" scope gate, ADR-335; and `income.type`, its second load-bearing tag, still unscored). LP-427
+removes exactly ONE of IN-13's blockers (the uncalibrated verdict) and says so — it does not activate IN-13.
+
+**The normalization discipline (LP-393-4a).** Three of Priya's labels came back as `"yes - Read note columnd for
+condition"` (her typo + trailing space preserved). Geet confirmed these are `yes` and the note is a separate
+documentation requirement. The CSV normalizes `golden_label` to `yes` for scoring but PRESERVES her original
+wording verbatim in `labeler_note` and keeps her added `Note` column intact — the label was not silently
+rewritten to a bare `yes`; the record of why it changed travels with it.
+
+**Cross-refs.** ADR-334 (one producer per tag; the deterministic escape hatch this invokes), ADR-332 (the
+synthetic-calibration limit the escape hatch sidesteps), ADR-333 (the lossy extraction→snapshot boundary — why
+the child's age is not yet an extracted field), ADR-335 (IN-13's missing scope gate — a second, independent
+blocker), ADR-330 (`continuance_3yr=unknown` on a W-2 — the model being right about its own evidence limit),
+LP-393-6 (the documentation-standard-is-a-separate-rule ruling both candidates follow), LP-393-4a (originals
+preserved when a label is normalized), LP-420 (the blind worksheet), LP-423 (IN-13 held on two reasons).
