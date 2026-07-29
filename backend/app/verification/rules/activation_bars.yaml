@@ -333,37 +333,51 @@ IN-11:
 
 IN-12:
   # LP-423 — ACTIVATED. LP-419 held IN-12 because its self-employment SCOPE gate (income.is_self_employed) rested
-  # on income.type, which was thinly measured / unscored. LP-422 RESOLVED that: income.is_self_employed now reads
-  # Schedule C PRESENCE (the LP-421 surfaced structure) — a DETERMINISTIC FACT, not an AI judgment (ADR-334), so
-  # the gate no longer depends on income.type being scored (income.type is now a redundant fallback the tax-return
-  # path never needs). income.type is therefore DROPPED from load_bearing_ai_tags. What remains is the VERDICT
-  # tag has_2yr_history — measured 100% (LP-393-6), Priya-validated at 0.9 via IN-11 (the SAME tag, same evidence:
-  # the IN-6 inherit-the-verdict-tag's-bar pattern, no new judgment). So IN-12 is calibratable-now, validated,
-  # 1.0 >= 0.9 -> is_eligible -> ACTIVE (registry _LP423_ACTIVATED). ⚠️ THE ACCEPTED RISK (LP-423 D3, ADR-335):
-  # the deterministic gate rests on the tax-return extractor, a self-declared STARTER (ADR-333) with NO golden
-  # files. Accepted because the failure mode is MILD and VISIBLE: a missed Schedule C -> is_self_employed no/
-  # unknown -> IN-12 not_applicable (a wrong SCOPE, not a false verdict), and the borrower's 2-year history gap
-  # is STILL surfaced by IN-11 (live, income-type-agnostic) — no finding is lost. Geet's call to activate on the
-  # unvalidated extractor; Priya's view on the real-world Schedule-C miss-rate is the follow-up refinement.
+  # on income.type, which was thinly measured / unscored. LP-422 STRENGTHENED that gate with a DETERMINISTIC
+  # Schedule C PRESENCE path (the LP-421 surfaced structure — a FACT, not an AI judgment, ADR-334): Schedule C ->
+  # "yes" needs no income.type. ⚠️ BUT income.type is NOT fully removed from the gate (LP-423 review): the recipe
+  # STILL needs income.type for the NOT_APPLICABLE path — a W-2 borrower reaches is_self_employed "no" (income
+  # documents, none self-employment) ONLY via income.type; without it a non-self-employed borrower resolves to
+  # "unknown" -> IN-12 couldnt_check, not not_applicable. income.type == self_employment is ALSO still a secondary
+  # "yes" path (a 1003-declared self-employment with no surfaced Schedule C). So income.type IS load-bearing and
+  # is RESTORED to load_bearing_ai_tags. What makes IN-12 eligible is the VERDICT tag has_2yr_history — measured
+  # 100% (LP-393-6), Priya-validated at 0.9 via IN-11 (SAME tag/evidence, the IN-6 inherit pattern); measured_
+  # accuracy (1.0) reflects THAT verdict tag. So calibratable-now, validated, 1.0 >= 0.9 -> is_eligible -> ACTIVE.
+  # ⚠️ ACCEPTED RISKS (LP-423 D3, ADR-335): (a) the Schedule-C path rests on the STARTER tax-return extractor
+  # (ADR-333, no golden files) — a MISSED Schedule C is a wrong SCOPE (not_applicable), visible, and IN-11 (live)
+  # still surfaces the 2-year gap, so nothing is lost. (b) the SCOPE also depends on the UNSCORED income.type —
+  # a wage-earner MISCLASSIFIED as self_employment (no Schedule C) makes IN-12 apply and FIRE a spurious
+  # self-employment finding when has_2yr_history == "no"; accepted because it is LOW-probability (a clean W-2/pay
+  # stub is unambiguous wage income), BOUNDED (it only co-occurs with an IN-11 finding on the same borrower), and
+  # never a false VERDICT (has_2yr_history is validated). Geet's call to activate; Priya's view on the real-world
+  # Schedule-C miss-rate + income.type accuracy is the follow-up refinement.
   status: calibratable-now
   ships: auto
   threshold: 0.9
-  validated: true          # inherits has_2yr_history's Priya sign-off (IN-11, LP-393-6, same tag/evidence). The
-                           # self-employment GATE is a deterministic Schedule-C fact (LP-422) — no new threshold.
-  load_bearing_ai_tags: [income.has_2yr_history]   # income.type dropped: the gate is deterministic (LP-422)
-  measured_accuracy: 1.0   # has_2yr_history 100% (LP-393-6) — the same measurement live IN-11 rests on
-  fp_fn: "FN (self-employment without history) >> FP; a missed Schedule C is a wrong scope IN-11 backstops"
+  validated: true          # inherits has_2yr_history's Priya sign-off (IN-11, LP-393-6, same tag/evidence) — the
+                           # VERDICT bar. The self-employment GATE has a deterministic Schedule-C path (LP-422)
+                           # PLUS an income.type path (unscored — the accepted-risk (b) above); no new threshold.
+  load_bearing_ai_tags: [income.has_2yr_history, income.type]   # income.type IS load-bearing: the gate's
+                           # not_applicable ("no") path + the income.type == self_employment secondary "yes"
+                           # path both need it (LP-423 review — it was wrongly dropped; measured_accuracy above
+                           # covers the VERDICT tag has_2yr_history, not the unscored income.type scope gate).
+  measured_accuracy: 1.0   # has_2yr_history 100% (LP-393-6) — the VERDICT tag's measurement, the same live IN-11 rests on
+  fp_fn: "FN (self-employment without history) >> FP; a missed Schedule C is a wrong scope IN-11 backstops; an income.type-misclassified scope FP is bounded (co-occurs with IN-11)"
   rationale: >-
     IN-12 gates on income.is_self_employed == yes (self-employment-specific — the ADR-310 gate that
-    distinguishes it from IN-11) and checks the borrower's income.has_2yr_history. LP-422 made the gate a
-    DETERMINISTIC read of Schedule C presence (no AI, no calibration — ADR-334's escape hatch), resolving the
-    LP-419 income.type-unscored blocker; income.type is dropped as load-bearing. The VERDICT tag has_2yr_history
-    is measured 100% (LP-393-6) and Priya-validated at 0.9 via IN-11 (same tag, same evidence — the IN-6
-    inherit pattern, no new judgment), so validated:true and 1.0 >= 0.9 -> is_eligible. ACTIVATED (LP-423 D3).
-    ACCEPTED RISK: the gate rests on the STARTER tax-return extractor (ADR-333), no golden files — accepted
-    because a missed Schedule C is a wrong SCOPE (not_applicable), visible as absence, and IN-11 (live) still
-    surfaces the underlying 2-year gap, so nothing is lost. See ADR-335 for the standing precedent (activating
-    on an unvalidated extractor when the failure mode is a backstopped wrong-scope).
+    distinguishes it from IN-11) and checks the borrower's income.has_2yr_history. LP-422 gave the gate a
+    DETERMINISTIC Schedule C presence path (a FACT, no calibration — ADR-334's escape hatch). It is NOT purely
+    deterministic, though: income.type is still load-bearing — the "no" -> not_applicable determination (a W-2
+    borrower) and the income.type == self_employment secondary "yes" path both need it, and income_amounts (its
+    producer) runs for the live set. So income.type stays in load_bearing_ai_tags. Eligibility rests on the
+    VERDICT tag has_2yr_history — measured 100% (LP-393-6), Priya-validated at 0.9 via IN-11 (same tag/evidence,
+    the IN-6 inherit pattern); measured_accuracy 1.0 >= 0.9 -> is_eligible. ACTIVATED (LP-423 D3). ACCEPTED
+    RISKS: (a) the Schedule-C path rests on the STARTER tax-return extractor (ADR-333, no golden files) — a
+    missed Schedule C is a wrong SCOPE (not_applicable), visible, and IN-11 (live) still surfaces the 2-year gap.
+    (b) the SCOPE also depends on the UNSCORED income.type — an income.type-misclassified self_employment can
+    make IN-12 fire a spurious finding, accepted because it is low-probability, bounded (co-occurs with IN-11),
+    and never a false VERDICT. See ADR-335 for the standing precedent (activating when the failure mode is a
+    backstopped wrong-scope / bounded FP, not a false verdict).
 
 IN-13:
   # LP-423 — NOT re-scoped, still HELD (two independent reasons). (1) SCOPE: LP-422 proposed re-scoping IN-13

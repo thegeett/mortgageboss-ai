@@ -12507,10 +12507,17 @@ rest on the tax-return extractor, a self-declared STARTER (ADR-333) with NO gold
 turns on the FAILURE MODE, and the two rules differ decisively:
 - **IN-12 (activated).** A missed Schedule C → `is_self_employed` no/unknown → IN-12 `not_applicable`. That is a
   wrong SCOPE, VISIBLE as absence — and the borrower's 2-year-history gap is STILL surfaced by IN-11 (live,
-  income-type-agnostic), so no finding is lost. A hallucinated Schedule C → IN-12 applies to a wage earner →
-  noise IN-11 already makes, not a false green. The verdict tag (`has_2yr_history`) is Priya-validated at 0.9 /
-  measured 100% (inherited from IN-11, the IN-6 same-tag-same-evidence pattern), and the gate is a DETERMINISTIC
-  fact (ADR-334), so there is no un-calibrated judgment. → **ACTIVATED** (calibratable-now, validated, eligible).
+  income-type-agnostic), so no finding is lost. The verdict tag (`has_2yr_history`) is Priya-validated at 0.9 /
+  measured 100% (inherited from IN-11, the IN-6 same-tag-same-evidence pattern), so the VERDICT is never a false
+  green. ⚠️ Correction (LP-423 review): the gate is NOT purely a deterministic Schedule-C fact — `is_self_employed`
+  still needs the UNSCORED `income.type` for its "no" → not_applicable determination (a W-2 borrower) and as an
+  `income.type == self_employment` secondary "yes" (a 1003-declared self-employment with no surfaced Schedule C).
+  So the SCOPE has a bounded FP: an `income.type`-misclassified wage earner (no Schedule C) makes IN-12 apply and
+  FIRE a spurious self-employment finding when `has_2yr_history == "no"`. Accepted because it is low-probability
+  (clean W-2/pay-stub wage income is unambiguous), BOUNDED (it only co-occurs with an IN-11 finding on the same
+  borrower — noise IN-11 already makes, not a new false green), and never a false VERDICT. `income.type` is
+  therefore kept in `load_bearing_ai_tags`; `measured_accuracy` reflects the VERDICT tag, not the scope gate.
+  → **ACTIVATED** (calibratable-now, validated, eligible — the accepted scope risk is bounded).
 - **IN-13 (held).** A missed Schedule E (were it gated on rental) → `not_applicable` → the rule SILENTLY decides
   it does not apply and never checks a borrower who does have that income. Silent UNDER-coverage — the kind a
   processor would not notice. Plus its verdict tag is uncalibrated. → **HELD.**

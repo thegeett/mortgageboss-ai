@@ -35,17 +35,17 @@ _JUDGMENT_CSV = Path(__file__).resolve().parents[4] / "docs/calibration/lf6t3n-l
 # --------------------------------------------------------------------------- #
 def test_in12_bar_activated_on_the_deterministic_gate_lp423() -> None:
     # LP-396 pinned IN-12 as needs-producer; LP-419 held it (calibration blocker on the unscored income.type);
-    # LP-422 made the self-employment gate a DETERMINISTIC Schedule-C fact, resolving that blocker; LP-423
-    # ACTIVATED it — calibratable-now, validated (the verdict tag has_2yr_history inherits IN-11's 0.9), eligible.
+    # LP-422 ADDED a DETERMINISTIC Schedule-C presence path to the self-employment gate; LP-423 ACTIVATED it —
+    # calibratable-now, validated (the verdict tag has_2yr_history inherits IN-11's 0.9), eligible.
     bar = load_activation_bars()["IN-12"]
     assert bar.status == "calibratable-now" and bar.threshold == 0.9 and bar.validated
-    assert bar.load_bearing_ai_tags == (
-        "income.has_2yr_history",
-    )  # income.type dropped (the gate is a fact)
+    # income.type is STILL load-bearing (LP-423 review): the gate needs it for the "no" → not_applicable path and
+    # the income.type == self_employment secondary "yes" — the accepted, bounded scope risk.
+    assert bar.load_bearing_ai_tags == ("income.has_2yr_history", "income.type")
     low = bar.rationale.lower()
     assert (
         "self-employment" in low and "schedule c" in low
-    )  # the deterministic gate that unblocked it
+    )  # the deterministic gate path that unblocked it
     assert "starter" in low  # the accepted-risk caveat (the unvalidated extractor) is named
 
 
