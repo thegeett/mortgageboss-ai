@@ -166,11 +166,19 @@ AS-6:
   #     firing correctly (N1/N3/N4/N6). The ratify caveat is satisfied, so AS-6 ships AUTO. (Structural -> auto is
   #     legal; the LP-424 kind cross-check passes.)
   # (3) WHAT THE BAR MEASURES (AS-6 is the FIRST multi-tag rule — ADR-338). Its ROUTING (fired / needs_review /
-  #     satisfied) rests on owner_matches_borrower (11/11) + non_borrower_co_holder (11/11), BOTH 1.0. The third
-  #     read tag holder_name_variance (5/11 vs her exact labels, LP-403) drives ONLY the REASON string on a
-  #     needs_review row — which a human then reviews — so it is NOT verdict-load-bearing and does NOT gate the
-  #     bar. measured_accuracy is the min of the ROUTING DRIVERS = 1.0. Taking the weakest of ALL read tags (0.45)
-  #     would wrongly block a rule whose VERDICT is 11/11; ADR-338 draws the routing-vs-explanation line.
+  #     satisfied) rests on owner_matches_borrower (11/11) + non_borrower_co_holder (11/11), BOTH 1.0. measured_
+  #     accuracy is the min of those ROUTING DRIVERS = 1.0. The third read tag holder_name_variance (5/11 vs her
+  #     exact labels, LP-403) is NOT a routing driver — so it is EXCLUDED from measured_accuracy (taking the
+  #     weakest of ALL read tags, 0.45, would wrongly block a rule whose VERDICT routing is 11/11).
+  #     ⚠️ CORRECTION (LP-429 review): holder_name_variance is NOT purely reason-only — the SPEC gates on it
+  #     (gated_tags: [stmt.holder_name_variance]): at runtime `holder_name_variance == unknown` → AS-6
+  #     COULDNT_CHECK (the name could not be compared), and only a non-unknown value lets AS-6 proceed to the
+  #     owner_matches routing. So it IS verdict-affecting via the couldnt_check GATE. The 5/11 is accuracy vs
+  #     Priya's exact variance CATEGORY (nickname/other/none) — the reason-string dimension; the GATE dimension
+  #     is only unknown-vs-not, and its reliability is NOT separately measured here. ACCEPTED because the failure
+  #     is BOUNDED and safe-direction: a false-unknown → a VISIBLE couldnt_check (never a false pass — a genuinely
+  #     unreadable holder name would also leave owner_matches unknown → needs_review), and the routing verdict is
+  #     owner_matches-driven at 11/11. Measuring the gate's unknown-vs-not accuracy is a follow-up refinement.
   # (4) VARIANCE RESIDUAL (LP-403) — she labeled N2 (Roberta)=nickname, P2 (Bob)=other; the AI says the reverse,
   #     and the conventional reading favours the AI (Bob is Robert's classic nickname; Roberta is a distinct given
   #     name). Affects the variance SCORE + some reason wording, NOT the routing — a known refinement AS-6 ships
@@ -180,8 +188,10 @@ AS-6:
   threshold: 0.95
   validated: true   # LP-429 — Priya approved 0.95, weighing the four items recorded above
   measured_accuracy: 1.0   # min of the ROUTING drivers owner_matches_borrower + non_borrower_co_holder (both 11/11)
-  # The VERDICT-driving tags only (ADR-338). holder_name_variance IS read by the spec but drives reason text on a
-  # needs_review row, not routing — 5/11 there does not gate the bar (a human reviews that row regardless).
+  # The ROUTING drivers only (ADR-338). holder_name_variance is EXCLUDED from measured_accuracy — its 5/11 is
+  # category (reason-string) accuracy, not a routing driver. ⚠️ It is NOT unmeasured-and-harmless, though: the
+  # spec gates couldnt_check on it (gated_tags: [stmt.holder_name_variance]) — a wrong unknown-vs-not gate value
+  # is a verdict effect, bounded to a VISIBLE couldnt_check (never a false verdict; see item (3) above).
   load_bearing_ai_tags: [stmt.owner_matches_borrower, stmt.non_borrower_co_holder]
   fp_fn: "FN (accepts a statement NOT owned by the borrower -> someone else's assets counted) >> FP (a false 'not the borrower's account' -> a human re-checks a legit statement)"
   rationale: >-
@@ -191,8 +201,10 @@ AS-6:
     signed weighing four things (recorded in the comment above): the 0.95 HEIGHT; ships AUTO because the
     ratify-only condition LP-397 attached ("until a negative case is tested") is now MET (LP-398's six negatives,
     four firing in LP-404); WHAT THE BAR MEASURES — the ROUTING drivers owner_matches_borrower + non_borrower
-    _co_holder (both 11/11 = 1.0), NOT the reason-only holder_name_variance (5/11), the first multi-tag precedent
-    (ADR-338); and the N2/P2 variance taxonomy RESIDUAL (a refinement it ships with). ⚠️ SYNTHETIC-DATA basis:
+    _co_holder (both 11/11 = 1.0), NOT holder_name_variance (5/11 category accuracy), the first multi-tag
+    precedent (ADR-338). NB (LP-429 review) holder_name_variance is the spec's couldnt_check GATE, not reason-
+    only — a wrong gate value is bounded to a visible couldnt_check, never a false verdict (see the comment
+    above); and the N2/P2 variance taxonomy RESIDUAL (a refinement it ships with). ⚠️ SYNTHETIC-DATA basis:
     the 4-fired/5-needs_review/2-satisfied proof is on the LP-401 fixture (constructed), and the 5 REAL LF-6T3N
     statements are all `yes` (the FP direction) — the negative FN direction is proven only on synthetic cases. ⚠️
     D5 COVERAGE GAP: stmt_facts runs only on bank_statement/money_market, so investment/brokerage statements are

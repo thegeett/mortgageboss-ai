@@ -12681,7 +12681,7 @@ blocker), ADR-330 (`continuance_3yr=unknown` on a W-2 — the model being right 
 LP-393-6 (the documentation-standard-is-a-separate-rule ruling both candidates follow), LP-393-4a (originals
 preserved when a label is normalized), LP-420 (the blind worksheet), LP-423 (IN-13 held on two reasons).
 
-## ADR-338: A multi-tag rule's activation bar measures its VERDICT-DRIVING (routing) tags, not every tag it reads — a reason-only tag does not gate the bar (AS-6, the first multi-tag rule; LP-429)
+## ADR-338: A multi-tag rule's activation bar measures its VERDICT-DRIVING (routing) tags, not every tag it reads — but excluding a non-routing tag that still gates couldnt_check needs a bounded-failure argument, not a "reason-only" claim (AS-6, the first multi-tag rule; LP-429, corrected)
 
 **Context.** LP-404 turned AS-6 (account ownership) into the FIRST multi-tag rule: it reads THREE `stmt_facts`
 tags and combines them into Priya's surface-don't-reject ruling — `owner_matches_borrower=no` → fired (a
@@ -12699,13 +12699,25 @@ not the min over every tag the spec reads.** AS-6's routing (which of fired / ne
 statement lands in) rests entirely on `owner_matches_borrower` + `non_borrower_co_holder`, both 11/11 → the bar
 measures 1.0 ≥ 0.95 and AS-6 activates. `holder_name_variance` at 5/11 does NOT gate the bar.
 
-**Why a reason-only tag does not gate the bar.** The activation bar exists to answer "can the automated VERDICT
-be trusted?" `holder_name_variance` changes only the WORDING of the reason on a `needs_review` row — the specific
-kind of name difference (nickname / surname / other) — and a `needs_review` row is, by definition, one a human
-reviews. So a wrong variance label degrades the human-facing explanation on a row a human already inspects; it
-never changes which bucket a statement lands in, and never produces a wrong AUTO verdict. Folding its 5/11 into
-the bar would conflate two different questions — "is the verdict trustworthy" (yes, 11/11) and "is the
-explanation always perfectly worded" (no, 5/11) — and would BLOCK a rule whose verdict is provably correct.
+**Why `holder_name_variance` is excluded from `measured_accuracy`.** The activation bar exists to answer "can the
+automated VERDICT be trusted?" The routing among PROCEEDING statements (fired / needs_review / satisfied) rests
+entirely on `owner_matches_borrower` + `non_borrower_co_holder` (both 11/11); `holder_name_variance`'s 5/11 is
+accuracy vs Priya's exact variance CATEGORY (nickname / surname / other), which appears only in the reason string
+on a `needs_review` row a human already inspects. Folding its 5/11 in would conflate "is the verdict trustworthy"
+(yes, 11/11) with "is the explanation always perfectly worded" (no, 5/11) and would BLOCK a rule whose routing is
+provably correct.
+
+**⚠️ CORRECTION (LP-429 review): `holder_name_variance` is NOT purely reason-only — it is AS-6's couldnt_check
+GATE.** AS-6's spec has `gated_tags: [stmt.holder_name_variance]`: at runtime `holder_name_variance == unknown` →
+AS-6 `couldnt_check` (the name could not be compared), and only a non-unknown value lets AS-6 proceed to the
+routing. So it IS verdict-affecting — via the couldnt_check gate, not the fired/satisfied routing. The 5/11 is
+its CATEGORY accuracy (the reason dimension); the GATE dimension is only unknown-vs-not, whose reliability is not
+separately measured. The exclusion from `measured_accuracy` is still defended, but on the correct basis: a wrong
+gate value is BOUNDED and safe-direction — a false-unknown produces a VISIBLE `couldnt_check` (a missed check
+surfaced as a gap), never a false AUTO verdict (a genuinely unreadable holder name would also leave
+`owner_matches_borrower` unknown → needs_review, and the routing verdict is `owner_matches`-driven at 11/11). So
+`holder_name_variance`'s accuracy cannot manufacture a wrong satisfied/fired. Measuring the gate's unknown-vs-not
+accuracy separately from the 45% category accuracy is a follow-up refinement.
 
 **This REFINES the LP-390-5a weakest-tag rule, does not contradict it.** LP-390-5a — "the bar takes the weakest
 load-bearing tag" — was written for single-verdict-driving tags and remains correct for them: among the tags
@@ -12714,12 +12726,17 @@ the SET that rule ranges over for a multi-tag rule: the verdict-driving (routing
 tags. The bar's `load_bearing_ai_tags` is set to exactly the two routing tags; `holder_name_variance` is
 deliberately excluded, with the reason recorded in the bar so the exclusion is auditable, never silent.
 
-**The test that keeps this honest.** A reason-only tag is one whose value appears only in reason/how_to_fix text
-on a needs_review (or otherwise human-reviewed) outcome — NEVER in a `when_tags` / `when_compare` predicate that
-selects an AUTO (satisfied/fired) verdict. If a future edit made `holder_name_variance` route a verdict, it would
-become verdict-driving and MUST re-enter the bar (and be re-measured). AS-6's spec routes only on
-`owner_matches_borrower` + `non_borrower_co_holder`, so the exclusion holds; a spec change is the trigger to
-revisit it.
+**The test that keeps this honest (corrected, LP-429 review).** A tag may be excluded from a multi-tag rule's
+`measured_accuracy` only when it is not a ROUTING driver — its value must NOT appear in a `when_tags` /
+`when_compare` predicate that selects an AUTO (satisfied/fired) verdict. But excluded ≠ harmless: a tag in
+`gated_tags` (like `holder_name_variance`) DOES affect the verdict via the couldnt_check gate, so the exclusion
+requires the extra safety argument above — the gate failure must be bounded to a VISIBLE couldnt_check, never a
+false AUTO verdict. (The original wording of this test checked only `when_tags`/`when_compare` and OMITTED
+`gated_tags` — the gap that let `holder_name_variance` be miscalled purely reason-only.) If a future edit made
+`holder_name_variance` route a verdict (a `when_tags`/`when_compare` predicate), it would become a routing driver
+and MUST re-enter `measured_accuracy` and be re-measured. AS-6's spec routes only on `owner_matches_borrower` +
+`non_borrower_co_holder` (with `holder_name_variance` in `gated_tags`), so the exclusion holds under the
+bounded-couldnt_check argument; a spec change is the trigger to revisit it.
 
 **What LP-429 did NOT do.** It did not resolve the N2/P2 variance taxonomy residual (she labeled N2 (Roberta) =
 `nickname`, P2 (Bob) = `other`; the AI says the reverse, and the conventional reading favours the AI) — a Priya
