@@ -1,0 +1,77 @@
+rule_id: IN-15
+name: Terminated employment documentation
+category: Income
+kind: structural          # rule_kinds.csv: IN-15 = structural (deterministic_only)
+numeric_check: false
+criteria: >-
+  Priya's B14 ruling (LP-393-6) carved a documentation standard OUT of the 2-year-history question: a
+  terminated job's two years STILL COUNT as history (that is IN-11's concern), but whether the employment
+  is CURRENTLY documented is a SEPARATE check — this one. Her ruling is exact (LP-430): "terminated" = ANY
+  employment end date in the PAST (no grace period), and ONE subsequent pay stub clears it. So this rule
+  fires when a borrower has a VOE with a past end date and NO pay stub dated after it — the documentation is
+  missing. Evaluated PER BORROWER (LP-385): the VOE end date and the pay-stub dates are cross-document facts,
+  compared over that borrower's own attributed documents (never another borrower's). Deterministic — two
+  date facts, no judgment (ADR-334: no calibration round). It ASKS FOR THE DOCUMENT; it never asserts the
+  borrower is unemployed (a missing pay stub is a file gap, not a fact about the borrower).
+applicability:
+  scope: each borrower with a terminated (past end date) employment
+  trigger: once per borrower, on the employment-termination documentation status
+required_inputs:
+  - name: terminated_employment
+    snapshot_path: tags.by_subject[<borrower_id>]["income.terminated_employment"]
+    description: >-
+      the borrower's termination documentation status (derived, per-borrower): needs_pay_stub (a past end
+      date, no subsequent pay stub) / cleared / not_terminated / unknown
+  - name: terminated_employment_end_date
+    snapshot_path: tags.by_subject[<borrower_id>]["income.terminated_employment_end_date"]
+    description: the most recent past employment end date, interpolated into the reason (the IH-3 pattern)
+reference_values:
+  priya_validated: false
+  threshold_needs_signoff: false
+  guideline_text: >-
+    A terminated/former employment used in the file must be shown to be currently documented. Priya's B14
+    ruling (LP-393-6): a terminated job's history still counts; the documentation standard is a separate
+    check — any past employment end date requires a subsequent pay stub (LP-430). Deterministic, no threshold.
+subject_enumeration: per_borrower
+subject_key_fields:
+  - borrower
+evidence_required: >-
+  whether the borrower's terminated (past end date) employment is documented by a pay stub dated after the
+  end date
+guideline_reference: "Fannie Mae Selling Guide B3-3.1-02 (verification of current employment); Priya B14 (LP-393-6)."
+spec_version: 1
+deterministic:
+  # LP-430: NO document-type applicability — the rule enumerates per BORROWER and reads the derived
+  # income.terminated_employment (produced at the borrower subject from that borrower's VOE end date +
+  # pay-stub dates, LP-385). The applicability predicate scopes it to a borrower who ACTUALLY has a past
+  # termination: `ne not_terminated`, so a borrower with no VOE / a current job / only a FUTURE end date →
+  # not_applicable (a future end date is a continuation concern — IN-13's territory — NOT a termination).
+  # An unreadable status → the gate couldnt_checks (fail-closed). NOT applicability_expected: a missing VOE
+  # is not_applicable via the tag, never a missing-document accusation.
+  applicability:
+    tag: income.terminated_employment
+    op: ne
+    value: not_terminated
+  load_bearing_tags:
+    - income.terminated_employment
+  gated_tags:
+    - income.terminated_employment
+  operands:
+    end_date: {tag: income.terminated_employment_end_date, type: date}
+  outcomes:
+    # A PAST end date with no pay stub dated after it — the documentation is missing. ASK FOR THE DOCUMENT
+    # (interpolating the end date), never assert unemployment.
+    - verdict: fired
+      when_tags:
+        - {tag: income.terminated_employment, op: eq, value: needs_pay_stub}
+      reasoning: >-
+        employment shown as ended {end_date}; a pay stub dated after that is needed to confirm current
+        employment
+      how_to_fix: >-
+        Upload a pay stub dated after {end_date} (from any employer) confirming the borrower is currently
+        employed, or document why the terminated income is not being used.
+    # A past end date CLEARED by a subsequent pay stub (any employer, dated after the end date).
+    - verdict: satisfied
+      default: true
+      reasoning: >-
+        employment ended {end_date}, but a pay stub dated after it confirms current employment

@@ -102,6 +102,10 @@ tags:
   # measured income.type (no new AI), for IN-12 — the borrower-level self-employment signal its bar said was
   # missing (income.type is subject:document). "no" lets IN-12 reach not_applicable (an enum can, unlike a number).
   income.is_self_employed: {mode: derived, subject: borrower, data: income_is_self_employed}
+  # LP-430 — the terminated-employment documentation check (Priya's B14 ruling, the separate documentation
+  # standard). Both DERIVED per-borrower from income.employment_end (VOE) + income.pay_date; feed IN-15.
+  income.terminated_employment: {mode: derived, subject: borrower, data: income_terminated_employment}
+  income.terminated_employment_end_date: {mode: derived, subject: borrower, data: income_terminated_employment_end_date}
   # LP-422 — the rental analog: Schedule E presence -> a per-borrower rental fact, for IN-13's rental scope.
   income.has_rental_income: {mode: derived, subject: borrower, data: income_has_rental_income}
   income.ytd_annualized_shortfall_pct: {mode: derived, subject: loan, data: income_ytd_annualized_shortfall}

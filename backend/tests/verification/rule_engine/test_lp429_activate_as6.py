@@ -90,8 +90,10 @@ def test_as6_is_validated_eligible_and_live() -> None:
     assert "AS-6" in ACTIVE_RULE_IDS
 
 
-def test_active_count_is_34_and_invariant_holds() -> None:
-    assert len(ACTIVE_RULE_IDS) == EXPECTED_ACTIVE_RULE_COUNT == 34
+def test_as6_live_and_invariant_holds() -> None:
+    # (The absolute count moved to 35 when LP-430 activated IN-15; the single-source count guard lives in
+    # tests/expected_active.py, so this asserts the invariant + that AS-6 is in the eligible set.)
+    assert len(ACTIVE_RULE_IDS) == EXPECTED_ACTIVE_RULE_COUNT
     assert set(ACTIVE_RULE_IDS) - set(_BASE_ACTIVE) == set(eligible_rule_ids())
     assert "AS-6" in eligible_rule_ids()
     assert len(set(ACTIVE_RULE_IDS)) == len(ACTIVE_RULE_IDS)  # no duplicates

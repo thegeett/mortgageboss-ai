@@ -36,6 +36,7 @@ IN-11,Variable income averaging / history,Income,calculative,deterministic_booke
 IN-12,Self-employment income analysis,Income,calculative,deterministic_bookend+ai,true,,false,true,Net + add-backs + K-1 — dedicated calculator; method=Priya-validated.
 IN-13,Other income continuance,Income,judgmental,ai_judgment,false,,false,false,Continuance (3yr) + receipt — interpret award/order.
 IN-14,Rental income support,Income,judgmental,ai_judgment,false,,false,false,Support docs + vacancy/expense adjustment — judgment.
+IN-15,Terminated employment documentation,Income,structural,deterministic_only,false,true,false,false,"Priya's B14 separate check: any past VOE end date requires a subsequent pay stub — two date facts, deterministic, no AI."
 AS-1,Large-deposit sourcing sweep,Assets,calculative,deterministic_bookend+ai,true,,false,true,Each deposit vs income-derived threshold — arithmetic; AI recognizes payroll/transfers + per-deposit subject enum.
 AS-2,Earnest money deposit sourcing,Assets,structural,ai_fuzzy_match,false,false,false,false,Match contract EMD to a debit in verified account — match; sourcing judgment → AI.
 AS-3,Cash-to-close sufficiency,Assets,calculative,deterministic_bookend+ai,true,,false,false,assets vs down+costs+reserves — arithmetic.

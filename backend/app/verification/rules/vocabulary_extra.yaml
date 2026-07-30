@@ -201,6 +201,35 @@ tags:
       readable income types none rental) → lets IN-13 reach not_applicable. "unknown" = no tax return and no
       readable income type. Presence, not amount (ADR-324).
     produced_by: derived
+  # LP-430 — the terminated-employment documentation check (Priya's B14 ruling: a terminated job's 2 years
+  # still count as HISTORY — IN-11's concern — but the documentation standard is a SEPARATE check, this one).
+  # DETERMINISTIC (two date/presence facts, no judgment → the ADR-334 escape hatch, no calibration round). A
+  # per-borrower status: does the borrower have a PAST employment end date, and if so is it cleared by a
+  # subsequent pay stub? "needs_pay_stub" fires IN-15 (the documentation is missing); "cleared" satisfies;
+  # "not_terminated" (no past end date — no VOE, or only future/current) → IN-15 not_applicable; "unknown" only
+  # if the snapshot cannot be read (fail-closed). Paired with income.terminated_employment_end_date (the date
+  # IN-15 interpolates into its reason). NO AI — the reason ASKS FOR THE DOCUMENT, never asserts unemployment.
+  income.terminated_employment:
+    entity: borrower
+    value_type: enum
+    allowed_values: ["cleared", "needs_pay_stub", "not_terminated", "unknown"]
+    description: >-
+      PER BORROWER: does the borrower have a terminated (any PAST end date) employment that a subsequent pay
+      stub has NOT cleared? "needs_pay_stub" = a past VOE end date with no later pay stub (IN-15 fires — the
+      documentation is missing); "cleared" = a past end date + a pay stub dated after it; "not_terminated" = no
+      readable past end date (no VOE / current / future end date) → IN-15 not_applicable; "unknown" = the
+      documents/tags cannot be read. Derived from income.employment_end + income.pay_date over the borrower's
+      attributed documents. No AI, no calibration.
+    produced_by: derived
+  income.terminated_employment_end_date:
+    entity: borrower
+    value_type: date
+    allowed_values: null
+    description: >-
+      PER BORROWER: the most recent PAST employment end date (the termination IN-15 documents), for its reason
+      interpolation. A real date when income.terminated_employment is "cleared"/"needs_pay_stub"; "unknown"
+      otherwise (no past end date to name). Derived alongside income.terminated_employment (LP-430).
+    produced_by: derived
   income.employer_coverage:
     entity: borrower
     value_type: enum

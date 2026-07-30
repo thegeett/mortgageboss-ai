@@ -97,10 +97,17 @@ async def test_plus_only_appends_documents_without_mutating_the_base() -> None:
     plus_ids = {e.content_id for e in build_lf6t3n_plus().documents.entries}
     assert plus_ids - base_ids == {"voe_prior", "voe_current", "stmt_missing_page"}
     # 2) every EXISTING (per-document) subject's tags are byte-identical — new documents mutate no old one.
+    #    EXEMPT: the two per-BORROWER employment aggregates (income.terminated_employment* — LP-430) change
+    #    legitimately when the two VOEs are appended to that borrower, exactly as the loan's
+    #    income.max_employment_gap_days does (step 4 carves that out too — a derived aggregate reflects its new
+    #    inputs; that is not a MUTATION of an existing document's tag).
+    _AGGREGATE_EXEMPT = {"income.terminated_employment", "income.terminated_employment_end_date"}
     for subject, tags in base.tags.by_subject.items():
         if subject == "loan":
             continue
         for tag_id, tag in tags.items():
+            if tag_id in _AGGREGATE_EXEMPT:
+                continue
             got = plus.tags.by_subject.get(subject, {}).get(tag_id)
             assert got is not None and got.value == tag.value, f"{subject}/{tag_id} changed"
     # 3) AS-10's input is UNDISTURBED (the AS-9 statement joined an existing account + month on purpose).

@@ -184,6 +184,15 @@ _LP428_ACTIVATED: tuple[str, ...] = ("IN-8", "IN-9")
 # (no LP-384 missing-tag trap). Structural -> ships auto (LP-424 kind cross-check passes).
 _LP429_ACTIVATED: tuple[str, ...] = ("AS-6",)
 
+# LP-430 — IN-15 (terminated-employment documentation) goes live (34 -> 35). Priya's B14 ruling (LP-393-6) spun
+# off a SEPARATE documentation check from has_2yr_history: a terminated job's 2 years still count as history
+# (IN-11), but whether the employment is documented as CURRENT is this check — any PAST VOE end date requires a
+# subsequent pay stub. DETERMINISTIC (income.terminated_employment, derived per-borrower from income.employment_end
+# + income.pay_date — two date facts) → no AI, no threshold (ADR-334 escape hatch, no calibration round). So the
+# AS-8/IH-3 no-ai-dependency path — eligible on input_resolves alone (verified on build_terminated_employment_
+# snapshot: fire / satisfy / future-n/a / no-VOE-n/a). Structural → ships auto. Does NOT change IN-11/IN-12.
+_LP430_ACTIVATED: tuple[str, ...] = ("IN-15",)
+
 # The gate is the source of truth: test_activation_gate_lp389 asserts ACTIVE_RULE_IDS - _BASE_ACTIVE ==
 # eligible_rule_ids() — a rule CANNOT enter this set without meeting the eligibility gate (not a hand-list).
 ACTIVE_RULE_IDS: tuple[str, ...] = (
@@ -201,6 +210,7 @@ ACTIVE_RULE_IDS: tuple[str, ...] = (
     *_LP423_ACTIVATED,
     *_LP428_ACTIVATED,
     *_LP429_ACTIVATED,
+    *_LP430_ACTIVATED,
 )
 
 

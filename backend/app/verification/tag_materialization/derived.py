@@ -1534,6 +1534,98 @@ def _housing_hoa_monthly(
     ), f"monthly HOA dues {monthly} (from the HOA statement's stated dues and frequency)"
 
 
+def _borrower_termination(snapshot: Snapshot, borrower_id: str) -> tuple[str, date | None]:
+    """PER BORROWER (LP-430): the borrower's employment-termination documentation status, from
+    income.employment_end (parsed off the VOE) + income.pay_date over the borrower's ATTRIBUTED
+    documents (belongs_to — a borrower's own documents never speak for another's).
+
+    Returns ``(status, most_recent_past_end_date)``:
+      * ``("needs_pay_stub", end)`` — a PAST end date with NO pay stub dated after it (IN-15 fires).
+      * ``("cleared", end)``        — a past end date + a pay stub dated AFTER it (IN-15 satisfied).
+      * ``("not_terminated", None)``— no readable PAST end date (no VOE / current / a FUTURE end date
+                                      only) → IN-15 not_applicable.
+      * ``("unknown", None)``       — the documents/tags section cannot be read (fail-closed).
+
+    Priya's ruling (B14 → LP-430): ANY end date in the PAST is a termination (no grace period); ONE
+    subsequent pay stub — from ANY employer (a new job clears it more convincingly than the same one),
+    dated AFTER the end date — clears it. Deterministic (two date facts): no AI, no threshold. An
+    UNREADABLE end date on a present VOE is an ABSENT income.employment_end tag (parsed dates are
+    date-or-absent), indistinguishable from no-VOE without the AI voe_present tag — so it lands in
+    not_terminated (the never-accuse choice), a documented limitation of the no-AI design (LP-430 D4)."""
+    if snapshot.documents.absent or snapshot.tags.absent:
+        return _UNKNOWN, None
+    file_date = snapshot.created_at.date()
+    end_dates: list[date] = []
+    pay_dates: list[date] = []
+    for entry in _borrower_attributed_documents(snapshot, borrower_id):
+        tags = snapshot.tags.by_subject.get(entry.content_id, {})
+        end_tag = tags.get("income.employment_end")
+        if end_tag is not None and str(end_tag.value) != _UNKNOWN:
+            parsed = coerce_date(str(end_tag.value))
+            if parsed is not None:
+                end_dates.append(parsed)
+        pay_tag = tags.get("income.pay_date")
+        if pay_tag is not None and str(pay_tag.value) != _UNKNOWN:
+            parsed = coerce_date(str(pay_tag.value))
+            if parsed is not None:
+                pay_dates.append(parsed)
+    past_ends = [d for d in end_dates if d < file_date]
+    if not past_ends:
+        return "not_terminated", None
+    end = max(
+        past_ends
+    )  # the MOST RECENT termination — the date a clearing pay stub must post-date
+    if any(p > end for p in pay_dates):
+        return "cleared", end
+    return "needs_pay_stub", end
+
+
+def _income_terminated_employment(
+    snapshot: Snapshot, subject_id: str, subject_raw: object
+) -> tuple[JsonValue, str]:
+    """income.terminated_employment — LP-430: does the borrower have a terminated (past end date)
+    employment a subsequent pay stub has NOT cleared? Priya's B14 separate documentation check. The
+    reason ASKS FOR THE DOCUMENT (a missing pay stub is a file gap), never asserts unemployment."""
+    if not isinstance(subject_raw, BorrowerSubject):
+        return (
+            _UNKNOWN,
+            "terminated-employment documentation is a per-borrower recipe (needs a borrower subject)",
+        )
+    status, end = _borrower_termination(snapshot, subject_id)
+    reasons = {
+        "needs_pay_stub": (
+            f"borrower {subject_id}: employment shown as ended {end} with no pay stub dated after it — "
+            "a pay stub dated after that is needed to confirm current employment"
+        ),
+        "cleared": (
+            f"borrower {subject_id}: employment ended {end}, but a pay stub dated after it confirms "
+            "current employment"
+        ),
+        "not_terminated": (
+            f"borrower {subject_id}: no employment end date in the past — not a terminated job"
+        ),
+        "unknown": f"borrower {subject_id}: employment-termination documentation cannot be read",
+    }
+    return status, reasons[status]
+
+
+def _income_terminated_employment_end_date(
+    snapshot: Snapshot, subject_id: str, subject_raw: object
+) -> tuple[JsonValue, str]:
+    """income.terminated_employment_end_date — LP-430: the most recent PAST employment end date, for
+    IN-15's reason interpolation. A real date when terminated_employment is cleared/needs_pay_stub;
+    "unknown" otherwise (no past end date to name)."""
+    if not isinstance(subject_raw, BorrowerSubject):
+        return _UNKNOWN, "a per-borrower recipe (needs a borrower subject)"
+    _status, end = _borrower_termination(snapshot, subject_id)
+    if end is None:
+        return _UNKNOWN, f"borrower {subject_id}: no past employment end date to name"
+    return (
+        end.isoformat(),
+        f"borrower {subject_id}: most recent past employment end date is {end.isoformat()}",
+    )
+
+
 _RECIPES: dict[str, Recipe] = {
     "app_required_fields_present": _app_required_fields_present,
     # LP-323-IN-B — the income family's loan-level arithmetic (per-borrower granularity is deferred:
@@ -1575,6 +1667,9 @@ _RECIPES: dict[str, Recipe] = {
     # IN-12. No new AI, no calibration round (the win). "no" lets IN-12 reach not_applicable. LP-422 extended
     # it: Schedule C presence (LP-421) is a second, stronger deterministic source income.type cannot carry.
     "income_is_self_employed": _income_is_self_employed,
+    # LP-430 — the terminated-employment documentation check (Priya's B14 separate standard).
+    "income_terminated_employment": _income_terminated_employment,
+    "income_terminated_employment_end_date": _income_terminated_employment_end_date,
     # LP-422 — the rental analog for IN-13: Schedule E presence OR income.type == "rental" -> a per-borrower
     # rental fact (the ADR-332 escape hatch — a fact substitutes for a judgment). Mirrors is_self_employed's
     # dual-signal shape (Schedule + income.type). Presence, not amount.

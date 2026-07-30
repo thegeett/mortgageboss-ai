@@ -12750,3 +12750,60 @@ bar + its now-met ratify caveat), LP-402/403 (the re-scores: routing tags 11/11,
 LP-390-5a (the weakest-tag rule this refines), LP-412 / LP-428 (the sign-off-is-the-activation pattern), LP-424
 (the ships-mode-matches-kind cross-check — structural → auto is legal), ADR-335 (a rule's gate narrower than its
 intent — the D5 stmt_facts applicability gap is the mirror: the tag's coverage narrower than the rule's reach).
+
+## ADR-339: A documentation-standard check spun off a judgment tag is a DETERMINISTIC per-borrower producer (date/presence facts, no calibration); and the documentation-SUFFICIENCY qualifiers (any-employer, dated-after) are a recurring Priya decision (IN-15, LP-430)
+
+**Context.** Priya's B14 ruling (LP-393-6) split a documentation standard OUT of the `has_2yr_history`
+judgment: a terminated job's two years still COUNT as history (IN-11's concern), but whether the employment is
+documented as CURRENT is a SEPARATE check. LP-430 builds that check as **IN-15** (terminated-employment
+documentation) on her exact refinement: "terminated" = ANY employment end date in the past (no grace period);
+ONE subsequent pay stub clears it.
+
+**Decision 1 — the check is DETERMINISTIC, not a judgment (ADR-334 applied).** The question reduces to two
+FACTS the file already carries as typed-core dates: the VOE's end date (`income.employment_end`, parsed) and the
+pay stubs' pay dates (`income.pay_date`, parsed). "Is there a past end date, and if so a pay stub dated after
+it?" is date arithmetic — no perception, no judgment. So IN-15 rides a **derived per-borrower producer**
+(`income.terminated_employment`, an enum `cleared | needs_pay_stub | not_terminated | unknown`, computed over
+the borrower's `_borrower_attributed_documents`), NOT an AI tag. Per ADR-334 a fact substituting for a judgment
+needs **no calibration round** — IN-15 is `no-ai-dependency`, eligible on `input_resolves` alone (the IH-3/AS-8
+path), and activates immediately (ACTIVE 34 → 35). This is the general shape for every "documentation standard"
+Priya spins off a judgment tag: if it reduces to presence/date facts, it is a deterministic producer + a
+no-ai-dependency rule, not a new calibration.
+
+**Decision 2 — the reason ASKS FOR THE DOCUMENT, never asserts a fact about the borrower.** A missing pay stub
+is a FILE GAP, not evidence the borrower is unemployed. IN-15's fired reason is *"employment shown as ended
+{end_date}; a pay stub dated after that is needed to confirm current employment"* — it names the end date
+(interpolated, the IH-3 pattern) and requests the document. It never says "unemployed" / "no longer employed".
+This is a standing discipline for any missing-documentation rule: the finding is about the FILE, not the person.
+
+**Decision 3 — the documentation-SUFFICIENCY qualifiers are Priya's, and they recur (flagged, not silently
+chosen).** "One pay stub" is exact on the COUNT but silent on three qualifiers, each a documentation-sufficiency
+judgment that will recur across future documentation checks:
+- **Dated AFTER the end date?** YES — a pre-termination stub proves nothing. Decided (arithmetic:
+  `pay_date > end_date`).
+- **Same employer or ANY employer?** IN-15 takes the **permissive (any-employer)** reading: a new-employer pay
+  stub clears it MORE convincingly (the borrower is employed again), and a same-employer-only test would wrongly
+  fail a borrower who changed jobs (the wrong direction — a false FIRE on a genuinely-employed borrower). This is
+  a **defensible default flagged for Priya**, not a silent narrowing — recorded in the bar so her sign-off (or
+  revision) is a one-line change.
+- **Does a VOE / offer letter also clear it?** She said "pay stub" specifically. IN-15 does NOT broaden her
+  ruling — pay-stub-only — and the VOE/offer-letter question is flagged for her, not implemented.
+
+**The scope boundaries (recorded, not resolved).** A FUTURE end date is a CONTINUATION concern (IN-13's
+territory), not a termination → IN-15 is not_applicable (never a finding). An UNREADABLE end date on a present
+VOE is an ABSENT `income.employment_end` tag (parsed dates are date-or-absent; there is no `employment_status`
+tag), **indistinguishable from no-VOE without the AI `voe_present` tag** — so the deterministic rule treats it as
+not_applicable (the never-accuse choice). A future AI-gated variant could distinguish it, but that would forfeit
+the no-calibration property; the limitation is documented (LP-430 D4), not silently hidden.
+
+**The IN-11 boundary (D2).** IN-11 (`has_2yr_history=no` → fired) and IN-15 (`needs_pay_stub` → fired) read
+DISJOINT tags and produce provably distinct reasons (history vs the pay-stub documentation), so a terminated job
+never surfaces two overlapping findings — the AS-8/AS-10, IN-11/IN-12 complementary-not-duplicate discipline.
+IN-11/IN-12 are unchanged.
+
+**Cross-refs.** LP-393-6 / ADR-316 (the B14 ruling that carved out the separate check), ADR-334 (the
+deterministic escape hatch this applies), LP-421/422 (the derived-producer precedent — a fact promoted to a
+borrower tag), LP-385 (`_borrower_attributed_documents`, the per-borrower promotion), LP-417 (the IH-3
+no-ai-dependency date-compare + operand interpolation IN-15 mirrors), IN-11 (the history boundary). The three
+OTHER rules Priya's answers implied — IH-1 (a spec rewrite), PE-1 (an FHFA table), the pay-stub-only rule (a
+boundary check) — are their own tickets; only the terminated-employment check is built here.

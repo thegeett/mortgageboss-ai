@@ -82,6 +82,9 @@ _LOAN_SCHEDULES = UUID(
     "95000000-0000-4000-8000-000000000012"
 )  # LP-421 — a tax return with real Schedule C / E
 _SCHED_BORROWER = UUID("95000000-0000-4000-8000-0000000001bb")  # LP-421 — the schedules borrower id
+_LOAN_TERMINATED = UUID(
+    "95000000-0000-4000-8000-000000000013"
+)  # LP-430 — terminated-employment scenario
 _RUN = UUID("95000000-0000-4000-8000-0000000000ff")
 # The file (snapshot) date every closing date is measured against (deterministic — never a wall-clock now()).
 _FILE_DATE = datetime(2026, 7, 1, tzinfo=UTC)
@@ -625,6 +628,90 @@ def build_tax_return_with_schedules_snapshot() -> Snapshot:
     )
 
 
+# --------------------------------------------------------------------------- #
+# LP-430 — the TERMINATED-EMPLOYMENT documentation scenario (IN-15). Four borrowers, one per branch of
+# Priya's B14 separate-documentation check (a PAST VOE end date requires a subsequent pay stub):
+#   B1 (fire):    a VOE with a PAST end date (2026-05-01, before the 2026-07-01 file date), NO pay stub
+#                 -> income.terminated_employment = needs_pay_stub -> IN-15 FIRES (asks for the pay stub).
+#   B2 (satisfy): a past end date (2026-05-01) + a pay stub dated AFTER it (2026-06-15, any employer)
+#                 -> cleared -> IN-15 satisfied.
+#   B3 (n/a):     a VOE end date in the FUTURE (2027-01-01) -> not_terminated -> IN-15 not_applicable
+#                 (a future end date is a continuation concern — IN-13's territory — not a termination).
+#   B4 (n/a):     NO VOE, only a pay stub -> not_terminated -> IN-15 not_applicable (no past end date).
+# Per-borrower attribution (belongs_to + MISMO ids) so BorrowerSubject enumerates four; B2's pay stub is
+# attributed to B2 ONLY, so it can never clear B1's termination (the per-borrower isolation the recipe
+# guarantees). VOE end dates -> income.employment_end (parsed); pay dates -> income.pay_date (parsed).
+# --------------------------------------------------------------------------- #
+def _terminated_borrower(i: int) -> UUID:
+    return UUID(f"95000000-0000-4000-8000-0000000002{i:02d}")
+
+
+def build_terminated_employment_snapshot() -> Snapshot:
+    """Four borrowers exercising IN-15's branches (fire / satisfy / future-end n/a / no-VOE n/a). Standalone
+    (95… namespace, its own loan). The file date is 2026-07-01, so 2026-05-01 is a PAST end date and
+    2027-01-01 a FUTURE one. Materialize parsed + derived (no AI needed) to produce income.terminated_*."""
+    docs: list[DocumentEntry] = []
+    mismo: dict[str, SnapshotField] = {}
+    for i in range(1, 5):
+        bid = _terminated_borrower(i)
+        mismo[f"borrower.{i}.borrower_id"] = _f(str(bid))
+        mismo[f"borrower.{i}.first_name"] = _f(f"Borrower {i}")
+
+    def _attr(cid: str, dtype: str, i: int, **fields: str) -> DocumentEntry:
+        return DocumentEntry(
+            content_id=cid,
+            document_type=dtype,
+            belongs_to=(BorrowerRef(borrower_id=_terminated_borrower(i), name=f"Borrower {i}"),),
+            fields={k: _f(v) for k, v in fields.items()},
+        )
+
+    # B1 — FIRE: a past end date, no pay stub.
+    docs.append(
+        _attr(
+            "95-voe-t1",
+            "voe",
+            1,
+            employer_name="Acme Logistics",
+            employee_name="Borrower 1",
+            employment_status="former",
+            start_date="2022-01-01",
+            end_date="2026-05-01",
+        )
+    )
+    # B2 — SATISFY: a past end date CLEARED by a pay stub dated after it (a NEW employer — the permissive read).
+    docs.append(
+        _attr(
+            "95-voe-t2",
+            "voe",
+            2,
+            employer_name="Beta Manufacturing",
+            employee_name="Borrower 2",
+            employment_status="former",
+            start_date="2022-01-01",
+            end_date="2026-05-01",
+        )
+    )
+    docs.append(_attr("95-ps-t2", "pay_stub", 2, employer_name="Gamma Corp", pay_date="2026-06-15"))
+    # B3 — NOT_APPLICABLE: a FUTURE end date (a fixed-term contract still running).
+    docs.append(
+        _attr(
+            "95-voe-t3",
+            "voe",
+            3,
+            employer_name="Delta Inc",
+            employee_name="Borrower 3",
+            employment_status="current",
+            start_date="2022-01-01",
+            end_date="2027-01-01",
+        )
+    )
+    # B4 — NOT_APPLICABLE: no VOE at all, only a pay stub.
+    docs.append(
+        _attr("95-ps-t4", "pay_stub", 4, employer_name="Epsilon LLC", pay_date="2026-06-15")
+    )
+    return _snapshot(_LOAN_TERMINATED, docs, mismo)
+
+
 # The expected fired/materialized outcomes — recorded HERE / in tests, never predicted in prose (LP-337).
 EXPECTED_TAXES_MONTHLY = "500.00"  # 6000 / 12
 EXPECTED_HOA_MONTHLY = "300.00"  # 300 monthly
@@ -653,5 +740,6 @@ __all__ = [
     "build_statement_break_snapshot",
     "build_subject_housing_snapshot",
     "build_tax_return_with_schedules_snapshot",
+    "build_terminated_employment_snapshot",
     "build_voe_offer_labeling_snapshot",
 ]

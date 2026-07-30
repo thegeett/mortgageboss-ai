@@ -598,6 +598,39 @@ IH-3:
     IH-3 COULDNT_CHECKS there — an honest absence, not a bug; the branches are proven on the binder scenarios
     (LP-417 tests). A missing binder is couldnt_check, not not_applicable (insurance is required — D5).
 
+IN-15:
+  # LP-430 — Priya's B14 SEPARATE documentation check, finally built (a terminated job's 2 years still count as
+  # HISTORY — IN-11's concern — but whether it is documented as CURRENT is this check). DETERMINISTIC: it reads
+  # income.terminated_employment (derived, per-borrower, from income.employment_end + income.pay_date — two DATE
+  # facts) → NO AI load-bearing tag, NO threshold (her ruling is exact: ANY past end date fires; ONE subsequent
+  # pay stub clears). So the AS-8 / IH-3 no-ai-dependency path — eligible on input_resolves alone (the ADR-334
+  # escape hatch: a fact substitutes for a judgment, no calibration round). Structural → ships auto (LP-424 cross-
+  # check passes). The reason ASKS FOR THE DOCUMENT (interpolating the end date), never asserts unemployment.
+  status: no-ai-dependency
+  ships: auto
+  threshold: null
+  validated: false
+  input_resolves: true    # LP-430: resolves on build_terminated_employment_snapshot — a past end date + no pay
+                          # stub FIRES (B1); + a later pay stub SATISFIES (B2); a future end date / no VOE →
+                          # not_applicable (B3/B4). (The IH-3 pattern: verified on a scenario fixture, not base
+                          # LF-6T3N, which has no VOE — so IN-15 is not_applicable there, an honest absence.)
+  load_bearing_ai_tags: []
+  fp_fn: >-
+    FP (a false "needs a pay stub" — the processor uploads / points to the pay stub) > FN (misses a terminated
+    job with no current-employment proof). A missing pay stub is a FILE GAP surfaced for a human, low stakes.
+  rationale: >-
+    no AI load-bearing tag — income.terminated_employment is DERIVED from two parsed date facts (the VOE's
+    income.employment_end and the pay stubs' income.pay_date), compared per borrower (LP-385). NO threshold:
+    Priya's ruling is exact — ANY employment end date in the past is a termination (no grace period), and ONE
+    pay stub dated AFTER it (from ANY employer — a new job clears it more convincingly; the permissive read,
+    flagged for her confirmation) clears the documentation requirement. So the AS-8/IH-3 no-ai-dependency path,
+    eligible on input_resolves alone (the ADR-334 escape hatch — no calibration round). A future end date is a
+    CONTINUATION concern (IN-13's territory), not a termination → not_applicable. An unreadable end date on a
+    present VOE is indistinguishable from no-VOE without the AI voe_present tag → not_applicable (the never-accuse
+    choice; a documented no-AI limitation, LP-430 D4). The reason ASKS FOR THE DOCUMENT, never asserts the
+    borrower is unemployed. OPEN (flagged for Priya): same-employer vs any-employer clearing pay stub; whether a
+    VOE/offer letter also clears (she said "pay stub" — not broadened here).
+
 PC-3:
   # LP-407-4 — the LAST blocker-free rule (LP-415/LP-416 re-plan). It branches on the DERIVED
   # property.address_normalized_match (a deterministic contract-vs-MISMO subject-address compare using the

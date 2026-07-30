@@ -60,6 +60,7 @@ _ACTIVATED = frozenset(
         "IN-8",  # LP-428 — VOE present (calibratable-now; voe_present 100% two-sided, Priya signed off 0.95)
         "IN-9",  # LP-428 — offer letter present (calibratable-now; offer_letter_present 100%, Priya 0.95)
         "AS-6",  # LP-429 — account ownership (calibratable-now; routing 11/11, Priya signed off 0.95)
+        "IN-15",  # LP-430 — terminated-employment documentation (no-ai-dependency; deterministic date compare)
     }
 )
 
@@ -77,8 +78,9 @@ def test_exactly_the_eligible_candidates_pass() -> None:
     held = set(bars) - eligible
     # IN-1/IN-5/AS-2/AS-12/IN-3 (AI, validated, measured >= bar); ID-5 + AS-9/IN-4/AS-10 (no-AI, input resolves).
     assert eligible == set(_ACTIVATED)
-    # 7 held after LP-429 (was 8): AS-6 moved held → eligible (Priya signed off its 0.95 bar). The rest — incl.
-    # OC-1 / IN-13 / AS-4/5/7 / IN-14 — stay held.
+    # Still 7 held after LP-430: IN-15 is a NEW candidate that activated IMMEDIATELY (no-ai-dependency, input
+    # resolves) — it was never in the held set, so held is unchanged. The held rest: OC-1 / IN-13 / AS-4/5/7 /
+    # IN-14.
     assert len(held) == 7 and not (held & _ACTIVATED)  # every other candidate is held
 
 
@@ -97,6 +99,7 @@ def test_eligible_rule_ids_is_sorted_and_matches() -> None:
         "IN-10",
         "IN-11",
         "IN-12",  # LP-423 (sorts between IN-11 and IN-3)
+        "IN-15",  # LP-430 (sorts between IN-12 and IN-3)
         "IN-3",
         "IN-4",
         "IN-5",

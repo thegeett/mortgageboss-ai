@@ -280,6 +280,9 @@ def test_active_set_is_base_plus_lp389() -> None:
             # LP-429 — AS-6 (account ownership): the FIRST multi-tag rule; routing rests on owner_matches +
             # non_borrower_co_holder (both 11/11), Priya signed off 0.95. Structural → ships auto.
             "AS-6",
+            # LP-430 — IN-15 (terminated-employment documentation): no-ai-dependency, deterministic (a derived
+            # date comparison), eligible on input_resolves. Priya's B14 separate check. Structural → ships auto.
+            "IN-15",
         )
     )
     # A bar persists after activation as the record of WHY the rule went live, so the bars now intersect the
@@ -310,6 +313,7 @@ def test_active_set_is_base_plus_lp389() -> None:
             "IN-8",  # LP-428 — live via its bar (calibratable-now, validated; Priya signed off 0.95)
             "IN-9",  # LP-428 — live via its bar (calibratable-now, validated; Priya signed off 0.95)
             "AS-6",  # LP-429 — live via its bar (calibratable-now, validated; routing 11/11, Priya signed off)
+            "IN-15",  # LP-430 — live via its bar (no-ai-dependency, input resolves; terminated-employment)
         }
     )
     assert not (set(load_activation_bars()) & set(_BASE_ACTIVE))

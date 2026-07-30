@@ -99,18 +99,19 @@ async def test_lf6t3n_full_verdict_distribution_is_stable() -> None:
     # would read yes/no). So +52 not_applicable + +8 couldnt_check → 367. LP-429 ACTIVATED AS-6 (per_document over
     # the 30 docs): 21 non-bank-statement docs → not_applicable, and the 9 statements/unclassified → couldnt_check
     # (owner_matches is honest-unknown under the stub; a real AI reads yes → satisfied, per the LP-429 real run).
-    # So +21 not_applicable + +9 couldnt_check. The lock is now 397 evals / couldnt_check 200. Any OTHER movement
-    # would be a regression.
+    # So +21 not_applicable + +9 couldnt_check → 397. LP-430 ACTIVATED IN-15 (per_borrower): LF-6T3N's 2
+    # borrowers have no VOE → income.terminated_employment = not_terminated → not_applicable, so +2
+    # not_applicable. The lock is now 399 evals / couldnt_check 200. Any OTHER movement would be a regression.
     mat = await materialize_tags(
         build_lf6t3n_snapshot(), ai_reasoners=stub_materialization_reasoners()
     )
     results, _ = await evaluate_rules(mat)
-    assert len(results) == 397
+    assert len(results) == 399
     assert (
         Counter(r.verdict.value for r in results)
         == {
             "couldnt_check": 200,  # +AS-6 x9 (LP-429 — owner_matches unknown under the stub on 5 stmts + 4 unclassified)
-            "not_applicable": 172,  # +AS-6 x21 (LP-429 — non-bank-statement doc types)
+            "not_applicable": 174,  # +AS-6 x21 (LP-429) +IN-15 x2 (LP-430 — no VOE on LF-6T3N → not_terminated)
             "satisfied": 21,  # +PC-2 (LP-407-3): both prices 365000 → satisfied
             "fired": 2,
             "needs_review": 2,
