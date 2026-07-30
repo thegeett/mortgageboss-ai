@@ -96,18 +96,21 @@ async def test_lf6t3n_full_verdict_distribution_is_stable() -> None:
     # COULDNT_CHECK. LP-428 ACTIVATED IN-8 + IN-9 (both per_document over LF-6T3N's 30 documents) → +60 evals:
     # each gates to its own doc type (voe / employment_offer_letter), so 26 non-matching docs → not_applicable and
     # the 4 matching docs → couldnt_check (their presence tag is honest-unknown under the keyless stub; a real AI
-    # would read yes/no). So +52 not_applicable + +8 couldnt_check. The lock is now 367 evals / couldnt_check 191.
-    # Any OTHER movement would be a regression.
+    # would read yes/no). So +52 not_applicable + +8 couldnt_check → 367. LP-429 ACTIVATED AS-6 (per_document over
+    # the 30 docs): 21 non-bank-statement docs → not_applicable, and the 9 statements/unclassified → couldnt_check
+    # (owner_matches is honest-unknown under the stub; a real AI reads yes → satisfied, per the LP-429 real run).
+    # So +21 not_applicable + +9 couldnt_check. The lock is now 397 evals / couldnt_check 200. Any OTHER movement
+    # would be a regression.
     mat = await materialize_tags(
         build_lf6t3n_snapshot(), ai_reasoners=stub_materialization_reasoners()
     )
     results, _ = await evaluate_rules(mat)
-    assert len(results) == 367
+    assert len(results) == 397
     assert (
         Counter(r.verdict.value for r in results)
         == {
-            "couldnt_check": 191,  # +IN-8 x4 +IN-9 x4 (LP-428 — the presence tags unknown under the stub)
-            "not_applicable": 151,  # +IN-8 x26 +IN-9 x26 (LP-428 — non-matching doc types)
+            "couldnt_check": 200,  # +AS-6 x9 (LP-429 — owner_matches unknown under the stub on 5 stmts + 4 unclassified)
+            "not_applicable": 172,  # +AS-6 x21 (LP-429 — non-bank-statement doc types)
             "satisfied": 21,  # +PC-2 (LP-407-3): both prices 365000 → satisfied
             "fired": 2,
             "needs_review": 2,

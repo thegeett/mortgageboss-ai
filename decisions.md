@@ -12680,3 +12680,56 @@ the child's age is not yet an extracted field), ADR-335 (IN-13's missing scope g
 blocker), ADR-330 (`continuance_3yr=unknown` on a W-2 — the model being right about its own evidence limit),
 LP-393-6 (the documentation-standard-is-a-separate-rule ruling both candidates follow), LP-393-4a (originals
 preserved when a label is normalized), LP-420 (the blind worksheet), LP-423 (IN-13 held on two reasons).
+
+## ADR-338: A multi-tag rule's activation bar measures its VERDICT-DRIVING (routing) tags, not every tag it reads — a reason-only tag does not gate the bar (AS-6, the first multi-tag rule; LP-429)
+
+**Context.** LP-404 turned AS-6 (account ownership) into the FIRST multi-tag rule: it reads THREE `stmt_facts`
+tags and combines them into Priya's surface-don't-reject ruling — `owner_matches_borrower=no` → fired (a
+third-party account, excluded), `owner_matches_borrower=unknown` → needs_review, `non_borrower_co_holder=yes` →
+needs_review, `owner_matches_borrower=yes` → satisfied (the middle rows COUNT — the statement is used while a
+human confirms). LP-429 activates it on Priya's 0.95 sign-off. The activation surfaced a genuinely new question,
+because the three tags scored DIFFERENTLY against her labels (LP-402/403):
+
+- `owner_matches_borrower` — **11/11** (drives fired vs satisfied)
+- `non_borrower_co_holder` — **11/11** (drives the joint-account needs_review row)
+- `holder_name_variance` — **5/11** vs her exact labels (drives the REASON string shown on a needs_review row)
+
+**The decision — the bar's `measured_accuracy` is the min over the tags that DRIVE THE VERDICT (the ROUTING),
+not the min over every tag the spec reads.** AS-6's routing (which of fired / needs_review / satisfied a
+statement lands in) rests entirely on `owner_matches_borrower` + `non_borrower_co_holder`, both 11/11 → the bar
+measures 1.0 ≥ 0.95 and AS-6 activates. `holder_name_variance` at 5/11 does NOT gate the bar.
+
+**Why a reason-only tag does not gate the bar.** The activation bar exists to answer "can the automated VERDICT
+be trusted?" `holder_name_variance` changes only the WORDING of the reason on a `needs_review` row — the specific
+kind of name difference (nickname / surname / other) — and a `needs_review` row is, by definition, one a human
+reviews. So a wrong variance label degrades the human-facing explanation on a row a human already inspects; it
+never changes which bucket a statement lands in, and never produces a wrong AUTO verdict. Folding its 5/11 into
+the bar would conflate two different questions — "is the verdict trustworthy" (yes, 11/11) and "is the
+explanation always perfectly worded" (no, 5/11) — and would BLOCK a rule whose verdict is provably correct.
+
+**This REFINES the LP-390-5a weakest-tag rule, does not contradict it.** LP-390-5a — "the bar takes the weakest
+load-bearing tag" — was written for single-verdict-driving tags and remains correct for them: among the tags
+that DRIVE the verdict, the bar still takes the weakest (here min(11/11, 11/11) = 1.0). ADR-338 only clarifies
+the SET that rule ranges over for a multi-tag rule: the verdict-driving (routing) tags, not the reason-decoration
+tags. The bar's `load_bearing_ai_tags` is set to exactly the two routing tags; `holder_name_variance` is
+deliberately excluded, with the reason recorded in the bar so the exclusion is auditable, never silent.
+
+**The test that keeps this honest.** A reason-only tag is one whose value appears only in reason/how_to_fix text
+on a needs_review (or otherwise human-reviewed) outcome — NEVER in a `when_tags` / `when_compare` predicate that
+selects an AUTO (satisfied/fired) verdict. If a future edit made `holder_name_variance` route a verdict, it would
+become verdict-driving and MUST re-enter the bar (and be re-measured). AS-6's spec routes only on
+`owner_matches_borrower` + `non_borrower_co_holder`, so the exclusion holds; a spec change is the trigger to
+revisit it.
+
+**What LP-429 did NOT do.** It did not resolve the N2/P2 variance taxonomy residual (she labeled N2 (Roberta) =
+`nickname`, P2 (Bob) = `other`; the AI says the reverse, and the conventional reading favours the AI) — a Priya
+taxonomy round, its own ticket; AS-6 ships with it recorded. It did not widen `stmt_facts`' applicability (the D5
+gap: investment/brokerage statements are not ownership-checked at all) — its own ticket. And the negative FN
+direction is proven only on the LP-401 SYNTHETIC cases (the 5 real LF-6T3N statements are all `yes`) — the
+synthetic-data caveat AS-6 ships with.
+
+**Cross-refs.** LP-404 (the multi-tag rule + its 4-fired/5-needs_review/2-satisfied proof), LP-397 (the proposed
+bar + its now-met ratify caveat), LP-402/403 (the re-scores: routing tags 11/11, variance 5/11 + the residual),
+LP-390-5a (the weakest-tag rule this refines), LP-412 / LP-428 (the sign-off-is-the-activation pattern), LP-424
+(the ships-mode-matches-kind cross-check — structural → auto is legal), ADR-335 (a rule's gate narrower than its
+intent — the D5 stmt_facts applicability gap is the mirror: the tag's coverage narrower than the rule's reach).

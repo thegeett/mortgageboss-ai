@@ -64,9 +64,9 @@ def test_the_variance_values_are_descriptive_observables_not_verdicts() -> None:
     assert av["stmt.non_borrower_co_holder"] == ("yes", "no", "unknown")
 
 
-def test_as6_is_not_activated_by_this_ticket() -> None:
-    # LP-400 declared the variance/co_holder tags but AS-6 did not yet consume them. (LP-404 later made
-    # AS-6 read all three statement-holder tags — but still did not activate it.)
+def test_as6_activation_came_later_not_from_this_ticket() -> None:
+    # LP-400 declared the variance/co_holder tags but AS-6 did not yet consume them, and this ticket did not
+    # activate it. AS-6 was activated later, on Priya's OWN sign-off in LP-429 (a separate ruling) — now live.
     spec = load_rule_spec("AS-6")
     assert spec.deterministic is not None
     assert set(spec.deterministic.load_bearing_tags) == {
@@ -74,7 +74,7 @@ def test_as6_is_not_activated_by_this_ticket() -> None:
         "stmt.holder_name_variance",
         "stmt.non_borrower_co_holder",
     }
-    assert "AS-6" not in ACTIVE_RULE_IDS  # AS-6 not activated by this ticket (still held)
+    assert "AS-6" in ACTIVE_RULE_IDS  # live via LP-429's sign-off, not this tag-only ticket
 
 
 # --------------------------------------------------------------------------- #

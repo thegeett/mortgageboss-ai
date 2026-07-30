@@ -52,6 +52,9 @@ _FACT_LABELS: dict[str, str] = {
     "income.max_employment_gap_days": "largest employment gap",  # IN-4
     "stmt.min_account_months": "months of statements on file per account",  # AS-10
     "stmt.continuity": "statement balance continuity across the account",  # AS-8 (LP-410 / LP-406-2b)
+    "stmt.owner_matches_borrower": "account-holder match to a borrower",  # AS-6 (LP-429)
+    "stmt.holder_name_variance": "account-holder name variance",  # AS-6 (LP-429 — the gated tag)
+    "stmt.non_borrower_co_holder": "non-borrower co-holder on the account",  # AS-6 (LP-429)
     "income.employer_coverage": "pay-stub / W-2 employer coverage",  # IN-6 (LP-410 / LP-406-3b)
     "dti.qualifying_income_monthly": "qualifying income",
     "housing.insurance_monthly": "homeowners insurance",

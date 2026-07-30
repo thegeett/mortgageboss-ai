@@ -53,25 +53,25 @@ def test_the_honest_activation_state_is_reported() -> None:
     by = {
         s: sum(1 for b in bars.values() if b.status == s) for s in {b.status for b in bars.values()}
     }
-    # 9 SIGNED OFF (IN-1, IN-5, IN-3 + AS-2, AS-12 + IN-7, IN-10, IN-11, AS-11) + 2 PROPOSED-but-unvalidated
-    # (AS-6, LP-397 — one-sided n=5; IN-6, LP-406-3b — proposed IN-5's 0.95, pending Priya).
+    # The calibratable-now STATUS count is unchanged by activation (a signed-off bar keeps its status, only
+    # moving unvalidated -> validated). AS-6 (LP-429) is now among the validated calibratable-now bars.
     assert (
         by["calibratable-now"] == 14
-    )  # +IN-6 (LP-406-3b) +IN-12 (LP-423) +IN-8 +IN-9 (LP-426 — voe/offer scored 100%, proposed 0.95, unvalidated)
+    )  # +IN-6 (LP-406-3b) +IN-12 (LP-423) +IN-8 +IN-9 (LP-426/LP-428) +AS-6 (LP-397/LP-429) — all now validated
     assert by.get("not-calibratable-yet", 0) >= 1 and by.get("no-ai-dependency", 0) >= 1
     assert (
         by.get("no-ai-threshold-pending", 0) == 1
     )  # PC-7 (LP-411 — the third case, held on Priya's window)
-    # LP-390-7 signed off AS-2 + AS-12; LP-390-9 signed off IN-3; LP-393-6 signed off IN-7/IN-10/IN-11/AS-11 —
-    # those NINE calibratable rules are validated; AS-6 (LP-397) is calibratable but NOT yet validated.
+    # LP-390-7 signed off AS-2 + AS-12; LP-390-9 signed off IN-3; LP-393-6 signed off IN-7/IN-10/IN-11/AS-11;
+    # LP-429 signed off AS-6 — all validated calibratable-now rules.
     assert all(
         bars[r].validated
         for r in ("IN-1", "IN-5", "AS-2", "AS-12", "IN-3", "IN-7", "IN-10", "IN-11", "AS-11")
     )
     assert bars["AS-6"].status == "calibratable-now" and bars["AS-6"].threshold is not None
-    assert not bars[
+    assert bars[
         "AS-6"
-    ].validated  # proposed, not signed off — validating it would activate it (LP-393-6)
+    ].validated  # LP-429 — Priya signed off (validating it activated it, LP-393-6)
 
 
 # --------------------------------------------------------------------------- #
@@ -175,6 +175,7 @@ def test_exactly_the_signed_off_bars_are_validated() -> None:
             "IN-12",  # LP-423 — inherits IN-11's validated 0.9 (deterministic Schedule-C gate)
             "IN-8",  # LP-428 — Priya signed off 0.95 (voe_present 100%, synthetic caveat weighed)
             "IN-9",  # LP-428 — Priya signed off 0.95 (offer_letter_present 100%, caveats weighed)
+            "AS-6",  # LP-429 — Priya signed off 0.95 (routing 11/11; the reason-only variance tag excluded)
         }
     )  # NOTE: PC-2 (LP-407-3) is no-ai-dependency with validated:false — it is NOT in this signed-off set.
     assert all(b.validated is False for rid, b in bars.items() if rid not in validated)
@@ -276,6 +277,9 @@ def test_active_set_is_base_plus_lp389() -> None:
             # synthetic caveat. Structural presence checks → ships auto.
             "IN-8",
             "IN-9",
+            # LP-429 — AS-6 (account ownership): the FIRST multi-tag rule; routing rests on owner_matches +
+            # non_borrower_co_holder (both 11/11), Priya signed off 0.95. Structural → ships auto.
+            "AS-6",
         )
     )
     # A bar persists after activation as the record of WHY the rule went live, so the bars now intersect the
@@ -305,6 +309,7 @@ def test_active_set_is_base_plus_lp389() -> None:
             "IN-12",  # LP-423 — live via its bar (calibratable-now, validated; deterministic Schedule-C gate)
             "IN-8",  # LP-428 — live via its bar (calibratable-now, validated; Priya signed off 0.95)
             "IN-9",  # LP-428 — live via its bar (calibratable-now, validated; Priya signed off 0.95)
+            "AS-6",  # LP-429 — live via its bar (calibratable-now, validated; routing 11/11, Priya signed off)
         }
     )
     assert not (set(load_activation_bars()) & set(_BASE_ACTIVE))

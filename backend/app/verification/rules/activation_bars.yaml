@@ -157,33 +157,47 @@ AS-5:
     n=0 coverage gap. Held (not calibratable) until that design call is made — not a calibration gap. No bar.
 
 AS-6:
-  # LP-397: owner_matches_borrower now PRODUCES (LP-390-8a fed stmt_facts the borrower roster) and scored 100%
-  # (5/5) on the LF-6T3N bank statements -> calibratable-now. PROPOSED 0.95 auto, validated:false. ⚠️ The 5 are
-  # ALL `yes` (ONE-SIDED): the DANGEROUS FN direction (a non-borrower statement) is UNTESTED — Priya weighs
-  # ratify-only + the name-match strictness before sign-off. Validating IS activating (the LP-393-6 coupling).
+  # LP-429 — VALIDATED. Priya SIGNED OFF the 0.95 bar (the LP-412 pattern: her ruling IS the activation). FOUR
+  # things her sign-off covers, recorded:
+  # (1) HEIGHT — 0.95 (LP-397's proposal). The routing driver owner_matches_borrower measures 1.0 (11/11 after
+  #     LP-402/403 added the six negative cases; was 5/5 one-sided at proposal).
+  # (2) ships:auto AND THE FACT THAT CHANGED — LP-397 proposed auto but recommended RATIFY-ONLY "until a negative
+  #     case is tested." That condition is NOW MET: LP-398 built six negative statements and LP-404 shows four
+  #     firing correctly (N1/N3/N4/N6). The ratify caveat is satisfied, so AS-6 ships AUTO. (Structural -> auto is
+  #     legal; the LP-424 kind cross-check passes.)
+  # (3) WHAT THE BAR MEASURES (AS-6 is the FIRST multi-tag rule — ADR-338). Its ROUTING (fired / needs_review /
+  #     satisfied) rests on owner_matches_borrower (11/11) + non_borrower_co_holder (11/11), BOTH 1.0. The third
+  #     read tag holder_name_variance (5/11 vs her exact labels, LP-403) drives ONLY the REASON string on a
+  #     needs_review row — which a human then reviews — so it is NOT verdict-load-bearing and does NOT gate the
+  #     bar. measured_accuracy is the min of the ROUTING DRIVERS = 1.0. Taking the weakest of ALL read tags (0.45)
+  #     would wrongly block a rule whose VERDICT is 11/11; ADR-338 draws the routing-vs-explanation line.
+  # (4) VARIANCE RESIDUAL (LP-403) — she labeled N2 (Roberta)=nickname, P2 (Bob)=other; the AI says the reverse,
+  #     and the conventional reading favours the AI (Bob is Robert's classic nickname; Roberta is a distinct given
+  #     name). Affects the variance SCORE + some reason wording, NOT the routing — a known refinement AS-6 ships
+  #     with (a Priya taxonomy round, its own ticket).
   status: calibratable-now
   ships: auto
   threshold: 0.95
-  validated: false
-  measured_accuracy: 1.0   # stmt.owner_matches_borrower 5/5 (LP-390-8a) — but ONE-SIDED (all `yes`); see caveat.
-  load_bearing_ai_tags: [stmt.owner_matches_borrower]
+  validated: true   # LP-429 — Priya approved 0.95, weighing the four items recorded above
+  measured_accuracy: 1.0   # min of the ROUTING drivers owner_matches_borrower + non_borrower_co_holder (both 11/11)
+  # The VERDICT-driving tags only (ADR-338). holder_name_variance IS read by the spec but drives reason text on a
+  # needs_review row, not routing — 5/11 there does not gate the bar (a human reviews that row regardless).
+  load_bearing_ai_tags: [stmt.owner_matches_borrower, stmt.non_borrower_co_holder]
   fp_fn: "FN (accepts a statement NOT owned by the borrower -> someone else's assets counted) >> FP (a false 'not the borrower's account' -> a human re-checks a legit statement)"
   rationale: >-
-    owner_matches_borrower now PRODUCES real comparisons (LP-390-8a fed stmt_facts the loan's borrower roster;
-    BEFORE: 5/5 structural `unknown` "no borrower names provided"; AFTER: e.g. "'Jordan A Rivera' matches
-    borrower 'Jordan Rivera' - the middle initial"). Scored 100% (5/5) vs Priya's goldens. Structural -> ships
-    AUTO; FN-dangerous (a statement not owned by the borrower accepted as the borrower's assets) -> a HIGH bar;
-    PROPOSED 0.95. ⚠️ ONE-SIDED n: the real n is 5 (3 of the 8 goldens are UNSCORABLE — the D5 gap below), and
-    ALL 5 are `yes`. The tag has NEVER been tested on a NEGATIVE case (a statement that does NOT belong to the
-    borrower) — which is EXACTLY what AS-6 exists to catch, and exactly the DANGEROUS FN direction. 100% on 5
-    same-direction cases is NOT proof it can spot a mismatch (the AS-2 untested-trigger shape). Priya: consider
-    RATIFY-ONLY until a negative-case scenario exists. ⚠️ NAME-MATCH STRICTNESS is her call: LP-390-8a chose
-    TOLERANT (middle-initial, nickname Bob/Robert, maiden vs married, joint-account match-if-either) — the SAFE
-    direction (over-strict false-flags a borrower's own account) — but HOW tolerant (a bare initial "J. Rivera";
-    a trust/LLC in the borrower's name) is an underwriting judgment. ⚠️ D5 COVERAGE GAP: stmt_facts runs only on
-    bank_statement/money_market, so the 3 investment_account goldens are unscorable AND investment/brokerage
-    statements are NOT ownership-checked at all — its own ticket (widen stmt_facts' applicability). Validating
-    this bar ACTIVATES the rule (LP-393-6 coupling) — the sign-off IS the activation.
+    LP-404 turned AS-6 into the FIRST multi-tag rule delivering Priya's surface-don't-reject ruling: owner=no ->
+    fired, owner=unknown -> needs_review, co_holder=yes -> needs_review, owner=yes -> satisfied (the middle rows
+    COUNT — needs_review, not fired). LP-429: Priya APPROVED the 0.95 bar and AS-6 is now validated:true. She
+    signed weighing four things (recorded in the comment above): the 0.95 HEIGHT; ships AUTO because the
+    ratify-only condition LP-397 attached ("until a negative case is tested") is now MET (LP-398's six negatives,
+    four firing in LP-404); WHAT THE BAR MEASURES — the ROUTING drivers owner_matches_borrower + non_borrower
+    _co_holder (both 11/11 = 1.0), NOT the reason-only holder_name_variance (5/11), the first multi-tag precedent
+    (ADR-338); and the N2/P2 variance taxonomy RESIDUAL (a refinement it ships with). ⚠️ SYNTHETIC-DATA basis:
+    the 4-fired/5-needs_review/2-satisfied proof is on the LP-401 fixture (constructed), and the 5 REAL LF-6T3N
+    statements are all `yes` (the FP direction) — the negative FN direction is proven only on synthetic cases. ⚠️
+    D5 COVERAGE GAP: stmt_facts runs only on bank_statement/money_market, so investment/brokerage statements are
+    NOT ownership-checked at all (its own ticket — widen stmt_facts' applicability). Validating this bar ACTIVATES
+    the rule (LP-393-6 coupling) — the sign-off IS the activation.
 
 AS-7:
   status: not-calibratable-yet

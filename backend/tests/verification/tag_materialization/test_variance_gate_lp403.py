@@ -49,10 +49,10 @@ def test_the_sibling_prompts_are_untouched() -> None:
     assert _allowed_values_by_tag()["stmt.non_borrower_co_holder"] == ("yes", "no", "unknown")
 
 
-def test_as6_not_activated_by_this_ticket() -> None:
-    # LP-403 widened the variance gate but did not touch AS-6 or activate it. (LP-404 later made AS-6 read
-    # all three statement-holder tags — variance among them — but still did not activate it.)
+def test_as6_activation_came_later_not_from_this_ticket() -> None:
+    # LP-403 widened the variance gate (tag-work only) and did not activate AS-6. AS-6 was activated later, on
+    # Priya's OWN sign-off in LP-429 (a separate ruling) — so it is now live.
     spec = load_rule_spec("AS-6")
     assert spec.deterministic is not None
     assert "stmt.owner_matches_borrower" in spec.deterministic.load_bearing_tags
-    assert "AS-6" not in ACTIVE_RULE_IDS  # AS-6 not activated by this ticket (still held)
+    assert "AS-6" in ACTIVE_RULE_IDS  # live via LP-429's sign-off, not this tag-only ticket

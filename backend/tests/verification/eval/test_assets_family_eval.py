@@ -104,11 +104,12 @@ def test_assets_activation_state() -> None:
     # signed off once apparent_category (100% concrete, LP-390-5a) + has_identified_source (93.8%) were measured.
     # LP-393-6 activated AS-11 (retirement/stock liquidation terms, auto) — liquidation_terms scored 100% (6/6)
     # on the LP-393-1 fixture after LP-393-4a encoded Priya's precedence rule; she signed off the 0.90 bar.
-    for rid in ("AS-9", "AS-10", "AS-2", "AS-12", "AS-11"):
+    # LP-429 activated AS-6 (account ownership) — the first multi-tag rule, Priya signed off the 0.95 bar.
+    for rid in ("AS-9", "AS-10", "AS-2", "AS-12", "AS-11", "AS-6"):
         assert rid in ACTIVE_RULE_IDS
     # The rest stay inert: authored + evaluated, not shipped (the LP-333 discipline). AS-3 is calculator-
     # blocked (no §3B cash-to-close calc); the others rest on unscored AI tags / a design question (AS-5).
-    for rid in ("AS-3", "AS-4", "AS-5", "AS-6", "AS-7"):
+    for rid in ("AS-3", "AS-4", "AS-5", "AS-7"):
         assert rid not in ACTIVE_RULE_IDS
 
 

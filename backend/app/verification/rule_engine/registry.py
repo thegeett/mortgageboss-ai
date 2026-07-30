@@ -173,6 +173,17 @@ _LP423_ACTIVATED: tuple[str, ...] = ("IN-12",)
 # unscored — LP-423/LP-427). Structural presence checks → ships auto per their kind.
 _LP428_ACTIVATED: tuple[str, ...] = ("IN-8", "IN-9")
 
+# LP-429 — AS-6 (account ownership) goes live (33 -> 34) on Priya's sign-off. LP-404 turned it into the FIRST
+# multi-tag rule (owner=no -> fired, owner=unknown / co_holder=yes -> needs_review, owner=yes -> satisfied; the
+# middle rows COUNT). Its bar has been proposed since LP-397 (0.95 auto). Priya APPROVED 0.95, weighing four
+# things: the height; ships AUTO (LP-397's ratify-only caveat is now MET — LP-398's six negatives, four firing in
+# LP-404); WHAT THE BAR MEASURES — the ROUTING drivers owner_matches_borrower + non_borrower_co_holder (both
+# 11/11), NOT the reason-only holder_name_variance (5/11), the first multi-tag precedent (ADR-338); and the
+# N2/P2 variance taxonomy residual it ships with. Its three tags come from the stmt_facts group, which was
+# PENDING-only and now folds into _required_ai_groups — so they are PRODUCED on the live snapshot when AS-6 runs
+# (no LP-384 missing-tag trap). Structural -> ships auto (LP-424 kind cross-check passes).
+_LP429_ACTIVATED: tuple[str, ...] = ("AS-6",)
+
 # The gate is the source of truth: test_activation_gate_lp389 asserts ACTIVE_RULE_IDS - _BASE_ACTIVE ==
 # eligible_rule_ids() — a rule CANNOT enter this set without meeting the eligibility gate (not a hand-list).
 ACTIVE_RULE_IDS: tuple[str, ...] = (
@@ -189,6 +200,7 @@ ACTIVE_RULE_IDS: tuple[str, ...] = (
     *_LP4074_ACTIVATED,
     *_LP423_ACTIVATED,
     *_LP428_ACTIVATED,
+    *_LP429_ACTIVATED,
 )
 
 

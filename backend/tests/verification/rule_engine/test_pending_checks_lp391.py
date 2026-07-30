@@ -97,35 +97,31 @@ def test_blocked_candidates_are_exactly_bars_minus_active() -> None:
 # --------------------------------------------------------------------------- #
 # APPLICABLE + DATA → a manual-review flag, never the verdict
 # --------------------------------------------------------------------------- #
-def _stmt(cid: str, owner: UUID) -> DocumentEntry:
-    # a bank_statement document (AS-6's applicability type) attributed to a borrower.
-    # (Was a VOE for IN-8, which went live in LP-428 — AS-6 is now the standing blocked per_document example.)
+def _gift(cid: str, owner: UUID) -> DocumentEntry:
+    # a gift_letter document (AS-5's applicability type) attributed to a borrower.
+    # (Was a bank_statement for AS-6, which went live in LP-429 — AS-5 is now the standing blocked per_document
+    # example; it reads txn.apparent_category, still uncalibrated.)
     return DocumentEntry(
         content_id=cid,
-        document_type="bank_statement",
+        document_type="gift_letter",
         belongs_to=(BorrowerRef(borrower_id=owner, name="X"),),
-        fields={"account_holder": _f("Acme")},
+        fields={"donor": _f("Aunt May")},
     )
 
 
 async def test_a_blocked_rule_that_reaches_a_verdict_surfaces_pending_never_the_verdict() -> None:
-    # AS-6 (blocked: the stmt-holder tags uncalibrated) is per_document on a bank_statement. The statement
-    # carries owner_matches_borrower="no" (holder_name_variance present so it clears the gate) → the rule WOULD
-    # 'fire' a third-party-account finding (an untrusted verdict). Still BLOCKED, so the would-be fire surfaces
-    # as PENDING, never the verdict. (IN-8 demonstrated this before LP-428 activated it; IN-12 before LP-423.)
+    # AS-5 (blocked: txn.apparent_category uncalibrated) is per_document on a gift_letter. The document carries
+    # apparent_category="payroll" (present, so it clears the gate) != "gift" → the rule WOULD 'fire' an
+    # incomplete-gift-chain finding (an untrusted verdict). Still BLOCKED, so the would-be fire surfaces as
+    # PENDING, never the verdict. (AS-6 demonstrated this before LP-429 activated it; IN-8 before LP-428.)
     snap = _snap(
-        {
-            "stmtA": {
-                "stmt.owner_matches_borrower": _tag("no"),
-                "stmt.holder_name_variance": _tag("different_surname"),
-            }
-        },
-        extra_docs=(_stmt("stmtA", _A),),
+        {"giftA": {"txn.apparent_category": _tag("payroll")}},
+        extra_docs=(_gift("giftA", _A),),
     )
     pending = await evaluate_pending_checks(snap)
-    as6 = [p for p in pending if p.rule_id == "AS-6"]
-    assert len(as6) == 1 and as6[0].subject_id == "stmtA"  # the statement document surfaces
-    flag = as6[0]
+    as5 = [p for p in pending if p.rule_id == "AS-5"]
+    assert len(as5) == 1 and as5[0].subject_id == "giftA"  # the gift-letter document surfaces
+    flag = as5[0]
     # THE NO-LEAK GUARANTEE: the would-be 'fired' is discarded — never shipped.
     assert flag.verdict is Verdict.PENDING_AUTOMATION
     assert flag.load_bearing_tags == ()  # the uncalibrated tag VALUE never rides along
@@ -136,11 +132,11 @@ async def test_a_blocked_rule_that_reaches_a_verdict_surfaces_pending_never_the_
 
 
 async def test_a_blocked_rule_with_no_data_stays_dark_no_fabricated_flag() -> None:
-    # AS-6 is APPLICABLE (a bank_statement is present) but has NO stmt.holder_name_variance tag → couldnt_checks
-    # → NOTHING surfaces (honest silence, not a fabricated "manual review" the rule cannot support).
-    snap = _snap({}, extra_docs=(_stmt("stmtA", _A),))
+    # AS-5 is APPLICABLE (a gift_letter is present) but has NO txn.apparent_category tag → couldnt_checks →
+    # NOTHING surfaces (honest silence, not a fabricated "manual review" the rule cannot support).
+    snap = _snap({}, extra_docs=(_gift("giftA", _A),))
     pending = await evaluate_pending_checks(snap)
-    assert [p for p in pending if p.rule_id == "AS-6"] == []
+    assert [p for p in pending if p.rule_id == "AS-5"] == []
 
 
 async def test_a_blocked_JUDGMENT_rule_surfaces_through_the_stub_no_api_call() -> None:

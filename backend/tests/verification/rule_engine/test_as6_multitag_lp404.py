@@ -177,14 +177,13 @@ def test_the_real_lf6t3n_shape_stays_satisfied_no_false_flag() -> None:
 # --------------------------------------------------------------------------- #
 # EQUIVALENCE — only AS-6 changed; it is NOT activated (its bar is Priya's, still pending)
 # --------------------------------------------------------------------------- #
-def test_as6_is_not_active_only_the_rule_changed() -> None:
-    # LP-404 changes the RULE, not the activation bar (validated:false → inert). ACTIVE stays 24.
-    assert "AS-6" not in ACTIVE_RULE_IDS
+def test_as6_became_active_on_its_own_sign_off_lp429() -> None:
+    # LP-404 changed the RULE only (the bar stayed validated:false → inert then). LP-429 is Priya's SEPARATE
+    # sign-off of the bar — validated:true — which is what activated AS-6. So it is now live, on its own ruling.
+    assert "AS-6" in ACTIVE_RULE_IDS
     from tests.expected_active import EXPECTED_ACTIVE_RULE_COUNT
 
-    assert (
-        len(ACTIVE_RULE_IDS) == EXPECTED_ACTIVE_RULE_COUNT
-    )  # AS-6 still not active (asserted above)
+    assert len(ACTIVE_RULE_IDS) == EXPECTED_ACTIVE_RULE_COUNT  # 34 — AS-6 among them
 
 
 def test_the_fired_branch_scopes_to_bank_statements_only() -> None:

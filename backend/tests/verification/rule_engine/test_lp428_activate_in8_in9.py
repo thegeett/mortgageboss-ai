@@ -51,19 +51,23 @@ def test_in13_the_sibling_stays_held_no_ride_along() -> None:
     assert "IN-13" not in ACTIVE_RULE_IDS
 
 
-def test_as6_the_other_unsigned_bar_stays_held() -> None:
-    # AS-6 is calibratable-now with the SAME 0.95/1.0 shape but validated:false — Priya has not signed it. It
-    # must stay held: LP-428 flips ONLY IN-8 and IN-9, never every calibratable-now-but-unsigned bar.
-    bar = load_activation_bars()["AS-6"]
-    assert bar.status == "calibratable-now" and not bar.validated
-    assert not is_eligible(bar) and "AS-6" not in ACTIVE_RULE_IDS
+def test_lp428_flipped_exactly_in8_in9_not_as6() -> None:
+    # LP-428 flipped ONLY IN-8 + IN-9 — never every calibratable-now-but-unsigned bar. AS-6 had the same
+    # 0.95/1.0 shape but was unsigned at the LP-428 moment, so LP-428 left it held. (AS-6 was later activated on
+    # its OWN sign-off in LP-429 — a separate ticket, a separate ruling; this pins that LP-428 did not sweep it.)
+    from app.verification.rule_engine.registry import _LP428_ACTIVATED
+
+    assert set(_LP428_ACTIVATED) == {"IN-8", "IN-9"}
+    assert "AS-6" not in _LP428_ACTIVATED
 
 
 # ======================================================================= #
 # The count + the LP-389 invariant
 # ======================================================================= #
-def test_active_count_is_33_and_invariant_holds() -> None:
-    assert len(ACTIVE_RULE_IDS) == EXPECTED_ACTIVE_RULE_COUNT == 33
+def test_in8_in9_live_and_invariant_holds() -> None:
+    # (The absolute count moved to 34 when LP-429 activated AS-6; the single-source count guard lives in
+    # tests/expected_active.py, so this asserts the invariant + that IN-8/IN-9 are in the eligible set.)
+    assert len(ACTIVE_RULE_IDS) == EXPECTED_ACTIVE_RULE_COUNT
     # a rule cannot enter the active set without passing the gate
     assert set(ACTIVE_RULE_IDS) - set(_BASE_ACTIVE) == set(eligible_rule_ids())
     assert {"IN-8", "IN-9"} <= set(eligible_rule_ids())

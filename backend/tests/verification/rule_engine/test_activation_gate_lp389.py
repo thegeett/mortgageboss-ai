@@ -59,6 +59,7 @@ _ACTIVATED = frozenset(
         # the gate is a deterministic Schedule-C fact — LP-422)
         "IN-8",  # LP-428 — VOE present (calibratable-now; voe_present 100% two-sided, Priya signed off 0.95)
         "IN-9",  # LP-428 — offer letter present (calibratable-now; offer_letter_present 100%, Priya 0.95)
+        "AS-6",  # LP-429 — account ownership (calibratable-now; routing 11/11, Priya signed off 0.95)
     }
 )
 
@@ -76,9 +77,9 @@ def test_exactly_the_eligible_candidates_pass() -> None:
     held = set(bars) - eligible
     # IN-1/IN-5/AS-2/AS-12/IN-3 (AI, validated, measured >= bar); ID-5 + AS-9/IN-4/AS-10 (no-AI, input resolves).
     assert eligible == set(_ACTIVATED)
-    # 8 held after LP-428 (was 10): IN-8 + IN-9 moved held → eligible (Priya signed off their 0.95 bars, LP-428).
-    # The rest — incl. OC-1 / IN-13 (the sibling that must NOT ride along) / AS-6 (unsigned) — stay held.
-    assert len(held) == 8 and not (held & _ACTIVATED)  # every other candidate is held
+    # 7 held after LP-429 (was 8): AS-6 moved held → eligible (Priya signed off its 0.95 bar). The rest — incl.
+    # OC-1 / IN-13 / AS-4/5/7 / IN-14 — stay held.
+    assert len(held) == 7 and not (held & _ACTIVATED)  # every other candidate is held
 
 
 def test_eligible_rule_ids_is_sorted_and_matches() -> None:
@@ -87,6 +88,7 @@ def test_eligible_rule_ids_is_sorted_and_matches() -> None:
         "AS-11",
         "AS-12",
         "AS-2",
+        "AS-6",  # LP-429 (sorts between AS-2 and AS-8)
         "AS-8",  # LP-406-2b
         "AS-9",
         "ID-5",
