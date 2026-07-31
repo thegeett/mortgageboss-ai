@@ -12807,3 +12807,68 @@ borrower tag), LP-385 (`_borrower_attributed_documents`, the per-borrower promot
 no-ai-dependency date-compare + operand interpolation IN-15 mirrors), IN-11 (the history boundary). The three
 OTHER rules Priya's answers implied — IH-1 (a spec rewrite), PE-1 (an FHFA table), the pay-stub-only rule (a
 boundary check) — are their own tickets; only the terminated-employment check is built here.
+
+## ADR-340: IH-1 is a loss-settlement-BASIS check, not the retired coverage-vs-loan arithmetic (Priya's ruling, effective 2026-03-18) — but its field is not extracted, so LP-431 STOPs at an extractor-extension boundary (LP-431)
+
+**Context.** LP-431 set out to write IH-1 (insurance adequacy). The catalog (`rule_kinds.csv`) had it planned as
+a CALCULATIVE rule — *"dwelling coverage vs loan amount/replacement — numeric compare"* (the classic 80%-of-
+replacement-cost / coverage-vs-loan-balance test). **Priya's answer REPLACED that rule.** Her ruling, recorded
+here with its stated basis so a future reader can re-check it:
+
+**The regulatory premise (Priya's domain ruling — UNVERIFIED from the codebase; its stated effective date is on
+record).** Fannie Mae / Freddie Mac **retired the coverage-vs-loan-balance and 80%-of-replacement-cost
+comparison, effective 2026-03-18.** So IH-1 is no longer an arithmetic test. Her replacement is a **loss-
+settlement-BASIS check**: `replacement_cost_basis = true → adequate`; `false → inadequate`; `missing → manual
+review`. No percentage, no coverage/loan comparison. **This ADR does not verify the agency change — it records
+that IH-1's entire shape rests on it, so the basis is auditable.**
+
+**The decision — IH-1 is a three-outcome boolean check (satisfied / fired / couldnt_check), NOT calculative.**
+That reclassifies it from the catalog's `calculative` to `structural` (a presence/basis read, no ratio, no Priya
+threshold — so it would be `no-ai-dependency` and activate without a sign-off, the IH-3 shape). The catalog
+description is now stale; it is updated when the rule is actually built.
+
+**THE STOP (D1) — the field is not extracted, so the rule cannot be built yet.** The `homeowners_insurance`
+extractor's TYPED CORE is `named_insured / carrier_name / policy_number / property_address / coverage_amount /
+annual_premium / effective_date / expiration_date` — **no loss-settlement-basis field.** The extraction PROMPT
+does not even solicit it (zero mention of replacement / settlement / ACV), so it will not reliably appear in the
+grouped `additional_sections` catch-all either. Per **LP-405** (no rule may depend on the free-form,
+per-document, uncoerced catch-all), IH-1 **cannot be built on the current extractor**. This is the PC-4/6/8/9 /
+IH-2/IH-8 class: an **extractor-extension ticket** (add a typed-core `loss_settlement_basis` field, with
+golden-file evidence), NOT a rule ticket. LP-431 therefore writes **no spec, no producer, no fixture, no
+activation** — the honest outcome the ticket flagged as likely. A guard test pins the gap so the exclusion cannot
+silently rot (the LP-420 census-guard discipline).
+
+**The ACV-roof nuance cannot be honored yet.** Priya noted *"roof coverage may be settled on an actual-cash-value
+basis"* — so an ACV roof must NOT fail a replacement-cost dwelling policy. That requires PER-ITEM settlement
+granularity, which the extractor also lacks (there is only one policy-level basis, and it is not extracted at
+all). The extractor extension must carry both the dwelling basis AND the per-item (roof) exception, or IH-1 would
+false-fire on an ACV roof.
+
+**What the extractor extension needs (the follow-up ticket).** A typed-core `loss_settlement_basis` on
+`HomeownersInsuranceExtraction` (enum: `replacement_cost / actual_cash_value / unknown`), the prompt taught to
+read the loss-settlement/valuation clause, per-item overrides for the roof (an ACV-roof exception), and golden
+files evidencing it. Then IH-1 is a trivial `no-ai-dependency` structural rule (basis == replacement_cost →
+satisfied; actual_cash_value → fired; missing → couldnt_check), the IH-3 shape.
+
+**The scope boundaries (recorded, not built).**
+- **The LEGACY investor overlay** — some investors still apply `min(100% RC, max(100% loan, 80% RC))` (UWM /
+  Sun-West may differ). Recorded as a possible future investor-overlay variant, NOT built (Priya's ruling
+  retires the comparison for the agencies; overlays are a separate question for her).
+- **The condo / PUD master policy** — Priya's *"a condo/co-op/PUD master policy must cover ≥ 100% of the
+  project improvements' replacement cost"* is an ARITHMETIC test on a DIFFERENT document (a master policy), and
+  the catalog already reserves it as **IH-7** ("Condo master policy"). NOT IH-1's job; a separate candidate
+  (likely similarly extractor-gated — LP-415 found the condo questionnaire has no extractor). IH-1 would need a
+  `property.type` / condo indicator to EXCLUDE condos so it does not apply the dwelling-basis test to a master
+  policy — and **no confirmed condo indicator tag exists** (the `loan.purpose` situation, LP-424 item 4) — a
+  scoping gap the extension must also address.
+- **The other two adequacy conditions Priya named** — "required hazards covered" and "the deductible within
+  agency limits" — are NOT IH-1's (D2, the AS-8/AS-10 two-rules-one-inadequacy noise lesson). Hazards map to
+  IH-6 (flood) / IH-8 (wind-hail) / IH-2 (mortgagee clause); the DEDUCTIBLE is an unwritten candidate that would
+  need Priya's agency limits (a threshold — another reason it is not IH-1, which by her ruling has none).
+
+**Cross-refs.** LP-405 (the typed-core-vs-catch-all rule — the STOP basis), LP-417 (IH-3, the live insurance
+sibling on the same binder — IH-1's intended shape + the boundary), LP-415 (the Insurance audit — IH-2/IH-8
+extractor-gated, the condo questionnaire gap), LP-424 item 4 (the missing property-type indicator precedent),
+ADR-333 (the extraction→snapshot boundary — a field must be typed-core to be rule-visible). The three sibling
+rules from Priya's B14-adjacent answers (IH-1 here; PE-1 an FHFA table; the pay-stub-only rule) each have their
+own ticket; LP-430 built the terminated-employment one.
