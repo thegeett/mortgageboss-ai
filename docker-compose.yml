@@ -13,14 +13,14 @@
 services:
   postgres:
     image: postgres:16-alpine
-    container_name: mortgageboss-postgres
+    container_name: ${STACK:-mortgageboss}-postgres
     restart: unless-stopped
     environment:
       POSTGRES_USER: mortgageboss
       POSTGRES_PASSWORD: mortgageboss_dev_password
       POSTGRES_DB: mortgageboss_dev
     ports:
-      - "5432:5432"
+      - "${PG_PORT:-5432}:5432"
     volumes:
       - mortgageboss-postgres-data:/var/lib/postgresql/data
     networks:
@@ -34,11 +34,11 @@ services:
 
   redis:
     image: redis:7-alpine
-    container_name: mortgageboss-redis
+    container_name: ${STACK:-mortgageboss}-redis
     restart: unless-stopped
     command: ["redis-server", "--appendonly", "yes"]
     ports:
-      - "6379:6379"
+      - "${REDIS_PORT:-6379}:6379"
     volumes:
       - mortgageboss-redis-data:/data
     networks:
@@ -51,11 +51,11 @@ services:
 
   mailhog:
     image: mailhog/mailhog:latest
-    container_name: mortgageboss-mailhog
+    container_name: ${STACK:-mortgageboss}-mailhog
     restart: unless-stopped
     ports:
-      - "1025:1025"  # SMTP
-      - "8025:8025"  # Web UI
+      - "${SMTP_PORT:-1025}:1025"  # SMTP
+      - "${MAILHOG_UI_PORT:-8025}:8025"  # Web UI
     networks:
       - mortgageboss-network
     healthcheck:
@@ -76,7 +76,7 @@ services:
   #   # on macOS/Colima add --pool=solo if the prefork pool misbehaves)
   worker:
     build: ./backend
-    container_name: mortgageboss-worker
+    container_name: ${STACK:-mortgageboss}-worker
     restart: unless-stopped
     command: ["uv", "run", "celery", "-A", "app.tasks.celery_app", "worker", "--loglevel=info"]
     env_file:

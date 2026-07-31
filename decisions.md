@@ -12872,3 +12872,52 @@ extractor-gated, the condo questionnaire gap), LP-424 item 4 (the missing proper
 ADR-333 (the extraction→snapshot boundary — a field must be typed-core to be rule-visible). The three sibling
 rules from Priya's B14-adjacent answers (IH-1 here; PE-1 an FHFA table; the pay-stub-only rule) each have their
 own ticket; LP-430 built the terminated-employment one.
+
+## ADR-341: A second worktree's stack is separated by SHELL-VARIABLE DEFAULTS in `docker-compose.yml`, and its database is SEEDED from the main one rather than migrated from empty (A1)
+
+**Context.** The Bedrock integration branch runs as a second `git worktree` (`../mbai-bedrock`) alongside the
+rule-engine worktree on one machine. `git worktree` isolates **files only** — containers, Postgres, Redis, and
+host ports are runtime and collide. The blocking specific: `container_name` **overrides** Compose's project-name
+prefixing, so the four hardcoded `mortgageboss-*` names made a second project impossible — `-p` cannot help
+while those names are literal. The main stack had been up for weeks with live dev data in its volumes and could
+not be disturbed to fix this.
+
+**The decision — parameterize with defaults, do not remove.** `container_name` and the host side of each port
+became `${STACK:-mortgageboss}-postgres` / `"${PG_PORT:-5432}:5432"` and so on. Eight lines changed; volumes and
+the network were already safe (no explicit `name:`, so Compose prefixes them per project), and the worker's
+`environment` block was already safe (it targets service names on the project-internal network).
+
+The **default** is what matters: with no root `.env`, every value resolves to exactly what it was before, so the
+main worktree is untouched by a change committed on this branch. Verified by resolving the edited file with the
+root `.env` suppressed — `mortgageboss-*` on 5432 / 6379 / 1025 / 8025, byte-identical to the pre-change output.
+
+**Rejected: deleting `container_name` entirely.** That is the "clean" fix — let Compose prefix names per project
+— but it renames the main worktree's four running containers the moment the branch merges, and every existing
+`docker exec mortgageboss-postgres …` in scripts, docs, and muscle memory breaks. A default-valued variable
+buys the same isolation with a zero-diff runtime for the existing stack. Backward compatibility outranks
+cleanliness when the other side of the change is a live stack holding weeks of real work.
+
+**The decision — seed from the main database, do not migrate from empty.** `scripts/seed-from-main.sh` does
+`pg_dump | pg_restore` between the two containers. Running `alembic upgrade head` against an empty database
+would have produced the schema, but not the 28 loan files needed to develop against, and would have required
+running Alembic in a worktree — the single most dangerous command here, since a migration aimed at 5432
+corrupts the live rule-engine schema. Seeding sidesteps that: the schema arrives carrying its own
+`alembic_version` (`9f0a5f88b6f8`, identical on both sides), so **no Alembic command runs in this worktree at
+all**. `scripts/check-stack.sh` guards any future one by refusing unless the reached database publishes the
+expected host port.
+
+**The database and `backend/storage` are ONE unit.** Extraction rows reference uploaded files on disk. A
+database-only copy yields rows pointing at files that do not exist — a failure that surfaces late, as a
+`StorageError` at document-read time, not at seed time. The script copies both or the seed is wrong; this is why
+it is a script and not a documented `pg_dump` one-liner.
+
+**Mailhog is excluded from this branch's stack.** Its ports are parameterizable but left unset, so it would
+resolve to 1025/8025 and collide. Only `postgres redis worker` start here. The consequence is recorded rather
+than fixed: this worktree's `SMTP_PORT=1025` reaches the **main** worktree's Mailhog. Acceptable for a dev mail
+catcher, and cheaper than a fourth port to remember.
+
+**Cross-refs.** ADR-005 (dev credentials intentionally committed in `docker-compose.yml`), LP-41 / LP-73 (the
+worker service and its start-by-default footgun), [`docs/worktree-setup.md`](docs/worktree-setup.md) (the
+operational guide — port map, the three `.env` files, troubleshooting), A1 (this ticket). The two cross-talk
+defaults this had to work around — `NEXT_PUBLIC_API_URL` falling back to `:8000` and `cors_allowed_origins` to
+`:3000` — are deliberately left alone in code and fixed by env files, since the main worktree depends on them.
