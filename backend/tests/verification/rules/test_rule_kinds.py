@@ -25,11 +25,11 @@ from app.verification.rules.kinds import (
 # Phase-0 counts from the xlsx (formalized as-is; the file's "130" title is off by 3).
 _EXPECTED = {
     RuleKindName.CALCULATIVE: 29,
-    RuleKindName.STRUCTURAL: 61,  # LP-430 — +IN-15 (terminated-employment documentation, deterministic)
+    RuleKindName.STRUCTURAL: 62,  # LP-430 +IN-15; LP-433 +IN-16 (both deterministic documentation checks)
     RuleKindName.JUDGMENTAL: 29,
     RuleKindName.OUT_OF_SCOPE: 15,
 }
-_TOTAL = 134  # LP-430 — +IN-15
+_TOTAL = 135  # LP-430 +IN-15; LP-433 +IN-16
 
 
 def test_all_rules_present_with_expected_counts() -> None:

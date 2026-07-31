@@ -17,7 +17,8 @@ stronger, deliberately-independent guard and a separate concern from this count.
 from __future__ import annotations
 
 # Bumped by each activation: … LP-407-3 (+PC-2) → 28 → LP-417 (+IH-3) → 29 → LP-407-4 (+PC-3) → 30 →
-# LP-423 (+IN-12) → 31 → LP-428 (+IN-8, +IN-9) → 33 → LP-429 (+AS-6) → 34 → LP-430 (+IN-15) → 35.
-EXPECTED_ACTIVE_RULE_COUNT: int = 35
+# LP-423 (+IN-12) → 31 → LP-428 (+IN-8, +IN-9) → 33 → LP-429 (+AS-6) → 34 → LP-430 (+IN-15) → 35 →
+# LP-433 (+IN-16) → 36.
+EXPECTED_ACTIVE_RULE_COUNT: int = 36
 
 __all__ = ["EXPECTED_ACTIVE_RULE_COUNT"]

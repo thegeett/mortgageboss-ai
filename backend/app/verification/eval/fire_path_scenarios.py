@@ -85,6 +85,9 @@ _SCHED_BORROWER = UUID("95000000-0000-4000-8000-0000000001bb")  # LP-421 — the
 _LOAN_TERMINATED = UUID(
     "95000000-0000-4000-8000-000000000013"
 )  # LP-430 — terminated-employment scenario
+_LOAN_PAY_STUB_ONLY = UUID(
+    "95000000-0000-4000-8000-000000000014"
+)  # LP-433 — pay-stub-only documentation scenario
 _RUN = UUID("95000000-0000-4000-8000-0000000000ff")
 # The file (snapshot) date every closing date is measured against (deterministic — never a wall-clock now()).
 _FILE_DATE = datetime(2026, 7, 1, tzinfo=UTC)
@@ -712,6 +715,61 @@ def build_terminated_employment_snapshot() -> Snapshot:
     return _snapshot(_LOAN_TERMINATED, docs, mismo)
 
 
+# --------------------------------------------------------------------------- #
+# LP-433 — the PAY-STUB-ONLY documentation scenario (IN-16). Four borrowers, one per branch of Priya's B12
+# separate-documentation check (a 2-year history cannot rest on pay stubs alone — a W-2 or 1099 is required):
+#   B1 (fire):    pay stubs only, no W-2 and no 1099 -> income.history_documentation = pay_stub_only -> IN-16
+#                 FIRES (asks for a W-2 or 1099).
+#   B2 (satisfy): a W-2 attributed -> w2_or_1099 -> IN-16 satisfied.
+#   B3 (satisfy): a 1099 attributed (NO W-2) -> w2_or_1099 -> IN-16 satisfied (proves the "or 1099" leg).
+#   B4 (n/a):     a VOE only, no pay stubs / W-2 / 1099 -> no_pay_stubs -> IN-16 not_applicable (a VOE-only
+#                 borrower is out of scope — her ruling is about pay-stub-only history; NOT broadened to accept
+#                 the VOE, and NOT fired since there is no pay-stub history to challenge).
+# Per-borrower attribution (belongs_to + MISMO ids) so BorrowerSubject enumerates four; B2's W-2 is attributed
+# to B2 ONLY, so it never satisfies B1 (the per-borrower isolation the recipe guarantees). Document-type
+# PRESENCE only — no extracted-field dependency (the IN-8/IN-9 discipline).
+# --------------------------------------------------------------------------- #
+def _pay_stub_only_borrower(i: int) -> UUID:
+    return UUID(f"95000000-0000-4000-8000-0000000003{i:02d}")
+
+
+def build_pay_stub_only_snapshot() -> Snapshot:
+    """Four borrowers exercising IN-16's branches (fire / W-2 satisfy / 1099 satisfy / VOE-only n/a). Standalone
+    (95… namespace, its own loan). Materialize the derived producer (no AI needed) to produce
+    income.history_documentation; IN-16 reads it per borrower."""
+    docs: list[DocumentEntry] = []
+    mismo: dict[str, SnapshotField] = {}
+    for i in range(1, 5):
+        bid = _pay_stub_only_borrower(i)
+        mismo[f"borrower.{i}.borrower_id"] = _f(str(bid))
+        mismo[f"borrower.{i}.first_name"] = _f(f"Borrower {i}")
+
+    def _attr(cid: str, dtype: str, i: int, **fields: str) -> DocumentEntry:
+        return DocumentEntry(
+            content_id=cid,
+            document_type=dtype,
+            belongs_to=(BorrowerRef(borrower_id=_pay_stub_only_borrower(i), name=f"Borrower {i}"),),
+            fields={k: _f(v) for k, v in fields.items()},
+        )
+
+    # B1 — FIRE: pay stubs only (no W-2, no 1099).
+    docs.append(
+        _attr("95-ps-p1", "pay_stub", 1, employer_name="Acme Freight", pay_date="2026-06-15")
+    )
+    docs.append(
+        _attr("95-ps-p1b", "pay_stub", 1, employer_name="Acme Freight", pay_date="2026-05-15")
+    )
+    # B2 — SATISFY (W-2): a W-2 documents the history.
+    docs.append(_attr("95-w2-p2", "w2", 2, employer_name="Beta Manufacturing", tax_year="2025"))
+    # B3 — SATISFY (1099): a 1099, no W-2 — the "or 1099" leg.
+    docs.append(_attr("95-1099-p3", "1099", 3, payer_name="Gamma Contracting", tax_year="2025"))
+    # B4 — NOT_APPLICABLE: a VOE only (no pay stubs / W-2 / 1099).
+    docs.append(
+        _attr("95-voe-p4", "voe", 4, employer_name="Delta Inc", employment_status="current")
+    )
+    return _snapshot(_LOAN_PAY_STUB_ONLY, docs, mismo)
+
+
 # The expected fired/materialized outcomes — recorded HERE / in tests, never predicted in prose (LP-337).
 EXPECTED_TAXES_MONTHLY = "500.00"  # 6000 / 12
 EXPECTED_HOA_MONTHLY = "300.00"  # 300 monthly
@@ -736,6 +794,7 @@ __all__ = [
     "build_insurance_two_binder_snapshot",
     "build_other_income_continuance_snapshot",
     "build_past_closing_snapshot",
+    "build_pay_stub_only_snapshot",
     "build_self_employed_no_history_snapshot",
     "build_statement_break_snapshot",
     "build_subject_housing_snapshot",

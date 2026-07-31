@@ -56,9 +56,9 @@ def test_desired_state_shape() -> None:
 
     # rule_kinds.csv is 133 rules; the vocabulary is 143 xlsx tags + 1 hand-added overlay tag
     # (id.poa_acceptable LP-329, id.residency_eligible LP-331) = 145.
-    assert len(rules) == 134  # LP-430 — +IN-15 (terminated-employment documentation)
-    # LP-430 — +2 overlay tags (income.terminated_employment + income.terminated_employment_end_date).
-    assert len(tags) == 170  # +4 assets (LP-323-AS-B) +2 ID-5 (LP-389-A) +2 stmt variance/co-holder
+    assert len(rules) == 135  # LP-430 +IN-15; LP-433 +IN-16 (pay-stub-only documentation)
+    # LP-430 — +2 overlay (income.terminated_employment + _end_date); LP-433 — +1 (income.history_documentation).
+    assert len(tags) == 171  # +4 assets (LP-323-AS-B) +2 ID-5 (LP-389-A) +2 stmt variance/co-holder
     # (LP-400) +3 the LP-410 derived-producer wave (days_until_closing / stmt.continuity / employer_coverage)
     # +1 LP-407-2 (contract.loan_sales_price — the PC-2 loan promotion; its 4 other tags already exist in the CSV)
     # +1 LP-417 (ins.loan_effective_date — the IH-3 loan promotion; ins.effective_date already exists in the CSV)

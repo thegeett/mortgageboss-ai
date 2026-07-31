@@ -1,0 +1,70 @@
+rule_id: IN-16
+name: Pay-stub-only documentation
+category: Income
+kind: structural          # rule_kinds.csv: IN-16 = structural (deterministic_only)
+numeric_check: false
+criteria: >-
+  Priya's B12 ruling (LP-393-6), the sibling of IN-15's B14 check: her LP-393-6 ruling carved a documentation
+  standard OUT of the has_2yr_history judgment — a terminated job's years still count as history (IN-11), and
+  whether the history is adequately DOCUMENTED is a SEPARATE check. Her B12 answer is exact (LP-432): "W-2 or
+  1099 is required to show 2 year history" — pay stubs alone cannot establish it. So this rule fires when a
+  borrower's income is evidenced ONLY by pay stubs (no W-2 and no 1099 attributed). Evaluated PER BORROWER
+  (LP-385): document-type presence is read over that borrower's own attributed documents (never another
+  borrower's). Deterministic — a document-type presence read, no judgment (ADR-334: no calibration round). It
+  reads document-type PRESENCE, not extracted 1099 fields (the IN-8/IN-9 discipline), so the ruling is "W-2 OR
+  1099", not W-2-only. It ASKS FOR THE DOCUMENT; it never asserts the borrower cannot document their income (a
+  missing document is a file gap, not a fact about the borrower).
+applicability:
+  scope: each borrower whose income history is documented by pay stubs
+  trigger: once per borrower, on the income-history documentation basis
+required_inputs:
+  - name: history_documentation
+    snapshot_path: tags.by_subject[<borrower_id>]["income.history_documentation"]
+    description: >-
+      the documents evidencing the borrower's income history (derived, per-borrower): w2_or_1099 (documented) /
+      pay_stub_only (only pay stubs) / no_pay_stubs (no pay-stub history to check) / unknown
+reference_values:
+  priya_validated: false
+  threshold_needs_signoff: false
+  guideline_text: >-
+    A borrower's two-year income history must be documented with a W-2 or 1099; pay stubs alone are
+    insufficient (Priya's B12 ruling, LP-393-6 / LP-432). Deterministic, no threshold.
+subject_enumeration: per_borrower
+subject_key_fields:
+  - borrower
+evidence_required: >-
+  whether the borrower's income history is documented by a W-2 or 1099, or only by pay stubs
+guideline_reference: "Fannie Mae Selling Guide B3-3.1 (income documentation); Priya B12 (LP-393-6)."
+spec_version: 1
+deterministic:
+  # LP-433: NO document-type applicability — the rule enumerates per BORROWER and reads the derived
+  # income.history_documentation (produced at the borrower subject from the document-type presence of the
+  # borrower's attributed w2 / 1099 / pay_stub, LP-385). The applicability predicate scopes it to a borrower
+  # who ACTUALLY relies on pay stubs: `ne no_pay_stubs`, so a borrower with no pay stubs (no income documents,
+  # or a VOE only) → not_applicable (never a finding on an empty set). An unreadable basis → the gate
+  # couldnt_checks (fail-closed). NOT applicability_expected: a missing document is not_applicable via the tag,
+  # never a missing-document accusation.
+  applicability:
+    tag: income.history_documentation
+    op: ne
+    value: no_pay_stubs
+  load_bearing_tags:
+    - income.history_documentation
+  gated_tags:
+    - income.history_documentation
+  outcomes:
+    # Income evidenced ONLY by pay stubs — the documentation is insufficient for a two-year history. ASK FOR
+    # THE DOCUMENT, never assert a deficiency about the borrower.
+    - verdict: fired
+      when_tags:
+        - {tag: income.history_documentation, op: eq, value: pay_stub_only}
+      reasoning: >-
+        this borrower's income is evidenced only by pay stubs — a W-2 or 1099 is needed to establish the
+        two-year income history
+      how_to_fix: >-
+        Obtain a W-2 or a 1099 for the borrower (the two-year history cannot rest on pay stubs alone).
+    # A W-2 or 1099 is attributed — the history can be established.
+    - verdict: satisfied
+      default: true
+      reasoning: >-
+        a W-2 or 1099 documents the borrower's income history

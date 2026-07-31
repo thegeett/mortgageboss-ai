@@ -135,7 +135,9 @@ def test_in15_is_active_and_the_invariant_holds() -> None:
     assert bar.status == "no-ai-dependency" and bar.threshold is None
     assert bar.ships == "auto" and not bar.load_bearing_ai_tags  # deterministic, no AI tag
     assert is_eligible(bar) and "IN-15" in ACTIVE_RULE_IDS
-    assert len(ACTIVE_RULE_IDS) == EXPECTED_ACTIVE_RULE_COUNT == 35
+    assert (
+        len(ACTIVE_RULE_IDS) == EXPECTED_ACTIVE_RULE_COUNT
+    )  # 36 after LP-433 (+IN-16); single-source guard
     assert set(ACTIVE_RULE_IDS) - set(_BASE_ACTIVE) == set(eligible_rule_ids())
 
 

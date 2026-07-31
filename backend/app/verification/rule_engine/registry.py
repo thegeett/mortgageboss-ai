@@ -193,6 +193,15 @@ _LP429_ACTIVATED: tuple[str, ...] = ("AS-6",)
 # snapshot: fire / satisfy / future-n/a / no-VOE-n/a). Structural → ships auto. Does NOT change IN-11/IN-12.
 _LP430_ACTIVATED: tuple[str, ...] = ("IN-15",)
 
+# LP-433 — IN-16 (pay-stub-only documentation) goes live (35 -> 36). Priya's B12 ruling (LP-393-6), the sibling
+# of IN-15's B14 check: a 2-year history cannot rest on pay stubs alone — a W-2 or 1099 is required. DETERMINISTIC
+# (income.history_documentation, derived per-borrower from the DOCUMENT-TYPE PRESENCE of the borrower's attributed
+# w2 / 1099 / pay_stub) → no AI, no threshold (ADR-334 escape hatch, no calibration round). So the AS-8/IH-3/IN-15
+# no-ai-dependency path — eligible on input_resolves alone (verified on build_pay_stub_only_snapshot: fire / W-2
+# satisfy / 1099 satisfy / VOE-only n/a). Structural → ships auto. Does NOT change IN-6/IN-11/IN-15. The LAST rule
+# reachable without new document capability (LP-432).
+_LP433_ACTIVATED: tuple[str, ...] = ("IN-16",)
+
 # The gate is the source of truth: test_activation_gate_lp389 asserts ACTIVE_RULE_IDS - _BASE_ACTIVE ==
 # eligible_rule_ids() — a rule CANNOT enter this set without meeting the eligibility gate (not a hand-list).
 ACTIVE_RULE_IDS: tuple[str, ...] = (
@@ -211,6 +220,7 @@ ACTIVE_RULE_IDS: tuple[str, ...] = (
     *_LP428_ACTIVATED,
     *_LP429_ACTIVATED,
     *_LP430_ACTIVATED,
+    *_LP433_ACTIVATED,
 )
 
 

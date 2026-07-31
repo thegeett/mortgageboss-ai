@@ -230,6 +230,25 @@ tags:
       interpolation. A real date when income.terminated_employment is "cleared"/"needs_pay_stub"; "unknown"
       otherwise (no past end date to name). Derived alongside income.terminated_employment (LP-430).
     produced_by: derived
+  # LP-433 — the pay-stub-only documentation check (Priya's B12 ruling, the sibling of IN-15's B14 check): a
+  # borrower's 2-year history cannot rest on pay stubs alone — a W-2 or 1099 is required. DETERMINISTIC (a
+  # document-type presence read, no judgment → ADR-334, no calibration). PER BORROWER over the borrower's
+  # attributed income documents. "pay_stub_only" fires IN-16 (documentation insufficient); "w2_or_1099"
+  # satisfies; "no_pay_stubs" (no pay-stub-based history to challenge — no pay stubs, and no W-2/1099) → IN-16
+  # not_applicable; "unknown" only if the documents cannot be read (fail-closed). NO AI — the reason ASKS FOR
+  # THE DOCUMENT, never asserts the borrower cannot document their income.
+  income.history_documentation:
+    entity: borrower
+    value_type: enum
+    allowed_values: ["w2_or_1099", "pay_stub_only", "no_pay_stubs", "unknown"]
+    description: >-
+      PER BORROWER: what documents evidence the borrower's income history? "w2_or_1099" = a W-2 or a 1099 is
+      attributed (the two-year history can be established → IN-16 satisfied); "pay_stub_only" = pay stubs are
+      attributed but NO W-2 and NO 1099 (IN-16 fires — pay stubs alone cannot show a two-year history);
+      "no_pay_stubs" = no pay stubs attributed (no pay-stub-only history for this check — no income docs, or a
+      VOE only) → IN-16 not_applicable; "unknown" = the documents cannot be read. Derived from document-type
+      PRESENCE (w2 / 1099 / pay_stub) over the borrower's attributed documents. No AI, no calibration.
+    produced_by: derived
   income.employer_coverage:
     entity: borrower
     value_type: enum

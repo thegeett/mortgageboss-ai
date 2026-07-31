@@ -256,5 +256,6 @@ def test_registry_drift_guard_and_activation_unchanged() -> None:
             "IN-9",  # LP-428 — offer letter present (Priya signed off the 0.95 bar; offer_letter_present 100%)
             "AS-6",  # LP-429 — account ownership (Priya signed off the 0.95 bar; routing 11/11)
             "IN-15",  # LP-430 — terminated-employment documentation (no-ai-dependency; deterministic)
+            "IN-16",  # LP-433 — pay-stub-only documentation (no-ai-dependency; deterministic)
         )
     )

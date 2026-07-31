@@ -2,7 +2,7 @@
 
 Generated from `backend/app/verification/rules/rule_kinds.csv` (the source of truth) via `app.scripts.generate_rule_kinds_md` — do not edit by hand. See ADR-247 / LP-301.
 
-**134 rules** — calculative 29, structural 61, judgmental 29, out-of-scope 15. Numeric-check (deterministic bookend): 29. Priya-validated: 0/134. Thresholds needing sign-off: 22.
+**135 rules** — calculative 29, structural 62, judgmental 29, out-of-scope 15. Numeric-check (deterministic bookend): 29. Priya-validated: 0/135. Thresholds needing sign-off: 22.
 
 `exact_match` applies to structural rules only (true = deterministic-only, no AI; false = AI fuzzy entity match). `numeric_check` = the calculative bookend. `signoff` = a regulatory threshold Priya must sign off before ship. All rules are `priya_validated=false` until confirmed.
 
@@ -40,7 +40,7 @@ Generated from `backend/app/verification/rules/rule_kinds.csv` (the source of tr
 | PE-1 | Conventional eligibility | Program | calculative | deterministic_bookend+ai | true | — | false | true |
 | PE-3 | FHA minimum required investment | Program | calculative | deterministic_bookend | true | — | false | true |
 
-## structural (61)
+## structural (62)
 
 | rule_id | name | category | kind | evaluation_path | numeric | exact_match | validated | signoff |
 |---|---|---|---|---|---|---|---|---|
@@ -64,6 +64,7 @@ Generated from `backend/app/verification/rules/rule_kinds.csv` (the source of tr
 | IN-8 | VOE present | Income | structural | deterministic_only | false | true | false | false |
 | IN-9 | Future employment (offer letter) | Income | structural | deterministic_only | false | true | false | false |
 | IN-15 | Terminated employment documentation | Income | structural | deterministic_only | false | true | false | false |
+| IN-16 | Pay-stub-only documentation | Income | structural | deterministic_only | false | true | false | false |
 | AS-2 | Earnest money deposit sourcing | Assets | structural | ai_fuzzy_match | false | false | false | false |
 | AS-5 | Gift-fund documentation chain | Assets | structural | ai_fuzzy_match | false | false | false | false |
 | AS-6 | Account ownership | Assets | structural | ai_fuzzy_match | false | false | false | false |

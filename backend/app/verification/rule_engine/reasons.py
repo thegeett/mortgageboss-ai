@@ -72,6 +72,7 @@ _FACT_LABELS: dict[str, str] = {
     "asset.liquidation_terms": "account's liquidation terms",  # AS-11
     "income.is_self_employed": "self-employment income status",  # IN-12 (LP-423 — its applicability gate)
     "income.terminated_employment": "terminated-employment documentation status",  # IN-15 (LP-430)
+    "income.history_documentation": "income-history documentation basis",  # IN-16 (LP-433)
     "income.voe_present": "Verification of Employment",  # IN-8 (LP-428)
     "income.offer_letter_present": "employment offer letter",  # IN-9 (LP-428)
 }

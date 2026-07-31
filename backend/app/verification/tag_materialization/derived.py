@@ -1626,6 +1626,38 @@ def _income_terminated_employment_end_date(
     )
 
 
+def _income_history_documentation(
+    snapshot: Snapshot, subject_id: str, subject_raw: object
+) -> tuple[JsonValue, str]:
+    """income.history_documentation — LP-433: what documents evidence the borrower's income history? Priya's
+    B12 ruling — a 2-year history cannot rest on pay stubs alone; a W-2 or 1099 is required (the sibling of
+    IN-15's B14 check). A DETERMINISTIC document-type PRESENCE read (the IN-8/IN-9 discipline — the type label,
+    not extracted fields, so the unvalidated 1099 extractor does not narrow the ruling) over the borrower's
+    OWN attributed documents (belongs_to — a borrower's documents never speak for another's, LP-385). No AI, no
+    threshold. Option 1 (LP-432/LP-433 D1): fire on pay-stub-only, flagged for Priya (a VOE-documented borrower
+    with no W-2/1099 also fires — the over-fire the bar records)."""
+    if not isinstance(subject_raw, BorrowerSubject):
+        return (
+            _UNKNOWN,
+            "income-history documentation is a per-borrower recipe (needs a borrower subject)",
+        )
+    if snapshot.documents.absent:
+        return _UNKNOWN, f"borrower {subject_id}: no documents to read an income-history basis from"
+    types = {entry.document_type for entry in _borrower_attributed_documents(snapshot, subject_id)}
+    if types & {"w2", "1099"}:
+        return "w2_or_1099", (
+            f"borrower {subject_id}: a W-2 or 1099 is attributed — the two-year income history can be "
+            "established"
+        )
+    if "pay_stub" in types:
+        return "pay_stub_only", (
+            f"borrower {subject_id}: income is evidenced only by pay stubs (no W-2 or 1099 attributed)"
+        )
+    return "no_pay_stubs", (
+        f"borrower {subject_id}: no pay stubs attributed — no pay-stub-only history for this check"
+    )
+
+
 _RECIPES: dict[str, Recipe] = {
     "app_required_fields_present": _app_required_fields_present,
     # LP-323-IN-B — the income family's loan-level arithmetic (per-borrower granularity is deferred:
@@ -1670,6 +1702,8 @@ _RECIPES: dict[str, Recipe] = {
     # LP-430 — the terminated-employment documentation check (Priya's B14 separate standard).
     "income_terminated_employment": _income_terminated_employment,
     "income_terminated_employment_end_date": _income_terminated_employment_end_date,
+    # LP-433 — the pay-stub-only documentation check (Priya's B12 separate standard).
+    "income_history_documentation": _income_history_documentation,
     # LP-422 — the rental analog for IN-13: Schedule E presence OR income.type == "rental" -> a per-borrower
     # rental fact (the ADR-332 escape hatch — a fact substitutes for a judgment). Mirrors is_self_employed's
     # dual-signal shape (Schedule + income.type). Presence, not amount.

@@ -194,5 +194,6 @@ def test_no_rule_activation_changed() -> None:
             "IN-9",  # LP-428 — offer letter present (Priya signed off the 0.95 bar)
             "AS-6",  # LP-429 — account ownership (Priya signed off the 0.95 bar)
             "IN-15",  # LP-430 — terminated-employment documentation (no-ai-dependency, activated)
+            "IN-16",  # LP-433 — pay-stub-only documentation (no-ai-dependency; deterministic)
         )
     )

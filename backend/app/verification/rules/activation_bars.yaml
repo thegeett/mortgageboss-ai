@@ -631,6 +631,41 @@ IN-15:
     borrower is unemployed. OPEN (flagged for Priya): same-employer vs any-employer clearing pay stub; whether a
     VOE/offer letter also clears (she said "pay stub" — not broadened here).
 
+IN-16:
+  # LP-433 — Priya's B12 SEPARATE documentation check, the sibling of IN-15's B14 check: a 2-year history cannot
+  # rest on pay stubs alone — a W-2 or 1099 is required. DETERMINISTIC: it reads income.history_documentation
+  # (derived, per-borrower, from the DOCUMENT-TYPE PRESENCE of the borrower's attributed w2 / 1099 / pay_stub —
+  # the IN-8/IN-9 discipline, so the unvalidated 1099 extractor does not narrow the ruling to W-2-only) → NO AI
+  # load-bearing tag, NO threshold. So the AS-8 / IH-3 / IN-15 no-ai-dependency path — eligible on input_resolves
+  # alone (the ADR-334 escape hatch: a fact substitutes for a judgment, no calibration round). Structural →
+  # ships auto (LP-424 cross-check passes). The reason ASKS FOR THE DOCUMENT, never asserts a deficiency about
+  # the borrower.
+  status: no-ai-dependency
+  ships: auto
+  threshold: null
+  validated: false
+  input_resolves: true    # LP-433: resolves on build_pay_stub_only_snapshot — pay-stub-only FIRES (B1); a W-2
+                          # SATISFIES (B2); a 1099-no-W-2 SATISFIES (B3, the "or 1099" leg); a VOE-only borrower
+                          # → not_applicable (B4). Also confirmed on the income-scenario fixture's B12 (Priya's
+                          # labelled pay-stub-only borrower). (The IH-3/IN-15 pattern: a scenario fixture, not
+                          # base LF-6T3N, whose borrowers carry W-2s → satisfied there.)
+  load_bearing_ai_tags: []
+  fp_fn: >-
+    FP (a false "needs a W-2/1099" — the processor uploads / points to it) > FN (misses a pay-stub-only history).
+    A missing W-2/1099 is a FILE GAP surfaced for a human, low stakes.
+  rationale: >-
+    no AI load-bearing tag — income.history_documentation is DERIVED from the document-type PRESENCE of the
+    borrower's attributed w2 / 1099 / pay_stub (LP-385), a fact. NO threshold: Priya's B12 ruling is exact — "W-2
+    or 1099 is required to show 2 year history", pay stubs alone are insufficient. So the AS-8/IH-3/IN-15
+    no-ai-dependency path, eligible on input_resolves alone (the ADR-334 escape hatch — no calibration round).
+    The reason ASKS FOR THE DOCUMENT, never asserts the borrower cannot document their income (LP-430
+    discipline). ⚠️ OPTION 1 (LP-432/LP-433 D1, flagged for Priya): it fires on ANY borrower with pay stubs and
+    no W-2/1099 — including one documented ANOTHER way (e.g. a VOE) who is not relying on pay stubs for history
+    (an OVER-FIRE). Narrowing to Option 2 (gate on income.has_2yr_history) is a one-line applicability change,
+    but that makes it AI-dependent (inherits IN-11's calibration) — deferred to her confirmation. ⚠️ ALSO OPEN
+    for her: whether a VOE should ALSO satisfy (she said "W-2 or 1099" — NOT broadened here; a VOE-only borrower
+    is not_applicable, not satisfied).
+
 PC-3:
   # LP-407-4 — the LAST blocker-free rule (LP-415/LP-416 re-plan). It branches on the DERIVED
   # property.address_normalized_match (a deterministic contract-vs-MISMO subject-address compare using the
