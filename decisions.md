@@ -12872,3 +12872,55 @@ extractor-gated, the condo questionnaire gap), LP-424 item 4 (the missing proper
 ADR-333 (the extraction→snapshot boundary — a field must be typed-core to be rule-visible). The three sibling
 rules from Priya's B14-adjacent answers (IH-1 here; PE-1 an FHFA table; the pay-stub-only rule) each have their
 own ticket; LP-430 built the terminated-employment one.
+
+## ADR-341: The extractor generator emits validated flat schemas and REFUSES the rest — the structure is scriptable, the prose is not (LP-434)
+
+**Context.** `docs/schema-specs/` holds 108 JSON specs describing each document type's extraction schema;
+`_GENERATION_GUIDE.md` defines how a spec becomes code. LP-434 built the generator. Because every future extractor
+will be produced this way, a template error would propagate silently across ~98 types — so the contract, and the
+one place the guide is optimistic, are recorded here.
+
+**The decision — validate first, refuse loudly, generate only the flat/clean part.** The generator
+(`app/ai/extraction/generator/`) runs the guide's five §0 stop conditions BEFORE any emitter and refuses a spec
+outright — with reasons — rather than emitting partial or guessed code:
+(1) a blocking `open_questions` entry; (2) a field `type` with no coercer (`str`/`Decimal`/`date`/`int` only);
+(3) a `pii.kind` not in the live `PiiKind` enum (**DOB and ADDRESS do not exist today**); (4) **any** nested list
+(~5 bespoke files each, no generic mechanism); (5) a field with no `reason_class`. The valid PII kinds are read
+from the live enum, not hard-coded, so adding a kind (with its mask strategy) unblocks its specs with no edit to
+the validator. A passing spec emits the module, the prompt scaffold, the `EXTRACTORS` registration snippet, and
+the test skeleton. Review metadata (`why` / `reason_class` / `rejected` / `open_questions` / `rule_floor` /
+`plumbing_sites`) is NEVER emitted into code. A spec with a shipping `existing_extractor` produces a **diff-mode
+report** of the `exists_today: false` additions, never a module and never a patch (a bad patch to a shipping
+extractor is worse than a manual edit).
+
+**What it refuses is the point.** All ten of the top specs refuse — the CORRECT outcome, since they are
+nested-heavy by design. Notably **008-w2 refuses** (its `employee_address` carries `pii.kind: "ADDRESS"`,
+absent from `PiiKind`), correcting the LP-434 ticket's prediction that w2 would pass. `condo_questionnaire` is one
+resolved blocking question from generating; `w2`'s four non-address additions generate fine.
+
+**The round-trip is the proof.** A spec describing `property_tax_bill` as it ships (`existing_extractor: null`)
+generates a module whose `_CORE_SPEC` is **byte-identical** to the shipping one (same fields, same coercers,
+same imports, same function bodies); the ONLY differences are docstrings/comments. Pinned by two tests comparing
+the generated `_CORE_SPEC` and model field names/annotations against the live shipping module.
+
+**D2 — mechanism.** f-string templates normalized through ruff itself (`ruff check --fix --select I` +
+`ruff format`, via `--stdin-filename` so first-party `app` detection is correct). This is the simplest way to
+GUARANTEE byte-clean, import-sorted, ruff- and mypy-passing output for any field set, rather than hand-guessing
+where ruff wraps a long call for a long class prefix. ruff is a dev dependency, always present in-repo.
+
+**The D1 finding — the guide's §12 is slightly optimistic about uniformity.** Diffing two shipping flat modules,
+the *code* is near-identical (imports modulo the coercer line, the Result class, `.failed()`, the parse/extract
+bodies, the logging — all byte-identical modulo substituted names), BUT the module docstring, class docstrings,
+and inline field comments are **bespoke prose per module**. The generator therefore emits *neutral, honest*
+docstrings/comments — a "GENERATED STARTER — accuracy UNVALIDATED" banner — rather than imitating hand-written
+prose it cannot reconstruct from the spec. **The structure is scriptable; the prose (and accuracy) are not.** A
+generated extractor ships structurally correct and mechanically tested, tuned by a human prompt pass and Priya's
+review of real extractions — never presented as already tuned.
+
+**Consequences.** Sizing the 108 is guide §12: scripted generation for the flat/clean thin majority · ~15–20 real
+tickets for the nested / PII-heavy / new-coercer documents · a Priya validation pass over all. Adding a `PiiKind`
+(DOB/ADDRESS) with a genuine mask strategy unblocks six of the top ten at condition 3. Nested lists stay bespoke.
+
+**Cross-refs.** `docs/schema-specs/_GENERATION_GUIDE.md` (the authoritative contract), `_FORMAT.md` (the spec
+shape), ADR-333 (the extraction→snapshot boundary — a field must be typed-core to be rule-visible), ADR-340
+(the extractor-extension boundary that stopped IH-1), LP-62 (the flat-extractor fan-out this scales).

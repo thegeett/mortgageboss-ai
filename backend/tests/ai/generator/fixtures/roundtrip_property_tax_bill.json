@@ -1,0 +1,24 @@
+{
+  "document_type": "property_tax_bill",
+  "slug": "property-tax-bill-roundtrip",
+  "tier": 2,
+  "rules_served": ["DT-4", "RE-2"],
+  "summary_hint": "assessed owner, property address, assessed value, annual tax, due date(s), taxing authority",
+  "existing_extractor": null,
+  "catalog_coverage": "full",
+
+  "typed_core": [
+    {"name":"owner_name","type":"str","why":"the assessed owner named on the bill","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"the assessed owner(s) named on the bill"},
+    {"name":"property_address","type":"str","why":"the taxed property; matched subject-vs-other in Phase 3","rules":["RE-2"],"reason_class":"rule","rule_floor":false,"degraded_from":"address","pii":null,"exists_today":false,"prompt_hint":"the taxed property's address (capture it; do NOT decide which property it is)"},
+    {"name":"assessed_value","type":"Decimal","why":"DT-4 — the assessed / taxable value","rules":["DT-4"],"reason_class":"rule","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"the assessed / taxable value"},
+    {"name":"annual_tax_amount","type":"Decimal","why":"DT-4 — the housing-expense / DTI figure","rules":["DT-4"],"reason_class":"rule","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"the total annual property tax"},
+    {"name":"due_dates","type":"str","why":"a bill often has two installment due dates; capture verbatim","rules":["DT-4"],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"the due date(s) AS WRITTEN — often two installments; capture verbatim"},
+    {"name":"taxing_authority","type":"str","why":"DT-4 context — county / municipality / taxing body","rules":["DT-4"],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"the county / municipality / taxing body"}
+  ],
+
+  "nested_lists": [],
+  "rejected": [],
+  "encoding_variations": [],
+  "open_questions": [],
+  "notes": ["Round-trip fixture (LP-434): describes property_tax_bill as it ships today so the generated module can be diffed against app/ai/extraction/property_tax_bill.py. existing_extractor is null so a full module is generated."]
+}
