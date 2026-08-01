@@ -64,6 +64,7 @@ from app.models.loan_file import LoanFile
 from app.services.borrower_name_matching import BORROWER_NAME_FIELDS
 from app.verification.snapshot.content_id import (
     DOC_PREFIX,
+    LIST_PREFIX,
     TXN_PREFIX,
     assign_content_ids,
     unordered_fingerprint,
@@ -72,6 +73,7 @@ from app.verification.snapshot.fields import Field, FieldSource
 from app.verification.snapshot.model import (
     BorrowerRef,
     DocumentEntry,
+    ListRow,
     ScheduleCRecord,
     ScheduleEPropertyRecord,
     ScheduleERecord,
@@ -449,6 +451,164 @@ def _all_absent(*fields: Field) -> bool:
     return all(f.absent for f in fields)
 
 
+# --------------------------------------------------------------------------- #
+# LP-437 — the GENERIC nested-list mechanism (one build for all 66 lists).
+#
+# The bespoke path (transactions / schedule_c / schedule_e) is a record class + a
+# DocumentEntry attribute + a build_* reshaper PER list. This replaces that, for NEW
+# lists only, with ONE converter driven by a per-document-type ListSpec: each row's
+# fields are read with the SAME _typed_field the schedules use (the extractor already
+# coerced them at extraction time), then three DECLARABLE helpers apply — redact /
+# derived / stable_row_id. The three legacy attributes are untouched (live AS-1/IN-12/IN-13).
+#
+# The registry is EMPTY today: LP-438 (the generator + _FORMAT.md) emits the real
+# ListSpecs. With no specs, build_list_rows returns {} for every document, so every
+# DocumentEntry gets lists={} (present-empty) — additive, no rule/tag/extractor touched.
+# --------------------------------------------------------------------------- #
+
+_DERIVED = FieldSource.DERIVED
+
+
+@dataclass(frozen=True)
+class DerivedSpec:
+    """A DECLARED derived row field: map ``from_field``'s value → a new ``field`` (LP-437).
+
+    FAIL-CLOSED (D5): an UNMAPPED source value produces an ABSENT Field, never a fabricated
+    value — copying ``_direction``'s absent-on-unknown discipline (the forged-deposit guard).
+    """
+
+    field: str
+    from_field: str
+    mapping: dict[str, str]
+
+
+@dataclass(frozen=True)
+class ListSpec:
+    """One document type's declaration of a generic nested list (LP-437).
+
+    ``fields`` are the row's declared field names (read via ``_typed_field``, already coerced at
+    extraction time). ``derived`` adds computed fields (fail-closed). ``redact`` runs the shared
+    ``_DESC_REDACT`` over named fields. ``stable_row_id`` assigns a content-derived ``row_id`` per row
+    (only for a list whose rows a rule enumerates as subjects). Emitted by the generator (LP-438).
+    """
+
+    name: str
+    fields: tuple[str, ...]
+    derived: tuple[DerivedSpec, ...] = ()
+    redact: frozenset[str] = frozenset()
+    stable_row_id: bool = False
+
+
+# document_type → its declared lists. EMPTY until LP-438 emits real ListSpecs; every real
+# document therefore gets lists={} (present-empty), so nothing changes for any live rule.
+_LIST_SPECS: dict[str, tuple[ListSpec, ...]] = {}
+
+
+def _raw_scalar(row: dict[str, Any], field: str) -> Any:
+    """The raw stored value of a row field — the ``{"value": ...}`` inner value, or a bare value.
+
+    A derived helper reads its SOURCE from the raw extraction row (like ``_direction`` reads
+    ``transaction_type``), tolerant of both the typed ``{value, source, confidence}`` shape and a
+    bare scalar the extractor may store for a non-typed-core row field.
+    """
+    entry = row.get(field)
+    if isinstance(entry, dict):
+        return entry.get("value")
+    return entry
+
+
+def _derive_field(row: dict[str, Any], spec: DerivedSpec) -> Field:
+    """Map a source value to a new derived Field; ABSENT on an unmapped value (fail-closed, D5)."""
+    raw = _raw_scalar(row, spec.from_field)
+    if raw is None:
+        return Field.missing()
+    key = str(raw).strip().lower().replace(" ", "_")
+    mapped = spec.mapping.get(key)
+    if mapped is None:
+        return Field.missing()  # unmapped → absent, NEVER fabricated (the _direction discipline)
+    return Field.present(mapped, source=_DERIVED)
+
+
+def _redact_field(field: Field) -> Field:
+    """The field with any 9+-digit run redacted (the shared ``_DESC_REDACT``); non-str/absent unchanged."""
+    if field.absent or not isinstance(field.value, str):
+        return field
+    return field.model_copy(update={"value": _DESC_REDACT.sub(_REDACTED, field.value)})
+
+
+def _list_row_fields(row: dict[str, Any], spec: ListSpec) -> dict[str, Field]:
+    """One raw extraction row → its ``{name: Field}`` map (declared + derived + redacted)."""
+    fields: dict[str, Field] = {name: _typed_field(row.get(name)) for name in spec.fields}
+    for dspec in spec.derived:
+        fields[dspec.field] = _derive_field(row, dspec)
+    for name in spec.redact:
+        if name in fields:
+            fields[name] = _redact_field(fields[name])
+    return fields
+
+
+@dataclass(frozen=True)
+class _ListDraft:
+    """A list reshaped WITHOUT ids (pass 1) — rows' fields + content, plus whether row_ids are wanted."""
+
+    rows: tuple[dict[str, Field], ...]
+    contents: tuple[dict[str, Any], ...]
+    stable_row_id: bool
+
+
+def build_list_rows(extracted: dict[str, Any], document_type: str | None) -> dict[str, _ListDraft]:
+    """Reshape every declared generic list for a document (pass 1 — no ids yet), or ``{}``.
+
+    Mirrors ``transaction_field_sets``: pure read + reshape, ids assigned later once the parent
+    document's id is known. A fully-absent row is dropped (no hallucinated empty row — the schedule_c
+    discipline). ``{}`` when the document type declares no list (the common case today: the registry is
+    empty, so EVERY document gets ``{}`` → ``lists={}``)."""
+    specs = _LIST_SPECS.get(document_type or "", ())
+    drafts: dict[str, _ListDraft] = {}
+    for spec in specs:
+        raw = extracted.get(spec.name)
+        if not isinstance(raw, list):
+            continue
+        rows: list[dict[str, Field]] = []
+        contents: list[dict[str, Any]] = []
+        for row in raw:
+            if not isinstance(row, dict):
+                continue
+            fields = _list_row_fields(row, spec)
+            if all(f.absent for f in fields.values()):
+                continue  # nothing read → drop, never a fabricated empty row
+            rows.append(fields)
+            contents.append({name: fld.model_dump(mode="json") for name, fld in fields.items()})
+        if rows:
+            drafts[spec.name] = _ListDraft(tuple(rows), tuple(contents), spec.stable_row_id)
+    return drafts
+
+
+def finalize_lists(
+    drafts: dict[str, _ListDraft], *, document_content_id: str
+) -> dict[str, tuple[ListRow, ...]]:
+    """Assign stable ``row_id``s (pass 2, where the parent document id is known) → the final ``lists`` map.
+
+    A list declaring ``stable_row_id`` gets a content-derived id per row (scoped under the document id +
+    the list name, with the duplicate tiebreak — the ``build_transactions`` shape via the generic
+    ``assign_content_ids``); a list that does not is left ``row_id=None`` (aggregate-only, no per-row id).
+    """
+    out: dict[str, tuple[ListRow, ...]] = {}
+    for name, draft in drafts.items():
+        if draft.stable_row_id:
+            bases = [
+                {"doc": document_content_id, "list": name, **content} for content in draft.contents
+            ]
+            ids = assign_content_ids(LIST_PREFIX, bases)
+            out[name] = tuple(
+                ListRow(fields=fields, row_id=cid)
+                for fields, cid in zip(draft.rows, ids, strict=True)
+            )
+        else:
+            out[name] = tuple(ListRow(fields=fields) for fields in draft.rows)
+    return out
+
+
 def _document_base(
     document_type: str | None,
     refs: tuple[BorrowerRef, ...],
@@ -512,6 +672,9 @@ class _ReshapedDoc:
     # the id fingerprint — content_ids stay byte-identical).
     schedule_c: tuple[ScheduleCRecord, ...] | None
     schedule_e: ScheduleERecord | None
+    # LP-437 — generic list drafts (pass-1, pre-id), finalized with row_ids in pass 2. NOT folded
+    # into the document id fingerprint, so every existing document content_id stays byte-identical.
+    list_drafts: dict[str, _ListDraft]
 
 
 async def _reshape_and_assign_ids(
@@ -572,6 +735,7 @@ async def _reshape_and_assign_ids(
                 txn_contents,
                 build_schedule_c(extracted, document.document_type),
                 build_schedule_e(extracted, document.document_type),
+                build_list_rows(extracted, document.document_type),
             )
         )
 
@@ -611,6 +775,9 @@ async def build_documents_section(db: AsyncSession, loan_file: LoanFile) -> list
                 ),
                 schedule_c=d.schedule_c,  # LP-421 — None for every non-tax-return document
                 schedule_e=d.schedule_e,
+                lists=finalize_lists(
+                    d.list_drafts, document_content_id=doc_id
+                ),  # LP-437 — {} today
             )
         )
     return entries

@@ -44,6 +44,9 @@ _ID_LEN = 16
 # the module docstring). ``DOC`` scopes a document; ``TXN`` a transaction (under its doc).
 DOC_PREFIX = "doc"
 TXN_PREFIX = "txn"
+# LP-437 — one guard-safe letter prefix for EVERY generic list row (the list name is folded
+# into the hashed content, so rows across different lists never collide despite one prefix).
+LIST_PREFIX = "lst"
 
 
 def _canonical(payload: Any) -> str:

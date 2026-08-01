@@ -12957,3 +12957,57 @@ it. No rule moved; the 18 shipping extractors are byte-unchanged.
 
 **Cross-refs.** ADR-341 (the generator contract), `_GENERATION_GUIDE.md` §4/§12, `docs/tickets/LP-435.md` (the
 full validate table + roll-up), `docs/schema-specs/_WIRING_BACKLOG.md` (wiring + diff reports).
+
+## ADR-343: Generic nested lists — one mechanism for all 66, coexisting with the three bespoke attributes, and deliberately invisible to AI (LP-437)
+
+**Context.** 61 of 108 schema specs refuse on the nested-list stop condition; each list currently costs ~5 hand-
+written files (a snapshot record class + a `DocumentEntry` attribute + a `build_*` reshaper, per LP-421/ADR-061),
+i.e. ~330 edits. LP-436 investigated whether the plumbing can be generic and found it can, because the reason the
+bespoke path looked unavoidable does not hold: **there is no executable path resolver.** `snapshot_path` in a rule
+spec is `snapshot_path: str` documentation (specs.py) — never parsed — and real consumption is a Python attribute
+read (`all_transactions` reads `entry.transactions`; a derived recipe reads `entry.schedule_c`). LP-437 builds the
+generic mechanism.
+
+**The decision — one additive generic channel, driven by a per-list declaration.** `DocumentEntry` gains
+`lists: dict[str, tuple[ListRow, ...]] = {}`, where `ListRow.fields` is the same `{name: Field}` map a document's
+flat `fields` uses. One converter (`build_list_rows` + `finalize_lists` in documents_section.py) reshapes every
+declared list for a document, reading each row field with the SAME `_typed_field` the schedules use (the extractor
+already coerced values at extraction time; the snapshot-time step is a read, not a re-coercion). A per-document-type
+`ListSpec` (name + declared field names + three helper declarations) drives it; the registry `_LIST_SPECS` is EMPTY
+today (LP-438 emits the real specs), so every real document gets `lists={}` — nothing changes for any live rule. A
+generic reader `all_list_rows(snapshot, name)` mirrors `all_transactions` so a consumer reads
+`entry.lists.get(name, ())` through one helper.
+
+**Why generic here where bespoke was needed before.** Nothing is lost relative to a bespoke list: a row `Field`
+carries value + confidence + provenance `source`, exactly what a `TransactionRecord`/`ScheduleCRecord` field carries
+(page/snippet are not in the snapshot `Field` for ANY field — flat, transaction, or schedule — so the generic list
+matches the bespoke fidelity). Because consumption is a plain attribute read and there is no resolver to teach a new
+grammar, the storage side (record class + attribute + reshaper) collapses to one build + a declaration; only the
+consumer (a rule enumerator or a derived recipe) stays per-list, which is the rule's own logic.
+
+**Coexist, do NOT migrate (a STOP, not a refactor).** `transactions` feeds live AS-1; `schedule_c` feeds live
+IN-12; `schedule_e` feeds IN-13. The three bespoke attributes are left byte-unchanged; `lists` is for the 66 NEW
+lists only. Migrating a live-rule attribute is out of scope by construction.
+
+**No `SNAPSHOT_VERSION` bump (the LP-421 precedent exactly).** `lists` is additive with a default, so the committed
+v4 golden fixture (which carries no `lists` key) still validates — the default fills it. Bumping is the failure mode
+LP-421 already paid for (74 failures from the strict version validator rejecting the committed fixture). Verified: no
+test byte-compares a snapshot to the fixture; the fixture loads via tolerant `model_validate`.
+
+**The three declarable helpers and the fail-closed contract.** `redact` runs the shared `_DESC_REDACT`
+(`\d(?:[\s-]?\d){8,}`) over named fields (zero new logic). `stable_row_id` calls the already-generic
+`assign_content_ids` with one guard-safe `lst` prefix (the list name folded into the hashed content). `derived` maps
+a source value to a new field and **MUST fail closed: an unmapped value produces an ABSENT Field, never a fabricated
+value** — copying `_direction`'s absent-on-unknown discipline, the guard that stops a forged deposit tripping AS-1.
+Tested explicitly (`test_derived_is_fail_closed_absent_on_unknown`).
+
+**The deliberate boundary — list data is INVISIBLE to AI reasoning.** `subjects.py::_doc_context` /
+`_borrower_context` build the AI context from `DocumentEntry.fields` only; `lists` (like the catch-all) is not sent.
+This is the exact boundary that made the homeowners-insurance catch-all unreachable and killed IH-1 (LP-431). It is
+a KNOWN, deliberate, SEPARATE decision (LP-436 step 8) — this ticket does not change it; deterministic
+`snapshot_path`-style enumerators and derived recipes reach list data, AI reasoners do not until a future ticket
+teaches the context builders to emit rows (opt-in + row cap, because a 20-tradeline row set is a real token cost).
+
+**Cross-refs.** LP-436 (`docs/tickets/LP-436.md`, the investigation), ADR-061 (the first-class typed-path pattern
+the three bespoke lists follow), LP-421 (the additive-no-bump precedent), ADR-248 (the transaction redaction/direction
+discipline), ADR-251 (content-ids). LP-438 adds the `_FORMAT.md` list declaration + the generator emitting `ListSpec`s.

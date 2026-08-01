@@ -7,7 +7,7 @@ copy-pasted per stage. No mutation, no DB, no AI.
 from __future__ import annotations
 
 from app.verification.snapshot.fields import Field
-from app.verification.snapshot.model import Snapshot, TransactionRecord
+from app.verification.snapshot.model import ListRow, Snapshot, TransactionRecord
 
 
 def field_value(field: Field) -> object:
@@ -27,3 +27,15 @@ def all_transactions(snapshot: Snapshot) -> list[TransactionRecord]:
     if snapshot.documents.absent:
         return []
     return [txn for entry in snapshot.documents.entries for txn in (entry.transactions or ())]
+
+
+def all_list_rows(snapshot: Snapshot, list_name: str) -> list[ListRow]:
+    """Every row of the named GENERIC list across the snapshot's documents (LP-437), in order.
+
+    The generic counterpart to :func:`all_transactions` — a derived recipe or a per-row enumerator
+    reads ``entry.lists.get(list_name, ())`` cleanly through this one helper, never reaching into the
+    dict per consumer. Empty when the documents section is absent or no document carries the list.
+    """
+    if snapshot.documents.absent:
+        return []
+    return [row for entry in snapshot.documents.entries for row in entry.lists.get(list_name, ())]
