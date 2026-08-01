@@ -1,0 +1,75 @@
+{
+  "document_type": "property_tax_bill_non_subject",
+  "slug": "property-tax-bill-non-subject",
+  "tier": 3,
+  "rules_served": [],
+  "summary_hint": "taxing authority, parcel, tax year, total due and balance/delinquency for a NON-subject property",
+  "existing_extractor": null,
+  "catalog_coverage": "full",
+
+  "typed_core": [
+    {"name":"document_title","type":"str","why":"processor — distinguishes bill/statement type","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"taxing_authority","type":"str","why":"identity — CORE; who levies the tax","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"entity","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"property_address","type":"str","why":"identity — CORE; the taxed property","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"parcel_or_apn","type":"str","why":"identity — CORE; the parcel match key","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"taxpayer_name","type":"str","why":"identity — CORE; taxpayer/owner of record (ownership match)","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"taxpayer_name_2","type":"str","why":"identity — second taxpayer/owner","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"taxpayer_count","type":"int","why":"disambiguator — guards the taxpayer-name split","rules":[],"reason_class":"disambiguator","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"tax_bill_or_account_number","type":"str","why":"identity/processor — the bill/account reference for follow-up","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"tax_year","type":"int","why":"identity/disambiguator — CORE; the year every amount below belongs to (amounts are unreadable without it)","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"Every dollar amount on a tax bill is tied to a tax year — always populate tax_year alongside them"},
+    {"name":"total_assessed_value","type":"Decimal","why":"processor — CORE; assessed value","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"taxable_value","type":"Decimal","why":"processor — taxable value after exemptions","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"base_tax_amount","type":"Decimal","why":"processor — CORE; base levy","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"total_tax_due","type":"Decimal","why":"processor — CORE; headline amount owed for the year","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"penalties_and_interest","type":"Decimal","why":"processor — delinquency cost accrued","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"current_balance","type":"Decimal","why":"processor — CORE; amount still owed (unpaid taxes = potential lien)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"delinquent_or_lien_status","type":"str","why":"identity/processor — CORE; delinquent/lien status is the title-risk headline","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":"Do NOT compute delinquency — extract the printed status/notice; the tag layer judges lien risk"},
+    {"name":"legal_description","type":"str","why":"disambiguator — confirms the parcel behind the APN","rules":[],"reason_class":"disambiguator","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"subject_property_indicator","type":"str","why":"identity — CORE; classifies this as NON-subject","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"bool","pii":null,"exists_today":false,"prompt_hint":"Fixed FALSE for this class, but extract the printed indicator rather than assuming"},
+    {"name":"loan_number","type":"str","why":"identity — links the bill to the loan file","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null}
+  ],
+
+  "nested_lists": [
+    {
+      "name":"installments_and_due_dates","shape":"flat_row",
+      "shape_reason":"installments genuinely repeat (typically 2, occasionally 4) and a processor checks which are paid/due; a flat row (installment label + amount + due date + paid indicator) is tiny against the 16,384-token ceiling",
+      "expected_item_count":"2 (occasionally 4 or 1)","rules":[],
+      "exists_today":false,"plumbing_sites":5,
+      "fields":[
+        {"name":"installment_label","type":"str","why":"processor — which installment this row is"},
+        {"name":"amount","type":"Decimal","why":"processor — installment amount"},
+        {"name":"due_date","type":"date","why":"processor — when the installment is due"},
+        {"name":"paid_indicator","type":"str","why":"processor — whether this installment is paid/due"}
+      ]
+    }
+  ],
+
+  "rejected": [
+    {"name":"party_names / party_addresses","reason":"duplicate taxpayer_or_owner_names"},
+    {"name":"assessment_period","reason":"duplicates tax_year as the amount disambiguator"},
+    {"name":"assessed_land_value / assessed_improvement_value","reason":"detail; total_assessed_value suffices"},
+    {"name":"exemptions_or_credits","reason":"object[]; detail with no consumer, stays in catch-all"},
+    {"name":"tax_rates_or_millage","reason":"object[]; millage detail, no consumer"},
+    {"name":"special_assessments_or_charges","reason":"object[]; detail; total_tax_due/current_balance capture the net"},
+    {"name":"payments_and_paid_dates","reason":"object[]; current_balance + installment paid flags capture payment state"},
+    {"name":"issuer_name / issuer_address / phone / email","reason":"duplicate taxing_authority"},
+    {"name":"signature_blocks / notary_block","reason":"a tax bill is not executed"},
+    {"name":"form_number / effective / expiration / statement period","reason":"not a standardized form; no consumer"}
+  ],
+
+  "encoding_variations": [
+    "Delinquency is stated as 'PAID,' 'CURRENT,' 'DELINQUENT,' 'PRIOR YEAR DUE,' or a tax-lien/sale notice — capture the printed status verbatim into delinquent_or_lien_status",
+    "Tax year vs fiscal/assessment period differ by jurisdiction ('FY 2025-26'); tax_year disambiguates the amounts",
+    "'Total due' may be annual or per-installment — keep the annual total_tax_due distinct from installment amounts"
+  ],
+
+  "open_questions": [
+    {"id":1,"q":"Flatten installments vs nested list.","options":["nested flat-row list (drafted) — safe for any count","flatten to installment_1_* / installment_2_* fields"],"recommendation":"(a) nested — avoids losing a 4-installment bill, and the list is cheap","blocks_implementation":true},
+    {"id":2,"q":"Non-subject tax bill's purpose.","options":[],"recommendation":"Its value is confirming other-real-estate carrying costs and surfacing tax liens; if a rule is later built to net property tax into DTI, total_tax_due + tax_year are ready. No action now","blocks_implementation":false}
+  ],
+
+  "notes": [
+    "No rules read this document today (rule_count 0); there is no rule floor. This bill covers a non-subject property (other real estate owned). Fields earn a place by identity, disambiguation, or processor use — especially delinquency/lien status.",
+    "No restricted fields on this doc. tax_bill_or_account_number is standard sensitivity → identity field, not registry PII. No _PII_FIELDS additions."
+  ]
+}

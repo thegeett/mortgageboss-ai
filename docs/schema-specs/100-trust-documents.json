@@ -1,0 +1,79 @@
+{
+  "document_type": "trust_documents",
+  "slug": "trust-documents",
+  "tier": 3,
+  "rules_served": [],
+  "summary_hint": "Tells a processor which trust document this is, which trust, who the current trustees are, and whether they may borrow and encumber.",
+  "existing_extractor": null,
+  "catalog_coverage": "full",
+
+  "typed_core": [
+    {"name":"document_title","type":"str","why":"identity — confirms the specific instrument","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"issuer_name","type":"str","why":"identity/source — preparing party (often counsel)","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"trust_document_subtype","type":"str","why":"identity/disambiguator — certification vs amendment vs restatement drives what it proves (degraded from enum)","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"trust_name","type":"str","why":"identity — the trust the loan vests into","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"original_trust_date","type":"date","why":"identity/disambiguator — anchors which underlying trust","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"document_execution_date","type":"date","why":"recency — when this instrument was executed; which version is operative","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"amendment_number","type":"str","why":"disambiguator — which amendment in sequence, when this is an amendment","rules":[],"reason_class":"disambiguator","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"supersedes_or_modifies_sections","type":"str","why":"processor — what an amendment changes (degraded/joined from string[])","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"object","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"current_trustee_name","type":"str","why":"identity — who can currently act for the trust; match to borrower (flattened from person[])","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"object","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"current_trustee_name_2","type":"str","why":"identity — second current trustee","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"current_trustee_count","type":"int","why":"disambiguator — number of current trustees / co-trustee acting requirement","rules":[],"reason_class":"disambiguator","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"former_or_removed_trustee_name","type":"str","why":"processor — a removed/former trustee, so stale authority is visible (flattened from person[])","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"object","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"successor_trustee_event","type":"str","why":"processor — the event that elevates a successor trustee","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"trust_revocability_status","type":"str","why":"processor — revocable vs irrevocable headline (degraded from enum)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"trustee_borrowing_authority","type":"str","why":"processor — headline authority: may the trustee incur debt (degraded from bool)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"bool","pii":null,"exists_today":false,"prompt_hint":"Record authority flags null when silent; do not infer"},
+    {"name":"trustee_mortgage_authority","type":"str","why":"processor — headline authority: may the trustee pledge real property (degraded from bool)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"bool","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"beneficial_interest_summary","type":"str","why":"processor — who holds beneficial interest (borrower-in-trust context)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"certification_current_and_unamended","type":"str","why":"processor — headline for a certification: trust is current and unamended (degraded from bool)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"bool","pii":null,"exists_today":false,"prompt_hint":"false (or a listed amendment) means the certification cannot be relied on alone"},
+    {"name":"property_address","type":"str","why":"identity/linkage — subject property tied to the trust, when stated (degraded from address)","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"address","pii":null,"exists_today":false,"prompt_hint":null}
+  ],
+
+  "nested_lists": [
+    {
+      "name":"authorized_signer_names_and_capacity","shape":"flat_row",
+      "shape_reason":"the authorized signers and their capacities genuinely repeat (a handful) and are decision-relevant — they are who may sign the mortgage on the trust's behalf; flat rows with one source each are token-safe",
+      "expected_item_count":"a handful","rules":[],
+      "exists_today":false,"plumbing_sites":5,
+      "fields":[
+        {"name":"name","type":"str","why":"processor — the authorized signer"},
+        {"name":"capacity","type":"str","why":"processor — the capacity in which they sign (co-trustee, power of attorney)"},
+        {"name":"signature_present","type":"str","why":"processor — whether the signer executed the instrument"}
+      ]
+    }
+  ],
+
+  "rejected": [
+    {"name":"the 8 TECHNICAL provenance fields","reason":"already in the TypedField wrapper"},
+    {"name":"form_number, form_revision_date, document_status_or_version","reason":"not a numbered/versioned form; subtype covers the distinction"},
+    {"name":"issuer_address, issuer_phone, issuer_email_or_url","reason":"preparer contact; no consumer"},
+    {"name":"document_issue_date, effective_date, expiration_date, statement_period_start/_end","reason":"duplicate/derive from document_execution_date; no statement period"},
+    {"name":"party_names, party_addresses","reason":"duplicate the flattened trustee/signer fields"},
+    {"name":"loan_number, account_case_reference_number","reason":"rarely on the instrument"},
+    {"name":"signature_blocks, notary_block, notary_acknowledgment","reason":"signature presence captured in the signer list; full notary block low-value"},
+    {"name":"signatures (signature[])","reason":"folded into authorized_signer_names_and_capacity (which carries a signature-present column)"},
+    {"name":"recording_information","reason":"OPTIONAL; no consumer for a certification/amendment"},
+    {"name":"property_or_asset_references","reason":"genuinely repeats but not decision-critical; see Open questions"}
+  ],
+
+  "encoding_variations": [
+    "Subtype varies: 'Certification of Trust', 'Certificate of Trust', 'First Amendment to…', 'Amended and Restated…' — trust_document_subtype beside document_title disambiguates what the instrument proves",
+    "A certification abstracts the full trust: it asserts powers (borrow/mortgage) rather than granting them — capture the asserted authority flags with certification_current_and_unamended beside them, since a certification's value depends on it being current",
+    "Original trust date vs this document's execution date frequently differ (an amendment years later) — both anchor the correct trust and version",
+    "Successor-trustee triggers stated as events (death/incapacity/resignation) — capture verbatim"
+  ],
+
+  "open_questions": [
+    {"id":1,"q":"Which repeating list to keep. Chose authorized_signer_names_and_capacity (who may sign the mortgage) over property_or_asset_references.","options":["authorized_signer_names_and_capacity","property_or_asset_references (or a second list)"],"recommendation":"authorized_signer_names_and_capacity is the higher-value list; if asset/property linkage is needed, flag whether a second list is warranted (exceeds the one-list budget)","blocks_implementation":true},
+    {"id":2,"q":"Certification vs full agreement overlap. This type overlaps packet 099.","options":["keep both schemas distinct","merge"],"recommendation":"keep both distinct — a certification asserts, an agreement grants; note the classifier must reliably separate them","blocks_implementation":false},
+    {"id":3,"q":"Authority flags degraded to str, null-when-silent. No bool coercer.","options":["str with null-when-silent","typed bool"],"recommendation":"confirm downstream distinguishes null from 'No', and that a certification's asserted authority is treated as weaker evidence than the agreement's granting clause","blocks_implementation":false}
+  ],
+
+  "notes": [
+    "This is often a Certification of Trust — an abstract that asserts trustee authority — distinct from the full agreement (packet 099); the authority flags reflect what is certified, not the granting clause.",
+    "Capture the current trustees and the authorized signers separately (a signer may act under a power of attorney or as co-trustee).",
+    "Record authority flags null when silent; do not infer.",
+    "No PII requiring registration — a certification/amendment typically omits the trust TIN; if a given instrument prints the trust TIN, register it as in packet 099 (tax_identification_number_masked, pre_masked true).",
+    "Ambiguity: document_execution_date is tagged 'recency' (not one of the five reason classes); mapped to reason_class 'processor' (freshness/which-version-is-operative is a processor-facing concern)."
+  ]
+}

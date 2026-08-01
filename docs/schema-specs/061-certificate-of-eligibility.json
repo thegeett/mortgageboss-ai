@@ -1,0 +1,78 @@
+{
+  "document_type": "certificate_of_eligibility",
+  "slug": "certificate-of-eligibility",
+  "tier": 3,
+  "rules_served": [],
+  "summary_hint": "VA COE for {veteran name}, entitlement code {code}, {available_entitlement_amount} available, funding fee {exempt/not exempt}, issued {coe_issue_date}.",
+  "existing_extractor": null,
+  "catalog_coverage": "full",
+
+  "typed_core": [
+    {"name":"issuer_name","type":"str","why":"identity — source is VA / a Regional Loan Center; authenticity check","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"regional_loan_center_or_issuer","type":"str","why":"disambiguator for issuer_name (which VA RLC issued it)","rules":[],"reason_class":"disambiguator","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"veteran_or_service_member_name","type":"str","why":"identity — whose eligibility this is (flattened from person)","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"social_security_number_masked","type":"str","why":"PII — attaches COE to the borrower; last-4 identity match","rules":[],"reason_class":"pii","rule_floor":false,"degraded_from":null,"pii":{"kind":"SSN","pre_masked":true},"exists_today":false,"prompt_hint":"SSN on a COE is normally masked to last-4 — extract as printed; never infer full digits"},
+    {"name":"va_file_or_loan_number","type":"str","why":"identity — the VA-side cross-document key","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"coe_status","type":"str","why":"processor — is the certificate valid/active","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"coe_issue_date","type":"date","why":"identity — which issuance of the COE","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"entitlement_code","type":"str","why":"processor — entitlement category drives eligibility interpretation","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"'Entitlement code' is a two-digit VA code — extract verbatim, do not interpret"},
+    {"name":"basic_entitlement_amount","type":"Decimal","why":"processor — entitlement math","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"available_entitlement_amount","type":"Decimal","why":"processor — the headline number for loan sizing / second-tier entitlement","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"funding_fee_exempt_indicator","type":"str","why":"processor — whether the VA funding fee applies","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"bool","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"funding_fee_exemption_reason","type":"str","why":"disambiguator for the exempt indicator (why exempt: disability, Purple Heart)","rules":[],"reason_class":"disambiguator","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"disability_compensation_status","type":"str","why":"processor — corroborates funding-fee exemption","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"restoration_status","type":"str","why":"processor — whether prior entitlement was restored","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"minimum_service_requirement_met","type":"str","why":"processor — service-eligibility flag","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"bool","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"branch_of_service","type":"str","why":"identity/processor — which branch","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"service_status","type":"str","why":"processor — active / veteran / reserve","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"surviving_spouse_indicator","type":"str","why":"processor — surviving-spouse eligibility path","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"bool","pii":null,"exists_today":false,"prompt_hint":null}
+  ],
+
+  "nested_lists": [
+    {
+      "name":"prior_va_loan_or_entitlement_charges","shape":"flat_row",
+      "shape_reason":"a COE lists prior VA loans that charged entitlement; count is small (typically 0-4), so a flat row per prior loan is cheap and well under the 16,384 ceiling. Serves no rule today; retained for processor entitlement math",
+      "expected_item_count":"0-4","rules":[],
+      "exists_today":false,"plumbing_sites":5,
+      "fields":[
+        {"name":"prior_loan_reference","type":"str","why":"identifies the prior VA loan that charged entitlement"},
+        {"name":"entitlement_amount_charged","type":"Decimal","why":"the entitlement amount charged by the prior loan; feeds remaining-entitlement math"},
+        {"name":"prior_loan_status","type":"str","why":"paid-in-full / active — bears on whether entitlement was restored"}
+      ]
+    }
+  ],
+
+  "rejected": [
+    {"name":"document_title, form_number, form_revision_date","reason":"not load-bearing; catch-all suffices"},
+    {"name":"issuer_address, issuer_phone, issuer_email_or_url","reason":"no consumer; verification not rule-driven"},
+    {"name":"document_issue_date, effective_date, expiration_date","reason":"duplicate coe_issue_date; a COE has no closing-relevant expiration"},
+    {"name":"statement_period_start/end","reason":"not a statement"},
+    {"name":"party_names, party_addresses","reason":"veteran is captured by veteran_or_service_member_name"},
+    {"name":"property_address, loan_number, account_case_reference_number","reason":"a COE is not property- or loan-specific"},
+    {"name":"signature_blocks, notary_block","reason":"a COE is system-issued, not executed"},
+    {"name":"document_status_or_version","reason":"duplicates coe_status"},
+    {"name":"coe_conditions_or_notes","reason":"free text -> catch-all"},
+    {"name":"service_dates (date_range[])","reason":"no coercer for date_range; low value; catch-all"}
+  ],
+
+  "encoding_variations": [
+    "Entitlement is stated as a code (e.g. '05', '10') that maps to an entitlement category — the code alone is meaningless without the VA code table; keep entitlement_code verbatim.",
+    "Funding-fee exemption appears three ways: an explicit exempt flag, a prose reason ('exempt — service-connected disability'), or a disability rating implying exemption. Keep both funding_fee_exempt_indicator and funding_fee_exemption_reason so a bare flag is trusted.",
+    "Entitlement amounts may be printed as '$36,000 basic' plus a bonus/second-tier figure — capture basic and available separately."
+  ],
+
+  "open_questions": [
+    {"id":1,"q":"prior_va_loan_or_entitlement_charges shape. Item count is small but unbounded.","options":["flat-row nested list","drop to catch-all"],"recommendation":"flat-row — a processor computing remaining entitlement needs it structured, and cost is low","blocks_implementation":true},
+    {"id":2,"q":"Is a COE ever consumed by a rule? Today zero rules. If a future VA-eligibility rule lands, available_entitlement_amount and funding_fee_exempt_indicator become the floor.","options":["zero rules today","future VA-eligibility rule"],"recommendation":"they are already promoted, so no re-extraction needed. Confirm with domain expert","blocks_implementation":false},
+    {"id":3,"q":"va_file_or_loan_number PII class. Confidential but not SSN-class. Register in _PII_FIELDS or leave as a plain typed field?","options":["register in _PII_FIELDS","plain typed field, flagged"],"recommendation":"plain typed field, flagged","blocks_implementation":true}
+  ],
+
+  "notes": [
+    "No rules read this document today, so there is no rule floor. The VA Certificate of Eligibility is the gating document for a VA loan: it establishes the veteran, their entitlement, and whether the funding fee applies.",
+    "social_security_number_masked needs _PII_FIELDS registration, pre_masked true (COE prints last-4 only). Not in the current 7-field registry.",
+    "va_file_or_loan_number is a confidential identifier — treat as a typed field (not catch-all) but not SSN-class PII; flag for review rather than auto-registering.",
+    "Prompt hint (doc-level): tell the model this is a VA Form 26-8320 / 26-8320a class document; issuer is the Department of Veterans Affairs, not a private lender.",
+    "The nested list prior_va_loan_or_entitlement_charges fields (prior_loan_reference, entitlement_amount_charged, prior_loan_status) are inferred — the design doc describes the list in prose but does not enumerate its fields.",
+    "Ambiguity: va_file_or_loan_number PII class is unresolved (Open question 3) — carried as reason_class identity with pii null, pending the register-or-plain decision."
+  ]
+}

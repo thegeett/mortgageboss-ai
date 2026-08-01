@@ -1,0 +1,84 @@
+{
+  "document_type": "business_federal_tax_returns",
+  "slug": "business-federal-tax-returns",
+  "tier": 3,
+  "rules_served": [],
+  "summary_hint": "<Form type> for <business legal name> (EIN ..<last4>), tax year <year>: gross receipts $<x>, ordinary/taxable income $<y>; borrower owns <ownership %>.",
+  "existing_extractor": null,
+  "catalog_coverage": "full",
+
+  "typed_core": [
+    {"name":"return_form_type","type":"str","why":"identity/disambiguator — 1065 vs 1120 vs 1120S drives which income figure applies","rules":[],"reason_class":"disambiguator","rule_floor":false,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"tax_period_start","type":"date","why":"identity/disambiguator — the tax year beside every figure (flattened from date_range)","rules":[],"reason_class":"disambiguator","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"tax_period_end","type":"date","why":"identity/disambiguator — fiscal vs calendar year end (flattened from date_range)","rules":[],"reason_class":"disambiguator","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"business_legal_name","type":"str","why":"identity — whose return (flattened from entity)","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"ein","type":"str","why":"PII (restricted, raw) — the business tax ID; must be typed, never catch-all","rules":[],"reason_class":"pii","rule_floor":false,"degraded_from":null,"pii":{"kind":"EIN","pre_masked":false},"exists_today":false,"prompt_hint":null},
+    {"name":"business_address","type":"str","why":"identity/linkage — where the business operates (flattened from address)","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"address","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"entity_type","type":"str","why":"processor — entity form drives income treatment","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"accounting_method","type":"str","why":"processor — cash vs accrual affects income analysis","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"initial_final_or_amended_return","type":"str","why":"processor — a 'final' return signals the business closed (income risk)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"date_business_started_or_incorporated","type":"date","why":"processor — 2-year self-employment history","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"principal_business_activity","type":"str","why":"identity/processor — nature of the business (flattened from object)","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"object","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"naics_or_activity_code","type":"str","why":"disambiguator — the IRS activity code beside the activity description (flattened from object)","rules":[],"reason_class":"disambiguator","rule_floor":false,"degraded_from":"object","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"gross_receipts_or_sales","type":"Decimal","why":"processor — top-line revenue","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"gross_profit","type":"Decimal","why":"processor — revenue after COGS","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"ordinary_or_taxable_income","type":"Decimal","why":"processor — the key income figure for qualifying","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"depreciation_and_amortization","type":"Decimal","why":"processor — standard cash-flow add-back","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"depletion","type":"Decimal","why":"processor — standard cash-flow add-back","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"guaranteed_payments","type":"Decimal","why":"processor — partner compensation counted as income","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"distributions_or_dividends","type":"Decimal","why":"processor — cash actually paid to the owner","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"retained_earnings_or_capital","type":"Decimal","why":"processor — business liquidity/trend","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"authorized_signer_name_title","type":"str","why":"execution/identity — who signed and their role","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"signature_date","type":"date","why":"execution — signed/filed date","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"paid_preparer_name","type":"str","why":"source — the preparer's independence (flattened from object)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null}
+  ],
+
+  "nested_lists": [
+    {
+      "name":"owner_partner_shareholder_records","shape":"per_field_wrapped",
+      "shape_reason":"per-field wrapping (heavy) is affordable because owner counts are small (typically 1-5); each record needs name + ownership % + distribution/K-1 share, and the ownership % is what attributes income to the borrower. Mirrors the tax_return.schedule_c precedent",
+      "expected_item_count":"1-5","rules":[],
+      "exists_today":false,"plumbing_sites":5,
+      "fields":[
+        {"name":"owner_name","type":"str","why":"attributes business income to the named owner"},
+        {"name":"ownership_percentage","type":"str","why":"the ownership % that attributes income to the borrower (percent, no coercer, kept as string)"},
+        {"name":"distribution_or_k1_share","type":"Decimal","why":"the distribution / K-1 income share paid to the owner"}
+      ]
+    }
+  ],
+
+  "rejected": [
+    {"name":"the 8 TECHNICAL provenance fields","reason":"already in the TypedField wrapper"},
+    {"name":"party_names / party_addresses","reason":"generic; superseded by typed business/owner fields"},
+    {"name":"returns_allowances_and_cogs","reason":"components of gross profit already captured; catch-all suffices"},
+    {"name":"other_income, meals_and_nonrecurring_expenses, officer_or_owner_compensation","reason":"candidate lists deferred — budget one list, zero rules; top-line add-backs captured as scalars"},
+    {"name":"expense_line_items, balance_sheet_assets, balance_sheet_liabilities_and_equity, cash_and_notes_payable, schedule_k_and_k1_summary","reason":"additional candidate lists deferred"},
+    {"name":"attached_schedules_and_forms","reason":"inventory list; no consumer"},
+    {"name":"property_address, loan_number","reason":"not on a business return face"},
+    {"name":"issuer_name, issuer_address, issuer_phone, issuer_email_or_url, form_number, form_revision_date","reason":"the return is self-identifying via return_form_type"},
+    {"name":"document_issue_date, effective_date, expiration_date, statement_period_start/end","reason":"duplicate the tax period"},
+    {"name":"document_title, document_status_or_version, signature_blocks, notary_block, paid_preparer_information (full object)","reason":"execution/identity detail beyond the flattened fields kept"}
+  ],
+
+  "encoding_variations": [
+    "The 'income' figure differs by form: 1065 line 'Ordinary business income', 1120S the same, 1120 'Taxable income' — return_form_type beside ordinary_or_taxable_income is the required disambiguator.",
+    "Fiscal-year filers state a period, not a calendar year; keep tax_period_start/_end rather than a single year so a fiscal year is unambiguous.",
+    "Add-backs appear on different lines/schedules (Form 8825, Schedule L, Form 4562); capture the top-line figure and let the snippet show its origin."
+  ],
+
+  "open_questions": [
+    {"id":1,"q":"Which nested list — owner_partner_shareholder_records (chosen, for income attribution) vs expense_line_items (for add-back detail) vs schedule_k_and_k1_summary. Only one fits the budget with zero rules.","options":["owner_partner_shareholder_records","expense_line_items","schedule_k_and_k1_summary"],"recommendation":"keep owner records (attributes income to the borrower); revisit when a self-employed-income rule specifies exactly which schedule it reads","blocks_implementation":true},
+    {"id":2,"q":"List shape — per-field-wrapped chosen on the assumption of few owners. If a return can carry many shareholders, switch to flat-row to protect the 16,384-token ceiling.","options":["per-field-wrapped","flat-row"],"recommendation":"flag item-count uncertainty; default to per-field-wrapped for typical 1-5 owners","blocks_implementation":true},
+    {"id":3,"q":"Add-backs as scalars vs list — depreciation/depletion/guaranteed-payments are kept as scalar top-line figures rather than in a list.","options":["scalar top-line figures","full expense list"],"recommendation":"acceptable for zero rules; a cash-flow rule may later want the full expense list","blocks_implementation":true}
+  ],
+
+  "notes": [
+    "No rules read this document today, so there is no rule floor. This is the deepest of the eight but still Tier 3 — depth is capped at the figures a processor reads off the face of the return.",
+    "ein is the raw EIN (pre_masked false) and needs _PII_FIELDS registration; the snapshot masks it and adds a match-hash. The registry's employer_ein is stored masked — this raw-EIN catalog field is a distinct entry.",
+    "Owner/shareholder SSNs, if present on a K-1, must be promoted to a typed masked field within the nested record's redactor — never left to the catch-all.",
+    "Prompt hint (doc-level): this is a self-employed income source. Capture the income figure, the borrower's ownership %, and the standard add-backs verbatim; do NOT compute qualifying income or cash flow (a downstream calculation, not a fact).",
+    "Prompt hint (doc-level): report money as strings (e.g. '152340.00'); negative income keeps its sign. Ownership % lives in the owner records, tied to each owner's name.",
+    "Ambiguity: signature_date is tagged 'execution', which is not one of the five reason_class values — mapped to processor as best guess.",
+    "Ambiguity: paid_preparer_name is tagged 'source', which is not one of the five reason_class values — mapped to processor as best guess."
+  ]
+}

@@ -1,0 +1,85 @@
+{
+  "document_type": "mortgage_loan_origination_agreement",
+  "slug": "mortgage-loan-origination-agreement",
+  "tier": 3,
+  "rules_served": [],
+  "summary_hint": "Origination agreement between <borrower> and <broker/originator> (NMLS <org_nmls_id>), dated <agreement_date>, compensation <broker_compensation_method>.",
+  "existing_extractor": null,
+  "catalog_coverage": "full",
+
+  "typed_core": [
+    {"name":"document_title","type":"str","why":"identity/classification — human review","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"agreement_date","type":"date","why":"identity — when signed; recency (CORE)","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"issuer_name","type":"str","why":"identity/source — the originating organization on the letterhead","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"borrower_name","type":"str","why":"identity — whose agreement (flattened from borrower_names)","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"borrower_name_2","type":"str","why":"identity — co-borrower","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"borrower_names_raw","type":"str","why":"disambiguator — verbatim signer string (§3)","rules":[],"reason_class":"disambiguator","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"mortgage_broker_or_originator_name","type":"str","why":"identity — the broker/originator party (CORE)","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"creditor_or_lender_name","type":"str","why":"identity/disambiguator — the lender when named; distinguishes broker vs creditor comp","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"organization_nmls_id","type":"str","why":"identity/compliance — org NMLS license id; primary compliance key (CORE)","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"individual_originator_name","type":"str","why":"identity — the licensed individual (flattened from person)","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"object","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"individual_nmls_id","type":"str","why":"identity/compliance — individual NMLS license id (CORE)","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"broker_compensation_method","type":"str","why":"processor/compliance — borrower-paid vs lender-paid; the central compliance fact","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":"BPC vs LPC is mutually exclusive — only one compensation amount field should be populated; capture the method verbatim"},
+    {"name":"borrower_paid_compensation","type":"Decimal","why":"processor — comp amount when borrower-paid","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"lender_paid_compensation","type":"Decimal","why":"processor — comp amount when lender-paid","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"deposit_or_application_fee","type":"Decimal","why":"processor — upfront fee charged","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"lender_credits_or_rebates","type":"Decimal","why":"processor — credits/rebates disclosed","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"broker_or_agent_relationship","type":"str","why":"processor — agent-of-borrower vs independent contractor","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"exclusivity_indicator","type":"str","why":"processor — whether the borrower is bound exclusively","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"bool","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"rate_lock_responsibilities","type":"str","why":"processor — who bears rate-lock risk","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"refundability_and_cancellation_terms","type":"str","why":"processor — refund/cancellation terms Priya reads (CORE)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"agreement_term_or_expiration","type":"str","why":"processor — how long the agreement binds","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"date_range","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"property_address","type":"str","why":"identity linkage (flattened) — ties to the subject file","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"address","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"loan_number","type":"str","why":"identity linkage — ties to the loan file","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null}
+  ],
+
+  "nested_lists": [
+    {
+      "name":"origination_and_broker_fee_items","shape":"flat_row",
+      "shape_reason":"fee schedules list several {fee_name, amount} lines; flat rows are light and adapt to varying fee counts. The one list with a plausible future consumer (fee/comp reconciliation against the Loan Estimate). Item count is modest (typically <15), well under the token ceiling",
+      "expected_item_count":"<15","rules":[],
+      "exists_today":false,"plumbing_sites":5,
+      "fields":[
+        {"name":"fee_name","type":"str","why":"the fee schedule line label"},
+        {"name":"amount","type":"Decimal","why":"the fee/comp amount for fee-comp reconciliation against the Loan Estimate"}
+      ]
+    }
+  ],
+
+  "rejected": [
+    {"name":"the 8 TECHNICAL provenance fields","reason":"already in the TypedField wrapper"},
+    {"name":"form_number, form_revision_date","reason":"not a single standardized form across brokers"},
+    {"name":"issuer_address, issuer_phone, issuer_email_or_url","reason":"no consumer"},
+    {"name":"document_issue_date, effective_date, expiration_date","reason":"duplicate agreement_date / agreement_term_or_expiration"},
+    {"name":"statement_period_start/end","reason":"an agreement has no coverage period"},
+    {"name":"party_names, party_addresses","reason":"duplicate the named parties; no per-party rule"},
+    {"name":"account_case_reference_number","reason":"no consumer"},
+    {"name":"signature_blocks, notary_block","reason":"duplicate borrower_and_originator_signatures; not notarized"},
+    {"name":"document_status_or_version","reason":"no draft/final consumer"},
+    {"name":"loan_amount_or_requested_terms","reason":"requested terms have no consumer here; captured in URLA/1003"},
+    {"name":"originator_services, borrower_obligations","reason":"narrative lists with no rule; catch-all"},
+    {"name":"third_party_provider_authority, conflicts_or_affiliate_disclosures, governing_law_and_dispute_terms","reason":"boilerplate; no consumer"}
+  ],
+
+  "encoding_variations": [
+    "broker_compensation_method (enum, null): 'Borrower-Paid Compensation' (BPC) vs 'Lender-Paid Compensation' (LPC) — determines which of the two comp amount fields is populated; capture the method beside the amount (§3)",
+    "broker_or_agent_relationship (enum, null): 'agent', 'independent contractor', 'not acting as your agent' — prose varies",
+    "exclusivity_indicator (boolean) stated as a clause, not a checkbox — degrade to str",
+    "Two NMLS numbers appear (organization and individual) — keep distinct; the org id and individual id are different registries"
+  ],
+
+  "open_questions": [
+    {"id":1,"q":"origination_and_broker_fee_items vs the comp scalars — the list may double-count borrower_paid_compensation.","options":["keep both the fee list and comp scalars, flag the overlap for the reshaper","drop the fee list until a fee-reconciliation rule is planned"],"recommendation":"keep both but flag the overlap for the reshaper; confirm whether a fee-reconciliation rule is planned before investing the ~5 sites of list plumbing","blocks_implementation":true},
+    {"id":2,"q":"state_license_numbers typed vs catch-all.","options":["catch-all now","promote to a second flat list"],"recommendation":"catch-all now; promote to a second flat list only if state-licensing validation becomes a rule","blocks_implementation":true},
+    {"id":3,"q":"Comp method as the compliance anchor — broker_compensation_method degrades from enum to str.","options":["keep degraded str","add a controlled vocabulary/coercer"],"recommendation":"if a comp-compliance rule is built, confirm whether a controlled vocabulary/coercer should be added","blocks_implementation":false}
+  ],
+
+  "notes": [
+    "No rules in the packet -> no rule floor. The agreement establishes the broker/originator relationship and the compensation structure (borrower-paid vs lender-paid comp, NMLS licensing); every field is justified by identity or processor review. NMLS ids and comp method are the fields a future compliance rule would most plausibly read.",
+    "NMLS ids are public license identifiers, not PII — retained as identity/compliance fields. loan_number (confidential) treated as identity/linkage. No SSN/DOB/account number on this agreement; no new _PII_FIELDS entries.",
+    "Prompt hint (spans organization_nmls_id and individual_nmls_id): distinguish organization NMLS id from individual originator NMLS id — both are always present on a compliant agreement; mislabeling inverts the compliance check.",
+    "Prompt hint (doc-level): the broker/originator, the creditor/lender, and the borrower are three distinct parties — do not conflate broker with lender.",
+    "Prompt hint (doc-level): money stays a string in value, coerced to Decimal on read.",
+    "state_license_numbers (object[]) is a genuine repeat (one row per state) but no rule reads it — left to the catch-all as compliance reference detail."
+  ]
+}

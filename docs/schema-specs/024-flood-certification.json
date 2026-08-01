@@ -1,0 +1,74 @@
+{
+  "document_type": "flood_certification",
+  "slug": "flood-certification",
+  "tier": 2,
+  "rules_served": ["IH-5", "IH-6"],
+  "summary_hint": "FEMA flood determination for <property_address>: Zone <flood_zone>, SFHA <yes/no>, NFIP community <name>/<number>, panel <map_panel_number>, determined <determination_date> by <determination_company_name> — the zone IH-5 needs and the SFHA flag IH-6 keys on.",
+  "existing_extractor": null,
+  "catalog_coverage": "full",
+
+  "typed_core": [
+    {"name":"flood_zone","type":"str","why":"IH-5 (rule reads it) — the zone to extract; IH-6 reads it to detect Zone A/V (SFHA)","rules":["IH-5","IH-6"],"reason_class":"rule","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"SFHA zones are A/AE/AO/AH/AR/A99 and V/VE; X/B/C/D are not SFHA. The flood_zone value disambiguates the SFHA indicator"},
+    {"name":"special_flood_hazard_area_indicator","type":"str","why":"IH-6 (rule reads it) — the authoritative SFHA yes/no that triggers the flood-policy check","rules":["IH-6"],"reason_class":"rule","rule_floor":false,"degraded_from":"bool","pii":null,"exists_today":false,"prompt_hint":"The SFHA indicator is authoritative for IH-6; if it conflicts with the flood_zone, surface for review rather than deriving SFHA from the zone alone"},
+    {"name":"property_address","type":"str","why":"identity — which property the determination covers; IH-5/IH-6 attribution to the subject","rules":["IH-5","IH-6"],"reason_class":"identity","rule_floor":false,"degraded_from":"address","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"property_description_or_parcel","type":"str","why":"disambiguator for property_address — legal description / parcel when the street address is ambiguous or absent","rules":[],"reason_class":"disambiguator","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"federal_flood_insurance_available","type":"str","why":"processor / IH-6 context — whether NFIP coverage is available (regular vs emergency program vs not participating)","rules":["IH-6"],"reason_class":"processor","rule_floor":false,"degraded_from":"bool","pii":null,"exists_today":false,"prompt_hint":"CBRA/OPA can void federal flood insurance availability even inside an SFHA — capture coastal_barrier_or_opa_indicator alongside this"},
+    {"name":"coastal_barrier_or_opa_indicator","type":"str","why":"disambiguator for IH-6 — a CBRA/OPA property may be in an SFHA yet have NO federal flood insurance available, changing the required action","rules":["IH-6"],"reason_class":"disambiguator","rule_floor":false,"degraded_from":"bool","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"nfip_community_name","type":"str","why":"identity — the community; disambiguates the zone (zones are per community/panel)","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"nfip_community_number","type":"str","why":"identity/disambiguator — NFIP community id; with the panel it authenticates the zone read","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"identifier","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"county","type":"str","why":"identity/disambiguator — locates the community/panel; aids property matching","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"map_panel_number","type":"str","why":"disambiguator for flood_zone — the zone is read off a specific FIRM panel; the panel id anchors it","rules":[],"reason_class":"disambiguator","rule_floor":false,"degraded_from":"identifier","pii":null,"exists_today":false,"prompt_hint":"Capture the full FIRM panel identifier (community number + panel number + suffix) and the map effective/revised date together — the zone is only trustworthy against a specific map version"},
+    {"name":"map_panel_suffix","type":"str","why":"disambiguator — the suffix letter completes the FIRM panel identifier","rules":[],"reason_class":"disambiguator","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"map_effective_or_revised_date","type":"date","why":"disambiguator — which FIRM map version produced the zone; recency of the map","rules":[],"reason_class":"disambiguator","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"determination_date","type":"date","why":"IH-5/identity — when the determination was made; recency / life-of-loan currency","rules":["IH-5"],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"determination_company_name","type":"str","why":"identity — who made the determination (third-party independence)","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"determination_identifier","type":"str","why":"identity — determination / tracking number for cross-document matching","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"identifier","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"determination_method_or_source","type":"str","why":"disambiguator — how the zone was determined (map read vs LOMA/LOMR letter), which affects trust in the zone","rules":[],"reason_class":"disambiguator","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"lender_name_and_address","type":"str","why":"identity/attribution — links the determination to the lender/loan","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"object","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"lender_id_or_loan_number","type":"str","why":"identity — links to the loan file (confidential)","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"identifier","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"borrower_name","type":"str","why":"identity — attaches the determination to the borrower","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"person","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"life_of_loan_tracking_indicator","type":"str","why":"processor/compliance — whether life-of-loan monitoring was ordered","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"bool","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"form_number","type":"str","why":"identity/disambiguator — confirms the standard FEMA SFHDF (Form 086-0-32) vs a vendor variant","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"This is the FEMA Standard Flood Hazard Determination Form (SFHDF, FEMA Form 086-0-32) or a vendor equivalent — expect NFIP community, FIRM map panel + suffix + effective date, flood zone, SFHA yes/no, and federal-insurance-availability boxes"},
+    {"name":"comments_or_manual_review","type":"str","why":"processor — manual-review notes (e.g. 'structure outside SFHA though parcel touches') that are material to IH-6","rules":["IH-6"],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null}
+  ],
+
+  "nested_lists": [],
+
+  "rejected": [
+    {"name":"document_title","reason":"classification happens before extraction"},
+    {"name":"form_revision_date","reason":"form_number is enough to identify the SFHDF; revision date marginal, catch-all"},
+    {"name":"issuer_name","reason":"duplicates determination_company_name (the issuer is the determination vendor)"},
+    {"name":"issuer_address, issuer_phone, issuer_email_or_url","reason":"determination-company contact; marginal, catch-all"},
+    {"name":"effective_date, expiration_date","reason":"a flood determination is life-of-loan and does not 'expire'; would duplicate map/determination dates"},
+    {"name":"statement_period_start, statement_period_end","reason":"not applicable to a flood determination"},
+    {"name":"party_names, party_addresses","reason":"covered by flattened borrower_name + lender_name_and_address + determination_company_name"},
+    {"name":"loan_number","reason":"duplicates lender_id_or_loan_number"},
+    {"name":"account_case_reference_number","reason":"duplicates determination_identifier"},
+    {"name":"signature_blocks, preparer_signature_or_certification","reason":"flood determinations are commonly system-generated/unsigned; no rule; authenticity is marginal here — catch-all"},
+    {"name":"notary_block","reason":"not notarized"},
+    {"name":"document_status_or_version","reason":"marginal; catch-all"},
+    {"name":"document_issue_date","reason":"duplicates determination_date"}
+  ],
+
+  "encoding_variations": [
+    "flood_zone — stated many ways: A, AE, AO, AH, AR, A99, V, VE (all SFHA) vs X, X (shaded), B, C, D (non-SFHA / undetermined). Some certs write 'Zone AE' and some just 'AE'. IH-6's SFHA set is A/AE/AO/AH/AR/A99/V/VE.",
+    "special_flood_hazard_area_indicator — a boolean with no coercer; appears as Yes/No, Y/N, an X in a 'IN SFHA' box, or 'OUT'. Degraded to str; the prompt must normalize.",
+    "federal_flood_insurance_available — 'regular program', 'emergency program', 'not participating', 'NSFHA'. Degraded from boolean to str; carries more than yes/no.",
+    "coastal_barrier_or_opa_indicator — CBRA / OPA designation; often blank when not applicable. Degraded to str.",
+    "map_panel_number + map_panel_suffix — the full FIRM panel id is panel number + suffix letter (e.g. 48201C 0805 L); some certs print them together, some in separate boxes. Keep both."
+  ],
+
+  "open_questions": [
+    {"id":1,"q":"Boolean degradation — special_flood_hazard_area_indicator, federal_flood_insurance_available, coastal_barrier_or_opa_indicator, and life_of_loan_tracking_indicator all degrade to str (no boolean coercer). IH-6 must interpret 'Y'/'Yes'/'X'/checkbox.","options":["keep str + a prompt hint to emit normalized yes/no","add a boolean coercer"],"recommendation":"(a) now, flag (b) as a candidate coercer since flood SFHA is a hard yes/no gate","blocks_implementation":false},
+    {"id":2,"q":"Zone-vs-indicator authority — if flood_zone implies SFHA (e.g. AE) but the SFHA indicator says 'OUT' (structure outside the mapped SFHA), which does IH-6 read?","options":["SFHA indicator is authoritative","derive from flood_zone"],"recommendation":"the SFHA indicator is the field IH-6 reads; flood_zone is the disambiguator; conflicts surface for review","blocks_implementation":false},
+    {"id":3,"q":"Both rules BLOCKED — IH-5 and IH-6 are status BLOCKED (no producer yet). Confirm the schema should still land flood_zone and the SFHA indicator now so the rules light up when unblocked.","options":["land them now (rule-floor-first)","wait until unblocked"],"recommendation":"yes — rule-floor-first; landing them now avoids the value going to the discarded catch-all later","blocks_implementation":false},
+    {"id":4,"q":"comments_or_manual_review as free text — partial-SFHA nuance ('structure outside SFHA though parcel touches') is material to IH-6 but arrives as prose.","options":["keep free-text now","later add a structured partial-SFHA flag/tag"],"recommendation":"(a); flag a potential tag for the reviewer","blocks_implementation":false}
+  ],
+
+  "notes": [
+    "22 typed-core rows — within the 20-25 target. The two rules key on just two fields (flood_zone, SFHA indicator); the remainder are the FIRM/NFIP disambiguators those two fields need to be trusted, plus identity and processor fields.",
+    "Both IH-5 and IH-6 are currently status BLOCKED (no producer yet); the fields must still land now (rule-floor-first) so the rules activate when unblocked.",
+    "No new _PII_FIELDS registration proposed. borrower_name is standard sensitivity; lender_id_or_loan_number is confidential but a loan identifier, not a maskable PII kind; property_address is the subject collateral (widely known), promoted to typed core for identity, not masking. If a determination ever carries the borrower's separate mailing address or any SSN, add it as a named typed field and register, never leave to the unmasked catch-all.",
+    "Ambiguity: determination_date is marked 'IH-5/identity' — classed identity (when the determination was made / recency) with IH-5 carried in rules; a defensible alternative is reason_class rule."
+  ]
+}

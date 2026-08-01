@@ -1,0 +1,97 @@
+{
+  "document_type": "appraisal",
+  "slug": "appraisal",
+  "tier": 1,
+  "rules_served": ["FR-2","IN-14","OC-3","PC-3","PE-1","PE-4","PR-2","PR-3","PR-4","PR-5","PR-6","PR-7","PR-8","TI-2"],
+  "summary_hint": "property, appraised value, effective date, condition rating, appraiser",
+  "existing_extractor": null,
+  "catalog_coverage": "none",
+
+  "typed_core": [
+    {"name":"uad_version","type":"str","why":"UAD 2.6 vs 3.6 (cutover ~Nov 2026) have DIFFERENT field sets, form numbers and rating vocabularies. This is a PREREQUISITE for reading anything else correctly, not an ordinary field","rules":["PR-4","PR-5"],"reason_class":"disambiguator","rule_floor":true,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":"Determine this FIRST — it dictates where every other field lives and which rating vocabulary applies"},
+    {"name":"form_type","type":"str","why":"PR-3 eligibility, PR-4 completeness — 1004 (SFR) / 1073 (condo) / 1025 (2-4 unit) / 2055 (exterior-only) have materially different layouts","rules":["PR-3","PR-4"],"reason_class":"disambiguator","rule_floor":true,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":"Determine this second — it changes the layout"},
+    {"name":"appraisal_effective_date","type":"date","why":"PR-6 ('closing_date minus appraisal_date vs the validity window'), PR-8 (disaster cross-reference)","rules":["PR-6","PR-8"],"reason_class":"rule","rule_floor":true,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"The EFFECTIVE date (the inspection), not the signature date — PR-6 measures from this"},
+    {"name":"report_date","type":"date","why":"disambiguator — the signature date differs from the effective date; PR-6 must not use it","rules":["PR-6"],"reason_class":"disambiguator","rule_floor":true,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"appraiser_name","type":"str","why":"FR-2 (related-party signals), PR-4 completeness","rules":["FR-2","PR-4"],"reason_class":"rule","rule_floor":true,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"appraiser_license","type":"str","why":"PR-4 completeness","rules":["PR-4"],"reason_class":"rule","rule_floor":true,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"lender_client_name","type":"str","why":"PR-4 completeness","rules":["PR-4"],"reason_class":"rule","rule_floor":true,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+
+    {"name":"subject_property_address","type":"str","why":"PR-7, PC-3, TI-1, PR-8 (disaster location)","rules":["PR-7","PC-3","PR-8"],"reason_class":"rule","rule_floor":true,"degraded_from":"address","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"county","type":"str","why":"PR-8 — FEMA disaster declarations are issued BY COUNTY, finer than the address","rules":["PR-8"],"reason_class":"rule","rule_floor":true,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"legal_description","type":"str","why":"TI-2 — compared across title / appraisal / contract","rules":["TI-2"],"reason_class":"rule","rule_floor":true,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"parcel_identification_number","type":"str","why":"TI-2 — a cleaner match key than the address","rules":["TI-2"],"reason_class":"identity","rule_floor":true,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"property_type","type":"str","why":"PR-3, PE-1 — eligibility by property type","rules":["PR-3","PE-1"],"reason_class":"rule","rule_floor":true,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"number_of_units","type":"int","why":"PE-1, PR-3","rules":["PE-1","PR-3"],"reason_class":"rule","rule_floor":true,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"occupant_status","type":"str","why":"OC-3, OC-1 — the URAR Owner/Tenant/Vacant marker","rules":["OC-1","OC-3"],"reason_class":"rule","rule_floor":true,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"year_built","type":"int","why":"PE-1, PR-3","rules":["PE-1","PR-3"],"reason_class":"rule","rule_floor":true,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"gross_living_area","type":"int","why":"PR-4 — the primary comparison metric","rules":["PR-4"],"reason_class":"rule","rule_floor":true,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"project_name","type":"str","why":"CO-1 (is a condo questionnaire needed?), DT-2 — joins to the questionnaire","rules":["CO-1","DT-2"],"reason_class":"rule","rule_floor":true,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"hoa_dues_amount","type":"Decimal","why":"DT-2, CO-2 — the URAR states HOA dues","rules":["DT-2","CO-2"],"reason_class":"rule","rule_floor":true,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"hoa_dues_frequency","type":"str","why":"DT-2 disambiguator — monthly vs annual changes the DTI by 12x","rules":["DT-2"],"reason_class":"disambiguator","rule_floor":true,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":"ALWAYS state monthly vs annual — never assume"},
+
+    {"name":"appraised_value","type":"Decimal","why":"PR-2 — 'if lower than the purchase price, LTV uses the lower'","rules":["PR-2","PE-1","PR-4"],"reason_class":"rule","rule_floor":true,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"contract_price_stated","type":"Decimal","why":"PR-2, FR-2 — the appraiser records the contract price; a mismatch with the actual contract is a signal","rules":["PR-2","FR-2"],"reason_class":"rule","rule_floor":true,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"value_approach_used","type":"str","why":"PR-4 — sales comparison / cost / income","rules":["PR-4"],"reason_class":"rule","rule_floor":true,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"property_owner_of_record","type":"str","why":"FR-2 — owner of public record; a related-party signal","rules":["FR-2"],"reason_class":"rule","rule_floor":true,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"prior_sale_date","type":"date","why":"FR-2, TI-6 — the subject's 3-year prior sale; rapid-transfer signal","rules":["FR-2"],"reason_class":"rule","rule_floor":true,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"From the subject's transfer-history section, NOT from the comparables"},
+    {"name":"prior_sale_price","type":"Decimal","why":"FR-2 — a flip shows as a large jump over a short interval","rules":["FR-2"],"reason_class":"rule","rule_floor":true,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+
+    {"name":"condition_rating","type":"str","why":"PR-5, PE-4 — the UAD C1-C6 code; C5/C6 flags repair or reinspection","rules":["PR-5","PE-4"],"reason_class":"rule","rule_floor":true,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":"The C1-C6 code. If only prose is given ('average'), record the prose and leave the code null — do NOT translate"},
+    {"name":"quality_rating","type":"str","why":"PR-5 — the UAD Q1-Q6 code","rules":["PR-5"],"reason_class":"rule","rule_floor":true,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"appraisal_completion_condition","type":"str","why":"PE-4, PR-5 — as-is vs subject-to-repairs vs subject-to-completion","rules":["PE-4","PR-5"],"reason_class":"rule","rule_floor":true,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"repairs_required_indicator","type":"str","why":"PR-5, PE-4 — 'AI-surface condition callouts'","rules":["PR-5","PE-4"],"reason_class":"rule","rule_floor":true,"degraded_from":"bool","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"fha_condition_deficiencies","type":"str","why":"PE-4 is FHA-specific; the 1004 has an FHA section the general condition rating does not cover","rules":["PE-4"],"reason_class":"rule","rule_floor":true,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+
+    {"name":"estimated_monthly_market_rent","type":"Decimal","why":"IN-14, OC-3 — 'detect rental income; check for the required support'","rules":["IN-14","OC-3"],"reason_class":"rule","rule_floor":true,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"rent_schedule_attached","type":"str","why":"IN-14 — form 1007 presence","rules":["IN-14"],"reason_class":"rule","rule_floor":true,"degraded_from":"bool","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"comparable_count","type":"int","why":"PR-4 completeness — the cheap deterministic signal that comps are present, and a truncation check against the comparables list","rules":["PR-4"],"reason_class":"rule","rule_floor":true,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"Read the count from the grid header before listing the comps"}
+  ],
+
+  "nested_lists": [
+    {"name":"comparable_sales","shape":"flat_row",
+     "shape_reason":"3-6 comps; the SUMMARY ROW per comp only — the full adjustment grid is ~25 lines per comp (~150 values) and would risk the 16,384-token ceiling",
+     "expected_item_count":"3-6","rules":["PR-2","PR-4","FR-2"],"exists_today":false,"plumbing_sites":5,
+     "fields":[
+       {"name":"comp_number","type":"int","why":"identity"},
+       {"name":"address","type":"str","why":"PR-4 — proximity and comparability"},
+       {"name":"sale_price","type":"Decimal","why":"PR-2 context, FR-2 inflated-value signals"},
+       {"name":"sale_date","type":"date","why":"PR-4 — recency of the comp"},
+       {"name":"gross_living_area","type":"int","why":"PR-4 — the primary comparison metric"},
+       {"name":"distance_from_subject","type":"str","why":"PR-4"},
+       {"name":"net_adjustment","type":"Decimal","why":"FR-2 — large adjustments are an inflated-value signal"},
+       {"name":"adjusted_value","type":"Decimal","why":"PR-2, FR-2"}
+     ]}
+  ],
+
+  "rejected": [
+    {"name":"appraisal_delivery_date","reason":"BOUNDARY ERROR — DC-6's date lives on the Appraisal Delivery record, a DIFFERENT document type. It is not on the appraisal report"},
+    {"name":"the full adjustment grid (~25 lines x 6 comps)","reason":"token ceiling — the summary row per comp serves every rule that reads comps; no rule reads an individual adjustment line"},
+    {"name":"is_value_supported / value_is_reasonable","reason":"a judgment, not a fact — PR-2 compares to the contract price. Tags describe; rules judge"},
+    {"name":"is_fha_eligible","reason":"a judgment — PE-4 applies the FHA rules to the deficiencies"},
+    {"name":"neighborhood_description / market_trend_narrative","reason":"prose; no rule reads it. Catch-all"},
+    {"name":"cost_approach_detail","reason":"only the value approach USED matters (PR-4)"},
+    {"name":"appraiser_signature_image","reason":"not extractable as a value"},
+    {"name":"the 8 TECHNICAL provenance fields","reason":"already in the TypedField wrapper"}
+  ],
+
+  "encoding_variations": [
+    "UAD 2.6 vs 3.6 — the dominant variation. Different form numbers, field names and rating vocabularies; cutover ~Nov 2026",
+    "Form type changes the layout entirely: 1004 (SFR) / 1073 (condo) / 1025 (2-4 unit) / 2055 (exterior-only)",
+    "Condition is C1-C6 in UAD, but legacy reports use prose ('average', 'good')",
+    "Adjustments may be a grid or a narrative",
+    "HOA dues may be monthly or annual"
+  ],
+
+  "open_questions": [
+    {"id":1,"q":"UAD 3.6 cutover (~Nov 2026) — build for 2.6 now, or design both?","options":["2.6 now, 3.6 later","version-agnostic schema, branch only in the prompt"],"recommendation":"version-agnostic schema with prompt branching — the field NAMES are stable enough; it is the LOCATIONS and vocabularies that move","blocks_implementation":true},
+    {"id":2,"q":"Comparable depth","options":["summary row per comp (chosen)","the full adjustment grid"],"recommendation":"summary row — no rule (PR-2/PR-4/FR-2) reads an individual adjustment line, and the grid is ~150 values","blocks_implementation":false},
+    {"id":3,"q":"One schema with form_type branching, or separate document types per form?","options":["one schema (chosen)","separate types for 1004/1073/1025/2055"],"recommendation":"one schema — the rules read the same fields regardless of form","blocks_implementation":false},
+    {"id":4,"q":"PR-8 needs FEMA disaster declarations cross-referenced against county and date","options":["out of scope for the schema","in scope"],"recommendation":"out of scope — this is EXTERNAL REFERENCE DATA, the same class as PE-1's FHFA table. The schema's job is to supply county and effective_date","blocks_implementation":false}
+  ],
+
+  "notes": [
+    "NO v2 catalog entry — the rule floor IS the entire schema.",
+    "THE MOST TIME-SENSITIVE DOCUMENT IN THE SET: the UAD 2.6 to 3.6 cutover is ~Nov 2026, and the two versions have different field sets. Building after the cutover means supporting both formats anyway.",
+    "appraisal_delivery_date was placed on this document in an earlier draft — corrected here; DC-6 reads a separate Appraisal Delivery record."
+  ]
+}

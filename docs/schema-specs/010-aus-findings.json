@@ -1,0 +1,77 @@
+{
+  "document_type": "aus_findings",
+  "slug": "aus-findings",
+  "tier": 1,
+  "rules_served": ["AU-1","AU-2","AU-3"],
+  "summary_hint": "engine, recommendation, casefile ID, submission date, condition count",
+  "existing_extractor": null,
+  "catalog_coverage": "none",
+
+  "typed_core": [
+    {"name":"aus_engine","type":"str","why":"DU vs LPA — DISAMBIGUATOR FOR THE ENTIRE DOCUMENT; the two have different layouts and vocabularies","rules":["AU-3"],"reason_class":"disambiguator","rule_floor":true,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":"Determine this FIRST — DU and LPA differ throughout"},
+    {"name":"casefile_or_key_number","type":"str","why":"identity","rules":[],"reason_class":"identity","rule_floor":true,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"submission_date","type":"date","why":"AU-1 — findings older than the documents may be stale; also picks the governing run","rules":["AU-1"],"reason_class":"rule","rule_floor":true,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"submission_number","type":"int","why":"disambiguator — resubmissions are common; THE LATEST GOVERNS","rules":["AU-1"],"reason_class":"disambiguator","rule_floor":true,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"lender_loan_number","type":"str","why":"identity — joins to the 1003","rules":[],"reason_class":"identity","rule_floor":true,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+
+    {"name":"recommendation","type":"str","why":"AU-3 — 'extract the recommendation; flag non-Approve outcomes'","rules":["AU-3"],"reason_class":"rule","rule_floor":true,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":"'Approve/Eligible' is TWO facts — capture the recommendation and the eligibility separately"},
+    {"name":"eligibility_status","type":"str","why":"AU-3 — Approve/ELIGIBLE vs Approve/INELIGIBLE are very different outcomes","rules":["AU-3"],"reason_class":"rule","rule_floor":true,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"risk_class","type":"str","why":"AU-3 — LPA's Accept/Caution","rules":["AU-3"],"reason_class":"rule","rule_floor":true,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"ineligibility_reasons","type":"str","why":"AU-3 — flagging 'not approved' without the reason is not actionable for a processor","rules":["AU-3"],"reason_class":"rule","rule_floor":true,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+
+    {"name":"aus_qualifying_income","type":"Decimal","why":"AU-1 — compared against DOCUMENTED income (IN-1). NOTE: this is the AUS's STATED input, never a substitute for documented income","rules":["AU-1"],"reason_class":"rule","rule_floor":true,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"aus_total_assets","type":"Decimal","why":"AU-1 — compared against verified assets (AS-3)","rules":["AU-1"],"reason_class":"rule","rule_floor":true,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"aus_credit_score","type":"int","why":"AU-1 — compared against the credit report's representative score (CR-7)","rules":["AU-1"],"reason_class":"rule","rule_floor":true,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"aus_dti_ratio","type":"Decimal","why":"AU-1 — compared against the engine's computed DTI","rules":["AU-1"],"reason_class":"rule","rule_floor":true,"degraded_from":"percent","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"aus_ltv_ratio","type":"Decimal","why":"AU-1","rules":["AU-1"],"reason_class":"rule","rule_floor":true,"degraded_from":"percent","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"aus_cltv_ratio","type":"Decimal","why":"AU-1, CR-2 (HCLTV)","rules":["AU-1","CR-2"],"reason_class":"rule","rule_floor":true,"degraded_from":"percent","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"aus_loan_amount","type":"Decimal","why":"AU-1 — compared against the 1003","rules":["AU-1"],"reason_class":"rule","rule_floor":true,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"aus_property_value","type":"Decimal","why":"AU-1 — compared against the appraisal (PR-2)","rules":["AU-1"],"reason_class":"rule","rule_floor":true,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"aus_occupancy","type":"str","why":"AU-1 — compared against the 1003 (OC-1)","rules":["AU-1"],"reason_class":"rule","rule_floor":true,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"aus_loan_purpose","type":"str","why":"AU-1","rules":["AU-1"],"reason_class":"rule","rule_floor":true,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":null},
+
+    {"name":"required_reserve_months","type":"Decimal","why":"AS-4 — the required reserve months come from the findings","rules":["AS-4"],"reason_class":"rule","rule_floor":true,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"If stated only inside a condition, capture it there AND here, noting the source"},
+    {"name":"asset_documentation_level","type":"str","why":"AS-10 — 'the required month count from DU findings'","rules":["AS-10"],"reason_class":"rule","rule_floor":true,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"income_documentation_level","type":"str","why":"IN-11, DT-7 — full doc vs streamlined changes what is required","rules":["DT-7","IN-11"],"reason_class":"rule","rule_floor":true,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"condition_count","type":"int","why":"AU-2 completeness — and a truncation check against the conditions list","rules":["AU-2"],"reason_class":"rule","rule_floor":true,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"Read the total from the section header BEFORE listing the conditions"}
+  ],
+
+  "nested_lists": [
+    {"name":"aus_required_conditions","shape":"flat_row",
+     "shape_reason":"10-40 items; per-field wrapping would risk the 16,384-token ceiling",
+     "expected_item_count":"10-40","rules":["AU-2"],"exists_today":false,"plumbing_sites":5,
+     "fields":[
+       {"name":"condition_number","type":"str","why":"AU-2 identity"},
+       {"name":"condition_category","type":"str","why":"AU-2 — credit / income / asset / property grouping"},
+       {"name":"condition_text","type":"str","why":"AU-2 — 'reconcile each against collected documents'. CAPTURE VERBATIM: a paraphrase breaks the match","pii_note":"condition text sometimes quotes borrower names or partial SSNs — do not quote identifiers"},
+       {"name":"is_prior_to_close","type":"str","why":"AU-2 — prior-to-close vs prior-to-doc changes urgency"}
+     ]}
+  ],
+
+  "rejected": [
+    {"name":"messages (a second nested list)","reason":"deferred — DU's coded observation messages explain the recommendation, but AU-3's need is met by ineligibility_reasons. ~5 plumbing sites for explanatory detail"},
+    {"name":"is_approvable / will_close","reason":"a judgment, not a fact — AU-3's job"},
+    {"name":"underwriter_notes","reason":"not part of the AUS output"},
+    {"name":"the full 1003 data echoed in the findings","reason":"USE THE 1003 ITSELF. Only the AUS's STATED inputs matter, and those are the named aus_* fields — which is precisely what AU-1 compares"},
+    {"name":"fee_detail","reason":"no consumer"},
+    {"name":"the 8 TECHNICAL provenance fields","reason":"already in the TypedField wrapper"}
+  ],
+
+  "encoding_variations": [
+    "DU vs LPA — the dominant variation. Different recommendation vocabularies (Approve/Eligible vs Accept), different message coding, different layouts",
+    "Resubmissions produce multiple findings in one file",
+    "Conditions may be numbered, bulleted, or grouped by category",
+    "Reserve requirements may be stated as months, as a dollar amount, or embedded in a condition"
+  ],
+
+  "open_questions": [
+    {"id":1,"q":"Multiple submissions in one file (2-5 DU runs are common)","options":["separate documents, latest governs (chosen)","one extraction with a submissions list"],"recommendation":"separate documents — each is a distinct PDF, and a list would triple the nesting cost","blocks_implementation":true},
+    {"id":2,"q":"AU-2's condition matching is a fuzzy cross-document match","options":["deterministic rule","AI tag"],"recommendation":"likely an AI tag — the schema's job is faithful capture; the matching is a SEPARATE design problem","blocks_implementation":false},
+    {"id":3,"q":"aus_* fields duplicate other documents BY DESIGN (AU-1 compares them)","options":["accept","rename for clarity"],"recommendation":"keep the aus_ prefix — a rule must never mistake aus_qualifying_income for documented income","blocks_implementation":false}
+  ],
+
+  "notes": [
+    "NO v2 catalog entry — the rule floor IS the entire schema.",
+    "Only 3 rules, but AUS findings DRIVE REQUIREMENTS ACROSS THE WHOLE FILE — the required document list, reserve months, and income documentation level. AS-10 already reads it ('the required month count from DU findings'), so a fourth rule depends on it indirectly."
+  ]
+}

@@ -1,0 +1,86 @@
+{
+  "document_type": "master_insurance_policy_for_condominium",
+  "slug": "master-insurance-policy-for-condominium",
+  "tier": 3,
+  "rules_served": ["CO-3"],
+  "summary_hint": "Master policy <policy_number> from <insurance_carrier> for <condominium_project_name> (assoc. <association_or_named_insured>), <effective_date>–<expiration_date>: <blanket/scheduled>, RCV <yes/no>, unit scope <walls-in/bare-walls>, GL <limit>, fidelity <amount/none> — the adequacy inputs CO-3 checks, incl. the fidelity coverage the example fires on.",
+  "existing_extractor": null,
+  "catalog_coverage": "full",
+
+  "typed_core": [
+    {"name":"association_or_named_insured","type":"str","why":"CO-3 — the HOA named insured on the master policy","rules":["CO-3"],"reason_class":"rule","rule_floor":false,"degraded_from":"entity","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"condominium_project_name","type":"str","why":"CO-3 — must match the subject project; identity","rules":["CO-3"],"reason_class":"rule","rule_floor":false,"degraded_from":"entity","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"insurance_carrier","type":"str","why":"CO-3 — the policy's source/carrier","rules":["CO-3"],"reason_class":"rule","rule_floor":false,"degraded_from":"entity","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"policy_number","type":"str","why":"PII (restricted) — policy identity; promote so it is masked, not left unmasked in the catch-all","rules":[],"reason_class":"pii","rule_floor":false,"degraded_from":"identifier","pii":{"kind":"POLICY","pre_masked":false},"exists_today":false,"prompt_hint":"Mask the policy number"},
+    {"name":"policy_form_and_coverage_basis","type":"str","why":"CO-3 disambiguator — the form (e.g. special-form / all-risk) sets what 'adequate' means","rules":["CO-3"],"reason_class":"disambiguator","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"effective_date","type":"date","why":"CO-3 — the master policy must be in force through closing","rules":["CO-3"],"reason_class":"rule","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"expiration_date","type":"date","why":"CO-3 — must remain valid through closing","rules":["CO-3"],"reason_class":"rule","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"blanket_or_scheduled_coverage","type":"str","why":"CO-3 — blanket vs scheduled changes how building limits satisfy adequacy","rules":["CO-3"],"reason_class":"rule","rule_floor":false,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"replacement_cost_indicator","type":"str","why":"CO-3 disambiguator — RCV vs ACV; the settlement-basis lesson — the same 'replacement cost' wording can attach to a different coverage row","rules":["CO-3"],"reason_class":"disambiguator","rule_floor":false,"degraded_from":"bool","pii":null,"exists_today":false,"prompt_hint":"Read the RCV/ACV basis from the building coverage row, not the first 'replacement cost' on the page"},
+    {"name":"coinsurance_percentage","type":"str","why":"CO-3 — a coinsurance clause can render limits inadequate (a penalty on underinsurance)","rules":["CO-3"],"reason_class":"rule","rule_floor":false,"degraded_from":"percent","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"walls_in_bare_walls_or_single_entity_scope","type":"str","why":"CO-3 — walls-in vs bare-walls vs single-entity determines whether unit interiors are covered by the master or need HO-6","rules":["CO-3"],"reason_class":"rule","rule_floor":false,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"water_damage_or_master_policy_exclusions","type":"str","why":"CO-3 — material exclusions are the 'inadequacy' CO-3 flags","rules":["CO-3"],"reason_class":"rule","rule_floor":false,"degraded_from":"array","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"general_liability_each_occurrence_limit","type":"Decimal","why":"CO-3 — GL adequacy (typically ≥ $1M each occurrence)","rules":["CO-3"],"reason_class":"rule","rule_floor":false,"degraded_from":"object","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"fidelity_crime_coverage_present","type":"str","why":"CO-3 — the example: 'no fidelity coverage where required → fire'","rules":["CO-3"],"reason_class":"rule","rule_floor":false,"degraded_from":"bool","pii":null,"exists_today":false,"prompt_hint":"Capture presence explicitly — absence where required is the CO-3 fire"},
+    {"name":"fidelity_crime_coverage_amount","type":"Decimal","why":"CO-3 — the fidelity/crime limit checked against the requirement","rules":["CO-3"],"reason_class":"rule","rule_floor":false,"degraded_from":"object","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"flood_coverage_present","type":"str","why":"processor/CO-3 — whether the master carries flood (warrantability where the project is in an SFHA)","rules":["CO-3"],"reason_class":"processor","rule_floor":false,"degraded_from":"bool","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"agent_contact_and_certificate_date","type":"str","why":"recency/processor — who issued the evidence and when (COI date); follow-up","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"object","pii":null,"exists_today":false,"prompt_hint":null}
+  ],
+
+  "nested_lists": [
+    {
+      "name":"building_limits","shape":"flat_row",
+      "shape_reason":"a project has 1–several insured buildings, each with a limit and (often) its own deductible — few-to-moderate items, so a flat row is light",
+      "expected_item_count":"1-several","rules":["CO-3"],
+      "exists_today":false,"plumbing_sites":5,
+      "fields":[
+        {"name":"building_identifier_or_address","type":"str","why":"CO-3 — identifies the insured building"},
+        {"name":"coverage_limit","type":"Decimal","why":"CO-3 — building coverage adequacy"},
+        {"name":"deductible","type":"Decimal","why":"CO-3 — the building deductible"},
+        {"name":"wind_hail_named_storm_deductible","type":"str","why":"CO-3 — separate wind/hail/named-storm deductible (often a percentage, so degrade to str)"},
+        {"name":"source","type":"str","why":"provenance — the row the value came from"}
+      ]
+    }
+  ],
+
+  "rejected": [
+    {"name":"document_title, form_number, form_revision_date","reason":"classification/version before extraction (policy_form_and_coverage_basis identifies the form)"},
+    {"name":"issuer_name","reason":"duplicates insurance_carrier"},
+    {"name":"issuer_address, issuer_phone, issuer_email_or_url","reason":"carrier contact; captured via agent_contact where relevant; catch-all"},
+    {"name":"document_issue_date","reason":"duplicates the certificate date in agent_contact_and_certificate_date"},
+    {"name":"statement_period_start/_end","reason":"the policy term is effective/expiration, not a statement period"},
+    {"name":"party_names, party_addresses","reason":"the association is captured; no individual parties on a master policy"},
+    {"name":"property_address","reason":"covered by condominium_project_name + the building rows"},
+    {"name":"loan_number","reason":"not on a master policy (a unit's mortgagee clause lives on the unit's evidence)"},
+    {"name":"account_case_reference_number","reason":"duplicates policy_number"},
+    {"name":"signature_blocks, notary_block","reason":"a policy/COI is issued by the carrier, not executed/notarized"},
+    {"name":"document_status_or_version","reason":"effective/expiration + carrier issuance suffice"},
+    {"name":"covered_property_addresses_or_buildings","reason":"merged into the building_limits per-building rows"},
+    {"name":"property_deductibles, wind_hail_named_storm_deductibles","reason":"merged into the building_limits rows as deductible columns"},
+    {"name":"ordinance_law_and_equipment_breakdown, boiler_machinery_or_equipment_breakdown","reason":"secondary coverages; no CO-3 adequacy gate; catch-all"},
+    {"name":"directors_and_officers_coverage","reason":"not a CO-3/warrantability input; catch-all"},
+    {"name":"mortgagee_or_certificate_holder","reason":"on a master policy the mortgagee clause is per-unit on the unit's evidence, not the master; catch-all unless a rule needs it"}
+  ],
+
+  "encoding_variations": [
+    "replacement_cost_indicator — 'Replacement Cost', 'RCV', 'Guaranteed Replacement Cost', 'ACV'. No boolean coercer; the basis may attach to the building coverage vs another row — read the building-coverage row (the settlement-basis lesson)",
+    "blanket_or_scheduled_coverage — 'Blanket', 'Scheduled', 'Blanket by building'; blanket limits cover all buildings collectively",
+    "walls_in_bare_walls_or_single_entity_scope — 'Walls-in / all-in', 'Bare-walls / studs-out', 'Single-entity', 'Original specifications'. No enum coercer; determines whether a separate HO-6 walls-in policy is needed",
+    "fidelity/crime — labeled 'Fidelity Bond', 'Employee Dishonesty', 'Crime Coverage', 'Commercial Crime'. Present-vs-absent and the limit are the two facts CO-3 needs; a $0/absent bond where required is the fire",
+    "general liability — '$1,000,000 each occurrence / $2,000,000 aggregate'; capture the each-occurrence limit as the adequacy input",
+    "coinsurance — '80%', '90%', 'Agreed Value (no coinsurance)'. No percent coercer; degrade to str; 'agreed value' waives the penalty"
+  ],
+
+  "open_questions": [
+    {"id":1,"q":"BLOCKED status — CO-3 has no producer yet. Confirm the schema should land the adequacy fields now so the rule lights up when unblocked","options":["land adequacy fields now","wait until CO-3 has a producer"],"recommendation":"yes (rule-floor-first)","blocks_implementation":false},
+    {"id":2,"q":"Merging three object[] into one building_limits list — the catalog separates building limits, property deductibles, and wind/hail deductibles","options":["one per-building row carrying limit + deductibles (chosen, honors the one-nested-list budget)","separate lists if buildings and deductibles do not align 1:1"],"recommendation":"(a) one per-building row; flag (b) if a real blanket policy does not map cleanly per building","blocks_implementation":true},
+    {"id":3,"q":"Fidelity flattening — fidelity_or_crime_coverage (object) is flattened to present-flag + amount. Confirm those two are the CO-3 inputs","options":["present-flag + amount only","add a required-amount formula"],"recommendation":"the schema lands the coverage fact and leaves the requirement math (e.g. 3 months of assessments) to CO-3","blocks_implementation":false},
+    {"id":4,"q":"RCV basis disambiguation — replacement_cost_indicator must reflect the building coverage (the settlement-basis lesson)","options":["prompt the model to read the building row","split basis per coverage later"],"recommendation":"prompt the model to read the building row; flag if misreads appear","blocks_implementation":false}
+  ],
+
+  "notes": [
+    "The catalog splits building_limits, property_deductibles, and wind_hail_named_storm_deductibles into three object[] structures and adds covered_property_addresses_or_buildings. Per the one-nested-list budget, these are merged into a single per-building row (limit + deductibles + identity).",
+    "No borrower PII: a master condo policy names the association, not individual owners; association_or_named_insured and insurance_carrier are entities.",
+    "Ambiguity: flood_coverage_present is tagged 'processor/CO-3' — classed processor as primary but it also serves CO-3 (warrantability); flagged."
+  ]
+}

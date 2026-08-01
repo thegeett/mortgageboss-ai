@@ -1,0 +1,82 @@
+{
+  "document_type": "military_leave_and_earning_statement_les",
+  "slug": "military-leave-and-earning-statement-les",
+  "tier": 3,
+  "rules_served": [],
+  "summary_hint": "<branch> LES for <service_member>, pay grade <pay_grade>, period <pay_period>, gross entitlements <gross_entitlements>, net pay <net_pay>.",
+  "existing_extractor": null,
+  "catalog_coverage": "full",
+
+  "typed_core": [
+    {"name":"document_title","type":"str","why":"identity/classification — confirms an LES vs a civilian stub","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"issuer_name","type":"str","why":"identity/source — DFAS / branch pay office","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"The LES is issued by DFAS; issuer_name is a pay office, not an employer"},
+    {"name":"service_member_name","type":"str","why":"identity — whose income (flattened from person)","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"social_security_number_masked","type":"str","why":"PII (highly_restricted) — identity key; needs _PII_FIELDS registration (pre_masked true)","rules":[],"reason_class":"pii","rule_floor":false,"degraded_from":null,"pii":{"kind":"SSN","pre_masked":true},"exists_today":false,"prompt_hint":null},
+    {"name":"pay_grade","type":"str","why":"identity/disambiguator — E-5/O-3 sets BAH/BAS rates; processor","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"branch_or_component","type":"str","why":"identity/classification; Army/Navy/etc. and active vs reserve","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"pay_period","type":"str","why":"identity; which period this LES covers","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"date_range","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"pay_date_or_service_date","type":"date","why":"disambiguator — the pay/as-of date beside the period","rules":[],"reason_class":"disambiguator","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"years_of_service","type":"Decimal","why":"processor — drives longevity pay; continuity signal","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"ets_or_service_expiration_date","type":"date","why":"processor — separation date; income continuance through/after closing","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"ETS = Expiration of Term of Service; governs income continuance — capture even when far in the future"},
+    {"name":"duty_station","type":"str","why":"processor — location; supports residency/BAH","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"bah_dependency_status","type":"str","why":"disambiguator — with/without dependents sets the BAH figure","rules":[],"reason_class":"disambiguator","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"gross_entitlements","type":"Decimal","why":"processor — total gross military pay; income-calc input (CORE)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"total_deductions","type":"Decimal","why":"processor — total deductions","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"total_allotments","type":"Decimal","why":"processor — total allotments","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"net_pay","type":"Decimal","why":"processor — take-home pay","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"end_of_month_pay","type":"Decimal","why":"processor — actual disbursement figure","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"federal_tax_data","type":"str","why":"processor — federal withholding/exemptions","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"object","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"fica_tax_data","type":"str","why":"processor — FICA withholding","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"object","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"state_tax_data","type":"str","why":"processor — state withholding","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"object","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"leave_balance","type":"str","why":"processor — leave accrued/used/balance","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"object","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"direct_deposit_account_last4","type":"str","why":"PII (restricted) — deposit account last-4; needs _PII_FIELDS registration (pre_masked true) (flattened from object)","rules":[],"reason_class":"pii","rule_floor":false,"degraded_from":"object","pii":{"kind":"ACCOUNT","pre_masked":true},"exists_today":false,"prompt_hint":null}
+  ],
+
+  "nested_lists": [
+    {
+      "name":"entitlements","shape":"flat_row",
+      "shape_reason":"an LES lists ~5–15 entitlement lines (base pay, BAH, BAS, special/hazard pay), each a {label, amount} pair; flat rows are light and stay well under the 16,384-token ceiling",
+      "expected_item_count":"5-15","rules":[],
+      "exists_today":false,"plumbing_sites":5,
+      "fields":[
+        {"name":"label","type":"str","why":"the entitlement line label (BAH, BAS, base pay, special/hazard pay); BAH/BAS are non-taxable and must be itemized so underwriting can gross them up. Capture the label verbatim; do not expand"},
+        {"name":"amount","type":"Decimal","why":"the entitlement amount; the income-calc input that separates taxable from non-taxable pay"}
+      ]
+    }
+  ],
+
+  "rejected": [
+    {"name":"the 8 TECHNICAL provenance fields","reason":"already in the TypedField wrapper"},
+    {"name":"form_number, form_revision_date","reason":"LES is a fixed DFAS format; no per-file version consumer"},
+    {"name":"issuer_address, issuer_phone, issuer_email_or_url","reason":"no consumer"},
+    {"name":"effective_date, expiration_date, statement_period_start/end","reason":"duplicate pay_period / pay_date_or_service_date"},
+    {"name":"party_names, party_addresses","reason":"duplicate service_member_name; no per-party rule"},
+    {"name":"property_address, loan_number, account_case_reference_number","reason":"not on an LES"},
+    {"name":"signature_blocks, notary_block","reason":"an LES is system-generated, not executed"},
+    {"name":"document_status_or_version","reason":"no draft/final lifecycle"},
+    {"name":"special_pay_or_allowance_details","reason":"folds into the entitlements list"},
+    {"name":"remarks","reason":"no consumer; catch-all captures LES remarks"}
+  ],
+
+  "encoding_variations": [
+    "branch_or_component (enum, null): 'Army', 'USMC', 'Navy', 'Air Force', 'Space Force', 'Coast Guard'; and Active / Reserve / National Guard.",
+    "pay_period (date_range, no coercer): military LES often shows a single month; keep verbatim.",
+    "Entitlement labels are terse codes/abbreviations ('BAH', 'BAS', 'COLA', 'SDAP', 'HFP/IDP') — capture the label verbatim; do not expand.",
+    "pay_grade: 'E-5', 'O-3', 'W-2' (warrant) — the letter+number pair disambiguates enlisted/officer/warrant."
+  ],
+
+  "open_questions": [
+    {"id":1,"q":"One list or three. entitlements, deductions, allotments are three parallel object[]s.","options":["one entitlements list only","a single combined pay_line_items flat list with a category column covering all three"],"recommendation":"(a) one entitlements list now — the sole income-calc consumer; escalate to (b) if a rule needs typed deductions/allotments","blocks_implementation":true},
+    {"id":2,"q":"Tax objects flattened to str. federal/fica/state_tax_data are objects degraded to strings.","options":["keep flattened to str","promote sub-fields"],"recommendation":"keep flattened; if a withholding rule ever needs the components, they'd need sub-field promotion","blocks_implementation":true},
+    {"id":3,"q":"SSN field name. social_security_number_masked differs from the registry's taxpayer_ssn_masked.","options":["reuse the existing key","register a new one"],"recommendation":"confirm whether to reuse the existing key or register a new one","blocks_implementation":false}
+  ],
+
+  "notes": [
+    "No rules in the packet → no rule floor. The LES is the military analogue of a pay stub: its purpose is income qualification. The typed core captures the service member's identity, the pay period, the gross/net figures, and the entitlement detail (BAH/BAS are tax-advantaged and grossed up). Every field is justified by identity, PII, or processor review; a future income-calculation rule is the obvious consumer of the pay figures and the entitlements list.",
+    "The entitlements list is the one list that carries income-calc value (catalog mortgage_use: 'Calculate gross military income'), because BAH/BAS are non-taxable and get grossed up — the itemization separates taxable from non-taxable pay. Serves no rule today but is the highest-value future consumer. deductions and allotments are summarized by the total_deductions / total_allotments scalars.",
+    "social_security_number_masked — highly_restricted; needs _PII_FIELDS registration, pre_masked true. Not in the current 7-field registry (distinct name from taxpayer_ssn_masked) — flag. Unregistered ⇒ full SSN could land unmasked in the catch-all.",
+    "direct_deposit_account_last4 — restricted; needs _PII_FIELDS registration, pre_masked true. Flattened from the direct_deposit_institution_and_account_last4 object.",
+    "service_member_name — personal name, retained as typed identity (not a _PII_FIELDS entry).",
+    "Prompt hint (doc-level): BAH (housing) and BAS (subsistence) are non-taxable allowances — they must be itemized in entitlements, not merged into a single gross, because underwriting grosses them up. Money stays a string in value, coerced to Decimal on read."
+  ]
+}

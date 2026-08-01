@@ -1,0 +1,93 @@
+{
+  "document_type": "purchase_agreement",
+  "slug": "purchase-agreement",
+  "tier": 1,
+  "rules_served": ["AS-2","CL-1","CR-13","DC-3","DT-2","DT-4","FR-2","FR-3","PC-1","PC-2","PC-3","PC-4","PC-5","PC-6","PC-7","PC-8","PC-9","PR-2","PR-6","PR-7","TI-1","TI-2"],
+  "summary_hint": "buyer(s), seller(s), property, price, closing date",
+  "existing_extractor": "app/ai/extraction/purchase_agreement.py",
+  "catalog_coverage": "full",
+
+  "typed_core": [
+    {"name":"buyer_name","type":"str","why":"PC-1 — 'tolerant-match contract parties to the file/title'","rules":["PC-1","TI-1"],"reason_class":"rule","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":true,"prompt_hint":null},
+    {"name":"buyer_name_2","type":"str","why":"a joint purchase is the norm","rules":["PC-1"],"reason_class":"rule","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"buyer_names_raw","type":"str","why":"disambiguator — the verbatim buyer line, so a bad name-split stays inspectable and an entity-vs-person distinction is preserved","rules":["PC-1","TI-1","FR-2"],"reason_class":"disambiguator","rule_floor":true,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"Capture the buyer line VERBATIM before splitting"},
+    {"name":"buyer_count","type":"int","why":"disambiguator","rules":["PC-1"],"reason_class":"disambiguator","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"seller_name","type":"str","why":"PC-1, FR-2 (non-arm's-length)","rules":["PC-1","FR-2","TI-1"],"reason_class":"rule","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":true,"prompt_hint":null},
+    {"name":"seller_name_2","type":"str","why":"a joint seller","rules":["PC-1"],"reason_class":"rule","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"seller_names_raw","type":"str","why":"disambiguator — the verbatim seller line; an LLC or trust seller is an FR-2 signal that a split would destroy","rules":["PC-1","TI-1","FR-2"],"reason_class":"disambiguator","rule_floor":true,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"seller_count","type":"int","why":"disambiguator","rules":["PC-1"],"reason_class":"disambiguator","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"parties_relationship_disclosed","type":"str","why":"FR-2 — 'AI-surface related-party signals'. Some contracts state a buyer-seller relationship outright","rules":["FR-2"],"reason_class":"rule","rule_floor":true,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"listing_agent_name","type":"str","why":"FR-2 — a shared agent between buyer and seller is a related-party signal","rules":["FR-2"],"reason_class":"rule","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"selling_agent_name","type":"str","why":"FR-2","rules":["FR-2"],"reason_class":"rule","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+
+    {"name":"property_address","type":"str","why":"PC-3, PR-7, TI-1, TI-2","rules":["PC-3","PR-7","TI-1"],"reason_class":"rule","rule_floor":false,"degraded_from":"address","pii":null,"exists_today":true,"prompt_hint":null},
+    {"name":"legal_description","type":"str","why":"TI-2 — 'compare legal descriptions across sources'","rules":["TI-2"],"reason_class":"rule","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"Capture verbatim and completely — TI-2 compares text"},
+    {"name":"sales_price","type":"Decimal","why":"PC-2, PR-2, PC-4 (IPC is a % of price)","rules":["PC-2","PC-4","PR-2"],"reason_class":"rule","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":true,"prompt_hint":null},
+    {"name":"property_type","type":"str","why":"DT-2 — 'detect an HOA (condo/PUD)'","rules":["DT-2"],"reason_class":"rule","rule_floor":false,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"hoa_indicator","type":"str","why":"DT-2 — the contract usually states whether the property is HOA-governed","rules":["DT-2"],"reason_class":"rule","rule_floor":false,"degraded_from":"bool","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"hoa_dues_amount","type":"Decimal","why":"DT-2 — sometimes stated in the contract","rules":["DT-2"],"reason_class":"rule","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"annual_property_tax","type":"Decimal","why":"DT-4 — 'compare the tax figure used to the assessed/estimated tax'","rules":["DT-4"],"reason_class":"rule","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+
+    {"name":"earnest_money_amount","type":"Decimal","why":"AS-2, PC-5","rules":["AS-2","PC-5"],"reason_class":"rule","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":true,"prompt_hint":null},
+    {"name":"earnest_money_due_date","type":"date","why":"AS-2 — 'a debit within the timeframe' needs the window","rules":["AS-2","PC-5"],"reason_class":"rule","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"earnest_money_holder","type":"str","why":"AS-2 disambiguator — escrow/title/broker; the debit's payee will carry this name","rules":["AS-2","PC-5"],"reason_class":"disambiguator","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"seller_credit_amount","type":"Decimal","why":"PC-4 — 'compute the credit as a % of price vs the IPC cap'. Currently reachable only via the catch-all, so PC-4 is DEAD","rules":["PC-4"],"reason_class":"rule","rule_floor":true,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"Search the contract AND any addendum; sum all seller-paid amounts, noting the purpose separately"},
+    {"name":"seller_credit_purpose","type":"str","why":"PC-4, FR-3 — closing costs vs repairs vs rate buy-down are treated differently","rules":["PC-4","FR-3"],"reason_class":"rule","rule_floor":true,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"other_concessions_amount","type":"Decimal","why":"FR-3 — 'credits beyond IPC norms'","rules":["FR-3"],"reason_class":"rule","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"down_payment_amount","type":"Decimal","why":"PE-3 (FHA minimum investment), AS-3","rules":["AS-3","PE-3"],"reason_class":"rule","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"loan_amount_stated","type":"Decimal","why":"disambiguator — the contract's assumed financing vs the actual loan","rules":[],"reason_class":"disambiguator","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+
+    {"name":"contract_date","type":"date","why":"FR-2 (rapid transfer), TI-6 (chain of title); also the base for computing day-count contingencies","rules":["FR-2","PC-9"],"reason_class":"rule","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"closing_date","type":"date","why":"PC-7, CR-13, PR-6","rules":["PC-7","CR-13","PR-6"],"reason_class":"rule","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":true,"prompt_hint":null},
+    {"name":"contract_expiration_date","type":"date","why":"PC-7's sibling — a contract can expire before closing","rules":["PC-7"],"reason_class":"rule","rule_floor":true,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+
+    {"name":"all_parties_signed","type":"str","why":"PC-6 — 'assess signature presence'","rules":["PC-6"],"reason_class":"rule","rule_floor":false,"degraded_from":"bool","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"personal_property_included","type":"str","why":"PC-8 — 'AI-surface included personal property'","rules":["PC-8"],"reason_class":"rule","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"personal_property_value","type":"Decimal","why":"PC-8 — 'flag for value adjustment'","rules":["PC-8"],"reason_class":"rule","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"Only if separately stated — do not estimate"},
+    {"name":"side_agreements_referenced","type":"str","why":"FR-3 — 'referenced side agreements'","rules":["FR-3"],"reason_class":"rule","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null}
+  ],
+
+  "nested_lists": [
+    {"name":"addenda","shape":"flat_row","shape_reason":"2-8 items; flat rows are trivially cheap","expected_item_count":"2-8","rules":["PC-6","FR-3"],"exists_today":false,"plumbing_sites":5,
+     "fields":[
+       {"name":"addendum_name","type":"str","why":"PC-6 — 'each referenced addendum is present and dated'"},
+       {"name":"addendum_type","type":"str","why":"PC-6, FR-3 — a side-agreement addendum is an FR-3 signal"},
+       {"name":"addendum_date","type":"date","why":"PC-6 — 'present and dated'"},
+       {"name":"is_signed","type":"str","why":"PC-6 — signature presence"},
+       {"name":"is_attached","type":"str","why":"PC-6 — referenced but missing is the finding"}
+     ]},
+    {"name":"contingencies","shape":"flat_row","shape_reason":"3-6 items; flat rows are trivially cheap","expected_item_count":"3-6","rules":["PC-9"],"exists_today":false,"plumbing_sites":5,
+     "fields":[
+       {"name":"contingency_type","type":"str","why":"PC-9 — financing / appraisal / inspection / sale-of-home"},
+       {"name":"deadline_date","type":"date","why":"PC-9 — 'flag approaching/passed deadlines'"},
+       {"name":"is_waived","type":"str","why":"PC-9 — a waived contingency has no deadline to miss"}
+     ]}
+  ],
+
+  "rejected": [
+    {"name":"is_arms_length","reason":"a judgment, not a fact — FR-2's job. Extract the SIGNALS (agents, disclosed relationship), not the conclusion"},
+    {"name":"ipc_limit_exceeded","reason":"a judgment — PC-4 computes it against a program cap the contract does not know"},
+    {"name":"financing_type","reason":"duplicates the 1003's loan_purpose; the contract's assumption is not authoritative"},
+    {"name":"escrow_company_address / agent_license_numbers","reason":"no consumer"},
+    {"name":"title_company_name","reason":"reachable, but TI-1 uses the title commitment itself"},
+    {"name":"the 8 TECHNICAL provenance fields","reason":"already in the TypedField wrapper"}
+  ],
+
+  "encoding_variations": [
+    "State-specific forms — a California RPA reads nothing like a Texas TREC form or a local realtor-board contract",
+    "Seller credits appear as 'seller concessions', 'seller-paid closing costs', 'seller contribution', or in an addendum",
+    "Contingencies may be checkboxes with day-counts ('17 days from acceptance') rather than dates",
+    "Personal property may be a checklist, a paragraph, or an addendum"
+  ],
+
+  "open_questions": [
+    {"id":1,"q":"Contingency day-counts ('17 days from acceptance')","options":["compute the date at extraction","return the raw phrase and let a derived producer compute"],"recommendation":"extract both — the computed date in value, the raw phrase in snippet","blocks_implementation":false},
+    {"id":2,"q":"Seller credit split between contract and addendum","options":["sum at extraction","return each occurrence"],"recommendation":"sum, with each source in the snippet — PC-4 needs one number against a cap","blocks_implementation":false},
+    {"id":3,"q":"Contract property_type vs the 1003's — they can disagree and no rule compares them","options":["ignore","possibly a missing rule"],"recommendation":"capture both; flag the absent comparison as a candidate rule","blocks_implementation":false}
+  ],
+
+  "notes": [
+    "The shipping extractor has 6 fields, all with consumers — nothing to remove. This spec adds 26.",
+    "LP-407-1 confirmed seller credit, addenda, personal property and contingency dates are reachable ONLY via the free-form catch-all, which is discarded at the snapshot boundary. PC-4, PC-6, PC-8 and PC-9 are dead until these become typed-core. This spec is that fix."
+  ]
+}

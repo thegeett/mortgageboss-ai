@@ -1,0 +1,80 @@
+{
+  "document_type": "condo_questionnaire",
+  "slug": "condo-questionnaire",
+  "tier": 1,
+  "rules_served": ["CO-1","CO-2","CO-3","CO-4","CO-5","DT-2","IH-7"],
+  "summary_hint": "project name, owner-occupancy %, delinquency %, litigation status, master policy",
+  "existing_extractor": null,
+  "catalog_coverage": "none",
+
+  "typed_core": [
+    {"name":"project_name","type":"str","why":"CO-1 — joins to the appraisal's project_name","rules":["CO-1"],"reason_class":"identity","rule_floor":true,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"project_address","type":"str","why":"CO-1, PR-7","rules":["CO-1"],"reason_class":"identity","rule_floor":true,"degraded_from":"address","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"hoa_name","type":"str","why":"identity","rules":[],"reason_class":"identity","rule_floor":true,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"management_company","type":"str","why":"identity","rules":[],"reason_class":"identity","rule_floor":true,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"questionnaire_form_type","type":"str","why":"disambiguator — Fannie 1076 / Freddie 476 / lender-specific number their questions differently","rules":["CO-1"],"reason_class":"disambiguator","rule_floor":true,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"completed_by_name","type":"str","why":"CO-1 completeness","rules":["CO-1"],"reason_class":"rule","rule_floor":true,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"completed_date","type":"date","why":"CO-1 — a stale questionnaire may not be acceptable","rules":["CO-1"],"reason_class":"rule","rule_floor":true,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"is_signed","type":"str","why":"CO-1 — an unsigned questionnaire is incomplete","rules":["CO-1"],"reason_class":"rule","rule_floor":true,"degraded_from":"bool","pii":null,"exists_today":false,"prompt_hint":null},
+
+    {"name":"total_units","type":"int","why":"CO-5 — the denominator for every percentage","rules":["CO-5"],"reason_class":"rule","rule_floor":true,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"units_sold_and_closed","type":"int","why":"CO-5 — presale concentration","rules":["CO-5"],"reason_class":"rule","rule_floor":true,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"owner_occupied_units","type":"int","why":"CO-5 — the owner-occupancy test","rules":["CO-5"],"reason_class":"rule","rule_floor":true,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"owner_occupancy_percentage","type":"Decimal","why":"CO-5 — stated directly on most forms","rules":["CO-5"],"reason_class":"rule","rule_floor":true,"degraded_from":"percent","pii":null,"exists_today":false,"prompt_hint":"Capture BOTH the count and the percentage where both are given — a disagreement between them is itself a signal"},
+    {"name":"investor_owned_units","type":"int","why":"CO-5","rules":["CO-5"],"reason_class":"rule","rule_floor":true,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"single_entity_owned_units","type":"int","why":"CO-5 — concentration; a single owner holding too many units breaks warrantability","rules":["CO-5"],"reason_class":"rule","rule_floor":true,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"single_entity_max_percentage","type":"Decimal","why":"CO-5","rules":["CO-5"],"reason_class":"rule","rule_floor":true,"degraded_from":"percent","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"commercial_space_percentage","type":"Decimal","why":"CO-5 — commercial use above a threshold breaks warrantability","rules":["CO-5"],"reason_class":"rule","rule_floor":true,"degraded_from":"percent","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"project_type","type":"str","why":"PR-3, CO-5 — established / new / conversion / detached","rules":["CO-5","PR-3"],"reason_class":"rule","rule_floor":true,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"is_project_complete","type":"str","why":"CO-5 — incomplete phasing is a warrantability issue","rules":["CO-5"],"reason_class":"rule","rule_floor":true,"degraded_from":"bool","pii":null,"exists_today":false,"prompt_hint":null},
+
+    {"name":"hoa_dues_amount","type":"Decimal","why":"DT-2, CO-2 — 'confirm HOA dues are in the payment'","rules":["CO-2","DT-2"],"reason_class":"rule","rule_floor":true,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"hoa_dues_frequency","type":"str","why":"DT-2 disambiguator — monthly vs annual is a 12x error","rules":["DT-2","CO-2"],"reason_class":"disambiguator","rule_floor":true,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":"ALWAYS state monthly vs annual — never assume"},
+    {"name":"units_delinquent_over_60_days","type":"int","why":"CO-5 — the delinquency test","rules":["CO-5"],"reason_class":"rule","rule_floor":true,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"delinquency_percentage","type":"Decimal","why":"CO-5","rules":["CO-5"],"reason_class":"rule","rule_floor":true,"degraded_from":"percent","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"annual_budget_amount","type":"Decimal","why":"CO-4 — the reserve denominator","rules":["CO-4"],"reason_class":"rule","rule_floor":true,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"reserve_fund_balance","type":"Decimal","why":"CO-4 — 'extract the reserve percentage'","rules":["CO-4"],"reason_class":"rule","rule_floor":true,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"reserve_contribution_percentage","type":"Decimal","why":"CO-4 — the 10% test","rules":["CO-4"],"reason_class":"rule","rule_floor":true,"degraded_from":"percent","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"special_assessment_indicator","type":"str","why":"CO-4, CO-5","rules":["CO-4","CO-5"],"reason_class":"rule","rule_floor":true,"degraded_from":"bool","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"special_assessment_amount","type":"Decimal","why":"CO-4","rules":["CO-4"],"reason_class":"rule","rule_floor":true,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+
+    {"name":"master_policy_carrier","type":"str","why":"CO-3, IH-7 — 'check for the master policy'","rules":["CO-3","IH-7"],"reason_class":"rule","rule_floor":true,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"master_policy_number","type":"str","why":"CO-3, IH-7","rules":["CO-3","IH-7"],"reason_class":"rule","rule_floor":true,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"master_policy_coverage_amount","type":"Decimal","why":"IH-7 — must equal at least 100% of project replacement cost","rules":["IH-7"],"reason_class":"rule","rule_floor":true,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"master_policy_replacement_cost_basis","type":"str","why":"IH-7, CO-3 — THE IH-1 LESSON APPLIED: a coverage amount alone does not establish adequacy","rules":["CO-3","IH-7"],"reason_class":"rule","rule_floor":true,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":"Look for 'replacement cost', 'guaranteed replacement cost', or 'actual cash value' in the insurance section"},
+    {"name":"fidelity_bond_indicator","type":"str","why":"CO-3 — 'master policy + fidelity against requirements'","rules":["CO-3"],"reason_class":"rule","rule_floor":true,"degraded_from":"bool","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"fidelity_bond_amount","type":"Decimal","why":"CO-3","rules":["CO-3"],"reason_class":"rule","rule_floor":true,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"litigation_indicator","type":"str","why":"CO-5 — 'AI-surface litigation answers'","rules":["CO-5"],"reason_class":"rule","rule_floor":true,"degraded_from":"bool","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"litigation_description","type":"str","why":"CO-5 — the NATURE matters: construction-defect litigation is disqualifying, a slip-and-fall usually is not","rules":["CO-5"],"reason_class":"rule","rule_floor":true,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"Capture the explanation VERBATIM — CO-5 needs the nature, not just the flag"}
+  ],
+
+  "nested_lists": [],
+
+  "rejected": [
+    {"name":"is_warrantable / meets_fannie_guidelines","reason":"A JUDGMENT, NOT A FACT — the whole point of CO-5. Tags describe; rules judge. THE SINGLE MOST IMPORTANT REJECTION IN THIS SCHEMA"},
+    {"name":"project_facilities (nested list)","reason":"deferred — CO-5's primary signals are all flat percentage fields; a list would cost ~5 plumbing sites for shared-amenity detail no rule reads today"},
+    {"name":"project_amenities (prose list)","reason":"no consumer"},
+    {"name":"developer_name / year_built","reason":"no consumer today (the appraisal carries year built)"},
+    {"name":"unit_mix_detail","reason":"no consumer"},
+    {"name":"the 8 TECHNICAL provenance fields","reason":"already in the TypedField wrapper"}
+  ],
+
+  "encoding_variations": [
+    "Fannie 1076 vs Freddie 476 vs lender-specific — the same questions, different numbering",
+    "Percentages may be stated directly or require computing from counts",
+    "Litigation is often a checkbox plus a free-text explanation",
+    "Reserves may be an amount, a percentage of budget, or 'adequate' prose"
+  ],
+
+  "open_questions": [
+    {"id":1,"q":"Percentages vs counts — compute a missing percentage from counts?","options":["return both as stated (chosen)","compute the missing one"],"recommendation":"return as stated — an extractor that computes is doing arithmetic the rule should own","blocks_implementation":false},
+    {"id":2,"q":"Defer project_facilities?","options":["defer (chosen)","include"],"recommendation":"defer — ~5 plumbing sites for detail no rule reads","blocks_implementation":false},
+    {"id":3,"q":"The condo master policy is its own document type ('Master Insurance Policy for Condominium')","options":["these four fields are a convenience copy","IH-7 reads the master policy document instead"],"recommendation":"CONFIRM before relying on them — if IH-7 reads the policy document, the authoritative source is elsewhere and these are a cross-check","blocks_implementation":true}
+  ],
+
+  "notes": [
+    "NO v2 catalog entry — the rule floor IS the entire schema.",
+    "Priya's ruling: condo rules must distinguish WARRANTABLE vs NON-WARRANTABLE projects, not merely check that a questionnaire exists. Warrantability is a CONCLUSION drawn from several facts — this schema captures the facts; CO-5 judges.",
+    "All 5 CO rules are BLOCKED on this extractor."
+  ]
+}

@@ -1,0 +1,64 @@
+{
+  "document_type": "retirement_check",
+  "slug": "retirement-check",
+  "tier": 3,
+  "rules_served": [],
+  "summary_hint": "payer/plan, retiree payee, check number/date, net amount and frequency, plus clearing evidence",
+  "existing_extractor": null,
+  "catalog_coverage": "full",
+
+  "typed_core": [
+    {"name":"document_title","type":"str","why":"processor — distinguishes check vs stub image","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"payer_or_plan_name","type":"str","why":"identity — CORE; the retirement income source","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"entity","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"payer_bank_name","type":"str","why":"processor — the bank the check is drawn on","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"Distinguish the payer bank (drawn-on) from the payer/plan (income source) — they are different entities"},
+    {"name":"payee_or_retiree_name","type":"str","why":"identity — CORE; whose income this is (borrower match)","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"person","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"check_number","type":"str","why":"identity — CORE; the check instrument identifier","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"check_date","type":"date","why":"identity — CORE; check date, drives recency","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"benefit_period_start","type":"date","why":"disambiguator — the period the payment covers","rules":[],"reason_class":"disambiguator","rule_floor":false,"degraded_from":"date_range","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"benefit_period_end","type":"date","why":"disambiguator — end of the covered period","rules":[],"reason_class":"disambiguator","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"benefit_type","type":"str","why":"identity — CORE; pension/annuity/IRA/other","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"plan_claim_or_account_last4","type":"str","why":"PII — masked plan/claim/account identifier; must be a named field, not catch-all","rules":[],"reason_class":"pii","rule_floor":false,"degraded_from":null,"pii":{"kind":"ACCOUNT","pre_masked":true},"exists_today":false,"prompt_hint":"Never emit a full account number; mask plan/claim and deposit accounts to last-4"},
+    {"name":"gross_benefit_amount","type":"Decimal","why":"processor — gross benefit before deductions","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"net_check_amount","type":"Decimal","why":"processor — CORE; the deposited amount (income headline)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"written_amount","type":"str","why":"disambiguator — the legal (spelled-out) amount cross-checks the numeric net (OCR/fraud guard)","rules":[],"reason_class":"disambiguator","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"payment_frequency","type":"str","why":"processor — CORE; monthly/quarterly, needed to annualize income","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"memo_or_benefit_reference","type":"str","why":"processor — memo line context","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"front_image_present","type":"str","why":"processor — CORE; whether the check front image is present","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"bool","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"back_image_present","type":"str","why":"processor — whether the endorsed back is present","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"bool","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"payee_endorsement","type":"str","why":"processor — an endorsement evidences deposit/negotiation","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"deposit_account_last4","type":"str","why":"PII — masked deposit account; must be a named field, not catch-all","rules":[],"reason_class":"pii","rule_floor":false,"degraded_from":null,"pii":{"kind":"ACCOUNT","pre_masked":true},"exists_today":false,"prompt_hint":null},
+    {"name":"cleared_or_posted_date","type":"date","why":"processor — proof the check was deposited/cleared","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"void_stop_orreturn_status","type":"str","why":"identity/processor — CORE; void/stop/return status (is the instrument valid)","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"related_award_orstatement_reference","type":"str","why":"processor — links the check to its award letter/statement","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"loan_number","type":"str","why":"identity — links the document to the loan file","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null}
+  ],
+
+  "nested_lists": [],
+
+  "rejected": [
+    {"name":"party_names / party_addresses","reason":"duplicate payee_or_retiree_name / payer_or_plan_name"},
+    {"name":"federal_state_or_other_deductions","reason":"object[]; gross + net capture the income figures; no reconciliation rule"},
+    {"name":"property_address","reason":"not relevant to a retirement check"},
+    {"name":"issuer_name / issuer_address / phone / email","reason":"duplicate the payer/plan and bank fields"},
+    {"name":"signature_blocks / notary_block","reason":"superseded by payee_endorsement; a check is not notarized"},
+    {"name":"form_number / form_revision_date / effective / expiration / statement period","reason":"not a standardized form; no consumer"},
+    {"name":"document_status_or_version","reason":"superseded by void_stop_orreturn_status"}
+  ],
+
+  "encoding_variations": [
+    "Numeric vs written (legal) amount: net_check_amount is numeric; written_amount is the spelled-out line — the disambiguator that catches an OCR misread of the numeric",
+    "Benefit period may be a single covered month or a range; keep start/end distinct from check_date",
+    "Void/stop/return status appears as a stamp, a memo, or an image overlay — capture verbatim"
+  ],
+
+  "open_questions": [
+    {"id":1,"q":"Check vs deposit evidence — a retirement check may be submitted as proof of income OR as proof of deposit (with clearing evidence). The clearing fields (cleared_or_posted_date, payee_endorsement, deposit_account_last4) only fill in the latter case.","options":["keep the clearing fields (cheap, null when absent)","drop the clearing fields"],"recommendation":"keep","blocks_implementation":false},
+    {"id":2,"q":"written_amount value — included as an OCR/fraud disambiguator for the numeric net. If it proves rarely populated on modern printed checks, it can be dropped.","options":["keep","drop"],"recommendation":"keep for now","blocks_implementation":false}
+  ],
+
+  "notes": [
+    "No rules read this document today (rule_count 0); there is no rule floor. A retirement check evidences receipt of retirement income (an income-continuance / deposit source). Fields earn a place by identity, PII protection, disambiguation, or processor use.",
+    "plan_claim_or_account_last4 and deposit_account_last4 need _PII_FIELDS registration, pre_masked true (catalog sensitivity restricted; issuer prints last-4). Payee name is standard sensitivity → identity field, not registry PII.",
+    "Prompt hint (doc-level): Do NOT judge whether income is stable/continuing — extract amount, frequency, and dates; a rule/tag judges continuance."
+  ]
+}

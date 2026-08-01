@@ -1,0 +1,84 @@
+{
+  "document_type": "trust_federal_tax_returns",
+  "slug": "trust-federal-tax-returns",
+  "tier": 3,
+  "rules_served": [],
+  "summary_hint": "which trust/estate (name + EIN), which tax year, its total income and distributable net income, and the total distributions paid to beneficiaries",
+  "existing_extractor": null,
+  "catalog_coverage": "full",
+
+  "typed_core": [
+    {"name":"document_title","type":"str","why":"identity — confirms this is a 1041 and not a personal 1040/1120","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"form_number","type":"str","why":"disambiguator — the literal \"1041\" form code beside the title; distinguishes trust vs estate vs grantor filings","rules":[],"reason_class":"disambiguator","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"tax_year_or_period","type":"str","why":"identity — which year this return covers (degraded from date_range; a fiscal-year trust may state a range, not a single year)","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"date_range","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"estate_or_trust_name","type":"str","why":"identity — names the filing entity (degraded from entity)","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"entity","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"ein","type":"str","why":"PII + identity — the trust's taxpayer ID; the join key to K-1s and to the borrower's stated trust income","rules":[],"reason_class":"pii","rule_floor":false,"degraded_from":null,"pii":{"kind":"EIN","pre_masked":false},"exists_today":false,"prompt_hint":"EIN format is NN-NNNNNNN; do not confuse it with a beneficiary SSN (NNN-NN-NNNN)"},
+    {"name":"entity_type","type":"str","why":"processor — decedent's estate vs simple vs complex vs grantor trust changes how distributions are treated (degraded from enum)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"initial_final_or_amended_return","type":"str","why":"processor — a \"final\" return signals the trust is terminating, ending the income source (degraded from enum)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"date_entity_created","type":"date","why":"identity — establishes trust vintage; supports seasoning of the income source","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"fiduciary_name","type":"str","why":"identity/processor — the trustee who signs and can be contacted (flattened from fiduciary_name_and_address object)","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"object","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"fiduciary_address","type":"str","why":"processor — trustee contact for verification (flattened from the same object)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"object","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"party_names_raw","type":"str","why":"disambiguator — the verbatim named-party string so a bad fiduciary/beneficiary split stays visible (flattened from person[])","rules":[],"reason_class":"disambiguator","rule_floor":false,"degraded_from":"object","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"total_income","type":"Decimal","why":"processor — top-line trust income","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"income_distribution_deduction","type":"Decimal","why":"processor — the amount passed through to beneficiaries (drives beneficiary income)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"distributable_net_income","type":"Decimal","why":"processor — DNI caps the taxable portion of beneficiary distributions","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"distributions_paid_or_required","type":"Decimal","why":"processor — the actual/required distribution total; the borrower-beneficiary's income figure","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"taxable_income","type":"Decimal","why":"processor — trust-level taxable income after the distribution deduction","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"total_tax","type":"Decimal","why":"processor — trust tax liability (net-income cross-check)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"accounting_method","type":"str","why":"disambiguator — cash vs accrual changes how income/distribution figures should be read (degraded from enum)","rules":[],"reason_class":"disambiguator","rule_floor":false,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"fiduciary_signed","type":"str","why":"processor — was the return executed by the fiduciary (degraded from signature/bool)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"signature","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"fiduciary_signature_date","type":"date","why":"processor — execution date; supports document-age testing","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"preparer_name","type":"str","why":"processor — third-party preparer independence (flattened from paid_preparer_information object)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"object","pii":null,"exists_today":false,"prompt_hint":null}
+  ],
+
+  "nested_lists": [
+    {
+      "name":"beneficiary_k1_records","shape":"flat_row",
+      "shape_reason":"a trust genuinely has multiple beneficiaries and this is the highest-value repeating structure (it carries the borrower's distribution income and TIN); item count is small-to-moderate (typically < 20), but a flat row keeps token cost low and matches the other financial lists",
+      "expected_item_count":"< 20","rules":[],
+      "exists_today":false,"plumbing_sites":5,
+      "fields":[
+        {"name":"beneficiary_name","type":"str","why":"names the beneficiary receiving the distributive share"},
+        {"name":"beneficiary_tin_masked","type":"str","why":"the beneficiary's SSN/TIN, the join to a borrower's stated trust income","pii_note":"beneficiary SSN/TIN — needs its own row redactor via the nested-record (transaction-description) pattern; needs registration, pre_masked=true"},
+        {"name":"distributive_share_amount","type":"Decimal","why":"the borrower-beneficiary's distribution income figure"},
+        {"name":"income_type","type":"str","why":"the K-1 income-type label paired with the share amount (box 1 interest, box 5 other portfolio, etc.)"},
+        {"name":"source","type":"str","why":"provenance of the row within the return"}
+      ]
+    }
+  ],
+
+  "rejected": [
+    {"name":"issuer_name","reason":"on a self-prepared 1041 the \"issuer\" is the trust itself; duplicates estate_or_trust_name — captured there / by preparer_name"},
+    {"name":"issuer_address / issuer_phone / issuer_email_or_url","reason":"contact fields with no consumer on a tax return; catch-all captures if present"},
+    {"name":"document_issue_date / effective_date / expiration_date","reason":"duplicate tax_year_or_period and fiduciary_signature_date"},
+    {"name":"statement_period_start / statement_period_end","reason":"not a statement; the period is tax_year_or_period"},
+    {"name":"property_address / loan_number / account_case_reference_number","reason":"not present on a 1041"},
+    {"name":"interest_income / dividends / business_income_or_loss / capital_gain_or_loss","reason":"components of total_income; no consumer distinguishes them — catch-all captures if a future rule needs a line item"},
+    {"name":"deduction_line_items","reason":"object[] with no rule; total effect is already in taxable_income; would consume the single list budget without a consumer"},
+    {"name":"rents_royalties_partnerships_and_other_income","reason":"object[] income components; no consumer; catch-all captures"},
+    {"name":"attached_schedules_and_statements","reason":"string[] inventory with no consumer; a description, not a decision input"},
+    {"name":"accumulation_or_discretionary_terms","reason":"narrative with no rule; catch-all captures"},
+    {"name":"signature_blocks / notary_block","reason":"fiduciary execution captured by fiduciary_signed; a 1041 is not notarized"},
+    {"name":"document_status_or_version","reason":"duplicates initial_final_or_amended_return"}
+  ],
+
+  "encoding_variations": [
+    "Tax year stated as a single year (\"2025\") on calendar filers but as an explicit date range on fiscal-year trusts — carry tax_year_or_period verbatim",
+    "Entity type appears both as a checkbox label (\"Complex trust\") and as an IRS box selection — the model must read the checked box, not merely find the word",
+    "\"Distributions\" appear in two places: Schedule B line (income distribution deduction) and the K-1 box 1-14 amounts; distributions_paid_or_required vs income_distribution_deduction are distinct figures; keep both so they are not conflated"
+  ],
+
+  "open_questions": [
+    {"id":1,"q":"Second/third nested list (deduction_line_items, K-1s, other-income) — the catalog offers three object[] structures.","options":["keep only beneficiary_k1_records","also nest deductions"],"recommendation":"keep only beneficiary_k1_records — it is the only one with a plausible future consumer (borrower distribution income); revisit if a trust-income recipe needs line-item deductions","blocks_implementation":true},
+    {"id":2,"q":"EIN masking policy.","options":["store raw (snapshot masks, preserves K-1 join)","pre-mask to last-4 in the extractor"],"recommendation":"store raw — preserves K-1 join, snapshot masks; flagging rather than deciding","blocks_implementation":true},
+    {"id":3,"q":"beneficiary_k1_records item shape uncertainty — beneficiary count is usually small but unbounded (a large family trust could have many).","options":["flat-row (chosen)","reconsider shape after a real sample"],"recommendation":"flat-row chosen to stay under the 16,384 ceiling; confirm with a real multi-beneficiary sample","blocks_implementation":false}
+  ],
+
+  "notes": [
+    "No rules read this document today (rule floor is empty); every field is justified by identity, PII, disambiguation, or processor use — the \"cheap future rule\" test. This is a Form 1041 (U.S. Income Tax Return for Estates and Trusts).",
+    "Box map for the money fields: Line 9 total income, Line 18 income distribution deduction, Line 22/23 taxable income, Line 7 Schedule B DNI, Schedule B line 10 distributions.",
+    "Each beneficiary K-1 is a Schedule K-1 (Form 1041); box 1 is interest, box 5 other portfolio income, etc. — capture the share amount and its income-type label together.",
+    "ein needs _PII_FIELDS registration (the registered employer_ein is a different field); recommend raw + snapshot masking to preserve the K-1 join.",
+    "beneficiary_tin_masked (nested) has no _PII_FIELDS path; it must carry its own redactor via the nested-record pattern and needs registration, pre_masked=true."
+  ]
+}

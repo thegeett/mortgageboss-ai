@@ -1,0 +1,73 @@
+{
+  "document_type": "cpa_letter",
+  "slug": "cpa-letter",
+  "tier": 3,
+  "rules_served": ["IN-12"],
+  "summary_hint": "CPA letter from <cpa_name>, <cpa_firm_name> (license <cpa_license_number>/<cpa_license_state>), dated <letter_date>: attests <business_legal_name> exists, borrower <client_or_borrower_names> owns <borrower_ownership_percentage>, self-employed since <business_start_date>",
+  "existing_extractor": null,
+  "catalog_coverage": "full",
+
+  "typed_core": [
+    {"name": "cpa_name", "type": "str", "why": "identity/source — the attesting CPA; third-party independence", "rules": [], "reason_class": "identity", "rule_floor": false, "degraded_from": "person", "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "cpa_firm_name", "type": "str", "why": "identity/source — the firm", "rules": [], "reason_class": "identity", "rule_floor": false, "degraded_from": "entity", "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "cpa_firm_address", "type": "str", "why": "identity — firm location; source reconciliation", "rules": [], "reason_class": "identity", "rule_floor": false, "degraded_from": "address", "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "cpa_license_number", "type": "str", "why": "authenticity — verify the CPA is licensed (the letter's whole value is the licensed attestation)", "rules": [], "reason_class": "processor", "rule_floor": false, "degraded_from": "identifier", "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "cpa_license_state", "type": "str", "why": "disambiguator for cpa_license_number — a license number is only meaningful with its issuing state", "rules": [], "reason_class": "disambiguator", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "license_status_or_verification", "type": "str", "why": "processor/authenticity — active/verified license; supports reliance on the letter", "rules": [], "reason_class": "processor", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "client_or_borrower_names", "type": "str", "why": "IN-12 (corroboration) — match the client to the borrower (flattened person[] -> primary + _2)", "rules": ["IN-12"], "reason_class": "rule", "rule_floor": false, "degraded_from": "person", "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "business_legal_name", "type": "str", "why": "IN-12 (corroboration) — match the entity to the tax returns / K-1", "rules": ["IN-12"], "reason_class": "rule", "rule_floor": false, "degraded_from": "entity", "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "entity_type", "type": "str", "why": "IN-12 — the self-employment methodology differs by structure (sole prop vs partnership vs S-corp)", "rules": ["IN-12"], "reason_class": "rule", "rule_floor": false, "degraded_from": "enum", "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "borrower_ownership_percentage", "type": "str", "why": "IN-12 — ownership share used to attribute business income to the borrower", "rules": ["IN-12"], "reason_class": "rule", "rule_floor": false, "degraded_from": "percent", "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "business_start_date_or_operating_duration", "type": "str", "why": "IN-12 (corroboration) — the 2-year self-employment history", "rules": ["IN-12"], "reason_class": "rule", "rule_floor": false, "degraded_from": "object", "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "business_address_and_activity", "type": "str", "why": "identity — business location and nature; corroborates the return", "rules": [], "reason_class": "identity", "rule_floor": false, "degraded_from": "object", "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "cpa_client_relationship_start_date", "type": "date", "why": "processor — how long the CPA has served the business; weight of the attestation", "rules": [], "reason_class": "processor", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "business_existence_assertion", "type": "str", "why": "IN-12 (corroboration) — the CPA's assertion the business exists and is operating", "rules": ["IN-12"], "reason_class": "rule", "rule_floor": false, "degraded_from": "bool", "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "self_employment_status_assertion", "type": "str", "why": "IN-12 — the CPA's assertion the borrower is self-employed", "rules": ["IN-12"], "reason_class": "rule", "rule_floor": false, "degraded_from": "bool", "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "income_or_compensation_facts", "type": "str", "why": "IN-12 — any income/compensation facts the CPA states", "rules": ["IN-12"], "reason_class": "rule", "rule_floor": false, "degraded_from": "object", "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "business_liquidity_or_withdrawal_impact_statement", "type": "str", "why": "IN-12 / asset use — the common CPA-letter purpose: whether withdrawing funds harms the business (feeds business-liquidity conditions)", "rules": ["IN-12"], "reason_class": "rule", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": "Capture the withdrawal-impact statement verbatim: whether pulling assets from the business hurts operations"},
+    {"name": "scope_limitations_and_disclaimers", "type": "str", "why": "processor — CPA disclaimers ('no assurance', 'for information only') that limit how much the letter can be relied on", "rules": [], "reason_class": "processor", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": "Capture the CPA's scope limitations/disclaimers — many letters explicitly decline to opine on the borrower's ability to repay; that changes how the letter is used"},
+    {"name": "letter_date", "type": "date", "why": "recency — how current the attestation is", "rules": [], "reason_class": "processor", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "cpa_signature", "type": "str", "why": "authenticity/execution — the letter must be signed by the CPA", "rules": [], "reason_class": "processor", "rule_floor": false, "degraded_from": "signature", "pii": null, "exists_today": false, "prompt_hint": null}
+  ],
+
+  "nested_lists": [],
+
+  "rejected": [
+    {"name": "document_title, form_number, form_revision_date", "reason": "classification/version before extraction; a letter is not a form"},
+    {"name": "issuer_name", "reason": "duplicates cpa_firm_name / cpa_name"},
+    {"name": "issuer_address, issuer_phone, issuer_email_or_url", "reason": "duplicate cpa_firm_address / cpa_phone_email; catch-all"},
+    {"name": "cpa_phone_email", "reason": "contact only; no rule/processor gate; catch-all"},
+    {"name": "document_issue_date, effective_date, expiration_date", "reason": "duplicate letter_date; a letter does not expire"},
+    {"name": "statement_period_start/_end", "reason": "not applicable"},
+    {"name": "party_names, party_addresses", "reason": "covered by client_or_borrower_names + business_address_and_activity"},
+    {"name": "property_address, loan_number", "reason": "not on a CPA letter"},
+    {"name": "account_case_reference_number", "reason": "no consumer"},
+    {"name": "signature_blocks", "reason": "cpa_signature covers the one signature that matters"},
+    {"name": "notary_block", "reason": "not notarized"},
+    {"name": "document_status_or_version", "reason": "no consumer"},
+    {"name": "services_provided", "reason": "narrative list; no IN-12 field to feed; catch-all"},
+    {"name": "other_factual_assertions", "reason": "open-ended key/value narrative; catch-all"}
+  ],
+
+  "encoding_variations": [
+    "entity_type — no enum coercer; 'Sole Proprietorship', 'Schedule C', 'Single-member LLC', 'Partnership', 'S-Corporation', '1120-S'. Degrade to str; the structure drives the IN-12 method",
+    "borrower_ownership_percentage — '100%', 'sole owner', '50/50', 'a 40% member interest'. No percent coercer; degrade to str and keep verbatim",
+    "business_start_date_or_operating_duration — 'since 2015', 'operating for over 8 years', 'established March 3, 2015'. May be a duration, not a date; flatten to str",
+    "the assertions — existence / self-employment / withdrawal-impact are prose, not checkboxes; degrade the booleans to str and keep the sentence",
+    "scope_limitations_and_disclaimers — CPAs increasingly add AICPA-driven disclaimers refusing to opine on solvency/creditworthiness; capture verbatim as it bounds reliance"
+  ],
+
+  "open_questions": [
+    {"id": 1, "q": "Rule-floor derivability — IN-12's how_engine_checks runs a calculator over the tax documents; it names no CPA-letter field. The fields above are the corroboration a human reads", "options": ["land them as corroboration (done)", "treat the letter as no-hard-floor"], "recommendation": "(a); flag that IN-12 under-specifies the letter", "blocks_implementation": false},
+    {"id": 2, "q": "Boolean/percent/object degradations — existence/self-employment assertions (bool), ownership_percentage (percent), start-date/duration and address/activity (object) all degrade to str", "options": ["keep str + prompt hints now", "add coercers (e.g. percent)"], "recommendation": "keep str + prompt hints now; if a rule later gates on ownership % >= 25%, a percent coercer would help", "blocks_implementation": false},
+    {"id": 3, "q": "Multi-borrower letters — a letter may cover two borrowers/co-owners. client_or_borrower_names flattens to primary + _2", "options": ["flatten to primary + _2", "promote to a small list"], "recommendation": "confirm two is enough or promote to a small list if a rule must address owners individually", "blocks_implementation": false}
+  ],
+
+  "notes": [
+    "No existing_extractor for this document type — new schema.",
+    "20 typed-core rows — within the 20-25 target. IN-12 corroboration (existence, self-employment, ownership %, entity type, duration) drives most; the CPA-identity/authenticity block ensures the attestation is from a real licensed CPA.",
+    "A CPA 'letter' (a.k.a. CPA comfort/verification letter) is free-form prose on firm letterhead — read the letterhead for firm/CPA/license, the body for assertions, the close for date/signature.",
+    "PII: no new _PII_FIELDS registration proposed. client_or_borrower_names is a person name at standard sensitivity (identity); the CPA's identity and license are not borrower PII. If a CPA letter states the borrower's SSN or the business EIN, those must be named typed fields and registered — not left to the unmasked catch-all.",
+    "cpa_license_number ('authenticity'), license_status_or_verification ('processor/authenticity') and cpa_signature ('authenticity/execution') carry an 'authenticity/execution' rationale that is not one of the five classes; all mapped to processor (validity/authenticity gate) as a best guess — flagged as ambiguity."
+  ]
+}

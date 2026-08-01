@@ -1,0 +1,80 @@
+{
+  "document_type": "retirement_account",
+  "slug": "retiree-account-statement",
+  "tier": 2,
+  "rules_served": ["AS-11", "AS-3", "AS-4"],
+  "summary_hint": "whose retirement/annuity account, at which custodian, its total and vested balances, any withdrawal restriction, and the distribution being drawn",
+  "existing_extractor": "app/ai/extraction/retirement_account.py",
+  "catalog_coverage": "full",
+
+  "typed_core": [
+    {"name": "plan_or_custodian_name", "type": "str", "why": "identity/source — AS-3/AS-4 group assets by institution", "rules": ["AS-3", "AS-4"], "reason_class": "identity", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": true, "prompt_hint": null},
+    {"name": "retiree_or_account_owner_name", "type": "str", "why": "identity — attach the account to the borrower (AS ownership)", "rules": [], "reason_class": "identity", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": true, "prompt_hint": null},
+    {"name": "retiree_or_account_owner_name_2", "type": "str", "why": "identity — joint/co-owner; AS-6-style ownership needs a named co-holder", "rules": [], "reason_class": "identity", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "plan_or_account_number_masked", "type": "str", "why": "PII (restricted, pre-masked) — account grouping key", "rules": [], "reason_class": "pii", "rule_floor": false, "degraded_from": null, "pii": {"kind": "ACCOUNT", "pre_masked": true}, "exists_today": true, "prompt_hint": "Mask the account number to last-4; never emit the full number anywhere"},
+    {"name": "plan_type", "type": "str", "why": "AS-11/AS-4 — IRA vs 401(k) vs pension vs annuity drives vesting/access and reserve eligibility; disambiguator", "rules": ["AS-11", "AS-4"], "reason_class": "disambiguator", "rule_floor": false, "degraded_from": "enum", "pii": null, "exists_today": true, "prompt_hint": null},
+    {"name": "statement_date", "type": "date", "why": "identity/recency — AS-3/AS-4 require a current statement", "rules": ["AS-3", "AS-4"], "reason_class": "identity", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "statement_period_start", "type": "date", "why": "coverage/continuity", "rules": [], "reason_class": "processor", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": true, "prompt_hint": null},
+    {"name": "statement_period_end", "type": "date", "why": "coverage/recency", "rules": [], "reason_class": "processor", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": true, "prompt_hint": null},
+    {"name": "vested_balance", "type": "Decimal", "why": "AS-11 (usable portion), AS-3/AS-4 (only the vested portion is reserve-eligible)", "rules": ["AS-11", "AS-3", "AS-4"], "reason_class": "rule", "rule_floor": true, "degraded_from": null, "pii": null, "exists_today": true, "prompt_hint": null},
+    {"name": "vested_percentage", "type": "Decimal", "why": "disambiguator for vested_balance — AS-11 example '60% vested'; cross-checks the vested figure", "rules": ["AS-11"], "reason_class": "disambiguator", "rule_floor": true, "degraded_from": "percent", "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "total_balance", "type": "Decimal", "why": "AS-3, AS-4, AS-11 (the full account value, '$50k balance'); issuers label it Ending/Total/Account Balance", "rules": ["AS-3", "AS-4", "AS-11"], "reason_class": "rule", "rule_floor": true, "degraded_from": null, "pii": null, "exists_today": true, "prompt_hint": null},
+    {"name": "beginning_balance", "type": "Decimal", "why": "processor/continuity — period-over-period movement for a draw-down account (catalog CONDITIONAL)", "rules": [], "reason_class": "processor", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "remaining_available_balance", "type": "Decimal", "why": "AS-3/AS-11 — accessible balance after restrictions/loans for a depleting retiree account (catalog CONDITIONAL)", "rules": ["AS-3", "AS-11"], "reason_class": "rule", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "outstanding_loan_balance", "type": "Decimal", "why": "AS-11 — outstanding loans reduce the usable portion (example: 'loans outstanding')", "rules": ["AS-11"], "reason_class": "rule", "rule_floor": true, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "withdrawal_or_liquidation_terms", "type": "str", "why": "AS-11 — 'flag if terms restrict use'; the restriction/penalty text the rule judges", "rules": ["AS-11"], "reason_class": "rule", "rule_floor": true, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "gross_distribution_amount", "type": "Decimal", "why": "processor/income — the periodic draw; also a draw-down sustainability signal for AS-4", "rules": ["AS-4"], "reason_class": "processor", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "net_distribution_amount", "type": "Decimal", "why": "processor/income — actual funds received", "rules": [], "reason_class": "processor", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "distribution_frequency", "type": "str", "why": "disambiguator — monthly annuity vs one-time lump sum changes how gross/net are read", "rules": [], "reason_class": "disambiguator", "rule_floor": false, "degraded_from": "enum", "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "distribution_date_or_schedule", "type": "str", "why": "processor — when distributions occur", "rules": [], "reason_class": "processor", "rule_floor": false, "degraded_from": "object", "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "year_to_date_distributions", "type": "Decimal", "why": "processor/income continuity — annualization cross-check (CONDITIONAL)", "rules": [], "reason_class": "processor", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "required_minimum_distribution_indicator", "type": "str", "why": "disambiguator — RMD (mandatory) vs discretionary distribution affects durability", "rules": [], "reason_class": "disambiguator", "rule_floor": false, "degraded_from": "bool", "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "fixed_period_or_lifetime_indicator", "type": "str", "why": "AS-11 durability — fixed-period vs lifetime distribution determines whether the income/asset continues", "rules": ["AS-11"], "reason_class": "rule", "rule_floor": false, "degraded_from": "enum", "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "scheduled_end_date", "type": "date", "why": "processor — when a fixed-period distribution ends (3-year-continuance test); durability signal", "rules": [], "reason_class": "processor", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": null}
+  ],
+
+  "nested_lists": [],
+
+  "rejected": [
+    {"name": "the 8 TECHNICAL provenance fields", "reason": "already in the TypedField wrapper"},
+    {"name": "issuer_name", "reason": "duplicate of plan_or_custodian_name for this document"},
+    {"name": "issuer_address, issuer_phone, issuer_email_or_url", "reason": "no rule/processor consumer"},
+    {"name": "form_number, form_revision_date", "reason": "not a standardized numbered form"},
+    {"name": "document_issue_date, effective_date, expiration_date", "reason": "duplicate statement_date / statement period"},
+    {"name": "statement_period (date_range)", "reason": "superseded by statement_period_start/_end"},
+    {"name": "party_names, party_addresses", "reason": "generic; superseded by retiree_or_account_owner_name"},
+    {"name": "property_address, loan_number", "reason": "not present on a retirement statement"},
+    {"name": "account_case_reference_number", "reason": "superseded by plan_or_account_number_masked"},
+    {"name": "signature_blocks, notary_block", "reason": "a retirement statement is not executed/notarized"},
+    {"name": "document_status_or_version", "reason": "no consumer"},
+    {"name": "federal_state_tax_withholding", "reason": "net vs gross already captured; withholding detail to catch-all"},
+    {"name": "other_deductions", "reason": "no rule; net_distribution_amount captures the effect"},
+    {"name": "distribution_type_or_code", "reason": "no consumer beyond distribution_frequency/type already captured"},
+    {"name": "beneficiary_or_survivor_option", "reason": "no rule; not needed for reserves"}
+  ],
+
+  "encoding_variations": [
+    "Balance labels — the full value appears as 'Ending Balance', 'Total Value', 'Account Balance', 'Vested Balance', or 'Total Vested'; total_balance vs vested_balance must be kept separate (do NOT assume equal — existing prompt already enforces this)",
+    "Vesting — stated as a vested dollar amount, a vested percentage ('60% vested'), or a full vesting schedule table; capture the dollar figure in vested_balance and the percent in vested_percentage",
+    "Plan type — '401(k)', 'Traditional IRA', 'Roth IRA', '403(b)', 'Defined Benefit Pension', 'Annuity'; degrades from enum",
+    "Distribution vs balance statement — a retiree statement may be draw-down (shows distributions + remaining balance) or accumulation (shows balance only); fields absent for one form are null, never fabricated",
+    "Restriction/penalty prose — early-withdrawal penalty, loan-outstanding, or plan-lock language is free text; withdrawal_or_liquidation_terms captures it verbatim for AS-11 to judge"
+  ],
+
+  "open_questions": [
+    {"id": 1, "q": "total_balance vs catalog ending_balance/remaining_available_balance — for an accumulation statement these coincide; for a draw-down statement remaining_available_balance < total_balance", "options": ["keep total_balance and remaining_available_balance as distinct", "collapse"], "recommendation": "keep total_balance (full value, AS-3/AS-4) AND remaining_available_balance (accessible-after-restriction, AS-11) as distinct — confirm which the reserve calc should sum", "blocks_implementation": false},
+    {"id": 2, "q": "Holdings/positions nested list — many retirement/brokerage statements list positions with market values; no current rule reads them", "options": ["none", "flat-row holdings list if a future rule needs per-asset liquidity classification"], "recommendation": "none — account-level balances satisfy AS-3/AS-4/AS-11; if ever added, flat-row (item count can be large, 20+)", "blocks_implementation": false},
+    {"id": 3, "q": "Vesting representation — statements give vested $ and/or vested %", "options": ["capture both vested_balance and vested_percentage", "one only"], "recommendation": "capture both; if only a schedule table is present, read the current-year vested figure and note the derivation in the snippet", "blocks_implementation": false},
+    {"id": 4, "q": "PII field name — plan_or_account_number_masked vs the registered account_number_masked", "options": ["register the new name in _PII_FIELDS (pre_masked=true)", "rename to account_number_masked"], "recommendation": "register the new name in _PII_FIELDS (pre_masked=true) rather than renaming, to avoid breaking the existing extractor's field", "blocks_implementation": true},
+    {"id": 5, "q": "Is this an asset or income document? Today's 3 rules are all Assets, but the catalog CORE set is distribution/income-heavy", "options": ["serve both (done here)", "asset only"], "recommendation": "the schema serve both (done here); confirm no income rule is silently depending on the catch-all today", "blocks_implementation": false}
+  ],
+
+  "notes": [
+    "Two balances matter and are separate: total_balance (full account) and vested_balance (owned/accessible). If only one balance is shown with no vesting language, fill total_balance and leave vested_balance null — do NOT assume they are equal.",
+    "Subtract nothing in the extractor: capture outstanding_loan_balance and withdrawal_or_liquidation_terms as read; the engine (AS-11) computes the usable portion.",
+    "This document can serve as both an asset (reserves — the active rules) and income (distributions); the distribution fields are captured even though today's rules are asset rules, so a future income rule is a schema no-op.",
+    "distribution_frequency, plan_type, fixed_period_or_lifetime_indicator, and required_minimum_distribution_indicator have enum_values null — pass through the stated value and normalize in the prompt.",
+    "plan_or_account_number_masked needs its own _PII_FIELDS registration (pre_masked=true); the registry today holds account_number_masked, a different key, so this field would otherwise be treated as a plain string.",
+    "statement_period_start and statement_period_end reason_class were set to processor as a best guess: their 'coverage/continuity' and 'coverage/recency' whys cite no rule id and name no explicit reason_class."
+  ]
+}

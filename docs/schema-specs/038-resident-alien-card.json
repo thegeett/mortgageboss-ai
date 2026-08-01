@@ -1,0 +1,62 @@
+{
+  "document_type": "resident_alien_card",
+  "slug": "resident-alien-card",
+  "tier": 3,
+  "rules_served": ["ID-8"],
+  "summary_hint": "<document_type> for <full_name> (A# <uscis_number_or_a_number>), category <category_code>, resident since <resident_since_date>, card expires <card_expiration_date>.",
+  "existing_extractor": null,
+  "catalog_coverage": "full",
+
+  "typed_core": [
+    {"name":"document_type","type":"str","why":"ID-8 — establishes status (Permanent Resident Card vs Conditional); the residency the rule tests","rules":["ID-8"],"reason_class":"rule","rule_floor":false,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"full_name","type":"str","why":"identity — whose card; match to the borrower","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"person","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"date_of_birth","type":"date","why":"PII + identity disambiguator — distinguishes same-name borrowers","rules":[],"reason_class":"pii","rule_floor":false,"degraded_from":null,"pii":{"kind":"DOB","pre_masked":false},"exists_today":false,"prompt_hint":null},
+    {"name":"uscis_number_or_a_number","type":"str","why":"PII (highly_restricted) + identity — the alien-registration key","rules":[],"reason_class":"pii","rule_floor":false,"degraded_from":"identifier","pii":{"kind":"A_NUMBER","pre_masked":false},"exists_today":false,"prompt_hint":"The A-number and USCIS number are the same value under different labels — treat as one field"},
+    {"name":"card_number","type":"str","why":"PII (highly_restricted) — the physical card serial","rules":[],"reason_class":"pii","rule_floor":false,"degraded_from":"identifier","pii":{"kind":"CARD","pre_masked":false},"exists_today":false,"prompt_hint":null},
+    {"name":"category_code","type":"str","why":"ID-8 — the immigrant category drives program restrictions (e.g. conditional vs unconditional)","rules":["ID-8"],"reason_class":"rule","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"CR-prefixed codes = conditional permanent resident (2-year card) — flag for ID-8; a card expiring within the loan window needs updated immigration docs"},
+    {"name":"country_of_birth","type":"str","why":"processor — identity context","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"country_code","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"sex","type":"str","why":"processor — identity match against other documents","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"resident_since_date","type":"date","why":"ID-8 — establishes length/permanence of residency","rules":["ID-8"],"reason_class":"rule","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"card_expiration_date","type":"date","why":"ID-8 — whether the card is valid through closing (short expiry → request updated docs)","rules":["ID-8"],"reason_class":"rule","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"card_issue_or_revision_date","type":"date","why":"disambiguator for card version — which I-551 series/rules apply","rules":[],"reason_class":"disambiguator","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"issuer_name","type":"str","why":"CORE — source authenticity (USCIS/DHS)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"photo_present","type":"str","why":"processor — authenticity indicator","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"bool","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"signature_or_signature_waived","type":"str","why":"processor — authenticity indicator; 'signature waived' is common on minors' cards","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":null}
+  ],
+
+  "nested_lists": [],
+
+  "rejected": [
+    {"name":"the 8 TECHNICAL provenance fields","reason":"already in the TypedField wrapper"},
+    {"name":"document_title","reason":"duplicates document_type"},
+    {"name":"form_number, form_revision_date","reason":"the I-551 designation is captured by document_type/version; not a filled-form schema"},
+    {"name":"issuer_address, issuer_phone, issuer_email_or_url","reason":"not present / contact only"},
+    {"name":"document_issue_date, effective_date, expiration_date, statement_period_start, statement_period_end","reason":"duplicate card_issue/expiration dates; a card is not a statement"},
+    {"name":"party_names, party_addresses","reason":"single holder covered by full_name; no address on the card"},
+    {"name":"property_address, loan_number, account_case_reference_number","reason":"not on an ID card"},
+    {"name":"signature_blocks, notary_block","reason":"not an executed/notarized document; signature_or_signature_waived covers the one indicator"},
+    {"name":"document_status_or_version","reason":"folded into document_type"},
+    {"name":"machine_readable_data","reason":"unmasked PII duplicate — the MRZ re-encodes name/DOB/A-number already typed; storing it raw leaks PII to the catch-all"}
+  ],
+
+  "encoding_variations": [
+    "A-number vs USCIS number — the same 7–9 digit number is labeled 'A#', 'USCIS#', or 'Alien Registration Number'; treat as one field",
+    "category_code — codes like IR1, CR1, IR6, E11; CR prefixes denote conditional residents (2-year card) — material to ID-8",
+    "resident-since — 'Resident Since', 'Permanent Resident Since'; a date, not a period",
+    "card version — legacy I-551 ('Resident Alien' wording) vs current 'Permanent Resident Card'; document_type + card_issue_or_revision_date disambiguate",
+    "signature — printed signature vs 'Signature Waived' (minors); degrade the enum to str"
+  ],
+
+  "open_questions": [
+    {"id":1,"q":"A-number masking policy — register uscis_number_or_a_number raw (snapshot masks) or have the extractor pre-mask to last-3?","options":["register raw (pre_masked false)","pre-mask to last-3"],"recommendation":"register raw (pre_masked false), consistent with recipient_tin; snapshot handles masking + match-hash","blocks_implementation":true},
+    {"id":2,"q":"Conditional-resident detection — ID-8 cares whether the card is conditional (CR category, 2-year validity)","options":["derive downstream from category_code + card_expiration_date","add a typed is_conditional boolean-degraded-to-str"],"recommendation":"(a) derive downstream from category_code + card_expiration_date","blocks_implementation":true},
+    {"id":3,"q":"Machine-readable zone — rejected here to avoid unmasked PII","options":["reject the MRZ","if a future authenticity rule needs the MRZ checksum, model it as a nested record with its own redactor"],"recommendation":"reject now; if needed later, a nested record with its own redactor, not a catch-all string","blocks_implementation":false}
+  ],
+
+  "notes": [
+    "14 typed-core rows — below the 20–25 target, appropriate for a single-rule ID card with a compact field set; every field serves ID-8, identity, PII, or authenticity.",
+    "The card is USCIS Form I-551 ('Green Card'); read the front for name/A#/category/dates and the back MRZ only to corroborate. Do NOT emit the full MRZ into the catch-all — it encodes name, DOB, and A-number unmasked.",
+    "full_name, country_of_birth, sex are standard-sensitivity identity fields, not registry PII.",
+    "Ambiguity: issuer_name is tagged 'CORE' with no explicit reason_class; set to processor (source authenticity) as best guess; flagged."
+  ]
+}

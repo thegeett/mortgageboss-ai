@@ -1,0 +1,83 @@
+{
+  "document_type": "homeowner_s_insurance_quote",
+  "slug": "homeowner-s-insurance-quote",
+  "tier": 3,
+  "rules_served": [],
+  "summary_hint": "Homeowner's quote from Universal P&C for 42 Oak St — Dwelling (Cov A) $410,000, replacement-cost basis, $2,500 deductible, annual premium $1,840, valid through 09/15/2026.",
+  "existing_extractor": null,
+  "catalog_coverage": "full",
+
+  "typed_core": [
+    {"name":"insurance_carrier","type":"str","why":"identity — the risk-bearing carrier; source validation","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"quote_number","type":"str","why":"identity — dedup / cross-reference","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"quote_date","type":"date","why":"processor — recency of the quote","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"quote_valid_through_date","type":"date","why":"processor — must be valid through closing (cheap future rule)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"proposed_effective_date","type":"date","why":"processor — coverage must start on/before closing","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"binding_status","type":"str","why":"processor — bound vs indicative quote","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"estimated_or_final_premium_indicator","type":"str","why":"disambiguator — estimate vs final premium","rules":[],"reason_class":"disambiguator","rule_floor":false,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"agency_or_producer_name","type":"str","why":"processor — producer/agency contact","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"object","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"named_insured","type":"str","why":"identity — borrower match","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"person_or_entity","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"named_insured_2","type":"str","why":"identity — co-insured","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"named_insured_count","type":"int","why":"disambiguator — flags a bad name split","rules":[],"reason_class":"disambiguator","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"insured_property_address","type":"str","why":"identity — subject-property link","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"address","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"policy_number","type":"str","why":"PII (restricted) — policy identifier; masked","rules":[],"reason_class":"pii","rule_floor":false,"degraded_from":null,"pii":{"kind":"POLICY","pre_masked":true},"exists_today":false,"prompt_hint":null},
+    {"name":"policy_status","type":"str","why":"processor — quote / bound / active","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"dwelling_coverage_a","type":"Decimal","why":"headline — must meet loan/replacement-cost minimum","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"Coverage letters are fixed: A dwelling, B other structures, C personal property, D loss of use, E personal liability, F medical payments — map by letter, not position"},
+    {"name":"other_structures_coverage_b","type":"Decimal","why":"processor — coverage completeness","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"personal_property_coverage_c","type":"Decimal","why":"processor — coverage completeness","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"personal_liability_coverage_e","type":"Decimal","why":"processor — liability adequacy","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"replacement_cost_or_coinsurance_basis","type":"str","why":"processor/disambiguator — the IH-1 field: dwelling settlement basis (RCV vs ACV)","rules":[],"reason_class":"disambiguator","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"Carry the policy_form / ISO code alongside so the dwelling basis is not confused with the personal-property basis. ISO form code implies the settlement basis when no words state it (HO-3 = replacement cost, HO-8 = ACV/modified)"},
+    {"name":"annual_premium","type":"Decimal","why":"headline — escrow / DTI figure","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"premium_paid_or_due_status","type":"str","why":"processor — paid-at-closing requirement","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"effective_date","type":"date","why":"processor — policy term start","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"expiration_date","type":"date","why":"processor — policy term end","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null}
+  ],
+
+  "nested_lists": [
+    {
+      "name":"mortgagee_or_lienholder_entries","shape":"flat_row",
+      "shape_reason":"1–3 entries; flat rows support a mortgagee-clause verification. Serves lender-listed-correctly checks",
+      "expected_item_count":"1–3","rules":[],
+      "exists_today":false,"plumbing_sites":5,
+      "fields":[
+        {"name":"lender_name","type":"str","why":"mortgagee-clause verification — lender listed correctly"},
+        {"name":"loan_number","type":"str","why":"mortgagee-clause verification — the lender's own identifier (not borrower PII)"},
+        {"name":"clause_address","type":"str","why":"mortgagee-clause verification — the clause mailing address"}
+      ]
+    }
+  ],
+
+  "rejected": [
+    {"name":"document_title, form_number, form_revision_date, document_status_or_version","reason":"classification/version metadata; policy_status is the real status"},
+    {"name":"issuer_name, issuer_address, issuer_phone, issuer_email_or_url","reason":"insurance_carrier + agency_or_producer_name carry source and contact"},
+    {"name":"party_names, party_addresses, property_address","reason":"duplicate named_insureds / insured_property_address"},
+    {"name":"account_case_reference_number","reason":"duplicates quote_number / policy_number"},
+    {"name":"statement_period_start/end, document_issue_date","reason":"duplicate/adjacent to policy term and quote dates"},
+    {"name":"signature_blocks, notary_block","reason":"a quote is not executed"},
+    {"name":"loss_of_use_coverage_d, medical_payments_coverage_f","reason":"low-value coverages; no consumer; catch-all"},
+    {"name":"policy_form","reason":"folded into the disambiguator note beside replacement_cost_or_coinsurance_basis; capture the ISO code in the snippet"},
+    {"name":"covered_perils_forms_and_endorsements","reason":"string[] list; no consumer beyond the form code already carried; catch-all"},
+    {"name":"ordinance_or_law_coverage, wind_hail_hurricane_coverage, cancellation_or_nonrenewal_notice, underwriting_assumptions, conditions_to_bind","reason":"detail objects/lists with no consumer today; catch-all"},
+    {"name":"the 8 TECHNICAL provenance fields","reason":"already in the TypedField wrapper"}
+  ],
+
+  "encoding_variations": [
+    "replacement_cost_or_coinsurance_basis — the canonical trap: stated as an explicit flag ('Dwelling RCV: Y' beside 'Personal Property RCV: N'), as an ISO form code only ('HO 00 03'), or as prose ('replacement cost settlement applies'). Carry the policy_form / ISO code alongside so the dwelling basis is not confused with the personal-property basis",
+    "dwelling_coverage_a — 'Coverage A', 'Dwelling', 'Cov A'; always tie the amount to its coverage letter — an extractor matching a bare dollar figure can grab Coverage C",
+    "annual_premium — annual vs 6-month vs monthly; carry the term, and read estimated_or_final_premium_indicator beside it"
+  ],
+
+  "open_questions": [
+    {"id":1,"q":"Which one nested list? mortgagee_or_lienholder_entries vs deductibles — both CORE object[]","options":["nest mortgagee_entries","nest deductibles"],"recommendation":"nest mortgagee_entries (needed to verify the lender clause) and add a flat wind_hail_deductible / all_perils_deductible pair if a rule needs deductibles, rather than a second list","blocks_implementation":true},
+    {"id":2,"q":"replacement_cost_or_coinsurance_basis reliability — should the schema carry policy_form (ISO code) as its own typed field to guarantee the disambiguator survives?","options":["carry policy_form as its own typed field","keep the ISO code in the snippet"],"recommendation":"yes if an IH-1-style rule is activated — otherwise keep the code in the snippet and revisit","blocks_implementation":false},
+    {"id":3,"q":"policy_number masking — pre-mask at extraction vs raw-then-snapshot","options":["pre-mask at extraction","extract raw, snapshot masks"],"recommendation":"pre-mask (restricted)","blocks_implementation":true}
+  ],
+
+  "notes": [
+    "No rules consume this type today, so there is no rule floor — but this is the exact document family behind LP-431 / IH-1, where the dwelling loss-settlement basis was read correctly yet landed in the discarded catch-all. So replacement_cost_or_coinsurance_basis and dwelling_coverage_a are typed even absent a live rule, and the disambiguator discipline is applied hard here.",
+    "deductibles is NOT nested (one-list budget) — wind/hail deductibles matter but are carried flat if a rule needs them.",
+    "PII: named insureds are standard. Mortgagee entries may embed the loan number (confidential) in source — acceptable as it is the lender's own identifier, not borrower PII.",
+    "Prompt hint (doc-level): A quote is not proof of coverage; binding_status / policy_status / estimated_or_final_premium_indicator distinguish an indicative quote from a bound policy — do not treat a quote as an active policy.",
+    "Ambiguity: dwelling_coverage_a and annual_premium are tagged 'headline' (not a defined reason_class); classified as processor. replacement_cost_or_coinsurance_basis is tagged 'processor/disambiguator'; classified as disambiguator (the §3 disambiguator field the doc emphasizes)."
+  ]
+}

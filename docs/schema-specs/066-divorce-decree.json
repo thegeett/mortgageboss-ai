@@ -1,0 +1,79 @@
+{
+  "document_type": "divorce_decree",
+  "slug": "divorce-decree",
+  "tier": 3,
+  "rules_served": [],
+  "summary_hint": "{court} decree, {petitioner} v. {respondent}, {decree_status}, entered {decree_entry_date}, {N} support obligations, {N} property/debt awards.",
+  "existing_extractor": "app/ai/extraction/divorce_decree.py",
+  "catalog_coverage": "full",
+
+  "typed_core": [
+    {"name":"court_name","type":"str","why":"identity — issuing court","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"court_jurisdiction","type":"str","why":"disambiguator — state/county governs interpretation","rules":[],"reason_class":"disambiguator","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"case_number","type":"str","why":"identity — cross-document key (confidential)","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"petitioner_name","type":"str","why":"identity — party 1 (flattened from person[])","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"object","pii":null,"exists_today":true,"prompt_hint":null},
+    {"name":"respondent_name","type":"str","why":"identity — party 2 (flattened from person[])","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"object","pii":null,"exists_today":true,"prompt_hint":null},
+    {"name":"decree_entry_date","type":"date","why":"identity — when the decree was entered (the effective date)","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":true,"prompt_hint":null},
+    {"name":"decree_final_date","type":"date","why":"disambiguator — final/effective date vs entry date","rules":[],"reason_class":"disambiguator","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"decree_status","type":"str","why":"processor — final vs interlocutory/pending; an unfinalized decree can't be relied on","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":"Distinguish final vs interlocutory — only a final decree is reliable"},
+    {"name":"dissolution_granted_indicator","type":"str","why":"processor — is the divorce actually granted","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"bool","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"marriage_date","type":"date","why":"processor — marriage duration (support-term context)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"separation_date","type":"date","why":"processor — separation timing","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"name_change_order","type":"str","why":"processor — name matching across the loan file","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"incorporated_settlement_agreement","type":"str","why":"disambiguator — support/property terms may live in an incorporated MSA, not the decree body","rules":[],"reason_class":"disambiguator","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"judge_name","type":"str","why":"execution — signing judge (flattened from signature)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"object","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"appeal_or_stay_indicator","type":"str","why":"processor — an appeal/stay affects enforceability","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"bool","pii":null,"exists_today":false,"prompt_hint":null}
+  ],
+
+  "nested_lists": [
+    {
+      "name":"support_obligations","shape":"flat_row",
+      "shape_reason":"the single highest-value structure — each obligation is income for one party and a liability for the other. Few items (1-4), flat is cheap. The one budgeted nested list",
+      "expected_item_count":"1-4","rules":[],
+      "exists_today":true,"plumbing_sites":0,
+      "fields":[
+        {"name":"obligation_type","type":"str","why":"alimony vs child support — never merge the two"},
+        {"name":"amount","type":"Decimal","why":"the obligation amount"},
+        {"name":"frequency","type":"str","why":"per month / monthly / schedule — makes the amount readable"},
+        {"name":"payer","type":"str","why":"who pays — the same amount is income to one party and a liability to the other"},
+        {"name":"recipient","type":"str","why":"who receives — added alongside payer so direction is unambiguous"},
+        {"name":"source","type":"str","why":"provenance snippet for the obligation row"}
+      ]
+    }
+  ],
+
+  "rejected": [
+    {"name":"document_title, form_number, form_revision_date","reason":"not load-bearing"},
+    {"name":"issuer_name, issuer_address/phone/email","reason":"issuer is the court, captured by court_name"},
+    {"name":"document_issue_date, effective_date, expiration_date","reason":"duplicate decree_entry_date/decree_final_date"},
+    {"name":"statement_period_start/end","reason":"not a statement"},
+    {"name":"party_names, party_addresses","reason":"captured by petitioner/respondent"},
+    {"name":"property_address, loan_number, account_case_reference_number","reason":"property captured in real_property_awards; no loan link"},
+    {"name":"signature_blocks, notary_block","reason":"judge_name + clerk stamp suffice"},
+    {"name":"case_caption","reason":"duplicates petitioner/respondent"},
+    {"name":"custody_or_residency_provisions","reason":"OPTIONAL; no mortgage consumer -> catch-all"},
+    {"name":"clerk_filing_stamp, amendment_or_modification_orders, retirement_or_qdro_provisions, personal_property_awards, equalization_or_lump_sum_payment, childcare_or_other_recurring_obligations","reason":"low-frequency / no consumer -> catch-all (revisit if a DTI rule needs them)"}
+  ],
+
+  "encoding_variations": [
+    "Support is stated as '$X per month', '$X monthly', or a schedule; capture amount + frequency and the payer so the direction (income vs liability) is unambiguous",
+    "Parties appear as 'Petitioner/Respondent' or 'Plaintiff/Defendant' — normalize by role, keep raw names",
+    "Key financial terms are often in an incorporated marital settlement agreement rather than the decree text — incorporated_settlement_agreement flags when obligations may be off-page"
+  ],
+
+  "open_questions": [
+    {"id":1,"q":"Second and third nested lists. The domain arguably needs three repeating structures (support, debt, property); the standard budgets one per document absent rules.","options":["(a) ship only support_obligations","(b) ship support + a merged property_and_debt_allocations","(c) ship all three (matching/exceeding the existing extractor's two)"],"recommendation":"(b) — support_obligations plus one merged asset/debt-allocation list, since the existing extractor already carries two lists and debt allocation drives DTI","blocks_implementation":true},
+    {"id":2,"q":"payer/recipient labeling. Obligations reference 'Petitioner/Respondent' or names.","options":["raw label only","resolved name only","capture both"],"recommendation":"capture both the raw label and the resolved name so direction is auditable","blocks_implementation":false},
+    {"id":3,"q":"case_number PII class. Confidential but not SSN-class. Register in _PII_FIELDS or keep as a plain typed field?","options":["register in _PII_FIELDS","keep as a plain typed field"],"recommendation":"plain typed field, flagged","blocks_implementation":true}
+  ],
+
+  "notes": [
+    "No rules consume this type today, so there is no rule floor.",
+    "An existing starter extractor ships (3-field typed core); all three are retained (renamed): party_1_name -> petitioner_name, party_2_name -> respondent_name, effective_date -> decree_entry_date. The support_obligations and property_awards nested lists already ship (add a recipient field to support_obligations).",
+    "ADD fields a rule/processor needs, today only in the unmasked catch-all: case_number, decree_status, debt_allocations (nested), court_name/court_jurisdiction, dissolution_granted_indicator.",
+    "case_number is confidential but not SSN-class; kept as a plain typed field and flagged for review rather than auto-registering in _PII_FIELDS.",
+    "Prompt hint (support obligations are the priority): capture every obligation as its own list entry; never merge alimony and child support.",
+    "Prompt hint (payer): record who pays each obligation (a name or party label) — the same $1,200/mo is income to one borrower and a liability to another.",
+    "judge_name's why cites 'execution', which is not one of the five reason_class values; mapped to processor and flagged as an ambiguity."
+  ]
+}

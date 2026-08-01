@@ -1,0 +1,73 @@
+{
+  "document_type": "k_1_shareholder_profit_and_loss_transcripts",
+  "slug": "k-1-shareholder-profit-and-loss-transcripts",
+  "tier": 3,
+  "rules_served": [],
+  "summary_hint": "IRS K-1 transcript, tax year 2024, Form 1120-S — Rivera Holdings LLC (EIN ..2231), shareholder Jordan Rivera 40%, ordinary business income $92,400, distributions $60,000.",
+  "existing_extractor": null,
+  "catalog_coverage": "full",
+
+  "typed_core": [
+    {"name":"transcript_type","type":"str","why":"identity — which transcript product","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"transcript_request_or_run_date","type":"date","why":"processor — recency of the pull","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"tax_year","type":"str","why":"disambiguator — the year the figures belong to; a K-1 income figure is misreadable without its year","rules":[],"reason_class":"disambiguator","rule_floor":false,"degraded_from":"date_range","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"source_form","type":"str","why":"identity — 1120-S (S-corp) vs 1065 (partnership); changes how lines map","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"entity_name","type":"str","why":"identity — the pass-through business","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"entity","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"entity_ein_masked","type":"str","why":"PII (restricted) — business EIN; entity grouping key","rules":[],"reason_class":"pii","rule_floor":false,"degraded_from":null,"pii":{"kind":"EIN","pre_masked":true},"exists_today":false,"prompt_hint":null},
+    {"name":"shareholder_or_partner_name","type":"str","why":"identity — whose income; borrower match","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"person_or_entity","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"shareholder_or_partner_tin_masked","type":"str","why":"PII (highly_restricted) — the borrower's TIN/SSN","rules":[],"reason_class":"pii","rule_floor":false,"degraded_from":null,"pii":{"kind":"SSN","pre_masked":true},"exists_today":false,"prompt_hint":null},
+    {"name":"ownership_percentage","type":"str","why":"processor — allocation share; proportion of income counted","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"object","pii":null,"exists_today":false,"prompt_hint":"Profit %, loss %, and capital % may all appear and differ; capture the stated share(s) verbatim, do not pick one silently"},
+    {"name":"ordinary_business_income_or_loss","type":"Decimal","why":"headline — the primary qualifying-income line","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"rental_real_estate_income_or_loss","type":"Decimal","why":"processor — additional pass-through income line","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"other_rental_income_or_loss","type":"Decimal","why":"processor — additional pass-through income line","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"guaranteed_payments_or_compensation","type":"Decimal","why":"processor — partner compensation (1065) counts toward income","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"distributions_or_withdrawals","type":"Decimal","why":"processor — cash actually taken; liquidity/support for income","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"interest_dividends_and_gains","type":"str","why":"processor — portfolio income lines","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"object","pii":null,"exists_today":false,"prompt_hint":null}
+  ],
+
+  "nested_lists": [
+    {
+      "name":"transcript_line_items","shape":"flat_row",
+      "shape_reason":"an IRS transcript enumerates many coded lines (line_code, description, amount); flat rows are the light shape and stay under the ceiling. Serves pass-through income reconciliation — the natural single nested list for the document",
+      "expected_item_count":"many","rules":[],
+      "exists_today":false,"plumbing_sites":5,
+      "fields":[
+        {"name":"line_code","type":"str","why":"the transcript line reference to map to a K-1 box meaning"},
+        {"name":"description","type":"str","why":"the line description (often abbreviated/truncated)"},
+        {"name":"amount","type":"Decimal","why":"the line amount; preserve sign for losses"}
+      ]
+    }
+  ],
+
+  "rejected": [
+    {"name":"document_title, form_number, form_revision_date, document_status_or_version","reason":"classification/version metadata; source_form is the real form signal"},
+    {"name":"issuer_name, issuer_address, issuer_phone, issuer_email_or_url","reason":"issuer is the IRS; no contact/verification need"},
+    {"name":"party_names, party_addresses, property_address","reason":"duplicate entity/shareholder fields; no property link"},
+    {"name":"loan_number, account_case_reference_number","reason":"linkage nice-to-have; no consumer"},
+    {"name":"effective_date, expiration_date, statement_period_start/end, document_issue_date","reason":"duplicate/adjacent to tax_year / transcript_request_or_run_date"},
+    {"name":"signature_blocks, notary_block","reason":"a transcript is not executed"},
+    {"name":"account_adjustments_or_mismatches","reason":"a judgment/exception list, not a fact — leave to tag/rule layer; catch-all"},
+    {"name":"the 8 TECHNICAL provenance fields","reason":"already in the TypedField wrapper"}
+  ],
+
+  "encoding_variations": [
+    "tax_year — '2024', 'TAX PERIOD DEC. 31, 2024', '202412'; IRS transcripts encode the period as a YYYYMM cycle — normalize but keep the raw beside the income",
+    "source_form — 'FORM 1120S', '1065', 'SCH K-1'; the form governs whether 'ordinary business income' is Box 1 of an 1120-S K-1 or a 1065 K-1 with guaranteed payments — carry the form",
+    "ownership_percentage — profit %, loss %, and capital % may all appear and differ; capture the stated share(s) verbatim, do not pick one silently",
+    "Losses appear in parentheses or with a trailing minus — preserve sign"
+  ],
+
+  "open_questions": [
+    {"id":1,"q":"ownership_percentage flattening — profit/loss/capital shares can differ","options":["single string with the label","split into typed fields per share"],"recommendation":"capture the stated share(s) as a single string with the label; split into typed fields only if a rule must apply the profit % specifically","blocks_implementation":false},
+    {"id":2,"q":"interest_dividends_and_gains flattening — flattened to one string","options":["one string","break out interest_income, dividend_income, capital_gain as Decimals"],"recommendation":"keep one string; break out the components only if a rule needs them","blocks_implementation":false},
+    {"id":3,"q":"Line-item vs summary duplication — several summary lines (ordinary income, guaranteed payments) also appear inside transcript_line_items","options":["keep both","keep only one"],"recommendation":"keep both — the typed summary fields are the stable rule targets; the list is the audit trail","blocks_implementation":false}
+  ],
+
+  "notes": [
+    "No rules consume this type today, so there is no rule floor. This is an IRS-sourced pass-through income record; fields are chosen for future self-employment / pass-through income qualification — the year, the entity, the ownership %, and the income lines — plus the EIN/TIN PII.",
+    "PII: entity_ein_masked (restricted, pre-masked) — registry has employer_ein but this field's name differs, needs _PII_FIELDS registration under its own name, pre_masked true. shareholder_or_partner_tin_masked (highly_restricted, pre-masked) — registry has taxpayer_ssn_masked / recipient_tin but this name differs, needs registration, pre_masked true.",
+    "Prompt hint (doc-level): IRS transcripts label figures by line reference, often abbreviated/truncated; map to the K-1 box meaning (1120-S K-1 Box 1 = ordinary business income; 1065 K-1 Box 1 = ordinary business income, Box 4 = guaranteed payments, Box 19 = distributions).",
+    "Prompt hint (doc-level): A transcript reflects what the IRS has on file (may lag the return); transcript_request_or_run_date and tax_year together tell a processor how current it is. EIN/TIN arrive pre-masked (e.g. XX-XXX2231, XXX-XX-4487) — keep them masked; never reconstruct.",
+    "Ambiguity: ordinary_business_income_or_loss is tagged 'headline' (not a defined reason_class); classified as processor (the primary qualifying-income figure)."
+  ]
+}

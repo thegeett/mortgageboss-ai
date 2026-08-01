@@ -1,0 +1,69 @@
+{
+  "document_type": "work_visa_ead_card",
+  "slug": "work-visa-ead-card",
+  "tier": 3,
+  "rules_served": [],
+  "summary_hint": "whose work authorization this is, the immigration document type and category, and the valid-from / expiration (admit-until) dates — so a processor can confirm the borrower is authorized to work and that authorization extends through closing without opening the card",
+  "existing_extractor": null,
+  "catalog_coverage": "full",
+
+  "typed_core": [
+    {"name":"document_title","type":"str","why":"identity — confirms the card genre","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"immigration_document_type","type":"str","why":"identity — EAD vs work visa vs I-94 vs permanent-resident card determines the auth framework (degraded from enum)","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":"Card families: EAD (Form I-766), work visa (foil in passport), I-94 admission record, permanent-resident card (I-551) — this field routes the reading"},
+    {"name":"full_name","type":"str","why":"identity — the authorized individual; attaches to the borrower (degraded from person)","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"person","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"document_or_card_number","type":"str","why":"PII (highly_restricted) + identity — the card number","rules":[],"reason_class":"pii","rule_floor":false,"degraded_from":null,"pii":{"kind":"DOCUMENT_NUMBER","pre_masked":true},"exists_today":false,"prompt_hint":null},
+    {"name":"uscis_or_a_number","type":"str","why":"PII (highly_restricted) — the Alien Registration Number; identity/linkage","rules":[],"reason_class":"pii","rule_floor":false,"degraded_from":null,"pii":{"kind":"A_NUMBER","pre_masked":true},"exists_today":false,"prompt_hint":"A-number appears as 'A#', 'USCIS#', or 'Alien Reg. No.' with 8-9 digits — normalize into this field"},
+    {"name":"receipt_number","type":"str","why":"PII (restricted) — USCIS receipt number; supports auto-extension eligibility checks","rules":[],"reason_class":"pii","rule_floor":false,"degraded_from":null,"pii":{"kind":"RECEIPT_NUMBER","pre_masked":true},"exists_today":false,"prompt_hint":null},
+    {"name":"date_of_birth","type":"date","why":"PII (highly_restricted) + identity — disambiguates individuals with the same name","rules":[],"reason_class":"pii","rule_floor":false,"degraded_from":null,"pii":{"kind":"DOB","pre_masked":false},"exists_today":false,"prompt_hint":null},
+    {"name":"country_of_birth_or_citizenship","type":"str","why":"processor — supports non-permanent-resident eligibility review","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"visa_or_ead_category","type":"str","why":"processor — the category/class (e.g. EAD C09, H-1B) determines the work-auth type","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"EAD category codes (e.g. C09, A05, C08) live on the front beside 'Category'; capture the code verbatim even when the human label (e.g. 'pending adjustment of status') is absent"},
+    {"name":"status_or_class_of_admission","type":"str","why":"disambiguator — the admission class beside the category; the two together fix the exact status","rules":[],"reason_class":"disambiguator","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"valid_from_date","type":"date","why":"processor — when authorization begins","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"expiration_or_admit_until_date","type":"date","why":"processor — headline: does authorization extend through closing (continuance)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"'Duration of Status (D/S)' is a valid admit-until value and must NOT be forced into a date; capture the literal"},
+    {"name":"employer_or_petitioner_name","type":"str","why":"processor — employer-specific status (e.g. H-1B) ties auth to a named employer","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"employer_specific_restriction","type":"str","why":"processor — restriction limiting work to a specific employer","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"employment_authorized_indicator","type":"str","why":"processor — headline authorized-to-work flag (degraded from boolean)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"bool","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"automatic_extension_or_receipt_rule","type":"str","why":"disambiguator — a 180-day auto-extension can make an 'expired' card still valid; needed beside the expiration date","rules":[],"reason_class":"disambiguator","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"passport_number","type":"str","why":"PII (highly_restricted) — identity linkage to the passport","rules":[],"reason_class":"pii","rule_floor":false,"degraded_from":null,"pii":{"kind":"PASSPORT","pre_masked":true},"exists_today":false,"prompt_hint":null},
+    {"name":"passport_issuing_country","type":"str","why":"processor — issuing country (degraded from country_code)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"country_code","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"visa_number","type":"str","why":"PII (highly_restricted) — the visa foil number; identity linkage","rules":[],"reason_class":"pii","rule_floor":false,"degraded_from":null,"pii":{"kind":"VISA","pre_masked":true},"exists_today":false,"prompt_hint":null},
+    {"name":"i94_admission_number","type":"str","why":"PII (highly_restricted) — the I-94 admission number; identity/entry linkage","rules":[],"reason_class":"pii","rule_floor":false,"degraded_from":null,"pii":{"kind":"I94","pre_masked":true},"exists_today":false,"prompt_hint":null}
+  ],
+
+  "nested_lists": [],
+
+  "rejected": [
+    {"name":"issuer_name","reason":"the issuer is USCIS/DHS for every card; no discriminating value"},
+    {"name":"issuer_address / issuer_phone / issuer_email_or_url","reason":"not present / no consumer"},
+    {"name":"form_number / form_revision_date","reason":"the card form (I-766 etc.) is implied by immigration_document_type"},
+    {"name":"document_issue_date / effective_date","reason":"duplicate valid_from_date"},
+    {"name":"expiration_date (generic)","reason":"duplicated by the specific expiration_or_admit_until_date"},
+    {"name":"statement_period_start / statement_period_end","reason":"not a statement"},
+    {"name":"party_names / party_addresses","reason":"duplicate full_name; a card has no party address consumer"},
+    {"name":"property_address / loan_number / account_case_reference_number","reason":"not present on an ID card"},
+    {"name":"sex","reason":"OPTIONAL; no mortgage consumer and adds protected-class exposure"},
+    {"name":"port_and_date_of_entry","reason":"OPTIONAL object with no consumer; catch-all captures if needed"},
+    {"name":"signature_blocks / notary_block / document_status_or_version","reason":"a card is not executed/notarized in this sense"}
+  ],
+
+  "encoding_variations": [
+    "Expiration is stated as 'Card Expires', 'Valid Until', or 'Admit Until (D/S)' — where D/S ('duration of status') means no fixed date; capture that literal, do not coerce D/S to a date",
+    "EAD category codes (e.g. C09, A05, C08) are the machine-readable status; the human label ('pending adjustment of status') may be absent — capture the code into visa_or_ead_category",
+    "An expired card plus a valid receipt notice can still authorize work under the auto-extension rule — automatic_extension_or_receipt_rule must be captured beside the expiration to avoid a confident false 'expired' reading",
+    "A-number appears as 'A#', 'USCIS#', or 'Alien Reg. No.' with 8-9 digits — normalize into uscis_or_a_number"
+  ],
+
+  "open_questions": [
+    {"id":1,"q":"Seven new _PII_FIELDS registrations. This one document nearly triples the current registry.","options":["register all seven now","defer registration"],"recommendation":"register all seven as listed; confirm the masking policy per field (last-4 vs raw+snapshot) with the security owner before build — flagging, not deciding","blocks_implementation":true},
+    {"id":2,"q":"date_of_birth as PII + identity. DOB is highly_restricted but is the key disambiguator between same-named individuals.","options":["keep typed, store raw, let the snapshot mask","drop to the catch-all"],"recommendation":"keep typed, store raw, let the snapshot mask; do not drop it to the catch-all where it would be stored unmasked","blocks_implementation":true},
+    {"id":3,"q":"'D/S' and auto-extension handling. The expiration field can hold a non-date literal and an 'expired' card can still be valid.","options":["keep expiration_or_admit_until_date permissive and co-capture automatic_extension_or_receipt_rule","force a bare date comparison"],"recommendation":"keep expiration_or_admit_until_date as a permissive field and always co-capture automatic_extension_or_receipt_rule; a future work-authorization rule interprets the pair rather than a bare date comparison","blocks_implementation":false}
+  ],
+
+  "notes": [
+    "No rules read this document today (rule floor is empty). Fields are justified by identity, disambiguation, PII, and processor use.",
+    "This document type is unusually PII-dense: a government-issued identity card (EAD/visa/I-94), so most fields are restricted or highly_restricted and MUST be typed (the catch-all stores raw). Its mortgage value is establishing lawful work authorization and its expiration relative to closing.",
+    "None of the seven PII fields are in the 7-field _PII_FIELDS registry today; every one needs registration.",
+    "full_name is 'standard' sensitivity and typed for identity (not masked), consistent with names on other documents.",
+    "All identifier fields are sensitive — capture them but expect them to be masked; never emit a full number into the free-form catch-all."
+  ]
+}

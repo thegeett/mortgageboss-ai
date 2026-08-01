@@ -1,0 +1,68 @@
+{
+  "document_type": "miscellaneous_document",
+  "slug": "miscellaneous-document",
+  "tier": 3,
+  "rules_served": [],
+  "summary_hint": "<document_title> from <issuer>, dated <document_date>, re: <document_purpose>.",
+  "existing_extractor": null,
+  "catalog_coverage": "full",
+
+  "typed_core": [
+    {"name":"document_title","type":"str","why":"identity/classification — the primary reclassification signal (CORE)","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"provisional_document_subtype","type":"str","why":"processor — model's best guess at the real type; drives reclassification","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"This is a fallback classification — the model's most useful output is provisional_document_subtype: name the document type this should be so a human can reclassify"},
+    {"name":"issuer_or_creator","type":"str","why":"identity/source — who produced it (CORE)","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"issuer_name","type":"str","why":"disambiguator — issuer header when distinct from issuer_or_creator","rules":[],"reason_class":"disambiguator","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"document_date","type":"date","why":"identity — when created; recency (CORE)","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"document_purpose_or_category","type":"str","why":"processor — what the document is for (CORE)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"effective_or_coverage_period","type":"str","why":"identity; the period it covers, if any","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"date_range","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"party_name","type":"str","why":"identity — named party to attach to a borrower (flattened from parties_named person_orentity[])","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"party_name_2","type":"str","why":"identity — second named party","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"parties_named_raw","type":"str","why":"disambiguator — verbatim party string so a bad split stays visible","rules":[],"reason_class":"disambiguator","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"property_orloan_reference","type":"str","why":"identity linkage — ties to a property/loan when stated","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"account_case_or_reference_number","type":"str","why":"PII candidate (restricted) — reference/account number; identity + dedup key","rules":[],"reason_class":"pii","rule_floor":false,"degraded_from":null,"pii":{"kind":"ACCOUNT","pre_masked":false},"exists_today":false,"prompt_hint":"Treat any number that could be an SSN/account number as sensitive and route it to the typed identifier field, never the catch-all"},
+    {"name":"status_or_outcome","type":"str","why":"processor — disposition, if the document reports one","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null}
+  ],
+
+  "nested_lists": [
+    {
+      "name":"key_value_pairs","shape":"flat_row",
+      "shape_reason":"because the document is unclassified, its content is best captured as generic {key, value} rows rather than a bespoke typed structure — a flat row per pair is light and adapts to any layout; flat-row is the safe default under the 16,384-token ceiling",
+      "expected_item_count":"unknown (recommend hard cap ~50)","rules":[],
+      "exists_today":false,"plumbing_sites":5,
+      "fields":[
+        {"name":"key","type":"str","why":"the field label as it appears on the page"},
+        {"name":"value","type":"str","why":"the field value; the correct home for the body of an unknown document"}
+      ]
+    }
+  ],
+
+  "rejected": [
+    {"name":"the 8 TECHNICAL provenance fields","reason":"already in the TypedField wrapper"},
+    {"name":"recommended_reclassification","reason":"catalog TECHNICAL — a single-occurrence derived conclusion; the model's guess belongs in provisional_document_subtype, and reclassification is a downstream decision, not an extracted fact (tags describe, rules judge)"},
+    {"name":"form_number, form_revision_date","reason":"unknown document; no version consumer"},
+    {"name":"issuer_address, issuer_phone, issuer_email_or_url","reason":"no consumer"},
+    {"name":"effective_date, expiration_date, statement_period_start/end","reason":"duplicate effective_or_coverage_period / document_date"},
+    {"name":"party_names, party_addresses, loan_number, property_address","reason":"duplicate the flattened party_name / property_orloan_reference"},
+    {"name":"signature_blocks, notary_block, document_status_or_version","reason":"duplicate signatures_seals_or_certifications / status_or_outcome; no consumer"},
+    {"name":"amounts_and_dates, narrative_sections, tables_orline_items, signatures_seals_or_certifications, attachments_or_referenced_documents","reason":"no consumer; body captured by key_value_pairs + catch-all"}
+  ],
+
+  "encoding_variations": [
+    "Because the type is unknown, document_title, provisional_document_subtype, and document_purpose_or_category may all restate the same thing in different words — keep all three so a human can reclassify from whichever the issuer used.",
+    "effective_or_coverage_period (date_range, no coercer) — keep verbatim.",
+    "Identifiers may be labeled 'Case #', 'Ref', 'Account', 'Policy', 'Permit' — capture the label with the value."
+  ],
+
+  "open_questions": [
+    {"id":1,"q":"key_value_pairs item count. Unknown by definition.","options":["flat-row + one source with a hard cap (e.g. 50 pairs)","uncapped"],"recommendation":"flat-row + one source and a hard cap to stay under the token ceiling; flag if documents routinely exceed that","blocks_implementation":false},
+    {"id":2,"q":"account_case_or_reference_number PII registration.","options":["register in _PII_FIELDS (pre_masked false)","leave to the catch-all"],"recommendation":"register in _PII_FIELDS (pre_masked false — the model cannot reliably pre-mask an unknown identifier; the snapshot masks raw). This is the highest-risk unmasked-PII path in the whole packet because the doc type is unknown","blocks_implementation":true},
+    {"id":3,"q":"How much to type at all. A misc document arguably needs only identity + key_value_pairs.","options":["keep the extra CORE fields (document_purpose, status_or_outcome)","drop them to catch-all"],"recommendation":"kept for reclassification; confirm they earn their tokens or drop to catch-all","blocks_implementation":true}
+  ],
+
+  "notes": [
+    "No rules in the packet → no rule floor. This is the catch-all document type — anything classification could not place. Its schema's real job is to capture enough identity to (a) let a human reclassify it and (b) attach it to a borrower/property/loan. Deep typed extraction is inappropriate because the content is unknown; the body goes to key_value_pairs and the catch-all. Every field is justified by identity or processor review.",
+    "account_case_or_reference_number — catalog restricted. On a truly unknown document this could be an account number, a case number, or a policy number. Recommend registering it in _PII_FIELDS (pre_masked false). Unregistered ⇒ a real account number could land unmasked in the catch-all. This is the single most important PII decision for the catch-all doc type.",
+    "Named parties are personal names — retained as typed identity fields.",
+    "Prompt hint (doc-level): do not invent structure. Capture what is on the page as key_value_pairs; do not force it into a schema for a type it may not be."
+  ]
+}

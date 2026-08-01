@@ -1,0 +1,77 @@
+{
+  "document_type": "bank_deposit_slip",
+  "slug": "bank-deposit-slip",
+  "tier": 3,
+  "rules_served": [],
+  "summary_hint": "<account_holder> deposited <deposit_total> (<cash_amount> cash / <checks_total> checks) to <financial_institution> acct …<last4> on <deposit_date> via <deposit_channel>.",
+  "existing_extractor": null,
+  "catalog_coverage": "full",
+
+  "typed_core": [
+    {"name":"financial_institution_name","type":"str","why":"identity: which bank — matches the slip to the borrower's verified account/statement","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"branch_identifier","type":"str","why":"identity / disambiguator: which branch — helps distinguish accounts and locate the teller record","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"account_holder_name","type":"str","why":"identity: whose account received the deposit; matches to the borrower","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"account_number_masked","type":"str","why":"PII (restricted, already registered as account_number_masked): the destination account — the key that ties the deposit to a verified asset account","rules":[],"reason_class":"pii","rule_floor":false,"degraded_from":null,"pii":{"kind":"ACCOUNT","pre_masked":true},"exists_today":false,"prompt_hint":"Slips show the account as full, last-4, or ****1234 — always file under account_number_masked; never let a full number reach the catch-all"},
+    {"name":"account_type","type":"str","why":"disambiguator: checking vs savings — asset-eligibility context","rules":[],"reason_class":"disambiguator","rule_floor":false,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"deposit_date","type":"date","why":"processor: when the deposit posted — the date matched against the bank-statement credit","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"deposit_channel","type":"str","why":"disambiguator: teller / ATM / mobile / mail — affects how the deposit is corroborated and its risk","rules":[],"reason_class":"disambiguator","rule_floor":false,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"transaction_or_teller_number","type":"str","why":"identity / processor: the transaction reference for matching to the bank statement line","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"deposit_total","type":"Decimal","why":"processor: the headline deposited amount — reconciled to the bank statement and to source docs","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"cash_amount","type":"Decimal","why":"processor: cash portion — cash deposits require sourcing; the single most underwriting-relevant split","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"Report cash_amount, checks_total, and less_cash_received separately — do not collapse into the total"},
+    {"name":"checks_total","type":"Decimal","why":"disambiguator for deposit_total: the checks portion that, with cash, explains the total composition","rules":[],"reason_class":"disambiguator","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"less_cash_received","type":"Decimal","why":"disambiguator for deposit_total: cash taken back reduces the net credited amount — without it the net deposit is misread","rules":[],"reason_class":"disambiguator","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"currency","type":"str","why":"disambiguator: non-USD deposits change the sourced amount","rules":[],"reason_class":"disambiguator","rule_floor":false,"degraded_from":"currency_code","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"funds_availability_date","type":"date","why":"processor: when funds became usable — relevant to cash-to-close timing","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"teller_validation_or_stamp","type":"str","why":"processor: the bank validation/stamp is what makes the slip credible evidence vs a filled-in blank","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"Capture the teller validation / bank stamp verbatim — describe it, do not judge sufficiency"},
+    {"name":"deposit_time","type":"str","why":"disambiguator: distinguishes two same-day deposits to the same account","rules":[],"reason_class":"disambiguator","rule_floor":false,"degraded_from":"time","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"document_issue_date","type":"date","why":"processor: slip date when distinct from deposit_date","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"loan_number","type":"str","why":"identity: links the slip to the loan file, when stated (confidential)","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null}
+  ],
+
+  "nested_lists": [
+    {
+      "name":"check_items","shape":"flat_row",
+      "shape_reason":"deposited checks genuinely repeat (a slip can itemize several checks, each with payer/amount/check-number), and per-check sourcing is exactly the underwriting use ('source each item'). Flat rows {payer_or_drawer, amount, check_number, source} are light and sufficient",
+      "expected_item_count":"several","rules":[],
+      "exists_today":false,"plumbing_sites":5,
+      "fields":[
+        {"name":"payer_or_drawer","type":"str","why":"processor: per-item sourcing — who wrote the deposited check"},
+        {"name":"amount","type":"Decimal","why":"processor: per-item amount that composes the checks total"},
+        {"name":"check_number","type":"str","why":"identity: per-item reference for matching","pii_note":"a check number is quasi-PII (ties to a drawer's account); the nested record needs its own redactor so it is not stored raw"},
+        {"name":"source","type":"str","why":"processor: the documented source of the item — the per-item sourcing use"}
+      ]
+    }
+  ],
+
+  "rejected": [
+    {"name":"the 8 TECHNICAL provenance fields","reason":"already in the TypedField wrapper"},
+    {"name":"document_title, form_number, form_revision_date, document_status_or_version","reason":"a deposit slip is a bank form, not a standardized/versioned form a rule reads"},
+    {"name":"issuer_name, issuer_address, issuer_phone, issuer_email_or_url","reason":"the bank is captured by financial_institution_name; other contact detail has no consumer"},
+    {"name":"effective_date, expiration_date, statement_period_start, statement_period_end","reason":"a slip is a point-in-time record; deposit_date covers it, no coverage period"},
+    {"name":"party_names, party_addresses","reason":"redundant — the party is account_holder_name"},
+    {"name":"property_address, account_case_reference_number","reason":"not present on a deposit slip; keyed by account + transaction number"},
+    {"name":"signature_blocks, notary_block","reason":"a slip is not executed/notarized; the depositor mark is deposit_slip_signature_or_initials (no consumer)"},
+    {"name":"deposit_slip_signature_or_initials","reason":"OPTIONAL; a depositor's initials on a slip have no rule/processor consumer"},
+    {"name":"memo_or_description","reason":"OPTIONAL free text with no consumer; catch-all captures it"}
+  ],
+
+  "encoding_variations": [
+    "Net vs gross: deposit_total, cash_amount, checks_total, and less_cash_received interrelate — the credited amount is cash + checks − less_cash_received; carry all four or the net deposit is ambiguous",
+    "Account masking: slips show the account variously as full, last-4, or ****1234 — always file under account_number_masked; never let a full number reach the catch-all",
+    "Date vs time: two same-day deposits are distinguished only by deposit_time and/or transaction_or_teller_number — keep both",
+    "Validation: a machine-printed teller stamp vs a hand-written slip changes evidentiary weight — capture teller_validation_or_stamp verbatim"
+  ],
+
+  "open_questions": [
+    {"id":1,"q":"No rule consumes this document today (Tier 3, rule_count 0). The likely future consumer is a large-deposit / asset-sourcing rule (the AS-family analog).","options":["keep the composition + check-items fields","trim to amount + date + account if no rule materializes"],"recommendation":"keep the composition + check-items fields so that rule can be built without re-extraction","blocks_implementation":false},
+    {"id":2,"q":"check_items PII — check-item rows carry check numbers and drawer names.","options":["build the nested record with a redactor (like transactions)","leave check numbers to the catch-all"],"recommendation":"build the nested record with a redactor rather than leaving check numbers to the catch-all; confirm the redaction approach","blocks_implementation":true},
+    {"id":3,"q":"currency, deposit_time degraded (no coercer for currency_code/time).","options":["degrade to str","add coercers"],"recommendation":"degrade to str; add coercers only if a rule needs currency math or sub-day ordering","blocks_implementation":false},
+    {"id":4,"q":"account_type enum with no coercer.","options":["degrade to str + prompt hint","add a coercer"],"recommendation":"degrade to str + prompt hint","blocks_implementation":false}
+  ],
+
+  "notes": [
+    "This slip is sourcing evidence for a deposit on a bank statement — extract the amount, composition (cash vs checks), destination account, and date so a processor can match it.",
+    "Itemize deposited checks in check_items (payer/drawer, amount, check number) when shown; a check number is PII — keep it in the nested record with a redactor, not the catch-all.",
+    "account_number_masked reuses the existing registered _PII_FIELDS key (pre_masked true)."
+  ]
+}

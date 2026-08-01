@@ -1,0 +1,75 @@
+{
+  "document_type": "financial_statements",
+  "slug": "financial-statements",
+  "tier": 3,
+  "rules_served": [],
+  "summary_hint": "Personal financial statement of Jordan Rivera as of 03/31/2026 — total assets $842,000, total liabilities $310,000, net worth $532,000.",
+  "existing_extractor": null,
+  "catalog_coverage": "full",
+
+  "typed_core": [
+    {"name":"issuer_name","type":"str","why":"identity — source/preparer org; third-party independence check (processor)","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"statement_type","type":"str","why":"identity — personal vs business financial statement","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"statement_as_of_date","type":"date","why":"identity — the point-in-time the balances are stated; recency (processor)","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"subject_name","type":"str","why":"identity — whose statement (flattened from person_or_entity[]); borrower match","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"object","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"subject_name_2","type":"str","why":"identity — second subject (joint statement)","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"subject_count","type":"int","why":"disambiguator — number of subjects; flags a bad name split","rules":[],"reason_class":"disambiguator","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"subject_names_raw","type":"str","why":"disambiguator — verbatim name string so a wrong split stays visible","rules":[],"reason_class":"disambiguator","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"prepared_by","type":"str","why":"processor — CPA/self-prepared distinction; independence signal","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"accounting_basis","type":"str","why":"disambiguator — cash vs accrual changes how totals read","rules":[],"reason_class":"disambiguator","rule_floor":false,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"joint_with_spouse_indicator","type":"str","why":"processor — whose assets/liabilities are commingled","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"bool","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"total_assets","type":"Decimal","why":"headline — asset base for reserves/net worth","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"liquid_assets_total","type":"Decimal","why":"processor — reserve eligibility (cheap future rule)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"total_liabilities","type":"Decimal","why":"headline — undisclosed-debt cross-check","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"Contingent liabilities (guarantees, co-signed notes) are off-balance-sheet — do not fold them into total_liabilities"},
+    {"name":"net_worth","type":"Decimal","why":"headline — the summary figure","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"'Net worth' = total assets - total liabilities; extract the stated value; a mismatch with the totals is a tag/rule judgment, not something to reconcile at extraction"},
+    {"name":"certification_of_accuracy","type":"str","why":"processor — signed attestation present","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"bool","pii":null,"exists_today":false,"prompt_hint":null}
+  ],
+
+  "nested_lists": [
+    {
+      "name":"asset_line_items","shape":"flat_row",
+      "shape_reason":"a personal financial statement lists 10-40 holdings; flat rows keep it well under the 16,384-token ceiling and per-field wrapping would be wasteful for descriptive rows (category, description, value)",
+      "expected_item_count":"10-40","rules":[],
+      "exists_today":false,"plumbing_sites":5,
+      "fields":[
+        {"name":"category","type":"str","why":"asset category (e.g. cash, securities, real estate)"},
+        {"name":"description","type":"str","why":"asset description","pii_note":"may embed account numbers in free text — treat as potentially sensitive; no _PII_FIELDS path"},
+        {"name":"value","type":"Decimal","why":"asset value"},
+        {"name":"source","type":"str","why":"provenance snippet for the asset row","pii_note":"snippet may embed account numbers — treat as potentially sensitive"}
+      ]
+    }
+  ],
+
+  "rejected": [
+    {"name":"document_title, form_number, form_revision_date","reason":"classification/version metadata; catch-all suffices, no consumer"},
+    {"name":"issuer_address, issuer_phone, issuer_email_or_url","reason":"contact detail; no rule/processor need for a financial statement"},
+    {"name":"party_names","reason":"duplicates subject_names (the doc-specific parties field)"},
+    {"name":"party_addresses, property_address","reason":"not load-bearing on a net-worth statement; no property link needed"},
+    {"name":"loan_number, account_case_reference_number","reason":"linkage nice-to-have; no consumer; catch-all captures"},
+    {"name":"effective_date, expiration_date, statement_period_start/end, document_issue_date","reason":"duplicate/adjacent to statement_as_of_date"},
+    {"name":"signature_blocks, notary_block, preparer_or_subject_signatures","reason":"a financial statement's execution is not rule-checked; certification_of_accuracy covers attestation"},
+    {"name":"document_status_or_version","reason":"no consumer"},
+    {"name":"contingent_liabilities, annual_income_by_source","reason":"second/third nested lists; over budget — leave to catch-all unless a rule appears"},
+    {"name":"the 8 TECHNICAL provenance fields","reason":"already in the TypedField wrapper"}
+  ],
+
+  "encoding_variations": [
+    "statement_type — 'Personal Financial Statement', 'SBA Form 413', 'Statement of Financial Condition'; needs the form/label context to distinguish personal from business",
+    "accounting_basis — 'cash basis' vs 'accrual' vs unstated; carry prepared_by alongside so an unlabeled basis can be judged",
+    "net_worth — sometimes stated, sometimes only derivable from totals; capture the stated figure verbatim, do not compute"
+  ],
+
+  "open_questions": [
+    {"id":1,"q":"Which one nested list? asset_line_items vs liability_line_items — both are catalog CORE object[].","options":["(a) nest assets only","(b) nest liabilities only","(c) nest both (2x plumbing, over the one-list budget)"],"recommendation":"(a) — assets drive reserve/liquidity use; revisit if an undisclosed-debt rule lands that must read individual liabilities","blocks_implementation":true},
+    {"id":2,"q":"subject_names cardinality — flattened to two + count + raw. If a future rule must address a specific business entity vs individual subject separately, revisit.","options":["flat (two + count + raw)","person_or_entity[] nested list"],"recommendation":"keep flat; revisit as person_or_entity[] only if a rule needs subjects addressed individually","blocks_implementation":false},
+    {"id":3,"q":"annual_income_by_source — genuinely repeating but no consumer today.","options":["leave to catch-all","add a second nested list"],"recommendation":"leaving to catch-all rather than a second nested list","blocks_implementation":false}
+  ],
+
+  "notes": [
+    "No rules consume this type today, so there is no rule floor; every field earns its place on identity, PII, processor use, or disambiguation.",
+    "No restricted PII is typed here. account_case_reference_number is confidential but a document reference, not a person identifier; subject names are standard-sensitivity; no field crosses into _PII_FIELDS.",
+    "Asset/liability line items may embed account numbers in free text — the nested source.snippet and description should be treated as potentially sensitive, handled by a row redactor, not _PII_FIELDS.",
+    "Prompt hint (doc-level): SBA Form 413 is the most common standardized personal financial statement — capture form_number into the catch-all but read totals from the summary block, not the schedules.",
+    "total_assets, total_liabilities, and net_worth are tagged 'headline' in the markdown, which is not one of the five reason_class values; mapped to processor and flagged as ambiguities."
+  ]
+}

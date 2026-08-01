@@ -1,0 +1,87 @@
+{
+  "document_type": "mortgage_payoff",
+  "slug": "mortgage-payoff",
+  "tier": 2,
+  "rules_served": ["CR-3", "TI-3"],
+  "summary_hint": "<creditor_or_servicer_name> payoff on <property_address> / loan <loan_number_masked>: $<total_payoff_amount> good through <payoff_good_through_date>, status <quote_status>. — a processor sees which debt/lien this clears, the amount, and whether the quote is still valid.",
+  "existing_extractor": null,
+  "catalog_coverage": "full",
+
+  "typed_core": [
+    {"name":"issuer_name","type":"str","why":"identity/source of the statement (often equals the servicer); authenticity","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"creditor_or_servicer_name","type":"str","why":"CR-3 (match the excluded/paid-off liability's creditor), TI-3 (match the lienholder on title)","rules":["CR-3","TI-3"],"reason_class":"rule","rule_floor":true,"degraded_from":"entity","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"servicer_phone","type":"str","why":"processor — call the servicer to confirm/execute the payoff","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"object","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"borrower_names_raw","type":"str","why":"disambiguator — verbatim borrower string so a bad split stays visible","rules":[],"reason_class":"disambiguator","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"borrower_name","type":"str","why":"CR-3 — whose liability is being paid; identity (attach to borrower)","rules":["CR-3"],"reason_class":"rule","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"borrower_name_2","type":"str","why":"identity — co-borrower on the paid-off loan","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"property_address","type":"str","why":"TI-3 — match the lien's property on title; identity","rules":["TI-3"],"reason_class":"rule","rule_floor":true,"degraded_from":"address","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"loan_number_masked","type":"str","why":"CR-3 (match the credit-report tradeline), TI-3 (match the lien); PII (restricted, pre-masked)","rules":["CR-3","TI-3"],"reason_class":"pii","rule_floor":true,"degraded_from":null,"pii":{"kind":"ACCOUNT","pre_masked":true},"exists_today":false,"prompt_hint":null},
+    {"name":"account_case_reference_number","type":"str","why":"disambiguator — an alternate account/reference to match the liability when the loan number is masked; supports CR-3","rules":["CR-3"],"reason_class":"disambiguator","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"payoff_quote_date","type":"date","why":"identity/recency — when the quote was issued","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"Distinguish the quote date from the good-through date — the good-through date plus per_diem_interest recomputes the amount if closing moves"},
+    {"name":"payoff_good_through_date","type":"date","why":"CR-3 / TI-3 — payoff validity: is the quote still good through closing?","rules":["CR-3","TI-3"],"reason_class":"rule","rule_floor":true,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"The good-through date plus per_diem_interest recomputes the amount if closing moves; the formula is in payoff_after_good_through_formula"},
+    {"name":"unpaid_principal_balance","type":"Decimal","why":"CR-3 — the underlying debt balance being excluded/paid","rules":["CR-3"],"reason_class":"rule","rule_floor":true,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"interest_through_good_through_date","type":"Decimal","why":"processor — payoff-calc component (verify the total)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"per_diem_interest","type":"Decimal","why":"processor — recompute the payoff if closing slips past the good-through date","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"escrow_balance_orcredit","type":"Decimal","why":"processor — net payoff (a credit reduces funds needed)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"prepayment_penalty","type":"Decimal","why":"processor — a red-flag / unexpected cost that changes funds-to-close","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"total_payoff_amount","type":"Decimal","why":"CR-3 (funds needed / must be sourced), TI-3 (amount to clear the lien)","rules":["CR-3","TI-3"],"reason_class":"rule","rule_floor":true,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"Fees may be itemized (late charges, recording/reconveyance, statement fee, other advances) — the itemization is secondary; the consumed value is total_payoff_amount"},
+    {"name":"payoff_after_good_through_formula","type":"str","why":"processor — how to recompute if closing moves (per-diem application)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"payment_method_allowed","type":"str","why":"processor — how the payoff must be remitted","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"wire_or_remittance_instructions","type":"str","why":"processor — execute the payoff; PII (highly_restricted, raw) — contains account/routing","rules":[],"reason_class":"pii","rule_floor":false,"degraded_from":"object","pii":{"kind":"ACCOUNT","pre_masked":false},"exists_today":false,"prompt_hint":"Wire/remittance instructions are the highest-risk data on the page — extract every component (bank, ABA/routing, account, beneficiary, reference) but treat as highly restricted"},
+    {"name":"certified_funds_requirement","type":"str","why":"processor — payment condition affecting how funds are delivered","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"lien_release_timing","type":"str","why":"TI-3 — the release plan: when the lien will be cleared after payoff","rules":["TI-3"],"reason_class":"rule","rule_floor":true,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"Often phrased as 'release recorded within N days of payoff' — this is TI-3's release-plan evidence"},
+    {"name":"quote_status","type":"str","why":"CR-3 — paid-in-full vs preliminary/estimated quote determines whether it is real payoff evidence","rules":["CR-3"],"reason_class":"rule","rule_floor":true,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":"A preliminary/estimated quote is not the same as a paid-in-full letter for CR-3"}
+  ],
+
+  "nested_lists": [
+    {
+      "name":"payoff_conditions_orlimitations","shape":"flat_row",
+      "shape_reason":"the catalog CORE payoff_conditions_orlimitations (string[]) genuinely repeats and is short (a handful of bulleted conditions), so a flat-row list is cheap and stays far under the 16,384 ceiling",
+      "expected_item_count":"a handful","rules":["TI-3"],
+      "exists_today":false,"plumbing_sites":5,
+      "fields":[
+        {"name":"condition","type":"str","why":"processor / TI-3 — a bulleted payoff condition or limitation"},
+        {"name":"source","type":"str","why":"provenance of the condition within the statement"}
+      ]
+    }
+  ],
+
+  "rejected": [
+    {"name":"document_title","reason":"document_type comes from classification; weak identity"},
+    {"name":"form_number, form_revision_date","reason":"payoff statements are not a single standardized form"},
+    {"name":"issuer_address, issuer_email_or_url","reason":"no rule/processor consumer (servicer_phone kept for contact)"},
+    {"name":"issuer_phone","reason":"duplicates servicer_phone (issuer usually = servicer)"},
+    {"name":"effective_date, expiration_date","reason":"duplicate payoff_quote_date / payoff_good_through_date"},
+    {"name":"statement_period_start, statement_period_end","reason":"a payoff statement has no statement period"},
+    {"name":"party_names, party_addresses","reason":"subsumed by borrower/creditor/property fields"},
+    {"name":"loan_number","reason":"duplicates loan_number_masked; the masked form is the PII-safe key"},
+    {"name":"payoff_reason_or_transaction","reason":"no rule reads it; low processor value (roll to catch-all)"},
+    {"name":"late_charges, release_recording_or_reconveyance_fee, suspense_or_partial_payment_balance","reason":"individual fee components with no rule consumer; captured in total_payoff_amount and the catch-all"},
+    {"name":"other_fees_or_advances","reason":"line-item fees with no rule consumer; would spend the nested-list budget for no reader"},
+    {"name":"signature_blocks, notary_block","reason":"a payoff statement is issued, not executed/notarized by the parties"},
+    {"name":"document_status_or_version","reason":"overlaps quote_status, which is the meaningful signal"},
+    {"name":"verifier_or_contact_name","reason":"marginal processor value; contact is covered by servicer_phone"}
+  ],
+
+  "encoding_variations": [
+    "Total payoff may be a single figure or the sum of UPB + interest + fees - escrow credit; capture total_payoff_amount as stated and the components separately so the processor can reconcile.",
+    "Good-through vs quote date — issuers label these differently ('payoff valid through', 'figures good until', 'expiration'); the good-through date governs per_diem application, not the quote date.",
+    "Loan number appears full or masked (last-4); when masked, account_case_reference_number may be the only full match key for the tradeline/lien.",
+    "Quote status stated as 'PRELIMINARY', 'ESTIMATED', 'PAID IN FULL', 'FINAL' — enum degrades to str; only a paid-in-full/final status is true CR-3 payoff evidence.",
+    "Wire instructions may be prose or a labeled block (Bank / ABA / Account / Beneficiary) — flatten to str but preserve every labeled component in the snippet."
+  ],
+
+  "open_questions": [
+    {"id":1,"q":"Which nested list. payoff_conditions_orlimitations (CORE string[]) vs other_fees_or_advances (object[]).","options":["nest payoff_conditions_orlimitations (flat string rows)","nest other_fees_or_advances"],"recommendation":"nest payoff_conditions_orlimitations (flat string rows — CORE, processor/TI-3 relevant); leave other_fees_or_advances to the catch-all since no rule reads line-item fees and total_payoff_amount is the consumed figure","blocks_implementation":true},
+    {"id":2,"q":"wire_or_remittance_instructions handling.","options":["single flattened str registered highly_restricted with a redactor","a nested record (bank/ABA/account/beneficiary) each with its own redactor"],"recommendation":"(a) flattened str + redactor now (one payoff = one instruction block); escalate to (b) only if a rule must read the routing/account individually","blocks_implementation":true},
+    {"id":3,"q":"TI-3 is BLOCKED. Its floor fields are still derived and included so the rule is not dead on arrival when it unblocks. Confirm no additional lien-matching key (e.g. recording/instrument number) is expected.","options":["include as-is","add a recording/instrument number match key"],"recommendation":"include as-is; flag recording/instrument number as a possible future add","blocks_implementation":false},
+    {"id":4,"q":"account_case_reference_number as CR-3 match key. Kept as a disambiguator when loan_number_masked cannot match the tradeline. Confirm the matching logic prefers loan number and falls back to this reference.","options":["prefer loan number, fall back to reference","other"],"recommendation":"keep","blocks_implementation":false}
+  ],
+
+  "notes": [
+    "loan_number_masked needs _PII_FIELDS registration (restricted, pre_masked=true; analogous to account_number_masked).",
+    "wire_or_remittance_instructions is the highest-sensitivity element in the document (highly_restricted, raw — contains full account + routing numbers); it must be a named typed field with its own redactor (or a nested record with a redactor) and must not reach the unmasked catch-all. Classed reason_class pii here (why leads 'processor' but the governing reason it is a named typed field is PII protection).",
+    "TI-3 is BLOCKED; its floor fields (property_address, creditor_or_servicer_name, loan_number_masked, total_payoff_amount, lien_release_timing) are still derived and included so the rule is not dead on arrival when it unblocks.",
+    "No existing extractor for this document type (not among the 18 built) — no diff section; all fields exists_today=false."
+  ]
+}

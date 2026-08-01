@@ -1,0 +1,86 @@
+{
+  "document_type": "k_1_schedule_1065_1120s",
+  "slug": "k-1-schedule-1065-1120s",
+  "tier": 3,
+  "rules_served": ["IN-12"],
+  "summary_hint": "<source_form> K-1 for tax year <tax_year>: <partner_or_shareholder_name> owns <ownership %> of <entity_name> (EIN <entity_ein>); ordinary income <box 1>, guaranteed payments <guaranteed_payments>, distributions <distributions> — the K-1 amounts IN-12 rolls into qualifying income.",
+  "existing_extractor": null,
+  "catalog_coverage": "full",
+
+  "typed_core": [
+    {"name":"tax_year","type":"int","why":"IN-12 — the year the amounts cover; disambiguator beside every figure; multi-year averaging","rules":["IN-12"],"reason_class":"rule","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"source_form","type":"str","why":"IN-12 — 1065 (partnership) vs 1120S (S-corp): the qualifying-income methodology differs; also which boxes carry income","rules":["IN-12"],"reason_class":"rule","rule_floor":false,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":"Read from the header: 'Schedule K-1 (Form 1065)' = partnership; 'Schedule K-1 (Form 1120-S)' = S-corp. The form governs box numbering and the income method"},
+    {"name":"final_or_amended_k1","type":"str","why":"processor — an AMENDED K-1 supersedes; a FINAL K-1 signals the entity/interest ended (continuance)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"entity_name","type":"str","why":"IN-12 — match the entity to the business tax return / CPA letter / business license","rules":["IN-12"],"reason_class":"rule","rule_floor":false,"degraded_from":"entity","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"entity_ein","type":"str","why":"PII (masked, EIN) — entity identity; match key across business documents","rules":[],"reason_class":"pii","rule_floor":false,"degraded_from":"identifier","pii":{"kind":"EIN","pre_masked":false},"exists_today":false,"prompt_hint":"Mask the EIN"},
+    {"name":"entity_address","type":"str","why":"identity — entity location; corroborates the business","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"address","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"partner_or_shareholder_name","type":"str","why":"IN-12 — must be the borrower; attributes the income","rules":["IN-12"],"reason_class":"rule","rule_floor":false,"degraded_from":"person_or_entity","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"partner_or_shareholder_tin","type":"str","why":"PII (raw, highly_restricted) — borrower SSN/TIN; match key","rules":[],"reason_class":"pii","rule_floor":false,"degraded_from":null,"pii":{"kind":"SSN","pre_masked":false},"exists_today":false,"prompt_hint":"Treat the partner/shareholder TIN as a raw SSN — never quote it"},
+    {"name":"partner_or_shareholder_address","type":"str","why":"identity/occupancy; PII — borrower address, must be typed or it lands unmasked in the catch-all","rules":[],"reason_class":"pii","rule_floor":false,"degraded_from":"address","pii":{"kind":"ADDRESS","pre_masked":false},"exists_today":false,"prompt_hint":null},
+    {"name":"partner_type_or_shareholder_status","type":"str","why":"processor/IN-12 — general vs limited partner changes self-employment-tax treatment of the income","rules":["IN-12"],"reason_class":"processor","rule_floor":false,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"profit_loss_capital_or_ownership_percentages","type":"str","why":"IN-12 — the ownership share(s) used to attribute entity income; profit/loss/capital % can differ","rules":["IN-12"],"reason_class":"rule","rule_floor":false,"degraded_from":"object","pii":null,"exists_today":false,"prompt_hint":"Capture all stated percentages (profit/loss/capital)"},
+    {"name":"current_year_net_income_or_loss","type":"Decimal","why":"IN-12 — the partner's share of net income/loss","rules":["IN-12"],"reason_class":"rule","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"capital_account_ending","type":"Decimal","why":"processor — ending capital; supports capital-account and viability analysis","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"withdrawals_and_distributions","type":"Decimal","why":"IN-12 — distributions from the capital-account section (Item L); qualifying income per the example","rules":["IN-12"],"reason_class":"rule","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"guaranteed_payments","type":"Decimal","why":"IN-12 — guaranteed payments to the partner count as self-employment income","rules":["IN-12"],"reason_class":"rule","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"distributions","type":"Decimal","why":"IN-12 — box distributions (1065 box 19 / 1120S box 16 code D); the example's 'K-1 distributions → qualifying income'","rules":["IN-12"],"reason_class":"rule","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null}
+  ],
+
+  "nested_lists": [
+    {
+      "name":"k1_box_items","shape":"flat_row",
+      "shape_reason":"a K-1 carries many numbered boxes (ordinary income, net rental, interest, dividends, capital gain, §179, credits, and lettered sub-codes) — many items, so a flat row is light and stays well under the 16,384 ceiling",
+      "expected_item_count":"many","rules":["IN-12"],
+      "exists_today":false,"plumbing_sites":5,
+      "fields":[
+        {"name":"box_number","type":"str","why":"IN-12 — identifies the box (e.g. '1', '16D')"},
+        {"name":"box_label","type":"str","why":"IN-12 — the box description"},
+        {"name":"amount","type":"Decimal","why":"IN-12 — the box amount (the calculator reads ordinary business income box 1, rental box 2, and others)"},
+        {"name":"code","type":"str","why":"IN-12 — the lettered code where present"},
+        {"name":"source","type":"str","why":"provenance — the section/box the value came from"}
+      ]
+    }
+  ],
+
+  "rejected": [
+    {"name":"document_title, form_number, form_revision_date","reason":"classification/version before extraction; source_form identifies the schedule"},
+    {"name":"issuer_name","reason":"duplicates entity_name (the entity issues the K-1)"},
+    {"name":"issuer_address, issuer_phone, issuer_email_or_url","reason":"not on a K-1 / marginal; catch-all"},
+    {"name":"document_issue_date, effective_date, expiration_date","reason":"a K-1 reports a completed tax year; tax_year is the period"},
+    {"name":"statement_period_start/_end","reason":"not a statement period"},
+    {"name":"party_names, party_addresses","reason":"covered by entity_ and partner_ flattened fields"},
+    {"name":"property_address, loan_number","reason":"not on a K-1"},
+    {"name":"account_case_reference_number","reason":"no consumer beyond entity_ein"},
+    {"name":"signature_blocks, notary_block","reason":"a K-1 is not executed/notarized"},
+    {"name":"document_status_or_version","reason":"final_or_amended_k1 carries the material state"},
+    {"name":"irs_center_or_entity_state","reason":"OPTIONAL; marginal; catch-all"},
+    {"name":"domestic_or_foreign_status","reason":"marginal for IN-12; catch-all"},
+    {"name":"ownership_change_dates","reason":"rarely present; no IN-12 gate; catch-all"},
+    {"name":"capital_account_beginning, capital_contributed","reason":"intermediate rollforward lines; ending capital + distributions suffice; catch-all"},
+    {"name":"partner_share_of_liabilities","reason":"CONDITIONAL; not a direct income input; catch-all"},
+    {"name":"section_704c_or_basis_information","reason":"OPTIONAL specialist detail; catch-all"},
+    {"name":"state_and_local_k1_items","reason":"state overlay; no IN-12 (federal) gate; catch-all"},
+    {"name":"attached_statements","reason":"supporting statements; captured by reference; catch-all"}
+  ],
+
+  "encoding_variations": [
+    "source_form — read from the K-1 header: 'Schedule K-1 (Form 1065)' = partnership; 'Schedule K-1 (Form 1120-S)' = S-corp. The form governs box numbering (e.g. distributions are 1065 box 19 vs 1120S box 16 code D) and the income method",
+    "ownership percentages — 1065 Item J shows beginning/ending profit, loss, and capital % (which can differ); 1120S shows a single stock-ownership %. No percent coercer; flatten to str and keep all stated percentages",
+    "distributions appear twice — in the capital-account rollforward (Item L 'withdrawals & distributions') and in the box section (box 19 / 16D). Keep both; they can differ and the calculator may use either — the disambiguator is which section each came from",
+    "final_or_amended_k1 / domestic-foreign — checkboxes at the top; degrade to str",
+    "partner_type — 'General partner or LLC member-manager' vs 'Limited partner or other LLC member'; affects SE-tax treatment"
+  ],
+
+  "open_questions": [
+    {"id":1,"q":"k1_box_items shape — flat-row vs per-field-wrapped","options":["flat-row","per-field-wrapped"],"recommendation":"flat-row, comfortably under the ceiling (box counts are moderate-to-many with lettered sub-codes)","blocks_implementation":true},
+    {"id":2,"q":"Distributions duplication — the capital-account distribution (Item L) and the box distribution (19/16D) can differ","options":["type both (chosen) and let IN-12 pick","type one"],"recommendation":"type both — the discrepancy is itself informative; keep the section as the disambiguator","blocks_implementation":false},
+    {"id":3,"q":"Ownership % degradation — profit/loss/capital % differ and there is no percent coercer; flattened to one str","options":["keep the str now","confirm which numeric % IN-12 uses (typically profit %)"],"recommendation":"keep the str now, flag the numeric need","blocks_implementation":false},
+    {"id":4,"q":"PII registration — entity_ein, partner_or_shareholder_tin, and partner_or_shareholder_address are all unregistered under these names","options":["register before go-live"],"recommendation":"confirm registration before go-live so the snapshot masks them","blocks_implementation":false}
+  ],
+
+  "notes": [
+    "Decision-critical amounts (guaranteed_payments, distributions, current_year_net_income_or_loss) are ALSO typed above because IN-12 uses them directly; k1_box_items carries the remaining boxes so none are lost to the discarded catch-all.",
+    "IN-12 rolls up ordinary business income (box 1), net rental (box 2/3), guaranteed payments (1065 box 4), and distributions (1065 box 19 / 1120S box 16 code D).",
+    "Ambiguity: partner_type_or_shareholder_status is tagged 'processor/IN-12' — classed processor as primary but it also serves IN-12 (SE-tax treatment of income); flagged."
+  ]
+}

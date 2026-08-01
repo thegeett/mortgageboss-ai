@@ -1,0 +1,54 @@
+{
+  "document_type": "w2",
+  "slug": "latest-w-2s",
+  "tier": 1,
+  "rules_served": ["FR-1","ID-1","ID-2","IN-1","IN-5","IN-6","IN-10","IN-11"],
+  "summary_hint": "employer, employee, tax year, Box 1 wages",
+  "existing_extractor": "app/ai/extraction/w2.py",
+  "catalog_coverage": "full",
+
+  "typed_core": [
+    {"name":"tax_year","type":"int","why":"IN-11 (2-year history), IN-6, IN-10 — the year is the join key","rules":["IN-6","IN-10","IN-11"],"reason_class":"rule","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":true,"prompt_hint":null},
+    {"name":"employer_name","type":"str","why":"IN-5, IN-6, ID-1","rules":["ID-1","IN-5","IN-6"],"reason_class":"rule","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":true,"prompt_hint":null},
+    {"name":"employer_ein","type":"str","why":"IN-5 disambiguator — two employers with similar names; also PII","rules":["IN-5"],"reason_class":"pii","rule_floor":false,"degraded_from":null,"pii":{"kind":"ACCOUNT","pre_masked":false},"exists_today":true,"prompt_hint":null},
+    {"name":"employer_address","type":"str","why":"identity; IN-5 disambiguator","rules":["IN-5"],"reason_class":"disambiguator","rule_floor":false,"degraded_from":"address","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"employee_name","type":"str","why":"ID-1","rules":["ID-1"],"reason_class":"rule","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":true,"prompt_hint":null},
+    {"name":"employee_ssn","type":"str","why":"ID-2 — 'EXACT match, no fuzzy' (Box a)","rules":["ID-2"],"reason_class":"pii","rule_floor":false,"degraded_from":null,"pii":{"kind":"SSN","pre_masked":false},"exists_today":true,"prompt_hint":"NEVER place an SSN in additional_sections — catch-all values are stored unmasked"},
+    {"name":"employee_address","type":"str","why":"ID-4","rules":["ID-4"],"reason_class":"rule","rule_floor":false,"degraded_from":"address","pii":{"kind":"ADDRESS","pre_masked":false},"exists_today":false,"prompt_hint":null},
+
+    {"name":"wages_tips_other_comp","type":"Decimal","why":"IN-1, IN-3, IN-10, IN-11 — Box 1, the qualifying figure","rules":["IN-1","IN-10","IN-11"],"reason_class":"rule","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":true,"prompt_hint":"Read BOX 1 — not Boxes 3 or 5, which differ with pre-tax deferrals"},
+    {"name":"social_security_wages","type":"Decimal","why":"Box 3 disambiguator — differs from Box 1 when there are pre-tax deferrals","rules":["IN-1"],"reason_class":"disambiguator","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":true,"prompt_hint":null},
+    {"name":"medicare_wages","type":"Decimal","why":"Box 5 disambiguator — the uncapped figure","rules":["IN-1"],"reason_class":"disambiguator","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":true,"prompt_hint":null},
+    {"name":"federal_income_tax_withheld","type":"Decimal","why":"Box 2 — processor reference, and FR-1 reconciliation context","rules":["FR-1"],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":true,"prompt_hint":null},
+    {"name":"retirement_plan_checked","type":"str","why":"Box 13 — AS-4 may need a retirement-plan signal","rules":["AS-4"],"reason_class":"processor","rule_floor":false,"degraded_from":"bool","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"statutory_employee_checked","type":"str","why":"Box 13 — IN-12 distinguishes self-employed borrowers; a statutory employee is the hybrid case","rules":["IN-12"],"reason_class":"rule","rule_floor":true,"degraded_from":"bool","pii":null,"exists_today":false,"prompt_hint":"Box 13 has three checkboxes — capture statutory employee and retirement plan separately"},
+    {"name":"is_corrected_w2","type":"str","why":"disambiguator — a W-2c SUPERSEDES the original. Without it, two W-2s for one tax year look like a contradiction to IN-11 and IN-6","rules":["IN-6","IN-11"],"reason_class":"disambiguator","rule_floor":true,"degraded_from":"bool","pii":null,"exists_today":false,"prompt_hint":"If the form is a W-2c, set this and read the CORRECTED amounts"}
+  ],
+
+  "nested_lists": [],
+
+  "rejected": [
+    {"name":"state_wages / local_wages","reason":"no rule reads them; catch-all"},
+    {"name":"dependent_care_benefits","reason":"no consumer"},
+    {"name":"control_number","reason":"employer-internal"},
+    {"name":"Box 12 codes","reason":"variable, and no rule reads them; catch-all"},
+    {"name":"income_qualifies_for_underwriting","reason":"a judgment, not a fact — IN-1's job. Tags describe; rules judge"},
+    {"name":"the 8 TECHNICAL provenance fields","reason":"already in the TypedField wrapper"}
+  ],
+
+  "encoding_variations": [
+    "Box numbers are federally fixed — the most standardised document in the set",
+    "Layout varies (4-up perforated, single, employer-printed) but labels are constant",
+    "A corrected W-2 is titled 'W-2c' with different box labelling"
+  ],
+
+  "open_questions": [
+    {"id":1,"q":"retirement_plan_checked and statutory_employee_checked are booleans, but there is no coerce_bool","options":["str holding Y/N/null (chosen)","add a coercer"],"recommendation":"str for now — the same degradation applies across dozens of indicator fields; adding coerce_bool is a separate, global decision","blocks_implementation":false},
+    {"id":2,"q":"is_corrected_w2 is a rule-floor INFERENCE, not an explicit requirement","options":["include (chosen)","drop as speculative"],"recommendation":"include — no rule names it, but IN-11 and IN-6 would misbehave with a W-2c and its original present together","blocks_implementation":false}
+  ],
+
+  "notes": [
+    "The most standardised document in the set — federally fixed box numbers make encoding variation minimal.",
+    "The shipping extractor covers most of this; the spec adds 4 fields."
+  ]
+}

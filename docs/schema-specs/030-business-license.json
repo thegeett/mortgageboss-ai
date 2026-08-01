@@ -1,0 +1,65 @@
+{
+  "document_type": "business_license",
+  "slug": "business-license",
+  "tier": 3,
+  "rules_served": ["IN-12"],
+  "summary_hint": "<license_type_or_class> for <business_legal_name> (owner <owner_or_qualifying_individual>), issued <issue_date> by <issuing_agency_or_jurisdiction>, status <license_status>, expires <expiration_or_renewal_date>",
+  "existing_extractor": null,
+  "catalog_coverage": "full",
+
+  "typed_core": [
+    {"name": "issuing_agency_or_jurisdiction", "type": "str", "why": "identity/source — which city/county/state issued it; third-party independence", "rules": [], "reason_class": "identity", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "issuer_name", "type": "str", "why": "identity — the issuing office/department name (may equal the agency)", "rules": [], "reason_class": "identity", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "license_number", "type": "str", "why": "identity/dedup — the license identifier for cross-document matching", "rules": [], "reason_class": "identity", "rule_floor": false, "degraded_from": "identifier", "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "license_type_or_class", "type": "str", "why": "processor — what the business is licensed to do; nature of the self-employment", "rules": [], "reason_class": "processor", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "business_legal_name", "type": "str", "why": "IN-12 (corroboration) — match the licensed entity to the business tax return / K-1 entity name", "rules": ["IN-12"], "reason_class": "rule", "rule_floor": false, "degraded_from": "entity", "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "dba_name", "type": "str", "why": "disambiguator for business_legal_name — the business may operate/file under a DBA that differs from the legal name", "rules": [], "reason_class": "disambiguator", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "owner_or_qualifying_individual", "type": "str", "why": "IN-12 (corroboration) — match the owner to the borrower", "rules": ["IN-12"], "reason_class": "rule", "rule_floor": false, "degraded_from": "person_or_entity", "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "business_address", "type": "str", "why": "identity — match to the business address on the tax return", "rules": [], "reason_class": "identity", "rule_floor": false, "degraded_from": "address", "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "business_activity_or_trade", "type": "str", "why": "processor — the trade/activity; supports the nature-of-business review", "rules": [], "reason_class": "processor", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "industry_or_naics_code", "type": "str", "why": "disambiguator for business_activity_or_trade — the NAICS code pins the activity when the free-text trade is vague", "rules": [], "reason_class": "disambiguator", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": "NAICS/SIC codes may appear; capture them as the activity disambiguator"},
+    {"name": "issue_date", "type": "date", "why": "IN-12 (corroboration) — establishes how long the business has operated (the 2-year self-employment history)", "rules": ["IN-12"], "reason_class": "rule", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "expiration_or_renewal_date", "type": "date", "why": "validity through closing; a lapsed license undercuts 'active business'", "rules": [], "reason_class": "processor", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "license_status", "type": "str", "why": "IN-12 (corroboration) — active vs suspended/expired; corroborates the business currently exists", "rules": ["IN-12"], "reason_class": "rule", "rule_floor": false, "degraded_from": "enum", "pii": null, "exists_today": false, "prompt_hint": null}
+  ],
+
+  "nested_lists": [],
+
+  "rejected": [
+    {"name": "document_title, form_number, form_revision_date", "reason": "classification/version before extraction; not a standardized form"},
+    {"name": "issuer_address, issuer_phone, issuer_email_or_url", "reason": "issuing-agency contact; marginal, catch-all"},
+    {"name": "document_issue_date", "reason": "duplicates issue_date (License identity)"},
+    {"name": "effective_date", "reason": "duplicates issue_date for a license"},
+    {"name": "expiration_date", "reason": "duplicates expiration_or_renewal_date (License identity)"},
+    {"name": "statement_period_start/_end", "reason": "not applicable to a license"},
+    {"name": "party_names, party_addresses", "reason": "covered by flattened owner_ and business_address fields"},
+    {"name": "property_address, loan_number", "reason": "not on a business license"},
+    {"name": "account_case_reference_number", "reason": "duplicates license_number"},
+    {"name": "signature_blocks", "reason": "a license is issued, not executed by the borrower; authenticity marginal"},
+    {"name": "notary_block", "reason": "not notarized"},
+    {"name": "document_status_or_version", "reason": "license_status carries this"},
+    {"name": "conditions_restrictions_or_endorsements", "reason": "marginal for IN-12; catch-all"},
+    {"name": "verification_url_or_qr_reference", "reason": "audit-only; no consumer; catch-all"}
+  ],
+
+  "encoding_variations": [
+    "license_status — no enum coercer; appears as 'Active', 'Current', 'In Good Standing', 'Valid', 'Expired', 'Suspended', 'Revoked'. Degrade to str; the prompt should preserve the verbatim word",
+    "business_legal_name vs dba_name — issuers print 'Legal Name', 'Business Name', 'DBA', 'Trade Name', 'Operating As'. Keep both so a legal-vs-DBA mismatch against the tax return is visible",
+    "issue_date vs expiration_or_renewal_date — some jurisdictions print only a 'valid through'/'renewal' date and no separate issue date; some print a term ('2025-2026'). Capture both dates where present",
+    "license_number — labeled 'License No.', 'Permit #', 'Registration No.', 'Account No.' depending on jurisdiction"
+  ],
+
+  "open_questions": [
+    {"id": 1, "q": "Rule-floor derivability — IN-12's how_engine_checks describes a calculator over the tax documents; it does not name any business-license field. The license fields are the likely corroboration reads, not fields the engine's text specifies", "options": ["land them as corroboration (done)", "treat the license as having no hard rule floor and rely on catalog CORE only"], "recommendation": "(a) — these are the fields a human uses to corroborate the calculator; flag that IN-12's text under-specifies the license", "blocks_implementation": false},
+    {"id": 2, "q": "Boolean/enum degradation — license_status degrades to str. If a future rule gates on active-vs-expired, a normalized status enum/coercer would help", "options": ["keep str + prompt hint now", "add a status enum/coercer"], "recommendation": "keep str + prompt hint now", "blocks_implementation": false},
+    {"id": 3, "q": "Business-name matching key — legal name vs DBA vs the tax-return entity name may all differ", "options": ["keep both business_legal_name and dba_name typed", "resolve to a single name"], "recommendation": "keep both business_legal_name and dba_name typed so the match/mismatch is visible rather than resolved silently", "blocks_implementation": false}
+  ],
+
+  "notes": [
+    "No existing_extractor for this document type — new schema.",
+    "IN-12's engine reads the tax documents, not the license directly, so the license's job is to corroborate existence/ownership/duration. 13 typed-core rows, below the 20-25 target, expected for a one-rule corroborating document.",
+    "A 'business license' spans city business-tax certificates, county permits, state professional/occupational licenses, and DBA/fictitious-name registrations — the layout varies widely; read labels, not positions.",
+    "The value to IN-12 is corroboration: does an active license exist for the borrower's business, and for how long — capture status, owner, legal/DBA name, and issue date.",
+    "PII: no new _PII_FIELDS registration proposed. owner_or_qualifying_individual is a person name at standard sensitivity (identity, not a maskable kind); the business address is a business location, not borrower home PII. If a license ever prints the owner's SSN or home address, that must become a named typed field and be registered — never left to the unmasked catch-all."
+  ]
+}

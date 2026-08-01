@@ -1,0 +1,65 @@
+{
+  "document_type": "letter_of_explanation_income",
+  "slug": "letter-of-explanation-income",
+  "tier": 3,
+  "rules_served": [],
+  "summary_hint": "Borrower LOE explaining <income_issue_type> for <employer/source>, covering <affected period>, current status <status>, signed <letter_date>.",
+  "existing_extractor": null,
+  "catalog_coverage": "full",
+
+  "typed_core": [
+    {"name":"document_title","type":"str","why":"identity/classification — distinguishes an income LOE from other LOE subtypes for human review","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"'LOE' / 'LOX' / 'letter of explanation' are interchangeable titles"},
+    {"name":"letter_date","type":"date","why":"identity — when written; recency of the explanation (processor)","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"borrower_name","type":"str","why":"identity — whose LOE (flattened from borrower_names person[])","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"borrower_name_2","type":"str","why":"identity — co-borrower when the letter is joint","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"borrower_names_raw","type":"str","why":"disambiguator — verbatim signer string so a bad name split stays visible","rules":[],"reason_class":"disambiguator","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"issuer_name","type":"str","why":"identity/source — normally the borrower; confirms the letter is borrower-authored, not third-party","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"The issuer of a LOE is normally the borrower, not a third party — do not expect institutional letterhead"},
+    {"name":"employer_business_or_income_source","type":"str","why":"identity — which income stream this letter explains; attaches the LOE to a paystub/VOE (processor)","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"position_or_income_type","type":"str","why":"disambiguator — which role/income when a borrower has several sources (processor)","rules":[],"reason_class":"disambiguator","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"income_issue_type","type":"str","why":"identity/classification; what is being explained (gap, decline, bonus, new job)","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"affected_dates_or_period","type":"str","why":"identity; the period the explanation covers (processor)","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"date_range","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"reason_or_cause","type":"str","why":"processor — the substance of the explanation Priya reads","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"Capture the reason verbatim; do not summarize or infer a cause the borrower did not state"},
+    {"name":"return_to_work_or_start_date","type":"date","why":"processor — forward-looking date supporting income continuity; cheap future rule","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"current_employment_orincome_status","type":"str","why":"processor; is the income still active","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"income_continuance_expectation","type":"str","why":"processor — borrower's stated expectation of continuance","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"variable_income_or_one_time_payment_classification","type":"str","why":"disambiguator — whether the amount recurs or is one-time (processor)","rules":[],"reason_class":"disambiguator","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"employment_gap_or_leave_details","type":"str","why":"processor — gap/leave specifics when present","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"object","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"supporting_documents_summary","type":"str","why":"processor — what evidence the borrower references (flattened; see Open questions)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"borrower_certification","type":"str","why":"processor — presence/wording of the truthfulness attestation","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"signature_date","type":"date","why":"execution — date the borrower signed (flattened from borrower_signatures_and_dates signature[])","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"property_address","type":"str","why":"identity linkage (flattened) — ties the letter to the subject file when stated","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"address","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"loan_number","type":"str","why":"identity linkage — ties the letter to the loan file when stated","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null}
+  ],
+
+  "nested_lists": [],
+
+  "rejected": [
+    {"name":"the 8 TECHNICAL provenance fields","reason":"already in the TypedField wrapper"},
+    {"name":"form_number, form_revision_date","reason":"a borrower LOE is not a standardized form"},
+    {"name":"issuer_address, issuer_phone, issuer_email_or_url","reason":"no consumer; issuer is the borrower"},
+    {"name":"effective_date, expiration_date, statement_period_start/end","reason":"a LOE has no coverage period; duplicate affected_dates_or_period"},
+    {"name":"party_names, party_addresses","reason":"duplicate borrower_names; no rule addresses parties individually"},
+    {"name":"account_case_reference_number","reason":"no consumer on a borrower letter"},
+    {"name":"notary_block, signature_blocks","reason":"a LOE is not notarized; borrower signature captured flat"},
+    {"name":"document_status_or_version","reason":"no draft/final lifecycle for a borrower letter"},
+    {"name":"income_amounts_orvariance","reason":"itemized amounts have no rule; catch-all captures them"}
+  ],
+
+  "encoding_variations": [
+    "income_issue_type / current_employment_orincome_status are catalog enum with enum_values: null — issuers use free prose ('still employed', 'on leave', 'returned'). Degrade to str; the model must not be forced into a fixed vocabulary.",
+    "affected_dates_or_period is a date_range with no coercer — issuers write 'March–June 2025', 'Q2 2025', or '3 months' — keep the verbatim string.",
+    "Borrower name may appear in the letterhead, the body, and the signature line with different formatting — borrower_names_raw preserves the signature form."
+  ],
+
+  "open_questions": [
+    {"id":1,"q":"supporting_documents shape.","options":["flat supporting_documents_summary str","a nested string list"],"recommendation":"(a) flat str — usually a short phrase, no consumer; leave until a rule needs to match named attachments","blocks_implementation":true},
+    {"id":2,"q":"income_amounts_orvariance as a list.","options":["leave to the catch-all","nested list of itemized figures"],"recommendation":"leave to the catch-all; flag for review if underwriting later wants itemized before/after figures typed","blocks_implementation":true},
+    {"id":3,"q":"borrower_name split.","options":["flat name/name_2 + raw string","split without raw retention"],"recommendation":"joint LOEs may sign two names on one line; borrower_names_raw retained so the tag layer can judge a bad split","blocks_implementation":false}
+  ],
+
+  "notes": [
+    "This document carries no rules in the packet, so there is no rule floor. Every typed-core field is justified by identity, disambiguation, or processor review. A borrower-authored narrative letter is mostly free prose; the typed core captures who/what/when so the letter can be attached to a borrower and income source, and the narrative itself falls to the catch-all.",
+    "loan_number is confidential in the catalog but is treated as an identity/linkage field (consistent with the standard's handling), not registered in _PII_FIELDS. No SSN, DOB, or account number appears on this document type.",
+    "Ambiguity: signature_date is described as 'execution' in the markdown, which is not one of the five reason_class values; classified as processor (a signing date the processor reviews for recency/validity) as best guess."
+  ]
+}

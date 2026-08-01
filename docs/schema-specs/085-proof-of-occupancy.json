@@ -1,0 +1,62 @@
+{
+  "document_type": "proof_of_occupancy",
+  "slug": "proof-of-occupancy",
+  "tier": 3,
+  "rules_served": [],
+  "summary_hint": "what kind of occupancy evidence (utility bill, voter registration, lease), for whom, at which service address, dated when — e.g. 'PG&E electric bill, J. Rivera, 41 Oak St, service active since 2024-03, statement 2026-06.'",
+  "existing_extractor": null,
+  "catalog_coverage": "full",
+
+  "typed_core": [
+    {"name":"document_title","type":"str","why":"processor — occupancy evidence spans utility/voter/lease; the title disambiguates the source class","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"evidence_type","type":"str","why":"identity — CORE; what kind of occupancy proof this is (utility/voter/insurance/lease)","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":"Occupancy evidence is issuer-diverse (utility, voter registration card, insurance declarations, lease). Set evidence_type from the document class, not from a printed label"},
+    {"name":"issuer_or_provider_name","type":"str","why":"identity — CORE; the utility/agency/provider that issued the evidence (independence of source)","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"occupant_name","type":"str","why":"identity — CORE; the person the evidence places at the address (borrower match)","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"occupant_name_2","type":"str","why":"identity — second named occupant on the evidence","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"occupant_count","type":"int","why":"disambiguator — how many occupants the split produced; guards a bad name split","rules":[],"reason_class":"disambiguator","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"service_or_property_address","type":"str","why":"identity — CORE; the address occupancy is being evidenced for (the crux of the document)","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"mailing_address","type":"str","why":"disambiguator/processor — a mailing address differing from the service address is itself an occupancy signal","rules":[],"reason_class":"disambiguator","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"document_or_statement_date","type":"date","why":"identity — CORE; document date, drives recency","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"coverage_period_start","type":"date","why":"processor — start of the service/coverage window the evidence spans","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"date_range","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"coverage_period_end","type":"date","why":"processor — end of the service/coverage window","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"service_or_lease_start_date","type":"date","why":"processor — when service/occupancy began, shows length of residence","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"current_service_or_occupancy_status","type":"str","why":"identity/processor — CORE; active vs inactive service","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":"Do NOT infer occupancy status — extract the printed service status verbatim; the tag layer judges"},
+    {"name":"owner_renter_or_other_status","type":"str","why":"processor — owner vs renter vs household member changes how occupancy is read","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"household_or_residency_relationship","type":"str","why":"processor — relationship of occupant to the borrower/household","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"account_or_reference_number_masked","type":"str","why":"PII — masked account/reference identifier; must be a named field, not catch-all","rules":[],"reason_class":"pii","rule_floor":false,"degraded_from":null,"pii":{"kind":"ACCOUNT","pre_masked":true},"exists_today":false,"prompt_hint":"Never emit an unmasked account number; if only a full number is visible, mask to last-4"},
+    {"name":"loan_number","type":"str","why":"identity — links the evidence to the loan file","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null}
+  ],
+
+  "nested_lists": [],
+
+  "rejected": [
+    {"name":"issuer_name","reason":"duplicates issuer_or_provider_name for this doc type"},
+    {"name":"party_names / party_addresses","reason":"duplicate occupant_names / addresses already captured"},
+    {"name":"property_address","reason":"duplicates service_or_property_address"},
+    {"name":"amount_due_or_paid","reason":"OPTIONAL; a bill amount is not occupancy evidence and has no consumer"},
+    {"name":"usage_or_activity_summary","reason":"OPTIONAL; free text, no consumer, stays in catch-all"},
+    {"name":"address_match_quality","reason":"TECHNICAL — a conclusion, not a fact; rules judge address match"},
+    {"name":"signature_blocks / notary_block","reason":"occupancy evidence (a bill) is not an executed instrument"},
+    {"name":"document_status_or_version, effective/expiration dates","reason":"no consumer; duplicate the statement date/period"},
+    {"name":"issuer_address / issuer_phone / issuer_email_or_url","reason":"no rule; independent-verification use is speculative"},
+    {"name":"form_number / form_revision_date","reason":"occupancy evidence is not a standardized form"}
+  ],
+
+  "encoding_variations": [
+    "Occupancy status appears as 'Active,' 'Current,' 'In service,' or an implicit non-zero balance — needs current_service_or_occupancy_status beside the account to be trustworthy",
+    "Service address vs mailing address: bills often print both; without both fields captured, a same-value comparison (the occupancy signal) is impossible",
+    "Coverage period may be a single 'Billing period 05/01-05/31' range or two separate dates"
+  ],
+
+  "open_questions": [
+    {"id":1,"q":"evidence_type without a fixed enum — the catalog gives no enum_values.","options":["free str as drafted","define a controlled vocabulary (utility/voter/lease/insurance/government)"],"recommendation":"free str now, revisit if a future occupancy rule needs a normalized value","blocks_implementation":false},
+    {"id":2,"q":"owner_renter status relevance — with zero rules its only use is processor review.","options":["keep","drop"],"recommendation":"keep (cheap, occupancy-relevant)","blocks_implementation":false}
+  ],
+
+  "notes": [
+    "No rules read this document today (rule_count 0), so there is no rule floor. Every field earns its place by identity, PII protection, disambiguation, or processor use. Field count is kept lean for a Tier-3 doc.",
+    "account_or_reference_number_masked needs _PII_FIELDS registration, pre_masked true (issuer prints only the display/last-4 form on a bill).",
+    "Occupant names and addresses are standard sensitivity in the catalog -> not registry PII, kept as identity fields.",
+    "A usage/consumption table (if present) has no consumer and stays in the catch-all."
+  ]
+}

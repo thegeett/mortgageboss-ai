@@ -1,0 +1,62 @@
+{
+  "document_type": "letter_of_explanation_child_care",
+  "slug": "letter-of-explanation-child-care",
+  "tier": 3,
+  "rules_served": [],
+  "summary_hint": "Borrower LOE from Dana Lee dated 07/12/2026 — childcare provided by a relative at no cost; no monthly childcare expense; expected to continue.",
+  "existing_extractor": null,
+  "catalog_coverage": "full",
+
+  "typed_core": [
+    {"name":"borrower_name","type":"str","why":"identity — whose letter; borrower match","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"person","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"borrower_name_2","type":"str","why":"identity — co-borrower","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"borrower_count","type":"int","why":"disambiguator — flags a bad name split","rules":[],"reason_class":"disambiguator","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"letter_date","type":"date","why":"processor — recency; ties the explanation to a file state","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"childcare_provider_name","type":"str","why":"processor — who provides care","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"person_or_entity","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"childcare_arrangement_type","type":"str","why":"identity — daycare / relative / in-home / none","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"current_childcare_expense","type":"Decimal","why":"headline — the DTI/expense figure","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"Childcare expense is a recurring obligation considered in DTI/residual income for some programs (notably VA residual income); capture the monthly figure, do not decide inclusion. Treat an explicit $0 as a real value, not a null"},
+    {"name":"expense_frequency","type":"str","why":"disambiguator — monthly vs weekly vs annual; the expense is unreadable without it","rules":[],"reason_class":"disambiguator","rule_floor":false,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"payer_name","type":"str","why":"processor — who pays (borrower vs third party)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"person","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"arrangement_start_date","type":"date","why":"processor — how established the arrangement is","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"expected_end_or_change_date","type":"date","why":"processor — continuance / upcoming change","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"no_expense_reason","type":"str","why":"processor — why $0 is claimed (relative care, spouse at home)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"A $0 / relative-provided arrangement is a valid outcome — the LOE exists precisely to document the absence of an expense; no_expense_reason carries it"},
+    {"name":"expected_future_expense","type":"Decimal","why":"processor — anticipated future DTI change","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"future_arrangement_or_change_explanation","type":"str","why":"processor — narrative of the upcoming change","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"borrower_certification","type":"str","why":"processor — the attestation language","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null}
+  ],
+
+  "nested_lists": [],
+
+  "rejected": [
+    {"name":"document_title, form_number, form_revision_date, document_status_or_version","reason":"classification/version metadata; no consumer"},
+    {"name":"issuer_name, issuer_address, issuer_phone, issuer_email_or_url","reason":"the borrower is the author; no third-party source"},
+    {"name":"party_names, party_addresses","reason":"duplicate borrower_names; addresses not load-bearing"},
+    {"name":"property_address, loan_number, account_case_reference_number","reason":"linkage nice-to-have; no consumer"},
+    {"name":"effective_date, expiration_date, statement_period_start/end, document_issue_date","reason":"duplicate/adjacent to letter_date"},
+    {"name":"signature_blocks, notary_block","reason":"borrower_signatures_and_dates covers execution"},
+    {"name":"borrower_signatures_and_dates","reason":"signature block; attestation carried by borrower_certification; no rule reads individual signatures"},
+    {"name":"dependents_or_children","reason":"sensitive child object[]; replaced by a flat dependent_count to minimize child PII (see Open questions)"},
+    {"name":"supporting_documents","reason":"string[] of exhibits; no consumer; catch-all"},
+    {"name":"the 8 TECHNICAL provenance fields","reason":"already in the TypedField wrapper"}
+  ],
+
+  "encoding_variations": [
+    "current_childcare_expense / expense_frequency — '$800/mo', '$200/week', '$9,600/yr', or '$0'; always carry the frequency, and treat an explicit $0 as a real value, not a null",
+    "no_expense_reason vs expense amount — a letter either states an amount or explains why there is none; capture whichever is present, do not force both",
+    "arrangement_type — 'daycare center', 'grandmother watches them', 'nanny', 'after-school program'; drives whether the expense is expected to continue"
+  ],
+
+  "open_questions": [
+    {"id":1,"q":"dependents_or_children — count vs list vs omit","options":["flat dependent_count int (recommended — supports the explanation, no child PII)","nested list with a child-data redactor (heavy plumbing, exposure)","omit entirely"],"recommendation":"flat dependent_count int; the number of children covered is the only fact a processor needs","blocks_implementation":true},
+    {"id":2,"q":"$0 expense representation — current_childcare_expense = 0 with no_expense_reason populated, vs a null amount","options":["store an explicit 0","null amount"],"recommendation":"store an explicit 0 so the absence is a positive fact, not a missing value","blocks_implementation":false},
+    {"id":3,"q":"expected_future_expense — kept because a childcare cost that begins after closing can affect residual income","options":["keep as typed field","drop to catch-all"],"recommendation":"confirm this is in-scope for the programs the engine targets, else drop to catch-all","blocks_implementation":false}
+  ],
+
+  "notes": [
+    "No rules consume this type today, so there is no rule floor. A childcare LOE explains a monthly childcare expense (or its absence) for DTI/residual-income purposes. The load-bearing facts are the expense amount, its frequency, and the arrangement — captured while minimizing sensitive child data.",
+    "Repeating lists: none. dependents_or_children is the only repeating candidate, but it is sensitive child data (the catalog's own mortgage_use says 'minimize sensitive child data'). Recommendation: capture a flat dependent_count (int, processor) instead of a list, and never type child names/DOBs. This field is NOT in the typed core table and is carried only in the open question.",
+    "PII: no masked identifiers in the catalog for this doc. The real PII risk is child data (names, ages, DOBs of dependents). None is a typed field, and the prompt must hard-block child identifiers from the catch-all. payer_name / childcare_provider_name are standard. Nothing needs _PII_FIELDS registration — but flag child-data handling for the PII reviewer.",
+    "Prompt hint (doc-level): Do NOT extract children's names, ages, DOBs, or school names into any field, including the catch-all — record only a count if needed.",
+    "Ambiguity: current_childcare_expense is tagged 'headline' (not a defined reason_class); classified as processor (the DTI/expense figure)."
+  ]
+}

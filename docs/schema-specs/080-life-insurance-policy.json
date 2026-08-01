@@ -1,0 +1,70 @@
+{
+  "document_type": "life_insurance_policy",
+  "slug": "life-insurance-policy",
+  "tier": 3,
+  "rules_served": [],
+  "summary_hint": "<carrier> <policy_type> policy for <insured>, face amount <face_amount>, net cash value <net_cash_value>, status <policy_status>.",
+  "existing_extractor": null,
+  "catalog_coverage": "full",
+
+  "typed_core": [
+    {"name":"document_title","type":"str","why":"identity/classification — human review","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"insurance_carrier","type":"str","why":"identity/source — who issued the policy (CORE)","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"issuer_name","type":"str","why":"disambiguator — administrator/issuer when different from the underwriting carrier","rules":[],"reason_class":"disambiguator","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"policy_owner_name","type":"str","why":"identity — whose asset this is; attaches to borrower (flattened from policy_owner_names)","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"policy_owner_name_2","type":"str","why":"identity — joint owner","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"insured_name","type":"str","why":"identity/disambiguator — the insured may differ from the owner; matters for asset attribution (flattened from insured_names)","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"Owner ≠ insured ≠ beneficiary — capture each in its own field; the owner controls the asset, the insured's death triggers the benefit"},
+    {"name":"policy_number_masked","type":"str","why":"PII (restricted) — policy identifier; grouping key. Needs _PII_FIELDS registration (pre_masked true)","rules":[],"reason_class":"pii","rule_floor":false,"degraded_from":null,"pii":{"kind":"ACCOUNT","pre_masked":true},"exists_today":false,"prompt_hint":null},
+    {"name":"policy_type","type":"str","why":"identity/classification; term vs whole/universal — term has no cash value","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":"Term life has no cash/surrender value — do not fabricate a value figure for a term policy; leave null"},
+    {"name":"policy_status","type":"str","why":"processor; in-force vs lapsed governs whether it counts","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"policy_effective_date","type":"date","why":"identity — when coverage began (CORE)","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"policy_issue_date","type":"date","why":"disambiguator — issue vs effective date reconciliation","rules":[],"reason_class":"disambiguator","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"face_amount_or_death_benefit","type":"Decimal","why":"processor — headline coverage amount","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"cash_surrender_value","type":"Decimal","why":"processor — the liquid asset value; likely future reserves rule","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"policy_loan_balance","type":"Decimal","why":"disambiguator — reduces net value; must sit beside cash value","rules":[],"reason_class":"disambiguator","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"net_cash_value","type":"Decimal","why":"processor — the usable asset figure (cash value minus loans); reserves consumer","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"Net cash value = cash surrender value − outstanding policy loan balance; capture the stated components, do not compute"},
+    {"name":"premium_amount","type":"Decimal","why":"processor — recurring obligation; DTI-adjacent","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"premium_frequency","type":"str","why":"disambiguator — annualizes the premium","rules":[],"reason_class":"disambiguator","rule_floor":false,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"premium_paid_through_date","type":"date","why":"processor — currency of the policy; supports in-force claim","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"lapse_or_expiration_date","type":"date","why":"processor — when coverage ends; term-policy validity through closing","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"assignment_or_collateral_interest","type":"str","why":"processor — whether the policy is pledged/assigned as collateral","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"surrender_or_withdrawal_restrictions","type":"str","why":"disambiguator — whether the cash value is actually accessible","rules":[],"reason_class":"disambiguator","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"policy_statement_date","type":"date","why":"identity/recency — as-of date of the value figures","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null}
+  ],
+
+  "nested_lists": [],
+
+  "rejected": [
+    {"name":"the 8 TECHNICAL provenance fields","reason":"already in the TypedField wrapper"},
+    {"name":"form_number, form_revision_date","reason":"policy form numbers vary; no consumer"},
+    {"name":"issuer_address, issuer_phone, issuer_email_or_url","reason":"no consumer"},
+    {"name":"effective_date, expiration_date","reason":"duplicate policy_effective_date / lapse_or_expiration_date"},
+    {"name":"statement_period_start/end","reason":"duplicate policy_statement_date"},
+    {"name":"party_names, party_addresses","reason":"duplicate owner/insured; no per-party rule"},
+    {"name":"property_address, loan_number, account_case_reference_number","reason":"not on a life policy; no consumer"},
+    {"name":"signature_blocks, notary_block","reason":"a policy is issued, not executed by the borrower"},
+    {"name":"document_status_or_version","reason":"duplicate policy_status"},
+    {"name":"beneficiary_names","reason":"no mortgage consumer; catch-all"},
+    {"name":"agent_or_service_contact","reason":"no consumer"}
+  ],
+
+  "encoding_variations": [
+    "policy_type (enum, null values): 'Term', 'Whole Life', 'Universal Life', 'Variable' — term policies have no cash surrender value; the type disambiguates whether the value fields should be non-null.",
+    "Value stated as 'Cash Value', 'Cash Surrender Value', 'Net Surrender Value', or 'Account Value' — cash_surrender_value, policy_loan_balance, and net_cash_value must be kept distinct; net = cash value − outstanding policy loans.",
+    "premium_frequency (enum, null): 'monthly', 'annual', 'quarterly' — required to annualize premium_amount.",
+    "policy_status: 'In Force', 'Active', 'Lapsed', 'Paid-Up', 'Surrendered'."
+  ],
+
+  "open_questions": [
+    {"id":1,"q":"Reserves consumer. net_cash_value / cash_surrender_value are typed on the expectation that a reserves rule will read them.","options":["confirm the intended snapshot_path","defer"],"recommendation":"confirm the intended snapshot_path so the field name matches the future rule","blocks_implementation":false},
+    {"id":2,"q":"policy_number_masked registration.","options":["add to _PII_FIELDS (pre_masked true)","leave to the catch-all"],"recommendation":"add to _PII_FIELDS (pre_masked true) before this schema ships, or the value lands unmasked in the catch-all","blocks_implementation":true},
+    {"id":3,"q":"Owner/insured cardinality.","options":["two scalars each (flattened)","person[] nested list"],"recommendation":"flattened to two scalars each; revisit as person[] only if a rule must address a third owner/insured","blocks_implementation":true}
+  ],
+
+  "notes": [
+    "No rules in the packet → no rule floor. A life insurance policy enters a mortgage file as an asset (cash surrender / net cash value used for reserves) or a collateral assignment. The typed core captures the identity, the in-force status, and the liquid-value figures; every field is justified by identity, PII, or processor review (a reserves rule reading net cash value is the obvious future consumer).",
+    "policy_number_masked is restricted; needs _PII_FIELDS registration, pre_masked true (extractor emits last-4). Not in the current 7-field registry — flag for registration. Leaving it to the catch-all would store the full policy number unmasked.",
+    "policy_owner_name / insured_name are personal names — standard-sensitivity, retained as typed identity fields (not _PII_FIELDS entries, consistent with how borrower names are handled elsewhere).",
+    "Money stays a string in value and is coerced to Decimal on read."
+  ]
+}

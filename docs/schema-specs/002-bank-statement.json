@@ -1,0 +1,104 @@
+{
+  "document_type": "bank_statement",
+  "slug": "bank-statements",
+  "tier": 1,
+  "rules_served": ["AS-1","AS-2","AS-3","AS-4","AS-5","AS-6","AS-7","AS-8","AS-9","AS-10","AS-12","DT-7","FR-1","FR-5","ID-1","ID-4","IN-13","OC-1","PC-5","PE-3"],
+  "summary_hint": "institution, account type, statement period, ending balance",
+  "existing_extractor": "app/ai/extraction/bank_statement.py",
+  "catalog_coverage": "full",
+
+  "typed_core": [
+    {"name":"institution_name","type":"str","why":"AS-8, AS-10 — account grouping key (with the masked number)","rules":["AS-8","AS-10"],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":true,"prompt_hint":null},
+
+    {"name":"account_holder_names_raw","type":"str","why":"disambiguator — the holder line verbatim before splitting; if the split is wrong ('JORDAN AND ROBERT CHEN' may be one person or two) the tag layer can see the original","rules":["AS-6"],"reason_class":"disambiguator","rule_floor":true,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"Capture the account-holder line VERBATIM before any splitting"},
+
+    {"name":"account_owner_name","type":"str","why":"AS-6 (ownership match), ID-1 (name consistency)","rules":["AS-6","ID-1"],"reason_class":"rule","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":true,"prompt_hint":null},
+
+    {"name":"account_owner_name_2","type":"str","why":"AS-6 — a joint account with a non-borrower co-holder is Priya's flagged case; today only one holder is captured so a co-owner is invisible","rules":["AS-6"],"reason_class":"rule","rule_floor":true,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"If two holders are named, set both name fields and the count"},
+
+    {"name":"account_owner_count","type":"int","why":"AS-6 disambiguator — how many owners the raw string resolved to","rules":["AS-6"],"reason_class":"disambiguator","rule_floor":true,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+
+    {"name":"account_holder_address","type":"str","why":"ID-4 (address consistency), OC-1 (occupancy signals) — currently not extracted, so those rules get nothing from a statement","rules":["ID-4","OC-1"],"reason_class":"rule","rule_floor":true,"degraded_from":"address","pii":{"kind":"ADDRESS","pre_masked":false},"exists_today":false,"prompt_hint":null},
+
+    {"name":"account_number_masked","type":"str","why":"PII; the account-grouping key for AS-8/AS-10","rules":["AS-8","AS-10"],"reason_class":"pii","rule_floor":false,"degraded_from":null,"pii":{"kind":"ACCOUNT","pre_masked":true},"exists_today":true,"prompt_hint":"Last 4 digits only — never the full account number"},
+
+    {"name":"account_type","type":"str","why":"AS-4 (reserve eligibility differs by type), AS-3 (liquid vs not)","rules":["AS-3","AS-4"],"reason_class":"rule","rule_floor":false,"degraded_from":"enum","pii":null,"exists_today":true,"prompt_hint":"checking / savings / money market / CD, as stated"},
+
+    {"name":"account_status","type":"str","why":"AS-4 — a closed account cannot be a reserve source","rules":["AS-4"],"reason_class":"rule","rule_floor":false,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":null},
+
+    {"name":"statement_period_start","type":"date","why":"AS-8 (continuity), AS-10 (enough months)","rules":["AS-8","AS-10"],"reason_class":"rule","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":true,"prompt_hint":null},
+
+    {"name":"statement_period_end","type":"date","why":"AS-8, AS-10, recency","rules":["AS-8","AS-10"],"reason_class":"rule","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":true,"prompt_hint":null},
+
+    {"name":"declared_page_count","type":"int","why":"AS-9 — 'extract the declared page count and compare to the actual'","rules":["AS-9"],"reason_class":"rule","rule_floor":true,"degraded_from":null,"pii":null,"exists_today":true,"prompt_hint":"The count PRINTED on the statement ('Page 1 of 4'), NOT the PDF page count"},
+
+    {"name":"beginning_balance","type":"Decimal","why":"AS-8 — the chain's left side","rules":["AS-8"],"reason_class":"rule","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":true,"prompt_hint":null},
+
+    {"name":"ending_balance","type":"Decimal","why":"AS-8 chain, AS-3 cash-to-close, AS-4 reserves","rules":["AS-3","AS-4","AS-8"],"reason_class":"rule","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":true,"prompt_hint":null},
+
+    {"name":"available_balance","type":"Decimal","why":"AS-3 — differs from ending when holds exist","rules":["AS-3"],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+
+    {"name":"average_daily_balance","type":"Decimal","why":"AS-4 — a large-deposit-inflated ending balance is visible against the average","rules":["AS-4"],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+
+    {"name":"total_deposits","type":"Decimal","why":"AS-1, AS-12 — cross-check against the transaction sum","rules":["AS-1","AS-12"],"reason_class":"rule","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":true,"prompt_hint":null},
+
+    {"name":"total_withdrawals","type":"Decimal","why":"AS-1, AS-12","rules":["AS-1","AS-12"],"reason_class":"rule","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":true,"prompt_hint":null},
+
+    {"name":"nsf_fee_count","type":"int","why":"AS-7 — currently blocked with no producer; a stated count is a deterministic path that skips per-transaction AI classification","rules":["AS-7"],"reason_class":"rule","rule_floor":true,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"Only if the statement SUMMARISES it — do not count transactions yourself"},
+
+    {"name":"nsf_fee_total","type":"Decimal","why":"AS-7","rules":["AS-7"],"reason_class":"rule","rule_floor":true,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+
+    {"name":"fees_total","type":"Decimal","why":"processor reference; distinguishes NSF fees from generic service charges","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+
+    {"name":"minimum_balance_requirement","type":"Decimal","why":"AS-4 — a required minimum is not freely available for reserves","rules":["AS-4"],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+
+    {"name":"holds_or_pledges","type":"str","why":"AS-4 — pledged or held funds are not reserve-eligible","rules":["AS-4"],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"Any statement that funds are held, pledged, or restricted"},
+
+    {"name":"interest_paid","type":"Decimal","why":"processor reference","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null}
+  ],
+
+  "nested_lists": [
+    {
+      "name":"transactions","shape":"flat_row",
+      "shape_reason":"a 4-month statement carries 200+ line items; per-field wrapping would risk the 16,384-token output ceiling",
+      "expected_item_count":"50-300","rules":["AS-1","AS-2","AS-5","AS-7","AS-12","PC-5","FR-5"],
+      "exists_today":true,"plumbing_sites":0,
+      "fields":[
+        {"name":"date","type":"date","why":"AS-1 timing, AS-2/PC-5 EMD window"},
+        {"name":"description","type":"str","why":"AS-5 gift detection, AS-7 NSF lines, FR-5 recurring debits","pii_note":"incidental PII — needs a row redactor, not _PII_FIELDS"},
+        {"name":"amount","type":"Decimal","why":"AS-1 large-deposit sweep, AS-2/PC-5 EMD match"},
+        {"name":"transaction_type","type":"str","why":"AS-1 deposits vs withdrawals"},
+        {"name":"running_balance","type":"Decimal","why":"AS-8 chain support"}
+      ]
+    }
+  ],
+
+  "rejected": [
+    {"name":"large_deposit_candidates","reason":"a judgment, not a fact — AS-1's job, computed from transactions against an income-derived threshold. Tags describe; rules judge"},
+    {"name":"the 8 TECHNICAL provenance fields","reason":"already in the TypedField wrapper"},
+    {"name":"notary_block / signature_blocks","reason":"a bank statement is not executed"},
+    {"name":"form_number / form_revision_date","reason":"not a standardised form"},
+    {"name":"property_address / loan_number","reason":"not on a bank statement"},
+    {"name":"effective_date / expiration_date","reason":"duplicate the statement period"},
+    {"name":"check_images_or_check_numbers","reason":"no consumer"},
+    {"name":"account_owner_names as person[]","reason":"a 1-3 element list costs ~5 plumbing sites; resolved flat with the raw string retained"}
+  ],
+
+  "encoding_variations": [
+    "Every institution formats differently — layout, section names, transaction table shape",
+    "Joint holders appear as 'A AND B', 'A & B', 'A/B', or on separate lines",
+    "NSF fees may be summarised, itemised among transactions, or both",
+    "Page count appears as 'Page 1 of 4' — the printed count, not the PDF's",
+    "Balances may print with CR or parentheses for credits"
+  ],
+
+  "open_questions": [
+    {"id":1,"q":"Flat holder fields vs person[]?","options":["flat name/name_2/count + raw string","person[] nested list"],"recommendation":"flat — a 1-3 element list is not worth ~5 plumbing sites; the raw string preserves auditability","blocks_implementation":false},
+    {"id":2,"q":"Should the extractor populate nsf_fee_count now, when AS-7 is still blocked on a producer?","options":["populate now","wait until AS-7 is built"],"recommendation":"populate now — if statements commonly state an NSF count, AS-7 becomes deterministic and skips per-transaction AI entirely","blocks_implementation":false}
+  ],
+
+  "notes": [
+    "The shipping extractor already implements page_count_declared AND page_count_present — it is ahead of the v2 catalog, which omits the field entirely.",
+    "A real catch-all was observed holding an unmasked home address and SSN; account_holder_address is promoted to typed core partly to protect it."
+  ]
+}

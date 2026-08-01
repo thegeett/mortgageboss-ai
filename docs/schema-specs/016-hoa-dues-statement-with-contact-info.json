@@ -1,0 +1,83 @@
+{
+  "document_type": "hoa_statement",
+  "slug": "hoa-dues-statement-with-contact-info",
+  "tier": 2,
+  "rules_served": ["CO-2", "CO-4", "DT-2"],
+  "summary_hint": "<association> HOA for <unit address>: dues <amount>/<frequency>, current balance <amount>, <paid-current | past due <amount>>. — the DTI-relevant headline a processor needs without opening the statement.",
+  "existing_extractor": "app/ai/extraction/hoa_statement.py",
+  "catalog_coverage": "full",
+
+  "typed_core": [
+    {"name": "issuer_name", "type": "str", "why": "identity: who issued the statement (association or management company); source validation.", "rules": [], "reason_class": "identity", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "association_name", "type": "str", "why": "CO-2/DT-2: identifies the HOA (detects a condo/PUD obligation); identity. From entity.", "rules": ["CO-2", "DT-2"], "reason_class": "identity", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": true, "prompt_hint": null},
+    {"name": "management_company", "type": "str", "why": "processor: contact/verification party; the 'with contact info' purpose of the doc. From entity.", "rules": [], "reason_class": "processor", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "association_contact_phone", "type": "str", "why": "processor: dues re-verification callback. Flattened from association_contact_information.", "rules": [], "reason_class": "processor", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "association_contact_email_or_url", "type": "str", "why": "processor: independent verification / audit trail. Flattened from association_contact_information.", "rules": [], "reason_class": "processor", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "association_contact_address", "type": "str", "why": "processor: source reconciliation / where to send payment. Flattened from association_contact_information.", "rules": [], "reason_class": "processor", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "unit_owner_name", "type": "str", "why": "identity: whose account; match to borrower. From unit_owner_names[0].", "rules": [], "reason_class": "identity", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": true, "prompt_hint": null},
+    {"name": "unit_owner_name_2", "type": "str", "why": "identity: co-owner on the account. From unit_owner_names[1].", "rules": [], "reason_class": "identity", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "property_or_unit_address", "type": "str", "why": "CO-2/DT-2 floor: detect the condo/PUD obligation and match the statement to the subject (or another owned) property.", "rules": ["CO-2", "DT-2"], "reason_class": "rule", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": true, "prompt_hint": "Capture the property/unit address even though this statement may be for the subject property or another property the borrower owns — do NOT decide which; matching happens downstream."},
+    {"name": "owner_account_number_masked", "type": "str", "why": "PII (restricted, pre-masked); cross-document / account matching key.", "rules": [], "reason_class": "pii", "rule_floor": false, "degraded_from": null, "pii": {"kind": "ACCOUNT", "pre_masked": true}, "exists_today": false, "prompt_hint": null},
+    {"name": "statement_date", "type": "date", "why": "identity/recency: which statement this is.", "rules": [], "reason_class": "identity", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "regular_assessment_amount", "type": "Decimal", "why": "CO-2, DT-2 floor: the dues figure that must be in the DTI payment.", "rules": ["CO-2", "DT-2"], "reason_class": "rule", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": true, "prompt_hint": "Report the recurring dues amount and its period separately from any account balance; do not sum them."},
+    {"name": "dues_frequency", "type": "str", "why": "CO-2, DT-2 disambiguator: $350/mo vs /qtr vs /yr materially changes DTI.", "rules": ["CO-2", "DT-2"], "reason_class": "disambiguator", "rule_floor": false, "degraded_from": "enum", "pii": null, "exists_today": true, "prompt_hint": null},
+    {"name": "current_balance", "type": "Decimal", "why": "processor: amount currently owed.", "rules": [], "reason_class": "processor", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": true, "prompt_hint": null},
+    {"name": "past_due_amount", "type": "Decimal", "why": "processor: delinquency (affects condo warrantability).", "rules": [], "reason_class": "processor", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "paid_current_indicator", "type": "str", "why": "processor: delinquency flag.", "rules": [], "reason_class": "processor", "rule_floor": false, "degraded_from": "bool", "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "next_due_date", "type": "date", "why": "processor; disambiguator: the next payment date.", "rules": [], "reason_class": "processor", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": true, "prompt_hint": null},
+    {"name": "collection_or_lien_status", "type": "str", "why": "processor: an HOA lien affects title/warrantability.", "rules": [], "reason_class": "processor", "rule_floor": false, "degraded_from": "enum", "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "reserve_percentage", "type": "str", "why": "CO-4 (reserve adequacy) — normally on the HOA budget, likely absent here.", "rules": ["CO-4"], "reason_class": "rule", "rule_floor": true, "degraded_from": "percent", "pii": null, "exists_today": false, "prompt_hint": "Reserve contribution as a % of budget — usually on the HOA budget, not a dues statement; extract only if literally printed here, otherwise null."}
+  ],
+
+  "nested_lists": [
+    {
+      "name": "special_assessment_items",
+      "shape": "flat_row",
+      "shape_reason": "few items (typically 0–3), each with description/amount/duration; flat is cheapest and stays well under the ceiling.",
+      "expected_item_count": "0-3",
+      "rules": ["CO-2", "DT-2"],
+      "exists_today": false,
+      "plumbing_sites": 5,
+      "fields": [
+        {"name": "description", "type": "str", "why": "the special-assessment description behind the full-payment picture for CO-2/DT-2"},
+        {"name": "amount", "type": "Decimal", "why": "the special-assessment amount"},
+        {"name": "duration", "type": "str", "why": "how long the special assessment runs (per-item detail for future warrantability/reserve rules)"}
+      ]
+    }
+  ],
+
+  "rejected": [
+    {"name": "document_title, form_number, form_revision_date", "reason": "not a standardized form; classification handles type"},
+    {"name": "issuer_address, issuer_phone, issuer_email_or_url", "reason": "redundant with the association_contact_* fields"},
+    {"name": "effective_date, expiration_date, statement_period_start, statement_period_end", "reason": "duplicate statement_date; a dues statement has no coverage period that a rule reads"},
+    {"name": "statement_period (date_range)", "reason": "duplicates statement_date + dues_frequency; no coercer for date_range"},
+    {"name": "party_names, party_addresses", "reason": "redundant — owners named via unit_owner_names; association via its own fields"},
+    {"name": "loan_number, account_case_reference_number", "reason": "not on an HOA statement; account key captured via owner_account_number_masked"},
+    {"name": "signature_blocks, notary_block, document_status_or_version", "reason": "an HOA dues statement is not executed/notarized"},
+    {"name": "prior_balance", "reason": "statement math; current_balance + past_due_amount suffice"},
+    {"name": "payments_and_credits", "reason": "ledger detail; no consumer (one-list budget spent on special assessments)"},
+    {"name": "late_fees_interest_or_legal_fees", "reason": "collapsed into past_due_amount / collection_or_lien_status"}
+  ],
+
+  "encoding_variations": [
+    "Dues frequency: 'Monthly Dues', 'Quarterly Assessment', '$4,200/yr' — dues_frequency must travel beside regular_assessment_amount, or the DTI payment is computed on the wrong period.",
+    "Issuer identity: the statement may be issued by the association directly or by its management company; issuer_name, association_name, and management_company are kept separately so a management-company header is not mistaken for the HOA.",
+    "Balance vs dues: the recurring assessment (regular_assessment_amount) is distinct from the ledger current_balance/past_due_amount; only the recurring dues feed DTI.",
+    "Paid-current / lien status: stated as a checkbox, 'Account in good standing', 'In collections', or a lien reference — reported as text."
+  ],
+
+  "open_questions": [
+    {"id": 1, "q": "CO-4 reserve percentage is not on this document. CO-4's required docs are the HOA budget and condo questionnaire; a dues statement rarely prints a reserve %.", "options": ["keep reserve_percentage as a best-effort typed field", "remove it here and route CO-4 entirely to the HOA-budget schema"], "recommendation": "route CO-4 to the HOA-budget schema; keep the field here only opportunistically.", "blocks_implementation": true},
+    {"id": 2, "q": "special_assessment_items shape/count. Item count is uncertain (0–3 typical, occasionally more).", "options": ["flat-row nested", "flatten to a single special_assessment_total"], "recommendation": "flat-row nested (preserves per-item description/duration for future warrantability rules).", "blocks_implementation": true},
+    {"id": 3, "q": "dues_frequency enum values are unspecified (monthly/quarterly/semi-annual/annual).", "options": ["str + a prompt hint", "a validated enum"], "recommendation": "str + a prompt hint rather than a validated enum until values are confirmed.", "blocks_implementation": false},
+    {"id": 4, "q": "Issuer overlap. issuer_name vs association_name vs management_company can collide.", "options": ["keep all three", "collapse/merge them"], "recommendation": "keep all three and let the disambiguation live in the snippets.", "blocks_implementation": false},
+    {"id": 5, "q": "owner_account_number_masked registration. New PII key distinct from account_number_masked.", "options": ["register as pre_masked=true", "raw handling if HOAs print it in full"], "recommendation": "register as pre_masked=true; confirm HOAs actually mask it (some print it in full → would need raw handling).", "blocks_implementation": true}
+  ],
+
+  "notes": [
+    "The CO-2/DT-2 floor (regular_assessment_amount, dues_frequency, property_or_unit_address) is already served by the existing schema.",
+    "PII: owner_account_number_masked needs _PII_FIELDS registration (pre_masked true), a distinct key from the existing account_number_masked; without registration a captured account number lands raw in the catch-all. unit_owner_name/_2 and property_or_unit_address are standard/property values kept typed for matching, not registered.",
+    "Do not judge whether dues are 'in the payment' — report the dues; CO-2/DT-2 judge.",
+    "reserve_percentage is a rule-floor field for CO-4 but likely absent on a dues statement; Open Q1 recommends routing CO-4 to the HOA-budget schema and keeping this field only opportunistically."
+  ]
+}

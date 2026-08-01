@@ -1,0 +1,96 @@
+{
+  "document_type": "voe",
+  "slug": "written-voe",
+  "tier": 2,
+  "rules_served": ["CL-4", "IN-4", "IN-7", "IN-8"],
+  "summary_hint": "Employer-completed VOE for <employee> at <employer>: <status> since <start date>, <position>, base pay <amount>/<period>, continued employment <probability>. — the headline a processor needs without opening the form.",
+  "existing_extractor": "app/ai/extraction/voe.py",
+  "catalog_coverage": "full",
+
+  "typed_core": [
+    {"name": "issuer_name", "type": "str", "why": "identity: who prepared/originated the VOE form; third-party-independence check.", "rules": [], "reason_class": "identity", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "document_issue_date", "type": "date", "why": "CL-4 (final-VOE window test); document recency.", "rules": ["CL-4"], "reason_class": "rule", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "employer_name", "type": "str", "why": "IN-8 (VOE must be tied to the employer, else fire); identity. Flattened from employer_name_and_address.", "rules": ["IN-8"], "reason_class": "rule", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": true, "prompt_hint": null},
+    {"name": "employer_address", "type": "str", "why": "processor: employer match/reconciliation; disambiguates employer_name. Flattened from employer_name_and_address.", "rules": [], "reason_class": "processor", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "lender_name", "type": "str", "why": "third-party independence (VOE goes to lender, not borrower); identity. Flattened from lender_name_and_address.", "rules": [], "reason_class": "identity", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "applicant_name", "type": "str", "why": "identity: whose employment is verified; borrower match. Flattened from applicant_name_address_and_employee_number.", "rules": [], "reason_class": "identity", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": true, "prompt_hint": null},
+    {"name": "applicant_address", "type": "str", "why": "PII (borrower home address — otherwise stored raw in the catch-all). Flattened.", "rules": [], "reason_class": "pii", "rule_floor": false, "degraded_from": "address", "pii": {"kind": "ADDRESS", "pre_masked": false}, "exists_today": false, "prompt_hint": null},
+    {"name": "employee_number", "type": "str", "why": "identifier: ties the VOE to the employee record; potential PII (may be an SSN). Flattened.", "rules": [], "reason_class": "pii", "rule_floor": false, "degraded_from": null, "pii": {"kind": "ACCOUNT", "pre_masked": false}, "exists_today": false, "prompt_hint": null},
+    {"name": "employment_status", "type": "str", "why": "disambiguator: distinguishes the present- vs previous-employment blocks so IN-4 can order records.", "rules": ["IN-4"], "reason_class": "disambiguator", "rule_floor": true, "degraded_from": null, "pii": null, "exists_today": true, "prompt_hint": "A VOE has a present-employment and a previous-employment section — extract dates/positions into the matching previous_* fields; do not collapse them."},
+    {"name": "employment_start_date", "type": "date", "why": "IN-4 (order employment records, compute gaps).", "rules": ["IN-4"], "reason_class": "rule", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": true, "prompt_hint": null},
+    {"name": "present_position", "type": "str", "why": "IN-7 (same line of work / income stability).", "rules": ["IN-7"], "reason_class": "rule", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": true, "prompt_hint": null},
+    {"name": "probability_of_continued_employment", "type": "str", "why": "IN-7 / income-stability context; processor.", "rules": ["IN-7"], "reason_class": "rule", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": true, "prompt_hint": null},
+    {"name": "current_gross_base_pay", "type": "Decimal", "why": "processor: base income; income-stability context.", "rules": [], "reason_class": "processor", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": true, "prompt_hint": null},
+    {"name": "base_pay_period", "type": "str", "why": "disambiguator for current_gross_base_pay (annual vs monthly vs hourly).", "rules": [], "reason_class": "disambiguator", "rule_floor": false, "degraded_from": "enum", "pii": null, "exists_today": true, "prompt_hint": "Money may carry '$'/commas; report the period exactly as printed."},
+    {"name": "average_hours_per_week", "type": "Decimal", "why": "disambiguator: needed to annualize hourly base pay; processor.", "rules": [], "reason_class": "disambiguator", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": true, "prompt_hint": null},
+    {"name": "previous_employment_hire_date", "type": "date", "why": "IN-4 (order records, compute gaps between jobs).", "rules": ["IN-4"], "reason_class": "rule", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "previous_employment_termination_date", "type": "date", "why": "IN-4 (order records, compute gaps between jobs).", "rules": ["IN-4"], "reason_class": "rule", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": true, "prompt_hint": null},
+    {"name": "position_held", "type": "str", "why": "IN-7 (prior role — the other half of the same-line-of-work comparison).", "rules": ["IN-7"], "reason_class": "rule", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "employer_signer_name", "type": "str", "why": "identity: who certified the VOE; third-party independence.", "rules": [], "reason_class": "identity", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "employer_signer_title", "type": "str", "why": "third-party independence (authorized signer of the employer).", "rules": [], "reason_class": "processor", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "employer_signer_phone", "type": "str", "why": "processor: re-verification callback.", "rules": [], "reason_class": "processor", "rule_floor": false, "degraded_from": "phone", "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "employer_signature_and_date", "type": "date", "why": "CL-4 (certification date must fall in the window).", "rules": ["CL-4"], "reason_class": "rule", "rule_floor": false, "degraded_from": "signature", "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "direct_return_to_lender_indicator", "type": "str", "why": "processor / independence (VOE not handled by the borrower).", "rules": [], "reason_class": "processor", "rule_floor": false, "degraded_from": "bool", "pii": null, "exists_today": false, "prompt_hint": "The 'returned directly to lender' checkbox — an independence signal; report the checkbox state as text."},
+    {"name": "applicant_authorization_signature", "type": "str", "why": "processor: borrower authorized the verification.", "rules": [], "reason_class": "processor", "rule_floor": false, "degraded_from": "signature", "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "ytd_income", "type": "Decimal", "why": "processor: YTD earnings supports base-pay reasonableness / income trend.", "rules": [], "reason_class": "processor", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": true, "prompt_hint": null}
+  ],
+
+  "nested_lists": [
+    {
+      "name": "gross_earnings_history",
+      "shape": "flat_row",
+      "shape_reason": "few rows (typically current + 2 prior years, columns base/overtime/commission/bonus), well under the 16,384 ceiling → flat is cheapest.",
+      "expected_item_count": "3 (current + 2 prior years)",
+      "rules": ["IN-7"],
+      "exists_today": false,
+      "plumbing_sites": 5,
+      "fields": [
+        {"name": "period", "type": "str", "why": "IN-7 — the year/period label the earnings row belongs to"},
+        {"name": "base", "type": "Decimal", "why": "IN-7 — base earnings for the period (variable-income stability)"},
+        {"name": "overtime", "type": "Decimal", "why": "IN-7 — overtime component (variable-income stability)"},
+        {"name": "commission", "type": "Decimal", "why": "IN-7 — commission component (variable-income stability)"},
+        {"name": "bonus", "type": "Decimal", "why": "IN-7 — bonus component (variable-income stability)"}
+      ]
+    }
+  ],
+
+  "rejected": [
+    {"name": "document_title, form_number, form_revision_date", "reason": "VOE forms are not a single standardized form; classification handles type"},
+    {"name": "issuer_address, issuer_phone, issuer_email_or_url", "reason": "issuer ≈ employer; employer/signer contact already captured"},
+    {"name": "effective_date, expiration_date, statement_period_start, statement_period_end", "reason": "a VOE has no coverage period; duplicate document_issue_date"},
+    {"name": "party_names, party_addresses", "reason": "redundant — applicant/employer/signer are named individually"},
+    {"name": "property_address, loan_number", "reason": "not on a VOE; linkage flows through the applicant"},
+    {"name": "account_case_reference_number", "reason": "no consumer"},
+    {"name": "signature_blocks, notary_block", "reason": "VOE is not notarized; signer captured individually"},
+    {"name": "lender_signature_title_date, lender_number", "reason": "lender does not certify the facts; no consumer"},
+    {"name": "document_status_or_version", "reason": "low value on a VOE"},
+    {"name": "military_pay_components", "reason": "rare; one-list budget spent on gross_earnings_history"},
+    {"name": "overtime_continuance_likely, bonus_continuance_likely", "reason": "booleans / near-judgments; income stability covered by probability_of_continued_employment + earnings history"},
+    {"name": "next_pay_increase_date_and_amount, last_pay_increase_date_and_amount", "reason": "no rule; low value"},
+    {"name": "leave_or_time_off_remarks", "reason": "no consumer (gap/LOE handled via dates)"},
+    {"name": "salary_at_termination", "reason": "no rule; income analysis uses current pay"},
+    {"name": "reason_for_leaving", "reason": "no rule; LOE conditioning is manual"}
+  ],
+
+  "encoding_variations": [
+    "Base pay period: stated as '/yr', 'annual', 'per month', '$/hr' — base_pay_period must travel beside current_gross_base_pay, and average_hours_per_week beside an hourly rate, or the pay is annualized wrong.",
+    "Present vs previous employment: the same fields (position, dates, salary) appear twice on the form; employment_status and the previous_* field names disambiguate which block a value came from for IN-4.",
+    "Continuation probability: 'likely', 'yes', 'probable', 'good' — kept as free str, not an enum.",
+    "Certification date: the 'final VOE' date can appear as the form's issue date or beside the employer signature; both captured (document_issue_date, employer_signature_and_date)."
+  ],
+
+  "open_questions": [
+    {"id": 1, "q": "gross_earnings_history shape. Item count is small and stable (~3 year-rows).", "options": ["flat-row (light)", "per-field-wrapped (heavy)"], "recommendation": "flat-row.", "blocks_implementation": true},
+    {"id": 2, "q": "military_pay_components. Separate nested list vs drop. Rare outside VA files; the one-list budget is spent on earnings history.", "options": ["separate nested list", "drop now, revisit for VA-heavy pipelines"], "recommendation": "drop now, revisit for VA-heavy pipelines.", "blocks_implementation": true},
+    {"id": 3, "q": "employee_number may be an SSN.", "options": ["treat as raw PII and confirm masking policy", "leave unmasked"], "recommendation": "treat as raw PII and confirm masking policy with Priya before go-live.", "blocks_implementation": true},
+    {"id": 4, "q": "employment_status is absent from the catalog. It is a derived disambiguator IN-4 relies on to order present vs previous blocks.", "options": ["include as a typed field (present/former)", "omit"], "recommendation": "include as a typed field (present/former).", "blocks_implementation": true},
+    {"id": 5, "q": "CL-4 is out of scope but which date is 'the final VOE date' — document_issue_date or employer_signature_and_date?", "options": ["document_issue_date", "employer_signature_and_date"], "recommendation": "employer_signature_and_date (the certification date) as the window anchor.", "blocks_implementation": false}
+  ],
+
+  "notes": [
+    "PII: applicant_address needs _PII_FIELDS registration (pre_masked false; would otherwise land raw in the catch-all). employee_number needs registration (pre_masked false) and may be an SSN on some forms — confirm masking with Priya. applicant_name and employer_signer_name are standard-sensitivity names, acceptable as typed core, not registered.",
+    "Do not judge income stability or gaps — report dates and positions verbatim; IN-4/IN-7 judge.",
+    "Ambiguity: employee_number — reason_class pii but the PII kind is uncertain (employee-record identifier that may be an SSN); registered kind 'ACCOUNT', pre_masked false, pending confirmation.",
+    "Ambiguity: employer_signer_title is a third-party-independence field tagged neither test explicitly; classified processor."
+  ]
+}

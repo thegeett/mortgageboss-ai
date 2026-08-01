@@ -1,0 +1,94 @@
+{
+  "document_type": "title_commitment",
+  "slug": "title-commitment",
+  "tier": 1,
+  "rules_served": ["CR-11","DT-4","FR-2","ID-7","PC-1","PC-3","PR-7","RE-1","TI-1","TI-2","TI-3","TI-4","TI-5","TI-6"],
+  "summary_hint": "insured party, property, vesting, effective date, count of exceptions and open liens",
+  "existing_extractor": null,
+  "catalog_coverage": "none",
+
+  "typed_core": [
+    {"name":"title_company_name","type":"str","why":"identity — TI-1","rules":["TI-1"],"reason_class":"identity","rule_floor":true,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"commitment_number","type":"str","why":"identity","rules":[],"reason_class":"identity","rule_floor":true,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"effective_date","type":"date","why":"TI-6 (chain of title) and the currency of the search","rules":["TI-6"],"reason_class":"rule","rule_floor":true,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"commitment_date","type":"date","why":"disambiguator — the issue date differs from the search effective date","rules":["TI-6"],"reason_class":"disambiguator","rule_floor":true,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"policy_amount","type":"Decimal","why":"should equal the loan amount; a mismatch is a signal","rules":[],"reason_class":"processor","rule_floor":true,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"policy_type","type":"str","why":"loan / owner / both — determines whose interests are insured","rules":["TI-1"],"reason_class":"identity","rule_floor":true,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":null},
+
+    {"name":"property_address","type":"str","why":"TI-1, PC-3, PR-7, RE-1","rules":["TI-1","PC-3","PR-7","RE-1"],"reason_class":"rule","rule_floor":true,"degraded_from":"address","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"legal_description","type":"str","why":"TI-2 — 'compare legal descriptions across sources'","rules":["TI-2"],"reason_class":"rule","rule_floor":true,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"Capture verbatim and completely, including bearings and distances. Do NOT summarise — TI-2 compares text"},
+    {"name":"legal_description_type","type":"str","why":"TI-2 disambiguator — lot-and-block vs metes-and-bounds vs condo-unit descriptions of the same parcel cannot be meaningfully compared as text","rules":["TI-2"],"reason_class":"disambiguator","rule_floor":true,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"parcel_identification_number","type":"str","why":"TI-2, DT-4 — the APN is a far cleaner match key than a tolerant address match","rules":["TI-2","DT-4"],"reason_class":"identity","rule_floor":true,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"county","type":"str","why":"identity; recording jurisdiction","rules":[],"reason_class":"identity","rule_floor":true,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+
+    {"name":"vested_owner_name","type":"str","why":"TI-5 — 'check the vesting against the borrower/marital info'","rules":["TI-5"],"reason_class":"rule","rule_floor":true,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"vested_owner_name_2","type":"str","why":"TI-5 — joint vesting","rules":["TI-5"],"reason_class":"rule","rule_floor":true,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"vesting_type","type":"str","why":"TI-5, ID-7 — sole / joint tenants / tenants in common / community property. The heart of TI-5","rules":["TI-5","ID-7"],"reason_class":"rule","rule_floor":true,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"vesting_marital_recital","type":"str","why":"ID-7 — 'a married man as his sole and separate property'. The recital is where title states marital status","rules":["ID-7"],"reason_class":"disambiguator","rule_floor":true,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"Capture the marital phrase VERBATIM"},
+    {"name":"proposed_insured_name","type":"str","why":"TI-1 — the buyer, matched to the file","rules":["TI-1","PC-1"],"reason_class":"rule","rule_floor":true,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"seller_of_record","type":"str","why":"TI-1, FR-2 — the current owner should be the contract's seller","rules":["TI-1","FR-2"],"reason_class":"rule","rule_floor":true,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+
+    {"name":"open_liens_indicator","type":"str","why":"TI-3 — a cheap applicability gate before walking the exception list","rules":["TI-3"],"reason_class":"rule","rule_floor":true,"degraded_from":"bool","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"judgments_indicator","type":"str","why":"TI-4, CR-11","rules":["TI-4","CR-11"],"reason_class":"rule","rule_floor":true,"degraded_from":"bool","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"survey_exception_indicator","type":"str","why":"a standard survey exception affects insurability; a processor checks it","rules":[],"reason_class":"processor","rule_floor":true,"degraded_from":"bool","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"taxes_status","type":"str","why":"DT-4, TI-4 — current vs delinquent","rules":["DT-4","TI-4"],"reason_class":"rule","rule_floor":true,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"annual_tax_amount","type":"Decimal","why":"DT-4 — 'compare the tax figure used to the assessed/estimated tax'","rules":["DT-4"],"reason_class":"rule","rule_floor":true,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null}
+  ],
+
+  "nested_lists": [
+    {"name":"schedule_b_items","shape":"flat_row",
+     "shape_reason":"10-30 items; requirements and exceptions merged into one list with a discriminator, saving ~5 plumbing sites versus two lists",
+     "expected_item_count":"10-30","rules":["TI-3","TI-4","CR-11"],"exists_today":false,"plumbing_sites":5,
+     "fields":[
+       {"name":"schedule","type":"str","why":"THE DISCRIMINATOR — B-I (Requirements: conditions to satisfy before closing) vs B-II (Exceptions: coverage carve-outs). Rules treat them differently and they must NOT be conflated"},
+       {"name":"item_number","type":"str","why":"identity within the schedule"},
+       {"name":"item_type","type":"str","why":"TI-3/TI-4 — easement / lien / mortgage / judgment / tax lien / CC&R / survey / other. Lets a rule find mortgages without re-reading prose"},
+       {"name":"description","type":"str","why":"TI-3, TI-4, CR-11 — the substance","pii_note":"exception text sometimes embeds judgment-debtor detail; do not quote SSNs or account numbers"},
+       {"name":"recording_date","type":"date","why":"TI-3, TI-6"},
+       {"name":"recording_reference","type":"str","why":"TI-3 — book/page or instrument number"},
+       {"name":"amount","type":"Decimal","why":"TI-3, TI-4, CR-11"},
+       {"name":"is_satisfied","type":"str","why":"TI-3 — 'check for a payoff/release plan'; CR-11 'fire if unresolved'"},
+       {"name":"affected_party","type":"str","why":"TI-4, CR-11 — whose judgment or lien"}
+     ]},
+    {"name":"chain_of_title","shape":"flat_row",
+     "shape_reason":"2-5 transfers; may be empty on a standard commitment","expected_item_count":"0-5","rules":["TI-6","FR-2"],
+     "exists_today":false,"plumbing_sites":5,
+     "fields":[
+       {"name":"transfer_date","type":"date","why":"TI-6 — 'AI-surface recent transfers'; a flip shows as two transfers months apart"},
+       {"name":"grantor","type":"str","why":"FR-2 — related-party signals"},
+       {"name":"grantee","type":"str","why":"FR-2"},
+       {"name":"consideration_amount","type":"Decimal","why":"FR-2 — 'price jumps' / inflated-value signal"},
+       {"name":"recording_reference","type":"str","why":"identity"}
+     ]}
+  ],
+
+  "rejected": [
+    {"name":"is_insurable / title_is_clear","reason":"a judgment, not a fact — TI-3/TI-4 decide from the exceptions and requirements. Tags describe; rules judge"},
+    {"name":"endorsements_available","reason":"no consumer"},
+    {"name":"underwriter_name / agent_license","reason":"no consumer"},
+    {"name":"premium_amount","reason":"closing-cost detail; no rule reads it"},
+    {"name":"chain_of_title_summary (prose)","reason":"superseded by the structured chain_of_title list"},
+    {"name":"the 8 TECHNICAL provenance fields","reason":"already in the TypedField wrapper"}
+  ],
+
+  "encoding_variations": [
+    "'Commitment' (East coast) vs 'Preliminary Report' (West coast) for the same document",
+    "Schedule numbering varies: A/B-I/B-II vs A/B/C; some use 'Requirements' and 'Exceptions' without letters",
+    "Vesting recitals are formulaic but wordy: 'John Smith and Mary Smith, husband and wife, as joint tenants with right of survivorship'",
+    "Legal descriptions: lot-and-block (short), metes-and-bounds (very long), condo (unit + building + declaration reference)"
+  ],
+
+  "open_questions": [
+    {"id":1,"q":"Legal description length vs the token ceiling","options":["capture verbatim (chosen)","capture a truncated form"],"recommendation":"verbatim — TI-2 compares text, and a truncation would produce false mismatches. But test against a metes-and-bounds commitment plus two nested lists","blocks_implementation":true},
+    {"id":2,"q":"Requirements and exceptions merged with a discriminator, or two lists?","options":["one list + schedule discriminator (chosen)","two separate lists"],"recommendation":"one list — saves ~5 plumbing sites, and the discriminator preserves the distinction rules depend on","blocks_implementation":false},
+    {"id":3,"q":"A lien appearing in BOTH requirements and exceptions","options":["capture twice","deduplicate"],"recommendation":"capture both — TI-3 needs the requirement to see the payoff plan; TI-4 needs the exception to see the encumbrance","blocks_implementation":false},
+    {"id":4,"q":"APN vs address as the match key for TI-1/PR-7/RE-1","options":["keep tolerant address matching","prefer the APN where both documents carry one"],"recommendation":"capture the APN regardless; preferring it is a RULE change, not a schema one","blocks_implementation":false},
+    {"id":5,"q":"Defer chain_of_title (~5 sites, serves only TI-6/FR-2)?","options":["ship both lists","ship schedule_b_items only"],"recommendation":"ship schedule_b_items first — it unblocks TI-3, TI-4 and CR-11; chain_of_title serves two AI-surface rules","blocks_implementation":true}
+  ],
+
+  "notes": [
+    "NO v2 catalog entry — the rule floor IS the entire schema. Every field is rule_floor: true.",
+    "Second-largest unlock after the credit report: 10 of its 14 rules are BLOCKED on this extractor.",
+    "Schedule B-I Requirements are conditions to satisfy before closing; B-II Exceptions are coverage carve-outs. Merging them would break TI-3, which reads requirements for the payoff plan."
+  ]
+}

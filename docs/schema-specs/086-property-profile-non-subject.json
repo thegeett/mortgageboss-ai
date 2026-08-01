@@ -1,0 +1,71 @@
+{
+  "document_type": "property_profile_non_subject",
+  "slug": "property-profile-non-subject",
+  "tier": 3,
+  "rules_served": [],
+  "summary_hint": "a data-vendor property report for a NON-subject property — address, APN, current owner, type/units, assessed & AVM value, tax status — e.g. 'CoreLogic profile, 88 Pine Ave (REO), owner J. Rivera, SFR, assessed $410k, taxes current, non-subject.'",
+  "existing_extractor": null,
+  "catalog_coverage": "full",
+
+  "typed_core": [
+    {"name":"document_title","type":"str","why":"processor — distinguishes profile source/vendor","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"issuer_name","type":"str","why":"identity — CORE; the data vendor (source independence)","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"data_source","type":"str","why":"identity/disambiguator — which dataset the values come from","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"object","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"report_date","type":"date","why":"identity — CORE; report as-of date, drives recency of every value below","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"property_address","type":"str","why":"identity — CORE; the property profiled","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"parcel_or_apn","type":"str","why":"identity — CORE; the cross-document match key for the parcel","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"legal_description","type":"str","why":"disambiguator — confirms the APN resolves to the intended parcel","rules":[],"reason_class":"disambiguator","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"owner_name","type":"str","why":"identity — CORE; current owner (borrower/relationship match)","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"owner_name_2","type":"str","why":"identity — second current owner","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"owner_count","type":"int","why":"disambiguator — guards a bad owner-name split","rules":[],"reason_class":"disambiguator","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"owner_mailing_address","type":"str","why":"processor — owner mailing != property address is an owner-occupancy signal","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"property_type","type":"str","why":"identity/processor — CORE; SFR/condo/2-4 unit","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"number_of_units","type":"int","why":"processor — CORE; unit count affects financing treatment","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"year_built","type":"int","why":"processor — age of improvements","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"gross_living_area","type":"str","why":"processor — living area headline","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"area","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"occupancy_or_homestead_status","type":"str","why":"processor — owner-occupied/homestead flag","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"total_assessed_value","type":"Decimal","why":"processor — assessed value","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"Prefer the county/assessor value for total_assessed_value and the vendor AVM for automated_or_reported_value"},
+    {"name":"assessment_tax_year","type":"int","why":"disambiguator — the year the assessed value belongs to (assessed values are stale without it)","rules":[],"reason_class":"disambiguator","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"annual_tax_amount","type":"Decimal","why":"processor — annual tax","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"object","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"tax_status","type":"str","why":"processor — paid/delinquent status (title/lien risk)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"object","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"automated_or_reported_value","type":"Decimal","why":"processor — AVM/estimated value","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"valuation_date","type":"date","why":"disambiguator — the AVM value is meaningless without its as-of date","rules":[],"reason_class":"disambiguator","rule_floor":false,"degraded_from":"object","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"flood_zone","type":"str","why":"processor — flood-zone code (insurance implication)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"object","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"subject_property_indicator","type":"str","why":"identity — CORE; classifies this as NON-subject","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"bool","pii":null,"exists_today":false,"prompt_hint":"subject_property_indicator is fixed FALSE for this document class, but extract the printed indicator rather than assuming"},
+    {"name":"loan_number","type":"str","why":"identity — links the profile to the loan file","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null}
+  ],
+
+  "nested_lists": [],
+
+  "rejected": [
+    {"name":"party_names / party_addresses","reason":"duplicate current_owner_names / owner address"},
+    {"name":"deed_or_vesting_information","reason":"nested object, no consumer; the title doc is authoritative on vesting"},
+    {"name":"assessed_land_value / assessed_improvement_value","reason":"detail; total_assessed_value suffices, no consumer"},
+    {"name":"bedrooms / bathrooms / lot_size / construction_or_style","reason":"property detail with no rule and marginal review value on a non-subject property"},
+    {"name":"land_use_or_zoning","reason":"no consumer for a non-subject property"},
+    {"name":"tax_amount_and_status (nested)","reason":"flattened to annual_tax_amount + tax_status"},
+    {"name":"valuation_date_and_confidence (nested)","reason":"flattened to valuation_date; confidence is a conclusion"},
+    {"name":"permit_or_code_information","reason":"OPTIONAL object[]; no consumer"},
+    {"name":"signature_blocks / notary_block","reason":"a data report is not executed"},
+    {"name":"form_number / form_revision_date / status / effective / expiration / statement period","reason":"not a standardized form; no consumer"},
+    {"name":"issuer_address / phone / email","reason":"no rule; speculative verification use"}
+  ],
+
+  "encoding_variations": [
+    "Assessed value vs AVM/market value are different numbers from different sources — assessment_tax_year and valuation_date are the disambiguators that keep them from being conflated",
+    "Owner names appear as persons or as an entity (LLC/trust) — captured as flattened strings; the owner_count guards the split",
+    "Flood zone may be an FEMA zone letter ('X', 'AE') or prose; capture the code verbatim"
+  ],
+
+  "open_questions": [
+    {"id":1,"q":"Sales/transfer history and lien summary as nested lists — both genuinely repeat and would be useful to a future prior-transfer or existing-lien rule.","options":["build one flat-row list now (which one?)","defer both to catch-all"],"recommendation":"defer both to catch-all — no consumer exists, and building bespoke plumbing for a Tier-3 non-subject doc is premature","blocks_implementation":true},
+    {"id":2,"q":"Property-characteristic depth — dropped beds/baths/lot/style.","options":["keep dropped","add back for other-real-estate rental income review"],"recommendation":"keep dropped pending feedback","blocks_implementation":false}
+  ],
+
+  "notes": [
+    "No rules read this document today (rule_count 0); there is no rule floor. This profile describes a non-subject property (other real estate owned, comparable, etc.). Fields earn a place by identity, disambiguation, or processor use.",
+    "No restricted fields on this doc. Owner names and mailing address are standard sensitivity -> kept as identity fields, not registry PII. No _PII_FIELDS additions.",
+    "sales_and_transfer_history and mortgage_lien_or_recorded_document_summary genuinely repeat, but no rule consumes them and each nested list costs ~5 sites of plumbing. Left to the catch-all until a rule needs them.",
+    "Prompt hint (doc-level): assessed and market/AVM values are NOT interchangeable — file each to its own field with its date."
+  ]
+}

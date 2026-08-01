@@ -1,0 +1,73 @@
+{
+  "document_type": "gift_letter",
+  "slug": "gift-letter",
+  "tier": 2,
+  "rules_served": ["AS-1", "AS-5"],
+  "summary_hint": "Donor <donor_name> (<relationship>) is gifting <borrower> $<gift_amount> for <subject property>, via <transfer_method>, [already transferred | pending], no repayment required. — a processor sees who gave what to whom and whether the three-link chain can close, without opening the PDF.",
+  "existing_extractor": "app/ai/extraction/gift_letter.py",
+  "catalog_coverage": "full",
+
+  "typed_core": [
+    {"name":"issuer_name","type":"str","why":"identity/source: the org that originated the letter/form (often the lender or a template provider); authenticity indicator","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"donor_names_raw","type":"str","why":"disambiguator — verbatim donor string so a bad split ('PAT AND ROBIN CHEN' = one or two donors) stays visible to the tag layer (bank_statement pattern); supports AS-5","rules":["AS-5"],"reason_class":"disambiguator","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"Joint donors (two parents) are common — capture the verbatim donor_names_raw plus the split"},
+    {"name":"donor_name","type":"str","why":"AS-5 — the donor-ability link: name must match the donor bank statement; identity","rules":["AS-5"],"reason_class":"rule","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":true,"prompt_hint":null},
+    {"name":"donor_name_2","type":"str","why":"AS-5 — joint donors (two parents common); identity of the second donor","rules":["AS-5"],"reason_class":"rule","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"donor_relationship_to_borrower","type":"str","why":"processor/eligibility: acceptable donor relationship (family) is a program requirement; feeds AS-5 gift validity","rules":["AS-5"],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":true,"prompt_hint":"Acceptable donor relationships (family member, fiance, domestic partner) are eligibility-relevant — extract the relationship exactly as stated"},
+    {"name":"donor_address","type":"str","why":"identity/attribution of the donor; potential PII (see PII) — flattened, not repeating","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"address","pii":{"kind":"ADDRESS","pre_masked":false},"exists_today":false,"prompt_hint":null},
+    {"name":"donor_phone","type":"str","why":"processor — independent donor verification / follow-up","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"phone","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"borrower_recipient_name","type":"str","why":"AS-1 / AS-5 — whose deposit the gift matches; identity (attach to borrower)","rules":["AS-1","AS-5"],"reason_class":"rule","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":true,"prompt_hint":null},
+    {"name":"borrower_recipient_name_2","type":"str","why":"identity — co-borrower recipient","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"subject_property_address","type":"str","why":"identity: links the letter to the subject property","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"address","pii":null,"exists_today":true,"prompt_hint":null},
+    {"name":"gift_amount","type":"Decimal","why":"AS-1 (compare to income-derived large-deposit threshold), AS-5 (match the gift to the deposit) — the primary matched value","rules":["AS-1","AS-5"],"reason_class":"rule","rule_floor":true,"degraded_from":null,"pii":null,"exists_today":true,"prompt_hint":null},
+    {"name":"gift_date_or_expected_transfer_date","type":"date","why":"AS-1 / AS-5 — match the deposit by date; distinguishes an executed vs expected transfer","rules":["AS-1","AS-5"],"reason_class":"rule","rule_floor":true,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"funds_already_transferred","type":"str","why":"AS-5 — whether the transfer link already exists (transferred) or is still pending","rules":["AS-5"],"reason_class":"rule","rule_floor":false,"degraded_from":"bool","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"transfer_method","type":"str","why":"AS-5 — transfer-evidence type (wire / check / ACH); disambiguator for matching the deposit","rules":["AS-5"],"reason_class":"disambiguator","rule_floor":false,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":"Typical transfer_method: wire, cashier's/certified check, personal check, ACH/EFT"},
+    {"name":"gift_source_account_institution","type":"str","why":"AS-5 — donor-ability link: match the donor bank statement's institution","rules":["AS-5"],"reason_class":"rule","rule_floor":true,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"gift_source_account_last4","type":"str","why":"AS-5 — match the donor source account; PII (restricted, pre-masked last-4)","rules":["AS-5"],"reason_class":"pii","rule_floor":true,"degraded_from":null,"pii":{"kind":"ACCOUNT","pre_masked":true},"exists_today":false,"prompt_hint":"Two account numbers may appear — the donor's source account and the borrower's/escrow destination account. Emit last-4 for each into its own slot; never merge"},
+    {"name":"recipient_or_escrow_account_last4","type":"str","why":"AS-1 / AS-5 — match the destination deposit account; PII (restricted, pre-masked last-4)","rules":["AS-1","AS-5"],"reason_class":"pii","rule_floor":true,"degraded_from":null,"pii":{"kind":"ACCOUNT","pre_masked":true},"exists_today":false,"prompt_hint":null},
+    {"name":"gift_purpose","type":"str","why":"disambiguator — down payment vs closing costs vs reserves tells AS-1 which deposit/use the gift funds","rules":["AS-1"],"reason_class":"disambiguator","rule_floor":false,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":"Typical gift_purpose values: down payment, closing costs, reserves"},
+    {"name":"no_repayment_required_statement","type":"str","why":"the defining attestation (gift, not a disguised loan) that AS-5 exists to protect; keep verbatim text, not a bare bool","rules":["AS-5"],"reason_class":"rule","rule_floor":false,"degraded_from":"bool","pii":null,"exists_today":true,"prompt_hint":"The no-repayment attestation is the field that makes the funds an asset rather than a debt — capture verbatim; if the letter does not state it, leave null, never invent"},
+    {"name":"no_ownership_or_lien_interest_statement","type":"str","why":"AS-5 — reinforces gift-not-loan (donor retains no interest); verbatim","rules":["AS-5"],"reason_class":"rule","rule_floor":false,"degraded_from":"bool","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"lender_name","type":"str","why":"identity — which loan/lender the gift is tied to; cross-document attribution","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"document_issue_date","type":"date","why":"identity/recency — the letter's own date (age testing)","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"donor_signature_present","type":"str","why":"AS-5 / processor — an unexecuted gift letter does not satisfy the chain link","rules":["AS-5"],"reason_class":"rule","rule_floor":false,"degraded_from":"signature","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"donor_signature_date","type":"date","why":"processor — execution date of the donor signature","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null}
+  ],
+
+  "nested_lists": [],
+
+  "rejected": [
+    {"name":"document_title","reason":"weak identity; document_type comes from classification"},
+    {"name":"form_number, form_revision_date","reason":"gift letters are not a single standardized form"},
+    {"name":"issuer_address, issuer_phone, issuer_email_or_url","reason":"issuer of the form is rarely the actor; no rule/processor consumer"},
+    {"name":"effective_date, expiration_date","reason":"not applicable to a gift letter; would duplicate the gift date"},
+    {"name":"statement_period_start, statement_period_end","reason":"a gift letter has no statement period"},
+    {"name":"party_names, party_addresses","reason":"subsumed by the specific donor_/borrower_/subject fields"},
+    {"name":"property_address (generic)","reason":"duplicates subject_property_address"},
+    {"name":"loan_number, account_case_reference_number","reason":"rarely present; no rule reads a loan number on a gift letter"},
+    {"name":"signature_blocks","reason":"flattened to donor_signature_present/_date; a list is over-plumbing for one signature"},
+    {"name":"notary_block","reason":"gift letters are typically not notarized"},
+    {"name":"document_status_or_version","reason":"not a versioned/status-bearing document"},
+    {"name":"borrower_acknowledgment_signature","reason":"no consumer — the donor's execution is the link AS-5 checks"}
+  ],
+
+  "encoding_variations": [
+    "Gift amount stated as $10,000 / 10,000.00 / Ten thousand dollars — coerce to Decimal; keep snippet.",
+    "Transfer state: 'funds have been transferred' vs 'will be transferred at closing' vs a checkbox — the bool degrades to str; disambiguate with transfer_method + gift_date_or_expected_transfer_date.",
+    "Donor source account referenced inline: 'drawn on Chase account ending 1234' — split into gift_source_account_institution + gift_source_account_last4; do not conflate with the recipient account.",
+    "No-repayment attestation phrased many ways ('no repayment is expected', 'not a loan', 'no obligation to repay') — capture verbatim str, null if truly absent.",
+    "Gift date may be the letter date, the deposit date, or an expected future date — the disambiguator is funds_already_transferred."
+  ],
+
+  "open_questions": [
+    {"id":1,"q":"donor_address / donor_phone PII.","options":["register donor_address in _PII_FIELDS (pre_masked=false) so it is masked + match-hashed like other addresses","accept standard sensitivity"],"recommendation":"register donor_address — a real address unmasked in the catch-all is the exact failure; leave donor_phone unregistered","blocks_implementation":true},
+    {"id":2,"q":"Joint donors shape. Flat donor_name / donor_name_2 + donor_names_raw covers 1-2 donors. If a rule ever needs to address 3+ donors individually, revisit as person[].","options":["stay flat (name/name_2 + raw string)","person[] nested list"],"recommendation":"stay flat now; the raw string preserves recoverability","blocks_implementation":false},
+    {"id":3,"q":"no_repayment / no_ownership as str vs bool. No bool coercer exists, and the verbatim attestation is more useful for review than a stripped true/false.","options":["keep as str","add a bool coercer"],"recommendation":"keep as str (matches the existing extractor's no_repayment_attestation)","blocks_implementation":false}
+  ],
+
+  "notes": [
+    "donor_address flagged for review — recommendation is to register it in _PII_FIELDS (pre_masked=false) so a real residential address is not left unmasked in the catch-all; set here as ADDRESS/pre_masked=false pending reviewer sign-off. donor_phone (contact PII, standard sensitivity) left unregistered.",
+    "gift_source_account_last4 and recipient_or_escrow_account_last4 both need _PII_FIELDS registration (restricted, pre_masked=true; analogous to account_number_masked); today the donor and destination accounts land in the unmasked catch-all as PII.",
+    "Ambiguity: transfer_method — classed disambiguator (matches the 'disambiguator for matching the deposit' framing) with AS-5 in rules; a defensible alternative is reason_class rule since it is the AS-5 transfer-evidence type."
+  ]
+}

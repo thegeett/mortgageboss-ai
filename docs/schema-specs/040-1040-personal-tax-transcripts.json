@@ -1,0 +1,79 @@
+{
+  "document_type": "1040_personal_tax_transcripts",
+  "slug": "1040-personal-tax-transcripts",
+  "tier": 3,
+  "rules_served": [],
+  "summary_hint": "IRS <transcript_type> for <taxpayer_name> (TIN <taxpayer_tin_masked>), tax year <tax_period_ending>, filing <filing_status>: AGI <adjusted_gross_income>, taxable income <taxable_income>, total tax <total_tax>.",
+  "existing_extractor": null,
+  "catalog_coverage": "full",
+
+  "typed_core": [
+    {"name":"issuer_name","type":"str","why":"source — IRS","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"transcript_type","type":"str","why":"disambiguator — Return Transcript vs Tax Account vs Record of Account vs Wage & Income vs Verification of Nonfiling; each carries different data","rules":[],"reason_class":"disambiguator","rule_floor":false,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":"Identify the transcript type first — it determines which fields exist; a Wage & Income transcript has no AGI/taxable-income line"},
+    {"name":"tax_form_number","type":"str","why":"disambiguator — 1040 / 1040-SR; which return","rules":[],"reason_class":"disambiguator","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"tax_period_ending","type":"date","why":"identity — the tax year the transcript covers","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"request_or_processing_date","type":"date","why":"recency — when the transcript was pulled","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"return_received_or_processed_date","type":"date","why":"processor — when the IRS processed the return","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"taxpayer_name","type":"str","why":"identity — match to the borrower","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"person","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"taxpayer_tin_masked","type":"str","why":"PII (highly_restricted) + identity key","rules":[],"reason_class":"pii","rule_floor":false,"degraded_from":"identifier","pii":{"kind":"TIN","pre_masked":true},"exists_today":false,"prompt_hint":"The TIN is already IRS-masked (XXX-XX-1234); do not attempt to reconstruct it"},
+    {"name":"spouse_name","type":"str","why":"identity — joint filer; match to co-borrower","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"person","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"spouse_tin_masked","type":"str","why":"PII (highly_restricted)","rules":[],"reason_class":"pii","rule_floor":false,"degraded_from":"identifier","pii":{"kind":"TIN","pre_masked":true},"exists_today":false,"prompt_hint":null},
+    {"name":"address_on_return","type":"str","why":"processor — address-consistency check","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"address","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"filing_status","type":"str","why":"processor/income — single/MFJ/MFS/HoH context","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"adjusted_gross_income","type":"Decimal","why":"processor — the income analysis base","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"taxable_income","type":"Decimal","why":"processor — income reconciliation","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"total_tax","type":"Decimal","why":"processor — income reconciliation","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"return_filed_indicator","type":"str","why":"processor — return-on-file confirmation","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"bool","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"verification_of_nonfiling_indicator","type":"str","why":"processor — nonfiling status","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"bool","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"customer_file_number","type":"str","why":"identity — the lender's file-linkage number (10-digit CFN on IRS transcripts)","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"The 10-digit CFN the lender put on the 4506-C, echoed on the transcript — use it for file linkage, not the masked SSN"}
+  ],
+
+  "nested_lists": [
+    {
+      "name":"return_line_items","shape":"flat_row",
+      "shape_reason":"the transcript is a long list of labeled dollar lines (income items, adjustments, deductions, credits, per-computer values); many items → flat rows keep well under the 16,384-token ceiling",
+      "expected_item_count":"many","rules":[],
+      "exists_today":false,"plumbing_sites":5,
+      "fields":[
+        {"name":"section","type":"str","why":"tags Income vs Adjustments vs Tax"},
+        {"name":"line_label","type":"str","why":"the transcript line label"},
+        {"name":"amount","type":"Decimal","why":"the line amount; supports future income-reconciliation rules"},
+        {"name":"source","type":"str","why":"provenance — as-filed vs PER COMPUTER"}
+      ]
+    }
+  ],
+
+  "rejected": [
+    {"name":"the 8 TECHNICAL provenance fields","reason":"already in the TypedField wrapper"},
+    {"name":"document_title","reason":"duplicates transcript_type"},
+    {"name":"form_number, form_revision_date","reason":"the transcript layout is not a filled-form schema; tax_form_number covers the return form"},
+    {"name":"issuer_address, issuer_phone, issuer_email_or_url","reason":"not present / contact only"},
+    {"name":"document_issue_date, effective_date, expiration_date","reason":"duplicate request/processing dates; a transcript does not expire"},
+    {"name":"statement_period_start, statement_period_end","reason":"duplicate tax_period_ending"},
+    {"name":"party_names, party_addresses","reason":"covered by taxpayer_name / spouse_name / address_on_return"},
+    {"name":"property_address, loan_number","reason":"not on an IRS transcript"},
+    {"name":"account_case_reference_number","reason":"customer_file_number covers the linkage key"},
+    {"name":"signature_blocks, notary_block","reason":"a transcript is agency-issued, not executed"},
+    {"name":"document_status_or_version","reason":"no consumer"},
+    {"name":"wages_and_income_summary, account_adjustments, penalties_interest_and_payments","reason":"rolled into the single return_line_items nested list (one-list budget)"}
+  ],
+
+  "encoding_variations": [
+    "transcript_type — the five IRS products differ sharply: a Return Transcript has line items; a Tax Account Transcript has adjustments/payments; a Record of Account combines both; Wage & Income lists W-2/1099s; Verification of Nonfiling has no return data. The type governs which typed fields will be null",
+    "per-computer values — transcripts print both as-filed and 'PER COMPUTER' figures; prefer as-filed unless the rule says otherwise; note which was read",
+    "tax_period_ending — 'Dec. 31, 2024' vs '202412'; degrade to date",
+    "masked TIN — always 'XXX-XX-' + last 4; already masked by the IRS"
+  ],
+
+  "open_questions": [
+    {"id":1,"q":"No attached rule — the packet lists 0 rules, yet IN-12 (self-employment) and income rules typically consume 1040 transcripts","options":["design to identity/processor as done and flag that the rule mapping is incomplete","wait for the rule"],"recommendation":"(a) design to identity/processor and surface the gap","blocks_implementation":false},
+    {"id":2,"q":"Which object[] is the nested list — return_line_items, wages_and_income_summary, and account_adjustments are all repeating","options":["one flat return_line_items with a section tag absorbing all three","separate lists (heavy)"],"recommendation":"(a) one flat return_line_items; a Wage & Income transcript may warrant its own list if a rule reads per-payer income","blocks_implementation":true},
+    {"id":3,"q":"as-filed vs per-computer — confirm which figure the income analysis should trust","options":["trust as-filed","type both if a rule cross-checks"],"recommendation":"confirm which figure the income analysis should trust; consider typing both if a rule cross-checks","blocks_implementation":false}
+  ],
+
+  "notes": [
+    "This document serves 0 rules — no rule in the packet names it; fields are justified by identity, PII, disambiguator, or processor use. IN-12 self-employment analysis consumes tax documents but is not attached to this type in the packet.",
+    "Registry note: an existing taxpayer_ssn_masked (pre-masked) covers the same concept as taxpayer_tin_masked under a different name; reconcile naming rather than duplicate.",
+    "Read as-filed amounts, not 'PER COMPUTER', unless told otherwise; capture the distinction in the snippet."
+  ]
+}

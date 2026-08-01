@@ -1,0 +1,87 @@
+{
+  "document_type": "property_tax_bill",
+  "slug": "property-tax-bill-subject",
+  "tier": 2,
+  "rules_served": ["DT-4", "RE-2"],
+  "summary_hint": "County/authority, tax year, property address, and total tax due (with delinquent/lien status) — the annual property-tax figure for the housing payment/DTI, with the land vs improvement assessed split needed to catch new-construction under-assessment.",
+  "existing_extractor": "app/ai/extraction/property_tax_bill.py",
+  "catalog_coverage": "full",
+
+  "typed_core": [
+    {"name":"issuer_name","type":"str","why":"identity — source/authority that issued the bill","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"taxing_authority","type":"str","why":"identity — county/municipality/taxing body; DT-4 context","rules":["DT-4"],"reason_class":"identity","rule_floor":false,"degraded_from":"entity","pii":null,"exists_today":true,"prompt_hint":null},
+    {"name":"taxpayer_or_owner_names_raw","type":"str","why":"identity/disambiguator — owners verbatim (flattened from person_or_entity[]); a bad name split stays visible for the tag layer to judge","rules":[],"reason_class":"disambiguator","rule_floor":false,"degraded_from":"object","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"taxpayer_or_owner_name","type":"str","why":"identity — first assessed owner, matched to borrower / retained-REO owner","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":true,"prompt_hint":null},
+    {"name":"taxpayer_or_owner_name_2","type":"str","why":"identity — second assessed owner","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"property_address","type":"str","why":"RE-2 — the property this bill documents, matched later to subject vs retained REO","rules":["RE-2"],"reason_class":"rule","rule_floor":false,"degraded_from":"address","pii":null,"exists_today":true,"prompt_hint":"Do NOT decide whether this is the subject property or another owned property — capture the address and parcel so matching happens later"},
+    {"name":"parcel_or_apn","type":"str","why":"identity — parcel key for cross-document matching","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"identifier","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"tax_bill_or_account_number","type":"str","why":"identity/dedup — bill/account number","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"identifier","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"tax_year","type":"int","why":"DT-4 / RE-2 — the year the tax figure applies to; recency of the retained-property evidence","rules":["DT-4","RE-2"],"reason_class":"rule","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"assessment_period","type":"str","why":"disambiguator for tax_year — distinguishes fiscal (e.g. 2024-2025) from calendar year","rules":[],"reason_class":"disambiguator","rule_floor":false,"degraded_from":"datetime","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"assessed_land_value","type":"Decimal","why":"DT-4 — the new-construction land-only reassessment check reads this; without the split the AI-assist is blind","rules":["DT-4"],"reason_class":"rule","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"New construction: the bill may reflect a land-only (unimproved) assessment; capture assessed_land_value and assessed_improvement_value separately so DT-4 can flag that the improved value is not yet assessed and the payment must use the reassessed value"},
+    {"name":"assessed_improvement_value","type":"Decimal","why":"DT-4 — the improved/structure value; the reassessed basis a completed build should be taxed on","rules":["DT-4"],"reason_class":"rule","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"total_assessed_value","type":"Decimal","why":"DT-4 — assessed value compared against the tax figure","rules":["DT-4"],"reason_class":"rule","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":true,"prompt_hint":null},
+    {"name":"taxable_value","type":"Decimal","why":"DT-4 disambiguator — tax is computed on taxable (post-exemption) value, not gross assessed","rules":["DT-4"],"reason_class":"disambiguator","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"A homestead/owner-occupied exemption reduces taxable value; a new buyer may not inherit the seller's exemption, which changes the estimated tax"},
+    {"name":"base_tax_amount","type":"Decimal","why":"DT-4 — the ad valorem base tax, distinct from special assessments","rules":["DT-4"],"reason_class":"rule","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"Distinguish the ad valorem base tax from special assessments (Mello-Roos, CFD, bonds) — both belong on the bill, in different slots"},
+    {"name":"total_tax_due","type":"Decimal","why":"DT-4 — the total tax figure used in the payment/escrow estimate","rules":["DT-4"],"reason_class":"rule","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":true,"prompt_hint":null},
+    {"name":"current_balance","type":"Decimal","why":"RE-2 / processor — amount currently owed on the retained/subject property","rules":["RE-2"],"reason_class":"rule","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"penalties_and_interest","type":"Decimal","why":"processor — delinquency charges owed","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"delinquent_or_lien_status","type":"str","why":"processor — tax delinquency/lien affects title and escrow setup","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":null}
+  ],
+
+  "nested_lists": [
+    {
+      "name":"installments_and_due_dates","shape":"flat_row",
+      "shape_reason":"a tax bill carries 1-4 installments (annual / semi-annual / quarterly) — very few items, so a flat row per installment stays far under the 16,384-token ceiling and is simpler than per-field wrapping",
+      "expected_item_count":"1-4","rules":["DT-4"],
+      "exists_today":false,"plumbing_sites":5,
+      "fields":[
+        {"name":"installment_label","type":"str","why":"DT-4 payment timing — which installment (annual / semi-annual / quarterly)"},
+        {"name":"amount","type":"Decimal","why":"DT-4 — the installment amount"},
+        {"name":"due_date","type":"date","why":"DT-4 — payment timing"},
+        {"name":"paid_status","type":"str","why":"processor — paid / unpaid state of the installment"},
+        {"name":"paid_date","type":"date","why":"processor — when the installment was paid"},
+        {"name":"source","type":"str","why":"provenance of the installment row"}
+      ]
+    }
+  ],
+
+  "rejected": [
+    {"name":"the 8 TECHNICAL provenance fields","reason":"already in the TypedField wrapper"},
+    {"name":"subject_property_indicator","reason":"a judgment the extractor cannot read faithfully — a tax bill never declares itself the 'subject'; matching/RE-2 decides it. Contradicts the prompt's own 'do not decide which property' instruction"},
+    {"name":"party_names / party_addresses","reason":"duplicate taxpayer_or_owner_names — on a tax bill the parties are the assessed owners"},
+    {"name":"document_title, form_number, form_revision_date","reason":"a tax bill is not a standardized form; catch-all"},
+    {"name":"issuer_address, issuer_phone, issuer_email_or_url","reason":"no rule/processor consumer"},
+    {"name":"effective_date, expiration_date","reason":"duplicate tax_year / assessment_period"},
+    {"name":"statement_period_start / _end","reason":"a tax bill is not a periodic statement"},
+    {"name":"document_issue_date","reason":"duplicates tax_year for recency"},
+    {"name":"signature_blocks, notary_block","reason":"a tax bill is not an executed/notarized instrument"},
+    {"name":"document_status_or_version","reason":"'PAID'/'estimate' captured by delinquent_or_lien_status"},
+    {"name":"legal_description","reason":"long text, no rule/processor need; catch-all"},
+    {"name":"loan_number","reason":"not present on a taxing-authority bill"},
+    {"name":"account_case_reference_number","reason":"duplicates tax_bill_or_account_number"},
+    {"name":"exemptions_or_credits, tax_rates_or_millage, special_assessments_or_charges, payments_and_paid_dates","reason":"object[] beyond the one nested-list budget -> additional_sections (exemptions & special assessments flagged in Open questions)"}
+  ],
+
+  "encoding_variations": [
+    "Assessed vs taxable vs 'full cash value' vs 'net taxable' — issuers label the tax base differently; DT-4 must compare against the base the tax is actually computed on (taxable_value), not gross total_assessed_value.",
+    "Land vs improvement split labeled 'Land' / 'Improvements' / 'Structure' / 'Building'.",
+    "Tax year vs fiscal year — CA bills state '2024-2025'; others state a calendar year. assessment_period is the disambiguator.",
+    "Total tax may include or exclude special assessments (Mello-Roos / CFD / bond) — ad valorem base vs grand total. base_tax_amount vs total_tax_due carry both.",
+    "Status wording — 'PAID' / 'DELINQUENT' / 'PRIOR YEAR DUE' / 'TAX LIEN'.",
+    "Installment cadence — 1 (annual), 2 (semi-annual), 4 (quarterly)."
+  ],
+
+  "open_questions": [
+    {"id":1,"q":"subject_property_indicator (CORE) — fact or judgment?","options":["keep as a typed bool per the catalog","reject as a conclusion the extractor cannot read from the bill"],"recommendation":"(b) — a tax bill has no field stating it is the subject; RE-2 and downstream matching own that call, and the existing prompt explicitly says not to decide. Confirm before shipping","blocks_implementation":false},
+    {"id":2,"q":"Homestead/exemptions as a DT-4 disambiguator. Loss of a seller's homestead exemption on a new purchase raises the effective tax, which is exactly DT-4's under-estimate concern.","options":["leave exemptions_or_credits in the catch-all","promote a flattened exemptions_summary / homestead_exemption_present typed field"],"recommendation":"revisit (b) with the domain expert — currently left to catch-all to respect the one-list budget","blocks_implementation":true},
+    {"id":3,"q":"Special assessments and DT-4. Should the escrow/payment estimate include Mello-Roos/CFD special assessments, or only the ad valorem base? This determines whether DT-4 should read total_tax_due or base_tax_amount.","options":["read total_tax_due","read base_tax_amount"],"recommendation":"carry both (done) and let the rule authors choose; flag for domain-expert confirmation","blocks_implementation":false},
+    {"id":4,"q":"installments list shape — 1-4 items is firmly within budget for flat rows; no per-field wrap needed.","options":["flat-row","per-field wrap"],"recommendation":"flat-row (adopted). Confirm the item cap","blocks_implementation":false}
+  ],
+
+  "notes": [
+    "19 typed-core fields — appropriate for a Tier-2 document whose 2 rules concentrate on the assessed values and the tax figure; the remainder are identity/disambiguators a processor needs to attach the bill to the right property.",
+    "property_address and taxpayer_or_owner_name(s) are typed so they are not stored raw in the catch-all; recommend NOT masking (public tax record + RE-2/DT-4 match keys would break) — not in the 7-field _PII_FIELDS registry, pre_masked=false if registered. No SSN/DOB/full-account number appears on a property-tax bill.",
+    "Ambiguity: taxing_authority classed identity with DT-4 in rules ('DT-4 context'); current_balance classed rule (leads 'RE-2 / processor') — both have a defensible processor reading."
+  ]
+}

@@ -1,0 +1,71 @@
+{
+  "document_type": "mortgage_statement",
+  "slug": "mortgage-statement",
+  "tier": 2,
+  "rules_served": ["DT-6", "RE-1", "RE-2"],
+  "summary_hint": "<servicer> mortgage on <property_address> (loan ...<masked>): payment <amount_due>/mo (P&I <p+i>, escrow <escrow>), balance <outstanding_principal_balance>, due <payment_due_date>",
+  "existing_extractor": "app/ai/extraction/mortgage_statement.py",
+  "catalog_coverage": "full",
+
+  "typed_core": [
+    {"name": "borrower_name", "type": "str", "why": "RE-1 floor: whose property; matches the statement to a borrower across sources", "rules": ["RE-1"], "reason_class": "rule", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": true, "prompt_hint": null},
+    {"name": "borrower_name_2", "type": "str", "why": "RE-1: co-owner on the loan", "rules": ["RE-1"], "reason_class": "rule", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "property_address", "type": "str", "why": "DT-6/RE-1/RE-2 floor: the tolerant-address-match key that reconciles this property against the application REO, credit report, and title", "rules": ["DT-6", "RE-1", "RE-2"], "reason_class": "rule", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": true, "prompt_hint": "Capture the property address even though this may be the financed property or another owned property; do NOT classify which — matching happens downstream (RE-1)"},
+    {"name": "servicer_name", "type": "str", "why": "RE-1 floor: the source in the cross-source reconciliation; matches to the credit-report mortgage tradeline", "rules": ["RE-1"], "reason_class": "rule", "rule_floor": false, "degraded_from": "object", "pii": null, "exists_today": true, "prompt_hint": null},
+    {"name": "loan_number_masked", "type": "str", "why": "PII (restricted, pre-masked) + RE-1 matching key to the credit-report mortgage", "rules": ["RE-1"], "reason_class": "pii", "rule_floor": false, "degraded_from": null, "pii": {"kind": "ACCOUNT", "pre_masked": true}, "exists_today": false, "prompt_hint": "The loan number is usually printed masked — file it in loan_number_masked, never the catch-all"},
+    {"name": "statement_date", "type": "date", "why": "identity/recency: which statement this is; disambiguates two statements for the same loan", "rules": [], "reason_class": "identity", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "billing_cycle_or_period", "type": "str", "why": "processor: the period the payment covers; recency disambiguator", "rules": [], "reason_class": "processor", "rule_floor": false, "degraded_from": "date_range", "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "payment_due_date", "type": "date", "why": "DT-6: the payment obligation date; processor", "rules": ["DT-6"], "reason_class": "rule", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": true, "prompt_hint": null},
+    {"name": "amount_due", "type": "Decimal", "why": "DT-6 floor: the total monthly payment (PITIA) counted in DTI for a retained property", "rules": ["DT-6"], "reason_class": "rule", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": true, "prompt_hint": null},
+    {"name": "principal_amount", "type": "Decimal", "why": "DT-6 floor: the P of PITIA", "rules": ["DT-6"], "reason_class": "rule", "rule_floor": true, "degraded_from": "object", "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "interest_amount", "type": "Decimal", "why": "DT-6 floor: the I of PITIA", "rules": ["DT-6"], "reason_class": "rule", "rule_floor": true, "degraded_from": "object", "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "escrow_amount", "type": "Decimal", "why": "DT-6 floor + RE-2: the escrow (taxes+insurance) portion of the monthly payment", "rules": ["DT-6", "RE-2"], "reason_class": "rule", "rule_floor": false, "degraded_from": "object", "pii": null, "exists_today": true, "prompt_hint": null},
+    {"name": "outstanding_principal_balance", "type": "Decimal", "why": "RE-1 floor: the balance reconciled against the credit-report mortgage balance for the same property", "rules": ["RE-1"], "reason_class": "rule", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": true, "prompt_hint": null},
+    {"name": "interest_rate", "type": "str", "why": "processor: the note rate; supports DTI/payment sanity checks", "rules": [], "reason_class": "processor", "rule_floor": false, "degraded_from": "percent", "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "escrow_balance", "type": "Decimal", "why": "RE-2 floor: evidence taxes & insurance are escrowed/documented for the retained property", "rules": ["RE-2"], "reason_class": "rule", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "past_due_amount", "type": "Decimal", "why": "processor; RE-1 relevance: delinquency on a retained property affects DTI/eligibility", "rules": ["RE-1"], "reason_class": "processor", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "maturity_date", "type": "date", "why": "processor: remaining term of the retained-property mortgage", "rules": [], "reason_class": "processor", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "delinquency_status", "type": "str", "why": "processor; RE-1 relevance: current standing of the loan", "rules": ["RE-1"], "reason_class": "processor", "rule_floor": false, "degraded_from": "object", "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "loss_mitigation_or_bankruptcy_messages", "type": "str", "why": "processor: forbearance/BK flags on a retained property (risk signal; light string list)", "rules": [], "reason_class": "processor", "rule_floor": false, "degraded_from": "list", "pii": null, "exists_today": false, "prompt_hint": null}
+  ],
+
+  "nested_lists": [],
+
+  "rejected": [
+    {"name": "document_title, form_number, form_revision_date, document_status_or_version", "reason": "a mortgage statement is not a standardized form; classification handles type"},
+    {"name": "issuer_name, issuer_address, issuer_phone, issuer_email_or_url", "reason": "the issuer is the servicer; captured via servicer_name (contact detail lands in catch-all with no rule consumer)"},
+    {"name": "effective_date, expiration_date, statement_period_start, statement_period_end", "reason": "duplicate statement_date / billing_cycle_or_period; no rule reads a separate coverage period"},
+    {"name": "party_names, party_addresses", "reason": "redundant — borrowers via borrower_names, property via property_address"},
+    {"name": "loan_number, account_case_reference_number", "reason": "statements print the loan number masked, captured via loan_number_masked; the full/unmasked number is not needed and would be raw PII"},
+    {"name": "signature_blocks, notary_block", "reason": "a mortgage statement is not executed or notarized"},
+    {"name": "prepayment_penalty_indicator", "reason": "no rule consumer on this document; catch-all captures it if printed"},
+    {"name": "fees_and_charges_due, late_payment_amount_and_date", "reason": "statement math; past_due_amount + delinquency_status carry the delinquency signal a processor needs"},
+    {"name": "transaction_activity", "reason": "payment ledger; no rule reads it (one-list budget not spent — see Open questions)"},
+    {"name": "partial_payment_or_suspense_balance", "reason": "no consumer; catch-all captures it"},
+    {"name": "year_to_date_payment_summary", "reason": "YTD totals derivable from the payment; no rule reads them"}
+  ],
+
+  "encoding_variations": [
+    "PITIA components: statements show the split as 'Principal $X / Interest $Y / Escrow $Z', or a combined 'Principal & Interest' line, or 'Taxes' and 'Insurance' broken out within escrow. principal_amount/interest_amount/escrow_amount must be read from payment_breakdown; when only 'P&I' combined is printed, report it under principal_amount with the snippet showing it is combined",
+    "Which property: this statement may be for the subject property being financed or another property the borrower owns. property_address is captured verbatim; do NOT decide which — RE-1 reconciles downstream",
+    "Servicer vs lender vs originator: the header may name a servicer, a sub-servicer, or the note holder. servicer_name is flattened from servicer_name_and_contact; keep the name as printed for the credit-report match",
+    "Amount due vs past due: amount_due (this cycle's total) is distinct from past_due_amount (arrears) and outstanding_principal_balance (loan balance) — three different figures a statement prints near each other",
+    "Escrow amount vs escrow balance: the monthly escrow portion (escrow_amount, feeds PITIA) is distinct from the accumulated escrow_balance (RE-2 evidence T&I are escrowed) — do not conflate"
+  ],
+
+  "open_questions": [
+    {"id": 1, "q": "payment_breakdown flattening (P&I combined vs split) — DT-6 needs the full PITIA; statements variously show 'Principal / Interest / Escrow' or a single 'Principal & Interest' line", "options": ["three scalars principal_amount/interest_amount/escrow_amount", "a principal_and_interest_amount combined scalar"], "recommendation": "three scalars, with a combined value falling to principal_amount and the snippet disclosing it; confirm with Priya whether DTI needs P and I separated", "blocks_implementation": false},
+    {"id": 2, "q": "RE-2 tax/insurance granularity — is escrow_amount + escrow_balance sufficient evidence, or does RE-2 need itemized property_tax_escrow / hazard_insurance_escrow scalars when the statement breaks them out?", "options": ["escrow amount + balance", "add itemized property_tax_escrow / hazard_insurance_escrow scalars"], "recommendation": "start with escrow amount + balance; add the two itemized scalars only if RE-2's DET check requires line-item proof", "blocks_implementation": false},
+    {"id": 3, "q": "transaction_activity — nest or drop? No current rule consumes it", "options": ["drop to catch-all", "a flat-row nested list for a future payment-history rule"], "recommendation": "drop; reconsider if a delinquency/payment-history rule is built", "blocks_implementation": false},
+    {"id": 4, "q": "property_address PII vs matchability — it is sensitive but RE-1 needs it in plaintext for tolerant matching; masking would break the rule", "options": ["keep typed and unmasked, do not register in _PII_FIELDS", "register/mask it"], "recommendation": "keep typed and unmasked, do not register in _PII_FIELDS; confirm this is an acceptable PII posture for a property address", "blocks_implementation": true},
+    {"id": 5, "q": "interest_rate and billing_cycle_or_period degrade to str (no percent/date_range coercer)", "options": ["str + prompt hints", "add coercers"], "recommendation": "str + prompt hints (rate as printed incl. '%'; period as a single ISO date pair) until coercers are justified by a rule", "blocks_implementation": false}
+  ],
+
+  "notes": [
+    "The monthly payment is a debt obligation (it affects DTI). Capture the full PITIA breakdown — principal, interest, escrow — not just the total, so DT-6 can count the retained-property payment.",
+    "Escrow that includes taxes and insurance is the evidence RE-2 needs; capture escrow_amount (monthly) and escrow_balance (accumulated).",
+    "Do not judge whether the payment is 'in DTI' or whether the property is disclosed — report the figures; DT-6/RE-1/RE-2 judge.",
+    "property_address is sensitive PII but must remain unmasked for RE-1's tolerant address match; kept typed (protects it from the raw catch-all path) but not registered in _PII_FIELDS — pii is null by design.",
+    "loan_number_masked is not among the 7 currently registered _PII_FIELDS keys (the registry has account_number_masked, a distinct key); unregistered, the loan number lands raw in the unmasked catch-all — register with pre_masked true."
+  ]
+}

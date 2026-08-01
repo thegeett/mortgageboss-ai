@@ -1,0 +1,86 @@
+{
+  "document_type": "profit_and_loss",
+  "slug": "profit-and-loss-statement-balance-sheet",
+  "tier": 3,
+  "rules_served": ["IN-12"],
+  "summary_hint": "P&L / balance sheet for <business_legal_name>, <period_start>–<period_end_or_as_of_date> (<accounting_basis>): total revenue <total_revenue>, net income <net_income_or_loss>; total assets <total_assets>, equity <owner_or_shareholder_equity>; prepared by <prepared_by>.",
+  "existing_extractor": "app/ai/extraction/profit_and_loss.py",
+  "catalog_coverage": "full",
+
+  "typed_core": [
+    {"name":"business_legal_name","type":"str","why":"identity — whose business; match to tax returns / K-1","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"entity","pii":null,"exists_today":true,"prompt_hint":null},
+    {"name":"issuer_name","type":"str","why":"CORE — source/preparer; third-party independence","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"statement_type","type":"str","why":"disambiguator — P&L only vs balance sheet only vs combined; changes which figures are present","rules":[],"reason_class":"disambiguator","rule_floor":false,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"period_start","type":"date","why":"identity — the P&L coverage period start","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":true,"prompt_hint":null},
+    {"name":"period_end_or_as_of_date","type":"date","why":"identity/recency — P&L period end (and balance-sheet as-of date)","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":true,"prompt_hint":"A P&L states a period end; a balance sheet states a single as-of date — do not confuse with period_start"},
+    {"name":"accounting_basis","type":"str","why":"disambiguator for the income figures — cash vs accrual changes the IN-12 analysis","rules":["IN-12"],"reason_class":"disambiguator","rule_floor":false,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":"Distinguish cash vs accrual basis; it materially changes the income read"},
+    {"name":"prepared_by","type":"str","why":"CORE — self-prepared vs CPA; weighs reliability","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"preparer_relationship","type":"str","why":"disambiguator for prepared_by — internal vs external preparer","rules":[],"reason_class":"disambiguator","rule_floor":false,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"cpa_review_compilation_or_audit_level","type":"str","why":"processor — assurance level (compilation/review/audit); reliance weight","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"total_revenue","type":"Decimal","why":"IN-12 — top-line revenue base","rules":["IN-12"],"reason_class":"rule","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":true,"prompt_hint":null},
+    {"name":"total_cost_of_goods_sold","type":"Decimal","why":"IN-12/processor — the gross-profit chain","rules":["IN-12"],"reason_class":"rule","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"gross_profit","type":"Decimal","why":"IN-12 — revenue less COGS","rules":["IN-12"],"reason_class":"rule","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"total_operating_expenses","type":"Decimal","why":"IN-12 — expense base","rules":["IN-12"],"reason_class":"rule","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":true,"prompt_hint":null},
+    {"name":"operating_income","type":"Decimal","why":"IN-12 — income before other items","rules":["IN-12"],"reason_class":"rule","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"net_income_or_loss","type":"Decimal","why":"IN-12 — the key self-employment qualifying-income base","rules":["IN-12"],"reason_class":"rule","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":true,"prompt_hint":"The KEY figure for IN-12; do not compute it if unprinted, leave null"},
+    {"name":"total_assets","type":"Decimal","why":"processor — balance-sheet size/liquidity context","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"cash_and_cash_equivalents","type":"Decimal","why":"processor — business liquidity (withdrawal-impact)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"total_liabilities","type":"Decimal","why":"processor — leverage","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"owner_or_shareholder_equity","type":"Decimal","why":"processor — net worth of the business","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"management_certification","type":"str","why":"processor — whether management attested to the figures","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"bool","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"signer_name_title","type":"str","why":"identity — who certified the statement","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"signature_and_date","type":"str","why":"processor — execution present","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"signature","pii":null,"exists_today":false,"prompt_hint":null}
+  ],
+
+  "nested_lists": [
+    {
+      "name":"financial_line_items","shape":"flat_row",
+      "shape_reason":"the document has several genuinely repeating groups (revenue lines, COGS, operating expenses, other income/expense, depreciation & non-recurring items, current assets, fixed/other assets, current liabilities, short/long-term debt). Item count is moderate (~20–50), so flat rows stay well under the 16,384-token ceiling",
+      "expected_item_count":"~20-50","rules":["IN-12"],
+      "exists_today":false,"plumbing_sites":5,
+      "fields":[
+        {"name":"section","type":"str","why":"IN-12 — tags the group so the add-back lines (depreciation, amortization) IN-12 needs are addressable"},
+        {"name":"label","type":"str","why":"IN-12 — the line-item label"},
+        {"name":"amount","type":"Decimal","why":"IN-12 — the line amount"},
+        {"name":"source","type":"str","why":"provenance — the row the value came from"}
+      ]
+    }
+  ],
+
+  "rejected": [
+    {"name":"the 8 TECHNICAL provenance fields","reason":"already in the TypedField wrapper"},
+    {"name":"document_title","reason":"duplicates statement_type; classification precedes extraction"},
+    {"name":"form_number, form_revision_date","reason":"a P&L/balance sheet is not a standardized form"},
+    {"name":"issuer_address, issuer_phone, issuer_email_or_url","reason":"contact only; catch-all"},
+    {"name":"document_issue_date, effective_date, expiration_date","reason":"duplicate the statement period; a P&L does not expire"},
+    {"name":"statement_period_start, statement_period_end","reason":"duplicate period_start / period_end_or_as_of_date"},
+    {"name":"party_names, party_addresses","reason":"the business is covered by business_legal_name"},
+    {"name":"property_address, loan_number, account_case_reference_number","reason":"not on a P&L/balance sheet; no consumer"},
+    {"name":"signature_blocks, notary_block","reason":"the certification block (signer_name_title + signature_and_date) covers the one execution that matters; not notarized"},
+    {"name":"document_status_or_version","reason":"no consumer"},
+    {"name":"comparative_periods","reason":"prior-period columns land as extra line items; no rule addresses them"},
+    {"name":"revenue_line_items, cost_of_goods_sold_line_items, operating_expense_line_items, other_income_and_expense, depreciation_amortization_and_nonrecurring_items, current_asset_line_items, fixed_and_other_assets, current_liability_line_items, short_and_long_term_debt","reason":"rolled into the single financial_line_items nested list (one-list budget)"},
+    {"name":"accounts_receivable, inventory, accounts_payable","reason":"individual balance-sheet lines; captured in the nested list"}
+  ],
+
+  "encoding_variations": [
+    "statement_type — 'Profit & Loss', 'Income Statement', 'Statement of Operations', 'Balance Sheet', or a combined package; no enum coercer, degrade to str",
+    "accounting_basis — 'Cash Basis', 'Accrual Basis', 'Modified Cash'; degrade to str; changes IN-12 handling",
+    "period vs as-of — a P&L states a period; a balance sheet states a single as-of date; period_end_or_as_of_date must not be confused with period_start",
+    "negatives — losses shown as (12,345) or -12,345; $/commas present (parsed by the Decimal coercer)",
+    "depreciation/amortization — may appear inside operating expenses or as a separate add-back section; capture with its section tag"
+  ],
+
+  "open_questions": [
+    {"id":1,"q":"One combined nested list vs several — the document naturally has ~9 repeating groups","options":["one flat financial_line_items with a section tag","separate lists per group (heavy plumbing, ~5 sites each)"],"recommendation":"(a) one flat financial_line_items — stays within the one-list budget and keeps IN-12 add-backs addressable","blocks_implementation":true},
+    {"id":2,"q":"Depreciation add-backs as scalars — IN-12 depends on depreciation/amortization add-backs","options":["leave them as tagged rows in the nested list","promote total_depreciation_amortization to a typed scalar"],"recommendation":"(a) leave them as tagged rows; promote a scalar only if the calculator wants a single number","blocks_implementation":true},
+    {"id":3,"q":"Rule-floor derivability — IN-12's how_engine_checks names 'a dedicated Priya-validated calculator' over the tax documents, not specific P&L fields","options":["the P&L chain above is the reasonable floor","confirm the calculator's exact input list"],"recommendation":"the P&L chain is the reasonable floor; confirm the calculator's exact input list","blocks_implementation":false}
+  ],
+
+  "notes": [
+    "Existing extractor is P&L-only; the spec keeps business_legal_name, period_start, period_end_or_as_of_date, total_revenue, total_operating_expenses, net_income_or_loss and ADDS gross_profit, operating_income, accounting_basis, statement_type, the balance-sheet totals, and the depreciation add-back lines.",
+    "Capture depreciation and amortization line items verbatim — they are IN-12 add-backs; if they land only in the catch-all they are discarded at the snapshot boundary and the add-back is lost.",
+    "No new _PII_FIELDS registration proposed; if the statement prints the owner's SSN or a full business bank-account number, promote it to a named typed field rather than leaving it in the unmasked catch-all.",
+    "Ambiguity: issuer_name and prepared_by are tagged 'CORE' with no explicit reason_class; both set to processor (reliability/independence weighting) as best guess; flagged."
+  ]
+}

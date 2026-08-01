@@ -1,0 +1,61 @@
+{
+  "document_type": "government_issued_id",
+  "slug": "government-issued-id",
+  "tier": 3,
+  "rules_served": [],
+  "summary_hint": "California driver's license for Jordan A. Rivera, DOB 1985-04-12, expires 2028-04-12 — valid, photo and signature present.",
+  "existing_extractor": null,
+  "catalog_coverage": "full",
+
+  "typed_core": [
+    {"name":"government_id_type","type":"str","why":"identity — driver's license / passport / state ID","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":"'REAL ID compliant' / star markings are a status signal, not the ID type"},
+    {"name":"issuing_country","type":"str","why":"identity — country of issue","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"country_code","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"issuing_authority","type":"str","why":"identity — DMV / State Dept; source validation","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"document_number","type":"str","why":"PII (highly_restricted) — the credential number; must be masked","rules":[],"reason_class":"pii","rule_floor":false,"degraded_from":null,"pii":{"kind":"ID","pre_masked":true},"exists_today":false,"prompt_hint":null},
+    {"name":"full_legal_name","type":"str","why":"identity + PII — name on the credential; borrower match","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"person","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"date_of_birth","type":"date","why":"PII (highly_restricted) — identity/age verification","rules":[],"reason_class":"pii","rule_floor":false,"degraded_from":null,"pii":{"kind":"DOB","pre_masked":false},"exists_today":false,"prompt_hint":null},
+    {"name":"expiration_date","type":"date","why":"processor — must be unexpired through closing (cheap future rule)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"issue_date","type":"date","why":"processor — issuance recency","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"document_status","type":"str","why":"processor — valid / expired / revoked","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"place_of_birth","type":"str","why":"identity — secondary identifier (passports)","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"nationality_or_citizenship","type":"str","why":"processor — citizenship/residency eligibility signal","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"sex","type":"str","why":"identity — secondary descriptor","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"residential_address","type":"str","why":"identity — address consistency; potential PII","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"address","pii":{"kind":"ADDRESS","pre_masked":false},"exists_today":false,"prompt_hint":null},
+    {"name":"photo_present","type":"str","why":"processor — authenticity/completeness","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"bool","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"signature_present","type":"str","why":"processor — authenticity/completeness","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"bool","pii":null,"exists_today":false,"prompt_hint":null}
+  ],
+
+  "nested_lists": [],
+
+  "rejected": [
+    {"name":"document_title, form_number, form_revision_date, document_status_or_version","reason":"classification/version metadata; document_status (Credential group) is the real status field"},
+    {"name":"issuer_name, issuer_address, issuer_phone, issuer_email_or_url","reason":"issuing_authority carries the source; an ID has no contact-us block"},
+    {"name":"party_names, party_addresses","reason":"duplicate full_legal_name / residential_address"},
+    {"name":"property_address, loan_number, account_case_reference_number","reason":"not present on an ID; no consumer"},
+    {"name":"effective_date, statement_period_start/end, document_issue_date","reason":"duplicate/adjacent to issue_date / expiration_date"},
+    {"name":"signature_blocks, notary_block","reason":"an ID is not executed; signature_present is the relevant flag"},
+    {"name":"machine_readable_zone","reason":"highly_restricted; full re-encoding of all PII — no consumer, high leak risk"},
+    {"name":"barcode_or_chip_data","reason":"highly_restricted biometric/PII key_value[]; no consumer"},
+    {"name":"legal_presence_or_use_restrictions","reason":"prose restrictions; no consumer; leave to catch-all"},
+    {"name":"the 8 TECHNICAL provenance fields","reason":"already in the TypedField wrapper"}
+  ],
+
+  "encoding_variations": [
+    "government_id_type — 'DRIVER LICENSE', 'DL', 'OPERATOR LICENSE', 'REAL ID', passport 'P<'; carry issuing_authority alongside to disambiguate a state DL from a state ID",
+    "date_of_birth — 'DOB', 'Date of Birth', '3 DOB', MRZ YYMMDD; formats vary by country — normalize to ISO date, but the MRZ form is a different encoding of the same fact",
+    "expiration_date — 'EXP', '4b', 'Expires'; on some IDs the AAMVA field number (4b) is the only label"
+  ],
+
+  "open_questions": [
+    {"id":1,"q":"document_number masking — extract already-masked (map to existing id_number_masked, pre_masked true) or extract raw and let the snapshot mask (pre_masked false)?","options":["pre-mask at extraction (id_number_masked, pre_masked true)","extract raw, snapshot masks (pre_masked false)"],"recommendation":"pre-mask at extraction to match id_number_masked and never store the full number","blocks_implementation":true},
+    {"id":2,"q":"full_legal_name masking — names are normally unmasked, but this is a highly-sensitive identity document","options":["keep typed and unmasked (needed for borrower match)","register as masked PII"],"recommendation":"keep typed and unmasked but flag for the PII reviewer","blocks_implementation":true},
+    {"id":3,"q":"residential_address — promote to a registered PII field, or accept as standard?","options":["registered PII field (pre_masked false)","accept as standard"],"recommendation":"keep typed (out of the unmasked catch-all) and flag pre_masked false for review","blocks_implementation":true}
+  ],
+
+  "notes": [
+    "No rules consume this type today, so there is no rule floor. This document is nearly all PII: its purpose is identity verification, so most typed fields exist to protect PII or to establish identity/validity. Aggressive rejection of the machine-readable/biometric fields keeps unmasked data out of the catch-all.",
+    "Prompt hint (doc-level): US driver's licenses use AAMVA element codes (1 = family name, 2 = given name, 4b = expiry, 4d = document number, 15 = sex, 8 = address); the model should map these codes, not just visual labels.",
+    "Prompt hint (doc-level): Passport MRZ (two P< lines) encodes name, number, nationality, DOB, sex, expiry — do NOT copy the raw MRZ into any field; read the human-readable zone.",
+    "PII note: full_legal_name is listed in the PII section but names are not masked by convention — kept typed with pii null (reason_class identity), flagged for the PII reviewer. document_number, date_of_birth, and residential_address are the registered PII fields."
+  ]
+}

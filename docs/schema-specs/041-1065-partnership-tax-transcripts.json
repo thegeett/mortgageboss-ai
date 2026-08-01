@@ -1,0 +1,80 @@
+{
+  "document_type": "1065_partnership_tax_transcripts",
+  "slug": "1065-partnership-tax-transcripts",
+  "tier": 3,
+  "rules_served": [],
+  "summary_hint": "IRS <transcript_type> of Form <tax_form_number> for <partnership_legal_name> (EIN <ein_masked>), tax year <tax_period_ending>: total income <total_income>, ordinary business income <ordinary_business_income_or_loss>, guaranteed payments <guaranteed_payments_to_partners>.",
+  "existing_extractor": null,
+  "catalog_coverage": "full",
+
+  "typed_core": [
+    {"name":"issuer_name","type":"str","why":"source — IRS","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"transcript_type","type":"str","why":"disambiguator — Return Transcript vs Account Transcript vs Record of Account","rules":[],"reason_class":"disambiguator","rule_floor":false,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"tax_form_number","type":"str","why":"disambiguator — Form 1065 (partnership)","rules":[],"reason_class":"disambiguator","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"tax_period_ending","type":"date","why":"identity — the tax year","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"request_or_processing_date","type":"date","why":"recency — when the transcript was pulled","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"partnership_legal_name","type":"str","why":"identity — the business; match to K-1 / borrower's ownership","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"object","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"ein_masked","type":"str","why":"PII (restricted) + identity key","rules":[],"reason_class":"pii","rule_floor":false,"degraded_from":"identifier","pii":{"kind":"ACCOUNT","pre_masked":true},"exists_today":false,"prompt_hint":"The EIN is already IRS-masked (XX-XXX1234)"},
+    {"name":"business_address","type":"str","why":"identity — business location","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"address","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"date_business_started","type":"date","why":"processor — business history (2-year self-employment test)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"accounting_method","type":"str","why":"disambiguator — cash vs accrual for the income figures","rules":[],"reason_class":"disambiguator","rule_floor":false,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"number_of_schedules_k1","type":"int","why":"processor — number of partners (co-ownership context)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"Tells you how many partners share the income"},
+    {"name":"gross_receipts_or_sales","type":"Decimal","why":"processor — top-line revenue","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"cost_of_goods_sold","type":"Decimal","why":"processor — gross-profit chain","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"gross_profit","type":"Decimal","why":"processor — revenue less COGS","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"total_income","type":"Decimal","why":"processor — partnership total income","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"guaranteed_payments_to_partners","type":"Decimal","why":"processor — a component of a partner's qualifying income","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"Capture guaranteed payments (Line 10 / Schedule K Line 4) with the line label"},
+    {"name":"ordinary_business_income_or_loss","type":"Decimal","why":"processor — the base flowing to partners' K-1 (Line 22)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"Capture ordinary business income (Line 22) with the line label"}
+  ],
+
+  "nested_lists": [
+    {
+      "name":"schedule_k_items","shape":"flat_row",
+      "shape_reason":"Schedule K distributive-share items (ordinary income, rental, interest, dividends, guaranteed payments, §179) flow to each partner's K-1 and drive partner-level qualifying income; genuinely repeats, ~15-25 lines, so flat rows",
+      "expected_item_count":"15-25","rules":[],
+      "exists_today":false,"plumbing_sites":5,
+      "fields":[
+        {"name":"line_label","type":"str","why":"the Schedule K distributive-share line name"},
+        {"name":"amount","type":"Decimal","why":"the line amount that flows to each partner's K-1"},
+        {"name":"source","type":"str","why":"the source line reference"}
+      ]
+    }
+  ],
+
+  "rejected": [
+    {"name":"the 8 TECHNICAL provenance fields","reason":"already in the TypedField wrapper"},
+    {"name":"document_title","reason":"duplicates transcript_type"},
+    {"name":"form_number, form_revision_date","reason":"transcript layout is not a filled-form schema; tax_form_number covers the return"},
+    {"name":"issuer_address, issuer_phone, issuer_email_or_url","reason":"not present / contact only"},
+    {"name":"document_issue_date, effective_date, expiration_date","reason":"duplicate request/processing dates; a transcript does not expire"},
+    {"name":"statement_period_start, statement_period_end","reason":"duplicate tax_period_ending"},
+    {"name":"party_names, party_addresses","reason":"covered by partnership_legal_name / business_address"},
+    {"name":"property_address, loan_number, account_case_reference_number","reason":"not on a 1065 transcript"},
+    {"name":"signature_blocks, notary_block","reason":"agency-issued, not executed"},
+    {"name":"document_status_or_version","reason":"no consumer"},
+    {"name":"business_activity_code, principal_business_activity, principal_product_or_service","reason":"descriptive; no rule/processor gate at Tier 3; catch-all"},
+    {"name":"returns_and_allowances, ordinary_income_from_other_entities, net_farm_profit_or_loss, net_gain_or_loss, other_income","reason":"minor income sublines; captured in the nested list or catch-all"},
+    {"name":"deduction_line_items, schedule_m_reconciliation_items, balance_sheet_assets, balance_sheet_liabilities_and_capital, partner_capital_and_liability_summary, irs_account_adjustments","reason":"not the chosen nested list (one-list budget); catch-all"}
+  ],
+
+  "encoding_variations": [
+    "transcript_type — Return Transcript (line items) vs Tax Account Transcript (adjustments/payments) vs Record of Account; governs which fields are null",
+    "ordinary business income — Form 1065 Line 22; also echoed on Schedule K Line 1; capture the source line to disambiguate",
+    "guaranteed payments — Line 10 / Schedule K Line 4; a partner's guaranteed payments are qualifying income separate from the distributive share",
+    "accounting_method — 'Cash', 'Accrual', 'Other'; degrade enum to str",
+    "masked EIN — XX-XXX + last 4 on transcripts"
+  ],
+
+  "open_questions": [
+    {"id":1,"q":"No attached rule — 0 rules in the packet, yet a partnership return is core to self-employment income (IN-12) for a partner-borrower","options":["design to identity/processor and flag the mapping gap","defer"],"recommendation":"(a) design to identity/processor and flag the mapping gap","blocks_implementation":false},
+    {"id":2,"q":"Which repeating list — schedule_k_items (distributive shares to K-1) vs deduction_line_items vs balance-sheet lines","options":["schedule_k_items","deduction_line_items","balance-sheet lines"],"recommendation":"schedule_k_items, since partner qualifying income derives from Schedule K; revisit if a rule reads deductions or the balance sheet","blocks_implementation":true},
+    {"id":3,"q":"Partner-level attribution — the borrower's usable income is their ownership share; confirm whether the matching K-1 supplies the share or this transcript must carry per-partner detail","options":["matching K-1 supplies the share","this transcript carries per-partner detail"],"recommendation":"confirm with the rule author whether per-partner detail is needed on this transcript","blocks_implementation":true}
+  ],
+
+  "notes": [
+    "Serves 0 rules — no rule in the packet names this document; fields justified by identity, PII, and processor use. The business-return chain feeds self-employment income analysis (IN-12) but no rule is attached in the packet.",
+    "17 typed-core rows. No rule floor; the income chain (receipts -> COGS -> gross profit -> total income -> ordinary business income) plus guaranteed payments are the figures a self-employment calculation would read; identity/EIN attach the return to the borrower's ownership.",
+    "Form 1065 is a partnership informational return — income passes through to partners on Schedule K-1; the borrower's usable income is their K-1 share plus guaranteed payments, not the whole partnership total.",
+    "PII registry note: ein_masked pre_masked true; an existing employer_ein (masked) covers the same concept under a different name — reconcile naming rather than duplicate."
+  ]
+}

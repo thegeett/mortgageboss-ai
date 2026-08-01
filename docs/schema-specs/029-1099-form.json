@@ -1,0 +1,67 @@
+{
+  "document_type": "form_1099",
+  "slug": "1099-form",
+  "tier": 3,
+  "rules_served": ["IN-13"],
+  "summary_hint": "1099-<variant> from <payer_name>, tax year <tax_year>: <income_amount> to <recipient_name>",
+  "existing_extractor": "app/ai/extraction/form_1099.py",
+  "catalog_coverage": "full",
+
+  "typed_core": [
+    {"name": "form_variant", "type": "str", "why": "IN-13 (rule reads it) — 'detect the income type'; also the disambiguator that says which box is the primary income (NEC->box 1, INT->box 1, DIV->box 1a, R->box 1)", "rules": ["IN-13"], "reason_class": "rule", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": true, "prompt_hint": "The 1099 is a SERIES: NEC, INT, DIV, MISC, R (and others). Read the variant from the title and map the primary income box per variant"},
+    {"name": "tax_year", "type": "int", "why": "IN-13 — the period the receipt covers; recency; the disambiguator beside the amount (a wage figure without its tax year can be misread)", "rules": ["IN-13"], "reason_class": "rule", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": true, "prompt_hint": null},
+    {"name": "corrected_indicator", "type": "str", "why": "processor — a CORRECTED 1099 supersedes the original figures; a rule/processor must know the amount is a restatement", "rules": [], "reason_class": "processor", "rule_floor": false, "degraded_from": "bool", "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "payer_name", "type": "str", "why": "identity/attribution — who paid; third-party independence (IN-13 source of income)", "rules": ["IN-13"], "reason_class": "identity", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": true, "prompt_hint": null},
+    {"name": "payer_tin", "type": "str", "why": "PII (registered masked) — payer TIN/EIN; identity of the payer", "rules": [], "reason_class": "pii", "rule_floor": false, "degraded_from": null, "pii": {"kind": "TIN", "pre_masked": true}, "exists_today": true, "prompt_hint": null},
+    {"name": "payer_address", "type": "str", "why": "identity — payer source/geographic reconciliation", "rules": [], "reason_class": "identity", "rule_floor": false, "degraded_from": "address", "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "recipient_name", "type": "str", "why": "identity — attaches the income to the borrower (IN-13 attribution)", "rules": ["IN-13"], "reason_class": "identity", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": true, "prompt_hint": null},
+    {"name": "recipient_tin", "type": "str", "why": "PII (registered raw) — recipient TIN/SSN; borrower match key (highly_restricted)", "rules": [], "reason_class": "pii", "rule_floor": false, "degraded_from": null, "pii": {"kind": "SSN", "pre_masked": false}, "exists_today": true, "prompt_hint": null},
+    {"name": "recipient_address", "type": "str", "why": "identity/occupancy match; PII — borrower address, must be typed or it lands unmasked in the catch-all", "rules": [], "reason_class": "pii", "rule_floor": false, "degraded_from": "address", "pii": {"kind": "ADDRESS", "pre_masked": false}, "exists_today": false, "prompt_hint": null},
+    {"name": "income_amount", "type": "Decimal", "why": "IN-13 — the primary income box for the variant; the receipt amount IN-13 checks", "rules": ["IN-13"], "reason_class": "rule", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": true, "prompt_hint": null},
+    {"name": "distribution_code", "type": "str", "why": "IN-13 disambiguator — 1099-R box 7 code(s) tell a periodic/continuing pension (likely to continue) from a lump-sum/early distribution; without it IN-13 cannot judge continuance (flattened from distribution_codes string[])", "rules": ["IN-13"], "reason_class": "disambiguator", "rule_floor": false, "degraded_from": "object", "pii": null, "exists_today": false, "prompt_hint": "For IN-13, the decision-relevant 1099 is usually the 1099-R (pension/retirement). Capture box 7 distribution code(s) — periodic vs lump-sum is what 'continuance' turns on"},
+    {"name": "taxable_amount_not_determined", "type": "str", "why": "processor — 1099-R 'taxable amount not determined'; qualifies how much of the distribution counts", "rules": [], "reason_class": "processor", "rule_floor": false, "degraded_from": "bool", "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "account_number", "type": "str", "why": "PII (restricted) — payer's account/annuity number; promote so it is masked rather than left unmasked in the catch-all; disambiguates which account/annuity", "rules": [], "reason_class": "pii", "rule_floor": false, "degraded_from": null, "pii": {"kind": "ACCOUNT", "pre_masked": false}, "exists_today": false, "prompt_hint": null},
+    {"name": "second_tin_notice", "type": "str", "why": "processor — flags a TIN mismatch the payer was warned about; authenticity signal", "rules": [], "reason_class": "processor", "rule_floor": false, "degraded_from": "bool", "pii": null, "exists_today": false, "prompt_hint": null}
+  ],
+
+  "nested_lists": [],
+
+  "rejected": [
+    {"name": "document_title, form_number, form_revision_date", "reason": "classification/version happen before extraction; form_variant identifies the form"},
+    {"name": "issuer_name", "reason": "duplicates payer_name on a 1099"},
+    {"name": "issuer_address, issuer_phone, issuer_email_or_url", "reason": "duplicate payer contact; catch-all"},
+    {"name": "document_issue_date, effective_date, expiration_date", "reason": "a 1099 reports a completed tax year; no effective/expiry; duplicates tax_year"},
+    {"name": "statement_period_start/_end", "reason": "not a statement period; the tax year is the period"},
+    {"name": "party_names, party_addresses", "reason": "covered by flattened payer_/recipient_ fields"},
+    {"name": "property_address, loan_number", "reason": "not on a 1099"},
+    {"name": "account_case_reference_number", "reason": "duplicates account_number"},
+    {"name": "signature_blocks, notary_block", "reason": "a 1099 is not executed/notarized"},
+    {"name": "document_status_or_version", "reason": "corrected/void indicators already carry this"},
+    {"name": "void_indicator", "reason": "marginal; a voided 1099 is rare and duplicates status — catch-all"},
+    {"name": "fatca_filing_requirement", "reason": "no consumer; catch-all"},
+    {"name": "box_values, state_local_values, distribution_codes (as list)", "reason": "the primary income + one distribution code are typed; the remaining boxes have no IN-13 consumer — catch-all (see Open questions)"},
+    {"name": "total_distribution_indicator", "reason": "1099-R marginal; no consumer"}
+  ],
+
+  "encoding_variations": [
+    "form_variant — read from the form title ('Form 1099-NEC', '1099-R', '1099-INT', '1099-DIV', '1099-MISC'). The variant governs which box is income; capture it verbatim",
+    "income_amount — the 'primary' box differs by variant (NEC box 1, INT box 1, DIV box 1a, R box 1 gross distribution, MISC the principal box present). The variant is its disambiguator; the tax year is a second disambiguator",
+    "distribution_code — 1099-R box 7 may carry one or two codes (e.g. 7=normal, 1=early, 4=death, 7D). Codes, not words, encode continuance",
+    "corrected_indicator / void_indicator — a checkbox at the top of the form; degrade to str"
+  ],
+
+  "open_questions": [
+    {"id": 1, "q": "Nest box_values or not? IN-13 needs only the primary income amount + distribution code (both typed)", "options": ["leave other boxes to the catch-all now", "add a flat-row box_values nested list (box_number, label, amount, source) for a future income/withholding rule"], "recommendation": "(a) now; revisit if a rule needs withholding or a non-primary box, since the catch-all is discarded at the snapshot boundary", "blocks_implementation": true},
+    {"id": 2, "q": "distribution_codes flattened to a single distribution_code str — box 7 usually holds 1-2 codes. Flattening to one str keeps the pair verbatim (e.g. '7D')", "options": ["keep flattened str", "separate coded elements"], "recommendation": "keep flattened str; confirm no case needs them as separate coded elements", "blocks_implementation": false},
+    {"id": 3, "q": "income_amount for MISC — MISC has several income boxes (rents box 1, other income box 3). The starter prompt takes 'the principal income box present'", "options": ["keep the principal-box heuristic", "enumerate every MISC box"], "recommendation": "keep that heuristic and record the box in the snippet as the disambiguator", "blocks_implementation": false}
+  ],
+
+  "notes": [
+    "Tier 3 with one EXTRACT rule; IN-13 keys on form_variant + income_amount + distribution_code, the rest are identity/PII/disambiguators. 14 typed-core rows, below the 20-25 target, which is expected for a one-rule form.",
+    "box_values (object[]) is the catalog's repeating structure, but IN-13 needs only the single primary income amount plus the 1099-R distribution code — both typed. If a future rule needs withholding or every numbered box, box_values becomes the one flat-row nested list; today nesting it would spend ~5 sites of plumbing for no consumer.",
+    "PII: payer_tin already in _PII_FIELDS (masked); recipient_tin already in _PII_FIELDS (raw); recipient_address needs registration pre_masked false (borrower address; snapshot masks + salted match-hash); account_number needs registration pre_masked false (full account/annuity number; currently would land unmasked in the catch-all).",
+    "IRS box numbers: NEC box 1 = nonemployee comp; INT box 1 = interest; DIV box 1a = ordinary dividends; R box 1 = gross distribution, box 2a = taxable amount, box 7 = distribution code(s).",
+    "Money may include $/commas (parsed); TINs/SSNs as written. Never quote the full recipient TIN in reasoning.",
+    "distribution_code is flattened from a distribution_codes string[]; degraded_from recorded as 'object' to note the structural flatten (the field itself is a str)."
+  ]
+}

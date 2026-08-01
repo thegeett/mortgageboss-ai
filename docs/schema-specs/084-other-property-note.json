@@ -1,0 +1,72 @@
+{
+  "document_type": "other_property_note",
+  "slug": "other-property-note",
+  "tier": 3,
+  "rules_served": [],
+  "summary_hint": "Promissory note on <property_address>: <original_principal_amount> at <interest_rate> (<rate_type>), P&I <monthly_principal_and_interest>, matures <maturity_date>.",
+  "existing_extractor": null,
+  "catalog_coverage": "full",
+
+  "typed_core": [
+    {"name":"document_title","type":"str","why":"identity/classification — human review","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"note_date","type":"date","why":"identity — origination date of the note (CORE)","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"note_city_and_state","type":"str","why":"disambiguator — the note's stated place; distinguishes jurisdiction (CORE)","rules":[],"reason_class":"disambiguator","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"note_city_and_state (the note's execution locale) is not the property address — keep distinct"},
+    {"name":"borrower_name","type":"str","why":"identity — who owes (flattened from borrower_names)","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"borrower_name_2","type":"str","why":"identity — co-borrower/co-maker","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"borrower_names_raw","type":"str","why":"disambiguator — verbatim maker string (§3)","rules":[],"reason_class":"disambiguator","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"lender_name","type":"str","why":"identity/source — the note holder (flattened from entity)","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"object","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"property_address","type":"str","why":"identity — which property this note encumbers (CORE; flattened)","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"address","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"subject_property_indicator","type":"str","why":"processor — confirms this is a non-subject property (catalog mortgage_use); the reason this doc type exists","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"bool","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"loan_number","type":"str","why":"identity linkage — ties to the loan file when stated","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"original_principal_amount","type":"Decimal","why":"processor — original loan balance (CORE)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"interest_rate","type":"Decimal","why":"processor — store the numeric rate; terms","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"percent","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"rate_type","type":"str","why":"disambiguator — fixed vs adjustable governs whether ARM fields apply","rules":[],"reason_class":"disambiguator","rule_floor":false,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":"Fixed vs adjustable: only populate margin_and_caps and change_dates_and_index for adjustable notes; leave null for fixed"},
+    {"name":"monthly_principal_and_interest","type":"Decimal","why":"processor — the P&I obligation feeding DTI; the headline figure (CORE)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"This note is for a property other than the one being financed — the monthly_principal_and_interest is an existing obligation that flows into DTI, not the new loan"},
+    {"name":"payment_due_day","type":"int","why":"processor — day of month payment is due","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"first_payment_date","type":"date","why":"processor — start of the payment schedule","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"maturity_date","type":"date","why":"processor — payoff date; remaining term","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"late_charge_terms","type":"str","why":"processor — late fee terms","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"object","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"prepayment_terms","type":"str","why":"processor — prepayment penalty presence/terms","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"balloon_payment_terms","type":"str","why":"processor/disambiguator — balloon presence changes the true obligation","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"object","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"margin_and_caps","type":"str","why":"disambiguator — ARM margin/caps beside rate_type when adjustable","rules":[],"reason_class":"disambiguator","rule_floor":false,"degraded_from":"object","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"change_dates_and_index","type":"str","why":"disambiguator — ARM index/adjustment schedule when adjustable","rules":[],"reason_class":"disambiguator","rule_floor":false,"degraded_from":"object","pii":null,"exists_today":false,"prompt_hint":null}
+  ],
+
+  "nested_lists": [],
+
+  "rejected": [
+    {"name":"the 8 TECHNICAL provenance fields","reason":"already in the TypedField wrapper"},
+    {"name":"form_number, form_revision_date","reason":"Fannie/Freddie note forms vary; no per-file consumer"},
+    {"name":"issuer_name, issuer_address, issuer_phone, issuer_email_or_url","reason":"duplicate lender_name; no consumer"},
+    {"name":"document_issue_date, effective_date, expiration_date","reason":"duplicate note_date / maturity_date"},
+    {"name":"statement_period_start/end","reason":"a note has no coverage period"},
+    {"name":"party_names, party_addresses","reason":"duplicate borrower/lender; no per-party rule"},
+    {"name":"account_case_reference_number","reason":"no consumer"},
+    {"name":"signature_blocks, notary_block","reason":"duplicate borrower_signatures; a note is signed not notarized"},
+    {"name":"document_status_or_version","reason":"no draft/final consumer"},
+    {"name":"payment_address_or_place","reason":"no consumer; catch-all"},
+    {"name":"default_and_notice_terms, acceleration_terms","reason":"legal boilerplate; no rule"},
+    {"name":"payment_change_terms, interest_only_or_negative_amortization_terms","reason":"ARM/IO boilerplate; captured via margin_and_caps / catch-all"},
+    {"name":"allonge_or_endorsement, rider_or_addendum_references","reason":"chain-of-title/reference detail; catch-all"}
+  ],
+
+  "encoding_variations": [
+    "interest_rate is catalog percent with no coercer — store the numeric value ('6.875'); note the unit is percent-per-annum, coerced downstream as needed",
+    "rate_type (enum, null): 'Fixed', 'Adjustable', 'ARM' — governs whether margin_and_caps / change_dates_and_index should be non-null",
+    "subject_property_indicator (boolean) — this note is filed because it is a non-subject property; the value should read false-for-subject, but capture the stated basis, degraded to str",
+    "note_city_and_state is the '[City], [State]' line at the top of the note form, distinct from property_address"
+  ],
+
+  "open_questions": [
+    {"id":1,"q":"subject_property_indicator as bool — degrades to str (no bool coercer).","options":["keep degraded str","add a bool coercer or a controlled string"],"recommendation":"if an REO/DTI rule is built, confirm whether a bool coercer or a controlled string is wanted so the non-subject test is deterministic","blocks_implementation":false},
+    {"id":2,"q":"ARM fields flattened — margin_and_caps / change_dates_and_index are objects flattened to str.","options":["keep flattened str","promote sub-fields to typed components"],"recommendation":"if ARM re-underwriting ever needs the components typed, they'd need sub-field promotion","blocks_implementation":false},
+    {"id":3,"q":"DTI consumer — monthly_principal_and_interest is typed on the expectation of a future DTI/liabilities rule.","options":["P&I alone","full PITI (taxes/insurance)"],"recommendation":"confirm the intended snapshot_path and whether taxes/insurance (full PITI) are needed rather than P&I alone","blocks_implementation":true}
+  ],
+
+  "notes": [
+    "No rules in the packet -> no rule floor. This is the promissory note for a non-subject property (retained/departure/investment). Its mortgage relevance is the monthly payment obligation that flows into DTI, plus confirmation it is not the subject property. The subject_property_indicator and monthly_principal_and_interest are the fields a future DTI/REO rule would read.",
+    "No new _PII_FIELDS entries. loan_number (confidential) treated as identity/linkage. borrower_name/lender_name are names retained as typed identity. No SSN/DOB/account number on a note.",
+    "allonge_or_endorsement (object[]) and rider_or_addendum_references (string[]) genuinely repeat but neither is read by a rule; endorsements/allonges are chain-of-title detail and riders are references — both fall to the catch-all. A note has one set of terms, not a repeating schedule.",
+    "Prompt hint (doc-level): money stays a string in value, coerced to Decimal on read."
+  ]
+}

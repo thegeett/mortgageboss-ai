@@ -1,0 +1,81 @@
+{
+  "document_type": "pay_stub",
+  "slug": "pay-stubs",
+  "tier": 1,
+  "rules_served": ["FR-1","FR-4","ID-1","ID-4","IN-1","IN-2","IN-3","IN-4","IN-5","IN-6","IN-7","IN-9","IN-10","IN-11"],
+  "summary_hint": "employer, employee, pay period, gross pay, YTD gross",
+  "existing_extractor": "app/ai/extraction/pay_stub.py",
+  "catalog_coverage": "full",
+
+  "typed_core": [
+    {"name":"employer_name","type":"str","why":"IN-5 (employer consistency), IN-6 (pay-stub/W-2 coverage), IN-4","rules":["IN-4","IN-5","IN-6"],"reason_class":"rule","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":true,"prompt_hint":null},
+    {"name":"employer_address","type":"str","why":"IN-5 disambiguator — two employers with similar names are distinguished by address","rules":["IN-5"],"reason_class":"disambiguator","rule_floor":true,"degraded_from":"address","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"employee_name","type":"str","why":"ID-1 — name consistency across the file","rules":["ID-1"],"reason_class":"rule","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":true,"prompt_hint":null},
+    {"name":"employee_address","type":"str","why":"ID-4 — currently reachable only via the catch-all, so ID-4 gets NOTHING from a pay stub today","rules":["ID-4"],"reason_class":"rule","rule_floor":true,"degraded_from":"address","pii":{"kind":"ADDRESS","pre_masked":false},"exists_today":false,"prompt_hint":null},
+    {"name":"employee_ssn_masked","type":"str","why":"PII protection — many stubs print a partial SSN, which today lands UNMASKED in the catch-all. Typing it is the only way to keep it out","rules":[],"reason_class":"pii","rule_floor":true,"degraded_from":null,"pii":{"kind":"SSN","pre_masked":true},"exists_today":false,"prompt_hint":"Last 4 only. NEVER place an SSN in additional_sections"},
+    {"name":"position_or_title","type":"str","why":"IN-7 — 'is the new role the same field'. Nothing else on a pay stub carries the job title","rules":["IN-7"],"reason_class":"rule","rule_floor":true,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"Often near the employee name or in a header block. Null if absent — do NOT infer from the employer's industry"},
+    {"name":"employment_start_date","type":"date","why":"IN-4 (gaps), IN-9 ('future/just-started employment')","rules":["IN-4","IN-9"],"reason_class":"rule","rule_floor":true,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+
+    {"name":"pay_period_start","type":"date","why":"IN-3 (periods elapsed), IN-4","rules":["IN-3","IN-4"],"reason_class":"rule","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":true,"prompt_hint":null},
+    {"name":"pay_period_end","type":"date","why":"IN-3, IN-4","rules":["IN-3","IN-4"],"reason_class":"rule","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":true,"prompt_hint":null},
+    {"name":"pay_date","type":"date","why":"IN-2 — 'the most recent pay date; compare age to the window'","rules":["IN-2","IN-3","IN-10"],"reason_class":"rule","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":true,"prompt_hint":null},
+    {"name":"pay_frequency","type":"str","why":"IN-3 — periods elapsed depends on it; IN-1 annualisation","rules":["IN-1","IN-3"],"reason_class":"rule","rule_floor":false,"degraded_from":"enum","pii":null,"exists_today":true,"prompt_hint":"Infer from the period dates when not stated; record the reasoning in the snippet"},
+
+    {"name":"gross_pay","type":"Decimal","why":"IN-1, IN-3, FR-1 (totals reconciliation)","rules":["IN-1","IN-3","FR-1"],"reason_class":"rule","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":true,"prompt_hint":null},
+    {"name":"net_pay","type":"Decimal","why":"FR-1 — gross minus deductions must equal net; an arithmetic break is the alteration signal","rules":["FR-1"],"reason_class":"rule","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":true,"prompt_hint":null},
+    {"name":"total_deductions_current","type":"Decimal","why":"FR-1 — the middle term of the reconciliation","rules":["FR-1"],"reason_class":"rule","rule_floor":true,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"ytd_gross","type":"Decimal","why":"IN-3 — 'YTD/periods_elapsed vs stated monthly'","rules":["IN-3","IN-10"],"reason_class":"rule","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":true,"prompt_hint":null},
+    {"name":"hours","type":"Decimal","why":"IN-11 (variable income)","rules":["IN-11"],"reason_class":"rule","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":true,"prompt_hint":null},
+    {"name":"rate","type":"Decimal","why":"IN-11","rules":["IN-11"],"reason_class":"rule","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":true,"prompt_hint":null}
+  ],
+
+  "nested_lists": [
+    {"name":"earnings_lines","shape":"flat_row",
+     "shape_reason":"3-8 lines; flat rows are trivially cheap and generalise better than four named YTD fields",
+     "expected_item_count":"3-8","rules":["IN-1","IN-10","IN-11","FR-1"],"exists_today":false,"plumbing_sites":5,
+     "fields":[
+       {"name":"earning_type","type":"str","why":"IN-11 — regular / overtime / bonus / commission. THE KEY FIELD: IN-10 and IN-11 both turn on separating base from variable income, and a single ytd_gross cannot express it"},
+       {"name":"hours","type":"Decimal","why":"IN-11"},
+       {"name":"rate","type":"Decimal","why":"IN-11"},
+       {"name":"current_amount","type":"Decimal","why":"IN-11 — this period's split"},
+       {"name":"ytd_amount","type":"Decimal","why":"IN-10, IN-11 — Priya's B12 case (base declined while bonus rose) turns on this split"}
+     ]},
+    {"name":"deduction_lines","shape":"flat_row",
+     "shape_reason":"5-15 lines; flat rows are cheap","expected_item_count":"5-15","rules":["FR-4","FR-1"],
+     "exists_today":false,"plumbing_sites":5,
+     "fields":[
+       {"name":"label","type":"str","why":"FR-4 — 'deduction lines implying an obligation'. A garnishment appears as GARN / Levy / Child Supp / Wage Attach"},
+       {"name":"category","type":"str","why":"FR-4 — tax / benefit / garnishment / retirement / other"},
+       {"name":"current_amount","type":"Decimal","why":"FR-4, FR-1"},
+       {"name":"ytd_amount","type":"Decimal","why":"FR-4"}
+     ]}
+  ],
+
+  "rejected": [
+    {"name":"four named YTD fields (ytd_regular / ytd_overtime / ytd_bonus / ytd_commission)","reason":"superseded by the earnings_lines list — same information, generalises to arbitrary earnings types, and one list costs the same ~5 sites as none of the four would"},
+    {"name":"check_number / direct_deposit_account","reason":"no consumer; account detail is PII with no rule need"},
+    {"name":"filing_status / allowances","reason":"tax detail; no rule reads it"},
+    {"name":"employer_ein","reason":"the W-2 carries it; a stub rarely does"},
+    {"name":"income_is_stable","reason":"a judgment, not a fact — IN-10/IN-11's job. Tags describe; rules judge"},
+    {"name":"is_garnishment_present","reason":"a judgment — FR-4 interprets the deduction lines"},
+    {"name":"the 8 TECHNICAL provenance fields","reason":"already in the TypedField wrapper"}
+  ],
+
+  "encoding_variations": [
+    "Every payroll provider differs — ADP, Paychex, Gusto, Workday, in-house",
+    "YTD components may be a column beside current amounts, a separate YTD block, or absent",
+    "Pay frequency is often implied by the period dates rather than stated",
+    "Deduction labels vary: garnishments appear as GARN, Levy, Child Supp, Wage Attach"
+  ],
+
+  "open_questions": [
+    {"id":1,"q":"earnings_lines list vs four named YTD fields","options":["nested list (chosen)","four named fields"],"recommendation":"the list — it generalises to arbitrary earnings types and costs the same ~5 sites","blocks_implementation":false},
+    {"id":2,"q":"SSN on pay stubs","options":["typed masked field (chosen)","instruct the prompt to omit entirely"],"recommendation":"typed masked field — no rule needs it, but typing it is the ONLY way to keep it out of the unmasked catch-all","blocks_implementation":false},
+    {"id":3,"q":"position_or_title reliability","options":["include (chosen)","omit"],"recommendation":"include, but MEASURE — IN-7 scores 100% on a fixture where occupation is always present; on real stubs it may often be null, pushing IN-7 to unknown","blocks_implementation":false}
+  ],
+
+  "notes": [
+    "The shipping extractor has 11 typed-core fields, all with consumers — nothing to remove. This spec adds 6 fields and 2 nested lists.",
+    "The earnings_lines list is the most valuable addition: IN-10 and IN-11 both require separating base from variable income, which a single ytd_gross cannot express. Priya's B12 case (base declined, bonus rose, total flat) is exactly this."
+  ]
+}

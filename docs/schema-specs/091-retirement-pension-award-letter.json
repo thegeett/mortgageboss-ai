@@ -1,0 +1,61 @@
+{
+  "document_type": "retirement_pension_award_letter",
+  "slug": "retirement-pension-award-letter",
+  "tier": 3,
+  "rules_served": [],
+  "summary_hint": "administrator, retiree/beneficiary, benefit type, gross periodic benefit and frequency, commencement, and whether it is lifetime",
+  "existing_extractor": null,
+  "catalog_coverage": "full",
+
+  "typed_core": [
+    {"name":"document_title","type":"str","why":"processor — distinguishes award letter vs statement","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"plan_or_pension_administrator","type":"str","why":"identity — CORE; the plan/administrator (income source)","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"retiree_or_beneficiary_name","type":"str","why":"identity — CORE; whose income this is (borrower match)","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"person","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"plan_or_claim_number_masked","type":"str","why":"PII — CORE; masked plan/claim number; must be a named field, not catch-all","rules":[],"reason_class":"pii","rule_floor":false,"degraded_from":null,"pii":{"kind":"ACCOUNT","pre_masked":true},"exists_today":false,"prompt_hint":"Mask the plan/claim number to last-4 if the full value is visible"},
+    {"name":"benefit_type","type":"str","why":"identity — CORE; pension/annuity/survivor/disability","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"award_letter_date","type":"date","why":"identity — CORE; letter date, drives recency","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"Distinguish award_letter_date (when the letter issued) from benefit_commencement_date (when income starts) — they differ"},
+    {"name":"retirement_or_entitlement_date","type":"date","why":"processor — when entitlement began","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"gross_periodic_benefit","type":"Decimal","why":"processor — CORE; the gross income figure (headline)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"net_periodic_benefit","type":"Decimal","why":"processor — net after withholding","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"payment_frequency","type":"str","why":"processor/disambiguator — CORE; monthly/annual — the gross amount is meaningless without its period","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"benefit_commencement_date","type":"date","why":"processor — CORE; when payments start (income-continuance timing)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"benefit_end_date","type":"date","why":"processor — end date, if term-certain (continuance beyond loan horizon)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"lifetime_or_term_certain","type":"str","why":"identity/processor — CORE; lifetime vs term-certain drives income continuance","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"survivor_benefit_terms","type":"str","why":"processor — survivor/joint terms affecting continuance","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"administrator_phone","type":"str","why":"processor — verification contact for the administrator","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"object","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"loan_number","type":"str","why":"identity — links the document to the loan file","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null}
+  ],
+
+  "nested_lists": [],
+
+  "rejected": [
+    {"name":"party_names / party_addresses","reason":"duplicate retiree_or_beneficiary_name / administrator"},
+    {"name":"deductions_and_withholding","reason":"object[]; gross + net capture the income figures; no reconciliation rule"},
+    {"name":"cost_of_living_adjustment_terms","reason":"OPTIONAL; income-stability nuance with no consumer"},
+    {"name":"lump_sum_or_rollover_option","reason":"OPTIONAL; not periodic income; no consumer"},
+    {"name":"vesting_or_service_credit","reason":"OPTIONAL; not needed once the benefit is awarded"},
+    {"name":"appeal_or_election_deadline","reason":"not income-relevant; no consumer"},
+    {"name":"administrator_contact_information (nested)","reason":"flattened to administrator_phone"},
+    {"name":"issuer_name","reason":"duplicates plan_or_pension_administrator"},
+    {"name":"property_address","reason":"not relevant to an award letter"},
+    {"name":"signature_blocks / notary_block","reason":"an administrator award letter is not executed by the borrower/notarized"},
+    {"name":"form_number / effective / expiration / statement period","reason":"not a standardized form; no consumer"}
+  ],
+
+  "encoding_variations": [
+    "Benefit amount + frequency: the same monthly figure may be printed as '$2,540/mo' or as an annual '$30,480/yr' — payment_frequency is the disambiguator that fixes the annualization",
+    "Continuance is stated as 'payable for life,' 'lifetime,' '10-year certain,' or with a benefit_end_date — capture both lifetime_or_term_certain and benefit_end_date",
+    "Gross vs net: award letters often state gross with a separate withholding line; keep both figures"
+  ],
+
+  "open_questions": [
+    {"id":1,"q":"net vs gross for income — underwriting typically qualifies on gross (often grossed-up for non-taxable retirement income).","options":["keep both gross and net","gross only"],"recommendation":"keep both; the gross-up is a downstream calculation","blocks_implementation":false},
+    {"id":2,"q":"survivor_benefit_terms as free text — it is prose.","options":["free str now","structured survivor flag"],"recommendation":"free str now; if a continuance rule later needs a structured survivor flag, add a boolean then","blocks_implementation":false}
+  ],
+
+  "notes": [
+    "No rules read this document today (rule_count 0); there is no rule floor. An award letter establishes the amount, frequency, and continuance of retirement income. Fields earn a place by identity, PII protection, disambiguation, or processor use.",
+    "plan_or_claim_number_masked needs _PII_FIELDS registration, pre_masked true (catalog sensitivity restricted; the field is already the masked form). Retiree/beneficiary name is standard sensitivity → identity field, not registry PII.",
+    "Prompt hint (doc-level): Do NOT annualize or judge continuance — extract gross, frequency, commencement, and lifetime/term verbatim; a rule/tag computes qualifying income."
+  ]
+}

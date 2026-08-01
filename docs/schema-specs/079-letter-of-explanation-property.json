@@ -1,0 +1,63 @@
+{
+  "document_type": "letter_of_explanation_property",
+  "slug": "letter-of-explanation-property",
+  "tier": 3,
+  "rules_served": [],
+  "summary_hint": "Borrower LOE on <property_issue_type> for <property_address>, resolution <status>, signed <letter_date>.",
+  "existing_extractor": null,
+  "catalog_coverage": "full",
+
+  "typed_core": [
+    {"name":"document_title","type":"str","why":"identity/classification — human review","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"letter_date","type":"date","why":"identity — when written; recency (processor)","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"borrower_name","type":"str","why":"identity — whose LOE (flattened from borrower_names)","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"borrower_name_2","type":"str","why":"identity — co-borrower","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"borrower_names_raw","type":"str","why":"disambiguator — verbatim signer string","rules":[],"reason_class":"disambiguator","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"issuer_name","type":"str","why":"identity/source — borrower-authored vs third-party","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"The issuer is normally the borrower, not an institution"},
+    {"name":"property_address","type":"str","why":"identity — which property this letter concerns (CORE; flattened from address)","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"address","pii":null,"exists_today":false,"prompt_hint":"Distinguish the subject property from a non-subject/departure property — the letter may explain a property other than the one being financed; capture the address verbatim rather than assuming subject"},
+    {"name":"parcel_or_apn","type":"str","why":"disambiguator — pins the property when the street address is ambiguous (processor)","rules":[],"reason_class":"disambiguator","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"property_issue_type","type":"str","why":"identity/classification; occupancy vs vesting vs address-history vs condition","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"ownership_or_vesting_details","type":"str","why":"processor — vesting/title explanation Priya reads","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"occupancy_or_use_details","type":"str","why":"processor — occupancy claim (feeds occupancy review; cheap future rule)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"Occupancy statements ('I will occupy as primary residence') are load-bearing for occupancy review — capture verbatim"},
+    {"name":"address_mismatch_orhistory","type":"str","why":"processor/disambiguator — reconciles an address discrepancy across the file","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"reason_or_cause","type":"str","why":"processor — the substance of the explanation","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"resolution_and_current_status","type":"str","why":"processor — whether the matter is resolved","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"rental_or_vacancy_details","type":"str","why":"processor — rental income / vacancy claim when present","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"object","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"supporting_documents_summary","type":"str","why":"processor — evidence referenced (flattened)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"borrower_certification","type":"str","why":"processor — presence of the truthfulness attestation","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"signature_date","type":"date","why":"execution — date signed (flattened)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"loan_number","type":"str","why":"identity linkage — ties to the loan file when stated","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null}
+  ],
+
+  "nested_lists": [],
+
+  "rejected": [
+    {"name":"the 8 TECHNICAL provenance fields","reason":"already in the TypedField wrapper"},
+    {"name":"form_number, form_revision_date","reason":"not a standardized form"},
+    {"name":"issuer_address, issuer_phone, issuer_email_or_url","reason":"no consumer; issuer is the borrower"},
+    {"name":"effective_date, expiration_date, statement_period_start/end","reason":"a LOE has no coverage period"},
+    {"name":"party_names, party_addresses","reason":"duplicate borrower_names; no per-party rule"},
+    {"name":"account_case_reference_number","reason":"no consumer on a borrower letter"},
+    {"name":"notary_block, signature_blocks","reason":"not notarized; signature captured flat"},
+    {"name":"document_status_or_version","reason":"no draft/final lifecycle"},
+    {"name":"transaction_transfer_or_acquisition_dates, repair_condition_or_permit_details, involved_parties_and_relationships, facts_and_chronology","reason":"no rule; catch-all captures the narrative"}
+  ],
+
+  "encoding_variations": [
+    "property_issue_type is catalog enum with enum_values: null — issuers write prose. Degrade to str.",
+    "Property may be identified by street address, APN, or legal description — property_address + parcel_or_apn together disambiguate.",
+    "rental_or_vacancy_details is an object — flatten to a string; the model states it as prose."
+  ],
+
+  "open_questions": [
+    {"id":1,"q":"facts_and_chronology / transfer dates typed vs catch-all.","options":["catch-all","typed timeline (nested list)"],"recommendation":"catch-all — no consumer; flag if occupancy/flip rules later need a typed timeline","blocks_implementation":true},
+    {"id":2,"q":"Subject vs non-subject property. There is no subject_property_indicator in this catalog (unlike 084). Should we add one so occupancy logic knows which property the letter explains?","options":["add a subject_property_indicator field","leave absent"],"recommendation":"add as [absent from catalog] if occupancy rules materialize","blocks_implementation":true},
+    {"id":3,"q":"property_address when multiple properties are named.","options":["single flattened address","list of addresses"],"recommendation":"kept as a single flattened address; revisit as a list only if a letter routinely covers several properties","blocks_implementation":true}
+  ],
+
+  "notes": [
+    "No rules in the packet → no rule floor. A borrower letter explaining a property-related question (occupancy, vesting, address history, prior transactions, condition). Typed core anchors the property and the issue so the letter can be attached to the right property; the narrative falls to the catch-all. Every field justified by identity, disambiguation, or processor review.",
+    "loan_number (confidential) treated as identity/linkage, not registered. No SSN/DOB/account number on this document type.",
+    "Ambiguity: address_mismatch_orhistory is tagged 'processor/disambiguator'; classified as processor (first-listed primary) — the disambiguation reading is also defensible. signature_date is tagged 'execution', not one of the five classes; classified as processor as best guess."
+  ]
+}

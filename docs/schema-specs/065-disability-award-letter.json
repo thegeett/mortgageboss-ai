@@ -1,0 +1,74 @@
+{
+  "document_type": "disability_award_letter",
+  "slug": "disability-award-letter",
+  "tier": 3,
+  "rules_served": [],
+  "summary_hint": "{agency} disability award to {beneficiary}, {gross_benefit_amount}/{frequency}, {taxable_status}, starting {benefit_start_date}, {continuation statement}.",
+  "existing_extractor": null,
+  "catalog_coverage": "full",
+
+  "typed_core": [
+    {"name":"issuer_name","type":"str","why":"identity — the paying source","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"awarding_agency_or_insurer","type":"str","why":"disambiguator — SSA vs VA vs private insurer changes interpretation","rules":[],"reason_class":"disambiguator","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"The paying agency matters: SSA (SSDI/SSI), VA (service-connected disability), or a private disability insurer — extract verbatim"},
+    {"name":"beneficiary_name","type":"str","why":"identity — whose income (flattened from person)","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"object","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"claim_or_account_number_masked","type":"str","why":"PII — attaches the award to the borrower","rules":[],"reason_class":"pii","rule_floor":false,"degraded_from":null,"pii":{"kind":"ACCOUNT","pre_masked":true},"exists_today":false,"prompt_hint":null},
+    {"name":"benefit_program_or_policy","type":"str","why":"disambiguator — SSDI vs SSI vs LTD policy; affects continuance/gross-up","rules":[],"reason_class":"disambiguator","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"award_letter_date","type":"date","why":"identity — when the award was stated","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"disability_status","type":"str","why":"processor — approved / active","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"disability_onset_or_entitlement_date","type":"date","why":"processor — when entitlement began","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"gross_benefit_amount","type":"Decimal","why":"processor — the income headline","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"payment_frequency","type":"str","why":"disambiguator for the amount — monthly vs annual","rules":[],"reason_class":"disambiguator","rule_floor":false,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"net_benefit_amount","type":"Decimal","why":"processor — net of offsets","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"taxable_status","type":"str","why":"processor — non-taxable benefit income may be grossed up","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":"Non-taxable disability income is commonly grossed up in underwriting — capture taxable_status and the gross figure exactly"},
+    {"name":"benefit_start_date","type":"date","why":"processor — income start","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"benefit_end_or_review_date","type":"date","why":"processor — the continuance / 3-year test date","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"continuation_or_permanency_statement","type":"str","why":"processor — is income likely to continue (the key qualifying question)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"retroactive_or_lump_sum_amount","type":"Decimal","why":"processor — a lump sum may appear as a large deposit/asset","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"A retroactive/back-pay lump sum is distinct from the recurring monthly benefit — do not add them"},
+    {"name":"appeal_or_pending_review_status","type":"str","why":"processor — a pending appeal undermines income stability","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"agency_contact_information","type":"str","why":"processor — reverification contact (flattened from object)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"object","pii":null,"exists_today":false,"prompt_hint":null}
+  ],
+
+  "nested_lists": [
+    {
+      "name":"deductions_or_offsets","shape":"flat_row",
+      "shape_reason":"offsets (e.g. Medicare premium, workers-comp offset) reconcile gross to net; few items, flat is cheap",
+      "expected_item_count":"0-3 (uncertain — flag)","rules":[],
+      "exists_today":false,"plumbing_sites":5,
+      "fields":[
+        {"name":"label","type":"str","why":"the offset/deduction label (e.g. Medicare premium, workers-comp offset)"},
+        {"name":"amount","type":"Decimal","why":"the offset amount reconciling gross to net"},
+        {"name":"source","type":"str","why":"provenance snippet for the offset row"}
+      ]
+    }
+  ],
+
+  "rejected": [
+    {"name":"document_title, form_number, form_revision_date","reason":"not load-bearing"},
+    {"name":"issuer_address, issuer_phone, issuer_email_or_url","reason":"duplicated by agency_contact_information"},
+    {"name":"document_issue_date, effective_date, expiration_date","reason":"duplicate award_letter_date/benefit dates"},
+    {"name":"statement_period_start/end","reason":"not a statement"},
+    {"name":"party_names, party_addresses","reason":"beneficiary captured directly"},
+    {"name":"property_address, loan_number, account_case_reference_number","reason":"not on an award letter"},
+    {"name":"signature_blocks, notary_block","reason":"agency-issued, not executed by the borrower"},
+    {"name":"document_status_or_version","reason":"duplicates disability_status"},
+    {"name":"cost_of_living_adjustment","reason":"OPTIONAL free text; no consumer -> catch-all"}
+  ],
+
+  "encoding_variations": [
+    "Benefit amount is stated monthly or annually; payment_frequency beside it prevents a 12x error",
+    "Taxability is stated as prose ('this benefit is not subject to federal income tax'), a checkbox, or omitted — keep taxable_status verbatim; absence != taxable",
+    "Continuance appears as an explicit review date, 'permanent', or 'subject to periodic review' — keep both benefit_end_or_review_date and the free-text continuation_or_permanency_statement"
+  ],
+
+  "open_questions": [
+    {"id":1,"q":"deductions_or_offsets shape/count. Usually 0-3 offsets.","options":["flat-row nested list","catch-all"],"recommendation":"flat-row — needed to explain the gross-to-net gap for gross-up","blocks_implementation":true},
+    {"id":2,"q":"Gross vs net for qualifying. Both are captured; underwriting may use gross (grossed up) or net depending on program.","options":["gross","net","keep both"],"recommendation":"keep both; a future income rule chooses","blocks_implementation":false},
+    {"id":3,"q":"Continuance as structured vs prose. The 3-year continuance decision hinges on this.","options":["keep prose continuation_or_permanency_statement (this draft)","add a derived boolean"],"recommendation":"keep prose now; tags/rules judge continuance — a schema field should not","blocks_implementation":true}
+  ],
+
+  "notes": [
+    "No rules consume this type today, so there is no rule floor; every field earns its place on identity, PII, processor use, or disambiguation.",
+    "beneficiary_name is standard-sensitivity; kept as a typed field for identity but not promoted to _PII_FIELDS (registry is for SSN/account/EIN class).",
+    "claim_or_account_number_masked needs _PII_FIELDS registration (pre_masked true); not currently in the 7-field registry."
+  ]
+}

@@ -1,0 +1,76 @@
+{
+  "document_type": "foster_care_verification",
+  "slug": "foster-care-verification",
+  "tier": 3,
+  "rules_served": [],
+  "summary_hint": "State foster-care verification for foster parent Dana Lee — $1,240/month, active placement since 06/2023, expected to continue 3+ years.",
+  "existing_extractor": null,
+  "catalog_coverage": "full",
+
+  "typed_core": [
+    {"name":"issuer_name","type":"str","why":"identity — issuing organization; third-party independence (processor)","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"government_agency_or_provider","type":"str","why":"identity — the paying agency (flattened from entity); source validation","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"object","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"agency_contact_phone","type":"str","why":"processor — reverification contact (flattened from agency_contact_information object)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"object","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"recipient_or_foster_parent_name","type":"str","why":"identity — whose income (flattened from person[]); borrower match","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"object","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"recipient_or_foster_parent_name_2","type":"str","why":"identity — co-foster-parent","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"recipient_or_foster_parent_count","type":"int","why":"disambiguator — number of recipients; flags a bad name split","rules":[],"reason_class":"disambiguator","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"case_provider_or_account_number_masked","type":"str","why":"PII (restricted) — case/provider number; account grouping key","rules":[],"reason_class":"pii","rule_floor":false,"degraded_from":null,"pii":{"kind":"ACCOUNT","pre_masked":true},"exists_today":false,"prompt_hint":null},
+    {"name":"verification_date","type":"date","why":"identity — recency of the verification (processor)","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"program_or_payment_type","type":"str","why":"identity — which benefit program the payment falls under","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"placement_start_date","type":"date","why":"processor — establishes payment history length (2-year lookback)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"placement_end_or_review_date","type":"date","why":"processor — continuance boundary","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"current_placement_status","type":"str","why":"processor — active vs terminated","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"gross_payment_amount","type":"Decimal","why":"headline — the qualifying-income figure","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"payment_frequency","type":"str","why":"disambiguator — monthly vs per-diem vs annual; without it the amount is unreadable","rules":[],"reason_class":"disambiguator","rule_floor":false,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":"A per-diem/per-child rate must be captured with its unit — do not annualize at extraction"},
+    {"name":"taxable_status","type":"str","why":"processor — taxable vs reimbursement affects gross-up","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":"Foster-care income is generally non-taxable difficulty-of-care payments; the taxable_status and reimbursement/income distinction matters for whether it counts and can be grossed up"},
+    {"name":"termination_or_change_events","type":"str","why":"processor — pending changes that break continuance","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"expected_continuance_statement","type":"str","why":"processor — the 3-year-continuance test hinges on this","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"verifier_name_title","type":"str","why":"processor — who signed the verification; independence","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null}
+  ],
+
+  "nested_lists": [
+    {
+      "name":"payment_history","shape":"flat_row",
+      "shape_reason":"a verification typically lists 6-24 monthly payments; flat rows (period, amount, date_paid) stay well under the ceiling and support a future income-averaging / stability check",
+      "expected_item_count":"6-24","rules":[],
+      "exists_today":false,"plumbing_sites":5,
+      "fields":[
+        {"name":"period","type":"str","why":"the payment period"},
+        {"name":"amount","type":"Decimal","why":"the payment amount for the period"},
+        {"name":"date_paid","type":"date","why":"when the period's payment was made"},
+        {"name":"source","type":"str","why":"provenance snippet for the payment row"}
+      ]
+    }
+  ],
+
+  "rejected": [
+    {"name":"document_title, form_number, form_revision_date, document_status_or_version","reason":"classification/version metadata; no consumer"},
+    {"name":"issuer_address, issuer_phone, issuer_email_or_url","reason":"agency_contact_phone covers the one contact a processor needs"},
+    {"name":"party_names, party_addresses","reason":"duplicate recipient_or_foster_parent_names; addresses not load-bearing"},
+    {"name":"property_address, loan_number, account_case_reference_number","reason":"linkage nice-to-have; no consumer"},
+    {"name":"effective_date, expiration_date, statement_period_start/end, document_issue_date","reason":"duplicate/adjacent to verification_date / placement dates"},
+    {"name":"signature_blocks, notary_block, verifier_signature","reason":"execution not rule-checked; verifier_name_title carries attribution"},
+    {"name":"placement_identifier_masked","reason":"OPTIONAL; duplicates the case number; adds PII surface with no consumer"},
+    {"name":"reimbursement_vs_income_components","reason":"second nested list; over budget — leave to catch-all"},
+    {"name":"the 8 TECHNICAL provenance fields","reason":"already in the TypedField wrapper"}
+  ],
+
+  "encoding_variations": [
+    "gross_payment_amount / payment_frequency — '$620 biweekly', '$1,240/mo', '$40/day per child'; the amount is meaningless without the frequency and the per-child basis — carry both",
+    "expected_continuance_statement — prose ('payments expected to continue'), a checkbox, or a fixed end date; capture verbatim, do not infer a yes/no",
+    "taxable_status — 'non-taxable reimbursement' vs 'reportable income'; drives whether income can be grossed up"
+  ],
+
+  "open_questions": [
+    {"id":1,"q":"taxable_status vs reimbursement_vs_income_components — the taxable/reimbursement split can be a single enum-degraded string or a nested breakdown.","options":["flat taxable_status","nested reimbursement_vs_income_components"],"recommendation":"keep the flat taxable_status; only nest reimbursement_vs_income_components if a rule must read component amounts","blocks_implementation":true},
+    {"id":2,"q":"Child data minimization — the catalog has no child-identifier field, which is correct. Confirm the prompt hard-blocks child PII from the catch-all, since the catch-all is stored unmasked.","options":["confirm prompt hard-blocks child PII from the catch-all"],"recommendation":"confirm the prompt hard-blocks the foster child's name, DOB, and case-child identifiers from every field including the catch-all","blocks_implementation":true}
+  ],
+
+  "notes": [
+    "No rules consume this type today, so there is no rule floor; every field earns its place on identity, PII, processor use, or disambiguation.",
+    "case_provider_or_account_number_masked is restricted and pre-masked -> needs _PII_FIELDS registration (pre_masked true).",
+    "A foster-care verification concerns a child; no child name/DOB is a typed field, and the model must be told not to file child identifiers into the catch-all (unmasked).",
+    "Prompt hint (doc-level): do NOT extract the foster child's name, DOB, or case-child identifiers into any field including the catch-all.",
+    "gross_payment_amount is tagged 'headline' in the markdown, which is not one of the five reason_class values; mapped to processor and flagged as an ambiguity."
+  ]
+}

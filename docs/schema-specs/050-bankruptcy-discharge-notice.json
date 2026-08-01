@@ -1,0 +1,65 @@
+{
+  "document_type": "bankruptcy_discharge_notice",
+  "slug": "bankruptcy-discharge-notice",
+  "tier": 3,
+  "rules_served": [],
+  "summary_hint": "<debtor(s)> — Chapter <bankruptcy_chapter> bankruptcy (<court>, case <case_number>) discharged <discharge_order_date>; discharge granted <yes/no>, status <case_status_after_discharge>.",
+  "existing_extractor": null,
+  "catalog_coverage": "full",
+
+  "typed_core": [
+    {"name":"debtor_name","type":"str","why":"identity: whose bankruptcy; matches to the borrower","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"joint_debtor_name","type":"str","why":"identity: co-debtor (often a spouse/co-borrower)","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"bankruptcy_chapter","type":"str","why":"disambiguator: Chapter 7 vs 11 vs 13 sets the seasoning period; the discharge date is uninterpretable without it","rules":[],"reason_class":"disambiguator","rule_floor":false,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":"The chapter is load-bearing (it sets the seasoning waiting period) — keep verbatim"},
+    {"name":"discharge_granted_indicator","type":"str","why":"processor: whether discharge was actually granted (vs denied/dismissed) — the yes/no an underwriter needs","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"bool","pii":null,"exists_today":false,"prompt_hint":"Distinguish a granted discharge from a denial/dismissal — read the order's actual disposition, do not infer from the title"},
+    {"name":"discharge_order_date","type":"date","why":"processor: the date the discharge was ordered — the seasoning-clock start; the single most important field on the document","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"The discharge date is load-bearing (it sets the mortgage seasoning waiting period) — extract precisely; do NOT compute or judge whether seasoning is met"},
+    {"name":"discharge_effective_date","type":"date","why":"disambiguator for discharge_order_date: effective date when it differs from the order date — which date the waiting period runs from","rules":[],"reason_class":"disambiguator","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"case_status_after_discharge","type":"str","why":"processor: discharged / closed / reopened — confirms the case is truly concluded","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"bankruptcy_court_name","type":"str","why":"identity: the issuing court — provenance/authenticity of the order","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"district_or_division","type":"str","why":"identity / disambiguator: the specific district/division — completes the court identity and helps verify the case","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"case_number","type":"str","why":"PII (confidential) / identity: the case key that ties the discharge to the filing and to any credit-report public record","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"Keep the case number in case_number (it keys a public record) — do not leave it to the catch-all"},
+    {"name":"case_filing_date","type":"date","why":"disambiguator: the filing date bounds the case timeline (filing → discharge); distinguishes the case from a refile","rules":[],"reason_class":"disambiguator","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"exceptions_or_nondischargeable_debts","type":"str","why":"processor: debts excepted from discharge (e.g. a reaffirmed mortgage, taxes, support) — material to remaining liabilities","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"Capture exceptions / nondischargeable debts — a reaffirmed mortgage or excepted tax debt survives and matters to the liability picture"},
+    {"name":"debts_subject_to_discharge_summary","type":"str","why":"processor: what was discharged — supports reconciling the credit report's discharged tradelines","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"prior_discharge_or_revocation_reference","type":"str","why":"processor / disambiguator: a prior discharge or a revocation changes the seasoning analysis (multiple bankruptcies)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"judge_name","type":"str","why":"processor: authenticity signal on a court order","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"document_issue_date","type":"date","why":"processor: notice issue date when distinct from the order date","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"loan_number","type":"str","why":"identity: links the document to the loan file, when stated (confidential)","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"property_address","type":"str","why":"identity: subject/non-subject property when referenced","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"address","pii":null,"exists_today":false,"prompt_hint":null}
+  ],
+
+  "nested_lists": [],
+
+  "rejected": [
+    {"name":"the 8 TECHNICAL provenance fields","reason":"already in the TypedField wrapper"},
+    {"name":"document_title, form_number, form_revision_date, document_status_or_version","reason":"a discharge order's type is classified upstream; not a versioned form a rule reads"},
+    {"name":"issuer_name, issuer_address, issuer_phone, issuer_email_or_url","reason":"the issuer is the court, captured by bankruptcy_court_name / district_or_division"},
+    {"name":"effective_date, expiration_date, statement_period_start, statement_period_end","reason":"duplicate the discharge/filing dates; no coverage period"},
+    {"name":"party_names, party_addresses","reason":"redundant — the parties are debtor_name / joint_debtor_name"},
+    {"name":"account_case_reference_number","reason":"duplicates case_number"},
+    {"name":"signature_blocks, notary_block","reason":"a court order's authentication is the judge/clerk/seal, not a party signature"},
+    {"name":"creditor_collection_prohibition_notice","reason":"OPTIONAL boilerplate (the standard injunction language); no consumer"},
+    {"name":"clerk_name_or_signature, court_seal_or_filing_stamp","reason":"authentication objects with no rule/processor consumer beyond judge_name; defer to catch-all"}
+  ],
+
+  "encoding_variations": [
+    "Chapter: 'Chapter 7', 'Ch. 7', 'Chapter 13' — bankruptcy_chapter degrades to text; keep verbatim, it drives the seasoning period",
+    "Two dates: discharge_order_date (when signed) vs discharge_effective_date (when effective) — usually the same, sometimes not; the waiting period runs from the discharge date, so keep both distinct from case_filing_date",
+    "Granted vs dismissed: a 'discharge' notice is not always a granted discharge — it can note denial/dismissal. discharge_granted_indicator captures the actual outcome; do not assume 'granted' from the document title",
+    "Case number format: '23-10456', '6:23-bk-10456-ABC' — keep the full formatted string for public-record matching"
+  ],
+
+  "open_questions": [
+    {"id":1,"q":"No rule consumes this document today (Tier 3, rule_count 0), but a bankruptcy-seasoning rule is highly likely.","options":["keep discharge_order_date, discharge_effective_date, bankruptcy_chapter, discharge_granted_indicator, case_filing_date","trim if no rule materializes"],"recommendation":"keep those fields so that rule can be built without re-extraction — exactly the IH-1 scenario (a future rule needs a date the schema must already ask for)","blocks_implementation":false},
+    {"id":2,"q":"case_number PII treatment — confidential, keys a public record.","options":["register as a masked PII field","keep as a plain typed identity field, unmasked"],"recommendation":"keep as typed identity, unmasked (it is needed for public-record matching and is not an account/SSN), but flag for the privacy reviewer","blocks_implementation":true},
+    {"id":3,"q":"bankruptcy_chapter, discharge_granted_indicator, case_status_after_discharge enum/bool with no coercer.","options":["degrade to str + prompt hint","add a coercer"],"recommendation":"degrade to str + prompt hint listing canonical values","blocks_implementation":false},
+    {"id":4,"q":"Discharge vs dismissal ambiguity — a 'notice' may report a dismissal, not a discharge.","options":["prompt forces discharge_granted_indicator to reflect the actual disposition","rely on upstream classification to separate dismissal notices"],"recommendation":"have the prompt force discharge_granted_indicator to reflect the actual disposition; flag whether classification already separates dismissal notices","blocks_implementation":false}
+  ],
+
+  "notes": [
+    "The discharge date and the chapter are the two load-bearing facts (they set the mortgage seasoning waiting period).",
+    "Do NOT compute or judge whether the seasoning period is met — capture the date; the rule/underwriter judges.",
+    "Ambiguity: case_number is tagged PII (confidential) but the design recommends keeping it as a typed identity field, unmasked — reason_class set to identity and pii left null pending the privacy reviewer (open question 2 blocks).",
+    "No SSN/DOB on a discharge order (unlike the filing #051)."
+  ]
+}

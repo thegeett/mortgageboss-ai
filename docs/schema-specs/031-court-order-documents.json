@@ -1,0 +1,93 @@
+{
+  "document_type": "court_order_documents",
+  "slug": "court-order-documents",
+  "tier": 3,
+  "rules_served": ["IN-13"],
+  "summary_hint": "<document_or_order_type> in <case_caption> (<court_name>, case <case_number>), entered <entry_or_order_date>: <support_awards summary> — the obligation type, amount, and END date IN-13 needs for continuance",
+  "existing_extractor": null,
+  "catalog_coverage": "full",
+
+  "typed_core": [
+    {"name": "court_name", "type": "str", "why": "identity/source — which court issued the order; third-party independence", "rules": [], "reason_class": "identity", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "jurisdiction_and_division", "type": "str", "why": "identity — state/county/division; locates the order", "rules": [], "reason_class": "identity", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "case_number", "type": "str", "why": "identity/dedup — the case identifier for cross-document matching (confidential)", "rules": [], "reason_class": "identity", "rule_floor": false, "degraded_from": "identifier", "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "case_caption", "type": "str", "why": "identity — 'Petitioner v. Respondent'; names the parties for borrower attribution", "rules": [], "reason_class": "identity", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "document_or_order_type", "type": "str", "why": "IN-13 (rule reads it) — 'detect the income type': divorce decree / child-support order / alimony / support modification", "rules": ["IN-13"], "reason_class": "rule", "rule_floor": false, "degraded_from": "enum", "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "entry_or_order_date", "type": "date", "why": "IN-13 — when the order took effect; recency; the anchor for computing remaining continuance", "rules": ["IN-13"], "reason_class": "rule", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "effective_date", "type": "date", "why": "disambiguator — support may start on a date other than entry (retroactive/prospective start)", "rules": [], "reason_class": "disambiguator", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "final_or_interlocutory_status", "type": "str", "why": "processor/IN-13 — only a FINAL order is reliable for qualifying income; an interlocutory/temporary order is not", "rules": ["IN-13"], "reason_class": "processor", "rule_floor": false, "degraded_from": "enum", "pii": null, "exists_today": false, "prompt_hint": "Only a final order is reliable; flag temporary/interlocutory orders"},
+    {"name": "obligor_name", "type": "str", "why": "identity — who PAYS the support (attribution)", "rules": [], "reason_class": "identity", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "obligee_name", "type": "str", "why": "identity — who RECEIVES the support = the borrower using it to qualify (IN-13 attribution)", "rules": ["IN-13"], "reason_class": "identity", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "current_compliance_or_enforcement_status", "type": "str", "why": "IN-13 — corroborates receipt / history of payment vs arrears/enforcement", "rules": ["IN-13"], "reason_class": "rule", "rule_floor": false, "degraded_from": "enum", "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "judge_name_and_signature", "type": "str", "why": "authenticity/execution — a court order is only valid if entered by the judge", "rules": [], "reason_class": "processor", "rule_floor": false, "degraded_from": "signature", "pii": null, "exists_today": false, "prompt_hint": null}
+  ],
+
+  "nested_lists": [
+    {
+      "name": "support_awards",
+      "shape": "flat_row",
+      "shape_reason": "a decree commonly grants 1-4 obligations (alimony, child support, arrears, property offset) — few items, so a flat row is light and adequate; per-field wrapping is unnecessary",
+      "expected_item_count": "1-4",
+      "rules": ["IN-13"],
+      "exists_today": false,
+      "plumbing_sites": 5,
+      "fields": [
+        {"name": "award_type", "type": "str", "why": "IN-13 — the obligation type per stream (alimony / child-support / spousal)"},
+        {"name": "amount", "type": "Decimal", "why": "IN-13 — the support amount per stream"},
+        {"name": "frequency", "type": "str", "why": "IN-13 — monthly/weekly/lump; the amount is meaningless without its frequency [RULE FLOOR — absent from catalog as a named field]"},
+        {"name": "start_date", "type": "date", "why": "IN-13 — when the stream begins"},
+        {"name": "end_date", "type": "date", "why": "IN-13 — the continuance/termination date the rule turns on ('order ends in 12 months -> may not be usable'); has no named catalog field [RULE FLOOR — absent from catalog]"},
+        {"name": "payer", "type": "str", "why": "IN-13 — the obligor for this stream"},
+        {"name": "payee", "type": "str", "why": "IN-13 — the obligee for this stream (borrower attribution)"},
+        {"name": "escalation_or_conditions", "type": "str", "why": "IN-13 — verbatim escalation/condition, incl. event-based termination ('until the child turns 18') when end_date is not a stated date"},
+        {"name": "source", "type": "str", "why": "provenance — where in the order this award was read"}
+      ]
+    }
+  ],
+
+  "rejected": [
+    {"name": "document_title, form_number, form_revision_date", "reason": "classification/version before extraction"},
+    {"name": "issuer_name", "reason": "duplicates court_name"},
+    {"name": "issuer_address, issuer_phone, issuer_email_or_url", "reason": "court contact; catch-all"},
+    {"name": "document_issue_date", "reason": "duplicates entry_or_order_date"},
+    {"name": "expiration_date", "reason": "support end dates live in support_awards.end_date, not a document expiry"},
+    {"name": "statement_period_start/_end", "reason": "not applicable"},
+    {"name": "party_names, party_addresses, parties", "reason": "covered by case_caption + flattened obligor/obligee + the award payer/payee columns"},
+    {"name": "property_address, loan_number", "reason": "present only if the order awards specific property; catch-all unless a rule needs it"},
+    {"name": "account_case_reference_number", "reason": "duplicates case_number"},
+    {"name": "filing_date, hearing_date", "reason": "procedural; not what IN-13 reads; catch-all"},
+    {"name": "signature_blocks", "reason": "judge signature is captured; party signatures marginal"},
+    {"name": "notary_block, clerk_stamp_or_certification", "reason": "authenticity marginal beyond judge signature; catch-all"},
+    {"name": "document_status_or_version", "reason": "final_or_interlocutory_status carries the material distinction"},
+    {"name": "court_findings", "reason": "narrative; a conclusion of the court, not a fact IN-13 computes; catch-all"},
+    {"name": "property_or_title_awards, debt_allocations", "reason": "not income-continuance; no IN-13 consumer; catch-all"},
+    {"name": "restraining_lien_or_garnishment_terms", "reason": "not income; catch-all"},
+    {"name": "compliance_deadlines", "reason": "procedural deadlines; not the support end date; catch-all"},
+    {"name": "appeal_stay_or_modification_status", "reason": "marginal; catch-all"},
+    {"name": "incorporated_agreements_or_exhibits", "reason": "noted in prompt; a reference list with no IN-13 field to feed; catch-all"},
+    {"name": "subsequent_orders_or_amendments", "reason": "if a later order modifies terms it is its own document; catch-all"}
+  ],
+
+  "encoding_variations": [
+    "document_or_order_type — no enum coercer; 'Final Judgment of Dissolution of Marriage', 'Order for Child Support', 'Marital Settlement Agreement (incorporated)', 'Uniform Support Order', 'Judgment/Decree'. Degrade to str",
+    "support amount + frequency — stated as '$1,500/month', '$750 semi-monthly', '$18,000 per year', or a per-child amount; the amount is meaningless without its frequency (a disambiguator carried as its own column)",
+    "end_date / termination — encoded as an explicit date, 'until the child reaches 18/graduates', 'for 36 months', or 'until remarriage/death'. Some are event-conditioned, not a date — capture verbatim and flag when non-numeric",
+    "final_or_interlocutory_status — 'Final', 'Temporary', 'Pendente lite', 'Interim', 'Modified'. Degrade to str"
+  ],
+
+  "open_questions": [
+    {"id": 1, "q": "Flatten primary support vs nest support_awards — an order can grant alimony AND child support with different amounts/end dates", "options": ["flatten only the primary award to typed fields (loses the second stream)", "a support_awards flat-row list (chosen)"], "recommendation": "(b) — IN-13 must see every continuing stream and its end date", "blocks_implementation": true},
+    {"id": 2, "q": "Event-based termination — many child-support orders end on an event ('until the child turns 18'), not a date. end_date cannot always be a date", "options": ["coerce end_date to date when stated + carry verbatim condition in escalation_or_conditions", "always store a free-text termination"], "recommendation": "keep end_date as the coerced date when a date is stated, and carry the verbatim condition in escalation_or_conditions; flag event-based terminations for human review rather than deriving a date", "blocks_implementation": false},
+    {"id": 3, "q": "Underivable specifics — IN-13's how_engine_checks derives type + amount + end date + receipt cleanly; it does not derive custody or property terms", "options": ["leave custody/property to the catch-all (done)", "add typed fields for them"], "recommendation": "confirm the support_awards columns are the right floor; custody/property terms correctly left to the catch-all", "blocks_implementation": false},
+    {"id": 4, "q": "Rule-floor gap registration — support_awards.end_date and .frequency are absent from the catalog", "options": ["add them as first-class extracted values via the nested list", "leave to object[] blobs"], "recommendation": "confirm they are added as first-class extracted values (via the nested list) so IN-13 is not dead on arrival", "blocks_implementation": true}
+  ],
+
+  "notes": [
+    "No existing_extractor for this document type — new schema.",
+    "12 typed-core rows + one nested list. The decisive continuance data — type, amount, frequency, start, and END date per obligation — lives in support_awards because an order can grant more than one stream (alimony and child support). Below the 20-25 target, expected for a one-rule document.",
+    "RULE FLOOR find: support_awards.end_date is the field IN-13's example turns on and has no named catalog field (buried inside support_or_income_awards/ordered_obligations object[] blobs); frequency is likewise absent as a named field. Surfacing them as explicit columns is the primary rule-floor find. nested-list fields carry no rule_floor key in this format, so it is recorded here.",
+    "PII: no new _PII_FIELDS registration proposed. Party names (obligor/obligee) are standard sensitivity; case_number is confidential but a docket identifier, not a maskable PII kind. Family-law orders frequently contain children's names/DOBs and parties' SSNs in the body — these must NOT be captured to the unmasked catch-all; the prompt should be told to omit minors' identifying details.",
+    "An order may incorporate a Marital Settlement Agreement by reference — note it; the actual terms may be in the attached MSA.",
+    "judge_name_and_signature carries reason_class 'authenticity/execution' in the doc, which is not one of the five classes; mapped to processor (validity/authenticity gate) as a best guess — flagged as ambiguity."
+  ]
+}

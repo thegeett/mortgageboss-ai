@@ -1,0 +1,62 @@
+{
+  "document_type": "consent_to_use_electronic_records_and_signatures",
+  "slug": "consent-to-use-electronic-records-and-signatures",
+  "tier": 3,
+  "rules_served": [],
+  "summary_hint": "E-SIGN consent by {consumer name}, affirmatively consented {consent_date_time}, delivery {delivery_method}, version {consent_version}.",
+  "existing_extractor": null,
+  "catalog_coverage": "full",
+
+  "typed_core": [
+    {"name":"issuer_name","type":"str","why":"identity — the lender/originator obtaining consent","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"consumer_name","type":"str","why":"identity — whose consent (flattened from person[]; primary signer)","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"consumer_name_2","type":"str","why":"identity — second consumer on joint consent","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"consumer_count","type":"int","why":"disambiguator — how many consumers the raw name string held","rules":[],"reason_class":"disambiguator","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"consumer_email_addresses","type":"str","why":"PII — delivery address; also identity/contact","rules":[],"reason_class":"pii","rule_floor":false,"degraded_from":null,"pii":{"kind":"EMAIL","pre_masked":false},"exists_today":false,"prompt_hint":null},
+    {"name":"consumer_phone_numbers","type":"str","why":"PII — contact number","rules":[],"reason_class":"pii","rule_floor":false,"degraded_from":null,"pii":{"kind":"PHONE","pre_masked":false},"exists_today":false,"prompt_hint":null},
+    {"name":"consent_date_time","type":"str","why":"identity — when consent was given","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"datetime","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"affirmative_consent_indicator","type":"str","why":"processor — the headline: did the consumer affirmatively consent","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"bool","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"delivery_method","type":"str","why":"processor — how records are delivered","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"consent_version","type":"str","why":"disambiguator/identity — which version of the consent was signed","rules":[],"reason_class":"disambiguator","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"consent_scope_and_duration","type":"str","why":"processor — how long / what the consent covers","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"records_covered","type":"str","why":"processor — which records the consent applies to (flattened from string[])","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"object","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"withdrawal_date_time","type":"str","why":"processor — whether/when consent was withdrawn","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"datetime","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"loan_number","type":"str","why":"identity — links consent to the loan file","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"document_issue_date","type":"date","why":"identity — document date when no explicit consent timestamp","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"electronic_signature","type":"str","why":"processor/execution — signature presence (flattened from signature)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"object","pii":null,"exists_today":false,"prompt_hint":null}
+  ],
+
+  "nested_lists": [],
+
+  "rejected": [
+    {"name":"document_title, form_number, form_revision_date","reason":"not load-bearing"},
+    {"name":"issuer_address, issuer_phone, issuer_email_or_url","reason":"no consumer"},
+    {"name":"effective_date, expiration_date, statement_period_start/end","reason":"not applicable to a consent"},
+    {"name":"party_names, party_addresses","reason":"consumers captured by consumer_name*"},
+    {"name":"property_address, account_case_reference_number","reason":"not on an E-SIGN consent"},
+    {"name":"signature_blocks, notary_block","reason":"single electronic_signature suffices; not notarized"},
+    {"name":"document_status_or_version","reason":"duplicates consent_version"},
+    {"name":"hardware_software_requirements, right_to_paper_copies, paper_copy_fees, consent_withdrawal_procedure, contact_update_procedure, consequences_of_withdrawal, hardware_requirement_change_notice, ability_to_access_or_demonstration","reason":"boilerplate disclosure text; no field-level consumer -> catch-all"},
+    {"name":"transactions_or_accounts_covered","reason":"duplicates records_covered/scope"},
+    {"name":"ip_address_or_device_metadata","reason":"restricted audit metadata; no consumer; must not sit unmasked"}
+  ],
+
+  "encoding_variations": [
+    "Consent timestamp appears as an audit datetime, a signature date, or prose ('I consent on this day...'). No datetime coercer -> str; keep document_issue_date (date) as a fallback.",
+    "'Affirmative consent' may be a checkbox, an 'I Agree' button capture, or a typed-name signature — all mean the same yes; keep the raw indicator plus electronic_signature."
+  ],
+
+  "open_questions": [
+    {"id":1,"q":"Is any compliance-completeness rule planned? If a future rule checks that all ESIGN required disclosures are present, several rejected boilerplate fields (right_to_paper_copies, hardware_software_requirements, consent_withdrawal_procedure) become the floor.","options":["leave in catch-all until rule exists","promote boilerplate disclosure fields now"],"recommendation":"leave in catch-all until that rule exists; promote then","blocks_implementation":false},
+    {"id":2,"q":"consent_date_time vs document_issue_date. Both may be present; datetime has no coercer.","options":["keep datetime as str plus document_issue_date fallback","single field"],"recommendation":"keep the datetime as str for the exact timestamp and document_issue_date (date) as a coercible fallback","blocks_implementation":false},
+    {"id":3,"q":"Joint consent modeling. Two consumers with two emails/phones — flat pairing may misalign which email belongs to which name.","options":["keep raw lists as str and flag alignment as a known limitation","nest consumers"],"recommendation":"keep raw lists as str and flag alignment as a known limitation rather than nesting","blocks_implementation":true}
+  ],
+
+  "notes": [
+    "No rules today, so no rule floor. This is an ESIGN Act consent disclosure. Most of its CORE catalog fields are boilerplate disclosure text (hardware requirements, right-to-paper-copy language, withdrawal procedure) — a processor does not read those field-by-field; they belong in the catch-all. The load-bearing facts are who consented, when, whether affirmatively, and which version.",
+    "consumer_email_addresses needs registration, pre_masked false (raw email; the snapshot must mask). consumer_phone_numbers needs registration, pre_masked false (raw phone). Neither is in the 7-field registry.",
+    "ip_address_or_device_metadata (catalog OPTIONAL, restricted) is rejected from typed core, but noted: if ever captured it must NOT land in the unmasked catch-all. Flag.",
+    "Prompt hint (doc-level): tell the model this is an ESIGN Act consent; the legally required elements (right to paper, hardware/software requirements, withdrawal right) are present as disclosure text — capture them into additional_sections, not typed core.",
+    "Prompt hint (doc-level): email and phone here are consumer PII — extract verbatim, do not normalize or mask (the snapshot masks raw PII)."
+  ]
+}

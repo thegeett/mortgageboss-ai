@@ -1,0 +1,74 @@
+{
+  "document_type": "trust_agreement",
+  "slug": "trust-agreement",
+  "tier": 3,
+  "rules_served": [],
+  "summary_hint": "Tells a processor which trust, who acts as trustee, and whether the trust may encumber the property.",
+  "existing_extractor": null,
+  "catalog_coverage": "full",
+
+  "typed_core": [
+    {"name":"document_title","type":"str","why":"identity — confirms this is the trust agreement vs a certification/amendment","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"issuer_name","type":"str","why":"identity/source — preparing party (often counsel)","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"trust_name","type":"str","why":"identity — the trust the loan vests into","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"trust_execution_date","type":"date","why":"identity/disambiguator — which trust/version; distinguishes restatements","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"trust_type","type":"str","why":"processor — living/testamentary/land trust drives eligibility (degraded from enum)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"revocable_indicator","type":"str","why":"processor — revocable vs irrevocable headline (degraded from bool)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"bool","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"governing_law_state","type":"str","why":"processor — state law governing trustee powers","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"tax_identification_number_masked","type":"str","why":"PII (restricted); identity — the trust's TIN/EIN","rules":[],"reason_class":"pii","rule_floor":false,"degraded_from":null,"pii":{"kind":"TIN","pre_masked":true},"exists_today":false,"prompt_hint":"Capture the trust TIN masked; never emit it to the catch-all"},
+    {"name":"grantor_or_settlor_name","type":"str","why":"identity — who created the trust; match to borrower (flattened from person[])","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"object","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"grantor_or_settlor_name_2","type":"str","why":"identity — second grantor (e.g. spousal trust)","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"grantor_or_settlor_count","type":"int","why":"disambiguator — number of grantors, so a bad name split is visible","rules":[],"reason_class":"disambiguator","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"current_trustee_name","type":"str","why":"identity — who can act for the trust; match to borrower (flattened from person[])","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"object","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"current_trustee_name_2","type":"str","why":"identity — second current trustee","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"current_trustee_count","type":"int","why":"disambiguator — number of trustees / co-trustee acting requirements","rules":[],"reason_class":"disambiguator","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"successor_trustee_name","type":"str","why":"processor — who acts if the current trustee cannot (flattened from person[])","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"object","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"beneficiary_name","type":"str","why":"identity — who holds beneficial interest; match to borrower (flattened from person[])","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"object","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"beneficiary_name_2","type":"str","why":"identity — second beneficiary","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"beneficiary_count","type":"int","why":"disambiguator — number of beneficiaries","rules":[],"reason_class":"disambiguator","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"borrower_role_in_trust","type":"str","why":"processor — grantor/trustee/beneficiary drives whether the borrower can pledge (degraded from enum)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":"Distinguish grantor/settlor, trustee, and beneficiary even when one person holds all three roles"},
+    {"name":"trustee_power_to_borrow","type":"str","why":"processor — headline authority: may the trustee incur debt (degraded from bool)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"bool","pii":null,"exists_today":false,"prompt_hint":"Source each power flag to its granting clause; do not infer a power that is not expressly granted; record null when silent"},
+    {"name":"trustee_power_to_mortgage_or_encumber","type":"str","why":"processor — headline authority: may the trustee pledge real property (degraded from bool)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"bool","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"trustee_power_to_buy_sell_or_hold_real_property","type":"str","why":"processor — real-property powers supporting the pledge (degraded from bool)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"bool","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"distribution_terms","type":"str","why":"processor — how/when the trust distributes (beneficial-interest context)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"subject_property_in_trust","type":"str","why":"linkage — whether the subject property is (to be) held in trust (degraded from bool)","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"bool","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"trustee_signature_present","type":"str","why":"execution — whether the trustee(s) executed the instrument (degraded/flattened from signature[])","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"object","pii":null,"exists_today":false,"prompt_hint":null}
+  ],
+
+  "nested_lists": [],
+
+  "rejected": [
+    {"name":"the 8 TECHNICAL provenance fields","reason":"already in the TypedField wrapper"},
+    {"name":"form_number, form_revision_date, document_status_or_version","reason":"a trust instrument is not a numbered/versioned form"},
+    {"name":"issuer_address, issuer_phone, issuer_email_or_url","reason":"preparer contact; no consumer"},
+    {"name":"document_issue_date, effective_date, expiration_date, statement_period_start/_end","reason":"duplicate/derive from trust_execution_date; a trust has no statement period"},
+    {"name":"party_names, party_addresses","reason":"duplicate the flattened grantor/trustee/beneficiary fields"},
+    {"name":"loan_number, account_case_reference_number","reason":"rarely on the instrument itself"},
+    {"name":"signature_blocks, notary_block, notary_acknowledgment","reason":"trustee-signature presence captured; full notary block is low-value here"},
+    {"name":"beneficiary_right_to_income, beneficiary_right_to_principal","reason":"detail folded into distribution_terms; no rule"},
+    {"name":"spendthrift_or_transfer_restrictions, trust_termination_events","reason":"no consumer; leave to catch-all"},
+    {"name":"trust_asset_schedule, amendment_references","reason":"genuinely repeat but not decision-critical; see Open questions"}
+  ],
+
+  "encoding_variations": [
+    "Revocability stated as an explicit 'revocable'/'irrevocable' label, as a section granting the grantor power to amend/revoke, or implied by trust type — revocable_indicator beside trust_type disambiguates",
+    "Trustee powers appear as an enumerated powers list, incorporation of a state statutory powers act, or prose — the three power flags must each be sourced to the granting language; absence of an explicit power is null, not false",
+    "Trust name/date often restated by amendment ('the Smith Family Trust dated 1/1/2010, as amended') — trust_execution_date anchors the original",
+    "Grantor and trustee are frequently the same person in a revocable living trust — capture both roles even when names match"
+  ],
+
+  "open_questions": [
+    {"id":1,"q":"Nested list for amendments. amendment_references determines which version of the trust governs — arguably the one structure worth nesting.","options":["none (flatten a count/latest-amendment date instead)","add a flat-row list"],"recommendation":"none now for a no-rule Tier-3 doc — flatten a count/latest-amendment date; revisit if a 'trust currency' rule is built","blocks_implementation":true},
+    {"id":2,"q":"Power flags degraded to str with null-when-silent. No bool coercer, and silence must not read as 'no power.'","options":["str with null-when-silent","typed bool"],"recommendation":"confirm downstream treats null distinctly from 'No'","blocks_implementation":false},
+    {"id":3,"q":"More than two parties. Grantors/trustees/beneficiaries flattened to two + a count. Trusts can exceed two (multiple successor trustees, several beneficiaries).","options":["flatten to two + count","add a person[] list"],"recommendation":"flag when _count > 2 that the tail is in the catch-all; consider a person[] list only if a rule must address them individually","blocks_implementation":true}
+  ],
+
+  "notes": [
+    "The mortgage-relevant question is authority: can the trustee borrow and encumber the subject property. Source each power flag to its granting clause.",
+    "Do not infer a power that is not expressly granted; record null when silent (a rule/processor will treat silence as a gap).",
+    "Distinguish grantor/settlor, trustee, and beneficiary even when one person holds all three roles.",
+    "tax_identification_number_masked needs _PII_FIELDS registration, pre_masked true (a trust TIN/EIN, restricted); not covered by the registered employer_ein.",
+    "Ambiguity: subject_property_in_trust is tagged 'linkage' (not one of the five reason classes); mapped to reason_class 'identity' (identity/linkage to the subject property).",
+    "Ambiguity: trustee_signature_present is tagged 'execution' (not one of the five reason classes); mapped to reason_class 'processor' (execution status is a processor-facing verification concern)."
+  ]
+}

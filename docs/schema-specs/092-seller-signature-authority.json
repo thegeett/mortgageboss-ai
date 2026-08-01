@@ -1,0 +1,77 @@
+{
+  "document_type": "seller_signature_authority",
+  "slug": "seller-signature-authority",
+  "tier": 3,
+  "rules_served": [],
+  "summary_hint": "who may sign for the seller entity, in what capacity, under which authority document, scoped to which property",
+  "existing_extractor": null,
+  "catalog_coverage": "full",
+
+  "typed_core": [
+    {"name":"document_title","type":"str","why":"processor — distinguishes resolution vs POA vs trust certificate","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"seller_legal_name","type":"str","why":"identity — CORE; the seller entity/person being bound","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"person_or_entity","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"seller_entity_type","type":"str","why":"identity/disambiguator — CORE; LLC/corp/trust/estate determines which authority doc is required","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"property_address","type":"str","why":"identity — CORE; the transaction property","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"transaction_or_contract_reference","type":"str","why":"processor/linkage — ties the authority to the specific transaction","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"authorized_signer_name","type":"str","why":"identity — CORE; the person who may sign","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"authorized_signer_title_or_capacity","type":"str","why":"identity/processor — CORE; capacity (member/officer/trustee/agent) that grounds the authority","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"authority_document_type","type":"str","why":"identity — CORE; resolution/POA/trust cert/letters testamentary","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"authority_document_date","type":"date","why":"identity — CORE; date the authority was granted (recency/validity)","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"authority_scope","type":"str","why":"processor — CORE; what the signer is empowered to do","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"authority_effective_date","type":"date","why":"processor — when the authority becomes effective","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"authority_expiration_or_termination","type":"str","why":"processor — whether the authority is still valid through closing","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"specific_property_or_transaction_authority","type":"str","why":"processor — CORE; whether the authority covers THIS property/transaction","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"bool","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"entity_resolution_or_governing_document_reference","type":"str","why":"processor — cites the governing document backing the authority","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"trust_or_estate_reference","type":"str","why":"processor — trust/estate/case reference when the seller is a trust or estate","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"object","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"poa_principal","type":"str","why":"disambiguator — for a POA, the principal being represented","rules":[],"reason_class":"disambiguator","rule_floor":false,"degraded_from":"object","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"poa_agent","type":"str","why":"disambiguator — for a POA, the agent named (must match the authorized signer)","rules":[],"reason_class":"disambiguator","rule_floor":false,"degraded_from":"object","pii":null,"exists_today":false,"prompt_hint":"Match the POA agent to the authorized signer where a POA is the authority type"},
+    {"name":"recording_reference","type":"str","why":"processor — recording book/page/instrument if the authority is recorded","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"object","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"revocation_or_superseding_document_indicator","type":"str","why":"processor — CONDITIONAL; flags a revoked/superseded authority","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"bool","pii":null,"exists_today":false,"prompt_hint":"Capture verbatim — a superseded authority is a closing blocker"},
+    {"name":"loan_number","type":"str","why":"identity — links the document to the loan file","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null}
+  ],
+
+  "nested_lists": [
+    {
+      "name":"signatures_and_notary","shape":"flat_row",
+      "shape_reason":"execution blocks genuinely repeat (signer(s) + notary, typically <=2) and a processor confirms the authority itself is executed/notarized; a flat row (signer name + capacity + signed indicator + notary indicator + date) is tiny against the 16,384-token ceiling",
+      "expected_item_count":"<=2","rules":[],
+      "exists_today":false,"plumbing_sites":5,
+      "fields":[
+        {"name":"signer_name","type":"str","why":"processor — who executed the authority"},
+        {"name":"capacity","type":"str","why":"processor — the capacity in which they signed"},
+        {"name":"signed_indicator","type":"str","why":"processor — whether the block is signed"},
+        {"name":"notary_indicator","type":"str","why":"processor — whether the block is notarized"},
+        {"name":"date","type":"date","why":"processor — the execution/notary date"}
+      ]
+    }
+  ],
+
+  "rejected": [
+    {"name":"party_names / party_addresses","reason":"duplicate seller_legal_name / authorized_signer_name"},
+    {"name":"delegation_or_substitution_authority","reason":"edge-case CONDITIONAL string; no consumer, stays in catch-all"},
+    {"name":"power_of_attorney_principal_and_agent (nested)","reason":"flattened to poa_principal / poa_agent"},
+    {"name":"trust_or_estate_case_information (nested)","reason":"flattened to trust_or_estate_reference"},
+    {"name":"recording_information (nested)","reason":"flattened to recording_reference"},
+    {"name":"notary_block","reason":"superseded by the signatures_and_notary list"},
+    {"name":"issuer_name / issuer_address / phone / email","reason":"the issuer is the seller/entity already captured"},
+    {"name":"form_number / effective / expiration / statement period","reason":"not a standardized form; the authority dates are captured explicitly"},
+    {"name":"document_status_or_version","reason":"superseded by revocation_or_superseding_document_indicator"}
+  ],
+
+  "encoding_variations": [
+    "Authority arrives in several document types (corporate resolution, LLC operating-agreement excerpt, trust certificate, letters testamentary, POA) — authority_document_type + seller_entity_type fix which one and what it must contain",
+    "POA principal/agent vs authorized signer: on a POA the poa_agent should equal authorized_signer_name; capturing both lets the tag layer catch a mismatch",
+    "Scope may be general or transaction-specific — specific_property_or_transaction_authority disambiguates whether it reaches this closing"
+  ],
+
+  "open_questions": [
+    {"id":1,"q":"Flatten signatures_and_notary vs nested list — there are usually <=2 signers plus a notary.","options":["nested flat-row list (drafted) — safe for any count","flatten to signer_signed / notary_present / notary_date"],"recommendation":"(a) nested — the notary block is the proof the authority is itself validly executed, and the list is cheap","blocks_implementation":true},
+    {"id":2,"q":"seller_entity_type without an enum — the catalog provides no enum_values.","options":["free str (drafted)","a controlled vocabulary (individual/LLC/corp/partnership/trust/estate)"],"recommendation":"free str now; normalize if a rule later branches on entity type","blocks_implementation":false}
+  ],
+
+  "notes": [
+    "No rules read this document today (rule_count 0); there is no rule floor. This document proves that a named person may bind the seller (entity, trust, estate, or via POA) for the transaction. Fields earn a place by identity, disambiguation, or processor use.",
+    "No restricted fields on this doc. Signer/principal/agent names are standard sensitivity → identity fields, not registry PII. No _PII_FIELDS additions.",
+    "Prompt hint (doc-level): Do NOT decide whether the authority is sufficient — extract signer, capacity, document type, scope, dates, and revocation status; a processor/rule judges sufficiency."
+  ]
+}
