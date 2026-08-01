@@ -12924,3 +12924,36 @@ tickets for the nested / PII-heavy / new-coercer documents · a Priya validation
 **Cross-refs.** `docs/schema-specs/_GENERATION_GUIDE.md` (the authoritative contract), `_FORMAT.md` (the spec
 shape), ADR-333 (the extraction→snapshot boundary — a field must be typed-core to be rule-visible), ADR-340
 (the extractor-extension boundary that stopped IH-1), LP-62 (the flat-extractor fan-out this scales).
+
+## ADR-342: The schema-spec pass set is the thin Tier-2/3 tail, not the flat valuable middle — the generator's leverage is smaller and differently shaped than guide §12 predicted (LP-435)
+
+**Context.** LP-435 applied Geet's four spec decisions (addresses unmasked; credit-report/appraisal/condo open
+questions answered), validated all 108 schema specs, and generated every passing spec. The ADR note asked to
+record if the pass rate is far from what `_GENERATION_GUIDE.md` §12 predicts ("scripted generation for the flat
+majority · a bounded set of bespoke tickets for the nested/PII-heavy tail"), since that resizes the remaining work.
+
+**The finding — it is far off, in shape more than count.** 14 of 108 pass. But the passing set is the **thin
+tail**: by their own declared tier, the 13 generated new-type modules are **1 Tier-1** (condo_questionnaire, 7
+rules), **3 Tier-2**, and **9 Tier-3 documents with 0–1 rules each**. They pass precisely *because* they are
+simple — no nested lists, no blocking questions, no DOB/ADDRESS. **Every high-value document refuses:** the 1003,
+credit report, appraisal, bank statement, title commitment, AUS findings, and the tax-return family all carry a
+nested list (61 specs), a DOB/ADDRESS PII kind (27 specs), or an unresolved blocking question (85 specs) — usually
+several. There are **66 nested lists across the specs**, each a bespoke ~5-file ticket (guide §4).
+
+**The decision — the generator's leverage is real but bounded, and it is in the tail.** Guide §12's "scripted
+generation for the flat majority" is only half right: the flat, all-coercible, no-blocking-question majority that
+the generator *can* emit today is the low-rule-count Tier-2/3 tail, not the flat-but-valuable middle. Sizing the
+remaining work accordingly: (a) the **66-nested-list backlog** is the critical path — every valuable document is
+gated on hand-built lists; (b) a **DOB `PiiKind`** decision (11 fields / 9 specs) plus the accepted address
+unmasking are prerequisites for the identity-heavy docs; (c) the ~85 **blocking open questions** are the cheapest
+lever — 20 specs are one answer from passing (the near-miss list). The generator remains the right tool for the
+thin tail and for the flat additions to shipping extractors (the 18 diff reports), but it does not, by itself,
+unlock the documents the rules actually need.
+
+**What LP-435 did with the finding.** Generated + placed the 13 passing modules (unwired, per Geet — the pipeline
+extracts only Tier-1, a hard `== 18` invariant forbids silent promotion, and 9 of 13 are near-ruleless Tier-3);
+produced a wiring backlog + 18 diff reports (`docs/schema-specs/_WIRING_BACKLOG.md`); left DOB masked and flagged
+it. No rule moved; the 18 shipping extractors are byte-unchanged.
+
+**Cross-refs.** ADR-341 (the generator contract), `_GENERATION_GUIDE.md` §4/§12, `docs/tickets/LP-435.md` (the
+full validate table + roll-up), `docs/schema-specs/_WIRING_BACKLOG.md` (wiring + diff reports).

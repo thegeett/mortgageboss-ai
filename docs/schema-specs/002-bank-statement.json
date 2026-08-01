@@ -18,7 +18,7 @@
 
     {"name":"account_owner_count","type":"int","why":"AS-6 disambiguator — how many owners the raw string resolved to","rules":["AS-6"],"reason_class":"disambiguator","rule_floor":true,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
 
-    {"name":"account_holder_address","type":"str","why":"ID-4 (address consistency), OC-1 (occupancy signals) — currently not extracted, so those rules get nothing from a statement","rules":["ID-4","OC-1"],"reason_class":"rule","rule_floor":true,"degraded_from":"address","pii":{"kind":"ADDRESS","pre_masked":false},"exists_today":false,"prompt_hint":null},
+    {"name":"account_holder_address","type":"str","why":"ID-4 (address consistency), OC-1 (occupancy signals) — currently not extracted, so those rules get nothing from a statement","rules":["ID-4","OC-1"],"reason_class":"rule","rule_floor":true,"degraded_from":"address","pii":null,"exists_today":false,"prompt_hint":null},
 
     {"name":"account_number_masked","type":"str","why":"PII; the account-grouping key for AS-8/AS-10","rules":["AS-8","AS-10"],"reason_class":"pii","rule_floor":false,"degraded_from":null,"pii":{"kind":"ACCOUNT","pre_masked":true},"exists_today":true,"prompt_hint":"Last 4 digits only — never the full account number"},
 

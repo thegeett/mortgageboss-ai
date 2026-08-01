@@ -14,7 +14,7 @@
     {"name":"employer_address","type":"str","why":"identity; IN-5 disambiguator","rules":["IN-5"],"reason_class":"disambiguator","rule_floor":false,"degraded_from":"address","pii":null,"exists_today":false,"prompt_hint":null},
     {"name":"employee_name","type":"str","why":"ID-1","rules":["ID-1"],"reason_class":"rule","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":true,"prompt_hint":null},
     {"name":"employee_ssn","type":"str","why":"ID-2 — 'EXACT match, no fuzzy' (Box a)","rules":["ID-2"],"reason_class":"pii","rule_floor":false,"degraded_from":null,"pii":{"kind":"SSN","pre_masked":false},"exists_today":true,"prompt_hint":"NEVER place an SSN in additional_sections — catch-all values are stored unmasked"},
-    {"name":"employee_address","type":"str","why":"ID-4","rules":["ID-4"],"reason_class":"rule","rule_floor":false,"degraded_from":"address","pii":{"kind":"ADDRESS","pre_masked":false},"exists_today":false,"prompt_hint":null},
+    {"name":"employee_address","type":"str","why":"ID-4","rules":["ID-4"],"reason_class":"rule","rule_floor":false,"degraded_from":"address","pii":null,"exists_today":false,"prompt_hint":null},
 
     {"name":"wages_tips_other_comp","type":"Decimal","why":"IN-1, IN-3, IN-10, IN-11 — Box 1, the qualifying figure","rules":["IN-1","IN-10","IN-11"],"reason_class":"rule","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":true,"prompt_hint":"Read BOX 1 — not Boxes 3 or 5, which differ with pre-tax deferrals"},
     {"name":"social_security_wages","type":"Decimal","why":"Box 3 disambiguator — differs from Box 1 when there are pre-tax deferrals","rules":["IN-1"],"reason_class":"disambiguator","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":true,"prompt_hint":null},

@@ -1,0 +1,109 @@
+"""Tests for subject property note extraction (GENERATED, LP-434) — the AI wrapper is MOCKED.
+
+Shape/mechanism, not accuracy (guide §10): the typed core is coerced with source, an
+all-null core is FAILED, unparseable JSON returns None, and the ``.failed()`` factory
+holds. No real samples exist — accuracy is validated as real documents flow through.
+"""
+
+import json
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
+
+import pytest
+from app.ai.client import AIClientError
+from app.ai.extraction import model_call
+from app.ai.extraction.subject_property_note import (
+    SubjectPropertyNoteExtraction,
+    SubjectPropertyNoteExtractionResult,
+    _parse_subject_property_note_json,
+    extract_subject_property_note,
+)
+from app.models.extraction import ExtractionStatus
+
+PDF_BYTES = b"%PDF-1.7 dummy subject_property_note"
+
+
+def _core(value: object, page: int | None = 1, snippet: str | None = "snip") -> dict:
+    return {"value": value, "page": page, "snippet": snippet}
+
+
+FULL_PAYLOAD = {
+    "typed_core": {
+        "property_address": _core("SAMPLE"),
+        "borrower_names_raw": _core("SAMPLE"),
+        "borrower_name": _core("SAMPLE"),
+        "borrower_name_2": _core("SAMPLE"),
+        "lender_name": _core("SAMPLE"),
+        "note_date": _core("2024-01-15"),
+        "note_city_and_state": _core("SAMPLE"),
+        "loan_number": _core("SAMPLE"),
+        "original_principal_amount": _core("1234.56"),
+        "interest_rate": _core("1234.56"),
+        "rate_type": _core("SAMPLE"),
+        "payment_due_day": _core(2024),
+        "first_payment_date": _core("2024-01-15"),
+        "maturity_date": _core("2024-01-15"),
+        "monthly_principal_and_interest": _core("1234.56"),
+        "late_charge_terms": _core("SAMPLE"),
+        "prepayment_terms": _core("SAMPLE"),
+        "balloon_payment_terms": _core("SAMPLE"),
+        "interest_only_or_negative_amortization_terms": _core("SAMPLE"),
+        "borrower_signature_present": _core("SAMPLE"),
+        "borrower_signature_date": _core("2024-01-15"),
+    },
+    "additional_sections": [{"section": "Other", "fields": [{"label": "Note", "value": "x"}]}],
+    "confidence": 0.9,
+    "reasoning": "generated test fixture.",
+}
+FULL_JSON = json.dumps(FULL_PAYLOAD)
+
+
+def _mock_complete(
+    monkeypatch: pytest.MonkeyPatch, *, text: str | None = None, exc: Exception | None = None
+) -> AsyncMock:
+    if exc is not None:
+        mock = AsyncMock(side_effect=exc)
+    else:
+        mock = AsyncMock(
+            return_value=SimpleNamespace(
+                text=text, input_tokens=150, output_tokens=60, model="m", stop_reason="end_turn"
+            )
+        )
+    monkeypatch.setattr(model_call, "complete", mock)
+    return mock
+
+
+def test_typed_core_coerced_with_source() -> None:
+    d = _parse_subject_property_note_json(FULL_JSON).data  # type: ignore[union-attr]
+    assert d.property_address.value == "SAMPLE"
+    assert d.property_address.source is not None
+
+
+def test_all_null_core_is_failed() -> None:
+    payload = {"typed_core": {"property_address": _core(None)}}
+    parsed = _parse_subject_property_note_json(json.dumps(payload))
+    assert parsed is not None
+    assert parsed.status == ExtractionStatus.FAILED
+
+
+@pytest.mark.parametrize("raw", ["not json", "", "{ broken"])
+def test_parse_unparseable_returns_none(raw: str) -> None:
+    assert _parse_subject_property_note_json(raw) is None
+
+
+async def test_extract_success(monkeypatch: pytest.MonkeyPatch) -> None:
+    _mock_complete(monkeypatch, text=FULL_JSON)
+    result = await extract_subject_property_note(PDF_BYTES, "application/pdf")
+    assert result.status == ExtractionStatus.SUCCEEDED
+
+
+async def test_extract_ai_failure_returns_failed(monkeypatch: pytest.MonkeyPatch) -> None:
+    _mock_complete(monkeypatch, exc=AIClientError("boom"))
+    result = await extract_subject_property_note(PDF_BYTES, "application/pdf")
+    assert result.status == ExtractionStatus.FAILED
+
+
+def test_failed_factory() -> None:
+    result = SubjectPropertyNoteExtractionResult.failed("nope")
+    assert result.status == ExtractionStatus.FAILED
+    assert result.data == SubjectPropertyNoteExtraction()

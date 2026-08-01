@@ -83,7 +83,7 @@
   ],
 
   "open_questions": [
-    {"id":1,"q":"UAD 3.6 cutover (~Nov 2026) — build for 2.6 now, or design both?","options":["2.6 now, 3.6 later","version-agnostic schema, branch only in the prompt"],"recommendation":"version-agnostic schema with prompt branching — the field NAMES are stable enough; it is the LOCATIONS and vocabularies that move","blocks_implementation":true},
+    {"id":1,"q":"UAD 3.6 cutover (~Nov 2026) — build for 2.6 now, or design both?","options":["2.6 now, 3.6 later","version-agnostic schema, branch only in the prompt"],"recommendation":"version-agnostic schema with prompt branching — the field NAMES are stable enough; it is the LOCATIONS and vocabularies that move GEET'S DECISION (LP-435): design for BOTH UAD 2.6 and 3.6 — version-agnostic schema, branch only in the prompt.","blocks_implementation":false},
     {"id":2,"q":"Comparable depth","options":["summary row per comp (chosen)","the full adjustment grid"],"recommendation":"summary row — no rule (PR-2/PR-4/FR-2) reads an individual adjustment line, and the grid is ~150 values","blocks_implementation":false},
     {"id":3,"q":"One schema with form_type branching, or separate document types per form?","options":["one schema (chosen)","separate types for 1004/1073/1025/2055"],"recommendation":"one schema — the rules read the same fields regardless of form","blocks_implementation":false},
     {"id":4,"q":"PR-8 needs FEMA disaster declarations cross-referenced against county and date","options":["out of scope for the schema","in scope"],"recommendation":"out of scope — this is EXTERNAL REFERENCE DATA, the same class as PE-1's FHFA table. The schema's job is to supply county and effective_date","blocks_implementation":false}

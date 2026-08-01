@@ -20,7 +20,7 @@
     {"name":"place_of_birth","type":"str","why":"identity — secondary identifier (passports)","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
     {"name":"nationality_or_citizenship","type":"str","why":"processor — citizenship/residency eligibility signal","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
     {"name":"sex","type":"str","why":"identity — secondary descriptor","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":null},
-    {"name":"residential_address","type":"str","why":"identity — address consistency; potential PII","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"address","pii":{"kind":"ADDRESS","pre_masked":false},"exists_today":false,"prompt_hint":null},
+    {"name":"residential_address","type":"str","why":"identity — address consistency; potential PII","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"address","pii":null,"exists_today":false,"prompt_hint":null},
     {"name":"photo_present","type":"str","why":"processor — authenticity/completeness","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"bool","pii":null,"exists_today":false,"prompt_hint":null},
     {"name":"signature_present","type":"str","why":"processor — authenticity/completeness","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"bool","pii":null,"exists_today":false,"prompt_hint":null}
   ],

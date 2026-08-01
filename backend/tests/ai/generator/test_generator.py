@@ -141,14 +141,22 @@ def test_condition_5_missing_reason_class(tmp_path: Path) -> None:
     assert 5 in _conditions(validate(spec))
 
 
-def test_all_ten_top_specs_refuse() -> None:
-    # A high refusal rate on the nested-heavy top ten is the CORRECT outcome (guide §12).
+def test_top_ten_refuse_except_the_two_geet_unblocked() -> None:
+    # A high refusal rate on the nested-heavy top ten is the CORRECT outcome (guide §12). After LP-435
+    # applied Geet's four decisions, TWO of the top ten now pass: 008-w2 (its ADDRESS pii was unmasked →
+    # pii null) and 009-condo (its blocking master-policy question was answered). The other eight still
+    # refuse (nested lists, DOB, other blocking questions). This pins that post-decision reality.
     specs_dir = _BACKEND.parent / "docs" / "schema-specs"
+    now_passing = {"w2", "condo_questionnaire"}
     for n in range(1, 11):
         matches = list(specs_dir.glob(f"{n:03d}-*.json"))
         assert matches, f"missing spec {n:03d}"
         spec = load_spec(matches[0])
-        assert validate(spec), f"{spec.document_type} unexpectedly passed"
+        refuses = bool(validate(spec))
+        if spec.document_type in now_passing:
+            assert not refuses, f"{spec.document_type} should pass after Geet's LP-435 decisions"
+        else:
+            assert refuses, f"{spec.document_type} unexpectedly passed"
 
 
 # --------------------------------------------------------------------------- #

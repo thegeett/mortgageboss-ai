@@ -69,7 +69,7 @@
   "open_questions": [
     {"id":1,"q":"Percentages vs counts — compute a missing percentage from counts?","options":["return both as stated (chosen)","compute the missing one"],"recommendation":"return as stated — an extractor that computes is doing arithmetic the rule should own","blocks_implementation":false},
     {"id":2,"q":"Defer project_facilities?","options":["defer (chosen)","include"],"recommendation":"defer — ~5 plumbing sites for detail no rule reads","blocks_implementation":false},
-    {"id":3,"q":"The condo master policy is its own document type ('Master Insurance Policy for Condominium')","options":["these four fields are a convenience copy","IH-7 reads the master policy document instead"],"recommendation":"CONFIRM before relying on them — if IH-7 reads the policy document, the authoritative source is elsewhere and these are a cross-check","blocks_implementation":true}
+    {"id":3,"q":"The condo master policy is its own document type ('Master Insurance Policy for Condominium')","options":["these four fields are a convenience copy","IH-7 reads the master policy document instead"],"recommendation":"CONFIRM before relying on them — if IH-7 reads the policy document, the authoritative source is elsewhere and these are a cross-check GEET'S DECISION (LP-435): BOTH — the questionnaire's master-policy fields stay AND the master-policy document is its own source.","blocks_implementation":false}
   ],
 
   "notes": [
