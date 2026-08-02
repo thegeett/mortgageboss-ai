@@ -190,15 +190,15 @@ async def test_happy_path_pay_stub(
 # --------------------------------------------------------------------------- #
 
 
-async def test_tier1_without_extractor_is_classified_only(
+async def test_tier1_without_extractor_falls_back_to_the_interim_summary(
     monkeypatch: pytest.MonkeyPatch, db_session: AsyncSession
 ) -> None:
-    """A Tier-1 type with no registered extractor → classified-only (graceful branch).
+    """A Tier-1 type with no registered extractor → the interim summary (LP-441 review).
 
-    Every Tier-1 catalog type now HAS an extractor (LP-60..64 complete), so to
-    exercise the graceful branch we remove one from the registry — simulating a
-    future Tier-1 type cataloged before its extractor is built. Graceful, NOT a
-    crash: the doc is correctly classified + tiered + categorized; terminal status.
+    LP-441 promoted 18 spec'd types to Tier-1 before their extractors are wired. Such a
+    promoted-but-unwired type must NOT silently lose the human-reference gist it got as Tier-2 —
+    it falls back to the shared summarize path (a summary, terminal status), NOT classified-only.
+    To exercise the branch we remove a built extractor from the registry.
     """
     doc = await _setup_document(db_session)
     _patch_storage(monkeypatch)
@@ -207,15 +207,18 @@ async def test_tier1_without_extractor_is_classified_only(
         monkeypatch,
         ClassificationResult(document_type="tax_return", confidence=0.9, reasoning="x"),
     )
+    summarize = _patch_summarize(monkeypatch, "A tax return awaiting deep extraction.")
 
     await pipeline._process_document(db_session, str(doc.id))
     await db_session.refresh(doc)
 
-    assert doc.status == DocumentStatus.COMPLETED  # terminal
+    assert doc.status == DocumentStatus.COMPLETED  # terminal, never FAILED
     assert doc.document_type == "tax_return"
     assert doc.tier == Tier.TIER_1
     assert doc.category == DocumentCategory.INCOME_EMPLOYMENT
     assert await _current_extraction(db_session, doc.id) is None  # no extractor ran
+    assert summarize.call_count == 1  # the interim summary ran (not classified-only)
+    assert doc.summary == "A tax return awaiting deep extraction."  # the gist is kept
 
 
 async def test_tier2_summarized_and_terminal(
@@ -948,8 +951,8 @@ async def test_a_newly_promoted_tier1_type_with_no_extractor_completes_cleanly(
     monkeypatch: pytest.MonkeyPatch, db_session: AsyncSession
 ) -> None:
     """THE D3 SAFETY GATE (LP-441): a real newly-promoted Tier-1 type (credit_report) with NO registered
-    extractor must COMPLETE as classified-only — never error, never FAILED. This is the whole reason the
-    merge is safe before step 7 wires the extractors."""
+    extractor must COMPLETE cleanly — never error, never FAILED — with the interim summary it had as
+    Tier-2 (LP-441 review: a promoted-but-unwired type keeps its gist until step 7 wires its extractor)."""
     from app.ai.extraction import EXTRACTORS
 
     assert "credit_report" not in EXTRACTORS  # promoted to Tier-1, extractor not wired yet
@@ -959,14 +962,16 @@ async def test_a_newly_promoted_tier1_type_with_no_extractor_completes_cleanly(
         monkeypatch,
         ClassificationResult(document_type="credit_report", confidence=0.9, reasoning="x"),
     )
+    summarize = _patch_summarize(monkeypatch, "A tri-merge credit report for the borrower.")
 
     await pipeline._process_document(db_session, str(doc.id))
     await db_session.refresh(doc)
 
-    assert doc.status == DocumentStatus.COMPLETED  # classified-only, NOT errored / FAILED
+    assert doc.status == DocumentStatus.COMPLETED  # clean terminal, NOT errored / FAILED
     assert doc.tier == Tier.TIER_1
     assert doc.document_type == "credit_report"
     assert await _current_extraction(db_session, doc.id) is None  # no extractor ran
+    assert summarize.call_count == 1 and doc.summary is not None  # keeps the interim gist
 
 
 async def test_tax_return_routes_to_its_extractor(
