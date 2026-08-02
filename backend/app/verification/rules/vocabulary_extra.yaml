@@ -152,6 +152,21 @@ tags:
       date is present.
     produced_by: derived
 
+  # --- LP-444 — the FIRST consumer of list visibility (CR-4). A per-borrower AI verdict comparing the
+  #     credit report's tradelines (a generic list, now visible) against the app's file-level stated
+  #     liabilities (the MISMO comparison set). Ships INERT (CR-4 is not in ACTIVE_RULE_IDS) pending
+  #     calibration + Priya's bar — a new AI judgment is never activated on arrival. ------------------- #
+  credit.undisclosed_tradeline:
+    entity: borrower
+    value_type: enum
+    allowed_values: ["yes", "no", "unknown"]
+    description: >-
+      Does the credit report show a tradeline with a monthly payment > 0 that is NOT reflected in the
+      app's stated liabilities (CR-4, report-vs-app)? "yes" = an undisclosed tradeline exists; "no" =
+      every payment-bearing tradeline is disclosed; "unknown" = cannot compare (a truncated list, no
+      credit report, or no stated liabilities). NEVER a confident "no" over a list marked truncated.
+    produced_by: AI
+
   # --- LP-410 — the derived-producer wave: three descriptive tags that unblock PC-7 / AS-8 / IN-6. The
   #     rules were blocked not on inputs but on EXPRESSIBILITY (PC-7 no `today`; AS-8 ordered-pairwise,
   #     ADR-322; IN-6 set-coverage, ADR-323). These DERIVE the fact so a trivial rule branches on it. The

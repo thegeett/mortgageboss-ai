@@ -25,7 +25,7 @@ from app.verification.rule_engine.activation_bars import load_activation_bars
 from app.verification.snapshot.fields import Field, FieldSource
 from app.verification.snapshot.model import DocumentEntry
 from app.verification.tag_materialization.declarations import load_ai_groups, load_declarations
-from app.verification.tag_materialization.subjects import subject_type
+from app.verification.tag_materialization.subjects import ContextOptions, subject_type
 
 _JUDGMENT_CSV = Path(__file__).resolve().parents[4] / "docs/calibration/lf6t3n-labels-judgment.csv"
 
@@ -79,7 +79,7 @@ def test_as6_producer_context_still_carries_no_borrower_roster() -> None:
         document_type="bank_statement",
         fields={"account_holder": Field.present("Jordan A Rivera", source=FieldSource.EXTRACTED)},
     )
-    ctx = subject_type("document").build_context(stmt, None)
+    ctx = subject_type("document").build_context(stmt, None, ContextOptions())
     assert "account_holder" in ctx  # it can see the name ON the statement...
     assert not any(
         "borrower" in k.lower() for k in ctx

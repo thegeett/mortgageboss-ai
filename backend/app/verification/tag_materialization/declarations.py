@@ -90,6 +90,18 @@ class AiGroup:
     # (stmt.owner_matches_borrower) declares this; the producer then adds the loan's borrower roster to the
     # group's context. DECLARED (not a per-group code branch): a group that does not set it is byte-unchanged.
     include_borrower_roster: bool = False
+    # LP-444 — a group that needs a document's GENERIC LISTS (LP-437: entry.lists — tradelines, etc.) in its
+    # context OPTS IN here. DECLARED, opt-in only: a group that does not set it sees NO list data, so every
+    # existing group's context is byte-unchanged. The serialiser caps each list + marks truncation + scrubs
+    # list-row values (subjects.py); only document/borrower subjects carry documents (hence lists).
+    include_lists: bool = False
+    # LP-444 — the per-list row cap (how many rows are serialised before the truncation marker fires).
+    # Per-group so a dense list (a long credit report) can be given more rows; default is the module default.
+    list_row_cap: int = 50
+    # LP-444 — a BORROWER group that must compare against the app's file-level MISMO liabilities (CR-4:
+    # undisclosed tradeline) opts in here; the borrower context then adds `stated_liabilities`. Off by
+    # default → an existing borrower group is byte-unchanged.
+    include_stated_liabilities: bool = False
 
 
 def _parse_allowed(raw: str) -> tuple[str, ...] | None:
@@ -204,6 +216,31 @@ def load_ai_groups() -> dict[str, AiGroup]:
                 f"ai group {key!r}: `include_borrower_roster` is only for a document-subject group "
                 f"(the roster is the comparison context for a document's stated party), got subject={subject!r}"
             )
+        include_lists = body.get("include_lists", False)
+        if not isinstance(include_lists, bool):
+            raise DeclarationError(
+                f"ai group {key!r}: `include_lists` must be a boolean, got {include_lists!r}"
+            )
+        if include_lists and subject not in ("document", "borrower"):
+            raise DeclarationError(
+                f"ai group {key!r}: `include_lists` is only for a document- or borrower-subject group "
+                f"(only those carry documents, hence generic lists), got subject={subject!r}"
+            )
+        cap = body.get("list_row_cap", 50)
+        if not isinstance(cap, int) or isinstance(cap, bool) or cap < 1:
+            raise DeclarationError(
+                f"ai group {key!r}: `list_row_cap` must be a positive integer, got {cap!r}"
+            )
+        include_liabilities = body.get("include_stated_liabilities", False)
+        if not isinstance(include_liabilities, bool):
+            raise DeclarationError(
+                f"ai group {key!r}: `include_stated_liabilities` must be a boolean, got {include_liabilities!r}"
+            )
+        if include_liabilities and subject != "borrower":
+            raise DeclarationError(
+                f"ai group {key!r}: `include_stated_liabilities` is only for a borrower-subject group "
+                f"(the file-level liabilities are the per-borrower comparison set), got subject={subject!r}"
+            )
         groups[key] = AiGroup(
             key=key,
             subject=subject,
@@ -212,6 +249,9 @@ def load_ai_groups() -> dict[str, AiGroup]:
             system_prompt=prompt,
             applies_to=_parse_applies_to(key, subject, body.get("applies_to")),
             include_borrower_roster=roster,
+            include_lists=include_lists,
+            list_row_cap=cap,
+            include_stated_liabilities=include_liabilities,
         )
     return groups
 

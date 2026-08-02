@@ -19,7 +19,11 @@ from app.verification.eval.income_scenarios import (
     build_income_calibration_snapshot,
 )
 from app.verification.eval.lf6t3n_fixture import build_lf6t3n_plus, build_lf6t3n_snapshot
-from app.verification.tag_materialization.subjects import _borrower_context, subject_type
+from app.verification.tag_materialization.subjects import (
+    ContextOptions,
+    _borrower_context,
+    subject_type,
+)
 
 
 def _by_scenario() -> dict[int, list]:
@@ -108,7 +112,7 @@ def test_per_borrower_context_has_no_cross_feed() -> None:
     snap = build_income_calibration_snapshot()
     applies = frozenset({"w2", "pay_stub", "voe", "uniform_residential_loan_application"})
     for _sid, raw in subject_type("borrower").enumerate(snap):
-        ctx = _borrower_context(raw, applies)
+        ctx = _borrower_context(raw, applies, ContextOptions())
         n = int(raw.borrower_id[-2:])
         my_cids = {
             e.content_id

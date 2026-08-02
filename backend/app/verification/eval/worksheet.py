@@ -46,7 +46,7 @@ from app.verification.tag_materialization.declarations import (
     load_ai_groups,
     load_declarations,
 )
-from app.verification.tag_materialization.subjects import subject_type
+from app.verification.tag_materialization.subjects import ContextOptions, subject_type
 
 _CREDIT = "credit"
 _FREE_TEXT = frozenset({"txn.counterparty", "txn.source_reference"})
@@ -410,7 +410,8 @@ def compute_capacity(snapshot: Snapshot) -> list[TagCapacity]:
     borrower_income_counts = [
         len(
             _borrower_income_docs(
-                subject_type("borrower").build_context(bsub, None), _INCOME_STABILITY_DOCS
+                subject_type("borrower").build_context(bsub, None, ContextOptions()),
+                _INCOME_STABILITY_DOCS,
             )
         )
         for _bid, bsub in subject_type("borrower").enumerate(snapshot)
@@ -572,7 +573,8 @@ def build_worksheet(
                 # none is skipped (the tag would abstain) — no un-labelable rows.
                 for borrower_id, bsub in subject_type("borrower").enumerate(snapshot):
                     income_docs = _borrower_income_docs(
-                        subject_type("borrower").build_context(bsub, None), group.applicable_types
+                        subject_type("borrower").build_context(bsub, None, ContextOptions()),
+                        group.applicable_types,
                     )
                     if not income_docs:
                         continue

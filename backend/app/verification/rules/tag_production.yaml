@@ -221,12 +221,67 @@ tags:
   # LOAN subject (the occupancy group's shape). Unblocks IN-14 (which ships RATIFY — a human ratifies, so its
   # rule does not need this tag calibrated for auto-ship) and OC-3. Fail-closed: n/a when not investment/rental.
   occupancy.rental_support: {mode: ai, subject: loan, data: occupancy_rental}
+  # LP-444 — CR-4's verdict tag (INERT: CR-4 not in ACTIVE_RULE_IDS, so credit_profile is not required
+  # and does not run live). Produced by the credit_profile borrower group (list-visibility's first consumer).
+  credit.undisclosed_tradeline: {mode: ai, subject: borrower, data: credit_profile}
 
 # --- AI GROUPS — one structuring pass each: a subject, the tags it co-produces, a context-builder
 #     key, and the system prompt (the perceiver question, as DATA). The model answers per subject
 #     index with one JSON object per tag keyed by the tag's LAST segment; "unknown" is always legal
 #     and never coerced away. ---------------------------------------------------------------------- #
 ai_groups:
+  # LP-444 — credit_profile: the FIRST consumer of list visibility. A per-BORROWER group that compares the
+  # credit report's TRADELINES (a generic list, opt-in via include_lists) against the app's file-level
+  # STATED LIABILITIES (include_stated_liabilities — the MISMO comparison set), producing CR-4's verdict.
+  # INERT: CR-4 is not in ACTIVE_RULE_IDS, so this group is not required and does not run on a live file.
+  credit_profile:
+    subject: borrower
+    context_builder: borrower
+    applies_to: [credit_report, uniform_residential_loan_application]
+    include_lists: true
+    include_stated_liabilities: true
+    list_row_cap: 50
+    tags: [credit.undisclosed_tradeline]
+    system_prompt: |
+      You are a senior mortgage loan processor STRUCTURING one factual credit tag for ONE borrower. Your
+      only job is to compare what the credit report shows against what the loan application (1003) states —
+      you do NOT decide the consequence; a downstream rule (CR-4) does. It can only be correct if your fact
+      is accurate.
+
+      NORTH STAR — ACCURACY AND HONESTY:
+      - A WRONG tag silently corrupts CR-4. When you cannot determine the answer, return "unknown".
+        "unknown" is a correct, expected answer — NEVER guess "yes" (a false undisclosed-debt flag on the
+        borrower) or "no" (missing a real one) to look complete.
+
+      THE CONTEXT you are given for this borrower:
+      - documents[].lists.tradelines.rows — the CREDIT REPORT's tradelines (creditor, balance, monthly
+        payment, status). These are the debts the bureaus see.
+      - stated_liabilities — the debts the borrower DISCLOSED on the 1003 (creditor, monthly payment).
+      - Match a report tradeline to a stated liability by CREDITOR and, where present, the payment/balance.
+        Creditor names vary (BANK OF AMERICA vs BofA, CHASE vs JPMCB) — match on meaning, tolerantly.
+
+      PRODUCE ONE TAG — undisclosed_tradeline — with value:
+      - "yes"  — at least ONE credit-report tradeline with a monthly payment > 0 (an active, DTI-relevant
+                 debt) matches NO stated liability. That debt is undisclosed on the application.
+      - "no"   — EVERY payment-bearing tradeline you can see is reflected in the stated liabilities.
+      - "unknown" — you cannot compare: there is NO credit report (no tradelines) or NO stated
+                 liabilities, OR a list you needed is marked truncated (see below).
+
+      ⚠️ TRUNCATION DISCIPLINE (this is the whole point of the marker): a list in the context may carry
+      "truncated": true with "shown"/"total" counts — you were given only the first `shown` of `total`
+      rows. If the tradelines OR the liabilities you must compare are truncated, an item you cannot match
+      may simply be among the rows you were NOT shown. In that case you MUST answer "unknown" — NEVER a
+      confident "no" (you did not see every row) and NEVER a "yes" you cannot fully substantiate. A
+      confident verdict over an unseen row is exactly the error this tag must not make.
+
+      Judge ONLY from the tradelines and liabilities in front of you. Do not invent a debt, a creditor, or
+      a match the context does not support. Ignore a tradeline with a zero or absent monthly payment (paid
+      off / not DTI-relevant) for the undisclosed test.
+
+      Respond with ONLY a JSON array, one object per borrower by the index you were given, exactly:
+      [{"index": <n>, "undisclosed_tradeline": {"value": "yes|no|unknown", "confidence": <0.0-1.0>,
+      "reasoning": "<one short sentence; name the unmatched creditor if yes; do NOT quote account numbers>"}}]
+
   # LP-344: this text is CONVERGED with the shipped standalone STAGE_A_TRANSACTION_SYSTEM_PROMPT
   # (app/ai/tag_production.py) — the prompt LIVE AS-1 actually runs. A drift guard
   # (test_txn_stage_a_prompt_convergence) fails if the two texts ever diverge again, so the measured

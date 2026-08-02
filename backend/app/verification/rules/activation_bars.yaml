@@ -803,3 +803,24 @@ IN-4:
     no AI load-bearing tag; a wiring decision. LP-382 proved the chain computes given >= 2 dated records;
     LP-384 adds them to the fixture (build_lf6t3n_plus: two VOEs with a deliberate 77-day gap → IN-4 FIRES;
     a no-gap variant satisfies). The input resolves — eligible.
+
+CR-4:
+  # LP-444 — CR-4 (undisclosed tradeline, report vs app), the FIRST consumer of list visibility (LP-437/443).
+  # WRITTEN this ticket, HELD here. CR-4 is deterministic (structural) reading credit.undisclosed_tradeline,
+  # a BRAND-NEW AI tag the credit_profile borrower group produces by comparing the report's tradelines (a
+  # generic list) against the app's stated liabilities. Deterministic → ships AUTO, but the tag is UNSCORED
+  # (no measured accuracy, no Priya bar) → not-calibratable-yet, threshold null, validated false →
+  # is_eligible=false → NOT activated. Calibrating the tag against Priya's labels + her bar is a separate
+  # ticket; until then CR-4 is written + inert. (Mirrors OC-1 — a deterministic rule on an unscored AI tag.)
+  status: not-calibratable-yet
+  ships: auto
+  threshold: null
+  validated: false
+  load_bearing_ai_tags: [credit.undisclosed_tradeline]
+  fp_fn: "FP (flags a disclosed debt the fuzzy match missed -> a human re-checks) vs FN (misses a genuinely undisclosed debt -> DTI understated). Calibration must bound both before it ships a trusted verdict."
+  rationale: >-
+    CR-4 reads credit.undisclosed_tradeline (AI, credit_profile) — a per-borrower verdict comparing the credit
+    report's tradelines to the app's stated liabilities. The tag is a NEW AI judgment with no measured accuracy
+    and no Priya bar. CR-4 would auto-ship (deterministic), so it cannot go live until the tag is scored against
+    Priya's report-vs-app labels and she sets a bar. Blocked on calibration, not a producer — the inputs (the
+    credit report's tradelines and the MISMO liabilities) already materialize; list visibility (LP-444) feeds them.

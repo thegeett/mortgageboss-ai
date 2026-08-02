@@ -1,0 +1,67 @@
+rule_id: CR-4
+name: Undisclosed tradeline (report vs app)
+category: Credit
+kind: structural          # must equal rule_kinds.csv (CR-4 = structural, ai_fuzzy_match)
+numeric_check: false      # an enum verdict, not a ratio
+criteria: >-
+  Every debt the credit report shows as an ACTIVE, payment-bearing tradeline (a monthly payment > 0)
+  must be reflected in the liabilities the borrower stated on the loan application (1003). A report
+  tradeline that appears on NO stated liability is an UNDISCLOSED debt — it was omitted from the
+  application and would change the debt-to-income picture, so the processor must reconcile it before
+  submission. Creditor names vary across the bureaus and the application (BofA vs Bank of America), so
+  the match is fuzzy — the AI (credit_profile) does the comparison and this rule reads its verdict.
+  When the comparison cannot be made (no credit report, no stated liabilities, or a list too long to
+  fully compare), the answer is UNKNOWN → couldnt_check, NEVER a finding on a missing document and
+  NEVER a confident pass over rows that were not seen.
+applicability:
+  scope: every borrower on the loan with a credit report and stated liabilities
+  trigger: once per borrower, comparing the credit report's tradelines to the app's stated liabilities
+required_inputs:
+  - name: undisclosed_tradeline
+    snapshot_path: tags.by_subject[<borrower_id>]["credit.undisclosed_tradeline"]
+    description: >-
+      the AI verdict (credit_profile group) — yes (a payment-bearing report tradeline is not in the
+      stated liabilities), no (all disclosed), or unknown (cannot compare / a truncated list). Fuzzy
+      creditor matching lives in the AI; this rule reads the resolved fact.
+reference_values:
+  priya_validated: false
+  threshold_needs_signoff: false
+subject_enumeration: per_borrower
+subject_key_fields:
+  - borrower
+evidence_required: the credit report's tradelines and the application's stated liabilities
+guideline_reference: "Fannie Mae Selling Guide B3-6-02 (Debt-to-Income Ratios) / B3-5.1 (Credit)."
+spec_version: 1
+deterministic:
+  # No document-type applicability gate: a per-BORROWER rule always applies to a borrower; the "no
+  # credit report / no stated liabilities" case is carried by the verdict tag's `unknown` (below),
+  # which the gate routes to couldnt_check — never a finding on a missing document.
+  load_bearing_tags:
+    - credit.undisclosed_tradeline
+  # Gating on the verdict tag means `unknown` (a truncated list, or nothing to compare) →
+  # couldnt_check, so a confident finding is never produced over rows the AI could not fully see.
+  gated_tags:
+    - credit.undisclosed_tradeline
+  outcomes:
+    # An UNDISCLOSED tradeline: a payment-bearing debt on the report that the application does not state.
+    - verdict: fired
+      when_tags:
+        - {tag: credit.undisclosed_tradeline, op: eq, value: "yes"}
+      reasoning: >-
+        the credit report shows an active, payment-bearing tradeline that is not reflected in the
+        liabilities stated on the application — an undisclosed debt that would change the DTI picture
+      how_to_fix: >-
+        Reconcile the credit report against the 1003: add the missing liability to the application (or
+        document why it is excluded — paid by others, a duplicate, or a closed account), then re-check DTI.
+    # Every payment-bearing tradeline is disclosed on the application.
+    - verdict: satisfied
+      when_tags:
+        - {tag: credit.undisclosed_tradeline, op: eq, value: "no"}
+      reasoning: every payment-bearing tradeline on the credit report is reflected in the stated liabilities
+    # unknown / absent (no report, no stated liabilities, or a truncated list) — fail closed, never a
+    # finding on a missing document and never a confident pass over unseen rows.
+    - verdict: couldnt_check
+      default: true
+      reasoning: >-
+        the credit report could not be compared to the stated liabilities — the report or the
+        liabilities were missing, or the list was too long to compare in full

@@ -26,7 +26,11 @@ from app.verification.snapshot.model import (
 )
 from app.verification.tag_materialization.ai import AiGroupResult, AiSubjectJudgment, AiTagJudgment
 from app.verification.tag_materialization.producer import materialize_tags
-from app.verification.tag_materialization.subjects import BorrowerSubject, subject_type
+from app.verification.tag_materialization.subjects import (
+    BorrowerSubject,
+    ContextOptions,
+    subject_type,
+)
 
 pytestmark = pytest.mark.anyio
 
@@ -66,7 +70,7 @@ def _snap(entries: list[DocumentEntry]) -> Snapshot:
 
 def _borrower_ctx(snapshot: Snapshot, borrower_id, index: int, applies_to=None) -> dict:
     return subject_type("borrower").build_context(
-        BorrowerSubject(str(borrower_id), index, snapshot), applies_to
+        BorrowerSubject(str(borrower_id), index, snapshot), applies_to, ContextOptions()
     )
 
 

@@ -19,10 +19,35 @@ import re
 from collections.abc import Callable
 from dataclasses import dataclass
 
+from app.verification.snapshot.documents_section import _DESC_REDACT, _REDACTED
 from app.verification.snapshot.fields import Field
-from app.verification.snapshot.model import DocumentEntry, Snapshot, TransactionRecord
+from app.verification.snapshot.model import DocumentEntry, ListRow, Snapshot, TransactionRecord
 from app.verification.snapshot.pii import PiiField
 from app.verification.snapshot.traversal import all_transactions
+
+# LP-444 — the default per-list row cap: how many rows of a generic list are serialised into an AI
+# context before it is capped + MARKED truncated. A cap bounds the token cost (a credit report can carry
+# 30-50 tradelines); the truncation marker makes an unmatched item "unknown", never a confirmed absence.
+# A group may raise/lower it (``AiGroup.list_row_cap``) — per-group, so a dense report gets more rows.
+_DEFAULT_LIST_ROW_CAP = 50
+
+
+@dataclass(frozen=True)
+class ContextOptions:
+    """Per-group opt-ins that shape an AI context (LP-444). The DEFAULT changes nothing — a group that
+    passes the default gets a byte-identical context, so every existing group is unaffected.
+
+    * ``include_lists`` — serialise a document's generic lists (LP-437 ``entry.lists``) into the context.
+    * ``list_row_cap`` — the per-list row cap (default 50), raisable per group for a dense list.
+    * ``include_stated_liabilities`` — add the app's file-level MISMO liabilities to a BORROWER context
+      (the comparison set a report-vs-app rule like CR-4 matches report tradelines against)."""
+
+    include_lists: bool = False
+    list_row_cap: int = _DEFAULT_LIST_ROW_CAP
+    include_stated_liabilities: bool = False
+
+
+_DEFAULT_CONTEXT_OPTIONS = ContextOptions()
 
 # The loan-level production subject key (a single subject, like the rule-engine LOAN_SUBJECT).
 LOAN_SUBJECT = "loan"
@@ -44,8 +69,9 @@ class SubjectType:
     read_field: Callable[[object, str], RawField | None]
     # ``applies_to`` (LP-385) = the group's declared document types (or None = all). Only a context that
     # GATHERS documents (the borrower context) uses it — to filter the gathered set to the group's relevant
-    # doc-types; every other subject ignores it.
-    build_context: Callable[[object, frozenset[str] | None], dict[str, object]]
+    # doc-types; every other subject ignores it. ``ContextOptions`` (LP-444) carries the group's list /
+    # cap / liabilities opt-ins; the document + borrower builders use them, other subjects ignore them.
+    build_context: Callable[[object, frozenset[str] | None, ContextOptions], dict[str, object]]
 
 
 # --------------------------------------------------------------------------- #
@@ -69,7 +95,9 @@ def _txn_read_field(raw: object, field: str) -> RawField | None:
     return getattr(raw, attr) if attr is not None else None
 
 
-def _txn_context(raw: object, _applies_to: frozenset[str] | None) -> dict[str, object]:
+def _txn_context(
+    raw: object, _applies_to: frozenset[str] | None, _opts: ContextOptions
+) -> dict[str, object]:
     assert isinstance(raw, TransactionRecord)
     return {
         "date": _field_value(raw.date),
@@ -93,7 +121,9 @@ def _doc_read_field(raw: object, field: str) -> RawField | None:
     return raw.fields.get(field)
 
 
-def _doc_context(raw: object, _applies_to: frozenset[str] | None) -> dict[str, object]:
+def _doc_context(
+    raw: object, _applies_to: frozenset[str] | None, opts: ContextOptions
+) -> dict[str, object]:
     assert isinstance(raw, DocumentEntry)
     # Send the document's present fields as {name: value/display} — PiiFields contribute only their
     # MASKED display (never a raw value), so nothing raw-PII leaves in the AI prompt.
@@ -103,6 +133,10 @@ def _doc_context(raw: object, _applies_to: frozenset[str] | None) -> dict[str, o
             fields[name] = field.display if field.is_present else None
         elif field.is_present:
             fields[name] = field.value
+    # LP-444 — opt-in: add the document's generic lists (capped, truncation-marked, PII-scrubbed). A group
+    # that did not declare include_lists gets a byte-identical context (this branch never runs for it).
+    if opts.include_lists and raw.lists:
+        fields["lists"] = _serialize_lists(raw, opts.list_row_cap)
     return fields
 
 
@@ -120,7 +154,9 @@ def _loan_read_field(raw: object, field: str) -> RawField | None:
     return raw.mismo.facts.get(field)
 
 
-def _loan_context(raw: object, _applies_to: frozenset[str] | None) -> dict[str, object]:
+def _loan_context(
+    raw: object, _applies_to: frozenset[str] | None, _opts: ContextOptions
+) -> dict[str, object]:
     assert isinstance(raw, Snapshot)
     if raw.mismo.absent:
         return {}
@@ -131,6 +167,80 @@ def _field_value(field: RawField) -> object:
     if isinstance(field, PiiField):
         return field.display if field.is_present else None
     return field.value if field.is_present else None
+
+
+# --------------------------------------------------------------------------- #
+# LP-444 — serialise a document's GENERIC LISTS (LP-437) into an AI context, opt-in.
+# --------------------------------------------------------------------------- #
+def _scrub_list_value(value: object) -> object:
+    """Belt-and-braces PII scrub for one list-row value before it reaches a reasoner (LP-444 A4).
+
+    A ``ListRow.fields`` value is a PLAIN ``Field`` (model.py) — NEVER a ``PiiField`` — so unlike a
+    document's top-level fields (which contribute only a PiiField's MASKED display), a list-row value
+    carries whatever the extractor stored (list-row PII is not ``_PII_FIELDS``-routed). The snapshot layer
+    already applies a PER-LIST DECLARED redact to the known account/SSN row fields (the LP-443 review
+    backstop — ``ListSpec.redact`` on ``_TRADELINES_LIST`` etc.), but that only covers the fields a spec
+    named. THIS is the UNIVERSAL backstop at the context boundary — the last gate before an AI reasoner,
+    where a leak is worst (sending an unmasked account/SSN to a reasoner is worse than the unmasked
+    catch-all, which never leaves the database). Every string value is run through the SAME 9+-digit scrub
+    the snapshot uses (``documents_section._DESC_REDACT``), so even an UNDECLARED field or a future list
+    cannot leak: a masked last-4 / date / short id is kept (an honest signal), a long identifier becomes
+    ``[redacted]``. Non-string values (numbers/bools) pass through — they cannot carry an identifier string."""
+    if isinstance(value, str):
+        return _DESC_REDACT.sub(_REDACTED, value)
+    return value
+
+
+def _serialize_lists(entry: DocumentEntry, cap: int) -> dict[str, object]:
+    """A document's generic lists serialised for an AI context (LP-444) — opt-in, capped, scrubbed, marked.
+
+    Each list becomes ``{"rows": [...], ["truncated": true, "shown": M, "total": N]}``. The rows are the
+    first ``cap`` (the group's ``list_row_cap``, a token bound); when a list is longer the ``truncated``
+    MARKER is added so a reasoner knows an item it cannot match may be beyond the shown rows — the prompt
+    turns that into "answer unknown, never a confirmed absence" (the count-cross-check discipline applied
+    to reasoning). Every value is PII-scrubbed (:func:`_scrub_list_value`). Absent row fields are omitted
+    (absent≠empty). An empty ``lists`` map yields ``{}`` — a document with no wired list adds nothing."""
+    out: dict[str, object] = {}
+    for name, rows in entry.lists.items():
+        shown = rows[:cap]
+        serial_rows = [_serialize_row(row) for row in shown]
+        block: dict[str, object] = {"rows": serial_rows}
+        if len(rows) > cap:
+            block["truncated"] = True
+            block["shown"] = len(shown)
+            block["total"] = len(rows)
+        out[name] = block
+    return out
+
+
+_LIABILITY_KEY = re.compile(r"^liability\.(\d+)\.(.+)$")
+
+
+def _stated_liabilities(snapshot: Snapshot) -> list[dict[str, object]]:
+    """The app's FILE-LEVEL stated liabilities (MISMO ``liability.{k}.*``) grouped by index (LP-444).
+
+    The comparison set a report-vs-app rule (CR-4: undisclosed tradeline) matches report tradelines
+    against. File-level (shared across borrowers, no per-borrower attribution in the flat MISMO facts), so
+    each borrower context that opts in sees the full set. Values go through ``_field_value`` (a masked
+    PiiField display only) — though stated liabilities carry no account-number column (mismo_section), so
+    there is no raw identifier here. Sorted by index for a deterministic, run-independent context."""
+    if snapshot.mismo.absent:
+        return []
+    by_index: dict[int, dict[str, object]] = {}
+    for name, field in snapshot.mismo.facts.items():
+        m = _LIABILITY_KEY.match(name)
+        if m is not None:
+            by_index.setdefault(int(m.group(1)), {})[m.group(2)] = _field_value(field)
+    return [by_index[k] for k in sorted(by_index)]
+
+
+def _serialize_row(row: ListRow) -> dict[str, object]:
+    """One list row → ``{field: scrubbed value}`` (present fields only)."""
+    return {
+        name: _scrub_list_value(field.value)
+        for name, field in row.fields.items()
+        if field.is_present
+    }
 
 
 # --------------------------------------------------------------------------- #
@@ -187,7 +297,9 @@ def _borrower_read_field(raw: object, field: str) -> RawField | None:
     return raw.snapshot.mismo.facts.get(f"borrower.{raw.index}.{field}")
 
 
-def _borrower_context(raw: object, applies_to: frozenset[str] | None) -> dict[str, object]:
+def _borrower_context(
+    raw: object, applies_to: frozenset[str] | None, opts: ContextOptions
+) -> dict[str, object]:
     """The per-borrower AI context: this borrower's MISMO facts PLUS the documents ATTRIBUTED to them
     (LP-385). The generic per-borrower-over-documents primitive: a group asking a CROSS-document question
     (income_stability's 2-year history / decline / continuance) sees all of ONE borrower's documents at
@@ -232,13 +344,22 @@ def _borrower_context(raw: object, applies_to: frozenset[str] | None) -> dict[st
                 and entry.document_type not in applies_to
             ):
                 continue
-            documents.append(
-                {
-                    "document_type": entry.document_type,
-                    "fields": {name: _field_value(field) for name, field in entry.fields.items()},
-                }
-            )
-    return {"borrower_mismo": mismo, "documents": documents}
+            doc: dict[str, object] = {
+                "document_type": entry.document_type,
+                "fields": {name: _field_value(field) for name, field in entry.fields.items()},
+            }
+            # LP-444 — opt-in: a gathered document's generic lists (e.g. a credit report's tradelines).
+            # Only when the group declared include_lists → an existing borrower group is byte-unchanged.
+            if opts.include_lists and entry.lists:
+                doc["lists"] = _serialize_lists(entry, opts.list_row_cap)
+            documents.append(doc)
+    context: dict[str, object] = {"borrower_mismo": mismo, "documents": documents}
+    # LP-444 — opt-in: the app's file-level stated liabilities (the CR-4 comparison set). Off by default,
+    # so an existing borrower group (income_stability) is byte-unchanged; only a group that declares it
+    # (credit_profile) sees the liabilities alongside the gathered documents' lists.
+    if opts.include_stated_liabilities:
+        context["stated_liabilities"] = _stated_liabilities(snapshot)
+    return context
 
 
 def loan_borrower_roster(snapshot: Snapshot) -> list[str]:
