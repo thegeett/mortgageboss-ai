@@ -1,4 +1,4 @@
-"""Tests for alimony income verification extraction (GENERATED, LP-434) — the AI wrapper is MOCKED.
+"""Tests for child support income extraction (GENERATED, LP-434) — the AI wrapper is MOCKED.
 
 Shape/mechanism, not accuracy (guide §10): the typed core is coerced with source, an
 all-null core is FAILED, unparseable JSON returns None, and the ``.failed()`` factory
@@ -12,15 +12,15 @@ from unittest.mock import AsyncMock
 import pytest
 from app.ai.client import AIClientError
 from app.ai.extraction import model_call
-from app.ai.extraction.alimony_income_verification import (
-    AlimonyIncomeVerificationExtraction,
-    AlimonyIncomeVerificationExtractionResult,
-    _parse_alimony_income_verification_json,
-    extract_alimony_income_verification,
+from app.ai.extraction.child_support_income import (
+    ChildSupportIncomeExtraction,
+    ChildSupportIncomeExtractionResult,
+    _parse_child_support_income_json,
+    extract_child_support_income,
 )
 from app.models.extraction import ExtractionStatus
 
-PDF_BYTES = b"%PDF-1.7 dummy alimony_income_verification"
+PDF_BYTES = b"%PDF-1.7 dummy child_support_income"
 
 
 def _core(value: object, page: int | None = 1, snippet: str | None = "snip") -> dict:
@@ -43,6 +43,8 @@ FULL_PAYLOAD = {
         "payment_frequency": _core("SAMPLE"),
         "start_date": _core("2024-01-15"),
         "end_date_or_termination_events": _core("SAMPLE"),
+        "child_ages_or_dates_of_birth": _core("SAMPLE"),
+        "support_termination_age_or_event": _core("SAMPLE"),
         "escalation_or_cost_of_living_terms": _core("SAMPLE"),
         "arrears_balance": _core("1234.56"),
         "current_payment_status": _core("SAMPLE"),
@@ -74,36 +76,36 @@ def _mock_complete(
 
 
 def test_typed_core_coerced_with_source() -> None:
-    d = _parse_alimony_income_verification_json(FULL_JSON).data  # type: ignore[union-attr]
+    d = _parse_child_support_income_json(FULL_JSON).data  # type: ignore[union-attr]
     assert d.document_title.value == "SAMPLE"
     assert d.document_title.source is not None
 
 
 def test_all_null_core_is_failed() -> None:
     payload = {"typed_core": {"document_title": _core(None)}}
-    parsed = _parse_alimony_income_verification_json(json.dumps(payload))
+    parsed = _parse_child_support_income_json(json.dumps(payload))
     assert parsed is not None
     assert parsed.status == ExtractionStatus.FAILED
 
 
 @pytest.mark.parametrize("raw", ["not json", "", "{ broken"])
 def test_parse_unparseable_returns_none(raw: str) -> None:
-    assert _parse_alimony_income_verification_json(raw) is None
+    assert _parse_child_support_income_json(raw) is None
 
 
 async def test_extract_success(monkeypatch: pytest.MonkeyPatch) -> None:
     _mock_complete(monkeypatch, text=FULL_JSON)
-    result = await extract_alimony_income_verification(PDF_BYTES, "application/pdf")
+    result = await extract_child_support_income(PDF_BYTES, "application/pdf")
     assert result.status == ExtractionStatus.SUCCEEDED
 
 
 async def test_extract_ai_failure_returns_failed(monkeypatch: pytest.MonkeyPatch) -> None:
     _mock_complete(monkeypatch, exc=AIClientError("boom"))
-    result = await extract_alimony_income_verification(PDF_BYTES, "application/pdf")
+    result = await extract_child_support_income(PDF_BYTES, "application/pdf")
     assert result.status == ExtractionStatus.FAILED
 
 
 def test_failed_factory() -> None:
-    result = AlimonyIncomeVerificationExtractionResult.failed("nope")
+    result = ChildSupportIncomeExtractionResult.failed("nope")
     assert result.status == ExtractionStatus.FAILED
-    assert result.data == AlimonyIncomeVerificationExtraction()
+    assert result.data == ChildSupportIncomeExtraction()

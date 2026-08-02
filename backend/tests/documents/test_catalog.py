@@ -183,6 +183,50 @@ def test_the_invariant_fails_on_a_drift_case() -> None:
     assert _tier1_spec_drift(drift_b, {"has_a_spec"})[1] == {"has_a_spec"}
 
 
+def test_every_spec_document_type_resolves_to_a_catalog_entry() -> None:
+    """LP-442 — THE MEASURE, and the whole point of the ticket: the schema and catalog vocabularies
+    are reconciled, so EVERY spec ``document_type`` the extractors are keyed by is a catalog key the
+    classifier can emit. An unreconciled type routes to classified-only forever with no error — the
+    silent-routing failure. Was 36/108 before this ticket; now every spec resolves.
+    """
+    spec_types = _spec_document_types()
+    unresolved = spec_types - set(CATALOG)
+    assert unresolved == set(), (
+        f"spec types the classifier can never emit (silent routing): {unresolved}"
+    )
+    assert len(spec_types) == 109  # 108 + the alimony/child-support split
+
+
+def test_the_four_merges_and_the_split_resolve() -> None:
+    """LP-442 decisions 1-3: the merged spec types now live under their catalog keys, and the split
+    produced two distinct catalog keys (both promoted to Tier-1 by the LP-441 invariant)."""
+    spec_types = _spec_document_types()
+    # The 4 merges: the OLD spec names are gone; the catalog TARGETS carry the spec (→ Tier-1).
+    for old in (
+        "aba",
+        "consent_to_use_electronic_records_and_signatures",
+        "k_1_schedule_1065_1120s",
+        "mortgage_payoff",
+    ):
+        assert old not in spec_types, f"{old} should have been merged/renamed away"
+    for target in (
+        "affiliated_business_disclosure",
+        "e_consent_disclosure",
+        "k1_statement",
+        "payoff_statement",
+    ):
+        assert target in spec_types, f"{target} should now carry a spec"
+        assert get_tier(target) is Tier.TIER_1
+    # payoff_statement (PROPERTY), not debt_payoff_statement (CREDIT) — the verified mortgage-payoff target.
+    assert get_category("payoff_statement") is DocumentCategory.PROPERTY
+    # The split: one spec became two, both distinct catalog keys, both Tier-1.
+    assert "alimony_income_verification" not in spec_types
+    for split in ("alimony_income", "child_support_income"):
+        assert split in spec_types and get_tier(split) is Tier.TIER_1
+    # Decision 2: the generic borrower_authorization is retired.
+    assert "borrower_authorization" not in CATALOG
+
+
 def test_all_seven_categories_represented() -> None:
     present = {category for _, category in CATALOG.values()}
     assert present == {
@@ -201,7 +245,9 @@ def test_all_seven_categories_represented() -> None:
     [
         # A spread across categories + both tiers (LP-59 additions).
         ("tax_transcript", Tier.TIER_2, DocumentCategory.INCOME_EMPLOYMENT),
-        ("k1_statement", Tier.TIER_2, DocumentCategory.INCOME_EMPLOYMENT),
+        # LP-442: k1_statement was promoted to Tier-1 (the k_1_schedule spec merged into it);
+        # unemployment_income_letter is a spec-less INCOME type that stays Tier-2.
+        ("unemployment_income_letter", Tier.TIER_2, DocumentCategory.INCOME_EMPLOYMENT),
         ("brokerage_statement", Tier.TIER_2, DocumentCategory.ASSETS),
         ("certificate_of_deposit", Tier.TIER_2, DocumentCategory.ASSETS),
         # LP-441: appraisal / bankruptcy_discharge / permanent_resident_card / URLA were promoted to

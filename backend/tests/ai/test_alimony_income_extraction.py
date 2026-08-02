@@ -1,4 +1,4 @@
-"""Tests for mortgage payoff extraction (GENERATED, LP-434) — the AI wrapper is MOCKED.
+"""Tests for alimony income extraction (GENERATED, LP-434) — the AI wrapper is MOCKED.
 
 Shape/mechanism, not accuracy (guide §10): the typed core is coerced with source, an
 all-null core is FAILED, unparseable JSON returns None, and the ``.failed()`` factory
@@ -12,15 +12,15 @@ from unittest.mock import AsyncMock
 import pytest
 from app.ai.client import AIClientError
 from app.ai.extraction import model_call
-from app.ai.extraction.mortgage_payoff import (
-    MortgagePayoffExtraction,
-    MortgagePayoffExtractionResult,
-    _parse_mortgage_payoff_json,
-    extract_mortgage_payoff,
+from app.ai.extraction.alimony_income import (
+    AlimonyIncomeExtraction,
+    AlimonyIncomeExtractionResult,
+    _parse_alimony_income_json,
+    extract_alimony_income,
 )
 from app.models.extraction import ExtractionStatus
 
-PDF_BYTES = b"%PDF-1.7 dummy mortgage_payoff"
+PDF_BYTES = b"%PDF-1.7 dummy alimony_income"
 
 
 def _core(value: object, page: int | None = 1, snippet: str | None = "snip") -> dict:
@@ -29,29 +29,27 @@ def _core(value: object, page: int | None = 1, snippet: str | None = "snip") -> 
 
 FULL_PAYLOAD = {
     "typed_core": {
+        "document_title": _core("SAMPLE"),
         "issuer_name": _core("SAMPLE"),
-        "creditor_or_servicer_name": _core("SAMPLE"),
-        "servicer_phone": _core("SAMPLE"),
-        "borrower_names_raw": _core("SAMPLE"),
-        "borrower_name": _core("SAMPLE"),
-        "borrower_name_2": _core("SAMPLE"),
-        "property_address": _core("SAMPLE"),
-        "loan_number_masked": _core("SAMPLE"),
-        "account_case_reference_number": _core("SAMPLE"),
-        "payoff_quote_date": _core("2024-01-15"),
-        "payoff_good_through_date": _core("2024-01-15"),
-        "unpaid_principal_balance": _core("1234.56"),
-        "interest_through_good_through_date": _core("1234.56"),
-        "per_diem_interest": _core("1234.56"),
-        "escrow_balance_orcredit": _core("1234.56"),
-        "prepayment_penalty": _core("1234.56"),
-        "total_payoff_amount": _core("1234.56"),
-        "payoff_after_good_through_formula": _core("SAMPLE"),
-        "payment_method_allowed": _core("SAMPLE"),
-        "wire_or_remittance_instructions": _core("SAMPLE"),
-        "certified_funds_requirement": _core("SAMPLE"),
-        "lien_release_timing": _core("SAMPLE"),
-        "quote_status": _core("SAMPLE"),
+        "recipient_name": _core("SAMPLE"),
+        "payer_name": _core("SAMPLE"),
+        "court_or_agreement_type": _core("SAMPLE"),
+        "court_name": _core("SAMPLE"),
+        "case_number": _core("SAMPLE"),
+        "order_or_agreement_date": _core("2024-01-15"),
+        "modification_date": _core("2024-01-15"),
+        "support_type": _core("SAMPLE"),
+        "ordered_amount": _core("1234.56"),
+        "payment_frequency": _core("SAMPLE"),
+        "start_date": _core("2024-01-15"),
+        "end_date_or_termination_events": _core("SAMPLE"),
+        "escalation_or_cost_of_living_terms": _core("SAMPLE"),
+        "arrears_balance": _core("1234.56"),
+        "current_payment_status": _core("SAMPLE"),
+        "third_party_collection_or_sdu": _core("SAMPLE"),
+        "deposit_account_last4": _core("SAMPLE"),
+        "document_issue_date": _core("2024-01-15"),
+        "loan_number": _core("SAMPLE"),
     },
     "additional_sections": [{"section": "Other", "fields": [{"label": "Note", "value": "x"}]}],
     "confidence": 0.9,
@@ -76,36 +74,36 @@ def _mock_complete(
 
 
 def test_typed_core_coerced_with_source() -> None:
-    d = _parse_mortgage_payoff_json(FULL_JSON).data  # type: ignore[union-attr]
-    assert d.issuer_name.value == "SAMPLE"
-    assert d.issuer_name.source is not None
+    d = _parse_alimony_income_json(FULL_JSON).data  # type: ignore[union-attr]
+    assert d.document_title.value == "SAMPLE"
+    assert d.document_title.source is not None
 
 
 def test_all_null_core_is_failed() -> None:
-    payload = {"typed_core": {"issuer_name": _core(None)}}
-    parsed = _parse_mortgage_payoff_json(json.dumps(payload))
+    payload = {"typed_core": {"document_title": _core(None)}}
+    parsed = _parse_alimony_income_json(json.dumps(payload))
     assert parsed is not None
     assert parsed.status == ExtractionStatus.FAILED
 
 
 @pytest.mark.parametrize("raw", ["not json", "", "{ broken"])
 def test_parse_unparseable_returns_none(raw: str) -> None:
-    assert _parse_mortgage_payoff_json(raw) is None
+    assert _parse_alimony_income_json(raw) is None
 
 
 async def test_extract_success(monkeypatch: pytest.MonkeyPatch) -> None:
     _mock_complete(monkeypatch, text=FULL_JSON)
-    result = await extract_mortgage_payoff(PDF_BYTES, "application/pdf")
+    result = await extract_alimony_income(PDF_BYTES, "application/pdf")
     assert result.status == ExtractionStatus.SUCCEEDED
 
 
 async def test_extract_ai_failure_returns_failed(monkeypatch: pytest.MonkeyPatch) -> None:
     _mock_complete(monkeypatch, exc=AIClientError("boom"))
-    result = await extract_mortgage_payoff(PDF_BYTES, "application/pdf")
+    result = await extract_alimony_income(PDF_BYTES, "application/pdf")
     assert result.status == ExtractionStatus.FAILED
 
 
 def test_failed_factory() -> None:
-    result = MortgagePayoffExtractionResult.failed("nope")
+    result = AlimonyIncomeExtractionResult.failed("nope")
     assert result.status == ExtractionStatus.FAILED
-    assert result.data == MortgagePayoffExtraction()
+    assert result.data == AlimonyIncomeExtraction()

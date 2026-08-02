@@ -1,4 +1,4 @@
-"""Aba extraction — GENERATED from a schema spec by the LP-434 generator.
+"""K1 Statement extraction — GENERATED from a schema spec by the LP-434 generator.
 
 The LP-39a shape: a typed core (each field a ``TypedField`` with source) + a grouped
 catch-all (``additional_sections``). Honest nulls, graceful ``.failed()``, and
@@ -12,7 +12,7 @@ the same as tuned.
 """
 
 import json
-from datetime import date
+from decimal import Decimal
 from typing import Any
 
 import structlog
@@ -22,7 +22,7 @@ from app.ai.client import build_document_message
 from app.ai.extraction.model_call import run_extraction_completion
 from app.ai.extraction.parsing import (
     CoreSpec,
-    coerce_date,
+    coerce_decimal,
     coerce_int,
     coerce_str,
     derive_status,
@@ -36,15 +36,15 @@ from app.models.extraction import ExtractionStatus
 
 logger = structlog.get_logger(__name__)
 
-_PROMPT_PATH = "extraction/aba.txt"
+_PROMPT_PATH = "extraction/k1_statement.txt"
 _SUPPORTED_MEDIA_TYPES = frozenset({"application/pdf", "image/jpeg", "image/png", "image/jpg"})
 # Unbounded list output → 8192 (guide §7 sizing rule; 1 nested list(s)).
 # The test_extraction_budget_sizing CI guard enforces the sizing rule.
 _MAX_TOKENS = 8192
 
 
-class AbaExtraction(BaseModel):
-    """A aba in the LP-39a shape: typed core + grouped catch-all.
+class K1StatementExtraction(BaseModel):
+    """A k1 statement in the LP-39a shape: typed core + grouped catch-all.
 
     Typed core — the mortgage-decision-relevant fields, each a ``TypedField`` (value +
     source). Grouped catch-all (``additional_sections``) — everything else, so nothing
@@ -52,29 +52,33 @@ class AbaExtraction(BaseModel):
     """
 
     # --- Typed core (value + source) ---------------------------------------- #
-    issuer_name: TypedField[str] = Field(default_factory=TypedField)
-    disclosure_date: TypedField[date] = Field(default_factory=TypedField)
-    consumer_name: TypedField[str] = Field(default_factory=TypedField)
-    consumer_name_2: TypedField[str] = Field(default_factory=TypedField)
-    consumer_name_count: TypedField[int] = Field(default_factory=TypedField)
-    referring_party_name: TypedField[str] = Field(default_factory=TypedField)
-    referring_party_role: TypedField[str] = Field(default_factory=TypedField)
-    property_address_or_loan_reference: TypedField[str] = Field(default_factory=TypedField)
-    required_use_indicator: TypedField[str] = Field(default_factory=TypedField)
-    required_use_exception_or_discount: TypedField[str] = Field(default_factory=TypedField)
-    consumer_free_to_shop_statement: TypedField[str] = Field(default_factory=TypedField)
-    no_guarantee_of_lowest_price_statement: TypedField[str] = Field(default_factory=TypedField)
-    consumer_acknowledgment_text: TypedField[str] = Field(default_factory=TypedField)
-    consumer_signatures_and_dates: TypedField[str] = Field(default_factory=TypedField)
+    tax_year: TypedField[int] = Field(default_factory=TypedField)
+    source_form: TypedField[str] = Field(default_factory=TypedField)
+    final_or_amended_k1: TypedField[str] = Field(default_factory=TypedField)
+    entity_name: TypedField[str] = Field(default_factory=TypedField)
+    entity_ein: TypedField[str] = Field(default_factory=TypedField)
+    entity_address: TypedField[str] = Field(default_factory=TypedField)
+    partner_or_shareholder_name: TypedField[str] = Field(default_factory=TypedField)
+    partner_or_shareholder_tin: TypedField[str] = Field(default_factory=TypedField)
+    partner_or_shareholder_address: TypedField[str] = Field(default_factory=TypedField)
+    partner_type_or_shareholder_status: TypedField[str] = Field(default_factory=TypedField)
+    profit_loss_capital_or_ownership_percentages: TypedField[str] = Field(
+        default_factory=TypedField
+    )
+    current_year_net_income_or_loss: TypedField[Decimal] = Field(default_factory=TypedField)
+    capital_account_ending: TypedField[Decimal] = Field(default_factory=TypedField)
+    withdrawals_and_distributions: TypedField[Decimal] = Field(default_factory=TypedField)
+    guaranteed_payments: TypedField[Decimal] = Field(default_factory=TypedField)
+    distributions: TypedField[Decimal] = Field(default_factory=TypedField)
 
     # --- Grouped catch-all — everything else -------------------------------- #
     additional_sections: list[CatchAllSection] = Field(default_factory=list)
 
 
-class AbaExtractionResult(BaseModel):
-    """A aba extraction plus its outcome (mirrors the other extractor results)."""
+class K1StatementExtractionResult(BaseModel):
+    """A k1 statement extraction plus its outcome (mirrors the other extractor results)."""
 
-    data: AbaExtraction
+    data: K1StatementExtraction
     status: ExtractionStatus
     confidence: float = Field(ge=0.0, le=1.0)
     reasoning: str | None = None
@@ -82,10 +86,10 @@ class AbaExtractionResult(BaseModel):
     output_tokens: int | None = None
 
     @classmethod
-    def failed(cls, reason: str) -> "AbaExtractionResult":
+    def failed(cls, reason: str) -> "K1StatementExtractionResult":
         """The graceful fallback: all-null data, ``FAILED``, zero confidence."""
         return cls(
-            data=AbaExtraction(),
+            data=K1StatementExtraction(),
             status=ExtractionStatus.FAILED,
             confidence=0.0,
             reasoning=reason,
@@ -93,25 +97,27 @@ class AbaExtractionResult(BaseModel):
 
 
 _CORE_SPEC: CoreSpec = (
-    ("issuer_name", coerce_str),
-    ("disclosure_date", coerce_date),
-    ("consumer_name", coerce_str),
-    ("consumer_name_2", coerce_str),
-    ("consumer_name_count", coerce_int),
-    ("referring_party_name", coerce_str),
-    ("referring_party_role", coerce_str),
-    ("property_address_or_loan_reference", coerce_str),
-    ("required_use_indicator", coerce_str),
-    ("required_use_exception_or_discount", coerce_str),
-    ("consumer_free_to_shop_statement", coerce_str),
-    ("no_guarantee_of_lowest_price_statement", coerce_str),
-    ("consumer_acknowledgment_text", coerce_str),
-    ("consumer_signatures_and_dates", coerce_str),
+    ("tax_year", coerce_int),
+    ("source_form", coerce_str),
+    ("final_or_amended_k1", coerce_str),
+    ("entity_name", coerce_str),
+    ("entity_ein", coerce_str),
+    ("entity_address", coerce_str),
+    ("partner_or_shareholder_name", coerce_str),
+    ("partner_or_shareholder_tin", coerce_str),
+    ("partner_or_shareholder_address", coerce_str),
+    ("partner_type_or_shareholder_status", coerce_str),
+    ("profit_loss_capital_or_ownership_percentages", coerce_str),
+    ("current_year_net_income_or_loss", coerce_decimal),
+    ("capital_account_ending", coerce_decimal),
+    ("withdrawals_and_distributions", coerce_decimal),
+    ("guaranteed_payments", coerce_decimal),
+    ("distributions", coerce_decimal),
 )
 
 
-def _parse_aba_json(text: str) -> AbaExtractionResult | None:
-    """Defensively parse a model response into a aba result. Never raises."""
+def _parse_k1_statement_json(text: str) -> K1StatementExtractionResult | None:
+    """Defensively parse a model response into a k1 statement result. Never raises."""
     snippet = extract_json_object(text)
     if snippet is None:
         return None
@@ -126,7 +132,9 @@ def _parse_aba_json(text: str) -> AbaExtractionResult | None:
     sections = parse_catch_all(payload.get("additional_sections"))
 
     try:
-        data = AbaExtraction.model_validate({**core_payload, "additional_sections": sections})
+        data = K1StatementExtraction.model_validate(
+            {**core_payload, "additional_sections": sections}
+        )
     except ValidationError:
         return None
 
@@ -136,37 +144,39 @@ def _parse_aba_json(text: str) -> AbaExtractionResult | None:
     reasoning = (
         raw_reasoning.strip() if isinstance(raw_reasoning, str) and raw_reasoning.strip() else None
     )
-    return AbaExtractionResult(data=data, status=status, confidence=confidence, reasoning=reasoning)
+    return K1StatementExtractionResult(
+        data=data, status=status, confidence=confidence, reasoning=reasoning
+    )
 
 
-async def extract_aba(content: bytes, media_type: str) -> AbaExtractionResult:
-    """Extract aba values from a document's bytes (PDF/image). Never raises.
+async def extract_k1_statement(content: bytes, media_type: str) -> K1StatementExtractionResult:
+    """Extract k1 statement values from a document's bytes (PDF/image). Never raises.
 
     Mirrors the existing extractors. The bytes/base64, raw response, and extracted
     values are never logged — only metadata.
     """
     if not content or media_type.lower().strip() not in _SUPPORTED_MEDIA_TYPES:
-        return AbaExtractionResult.failed("empty or unsupported document")
+        return K1StatementExtractionResult.failed("empty or unsupported document")
 
     system_prompt = load_prompt(_PROMPT_PATH)
     try:
         message = build_document_message(content=content, media_type=media_type)
     except ValueError:
-        return AbaExtractionResult.failed("unsupported document media type")
+        return K1StatementExtractionResult.failed("unsupported document media type")
 
     call = await run_extraction_completion(
         system=system_prompt,
         message=message,
         max_tokens=_MAX_TOKENS,
-        log_label="aba",
+        log_label="k1_statement",
     )
     if call.text is None:
-        return AbaExtractionResult.failed(call.failure_reason or "AI call failed")
+        return K1StatementExtractionResult.failed(call.failure_reason or "AI call failed")
 
-    result = _parse_aba_json(call.text)
+    result = _parse_k1_statement_json(call.text)
     if result is None:
-        logger.warning("aba_extraction_parse_failed")  # no raw response logged
-        return AbaExtractionResult.failed("could not parse extraction")
+        logger.warning("k1_statement_extraction_parse_failed")  # no raw response logged
+        return K1StatementExtractionResult.failed("could not parse extraction")
 
     result.input_tokens = call.input_tokens
     result.output_tokens = call.output_tokens
@@ -174,7 +184,7 @@ async def extract_aba(content: bytes, media_type: str) -> AbaExtractionResult:
     # Metadata only: status, confidence, COUNTS — never values.
     core_present = sum(1 for key, _ in _CORE_SPEC if getattr(result.data, key).value is not None)
     logger.info(
-        "aba_extraction_done",
+        "k1_statement_extraction_done",
         status=result.status,
         confidence=result.confidence,
         core_fields_present=core_present,

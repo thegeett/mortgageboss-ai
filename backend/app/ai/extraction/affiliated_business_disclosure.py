@@ -1,4 +1,4 @@
-"""Consent To Use Electronic Records And Signatures extraction — GENERATED from a schema spec by the LP-434 generator.
+"""Affiliated Business Disclosure extraction — GENERATED from a schema spec by the LP-434 generator.
 
 The LP-39a shape: a typed core (each field a ``TypedField`` with source) + a grouped
 catch-all (``additional_sections``). Honest nulls, graceful ``.failed()``, and
@@ -36,15 +36,15 @@ from app.models.extraction import ExtractionStatus
 
 logger = structlog.get_logger(__name__)
 
-_PROMPT_PATH = "extraction/consent_to_use_electronic_records_and_signatures.txt"
+_PROMPT_PATH = "extraction/affiliated_business_disclosure.txt"
 _SUPPORTED_MEDIA_TYPES = frozenset({"application/pdf", "image/jpeg", "image/png", "image/jpg"})
-# Bounded fixed-form output → the 4096 scaffold budget (guide §7).
+# Unbounded list output → 8192 (guide §7 sizing rule; 1 nested list(s)).
 # The test_extraction_budget_sizing CI guard enforces the sizing rule.
-_MAX_TOKENS = 4096
+_MAX_TOKENS = 8192
 
 
-class ConsentToUseElectronicRecordsAndSignaturesExtraction(BaseModel):
-    """A consent to use electronic records and signatures in the LP-39a shape: typed core + grouped catch-all.
+class AffiliatedBusinessDisclosureExtraction(BaseModel):
+    """A affiliated business disclosure in the LP-39a shape: typed core + grouped catch-all.
 
     Typed core — the mortgage-decision-relevant fields, each a ``TypedField`` (value +
     source). Grouped catch-all (``additional_sections``) — everything else, so nothing
@@ -53,30 +53,28 @@ class ConsentToUseElectronicRecordsAndSignaturesExtraction(BaseModel):
 
     # --- Typed core (value + source) ---------------------------------------- #
     issuer_name: TypedField[str] = Field(default_factory=TypedField)
+    disclosure_date: TypedField[date] = Field(default_factory=TypedField)
     consumer_name: TypedField[str] = Field(default_factory=TypedField)
     consumer_name_2: TypedField[str] = Field(default_factory=TypedField)
-    consumer_count: TypedField[int] = Field(default_factory=TypedField)
-    consumer_email_addresses: TypedField[str] = Field(default_factory=TypedField)
-    consumer_phone_numbers: TypedField[str] = Field(default_factory=TypedField)
-    consent_date_time: TypedField[str] = Field(default_factory=TypedField)
-    affirmative_consent_indicator: TypedField[str] = Field(default_factory=TypedField)
-    delivery_method: TypedField[str] = Field(default_factory=TypedField)
-    consent_version: TypedField[str] = Field(default_factory=TypedField)
-    consent_scope_and_duration: TypedField[str] = Field(default_factory=TypedField)
-    records_covered: TypedField[str] = Field(default_factory=TypedField)
-    withdrawal_date_time: TypedField[str] = Field(default_factory=TypedField)
-    loan_number: TypedField[str] = Field(default_factory=TypedField)
-    document_issue_date: TypedField[date] = Field(default_factory=TypedField)
-    electronic_signature: TypedField[str] = Field(default_factory=TypedField)
+    consumer_name_count: TypedField[int] = Field(default_factory=TypedField)
+    referring_party_name: TypedField[str] = Field(default_factory=TypedField)
+    referring_party_role: TypedField[str] = Field(default_factory=TypedField)
+    property_address_or_loan_reference: TypedField[str] = Field(default_factory=TypedField)
+    required_use_indicator: TypedField[str] = Field(default_factory=TypedField)
+    required_use_exception_or_discount: TypedField[str] = Field(default_factory=TypedField)
+    consumer_free_to_shop_statement: TypedField[str] = Field(default_factory=TypedField)
+    no_guarantee_of_lowest_price_statement: TypedField[str] = Field(default_factory=TypedField)
+    consumer_acknowledgment_text: TypedField[str] = Field(default_factory=TypedField)
+    consumer_signatures_and_dates: TypedField[str] = Field(default_factory=TypedField)
 
     # --- Grouped catch-all — everything else -------------------------------- #
     additional_sections: list[CatchAllSection] = Field(default_factory=list)
 
 
-class ConsentToUseElectronicRecordsAndSignaturesExtractionResult(BaseModel):
-    """A consent to use electronic records and signatures extraction plus its outcome (mirrors the other extractor results)."""
+class AffiliatedBusinessDisclosureExtractionResult(BaseModel):
+    """A affiliated business disclosure extraction plus its outcome (mirrors the other extractor results)."""
 
-    data: ConsentToUseElectronicRecordsAndSignaturesExtraction
+    data: AffiliatedBusinessDisclosureExtraction
     status: ExtractionStatus
     confidence: float = Field(ge=0.0, le=1.0)
     reasoning: str | None = None
@@ -84,10 +82,10 @@ class ConsentToUseElectronicRecordsAndSignaturesExtractionResult(BaseModel):
     output_tokens: int | None = None
 
     @classmethod
-    def failed(cls, reason: str) -> "ConsentToUseElectronicRecordsAndSignaturesExtractionResult":
+    def failed(cls, reason: str) -> "AffiliatedBusinessDisclosureExtractionResult":
         """The graceful fallback: all-null data, ``FAILED``, zero confidence."""
         return cls(
-            data=ConsentToUseElectronicRecordsAndSignaturesExtraction(),
+            data=AffiliatedBusinessDisclosureExtraction(),
             status=ExtractionStatus.FAILED,
             confidence=0.0,
             reasoning=reason,
@@ -96,28 +94,26 @@ class ConsentToUseElectronicRecordsAndSignaturesExtractionResult(BaseModel):
 
 _CORE_SPEC: CoreSpec = (
     ("issuer_name", coerce_str),
+    ("disclosure_date", coerce_date),
     ("consumer_name", coerce_str),
     ("consumer_name_2", coerce_str),
-    ("consumer_count", coerce_int),
-    ("consumer_email_addresses", coerce_str),
-    ("consumer_phone_numbers", coerce_str),
-    ("consent_date_time", coerce_str),
-    ("affirmative_consent_indicator", coerce_str),
-    ("delivery_method", coerce_str),
-    ("consent_version", coerce_str),
-    ("consent_scope_and_duration", coerce_str),
-    ("records_covered", coerce_str),
-    ("withdrawal_date_time", coerce_str),
-    ("loan_number", coerce_str),
-    ("document_issue_date", coerce_date),
-    ("electronic_signature", coerce_str),
+    ("consumer_name_count", coerce_int),
+    ("referring_party_name", coerce_str),
+    ("referring_party_role", coerce_str),
+    ("property_address_or_loan_reference", coerce_str),
+    ("required_use_indicator", coerce_str),
+    ("required_use_exception_or_discount", coerce_str),
+    ("consumer_free_to_shop_statement", coerce_str),
+    ("no_guarantee_of_lowest_price_statement", coerce_str),
+    ("consumer_acknowledgment_text", coerce_str),
+    ("consumer_signatures_and_dates", coerce_str),
 )
 
 
-def _parse_consent_to_use_electronic_records_and_signatures_json(
+def _parse_affiliated_business_disclosure_json(
     text: str,
-) -> ConsentToUseElectronicRecordsAndSignaturesExtractionResult | None:
-    """Defensively parse a model response into a consent to use electronic records and signatures result. Never raises."""
+) -> AffiliatedBusinessDisclosureExtractionResult | None:
+    """Defensively parse a model response into a affiliated business disclosure result. Never raises."""
     snippet = extract_json_object(text)
     if snippet is None:
         return None
@@ -132,7 +128,7 @@ def _parse_consent_to_use_electronic_records_and_signatures_json(
     sections = parse_catch_all(payload.get("additional_sections"))
 
     try:
-        data = ConsentToUseElectronicRecordsAndSignaturesExtraction.model_validate(
+        data = AffiliatedBusinessDisclosureExtraction.model_validate(
             {**core_payload, "additional_sections": sections}
         )
     except ValidationError:
@@ -144,29 +140,27 @@ def _parse_consent_to_use_electronic_records_and_signatures_json(
     reasoning = (
         raw_reasoning.strip() if isinstance(raw_reasoning, str) and raw_reasoning.strip() else None
     )
-    return ConsentToUseElectronicRecordsAndSignaturesExtractionResult(
+    return AffiliatedBusinessDisclosureExtractionResult(
         data=data, status=status, confidence=confidence, reasoning=reasoning
     )
 
 
-async def extract_consent_to_use_electronic_records_and_signatures(
+async def extract_affiliated_business_disclosure(
     content: bytes, media_type: str
-) -> ConsentToUseElectronicRecordsAndSignaturesExtractionResult:
-    """Extract consent to use electronic records and signatures values from a document's bytes (PDF/image). Never raises.
+) -> AffiliatedBusinessDisclosureExtractionResult:
+    """Extract affiliated business disclosure values from a document's bytes (PDF/image). Never raises.
 
     Mirrors the existing extractors. The bytes/base64, raw response, and extracted
     values are never logged — only metadata.
     """
     if not content or media_type.lower().strip() not in _SUPPORTED_MEDIA_TYPES:
-        return ConsentToUseElectronicRecordsAndSignaturesExtractionResult.failed(
-            "empty or unsupported document"
-        )
+        return AffiliatedBusinessDisclosureExtractionResult.failed("empty or unsupported document")
 
     system_prompt = load_prompt(_PROMPT_PATH)
     try:
         message = build_document_message(content=content, media_type=media_type)
     except ValueError:
-        return ConsentToUseElectronicRecordsAndSignaturesExtractionResult.failed(
+        return AffiliatedBusinessDisclosureExtractionResult.failed(
             "unsupported document media type"
         )
 
@@ -174,21 +168,19 @@ async def extract_consent_to_use_electronic_records_and_signatures(
         system=system_prompt,
         message=message,
         max_tokens=_MAX_TOKENS,
-        log_label="consent_to_use_electronic_records_and_signatures",
+        log_label="affiliated_business_disclosure",
     )
     if call.text is None:
-        return ConsentToUseElectronicRecordsAndSignaturesExtractionResult.failed(
+        return AffiliatedBusinessDisclosureExtractionResult.failed(
             call.failure_reason or "AI call failed"
         )
 
-    result = _parse_consent_to_use_electronic_records_and_signatures_json(call.text)
+    result = _parse_affiliated_business_disclosure_json(call.text)
     if result is None:
         logger.warning(
-            "consent_to_use_electronic_records_and_signatures_extraction_parse_failed"
+            "affiliated_business_disclosure_extraction_parse_failed"
         )  # no raw response logged
-        return ConsentToUseElectronicRecordsAndSignaturesExtractionResult.failed(
-            "could not parse extraction"
-        )
+        return AffiliatedBusinessDisclosureExtractionResult.failed("could not parse extraction")
 
     result.input_tokens = call.input_tokens
     result.output_tokens = call.output_tokens
@@ -196,7 +188,7 @@ async def extract_consent_to_use_electronic_records_and_signatures(
     # Metadata only: status, confidence, COUNTS — never values.
     core_present = sum(1 for key, _ in _CORE_SPEC if getattr(result.data, key).value is not None)
     logger.info(
-        "consent_to_use_electronic_records_and_signatures_extraction_done",
+        "affiliated_business_disclosure_extraction_done",
         status=result.status,
         confidence=result.confidence,
         core_fields_present=core_present,

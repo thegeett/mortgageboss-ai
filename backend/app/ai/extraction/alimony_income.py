@@ -1,4 +1,4 @@
-"""K 1 Schedule 1065 1120S extraction — GENERATED from a schema spec by the LP-434 generator.
+"""Alimony Income extraction — GENERATED from a schema spec by the LP-434 generator.
 
 The LP-39a shape: a typed core (each field a ``TypedField`` with source) + a grouped
 catch-all (``additional_sections``). Honest nulls, graceful ``.failed()``, and
@@ -12,6 +12,7 @@ the same as tuned.
 """
 
 import json
+from datetime import date
 from decimal import Decimal
 from typing import Any
 
@@ -22,8 +23,8 @@ from app.ai.client import build_document_message
 from app.ai.extraction.model_call import run_extraction_completion
 from app.ai.extraction.parsing import (
     CoreSpec,
+    coerce_date,
     coerce_decimal,
-    coerce_int,
     coerce_str,
     derive_status,
     parse_catch_all,
@@ -36,15 +37,15 @@ from app.models.extraction import ExtractionStatus
 
 logger = structlog.get_logger(__name__)
 
-_PROMPT_PATH = "extraction/k_1_schedule_1065_1120s.txt"
+_PROMPT_PATH = "extraction/alimony_income.txt"
 _SUPPORTED_MEDIA_TYPES = frozenset({"application/pdf", "image/jpeg", "image/png", "image/jpg"})
 # Unbounded list output → 8192 (guide §7 sizing rule; 1 nested list(s)).
 # The test_extraction_budget_sizing CI guard enforces the sizing rule.
 _MAX_TOKENS = 8192
 
 
-class K1Schedule10651120sExtraction(BaseModel):
-    """A k 1 schedule 1065 1120s in the LP-39a shape: typed core + grouped catch-all.
+class AlimonyIncomeExtraction(BaseModel):
+    """A alimony income in the LP-39a shape: typed core + grouped catch-all.
 
     Typed core — the mortgage-decision-relevant fields, each a ``TypedField`` (value +
     source). Grouped catch-all (``additional_sections``) — everything else, so nothing
@@ -52,33 +53,36 @@ class K1Schedule10651120sExtraction(BaseModel):
     """
 
     # --- Typed core (value + source) ---------------------------------------- #
-    tax_year: TypedField[int] = Field(default_factory=TypedField)
-    source_form: TypedField[str] = Field(default_factory=TypedField)
-    final_or_amended_k1: TypedField[str] = Field(default_factory=TypedField)
-    entity_name: TypedField[str] = Field(default_factory=TypedField)
-    entity_ein: TypedField[str] = Field(default_factory=TypedField)
-    entity_address: TypedField[str] = Field(default_factory=TypedField)
-    partner_or_shareholder_name: TypedField[str] = Field(default_factory=TypedField)
-    partner_or_shareholder_tin: TypedField[str] = Field(default_factory=TypedField)
-    partner_or_shareholder_address: TypedField[str] = Field(default_factory=TypedField)
-    partner_type_or_shareholder_status: TypedField[str] = Field(default_factory=TypedField)
-    profit_loss_capital_or_ownership_percentages: TypedField[str] = Field(
-        default_factory=TypedField
-    )
-    current_year_net_income_or_loss: TypedField[Decimal] = Field(default_factory=TypedField)
-    capital_account_ending: TypedField[Decimal] = Field(default_factory=TypedField)
-    withdrawals_and_distributions: TypedField[Decimal] = Field(default_factory=TypedField)
-    guaranteed_payments: TypedField[Decimal] = Field(default_factory=TypedField)
-    distributions: TypedField[Decimal] = Field(default_factory=TypedField)
+    document_title: TypedField[str] = Field(default_factory=TypedField)
+    issuer_name: TypedField[str] = Field(default_factory=TypedField)
+    recipient_name: TypedField[str] = Field(default_factory=TypedField)
+    payer_name: TypedField[str] = Field(default_factory=TypedField)
+    court_or_agreement_type: TypedField[str] = Field(default_factory=TypedField)
+    court_name: TypedField[str] = Field(default_factory=TypedField)
+    case_number: TypedField[str] = Field(default_factory=TypedField)
+    order_or_agreement_date: TypedField[date] = Field(default_factory=TypedField)
+    modification_date: TypedField[date] = Field(default_factory=TypedField)
+    support_type: TypedField[str] = Field(default_factory=TypedField)
+    ordered_amount: TypedField[Decimal] = Field(default_factory=TypedField)
+    payment_frequency: TypedField[str] = Field(default_factory=TypedField)
+    start_date: TypedField[date] = Field(default_factory=TypedField)
+    end_date_or_termination_events: TypedField[str] = Field(default_factory=TypedField)
+    escalation_or_cost_of_living_terms: TypedField[str] = Field(default_factory=TypedField)
+    arrears_balance: TypedField[Decimal] = Field(default_factory=TypedField)
+    current_payment_status: TypedField[str] = Field(default_factory=TypedField)
+    third_party_collection_or_sdu: TypedField[str] = Field(default_factory=TypedField)
+    deposit_account_last4: TypedField[str] = Field(default_factory=TypedField)
+    document_issue_date: TypedField[date] = Field(default_factory=TypedField)
+    loan_number: TypedField[str] = Field(default_factory=TypedField)
 
     # --- Grouped catch-all — everything else -------------------------------- #
     additional_sections: list[CatchAllSection] = Field(default_factory=list)
 
 
-class K1Schedule10651120sExtractionResult(BaseModel):
-    """A k 1 schedule 1065 1120s extraction plus its outcome (mirrors the other extractor results)."""
+class AlimonyIncomeExtractionResult(BaseModel):
+    """A alimony income extraction plus its outcome (mirrors the other extractor results)."""
 
-    data: K1Schedule10651120sExtraction
+    data: AlimonyIncomeExtraction
     status: ExtractionStatus
     confidence: float = Field(ge=0.0, le=1.0)
     reasoning: str | None = None
@@ -86,10 +90,10 @@ class K1Schedule10651120sExtractionResult(BaseModel):
     output_tokens: int | None = None
 
     @classmethod
-    def failed(cls, reason: str) -> "K1Schedule10651120sExtractionResult":
+    def failed(cls, reason: str) -> "AlimonyIncomeExtractionResult":
         """The graceful fallback: all-null data, ``FAILED``, zero confidence."""
         return cls(
-            data=K1Schedule10651120sExtraction(),
+            data=AlimonyIncomeExtraction(),
             status=ExtractionStatus.FAILED,
             confidence=0.0,
             reasoning=reason,
@@ -97,27 +101,32 @@ class K1Schedule10651120sExtractionResult(BaseModel):
 
 
 _CORE_SPEC: CoreSpec = (
-    ("tax_year", coerce_int),
-    ("source_form", coerce_str),
-    ("final_or_amended_k1", coerce_str),
-    ("entity_name", coerce_str),
-    ("entity_ein", coerce_str),
-    ("entity_address", coerce_str),
-    ("partner_or_shareholder_name", coerce_str),
-    ("partner_or_shareholder_tin", coerce_str),
-    ("partner_or_shareholder_address", coerce_str),
-    ("partner_type_or_shareholder_status", coerce_str),
-    ("profit_loss_capital_or_ownership_percentages", coerce_str),
-    ("current_year_net_income_or_loss", coerce_decimal),
-    ("capital_account_ending", coerce_decimal),
-    ("withdrawals_and_distributions", coerce_decimal),
-    ("guaranteed_payments", coerce_decimal),
-    ("distributions", coerce_decimal),
+    ("document_title", coerce_str),
+    ("issuer_name", coerce_str),
+    ("recipient_name", coerce_str),
+    ("payer_name", coerce_str),
+    ("court_or_agreement_type", coerce_str),
+    ("court_name", coerce_str),
+    ("case_number", coerce_str),
+    ("order_or_agreement_date", coerce_date),
+    ("modification_date", coerce_date),
+    ("support_type", coerce_str),
+    ("ordered_amount", coerce_decimal),
+    ("payment_frequency", coerce_str),
+    ("start_date", coerce_date),
+    ("end_date_or_termination_events", coerce_str),
+    ("escalation_or_cost_of_living_terms", coerce_str),
+    ("arrears_balance", coerce_decimal),
+    ("current_payment_status", coerce_str),
+    ("third_party_collection_or_sdu", coerce_str),
+    ("deposit_account_last4", coerce_str),
+    ("document_issue_date", coerce_date),
+    ("loan_number", coerce_str),
 )
 
 
-def _parse_k_1_schedule_1065_1120s_json(text: str) -> K1Schedule10651120sExtractionResult | None:
-    """Defensively parse a model response into a k 1 schedule 1065 1120s result. Never raises."""
+def _parse_alimony_income_json(text: str) -> AlimonyIncomeExtractionResult | None:
+    """Defensively parse a model response into a alimony income result. Never raises."""
     snippet = extract_json_object(text)
     if snippet is None:
         return None
@@ -132,7 +141,7 @@ def _parse_k_1_schedule_1065_1120s_json(text: str) -> K1Schedule10651120sExtract
     sections = parse_catch_all(payload.get("additional_sections"))
 
     try:
-        data = K1Schedule10651120sExtraction.model_validate(
+        data = AlimonyIncomeExtraction.model_validate(
             {**core_payload, "additional_sections": sections}
         )
     except ValidationError:
@@ -144,41 +153,39 @@ def _parse_k_1_schedule_1065_1120s_json(text: str) -> K1Schedule10651120sExtract
     reasoning = (
         raw_reasoning.strip() if isinstance(raw_reasoning, str) and raw_reasoning.strip() else None
     )
-    return K1Schedule10651120sExtractionResult(
+    return AlimonyIncomeExtractionResult(
         data=data, status=status, confidence=confidence, reasoning=reasoning
     )
 
 
-async def extract_k_1_schedule_1065_1120s(
-    content: bytes, media_type: str
-) -> K1Schedule10651120sExtractionResult:
-    """Extract k 1 schedule 1065 1120s values from a document's bytes (PDF/image). Never raises.
+async def extract_alimony_income(content: bytes, media_type: str) -> AlimonyIncomeExtractionResult:
+    """Extract alimony income values from a document's bytes (PDF/image). Never raises.
 
     Mirrors the existing extractors. The bytes/base64, raw response, and extracted
     values are never logged — only metadata.
     """
     if not content or media_type.lower().strip() not in _SUPPORTED_MEDIA_TYPES:
-        return K1Schedule10651120sExtractionResult.failed("empty or unsupported document")
+        return AlimonyIncomeExtractionResult.failed("empty or unsupported document")
 
     system_prompt = load_prompt(_PROMPT_PATH)
     try:
         message = build_document_message(content=content, media_type=media_type)
     except ValueError:
-        return K1Schedule10651120sExtractionResult.failed("unsupported document media type")
+        return AlimonyIncomeExtractionResult.failed("unsupported document media type")
 
     call = await run_extraction_completion(
         system=system_prompt,
         message=message,
         max_tokens=_MAX_TOKENS,
-        log_label="k_1_schedule_1065_1120s",
+        log_label="alimony_income",
     )
     if call.text is None:
-        return K1Schedule10651120sExtractionResult.failed(call.failure_reason or "AI call failed")
+        return AlimonyIncomeExtractionResult.failed(call.failure_reason or "AI call failed")
 
-    result = _parse_k_1_schedule_1065_1120s_json(call.text)
+    result = _parse_alimony_income_json(call.text)
     if result is None:
-        logger.warning("k_1_schedule_1065_1120s_extraction_parse_failed")  # no raw response logged
-        return K1Schedule10651120sExtractionResult.failed("could not parse extraction")
+        logger.warning("alimony_income_extraction_parse_failed")  # no raw response logged
+        return AlimonyIncomeExtractionResult.failed("could not parse extraction")
 
     result.input_tokens = call.input_tokens
     result.output_tokens = call.output_tokens
@@ -186,7 +193,7 @@ async def extract_k_1_schedule_1065_1120s(
     # Metadata only: status, confidence, COUNTS — never values.
     core_present = sum(1 for key, _ in _CORE_SPEC if getattr(result.data, key).value is not None)
     logger.info(
-        "k_1_schedule_1065_1120s_extraction_done",
+        "alimony_income_extraction_done",
         status=result.status,
         confidence=result.confidence,
         core_fields_present=core_present,

@@ -20,8 +20,11 @@ _ALL = sorted(_SPECS.glob("[0-9]*.json"))
 _VALID_KINDS = {k.name for k in PiiKind}
 
 
-def test_there_are_108_specs() -> None:
-    assert len(_ALL) == 108
+def test_there_are_109_specs() -> None:
+    # LP-442 split alimony_income_verification into alimony_income + child_support_income (Geet's
+    # decision 1 — child support terminates at the child's emancipation age, alimony runs to the
+    # court order), so the corpus grew 108 → 109.
+    assert len(_ALL) == 109
 
 
 @pytest.mark.parametrize("path", _ALL, ids=lambda p: p.stem)
@@ -29,8 +32,8 @@ def test_spec_is_valid_json(path: Path) -> None:
     json.loads(path.read_text(encoding="utf-8"))  # raises on malformed JSON
 
 
-def test_all_108_specs_pass_the_validator() -> None:
-    # The measure: 14 (LP-435) → 70 (LP-438) → 108 (LP-439). Every spec is now generatable.
+def test_all_specs_pass_the_validator() -> None:
+    # The measure: 14 (LP-435) → 70 (LP-438) → 108 (LP-439) → 109 (LP-442 split). Every spec is generatable.
     refusing = {p.stem: [str(r) for r in validate(load_spec(p))] for p in _ALL}
     refusing = {k: v for k, v in refusing.items() if v}
     assert refusing == {}, f"specs still refusing: {refusing}"

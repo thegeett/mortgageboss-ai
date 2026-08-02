@@ -1,4 +1,4 @@
-"""Mortgage Payoff extraction — GENERATED from a schema spec by the LP-434 generator.
+"""Payoff Statement extraction — GENERATED from a schema spec by the LP-434 generator.
 
 The LP-39a shape: a typed core (each field a ``TypedField`` with source) + a grouped
 catch-all (``additional_sections``). Honest nulls, graceful ``.failed()``, and
@@ -37,15 +37,15 @@ from app.models.extraction import ExtractionStatus
 
 logger = structlog.get_logger(__name__)
 
-_PROMPT_PATH = "extraction/mortgage_payoff.txt"
+_PROMPT_PATH = "extraction/payoff_statement.txt"
 _SUPPORTED_MEDIA_TYPES = frozenset({"application/pdf", "image/jpeg", "image/png", "image/jpg"})
 # Unbounded list output → 8192 (guide §7 sizing rule; 1 nested list(s)).
 # The test_extraction_budget_sizing CI guard enforces the sizing rule.
 _MAX_TOKENS = 8192
 
 
-class MortgagePayoffExtraction(BaseModel):
-    """A mortgage payoff in the LP-39a shape: typed core + grouped catch-all.
+class PayoffStatementExtraction(BaseModel):
+    """A payoff statement in the LP-39a shape: typed core + grouped catch-all.
 
     Typed core — the mortgage-decision-relevant fields, each a ``TypedField`` (value +
     source). Grouped catch-all (``additional_sections``) — everything else, so nothing
@@ -81,10 +81,10 @@ class MortgagePayoffExtraction(BaseModel):
     additional_sections: list[CatchAllSection] = Field(default_factory=list)
 
 
-class MortgagePayoffExtractionResult(BaseModel):
-    """A mortgage payoff extraction plus its outcome (mirrors the other extractor results)."""
+class PayoffStatementExtractionResult(BaseModel):
+    """A payoff statement extraction plus its outcome (mirrors the other extractor results)."""
 
-    data: MortgagePayoffExtraction
+    data: PayoffStatementExtraction
     status: ExtractionStatus
     confidence: float = Field(ge=0.0, le=1.0)
     reasoning: str | None = None
@@ -92,10 +92,10 @@ class MortgagePayoffExtractionResult(BaseModel):
     output_tokens: int | None = None
 
     @classmethod
-    def failed(cls, reason: str) -> "MortgagePayoffExtractionResult":
+    def failed(cls, reason: str) -> "PayoffStatementExtractionResult":
         """The graceful fallback: all-null data, ``FAILED``, zero confidence."""
         return cls(
-            data=MortgagePayoffExtraction(),
+            data=PayoffStatementExtraction(),
             status=ExtractionStatus.FAILED,
             confidence=0.0,
             reasoning=reason,
@@ -129,8 +129,8 @@ _CORE_SPEC: CoreSpec = (
 )
 
 
-def _parse_mortgage_payoff_json(text: str) -> MortgagePayoffExtractionResult | None:
-    """Defensively parse a model response into a mortgage payoff result. Never raises."""
+def _parse_payoff_statement_json(text: str) -> PayoffStatementExtractionResult | None:
+    """Defensively parse a model response into a payoff statement result. Never raises."""
     snippet = extract_json_object(text)
     if snippet is None:
         return None
@@ -145,7 +145,7 @@ def _parse_mortgage_payoff_json(text: str) -> MortgagePayoffExtractionResult | N
     sections = parse_catch_all(payload.get("additional_sections"))
 
     try:
-        data = MortgagePayoffExtraction.model_validate(
+        data = PayoffStatementExtraction.model_validate(
             {**core_payload, "additional_sections": sections}
         )
     except ValidationError:
@@ -157,41 +157,41 @@ def _parse_mortgage_payoff_json(text: str) -> MortgagePayoffExtractionResult | N
     reasoning = (
         raw_reasoning.strip() if isinstance(raw_reasoning, str) and raw_reasoning.strip() else None
     )
-    return MortgagePayoffExtractionResult(
+    return PayoffStatementExtractionResult(
         data=data, status=status, confidence=confidence, reasoning=reasoning
     )
 
 
-async def extract_mortgage_payoff(
+async def extract_payoff_statement(
     content: bytes, media_type: str
-) -> MortgagePayoffExtractionResult:
-    """Extract mortgage payoff values from a document's bytes (PDF/image). Never raises.
+) -> PayoffStatementExtractionResult:
+    """Extract payoff statement values from a document's bytes (PDF/image). Never raises.
 
     Mirrors the existing extractors. The bytes/base64, raw response, and extracted
     values are never logged — only metadata.
     """
     if not content or media_type.lower().strip() not in _SUPPORTED_MEDIA_TYPES:
-        return MortgagePayoffExtractionResult.failed("empty or unsupported document")
+        return PayoffStatementExtractionResult.failed("empty or unsupported document")
 
     system_prompt = load_prompt(_PROMPT_PATH)
     try:
         message = build_document_message(content=content, media_type=media_type)
     except ValueError:
-        return MortgagePayoffExtractionResult.failed("unsupported document media type")
+        return PayoffStatementExtractionResult.failed("unsupported document media type")
 
     call = await run_extraction_completion(
         system=system_prompt,
         message=message,
         max_tokens=_MAX_TOKENS,
-        log_label="mortgage_payoff",
+        log_label="payoff_statement",
     )
     if call.text is None:
-        return MortgagePayoffExtractionResult.failed(call.failure_reason or "AI call failed")
+        return PayoffStatementExtractionResult.failed(call.failure_reason or "AI call failed")
 
-    result = _parse_mortgage_payoff_json(call.text)
+    result = _parse_payoff_statement_json(call.text)
     if result is None:
-        logger.warning("mortgage_payoff_extraction_parse_failed")  # no raw response logged
-        return MortgagePayoffExtractionResult.failed("could not parse extraction")
+        logger.warning("payoff_statement_extraction_parse_failed")  # no raw response logged
+        return PayoffStatementExtractionResult.failed("could not parse extraction")
 
     result.input_tokens = call.input_tokens
     result.output_tokens = call.output_tokens
@@ -199,7 +199,7 @@ async def extract_mortgage_payoff(
     # Metadata only: status, confidence, COUNTS — never values.
     core_present = sum(1 for key, _ in _CORE_SPEC if getattr(result.data, key).value is not None)
     logger.info(
-        "mortgage_payoff_extraction_done",
+        "payoff_statement_extraction_done",
         status=result.status,
         confidence=result.confidence,
         core_fields_present=core_present,

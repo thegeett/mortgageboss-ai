@@ -1,4 +1,4 @@
-"""Tests for consent to use electronic records and signatures extraction (GENERATED, LP-434) — the AI wrapper is MOCKED.
+"""Tests for affiliated business disclosure extraction (GENERATED, LP-434) — the AI wrapper is MOCKED.
 
 Shape/mechanism, not accuracy (guide §10): the typed core is coerced with source, an
 all-null core is FAILED, unparseable JSON returns None, and the ``.failed()`` factory
@@ -12,15 +12,15 @@ from unittest.mock import AsyncMock
 import pytest
 from app.ai.client import AIClientError
 from app.ai.extraction import model_call
-from app.ai.extraction.consent_to_use_electronic_records_and_signatures import (
-    ConsentToUseElectronicRecordsAndSignaturesExtraction,
-    ConsentToUseElectronicRecordsAndSignaturesExtractionResult,
-    _parse_consent_to_use_electronic_records_and_signatures_json,
-    extract_consent_to_use_electronic_records_and_signatures,
+from app.ai.extraction.affiliated_business_disclosure import (
+    AffiliatedBusinessDisclosureExtraction,
+    AffiliatedBusinessDisclosureExtractionResult,
+    _parse_affiliated_business_disclosure_json,
+    extract_affiliated_business_disclosure,
 )
 from app.models.extraction import ExtractionStatus
 
-PDF_BYTES = b"%PDF-1.7 dummy consent_to_use_electronic_records_and_signatures"
+PDF_BYTES = b"%PDF-1.7 dummy affiliated_business_disclosure"
 
 
 def _core(value: object, page: int | None = 1, snippet: str | None = "snip") -> dict:
@@ -30,21 +30,19 @@ def _core(value: object, page: int | None = 1, snippet: str | None = "snip") -> 
 FULL_PAYLOAD = {
     "typed_core": {
         "issuer_name": _core("SAMPLE"),
+        "disclosure_date": _core("2024-01-15"),
         "consumer_name": _core("SAMPLE"),
         "consumer_name_2": _core("SAMPLE"),
-        "consumer_count": _core(2024),
-        "consumer_email_addresses": _core("SAMPLE"),
-        "consumer_phone_numbers": _core("SAMPLE"),
-        "consent_date_time": _core("SAMPLE"),
-        "affirmative_consent_indicator": _core("SAMPLE"),
-        "delivery_method": _core("SAMPLE"),
-        "consent_version": _core("SAMPLE"),
-        "consent_scope_and_duration": _core("SAMPLE"),
-        "records_covered": _core("SAMPLE"),
-        "withdrawal_date_time": _core("SAMPLE"),
-        "loan_number": _core("SAMPLE"),
-        "document_issue_date": _core("2024-01-15"),
-        "electronic_signature": _core("SAMPLE"),
+        "consumer_name_count": _core(2024),
+        "referring_party_name": _core("SAMPLE"),
+        "referring_party_role": _core("SAMPLE"),
+        "property_address_or_loan_reference": _core("SAMPLE"),
+        "required_use_indicator": _core("SAMPLE"),
+        "required_use_exception_or_discount": _core("SAMPLE"),
+        "consumer_free_to_shop_statement": _core("SAMPLE"),
+        "no_guarantee_of_lowest_price_statement": _core("SAMPLE"),
+        "consumer_acknowledgment_text": _core("SAMPLE"),
+        "consumer_signatures_and_dates": _core("SAMPLE"),
     },
     "additional_sections": [{"section": "Other", "fields": [{"label": "Note", "value": "x"}]}],
     "confidence": 0.9,
@@ -69,40 +67,36 @@ def _mock_complete(
 
 
 def test_typed_core_coerced_with_source() -> None:
-    d = _parse_consent_to_use_electronic_records_and_signatures_json(FULL_JSON).data  # type: ignore[union-attr]
+    d = _parse_affiliated_business_disclosure_json(FULL_JSON).data  # type: ignore[union-attr]
     assert d.issuer_name.value == "SAMPLE"
     assert d.issuer_name.source is not None
 
 
 def test_all_null_core_is_failed() -> None:
     payload = {"typed_core": {"issuer_name": _core(None)}}
-    parsed = _parse_consent_to_use_electronic_records_and_signatures_json(json.dumps(payload))
+    parsed = _parse_affiliated_business_disclosure_json(json.dumps(payload))
     assert parsed is not None
     assert parsed.status == ExtractionStatus.FAILED
 
 
 @pytest.mark.parametrize("raw", ["not json", "", "{ broken"])
 def test_parse_unparseable_returns_none(raw: str) -> None:
-    assert _parse_consent_to_use_electronic_records_and_signatures_json(raw) is None
+    assert _parse_affiliated_business_disclosure_json(raw) is None
 
 
 async def test_extract_success(monkeypatch: pytest.MonkeyPatch) -> None:
     _mock_complete(monkeypatch, text=FULL_JSON)
-    result = await extract_consent_to_use_electronic_records_and_signatures(
-        PDF_BYTES, "application/pdf"
-    )
+    result = await extract_affiliated_business_disclosure(PDF_BYTES, "application/pdf")
     assert result.status == ExtractionStatus.SUCCEEDED
 
 
 async def test_extract_ai_failure_returns_failed(monkeypatch: pytest.MonkeyPatch) -> None:
     _mock_complete(monkeypatch, exc=AIClientError("boom"))
-    result = await extract_consent_to_use_electronic_records_and_signatures(
-        PDF_BYTES, "application/pdf"
-    )
+    result = await extract_affiliated_business_disclosure(PDF_BYTES, "application/pdf")
     assert result.status == ExtractionStatus.FAILED
 
 
 def test_failed_factory() -> None:
-    result = ConsentToUseElectronicRecordsAndSignaturesExtractionResult.failed("nope")
+    result = AffiliatedBusinessDisclosureExtractionResult.failed("nope")
     assert result.status == ExtractionStatus.FAILED
-    assert result.data == ConsentToUseElectronicRecordsAndSignaturesExtraction()
+    assert result.data == AffiliatedBusinessDisclosureExtraction()

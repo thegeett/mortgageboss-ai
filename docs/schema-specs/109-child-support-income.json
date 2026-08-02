@@ -1,0 +1,426 @@
+{
+  "document_type": "child_support_income",
+  "slug": "child-support-income",
+  "tier": 3,
+  "rules_served": [],
+  "summary_hint": "<recipient_name> receives <ordered_amount>/<payment_frequency> child support from <payer_name> under <court_or_agreement_type> dated <order_or_agreement_date> for <child_ages_or_dates_of_birth>; status <current_payment_status>, terminates at <support_termination_age_or_event>.",
+  "existing_extractor": null,
+  "catalog_coverage": "full",
+  "typed_core": [
+    {
+      "name": "document_title",
+      "type": "str",
+      "why": "identity / disambiguator: distinguishes a court order vs a separation agreement vs a third-party verification letter \u2014 each treated differently for income durability",
+      "rules": [],
+      "reason_class": "identity",
+      "rule_floor": false,
+      "degraded_from": null,
+      "pii": null,
+      "exists_today": false,
+      "prompt_hint": null
+    },
+    {
+      "name": "issuer_name",
+      "type": "str",
+      "why": "identity / processor: who produced the verification (court, attorney, SDU) \u2014 third-party independence check",
+      "rules": [],
+      "reason_class": "identity",
+      "rule_floor": false,
+      "degraded_from": null,
+      "pii": null,
+      "exists_today": false,
+      "prompt_hint": null
+    },
+    {
+      "name": "recipient_name",
+      "type": "str",
+      "why": "identity: whose income this is; matches the support recipient to the borrower",
+      "rules": [],
+      "reason_class": "identity",
+      "rule_floor": false,
+      "degraded_from": "object",
+      "pii": null,
+      "exists_today": false,
+      "prompt_hint": null
+    },
+    {
+      "name": "payer_name",
+      "type": "str",
+      "why": "identity: the obligor; party matching and to confirm the recipient is not also the payer",
+      "rules": [],
+      "reason_class": "identity",
+      "rule_floor": false,
+      "degraded_from": "object",
+      "pii": null,
+      "exists_today": false,
+      "prompt_hint": null
+    },
+    {
+      "name": "court_or_agreement_type",
+      "type": "str",
+      "why": "identity/disambiguator: the legal basis (court order vs voluntary agreement) drives whether the income is acceptable",
+      "rules": [],
+      "reason_class": "disambiguator",
+      "rule_floor": false,
+      "degraded_from": "enum",
+      "pii": null,
+      "exists_today": false,
+      "prompt_hint": null
+    },
+    {
+      "name": "court_name",
+      "type": "str",
+      "why": "identity: the issuing court; provenance of the order",
+      "rules": [],
+      "reason_class": "identity",
+      "rule_floor": false,
+      "degraded_from": "object",
+      "pii": null,
+      "exists_today": false,
+      "prompt_hint": null
+    },
+    {
+      "name": "case_number",
+      "type": "str",
+      "why": "identity / dedup: the case key that ties this to other filings for the same borrower",
+      "rules": [],
+      "reason_class": "identity",
+      "rule_floor": false,
+      "degraded_from": "object",
+      "pii": null,
+      "exists_today": false,
+      "prompt_hint": null
+    },
+    {
+      "name": "order_or_agreement_date",
+      "type": "date",
+      "why": "identity/disambiguator: which order governs; distinguishes the original from a later modification",
+      "rules": [],
+      "reason_class": "disambiguator",
+      "rule_floor": false,
+      "degraded_from": null,
+      "pii": null,
+      "exists_today": false,
+      "prompt_hint": null
+    },
+    {
+      "name": "modification_date",
+      "type": "date",
+      "why": "disambiguator for order_or_agreement_date: when the terms were last changed \u2014 the governing amount may be the modified one",
+      "rules": [],
+      "reason_class": "disambiguator",
+      "rule_floor": false,
+      "degraded_from": null,
+      "pii": null,
+      "exists_today": false,
+      "prompt_hint": null
+    },
+    {
+      "name": "support_type",
+      "type": "str",
+      "why": "disambiguator: alimony vs child support vs separate maintenance \u2014 child support has different continuance/gross-up treatment; misreading inverts the income analysis",
+      "rules": [],
+      "reason_class": "disambiguator",
+      "rule_floor": false,
+      "degraded_from": "enum",
+      "pii": null,
+      "exists_today": false,
+      "prompt_hint": "Distinguish alimony/spousal support from child support explicitly \u2014 do not collapse them; keep support_type verbatim"
+    },
+    {
+      "name": "ordered_amount",
+      "type": "Decimal",
+      "why": "processor: the periodic support amount \u2014 the headline income figure",
+      "rules": [],
+      "reason_class": "processor",
+      "rule_floor": false,
+      "degraded_from": null,
+      "pii": null,
+      "exists_today": false,
+      "prompt_hint": null
+    },
+    {
+      "name": "payment_frequency",
+      "type": "str",
+      "why": "disambiguator for ordered_amount: monthly vs biweekly vs weekly changes the annualized income; the amount is uninterpretable without it",
+      "rules": [],
+      "reason_class": "disambiguator",
+      "rule_floor": false,
+      "degraded_from": "enum",
+      "pii": null,
+      "exists_today": false,
+      "prompt_hint": "Report the payment frequency alongside the amount, verbatim, even when the annual figure is also stated"
+    },
+    {
+      "name": "start_date",
+      "type": "date",
+      "why": "processor: when receipt began \u2014 bounds the receipt-history window an underwriter reviews",
+      "rules": [],
+      "reason_class": "processor",
+      "rule_floor": false,
+      "degraded_from": null,
+      "pii": null,
+      "exists_today": false,
+      "prompt_hint": null
+    },
+    {
+      "name": "end_date_or_termination_events",
+      "type": "str",
+      "why": "processor: continuance \u2014 support must be expected to continue ~3 years to count; captures fixed end date or trigger events (remarriage, emancipation)",
+      "rules": [],
+      "reason_class": "processor",
+      "rule_floor": false,
+      "degraded_from": null,
+      "pii": null,
+      "exists_today": false,
+      "prompt_hint": "Capture continuance: the fixed end date OR the termination trigger events \u2014 do not compute the ~3-year test"
+    },
+    {
+      "name": "child_ages_or_dates_of_birth",
+      "type": "str",
+      "why": "processor / continuance: child support continues until each child's termination (emancipation) age; the child's current age bounds how long the income is expected to continue (the ~3-year continuance test) \u2014 Priya's ruling that child support ends at the termination age",
+      "rules": [],
+      "reason_class": "processor",
+      "rule_floor": false,
+      "degraded_from": null,
+      "pii": null,
+      "exists_today": false,
+      "prompt_hint": "Capture each child's age or date of birth as stated; do NOT compute remaining years \u2014 rules judge continuance, tags describe"
+    },
+    {
+      "name": "support_termination_age_or_event",
+      "type": "str",
+      "why": "processor / continuance: the age or event at which child support terminates (e.g. age 18, graduation, emancipation); with the child's age this is the continuance fact Priya's ruling requires for child support (distinct from alimony's fixed order end date)",
+      "rules": [],
+      "reason_class": "processor",
+      "rule_floor": false,
+      "degraded_from": null,
+      "pii": null,
+      "exists_today": false,
+      "prompt_hint": "Capture the stated termination age/trigger per child; do NOT compute the end date"
+    },
+    {
+      "name": "escalation_or_cost_of_living_terms",
+      "type": "str",
+      "why": "processor / disambiguator: future amount changes (COLA) that make ordered_amount a floor, not the final figure",
+      "rules": [],
+      "reason_class": "processor",
+      "rule_floor": false,
+      "degraded_from": null,
+      "pii": null,
+      "exists_today": false,
+      "prompt_hint": null
+    },
+    {
+      "name": "arrears_balance",
+      "type": "Decimal",
+      "why": "processor: an arrears balance signals unreliable receipt \u2014 directly affects whether the income is counted",
+      "rules": [],
+      "reason_class": "processor",
+      "rule_floor": false,
+      "degraded_from": null,
+      "pii": null,
+      "exists_today": false,
+      "prompt_hint": "Capture arrears faithfully \u2014 describes receipt reliability; do NOT judge whether the income counts"
+    },
+    {
+      "name": "current_payment_status",
+      "type": "str",
+      "why": "processor: current/delinquent/paid \u2014 the single strongest receipt-reliability signal",
+      "rules": [],
+      "reason_class": "processor",
+      "rule_floor": false,
+      "degraded_from": "enum",
+      "pii": null,
+      "exists_today": false,
+      "prompt_hint": null
+    },
+    {
+      "name": "third_party_collection_or_sdu",
+      "type": "str",
+      "why": "processor: a State Disbursement Unit / third-party collector produces documented, verifiable receipt \u2014 strengthens the income",
+      "rules": [],
+      "reason_class": "processor",
+      "rule_floor": false,
+      "degraded_from": "object",
+      "pii": null,
+      "exists_today": false,
+      "prompt_hint": null
+    },
+    {
+      "name": "deposit_account_last4",
+      "type": "str",
+      "why": "PII (restricted, last-4): the account support is deposited to; matches the income to a verified bank deposit",
+      "rules": [],
+      "reason_class": "pii",
+      "rule_floor": false,
+      "degraded_from": null,
+      "pii": {
+        "kind": "ACCOUNT",
+        "pre_masked": true
+      },
+      "exists_today": false,
+      "prompt_hint": "Last-4 of a deposit account is PII even though partial \u2014 file it here, never the catch-all"
+    },
+    {
+      "name": "document_issue_date",
+      "type": "date",
+      "why": "processor: verification age / recency \u2014 a stale verification may need refresh",
+      "rules": [],
+      "reason_class": "processor",
+      "rule_floor": false,
+      "degraded_from": null,
+      "pii": null,
+      "exists_today": false,
+      "prompt_hint": null
+    },
+    {
+      "name": "loan_number",
+      "type": "str",
+      "why": "identity: links the document to the loan file (confidential)",
+      "rules": [],
+      "reason_class": "identity",
+      "rule_floor": false,
+      "degraded_from": null,
+      "pii": null,
+      "exists_today": false,
+      "prompt_hint": null
+    }
+  ],
+  "nested_lists": [
+    {
+      "name": "payment_history",
+      "shape": "flat_row",
+      "shape_reason": "a support-payment history genuinely repeats (typically 12-24 monthly rows), and per-field wrapping would risk the 16,384-token ceiling for a long history \u2014 flat rows are the light shape",
+      "expected_item_count": "12-24",
+      "rules": [],
+      "exists_today": false,
+      "plumbing_sites": 5,
+      "fields": [
+        {
+          "name": "date",
+          "type": "date",
+          "why": "the payment date"
+        },
+        {
+          "name": "amount",
+          "type": "Decimal",
+          "why": "the payment amount \u2014 supports the stable-receipt analysis",
+          "pii_note": "payment-history rows may carry an account reference; the nested record needs its own redactor if any account digits appear (the transaction-description pattern)"
+        },
+        {
+          "name": "status",
+          "type": "str",
+          "why": "receipt status of the row"
+        },
+        {
+          "name": "source",
+          "type": "str",
+          "why": "the source reference"
+        }
+      ]
+    }
+  ],
+  "rejected": [
+    {
+      "name": "the 8 TECHNICAL provenance fields",
+      "reason": "already in the TypedField wrapper"
+    },
+    {
+      "name": "form_number, form_revision_date",
+      "reason": "not a standardized form; a court order / agreement is free-form"
+    },
+    {
+      "name": "issuer_address, issuer_phone, issuer_email_or_url",
+      "reason": "contact detail with no consumer; catch-all captures it if needed"
+    },
+    {
+      "name": "effective_date, expiration_date, statement_period_start, statement_period_end",
+      "reason": "duplicate start_date / order_or_agreement_date; the document has no coverage period"
+    },
+    {
+      "name": "party_names, party_addresses",
+      "reason": "redundant \u2014 the relevant parties are recipient_name and payer_name"
+    },
+    {
+      "name": "property_address",
+      "reason": "not present on a support order/verification"
+    },
+    {
+      "name": "account_case_reference_number",
+      "reason": "duplicates case_number flattened from the court object"
+    },
+    {
+      "name": "signature_blocks, notary_block",
+      "reason": "execution/notarization not consumed by any rule; the order's authority is the court, not a signature"
+    },
+    {
+      "name": "document_status_or_version",
+      "reason": "low value; modification_date already captures the amendment signal"
+    },
+    {
+      "name": "expected_continuance_months",
+      "reason": "a derived conclusion (computed from end_date_or_termination_events and today) \u2014 rules/underwriters judge continuance; tags describe. Reject per the fact-vs-conclusion rule"
+    },
+    {
+      "name": "current_payment_status as enum",
+      "reason": "kept as text (no enum coercer) rather than dropped"
+    }
+  ],
+  "encoding_variations": [
+    "Frequency: '$1,500/month', '$750 semi-monthly', '$346.15 weekly' \u2014 payment_frequency must travel beside ordered_amount or the annualized income is wrong by up to 4x",
+    "Support type: 'spousal support', 'alimony', 'maintenance', 'child support' are used interchangeably by different states but are NOT interchangeable for mortgage income \u2014 keep support_type verbatim",
+    "Governing amount: an original order plus a modification \u2014 order_or_agreement_date vs modification_date disambiguate which amount is current",
+    "Termination: stated as a fixed date ('through 06/2029') or as events ('until remarriage or death') \u2014 end_date_or_termination_events is a string to hold both forms"
+  ],
+  "open_questions": [
+    {
+      "id": 1,
+      "q": "No rule consumes this document today (Tier 3, rule_count 0). The field list is sized for a likely future income-continuity/receipt rule, not a known one",
+      "options": [
+        "trim to the ~10 identity+amount fields until a rule exists",
+        "keep the ~20-field income-analysis set"
+      ],
+      "recommendation": "(b) keep the ~20-field income-analysis set so the rule can be built without re-extraction \u2014 this is the IH-1 lesson (a missing field kills the future rule)",
+      "blocks_implementation": false
+    },
+    {
+      "id": 2,
+      "q": "payment_history shape and length. Item count is uncertain (a verification letter may show 3 months or 24)",
+      "options": [
+        "flat-row",
+        "per-field-wrapped"
+      ],
+      "recommendation": "flat-row; revisit to per-field-wrapped only if a rule must attribute each row's source individually GEET'S DECISION (LP-438): BUILD IT \u2014 LP-437 made nested lists cheap (one declaration + the generic mechanism); the one-list-budget / defer / no-consumer concern is overturned. Build as flat_row; the per-rule consumer is separate follow-up.",
+      "blocks_implementation": false
+    },
+    {
+      "id": 3,
+      "q": "case_number appears twice \u2014 via the flattened court object and via account_case_reference_number",
+      "options": [
+        "keep the court-object case_number",
+        "keep account_case_reference_number"
+      ],
+      "recommendation": "keep the court-object case_number and drop the generic reference field to avoid a duplicate",
+      "blocks_implementation": false
+    },
+    {
+      "id": 4,
+      "q": "support_type and current_payment_status are enums with no coercer",
+      "options": [
+        "degrade to str",
+        "add an enum coercer"
+      ],
+      "recommendation": "degrade to str and add a prompt hint listing the canonical values; add an enum coercer only if a rule needs to branch on them",
+      "blocks_implementation": false
+    }
+  ],
+  "notes": [
+    "SPLIT from the former alimony_income_verification spec (LP-442, Geet's decision 1): this spec is CHILD SUPPORT ONLY. Priya ruled child support qualifies differently from alimony \u2014 it terminates at the child's emancipation age, so this spec ADDS child_ages_or_dates_of_birth + support_termination_age_or_event (the continuance facts) on top of the shared income-analysis set. Alimony is the separate alimony_income spec (its continuance is the order's end date).",
+    "The two added continuance fields are the ONLY divergence from the alimony spec; every other field is the shared support-income analysis set.",
+    "Serves 0 rules today; the field set is retained so a future income-continuity/receipt rule can be built without re-extraction (the IH-1 lesson).",
+    "PII: deposit_account_last4 needs _PII_FIELDS registration, pre_masked true. recipient_name / payer_name are standard-sensitivity names, not registered.",
+    "Payment-history rows may carry an account reference; the nested record needs its own redactor if any account digits appear.",
+    "Do NOT judge whether the income counts (a rule/underwriter call \u2014 tags describe, rules judge)."
+  ]
+}

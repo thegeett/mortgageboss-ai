@@ -1,4 +1,4 @@
-"""Alimony Income Verification extraction — GENERATED from a schema spec by the LP-434 generator.
+"""E Consent Disclosure extraction — GENERATED from a schema spec by the LP-434 generator.
 
 The LP-39a shape: a typed core (each field a ``TypedField`` with source) + a grouped
 catch-all (``additional_sections``). Honest nulls, graceful ``.failed()``, and
@@ -13,7 +13,6 @@ the same as tuned.
 
 import json
 from datetime import date
-from decimal import Decimal
 from typing import Any
 
 import structlog
@@ -24,7 +23,7 @@ from app.ai.extraction.model_call import run_extraction_completion
 from app.ai.extraction.parsing import (
     CoreSpec,
     coerce_date,
-    coerce_decimal,
+    coerce_int,
     coerce_str,
     derive_status,
     parse_catch_all,
@@ -37,15 +36,15 @@ from app.models.extraction import ExtractionStatus
 
 logger = structlog.get_logger(__name__)
 
-_PROMPT_PATH = "extraction/alimony_income_verification.txt"
+_PROMPT_PATH = "extraction/e_consent_disclosure.txt"
 _SUPPORTED_MEDIA_TYPES = frozenset({"application/pdf", "image/jpeg", "image/png", "image/jpg"})
-# Unbounded list output → 8192 (guide §7 sizing rule; 1 nested list(s)).
+# Bounded fixed-form output → the 4096 scaffold budget (guide §7).
 # The test_extraction_budget_sizing CI guard enforces the sizing rule.
-_MAX_TOKENS = 8192
+_MAX_TOKENS = 4096
 
 
-class AlimonyIncomeVerificationExtraction(BaseModel):
-    """A alimony income verification in the LP-39a shape: typed core + grouped catch-all.
+class EConsentDisclosureExtraction(BaseModel):
+    """A e consent disclosure in the LP-39a shape: typed core + grouped catch-all.
 
     Typed core — the mortgage-decision-relevant fields, each a ``TypedField`` (value +
     source). Grouped catch-all (``additional_sections``) — everything else, so nothing
@@ -53,36 +52,31 @@ class AlimonyIncomeVerificationExtraction(BaseModel):
     """
 
     # --- Typed core (value + source) ---------------------------------------- #
-    document_title: TypedField[str] = Field(default_factory=TypedField)
     issuer_name: TypedField[str] = Field(default_factory=TypedField)
-    recipient_name: TypedField[str] = Field(default_factory=TypedField)
-    payer_name: TypedField[str] = Field(default_factory=TypedField)
-    court_or_agreement_type: TypedField[str] = Field(default_factory=TypedField)
-    court_name: TypedField[str] = Field(default_factory=TypedField)
-    case_number: TypedField[str] = Field(default_factory=TypedField)
-    order_or_agreement_date: TypedField[date] = Field(default_factory=TypedField)
-    modification_date: TypedField[date] = Field(default_factory=TypedField)
-    support_type: TypedField[str] = Field(default_factory=TypedField)
-    ordered_amount: TypedField[Decimal] = Field(default_factory=TypedField)
-    payment_frequency: TypedField[str] = Field(default_factory=TypedField)
-    start_date: TypedField[date] = Field(default_factory=TypedField)
-    end_date_or_termination_events: TypedField[str] = Field(default_factory=TypedField)
-    escalation_or_cost_of_living_terms: TypedField[str] = Field(default_factory=TypedField)
-    arrears_balance: TypedField[Decimal] = Field(default_factory=TypedField)
-    current_payment_status: TypedField[str] = Field(default_factory=TypedField)
-    third_party_collection_or_sdu: TypedField[str] = Field(default_factory=TypedField)
-    deposit_account_last4: TypedField[str] = Field(default_factory=TypedField)
-    document_issue_date: TypedField[date] = Field(default_factory=TypedField)
+    consumer_name: TypedField[str] = Field(default_factory=TypedField)
+    consumer_name_2: TypedField[str] = Field(default_factory=TypedField)
+    consumer_count: TypedField[int] = Field(default_factory=TypedField)
+    consumer_email_addresses: TypedField[str] = Field(default_factory=TypedField)
+    consumer_phone_numbers: TypedField[str] = Field(default_factory=TypedField)
+    consent_date_time: TypedField[str] = Field(default_factory=TypedField)
+    affirmative_consent_indicator: TypedField[str] = Field(default_factory=TypedField)
+    delivery_method: TypedField[str] = Field(default_factory=TypedField)
+    consent_version: TypedField[str] = Field(default_factory=TypedField)
+    consent_scope_and_duration: TypedField[str] = Field(default_factory=TypedField)
+    records_covered: TypedField[str] = Field(default_factory=TypedField)
+    withdrawal_date_time: TypedField[str] = Field(default_factory=TypedField)
     loan_number: TypedField[str] = Field(default_factory=TypedField)
+    document_issue_date: TypedField[date] = Field(default_factory=TypedField)
+    electronic_signature: TypedField[str] = Field(default_factory=TypedField)
 
     # --- Grouped catch-all — everything else -------------------------------- #
     additional_sections: list[CatchAllSection] = Field(default_factory=list)
 
 
-class AlimonyIncomeVerificationExtractionResult(BaseModel):
-    """A alimony income verification extraction plus its outcome (mirrors the other extractor results)."""
+class EConsentDisclosureExtractionResult(BaseModel):
+    """A e consent disclosure extraction plus its outcome (mirrors the other extractor results)."""
 
-    data: AlimonyIncomeVerificationExtraction
+    data: EConsentDisclosureExtraction
     status: ExtractionStatus
     confidence: float = Field(ge=0.0, le=1.0)
     reasoning: str | None = None
@@ -90,10 +84,10 @@ class AlimonyIncomeVerificationExtractionResult(BaseModel):
     output_tokens: int | None = None
 
     @classmethod
-    def failed(cls, reason: str) -> "AlimonyIncomeVerificationExtractionResult":
+    def failed(cls, reason: str) -> "EConsentDisclosureExtractionResult":
         """The graceful fallback: all-null data, ``FAILED``, zero confidence."""
         return cls(
-            data=AlimonyIncomeVerificationExtraction(),
+            data=EConsentDisclosureExtraction(),
             status=ExtractionStatus.FAILED,
             confidence=0.0,
             reasoning=reason,
@@ -101,34 +95,27 @@ class AlimonyIncomeVerificationExtractionResult(BaseModel):
 
 
 _CORE_SPEC: CoreSpec = (
-    ("document_title", coerce_str),
     ("issuer_name", coerce_str),
-    ("recipient_name", coerce_str),
-    ("payer_name", coerce_str),
-    ("court_or_agreement_type", coerce_str),
-    ("court_name", coerce_str),
-    ("case_number", coerce_str),
-    ("order_or_agreement_date", coerce_date),
-    ("modification_date", coerce_date),
-    ("support_type", coerce_str),
-    ("ordered_amount", coerce_decimal),
-    ("payment_frequency", coerce_str),
-    ("start_date", coerce_date),
-    ("end_date_or_termination_events", coerce_str),
-    ("escalation_or_cost_of_living_terms", coerce_str),
-    ("arrears_balance", coerce_decimal),
-    ("current_payment_status", coerce_str),
-    ("third_party_collection_or_sdu", coerce_str),
-    ("deposit_account_last4", coerce_str),
-    ("document_issue_date", coerce_date),
+    ("consumer_name", coerce_str),
+    ("consumer_name_2", coerce_str),
+    ("consumer_count", coerce_int),
+    ("consumer_email_addresses", coerce_str),
+    ("consumer_phone_numbers", coerce_str),
+    ("consent_date_time", coerce_str),
+    ("affirmative_consent_indicator", coerce_str),
+    ("delivery_method", coerce_str),
+    ("consent_version", coerce_str),
+    ("consent_scope_and_duration", coerce_str),
+    ("records_covered", coerce_str),
+    ("withdrawal_date_time", coerce_str),
     ("loan_number", coerce_str),
+    ("document_issue_date", coerce_date),
+    ("electronic_signature", coerce_str),
 )
 
 
-def _parse_alimony_income_verification_json(
-    text: str,
-) -> AlimonyIncomeVerificationExtractionResult | None:
-    """Defensively parse a model response into a alimony income verification result. Never raises."""
+def _parse_e_consent_disclosure_json(text: str) -> EConsentDisclosureExtractionResult | None:
+    """Defensively parse a model response into a e consent disclosure result. Never raises."""
     snippet = extract_json_object(text)
     if snippet is None:
         return None
@@ -143,7 +130,7 @@ def _parse_alimony_income_verification_json(
     sections = parse_catch_all(payload.get("additional_sections"))
 
     try:
-        data = AlimonyIncomeVerificationExtraction.model_validate(
+        data = EConsentDisclosureExtraction.model_validate(
             {**core_payload, "additional_sections": sections}
         )
     except ValidationError:
@@ -155,45 +142,41 @@ def _parse_alimony_income_verification_json(
     reasoning = (
         raw_reasoning.strip() if isinstance(raw_reasoning, str) and raw_reasoning.strip() else None
     )
-    return AlimonyIncomeVerificationExtractionResult(
+    return EConsentDisclosureExtractionResult(
         data=data, status=status, confidence=confidence, reasoning=reasoning
     )
 
 
-async def extract_alimony_income_verification(
+async def extract_e_consent_disclosure(
     content: bytes, media_type: str
-) -> AlimonyIncomeVerificationExtractionResult:
-    """Extract alimony income verification values from a document's bytes (PDF/image). Never raises.
+) -> EConsentDisclosureExtractionResult:
+    """Extract e consent disclosure values from a document's bytes (PDF/image). Never raises.
 
     Mirrors the existing extractors. The bytes/base64, raw response, and extracted
     values are never logged — only metadata.
     """
     if not content or media_type.lower().strip() not in _SUPPORTED_MEDIA_TYPES:
-        return AlimonyIncomeVerificationExtractionResult.failed("empty or unsupported document")
+        return EConsentDisclosureExtractionResult.failed("empty or unsupported document")
 
     system_prompt = load_prompt(_PROMPT_PATH)
     try:
         message = build_document_message(content=content, media_type=media_type)
     except ValueError:
-        return AlimonyIncomeVerificationExtractionResult.failed("unsupported document media type")
+        return EConsentDisclosureExtractionResult.failed("unsupported document media type")
 
     call = await run_extraction_completion(
         system=system_prompt,
         message=message,
         max_tokens=_MAX_TOKENS,
-        log_label="alimony_income_verification",
+        log_label="e_consent_disclosure",
     )
     if call.text is None:
-        return AlimonyIncomeVerificationExtractionResult.failed(
-            call.failure_reason or "AI call failed"
-        )
+        return EConsentDisclosureExtractionResult.failed(call.failure_reason or "AI call failed")
 
-    result = _parse_alimony_income_verification_json(call.text)
+    result = _parse_e_consent_disclosure_json(call.text)
     if result is None:
-        logger.warning(
-            "alimony_income_verification_extraction_parse_failed"
-        )  # no raw response logged
-        return AlimonyIncomeVerificationExtractionResult.failed("could not parse extraction")
+        logger.warning("e_consent_disclosure_extraction_parse_failed")  # no raw response logged
+        return EConsentDisclosureExtractionResult.failed("could not parse extraction")
 
     result.input_tokens = call.input_tokens
     result.output_tokens = call.output_tokens
@@ -201,7 +184,7 @@ async def extract_alimony_income_verification(
     # Metadata only: status, confidence, COUNTS — never values.
     core_present = sum(1 for key, _ in _CORE_SPEC if getattr(result.data, key).value is not None)
     logger.info(
-        "alimony_income_verification_extraction_done",
+        "e_consent_disclosure_extraction_done",
         status=result.status,
         confidence=result.confidence,
         core_fields_present=core_present,

@@ -65,17 +65,52 @@ CATALOG: dict[str, tuple[Tier, DocumentCategory]] = {
     "tax_transcript": (Tier.TIER_2, DocumentCategory.INCOME_EMPLOYMENT),
     "form_4506c": (Tier.TIER_2, DocumentCategory.INCOME_EMPLOYMENT),
     "business_tax_return": (Tier.TIER_1, DocumentCategory.INCOME_EMPLOYMENT),
-    "k1_statement": (Tier.TIER_2, DocumentCategory.INCOME_EMPLOYMENT),
+    "k1_statement": (
+        Tier.TIER_1,
+        DocumentCategory.INCOME_EMPLOYMENT,
+    ),  # LP-442: merge target (k_1_schedule spec)
     "social_security_award_letter": (Tier.TIER_1, DocumentCategory.INCOME_EMPLOYMENT),
     "pension_statement": (Tier.TIER_2, DocumentCategory.INCOME_EMPLOYMENT),
     "retirement_income_letter": (Tier.TIER_2, DocumentCategory.INCOME_EMPLOYMENT),
     "unemployment_income_letter": (Tier.TIER_2, DocumentCategory.INCOME_EMPLOYMENT),
     "disability_income_letter": (Tier.TIER_2, DocumentCategory.INCOME_EMPLOYMENT),
-    "child_support_income": (Tier.TIER_2, DocumentCategory.INCOME_EMPLOYMENT),
-    "alimony_income": (Tier.TIER_2, DocumentCategory.INCOME_EMPLOYMENT),
+    "child_support_income": (
+        Tier.TIER_1,
+        DocumentCategory.INCOME_EMPLOYMENT,
+    ),  # LP-442: split target
+    "alimony_income": (Tier.TIER_1, DocumentCategory.INCOME_EMPLOYMENT),  # LP-442: split target
     "rental_income_schedule": (Tier.TIER_2, DocumentCategory.INCOME_EMPLOYMENT),
     "commission_income_statement": (Tier.TIER_2, DocumentCategory.INCOME_EMPLOYMENT),
     "employment_offer_letter": (Tier.TIER_1, DocumentCategory.INCOME_EMPLOYMENT),
+    # LP-442 — schema'd types reconciled into the catalog (every one has a spec → Tier-1).
+    "form_1040_personal_tax_transcripts": (Tier.TIER_1, DocumentCategory.INCOME_EMPLOYMENT),
+    "form_1065_partnership_tax_transcripts": (Tier.TIER_1, DocumentCategory.INCOME_EMPLOYMENT),
+    "form_1120_corporate_tax_transcripts": (Tier.TIER_1, DocumentCategory.INCOME_EMPLOYMENT),
+    "form_4506t_request_for_transcript": (Tier.TIER_1, DocumentCategory.INCOME_EMPLOYMENT),
+    "transcripts_of_1099": (Tier.TIER_1, DocumentCategory.INCOME_EMPLOYMENT),
+    "k_1_shareholder_profit_and_loss_transcripts": (
+        Tier.TIER_1,
+        DocumentCategory.INCOME_EMPLOYMENT,
+    ),
+    "trust_federal_tax_returns": (Tier.TIER_1, DocumentCategory.INCOME_EMPLOYMENT),
+    "cpa_letter": (Tier.TIER_1, DocumentCategory.INCOME_EMPLOYMENT),
+    "business_existence_verification_cpa_ltr_bus_lic": (
+        Tier.TIER_1,
+        DocumentCategory.INCOME_EMPLOYMENT,
+    ),
+    "business_license": (Tier.TIER_1, DocumentCategory.INCOME_EMPLOYMENT),
+    "disability_award_letter": (Tier.TIER_1, DocumentCategory.INCOME_EMPLOYMENT),
+    "retirement_pension_award_letter": (Tier.TIER_1, DocumentCategory.INCOME_EMPLOYMENT),
+    "retirement_check": (Tier.TIER_1, DocumentCategory.INCOME_EMPLOYMENT),
+    "verbal_voe": (Tier.TIER_1, DocumentCategory.INCOME_EMPLOYMENT),
+    "military_leave_and_earning_statement_les": (Tier.TIER_1, DocumentCategory.INCOME_EMPLOYMENT),
+    "foster_care_verification": (Tier.TIER_1, DocumentCategory.INCOME_EMPLOYMENT),
+    "boarder_rental_payments": (Tier.TIER_1, DocumentCategory.INCOME_EMPLOYMENT),
+    "boarder_proof_of_residency": (Tier.TIER_1, DocumentCategory.INCOME_EMPLOYMENT),
+    "cancelled_checks_evidencing_receipt_of_note_income": (
+        Tier.TIER_1,
+        DocumentCategory.INCOME_EMPLOYMENT,
+    ),
     # ===================================================================== #
     # Assets
     # ===================================================================== #
@@ -92,6 +127,14 @@ CATALOG: dict[str, tuple[Tier, DocumentCategory]] = {
     "life_insurance_statement": (Tier.TIER_2, DocumentCategory.ASSETS),
     "sale_of_asset_proof": (Tier.TIER_2, DocumentCategory.ASSETS),
     "crypto_account_statement": (Tier.TIER_2, DocumentCategory.ASSETS),
+    # LP-442 — schema'd asset types.
+    "ira_401k": (Tier.TIER_1, DocumentCategory.ASSETS),
+    "bank_deposit_slip": (Tier.TIER_1, DocumentCategory.ASSETS),
+    "emd_withdrawal_proof": (Tier.TIER_1, DocumentCategory.ASSETS),
+    "life_insurance_policy": (Tier.TIER_1, DocumentCategory.ASSETS),
+    "verification_of_assets": (Tier.TIER_1, DocumentCategory.ASSETS),
+    "financial_statements": (Tier.TIER_1, DocumentCategory.ASSETS),
+    "statement_of_account": (Tier.TIER_1, DocumentCategory.ASSETS),
     # ===================================================================== #
     # Property
     # ===================================================================== #
@@ -111,8 +154,25 @@ CATALOG: dict[str, tuple[Tier, DocumentCategory]] = {
     "pest_inspection_report": (Tier.TIER_2, DocumentCategory.PROPERTY),
     "well_septic_certification": (Tier.TIER_2, DocumentCategory.PROPERTY),
     "condo_questionnaire": (Tier.TIER_1, DocumentCategory.PROPERTY),
-    "payoff_statement": (Tier.TIER_2, DocumentCategory.PROPERTY),
+    "payoff_statement": (
+        Tier.TIER_1,
+        DocumentCategory.PROPERTY,
+    ),  # LP-442: merge target (mortgage_payoff spec)
     "lease_agreement": (Tier.TIER_1, DocumentCategory.PROPERTY),
+    # LP-442 — schema'd property types.
+    "master_insurance_policy_for_condominium": (Tier.TIER_1, DocumentCategory.PROPERTY),
+    "building_permits": (Tier.TIER_1, DocumentCategory.PROPERTY),
+    "hoa_certification": (Tier.TIER_1, DocumentCategory.PROPERTY),
+    "homeowner_s_insurance_quote": (Tier.TIER_1, DocumentCategory.PROPERTY),
+    "termite_report": (Tier.TIER_1, DocumentCategory.PROPERTY),
+    "termite_completion": (Tier.TIER_1, DocumentCategory.PROPERTY),
+    "property_profile_subject": (Tier.TIER_1, DocumentCategory.PROPERTY),
+    "property_profile_non_subject": (Tier.TIER_1, DocumentCategory.PROPERTY),
+    "property_tax_bill_non_subject": (Tier.TIER_1, DocumentCategory.PROPERTY),
+    "proof_of_occupancy": (Tier.TIER_1, DocumentCategory.PROPERTY),
+    "subject_property_note": (Tier.TIER_1, DocumentCategory.PROPERTY),
+    "other_property_note": (Tier.TIER_1, DocumentCategory.PROPERTY),
+    "seller_signature_authority": (Tier.TIER_1, DocumentCategory.PROPERTY),
     # ===================================================================== #
     # Credit
     # ===================================================================== #
@@ -126,19 +186,40 @@ CATALOG: dict[str, tuple[Tier, DocumentCategory]] = {
     "debt_payoff_statement": (Tier.TIER_2, DocumentCategory.CREDIT),
     "student_loan_statement": (Tier.TIER_2, DocumentCategory.CREDIT),
     "installment_loan_statement": (Tier.TIER_2, DocumentCategory.CREDIT),
+    # LP-442 — schema'd credit types.
+    "bankruptcy_filing": (Tier.TIER_1, DocumentCategory.CREDIT),
+    "unsecured_note": (Tier.TIER_1, DocumentCategory.CREDIT),
+    "verification_of_mortgage": (Tier.TIER_1, DocumentCategory.CREDIT),
+    "verification_of_rent": (Tier.TIER_1, DocumentCategory.CREDIT),
     # ===================================================================== #
     # Disclosures
     # ===================================================================== #
     "closing_disclosure": (Tier.TIER_2, DocumentCategory.DISCLOSURES),
     "loan_estimate": (Tier.TIER_2, DocumentCategory.DISCLOSURES),
-    "borrower_authorization": (Tier.TIER_2, DocumentCategory.DISCLOSURES),
+    # LP-442 decision 2: the generic borrower_authorization is RETIRED — the two
+    # authorization specs (authorization_to_run_credit, borrower_authorization_and_certification)
+    # are distinct documents and cannot share a key. Verified unused (no rule/fixture/test).
     "intent_to_proceed": (Tier.TIER_2, DocumentCategory.DISCLOSURES),
     "notice_of_right_to_cancel": (Tier.TIER_2, DocumentCategory.DISCLOSURES),
     "truth_in_lending": (Tier.TIER_2, DocumentCategory.DISCLOSURES),
     "servicing_disclosure": (Tier.TIER_2, DocumentCategory.DISCLOSURES),
-    "affiliated_business_disclosure": (Tier.TIER_2, DocumentCategory.DISCLOSURES),
+    "affiliated_business_disclosure": (
+        Tier.TIER_1,
+        DocumentCategory.DISCLOSURES,
+    ),  # LP-442: merge target (aba spec)
     "privacy_notice": (Tier.TIER_2, DocumentCategory.DISCLOSURES),
-    "e_consent_disclosure": (Tier.TIER_2, DocumentCategory.DISCLOSURES),
+    "e_consent_disclosure": (
+        Tier.TIER_1,
+        DocumentCategory.DISCLOSURES,
+    ),  # LP-442: merge target (consent spec)
+    # LP-442 — schema'd disclosure/authorization types (decision 2 splits the two auth docs).
+    "authorization_to_run_credit": (Tier.TIER_1, DocumentCategory.DISCLOSURES),
+    "borrower_authorization_and_certification": (Tier.TIER_1, DocumentCategory.DISCLOSURES),
+    "borrower_s_authorization_for_counseling": (Tier.TIER_1, DocumentCategory.DISCLOSURES),
+    "credit_card_authorization": (Tier.TIER_1, DocumentCategory.DISCLOSURES),
+    "social_security_administration_ssa_89": (Tier.TIER_1, DocumentCategory.DISCLOSURES),
+    "mortgage_loan_origination_agreement": (Tier.TIER_1, DocumentCategory.DISCLOSURES),
+    "prior_closing_disclosure_final_cd_from_purchase": (Tier.TIER_1, DocumentCategory.DISCLOSURES),
     # ===================================================================== #
     # Borrower Info
     # ===================================================================== #
@@ -155,6 +236,18 @@ CATALOG: dict[str, tuple[Tier, DocumentCategory]] = {
     "power_of_attorney": (Tier.TIER_2, DocumentCategory.BORROWER_INFO),
     "trust_documentation": (Tier.TIER_2, DocumentCategory.BORROWER_INFO),
     "name_affidavit": (Tier.TIER_2, DocumentCategory.BORROWER_INFO),
+    # LP-442 — schema'd borrower-info types (incl. the 5 topical LOE variants + application LOE).
+    "government_issued_id": (Tier.TIER_1, DocumentCategory.BORROWER_INFO),
+    "work_visa_ead_card": (Tier.TIER_1, DocumentCategory.BORROWER_INFO),
+    "court_order_documents": (Tier.TIER_1, DocumentCategory.BORROWER_INFO),
+    "trust_agreement": (Tier.TIER_1, DocumentCategory.BORROWER_INFO),
+    "trust_documents": (Tier.TIER_1, DocumentCategory.BORROWER_INFO),
+    "application_loe": (Tier.TIER_1, DocumentCategory.BORROWER_INFO),
+    "letter_of_explanation_asset": (Tier.TIER_1, DocumentCategory.BORROWER_INFO),
+    "letter_of_explanation_child_care": (Tier.TIER_1, DocumentCategory.BORROWER_INFO),
+    "letter_of_explanation_income": (Tier.TIER_1, DocumentCategory.BORROWER_INFO),
+    "letter_of_explanation_misc": (Tier.TIER_1, DocumentCategory.BORROWER_INFO),
+    "letter_of_explanation_property": (Tier.TIER_1, DocumentCategory.BORROWER_INFO),
     # ===================================================================== #
     # Misc — recognized loan-file documents that don't fit the buckets above.
     # (The Tier-3 default below catches anything UNCATALOGED; these are known.)
@@ -163,6 +256,13 @@ CATALOG: dict[str, tuple[Tier, DocumentCategory]] = {
     "underwriting_approval": (Tier.TIER_2, DocumentCategory.MISC),
     "rate_lock_agreement": (Tier.TIER_2, DocumentCategory.MISC),
     "general_correspondence": (Tier.TIER_2, DocumentCategory.MISC),
+    # LP-442 — schema'd misc types.
+    "aus_findings": (Tier.TIER_1, DocumentCategory.MISC),
+    "certificate_of_eligibility": (Tier.TIER_1, DocumentCategory.MISC),
+    "appraisal_payment": (Tier.TIER_1, DocumentCategory.MISC),
+    "evidence_of_payment": (Tier.TIER_1, DocumentCategory.MISC),
+    "custom": (Tier.TIER_1, DocumentCategory.MISC),
+    "miscellaneous_document": (Tier.TIER_1, DocumentCategory.MISC),
 }
 
 # The default for any type not in the catalog: the long-tail Tier 3 / Misc bucket.

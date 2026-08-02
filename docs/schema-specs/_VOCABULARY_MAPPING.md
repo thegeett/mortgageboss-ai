@@ -1,3 +1,12 @@
+> **✅ RESOLVED by LP-442.** All 72 remaining uncataloged spec types are now reconciled: **4 merges**
+> (`aba`→`affiliated_business_disclosure`, `consent_…`→`e_consent_disclosure`,
+> `k_1_schedule_1065_1120s`→`k1_statement`, `mortgage_payoff`→`payoff_statement`), **1 split**
+> (`alimony_income_verification`→`alimony_income` + `child_support_income`), **67 new catalog types +
+> indicators**, and **1 retire** (`borrower_authorization`, decision 2). **Every spec `document_type` now
+> resolves to a catalog entry — 109/109.** The full reconciliation table, the verified payoff target, the 17
+> deliberate non-merges, and every indicator written are in [`../tickets/LP-442.md`](../tickets/LP-442.md) and
+> ADR-347. The table below is the LP-441 snapshot that motivated the follow-up — kept for provenance.
+
 # Vocabulary mapping — the 82 schema `document_type`s not in the catalog (LP-441)
 
 The schema-spec vocabulary diverged from the catalog/classifier vocabulary. This maps every one of the

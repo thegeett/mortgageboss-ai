@@ -1,5 +1,5 @@
 {
-  "document_type": "mortgage_payoff",
+  "document_type": "payoff_statement",
   "slug": "mortgage-payoff",
   "tier": 2,
   "rules_served": ["CR-3", "TI-3"],
