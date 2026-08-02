@@ -60,7 +60,7 @@
   ],
 
   "open_questions": [
-    {"id":1,"q":"donor_address / donor_phone PII.","options":["register donor_address in _PII_FIELDS (pre_masked=false) so it is masked + match-hashed like other addresses","accept standard sensitivity"],"recommendation":"register donor_address — a real address unmasked in the catch-all is the exact failure; leave donor_phone unregistered","blocks_implementation":true},
+    {"id":1,"q":"donor_address / donor_phone PII.","options":["register donor_address in _PII_FIELDS (pre_masked=false) so it is masked + match-hashed like other addresses","accept standard sensitivity"],"recommendation":"register donor_address — a real address unmasked in the catch-all is the exact failure; leave donor_phone unregistered GEET'S DECISION (LP-438): mask account-like identifiers (policy/account/plan numbers, wire/ACH trace, check references) via _PII_FIELDS; leave addresses and public-record case numbers PLAIN; DOB is unmasked (pii null).","blocks_implementation":false},
     {"id":2,"q":"Joint donors shape. Flat donor_name / donor_name_2 + donor_names_raw covers 1-2 donors. If a rule ever needs to address 3+ donors individually, revisit as person[].","options":["stay flat (name/name_2 + raw string)","person[] nested list"],"recommendation":"stay flat now; the raw string preserves recoverability","blocks_implementation":false},
     {"id":3,"q":"no_repayment / no_ownership as str vs bool. No bool coercer exists, and the verbatim attestation is more useful for review than a stripped true/false.","options":["keep as str","add a bool coercer"],"recommendation":"keep as str (matches the existing extractor's no_repayment_attestation)","blocks_implementation":false}
   ],

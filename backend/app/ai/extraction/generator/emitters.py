@@ -12,9 +12,10 @@ test skeleton. What is NEVER emitted: review metadata (``why`` / ``reason_class`
 ``rejected`` / ``open_questions`` / ``rule_floor`` / ``plumbing_sites`` …), a coercer,
 a ``PiiKind``, or a nested list.
 
-The count cross-check (guide §8) is built here too — :func:`count_crosscheck_pairs`
-and :func:`emit_count_crosscheck` — ready for the day a nested list is implemented,
-even though nested specs are refused today.
+Nested lists are GENERIC since LP-437/438 (no longer refused): :func:`emit_list_specs` emits a
+``ListSpec`` + registration snippet per list, and the count cross-check (guide §8,
+:func:`count_crosscheck_pairs` / :func:`emit_count_crosscheck`) fires where a ``<list>_count`` field
+sits beside a matching list.
 """
 
 from __future__ import annotations
@@ -355,6 +356,31 @@ def emit_prompt(spec: Spec) -> str:
         else "<one short sentence describing the document>"
     )
 
+    # Nested lists (LP-438) — the flat_row shape: one bare row per item + a page/snippet source.
+    nested_block = ""
+    nested_contract = ""
+    if spec.nested_lists:
+        blk = [
+            "",
+            "3. NESTED LISTS — one FLAT ROW per repeating item (bare values + a page/snippet):",
+        ]
+        for nl in spec.nested_lists:
+            blk.append(f"     {nl.name} — each row: " + ", ".join(f.name for f in nl.fields))
+        if count_crosscheck_pairs(spec):
+            blk.append(
+                "   Read the TOTAL COUNT from the document's summary FIRST, then list every item "
+                "(a count that disagrees with the rows marks the extraction PARTIAL)."
+            )
+        nested_block = "\n".join(blk) + "\n"
+        for nl in spec.nested_lists:
+            row = ", ".join(
+                f'"{f.name}": <{TYPE_TO_JSON.get(f.type or "str", "string")}|null>'
+                for f in nl.fields
+            )
+            nested_contract += (
+                f',\n  "{nl.name}": [{{{row}, "page": <int|null>, "snippet": <string|null>}}]'
+            )
+
     return f"""GENERATED STARTER PROMPT (LP-434) — REPLACE WITH / MERGE INTO THE TUNED {ttl_upper}
 PROMPT. A scaffold so the module works end-to-end; keep the JSON contract below. The
 typed-core field set comes from the schema spec — refine the wording with Priya.
@@ -370,7 +396,7 @@ CAPTURE EVERYTHING ON THE DOCUMENT — lose nothing. There are two buckets:
 
 2. ADDITIONAL SECTIONS — EVERYTHING ELSE, grouped by section (e.g. "Other"). Do not
    force these into the typed core — capture them here so nothing is lost.
-
+{nested_block}
 FOR EVERY FIELD include WHERE you read it:
   - "page"    (integer)  the 1-based page the value appears on
   - "snippet" (string)   the verbatim text you read the value from
@@ -390,7 +416,7 @@ Respond with ONLY a single JSON object, no markdown fences and no prose, exactly
     {{"section": "<section name>", "fields": [
       {{"label": "<field label>", "value": <string|null>, "page": <int|null>, "snippet": <string|null>}}
     ]}}
-  ],
+  ]{nested_contract},
   "field_confidence": {{"<typed_core field name>": <0.0-1.0|null>, "...": <0.0-1.0|null>}},
   "confidence": <number 0.0-1.0>,
   "reasoning": "{reasoning_hint}"
@@ -588,6 +614,73 @@ def emit_count_crosscheck(count_field: str, list_name: str) -> str:
 
 
 # --------------------------------------------------------------------------- #
+# Generic nested lists (LP-437/438) — emit a ListSpec + its registration per list
+# --------------------------------------------------------------------------- #
+
+
+def _list_const(list_name: str) -> str:
+    return f"_{list_name.upper()}_LIST"
+
+
+def emit_list_specs(spec: Spec) -> str:
+    """Per ``nested_lists`` entry, the LP-437 ``ListSpec`` construction + its ``_LIST_SPECS`` registration.
+
+    The generic mechanism (LP-437) makes a nested list a DECLARATION, not ~5 bespoke files: the emitted
+    ``ListSpec`` names the row fields and the three declarable helpers (``derived`` fail-closed on an
+    unmapped value, ``redact`` over named fields, ``stable_row_id``). Returns ``""`` for a flat spec.
+
+    The registration is emitted as a SNIPPET (like the ``EXTRACTORS`` registration) — never a patch to the
+    shared ``documents_section._LIST_SPECS`` file (a merge-conflict factory, D2). Wiring is a later step.
+    """
+    if not spec.nested_lists:
+        return ""
+    blocks: list[str] = []
+    consts: list[str] = []
+    for nl in spec.nested_lists:
+        const = _list_const(nl.name)
+        consts.append(const)
+        names = ", ".join(f'"{f.name}"' for f in nl.fields)
+        parts = [
+            f'    name="{nl.name}",',
+            f"    fields=({names},)," if nl.fields else "    fields=(),",
+        ]
+        if nl.derived:
+            dl = []
+            for d in nl.derived:
+                mp = ", ".join(f'"{k}": "{v}"' for k, v in d.mapping.items())
+                dl.append(
+                    f'        DerivedSpec(field="{d.field}", from_field="{d.from_field}", '
+                    f"mapping={{{mp}}}),"
+                )
+            parts.append("    derived=(\n" + "\n".join(dl) + "\n    ),")
+        if nl.redact:
+            parts.append("    redact=frozenset({" + ", ".join(f'"{r}"' for r in nl.redact) + "}),")
+        if nl.stable_row_id:
+            parts.append("    stable_row_id=True,")
+        blocks.append(f"{const} = ListSpec(\n" + "\n".join(parts) + "\n)")
+    reg = f'    "{spec.document_type}": ({", ".join(consts)},),'
+    return (
+        "# Generic nested lists (LP-437/438) — the ListSpec(s) + registration for this document type.\n"
+        "# from app.verification.snapshot.documents_section import ListSpec, DerivedSpec\n\n"
+        + "\n\n".join(blocks)
+        + "\n\n# Register in app/verification/snapshot/documents_section.py::_LIST_SPECS (a snippet, "
+        "never a patch — D2):\n" + reg + "\n"
+    )
+
+
+def emit_count_crosschecks(spec: Spec) -> str:
+    """The count cross-check(s) for every ``<list>_count`` field beside a matching list (guide §8).
+
+    Now reachable (nested lists are generatable — LP-438): each closes the model-self-truncation gap the
+    API truncation guard cannot see. ``""`` when the spec has no matching ``*_count`` + list pair.
+    """
+    pairs = count_crosscheck_pairs(spec)
+    if not pairs:
+        return ""
+    return "\n".join(emit_count_crosscheck(cf, ln) for cf, ln in pairs)
+
+
+# --------------------------------------------------------------------------- #
 # Diff mode (guide §6, D6) — a REPORT of what to add, never a patch
 # --------------------------------------------------------------------------- #
 
@@ -630,9 +723,27 @@ def emit_diff_report(spec: Spec) -> str:
 
     if spec.nested_lists:
         lines.append("")
-        lines.append(f"## Nested lists ({len(spec.nested_lists)}) — each a bespoke ~5-file ticket")
+        lines.append(
+            f"## Nested lists ({len(spec.nested_lists)}) — GENERIC (LP-437): a declaration, not ~5 files"
+        )
         for nested in spec.nested_lists:
+            extras = []
+            if nested.derived:
+                extras.append(f"derived={[d.field for d in nested.derived]}")
+            if nested.redact:
+                extras.append(f"redact={list(nested.redact)}")
+            if nested.stable_row_id:
+                extras.append("stable_row_id")
+            tail = f" [{', '.join(extras)}]" if extras else ""
             lines.append(
-                f"- BLOCKED  {nested.name} (guide §4): parser + snapshot Record + reshaper + consumer"
+                f"- ADD      {nested.name}: {len(nested.fields)} row fields{tail} "
+                "(+ a per-rule consumer — enumerator or derived recipe — as separate follow-up)"
             )
+        lines.append("")
+        lines.append(emit_list_specs(spec).rstrip())
+        crosschecks = emit_count_crosschecks(spec)
+        if crosschecks:
+            lines.append("")
+            lines.append("## Count cross-check(s) (guide §8) — count ≠ row count → PARTIAL")
+            lines.append(crosschecks.rstrip())
     return "\n".join(lines) + "\n"

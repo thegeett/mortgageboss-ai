@@ -65,7 +65,7 @@
   ],
 
   "open_questions": [
-    {"id":1,"q":"Flatten signatures_and_notary vs nested list — there are usually <=2 signers plus a notary.","options":["nested flat-row list (drafted) — safe for any count","flatten to signer_signed / notary_present / notary_date"],"recommendation":"(a) nested — the notary block is the proof the authority is itself validly executed, and the list is cheap","blocks_implementation":true},
+    {"id":1,"q":"Flatten signatures_and_notary vs nested list — there are usually <=2 signers plus a notary.","options":["nested flat-row list (drafted) — safe for any count","flatten to signer_signed / notary_present / notary_date"],"recommendation":"(a) nested — the notary block is the proof the authority is itself validly executed, and the list is cheap GEET'S DECISION (LP-438): FLATTEN signatures to signature_present + signature_date — no signature nested list.","blocks_implementation":false},
     {"id":2,"q":"seller_entity_type without an enum — the catalog provides no enum_values.","options":["free str (drafted)","a controlled vocabulary (individual/LLC/corp/partnership/trust/estate)"],"recommendation":"free str now; normalize if a rule later branches on entity type","blocks_implementation":false}
   ],
 

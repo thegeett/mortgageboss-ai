@@ -59,7 +59,7 @@
 
   "open_questions": [
     {"id":1,"q":"Overlap with the appraisal (004) and subject property note (028) — for the subject property, the appraisal is authoritative on characteristics and value.","options":["keep this profile lean as a cross-check source","enrich it with beds/baths/GLA to feed a value-reconciliation rule"],"recommendation":"keep lean until such a rule exists","blocks_implementation":false},
-    {"id":2,"q":"Sales/transfer & lien nested lists — same as 086.","options":["build a flat-row list now","defer to catch-all"],"recommendation":"defer to catch-all until a consumer exists","blocks_implementation":true}
+    {"id":2,"q":"Sales/transfer & lien nested lists — same as 086.","options":["build a flat-row list now","defer to catch-all"],"recommendation":"defer to catch-all until a consumer exists GEET'S DECISION (LP-438): BUILD IT — LP-437 made nested lists cheap (one declaration + the generic mechanism); the one-list-budget / defer / no-consumer concern is overturned. Build as flat_row; the per-rule consumer is separate follow-up.","blocks_implementation":false}
   ],
 
   "notes": [

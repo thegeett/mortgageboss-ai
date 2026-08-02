@@ -50,9 +50,9 @@
   ],
 
   "open_questions": [
-    {"id":1,"q":"facts_and_chronology / transfer dates typed vs catch-all.","options":["catch-all","typed timeline (nested list)"],"recommendation":"catch-all — no consumer; flag if occupancy/flip rules later need a typed timeline","blocks_implementation":true},
+    {"id":1,"q":"facts_and_chronology / transfer dates typed vs catch-all.","options":["catch-all","typed timeline (nested list)"],"recommendation":"catch-all — no consumer; flag if occupancy/flip rules later need a typed timeline GEET'S DECISION (LP-438): BUILD IT — LP-437 made nested lists cheap (one declaration + the generic mechanism); the one-list-budget / defer / no-consumer concern is overturned. Build as flat_row; the per-rule consumer is separate follow-up.","blocks_implementation":false},
     {"id":2,"q":"Subject vs non-subject property. There is no subject_property_indicator in this catalog (unlike 084). Should we add one so occupancy logic knows which property the letter explains?","options":["add a subject_property_indicator field","leave absent"],"recommendation":"add as [absent from catalog] if occupancy rules materialize","blocks_implementation":true},
-    {"id":3,"q":"property_address when multiple properties are named.","options":["single flattened address","list of addresses"],"recommendation":"kept as a single flattened address; revisit as a list only if a letter routinely covers several properties","blocks_implementation":true}
+    {"id":3,"q":"property_address when multiple properties are named.","options":["single flattened address","list of addresses"],"recommendation":"kept as a single flattened address; revisit as a list only if a letter routinely covers several properties GEET'S DECISION (LP-438): BUILD IT — LP-437 made nested lists cheap (one declaration + the generic mechanism); the one-list-budget / defer / no-consumer concern is overturned. Build as flat_row; the per-rule consumer is separate follow-up.","blocks_implementation":false}
   ],
 
   "notes": [

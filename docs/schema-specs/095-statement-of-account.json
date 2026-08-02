@@ -71,7 +71,7 @@
   ],
 
   "open_questions": [
-    {"id":1,"q":"transactions_or_activity shape and inclusion. Item count spans a few (mortgage statement) to dozens (credit card).","options":["flat-row list","omit until a rule needs transaction-level data"],"recommendation":"flat-row list — token-safe and reusable","blocks_implementation":true},
+    {"id":1,"q":"transactions_or_activity shape and inclusion. Item count spans a few (mortgage statement) to dozens (credit card).","options":["flat-row list","omit until a rule needs transaction-level data"],"recommendation":"flat-row list — token-safe and reusable GEET'S DECISION (LP-438): BUILD IT — LP-437 made nested lists cheap (one declaration + the generic mechanism); the one-list-budget / defer / no-consumer concern is overturned. Build as flat_row; the per-rule consumer is separate follow-up.","blocks_implementation":false},
     {"id":2,"q":"property_address presence. Only appears on secured-account statements (mortgage/HELOC).","options":["keep as identity/linkage","make it conditional in guidance"],"recommendation":"kept as identity/linkage; confirm it is worth the field for the unsecured-account majority, or make it conditional in guidance","blocks_implementation":false},
     {"id":3,"q":"Statement period as two dates vs the catalog's date_range.","options":["split to _start/_end","single date_range field"],"recommendation":"split to _start/_end because there is no date_range coercer; confirm downstream does not expect a single range field","blocks_implementation":false}
   ],

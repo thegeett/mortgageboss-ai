@@ -66,7 +66,7 @@
   ],
 
   "open_questions": [
-    {"id":1,"q":"One list or three. entitlements, deductions, allotments are three parallel object[]s.","options":["one entitlements list only","a single combined pay_line_items flat list with a category column covering all three"],"recommendation":"(a) one entitlements list now — the sole income-calc consumer; escalate to (b) if a rule needs typed deductions/allotments","blocks_implementation":true},
+    {"id":1,"q":"One list or three. entitlements, deductions, allotments are three parallel object[]s.","options":["one entitlements list only","a single combined pay_line_items flat list with a category column covering all three"],"recommendation":"(a) one entitlements list now — the sole income-calc consumer; escalate to (b) if a rule needs typed deductions/allotments GEET'S DECISION (LP-438): BUILD IT — LP-437 made nested lists cheap (one declaration + the generic mechanism); the one-list-budget / defer / no-consumer concern is overturned. Build as flat_row; the per-rule consumer is separate follow-up.","blocks_implementation":false},
     {"id":2,"q":"Tax objects flattened to str. federal/fica/state_tax_data are objects degraded to strings.","options":["keep flattened to str","promote sub-fields"],"recommendation":"keep flattened; if a withholding rule ever needs the components, they'd need sub-field promotion","blocks_implementation":true},
     {"id":3,"q":"SSN field name. social_security_number_masked differs from the registry's taxpayer_ssn_masked.","options":["reuse the existing key","register a new one"],"recommendation":"confirm whether to reuse the existing key or register a new one","blocks_implementation":false}
   ],

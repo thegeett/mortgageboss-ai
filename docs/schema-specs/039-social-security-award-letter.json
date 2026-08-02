@@ -62,7 +62,7 @@
   ],
 
   "open_questions": [
-    {"id":1,"q":"Deductions as a nested list vs catch-all — medicare_or_other_deductions is small and only supports gross→net reconciliation","options":["one flat nested list","drop it to the catch-all and keep only gross/net scalars"],"recommendation":"(b) drop to catch-all unless a rule needs itemized deductions","blocks_implementation":true},
+    {"id":1,"q":"Deductions as a nested list vs catch-all — medicare_or_other_deductions is small and only supports gross→net reconciliation","options":["one flat nested list","drop it to the catch-all and keep only gross/net scalars"],"recommendation":"(b) drop to catch-all unless a rule needs itemized deductions GEET'S DECISION (LP-438): BUILD IT — LP-437 made nested lists cheap (one declaration + the generic mechanism); the one-list-budget / defer / no-consumer concern is overturned. Build as flat_row; the per-rule consumer is separate follow-up.","blocks_implementation":false},
     {"id":2,"q":"Continuance derivation — IN-13 flags 'short/undocumented continuance'","options":["leave benefit_end_or_review_date + continuation_or_age_dependency_terms for the rule to interpret","add a derived months-to-end"],"recommendation":"(a) leave the fields for the rule; months-to-end is a conclusion, not a fact","blocks_implementation":false},
     {"id":3,"q":"SSI usability — SSI may be non-continuing/non-qualifying","options":["benefit_type alone suffices","add a separate program-eligibility flag"],"recommendation":"confirm whether benefit_type alone suffices for IN-13 or a separate program-eligibility flag is wanted","blocks_implementation":false}
   ],

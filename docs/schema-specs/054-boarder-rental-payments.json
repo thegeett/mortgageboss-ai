@@ -59,7 +59,7 @@
   ],
 
   "open_questions": [
-    {"id":1,"q":"Two candidate lists — payment_history (chosen) vs supporting_bank_statements_or_checks. Budget is one list per document.","options":["keep payment_history as the nested list","use supporting_bank_statements_or_checks"],"recommendation":"keep payment_history as the nested list; flatten supporting evidence to a bare string list only if a consumer appears","blocks_implementation":true},
+    {"id":1,"q":"Two candidate lists — payment_history (chosen) vs supporting_bank_statements_or_checks. Budget is one list per document.","options":["keep payment_history as the nested list","use supporting_bank_statements_or_checks"],"recommendation":"keep payment_history as the nested list; flatten supporting evidence to a bare string list only if a consumer appears GEET'S DECISION (LP-438): BUILD IT — LP-437 made nested lists cheap (one declaration + the generic mechanism); the one-list-budget / defer / no-consumer concern is overturned. Build as flat_row; the per-rule consumer is separate follow-up.","blocks_implementation":false},
     {"id":2,"q":"total_payments_received as fact vs conclusion — it is a stated total on the document (fact) but close to a computed figure.","options":["keep it (stated figure)","reject as a computed conclusion"],"recommendation":"keep it (stated figure, disambiguated by the history rows); reject only the average and the missed-payment count, which are judgments","blocks_implementation":false}
   ],
 

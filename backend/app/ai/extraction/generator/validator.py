@@ -91,17 +91,25 @@ def validate(spec: Spec) -> list[Refusal]:
                 )
             )
 
-    # Condition 4 — any nested list is bespoke, ~5 files each; never auto-generated.
-    if spec.nested_lists:
-        names = ", ".join(n.name for n in spec.nested_lists)
-        refusals.append(
-            Refusal(
-                4,
-                None,
-                f"spec has {len(spec.nested_lists)} nested list(s) [{names}] — "
-                "each is a bespoke ~5-file ticket (guide §4), not generated",
-            )
-        )
+    # Condition 4 is RETIRED (LP-438). Nested lists are no longer bespoke ~5-file tickets:
+    # LP-437's generic mechanism (ListRow / DocumentEntry.lists / _LIST_SPECS + the three helpers)
+    # makes the STORAGE side a declaration the generator emits. The CONSUMER (a rule enumerator or a
+    # derived recipe) is still per-list, but that is the rule's own logic, not a stop condition. A
+    # nested-list ROW FIELD still needs a coercer, though — condition 2 extends to it (a row with a
+    # bool/enum field cannot be typed any more than a flat one).
+    for nested in spec.nested_lists:
+        for rf in nested.fields:
+            # An untyped row field defaults to ``str`` (coerce_str), like a flat degraded field; only
+            # an EXPLICIT non-coercible type (bool/enum/…) refuses.
+            if rf.type is not None and rf.type not in VALID_TYPES:
+                refusals.append(
+                    Refusal(
+                        2,
+                        f"{nested.name}.{rf.name}",
+                        f"nested-list row field type {rf.type!r} has no coercer "
+                        f"(only {', '.join(VALID_TYPES)} exist)",
+                    )
+                )
 
     refusals.sort(key=lambda r: (r.condition, r.field or ""))
     return refusals

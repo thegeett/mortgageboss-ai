@@ -46,8 +46,8 @@
   ],
 
   "open_questions": [
-    {"id":1,"q":"facts_and_chronology typed vs catch-all.","options":["catch-all","typed timeline (nested list)"],"recommendation":"catch-all — no consumer today; flag if a future rule needs a typed timeline","blocks_implementation":true},
-    {"id":2,"q":"supporting_documents shape.","options":["flat supporting_documents_summary str","nested list"],"recommendation":"flat str; escalate to a list only if attachment-matching becomes a rule","blocks_implementation":true},
+    {"id":1,"q":"facts_and_chronology typed vs catch-all.","options":["catch-all","typed timeline (nested list)"],"recommendation":"catch-all — no consumer today; flag if a future rule needs a typed timeline GEET'S DECISION (LP-438): BUILD IT — LP-437 made nested lists cheap (one declaration + the generic mechanism); the one-list-budget / defer / no-consumer concern is overturned. Build as flat_row; the per-rule consumer is separate follow-up.","blocks_implementation":false},
+    {"id":2,"q":"supporting_documents shape.","options":["flat supporting_documents_summary str","nested list"],"recommendation":"flat str; escalate to a list only if attachment-matching becomes a rule GEET'S DECISION (LP-438): BUILD IT — LP-437 made nested lists cheap (one declaration + the generic mechanism); the one-list-budget / defer / no-consumer concern is overturned. Build as flat_row; the per-rule consumer is separate follow-up.","blocks_implementation":false},
     {"id":3,"q":"Overlap with 077/079.","options":["retain document_title verbatim","re-route to a specific subtype"],"recommendation":"because this is the fallback LOE, document_title should be retained verbatim so downstream can detect a document that belongs in a more specific subtype","blocks_implementation":false}
   ],
 

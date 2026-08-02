@@ -62,9 +62,9 @@
   ],
 
   "open_questions": [
-    {"id":1,"q":"prior_va_loan_or_entitlement_charges shape. Item count is small but unbounded.","options":["flat-row nested list","drop to catch-all"],"recommendation":"flat-row — a processor computing remaining entitlement needs it structured, and cost is low","blocks_implementation":true},
+    {"id":1,"q":"prior_va_loan_or_entitlement_charges shape. Item count is small but unbounded.","options":["flat-row nested list","drop to catch-all"],"recommendation":"flat-row — a processor computing remaining entitlement needs it structured, and cost is low GEET'S DECISION (LP-438): BUILD IT — LP-437 made nested lists cheap (one declaration + the generic mechanism); the one-list-budget / defer / no-consumer concern is overturned. Build as flat_row; the per-rule consumer is separate follow-up.","blocks_implementation":false},
     {"id":2,"q":"Is a COE ever consumed by a rule? Today zero rules. If a future VA-eligibility rule lands, available_entitlement_amount and funding_fee_exempt_indicator become the floor.","options":["zero rules today","future VA-eligibility rule"],"recommendation":"they are already promoted, so no re-extraction needed. Confirm with domain expert","blocks_implementation":false},
-    {"id":3,"q":"va_file_or_loan_number PII class. Confidential but not SSN-class. Register in _PII_FIELDS or leave as a plain typed field?","options":["register in _PII_FIELDS","plain typed field, flagged"],"recommendation":"plain typed field, flagged","blocks_implementation":true}
+    {"id":3,"q":"va_file_or_loan_number PII class. Confidential but not SSN-class. Register in _PII_FIELDS or leave as a plain typed field?","options":["register in _PII_FIELDS","plain typed field, flagged"],"recommendation":"plain typed field, flagged GEET'S DECISION (LP-438): mask account-like identifiers (policy/account/plan numbers, wire/ACH trace, check references) via _PII_FIELDS; leave addresses and public-record case numbers PLAIN; DOB is unmasked (pii null).","blocks_implementation":false}
   ],
 
   "notes": [

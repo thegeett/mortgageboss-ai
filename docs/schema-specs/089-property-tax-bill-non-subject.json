@@ -64,7 +64,7 @@
   ],
 
   "open_questions": [
-    {"id":1,"q":"Flatten installments vs nested list.","options":["nested flat-row list (drafted) — safe for any count","flatten to installment_1_* / installment_2_* fields"],"recommendation":"(a) nested — avoids losing a 4-installment bill, and the list is cheap","blocks_implementation":true},
+    {"id":1,"q":"Flatten installments vs nested list.","options":["nested flat-row list (drafted) — safe for any count","flatten to installment_1_* / installment_2_* fields"],"recommendation":"(a) nested — avoids losing a 4-installment bill, and the list is cheap GEET'S DECISION (LP-438): BUILD IT — LP-437 made nested lists cheap (one declaration + the generic mechanism); the one-list-budget / defer / no-consumer concern is overturned. Build as flat_row; the per-rule consumer is separate follow-up.","blocks_implementation":false},
     {"id":2,"q":"Non-subject tax bill's purpose.","options":[],"recommendation":"Its value is confirming other-real-estate carrying costs and surfacing tax liens; if a rule is later built to net property tax into DTI, total_tax_due + tax_year are ready. No action now","blocks_implementation":false}
   ],
 

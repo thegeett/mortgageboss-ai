@@ -67,7 +67,7 @@
 
   "open_questions": [
     {"id":1,"q":"No attached rule — the packet lists 0 rules, yet IN-12 (self-employment) and income rules typically consume 1040 transcripts","options":["design to identity/processor as done and flag that the rule mapping is incomplete","wait for the rule"],"recommendation":"(a) design to identity/processor and surface the gap","blocks_implementation":false},
-    {"id":2,"q":"Which object[] is the nested list — return_line_items, wages_and_income_summary, and account_adjustments are all repeating","options":["one flat return_line_items with a section tag absorbing all three","separate lists (heavy)"],"recommendation":"(a) one flat return_line_items; a Wage & Income transcript may warrant its own list if a rule reads per-payer income","blocks_implementation":true},
+    {"id":2,"q":"Which object[] is the nested list — return_line_items, wages_and_income_summary, and account_adjustments are all repeating","options":["one flat return_line_items with a section tag absorbing all three","separate lists (heavy)"],"recommendation":"(a) one flat return_line_items; a Wage & Income transcript may warrant its own list if a rule reads per-payer income GEET'S DECISION (LP-438): BUILD IT — LP-437 made nested lists cheap (one declaration + the generic mechanism); the one-list-budget / defer / no-consumer concern is overturned. Build as flat_row; the per-rule consumer is separate follow-up.","blocks_implementation":false},
     {"id":3,"q":"as-filed vs per-computer — confirm which figure the income analysis should trust","options":["trust as-filed","type both if a rule cross-checks"],"recommendation":"confirm which figure the income analysis should trust; consider typing both if a rule cross-checks","blocks_implementation":false}
   ],
 

@@ -85,11 +85,42 @@ class SpecField:
 
 
 @dataclass(frozen=True)
-class NestedList:
-    """One ``nested_lists`` entry — the name and item count; the generator never emits these."""
+class NestedListField:
+    """One field of a nested-list row — its name + coercer type."""
 
     name: str
+    type: str | None
+
+
+@dataclass(frozen=True)
+class DerivedField:
+    """A declared derived row field (LP-437): map ``from_field``'s value → a new ``field``.
+
+    Fail-closed by construction downstream: an unmapped source value yields an ABSENT field,
+    never a fabricated value (the ``_direction`` forged-deposit discipline).
+    """
+
+    field: str
+    from_field: str
+    mapping: dict[str, str]
+
+
+@dataclass(frozen=True)
+class NestedList:
+    """One ``nested_lists`` entry — now generatable via LP-437's generic ``ListSpec`` (was refused).
+
+    ``fields`` are the row's declared fields; ``derived`` / ``redact`` / ``stable_row_id`` are the
+    three LP-437 helper declarations (all optional). ``shape`` is ``flat_row`` (the light shape —
+    bare scalars + one source per row) or ``per_field_wrapped``.
+    """
+
+    name: str
+    shape: str | None
     expected_item_count: str | None
+    fields: tuple[NestedListField, ...]
+    derived: tuple[DerivedField, ...]
+    redact: tuple[str, ...]
+    stable_row_id: bool
     raw: dict[str, Any]
 
 
@@ -140,6 +171,16 @@ def _field(raw: Any) -> SpecField | None:
     )
 
 
+def _derived(raw: Any) -> DerivedField | None:
+    if not isinstance(raw, dict):
+        return None
+    field, from_field, mapping = raw.get("field"), raw.get("from"), raw.get("map")
+    if not (isinstance(field, str) and isinstance(from_field, str) and isinstance(mapping, dict)):
+        return None
+    clean = {str(k): str(v) for k, v in mapping.items()}
+    return DerivedField(field=field, from_field=from_field, mapping=clean)
+
+
 def _nested(raw: Any) -> NestedList | None:
     if not isinstance(raw, dict):
         return None
@@ -147,9 +188,23 @@ def _nested(raw: Any) -> NestedList | None:
     if not isinstance(name, str) or not name:
         return None
     count = raw.get("expected_item_count")
+    fields = tuple(
+        NestedListField(
+            name=x["name"], type=x.get("type") if isinstance(x.get("type"), str) else None
+        )
+        for x in _as_list(raw.get("fields"))
+        if isinstance(x, dict) and isinstance(x.get("name"), str)
+    )
+    derived = tuple(d for d in (_derived(x) for x in _as_list(raw.get("derived"))) if d is not None)
+    redact = tuple(x for x in _as_list(raw.get("redact")) if isinstance(x, str))
     return NestedList(
         name=name,
+        shape=raw.get("shape") if isinstance(raw.get("shape"), str) else None,
         expected_item_count=count if isinstance(count, str) else None,
+        fields=fields,
+        derived=derived,
+        redact=redact,
+        stable_row_id=raw.get("stable_row_id") is True,
         raw=raw,
     )
 

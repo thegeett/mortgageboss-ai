@@ -72,7 +72,7 @@
   ],
 
   "open_questions": [
-    {"id":1,"q":"k1_box_items shape — flat-row vs per-field-wrapped","options":["flat-row","per-field-wrapped"],"recommendation":"flat-row, comfortably under the ceiling (box counts are moderate-to-many with lettered sub-codes)","blocks_implementation":true},
+    {"id":1,"q":"k1_box_items shape — flat-row vs per-field-wrapped","options":["flat-row","per-field-wrapped"],"recommendation":"flat-row, comfortably under the ceiling (box counts are moderate-to-many with lettered sub-codes) GEET'S DECISION (LP-438): BUILD IT — LP-437 made nested lists cheap (one declaration + the generic mechanism); the one-list-budget / defer / no-consumer concern is overturned. Build as flat_row; the per-rule consumer is separate follow-up.","blocks_implementation":false},
     {"id":2,"q":"Distributions duplication — the capital-account distribution (Item L) and the box distribution (19/16D) can differ","options":["type both (chosen) and let IN-12 pick","type one"],"recommendation":"type both — the discrepancy is itself informative; keep the section as the disambiguator","blocks_implementation":false},
     {"id":3,"q":"Ownership % degradation — profit/loss/capital % differ and there is no percent coercer; flattened to one str","options":["keep the str now","confirm which numeric % IN-12 uses (typically profit %)"],"recommendation":"keep the str now, flag the numeric need","blocks_implementation":false},
     {"id":4,"q":"PII registration — entity_ein, partner_or_shareholder_tin, and partner_or_shareholder_address are all unregistered under these names","options":["register before go-live"],"recommendation":"confirm registration before go-live so the snapshot masks them","blocks_implementation":false}

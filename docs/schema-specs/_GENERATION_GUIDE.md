@@ -97,32 +97,37 @@ document name, and the `reasoning` hint.
 
 ---
 
-## 4. Nested lists — bespoke, ~5 files each
+## 4. Nested lists — GENERIC since LP-437 (a declaration, not ~5 files)
 
-**There is no generic mechanism.** A generator must **not** attempt these. Each is its own ticket.
+**This section is rewritten (LP-438). Nested lists are NO LONGER refused.** LP-437 built one generic
+mechanism (`ListRow` + `DocumentEntry.lists` + `_LIST_SPECS` + three declarable helpers), so the STORAGE side
+of a list is a declaration the generator emits — not the old five bespoke files.
 
-| # | file | what |
+**What the generator emits, per `nested_lists` entry:**
+
+| # | artifact | what |
 |---|---|---|
-| 1 | `app/ai/extraction/<type>.py` | the nested Pydantic class, its list parser (`_parse_<name>`), and the `list[X]` attribute |
-| 2 | `app/verification/snapshot/model.py` | a `…Record` class + the `DocumentEntry` attribute (`tuple[XRecord, ...] \| None = None`) |
-| 3 | `documents_section.py` | a `build_<name>(...)` reshaper, **registered in `build_documents_section`** |
-| 4 | the consumer | a rule `snapshot_path` (e.g. `documents.entries[document_type=="bank_statement"].transactions[direction=="credit"]`) or a `derived.py` recipe |
-| 5 | (if the list carries PII) | a bespoke per-row redactor — `_redact_description` is the precedent |
+| 1 | a `ListSpec` (LP-437) | `name` + row `fields` + the three helper declarations (`derived` / `redact` / `stable_row_id`) |
+| 2 | a `_LIST_SPECS` registration **snippet** | `"<type>": (_<LIST>_LIST,)` — a snippet, never a shared-file patch (D2) |
+| 3 | the prompt's flat-row block | one bare row per repeating item + a page/snippet source |
+| 4 | (if a `<list>_count` field is present) | the count cross-check — count ≠ row count → PARTIAL (§8) |
 
-⚠️ **Two caveats on the `plumbing_sites: 5` estimate:**
+There is no per-list Pydantic `…Record` class, no `DocumentEntry` attribute, no bespoke `build_<name>`
+reshaper — LP-437's generic converter and `assign_content_ids` do all of that, driven by the `ListSpec`.
 
-- **It is more if the consumer is a NEW fact-tag + rule** — add `vocabulary_extra.yaml`,
-  `tag_production.yaml`, the rule spec, `rule_kinds.csv`, `activation_bars.yaml` (**~5 more**).
-- **Site #4 varies enormously.** `build_schedule_c` is ~15 lines; `build_transactions` drags in
-  `TransactionRecord`, `_direction`, `_redact_description`, `_txn_field` and content-id assignment
-  (**100+ lines**).
+**What is still per-list — the CONSUMER (a human, per rule).** A list that feeds a rule needs either a per-row
+subject enumerator (like `_per_deposit` for `transactions`) or a `derived.py` recipe that aggregates it (like
+`income.is_self_employed` reading `entry.schedule_c`). **That is the rule's own logic, not plumbing** — the
+generator does NOT emit it; it reports it as required follow-up per list.
 
-**The wiring is mechanical; four decisions are human:** the item shape (flat-row vs per-field-wrapped), any
-derived attribute (e.g. `direction` = credit/debit), any redaction, and whether items need **stable
-content_ids** for cross-run reconciliation.
+**The three declarations are human decisions, recorded in the spec:** any `derived` field (a value-map,
+**fail-closed** — an unmapped value is ABSENT, never fabricated), any `redact` fields, and `stable_row_id`
+(only where a rule enumerates the rows as subjects). `flat_row` (bare scalars + one source per row) is the
+light shape; per-field wrapping is heavier and reserved for the rare case a row needs per-field provenance.
 
-**The spec already records the shape and its reason — honour it.** Flat-row was chosen wherever item counts
-are high, because per-field wrapping risks the output ceiling.
+**Coexistence (LP-437 ruling):** the three legacy bespoke lists (`transactions` → AS-1, `schedule_c` → IN-12,
+`schedule_e` → IN-13) are UNTOUCHED and keep their own attributes; `lists` is the generic channel for new
+lists only. **Do not migrate the legacy three** (they feed live rules).
 
 ---
 

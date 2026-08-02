@@ -131,9 +131,22 @@ def test_condition_3_known_pii_kind_passes(tmp_path: Path) -> None:
     assert validate(spec) == []
 
 
-def test_condition_4_nested_list(tmp_path: Path) -> None:
-    spec = _load(tmp_path, _spec_dict(nested_lists=[{"name": "rows", "fields": []}]))
-    assert 4 in _conditions(validate(spec))
+def test_condition_4_nested_list_is_retired(tmp_path: Path) -> None:
+    # LP-438: nested lists are generatable via LP-437's generic mechanism — no longer a stop condition.
+    spec = _load(
+        tmp_path,
+        _spec_dict(nested_lists=[{"name": "rows", "fields": [{"name": "a", "type": "str"}]}]),
+    )
+    assert validate(spec) == []  # a nested list alone no longer refuses
+
+
+def test_nested_list_row_field_with_no_coercer_still_refuses(tmp_path: Path) -> None:
+    # Condition 2 extends to row fields: a bool/enum row field has no coercer.
+    spec = _load(
+        tmp_path,
+        _spec_dict(nested_lists=[{"name": "rows", "fields": [{"name": "flag", "type": "bool"}]}]),
+    )
+    assert 2 in _conditions(validate(spec))
 
 
 def test_condition_5_missing_reason_class(tmp_path: Path) -> None:
@@ -141,20 +154,26 @@ def test_condition_5_missing_reason_class(tmp_path: Path) -> None:
     assert 5 in _conditions(validate(spec))
 
 
-def test_top_ten_refuse_except_the_two_geet_unblocked() -> None:
-    # A high refusal rate on the nested-heavy top ten is the CORRECT outcome (guide §12). After LP-435
-    # applied Geet's four decisions, TWO of the top ten now pass: 008-w2 (its ADDRESS pii was unmasked →
-    # pii null) and 009-condo (its blocking master-policy question was answered). The other eight still
-    # refuse (nested lists, DOB, other blocking questions). This pins that post-decision reality.
+def test_top_ten_pass_status_after_lp438() -> None:
+    # After LP-438 retired the nested-list condition and applied Geet's DOB + question decisions, SIX of the
+    # top ten pass; four still refuse on a blocking question left OUT of the four blanket themes (a token
+    # ceiling, a multi-submission splitter, an extract-at-all question). Pins the post-LP-438 reality.
     specs_dir = _BACKEND.parent / "docs" / "schema-specs"
-    now_passing = {"w2", "condo_questionnaire"}
+    now_passing = {
+        "bank_statement",
+        "purchase_agreement",
+        "appraisal",
+        "pay_stub",
+        "w2",
+        "condo_questionnaire",
+    }
     for n in range(1, 11):
         matches = list(specs_dir.glob(f"{n:03d}-*.json"))
         assert matches, f"missing spec {n:03d}"
         spec = load_spec(matches[0])
         refuses = bool(validate(spec))
         if spec.document_type in now_passing:
-            assert not refuses, f"{spec.document_type} should pass after Geet's LP-435 decisions"
+            assert not refuses, f"{spec.document_type} should pass after LP-438"
         else:
             assert refuses, f"{spec.document_type} unexpectedly passed"
 

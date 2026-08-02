@@ -13011,3 +13011,34 @@ teaches the context builders to emit rows (opt-in + row cap, because a 20-tradel
 **Cross-refs.** LP-436 (`docs/tickets/LP-436.md`, the investigation), ADR-061 (the first-class typed-path pattern
 the three bespoke lists follow), LP-421 (the additive-no-bump precedent), ADR-248 (the transaction redaction/direction
 discipline), ADR-251 (content-ids). LP-438 adds the `_FORMAT.md` list declaration + the generator emitting `ListSpec`s.
+
+## ADR-344: The generator emits generic-list registration as a SNIPPET, not a shared-file patch — and wiring is deferred because the ListSpec type lives in the snapshot layer (LP-438)
+
+**Context.** LP-437 built the generic nested-list mechanism (`ListSpec` / `DocumentEntry.lists` / `_LIST_SPECS`
++ three helpers) and shipped `_LIST_SPECS` empty. LP-438 extended the generator to emit a `ListSpec` per
+`nested_lists` entry. D2 asked how a generated module registers its lists WITHOUT every module editing one
+shared file (a merge-conflict factory).
+
+**The decision — emit the `_LIST_SPECS` registration as a SNIPPET, never a patch; defer wiring.** The generator
+emits, per list, the `ListSpec` construction plus a one-line registration snippet (`"<type>": (_<LIST>_LIST,)`)
+— exactly the shape of the existing `EXTRACTORS` registration snippet, which the generator also emits but never
+applies. Nothing patches `documents_section._LIST_SPECS`. This keeps generation side-effect-free and avoids the
+merge-conflict factory a shared-file edit would create at 66-list scale.
+
+**The layering reason wiring is a separate step.** The `ListSpec` / `DerivedSpec` types live in the SNAPSHOT
+layer (`app/verification/snapshot/documents_section.py`), because that is where the generic converter consumes
+them. A generated EXTRACTION module (`app/ai/extraction/<type>.py`) therefore cannot define its own `ListSpec`
+and self-register at import time without importing the verification layer — an inversion of the established
+`verification → app.ai` dependency direction. So the registry is populated by a deliberate wiring step (step 7),
+not by generation. Two clean shapes remain open for that step: (a) a generated registry module in the snapshot
+layer that aggregates per-type `ListSpec`s, or (b) moving the `ListSpec` type to a neutral module both layers
+import. LP-438 does not choose between them (it does not wire); it records that a shared-file-per-module edit is
+the one shape to avoid.
+
+**Consequences.** The generator is complete for emission; wiring 70 specs' lists into `_LIST_SPECS` (and writing
+each list's per-rule consumer — an enumerator or a derived recipe, which is the rule's own logic) is the
+follow-on. Nested lists are no longer a stop condition; the validate pass count rose 14 → 70.
+
+**Cross-refs.** ADR-343 (the LP-437 mechanism + the coexist / no-bump / AI-invisibility rulings),
+`docs/schema-specs/_GENERATION_GUIDE.md` §4 (rewritten), `_FORMAT.md` (the per-list declaration), LP-439 (the
+extractor generation that consumes these emissions).

@@ -62,7 +62,10 @@
       "name":"transactions","shape":"flat_row",
       "shape_reason":"a 4-month statement carries 200+ line items; per-field wrapping would risk the 16,384-token output ceiling",
       "expected_item_count":"50-300","rules":["AS-1","AS-2","AS-5","AS-7","AS-12","PC-5","FR-5"],
-      "exists_today":true,"plumbing_sites":0,
+      "exists_today":true,
+      "derived":[{"field":"direction","from":"transaction_type","map":{"deposit":"credit","withdrawal":"debit"}}],
+      "redact":["description"],
+      "stable_row_id":true,
       "fields":[
         {"name":"date","type":"date","why":"AS-1 timing, AS-2/PC-5 EMD window"},
         {"name":"description","type":"str","why":"AS-5 gift detection, AS-7 NSF lines, FR-5 recurring debits","pii_note":"incidental PII — needs a row redactor, not _PII_FIELDS"},

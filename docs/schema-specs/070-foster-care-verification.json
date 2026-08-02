@@ -62,8 +62,8 @@
   ],
 
   "open_questions": [
-    {"id":1,"q":"taxable_status vs reimbursement_vs_income_components — the taxable/reimbursement split can be a single enum-degraded string or a nested breakdown.","options":["flat taxable_status","nested reimbursement_vs_income_components"],"recommendation":"keep the flat taxable_status; only nest reimbursement_vs_income_components if a rule must read component amounts","blocks_implementation":true},
-    {"id":2,"q":"Child data minimization — the catalog has no child-identifier field, which is correct. Confirm the prompt hard-blocks child PII from the catch-all, since the catch-all is stored unmasked.","options":["confirm prompt hard-blocks child PII from the catch-all"],"recommendation":"confirm the prompt hard-blocks the foster child's name, DOB, and case-child identifiers from every field including the catch-all","blocks_implementation":true}
+    {"id":1,"q":"taxable_status vs reimbursement_vs_income_components — the taxable/reimbursement split can be a single enum-degraded string or a nested breakdown.","options":["flat taxable_status","nested reimbursement_vs_income_components"],"recommendation":"keep the flat taxable_status; only nest reimbursement_vs_income_components if a rule must read component amounts GEET'S DECISION (LP-438): BUILD IT — LP-437 made nested lists cheap (one declaration + the generic mechanism); the one-list-budget / defer / no-consumer concern is overturned. Build as flat_row; the per-rule consumer is separate follow-up.","blocks_implementation":false},
+    {"id":2,"q":"Child data minimization — the catalog has no child-identifier field, which is correct. Confirm the prompt hard-blocks child PII from the catch-all, since the catch-all is stored unmasked.","options":["confirm prompt hard-blocks child PII from the catch-all"],"recommendation":"confirm the prompt hard-blocks the foster child's name, DOB, and case-child identifiers from every field including the catch-all GEET'S DECISION (LP-438): dependent_count only — no child names, ages, or DOBs (the prompt hard-blocks child PII).","blocks_implementation":false}
   ],
 
   "notes": [

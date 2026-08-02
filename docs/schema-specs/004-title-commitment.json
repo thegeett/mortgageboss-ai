@@ -83,7 +83,7 @@
     {"id":2,"q":"Requirements and exceptions merged with a discriminator, or two lists?","options":["one list + schedule discriminator (chosen)","two separate lists"],"recommendation":"one list — saves ~5 plumbing sites, and the discriminator preserves the distinction rules depend on","blocks_implementation":false},
     {"id":3,"q":"A lien appearing in BOTH requirements and exceptions","options":["capture twice","deduplicate"],"recommendation":"capture both — TI-3 needs the requirement to see the payoff plan; TI-4 needs the exception to see the encumbrance","blocks_implementation":false},
     {"id":4,"q":"APN vs address as the match key for TI-1/PR-7/RE-1","options":["keep tolerant address matching","prefer the APN where both documents carry one"],"recommendation":"capture the APN regardless; preferring it is a RULE change, not a schema one","blocks_implementation":false},
-    {"id":5,"q":"Defer chain_of_title (~5 sites, serves only TI-6/FR-2)?","options":["ship both lists","ship schedule_b_items only"],"recommendation":"ship schedule_b_items first — it unblocks TI-3, TI-4 and CR-11; chain_of_title serves two AI-surface rules","blocks_implementation":true}
+    {"id":5,"q":"Defer chain_of_title (~5 sites, serves only TI-6/FR-2)?","options":["ship both lists","ship schedule_b_items only"],"recommendation":"ship schedule_b_items first — it unblocks TI-3, TI-4 and CR-11; chain_of_title serves two AI-surface rules GEET'S DECISION (LP-438): BUILD IT — LP-437 made nested lists cheap (one declaration + the generic mechanism); the one-list-budget / defer / no-consumer concern is overturned. Build as flat_row; the per-rule consumer is separate follow-up.","blocks_implementation":false}
   ],
 
   "notes": [

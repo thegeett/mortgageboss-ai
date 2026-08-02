@@ -67,7 +67,7 @@
   "open_questions": [
     {"id":1,"q":"Single receipt vs payment history. The document may be one payment or a ledger.","options":["populate recurring_payment_history only when a ledger is present, else leave []"],"recommendation":"keep the one flat nested list; flag that most instances leave it empty","blocks_implementation":false},
     {"id":2,"q":"Which cleared signal is authoritative? cleared_or_completed_indicator, paid_in_full_indicator, and account_status_after_payment overlap.","options":["pick one trusted signal","keep all three"],"recommendation":"keep all three (they corroborate); let a future DTI-exclusion rule pick the trusted one","blocks_implementation":false},
-    {"id":3,"q":"check_reference_or_trace_number PII class. Restricted but not last-4-masked.","options":["register as raw","keep as a plain restricted typed field"],"recommendation":"keep typed, flag","blocks_implementation":true}
+    {"id":3,"q":"check_reference_or_trace_number PII class. Restricted but not last-4-masked.","options":["register as raw","keep as a plain restricted typed field"],"recommendation":"keep typed, flag GEET'S DECISION (LP-438): mask account-like identifiers (policy/account/plan numbers, wire/ACH trace, check references) via _PII_FIELDS; leave addresses and public-record case numbers PLAIN; DOB is unmasked (pii null).","blocks_implementation":false}
   ],
 
   "notes": [

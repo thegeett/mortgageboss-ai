@@ -48,7 +48,7 @@
 
   "open_questions": [
     {"id":1,"q":"Enum/boolean degradation — several consent flags degrade to strings for lack of a bool/enum coercer.","options":["accept string degradation and rely on the snippet","add a coercer"],"recommendation":"accept string degradation and rely on the snippet; revisit only if a rule needs a typed boolean (e.g. 'authorization must permit post-closing re-verification')","blocks_implementation":false},
-    {"id":2,"q":"Signatures flattened vs nested — flattened to present/date for up to two borrowers.","options":["flatten to present/date fields","nested signatures list"],"recommendation":"flatten; revisit as a nested list only if a rule must address more than two signers individually","blocks_implementation":true}
+    {"id":2,"q":"Signatures flattened vs nested — flattened to present/date for up to two borrowers.","options":["flatten to present/date fields","nested signatures list"],"recommendation":"flatten; revisit as a nested list only if a rule must address more than two signers individually GEET'S DECISION (LP-438): FLATTEN signatures to signature_present + signature_date — no signature nested list.","blocks_implementation":false}
   ],
 
   "notes": [

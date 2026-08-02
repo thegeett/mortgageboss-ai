@@ -57,8 +57,8 @@
 
   "open_questions": [
     {"id":1,"q":"Reserves consumer. net_cash_value / cash_surrender_value are typed on the expectation that a reserves rule will read them.","options":["confirm the intended snapshot_path","defer"],"recommendation":"confirm the intended snapshot_path so the field name matches the future rule","blocks_implementation":false},
-    {"id":2,"q":"policy_number_masked registration.","options":["add to _PII_FIELDS (pre_masked true)","leave to the catch-all"],"recommendation":"add to _PII_FIELDS (pre_masked true) before this schema ships, or the value lands unmasked in the catch-all","blocks_implementation":true},
-    {"id":3,"q":"Owner/insured cardinality.","options":["two scalars each (flattened)","person[] nested list"],"recommendation":"flattened to two scalars each; revisit as person[] only if a rule must address a third owner/insured","blocks_implementation":true}
+    {"id":2,"q":"policy_number_masked registration.","options":["add to _PII_FIELDS (pre_masked true)","leave to the catch-all"],"recommendation":"add to _PII_FIELDS (pre_masked true) before this schema ships, or the value lands unmasked in the catch-all GEET'S DECISION (LP-438): mask account-like identifiers (policy/account/plan numbers, wire/ACH trace, check references) via _PII_FIELDS; leave addresses and public-record case numbers PLAIN; DOB is unmasked (pii null).","blocks_implementation":false},
+    {"id":3,"q":"Owner/insured cardinality.","options":["two scalars each (flattened)","person[] nested list"],"recommendation":"flattened to two scalars each; revisit as person[] only if a rule must address a third owner/insured GEET'S DECISION (LP-438): BUILD IT — LP-437 made nested lists cheap (one declaration + the generic mechanism); the one-list-budget / defer / no-consumer concern is overturned. Build as flat_row; the per-rule consumer is separate follow-up.","blocks_implementation":false}
   ],
 
   "notes": [

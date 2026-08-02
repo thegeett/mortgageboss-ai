@@ -52,8 +52,8 @@
   ],
 
   "open_questions": [
-    {"id":1,"q":"supporting_documents shape.","options":["flat supporting_documents_summary str","a nested string list"],"recommendation":"(a) flat str — usually a short phrase, no consumer; leave until a rule needs to match named attachments","blocks_implementation":true},
-    {"id":2,"q":"income_amounts_orvariance as a list.","options":["leave to the catch-all","nested list of itemized figures"],"recommendation":"leave to the catch-all; flag for review if underwriting later wants itemized before/after figures typed","blocks_implementation":true},
+    {"id":1,"q":"supporting_documents shape.","options":["flat supporting_documents_summary str","a nested string list"],"recommendation":"(a) flat str — usually a short phrase, no consumer; leave until a rule needs to match named attachments GEET'S DECISION (LP-438): BUILD IT — LP-437 made nested lists cheap (one declaration + the generic mechanism); the one-list-budget / defer / no-consumer concern is overturned. Build as flat_row; the per-rule consumer is separate follow-up.","blocks_implementation":false},
+    {"id":2,"q":"income_amounts_orvariance as a list.","options":["leave to the catch-all","nested list of itemized figures"],"recommendation":"leave to the catch-all; flag for review if underwriting later wants itemized before/after figures typed GEET'S DECISION (LP-438): BUILD IT — LP-437 made nested lists cheap (one declaration + the generic mechanism); the one-list-budget / defer / no-consumer concern is overturned. Build as flat_row; the per-rule consumer is separate follow-up.","blocks_implementation":false},
     {"id":3,"q":"borrower_name split.","options":["flat name/name_2 + raw string","split without raw retention"],"recommendation":"joint LOEs may sign two names on one line; borrower_names_raw retained so the tag layer can judge a bad split","blocks_implementation":false}
   ],
 

@@ -17,7 +17,9 @@ import sys
 from pathlib import Path
 
 from app.ai.extraction.generator.emitters import (
+    emit_count_crosschecks,
     emit_diff_report,
+    emit_list_specs,
     emit_module,
     emit_prompt,
     emit_registration,
@@ -73,6 +75,14 @@ def _generate_new_type(spec: Spec, out_dir: Path) -> int:
         print(f"  wrote {p}")
     print("\n--- registration (add by hand; the generator never patches __init__.py) ---")
     print(emit_registration(spec))
+    if spec.nested_lists:
+        list_specs = _write(out_dir, f"{dt}.lists.py", emit_list_specs(spec))
+        print(f"\n--- generic nested lists (LP-437/438) — wrote {list_specs} ---")
+        print(emit_list_specs(spec))
+        crosschecks = emit_count_crosschecks(spec)
+        if crosschecks:
+            print("--- count cross-check(s) (guide §8) — drop into the extractor's parse ---")
+            print(crosschecks)
     return 0
 
 

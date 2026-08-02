@@ -47,7 +47,7 @@
   ],
 
   "open_questions": [
-    {"id":1,"q":"dependents_or_children — count vs list vs omit","options":["flat dependent_count int (recommended — supports the explanation, no child PII)","nested list with a child-data redactor (heavy plumbing, exposure)","omit entirely"],"recommendation":"flat dependent_count int; the number of children covered is the only fact a processor needs","blocks_implementation":true},
+    {"id":1,"q":"dependents_or_children — count vs list vs omit","options":["flat dependent_count int (recommended — supports the explanation, no child PII)","nested list with a child-data redactor (heavy plumbing, exposure)","omit entirely"],"recommendation":"flat dependent_count int; the number of children covered is the only fact a processor needs GEET'S DECISION (LP-438): dependent_count only — no child names, ages, or DOBs (the prompt hard-blocks child PII).","blocks_implementation":false},
     {"id":2,"q":"$0 expense representation — current_childcare_expense = 0 with no_expense_reason populated, vs a null amount","options":["store an explicit 0","null amount"],"recommendation":"store an explicit 0 so the absence is a positive fact, not a missing value","blocks_implementation":false},
     {"id":3,"q":"expected_future_expense — kept because a childcare cost that begins after closing can affect residual income","options":["keep as typed field","drop to catch-all"],"recommendation":"confirm this is in-scope for the programs the engine targets, else drop to catch-all","blocks_implementation":false}
   ],

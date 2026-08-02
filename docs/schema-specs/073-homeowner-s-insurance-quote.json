@@ -68,9 +68,9 @@
   ],
 
   "open_questions": [
-    {"id":1,"q":"Which one nested list? mortgagee_or_lienholder_entries vs deductibles — both CORE object[]","options":["nest mortgagee_entries","nest deductibles"],"recommendation":"nest mortgagee_entries (needed to verify the lender clause) and add a flat wind_hail_deductible / all_perils_deductible pair if a rule needs deductibles, rather than a second list","blocks_implementation":true},
+    {"id":1,"q":"Which one nested list? mortgagee_or_lienholder_entries vs deductibles — both CORE object[]","options":["nest mortgagee_entries","nest deductibles"],"recommendation":"nest mortgagee_entries (needed to verify the lender clause) and add a flat wind_hail_deductible / all_perils_deductible pair if a rule needs deductibles, rather than a second list GEET'S DECISION (LP-438): BUILD IT — LP-437 made nested lists cheap (one declaration + the generic mechanism); the one-list-budget / defer / no-consumer concern is overturned. Build as flat_row; the per-rule consumer is separate follow-up.","blocks_implementation":false},
     {"id":2,"q":"replacement_cost_or_coinsurance_basis reliability — should the schema carry policy_form (ISO code) as its own typed field to guarantee the disambiguator survives?","options":["carry policy_form as its own typed field","keep the ISO code in the snippet"],"recommendation":"yes if an IH-1-style rule is activated — otherwise keep the code in the snippet and revisit","blocks_implementation":false},
-    {"id":3,"q":"policy_number masking — pre-mask at extraction vs raw-then-snapshot","options":["pre-mask at extraction","extract raw, snapshot masks"],"recommendation":"pre-mask (restricted)","blocks_implementation":true}
+    {"id":3,"q":"policy_number masking — pre-mask at extraction vs raw-then-snapshot","options":["pre-mask at extraction","extract raw, snapshot masks"],"recommendation":"pre-mask (restricted) GEET'S DECISION (LP-438): mask account-like identifiers (policy/account/plan numbers, wire/ACH trace, check references) via _PII_FIELDS; leave addresses and public-record case numbers PLAIN; DOB is unmasked (pii null).","blocks_implementation":false}
   ],
 
   "notes": [

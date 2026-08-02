@@ -65,7 +65,7 @@
   ],
 
   "open_questions": [
-    {"id":1,"q":"Which inspection list — inspection_results (chosen) vs required_inspections. They overlap; results carry outcomes.","options":["inspection_results","required_inspections"],"recommendation":"keep inspection_results; fold 'required' into it if a jurisdiction lists both. Flag if a rule ever needs the required-vs-performed gap","blocks_implementation":true},
+    {"id":1,"q":"Which inspection list — inspection_results (chosen) vs required_inspections. They overlap; results carry outcomes.","options":["inspection_results","required_inspections"],"recommendation":"keep inspection_results; fold 'required' into it if a jurisdiction lists both. Flag if a rule ever needs the required-vs-performed gap GEET'S DECISION (LP-438): BUILD IT — LP-437 made nested lists cheap (one declaration + the generic mechanism); the one-list-budget / defer / no-consumer concern is overturned. Build as flat_row; the per-rule consumer is separate follow-up.","blocks_implementation":false},
     {"id":2,"q":"Completion evidence — certificate_of_occupancy_or_completion is rejected in favor of status+close-date.","options":["rely on permit_status + final_or_close_date","add certificate_of_occupancy_or_completion as its own typed field"],"recommendation":"confirm with the domain expert that C-of-O presence isn't needed as its own typed field for renovation loans","blocks_implementation":false}
   ],
 

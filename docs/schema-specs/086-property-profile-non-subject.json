@@ -58,7 +58,7 @@
   ],
 
   "open_questions": [
-    {"id":1,"q":"Sales/transfer history and lien summary as nested lists — both genuinely repeat and would be useful to a future prior-transfer or existing-lien rule.","options":["build one flat-row list now (which one?)","defer both to catch-all"],"recommendation":"defer both to catch-all — no consumer exists, and building bespoke plumbing for a Tier-3 non-subject doc is premature","blocks_implementation":true},
+    {"id":1,"q":"Sales/transfer history and lien summary as nested lists — both genuinely repeat and would be useful to a future prior-transfer or existing-lien rule.","options":["build one flat-row list now (which one?)","defer both to catch-all"],"recommendation":"defer both to catch-all — no consumer exists, and building bespoke plumbing for a Tier-3 non-subject doc is premature GEET'S DECISION (LP-438): BUILD IT — LP-437 made nested lists cheap (one declaration + the generic mechanism); the one-list-budget / defer / no-consumer concern is overturned. Build as flat_row; the per-rule consumer is separate follow-up.","blocks_implementation":false},
     {"id":2,"q":"Property-characteristic depth — dropped beds/baths/lot/style.","options":["keep dropped","add back for other-real-estate rental income review"],"recommendation":"keep dropped pending feedback","blocks_implementation":false}
   ],
 

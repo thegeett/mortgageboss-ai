@@ -64,7 +64,7 @@
   ],
 
   "open_questions": [
-    {"id":1,"q":"loans_secured_by_or_held_at_institution — second nested list. The VOD's loan section can surface undisclosed debts or pledged assets (real mortgage value).","options":["keep only deposit_accounts now","add it as a second flat list"],"recommendation":"keep only deposit_accounts now — no rule consumes the loan section yet, and a second list is ~5 extra plumbing sites; flatten the presence signal into pledged_or_restricted_accounts for now and revisit when an undisclosed-debt rule exists","blocks_implementation":true},
+    {"id":1,"q":"loans_secured_by_or_held_at_institution — second nested list. The VOD's loan section can surface undisclosed debts or pledged assets (real mortgage value).","options":["keep only deposit_accounts now","add it as a second flat list"],"recommendation":"keep only deposit_accounts now — no rule consumes the loan section yet, and a second list is ~5 extra plumbing sites; flatten the presence signal into pledged_or_restricted_accounts for now and revisit when an undisclosed-debt rule exists GEET'S DECISION (LP-438): BUILD IT — LP-437 made nested lists cheap (one declaration + the generic mechanism); the one-list-budget / defer / no-consumer concern is overturned. Build as flat_row; the per-rule consumer is separate follow-up.","blocks_implementation":false},
     {"id":2,"q":"Signatures degraded to presence strings — applicant_authorized / institution_representative_signed degrade signature to str (no coercer).","options":["keep a presence/label string","add signer name"],"recommendation":"keep a presence/label string; add signer name only if a rule needs it","blocks_implementation":false}
   ],
 

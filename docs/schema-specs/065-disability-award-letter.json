@@ -61,7 +61,7 @@
   ],
 
   "open_questions": [
-    {"id":1,"q":"deductions_or_offsets shape/count. Usually 0-3 offsets.","options":["flat-row nested list","catch-all"],"recommendation":"flat-row — needed to explain the gross-to-net gap for gross-up","blocks_implementation":true},
+    {"id":1,"q":"deductions_or_offsets shape/count. Usually 0-3 offsets.","options":["flat-row nested list","catch-all"],"recommendation":"flat-row — needed to explain the gross-to-net gap for gross-up GEET'S DECISION (LP-438): BUILD IT — LP-437 made nested lists cheap (one declaration + the generic mechanism); the one-list-budget / defer / no-consumer concern is overturned. Build as flat_row; the per-rule consumer is separate follow-up.","blocks_implementation":false},
     {"id":2,"q":"Gross vs net for qualifying. Both are captured; underwriting may use gross (grossed up) or net depending on program.","options":["gross","net","keep both"],"recommendation":"keep both; a future income rule chooses","blocks_implementation":false},
     {"id":3,"q":"Continuance as structured vs prose. The 3-year continuance decision hinges on this.","options":["keep prose continuation_or_permanency_statement (this draft)","add a derived boolean"],"recommendation":"keep prose now; tags/rules judge continuance — a schema field should not","blocks_implementation":true}
   ],

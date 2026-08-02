@@ -70,7 +70,7 @@
   ],
 
   "open_questions": [
-    {"id":1,"q":"Which findings list gets the one nested-list slot: encroachments vs easements? Both repeat and both matter for title.","options":["encroachments (drafted) — they most often trigger conditions","easements — more numerous, affect lien priority","a single merged survey_exceptions list with a finding_type column"],"recommendation":"a single merged survey_exceptions list if a survey-findings rule is ever built; encroachments-only for now","blocks_implementation":true},
+    {"id":1,"q":"Which findings list gets the one nested-list slot: encroachments vs easements? Both repeat and both matter for title.","options":["encroachments (drafted) — they most often trigger conditions","easements — more numerous, affect lien priority","a single merged survey_exceptions list with a finding_type column"],"recommendation":"a single merged survey_exceptions list if a survey-findings rule is ever built; encroachments-only for now GEET'S DECISION (LP-438): BUILD IT — LP-437 made nested lists cheap (one declaration + the generic mechanism); the one-list-budget / defer / no-consumer concern is overturned. Build as flat_row; the per-rule consumer is separate follow-up.","blocks_implementation":false},
     {"id":2,"q":"surveyor_certification_text length — the certification block can be long.","options":["keep full text (drafted)","a truncated summary"],"recommendation":"full text — processors need the exact 'certified to' parties and a rule cannot re-derive them from a summary","blocks_implementation":false}
   ],
 

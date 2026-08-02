@@ -67,7 +67,7 @@
   ],
 
   "open_questions": [
-    {"id":1,"q":"other_monthly_charges — second nested list. Utilities/parking/pet charges could matter for total housing cost.","options":["(a) keep only rent_payment_history now","(b) add a second flat list for other_monthly_charges"],"recommendation":"(a) keep only rent_payment_history now — no rule consumes ancillary charges yet, and monthly_rent + subsidy_or_concession carry the core figure","blocks_implementation":true},
+    {"id":1,"q":"other_monthly_charges — second nested list. Utilities/parking/pet charges could matter for total housing cost.","options":["(a) keep only rent_payment_history now","(b) add a second flat list for other_monthly_charges"],"recommendation":"(a) keep only rent_payment_history now — no rule consumes ancillary charges yet, and monthly_rent + subsidy_or_concession carry the core figure GEET'S DECISION (LP-438): BUILD IT — LP-437 made nested lists cheap (one declaration + the generic mechanism); the one-list-budget / defer / no-consumer concern is overturned. Build as flat_row; the per-rule consumer is separate follow-up.","blocks_implementation":false},
     {"id":2,"q":"eviction_or_collection_status enum degradation. Stored as free str; the value set is uncontrolled until a real corpus is seen.","options":["keep str (free text)","introduce a controlled enum"],"recommendation":"keeping str; normalize in a future rule","blocks_implementation":false}
   ],
 

@@ -48,22 +48,44 @@ machine-checkable. A field with no defensible class does not go in.
 
 ## `NestedList`
 
+Since **LP-437** a nested list is a **declaration** the generator turns into a `ListSpec`, not ~5 bespoke
+files. Three optional helper declarations drive the LP-437 mechanism:
+
 ```jsonc
 {
   "name": "transactions",
-  "shape": "flat_row",              // flat_row | per_field_wrapped
+  "shape": "flat_row",              // flat_row (bare scalars + one source per row — the light shape) | per_field_wrapped
   "shape_reason": "200+ items on a 4-month statement; per-field wrapping risks the 16,384-token ceiling",
   "expected_item_count": "200+",
   "rules": ["AS-1", "AS-2", "AS-5"],
   "exists_today": true,
-  "plumbing_sites": 5,              // ~5 per list: parser · snapshot Record · DocumentEntry attr · reshaper · consumer
   "fields": [
     {"name": "amount", "type": "Decimal", "why": "AS-1 large-deposit sweep"},
     {"name": "description", "type": "str", "why": "AS-5 gift detection",
-     "pii_note": "incidental PII — needs a row redactor, not _PII_FIELDS"}
-  ]
+     "pii_note": "incidental PII — use `redact` below, not _PII_FIELDS"}
+  ],
+
+  // ── the three LP-437 helper declarations (all optional) ──
+  "derived": [                      // a value-map producing a NEW row field
+    {"field": "direction", "from": "transaction_type",
+     "map": {"deposit": "credit", "withdrawal": "debit"}}
+  ],
+  "redact": ["description"],        // run the shared _DESC_REDACT (\d(?:[\s-]?\d){8,}) over these fields
+  "stable_row_id": true             // content-derived row_id — ONLY where a rule enumerates rows as subjects
 }
 ```
+
+- **`derived`** — a value-map producing a new row field. ⚠️ **An UNMAPPED source value produces an ABSENT
+  field, never a fabricated one** — this is the forged-deposit discipline (`_direction`'s absent-on-unknown):
+  a guessed `direction` on an unlabelled row would trip a large-deposit rule on every unclassified withdrawal.
+- **`redact`** — the row fields to scrub with the shared `_DESC_REDACT` (a 9+-digit run → `[redacted]`), so a
+  free-text row field never carries a raw account/SSN at rest. The row-redactor path, not `_PII_FIELDS`.
+- **`stable_row_id`** — assign a content-derived `row_id` per row (`assign_content_ids`), **only** where a
+  rule enumerates the rows as finding subjects (like `transactions`/AS-1). A list read only in aggregate by a
+  derived recipe needs no per-row id and omits this.
+
+**`plumbing_sites` is deprecated (LP-438)** — it was ~5 per list under the bespoke path; under LP-437 the cost
+is ≈ one declaration + the per-rule consumer. Drop it from new/updated list entries.
 
 ## `Rejection` / `OpenQuestion`
 
@@ -87,7 +109,9 @@ resolved before code generation.
 | `typed_core[].name` + `.type` | the `TypedField[T]` declaration and its `_CORE_SPEC` coercer pair |
 | `typed_core[].pii` | the `_PII_FIELDS` entry |
 | `typed_core[].prompt_hint` | a per-field line in the prompt |
-| `nested_lists[].shape` | flat-row vs per-field-wrapped parser + prompt JSON block |
+| `nested_lists[]` | a LP-437 `ListSpec` + its `_LIST_SPECS` registration snippet + the prompt's flat-row block |
+| `nested_lists[].derived` / `.redact` / `.stable_row_id` | the `ListSpec`'s three helper declarations |
+| a `<list>_count` field beside a matching list | the count cross-check (count ≠ rows → PARTIAL, guide §8) |
 | `exists_today: false` | the additions a diff-style implementation must make |
 | `rejected` / `open_questions` / `encoding_variations` | **review only — never emitted into code** |
 
@@ -99,4 +123,6 @@ resolved before code generation.
    which is stored unmasked.
 4. **`rule_floor: true`** marks a field a rule needs that the catalog omits — each is a rule that would
    otherwise be dead on arrival.
-5. **A nested list costs ~5 plumbing sites.** Prefer flat fields; nest only for genuinely repeating items.
+5. **A nested list is a declaration (LP-437), not ~5 plumbing sites.** The STORAGE side is generic (a
+   `ListSpec` the generator emits); the CONSUMER (a rule enumerator or a derived recipe) is still per-list,
+   but that is the rule's own logic, not plumbing. Still prefer a flat field for a genuinely single value.

@@ -60,7 +60,7 @@
   ],
 
   "open_questions": [
-    {"id":1,"q":"Chronology vs parallel arrays — amounts_involved (money[]) and transaction_or_valuation_dates (date[]) could be kept as flat scalar lists instead of one object list","options":["one transfer_path_or_chronology list","two parallel scalar lists"],"recommendation":"one transfer_path_or_chronology list so each amount stays bound to its date/step; revisit only if letters routinely give a single amount+date (then flatten to two scalars)","blocks_implementation":true},
+    {"id":1,"q":"Chronology vs parallel arrays — amounts_involved (money[]) and transaction_or_valuation_dates (date[]) could be kept as flat scalar lists instead of one object list","options":["one transfer_path_or_chronology list","two parallel scalar lists"],"recommendation":"one transfer_path_or_chronology list so each amount stays bound to its date/step; revisit only if letters routinely give a single amount+date (then flatten to two scalars) GEET'S DECISION (LP-438): BUILD IT — LP-437 made nested lists cheap (one declaration + the generic mechanism); the one-list-budget / defer / no-consumer concern is overturned. Build as flat_row; the per-rule consumer is separate follow-up.","blocks_implementation":false},
     {"id":2,"q":"borrowed_funds_indicator degraded from bool — a tri-state ('yes / no / not stated') is more honest than a bool","options":["string capturing the stated language","bool"],"recommendation":"keep as string capturing the stated language","blocks_implementation":false},
     {"id":3,"q":"supporting_document_list — genuinely a list but no consumer","options":["catch-all","second nested list"],"recommendation":"catch-all rather than a second nested list","blocks_implementation":false}
   ],

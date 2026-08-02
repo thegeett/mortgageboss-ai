@@ -52,7 +52,7 @@
 
   "open_questions": [
     {"id":1,"q":"Which date is authoritative? receipt_date (when handed over) vs funds_received_date (when cleared) can differ.","options":["receipt_date","funds_received_date","keep both"],"recommendation":"keep both; asset-sourcing cares about cleared funds","blocks_implementation":false},
-    {"id":2,"q":"wire_or_ach_trace_number PII class. Restricted but not last-4-masked.","options":["register as raw PII","keep as a plain restricted typed field"],"recommendation":"keep typed, flag — a bare trace number is lower-risk than an account number but should not sit in the unmasked catch-all","blocks_implementation":true},
+    {"id":2,"q":"wire_or_ach_trace_number PII class. Restricted but not last-4-masked.","options":["register as raw PII","keep as a plain restricted typed field"],"recommendation":"keep typed, flag — a bare trace number is lower-risk than an account number but should not sit in the unmasked catch-all GEET'S DECISION (LP-438): mask account-like identifiers (policy/account/plan numbers, wire/ACH trace, check references) via _PII_FIELDS; leave addresses and public-record case numbers PLAIN; DOB is unmasked (pii null).","blocks_implementation":false},
     {"id":3,"q":"Overlap with EMD Withdrawal Proof / Bank Deposit Slip. Several asset-trace documents share these fields.","options":["confirm no duplication with sibling docs"],"recommendation":"confirm no field here duplicates a sibling doc's canonical home","blocks_implementation":false}
   ],
 

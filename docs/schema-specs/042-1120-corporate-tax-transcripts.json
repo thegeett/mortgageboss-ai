@@ -70,7 +70,7 @@
 
   "open_questions": [
     {"id":1,"q":"No attached rule — 0 rules in the packet, yet corporate returns are central to a business-owner borrower's income","options":["design to identity/processor and flag the mapping gap","defer"],"recommendation":"(a) design to identity/processor and flag the mapping gap","blocks_implementation":false},
-    {"id":2,"q":"Which repeating list — officer_compensation (owner W-2 income) vs deduction_line_items vs balance-sheet lines","options":["officer_compensation","deduction_line_items","balance-sheet lines"],"recommendation":"officer compensation, since it is the owner's direct income; revisit if a rule reads corporate cash flow or the balance sheet","blocks_implementation":true},
+    {"id":2,"q":"Which repeating list — officer_compensation (owner W-2 income) vs deduction_line_items vs balance-sheet lines","options":["officer_compensation","deduction_line_items","balance-sheet lines"],"recommendation":"officer compensation, since it is the owner's direct income; revisit if a rule reads corporate cash flow or the balance sheet GEET'S DECISION (LP-438): BUILD IT — LP-437 made nested lists cheap (one declaration + the generic mechanism); the one-list-budget / defer / no-consumer concern is overturned. Build as flat_row; the per-rule consumer is separate follow-up.","blocks_implementation":false},
     {"id":3,"q":"1120 vs 1120-S handling — the two forms need different income treatment; confirm whether one schema serves both (with tax_form_number branching) or the S-corp warrants its own type","options":["one schema with tax_form_number branching","separate S-corp type"],"recommendation":"confirm whether one schema serves both with tax_form_number branching","blocks_implementation":false}
   ],
 

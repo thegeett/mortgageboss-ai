@@ -60,7 +60,7 @@
   ],
 
   "open_questions": [
-    {"id":1,"q":"Which one nested list? asset_line_items vs liability_line_items — both are catalog CORE object[].","options":["(a) nest assets only","(b) nest liabilities only","(c) nest both (2x plumbing, over the one-list budget)"],"recommendation":"(a) — assets drive reserve/liquidity use; revisit if an undisclosed-debt rule lands that must read individual liabilities","blocks_implementation":true},
+    {"id":1,"q":"Which one nested list? asset_line_items vs liability_line_items — both are catalog CORE object[].","options":["(a) nest assets only","(b) nest liabilities only","(c) nest both (2x plumbing, over the one-list budget)"],"recommendation":"(a) — assets drive reserve/liquidity use; revisit if an undisclosed-debt rule lands that must read individual liabilities GEET'S DECISION (LP-438): BUILD IT — LP-437 made nested lists cheap (one declaration + the generic mechanism); the one-list-budget / defer / no-consumer concern is overturned. Build as flat_row; the per-rule consumer is separate follow-up.","blocks_implementation":false},
     {"id":2,"q":"subject_names cardinality — flattened to two + count + raw. If a future rule must address a specific business entity vs individual subject separately, revisit.","options":["flat (two + count + raw)","person_or_entity[] nested list"],"recommendation":"keep flat; revisit as person_or_entity[] only if a rule needs subjects addressed individually","blocks_implementation":false},
     {"id":3,"q":"annual_income_by_source — genuinely repeating but no consumer today.","options":["leave to catch-all","add a second nested list"],"recommendation":"leaving to catch-all rather than a second nested list","blocks_implementation":false}
   ],

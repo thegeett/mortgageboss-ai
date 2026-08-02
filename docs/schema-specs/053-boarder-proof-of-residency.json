@@ -59,9 +59,9 @@
   ],
 
   "open_questions": [
-    {"id":1,"q":"supporting_documents shape — flat-row nested list of strings vs flatten to a single joined string in typed_core?","options":["flat-row nested list of strings","flatten to a single joined string in typed_core"],"recommendation":"flat-row list, but acceptable to flatten if plumbing cost outweighs the value given zero rules","blocks_implementation":true},
+    {"id":1,"q":"supporting_documents shape — flat-row nested list of strings vs flatten to a single joined string in typed_core?","options":["flat-row nested list of strings","flatten to a single joined string in typed_core"],"recommendation":"flat-row list, but acceptable to flatten if plumbing cost outweighs the value given zero rules GEET'S DECISION (LP-438): BUILD IT — LP-437 made nested lists cheap (one declaration + the generic mechanism); the one-list-budget / defer / no-consumer concern is overturned. Build as flat_row; the per-rule consumer is separate follow-up.","blocks_implementation":false},
     {"id":2,"q":"Which address is authoritative — residence_address vs property_address vs mailing_and_service_address may all appear?","options":["keep all three typed","collapse to one"],"recommendation":"keep all three typed; let a future rule reconcile against the subject property rather than collapsing here","blocks_implementation":false},
-    {"id":3,"q":"PII scope for home addresses — should a boarder's residence_address be registered/masked?","options":["register/mask","leave at standard sensitivity"],"recommendation":"flag for the domain expert; standard sensitivity in the catalog suggests no, but it is a private residence","blocks_implementation":true}
+    {"id":3,"q":"PII scope for home addresses — should a boarder's residence_address be registered/masked?","options":["register/mask","leave at standard sensitivity"],"recommendation":"flag for the domain expert; standard sensitivity in the catalog suggests no, but it is a private residence GEET'S DECISION (LP-438): mask account-like identifiers (policy/account/plan numbers, wire/ACH trace, check references) via _PII_FIELDS; leave addresses and public-record case numbers PLAIN; DOB is unmasked (pii null).","blocks_implementation":false}
   ],
 
   "notes": [
