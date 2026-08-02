@@ -766,18 +766,35 @@ def test_failed_factory() -> None:
 
 
 def count_crosscheck_pairs(spec: Spec) -> list[tuple[str, str]]:
-    """``(count_field, list_name)`` pairs where a ``*_count`` field matches a nested list.
+    """``(count_field, list_name)`` pairs whose count should equal the list's FULL length.
 
-    A ``foo_count`` field matches a list named ``foos`` / ``foo`` / any list whose name
-    contains the ``foo`` stem (``tradeline_count`` → ``tradelines``; ``comparable_count``
-    → ``comparable_sales``; ``condition_count`` → ``aus_required_conditions``).
+    Two sources, explicit first (LP-445):
+
+    * **Explicit** — a nested list that declares ``count_field`` names the typed-core count equal to its
+      whole length. This expresses what the name heuristic cannot: a total named unlike its list
+      (``total_tradeline_count`` ↔ ``tradelines``, while ``open_tradeline_count`` — a DIFFERENT population —
+      is left uncrosschecked by simply not being named), and an irregular plural (``inquiry_count`` ↔
+      ``inquiries``). A declared ``count_field`` that is not a real typed-core field is ignored (the
+      validator rejects it up front; this stays fail-closed).
+    * **Heuristic fallback** — for every list WITHOUT an explicit declaration: a ``foo_count`` field
+      matches a list named ``foos`` / ``foo`` / any list whose name contains the ``foo`` stem
+      (``comparable_count`` → ``comparable_sales``; ``condition_count`` → ``aus_required_conditions``).
+      Unchanged, so every spec that does not opt in emits byte-identical cross-checks.
     """
+    core_names = {f.name for f in spec.typed_core}
     pairs: list[tuple[str, str]] = []
+    explicit_lists: set[str] = set()
+    for nested in spec.nested_lists:
+        if nested.count_field and nested.count_field in core_names:
+            pairs.append((nested.count_field, nested.name))
+            explicit_lists.add(nested.name)
     for f in spec.typed_core:
         if not f.name.endswith("_count"):
             continue
         stem = f.name[: -len("_count")]
         for nested in spec.nested_lists:
+            if nested.name in explicit_lists:
+                continue
             if nested.name in (f"{stem}s", stem) or stem in nested.name:
                 pairs.append((f.name, nested.name))
                 break

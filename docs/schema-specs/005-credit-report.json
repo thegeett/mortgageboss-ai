@@ -27,11 +27,20 @@
     {"name":"score_transunion","type":"int","why":"CR-7, PE-1","rules":["CR-7","PE-1"],"reason_class":"rule","rule_floor":true,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
     {"name":"score_model","type":"str","why":"CR-7 disambiguator — FICO v2/v4/v5 (mortgage classic) vs FICO 8 vs VantageScore are NOT comparable to a program minimum","rules":["CR-7"],"reason_class":"disambiguator","rule_floor":true,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":"Capture the model exactly as printed. Beacon = Equifax FICO; Empirica = TransUnion FICO. Never compare a Vantage score to a FICO minimum"},
 
-    {"name":"tradeline_count","type":"int","why":"DT-7 completeness signal, and a cross-check against the length of the tradelines list","rules":["DT-7"],"reason_class":"processor","rule_floor":true,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"open_tradeline_count","type":"int","why":"DT-7 completeness signal — the OPEN/active tradeline count the report summary quotes. NOT a list-length cross-check: the tradelines list carries ALL tradelines (open and closed), so this counts a different population (LP-445 — the LF-96SV false PARTIAL: 9 open vs 18 total)","rules":["DT-7"],"reason_class":"processor","rule_floor":true,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"The count of OPEN/active tradelines as stated in the report summary — the tradelines list contains ALL tradelines, open and closed"},
+    {"name":"total_tradeline_count","type":"int","why":"completeness cross-check for the tradelines list (LP-445): the total number of tradelines, open and closed, IF the report states one. Null when the summary quotes only an open count — the cross-check then does not fire (fail-closed: absent != mismatched)","rules":["DT-7"],"reason_class":"processor","rule_floor":true,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"The TOTAL number of tradelines, open and closed, if the report states one. Null if only an open/active count is given"},
     {"name":"total_monthly_debt_payment","type":"Decimal","why":"DT-7, supports CR-4 — the report's summed monthly obligations, reconciled against the application's stated liabilities","rules":["CR-4","DT-7"],"reason_class":"processor","rule_floor":true,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
     {"name":"public_record_count","type":"int","why":"presence gate for CR-6/CR-11 — a cheap 'are there any?' before walking the list","rules":["CR-6","CR-11"],"reason_class":"rule","rule_floor":true,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
     {"name":"inquiry_count","type":"int","why":"presence gate for CR-5 — how many hard inquiries need an LOE or matching tradeline","rules":["CR-5"],"reason_class":"rule","rule_floor":true,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
-    {"name":"security_freeze_or_fraud_alert","type":"str","why":"processor — a freeze or fraud alert blocks a clean pull and is a common condition","rules":[],"reason_class":"processor","rule_floor":true,"degraded_from":"bool","pii":null,"exists_today":false,"prompt_hint":null}
+    {"name":"security_freeze_or_fraud_alert","type":"str","why":"processor — a freeze or fraud alert blocks a clean pull and is a common condition","rules":[],"reason_class":"processor","rule_floor":true,"degraded_from":"bool","pii":null,"exists_today":false,"prompt_hint":null},
+
+    {"name":"ssn_alert_status","type":"str","why":"fraud/identity — the report's SSN verification/alert status (e.g. 'Requires Investigation', an issuance/mismatch alert). A processor stops on this. Named for the FACT, not one bureau's layout (LP-445 — promoted from the catch-all, the third IH-1 instance). Capture the stated status text; a rule judges","rules":[],"reason_class":"processor","rule_floor":true,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"The SSN verification/alert status exactly as stated (e.g. 'Requires Investigation', or an issuance/mismatch alert). Null if the report states no SSN alert. Never place the SSN digits here"},
+    {"name":"ssn_first_reported_date","type":"date","why":"fraud/identity disambiguator — the date the SSN was first reported for the consumer; a very recent date on an established borrower is a flag. A date, not the SSN — not raw-sensitive","rules":[],"reason_class":"processor","rule_floor":true,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"address_usage_alert","type":"str","why":"fraud/identity — an address-velocity alert (e.g. 'current address used N times in 30 days on different inquiries'). The alert text only — the address itself stays in borrower_current_address","rules":[],"reason_class":"processor","rule_floor":true,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"The address-usage/velocity alert text as stated. Null if none. Do NOT put a street address here — only the alert wording"},
+    {"name":"address_tenure_months","type":"int","why":"identity — the reported tenure at the current address in months; short tenure corroborates an address-velocity flag","rules":[],"reason_class":"processor","rule_floor":true,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"Tenure at the current address in MONTHS (e.g. '016 MONTH(S)' -> 16)"},
+    {"name":"credit_report_current_employer","type":"str","why":"IN-5 corroboration — an INDEPENDENT, bureau-reported employer to cross-check against the documented employer (pay stub / W-2 / VOE). The credit_report_ prefix (the aus_ precedent) marks the SOURCE so no rule mistakes it for the documented employer","rules":["IN-5"],"reason_class":"processor","rule_floor":true,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"The CURRENT employer as reported on the credit report (bureau-sourced, may be stale)"},
+    {"name":"credit_report_previous_employer","type":"str","why":"IN-5 disambiguator — a bureau-reported prior employer explains an apparent employer mismatch (a known former employer, not a discrepancy)","rules":["IN-5"],"reason_class":"processor","rule_floor":true,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"credit_report_occupation","type":"str","why":"IN-7 — the bureau-reported occupation/job title, an independent signal for the income-source reasonableness check","rules":["IN-7"],"reason_class":"processor","rule_floor":true,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null}
   ],
 
   "nested_lists": [
@@ -39,6 +48,7 @@
       "name":"tradelines","shape":"flat_row",
       "shape_reason":"a tri-merge routinely carries 20+ tradelines; per-field wrapping would risk the 16,384-token output ceiling",
       "expected_item_count":"10-30","rules":["CR-4","CR-5","CR-8","CR-9","CR-10","CR-12","RE-1"],
+      "count_field":"total_tradeline_count",
       "exists_today":false,"plumbing_sites":5,
       "fields":[
         {"name":"creditor_name","type":"str","why":"CR-4 — 'match by creditor + approx balance/payment'"},
@@ -61,6 +71,7 @@
       "name":"public_records","shape":"flat_row",
       "shape_reason":"typically 0-5 items; flat rows keep the token cost trivial",
       "expected_item_count":"0-5","rules":["CR-6","CR-11"],
+      "count_field":"public_record_count",
       "exists_today":false,"plumbing_sites":5,
       "fields":[
         {"name":"record_type","type":"str","why":"CR-6 — bankruptcy chapter / tax lien / judgment"},
@@ -75,6 +86,7 @@
       "name":"inquiries","shape":"flat_row",
       "shape_reason":"typically 0-10 items; flat rows keep the token cost trivial",
       "expected_item_count":"0-10","rules":["CR-5"],
+      "count_field":"inquiry_count",
       "exists_today":false,"plumbing_sites":5,
       "fields":[
         {"name":"inquiry_date","type":"date","why":"CR-5 — 'each inquiry within the window'"},
@@ -91,7 +103,7 @@
     {"name":"dti / total_debt_ratio","reason":"not on a credit report; computed downstream from income and liabilities"},
     {"name":"total_open_balance","reason":"a summary with no rule consumer; balances live per tradeline"},
     {"name":"accounts_in_good_standing_count","reason":"a summary conclusion; no rule"},
-    {"name":"employment_history (bureau-reported)","reason":"unreliable and stale; IN-4/IN-5 use the 1003 and pay stubs"},
+    {"name":"employment_history (bureau-reported)","reason":"REVISED (LP-445): the FULL bureau employment history stays rejected (unreliable/stale), but the current/previous employer + occupation ARE now promoted as credit_report_current_employer / credit_report_previous_employer / credit_report_occupation — INDEPENDENT corroboration for IN-5/IN-7, source-prefixed so no rule mistakes them for the documented employer. Tags describe; a rule decides how much to trust a bureau source"},
     {"name":"score_factors / reason codes","reason":"no rule reads them"},
     {"name":"the 8 TECHNICAL provenance fields","reason":"already in the TypedField wrapper"}
   ],

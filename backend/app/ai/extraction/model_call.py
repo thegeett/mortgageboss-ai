@@ -51,9 +51,16 @@ from app.core.config import settings
 
 logger = structlog.get_logger(__name__)
 
-# The single, decisive high-ceiling retry budget on truncation (matches ``tax_return``, the most
-# verbose type). One jump, not incremental bumps.
-RETRY_MAX_TOKENS = 16384
+# The single, decisive high-ceiling retry budget on truncation — one jump, not incremental bumps.
+# It must sit ABOVE the largest first-attempt budget (16384, the ≥2-nested-list tier: credit_report,
+# tax_return), or the "retry" re-rolls the SAME ceiling and a genuine truncation truncates again → a
+# wrongful FAILED (LP-445 found this: credit_report._MAX_TOKENS == RETRY_MAX_TOKENS == 16384, zero
+# headroom). 32768 doubles the top tier — real headroom for the densest instance (a 40-tradeline
+# tri-merge) — while staying half of claude-sonnet-4-5's 64K output ceiling, so a runaway output still
+# stops well before the API limit and a >32K response genuinely warrants a human look. The per-type
+# first-attempt tiers (4096/8192/16384) are UNCHANGED — they still encode the size expectation the
+# sizing guard asserts; only this decisive retry ceiling moves.
+RETRY_MAX_TOKENS = 32768
 
 # The HONEST reason surfaced when even the high-ceiling retry truncates — deliberately NOT the
 # misleading "could not parse extraction" (that mislabels a truncation as an unreadable document).

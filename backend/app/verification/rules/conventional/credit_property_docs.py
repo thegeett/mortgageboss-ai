@@ -170,13 +170,13 @@ CONV_CREDIT_DEROG_SHORT_SALE = conv_rule(
 
 CONV_CREDIT_TRADELINES = conv_rule(
     "conv.credit.tradelines_sufficient",
-    reads=("credit.tradeline_count",),
+    reads=("credit.open_tradeline_count",),
     condition=Condition(op=Operator.GE, value=Decimal("1"), unit="count"),
     severity=RuleSeverity.YELLOW,
     category=FindingCategory.CREDIT,
     description="Sufficient credit tradelines exist (else nontraditional credit may be needed).",
     source=sg("B3-5.4-01", to_verify=True),
-    notes="STARTER — section TO VERIFY (nontraditional-credit rules). Promotion pending: credit.tradeline_count.",
+    notes="STARTER — section TO VERIFY (nontraditional-credit rules). Promotion pending: credit.open_tradeline_count (LP-445 renamed from tradeline_count; the OPEN/active count is the 'sufficient tradelines' signal).",
 )
 
 

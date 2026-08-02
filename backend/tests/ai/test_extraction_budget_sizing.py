@@ -242,5 +242,5 @@ async def test_raised_type_still_backstopped_by_the_guard(monkeypatch: pytest.Mo
     assert (
         mock.await_args_list[0].kwargs["max_tokens"] == 8192
     )  # first attempt at the raised budget
-    assert mock.await_args_list[1].kwargs["max_tokens"] == 16384  # guard's retry ceiling
+    assert mock.await_args_list[1].kwargs["max_tokens"] == 32768  # guard's retry ceiling (LP-445)
     assert result.status == ExtractionStatus.SUCCEEDED

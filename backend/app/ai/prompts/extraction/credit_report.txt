@@ -9,27 +9,35 @@ You are given a single CREDIT REPORT. Read it faithfully and return structured d
 CAPTURE EVERYTHING ON THE DOCUMENT — lose nothing. There are two buckets:
 
 1. TYPED CORE — put these into their named slots:
-     borrower_name                   (string)
-     co_borrower_name                (string)
-     borrower_ssn                    (string) Never place an SSN in additional_sections — catch-all values are stored unmasked
-     co_borrower_ssn                 (string)
-     borrower_date_of_birth          (date (YYYY-MM-DD))
-     borrower_current_address        (string)
-     borrower_former_address         (string) Distinguish CURRENT from FORMER — never report a former address as current
-     report_date                     (date (YYYY-MM-DD)) The PULL/issue date, not the score as-of date
-     score_date                      (date (YYYY-MM-DD))
-     report_provider                 (string)
-     report_reference_number         (string)
-     credit_report_type              (string)
-     score_equifax                   (integer)
-     score_experian                  (integer)
-     score_transunion                (integer)
-     score_model                     (string) Capture the model exactly as printed. Beacon = Equifax FICO; Empirica = TransUnion FICO. Never compare a Vantage score to a FICO minimum
-     tradeline_count                 (integer)
-     total_monthly_debt_payment      (number)
-     public_record_count             (integer)
-     inquiry_count                   (integer)
-     security_freeze_or_fraud_alert  (string)
+     borrower_name                    (string)
+     co_borrower_name                 (string)
+     borrower_ssn                     (string) Never place an SSN in additional_sections — catch-all values are stored unmasked
+     co_borrower_ssn                  (string)
+     borrower_date_of_birth           (date (YYYY-MM-DD))
+     borrower_current_address         (string)
+     borrower_former_address          (string) Distinguish CURRENT from FORMER — never report a former address as current
+     report_date                      (date (YYYY-MM-DD)) The PULL/issue date, not the score as-of date
+     score_date                       (date (YYYY-MM-DD))
+     report_provider                  (string)
+     report_reference_number          (string)
+     credit_report_type               (string)
+     score_equifax                    (integer)
+     score_experian                   (integer)
+     score_transunion                 (integer)
+     score_model                      (string) Capture the model exactly as printed. Beacon = Equifax FICO; Empirica = TransUnion FICO. Never compare a Vantage score to a FICO minimum
+     open_tradeline_count             (integer) The count of OPEN/active tradelines as stated in the report summary — the tradelines list contains ALL tradelines, open and closed
+     total_tradeline_count            (integer) The TOTAL number of tradelines, open and closed, if the report states one. Null if only an open/active count is given
+     total_monthly_debt_payment       (number)
+     public_record_count              (integer)
+     inquiry_count                    (integer)
+     security_freeze_or_fraud_alert   (string)
+     ssn_alert_status                 (string) The SSN verification/alert status exactly as stated (e.g. 'Requires Investigation', or an issuance/mismatch alert). Null if the report states no SSN alert. Never place the SSN digits here
+     ssn_first_reported_date          (date (YYYY-MM-DD))
+     address_usage_alert              (string) The address-usage/velocity alert text as stated. Null if none. Do NOT put a street address here — only the alert wording
+     address_tenure_months            (integer) Tenure at the current address in MONTHS (e.g. '016 MONTH(S)' -> 16)
+     credit_report_current_employer   (string) The CURRENT employer as reported on the credit report (bureau-sourced, may be stale)
+     credit_report_previous_employer  (string)
+     credit_report_occupation         (string)
 
 2. ADDITIONAL SECTIONS — EVERYTHING ELSE, grouped by section (e.g. "Other"). Do not
    force these into the typed core — capture them here so nothing is lost.
@@ -74,11 +82,19 @@ Respond with ONLY a single JSON object, no markdown fences and no prose, exactly
     "score_experian": {"value": <int|null>, "page": <int|null>, "snippet": <string|null>},
     "score_transunion": {"value": <int|null>, "page": <int|null>, "snippet": <string|null>},
     "score_model": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
-    "tradeline_count": {"value": <int|null>, "page": <int|null>, "snippet": <string|null>},
+    "open_tradeline_count": {"value": <int|null>, "page": <int|null>, "snippet": <string|null>},
+    "total_tradeline_count": {"value": <int|null>, "page": <int|null>, "snippet": <string|null>},
     "total_monthly_debt_payment": {"value": <number|null>, "page": <int|null>, "snippet": <string|null>},
     "public_record_count": {"value": <int|null>, "page": <int|null>, "snippet": <string|null>},
     "inquiry_count": {"value": <int|null>, "page": <int|null>, "snippet": <string|null>},
-    "security_freeze_or_fraud_alert": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>}
+    "security_freeze_or_fraud_alert": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "ssn_alert_status": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "ssn_first_reported_date": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "address_usage_alert": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "address_tenure_months": {"value": <int|null>, "page": <int|null>, "snippet": <string|null>},
+    "credit_report_current_employer": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "credit_report_previous_employer": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "credit_report_occupation": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>}
   },
   "additional_sections": [
     {"section": "<section name>", "fields": [

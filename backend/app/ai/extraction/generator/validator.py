@@ -111,6 +111,19 @@ def validate(spec: Spec) -> list[Refusal]:
                     )
                 )
 
+    # A declared ``count_field`` (LP-445) must name a real typed-core field, or its emitted cross-check
+    # would reference ``data.<missing>.value`` — an AttributeError, or a silently dead check. Fail loudly.
+    core_names = {f.name for f in spec.typed_core}
+    for nested in spec.nested_lists:
+        if nested.count_field and nested.count_field not in core_names:
+            refusals.append(
+                Refusal(
+                    2,
+                    f"{nested.name}.count_field",
+                    f"count_field {nested.count_field!r} is not a typed-core field",
+                )
+            )
+
     refusals.sort(key=lambda r: (r.condition, r.field or ""))
     return refusals
 

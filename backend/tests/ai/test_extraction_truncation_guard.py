@@ -4,7 +4,7 @@ Pay-stub extraction returned empty because its 4096 max_tokens budget was too sm
 stub's many line items → the response truncated mid-JSON → the cut-off body silently failed to
 parse → misreported as "could not parse extraction" / NEEDS_REVIEW. Fix A right-sizes pay_stub's
 budget (8192); Fix B adds a SHARED guard (``app.ai.extraction.model_call.run_extraction_completion``)
-that detects ``stop_reason == "max_tokens"``, logs it distinctly, retries EXACTLY ONCE at 16384, and
+that detects ``stop_reason == "max_tokens"``, logs it distinctly, retries EXACTLY ONCE at 32768, and
 — if it still truncates — surfaces an HONEST truncated status (never "could not parse"). The guard
 covers ALL extractors (pay stub is just the first to hit it).
 """
@@ -94,8 +94,8 @@ async def test_truncation_retries_exactly_once_at_the_high_ceiling(
     assert mock.await_count == 2  # exactly one retry
     assert mock.await_args_list[0].kwargs["max_tokens"] == 8192  # attempt 1 at the type budget
     assert (
-        mock.await_args_list[1].kwargs["max_tokens"] == RETRY_MAX_TOKENS == 16384
-    )  # retry ceiling
+        mock.await_args_list[1].kwargs["max_tokens"] == RETRY_MAX_TOKENS == 32768
+    )  # retry ceiling (LP-445: raised from 16384 for headroom above the top first-attempt tier)
     # Retry succeeded → transparent: the good text comes back, not truncated.
     assert call.text == "{}" and call.truncated is False
 
@@ -209,7 +209,7 @@ async def test_guard_is_shared_second_extractor_also_retries(
     )
     result = await w2_module.extract_w2(_PDF, "application/pdf")
     assert mock.await_count == 2
-    assert mock.await_args_list[1].kwargs["max_tokens"] == 16384
+    assert mock.await_args_list[1].kwargs["max_tokens"] == 32768  # LP-445 retry ceiling
     assert result.status == ExtractionStatus.SUCCEEDED
 
 

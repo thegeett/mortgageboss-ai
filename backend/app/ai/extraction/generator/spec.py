@@ -121,6 +121,7 @@ class NestedList:
     derived: tuple[DerivedField, ...]
     redact: tuple[str, ...]
     stable_row_id: bool
+    count_field: str | None
     raw: dict[str, Any]
 
 
@@ -202,6 +203,11 @@ def _nested(raw: Any) -> NestedList | None:
     )
     derived = tuple(d for d in (_derived(x) for x in _as_list(raw.get("derived"))) if d is not None)
     redact = tuple(x for x in _as_list(raw.get("redact")) if isinstance(x, str))
+    # ``count_field`` (LP-445): the typed-core ``*_count`` that equals this list's FULL length, for the
+    # completeness cross-check. Explicit because the name heuristic cannot express two cases — a total that
+    # is named unlike its list (``total_tradeline_count`` ↔ ``tradelines`` while ``open_tradeline_count``,
+    # a DIFFERENT population, must NOT be checked) and an irregular plural (``inquiry_count`` ↔ ``inquiries``).
+    count_field = raw.get("count_field")
     return NestedList(
         name=name,
         shape=raw.get("shape") if isinstance(raw.get("shape"), str) else None,
@@ -210,6 +216,7 @@ def _nested(raw: Any) -> NestedList | None:
         derived=derived,
         redact=redact,
         stable_row_id=raw.get("stable_row_id") is True,
+        count_field=count_field if isinstance(count_field, str) and count_field else None,
         raw=raw,
     )
 

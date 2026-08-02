@@ -301,6 +301,43 @@ def test_count_crosscheck_absent_when_no_matching_list(tmp_path: Path) -> None:
     assert count_crosscheck_pairs(spec) == []
 
 
+def test_explicit_count_field_pairs_what_the_heuristic_cannot(tmp_path: Path) -> None:
+    # LP-445: a list's explicit ``count_field`` expresses what the name heuristic can't — a TOTAL named
+    # unlike its list is cross-checked while a same-stem OPEN count (a different population) is NOT, and an
+    # irregular plural (inquiry↔inquiries) pairs. Only the declared count fields appear.
+    spec = _load(
+        tmp_path,
+        _spec_dict(
+            typed_core=[
+                _field("open_tradeline_count", "int", reason_class="processor"),
+                _field("total_tradeline_count", "int", reason_class="processor"),
+                _field("inquiry_count", "int", reason_class="processor"),
+            ],
+            nested_lists=[
+                {"name": "tradelines", "fields": [], "count_field": "total_tradeline_count"},
+                {"name": "inquiries", "fields": [], "count_field": "inquiry_count"},
+            ],
+        ),
+    )
+    pairs = count_crosscheck_pairs(spec)
+    assert ("total_tradeline_count", "tradelines") in pairs
+    assert ("inquiry_count", "inquiries") in pairs
+    assert not any(c == "open_tradeline_count" for c, _ in pairs)  # the population miss is excluded
+
+
+def test_bogus_count_field_is_refused(tmp_path: Path) -> None:
+    # A count_field naming a non-existent typed-core field would emit a dead cross-check → refuse loudly.
+    spec = _load(
+        tmp_path,
+        _spec_dict(
+            typed_core=[_field("issuer", "str")],
+            nested_lists=[{"name": "tradelines", "fields": [], "count_field": "no_such_field"}],
+        ),
+    )
+    refusals = validate(spec)
+    assert any("count_field" in str(r) for r in refusals)
+
+
 # --------------------------------------------------------------------------- #
 # No review metadata reaches the output (guide §1)
 # --------------------------------------------------------------------------- #

@@ -71,11 +71,19 @@ class CreditReportExtraction(BaseModel):
     score_experian: TypedField[int] = Field(default_factory=TypedField)
     score_transunion: TypedField[int] = Field(default_factory=TypedField)
     score_model: TypedField[str] = Field(default_factory=TypedField)
-    tradeline_count: TypedField[int] = Field(default_factory=TypedField)
+    open_tradeline_count: TypedField[int] = Field(default_factory=TypedField)
+    total_tradeline_count: TypedField[int] = Field(default_factory=TypedField)
     total_monthly_debt_payment: TypedField[Decimal] = Field(default_factory=TypedField)
     public_record_count: TypedField[int] = Field(default_factory=TypedField)
     inquiry_count: TypedField[int] = Field(default_factory=TypedField)
     security_freeze_or_fraud_alert: TypedField[str] = Field(default_factory=TypedField)
+    ssn_alert_status: TypedField[str] = Field(default_factory=TypedField)
+    ssn_first_reported_date: TypedField[date] = Field(default_factory=TypedField)
+    address_usage_alert: TypedField[str] = Field(default_factory=TypedField)
+    address_tenure_months: TypedField[int] = Field(default_factory=TypedField)
+    credit_report_current_employer: TypedField[str] = Field(default_factory=TypedField)
+    credit_report_previous_employer: TypedField[str] = Field(default_factory=TypedField)
+    credit_report_occupation: TypedField[str] = Field(default_factory=TypedField)
 
     # --- Captured nested lists (LP-443) — bare rows, snapshot-read generically ------- #
     tradelines: list[dict[str, Any]] = Field(default_factory=list)
@@ -124,11 +132,19 @@ _CORE_SPEC: CoreSpec = (
     ("score_experian", coerce_int),
     ("score_transunion", coerce_int),
     ("score_model", coerce_str),
-    ("tradeline_count", coerce_int),
+    ("open_tradeline_count", coerce_int),
+    ("total_tradeline_count", coerce_int),
     ("total_monthly_debt_payment", coerce_decimal),
     ("public_record_count", coerce_int),
     ("inquiry_count", coerce_int),
     ("security_freeze_or_fraud_alert", coerce_str),
+    ("ssn_alert_status", coerce_str),
+    ("ssn_first_reported_date", coerce_date),
+    ("address_usage_alert", coerce_str),
+    ("address_tenure_months", coerce_int),
+    ("credit_report_current_employer", coerce_str),
+    ("credit_report_previous_employer", coerce_str),
+    ("credit_report_occupation", coerce_str),
 )
 
 
@@ -271,14 +287,20 @@ def _parse_credit_report_json(text: str) -> CreditReportExtractionResult | None:
     # captured row count means rows were dropped WITHOUT the API truncating → PARTIAL.
     if (
         status is ExtractionStatus.SUCCEEDED
-        and data.tradeline_count.value is not None
-        and data.tradeline_count.value != len(data.tradelines)
+        and data.total_tradeline_count.value is not None
+        and data.total_tradeline_count.value != len(data.tradelines)
     ):
         status = ExtractionStatus.PARTIAL
     if (
         status is ExtractionStatus.SUCCEEDED
         and data.public_record_count.value is not None
         and data.public_record_count.value != len(data.public_records)
+    ):
+        status = ExtractionStatus.PARTIAL
+    if (
+        status is ExtractionStatus.SUCCEEDED
+        and data.inquiry_count.value is not None
+        and data.inquiry_count.value != len(data.inquiries)
     ):
         status = ExtractionStatus.PARTIAL
     confidence = coerce_confidence(payload.get("confidence"))
