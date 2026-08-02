@@ -154,3 +154,30 @@ def test_appraisal_captures_list_rows() -> None:
     # Serializes to bare JSON scalars — the shape the snapshot reads.
     dumped = result.data.model_dump(mode="json")["comparable_sales"][0]
     assert dumped["sale_price"] == "440000" and dumped["comp_number"] == 1
+
+
+def test_list_row_pii_has_a_redact_backstop() -> None:
+    # LP-443 review: list-row PII is not _PII_FIELDS-routed, so a model masking failure would persist a
+    # full account number / TIN. Every list with a PII-shaped row field declares it in `redact`, so the
+    # 9+-digit scrub redacts a leaked full number while leaving a genuinely-masked value untouched.
+    import re
+
+    pat = re.compile(
+        r"(account_number|loan_number|card_number|_ssn|_tin\b|tin_masked|_ein|passport|"
+        r"visa_number|uscis|a_number|_last4|number_masked)",
+        re.I,
+    )
+    unguarded = {
+        f"{dt}.{s.name}.{f}"
+        for dt, specs in ds._LIST_SPECS.items()
+        for s in specs
+        for f in s.fields
+        if pat.search(f) and f not in s.redact
+    }
+    assert unguarded == set(), f"list-row PII fields with no redact backstop: {unguarded}"
+
+    # End to end: a leaked full account number is scrubbed; a genuinely-masked value survives.
+    leaked = ds._list_row_fields({"account_number_masked": "4111111111111111"}, ds._TRADELINES_LIST)
+    masked = ds._list_row_fields({"account_number_masked": "****1111"}, ds._TRADELINES_LIST)
+    assert leaked["account_number_masked"].value == "[redacted]"  # a masking miss is scrubbed
+    assert masked["account_number_masked"].value == "****1111"  # a real mask is preserved

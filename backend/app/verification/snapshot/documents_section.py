@@ -620,6 +620,11 @@ _TRADELINES_LIST = ListSpec(
         "worst_delinquency",
         "is_disputed",
     ),
+    # LP-443 review — a row-PII backstop: list-row PII is NOT _PII_FIELDS-routed, so if the (unvalidated,
+    # starter) prompt fails to mask, the _DESC_REDACT 9+-digit scrub redacts a leaked full account number
+    # (a genuinely-masked ****1234 is untouched). Not a full PiiField route — the deterministic per-list
+    # route is the deferred step; this closes the worst case now that the extractor is wired live.
+    redact=frozenset({"account_number_masked"}),
 )
 _PUBLIC_RECORDS_LIST = ListSpec(
     name="public_records",
@@ -669,6 +674,7 @@ _PAYMENT_HISTORY_MONTHS_LIST = ListSpec(
 _MORTGAGEE_OR_LIENHOLDER_ENTRIES_LIST = ListSpec(
     name="mortgagee_or_lienholder_entries",
     fields=("lender_name", "loan_number", "clause_address"),
+    redact=frozenset({"loan_number"}),  # LP-443 review — row-PII backstop (see _TRADELINES_LIST)
 )
 
 # LP-443 Phase C — ListSpec constants for the remaining generated list-bearing types (fields only,
@@ -801,6 +807,7 @@ _MORTGAGEE_CLAUSE_ENTRIES_LIST = ListSpec(
         "capacity",
         "source",
     ),
+    redact=frozenset({"loan_number"}),  # LP-443 review — row-PII backstop (see _TRADELINES_LIST)
 )
 _RETURN_LINE_ITEMS_LIST = ListSpec(
     name="return_line_items",
@@ -994,6 +1001,8 @@ _INFORMATION_RETURN_RECORDS_LIST = ListSpec(
         "amount",
         "account_number_masked",
     ),
+    # LP-443 review — row-PII backstop (see _TRADELINES_LIST). Scrubs a leaked full TIN/account number.
+    redact=frozenset({"payer_tin_masked", "account_number_masked"}),
 )
 _AUTHORIZED_SIGNER_NAMES_AND_CAPACITY_LIST = ListSpec(
     name="authorized_signer_names_and_capacity",
@@ -1012,6 +1021,9 @@ _BENEFICIARY_K1_RECORDS_LIST = ListSpec(
         "income_type",
         "source",
     ),
+    redact=frozenset(
+        {"beneficiary_tin_masked"}
+    ),  # LP-443 review — row-PII backstop (see _TRADELINES_LIST)
 )
 _UNSECURED_NOTE__PAYMENT_HISTORY_LIST = ListSpec(
     name="payment_history",
@@ -1035,6 +1047,9 @@ _VERIFIED_ACCOUNTS_LIST = ListSpec(
         "average_balance",
         "source",
     ),
+    redact=frozenset(
+        {"account_number_masked"}
+    ),  # LP-443 review — row-PII backstop (see _TRADELINES_LIST)
 )
 _DEPOSIT_ACCOUNTS_LIST = ListSpec(
     name="deposit_accounts",
@@ -1046,6 +1061,9 @@ _DEPOSIT_ACCOUNTS_LIST = ListSpec(
         "date_opened",
         "source",
     ),
+    redact=frozenset(
+        {"account_number_masked"}
+    ),  # LP-443 review — row-PII backstop (see _TRADELINES_LIST)
 )
 _RENT_PAYMENT_HISTORY_LIST = ListSpec(
     name="rent_payment_history",
