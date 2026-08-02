@@ -160,6 +160,17 @@ _PII_FIELDS: dict[str, tuple[PiiKind, bool]] = {
     "id_number_masked": (PiiKind.ACCOUNT, True),  # driver's-license number
     "taxpayer_ssn_masked": (PiiKind.SSN, True),  # tax return
     "employee_ssn": (PiiKind.SSN, False),  # W-2 — stored RAW ("SSN as written")
+    "employee_ssn_masked": (
+        PiiKind.SSN,
+        True,
+    ),  # LP-446 — pay stub, pre-masked (distinct from W-2's raw)
+    # LP-446 diffs — typed-core PII of the 15 remaining diff types (dedup vs the existing registry).
+    "spouse_ssn_masked": (PiiKind.SSN, True),  # tax_return
+    "employee_number": (PiiKind.ACCOUNT, False),  # voe — stored RAW, masked + hashed
+    "owner_account_number_masked": (PiiKind.ACCOUNT, True),  # hoa_statement
+    "gift_source_account_last4": (PiiKind.ACCOUNT, True),  # gift_letter
+    "recipient_or_escrow_account_last4": (PiiKind.ACCOUNT, True),  # gift_letter
+    "account_number": (PiiKind.ACCOUNT, False),  # form_1099 — stored RAW
     "recipient_tin": (PiiKind.SSN, False),  # 1099 recipient — stored RAW ("TIN/SSN as written")
     "employer_ein": (PiiKind.ACCOUNT, False),  # W-2 employer tax id — masked ****NNNN
     "payer_tin": (PiiKind.ACCOUNT, False),  # 1099 payer tax id — masked ****NNNN
@@ -693,6 +704,23 @@ _MORTGAGEE_OR_LIENHOLDER_ENTRIES_LIST = ListSpec(
     fields=("lender_name", "loan_number", "clause_address"),
     redact=frozenset({"loan_number"}),  # LP-443 review — row-PII backstop (see _TRADELINES_LIST)
 )
+# LP-446 — the homeowners_insurance diff's list (forms/endorsements). A personal-property replacement-cost
+# endorsement lands here as a row, kept DISTINCT from the dwelling's replacement_cost_or_coinsurance_basis
+# typed field (the IH-1 anti-conflation). No PII in a form code/description.
+_FORMS_AND_ENDORSEMENTS_LIST = ListSpec(
+    name="forms_and_endorsements",
+    fields=("code_or_label", "description"),
+)
+# LP-446 — the pay_stub diff's lists: the earnings split (base/OT/bonus — IN-10/IN-11) + deductions.
+# Legacy pay-stub extraction has NO list attribute, so these are purely additive (no legacy to disturb).
+_EARNINGS_LINES_LIST = ListSpec(
+    name="earnings_lines",
+    fields=("earning_type", "hours", "rate", "current_amount", "ytd_amount"),
+)
+_DEDUCTION_LINES_LIST = ListSpec(
+    name="deduction_lines",
+    fields=("label", "category", "current_amount", "ytd_amount"),
+)
 
 # LP-443 Phase C — ListSpec constants for the remaining generated list-bearing types (fields only,
 # from each spec; collisions on a shared list name are type-prefixed).
@@ -1096,7 +1124,87 @@ _RENT_PAYMENT_HISTORY_LIST = ListSpec(
 # document_type → its declared generic lists. bank_statement + the LP-443 batch are wired; every OTHER
 # document type still gets lists={} (present-empty) until its extractor's lists are wired. (condo_questionnaire
 # and business_license are wired for extraction but are FLAT — no list, so they are not here.)
+# LP-446 — the 6 remaining diff extractors' lists (voe / investment / purchase / property-tax / P&L / HOA).
+_GROSS_EARNINGS_HISTORY_LIST = ListSpec(
+    name="gross_earnings_history",
+    fields=(
+        "period",
+        "base",
+        "overtime",
+        "commission",
+        "bonus",
+    ),
+)
+_SECURITY_POSITIONS_LIST = ListSpec(
+    name="security_positions",
+    fields=(
+        "description",
+        "ticker_or_cusip",
+        "quantity",
+        "market_value",
+        "asset_class",
+        "source",
+    ),
+)
+_ADDENDA_LIST = ListSpec(
+    name="addenda",
+    fields=(
+        "addendum_name",
+        "addendum_type",
+        "addendum_date",
+        "is_signed",
+        "is_attached",
+    ),
+)
+_CONTINGENCIES_LIST = ListSpec(
+    name="contingencies",
+    fields=(
+        "contingency_type",
+        "deadline_date",
+        "is_waived",
+    ),
+)
+_PROPERTY_TAX_BILL__INSTALLMENTS_AND_DUE_DATES_LIST = ListSpec(
+    name="installments_and_due_dates",
+    fields=(
+        "installment_label",
+        "amount",
+        "due_date",
+        "paid_status",
+        "paid_date",
+        "source",
+    ),
+)
+_FINANCIAL_LINE_ITEMS_LIST = ListSpec(
+    name="financial_line_items",
+    fields=(
+        "section",
+        "label",
+        "amount",
+        "source",
+    ),
+)
+_SPECIAL_ASSESSMENT_ITEMS_LIST = ListSpec(
+    name="special_assessment_items",
+    fields=(
+        "description",
+        "amount",
+        "duration",
+    ),
+)
+
 _LIST_SPECS: dict[str, tuple[ListSpec, ...]] = {
+    "voe": (_GROSS_EARNINGS_HISTORY_LIST,),  # LP-446 diff (live extractor)
+    "investment_account": (_SECURITY_POSITIONS_LIST,),  # LP-446 diff (live extractor)
+    "purchase_agreement": (
+        _ADDENDA_LIST,
+        _CONTINGENCIES_LIST,
+    ),  # LP-446 diff (live extractor)
+    "property_tax_bill": (
+        _PROPERTY_TAX_BILL__INSTALLMENTS_AND_DUE_DATES_LIST,
+    ),  # LP-446 diff (live extractor)
+    "profit_and_loss": (_FINANCIAL_LINE_ITEMS_LIST,),  # LP-446 diff (live extractor)
+    "hoa_statement": (_SPECIAL_ASSESSMENT_ITEMS_LIST,),  # LP-446 diff (live extractor)
     "bank_statement": (_TRANSACTIONS_LIST,),
     "appraisal": (_COMPARABLE_SALES_LIST,),
     "credit_report": (_TRADELINES_LIST, _PUBLIC_RECORDS_LIST, _INQUIRIES_LIST),
@@ -1105,6 +1213,8 @@ _LIST_SPECS: dict[str, tuple[ListSpec, ...]] = {
     "certificate_of_eligibility": (_PRIOR_VA_LOAN_OR_ENTITLEMENT_CHARGES_LIST,),
     "verification_of_mortgage": (_PAYMENT_HISTORY_MONTHS_LIST,),
     "homeowner_s_insurance_quote": (_MORTGAGEE_OR_LIENHOLDER_ENTRIES_LIST,),
+    "homeowners_insurance": (_FORMS_AND_ENDORSEMENTS_LIST,),  # LP-446 diff (live extractor)
+    "pay_stub": (_EARNINGS_LINES_LIST, _DEDUCTION_LINES_LIST),  # LP-446 diff (live extractor)
     # LP-443 Phase C — the remaining generated list-bearing types.
     "affiliated_business_disclosure": (_AFFILIATE_ENTRIES_LIST,),
     "alimony_income": (_PAYMENT_HISTORY_LIST,),

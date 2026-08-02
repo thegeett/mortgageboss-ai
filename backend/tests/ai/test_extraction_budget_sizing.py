@@ -135,16 +135,17 @@ def test_correctly_sized_types_are_unchanged_no_blanket_raise() -> None:
     assert drivers_license._MAX_TOKENS == 2048
     for mod in (
         w2,
-        voe,
         letter_of_explanation,
-        homeowners_insurance,
         mortgage_statement,
-        hoa_statement,
-        property_tax_bill,
         form_1099,
         gift_letter,
     ):
         assert mod._MAX_TOKENS == 4096
+    # LP-446: these gained a generic list capture → the unbounded-list budget (1 list → 8192).
+    assert homeowners_insurance._MAX_TOKENS == 8192  # forms_and_endorsements
+    assert voe._MAX_TOKENS == 8192  # gross_earnings_history
+    assert hoa_statement._MAX_TOKENS == 8192  # special_assessment_items
+    assert property_tax_bill._MAX_TOKENS == 8192  # installments_and_due_dates
 
 
 def test_every_wired_generated_extractor_matches_the_sizing_rule() -> None:

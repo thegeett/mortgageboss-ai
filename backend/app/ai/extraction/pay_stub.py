@@ -53,6 +53,7 @@ from app.ai.extraction.parsing import (
     derive_status,
     parse_catch_all,
     parse_typed_core,
+    source_payload,
 )
 from app.ai.extraction.shape import CatchAllSection, TypedField
 from app.ai.parsing import coerce_confidence, extract_json_object
@@ -99,6 +100,21 @@ class PayStubExtraction(BaseModel):
     pay_frequency: TypedField[str] = Field(default_factory=TypedField)
     hours: TypedField[Decimal] = Field(default_factory=TypedField)
     rate: TypedField[Decimal] = Field(default_factory=TypedField)
+
+    # --- LP-446 diff (007 spec) — the exists_today:false additions ----------- #
+    employer_address: TypedField[str] = Field(default_factory=TypedField)
+    employee_address: TypedField[str] = Field(default_factory=TypedField)
+    employee_ssn_masked: TypedField[str] = Field(
+        default_factory=TypedField
+    )  # SENSITIVE (pre-masked)
+    position_or_title: TypedField[str] = Field(default_factory=TypedField)
+    employment_start_date: TypedField[date] = Field(default_factory=TypedField)
+    total_deductions_current: TypedField[Decimal] = Field(default_factory=TypedField)
+
+    # --- Captured nested lists (LP-446 / LP-437) — bare rows, snapshot-read generically ------ #
+    # earnings_lines is the base/OT/bonus split IN-10/IN-11 need (Priya's B12 case).
+    earnings_lines: list[dict[str, Any]] = Field(default_factory=list)
+    deduction_lines: list[dict[str, Any]] = Field(default_factory=list)
 
     # --- Grouped catch-all — everything else, by section -------------------- #
     additional_sections: list[CatchAllSection] = Field(default_factory=list)
@@ -148,7 +164,45 @@ _CORE_SPEC: CoreSpec = (
     ("pay_frequency", coerce_str),
     ("hours", coerce_decimal),
     ("rate", coerce_decimal),
+    # LP-446 diff additions
+    ("employer_address", coerce_str),
+    ("employee_address", coerce_str),
+    ("employee_ssn_masked", coerce_str),
+    ("position_or_title", coerce_str),
+    ("employment_start_date", coerce_date),
+    ("total_deductions_current", coerce_decimal),
 )
+
+# LP-446 — the two pay-stub lines lists: bare rows (mirrors bank_statement's transactions parse).
+_EARNINGS_LINES_ROW: CoreSpec = (
+    ("earning_type", coerce_str),
+    ("hours", coerce_decimal),
+    ("rate", coerce_decimal),
+    ("current_amount", coerce_decimal),
+    ("ytd_amount", coerce_decimal),
+)
+_DEDUCTION_LINES_ROW: CoreSpec = (
+    ("label", coerce_str),
+    ("category", coerce_str),
+    ("current_amount", coerce_decimal),
+    ("ytd_amount", coerce_decimal),
+)
+
+
+def _parse_rows(raw: Any, row_spec: CoreSpec) -> list[dict[str, Any]]:
+    """Coerce a bare-row list (LP-446) — each declared field coerced, a per-row source kept, empty
+    rows dropped (no hallucinated rows). Mirrors bank_statement's transactions parse."""
+    rows: list[dict[str, Any]] = []
+    if not isinstance(raw, list):
+        return rows
+    for entry in raw:
+        if not isinstance(entry, dict):
+            continue
+        row: dict[str, Any] = {name: coerce(entry.get(name)) for name, coerce in row_spec}
+        row["source"] = source_payload(entry)
+        if any(row[name] is not None for name, _ in row_spec):
+            rows.append(row)
+    return rows
 
 
 def _parse_pay_stub_json(text: str) -> PayStubExtractionResult | None:
@@ -170,14 +224,23 @@ def _parse_pay_stub_json(text: str) -> PayStubExtractionResult | None:
         return None
 
     core_payload, non_null, coercion_lost = parse_typed_core(payload, _CORE_SPEC)
+    earnings_lines = _parse_rows(payload.get("earnings_lines"), _EARNINGS_LINES_ROW)
+    deduction_lines = _parse_rows(payload.get("deduction_lines"), _DEDUCTION_LINES_ROW)
     sections = parse_catch_all(payload.get("additional_sections"))
 
     try:
-        data = PayStubExtraction.model_validate({**core_payload, "additional_sections": sections})
+        data = PayStubExtraction.model_validate(
+            {
+                **core_payload,
+                "earnings_lines": earnings_lines,
+                "deduction_lines": deduction_lines,
+                "additional_sections": sections,
+            }
+        )
     except ValidationError:
         return None
 
-    status = derive_status(non_null, coercion_lost)
+    status = derive_status(non_null + len(earnings_lines) + len(deduction_lines), coercion_lost)
     confidence = coerce_confidence(payload.get("confidence"))
     raw_reasoning = payload.get("reasoning")
     reasoning = (
@@ -239,5 +302,7 @@ async def extract_pay_stub(content: bytes, media_type: str) -> PayStubExtraction
         confidence=result.confidence,
         core_fields_present=core_present,
         catch_all_sections=len(result.data.additional_sections),
+        earnings_lines=len(result.data.earnings_lines),
+        deduction_lines=len(result.data.deduction_lines),
     )
     return result

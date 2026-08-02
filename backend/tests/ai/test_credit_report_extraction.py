@@ -190,27 +190,24 @@ def test_open_tradeline_count_is_NOT_crosschecked() -> None:
     assert parsed.status == ExtractionStatus.SUCCEEDED  # the false PARTIAL is gone
 
 
-def test_total_tradeline_count_fires_when_stated_and_mismatched() -> None:
-    # total_tradeline_count DOES measure list length — a declared 18 with 17 captured rows means a
-    # dropped row the API did not truncate → PARTIAL.
+def test_total_tradeline_count_is_no_longer_a_completeness_gate() -> None:
+    # LP-446: total_tradeline_count was REMOVED from the status cross-check. It is rarely printed and
+    # unreliable when it is (a model estimate of "total incl. closed" vs the tradelines actually listed) —
+    # it false-PARTIAL'd a correct extraction. A declared count that disagrees with the captured rows must
+    # NOT downgrade the status any more (the field is kept for information; tradelines have no gate).
     parsed = _parse_credit_report_json(
-        json.dumps(_payload(n_tradelines=17, total_tradeline_count=18))
+        json.dumps(
+            _payload(n_tradelines=18, total_tradeline_count=20)
+        )  # the real LF report: 18 rows, declared 20
     )
     assert parsed is not None
-    assert parsed.status == ExtractionStatus.PARTIAL
+    assert parsed.status == ExtractionStatus.SUCCEEDED  # was a FALSE PARTIAL before LP-446
+    assert (
+        parsed.data.total_tradeline_count.value == 20
+    )  # the field is still captured (informational)
 
 
-def test_total_tradeline_count_passes_when_it_matches() -> None:
-    parsed = _parse_credit_report_json(
-        json.dumps(_payload(n_tradelines=18, total_tradeline_count=18))
-    )
-    assert parsed is not None
-    assert parsed.status == ExtractionStatus.SUCCEEDED
-
-
-def test_total_tradeline_count_null_does_not_fire() -> None:
-    # The fail-closed shape: a report that states no all-in total (the common case) leaves the field
-    # null, and absence is never a mismatch — a complete extraction stays SUCCEEDED.
+def test_total_tradeline_count_null_stays_succeeded() -> None:
     parsed = _parse_credit_report_json(json.dumps(_payload(n_tradelines=18)))
     assert parsed is not None
     assert parsed.data.total_tradeline_count.value is None

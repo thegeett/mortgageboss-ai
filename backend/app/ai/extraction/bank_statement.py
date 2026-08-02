@@ -92,6 +92,22 @@ class BankStatementExtraction(BaseModel):
     total_deposits: TypedField[Decimal] = Field(default_factory=TypedField)
     total_withdrawals: TypedField[Decimal] = Field(default_factory=TypedField)
 
+    # --- LP-446 diff (002 spec) — the exists_today:false additions ----------- #
+    # account_owner_name_2 / account_owner_count unblock AS-6's joint-account blindness (the co-holder gap).
+    account_holder_names_raw: TypedField[str] = Field(default_factory=TypedField)
+    account_owner_name_2: TypedField[str] = Field(default_factory=TypedField)
+    account_owner_count: TypedField[int] = Field(default_factory=TypedField)
+    account_holder_address: TypedField[str] = Field(default_factory=TypedField)
+    account_status: TypedField[str] = Field(default_factory=TypedField)
+    available_balance: TypedField[Decimal] = Field(default_factory=TypedField)
+    average_daily_balance: TypedField[Decimal] = Field(default_factory=TypedField)
+    nsf_fee_count: TypedField[int] = Field(default_factory=TypedField)
+    nsf_fee_total: TypedField[Decimal] = Field(default_factory=TypedField)
+    fees_total: TypedField[Decimal] = Field(default_factory=TypedField)
+    minimum_balance_requirement: TypedField[Decimal] = Field(default_factory=TypedField)
+    holds_or_pledges: TypedField[str] = Field(default_factory=TypedField)
+    interest_paid: TypedField[Decimal] = Field(default_factory=TypedField)
+
     # --- Transactions (the structurally-new part, ADR-061) ------------------ #
     transactions: list[Transaction] = Field(default_factory=list)
 
@@ -138,6 +154,20 @@ _CORE_SPEC: CoreSpec = (
     ("ending_balance", coerce_decimal),
     ("total_deposits", coerce_decimal),
     ("total_withdrawals", coerce_decimal),
+    # LP-446 diff additions
+    ("account_holder_names_raw", coerce_str),
+    ("account_owner_name_2", coerce_str),
+    ("account_owner_count", coerce_int),
+    ("account_holder_address", coerce_str),
+    ("account_status", coerce_str),
+    ("available_balance", coerce_decimal),
+    ("average_daily_balance", coerce_decimal),
+    ("nsf_fee_count", coerce_int),
+    ("nsf_fee_total", coerce_decimal),
+    ("fees_total", coerce_decimal),
+    ("minimum_balance_requirement", coerce_decimal),
+    ("holds_or_pledges", coerce_str),
+    ("interest_paid", coerce_decimal),
     (
         "page_count_declared",
         coerce_int,

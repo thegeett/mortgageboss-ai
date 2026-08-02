@@ -29,6 +29,7 @@ from app.ai.extraction.parsing import (
     derive_status,
     parse_catch_all,
     parse_typed_core,
+    source_payload,
 )
 from app.ai.extraction.shape import CatchAllSection, TypedField
 from app.ai.parsing import coerce_confidence, extract_json_object
@@ -39,7 +40,7 @@ logger = structlog.get_logger(__name__)
 
 _PROMPT_PATH = "extraction/hoa_statement.txt"
 _SUPPORTED_MEDIA_TYPES = frozenset({"application/pdf", "image/jpeg", "image/png", "image/jpg"})
-_MAX_TOKENS = 4096
+_MAX_TOKENS = 8192  # LP-446: list-bearing (special_assessment_items) → unbounded-list budget
 
 
 class HOAStatementExtraction(BaseModel):
@@ -63,6 +64,23 @@ class HOAStatementExtraction(BaseModel):
     due_date: TypedField[date] = Field(default_factory=TypedField)
 
     # --- Grouped catch-all — everything else -------------------------------- #
+    # --- LP-446 diff — the exists_today:false additions --------------------- #
+    issuer_name: TypedField[str] = Field(default_factory=TypedField)
+    management_company: TypedField[str] = Field(default_factory=TypedField)
+    association_contact_phone: TypedField[str] = Field(default_factory=TypedField)
+    association_contact_email_or_url: TypedField[str] = Field(default_factory=TypedField)
+    association_contact_address: TypedField[str] = Field(default_factory=TypedField)
+    unit_owner_name_2: TypedField[str] = Field(default_factory=TypedField)
+    owner_account_number_masked: TypedField[str] = Field(default_factory=TypedField)
+    statement_date: TypedField[date] = Field(default_factory=TypedField)
+    past_due_amount: TypedField[Decimal] = Field(default_factory=TypedField)
+    paid_current_indicator: TypedField[str] = Field(default_factory=TypedField)
+    collection_or_lien_status: TypedField[str] = Field(default_factory=TypedField)
+    reserve_percentage: TypedField[str] = Field(default_factory=TypedField)
+
+    # --- LP-446 diff — captured nested list(s) (bare rows) --------------------- #
+    special_assessment_items: list[dict[str, Any]] = Field(default_factory=list)
+
     additional_sections: list[CatchAllSection] = Field(default_factory=list)
 
 
@@ -95,7 +113,42 @@ _CORE_SPEC: CoreSpec = (
     ("dues_frequency", coerce_str),
     ("balance", coerce_decimal),
     ("due_date", coerce_date),
+    # LP-446 diff additions
+    ("issuer_name", coerce_str),
+    ("management_company", coerce_str),
+    ("association_contact_phone", coerce_str),
+    ("association_contact_email_or_url", coerce_str),
+    ("association_contact_address", coerce_str),
+    ("unit_owner_name_2", coerce_str),
+    ("owner_account_number_masked", coerce_str),
+    ("statement_date", coerce_date),
+    ("past_due_amount", coerce_decimal),
+    ("paid_current_indicator", coerce_str),
+    ("collection_or_lien_status", coerce_str),
+    ("reserve_percentage", coerce_str),
 )
+
+_SPECIAL_ASSESSMENT_ITEMS_ROW: CoreSpec = (
+    ("description", coerce_str),
+    ("amount", coerce_str),
+    ("duration", coerce_str),
+)
+
+
+def _parse_rows(raw: Any, row_spec: CoreSpec) -> list[dict[str, Any]]:
+    """LP-446 — coerce a bare-row list (each declared field coerced, a per-row source kept, empty rows
+    dropped). Mirrors bank_statement's transactions parse; row values are read as strings by the snapshot."""
+    rows: list[dict[str, Any]] = []
+    if not isinstance(raw, list):
+        return rows
+    for entry in raw:
+        if not isinstance(entry, dict):
+            continue
+        row: dict[str, Any] = {name: coerce(entry.get(name)) for name, coerce in row_spec}
+        row["source"] = source_payload(entry)
+        if any(row[name] is not None for name, _ in row_spec):
+            rows.append(row)
+    return rows
 
 
 def _parse_hoa_statement_json(text: str) -> HOAStatementExtractionResult | None:
@@ -111,16 +164,23 @@ def _parse_hoa_statement_json(text: str) -> HOAStatementExtractionResult | None:
         return None
 
     core_payload, non_null, coercion_lost = parse_typed_core(payload, _CORE_SPEC)
+    special_assessment_items = _parse_rows(
+        payload.get("special_assessment_items"), _SPECIAL_ASSESSMENT_ITEMS_ROW
+    )
     sections = parse_catch_all(payload.get("additional_sections"))
 
     try:
         data = HOAStatementExtraction.model_validate(
-            {**core_payload, "additional_sections": sections}
+            {
+                **core_payload,
+                "special_assessment_items": special_assessment_items,
+                "additional_sections": sections,
+            }
         )
     except ValidationError:
         return None
 
-    status = derive_status(non_null, coercion_lost)
+    status = derive_status(non_null + len(special_assessment_items), coercion_lost)
     confidence = coerce_confidence(payload.get("confidence"))
     raw_reasoning = payload.get("reasoning")
     reasoning = (

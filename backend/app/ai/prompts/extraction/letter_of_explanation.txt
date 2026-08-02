@@ -52,17 +52,18 @@ Respond with ONLY a single JSON object, no markdown fences and no prose, exactly
     "explanation_summary": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
     "referenced_employer": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
     "referenced_date":     {"value": <date|null>, "page": <int|null>, "snippet": <string|null>},
-    "referenced_amount":   {"value": <number|null>, "page": <int|null>, "snippet": <string|null>}
+    "referenced_amount":   {"value": <number|null>, "page": <int|null>, "snippet": <string|null>},
+    "borrower_name": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "borrower_name_2": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "creditor_or_inquiry_company": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "account_number_last4": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "credit_report_bureau_or_reference": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "new_debt_resulted_from_inquiry": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "one_time_or_recurring_indicator": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "resolution_or_payoff_action": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "current_account_orissue_status": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "supporting_documents": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "borrower_certification": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "borrower_signature_present": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "borrower_signature_date": {"value": <YYYY-MM-DD|null>, "page": <int|null>, "snippet": <string|null>}
   },
-  "additional_sections": [
-    {"section": "<section name>", "fields": [
-      {"label": "<field label>", "value": <string|null>, "page": <int|null>, "snippet": <string|null>}
-    ]}
-  ],
-  "field_confidence": {"<typed_core field name>": <0.0-1.0|null>, "...": <0.0-1.0|null>},
-  "confidence": <number 0.0-1.0>,
-  "reasoning": "<one short sentence describing the document>"
-}
-
-Example (values illustrative; use null for anything absent):
-{"typed_core": {"subject": {"value": "employment gap Mar-Aug 2023", "page": 1, "snippet": "explain the gap from March to August 2023"}, "explanation_summary": {"value": "Borrower was between jobs after a layoff and returned to full-time work in August 2023.", "page": 1, "snippet": "I was laid off ... started a new role in August 2023"}, "referenced_date": {"value": "2023-08-01", "page": 1, "snippet": "August 2023"}}, "additional_sections": [], "confidence": 0.85, "reasoning": "A short borrower letter explaining a 2023 employment gap."}

@@ -86,6 +86,13 @@ class W2Extraction(BaseModel):
     medicare_tax_withheld: TypedField[Decimal] = Field(default_factory=TypedField)  # Box 6
 
     # --- Grouped catch-all — everything else, by section -------------------- #
+    # --- LP-446 diff — the exists_today:false additions --------------------- #
+    employer_address: TypedField[str] = Field(default_factory=TypedField)
+    employee_address: TypedField[str] = Field(default_factory=TypedField)
+    retirement_plan_checked: TypedField[str] = Field(default_factory=TypedField)
+    statutory_employee_checked: TypedField[str] = Field(default_factory=TypedField)
+    is_corrected_w2: TypedField[str] = Field(default_factory=TypedField)
+
     additional_sections: list[CatchAllSection] = Field(default_factory=list)
 
 
@@ -124,6 +131,12 @@ _CORE_SPEC: CoreSpec = (
     ("social_security_tax_withheld", coerce_decimal),
     ("medicare_wages", coerce_decimal),
     ("medicare_tax_withheld", coerce_decimal),
+    # LP-446 diff additions
+    ("employer_address", coerce_str),
+    ("employee_address", coerce_str),
+    ("retirement_plan_checked", coerce_str),
+    ("statutory_employee_checked", coerce_str),
+    ("is_corrected_w2", coerce_str),
 )
 
 

@@ -63,6 +63,20 @@ class MortgageStatementExtraction(BaseModel):
     due_date: TypedField[date] = Field(default_factory=TypedField)
 
     # --- Grouped catch-all — everything else -------------------------------- #
+    # --- LP-446 diff — the exists_today:false additions --------------------- #
+    borrower_name_2: TypedField[str] = Field(default_factory=TypedField)
+    loan_number_masked: TypedField[str] = Field(default_factory=TypedField)
+    statement_date: TypedField[date] = Field(default_factory=TypedField)
+    billing_cycle_or_period: TypedField[str] = Field(default_factory=TypedField)
+    principal_amount: TypedField[Decimal] = Field(default_factory=TypedField)
+    interest_amount: TypedField[Decimal] = Field(default_factory=TypedField)
+    interest_rate: TypedField[str] = Field(default_factory=TypedField)
+    escrow_balance: TypedField[Decimal] = Field(default_factory=TypedField)
+    past_due_amount: TypedField[Decimal] = Field(default_factory=TypedField)
+    maturity_date: TypedField[date] = Field(default_factory=TypedField)
+    delinquency_status: TypedField[str] = Field(default_factory=TypedField)
+    loss_mitigation_or_bankruptcy_messages: TypedField[str] = Field(default_factory=TypedField)
+
     additional_sections: list[CatchAllSection] = Field(default_factory=list)
 
 
@@ -95,6 +109,19 @@ _CORE_SPEC: CoreSpec = (
     ("unpaid_balance", coerce_decimal),
     ("escrow_amount", coerce_decimal),
     ("due_date", coerce_date),
+    # LP-446 diff additions
+    ("borrower_name_2", coerce_str),
+    ("loan_number_masked", coerce_str),
+    ("statement_date", coerce_date),
+    ("billing_cycle_or_period", coerce_str),
+    ("principal_amount", coerce_decimal),
+    ("interest_amount", coerce_decimal),
+    ("interest_rate", coerce_str),
+    ("escrow_balance", coerce_decimal),
+    ("past_due_amount", coerce_decimal),
+    ("maturity_date", coerce_date),
+    ("delinquency_status", coerce_str),
+    ("loss_mitigation_or_bankruptcy_messages", coerce_str),
 )
 
 

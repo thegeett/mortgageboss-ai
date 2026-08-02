@@ -57,17 +57,20 @@ Respond with ONLY a single JSON object, no markdown fences and no prose, exactly
     "statement_period_start": {"value": <date|null>, "page": <int|null>, "snippet": <string|null>},
     "statement_period_end":   {"value": <date|null>, "page": <int|null>, "snippet": <string|null>},
     "vested_balance":         {"value": <number|null>, "page": <int|null>, "snippet": <string|null>},
-    "total_balance":          {"value": <number|null>, "page": <int|null>, "snippet": <string|null>}
+    "total_balance":          {"value": <number|null>, "page": <int|null>, "snippet": <string|null>},
+    "retiree_or_account_owner_name_2": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "statement_date": {"value": <YYYY-MM-DD|null>, "page": <int|null>, "snippet": <string|null>},
+    "vested_percentage": {"value": <number|null>, "page": <int|null>, "snippet": <string|null>},
+    "beginning_balance": {"value": <number|null>, "page": <int|null>, "snippet": <string|null>},
+    "remaining_available_balance": {"value": <number|null>, "page": <int|null>, "snippet": <string|null>},
+    "outstanding_loan_balance": {"value": <number|null>, "page": <int|null>, "snippet": <string|null>},
+    "withdrawal_or_liquidation_terms": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "gross_distribution_amount": {"value": <number|null>, "page": <int|null>, "snippet": <string|null>},
+    "net_distribution_amount": {"value": <number|null>, "page": <int|null>, "snippet": <string|null>},
+    "distribution_frequency": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "distribution_date_or_schedule": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "year_to_date_distributions": {"value": <number|null>, "page": <int|null>, "snippet": <string|null>},
+    "required_minimum_distribution_indicator": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "fixed_period_or_lifetime_indicator": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "scheduled_end_date": {"value": <YYYY-MM-DD|null>, "page": <int|null>, "snippet": <string|null>}
   },
-  "additional_sections": [
-    {"section": "<section name>", "fields": [
-      {"label": "<field label>", "value": <string|null>, "page": <int|null>, "snippet": <string|null>}
-    ]}
-  ],
-  "field_confidence": {"<typed_core field name>": <0.0-1.0|null>, "...": <0.0-1.0|null>},
-  "confidence": <number 0.0-1.0>,
-  "reasoning": "<one short sentence; do NOT quote the full account number>"
-}
-
-Example (values illustrative; use null for anything absent):
-{"typed_core": {"institution_name": {"value": "Fidelity", "page": 1, "snippet": "Fidelity NetBenefits"}, "account_type": {"value": "401k", "page": 1, "snippet": "401(k) Plan"}, "total_balance": {"value": "243000.00", "page": 1, "snippet": "Total 243,000.00"}, "vested_balance": {"value": "243000.00", "page": 1, "snippet": "Vested 243,000.00"}}, "additional_sections": [{"section": "Employer Match", "fields": [{"label": "YTD match", "value": "4,200.00", "page": 1, "snippet": "Employer match 4,200.00"}]}], "confidence": 0.9, "reasoning": "401(k) statement showing total and vested balances."}

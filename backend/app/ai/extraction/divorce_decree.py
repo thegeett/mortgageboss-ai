@@ -98,6 +98,20 @@ class DivorceDecreeExtraction(BaseModel):
     property_awards: list[PropertyAward] = Field(default_factory=list)
 
     # --- Grouped catch-all — everything else -------------------------------- #
+    # --- LP-446 diff — the exists_today:false additions --------------------- #
+    court_name: TypedField[str] = Field(default_factory=TypedField)
+    court_jurisdiction: TypedField[str] = Field(default_factory=TypedField)
+    case_number: TypedField[str] = Field(default_factory=TypedField)
+    decree_final_date: TypedField[date] = Field(default_factory=TypedField)
+    decree_status: TypedField[str] = Field(default_factory=TypedField)
+    dissolution_granted_indicator: TypedField[str] = Field(default_factory=TypedField)
+    marriage_date: TypedField[date] = Field(default_factory=TypedField)
+    separation_date: TypedField[date] = Field(default_factory=TypedField)
+    name_change_order: TypedField[str] = Field(default_factory=TypedField)
+    incorporated_settlement_agreement: TypedField[str] = Field(default_factory=TypedField)
+    judge_name: TypedField[str] = Field(default_factory=TypedField)
+    appeal_or_stay_indicator: TypedField[str] = Field(default_factory=TypedField)
+
     additional_sections: list[CatchAllSection] = Field(default_factory=list)
 
 
@@ -126,6 +140,19 @@ _CORE_SPEC: CoreSpec = (
     ("party_1_name", coerce_str),
     ("party_2_name", coerce_str),
     ("effective_date", coerce_date),
+    # LP-446 diff additions
+    ("court_name", coerce_str),
+    ("court_jurisdiction", coerce_str),
+    ("case_number", coerce_str),
+    ("decree_final_date", coerce_date),
+    ("decree_status", coerce_str),
+    ("dissolution_granted_indicator", coerce_str),
+    ("marriage_date", coerce_date),
+    ("separation_date", coerce_date),
+    ("name_change_order", coerce_str),
+    ("incorporated_settlement_agreement", coerce_str),
+    ("judge_name", coerce_str),
+    ("appeal_or_stay_indicator", coerce_str),
 )
 
 

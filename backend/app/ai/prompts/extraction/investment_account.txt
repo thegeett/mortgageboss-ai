@@ -51,17 +51,19 @@ Respond with ONLY a single JSON object, no markdown fences and no prose, exactly
     "account_type":           {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
     "statement_period_start": {"value": <date|null>, "page": <int|null>, "snippet": <string|null>},
     "statement_period_end":   {"value": <date|null>, "page": <int|null>, "snippet": <string|null>},
-    "total_value":            {"value": <number|null>, "page": <int|null>, "snippet": <string|null>}
+    "total_value":            {"value": <number|null>, "page": <int|null>, "snippet": <string|null>},
+    "brokerage_or_custodian_name": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "document_title": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "account_registration_names_raw": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "account_owner_name_2": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "account_owner_count": {"value": <int|null>, "page": <int|null>, "snippet": <string|null>},
+    "statement_date": {"value": <YYYY-MM-DD|null>, "page": <int|null>, "snippet": <string|null>},
+    "cash_and_cash_equivalents": {"value": <number|null>, "page": <int|null>, "snippet": <string|null>},
+    "securities_market_value": {"value": <number|null>, "page": <int|null>, "snippet": <string|null>},
+    "margin_or_securities_backed_loan_balance": {"value": <number|null>, "page": <int|null>, "snippet": <string|null>},
+    "net_liquidation_value": {"value": <number|null>, "page": <int|null>, "snippet": <string|null>},
+    "vested_or_available_value": {"value": <number|null>, "page": <int|null>, "snippet": <string|null>},
+    "liquidation_restrictions": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "document_status_or_version": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>}
   },
-  "additional_sections": [
-    {"section": "<section name>", "fields": [
-      {"label": "<field label>", "value": <string|null>, "page": <int|null>, "snippet": <string|null>}
-    ]}
-  ],
-  "field_confidence": {"<typed_core field name>": <0.0-1.0|null>, "...": <0.0-1.0|null>},
-  "confidence": <number 0.0-1.0>,
-  "reasoning": "<one short sentence; do NOT quote the full account number>"
-}
-
-Example (values illustrative; use null for anything absent):
-{"typed_core": {"institution_name": {"value": "Vanguard", "page": 1, "snippet": "Vanguard Brokerage"}, "account_number_masked": {"value": "****4321", "page": 1, "snippet": "Account ****4321"}, "total_value": {"value": "19000.00", "page": 1, "snippet": "Total Value 19,000.00"}}, "additional_sections": [{"section": "Holdings", "fields": [{"label": "VTSAX", "value": "120 shares / 12,000.00", "page": 1, "snippet": "VTSAX 120 12,000.00"}]}], "confidence": 0.9, "reasoning": "Brokerage statement with a total portfolio value and itemized holdings."}
+  "security_positions": [{"description": <string|null>, "ticker_or_cusip": <string|null>, "quantity": <string|null>, "market_value": <string|null>, "asset_class": <string|null>, "source": <string|null>, "page": <int|null>, "snippet": <string|null>}],

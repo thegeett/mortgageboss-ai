@@ -28,10 +28,12 @@ from app.ai.extraction.parsing import (
     CoreSpec,
     coerce_date,
     coerce_decimal,
+    coerce_int,
     coerce_str,
     derive_status,
     parse_catch_all,
     parse_typed_core,
+    source_payload,
 )
 from app.ai.extraction.shape import CatchAllSection, TypedField
 from app.ai.parsing import coerce_confidence, extract_json_object
@@ -65,6 +67,39 @@ class PurchaseAgreementExtraction(BaseModel):
     earnest_money_amount: TypedField[Decimal] = Field(default_factory=TypedField)
 
     # --- Grouped catch-all — everything else (contingencies, terms) --------- #
+    # --- LP-446 diff — the exists_today:false additions --------------------- #
+    buyer_name_2: TypedField[str] = Field(default_factory=TypedField)
+    buyer_names_raw: TypedField[str] = Field(default_factory=TypedField)
+    buyer_count: TypedField[int] = Field(default_factory=TypedField)
+    seller_name_2: TypedField[str] = Field(default_factory=TypedField)
+    seller_names_raw: TypedField[str] = Field(default_factory=TypedField)
+    seller_count: TypedField[int] = Field(default_factory=TypedField)
+    parties_relationship_disclosed: TypedField[str] = Field(default_factory=TypedField)
+    listing_agent_name: TypedField[str] = Field(default_factory=TypedField)
+    selling_agent_name: TypedField[str] = Field(default_factory=TypedField)
+    legal_description: TypedField[str] = Field(default_factory=TypedField)
+    property_type: TypedField[str] = Field(default_factory=TypedField)
+    hoa_indicator: TypedField[str] = Field(default_factory=TypedField)
+    hoa_dues_amount: TypedField[Decimal] = Field(default_factory=TypedField)
+    annual_property_tax: TypedField[Decimal] = Field(default_factory=TypedField)
+    earnest_money_due_date: TypedField[date] = Field(default_factory=TypedField)
+    earnest_money_holder: TypedField[str] = Field(default_factory=TypedField)
+    seller_credit_amount: TypedField[Decimal] = Field(default_factory=TypedField)
+    seller_credit_purpose: TypedField[str] = Field(default_factory=TypedField)
+    other_concessions_amount: TypedField[Decimal] = Field(default_factory=TypedField)
+    down_payment_amount: TypedField[Decimal] = Field(default_factory=TypedField)
+    loan_amount_stated: TypedField[Decimal] = Field(default_factory=TypedField)
+    contract_date: TypedField[date] = Field(default_factory=TypedField)
+    contract_expiration_date: TypedField[date] = Field(default_factory=TypedField)
+    all_parties_signed: TypedField[str] = Field(default_factory=TypedField)
+    personal_property_included: TypedField[str] = Field(default_factory=TypedField)
+    personal_property_value: TypedField[Decimal] = Field(default_factory=TypedField)
+    side_agreements_referenced: TypedField[str] = Field(default_factory=TypedField)
+
+    # --- LP-446 diff — captured nested list(s) (bare rows) --------------------- #
+    addenda: list[dict[str, Any]] = Field(default_factory=list)
+    contingencies: list[dict[str, Any]] = Field(default_factory=list)
+
     additional_sections: list[CatchAllSection] = Field(default_factory=list)
 
 
@@ -96,7 +131,64 @@ _CORE_SPEC: CoreSpec = (
     ("sales_price", coerce_decimal),
     ("closing_date", coerce_date),
     ("earnest_money_amount", coerce_decimal),
+    # LP-446 diff additions
+    ("buyer_name_2", coerce_str),
+    ("buyer_names_raw", coerce_str),
+    ("buyer_count", coerce_int),
+    ("seller_name_2", coerce_str),
+    ("seller_names_raw", coerce_str),
+    ("seller_count", coerce_int),
+    ("parties_relationship_disclosed", coerce_str),
+    ("listing_agent_name", coerce_str),
+    ("selling_agent_name", coerce_str),
+    ("legal_description", coerce_str),
+    ("property_type", coerce_str),
+    ("hoa_indicator", coerce_str),
+    ("hoa_dues_amount", coerce_decimal),
+    ("annual_property_tax", coerce_decimal),
+    ("earnest_money_due_date", coerce_date),
+    ("earnest_money_holder", coerce_str),
+    ("seller_credit_amount", coerce_decimal),
+    ("seller_credit_purpose", coerce_str),
+    ("other_concessions_amount", coerce_decimal),
+    ("down_payment_amount", coerce_decimal),
+    ("loan_amount_stated", coerce_decimal),
+    ("contract_date", coerce_date),
+    ("contract_expiration_date", coerce_date),
+    ("all_parties_signed", coerce_str),
+    ("personal_property_included", coerce_str),
+    ("personal_property_value", coerce_decimal),
+    ("side_agreements_referenced", coerce_str),
 )
+
+_ADDENDA_ROW: CoreSpec = (
+    ("addendum_name", coerce_str),
+    ("addendum_type", coerce_str),
+    ("addendum_date", coerce_str),
+    ("is_signed", coerce_str),
+    ("is_attached", coerce_str),
+)
+_CONTINGENCIES_ROW: CoreSpec = (
+    ("contingency_type", coerce_str),
+    ("deadline_date", coerce_str),
+    ("is_waived", coerce_str),
+)
+
+
+def _parse_rows(raw: Any, row_spec: CoreSpec) -> list[dict[str, Any]]:
+    """LP-446 — coerce a bare-row list (each declared field coerced, a per-row source kept, empty rows
+    dropped). Mirrors bank_statement's transactions parse; row values are read as strings by the snapshot."""
+    rows: list[dict[str, Any]] = []
+    if not isinstance(raw, list):
+        return rows
+    for entry in raw:
+        if not isinstance(entry, dict):
+            continue
+        row: dict[str, Any] = {name: coerce(entry.get(name)) for name, coerce in row_spec}
+        row["source"] = source_payload(entry)
+        if any(row[name] is not None for name, _ in row_spec):
+            rows.append(row)
+    return rows
 
 
 def _parse_purchase_agreement_json(text: str) -> PurchaseAgreementExtractionResult | None:
@@ -112,16 +204,23 @@ def _parse_purchase_agreement_json(text: str) -> PurchaseAgreementExtractionResu
         return None
 
     core_payload, non_null, coercion_lost = parse_typed_core(payload, _CORE_SPEC)
+    addenda = _parse_rows(payload.get("addenda"), _ADDENDA_ROW)
+    contingencies = _parse_rows(payload.get("contingencies"), _CONTINGENCIES_ROW)
     sections = parse_catch_all(payload.get("additional_sections"))
 
     try:
         data = PurchaseAgreementExtraction.model_validate(
-            {**core_payload, "additional_sections": sections}
+            {
+                **core_payload,
+                "addenda": addenda,
+                "contingencies": contingencies,
+                "additional_sections": sections,
+            }
         )
     except ValidationError:
         return None
 
-    status = derive_status(non_null, coercion_lost)
+    status = derive_status(non_null + len(addenda) + len(contingencies), coercion_lost)
     confidence = coerce_confidence(payload.get("confidence"))
     raw_reasoning = payload.get("reasoning")
     reasoning = (

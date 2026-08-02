@@ -19,11 +19,33 @@ CAPTURE EVERYTHING ON THE DOCUMENT — lose nothing. There are two buckets:
      annual_premium    (number)  the annual premium
      effective_date    (date)    the policy start / effective date
      expiration_date   (date)    the policy end / expiration date
+     named_insured_2   (string)  a SECOND named insured, if the policy lists one
+     named_insured_raw (string)  the named-insured block VERBATIM (before any split)
+     agency_producer_name (string) the agency / producer / agent name
+     policy_form       (string)  the policy FORM code, e.g. "HO 00 03", "HO-3", "HO 00 05"
+     policy_status     (string)  active / new / renewal / cancelled, if stated
+     replacement_cost_or_coinsurance_basis (string)  ⚠️ the DWELLING's (Coverage A) loss-settlement
+                        basis ONLY: "replacement cost", "actual cash value / ACV", or a coinsurance %.
+                        Read it from the DWELLING / Coverage A line or the loss-settlement provisions —
+                        NOT from a personal-property endorsement (see the ⚠️ rule below). null if the
+                        dwelling basis is not explicitly stated.
+     wind_hail_hurricane_coverage (string) whether wind/hail/hurricane is covered or excluded
+     wind_hail_deductible (string) the wind/hail/hurricane deductible (may be a % or $)
+     premium_paid_or_due_status (string) whether the premium is paid / due / escrowed, if stated
+     mortgagee_name    (string)  the FIRST mortgagee / loss-payee name
+     mortgagee_clause_raw (string) the mortgagee clause VERBATIM (name + ISAOA/ATIMA + address)
+     mortgagee_count   (integer) how many mortgagees / loss payees are listed
+     document_issue_date (date)  the date the declarations page / binder was issued
 
 2. ADDITIONAL SECTIONS — EVERYTHING ELSE, grouped by section, e.g. "Coverages"
-   (other coverage lines + limits), "Deductibles", "Endorsements", "Mortgagee
-   Clause", "Insured/Contact". Do not force these into the typed core — capture
-   them here so nothing is lost.
+   (other coverage lines + limits), "Deductibles", "Insured/Contact". Do not force
+   these into the typed core — capture them here so nothing is lost.
+
+3. FORMS & ENDORSEMENTS — a LIST, one FLAT ROW per form/endorsement on the policy:
+     forms_and_endorsements — each row: code_or_label, description
+   List EVERY form and endorsement (its form code/label and what it does). A
+   personal-property (Coverage C) replacement-cost endorsement is a ROW HERE — it is
+   NOT the dwelling's loss-settlement basis.
 
 FOR EVERY FIELD include WHERE you read it:
   - "page"    (integer)  the 1-based page the value appears on
@@ -32,6 +54,14 @@ FOR EVERY FIELD include WHERE you read it:
 CRITICAL RULES:
   - If a value is NOT present or NOT legible, use null — NEVER guess or invent.
   - Money may include "$"/commas (they will be parsed). Dates in any common format.
+  - ⚠️ DWELLING vs PERSONAL-PROPERTY loss settlement — DO NOT CONFLATE. The
+    replacement_cost_or_coinsurance_basis field is the DWELLING's (Coverage A) basis
+    ONLY. A "replacement cost" endorsement that applies to PERSONAL PROPERTY /
+    contents (Coverage C) is a DIFFERENT thing — put it in forms_and_endorsements as
+    a row, and do NOT let it set the dwelling field. If ONLY a personal-property
+    replacement-cost endorsement is present and the DWELLING basis is not separately
+    stated, leave replacement_cost_or_coinsurance_basis null (a form code like
+    "HO 00 03" implies but does not explicitly state the dwelling basis).
 
 PER-FIELD CONFIDENCE — in addition to the per-document "confidence" below, return a
 "field_confidence" object mapping EACH typed-core field name to your certainty
@@ -49,13 +79,27 @@ Respond with ONLY a single JSON object, no markdown fences and no prose, exactly
     "coverage_amount":  {"value": <number|null>, "page": <int|null>, "snippet": <string|null>},
     "annual_premium":   {"value": <number|null>, "page": <int|null>, "snippet": <string|null>},
     "effective_date":   {"value": <date|null>, "page": <int|null>, "snippet": <string|null>},
-    "expiration_date":  {"value": <date|null>, "page": <int|null>, "snippet": <string|null>}
+    "expiration_date":  {"value": <date|null>, "page": <int|null>, "snippet": <string|null>},
+    "named_insured_2":  {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "named_insured_raw": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "agency_producer_name": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "policy_form":      {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "policy_status":    {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "replacement_cost_or_coinsurance_basis": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "wind_hail_hurricane_coverage": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "wind_hail_deductible": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "premium_paid_or_due_status": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "mortgagee_name":   {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "mortgagee_clause_raw": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "mortgagee_count":  {"value": <int|null>, "page": <int|null>, "snippet": <string|null>},
+    "document_issue_date": {"value": <date|null>, "page": <int|null>, "snippet": <string|null>}
   },
   "additional_sections": [
     {"section": "<section name>", "fields": [
       {"label": "<field label>", "value": <string|null>, "page": <int|null>, "snippet": <string|null>}
     ]}
   ],
+  "forms_and_endorsements": [{"code_or_label": <string|null>, "description": <string|null>, "page": <int|null>, "snippet": <string|null>}],
   "field_confidence": {"<typed_core field name>": <0.0-1.0|null>, "...": <0.0-1.0|null>},
   "confidence": <number 0.0-1.0>,
   "reasoning": "<one short sentence describing the document>"

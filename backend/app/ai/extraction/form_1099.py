@@ -80,6 +80,15 @@ class Form1099Extraction(BaseModel):
     income_amount: TypedField[Decimal] = Field(default_factory=TypedField)  # primary, per subtype
 
     # --- Grouped catch-all — everything else, by section -------------------- #
+    # --- LP-446 diff — the exists_today:false additions --------------------- #
+    corrected_indicator: TypedField[str] = Field(default_factory=TypedField)
+    payer_address: TypedField[str] = Field(default_factory=TypedField)
+    recipient_address: TypedField[str] = Field(default_factory=TypedField)
+    distribution_code: TypedField[str] = Field(default_factory=TypedField)
+    taxable_amount_not_determined: TypedField[str] = Field(default_factory=TypedField)
+    account_number: TypedField[str] = Field(default_factory=TypedField)
+    second_tin_notice: TypedField[str] = Field(default_factory=TypedField)
+
     additional_sections: list[CatchAllSection] = Field(default_factory=list)
 
 
@@ -112,6 +121,14 @@ _CORE_SPEC: CoreSpec = (
     ("recipient_tin", coerce_str),
     ("tax_year", coerce_int),
     ("income_amount", coerce_decimal),
+    # LP-446 diff additions
+    ("corrected_indicator", coerce_str),
+    ("payer_address", coerce_str),
+    ("recipient_address", coerce_str),
+    ("distribution_code", coerce_str),
+    ("taxable_amount_not_determined", coerce_str),
+    ("account_number", coerce_str),
+    ("second_tin_notice", coerce_str),
 )
 
 

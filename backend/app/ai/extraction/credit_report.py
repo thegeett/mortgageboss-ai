@@ -285,12 +285,14 @@ def _parse_credit_report_json(text: str) -> CreditReportExtractionResult | None:
 
     # Count cross-check (guide §8, LP-443): a declared count that disagrees with the
     # captured row count means rows were dropped WITHOUT the API truncating → PARTIAL.
-    if (
-        status is ExtractionStatus.SUCCEEDED
-        and data.total_tradeline_count.value is not None
-        and data.total_tradeline_count.value != len(data.tradelines)
-    ):
-        status = ExtractionStatus.PARTIAL
+    # ⚠️ LP-446: total_tradeline_count is DELIBERATELY NOT a cross-check. It is rarely printed and
+    # unreliable when it is (a model estimate of "total including closed" vs the tradelines actually
+    # listed) — it produced a FALSE PARTIAL on a correct 18-row extraction (declared 20). A guard that
+    # misfires more than it catches is worse than none, so tradelines have NO completeness gate; the field
+    # is kept for information. (public_record_count / inquiry_count count the SAME population they gate and
+    # stay. The Σ(monthly_payment)==total_monthly_debt_payment idea was NOT added: it held on n=1 but an
+    # exact/±1 gate is unjustifiable — a report whose total excludes a $0-payment closed account would
+    # false-PARTIAL. See LP-446.md D5.)
     if (
         status is ExtractionStatus.SUCCEEDED
         and data.public_record_count.value is not None

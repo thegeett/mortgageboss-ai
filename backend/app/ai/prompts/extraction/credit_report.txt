@@ -26,7 +26,7 @@ CAPTURE EVERYTHING ON THE DOCUMENT — lose nothing. There are two buckets:
      score_transunion                 (integer)
      score_model                      (string) Capture the model exactly as printed. Beacon = Equifax FICO; Empirica = TransUnion FICO. Never compare a Vantage score to a FICO minimum
      open_tradeline_count             (integer) The count of OPEN/active tradelines as stated in the report summary — the tradelines list contains ALL tradelines, open and closed
-     total_tradeline_count            (integer) The TOTAL number of tradelines, open and closed, ONLY if the report explicitly prints a total-of-all-tradelines. Leave null if the summary shows only an open/active count — do NOT sum the list yourself and do NOT infer a total
+     total_tradeline_count            (integer) Populate ONLY if the report EXPLICITLY prints a total tradeline count INCLUDING closed accounts. Do NOT compute, estimate, or infer it. If only an open/active count is stated, leave null. (Informational only — never used to judge completeness.)
      total_monthly_debt_payment       (number)
      public_record_count              (integer)
      inquiry_count                    (integer)

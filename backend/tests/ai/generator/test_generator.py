@@ -183,7 +183,10 @@ def test_generated_module_executes_and_core_spec_matches_spec() -> None:
     expected = [(f.name, TYPE_TO_COERCER[f.type]) for f in spec.typed_core if f.type is not None]
     assert got == expected
     model = ns[f"{class_prefix(spec.document_type)}Extraction"]
-    field_names = [n for n in model.model_fields if n != "additional_sections"]
+    list_names = {nl.name for nl in spec.nested_lists}
+    field_names = [
+        n for n in model.model_fields if n != "additional_sections" and n not in list_names
+    ]
     assert field_names == [f.name for f in spec.typed_core]
 
 
@@ -264,9 +267,10 @@ def test_roundtrip_model_fields_identical_to_shipping() -> None:
         match = re.search(r"TypedField\[(\w+)\]", str(ann))
         return match.group(1) if match else str(ann)
 
+    list_names = {nl.name for nl in spec.nested_lists}
     for name, info in real_model.model_fields.items():
-        if name == "additional_sections":
-            continue  # the catch-all is identical boilerplate, not a typed-core field
+        if name == "additional_sections" or name in list_names:
+            continue  # catch-all + list-capture fields are identical boilerplate, not typed-core
         assert _inner(gen_model.model_fields[name].annotation) == _inner(info.annotation)
 
 

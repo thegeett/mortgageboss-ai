@@ -52,17 +52,23 @@ Respond with ONLY a single JSON object, no markdown fences and no prose, exactly
     "recipient_name":           {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
     "gift_amount":              {"value": <number|null>, "page": <int|null>, "snippet": <string|null>},
     "property_address":         {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
-    "no_repayment_attestation": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>}
+    "no_repayment_attestation": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "issuer_name": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "donor_names_raw": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "donor_name_2": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "donor_address": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "donor_phone": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "borrower_recipient_name_2": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "gift_date_or_expected_transfer_date": {"value": <YYYY-MM-DD|null>, "page": <int|null>, "snippet": <string|null>},
+    "funds_already_transferred": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "transfer_method": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "gift_source_account_institution": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "gift_source_account_last4": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "recipient_or_escrow_account_last4": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "gift_purpose": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "no_ownership_or_lien_interest_statement": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "lender_name": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "document_issue_date": {"value": <YYYY-MM-DD|null>, "page": <int|null>, "snippet": <string|null>},
+    "donor_signature_present": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "donor_signature_date": {"value": <YYYY-MM-DD|null>, "page": <int|null>, "snippet": <string|null>}
   },
-  "additional_sections": [
-    {"section": "<section name>", "fields": [
-      {"label": "<field label>", "value": <string|null>, "page": <int|null>, "snippet": <string|null>}
-    ]}
-  ],
-  "field_confidence": {"<typed_core field name>": <0.0-1.0|null>, "...": <0.0-1.0|null>},
-  "confidence": <number 0.0-1.0>,
-  "reasoning": "<one short sentence describing the document>"
-}
-
-Example (values illustrative; use null for anything absent):
-{"typed_core": {"donor_name": {"value": "John Doe", "page": 1, "snippet": "Donor: John Doe"}, "donor_relationship": {"value": "father", "page": 1, "snippet": "relationship: father"}, "gift_amount": {"value": "56000.00", "page": 1, "snippet": "gift of $56,000"}, "no_repayment_attestation": {"value": "These funds are a gift and no repayment is expected.", "page": 1, "snippet": "no repayment is expected"}}, "additional_sections": [{"section": "Source of Funds", "fields": [{"label": "Donor bank", "value": "First National", "page": 1, "snippet": "drawn on First National"}]}], "confidence": 0.92, "reasoning": "A signed gift letter with a clear no-repayment statement."}

@@ -47,17 +47,22 @@ Respond with ONLY a single JSON object, no markdown fences and no prose, exactly
     "period_end":     {"value": <date|null>, "page": <int|null>, "snippet": <string|null>},
     "total_revenue":  {"value": <number|null>, "page": <int|null>, "snippet": <string|null>},
     "total_expenses": {"value": <number|null>, "page": <int|null>, "snippet": <string|null>},
-    "net_profit":     {"value": <number|null>, "page": <int|null>, "snippet": <string|null>}
+    "net_profit":     {"value": <number|null>, "page": <int|null>, "snippet": <string|null>},
+    "issuer_name": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "statement_type": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "accounting_basis": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "prepared_by": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "preparer_relationship": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "cpa_review_compilation_or_audit_level": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "total_cost_of_goods_sold": {"value": <number|null>, "page": <int|null>, "snippet": <string|null>},
+    "gross_profit": {"value": <number|null>, "page": <int|null>, "snippet": <string|null>},
+    "operating_income": {"value": <number|null>, "page": <int|null>, "snippet": <string|null>},
+    "total_assets": {"value": <number|null>, "page": <int|null>, "snippet": <string|null>},
+    "cash_and_cash_equivalents": {"value": <number|null>, "page": <int|null>, "snippet": <string|null>},
+    "total_liabilities": {"value": <number|null>, "page": <int|null>, "snippet": <string|null>},
+    "owner_or_shareholder_equity": {"value": <number|null>, "page": <int|null>, "snippet": <string|null>},
+    "management_certification": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "signer_name_title": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "signature_and_date": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>}
   },
-  "additional_sections": [
-    {"section": "<section name>", "fields": [
-      {"label": "<field label>", "value": <string|null>, "page": <int|null>, "snippet": <string|null>}
-    ]}
-  ],
-  "field_confidence": {"<typed_core field name>": <0.0-1.0|null>, "...": <0.0-1.0|null>},
-  "confidence": <number 0.0-1.0>,
-  "reasoning": "<one short sentence describing the document>"
-}
-
-Example (values illustrative; use null for anything absent):
-{"typed_core": {"business_name": {"value": "Doe Consulting LLC", "page": 1, "snippet": "Doe Consulting LLC"}, "period_start": {"value": "2024-01-01", "page": 1, "snippet": "Jan 1, 2024"}, "period_end": {"value": "2024-12-31", "page": 1, "snippet": "Dec 31, 2024"}, "total_revenue": {"value": "210000.00", "page": 1, "snippet": "Total Revenue 210,000.00"}, "net_profit": {"value": "96500.00", "page": 1, "snippet": "Net Income 96,500.00"}}, "additional_sections": [{"section": "Major Expenses", "fields": [{"label": "Contract labor", "value": "40000.00", "page": 1, "snippet": "Contract labor 40,000.00"}]}], "confidence": 0.88, "reasoning": "Annual P&L with a printed net income line."}
+  "financial_line_items": [{"section": <string|null>, "label": <string|null>, "amount": <string|null>, "source": <string|null>, "page": <int|null>, "snippet": <string|null>}],

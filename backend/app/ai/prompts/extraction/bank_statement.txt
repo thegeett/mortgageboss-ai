@@ -22,6 +22,19 @@ CAPTURE EVERYTHING. There are three buckets:
      ending_balance          (number)  closing balance
      total_deposits          (number)  total deposits/credits for the period
      total_withdrawals       (number)  total withdrawals/debits for the period
+     account_holder_names_raw (string) the account-holder name block VERBATIM (before any split)
+     account_owner_name_2    (string)  a SECOND account holder / joint owner, if the account lists one
+     account_owner_count     (int)     how many account holders / owners are named (1 for a single account)
+     account_holder_address  (string)  the account holder's mailing address
+     account_status          (string)  active / open / closed / overdrawn, if stated
+     available_balance       (number)  the available balance, if distinct from ending balance
+     average_daily_balance   (number)  the average daily / collected balance, if stated
+     nsf_fee_count           (int)     number of NSF / overdraft fee occurrences, if shown
+     nsf_fee_total           (number)  total NSF / overdraft fees for the period
+     fees_total              (number)  total fees charged for the period
+     minimum_balance_requirement (number) any stated minimum balance requirement
+     holds_or_pledges        (string)  any hold, pledge, or lien noted on the account
+     interest_paid           (number)  interest paid/earned for the period, if shown
      page_count_declared     (int)     the TOTAL page count the statement PRINTS, e.g. the "5" in
                                        "Page 1 of 5" / "Page 3 of 5". Report the total N, not the
                                        current page. null if no such "of N" is printed anywhere.
@@ -69,6 +82,19 @@ Respond with ONLY a single JSON object, no markdown fences and no prose, exactly
     "ending_balance":         {"value": <number|null>, "page": <int|null>, "snippet": <string|null>},
     "total_deposits":         {"value": <number|null>, "page": <int|null>, "snippet": <string|null>},
     "total_withdrawals":      {"value": <number|null>, "page": <int|null>, "snippet": <string|null>},
+    "account_holder_names_raw": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "account_owner_name_2":   {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "account_owner_count":    {"value": <int|null>, "page": <int|null>, "snippet": <string|null>},
+    "account_holder_address": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "account_status":         {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "available_balance":      {"value": <number|null>, "page": <int|null>, "snippet": <string|null>},
+    "average_daily_balance":  {"value": <number|null>, "page": <int|null>, "snippet": <string|null>},
+    "nsf_fee_count":          {"value": <int|null>, "page": <int|null>, "snippet": <string|null>},
+    "nsf_fee_total":          {"value": <number|null>, "page": <int|null>, "snippet": <string|null>},
+    "fees_total":             {"value": <number|null>, "page": <int|null>, "snippet": <string|null>},
+    "minimum_balance_requirement": {"value": <number|null>, "page": <int|null>, "snippet": <string|null>},
+    "holds_or_pledges":       {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "interest_paid":          {"value": <number|null>, "page": <int|null>, "snippet": <string|null>},
     "page_count_declared":    {"value": <int|null>, "page": <int|null>, "snippet": <string|null>}
   },
   "transactions": [

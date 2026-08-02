@@ -73,6 +73,23 @@ class RetirementAccountExtraction(BaseModel):
     total_balance: TypedField[Decimal] = Field(default_factory=TypedField)
 
     # --- Grouped catch-all — everything else -------------------------------- #
+    # --- LP-446 diff — the exists_today:false additions --------------------- #
+    retiree_or_account_owner_name_2: TypedField[str] = Field(default_factory=TypedField)
+    statement_date: TypedField[date] = Field(default_factory=TypedField)
+    vested_percentage: TypedField[Decimal] = Field(default_factory=TypedField)
+    beginning_balance: TypedField[Decimal] = Field(default_factory=TypedField)
+    remaining_available_balance: TypedField[Decimal] = Field(default_factory=TypedField)
+    outstanding_loan_balance: TypedField[Decimal] = Field(default_factory=TypedField)
+    withdrawal_or_liquidation_terms: TypedField[str] = Field(default_factory=TypedField)
+    gross_distribution_amount: TypedField[Decimal] = Field(default_factory=TypedField)
+    net_distribution_amount: TypedField[Decimal] = Field(default_factory=TypedField)
+    distribution_frequency: TypedField[str] = Field(default_factory=TypedField)
+    distribution_date_or_schedule: TypedField[str] = Field(default_factory=TypedField)
+    year_to_date_distributions: TypedField[Decimal] = Field(default_factory=TypedField)
+    required_minimum_distribution_indicator: TypedField[str] = Field(default_factory=TypedField)
+    fixed_period_or_lifetime_indicator: TypedField[str] = Field(default_factory=TypedField)
+    scheduled_end_date: TypedField[date] = Field(default_factory=TypedField)
+
     additional_sections: list[CatchAllSection] = Field(default_factory=list)
 
 
@@ -106,6 +123,22 @@ _CORE_SPEC: CoreSpec = (
     ("statement_period_end", coerce_date),
     ("vested_balance", coerce_decimal),
     ("total_balance", coerce_decimal),
+    # LP-446 diff additions
+    ("retiree_or_account_owner_name_2", coerce_str),
+    ("statement_date", coerce_date),
+    ("vested_percentage", coerce_decimal),
+    ("beginning_balance", coerce_decimal),
+    ("remaining_available_balance", coerce_decimal),
+    ("outstanding_loan_balance", coerce_decimal),
+    ("withdrawal_or_liquidation_terms", coerce_str),
+    ("gross_distribution_amount", coerce_decimal),
+    ("net_distribution_amount", coerce_decimal),
+    ("distribution_frequency", coerce_str),
+    ("distribution_date_or_schedule", coerce_str),
+    ("year_to_date_distributions", coerce_decimal),
+    ("required_minimum_distribution_indicator", coerce_str),
+    ("fixed_period_or_lifetime_indicator", coerce_str),
+    ("scheduled_end_date", coerce_date),
 )
 
 

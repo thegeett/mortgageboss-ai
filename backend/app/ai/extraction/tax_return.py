@@ -38,6 +38,7 @@ self-employed returns over time and the field set refined with Priya.
 """
 
 import json
+from datetime import date
 from decimal import Decimal
 from typing import Any
 
@@ -48,6 +49,7 @@ from app.ai.client import build_document_message
 from app.ai.extraction.model_call import run_extraction_completion
 from app.ai.extraction.parsing import (
     CoreSpec,
+    coerce_date,
     coerce_decimal,
     coerce_int,
     coerce_str,
@@ -131,6 +133,22 @@ class TaxReturnExtraction(BaseModel):
     wages: TypedField[Decimal] = Field(default_factory=TypedField)
     taxable_income: TypedField[Decimal] = Field(default_factory=TypedField)
 
+    # --- LP-446 diff (013 spec) — the exists_today:false additions ----------- #
+    amended_return_indicator: TypedField[str] = Field(default_factory=TypedField)
+    spouse_name: TypedField[str] = Field(default_factory=TypedField)
+    spouse_ssn_masked: TypedField[str] = Field(default_factory=TypedField)  # SENSITIVE — masked
+    home_address: TypedField[str] = Field(default_factory=TypedField)
+    wages_salaries_tips: TypedField[Decimal] = Field(default_factory=TypedField)
+    business_income_or_loss: TypedField[Decimal] = Field(default_factory=TypedField)
+    total_net_rental_income: TypedField[Decimal] = Field(default_factory=TypedField)
+    standard_or_itemized_deduction: TypedField[Decimal] = Field(default_factory=TypedField)
+    total_tax: TypedField[Decimal] = Field(default_factory=TypedField)
+    federal_income_tax_withheld: TypedField[Decimal] = Field(default_factory=TypedField)
+    total_payments: TypedField[Decimal] = Field(default_factory=TypedField)
+    attached_schedules_and_forms: TypedField[str] = Field(default_factory=TypedField)
+    return_signed_date: TypedField[date] = Field(default_factory=TypedField)
+    signatures_present: TypedField[str] = Field(default_factory=TypedField)
+
     # --- Typed income-critical schedules (present-or-null; repeatable lists) - #
     schedule_c: list[ScheduleC] = Field(default_factory=list)
     schedule_e: ScheduleE | None = None
@@ -170,6 +188,21 @@ _CORE_1040_SPEC: CoreSpec = (
     ("adjusted_gross_income", coerce_decimal),
     ("wages", coerce_decimal),
     ("taxable_income", coerce_decimal),
+    # LP-446 diff additions
+    ("amended_return_indicator", coerce_str),
+    ("spouse_name", coerce_str),
+    ("spouse_ssn_masked", coerce_str),
+    ("home_address", coerce_str),
+    ("wages_salaries_tips", coerce_decimal),
+    ("business_income_or_loss", coerce_decimal),
+    ("total_net_rental_income", coerce_decimal),
+    ("standard_or_itemized_deduction", coerce_decimal),
+    ("total_tax", coerce_decimal),
+    ("federal_income_tax_withheld", coerce_decimal),
+    ("total_payments", coerce_decimal),
+    ("attached_schedules_and_forms", coerce_str),
+    ("return_signed_date", coerce_date),
+    ("signatures_present", coerce_str),
 )
 _SCHEDULE_C_SPEC: CoreSpec = (
     ("business_name", coerce_str),
