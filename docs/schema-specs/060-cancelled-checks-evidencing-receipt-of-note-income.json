@@ -53,11 +53,12 @@
   ],
 
   "open_questions": [
-    {"id":1,"q":"One check vs a bundle — packets often bundle multiple cancelled checks.","options":["single-check schema + splitter emits one extraction per check","nested checks[] list"],"recommendation":"keep the schema single-check and rely on the splitter to emit one extraction per check; only introduce a nested checks[] list if the pipeline cannot split and a rule needs all checks in one record. Flag the splitter behavior with the domain expert","blocks_implementation":true},
+    {"id":1,"q":"One check vs a bundle — packets often bundle multiple cancelled checks.","options":["single-check schema + splitter emits one extraction per check","nested checks[] list"],"recommendation":"keep the schema single-check and rely on the splitter to emit one extraction per check; only introduce a nested checks[] list if the pipeline cannot split and a rule needs all checks in one record. Flag the splitter behavior with the domain expert GEET'S DECISION (LP-439): SINGLE-CHECK schema — no checks[] list; one extraction per document as uploaded.","blocks_implementation":false},
     {"id":2,"q":"Boolean degradation — front_image_present, back_image_present, and return_stop_or_void_indicator degrade to strings.","options":["accept str degradation","add a typed boolean coercer"],"recommendation":"accept and rely on the snippet; the returned/void flag is the one most likely to need a typed boolean if a rule is built","blocks_implementation":false}
   ],
 
   "notes": [
+    "Assumes one document per extraction — the pipeline does not split multi-document PDFs today (LP-439). Revisit if splitting is added.",
     "No rules read this document today, so there is no rule floor. A cancelled check proves the borrower actually received a note/installment payment; fields earn their place on identity, PII protection (masked account last-4s), and processor review.",
     "Both drawer_account_last4 and deposit_account_last4 are pre_masked true and need _PII_FIELDS registration.",
     "Endorsement text may contain a full account number written by hand; the model must mask it — do not file a full account number to the catch-all.",

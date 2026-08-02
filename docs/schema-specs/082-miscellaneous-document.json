@@ -56,7 +56,7 @@
   "open_questions": [
     {"id":1,"q":"key_value_pairs item count. Unknown by definition.","options":["flat-row + one source with a hard cap (e.g. 50 pairs)","uncapped"],"recommendation":"flat-row + one source and a hard cap to stay under the token ceiling; flag if documents routinely exceed that","blocks_implementation":false},
     {"id":2,"q":"account_case_or_reference_number PII registration.","options":["register in _PII_FIELDS (pre_masked false)","leave to the catch-all"],"recommendation":"register in _PII_FIELDS (pre_masked false — the model cannot reliably pre-mask an unknown identifier; the snapshot masks raw). This is the highest-risk unmasked-PII path in the whole packet because the doc type is unknown GEET'S DECISION (LP-438): mask account-like identifiers (policy/account/plan numbers, wire/ACH trace, check references) via _PII_FIELDS; leave addresses and public-record case numbers PLAIN; DOB is unmasked (pii null).","blocks_implementation":false},
-    {"id":3,"q":"How much to type at all. A misc document arguably needs only identity + key_value_pairs.","options":["keep the extra CORE fields (document_purpose, status_or_outcome)","drop them to catch-all"],"recommendation":"kept for reclassification; confirm they earn their tokens or drop to catch-all","blocks_implementation":true}
+    {"id":3,"q":"How much to type at all. A misc document arguably needs only identity + key_value_pairs.","options":["keep the extra CORE fields (document_purpose, status_or_outcome)","drop them to catch-all"],"recommendation":"kept for reclassification; confirm they earn their tokens or drop to catch-all GEET'S DECISION (LP-439): keep the extra fields (they earn their tokens for reclassification).","blocks_implementation":false}
   ],
 
   "notes": [

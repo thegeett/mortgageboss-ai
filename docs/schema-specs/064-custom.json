@@ -25,6 +25,7 @@
   "nested_lists": [
     {
       "name":"unmapped_key_value_pairs","shape":"flat_row",
+      "redact":["value"],
       "shape_reason":"a Custom document's real content is unknown at schema-design time, so the only safe structure is a generic key/value passthrough. Flat rows keep it light. This is the single nested list. Item count is unbounded",
       "expected_item_count":"unbounded","rules":[],
       "exists_today":false,"plumbing_sites":5,
@@ -50,8 +51,8 @@
   ],
 
   "open_questions": [
-    {"id":1,"q":"Should 'Custom' have a schema at all? It is a fallback for unclassified documents.","options":["thin identity + unmapped_key_value_pairs (this draft)","no dedicated schema — route to a pure catch-all extractor"],"recommendation":"(a), because even a generic identity header lets a processor attach the document to a borrower/loan","blocks_implementation":true},
-    {"id":2,"q":"unmapped_key_value_pairs and PII. A key/value passthrough can capture SSNs, account numbers, addresses unmasked.","options":["require a redactor sweep over this list before it is persisted","cap it to non-sensitive labels"],"recommendation":"require a redactor sweep over this list before it is persisted, or cap it to non-sensitive labels. Must be resolved before Custom is trusted","blocks_implementation":true},
+    {"id":1,"q":"Should 'Custom' have a schema at all? It is a fallback for unclassified documents.","options":["thin identity + unmapped_key_value_pairs (this draft)","no dedicated schema — route to a pure catch-all extractor"],"recommendation":"(a), because even a generic identity header lets a processor attach the document to a borrower/loan GEET'S DECISION (LP-439): yes — a thin identity schema lets a processor attach the document to a borrower/loan.","blocks_implementation":false},
+    {"id":2,"q":"unmapped_key_value_pairs and PII. A key/value passthrough can capture SSNs, account numbers, addresses unmasked.","options":["require a redactor sweep over this list before it is persisted","cap it to non-sensitive labels"],"recommendation":"require a redactor sweep over this list before it is persisted, or cap it to non-sensitive labels. Must be resolved before Custom is trusted GEET'S DECISION (LP-439): declare a redact over unmapped_key_value_pairs' value (LP-437's _DESC_REDACT) — the explicit safety gate; Custom is not trusted until the redactor is declared.","blocks_implementation":false},
     {"id":3,"q":"primary_amount ambiguity. Collapsing market value / balance / fee into one field loses meaning.","options":["keep as a rough headline","drop if reviewers find it misleading"],"recommendation":"keep it only as a rough headline and rely on document_subtype; drop if reviewers find it misleading","blocks_implementation":false},
     {"id":4,"q":"document_subtype collapse. The catalog offers three distinct subtype fields.","options":["single collapsed field","keep three distinct subtype fields"],"recommendation":"confirm a single collapsed field is acceptable, or whether classification upstream already resolves family","blocks_implementation":false}
   ],

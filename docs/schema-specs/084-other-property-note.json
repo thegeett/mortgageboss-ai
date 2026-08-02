@@ -60,7 +60,7 @@
   "open_questions": [
     {"id":1,"q":"subject_property_indicator as bool — degrades to str (no bool coercer).","options":["keep degraded str","add a bool coercer or a controlled string"],"recommendation":"if an REO/DTI rule is built, confirm whether a bool coercer or a controlled string is wanted so the non-subject test is deterministic","blocks_implementation":false},
     {"id":2,"q":"ARM fields flattened — margin_and_caps / change_dates_and_index are objects flattened to str.","options":["keep flattened str","promote sub-fields to typed components"],"recommendation":"if ARM re-underwriting ever needs the components typed, they'd need sub-field promotion","blocks_implementation":false},
-    {"id":3,"q":"DTI consumer — monthly_principal_and_interest is typed on the expectation of a future DTI/liabilities rule.","options":["P&I alone","full PITI (taxes/insurance)"],"recommendation":"confirm the intended snapshot_path and whether taxes/insurance (full PITI) are needed rather than P&I alone","blocks_implementation":true}
+    {"id":3,"q":"DTI consumer — monthly_principal_and_interest is typed on the expectation of a future DTI/liabilities rule.","options":["P&I alone","full PITI (taxes/insurance)"],"recommendation":"confirm the intended snapshot_path and whether taxes/insurance (full PITI) are needed rather than P&I alone GEET'S DECISION (LP-439): P&I ONLY — do NOT add taxes/insurance; the note states P&I and DT-6 assembles PITIA from other sources.","blocks_implementation":false}
   ],
 
   "notes": [

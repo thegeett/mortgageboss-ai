@@ -79,7 +79,7 @@
   ],
 
   "open_questions": [
-    {"id":1,"q":"Legal description length vs the token ceiling","options":["capture verbatim (chosen)","capture a truncated form"],"recommendation":"verbatim — TI-2 compares text, and a truncation would produce false mismatches. But test against a metes-and-bounds commitment plus two nested lists","blocks_implementation":true},
+    {"id":1,"q":"Legal description length vs the token ceiling","options":["capture verbatim (chosen)","capture a truncated form"],"recommendation":"verbatim — TI-2 compares text, and a truncation would produce false mismatches. But test against a metes-and-bounds commitment plus two nested lists GEET'S DECISION (LP-439): flat rows, verbatim legal description; test on a real metes-and-bounds document.","blocks_implementation":false},
     {"id":2,"q":"Requirements and exceptions merged with a discriminator, or two lists?","options":["one list + schedule discriminator (chosen)","two separate lists"],"recommendation":"one list — saves ~5 plumbing sites, and the discriminator preserves the distinction rules depend on","blocks_implementation":false},
     {"id":3,"q":"A lien appearing in BOTH requirements and exceptions","options":["capture twice","deduplicate"],"recommendation":"capture both — TI-3 needs the requirement to see the payoff plan; TI-4 needs the exception to see the encumbrance","blocks_implementation":false},
     {"id":4,"q":"APN vs address as the match key for TI-1/PR-7/RE-1","options":["keep tolerant address matching","prefer the APN where both documents carry one"],"recommendation":"capture the APN regardless; preferring it is a RULE change, not a schema one","blocks_implementation":false},

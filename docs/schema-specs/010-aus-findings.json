@@ -65,12 +65,13 @@
   ],
 
   "open_questions": [
-    {"id":1,"q":"Multiple submissions in one file (2-5 DU runs are common)","options":["separate documents, latest governs (chosen)","one extraction with a submissions list"],"recommendation":"separate documents — each is a distinct PDF, and a list would triple the nesting cost","blocks_implementation":true},
+    {"id":1,"q":"Multiple submissions in one file (2-5 DU runs are common)","options":["separate documents, latest governs (chosen)","one extraction with a submissions list"],"recommendation":"separate documents — each is a distinct PDF, and a list would triple the nesting cost GEET'S DECISION (LP-439): SINGLE-SUBMISSION schema — no submissions list; submission_number + submission_date distinguish runs.","blocks_implementation":false},
     {"id":2,"q":"AU-2's condition matching is a fuzzy cross-document match","options":["deterministic rule","AI tag"],"recommendation":"likely an AI tag — the schema's job is faithful capture; the matching is a SEPARATE design problem","blocks_implementation":false},
     {"id":3,"q":"aus_* fields duplicate other documents BY DESIGN (AU-1 compares them)","options":["accept","rename for clarity"],"recommendation":"keep the aus_ prefix — a rule must never mistake aus_qualifying_income for documented income","blocks_implementation":false}
   ],
 
   "notes": [
+    "Assumes one document per extraction — the pipeline does not split multi-document PDFs today (LP-439). Revisit if splitting is added.",
     "NO v2 catalog entry — the rule floor IS the entire schema.",
     "Only 3 rules, but AUS findings DRIVE REQUIREMENTS ACROSS THE WHOLE FILE — the required document list, reserve months, and income documentation level. AS-10 already reads it ('the required month count from DU findings'), so a fourth rule depends on it indirectly."
   ]

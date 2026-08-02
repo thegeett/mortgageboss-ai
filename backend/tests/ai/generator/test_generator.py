@@ -154,28 +154,15 @@ def test_condition_5_missing_reason_class(tmp_path: Path) -> None:
     assert 5 in _conditions(validate(spec))
 
 
-def test_top_ten_pass_status_after_lp438() -> None:
-    # After LP-438 retired the nested-list condition and applied Geet's DOB + question decisions, SIX of the
-    # top ten pass; four still refuse on a blocking question left OUT of the four blanket themes (a token
-    # ceiling, a multi-submission splitter, an extract-at-all question). Pins the post-LP-438 reality.
+def test_all_top_ten_pass_after_lp439() -> None:
+    # LP-439 applied the final 24 blocking-question answers and remapped the invented PII kinds, taking the
+    # validate pass count 70 → 108. Every top-ten spec (indeed every spec) now passes; the nested-heavy
+    # top ten that once anchored the refusal set is fully generatable. (test_lp439 pins all 108.)
     specs_dir = _BACKEND.parent / "docs" / "schema-specs"
-    now_passing = {
-        "bank_statement",
-        "purchase_agreement",
-        "appraisal",
-        "pay_stub",
-        "w2",
-        "condo_questionnaire",
-    }
     for n in range(1, 11):
         matches = list(specs_dir.glob(f"{n:03d}-*.json"))
         assert matches, f"missing spec {n:03d}"
-        spec = load_spec(matches[0])
-        refuses = bool(validate(spec))
-        if spec.document_type in now_passing:
-            assert not refuses, f"{spec.document_type} should pass after LP-438"
-        else:
-            assert refuses, f"{spec.document_type} unexpectedly passed"
+        assert validate(load_spec(matches[0])) == [], f"{matches[0].stem} unexpectedly refuses"
 
 
 # --------------------------------------------------------------------------- #
