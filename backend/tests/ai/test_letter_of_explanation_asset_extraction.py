@@ -45,6 +45,16 @@ FULL_PAYLOAD = {
         "borrower_certification": _core("SAMPLE"),
     },
     "additional_sections": [{"section": "Other", "fields": [{"label": "Note", "value": "x"}]}],
+    "transfer_path_or_chronology": [
+        {
+            "date": "2024-01-15",
+            "from": "SAMPLE",
+            "to": "SAMPLE",
+            "amount": "1234.56",
+            "page": 1,
+            "snippet": "s",
+        }
+    ],
     "confidence": 0.9,
     "reasoning": "generated test fixture.",
 }

@@ -30,6 +30,7 @@ from app.ai.extraction.parsing import (
     derive_status,
     parse_catch_all,
     parse_typed_core,
+    source_payload,
 )
 from app.ai.extraction.shape import CatchAllSection, TypedField
 from app.ai.parsing import coerce_confidence, extract_json_object
@@ -77,6 +78,9 @@ class StatementOfAccountExtraction(BaseModel):
     payoff_good_through_date: TypedField[date] = Field(default_factory=TypedField)
     property_address: TypedField[str] = Field(default_factory=TypedField)
     loan_number: TypedField[str] = Field(default_factory=TypedField)
+
+    # --- Captured nested lists (LP-443) — bare rows, snapshot-read generically ------- #
+    transactions_or_activity: list[dict[str, Any]] = Field(default_factory=list)
 
     # --- Grouped catch-all — everything else -------------------------------- #
     additional_sections: list[CatchAllSection] = Field(default_factory=list)
@@ -130,6 +134,38 @@ _CORE_SPEC: CoreSpec = (
 )
 
 
+_TRANSACTIONS_OR_ACTIVITY_ROW: CoreSpec = (
+    ("date", coerce_date),
+    ("description", coerce_str),
+    ("amount", coerce_decimal),
+    ("type", coerce_str),
+    ("running_balance", coerce_decimal),
+)
+
+
+def _parse_transactions_or_activity(raw: Any) -> list[dict[str, Any]]:
+    """Coerce the transactions_or_activity rows — bare scalars + a per-row page/snippet source (LP-443 capture).
+
+    Mirrors bank_statement's transactions parse: each declared field is coerced, a per-row source is
+    kept, and a fully-empty row is dropped (no hallucinated rows)."""
+    rows: list[dict[str, Any]] = []
+    if not isinstance(raw, list):
+        return rows
+    for entry in raw:
+        if not isinstance(entry, dict):
+            continue
+        row: dict[str, Any] = {
+            name: coerce(entry.get(name)) for name, coerce in _TRANSACTIONS_OR_ACTIVITY_ROW
+        }
+        if (
+            "source" not in row
+        ):  # never clobber a declared 'source' data field; else keep provenance
+            row["source"] = source_payload(entry)
+        if any(row[name] is not None for name, _ in _TRANSACTIONS_OR_ACTIVITY_ROW):
+            rows.append(row)
+    return rows
+
+
 def _parse_statement_of_account_json(text: str) -> StatementOfAccountExtractionResult | None:
     """Defensively parse a model response into a statement of account result. Never raises."""
     snippet = extract_json_object(text)
@@ -143,16 +179,23 @@ def _parse_statement_of_account_json(text: str) -> StatementOfAccountExtractionR
         return None
 
     core_payload, non_null, coercion_lost = parse_typed_core(payload, _CORE_SPEC)
+    transactions_or_activity = _parse_transactions_or_activity(
+        payload.get("transactions_or_activity")
+    )
     sections = parse_catch_all(payload.get("additional_sections"))
 
     try:
         data = StatementOfAccountExtraction.model_validate(
-            {**core_payload, "additional_sections": sections}
+            {
+                **core_payload,
+                "transactions_or_activity": transactions_or_activity,
+                "additional_sections": sections,
+            }
         )
     except ValidationError:
         return None
 
-    status = derive_status(non_null, coercion_lost)
+    status = derive_status(non_null + len(transactions_or_activity), coercion_lost)
     confidence = coerce_confidence(payload.get("confidence"))
     raw_reasoning = payload.get("reasoning")
     reasoning = (
@@ -205,5 +248,6 @@ async def extract_statement_of_account(
         confidence=result.confidence,
         core_fields_present=core_present,
         catch_all_sections=len(result.data.additional_sections),
+        list_rows_total=len(result.data.transactions_or_activity),
     )
     return result

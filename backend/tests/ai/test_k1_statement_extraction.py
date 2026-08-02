@@ -47,6 +47,17 @@ FULL_PAYLOAD = {
         "distributions": _core("1234.56"),
     },
     "additional_sections": [{"section": "Other", "fields": [{"label": "Note", "value": "x"}]}],
+    "k1_box_items": [
+        {
+            "box_number": "SAMPLE",
+            "box_label": "SAMPLE",
+            "amount": "1234.56",
+            "code": "SAMPLE",
+            "source": "SAMPLE",
+            "page": 1,
+            "snippet": "s",
+        }
+    ],
     "confidence": 0.9,
     "reasoning": "generated test fixture.",
 }

@@ -28,6 +28,7 @@ from app.ai.extraction.parsing import (
     derive_status,
     parse_catch_all,
     parse_typed_core,
+    source_payload,
 )
 from app.ai.extraction.shape import CatchAllSection, TypedField
 from app.ai.parsing import coerce_confidence, extract_json_object
@@ -70,6 +71,9 @@ class K1StatementExtraction(BaseModel):
     withdrawals_and_distributions: TypedField[Decimal] = Field(default_factory=TypedField)
     guaranteed_payments: TypedField[Decimal] = Field(default_factory=TypedField)
     distributions: TypedField[Decimal] = Field(default_factory=TypedField)
+
+    # --- Captured nested lists (LP-443) — bare rows, snapshot-read generically ------- #
+    k1_box_items: list[dict[str, Any]] = Field(default_factory=list)
 
     # --- Grouped catch-all — everything else -------------------------------- #
     additional_sections: list[CatchAllSection] = Field(default_factory=list)
@@ -116,6 +120,36 @@ _CORE_SPEC: CoreSpec = (
 )
 
 
+_K1_BOX_ITEMS_ROW: CoreSpec = (
+    ("box_number", coerce_str),
+    ("box_label", coerce_str),
+    ("amount", coerce_decimal),
+    ("code", coerce_str),
+    ("source", coerce_str),
+)
+
+
+def _parse_k1_box_items(raw: Any) -> list[dict[str, Any]]:
+    """Coerce the k1_box_items rows — bare scalars + a per-row page/snippet source (LP-443 capture).
+
+    Mirrors bank_statement's transactions parse: each declared field is coerced, a per-row source is
+    kept, and a fully-empty row is dropped (no hallucinated rows)."""
+    rows: list[dict[str, Any]] = []
+    if not isinstance(raw, list):
+        return rows
+    for entry in raw:
+        if not isinstance(entry, dict):
+            continue
+        row: dict[str, Any] = {name: coerce(entry.get(name)) for name, coerce in _K1_BOX_ITEMS_ROW}
+        if (
+            "source" not in row
+        ):  # never clobber a declared 'source' data field; else keep provenance
+            row["source"] = source_payload(entry)
+        if any(row[name] is not None for name, _ in _K1_BOX_ITEMS_ROW):
+            rows.append(row)
+    return rows
+
+
 def _parse_k1_statement_json(text: str) -> K1StatementExtractionResult | None:
     """Defensively parse a model response into a k1 statement result. Never raises."""
     snippet = extract_json_object(text)
@@ -129,16 +163,17 @@ def _parse_k1_statement_json(text: str) -> K1StatementExtractionResult | None:
         return None
 
     core_payload, non_null, coercion_lost = parse_typed_core(payload, _CORE_SPEC)
+    k1_box_items = _parse_k1_box_items(payload.get("k1_box_items"))
     sections = parse_catch_all(payload.get("additional_sections"))
 
     try:
         data = K1StatementExtraction.model_validate(
-            {**core_payload, "additional_sections": sections}
+            {**core_payload, "k1_box_items": k1_box_items, "additional_sections": sections}
         )
     except ValidationError:
         return None
 
-    status = derive_status(non_null, coercion_lost)
+    status = derive_status(non_null + len(k1_box_items), coercion_lost)
     confidence = coerce_confidence(payload.get("confidence"))
     raw_reasoning = payload.get("reasoning")
     reasoning = (
@@ -189,5 +224,6 @@ async def extract_k1_statement(content: bytes, media_type: str) -> K1StatementEx
         confidence=result.confidence,
         core_fields_present=core_present,
         catch_all_sections=len(result.data.additional_sections),
+        list_rows_total=len(result.data.k1_box_items),
     )
     return result

@@ -49,6 +49,16 @@ FULL_PAYLOAD = {
         "document_issue_date": _core("2024-01-15"),
     },
     "additional_sections": [{"section": "Other", "fields": [{"label": "Note", "value": "x"}]}],
+    "payment_history": [
+        {
+            "date": "2024-01-15",
+            "amount": "1234.56",
+            "method": "SAMPLE",
+            "status": "SAMPLE",
+            "page": 1,
+            "snippet": "s",
+        }
+    ],
     "confidence": 0.9,
     "reasoning": "generated test fixture.",
 }

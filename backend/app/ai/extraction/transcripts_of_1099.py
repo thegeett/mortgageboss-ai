@@ -23,11 +23,13 @@ from app.ai.extraction.model_call import run_extraction_completion
 from app.ai.extraction.parsing import (
     CoreSpec,
     coerce_date,
+    coerce_decimal,
     coerce_int,
     coerce_str,
     derive_status,
     parse_catch_all,
     parse_typed_core,
+    source_payload,
 )
 from app.ai.extraction.shape import CatchAllSection, TypedField
 from app.ai.parsing import coerce_confidence, extract_json_object
@@ -60,6 +62,9 @@ class TranscriptsOf1099Extraction(BaseModel):
     recipient_name: TypedField[str] = Field(default_factory=TypedField)
     recipient_tin_masked: TypedField[str] = Field(default_factory=TypedField)
     address_or_customer_file_number: TypedField[str] = Field(default_factory=TypedField)
+
+    # --- Captured nested lists (LP-443) — bare rows, snapshot-read generically ------- #
+    information_return_records: list[dict[str, Any]] = Field(default_factory=list)
 
     # --- Grouped catch-all — everything else -------------------------------- #
     additional_sections: list[CatchAllSection] = Field(default_factory=list)
@@ -98,6 +103,39 @@ _CORE_SPEC: CoreSpec = (
 )
 
 
+_INFORMATION_RETURN_RECORDS_ROW: CoreSpec = (
+    ("form_type", coerce_str),
+    ("payer_name", coerce_str),
+    ("payer_tin_masked", coerce_str),
+    ("box_or_income_type", coerce_str),
+    ("amount", coerce_decimal),
+    ("account_number_masked", coerce_str),
+)
+
+
+def _parse_information_return_records(raw: Any) -> list[dict[str, Any]]:
+    """Coerce the information_return_records rows — bare scalars + a per-row page/snippet source (LP-443 capture).
+
+    Mirrors bank_statement's transactions parse: each declared field is coerced, a per-row source is
+    kept, and a fully-empty row is dropped (no hallucinated rows)."""
+    rows: list[dict[str, Any]] = []
+    if not isinstance(raw, list):
+        return rows
+    for entry in raw:
+        if not isinstance(entry, dict):
+            continue
+        row: dict[str, Any] = {
+            name: coerce(entry.get(name)) for name, coerce in _INFORMATION_RETURN_RECORDS_ROW
+        }
+        if (
+            "source" not in row
+        ):  # never clobber a declared 'source' data field; else keep provenance
+            row["source"] = source_payload(entry)
+        if any(row[name] is not None for name, _ in _INFORMATION_RETURN_RECORDS_ROW):
+            rows.append(row)
+    return rows
+
+
 def _parse_transcripts_of_1099_json(text: str) -> TranscriptsOf1099ExtractionResult | None:
     """Defensively parse a model response into a transcripts of 1099 result. Never raises."""
     snippet = extract_json_object(text)
@@ -111,16 +149,23 @@ def _parse_transcripts_of_1099_json(text: str) -> TranscriptsOf1099ExtractionRes
         return None
 
     core_payload, non_null, coercion_lost = parse_typed_core(payload, _CORE_SPEC)
+    information_return_records = _parse_information_return_records(
+        payload.get("information_return_records")
+    )
     sections = parse_catch_all(payload.get("additional_sections"))
 
     try:
         data = TranscriptsOf1099Extraction.model_validate(
-            {**core_payload, "additional_sections": sections}
+            {
+                **core_payload,
+                "information_return_records": information_return_records,
+                "additional_sections": sections,
+            }
         )
     except ValidationError:
         return None
 
-    status = derive_status(non_null, coercion_lost)
+    status = derive_status(non_null + len(information_return_records), coercion_lost)
     confidence = coerce_confidence(payload.get("confidence"))
     raw_reasoning = payload.get("reasoning")
     reasoning = (
@@ -173,5 +218,6 @@ async def extract_transcripts_of_1099(
         confidence=result.confidence,
         core_fields_present=core_present,
         catch_all_sections=len(result.data.additional_sections),
+        list_rows_total=len(result.data.information_return_records),
     )
     return result

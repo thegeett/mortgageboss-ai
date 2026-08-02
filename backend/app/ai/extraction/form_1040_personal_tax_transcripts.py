@@ -29,6 +29,7 @@ from app.ai.extraction.parsing import (
     derive_status,
     parse_catch_all,
     parse_typed_core,
+    source_payload,
 )
 from app.ai.extraction.shape import CatchAllSection, TypedField
 from app.ai.parsing import coerce_confidence, extract_json_object
@@ -71,6 +72,9 @@ class Form1040PersonalTaxTranscriptsExtraction(BaseModel):
     return_filed_indicator: TypedField[str] = Field(default_factory=TypedField)
     verification_of_nonfiling_indicator: TypedField[str] = Field(default_factory=TypedField)
     customer_file_number: TypedField[str] = Field(default_factory=TypedField)
+
+    # --- Captured nested lists (LP-443) — bare rows, snapshot-read generically ------- #
+    return_line_items: list[dict[str, Any]] = Field(default_factory=list)
 
     # --- Grouped catch-all — everything else -------------------------------- #
     additional_sections: list[CatchAllSection] = Field(default_factory=list)
@@ -119,6 +123,37 @@ _CORE_SPEC: CoreSpec = (
 )
 
 
+_RETURN_LINE_ITEMS_ROW: CoreSpec = (
+    ("section", coerce_str),
+    ("line_label", coerce_str),
+    ("amount", coerce_decimal),
+    ("source", coerce_str),
+)
+
+
+def _parse_return_line_items(raw: Any) -> list[dict[str, Any]]:
+    """Coerce the return_line_items rows — bare scalars + a per-row page/snippet source (LP-443 capture).
+
+    Mirrors bank_statement's transactions parse: each declared field is coerced, a per-row source is
+    kept, and a fully-empty row is dropped (no hallucinated rows)."""
+    rows: list[dict[str, Any]] = []
+    if not isinstance(raw, list):
+        return rows
+    for entry in raw:
+        if not isinstance(entry, dict):
+            continue
+        row: dict[str, Any] = {
+            name: coerce(entry.get(name)) for name, coerce in _RETURN_LINE_ITEMS_ROW
+        }
+        if (
+            "source" not in row
+        ):  # never clobber a declared 'source' data field; else keep provenance
+            row["source"] = source_payload(entry)
+        if any(row[name] is not None for name, _ in _RETURN_LINE_ITEMS_ROW):
+            rows.append(row)
+    return rows
+
+
 def _parse_form_1040_personal_tax_transcripts_json(
     text: str,
 ) -> Form1040PersonalTaxTranscriptsExtractionResult | None:
@@ -134,16 +169,21 @@ def _parse_form_1040_personal_tax_transcripts_json(
         return None
 
     core_payload, non_null, coercion_lost = parse_typed_core(payload, _CORE_SPEC)
+    return_line_items = _parse_return_line_items(payload.get("return_line_items"))
     sections = parse_catch_all(payload.get("additional_sections"))
 
     try:
         data = Form1040PersonalTaxTranscriptsExtraction.model_validate(
-            {**core_payload, "additional_sections": sections}
+            {
+                **core_payload,
+                "return_line_items": return_line_items,
+                "additional_sections": sections,
+            }
         )
     except ValidationError:
         return None
 
-    status = derive_status(non_null, coercion_lost)
+    status = derive_status(non_null + len(return_line_items), coercion_lost)
     confidence = coerce_confidence(payload.get("confidence"))
     raw_reasoning = payload.get("reasoning")
     reasoning = (
@@ -204,5 +244,6 @@ async def extract_form_1040_personal_tax_transcripts(
         confidence=result.confidence,
         core_fields_present=core_present,
         catch_all_sections=len(result.data.additional_sections),
+        list_rows_total=len(result.data.return_line_items),
     )
     return result

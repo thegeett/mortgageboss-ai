@@ -51,6 +51,17 @@ FULL_PAYLOAD = {
         "independent_source_indicator": _core("SAMPLE"),
     },
     "additional_sections": [{"section": "Other", "fields": [{"label": "Note", "value": "x"}]}],
+    "rent_payment_history": [
+        {
+            "month": "SAMPLE",
+            "amount_due": "1234.56",
+            "amount_paid": "1234.56",
+            "payment_status": "SAMPLE",
+            "source": "SAMPLE",
+            "page": 1,
+            "snippet": "s",
+        }
+    ],
     "confidence": 0.9,
     "reasoning": "generated test fixture.",
 }

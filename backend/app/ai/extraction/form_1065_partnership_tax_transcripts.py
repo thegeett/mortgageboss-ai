@@ -30,6 +30,7 @@ from app.ai.extraction.parsing import (
     derive_status,
     parse_catch_all,
     parse_typed_core,
+    source_payload,
 )
 from app.ai.extraction.shape import CatchAllSection, TypedField
 from app.ai.parsing import coerce_confidence, extract_json_object
@@ -71,6 +72,9 @@ class Form1065PartnershipTaxTranscriptsExtraction(BaseModel):
     total_income: TypedField[Decimal] = Field(default_factory=TypedField)
     guaranteed_payments_to_partners: TypedField[Decimal] = Field(default_factory=TypedField)
     ordinary_business_income_or_loss: TypedField[Decimal] = Field(default_factory=TypedField)
+
+    # --- Captured nested lists (LP-443) — bare rows, snapshot-read generically ------- #
+    schedule_k_items: list[dict[str, Any]] = Field(default_factory=list)
 
     # --- Grouped catch-all — everything else -------------------------------- #
     additional_sections: list[CatchAllSection] = Field(default_factory=list)
@@ -118,6 +122,36 @@ _CORE_SPEC: CoreSpec = (
 )
 
 
+_SCHEDULE_K_ITEMS_ROW: CoreSpec = (
+    ("line_label", coerce_str),
+    ("amount", coerce_decimal),
+    ("source", coerce_str),
+)
+
+
+def _parse_schedule_k_items(raw: Any) -> list[dict[str, Any]]:
+    """Coerce the schedule_k_items rows — bare scalars + a per-row page/snippet source (LP-443 capture).
+
+    Mirrors bank_statement's transactions parse: each declared field is coerced, a per-row source is
+    kept, and a fully-empty row is dropped (no hallucinated rows)."""
+    rows: list[dict[str, Any]] = []
+    if not isinstance(raw, list):
+        return rows
+    for entry in raw:
+        if not isinstance(entry, dict):
+            continue
+        row: dict[str, Any] = {
+            name: coerce(entry.get(name)) for name, coerce in _SCHEDULE_K_ITEMS_ROW
+        }
+        if (
+            "source" not in row
+        ):  # never clobber a declared 'source' data field; else keep provenance
+            row["source"] = source_payload(entry)
+        if any(row[name] is not None for name, _ in _SCHEDULE_K_ITEMS_ROW):
+            rows.append(row)
+    return rows
+
+
 def _parse_form_1065_partnership_tax_transcripts_json(
     text: str,
 ) -> Form1065PartnershipTaxTranscriptsExtractionResult | None:
@@ -133,16 +167,17 @@ def _parse_form_1065_partnership_tax_transcripts_json(
         return None
 
     core_payload, non_null, coercion_lost = parse_typed_core(payload, _CORE_SPEC)
+    schedule_k_items = _parse_schedule_k_items(payload.get("schedule_k_items"))
     sections = parse_catch_all(payload.get("additional_sections"))
 
     try:
         data = Form1065PartnershipTaxTranscriptsExtraction.model_validate(
-            {**core_payload, "additional_sections": sections}
+            {**core_payload, "schedule_k_items": schedule_k_items, "additional_sections": sections}
         )
     except ValidationError:
         return None
 
-    status = derive_status(non_null, coercion_lost)
+    status = derive_status(non_null + len(schedule_k_items), coercion_lost)
     confidence = coerce_confidence(payload.get("confidence"))
     raw_reasoning = payload.get("reasoning")
     reasoning = (
@@ -205,5 +240,6 @@ async def extract_form_1065_partnership_tax_transcripts(
         confidence=result.confidence,
         core_fields_present=core_present,
         catch_all_sections=len(result.data.additional_sections),
+        list_rows_total=len(result.data.schedule_k_items),
     )
     return result

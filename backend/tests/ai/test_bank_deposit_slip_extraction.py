@@ -49,6 +49,16 @@ FULL_PAYLOAD = {
         "loan_number": _core("SAMPLE"),
     },
     "additional_sections": [{"section": "Other", "fields": [{"label": "Note", "value": "x"}]}],
+    "check_items": [
+        {
+            "payer_or_drawer": "SAMPLE",
+            "amount": "1234.56",
+            "check_number": "SAMPLE",
+            "source": "SAMPLE",
+            "page": 1,
+            "snippet": "s",
+        }
+    ],
     "confidence": 0.9,
     "reasoning": "generated test fixture.",
 }

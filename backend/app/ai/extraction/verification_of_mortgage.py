@@ -30,6 +30,7 @@ from app.ai.extraction.parsing import (
     derive_status,
     parse_catch_all,
     parse_typed_core,
+    source_payload,
 )
 from app.ai.extraction.shape import CatchAllSection, TypedField
 from app.ai.parsing import coerce_confidence, extract_json_object
@@ -84,6 +85,9 @@ class VerificationOfMortgageExtraction(BaseModel):
     verifier_phone_or_contact: TypedField[str] = Field(default_factory=TypedField)
     verification_date: TypedField[date] = Field(default_factory=TypedField)
     direct_source_indicator: TypedField[str] = Field(default_factory=TypedField)
+
+    # --- Captured nested lists (LP-443) — bare rows, snapshot-read generically ------- #
+    payment_history_months: list[dict[str, Any]] = Field(default_factory=list)
 
     # --- Grouped catch-all — everything else -------------------------------- #
     additional_sections: list[CatchAllSection] = Field(default_factory=list)
@@ -144,6 +148,37 @@ _CORE_SPEC: CoreSpec = (
 )
 
 
+_PAYMENT_HISTORY_MONTHS_ROW: CoreSpec = (
+    ("month", coerce_str),
+    ("payment_status", coerce_str),
+    ("amount_paid", coerce_decimal),
+    ("source", coerce_str),
+)
+
+
+def _parse_payment_history_months(raw: Any) -> list[dict[str, Any]]:
+    """Coerce the payment_history_months rows — bare scalars + a per-row page/snippet source (LP-443 capture).
+
+    Mirrors bank_statement's transactions parse: each declared field is coerced, a per-row source is
+    kept, and a fully-empty row is dropped (no hallucinated rows)."""
+    rows: list[dict[str, Any]] = []
+    if not isinstance(raw, list):
+        return rows
+    for entry in raw:
+        if not isinstance(entry, dict):
+            continue
+        row: dict[str, Any] = {
+            name: coerce(entry.get(name)) for name, coerce in _PAYMENT_HISTORY_MONTHS_ROW
+        }
+        if (
+            "source" not in row
+        ):  # never clobber a declared 'source' data field; else keep provenance
+            row["source"] = source_payload(entry)
+        if any(row[name] is not None for name, _ in _PAYMENT_HISTORY_MONTHS_ROW):
+            rows.append(row)
+    return rows
+
+
 def _parse_verification_of_mortgage_json(
     text: str,
 ) -> VerificationOfMortgageExtractionResult | None:
@@ -159,16 +194,21 @@ def _parse_verification_of_mortgage_json(
         return None
 
     core_payload, non_null, coercion_lost = parse_typed_core(payload, _CORE_SPEC)
+    payment_history_months = _parse_payment_history_months(payload.get("payment_history_months"))
     sections = parse_catch_all(payload.get("additional_sections"))
 
     try:
         data = VerificationOfMortgageExtraction.model_validate(
-            {**core_payload, "additional_sections": sections}
+            {
+                **core_payload,
+                "payment_history_months": payment_history_months,
+                "additional_sections": sections,
+            }
         )
     except ValidationError:
         return None
 
-    status = derive_status(non_null, coercion_lost)
+    status = derive_status(non_null + len(payment_history_months), coercion_lost)
     confidence = coerce_confidence(payload.get("confidence"))
     raw_reasoning = payload.get("reasoning")
     reasoning = (
@@ -223,5 +263,6 @@ async def extract_verification_of_mortgage(
         confidence=result.confidence,
         core_fields_present=core_present,
         catch_all_sections=len(result.data.additional_sections),
+        list_rows_total=len(result.data.payment_history_months),
     )
     return result

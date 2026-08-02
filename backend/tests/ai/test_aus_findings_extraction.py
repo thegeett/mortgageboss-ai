@@ -51,9 +51,19 @@ FULL_PAYLOAD = {
         "required_reserve_months": _core("1234.56"),
         "asset_documentation_level": _core("SAMPLE"),
         "income_documentation_level": _core("SAMPLE"),
-        "condition_count": _core(2024),
+        "condition_count": _core(1),
     },
     "additional_sections": [{"section": "Other", "fields": [{"label": "Note", "value": "x"}]}],
+    "aus_required_conditions": [
+        {
+            "condition_number": "SAMPLE",
+            "condition_category": "SAMPLE",
+            "condition_text": "SAMPLE",
+            "is_prior_to_close": "SAMPLE",
+            "page": 1,
+            "snippet": "s",
+        }
+    ],
     "confidence": 0.9,
     "reasoning": "generated test fixture.",
 }

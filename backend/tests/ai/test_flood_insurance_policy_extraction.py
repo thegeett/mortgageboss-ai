@@ -50,6 +50,17 @@ FULL_PAYLOAD = {
         "lender_loan_number": _core("SAMPLE"),
     },
     "additional_sections": [{"section": "Other", "fields": [{"label": "Note", "value": "x"}]}],
+    "mortgagee_clause_entries": [
+        {
+            "mortgagee_name": "SAMPLE",
+            "mortgagee_address": "SAMPLE",
+            "loan_number": "SAMPLE",
+            "capacity": "SAMPLE",
+            "source": "SAMPLE",
+            "page": 1,
+            "snippet": "s",
+        }
+    ],
     "confidence": 0.9,
     "reasoning": "generated test fixture.",
 }

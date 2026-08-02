@@ -51,6 +51,16 @@ FULL_PAYLOAD = {
         "company_representative_signed_date": _core("2024-01-15"),
     },
     "additional_sections": [{"section": "Other", "fields": [{"label": "Note", "value": "x"}]}],
+    "treatment_or_repair_items_completed": [
+        {
+            "item": "SAMPLE",
+            "method_or_chemical": "SAMPLE",
+            "area": "SAMPLE",
+            "status": "SAMPLE",
+            "page": 1,
+            "snippet": "s",
+        }
+    ],
     "confidence": 0.9,
     "reasoning": "generated test fixture.",
 }

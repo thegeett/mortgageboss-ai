@@ -51,6 +51,7 @@ FULL_PAYLOAD = {
         "account_case_reference_number": _core("SAMPLE"),
     },
     "additional_sections": [{"section": "Other", "fields": [{"label": "Note", "value": "x"}]}],
+    "supporting_documents": [{"document_name": "SAMPLE", "page": 1, "snippet": "s"}],
     "confidence": 0.9,
     "reasoning": "generated test fixture.",
 }

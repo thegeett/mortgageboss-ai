@@ -61,6 +61,16 @@ FULL_PAYLOAD = {
         "direct_source_indicator": _core("SAMPLE"),
     },
     "additional_sections": [{"section": "Other", "fields": [{"label": "Note", "value": "x"}]}],
+    "payment_history_months": [
+        {
+            "month": "SAMPLE",
+            "payment_status": "SAMPLE",
+            "amount_paid": "1234.56",
+            "source": "SAMPLE",
+            "page": 1,
+            "snippet": "s",
+        }
+    ],
     "confidence": 0.9,
     "reasoning": "generated test fixture.",
 }

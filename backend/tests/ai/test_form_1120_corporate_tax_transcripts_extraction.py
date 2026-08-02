@@ -49,6 +49,17 @@ FULL_PAYLOAD = {
         "total_tax": _core("1234.56"),
     },
     "additional_sections": [{"section": "Other", "fields": [{"label": "Note", "value": "x"}]}],
+    "officer_compensation": [
+        {
+            "officer_name_or_label": "SAMPLE",
+            "title": "SAMPLE",
+            "percent_time_or_ownership": "SAMPLE",
+            "compensation_amount": "1234.56",
+            "source": "SAMPLE",
+            "page": 1,
+            "snippet": "s",
+        }
+    ],
     "confidence": 0.9,
     "reasoning": "generated test fixture.",
 }

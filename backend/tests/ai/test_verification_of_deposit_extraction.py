@@ -48,6 +48,18 @@ FULL_PAYLOAD = {
         "institution_representative_signed": _core("SAMPLE"),
     },
     "additional_sections": [{"section": "Other", "fields": [{"label": "Note", "value": "x"}]}],
+    "deposit_accounts": [
+        {
+            "account_type": "SAMPLE",
+            "account_number_masked": "SAMPLE",
+            "current_balance": "1234.56",
+            "average_balance": "1234.56",
+            "date_opened": "2024-01-15",
+            "source": "SAMPLE",
+            "page": 1,
+            "snippet": "s",
+        }
+    ],
     "confidence": 0.9,
     "reasoning": "generated test fixture.",
 }

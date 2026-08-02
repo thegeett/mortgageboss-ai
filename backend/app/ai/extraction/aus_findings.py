@@ -30,6 +30,7 @@ from app.ai.extraction.parsing import (
     derive_status,
     parse_catch_all,
     parse_typed_core,
+    source_payload,
 )
 from app.ai.extraction.shape import CatchAllSection, TypedField
 from app.ai.parsing import coerce_confidence, extract_json_object
@@ -77,6 +78,9 @@ class AusFindingsExtraction(BaseModel):
     asset_documentation_level: TypedField[str] = Field(default_factory=TypedField)
     income_documentation_level: TypedField[str] = Field(default_factory=TypedField)
     condition_count: TypedField[int] = Field(default_factory=TypedField)
+
+    # --- Captured nested lists (LP-443) — bare rows, snapshot-read generically ------- #
+    aus_required_conditions: list[dict[str, Any]] = Field(default_factory=list)
 
     # --- Grouped catch-all — everything else -------------------------------- #
     additional_sections: list[CatchAllSection] = Field(default_factory=list)
@@ -130,6 +134,37 @@ _CORE_SPEC: CoreSpec = (
 )
 
 
+_AUS_REQUIRED_CONDITIONS_ROW: CoreSpec = (
+    ("condition_number", coerce_str),
+    ("condition_category", coerce_str),
+    ("condition_text", coerce_str),
+    ("is_prior_to_close", coerce_str),
+)
+
+
+def _parse_aus_required_conditions(raw: Any) -> list[dict[str, Any]]:
+    """Coerce the aus_required_conditions rows — bare scalars + a per-row page/snippet source (LP-443 capture).
+
+    Mirrors bank_statement's transactions parse: each declared field is coerced, a per-row source is
+    kept, and a fully-empty row is dropped (no hallucinated rows)."""
+    rows: list[dict[str, Any]] = []
+    if not isinstance(raw, list):
+        return rows
+    for entry in raw:
+        if not isinstance(entry, dict):
+            continue
+        row: dict[str, Any] = {
+            name: coerce(entry.get(name)) for name, coerce in _AUS_REQUIRED_CONDITIONS_ROW
+        }
+        if (
+            "source" not in row
+        ):  # never clobber a declared 'source' data field; else keep provenance
+            row["source"] = source_payload(entry)
+        if any(row[name] is not None for name, _ in _AUS_REQUIRED_CONDITIONS_ROW):
+            rows.append(row)
+    return rows
+
+
 def _parse_aus_findings_json(text: str) -> AusFindingsExtractionResult | None:
     """Defensively parse a model response into a aus findings result. Never raises."""
     snippet = extract_json_object(text)
@@ -143,16 +178,30 @@ def _parse_aus_findings_json(text: str) -> AusFindingsExtractionResult | None:
         return None
 
     core_payload, non_null, coercion_lost = parse_typed_core(payload, _CORE_SPEC)
+    aus_required_conditions = _parse_aus_required_conditions(payload.get("aus_required_conditions"))
     sections = parse_catch_all(payload.get("additional_sections"))
 
     try:
         data = AusFindingsExtraction.model_validate(
-            {**core_payload, "additional_sections": sections}
+            {
+                **core_payload,
+                "aus_required_conditions": aus_required_conditions,
+                "additional_sections": sections,
+            }
         )
     except ValidationError:
         return None
 
-    status = derive_status(non_null, coercion_lost)
+    status = derive_status(non_null + len(aus_required_conditions), coercion_lost)
+
+    # Count cross-check (guide §8, LP-443): a declared count that disagrees with the
+    # captured row count means rows were dropped WITHOUT the API truncating → PARTIAL.
+    if (
+        status is ExtractionStatus.SUCCEEDED
+        and data.condition_count.value is not None
+        and data.condition_count.value != len(data.aus_required_conditions)
+    ):
+        status = ExtractionStatus.PARTIAL
     confidence = coerce_confidence(payload.get("confidence"))
     raw_reasoning = payload.get("reasoning")
     reasoning = (
@@ -203,5 +252,6 @@ async def extract_aus_findings(content: bytes, media_type: str) -> AusFindingsEx
         confidence=result.confidence,
         core_fields_present=core_present,
         catch_all_sections=len(result.data.additional_sections),
+        list_rows_total=len(result.data.aus_required_conditions),
     )
     return result

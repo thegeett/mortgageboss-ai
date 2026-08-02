@@ -53,6 +53,32 @@ FULL_PAYLOAD = {
         "annual_tax_amount": _core("1234.56"),
     },
     "additional_sections": [{"section": "Other", "fields": [{"label": "Note", "value": "x"}]}],
+    "schedule_b_items": [
+        {
+            "schedule": "SAMPLE",
+            "item_number": "SAMPLE",
+            "item_type": "SAMPLE",
+            "description": "SAMPLE",
+            "recording_date": "2024-01-15",
+            "recording_reference": "SAMPLE",
+            "amount": "1234.56",
+            "is_satisfied": "SAMPLE",
+            "affected_party": "SAMPLE",
+            "page": 1,
+            "snippet": "s",
+        }
+    ],
+    "chain_of_title": [
+        {
+            "transfer_date": "2024-01-15",
+            "grantor": "SAMPLE",
+            "grantee": "SAMPLE",
+            "consideration_amount": "1234.56",
+            "recording_reference": "SAMPLE",
+            "page": 1,
+            "snippet": "s",
+        }
+    ],
     "confidence": 0.9,
     "reasoning": "generated test fixture.",
 }

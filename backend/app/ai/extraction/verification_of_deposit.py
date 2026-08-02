@@ -29,6 +29,7 @@ from app.ai.extraction.parsing import (
     derive_status,
     parse_catch_all,
     parse_typed_core,
+    source_payload,
 )
 from app.ai.extraction.shape import CatchAllSection, TypedField
 from app.ai.parsing import coerce_confidence, extract_json_object
@@ -70,6 +71,9 @@ class VerificationOfDepositExtraction(BaseModel):
     direct_delivery_indicator: TypedField[str] = Field(default_factory=TypedField)
     applicant_authorized: TypedField[str] = Field(default_factory=TypedField)
     institution_representative_signed: TypedField[str] = Field(default_factory=TypedField)
+
+    # --- Captured nested lists (LP-443) — bare rows, snapshot-read generically ------- #
+    deposit_accounts: list[dict[str, Any]] = Field(default_factory=list)
 
     # --- Grouped catch-all — everything else -------------------------------- #
     additional_sections: list[CatchAllSection] = Field(default_factory=list)
@@ -117,6 +121,39 @@ _CORE_SPEC: CoreSpec = (
 )
 
 
+_DEPOSIT_ACCOUNTS_ROW: CoreSpec = (
+    ("account_type", coerce_str),
+    ("account_number_masked", coerce_str),
+    ("current_balance", coerce_decimal),
+    ("average_balance", coerce_decimal),
+    ("date_opened", coerce_date),
+    ("source", coerce_str),
+)
+
+
+def _parse_deposit_accounts(raw: Any) -> list[dict[str, Any]]:
+    """Coerce the deposit_accounts rows — bare scalars + a per-row page/snippet source (LP-443 capture).
+
+    Mirrors bank_statement's transactions parse: each declared field is coerced, a per-row source is
+    kept, and a fully-empty row is dropped (no hallucinated rows)."""
+    rows: list[dict[str, Any]] = []
+    if not isinstance(raw, list):
+        return rows
+    for entry in raw:
+        if not isinstance(entry, dict):
+            continue
+        row: dict[str, Any] = {
+            name: coerce(entry.get(name)) for name, coerce in _DEPOSIT_ACCOUNTS_ROW
+        }
+        if (
+            "source" not in row
+        ):  # never clobber a declared 'source' data field; else keep provenance
+            row["source"] = source_payload(entry)
+        if any(row[name] is not None for name, _ in _DEPOSIT_ACCOUNTS_ROW):
+            rows.append(row)
+    return rows
+
+
 def _parse_verification_of_deposit_json(text: str) -> VerificationOfDepositExtractionResult | None:
     """Defensively parse a model response into a verification of deposit result. Never raises."""
     snippet = extract_json_object(text)
@@ -130,16 +167,17 @@ def _parse_verification_of_deposit_json(text: str) -> VerificationOfDepositExtra
         return None
 
     core_payload, non_null, coercion_lost = parse_typed_core(payload, _CORE_SPEC)
+    deposit_accounts = _parse_deposit_accounts(payload.get("deposit_accounts"))
     sections = parse_catch_all(payload.get("additional_sections"))
 
     try:
         data = VerificationOfDepositExtraction.model_validate(
-            {**core_payload, "additional_sections": sections}
+            {**core_payload, "deposit_accounts": deposit_accounts, "additional_sections": sections}
         )
     except ValidationError:
         return None
 
-    status = derive_status(non_null, coercion_lost)
+    status = derive_status(non_null + len(deposit_accounts), coercion_lost)
     confidence = coerce_confidence(payload.get("confidence"))
     raw_reasoning = payload.get("reasoning")
     reasoning = (
@@ -192,5 +230,6 @@ async def extract_verification_of_deposit(
         confidence=result.confidence,
         core_fields_present=core_present,
         catch_all_sections=len(result.data.additional_sections),
+        list_rows_total=len(result.data.deposit_accounts),
     )
     return result

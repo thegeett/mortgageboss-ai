@@ -30,6 +30,7 @@ from app.ai.extraction.parsing import (
     derive_status,
     parse_catch_all,
     parse_typed_core,
+    source_payload,
 )
 from app.ai.extraction.shape import CatchAllSection, TypedField
 from app.ai.parsing import coerce_confidence, extract_json_object
@@ -76,6 +77,9 @@ class HoaCertificationExtraction(BaseModel):
     master_insurance_amount: TypedField[Decimal] = Field(default_factory=TypedField)
     completed_by_name_title: TypedField[str] = Field(default_factory=TypedField)
     completion_date: TypedField[date] = Field(default_factory=TypedField)
+
+    # --- Captured nested lists (LP-443) — bare rows, snapshot-read generically ------- #
+    special_assessments: list[dict[str, Any]] = Field(default_factory=list)
 
     # --- Grouped catch-all — everything else -------------------------------- #
     additional_sections: list[CatchAllSection] = Field(default_factory=list)
@@ -128,6 +132,37 @@ _CORE_SPEC: CoreSpec = (
 )
 
 
+_SPECIAL_ASSESSMENTS_ROW: CoreSpec = (
+    ("description", coerce_str),
+    ("amount", coerce_decimal),
+    ("status", coerce_str),
+    ("date", coerce_date),
+)
+
+
+def _parse_special_assessments(raw: Any) -> list[dict[str, Any]]:
+    """Coerce the special_assessments rows — bare scalars + a per-row page/snippet source (LP-443 capture).
+
+    Mirrors bank_statement's transactions parse: each declared field is coerced, a per-row source is
+    kept, and a fully-empty row is dropped (no hallucinated rows)."""
+    rows: list[dict[str, Any]] = []
+    if not isinstance(raw, list):
+        return rows
+    for entry in raw:
+        if not isinstance(entry, dict):
+            continue
+        row: dict[str, Any] = {
+            name: coerce(entry.get(name)) for name, coerce in _SPECIAL_ASSESSMENTS_ROW
+        }
+        if (
+            "source" not in row
+        ):  # never clobber a declared 'source' data field; else keep provenance
+            row["source"] = source_payload(entry)
+        if any(row[name] is not None for name, _ in _SPECIAL_ASSESSMENTS_ROW):
+            rows.append(row)
+    return rows
+
+
 def _parse_hoa_certification_json(text: str) -> HoaCertificationExtractionResult | None:
     """Defensively parse a model response into a hoa certification result. Never raises."""
     snippet = extract_json_object(text)
@@ -141,16 +176,21 @@ def _parse_hoa_certification_json(text: str) -> HoaCertificationExtractionResult
         return None
 
     core_payload, non_null, coercion_lost = parse_typed_core(payload, _CORE_SPEC)
+    special_assessments = _parse_special_assessments(payload.get("special_assessments"))
     sections = parse_catch_all(payload.get("additional_sections"))
 
     try:
         data = HoaCertificationExtraction.model_validate(
-            {**core_payload, "additional_sections": sections}
+            {
+                **core_payload,
+                "special_assessments": special_assessments,
+                "additional_sections": sections,
+            }
         )
     except ValidationError:
         return None
 
-    status = derive_status(non_null, coercion_lost)
+    status = derive_status(non_null + len(special_assessments), coercion_lost)
     confidence = coerce_confidence(payload.get("confidence"))
     raw_reasoning = payload.get("reasoning")
     reasoning = (
@@ -203,5 +243,6 @@ async def extract_hoa_certification(
         confidence=result.confidence,
         core_fields_present=core_present,
         catch_all_sections=len(result.data.additional_sections),
+        list_rows_total=len(result.data.special_assessments),
     )
     return result

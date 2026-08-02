@@ -43,6 +43,21 @@ FULL_PAYLOAD = {
         "judge_name_and_signature": _core("SAMPLE"),
     },
     "additional_sections": [{"section": "Other", "fields": [{"label": "Note", "value": "x"}]}],
+    "support_awards": [
+        {
+            "award_type": "SAMPLE",
+            "amount": "1234.56",
+            "frequency": "SAMPLE",
+            "start_date": "2024-01-15",
+            "end_date": "2024-01-15",
+            "payer": "SAMPLE",
+            "payee": "SAMPLE",
+            "escalation_or_conditions": "SAMPLE",
+            "source": "SAMPLE",
+            "page": 1,
+            "snippet": "s",
+        }
+    ],
     "confidence": 0.9,
     "reasoning": "generated test fixture.",
 }

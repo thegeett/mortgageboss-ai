@@ -61,9 +61,23 @@ FULL_PAYLOAD = {
         "fha_condition_deficiencies": _core("SAMPLE"),
         "estimated_monthly_market_rent": _core("1234.56"),
         "rent_schedule_attached": _core("SAMPLE"),
-        "comparable_count": _core(2024),
+        "comparable_count": _core(1),
     },
     "additional_sections": [{"section": "Other", "fields": [{"label": "Note", "value": "x"}]}],
+    "comparable_sales": [
+        {
+            "comp_number": 2024,
+            "address": "SAMPLE",
+            "sale_price": "1234.56",
+            "sale_date": "2024-01-15",
+            "gross_living_area": 2024,
+            "distance_from_subject": "SAMPLE",
+            "net_adjustment": "1234.56",
+            "adjusted_value": "1234.56",
+            "page": 1,
+            "snippet": "s",
+        }
+    ],
     "confidence": 0.9,
     "reasoning": "generated test fixture.",
 }

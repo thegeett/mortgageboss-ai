@@ -27,6 +27,7 @@ from app.ai.extraction.parsing import (
     derive_status,
     parse_catch_all,
     parse_typed_core,
+    source_payload,
 )
 from app.ai.extraction.shape import CatchAllSection, TypedField
 from app.ai.parsing import coerce_confidence, extract_json_object
@@ -69,6 +70,9 @@ class ApplicationLoeExtraction(BaseModel):
     preparer_name: TypedField[str] = Field(default_factory=TypedField)
     property_address: TypedField[str] = Field(default_factory=TypedField)
     loan_number: TypedField[str] = Field(default_factory=TypedField)
+
+    # --- Captured nested lists (LP-443) — bare rows, snapshot-read generically ------- #
+    event_chronology: list[dict[str, Any]] = Field(default_factory=list)
 
     # --- Grouped catch-all — everything else -------------------------------- #
     additional_sections: list[CatchAllSection] = Field(default_factory=list)
@@ -117,6 +121,36 @@ _CORE_SPEC: CoreSpec = (
 )
 
 
+_EVENT_CHRONOLOGY_ROW: CoreSpec = (
+    ("date", coerce_date),
+    ("event", coerce_str),
+    ("source", coerce_str),
+)
+
+
+def _parse_event_chronology(raw: Any) -> list[dict[str, Any]]:
+    """Coerce the event_chronology rows — bare scalars + a per-row page/snippet source (LP-443 capture).
+
+    Mirrors bank_statement's transactions parse: each declared field is coerced, a per-row source is
+    kept, and a fully-empty row is dropped (no hallucinated rows)."""
+    rows: list[dict[str, Any]] = []
+    if not isinstance(raw, list):
+        return rows
+    for entry in raw:
+        if not isinstance(entry, dict):
+            continue
+        row: dict[str, Any] = {
+            name: coerce(entry.get(name)) for name, coerce in _EVENT_CHRONOLOGY_ROW
+        }
+        if (
+            "source" not in row
+        ):  # never clobber a declared 'source' data field; else keep provenance
+            row["source"] = source_payload(entry)
+        if any(row[name] is not None for name, _ in _EVENT_CHRONOLOGY_ROW):
+            rows.append(row)
+    return rows
+
+
 def _parse_application_loe_json(text: str) -> ApplicationLoeExtractionResult | None:
     """Defensively parse a model response into a application loe result. Never raises."""
     snippet = extract_json_object(text)
@@ -130,16 +164,17 @@ def _parse_application_loe_json(text: str) -> ApplicationLoeExtractionResult | N
         return None
 
     core_payload, non_null, coercion_lost = parse_typed_core(payload, _CORE_SPEC)
+    event_chronology = _parse_event_chronology(payload.get("event_chronology"))
     sections = parse_catch_all(payload.get("additional_sections"))
 
     try:
         data = ApplicationLoeExtraction.model_validate(
-            {**core_payload, "additional_sections": sections}
+            {**core_payload, "event_chronology": event_chronology, "additional_sections": sections}
         )
     except ValidationError:
         return None
 
-    status = derive_status(non_null, coercion_lost)
+    status = derive_status(non_null + len(event_chronology), coercion_lost)
     confidence = coerce_confidence(payload.get("confidence"))
     raw_reasoning = payload.get("reasoning")
     reasoning = (
@@ -192,5 +227,6 @@ async def extract_application_loe(
         confidence=result.confidence,
         core_fields_present=core_present,
         catch_all_sections=len(result.data.additional_sections),
+        list_rows_total=len(result.data.event_chronology),
     )
     return result

@@ -29,6 +29,7 @@ from app.ai.extraction.parsing import (
     derive_status,
     parse_catch_all,
     parse_typed_core,
+    source_payload,
 )
 from app.ai.extraction.shape import CatchAllSection, TypedField
 from app.ai.parsing import coerce_confidence, extract_json_object
@@ -75,6 +76,9 @@ class MilitaryLeaveAndEarningStatementLesExtraction(BaseModel):
     state_tax_data: TypedField[str] = Field(default_factory=TypedField)
     leave_balance: TypedField[str] = Field(default_factory=TypedField)
     direct_deposit_account_last4: TypedField[str] = Field(default_factory=TypedField)
+
+    # --- Captured nested lists (LP-443) — bare rows, snapshot-read generically ------- #
+    entitlements: list[dict[str, Any]] = Field(default_factory=list)
 
     # --- Grouped catch-all — everything else -------------------------------- #
     additional_sections: list[CatchAllSection] = Field(default_factory=list)
@@ -127,6 +131,33 @@ _CORE_SPEC: CoreSpec = (
 )
 
 
+_ENTITLEMENTS_ROW: CoreSpec = (
+    ("label", coerce_str),
+    ("amount", coerce_decimal),
+)
+
+
+def _parse_entitlements(raw: Any) -> list[dict[str, Any]]:
+    """Coerce the entitlements rows — bare scalars + a per-row page/snippet source (LP-443 capture).
+
+    Mirrors bank_statement's transactions parse: each declared field is coerced, a per-row source is
+    kept, and a fully-empty row is dropped (no hallucinated rows)."""
+    rows: list[dict[str, Any]] = []
+    if not isinstance(raw, list):
+        return rows
+    for entry in raw:
+        if not isinstance(entry, dict):
+            continue
+        row: dict[str, Any] = {name: coerce(entry.get(name)) for name, coerce in _ENTITLEMENTS_ROW}
+        if (
+            "source" not in row
+        ):  # never clobber a declared 'source' data field; else keep provenance
+            row["source"] = source_payload(entry)
+        if any(row[name] is not None for name, _ in _ENTITLEMENTS_ROW):
+            rows.append(row)
+    return rows
+
+
 def _parse_military_leave_and_earning_statement_les_json(
     text: str,
 ) -> MilitaryLeaveAndEarningStatementLesExtractionResult | None:
@@ -142,16 +173,17 @@ def _parse_military_leave_and_earning_statement_les_json(
         return None
 
     core_payload, non_null, coercion_lost = parse_typed_core(payload, _CORE_SPEC)
+    entitlements = _parse_entitlements(payload.get("entitlements"))
     sections = parse_catch_all(payload.get("additional_sections"))
 
     try:
         data = MilitaryLeaveAndEarningStatementLesExtraction.model_validate(
-            {**core_payload, "additional_sections": sections}
+            {**core_payload, "entitlements": entitlements, "additional_sections": sections}
         )
     except ValidationError:
         return None
 
-    status = derive_status(non_null, coercion_lost)
+    status = derive_status(non_null + len(entitlements), coercion_lost)
     confidence = coerce_confidence(payload.get("confidence"))
     raw_reasoning = payload.get("reasoning")
     reasoning = (
@@ -214,5 +246,6 @@ async def extract_military_leave_and_earning_statement_les(
         confidence=result.confidence,
         core_fields_present=core_present,
         catch_all_sections=len(result.data.additional_sections),
+        list_rows_total=len(result.data.entitlements),
     )
     return result

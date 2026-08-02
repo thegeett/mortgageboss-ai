@@ -54,6 +54,16 @@ FULL_PAYLOAD = {
         "loan_number": _core("SAMPLE"),
     },
     "additional_sections": [{"section": "Other", "fields": [{"label": "Note", "value": "x"}]}],
+    "payment_history": [
+        {
+            "date": "2024-01-15",
+            "amount": "1234.56",
+            "status": "SAMPLE",
+            "source": "SAMPLE",
+            "page": 1,
+            "snippet": "s",
+        }
+    ],
     "confidence": 0.9,
     "reasoning": "generated test fixture.",
 }

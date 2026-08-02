@@ -45,6 +45,17 @@ FULL_PAYLOAD = {
         "consumer_signatures_and_dates": _core("SAMPLE"),
     },
     "additional_sections": [{"section": "Other", "fields": [{"label": "Note", "value": "x"}]}],
+    "affiliate_entries": [
+        {
+            "provider_name": "SAMPLE",
+            "service_type": "SAMPLE",
+            "nature_of_relationship": "SAMPLE",
+            "estimated_charge_or_range": "SAMPLE",
+            "source": "SAMPLE",
+            "page": 1,
+            "snippet": "s",
+        }
+    ],
     "confidence": 0.9,
     "reasoning": "generated test fixture.",
 }

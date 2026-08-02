@@ -28,6 +28,7 @@ from app.ai.extraction.parsing import (
     derive_status,
     parse_catch_all,
     parse_typed_core,
+    source_payload,
 )
 from app.ai.extraction.shape import CatchAllSection, TypedField
 from app.ai.parsing import coerce_confidence, extract_json_object
@@ -71,6 +72,9 @@ class TrustDocumentsExtraction(BaseModel):
     beneficial_interest_summary: TypedField[str] = Field(default_factory=TypedField)
     certification_current_and_unamended: TypedField[str] = Field(default_factory=TypedField)
     property_address: TypedField[str] = Field(default_factory=TypedField)
+
+    # --- Captured nested lists (LP-443) — bare rows, snapshot-read generically ------- #
+    authorized_signer_names_and_capacity: list[dict[str, Any]] = Field(default_factory=list)
 
     # --- Grouped catch-all — everything else -------------------------------- #
     additional_sections: list[CatchAllSection] = Field(default_factory=list)
@@ -120,6 +124,37 @@ _CORE_SPEC: CoreSpec = (
 )
 
 
+_AUTHORIZED_SIGNER_NAMES_AND_CAPACITY_ROW: CoreSpec = (
+    ("name", coerce_str),
+    ("capacity", coerce_str),
+    ("signature_present", coerce_str),
+)
+
+
+def _parse_authorized_signer_names_and_capacity(raw: Any) -> list[dict[str, Any]]:
+    """Coerce the authorized_signer_names_and_capacity rows — bare scalars + a per-row page/snippet source (LP-443 capture).
+
+    Mirrors bank_statement's transactions parse: each declared field is coerced, a per-row source is
+    kept, and a fully-empty row is dropped (no hallucinated rows)."""
+    rows: list[dict[str, Any]] = []
+    if not isinstance(raw, list):
+        return rows
+    for entry in raw:
+        if not isinstance(entry, dict):
+            continue
+        row: dict[str, Any] = {
+            name: coerce(entry.get(name))
+            for name, coerce in _AUTHORIZED_SIGNER_NAMES_AND_CAPACITY_ROW
+        }
+        if (
+            "source" not in row
+        ):  # never clobber a declared 'source' data field; else keep provenance
+            row["source"] = source_payload(entry)
+        if any(row[name] is not None for name, _ in _AUTHORIZED_SIGNER_NAMES_AND_CAPACITY_ROW):
+            rows.append(row)
+    return rows
+
+
 def _parse_trust_documents_json(text: str) -> TrustDocumentsExtractionResult | None:
     """Defensively parse a model response into a trust documents result. Never raises."""
     snippet = extract_json_object(text)
@@ -133,16 +168,23 @@ def _parse_trust_documents_json(text: str) -> TrustDocumentsExtractionResult | N
         return None
 
     core_payload, non_null, coercion_lost = parse_typed_core(payload, _CORE_SPEC)
+    authorized_signer_names_and_capacity = _parse_authorized_signer_names_and_capacity(
+        payload.get("authorized_signer_names_and_capacity")
+    )
     sections = parse_catch_all(payload.get("additional_sections"))
 
     try:
         data = TrustDocumentsExtraction.model_validate(
-            {**core_payload, "additional_sections": sections}
+            {
+                **core_payload,
+                "authorized_signer_names_and_capacity": authorized_signer_names_and_capacity,
+                "additional_sections": sections,
+            }
         )
     except ValidationError:
         return None
 
-    status = derive_status(non_null, coercion_lost)
+    status = derive_status(non_null + len(authorized_signer_names_and_capacity), coercion_lost)
     confidence = coerce_confidence(payload.get("confidence"))
     raw_reasoning = payload.get("reasoning")
     reasoning = (
@@ -195,5 +237,6 @@ async def extract_trust_documents(
         confidence=result.confidence,
         core_fields_present=core_present,
         catch_all_sections=len(result.data.additional_sections),
+        list_rows_total=len(result.data.authorized_signer_names_and_capacity),
     )
     return result

@@ -47,6 +47,16 @@ FULL_PAYLOAD = {
         "account_case_reference_number": _core("SAMPLE"),
     },
     "additional_sections": [{"section": "Other", "fields": [{"label": "Note", "value": "x"}]}],
+    "findings": [
+        {
+            "category": "SAMPLE",
+            "insect_or_damage_type": "SAMPLE",
+            "location": "SAMPLE",
+            "description": "SAMPLE",
+            "page": 1,
+            "snippet": "s",
+        }
+    ],
     "confidence": 0.9,
     "reasoning": "generated test fixture.",
 }

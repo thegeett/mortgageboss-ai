@@ -47,6 +47,7 @@ FULL_PAYLOAD = {
         "candidate_acceptance_signature_and_date": _core("SAMPLE"),
     },
     "additional_sections": [{"section": "Other", "fields": [{"label": "Note", "value": "x"}]}],
+    "employment_contingencies": [{"contingency": "SAMPLE", "page": 1, "snippet": "s"}],
     "confidence": 0.9,
     "reasoning": "generated test fixture.",
 }

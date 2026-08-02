@@ -49,6 +49,16 @@ FULL_PAYLOAD = {
         "customer_file_number": _core("SAMPLE"),
     },
     "additional_sections": [{"section": "Other", "fields": [{"label": "Note", "value": "x"}]}],
+    "return_line_items": [
+        {
+            "section": "SAMPLE",
+            "line_label": "SAMPLE",
+            "amount": "1234.56",
+            "source": "SAMPLE",
+            "page": 1,
+            "snippet": "s",
+        }
+    ],
     "confidence": 0.9,
     "reasoning": "generated test fixture.",
 }

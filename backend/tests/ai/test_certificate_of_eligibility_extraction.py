@@ -49,6 +49,15 @@ FULL_PAYLOAD = {
         "surviving_spouse_indicator": _core("SAMPLE"),
     },
     "additional_sections": [{"section": "Other", "fields": [{"label": "Note", "value": "x"}]}],
+    "prior_va_loan_or_entitlement_charges": [
+        {
+            "prior_loan_reference": "SAMPLE",
+            "entitlement_amount_charged": "1234.56",
+            "prior_loan_status": "SAMPLE",
+            "page": 1,
+            "snippet": "s",
+        }
+    ],
     "confidence": 0.9,
     "reasoning": "generated test fixture.",
 }

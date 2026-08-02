@@ -43,6 +43,20 @@ FULL_PAYLOAD = {
         "total_available_assets": _core("1234.56"),
     },
     "additional_sections": [{"section": "Other", "fields": [{"label": "Note", "value": "x"}]}],
+    "verified_accounts": [
+        {
+            "institution_name": "SAMPLE",
+            "account_number_masked": "SAMPLE",
+            "account_type": "SAMPLE",
+            "account_holder_name": "SAMPLE",
+            "current_balance": "1234.56",
+            "available_balance": "1234.56",
+            "average_balance": "1234.56",
+            "source": "SAMPLE",
+            "page": 1,
+            "snippet": "s",
+        }
+    ],
     "confidence": 0.9,
     "reasoning": "generated test fixture.",
 }

@@ -46,6 +46,16 @@ FULL_PAYLOAD = {
         "certification_of_accuracy": _core("SAMPLE"),
     },
     "additional_sections": [{"section": "Other", "fields": [{"label": "Note", "value": "x"}]}],
+    "asset_line_items": [
+        {
+            "category": "SAMPLE",
+            "description": "SAMPLE",
+            "value": "1234.56",
+            "source": "SAMPLE",
+            "page": 1,
+            "snippet": "s",
+        }
+    ],
     "confidence": 0.9,
     "reasoning": "generated test fixture.",
 }

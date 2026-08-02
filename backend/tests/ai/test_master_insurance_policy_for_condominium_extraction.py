@@ -48,6 +48,17 @@ FULL_PAYLOAD = {
         "agent_contact_and_certificate_date": _core("SAMPLE"),
     },
     "additional_sections": [{"section": "Other", "fields": [{"label": "Note", "value": "x"}]}],
+    "building_limits": [
+        {
+            "building_identifier_or_address": "SAMPLE",
+            "coverage_limit": "1234.56",
+            "deductible": "1234.56",
+            "wind_hail_named_storm_deductible": "SAMPLE",
+            "source": "SAMPLE",
+            "page": 1,
+            "snippet": "s",
+        }
+    ],
     "confidence": 0.9,
     "reasoning": "generated test fixture.",
 }

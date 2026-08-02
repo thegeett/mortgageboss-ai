@@ -29,6 +29,7 @@ from app.ai.extraction.parsing import (
     derive_status,
     parse_catch_all,
     parse_typed_core,
+    source_payload,
 )
 from app.ai.extraction.shape import CatchAllSection, TypedField
 from app.ai.parsing import coerce_confidence, extract_json_object
@@ -71,6 +72,9 @@ class BankDepositSlipExtraction(BaseModel):
     deposit_time: TypedField[str] = Field(default_factory=TypedField)
     document_issue_date: TypedField[date] = Field(default_factory=TypedField)
     loan_number: TypedField[str] = Field(default_factory=TypedField)
+
+    # --- Captured nested lists (LP-443) — bare rows, snapshot-read generically ------- #
+    check_items: list[dict[str, Any]] = Field(default_factory=list)
 
     # --- Grouped catch-all — everything else -------------------------------- #
     additional_sections: list[CatchAllSection] = Field(default_factory=list)
@@ -119,6 +123,35 @@ _CORE_SPEC: CoreSpec = (
 )
 
 
+_CHECK_ITEMS_ROW: CoreSpec = (
+    ("payer_or_drawer", coerce_str),
+    ("amount", coerce_decimal),
+    ("check_number", coerce_str),
+    ("source", coerce_str),
+)
+
+
+def _parse_check_items(raw: Any) -> list[dict[str, Any]]:
+    """Coerce the check_items rows — bare scalars + a per-row page/snippet source (LP-443 capture).
+
+    Mirrors bank_statement's transactions parse: each declared field is coerced, a per-row source is
+    kept, and a fully-empty row is dropped (no hallucinated rows)."""
+    rows: list[dict[str, Any]] = []
+    if not isinstance(raw, list):
+        return rows
+    for entry in raw:
+        if not isinstance(entry, dict):
+            continue
+        row: dict[str, Any] = {name: coerce(entry.get(name)) for name, coerce in _CHECK_ITEMS_ROW}
+        if (
+            "source" not in row
+        ):  # never clobber a declared 'source' data field; else keep provenance
+            row["source"] = source_payload(entry)
+        if any(row[name] is not None for name, _ in _CHECK_ITEMS_ROW):
+            rows.append(row)
+    return rows
+
+
 def _parse_bank_deposit_slip_json(text: str) -> BankDepositSlipExtractionResult | None:
     """Defensively parse a model response into a bank deposit slip result. Never raises."""
     snippet = extract_json_object(text)
@@ -132,16 +165,17 @@ def _parse_bank_deposit_slip_json(text: str) -> BankDepositSlipExtractionResult 
         return None
 
     core_payload, non_null, coercion_lost = parse_typed_core(payload, _CORE_SPEC)
+    check_items = _parse_check_items(payload.get("check_items"))
     sections = parse_catch_all(payload.get("additional_sections"))
 
     try:
         data = BankDepositSlipExtraction.model_validate(
-            {**core_payload, "additional_sections": sections}
+            {**core_payload, "check_items": check_items, "additional_sections": sections}
         )
     except ValidationError:
         return None
 
-    status = derive_status(non_null, coercion_lost)
+    status = derive_status(non_null + len(check_items), coercion_lost)
     confidence = coerce_confidence(payload.get("confidence"))
     raw_reasoning = payload.get("reasoning")
     reasoning = (
@@ -194,5 +228,6 @@ async def extract_bank_deposit_slip(
         confidence=result.confidence,
         core_fields_present=core_present,
         catch_all_sections=len(result.data.additional_sections),
+        list_rows_total=len(result.data.check_items),
     )
     return result

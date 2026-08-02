@@ -50,6 +50,16 @@ FULL_PAYLOAD = {
         "loan_number": _core("SAMPLE"),
     },
     "additional_sections": [{"section": "Other", "fields": [{"label": "Note", "value": "x"}]}],
+    "installments_and_due_dates": [
+        {
+            "installment_label": "SAMPLE",
+            "amount": "1234.56",
+            "due_date": "2024-01-15",
+            "paid_indicator": "SAMPLE",
+            "page": 1,
+            "snippet": "s",
+        }
+    ],
     "confidence": 0.9,
     "reasoning": "generated test fixture.",
 }

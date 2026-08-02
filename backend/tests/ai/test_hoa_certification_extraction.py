@@ -53,6 +53,16 @@ FULL_PAYLOAD = {
         "completion_date": _core("2024-01-15"),
     },
     "additional_sections": [{"section": "Other", "fields": [{"label": "Note", "value": "x"}]}],
+    "special_assessments": [
+        {
+            "description": "SAMPLE",
+            "amount": "1234.56",
+            "status": "SAMPLE",
+            "date": "2024-01-15",
+            "page": 1,
+            "snippet": "s",
+        }
+    ],
     "confidence": 0.9,
     "reasoning": "generated test fixture.",
 }

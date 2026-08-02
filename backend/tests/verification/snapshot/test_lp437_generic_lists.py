@@ -47,19 +47,23 @@ _SPEC = ListSpec(
     stable_row_id=True,
 )
 
+# LP-443: generic-list rows are stored BARE (the shipping bank_statement.transactions shape) —
+# bare scalars + one page/snippet source per row, NOT {value}-wrapped. Row fields therefore carry
+# no per-field confidence (honestly None); the source is EXTRACTED.
 _EXTRACTED = {
     "activity": [
         {
-            "date": {"value": "2026-05-01", "confidence": 0.9},
-            "amount": {"value": "5000.00", "confidence": 0.95},
-            "description": {"value": "PAYROLL ACCT 123456789 DEP", "confidence": 0.8},
-            "transaction_type": {"value": "deposit"},
+            "date": "2026-05-01",
+            "amount": "5000.00",
+            "description": "PAYROLL ACCT 123456789 DEP",
+            "transaction_type": "deposit",
+            "source": {"page": 1, "snippet": "PAYROLL DEP"},
         },
         {
-            "date": {"value": "2026-05-03"},
-            "amount": {"value": "200.00"},
-            "description": {"value": "COFFEE SHOP"},
-            "transaction_type": {"value": "mystery_type"},  # UNKNOWN → direction must be ABSENT
+            "date": "2026-05-03",
+            "amount": "200.00",
+            "description": "COFFEE SHOP",
+            "transaction_type": "mystery_type",  # UNKNOWN → direction must be ABSENT
         },
     ]
 }
@@ -83,7 +87,8 @@ def test_generic_list_round_trips_typed(_registered: None) -> None:
     assert len(rows) == 2
     r1 = rows[0].fields
     assert r1["date"].value == "2026-05-01"
-    assert r1["amount"].value == "5000.00" and r1["amount"].confidence == 0.95  # nothing lost
+    # LP-443: a bare row carries no per-field confidence → honestly None (D4), never fabricated.
+    assert r1["amount"].value == "5000.00" and r1["amount"].confidence is None
     assert r1["amount"].source is FieldSource.EXTRACTED
 
 
@@ -136,7 +141,7 @@ def test_stable_row_id_is_stable_distinct_and_guard_safe(_registered: None) -> N
 def test_row_id_is_none_when_not_declared(monkeypatch: pytest.MonkeyPatch) -> None:
     spec = ListSpec(name="plain", fields=("a",), stable_row_id=False)
     monkeypatch.setitem(ds._LIST_SPECS, "plain_doc", (spec,))
-    drafts = build_list_rows({"plain": [{"a": {"value": "x"}}]}, "plain_doc")
+    drafts = build_list_rows({"plain": [{"a": "x"}]}, "plain_doc")
     rows = finalize_lists(drafts, document_content_id="docX")["plain"]
     assert rows[0].row_id is None  # aggregate-only list → no per-row id
 
@@ -144,7 +149,7 @@ def test_row_id_is_none_when_not_declared(monkeypatch: pytest.MonkeyPatch) -> No
 def test_all_absent_row_is_dropped(monkeypatch: pytest.MonkeyPatch) -> None:
     spec = ListSpec(name="rows", fields=("a", "b"))
     monkeypatch.setitem(ds._LIST_SPECS, "d", (spec,))
-    extracted = {"rows": [{"a": {"value": None}, "b": {"value": None}}, {"a": {"value": "kept"}}]}
+    extracted = {"rows": [{"a": None, "b": None}, {"a": "kept"}]}
     drafts = build_list_rows(extracted, "d")
     rows = finalize_lists(drafts, document_content_id="docX")["rows"]
     assert (
@@ -155,10 +160,12 @@ def test_all_absent_row_is_dropped(monkeypatch: pytest.MonkeyPatch) -> None:
 # --------------------------------------------------------------------------- #
 # Coexistence + additive invariants (the STOP conditions)
 # --------------------------------------------------------------------------- #
-def test_registry_empty_so_real_documents_get_empty_lists() -> None:
-    # No document type is registered in the shipped registry → every document gets {} (additive).
-    assert ds._LIST_SPECS == {}
-    assert build_list_rows({"transactions": [{"date": {"value": "x"}}]}, "bank_statement") == {}
+def test_only_wired_types_get_lists() -> None:
+    # LP-443 wires generic lists for the batch (bank_statement + the generated list-bearing types);
+    # a document type with NO wired list still gets {} (additive — nothing changes for it).
+    assert "bank_statement" in ds._LIST_SPECS  # the first wired list
+    assert build_list_rows({"transactions": [{"date": "x"}]}, "w2") == {}  # no wired list → {}
+    assert "transactions" in build_list_rows({"transactions": [{"date": "x"}]}, "bank_statement")
 
 
 def test_legacy_transactions_still_populate_and_coexist_with_lists(_registered: None) -> None:

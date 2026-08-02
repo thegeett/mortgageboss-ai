@@ -950,12 +950,14 @@ def test_every_registered_extractor_is_a_tier_1_type() -> None:
 async def test_a_newly_promoted_tier1_type_with_no_extractor_completes_cleanly(
     monkeypatch: pytest.MonkeyPatch, db_session: AsyncSession
 ) -> None:
-    """THE D3 SAFETY GATE (LP-441): a real newly-promoted Tier-1 type (credit_report) with NO registered
-    extractor must COMPLETE cleanly — never error, never FAILED — with the interim summary it had as
-    Tier-2 (LP-441 review: a promoted-but-unwired type keeps its gist until step 7 wires its extractor)."""
+    """THE D3 SAFETY GATE (LP-441): a Tier-1 type with NO registered extractor must COMPLETE cleanly —
+    never error, never FAILED — with the interim summary it had as Tier-2. SYNTHETIC since LP-443 Phase B
+    wired credit_report: the test removes it from EXTRACTORS to simulate the unwired state, so the gate is
+    proven independent of which types are wired (after LP-443 Phase C every real Tier-1 type IS wired)."""
     from app.ai.extraction import EXTRACTORS
 
-    assert "credit_report" not in EXTRACTORS  # promoted to Tier-1, extractor not wired yet
+    monkeypatch.delitem(pipeline.EXTRACTORS, "credit_report", raising=False)  # simulate: not wired
+    assert "credit_report" not in EXTRACTORS  # the D3 gate's precondition
     doc = await _setup_document(db_session)
     _patch_storage(monkeypatch)
     _patch_classify(
@@ -1024,8 +1026,11 @@ async def test_reprocess_uses_registry(
 async def test_reprocess_unregistered_type_is_classified_only(
     monkeypatch: pytest.MonkeyPatch, db_session: AsyncSession
 ) -> None:
+    # SYNTHETIC (LP-443): credit_report is now wired, so remove it to simulate an unregistered type —
+    # reprocess of a type with no extractor must complete classified-only, no matter what is wired.
+    monkeypatch.delitem(pipeline.EXTRACTORS, "credit_report", raising=False)
     doc = await _setup_document(db_session)
-    doc.document_type = "credit_report"  # no registered extractor
+    doc.document_type = "credit_report"  # no registered extractor (removed above)
     doc.status = DocumentStatus.CLASSIFIED
     await db_session.commit()
     _patch_storage(monkeypatch)

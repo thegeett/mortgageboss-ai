@@ -30,6 +30,7 @@ from app.ai.extraction.parsing import (
     derive_status,
     parse_catch_all,
     parse_typed_core,
+    source_payload,
 )
 from app.ai.extraction.shape import CatchAllSection, TypedField
 from app.ai.parsing import coerce_confidence, extract_json_object
@@ -87,6 +88,9 @@ class AppraisalExtraction(BaseModel):
     estimated_monthly_market_rent: TypedField[Decimal] = Field(default_factory=TypedField)
     rent_schedule_attached: TypedField[str] = Field(default_factory=TypedField)
     comparable_count: TypedField[int] = Field(default_factory=TypedField)
+
+    # --- Captured nested lists (LP-443) — bare rows, snapshot-read generically ------- #
+    comparable_sales: list[dict[str, Any]] = Field(default_factory=list)
 
     # --- Grouped catch-all — everything else -------------------------------- #
     additional_sections: list[CatchAllSection] = Field(default_factory=list)
@@ -150,6 +154,41 @@ _CORE_SPEC: CoreSpec = (
 )
 
 
+_COMPARABLE_SALES_ROW: CoreSpec = (
+    ("comp_number", coerce_int),
+    ("address", coerce_str),
+    ("sale_price", coerce_decimal),
+    ("sale_date", coerce_date),
+    ("gross_living_area", coerce_int),
+    ("distance_from_subject", coerce_str),
+    ("net_adjustment", coerce_decimal),
+    ("adjusted_value", coerce_decimal),
+)
+
+
+def _parse_comparable_sales(raw: Any) -> list[dict[str, Any]]:
+    """Coerce the comparable_sales rows — bare scalars + a per-row page/snippet source (LP-443 capture).
+
+    Mirrors bank_statement's transactions parse: each declared field is coerced, a per-row source is
+    kept, and a fully-empty row is dropped (no hallucinated rows)."""
+    rows: list[dict[str, Any]] = []
+    if not isinstance(raw, list):
+        return rows
+    for entry in raw:
+        if not isinstance(entry, dict):
+            continue
+        row: dict[str, Any] = {
+            name: coerce(entry.get(name)) for name, coerce in _COMPARABLE_SALES_ROW
+        }
+        if (
+            "source" not in row
+        ):  # never clobber a declared 'source' data field; else keep provenance
+            row["source"] = source_payload(entry)
+        if any(row[name] is not None for name, _ in _COMPARABLE_SALES_ROW):
+            rows.append(row)
+    return rows
+
+
 def _parse_appraisal_json(text: str) -> AppraisalExtractionResult | None:
     """Defensively parse a model response into a appraisal result. Never raises."""
     snippet = extract_json_object(text)
@@ -163,14 +202,26 @@ def _parse_appraisal_json(text: str) -> AppraisalExtractionResult | None:
         return None
 
     core_payload, non_null, coercion_lost = parse_typed_core(payload, _CORE_SPEC)
+    comparable_sales = _parse_comparable_sales(payload.get("comparable_sales"))
     sections = parse_catch_all(payload.get("additional_sections"))
 
     try:
-        data = AppraisalExtraction.model_validate({**core_payload, "additional_sections": sections})
+        data = AppraisalExtraction.model_validate(
+            {**core_payload, "comparable_sales": comparable_sales, "additional_sections": sections}
+        )
     except ValidationError:
         return None
 
-    status = derive_status(non_null, coercion_lost)
+    status = derive_status(non_null + len(comparable_sales), coercion_lost)
+
+    # Count cross-check (guide §8, LP-443): a declared count that disagrees with the
+    # captured row count means rows were dropped WITHOUT the API truncating → PARTIAL.
+    if (
+        status is ExtractionStatus.SUCCEEDED
+        and data.comparable_count.value is not None
+        and data.comparable_count.value != len(data.comparable_sales)
+    ):
+        status = ExtractionStatus.PARTIAL
     confidence = coerce_confidence(payload.get("confidence"))
     raw_reasoning = payload.get("reasoning")
     reasoning = (
@@ -221,5 +272,6 @@ async def extract_appraisal(content: bytes, media_type: str) -> AppraisalExtract
         confidence=result.confidence,
         core_fields_present=core_present,
         catch_all_sections=len(result.data.additional_sections),
+        list_rows_total=len(result.data.comparable_sales),
     )
     return result

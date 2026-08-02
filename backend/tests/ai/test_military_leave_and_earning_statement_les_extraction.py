@@ -53,6 +53,7 @@ FULL_PAYLOAD = {
         "direct_deposit_account_last4": _core("SAMPLE"),
     },
     "additional_sections": [{"section": "Other", "fields": [{"label": "Note", "value": "x"}]}],
+    "entitlements": [{"label": "SAMPLE", "amount": "1234.56", "page": 1, "snippet": "s"}],
     "confidence": 0.9,
     "reasoning": "generated test fixture.",
 }

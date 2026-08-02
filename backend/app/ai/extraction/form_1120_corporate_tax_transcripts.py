@@ -29,6 +29,7 @@ from app.ai.extraction.parsing import (
     derive_status,
     parse_catch_all,
     parse_typed_core,
+    source_payload,
 )
 from app.ai.extraction.shape import CatchAllSection, TypedField
 from app.ai.parsing import coerce_confidence, extract_json_object
@@ -73,6 +74,9 @@ class Form1120CorporateTaxTranscriptsExtraction(BaseModel):
     )
     taxable_income: TypedField[Decimal] = Field(default_factory=TypedField)
     total_tax: TypedField[Decimal] = Field(default_factory=TypedField)
+
+    # --- Captured nested lists (LP-443) — bare rows, snapshot-read generically ------- #
+    officer_compensation: list[dict[str, Any]] = Field(default_factory=list)
 
     # --- Grouped catch-all — everything else -------------------------------- #
     additional_sections: list[CatchAllSection] = Field(default_factory=list)
@@ -121,6 +125,38 @@ _CORE_SPEC: CoreSpec = (
 )
 
 
+_OFFICER_COMPENSATION_ROW: CoreSpec = (
+    ("officer_name_or_label", coerce_str),
+    ("title", coerce_str),
+    ("percent_time_or_ownership", coerce_str),
+    ("compensation_amount", coerce_decimal),
+    ("source", coerce_str),
+)
+
+
+def _parse_officer_compensation(raw: Any) -> list[dict[str, Any]]:
+    """Coerce the officer_compensation rows — bare scalars + a per-row page/snippet source (LP-443 capture).
+
+    Mirrors bank_statement's transactions parse: each declared field is coerced, a per-row source is
+    kept, and a fully-empty row is dropped (no hallucinated rows)."""
+    rows: list[dict[str, Any]] = []
+    if not isinstance(raw, list):
+        return rows
+    for entry in raw:
+        if not isinstance(entry, dict):
+            continue
+        row: dict[str, Any] = {
+            name: coerce(entry.get(name)) for name, coerce in _OFFICER_COMPENSATION_ROW
+        }
+        if (
+            "source" not in row
+        ):  # never clobber a declared 'source' data field; else keep provenance
+            row["source"] = source_payload(entry)
+        if any(row[name] is not None for name, _ in _OFFICER_COMPENSATION_ROW):
+            rows.append(row)
+    return rows
+
+
 def _parse_form_1120_corporate_tax_transcripts_json(
     text: str,
 ) -> Form1120CorporateTaxTranscriptsExtractionResult | None:
@@ -136,16 +172,21 @@ def _parse_form_1120_corporate_tax_transcripts_json(
         return None
 
     core_payload, non_null, coercion_lost = parse_typed_core(payload, _CORE_SPEC)
+    officer_compensation = _parse_officer_compensation(payload.get("officer_compensation"))
     sections = parse_catch_all(payload.get("additional_sections"))
 
     try:
         data = Form1120CorporateTaxTranscriptsExtraction.model_validate(
-            {**core_payload, "additional_sections": sections}
+            {
+                **core_payload,
+                "officer_compensation": officer_compensation,
+                "additional_sections": sections,
+            }
         )
     except ValidationError:
         return None
 
-    status = derive_status(non_null, coercion_lost)
+    status = derive_status(non_null + len(officer_compensation), coercion_lost)
     confidence = coerce_confidence(payload.get("confidence"))
     raw_reasoning = payload.get("reasoning")
     reasoning = (
@@ -206,5 +247,6 @@ async def extract_form_1120_corporate_tax_transcripts(
         confidence=result.confidence,
         core_fields_present=core_present,
         catch_all_sections=len(result.data.additional_sections),
+        list_rows_total=len(result.data.officer_compensation),
     )
     return result

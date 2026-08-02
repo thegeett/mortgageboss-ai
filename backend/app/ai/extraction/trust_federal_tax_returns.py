@@ -29,6 +29,7 @@ from app.ai.extraction.parsing import (
     derive_status,
     parse_catch_all,
     parse_typed_core,
+    source_payload,
 )
 from app.ai.extraction.shape import CatchAllSection, TypedField
 from app.ai.parsing import coerce_confidence, extract_json_object
@@ -74,6 +75,9 @@ class TrustFederalTaxReturnsExtraction(BaseModel):
     fiduciary_signed: TypedField[str] = Field(default_factory=TypedField)
     fiduciary_signature_date: TypedField[date] = Field(default_factory=TypedField)
     preparer_name: TypedField[str] = Field(default_factory=TypedField)
+
+    # --- Captured nested lists (LP-443) — bare rows, snapshot-read generically ------- #
+    beneficiary_k1_records: list[dict[str, Any]] = Field(default_factory=list)
 
     # --- Grouped catch-all — everything else -------------------------------- #
     additional_sections: list[CatchAllSection] = Field(default_factory=list)
@@ -125,6 +129,38 @@ _CORE_SPEC: CoreSpec = (
 )
 
 
+_BENEFICIARY_K1_RECORDS_ROW: CoreSpec = (
+    ("beneficiary_name", coerce_str),
+    ("beneficiary_tin_masked", coerce_str),
+    ("distributive_share_amount", coerce_decimal),
+    ("income_type", coerce_str),
+    ("source", coerce_str),
+)
+
+
+def _parse_beneficiary_k1_records(raw: Any) -> list[dict[str, Any]]:
+    """Coerce the beneficiary_k1_records rows — bare scalars + a per-row page/snippet source (LP-443 capture).
+
+    Mirrors bank_statement's transactions parse: each declared field is coerced, a per-row source is
+    kept, and a fully-empty row is dropped (no hallucinated rows)."""
+    rows: list[dict[str, Any]] = []
+    if not isinstance(raw, list):
+        return rows
+    for entry in raw:
+        if not isinstance(entry, dict):
+            continue
+        row: dict[str, Any] = {
+            name: coerce(entry.get(name)) for name, coerce in _BENEFICIARY_K1_RECORDS_ROW
+        }
+        if (
+            "source" not in row
+        ):  # never clobber a declared 'source' data field; else keep provenance
+            row["source"] = source_payload(entry)
+        if any(row[name] is not None for name, _ in _BENEFICIARY_K1_RECORDS_ROW):
+            rows.append(row)
+    return rows
+
+
 def _parse_trust_federal_tax_returns_json(
     text: str,
 ) -> TrustFederalTaxReturnsExtractionResult | None:
@@ -140,16 +176,21 @@ def _parse_trust_federal_tax_returns_json(
         return None
 
     core_payload, non_null, coercion_lost = parse_typed_core(payload, _CORE_SPEC)
+    beneficiary_k1_records = _parse_beneficiary_k1_records(payload.get("beneficiary_k1_records"))
     sections = parse_catch_all(payload.get("additional_sections"))
 
     try:
         data = TrustFederalTaxReturnsExtraction.model_validate(
-            {**core_payload, "additional_sections": sections}
+            {
+                **core_payload,
+                "beneficiary_k1_records": beneficiary_k1_records,
+                "additional_sections": sections,
+            }
         )
     except ValidationError:
         return None
 
-    status = derive_status(non_null, coercion_lost)
+    status = derive_status(non_null + len(beneficiary_k1_records), coercion_lost)
     confidence = coerce_confidence(payload.get("confidence"))
     raw_reasoning = payload.get("reasoning")
     reasoning = (
@@ -206,5 +247,6 @@ async def extract_trust_federal_tax_returns(
         confidence=result.confidence,
         core_fields_present=core_present,
         catch_all_sections=len(result.data.additional_sections),
+        list_rows_total=len(result.data.beneficiary_k1_records),
     )
     return result

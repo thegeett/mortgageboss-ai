@@ -52,6 +52,17 @@ FULL_PAYLOAD = {
         "preparer_name": _core("SAMPLE"),
     },
     "additional_sections": [{"section": "Other", "fields": [{"label": "Note", "value": "x"}]}],
+    "beneficiary_k1_records": [
+        {
+            "beneficiary_name": "SAMPLE",
+            "beneficiary_tin_masked": "SAMPLE",
+            "distributive_share_amount": "1234.56",
+            "income_type": "SAMPLE",
+            "source": "SAMPLE",
+            "page": 1,
+            "snippet": "s",
+        }
+    ],
     "confidence": 0.9,
     "reasoning": "generated test fixture.",
 }

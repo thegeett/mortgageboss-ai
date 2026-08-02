@@ -22,12 +22,14 @@ from app.ai.client import build_document_message
 from app.ai.extraction.model_call import run_extraction_completion
 from app.ai.extraction.parsing import (
     CoreSpec,
+    coerce_date,
     coerce_decimal,
     coerce_int,
     coerce_str,
     derive_status,
     parse_catch_all,
     parse_typed_core,
+    source_payload,
 )
 from app.ai.extraction.shape import CatchAllSection, TypedField
 from app.ai.parsing import coerce_confidence, extract_json_object
@@ -71,6 +73,9 @@ class PropertyTaxBillNonSubjectExtraction(BaseModel):
     legal_description: TypedField[str] = Field(default_factory=TypedField)
     subject_property_indicator: TypedField[str] = Field(default_factory=TypedField)
     loan_number: TypedField[str] = Field(default_factory=TypedField)
+
+    # --- Captured nested lists (LP-443) — bare rows, snapshot-read generically ------- #
+    installments_and_due_dates: list[dict[str, Any]] = Field(default_factory=list)
 
     # --- Grouped catch-all — everything else -------------------------------- #
     additional_sections: list[CatchAllSection] = Field(default_factory=list)
@@ -120,6 +125,37 @@ _CORE_SPEC: CoreSpec = (
 )
 
 
+_INSTALLMENTS_AND_DUE_DATES_ROW: CoreSpec = (
+    ("installment_label", coerce_str),
+    ("amount", coerce_decimal),
+    ("due_date", coerce_date),
+    ("paid_indicator", coerce_str),
+)
+
+
+def _parse_installments_and_due_dates(raw: Any) -> list[dict[str, Any]]:
+    """Coerce the installments_and_due_dates rows — bare scalars + a per-row page/snippet source (LP-443 capture).
+
+    Mirrors bank_statement's transactions parse: each declared field is coerced, a per-row source is
+    kept, and a fully-empty row is dropped (no hallucinated rows)."""
+    rows: list[dict[str, Any]] = []
+    if not isinstance(raw, list):
+        return rows
+    for entry in raw:
+        if not isinstance(entry, dict):
+            continue
+        row: dict[str, Any] = {
+            name: coerce(entry.get(name)) for name, coerce in _INSTALLMENTS_AND_DUE_DATES_ROW
+        }
+        if (
+            "source" not in row
+        ):  # never clobber a declared 'source' data field; else keep provenance
+            row["source"] = source_payload(entry)
+        if any(row[name] is not None for name, _ in _INSTALLMENTS_AND_DUE_DATES_ROW):
+            rows.append(row)
+    return rows
+
+
 def _parse_property_tax_bill_non_subject_json(
     text: str,
 ) -> PropertyTaxBillNonSubjectExtractionResult | None:
@@ -135,16 +171,23 @@ def _parse_property_tax_bill_non_subject_json(
         return None
 
     core_payload, non_null, coercion_lost = parse_typed_core(payload, _CORE_SPEC)
+    installments_and_due_dates = _parse_installments_and_due_dates(
+        payload.get("installments_and_due_dates")
+    )
     sections = parse_catch_all(payload.get("additional_sections"))
 
     try:
         data = PropertyTaxBillNonSubjectExtraction.model_validate(
-            {**core_payload, "additional_sections": sections}
+            {
+                **core_payload,
+                "installments_and_due_dates": installments_and_due_dates,
+                "additional_sections": sections,
+            }
         )
     except ValidationError:
         return None
 
-    status = derive_status(non_null, coercion_lost)
+    status = derive_status(non_null + len(installments_and_due_dates), coercion_lost)
     confidence = coerce_confidence(payload.get("confidence"))
     raw_reasoning = payload.get("reasoning")
     reasoning = (
@@ -201,5 +244,6 @@ async def extract_property_tax_bill_non_subject(
         confidence=result.confidence,
         core_fields_present=core_present,
         catch_all_sections=len(result.data.additional_sections),
+        list_rows_total=len(result.data.installments_and_due_dates),
     )
     return result

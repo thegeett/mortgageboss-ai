@@ -29,6 +29,7 @@ from app.ai.extraction.parsing import (
     derive_status,
     parse_catch_all,
     parse_typed_core,
+    source_payload,
 )
 from app.ai.extraction.shape import CatchAllSection, TypedField
 from app.ai.parsing import coerce_confidence, extract_json_object
@@ -76,6 +77,9 @@ class BusinessTaxReturnExtraction(BaseModel):
     authorized_signer_name_title: TypedField[str] = Field(default_factory=TypedField)
     signature_date: TypedField[date] = Field(default_factory=TypedField)
     paid_preparer_name: TypedField[str] = Field(default_factory=TypedField)
+
+    # --- Captured nested lists (LP-443) — bare rows, snapshot-read generically ------- #
+    owner_partner_shareholder_records: list[dict[str, Any]] = Field(default_factory=list)
 
     # --- Grouped catch-all — everything else -------------------------------- #
     additional_sections: list[CatchAllSection] = Field(default_factory=list)
@@ -129,6 +133,36 @@ _CORE_SPEC: CoreSpec = (
 )
 
 
+_OWNER_PARTNER_SHAREHOLDER_RECORDS_ROW: CoreSpec = (
+    ("owner_name", coerce_str),
+    ("ownership_percentage", coerce_str),
+    ("distribution_or_k1_share", coerce_decimal),
+)
+
+
+def _parse_owner_partner_shareholder_records(raw: Any) -> list[dict[str, Any]]:
+    """Coerce the owner_partner_shareholder_records rows — bare scalars + a per-row page/snippet source (LP-443 capture).
+
+    Mirrors bank_statement's transactions parse: each declared field is coerced, a per-row source is
+    kept, and a fully-empty row is dropped (no hallucinated rows)."""
+    rows: list[dict[str, Any]] = []
+    if not isinstance(raw, list):
+        return rows
+    for entry in raw:
+        if not isinstance(entry, dict):
+            continue
+        row: dict[str, Any] = {
+            name: coerce(entry.get(name)) for name, coerce in _OWNER_PARTNER_SHAREHOLDER_RECORDS_ROW
+        }
+        if (
+            "source" not in row
+        ):  # never clobber a declared 'source' data field; else keep provenance
+            row["source"] = source_payload(entry)
+        if any(row[name] is not None for name, _ in _OWNER_PARTNER_SHAREHOLDER_RECORDS_ROW):
+            rows.append(row)
+    return rows
+
+
 def _parse_business_tax_return_json(text: str) -> BusinessTaxReturnExtractionResult | None:
     """Defensively parse a model response into a business tax return result. Never raises."""
     snippet = extract_json_object(text)
@@ -142,16 +176,23 @@ def _parse_business_tax_return_json(text: str) -> BusinessTaxReturnExtractionRes
         return None
 
     core_payload, non_null, coercion_lost = parse_typed_core(payload, _CORE_SPEC)
+    owner_partner_shareholder_records = _parse_owner_partner_shareholder_records(
+        payload.get("owner_partner_shareholder_records")
+    )
     sections = parse_catch_all(payload.get("additional_sections"))
 
     try:
         data = BusinessTaxReturnExtraction.model_validate(
-            {**core_payload, "additional_sections": sections}
+            {
+                **core_payload,
+                "owner_partner_shareholder_records": owner_partner_shareholder_records,
+                "additional_sections": sections,
+            }
         )
     except ValidationError:
         return None
 
-    status = derive_status(non_null, coercion_lost)
+    status = derive_status(non_null + len(owner_partner_shareholder_records), coercion_lost)
     confidence = coerce_confidence(payload.get("confidence"))
     raw_reasoning = payload.get("reasoning")
     reasoning = (
@@ -204,5 +245,6 @@ async def extract_business_tax_return(
         confidence=result.confidence,
         core_fields_present=core_present,
         catch_all_sections=len(result.data.additional_sections),
+        list_rows_total=len(result.data.owner_partner_shareholder_records),
     )
     return result

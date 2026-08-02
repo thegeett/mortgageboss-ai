@@ -45,13 +45,54 @@ FULL_PAYLOAD = {
         "score_experian": _core(2024),
         "score_transunion": _core(2024),
         "score_model": _core("SAMPLE"),
-        "tradeline_count": _core(2024),
+        "tradeline_count": _core(1),
         "total_monthly_debt_payment": _core("1234.56"),
-        "public_record_count": _core(2024),
+        "public_record_count": _core(1),
         "inquiry_count": _core(2024),
         "security_freeze_or_fraud_alert": _core("SAMPLE"),
     },
     "additional_sections": [{"section": "Other", "fields": [{"label": "Note", "value": "x"}]}],
+    "tradelines": [
+        {
+            "creditor_name": "SAMPLE",
+            "account_type": "SAMPLE",
+            "account_number_masked": "SAMPLE",
+            "account_ownership": "SAMPLE",
+            "date_opened": "2024-01-15",
+            "balance": "1234.56",
+            "credit_limit_or_high_credit": "1234.56",
+            "monthly_payment": "1234.56",
+            "past_due_amount": "1234.56",
+            "account_status": "SAMPLE",
+            "payment_status": "SAMPLE",
+            "payment_history_24mo": "SAMPLE",
+            "worst_delinquency": "SAMPLE",
+            "is_disputed": "SAMPLE",
+            "page": 1,
+            "snippet": "s",
+        }
+    ],
+    "public_records": [
+        {
+            "record_type": "SAMPLE",
+            "filing_date": "2024-01-15",
+            "discharge_or_satisfied_date": "2024-01-15",
+            "status": "SAMPLE",
+            "amount": "1234.56",
+            "court_or_jurisdiction": "SAMPLE",
+            "page": 1,
+            "snippet": "s",
+        }
+    ],
+    "inquiries": [
+        {
+            "inquiry_date": "2024-01-15",
+            "creditor_name": "SAMPLE",
+            "inquiry_type": "SAMPLE",
+            "page": 1,
+            "snippet": "s",
+        }
+    ],
     "confidence": 0.9,
     "reasoning": "generated test fixture.",
 }

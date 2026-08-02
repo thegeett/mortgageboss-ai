@@ -54,6 +54,15 @@ FULL_PAYLOAD = {
         "loan_number": _core("SAMPLE"),
     },
     "additional_sections": [{"section": "Other", "fields": [{"label": "Note", "value": "x"}]}],
+    "encroachments_or_overlaps": [
+        {
+            "description": "SAMPLE",
+            "affected_boundary": "SAMPLE",
+            "location": "SAMPLE",
+            "page": 1,
+            "snippet": "s",
+        }
+    ],
     "confidence": 0.9,
     "reasoning": "generated test fixture.",
 }

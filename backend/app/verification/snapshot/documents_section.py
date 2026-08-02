@@ -163,6 +163,70 @@ _PII_FIELDS: dict[str, tuple[PiiKind, bool]] = {
     "recipient_tin": (PiiKind.SSN, False),  # 1099 recipient — stored RAW ("TIN/SSN as written")
     "employer_ein": (PiiKind.ACCOUNT, False),  # W-2 employer tax id — masked ****NNNN
     "payer_tin": (PiiKind.ACCOUNT, False),  # 1099 payer tax id — masked ****NNNN
+    # LP-443 step 7 — typed-core PII of the first wired batch. NOTE (reported gap): only TOP-LEVEL
+    # typed-core fields are routed here; PII inside a captured LIST row (e.g. a tradeline's
+    # account_number_masked) is NOT routed — it relies on the prompt masking it, so list-row PII
+    # masking is a follow-up (a per-list redact/route step), out of scope for the capture bridge.
+    "borrower_ssn": (PiiKind.SSN, False),  # credit_report — stored RAW, masked + hashed here
+    "co_borrower_ssn": (PiiKind.SSN, False),  # credit_report — stored RAW
+    "social_security_number_masked": (PiiKind.SSN, True),  # certificate_of_eligibility — pre-masked
+    "loan_number_masked": (PiiKind.ACCOUNT, True),  # verification_of_mortgage — pre-masked
+    "policy_number": (PiiKind.ACCOUNT, True),  # homeowner_s_insurance_quote — pre-masked
+    # LP-443 Phase C — typed-core PII across the remaining generated extractors (all account/
+    # SSN/TIN-like; no name conflicts). List-row PII still relies on prompt masking (reported gap).
+    "account_case_or_reference_number": (PiiKind.ACCOUNT, False),
+    "account_number_last4": (PiiKind.ACCOUNT, True),
+    "account_or_case_number_masked": (PiiKind.ACCOUNT, True),
+    "account_or_reference_number_masked": (PiiKind.ACCOUNT, True),
+    "borrower_ssn_or_itin": (PiiKind.SSN, False),
+    "borrower_ssn_or_itin_2": (PiiKind.SSN, False),
+    "card_number": (PiiKind.ACCOUNT, False),
+    "card_number_last4_or_token": (PiiKind.ACCOUNT, True),
+    "card_or_account_last4": (PiiKind.ACCOUNT, True),
+    "case_provider_or_account_number_masked": (PiiKind.ACCOUNT, True),
+    "certificate_or_state_file_number": (PiiKind.ACCOUNT, False),
+    "check_number_or_transaction_reference": (PiiKind.ACCOUNT, False),
+    "claim_number_masked": (PiiKind.ACCOUNT, True),
+    "claim_or_account_number_masked": (PiiKind.ACCOUNT, True),
+    "deposit_account_last4": (PiiKind.ACCOUNT, True),
+    "direct_deposit_account_last4": (PiiKind.ACCOUNT, True),
+    "document_number": (PiiKind.ACCOUNT, True),
+    "document_or_card_number": (PiiKind.ACCOUNT, True),
+    "drawer_account_last4": (PiiKind.ACCOUNT, True),
+    "ein": (PiiKind.ACCOUNT, False),
+    "ein_masked": (PiiKind.ACCOUNT, True),
+    "ein_or_state_entity_number_masked": (PiiKind.ACCOUNT, True),
+    "entity_ein": (PiiKind.ACCOUNT, False),
+    "entity_ein_masked": (PiiKind.ACCOUNT, True),
+    "expiration_month_year": (PiiKind.ACCOUNT, False),
+    "i94_admission_number": (PiiKind.ACCOUNT, True),
+    "loan_number": (PiiKind.ACCOUNT, True),
+    "local_file_or_registration_number": (PiiKind.ACCOUNT, False),
+    "partner_or_shareholder_tin": (PiiKind.SSN, False),
+    "passport_number": (PiiKind.ACCOUNT, True),
+    "payer_account_last4": (PiiKind.ACCOUNT, True),
+    "plan_claim_or_account_last4": (PiiKind.ACCOUNT, True),
+    "plan_or_claim_number_masked": (PiiKind.ACCOUNT, True),
+    "policy_number_masked": (PiiKind.ACCOUNT, True),
+    "receipt_number": (PiiKind.ACCOUNT, True),
+    "recipient_account_last4": (PiiKind.ACCOUNT, True),
+    "recipient_tin_masked": (PiiKind.ACCOUNT, True),
+    "shareholder_or_partner_tin_masked": (PiiKind.SSN, True),
+    "social_security_number": (PiiKind.SSN, False),
+    "social_security_number_2": (PiiKind.SSN, False),
+    "source_account_last4": (PiiKind.ACCOUNT, True),
+    "spouse_tin": (PiiKind.SSN, False),
+    "spouse_tin_masked": (PiiKind.ACCOUNT, True),
+    "ssn_or_itin_last4": (PiiKind.SSN, True),
+    "ssn_or_itin_last4_2": (PiiKind.SSN, True),
+    "tax_identification_number_masked": (PiiKind.ACCOUNT, True),
+    "taxpayer_tin": (PiiKind.SSN, False),
+    "taxpayer_tin_masked": (PiiKind.ACCOUNT, True),
+    "uscis_number_or_a_number": (PiiKind.ACCOUNT, False),
+    "uscis_or_a_number": (PiiKind.ACCOUNT, True),
+    "visa_number": (PiiKind.ACCOUNT, True),
+    "wire_ach_trace_number": (PiiKind.ACCOUNT, False),
+    "wire_or_remittance_instructions": (PiiKind.ACCOUNT, False),
 }
 
 
@@ -499,9 +563,559 @@ class ListSpec:
     stable_row_id: bool = False
 
 
-# document_type → its declared lists. EMPTY until LP-438 emits real ListSpecs; every real
-# document therefore gets lists={} (present-empty), so nothing changes for any live rule.
-_LIST_SPECS: dict[str, tuple[ListSpec, ...]] = {}
+# LP-443 — the FIRST wired generic list: bank_statement's transactions. This proves the capture
+# bridge end to end on a shipping extractor. It COEXISTS with the legacy bespoke transactions path
+# (transaction_field_sets → build_transactions → entry.transactions) — the SAME extracted
+# "transactions" rows populate BOTH entry.transactions (legacy, feeds live AS-1 — byte-unchanged)
+# AND entry.lists["transactions"] (generic, read by no rule yet). Belt-and-braces, additive, never a
+# migration (AS-1 must not move). NOTE (reported finding): the generic ``direction`` uses the minimal
+# snippet mapping (deposit/withdrawal); the legacy ``_direction`` maps a richer vocabulary — a per-rule
+# consumer of the generic list (a later step) must not read this ``direction`` as if it were AS-1's.
+_TRANSACTIONS_LIST = ListSpec(
+    name="transactions",
+    fields=("date", "description", "amount", "transaction_type", "running_balance"),
+    derived=(
+        DerivedSpec(
+            field="direction",
+            from_field="transaction_type",
+            mapping={"deposit": "credit", "withdrawal": "debit"},
+        ),
+    ),
+    redact=frozenset({"description"}),
+    stable_row_id=True,
+)
+
+# LP-443 step 7 — the first wired batch of GENERATED extractors' lists. Each ListSpec is emitted from
+# its schema spec (fields only — no derived/redact/stable_row_id unless the spec declares them); the rows
+# are captured bare by the generated extractor and read generically here. No rule reads these yet (a
+# per-rule consumer is a separate step); they are additive facts on the snapshot.
+_COMPARABLE_SALES_LIST = ListSpec(
+    name="comparable_sales",
+    fields=(
+        "comp_number",
+        "address",
+        "sale_price",
+        "sale_date",
+        "gross_living_area",
+        "distance_from_subject",
+        "net_adjustment",
+        "adjusted_value",
+    ),
+)
+_TRADELINES_LIST = ListSpec(
+    name="tradelines",
+    fields=(
+        "creditor_name",
+        "account_type",
+        "account_number_masked",
+        "account_ownership",
+        "date_opened",
+        "balance",
+        "credit_limit_or_high_credit",
+        "monthly_payment",
+        "past_due_amount",
+        "account_status",
+        "payment_status",
+        "payment_history_24mo",
+        "worst_delinquency",
+        "is_disputed",
+    ),
+)
+_PUBLIC_RECORDS_LIST = ListSpec(
+    name="public_records",
+    fields=(
+        "record_type",
+        "filing_date",
+        "discharge_or_satisfied_date",
+        "status",
+        "amount",
+        "court_or_jurisdiction",
+    ),
+)
+_INQUIRIES_LIST = ListSpec(
+    name="inquiries",
+    fields=("inquiry_date", "creditor_name", "inquiry_type"),
+)
+_SCHEDULE_B_ITEMS_LIST = ListSpec(
+    name="schedule_b_items",
+    fields=(
+        "schedule",
+        "item_number",
+        "item_type",
+        "description",
+        "recording_date",
+        "recording_reference",
+        "amount",
+        "is_satisfied",
+        "affected_party",
+    ),
+)
+_CHAIN_OF_TITLE_LIST = ListSpec(
+    name="chain_of_title",
+    fields=("transfer_date", "grantor", "grantee", "consideration_amount", "recording_reference"),
+)
+_AUS_REQUIRED_CONDITIONS_LIST = ListSpec(
+    name="aus_required_conditions",
+    fields=("condition_number", "condition_category", "condition_text", "is_prior_to_close"),
+)
+_PRIOR_VA_LOAN_OR_ENTITLEMENT_CHARGES_LIST = ListSpec(
+    name="prior_va_loan_or_entitlement_charges",
+    fields=("prior_loan_reference", "entitlement_amount_charged", "prior_loan_status"),
+)
+_PAYMENT_HISTORY_MONTHS_LIST = ListSpec(
+    name="payment_history_months",
+    fields=("month", "payment_status", "amount_paid", "source"),
+)
+_MORTGAGEE_OR_LIENHOLDER_ENTRIES_LIST = ListSpec(
+    name="mortgagee_or_lienholder_entries",
+    fields=("lender_name", "loan_number", "clause_address"),
+)
+
+# LP-443 Phase C — ListSpec constants for the remaining generated list-bearing types (fields only,
+# from each spec; collisions on a shared list name are type-prefixed).
+_AFFILIATE_ENTRIES_LIST = ListSpec(
+    name="affiliate_entries",
+    fields=(
+        "provider_name",
+        "service_type",
+        "nature_of_relationship",
+        "estimated_charge_or_range",
+        "source",
+    ),
+)
+_PAYMENT_HISTORY_LIST = ListSpec(
+    name="payment_history",
+    fields=(
+        "date",
+        "amount",
+        "status",
+        "source",
+    ),
+)
+_EVENT_CHRONOLOGY_LIST = ListSpec(
+    name="event_chronology",
+    fields=(
+        "date",
+        "event",
+        "source",
+    ),
+)
+_CHECK_ITEMS_LIST = ListSpec(
+    name="check_items",
+    fields=(
+        "payer_or_drawer",
+        "amount",
+        "check_number",
+        "source",
+    ),
+)
+_SUPPORTING_DOCUMENTS_LIST = ListSpec(name="supporting_documents", fields=("document_name",))
+_BOARDER_RENTAL_PAYMENTS__PAYMENT_HISTORY_LIST = ListSpec(
+    name="payment_history",
+    fields=(
+        "date",
+        "amount",
+        "method",
+        "status",
+    ),
+)
+_INSPECTION_RESULTS_LIST = ListSpec(
+    name="inspection_results",
+    fields=(
+        "type",
+        "date",
+        "result",
+    ),
+)
+_OWNER_PARTNER_SHAREHOLDER_RECORDS_LIST = ListSpec(
+    name="owner_partner_shareholder_records",
+    fields=(
+        "owner_name",
+        "ownership_percentage",
+        "distribution_or_k1_share",
+    ),
+)
+_CHILD_SUPPORT_INCOME__PAYMENT_HISTORY_LIST = ListSpec(
+    name="payment_history",
+    fields=(
+        "date",
+        "amount",
+        "status",
+        "source",
+    ),
+)
+_SUPPORT_AWARDS_LIST = ListSpec(
+    name="support_awards",
+    fields=(
+        "award_type",
+        "amount",
+        "frequency",
+        "start_date",
+        "end_date",
+        "payer",
+        "payee",
+        "escalation_or_conditions",
+        "source",
+    ),
+)
+_UNMAPPED_KEY_VALUE_PAIRS_LIST = ListSpec(
+    name="unmapped_key_value_pairs",
+    fields=(
+        "label",
+        "value",
+    ),
+)
+_DEDUCTIONS_OR_OFFSETS_LIST = ListSpec(
+    name="deductions_or_offsets",
+    fields=(
+        "label",
+        "amount",
+        "source",
+    ),
+)
+_EMPLOYMENT_CONTINGENCIES_LIST = ListSpec(name="employment_contingencies", fields=("contingency",))
+_RECURRING_PAYMENT_HISTORY_LIST = ListSpec(
+    name="recurring_payment_history",
+    fields=(
+        "date",
+        "amount",
+        "status",
+        "source",
+    ),
+)
+_ASSET_LINE_ITEMS_LIST = ListSpec(
+    name="asset_line_items",
+    fields=(
+        "category",
+        "description",
+        "value",
+        "source",
+    ),
+)
+_MORTGAGEE_CLAUSE_ENTRIES_LIST = ListSpec(
+    name="mortgagee_clause_entries",
+    fields=(
+        "mortgagee_name",
+        "mortgagee_address",
+        "loan_number",
+        "capacity",
+        "source",
+    ),
+)
+_RETURN_LINE_ITEMS_LIST = ListSpec(
+    name="return_line_items",
+    fields=(
+        "section",
+        "line_label",
+        "amount",
+        "source",
+    ),
+)
+_SCHEDULE_K_ITEMS_LIST = ListSpec(
+    name="schedule_k_items",
+    fields=(
+        "line_label",
+        "amount",
+        "source",
+    ),
+)
+_OFFICER_COMPENSATION_LIST = ListSpec(
+    name="officer_compensation",
+    fields=(
+        "officer_name_or_label",
+        "title",
+        "percent_time_or_ownership",
+        "compensation_amount",
+        "source",
+    ),
+)
+_FOSTER_CARE_VERIFICATION__PAYMENT_HISTORY_LIST = ListSpec(
+    name="payment_history",
+    fields=(
+        "period",
+        "amount",
+        "date_paid",
+        "source",
+    ),
+)
+_SPECIAL_ASSESSMENTS_LIST = ListSpec(
+    name="special_assessments",
+    fields=(
+        "description",
+        "amount",
+        "status",
+        "date",
+    ),
+)
+_K1_BOX_ITEMS_LIST = ListSpec(
+    name="k1_box_items",
+    fields=(
+        "box_number",
+        "box_label",
+        "amount",
+        "code",
+        "source",
+    ),
+)
+_TRANSCRIPT_LINE_ITEMS_LIST = ListSpec(
+    name="transcript_line_items",
+    fields=(
+        "line_code",
+        "description",
+        "amount",
+    ),
+)
+_TRANSFER_PATH_OR_CHRONOLOGY_LIST = ListSpec(
+    name="transfer_path_or_chronology",
+    fields=(
+        "date",
+        "from",
+        "to",
+        "amount",
+    ),
+)
+_BUILDING_LIMITS_LIST = ListSpec(
+    name="building_limits",
+    fields=(
+        "building_identifier_or_address",
+        "coverage_limit",
+        "deductible",
+        "wind_hail_named_storm_deductible",
+        "source",
+    ),
+)
+_ENTITLEMENTS_LIST = ListSpec(
+    name="entitlements",
+    fields=(
+        "label",
+        "amount",
+    ),
+)
+_KEY_VALUE_PAIRS_LIST = ListSpec(
+    name="key_value_pairs",
+    fields=(
+        "key",
+        "value",
+    ),
+)
+_ORIGINATION_AND_BROKER_FEE_ITEMS_LIST = ListSpec(
+    name="origination_and_broker_fee_items",
+    fields=(
+        "fee_name",
+        "amount",
+    ),
+)
+_PAYOFF_CONDITIONS_ORLIMITATIONS_LIST = ListSpec(
+    name="payoff_conditions_orlimitations",
+    fields=(
+        "condition",
+        "source",
+    ),
+)
+_CLOSING_COST_LINE_ITEMS_LIST = ListSpec(
+    name="closing_cost_line_items",
+    fields=(
+        "label",
+        "section",
+        "amount",
+        "paid_by",
+    ),
+)
+_INSTALLMENTS_AND_DUE_DATES_LIST = ListSpec(
+    name="installments_and_due_dates",
+    fields=(
+        "installment_label",
+        "amount",
+        "due_date",
+        "paid_indicator",
+    ),
+)
+_SIGNATURES_AND_NOTARY_LIST = ListSpec(
+    name="signatures_and_notary",
+    fields=(
+        "signer_name",
+        "capacity",
+        "signed_indicator",
+        "notary_indicator",
+        "date",
+    ),
+)
+_MEDICARE_OR_OTHER_DEDUCTIONS_LIST = ListSpec(
+    name="medicare_or_other_deductions",
+    fields=(
+        "label",
+        "amount",
+        "source",
+    ),
+)
+_TRANSACTIONS_OR_ACTIVITY_LIST = ListSpec(
+    name="transactions_or_activity",
+    fields=(
+        "date",
+        "description",
+        "amount",
+        "type",
+        "running_balance",
+    ),
+)
+_ENCROACHMENTS_OR_OVERLAPS_LIST = ListSpec(
+    name="encroachments_or_overlaps",
+    fields=(
+        "description",
+        "affected_boundary",
+        "location",
+    ),
+)
+_TREATMENT_OR_REPAIR_ITEMS_COMPLETED_LIST = ListSpec(
+    name="treatment_or_repair_items_completed",
+    fields=(
+        "item",
+        "method_or_chemical",
+        "area",
+        "status",
+    ),
+)
+_FINDINGS_LIST = ListSpec(
+    name="findings",
+    fields=(
+        "category",
+        "insect_or_damage_type",
+        "location",
+        "description",
+    ),
+)
+_INFORMATION_RETURN_RECORDS_LIST = ListSpec(
+    name="information_return_records",
+    fields=(
+        "form_type",
+        "payer_name",
+        "payer_tin_masked",
+        "box_or_income_type",
+        "amount",
+        "account_number_masked",
+    ),
+)
+_AUTHORIZED_SIGNER_NAMES_AND_CAPACITY_LIST = ListSpec(
+    name="authorized_signer_names_and_capacity",
+    fields=(
+        "name",
+        "capacity",
+        "signature_present",
+    ),
+)
+_BENEFICIARY_K1_RECORDS_LIST = ListSpec(
+    name="beneficiary_k1_records",
+    fields=(
+        "beneficiary_name",
+        "beneficiary_tin_masked",
+        "distributive_share_amount",
+        "income_type",
+        "source",
+    ),
+)
+_UNSECURED_NOTE__PAYMENT_HISTORY_LIST = ListSpec(
+    name="payment_history",
+    fields=(
+        "period",
+        "payment_amount",
+        "payment_status",
+        "remaining_balance",
+        "source",
+    ),
+)
+_VERIFIED_ACCOUNTS_LIST = ListSpec(
+    name="verified_accounts",
+    fields=(
+        "institution_name",
+        "account_number_masked",
+        "account_type",
+        "account_holder_name",
+        "current_balance",
+        "available_balance",
+        "average_balance",
+        "source",
+    ),
+)
+_DEPOSIT_ACCOUNTS_LIST = ListSpec(
+    name="deposit_accounts",
+    fields=(
+        "account_type",
+        "account_number_masked",
+        "current_balance",
+        "average_balance",
+        "date_opened",
+        "source",
+    ),
+)
+_RENT_PAYMENT_HISTORY_LIST = ListSpec(
+    name="rent_payment_history",
+    fields=(
+        "month",
+        "amount_due",
+        "amount_paid",
+        "payment_status",
+        "source",
+    ),
+)
+
+# document_type → its declared generic lists. bank_statement + the LP-443 batch are wired; every OTHER
+# document type still gets lists={} (present-empty) until its extractor's lists are wired. (condo_questionnaire
+# and business_license are wired for extraction but are FLAT — no list, so they are not here.)
+_LIST_SPECS: dict[str, tuple[ListSpec, ...]] = {
+    "bank_statement": (_TRANSACTIONS_LIST,),
+    "appraisal": (_COMPARABLE_SALES_LIST,),
+    "credit_report": (_TRADELINES_LIST, _PUBLIC_RECORDS_LIST, _INQUIRIES_LIST),
+    "title_commitment": (_SCHEDULE_B_ITEMS_LIST, _CHAIN_OF_TITLE_LIST),
+    "aus_findings": (_AUS_REQUIRED_CONDITIONS_LIST,),
+    "certificate_of_eligibility": (_PRIOR_VA_LOAN_OR_ENTITLEMENT_CHARGES_LIST,),
+    "verification_of_mortgage": (_PAYMENT_HISTORY_MONTHS_LIST,),
+    "homeowner_s_insurance_quote": (_MORTGAGEE_OR_LIENHOLDER_ENTRIES_LIST,),
+    # LP-443 Phase C — the remaining generated list-bearing types.
+    "affiliated_business_disclosure": (_AFFILIATE_ENTRIES_LIST,),
+    "alimony_income": (_PAYMENT_HISTORY_LIST,),
+    "application_loe": (_EVENT_CHRONOLOGY_LIST,),
+    "bank_deposit_slip": (_CHECK_ITEMS_LIST,),
+    "boarder_proof_of_residency": (_SUPPORTING_DOCUMENTS_LIST,),
+    "boarder_rental_payments": (_BOARDER_RENTAL_PAYMENTS__PAYMENT_HISTORY_LIST,),
+    "building_permits": (_INSPECTION_RESULTS_LIST,),
+    "business_tax_return": (_OWNER_PARTNER_SHAREHOLDER_RECORDS_LIST,),
+    "child_support_income": (_CHILD_SUPPORT_INCOME__PAYMENT_HISTORY_LIST,),
+    "court_order_documents": (_SUPPORT_AWARDS_LIST,),
+    "custom": (_UNMAPPED_KEY_VALUE_PAIRS_LIST,),
+    "disability_award_letter": (_DEDUCTIONS_OR_OFFSETS_LIST,),
+    "employment_offer_letter": (_EMPLOYMENT_CONTINGENCIES_LIST,),
+    "evidence_of_payment": (_RECURRING_PAYMENT_HISTORY_LIST,),
+    "financial_statements": (_ASSET_LINE_ITEMS_LIST,),
+    "flood_insurance_policy": (_MORTGAGEE_CLAUSE_ENTRIES_LIST,),
+    "form_1040_personal_tax_transcripts": (_RETURN_LINE_ITEMS_LIST,),
+    "form_1065_partnership_tax_transcripts": (_SCHEDULE_K_ITEMS_LIST,),
+    "form_1120_corporate_tax_transcripts": (_OFFICER_COMPENSATION_LIST,),
+    "foster_care_verification": (_FOSTER_CARE_VERIFICATION__PAYMENT_HISTORY_LIST,),
+    "hoa_certification": (_SPECIAL_ASSESSMENTS_LIST,),
+    "k1_statement": (_K1_BOX_ITEMS_LIST,),
+    "k_1_shareholder_profit_and_loss_transcripts": (_TRANSCRIPT_LINE_ITEMS_LIST,),
+    "letter_of_explanation_asset": (_TRANSFER_PATH_OR_CHRONOLOGY_LIST,),
+    "master_insurance_policy_for_condominium": (_BUILDING_LIMITS_LIST,),
+    "military_leave_and_earning_statement_les": (_ENTITLEMENTS_LIST,),
+    "miscellaneous_document": (_KEY_VALUE_PAIRS_LIST,),
+    "mortgage_loan_origination_agreement": (_ORIGINATION_AND_BROKER_FEE_ITEMS_LIST,),
+    "payoff_statement": (_PAYOFF_CONDITIONS_ORLIMITATIONS_LIST,),
+    "prior_closing_disclosure_final_cd_from_purchase": (_CLOSING_COST_LINE_ITEMS_LIST,),
+    "property_tax_bill_non_subject": (_INSTALLMENTS_AND_DUE_DATES_LIST,),
+    "seller_signature_authority": (_SIGNATURES_AND_NOTARY_LIST,),
+    "social_security_award_letter": (_MEDICARE_OR_OTHER_DEDUCTIONS_LIST,),
+    "statement_of_account": (_TRANSACTIONS_OR_ACTIVITY_LIST,),
+    "survey": (_ENCROACHMENTS_OR_OVERLAPS_LIST,),
+    "termite_completion": (_TREATMENT_OR_REPAIR_ITEMS_COMPLETED_LIST,),
+    "termite_report": (_FINDINGS_LIST,),
+    "transcripts_of_1099": (_INFORMATION_RETURN_RECORDS_LIST,),
+    "trust_documents": (_AUTHORIZED_SIGNER_NAMES_AND_CAPACITY_LIST,),
+    "trust_federal_tax_returns": (_BENEFICIARY_K1_RECORDS_LIST,),
+    "unsecured_note": (_UNSECURED_NOTE__PAYMENT_HISTORY_LIST,),
+    "verification_of_assets": (_VERIFIED_ACCOUNTS_LIST,),
+    "verification_of_deposit": (_DEPOSIT_ACCOUNTS_LIST,),
+    "verification_of_rent": (_RENT_PAYMENT_HISTORY_LIST,),
+}
 
 
 def _raw_scalar(row: dict[str, Any], field: str) -> Any:
@@ -536,9 +1150,27 @@ def _redact_field(field: Field) -> Field:
     return field.model_copy(update={"value": _DESC_REDACT.sub(_REDACTED, field.value)})
 
 
+def _list_field(raw: Any) -> Field:
+    """One generic-list row field → a ``Field`` (LP-443 — the capture bridge).
+
+    A generic-list row is stored as BARE scalars + one ``source`` per row — the shipping
+    ``bank_statement.transactions`` shape (D2), matched here so a single stored shape serves every
+    list. A bare row therefore carries NO per-field confidence, so it is honestly ``None`` (D4 — the
+    prompt supplies one page/snippet per row, never a per-field number; never fabricate one). A
+    ``{value}``-wrapped value is unwrapped defensively (a hand-written extractor could store either),
+    but confidence stays ``None`` — the wrapped shape carries none for list rows either. Mirrors
+    ``_txn_field`` (values already stringified by the extractor's ``model_dump(mode="json")``)."""
+    if isinstance(raw, dict):
+        raw = raw.get("value")
+    scalar = _scalar(raw)
+    if scalar is None:
+        return Field.missing()
+    return Field.present(scalar, source=_EXTRACTED, confidence=None)
+
+
 def _list_row_fields(row: dict[str, Any], spec: ListSpec) -> dict[str, Field]:
     """One raw extraction row → its ``{name: Field}`` map (declared + derived + redacted)."""
-    fields: dict[str, Field] = {name: _typed_field(row.get(name)) for name in spec.fields}
+    fields: dict[str, Field] = {name: _list_field(row.get(name)) for name in spec.fields}
     for dspec in spec.derived:
         fields[dspec.field] = _derive_field(row, dspec)
     for name in spec.redact:

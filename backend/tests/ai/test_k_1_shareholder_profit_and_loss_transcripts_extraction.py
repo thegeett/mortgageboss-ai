@@ -46,6 +46,15 @@ FULL_PAYLOAD = {
         "interest_dividends_and_gains": _core("SAMPLE"),
     },
     "additional_sections": [{"section": "Other", "fields": [{"label": "Note", "value": "x"}]}],
+    "transcript_line_items": [
+        {
+            "line_code": "SAMPLE",
+            "description": "SAMPLE",
+            "amount": "1234.56",
+            "page": 1,
+            "snippet": "s",
+        }
+    ],
     "confidence": 0.9,
     "reasoning": "generated test fixture.",
 }

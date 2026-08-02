@@ -29,6 +29,7 @@ from app.ai.extraction.parsing import (
     derive_status,
     parse_catch_all,
     parse_typed_core,
+    source_payload,
 )
 from app.ai.extraction.shape import CatchAllSection, TypedField
 from app.ai.parsing import coerce_confidence, extract_json_object
@@ -74,6 +75,9 @@ class EvidenceOfPaymentExtraction(BaseModel):
     account_status_after_payment: TypedField[str] = Field(default_factory=TypedField)
     billing_or_due_period: TypedField[str] = Field(default_factory=TypedField)
     loan_number: TypedField[str] = Field(default_factory=TypedField)
+
+    # --- Captured nested lists (LP-443) — bare rows, snapshot-read generically ------- #
+    recurring_payment_history: list[dict[str, Any]] = Field(default_factory=list)
 
     # --- Grouped catch-all — everything else -------------------------------- #
     additional_sections: list[CatchAllSection] = Field(default_factory=list)
@@ -125,6 +129,37 @@ _CORE_SPEC: CoreSpec = (
 )
 
 
+_RECURRING_PAYMENT_HISTORY_ROW: CoreSpec = (
+    ("date", coerce_date),
+    ("amount", coerce_decimal),
+    ("status", coerce_str),
+    ("source", coerce_str),
+)
+
+
+def _parse_recurring_payment_history(raw: Any) -> list[dict[str, Any]]:
+    """Coerce the recurring_payment_history rows — bare scalars + a per-row page/snippet source (LP-443 capture).
+
+    Mirrors bank_statement's transactions parse: each declared field is coerced, a per-row source is
+    kept, and a fully-empty row is dropped (no hallucinated rows)."""
+    rows: list[dict[str, Any]] = []
+    if not isinstance(raw, list):
+        return rows
+    for entry in raw:
+        if not isinstance(entry, dict):
+            continue
+        row: dict[str, Any] = {
+            name: coerce(entry.get(name)) for name, coerce in _RECURRING_PAYMENT_HISTORY_ROW
+        }
+        if (
+            "source" not in row
+        ):  # never clobber a declared 'source' data field; else keep provenance
+            row["source"] = source_payload(entry)
+        if any(row[name] is not None for name, _ in _RECURRING_PAYMENT_HISTORY_ROW):
+            rows.append(row)
+    return rows
+
+
 def _parse_evidence_of_payment_json(text: str) -> EvidenceOfPaymentExtractionResult | None:
     """Defensively parse a model response into a evidence of payment result. Never raises."""
     snippet = extract_json_object(text)
@@ -138,16 +173,23 @@ def _parse_evidence_of_payment_json(text: str) -> EvidenceOfPaymentExtractionRes
         return None
 
     core_payload, non_null, coercion_lost = parse_typed_core(payload, _CORE_SPEC)
+    recurring_payment_history = _parse_recurring_payment_history(
+        payload.get("recurring_payment_history")
+    )
     sections = parse_catch_all(payload.get("additional_sections"))
 
     try:
         data = EvidenceOfPaymentExtraction.model_validate(
-            {**core_payload, "additional_sections": sections}
+            {
+                **core_payload,
+                "recurring_payment_history": recurring_payment_history,
+                "additional_sections": sections,
+            }
         )
     except ValidationError:
         return None
 
-    status = derive_status(non_null, coercion_lost)
+    status = derive_status(non_null + len(recurring_payment_history), coercion_lost)
     confidence = coerce_confidence(payload.get("confidence"))
     raw_reasoning = payload.get("reasoning")
     reasoning = (
@@ -200,5 +242,6 @@ async def extract_evidence_of_payment(
         confidence=result.confidence,
         core_fields_present=core_present,
         catch_all_sections=len(result.data.additional_sections),
+        list_rows_total=len(result.data.recurring_payment_history),
     )
     return result

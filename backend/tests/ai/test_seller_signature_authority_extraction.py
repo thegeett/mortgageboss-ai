@@ -51,6 +51,17 @@ FULL_PAYLOAD = {
         "loan_number": _core("SAMPLE"),
     },
     "additional_sections": [{"section": "Other", "fields": [{"label": "Note", "value": "x"}]}],
+    "signatures_and_notary": [
+        {
+            "signer_name": "SAMPLE",
+            "capacity": "SAMPLE",
+            "signed_indicator": "SAMPLE",
+            "notary_indicator": "SAMPLE",
+            "date": "2024-01-15",
+            "page": 1,
+            "snippet": "s",
+        }
+    ],
     "confidence": 0.9,
     "reasoning": "generated test fixture.",
 }

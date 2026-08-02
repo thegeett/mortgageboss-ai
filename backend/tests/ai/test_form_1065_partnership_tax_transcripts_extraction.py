@@ -48,6 +48,9 @@ FULL_PAYLOAD = {
         "ordinary_business_income_or_loss": _core("1234.56"),
     },
     "additional_sections": [{"section": "Other", "fields": [{"label": "Note", "value": "x"}]}],
+    "schedule_k_items": [
+        {"line_label": "SAMPLE", "amount": "1234.56", "source": "SAMPLE", "page": 1, "snippet": "s"}
+    ],
     "confidence": 0.9,
     "reasoning": "generated test fixture.",
 }

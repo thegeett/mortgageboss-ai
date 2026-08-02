@@ -54,6 +54,15 @@ FULL_PAYLOAD = {
         "paid_preparer_name": _core("SAMPLE"),
     },
     "additional_sections": [{"section": "Other", "fields": [{"label": "Note", "value": "x"}]}],
+    "owner_partner_shareholder_records": [
+        {
+            "owner_name": "SAMPLE",
+            "ownership_percentage": "SAMPLE",
+            "distribution_or_k1_share": "1234.56",
+            "page": 1,
+            "snippet": "s",
+        }
+    ],
     "confidence": 0.9,
     "reasoning": "generated test fixture.",
 }

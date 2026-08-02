@@ -147,6 +147,42 @@ def test_correctly_sized_types_are_unchanged_no_blanket_raise() -> None:
         assert mod._MAX_TOKENS == 4096
 
 
+def test_every_wired_generated_extractor_matches_the_sizing_rule() -> None:
+    """LP-443 (step 7) extends the guard to the wired GENERATED modules — LP-440 noted this test only
+    named the 18 shipping types. Every generated extractor's ``_MAX_TOKENS`` must equal the sizing rule
+    (``max_tokens_for``: 0 lists → 4096, 1 → 8192, ≥2 → 16384) derived from its spec's nested-list count,
+    so a regeneration can never silently under-budget a list-bearing type."""
+    import importlib
+    import json
+    from pathlib import Path
+
+    from app.ai.extraction import EXTRACTORS
+    from app.ai.extraction.generator.emitters import max_tokens_for
+    from app.ai.extraction.generator.spec import load_spec
+
+    backend = Path(__file__).resolve().parents[2]
+    specs = backend.parent / "docs" / "schema-specs"
+    ext_dir = backend / "app" / "ai" / "extraction"
+    by_dt = {json.loads(p.read_text())["document_type"]: p for p in specs.glob("[0-9]*.json")}
+    marker = "GENERATED from a schema spec by the LP-434 generator"
+
+    checked, mismatches = 0, []
+    for dt in EXTRACTORS:
+        spec_path = by_dt.get(dt)
+        module_file = ext_dir / f"{dt}.py"
+        # Skip a type whose module isn't a same-named generated file: shipping extractors, and the
+        # diff-mode "1099" (its extractor lives in form_1099.py — not a generated module named "1099").
+        if spec_path is None or not module_file.exists() or marker not in module_file.read_text():
+            continue
+        module = importlib.import_module(f"app.ai.extraction.{dt}")
+        checked += 1
+        expected = max_tokens_for(load_spec(str(spec_path)))
+        if expected != module._MAX_TOKENS:
+            mismatches.append((dt, module._MAX_TOKENS, expected))
+    assert checked >= 80, f"expected the full generated fleet to be wired, only checked {checked}"
+    assert mismatches == [], f"generated modules mis-budgeted (module != sizing rule): {mismatches}"
+
+
 # --------------------------------------------------------------------------- #
 # The raised types extract a DENSE instance fully (the confirmed-failure regression)
 # --------------------------------------------------------------------------- #

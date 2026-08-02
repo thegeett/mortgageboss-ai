@@ -39,6 +39,18 @@ FULL_PAYLOAD = {
         "address_or_customer_file_number": _core("SAMPLE"),
     },
     "additional_sections": [{"section": "Other", "fields": [{"label": "Note", "value": "x"}]}],
+    "information_return_records": [
+        {
+            "form_type": "SAMPLE",
+            "payer_name": "SAMPLE",
+            "payer_tin_masked": "SAMPLE",
+            "box_or_income_type": "SAMPLE",
+            "amount": "1234.56",
+            "account_number_masked": "SAMPLE",
+            "page": 1,
+            "snippet": "s",
+        }
+    ],
     "confidence": 0.9,
     "reasoning": "generated test fixture.",
 }

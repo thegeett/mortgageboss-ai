@@ -49,6 +49,9 @@ FULL_PAYLOAD = {
         "agency_contact_information": _core("SAMPLE"),
     },
     "additional_sections": [{"section": "Other", "fields": [{"label": "Note", "value": "x"}]}],
+    "deductions_or_offsets": [
+        {"label": "SAMPLE", "amount": "1234.56", "source": "SAMPLE", "page": 1, "snippet": "s"}
+    ],
     "confidence": 0.9,
     "reasoning": "generated test fixture.",
 }

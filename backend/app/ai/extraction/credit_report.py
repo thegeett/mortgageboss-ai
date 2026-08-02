@@ -30,6 +30,7 @@ from app.ai.extraction.parsing import (
     derive_status,
     parse_catch_all,
     parse_typed_core,
+    source_payload,
 )
 from app.ai.extraction.shape import CatchAllSection, TypedField
 from app.ai.parsing import coerce_confidence, extract_json_object
@@ -75,6 +76,11 @@ class CreditReportExtraction(BaseModel):
     public_record_count: TypedField[int] = Field(default_factory=TypedField)
     inquiry_count: TypedField[int] = Field(default_factory=TypedField)
     security_freeze_or_fraud_alert: TypedField[str] = Field(default_factory=TypedField)
+
+    # --- Captured nested lists (LP-443) — bare rows, snapshot-read generically ------- #
+    tradelines: list[dict[str, Any]] = Field(default_factory=list)
+    public_records: list[dict[str, Any]] = Field(default_factory=list)
+    inquiries: list[dict[str, Any]] = Field(default_factory=list)
 
     # --- Grouped catch-all — everything else -------------------------------- #
     additional_sections: list[CatchAllSection] = Field(default_factory=list)
@@ -126,6 +132,106 @@ _CORE_SPEC: CoreSpec = (
 )
 
 
+_TRADELINES_ROW: CoreSpec = (
+    ("creditor_name", coerce_str),
+    ("account_type", coerce_str),
+    ("account_number_masked", coerce_str),
+    ("account_ownership", coerce_str),
+    ("date_opened", coerce_date),
+    ("balance", coerce_decimal),
+    ("credit_limit_or_high_credit", coerce_decimal),
+    ("monthly_payment", coerce_decimal),
+    ("past_due_amount", coerce_decimal),
+    ("account_status", coerce_str),
+    ("payment_status", coerce_str),
+    ("payment_history_24mo", coerce_str),
+    ("worst_delinquency", coerce_str),
+    ("is_disputed", coerce_str),
+)
+
+
+def _parse_tradelines(raw: Any) -> list[dict[str, Any]]:
+    """Coerce the tradelines rows — bare scalars + a per-row page/snippet source (LP-443 capture).
+
+    Mirrors bank_statement's transactions parse: each declared field is coerced, a per-row source is
+    kept, and a fully-empty row is dropped (no hallucinated rows)."""
+    rows: list[dict[str, Any]] = []
+    if not isinstance(raw, list):
+        return rows
+    for entry in raw:
+        if not isinstance(entry, dict):
+            continue
+        row: dict[str, Any] = {name: coerce(entry.get(name)) for name, coerce in _TRADELINES_ROW}
+        if (
+            "source" not in row
+        ):  # never clobber a declared 'source' data field; else keep provenance
+            row["source"] = source_payload(entry)
+        if any(row[name] is not None for name, _ in _TRADELINES_ROW):
+            rows.append(row)
+    return rows
+
+
+_PUBLIC_RECORDS_ROW: CoreSpec = (
+    ("record_type", coerce_str),
+    ("filing_date", coerce_date),
+    ("discharge_or_satisfied_date", coerce_date),
+    ("status", coerce_str),
+    ("amount", coerce_decimal),
+    ("court_or_jurisdiction", coerce_str),
+)
+
+
+def _parse_public_records(raw: Any) -> list[dict[str, Any]]:
+    """Coerce the public_records rows — bare scalars + a per-row page/snippet source (LP-443 capture).
+
+    Mirrors bank_statement's transactions parse: each declared field is coerced, a per-row source is
+    kept, and a fully-empty row is dropped (no hallucinated rows)."""
+    rows: list[dict[str, Any]] = []
+    if not isinstance(raw, list):
+        return rows
+    for entry in raw:
+        if not isinstance(entry, dict):
+            continue
+        row: dict[str, Any] = {
+            name: coerce(entry.get(name)) for name, coerce in _PUBLIC_RECORDS_ROW
+        }
+        if (
+            "source" not in row
+        ):  # never clobber a declared 'source' data field; else keep provenance
+            row["source"] = source_payload(entry)
+        if any(row[name] is not None for name, _ in _PUBLIC_RECORDS_ROW):
+            rows.append(row)
+    return rows
+
+
+_INQUIRIES_ROW: CoreSpec = (
+    ("inquiry_date", coerce_date),
+    ("creditor_name", coerce_str),
+    ("inquiry_type", coerce_str),
+)
+
+
+def _parse_inquiries(raw: Any) -> list[dict[str, Any]]:
+    """Coerce the inquiries rows — bare scalars + a per-row page/snippet source (LP-443 capture).
+
+    Mirrors bank_statement's transactions parse: each declared field is coerced, a per-row source is
+    kept, and a fully-empty row is dropped (no hallucinated rows)."""
+    rows: list[dict[str, Any]] = []
+    if not isinstance(raw, list):
+        return rows
+    for entry in raw:
+        if not isinstance(entry, dict):
+            continue
+        row: dict[str, Any] = {name: coerce(entry.get(name)) for name, coerce in _INQUIRIES_ROW}
+        if (
+            "source" not in row
+        ):  # never clobber a declared 'source' data field; else keep provenance
+            row["source"] = source_payload(entry)
+        if any(row[name] is not None for name, _ in _INQUIRIES_ROW):
+            rows.append(row)
+    return rows
+
+
 def _parse_credit_report_json(text: str) -> CreditReportExtractionResult | None:
     """Defensively parse a model response into a credit report result. Never raises."""
     snippet = extract_json_object(text)
@@ -139,16 +245,42 @@ def _parse_credit_report_json(text: str) -> CreditReportExtractionResult | None:
         return None
 
     core_payload, non_null, coercion_lost = parse_typed_core(payload, _CORE_SPEC)
+    tradelines = _parse_tradelines(payload.get("tradelines"))
+    public_records = _parse_public_records(payload.get("public_records"))
+    inquiries = _parse_inquiries(payload.get("inquiries"))
     sections = parse_catch_all(payload.get("additional_sections"))
 
     try:
         data = CreditReportExtraction.model_validate(
-            {**core_payload, "additional_sections": sections}
+            {
+                **core_payload,
+                "tradelines": tradelines,
+                "public_records": public_records,
+                "inquiries": inquiries,
+                "additional_sections": sections,
+            }
         )
     except ValidationError:
         return None
 
-    status = derive_status(non_null, coercion_lost)
+    status = derive_status(
+        non_null + len(tradelines) + len(public_records) + len(inquiries), coercion_lost
+    )
+
+    # Count cross-check (guide §8, LP-443): a declared count that disagrees with the
+    # captured row count means rows were dropped WITHOUT the API truncating → PARTIAL.
+    if (
+        status is ExtractionStatus.SUCCEEDED
+        and data.tradeline_count.value is not None
+        and data.tradeline_count.value != len(data.tradelines)
+    ):
+        status = ExtractionStatus.PARTIAL
+    if (
+        status is ExtractionStatus.SUCCEEDED
+        and data.public_record_count.value is not None
+        and data.public_record_count.value != len(data.public_records)
+    ):
+        status = ExtractionStatus.PARTIAL
     confidence = coerce_confidence(payload.get("confidence"))
     raw_reasoning = payload.get("reasoning")
     reasoning = (
@@ -199,5 +331,8 @@ async def extract_credit_report(content: bytes, media_type: str) -> CreditReport
         confidence=result.confidence,
         core_fields_present=core_present,
         catch_all_sections=len(result.data.additional_sections),
+        list_rows_total=len(result.data.tradelines)
+        + len(result.data.public_records)
+        + len(result.data.inquiries),
     )
     return result

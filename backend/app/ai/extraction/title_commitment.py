@@ -29,6 +29,7 @@ from app.ai.extraction.parsing import (
     derive_status,
     parse_catch_all,
     parse_typed_core,
+    source_payload,
 )
 from app.ai.extraction.shape import CatchAllSection, TypedField
 from app.ai.parsing import coerce_confidence, extract_json_object
@@ -75,6 +76,10 @@ class TitleCommitmentExtraction(BaseModel):
     survey_exception_indicator: TypedField[str] = Field(default_factory=TypedField)
     taxes_status: TypedField[str] = Field(default_factory=TypedField)
     annual_tax_amount: TypedField[Decimal] = Field(default_factory=TypedField)
+
+    # --- Captured nested lists (LP-443) — bare rows, snapshot-read generically ------- #
+    schedule_b_items: list[dict[str, Any]] = Field(default_factory=list)
+    chain_of_title: list[dict[str, Any]] = Field(default_factory=list)
 
     # --- Grouped catch-all — everything else -------------------------------- #
     additional_sections: list[CatchAllSection] = Field(default_factory=list)
@@ -127,6 +132,74 @@ _CORE_SPEC: CoreSpec = (
 )
 
 
+_SCHEDULE_B_ITEMS_ROW: CoreSpec = (
+    ("schedule", coerce_str),
+    ("item_number", coerce_str),
+    ("item_type", coerce_str),
+    ("description", coerce_str),
+    ("recording_date", coerce_date),
+    ("recording_reference", coerce_str),
+    ("amount", coerce_decimal),
+    ("is_satisfied", coerce_str),
+    ("affected_party", coerce_str),
+)
+
+
+def _parse_schedule_b_items(raw: Any) -> list[dict[str, Any]]:
+    """Coerce the schedule_b_items rows — bare scalars + a per-row page/snippet source (LP-443 capture).
+
+    Mirrors bank_statement's transactions parse: each declared field is coerced, a per-row source is
+    kept, and a fully-empty row is dropped (no hallucinated rows)."""
+    rows: list[dict[str, Any]] = []
+    if not isinstance(raw, list):
+        return rows
+    for entry in raw:
+        if not isinstance(entry, dict):
+            continue
+        row: dict[str, Any] = {
+            name: coerce(entry.get(name)) for name, coerce in _SCHEDULE_B_ITEMS_ROW
+        }
+        if (
+            "source" not in row
+        ):  # never clobber a declared 'source' data field; else keep provenance
+            row["source"] = source_payload(entry)
+        if any(row[name] is not None for name, _ in _SCHEDULE_B_ITEMS_ROW):
+            rows.append(row)
+    return rows
+
+
+_CHAIN_OF_TITLE_ROW: CoreSpec = (
+    ("transfer_date", coerce_date),
+    ("grantor", coerce_str),
+    ("grantee", coerce_str),
+    ("consideration_amount", coerce_decimal),
+    ("recording_reference", coerce_str),
+)
+
+
+def _parse_chain_of_title(raw: Any) -> list[dict[str, Any]]:
+    """Coerce the chain_of_title rows — bare scalars + a per-row page/snippet source (LP-443 capture).
+
+    Mirrors bank_statement's transactions parse: each declared field is coerced, a per-row source is
+    kept, and a fully-empty row is dropped (no hallucinated rows)."""
+    rows: list[dict[str, Any]] = []
+    if not isinstance(raw, list):
+        return rows
+    for entry in raw:
+        if not isinstance(entry, dict):
+            continue
+        row: dict[str, Any] = {
+            name: coerce(entry.get(name)) for name, coerce in _CHAIN_OF_TITLE_ROW
+        }
+        if (
+            "source" not in row
+        ):  # never clobber a declared 'source' data field; else keep provenance
+            row["source"] = source_payload(entry)
+        if any(row[name] is not None for name, _ in _CHAIN_OF_TITLE_ROW):
+            rows.append(row)
+    return rows
+
+
 def _parse_title_commitment_json(text: str) -> TitleCommitmentExtractionResult | None:
     """Defensively parse a model response into a title commitment result. Never raises."""
     snippet = extract_json_object(text)
@@ -140,16 +213,23 @@ def _parse_title_commitment_json(text: str) -> TitleCommitmentExtractionResult |
         return None
 
     core_payload, non_null, coercion_lost = parse_typed_core(payload, _CORE_SPEC)
+    schedule_b_items = _parse_schedule_b_items(payload.get("schedule_b_items"))
+    chain_of_title = _parse_chain_of_title(payload.get("chain_of_title"))
     sections = parse_catch_all(payload.get("additional_sections"))
 
     try:
         data = TitleCommitmentExtraction.model_validate(
-            {**core_payload, "additional_sections": sections}
+            {
+                **core_payload,
+                "schedule_b_items": schedule_b_items,
+                "chain_of_title": chain_of_title,
+                "additional_sections": sections,
+            }
         )
     except ValidationError:
         return None
 
-    status = derive_status(non_null, coercion_lost)
+    status = derive_status(non_null + len(schedule_b_items) + len(chain_of_title), coercion_lost)
     confidence = coerce_confidence(payload.get("confidence"))
     raw_reasoning = payload.get("reasoning")
     reasoning = (
@@ -202,5 +282,6 @@ async def extract_title_commitment(
         confidence=result.confidence,
         core_fields_present=core_present,
         catch_all_sections=len(result.data.additional_sections),
+        list_rows_total=len(result.data.schedule_b_items) + len(result.data.chain_of_title),
     )
     return result

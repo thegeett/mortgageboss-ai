@@ -29,6 +29,7 @@ from app.ai.extraction.parsing import (
     derive_status,
     parse_catch_all,
     parse_typed_core,
+    source_payload,
 )
 from app.ai.extraction.shape import CatchAllSection, TypedField
 from app.ai.parsing import coerce_confidence, extract_json_object
@@ -71,6 +72,9 @@ class CertificateOfEligibilityExtraction(BaseModel):
     branch_of_service: TypedField[str] = Field(default_factory=TypedField)
     service_status: TypedField[str] = Field(default_factory=TypedField)
     surviving_spouse_indicator: TypedField[str] = Field(default_factory=TypedField)
+
+    # --- Captured nested lists (LP-443) — bare rows, snapshot-read generically ------- #
+    prior_va_loan_or_entitlement_charges: list[dict[str, Any]] = Field(default_factory=list)
 
     # --- Grouped catch-all — everything else -------------------------------- #
     additional_sections: list[CatchAllSection] = Field(default_factory=list)
@@ -119,6 +123,37 @@ _CORE_SPEC: CoreSpec = (
 )
 
 
+_PRIOR_VA_LOAN_OR_ENTITLEMENT_CHARGES_ROW: CoreSpec = (
+    ("prior_loan_reference", coerce_str),
+    ("entitlement_amount_charged", coerce_decimal),
+    ("prior_loan_status", coerce_str),
+)
+
+
+def _parse_prior_va_loan_or_entitlement_charges(raw: Any) -> list[dict[str, Any]]:
+    """Coerce the prior_va_loan_or_entitlement_charges rows — bare scalars + a per-row page/snippet source (LP-443 capture).
+
+    Mirrors bank_statement's transactions parse: each declared field is coerced, a per-row source is
+    kept, and a fully-empty row is dropped (no hallucinated rows)."""
+    rows: list[dict[str, Any]] = []
+    if not isinstance(raw, list):
+        return rows
+    for entry in raw:
+        if not isinstance(entry, dict):
+            continue
+        row: dict[str, Any] = {
+            name: coerce(entry.get(name))
+            for name, coerce in _PRIOR_VA_LOAN_OR_ENTITLEMENT_CHARGES_ROW
+        }
+        if (
+            "source" not in row
+        ):  # never clobber a declared 'source' data field; else keep provenance
+            row["source"] = source_payload(entry)
+        if any(row[name] is not None for name, _ in _PRIOR_VA_LOAN_OR_ENTITLEMENT_CHARGES_ROW):
+            rows.append(row)
+    return rows
+
+
 def _parse_certificate_of_eligibility_json(
     text: str,
 ) -> CertificateOfEligibilityExtractionResult | None:
@@ -134,16 +169,23 @@ def _parse_certificate_of_eligibility_json(
         return None
 
     core_payload, non_null, coercion_lost = parse_typed_core(payload, _CORE_SPEC)
+    prior_va_loan_or_entitlement_charges = _parse_prior_va_loan_or_entitlement_charges(
+        payload.get("prior_va_loan_or_entitlement_charges")
+    )
     sections = parse_catch_all(payload.get("additional_sections"))
 
     try:
         data = CertificateOfEligibilityExtraction.model_validate(
-            {**core_payload, "additional_sections": sections}
+            {
+                **core_payload,
+                "prior_va_loan_or_entitlement_charges": prior_va_loan_or_entitlement_charges,
+                "additional_sections": sections,
+            }
         )
     except ValidationError:
         return None
 
-    status = derive_status(non_null, coercion_lost)
+    status = derive_status(non_null + len(prior_va_loan_or_entitlement_charges), coercion_lost)
     confidence = coerce_confidence(payload.get("confidence"))
     raw_reasoning = payload.get("reasoning")
     reasoning = (
@@ -200,5 +242,6 @@ async def extract_certificate_of_eligibility(
         confidence=result.confidence,
         core_fields_present=core_present,
         catch_all_sections=len(result.data.additional_sections),
+        list_rows_total=len(result.data.prior_va_loan_or_entitlement_charges),
     )
     return result

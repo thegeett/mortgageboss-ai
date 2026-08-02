@@ -29,6 +29,7 @@ from app.ai.extraction.parsing import (
     derive_status,
     parse_catch_all,
     parse_typed_core,
+    source_payload,
 )
 from app.ai.extraction.shape import CatchAllSection, TypedField
 from app.ai.parsing import coerce_confidence, extract_json_object
@@ -68,6 +69,9 @@ class SocialSecurityAwardLetterExtraction(BaseModel):
     benefit_end_or_review_date: TypedField[date] = Field(default_factory=TypedField)
     continuation_or_age_dependency_terms: TypedField[str] = Field(default_factory=TypedField)
     representative_payee: TypedField[str] = Field(default_factory=TypedField)
+
+    # --- Captured nested lists (LP-443) — bare rows, snapshot-read generically ------- #
+    medicare_or_other_deductions: list[dict[str, Any]] = Field(default_factory=list)
 
     # --- Grouped catch-all — everything else -------------------------------- #
     additional_sections: list[CatchAllSection] = Field(default_factory=list)
@@ -113,6 +117,36 @@ _CORE_SPEC: CoreSpec = (
 )
 
 
+_MEDICARE_OR_OTHER_DEDUCTIONS_ROW: CoreSpec = (
+    ("label", coerce_str),
+    ("amount", coerce_decimal),
+    ("source", coerce_str),
+)
+
+
+def _parse_medicare_or_other_deductions(raw: Any) -> list[dict[str, Any]]:
+    """Coerce the medicare_or_other_deductions rows — bare scalars + a per-row page/snippet source (LP-443 capture).
+
+    Mirrors bank_statement's transactions parse: each declared field is coerced, a per-row source is
+    kept, and a fully-empty row is dropped (no hallucinated rows)."""
+    rows: list[dict[str, Any]] = []
+    if not isinstance(raw, list):
+        return rows
+    for entry in raw:
+        if not isinstance(entry, dict):
+            continue
+        row: dict[str, Any] = {
+            name: coerce(entry.get(name)) for name, coerce in _MEDICARE_OR_OTHER_DEDUCTIONS_ROW
+        }
+        if (
+            "source" not in row
+        ):  # never clobber a declared 'source' data field; else keep provenance
+            row["source"] = source_payload(entry)
+        if any(row[name] is not None for name, _ in _MEDICARE_OR_OTHER_DEDUCTIONS_ROW):
+            rows.append(row)
+    return rows
+
+
 def _parse_social_security_award_letter_json(
     text: str,
 ) -> SocialSecurityAwardLetterExtractionResult | None:
@@ -128,16 +162,23 @@ def _parse_social_security_award_letter_json(
         return None
 
     core_payload, non_null, coercion_lost = parse_typed_core(payload, _CORE_SPEC)
+    medicare_or_other_deductions = _parse_medicare_or_other_deductions(
+        payload.get("medicare_or_other_deductions")
+    )
     sections = parse_catch_all(payload.get("additional_sections"))
 
     try:
         data = SocialSecurityAwardLetterExtraction.model_validate(
-            {**core_payload, "additional_sections": sections}
+            {
+                **core_payload,
+                "medicare_or_other_deductions": medicare_or_other_deductions,
+                "additional_sections": sections,
+            }
         )
     except ValidationError:
         return None
 
-    status = derive_status(non_null, coercion_lost)
+    status = derive_status(non_null + len(medicare_or_other_deductions), coercion_lost)
     confidence = coerce_confidence(payload.get("confidence"))
     raw_reasoning = payload.get("reasoning")
     reasoning = (
@@ -194,5 +235,6 @@ async def extract_social_security_award_letter(
         confidence=result.confidence,
         core_fields_present=core_present,
         catch_all_sections=len(result.data.additional_sections),
+        list_rows_total=len(result.data.medicare_or_other_deductions),
     )
     return result

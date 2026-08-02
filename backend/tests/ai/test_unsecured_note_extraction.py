@@ -54,6 +54,17 @@ FULL_PAYLOAD = {
         "makers_signed": _core("SAMPLE"),
     },
     "additional_sections": [{"section": "Other", "fields": [{"label": "Note", "value": "x"}]}],
+    "payment_history": [
+        {
+            "period": "SAMPLE",
+            "payment_amount": "1234.56",
+            "payment_status": "SAMPLE",
+            "remaining_balance": "1234.56",
+            "source": "SAMPLE",
+            "page": 1,
+            "snippet": "s",
+        }
+    ],
     "confidence": 0.9,
     "reasoning": "generated test fixture.",
 }

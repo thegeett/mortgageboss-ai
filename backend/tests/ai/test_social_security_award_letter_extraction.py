@@ -46,6 +46,9 @@ FULL_PAYLOAD = {
         "representative_payee": _core("SAMPLE"),
     },
     "additional_sections": [{"section": "Other", "fields": [{"label": "Note", "value": "x"}]}],
+    "medicare_or_other_deductions": [
+        {"label": "SAMPLE", "amount": "1234.56", "source": "SAMPLE", "page": 1, "snippet": "s"}
+    ],
     "confidence": 0.9,
     "reasoning": "generated test fixture.",
 }

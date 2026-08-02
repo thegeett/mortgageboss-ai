@@ -29,6 +29,7 @@ from app.ai.extraction.parsing import (
     derive_status,
     parse_catch_all,
     parse_typed_core,
+    source_payload,
 )
 from app.ai.extraction.shape import CatchAllSection, TypedField
 from app.ai.parsing import coerce_confidence, extract_json_object
@@ -70,6 +71,9 @@ class MasterInsurancePolicyForCondominiumExtraction(BaseModel):
     fidelity_crime_coverage_amount: TypedField[Decimal] = Field(default_factory=TypedField)
     flood_coverage_present: TypedField[str] = Field(default_factory=TypedField)
     agent_contact_and_certificate_date: TypedField[str] = Field(default_factory=TypedField)
+
+    # --- Captured nested lists (LP-443) — bare rows, snapshot-read generically ------- #
+    building_limits: list[dict[str, Any]] = Field(default_factory=list)
 
     # --- Grouped catch-all — everything else -------------------------------- #
     additional_sections: list[CatchAllSection] = Field(default_factory=list)
@@ -117,6 +121,38 @@ _CORE_SPEC: CoreSpec = (
 )
 
 
+_BUILDING_LIMITS_ROW: CoreSpec = (
+    ("building_identifier_or_address", coerce_str),
+    ("coverage_limit", coerce_decimal),
+    ("deductible", coerce_decimal),
+    ("wind_hail_named_storm_deductible", coerce_str),
+    ("source", coerce_str),
+)
+
+
+def _parse_building_limits(raw: Any) -> list[dict[str, Any]]:
+    """Coerce the building_limits rows — bare scalars + a per-row page/snippet source (LP-443 capture).
+
+    Mirrors bank_statement's transactions parse: each declared field is coerced, a per-row source is
+    kept, and a fully-empty row is dropped (no hallucinated rows)."""
+    rows: list[dict[str, Any]] = []
+    if not isinstance(raw, list):
+        return rows
+    for entry in raw:
+        if not isinstance(entry, dict):
+            continue
+        row: dict[str, Any] = {
+            name: coerce(entry.get(name)) for name, coerce in _BUILDING_LIMITS_ROW
+        }
+        if (
+            "source" not in row
+        ):  # never clobber a declared 'source' data field; else keep provenance
+            row["source"] = source_payload(entry)
+        if any(row[name] is not None for name, _ in _BUILDING_LIMITS_ROW):
+            rows.append(row)
+    return rows
+
+
 def _parse_master_insurance_policy_for_condominium_json(
     text: str,
 ) -> MasterInsurancePolicyForCondominiumExtractionResult | None:
@@ -132,16 +168,17 @@ def _parse_master_insurance_policy_for_condominium_json(
         return None
 
     core_payload, non_null, coercion_lost = parse_typed_core(payload, _CORE_SPEC)
+    building_limits = _parse_building_limits(payload.get("building_limits"))
     sections = parse_catch_all(payload.get("additional_sections"))
 
     try:
         data = MasterInsurancePolicyForCondominiumExtraction.model_validate(
-            {**core_payload, "additional_sections": sections}
+            {**core_payload, "building_limits": building_limits, "additional_sections": sections}
         )
     except ValidationError:
         return None
 
-    status = derive_status(non_null, coercion_lost)
+    status = derive_status(non_null + len(building_limits), coercion_lost)
     confidence = coerce_confidence(payload.get("confidence"))
     raw_reasoning = payload.get("reasoning")
     reasoning = (
@@ -204,5 +241,6 @@ async def extract_master_insurance_policy_for_condominium(
         confidence=result.confidence,
         core_fields_present=core_present,
         catch_all_sections=len(result.data.additional_sections),
+        list_rows_total=len(result.data.building_limits),
     )
     return result

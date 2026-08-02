@@ -43,6 +43,7 @@ FULL_PAYLOAD = {
         "current_status": _core("SAMPLE"),
     },
     "additional_sections": [{"section": "Other", "fields": [{"label": "Note", "value": "x"}]}],
+    "unmapped_key_value_pairs": [{"label": "SAMPLE", "value": "SAMPLE", "page": 1, "snippet": "s"}],
     "confidence": 0.9,
     "reasoning": "generated test fixture.",
 }

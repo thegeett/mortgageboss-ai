@@ -29,6 +29,7 @@ from app.ai.extraction.generator.spec import (
     TYPE_TO_COERCER,
     TYPE_TO_JSON,
     TYPE_TO_PROMPT_LABEL,
+    NestedListField,
     Spec,
     SpecField,
 )
@@ -111,9 +112,19 @@ _APP_IMPORTS_TAIL = (
 )
 
 
+def _list_row_coercer(field: NestedListField) -> str:
+    """The coercer for a nested-list row field. A list-row value is stringified at
+    ``model_dump(mode="json")`` regardless, so an unknown/absent type coerces as ``coerce_str``
+    (never dropped for want of a coercer — the list capture is deliberately permissive)."""
+    return TYPE_TO_COERCER.get(field.type or "str", "coerce_str")
+
+
 def _needed_coercers(spec: Spec) -> list[str]:
-    """The coercer names the module imports, sorted (``coerce_decimal`` < ``coerce_int`` …)."""
-    return sorted({TYPE_TO_COERCER[f.type] for f in spec.typed_core if f.type in TYPE_TO_COERCER})
+    """The coercer names the module imports, sorted — typed core AND every nested-list row field
+    (LP-443: the list capture coerces each declared row field, mirroring bank_statement)."""
+    core = {TYPE_TO_COERCER[f.type] for f in spec.typed_core if f.type in TYPE_TO_COERCER}
+    rows = {_list_row_coercer(f) for nl in spec.nested_lists for f in nl.fields}
+    return sorted(core | rows)
 
 
 def _parsing_import(spec: Spec) -> str:
@@ -124,6 +135,8 @@ def _parsing_import(spec: Spec) -> str:
         "parse_catch_all",
         "parse_typed_core",
     ]
+    if spec.nested_lists:  # LP-443 — the list capture keeps a per-row page/snippet source
+        names.append("source_payload")
     inner = ",\n".join(f"    {n}" for n in names)
     return f"from app.ai.extraction.parsing import (\n{inner},\n)\n"
 
@@ -154,8 +167,120 @@ def max_tokens_for(spec: Spec) -> int:
     return 8192 if n == 1 else 16384
 
 
+def _list_row_const(list_name: str) -> str:
+    return f"_{list_name.upper()}_ROW"
+
+
+def _list_capture_decls(spec: Spec) -> str:
+    """The capture field for each nested list — a bare-row ``list[dict]`` (LP-443).
+
+    Stored as ``list[dict[str, Any]]`` (bare scalars + a per-row source), the SAME shape the shipping
+    ``bank_statement.transactions`` stores and the generic snapshot reader expects — so a single stored
+    shape serves every list. Empty string for a flat spec."""
+    if not spec.nested_lists:
+        return ""
+    decls = "\n".join(
+        f"    {nl.name}: list[dict[str, Any]] = Field(default_factory=list)"
+        for nl in spec.nested_lists
+    )
+    return (
+        "\n\n    # --- Captured nested lists (LP-443) — bare rows, snapshot-read generically ------- #\n"
+        + decls
+    )
+
+
+def _list_parsers(spec: Spec) -> str:
+    """A row coerce-spec + a ``_parse_<list>`` helper per nested list (LP-443).
+
+    Mirrors ``bank_statement._parse_transactions``: each declared field is coerced, a per-row
+    page/snippet ``source`` is kept, and a fully-empty row is dropped (no hallucinated rows). Empty
+    string for a flat spec."""
+    if not spec.nested_lists:
+        return ""
+    blocks: list[str] = []
+    for nl in spec.nested_lists:
+        const = _list_row_const(nl.name)
+        rows = "\n".join(f'    ("{f.name}", {_list_row_coercer(f)}),' for f in nl.fields)
+        blocks.append(
+            f"""{const}: CoreSpec = (
+{rows}
+)
+
+
+def _parse_{nl.name}(raw: Any) -> list[dict[str, Any]]:
+    \"\"\"Coerce the {nl.name} rows — bare scalars + a per-row page/snippet source (LP-443 capture).
+
+    Mirrors bank_statement's transactions parse: each declared field is coerced, a per-row source is
+    kept, and a fully-empty row is dropped (no hallucinated rows).\"\"\"
+    rows: list[dict[str, Any]] = []
+    if not isinstance(raw, list):
+        return rows
+    for entry in raw:
+        if not isinstance(entry, dict):
+            continue
+        row: dict[str, Any] = {{name: coerce(entry.get(name)) for name, coerce in {const}}}
+        if "source" not in row:  # never clobber a declared 'source' data field; else keep provenance
+            row["source"] = source_payload(entry)
+        if any(row[name] is not None for name, _ in {const}):
+            rows.append(row)
+    return rows"""
+        )
+    return "\n\n\n" + "\n\n\n".join(blocks)
+
+
+def _list_parse_calls(spec: Spec) -> str:
+    """The ``<list> = _parse_<list>(payload.get("<list>"))`` lines inside the JSON parser."""
+    return "".join(
+        f'    {nl.name} = _parse_{nl.name}(payload.get("{nl.name}"))\n' for nl in spec.nested_lists
+    )
+
+
+def _list_validate_kwargs(spec: Spec) -> str:
+    """The ``"<list>": <list>,`` entries spliced into ``model_validate({...})``."""
+    return "".join(f'"{nl.name}": {nl.name}, ' for nl in spec.nested_lists)
+
+
+def _list_status_addend(spec: Spec) -> str:
+    """``+ len(<list>) ...`` — list rows count as extracted content (a doc may be mostly its list),
+    mirroring bank_statement's ``non_null + len(transactions)``."""
+    return "".join(f" + len({nl.name})" for nl in spec.nested_lists)
+
+
+def _list_count_crosschecks(spec: Spec) -> str:
+    """Inlined count cross-check(s): a declared ``*_count`` that disagrees with the captured row
+    count downgrades a SUCCEEDED extraction to PARTIAL (guide §8) — never a silent success when the
+    model dropped rows the API did not truncate. Only downgrades SUCCEEDED (a FAILED stays FAILED)."""
+    pairs = count_crosscheck_pairs(spec)
+    if not pairs:
+        return ""
+    lines = [
+        "\n    # Count cross-check (guide §8, LP-443): a declared count that disagrees with the"
+    ]
+    lines.append(
+        "    # captured row count means rows were dropped WITHOUT the API truncating → PARTIAL."
+    )
+    for count_field, list_name in pairs:
+        lines.append(
+            f"    if (\n"
+            f"        status is ExtractionStatus.SUCCEEDED\n"
+            f"        and data.{count_field}.value is not None\n"
+            f"        and data.{count_field}.value != len(data.{list_name})\n"
+            f"    ):\n"
+            f"        status = ExtractionStatus.PARTIAL"
+        )
+    return "\n".join(lines) + "\n"
+
+
+def _list_log_kwargs(spec: Spec) -> str:
+    """``list_rows_total=...`` for the done-log (metadata only — counts, never values)."""
+    if not spec.nested_lists:
+        return ""
+    total = " + ".join(f"len(result.data.{nl.name})" for nl in spec.nested_lists)
+    return f"\n        list_rows_total={total},"
+
+
 def emit_module(spec: Spec) -> str:
-    """Generate the extractor module source for a flat, validated spec."""
+    """Generate the extractor module source for a validated spec (flat or list-bearing, LP-443)."""
     _require_identifier(spec.document_type)
     dt = spec.document_type
     prefix = class_prefix(dt)
@@ -218,7 +343,7 @@ class {extraction}(BaseModel):
     """
 
     # --- Typed core (value + source) ---------------------------------------- #
-{field_decls}
+{field_decls}{_list_capture_decls(spec)}
 
     # --- Grouped catch-all — everything else -------------------------------- #
     additional_sections: list[CatchAllSection] = Field(default_factory=list)
@@ -247,7 +372,7 @@ class {result}(BaseModel):
 
 _CORE_SPEC: CoreSpec = (
 {core_spec}
-)
+){_list_parsers(spec)}
 
 
 def _parse_{dt}_json(text: str) -> {result} | None:
@@ -263,15 +388,17 @@ def _parse_{dt}_json(text: str) -> {result} | None:
         return None
 
     core_payload, non_null, coercion_lost = parse_typed_core(payload, _CORE_SPEC)
-    sections = parse_catch_all(payload.get("additional_sections"))
+{_list_parse_calls(spec)}    sections = parse_catch_all(payload.get("additional_sections"))
 
     try:
-        data = {extraction}.model_validate({{**core_payload, "additional_sections": sections}})
+        data = {extraction}.model_validate(
+            {{**core_payload, {_list_validate_kwargs(spec)}"additional_sections": sections}}
+        )
     except ValidationError:
         return None
 
-    status = derive_status(non_null, coercion_lost)
-    confidence = coerce_confidence(payload.get("confidence"))
+    status = derive_status(non_null{_list_status_addend(spec)}, coercion_lost)
+{_list_count_crosschecks(spec)}    confidence = coerce_confidence(payload.get("confidence"))
     raw_reasoning = payload.get("reasoning")
     reasoning = (
         raw_reasoning.strip() if isinstance(raw_reasoning, str) and raw_reasoning.strip() else None
@@ -318,7 +445,7 @@ async def extract_{dt}(content: bytes, media_type: str) -> {result}:
         status=result.status,
         confidence=result.confidence,
         core_fields_present=core_present,
-        catch_all_sections=len(result.data.additional_sections),
+        catch_all_sections=len(result.data.additional_sections),{_list_log_kwargs(spec)}
     )
     return result
 '''
@@ -486,13 +613,17 @@ def emit_pii_registration(spec: Spec) -> str:
 # --------------------------------------------------------------------------- #
 
 
-def _sample_value(field: SpecField) -> str:
+def _sample_for_type(type_name: str | None) -> str:
     return {
         "str": '"SAMPLE"',
         "Decimal": '"1234.56"',
         "date": '"2024-01-15"',
         "int": "2024",
-    }.get(field.type or "str", '"SAMPLE"')
+    }.get(type_name or "str", '"SAMPLE"')
+
+
+def _sample_value(field: SpecField) -> str:
+    return _sample_for_type(field.type)
 
 
 def emit_test(spec: Spec) -> str:
@@ -505,11 +636,28 @@ def emit_test(spec: Spec) -> str:
     fields = [f for f in spec.typed_core if f.type in TYPE_TO_ANNOTATION]
     first = fields[0]
 
-    payload_lines = "\n".join(f'        "{f.name}": _core({_sample_value(f)}),' for f in fields)
+    # A ``*_count`` field with a matching list gets the SAME value as the sample-row count so the
+    # happy-path payload does not trip the count cross-check (LP-443) → the test still asserts SUCCEEDED.
+    crosscheck_counts = {cf for cf, _ in count_crosscheck_pairs(spec)}
+    n_sample_rows = 1
+
+    def _payload_sample(f: SpecField) -> str:
+        return str(n_sample_rows) if f.name in crosscheck_counts else _sample_value(f)
+
+    payload_lines = "\n".join(f'        "{f.name}": _core({_payload_sample(f)}),' for f in fields)
+
+    # One sample row per nested list (LP-443) — so the capture is exercised and any count matches.
+    list_lines = ""
+    for nl in spec.nested_lists:
+        row = ", ".join(f'"{lf.name}": {_sample_for_type(lf.type)}' for lf in nl.fields)
+        list_lines += f'    "{nl.name}": [{{{row}, "page": 1, "snippet": "s"}}],\n'
+
     # ``Decimal`` is referenced only in the first-field assertion below.
     decimal_import = "from decimal import Decimal\n" if first.type == "Decimal" else ""
     # A representative typed-core assertion on the first field.
-    if first.type == "Decimal":
+    if first.name in crosscheck_counts:
+        first_assert = f"assert d.{first.name}.value == {n_sample_rows}"
+    elif first.type == "Decimal":
         first_assert = f'assert d.{first.name}.value == Decimal("1234.56")'
     elif first.type == "int":
         first_assert = f"assert d.{first.name}.value == 2024"
@@ -554,7 +702,7 @@ FULL_PAYLOAD = {{
     "additional_sections": [
         {{"section": "Other", "fields": [{{"label": "Note", "value": "x"}}]}}
     ],
-    "confidence": 0.9,
+{list_lines}    "confidence": 0.9,
     "reasoning": "generated test fixture.",
 }}
 FULL_JSON = json.dumps(FULL_PAYLOAD)

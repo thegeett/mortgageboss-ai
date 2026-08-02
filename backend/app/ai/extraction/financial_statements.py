@@ -30,6 +30,7 @@ from app.ai.extraction.parsing import (
     derive_status,
     parse_catch_all,
     parse_typed_core,
+    source_payload,
 )
 from app.ai.extraction.shape import CatchAllSection, TypedField
 from app.ai.parsing import coerce_confidence, extract_json_object
@@ -69,6 +70,9 @@ class FinancialStatementsExtraction(BaseModel):
     total_liabilities: TypedField[Decimal] = Field(default_factory=TypedField)
     net_worth: TypedField[Decimal] = Field(default_factory=TypedField)
     certification_of_accuracy: TypedField[str] = Field(default_factory=TypedField)
+
+    # --- Captured nested lists (LP-443) — bare rows, snapshot-read generically ------- #
+    asset_line_items: list[dict[str, Any]] = Field(default_factory=list)
 
     # --- Grouped catch-all — everything else -------------------------------- #
     additional_sections: list[CatchAllSection] = Field(default_factory=list)
@@ -114,6 +118,37 @@ _CORE_SPEC: CoreSpec = (
 )
 
 
+_ASSET_LINE_ITEMS_ROW: CoreSpec = (
+    ("category", coerce_str),
+    ("description", coerce_str),
+    ("value", coerce_decimal),
+    ("source", coerce_str),
+)
+
+
+def _parse_asset_line_items(raw: Any) -> list[dict[str, Any]]:
+    """Coerce the asset_line_items rows — bare scalars + a per-row page/snippet source (LP-443 capture).
+
+    Mirrors bank_statement's transactions parse: each declared field is coerced, a per-row source is
+    kept, and a fully-empty row is dropped (no hallucinated rows)."""
+    rows: list[dict[str, Any]] = []
+    if not isinstance(raw, list):
+        return rows
+    for entry in raw:
+        if not isinstance(entry, dict):
+            continue
+        row: dict[str, Any] = {
+            name: coerce(entry.get(name)) for name, coerce in _ASSET_LINE_ITEMS_ROW
+        }
+        if (
+            "source" not in row
+        ):  # never clobber a declared 'source' data field; else keep provenance
+            row["source"] = source_payload(entry)
+        if any(row[name] is not None for name, _ in _ASSET_LINE_ITEMS_ROW):
+            rows.append(row)
+    return rows
+
+
 def _parse_financial_statements_json(text: str) -> FinancialStatementsExtractionResult | None:
     """Defensively parse a model response into a financial statements result. Never raises."""
     snippet = extract_json_object(text)
@@ -127,16 +162,17 @@ def _parse_financial_statements_json(text: str) -> FinancialStatementsExtraction
         return None
 
     core_payload, non_null, coercion_lost = parse_typed_core(payload, _CORE_SPEC)
+    asset_line_items = _parse_asset_line_items(payload.get("asset_line_items"))
     sections = parse_catch_all(payload.get("additional_sections"))
 
     try:
         data = FinancialStatementsExtraction.model_validate(
-            {**core_payload, "additional_sections": sections}
+            {**core_payload, "asset_line_items": asset_line_items, "additional_sections": sections}
         )
     except ValidationError:
         return None
 
-    status = derive_status(non_null, coercion_lost)
+    status = derive_status(non_null + len(asset_line_items), coercion_lost)
     confidence = coerce_confidence(payload.get("confidence"))
     raw_reasoning = payload.get("reasoning")
     reasoning = (
@@ -189,5 +225,6 @@ async def extract_financial_statements(
         confidence=result.confidence,
         core_fields_present=core_present,
         catch_all_sections=len(result.data.additional_sections),
+        list_rows_total=len(result.data.asset_line_items),
     )
     return result

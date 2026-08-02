@@ -50,6 +50,15 @@ FULL_PAYLOAD = {
         "property_address": _core("SAMPLE"),
     },
     "additional_sections": [{"section": "Other", "fields": [{"label": "Note", "value": "x"}]}],
+    "authorized_signer_names_and_capacity": [
+        {
+            "name": "SAMPLE",
+            "capacity": "SAMPLE",
+            "signature_present": "SAMPLE",
+            "page": 1,
+            "snippet": "s",
+        }
+    ],
     "confidence": 0.9,
     "reasoning": "generated test fixture.",
 }

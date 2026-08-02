@@ -49,6 +49,16 @@ FULL_PAYLOAD = {
         "verifier_name_title": _core("SAMPLE"),
     },
     "additional_sections": [{"section": "Other", "fields": [{"label": "Note", "value": "x"}]}],
+    "payment_history": [
+        {
+            "period": "SAMPLE",
+            "amount": "1234.56",
+            "date_paid": "2024-01-15",
+            "source": "SAMPLE",
+            "page": 1,
+            "snippet": "s",
+        }
+    ],
     "confidence": 0.9,
     "reasoning": "generated test fixture.",
 }

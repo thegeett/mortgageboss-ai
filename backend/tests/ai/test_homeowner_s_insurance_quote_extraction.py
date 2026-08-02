@@ -54,6 +54,15 @@ FULL_PAYLOAD = {
         "expiration_date": _core("2024-01-15"),
     },
     "additional_sections": [{"section": "Other", "fields": [{"label": "Note", "value": "x"}]}],
+    "mortgagee_or_lienholder_entries": [
+        {
+            "lender_name": "SAMPLE",
+            "loan_number": "SAMPLE",
+            "clause_address": "SAMPLE",
+            "page": 1,
+            "snippet": "s",
+        }
+    ],
     "confidence": 0.9,
     "reasoning": "generated test fixture.",
 }

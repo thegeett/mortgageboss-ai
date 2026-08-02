@@ -44,6 +44,7 @@ FULL_PAYLOAD = {
         "status_or_outcome": _core("SAMPLE"),
     },
     "additional_sections": [{"section": "Other", "fields": [{"label": "Note", "value": "x"}]}],
+    "key_value_pairs": [{"key": "SAMPLE", "value": "SAMPLE", "page": 1, "snippet": "s"}],
     "confidence": 0.9,
     "reasoning": "generated test fixture.",
 }
