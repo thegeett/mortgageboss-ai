@@ -177,7 +177,12 @@ def _derived(raw: Any) -> DerivedField | None:
     field, from_field, mapping = raw.get("field"), raw.get("from"), raw.get("map")
     if not (isinstance(field, str) and isinstance(from_field, str) and isinstance(mapping, dict)):
         return None
-    clean = {str(k): str(v) for k, v in mapping.items()}
+    # NORMALIZE the map keys to match the runtime lookup: documents_section._derive_field computes its key
+    # as ``str(raw).strip().lower().replace(" ", "_")``. If we stored keys verbatim, a spec written with
+    # natural casing/spaces ("Deposit", "Wire Transfer") would emit a mapping the lookup can never hit → the
+    # derived field would silently always be ABSENT. Normalizing here makes the emitted mapping match the
+    # lookup regardless of how the spec author cased the keys (LP-438 review).
+    clean = {str(k).strip().lower().replace(" ", "_"): str(v) for k, v in mapping.items()}
     return DerivedField(field=field, from_field=from_field, mapping=clean)
 
 

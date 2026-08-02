@@ -89,6 +89,26 @@ def test_emits_the_derived_helper_fail_closed_mapping(tmp_path: Path) -> None:
     assert d.mapping == {"deposit": "credit", "withdrawal": "debit"}
 
 
+def test_derived_map_keys_are_normalized_to_match_the_runtime_lookup(tmp_path: Path) -> None:
+    # LP-438 review: _derive_field normalizes its lookup key (str(raw).strip().lower().replace(" ", "_")),
+    # so a spec written with natural casing/spaces must NOT emit verbatim keys the lookup can never hit
+    # (else the derived field is silently ALWAYS absent). The generator normalizes the keys, and the
+    # runtime resolves a natural-cased source value against the emitted mapping.
+    import copy
+
+    from app.verification.snapshot.documents_section import _derive_field
+
+    demo = copy.deepcopy(_LIST_DEMO)
+    demo["nested_lists"][0]["derived"][0]["map"] = {"Deposit": "credit", "Wire Transfer": "debit"}
+    ls = _exec_list_spec(emit_list_specs(_spec(tmp_path, demo)))
+    d = ls.derived[0]
+    assert d.mapping == {"deposit": "credit", "wire_transfer": "debit"}  # normalized, not verbatim
+    # end to end: a natural-cased extracted value resolves through the emitted mapping (not silently absent)
+    assert _derive_field({"transaction_type": "Wire Transfer"}, d).value == "debit"
+    assert _derive_field({"transaction_type": "Deposit"}, d).value == "credit"
+    assert _derive_field({"transaction_type": "unmapped"}, d).absent  # fail-closed still holds
+
+
 def test_emits_the_redact_helper(tmp_path: Path) -> None:
     ls = _exec_list_spec(emit_list_specs(_spec(tmp_path, _LIST_DEMO)))
     assert ls.redact == frozenset({"description"})
