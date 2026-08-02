@@ -1,5 +1,5 @@
 {
-  "document_type": "application_1003",
+  "document_type": "uniform_residential_loan_application",
   "slug": "1003-loan-application-urla",
   "tier": 1,
   "rules_served": ["CR-1","CR-2","CR-3","CR-4","DC-1","DT-6","ID-1","ID-2","ID-3","ID-4","ID-6","ID-7","ID-8","IN-1","IN-4","IN-5","IN-7","OC-1","OC-2","PC-1","PC-2","PC-3","PE-1","PR-3","PR-7","RE-1","TI-1","TI-5"],

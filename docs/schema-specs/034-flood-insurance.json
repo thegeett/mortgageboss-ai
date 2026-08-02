@@ -1,5 +1,5 @@
 {
-  "document_type": "flood_insurance",
+  "document_type": "flood_insurance_policy",
   "slug": "flood-insurance",
   "tier": 3,
   "rules_served": ["IH-6"],

@@ -1,5 +1,5 @@
 {
-  "document_type": "resident_alien_card",
+  "document_type": "permanent_resident_card",
   "slug": "resident-alien-card",
   "tier": 3,
   "rules_served": ["ID-8"],

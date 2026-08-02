@@ -64,9 +64,9 @@ CATALOG: dict[str, tuple[Tier, DocumentCategory]] = {
     "profit_and_loss": (Tier.TIER_1, DocumentCategory.INCOME_EMPLOYMENT),  # T1
     "tax_transcript": (Tier.TIER_2, DocumentCategory.INCOME_EMPLOYMENT),
     "form_4506c": (Tier.TIER_2, DocumentCategory.INCOME_EMPLOYMENT),
-    "business_tax_return": (Tier.TIER_2, DocumentCategory.INCOME_EMPLOYMENT),
+    "business_tax_return": (Tier.TIER_1, DocumentCategory.INCOME_EMPLOYMENT),
     "k1_statement": (Tier.TIER_2, DocumentCategory.INCOME_EMPLOYMENT),
-    "social_security_award_letter": (Tier.TIER_2, DocumentCategory.INCOME_EMPLOYMENT),
+    "social_security_award_letter": (Tier.TIER_1, DocumentCategory.INCOME_EMPLOYMENT),
     "pension_statement": (Tier.TIER_2, DocumentCategory.INCOME_EMPLOYMENT),
     "retirement_income_letter": (Tier.TIER_2, DocumentCategory.INCOME_EMPLOYMENT),
     "unemployment_income_letter": (Tier.TIER_2, DocumentCategory.INCOME_EMPLOYMENT),
@@ -75,7 +75,7 @@ CATALOG: dict[str, tuple[Tier, DocumentCategory]] = {
     "alimony_income": (Tier.TIER_2, DocumentCategory.INCOME_EMPLOYMENT),
     "rental_income_schedule": (Tier.TIER_2, DocumentCategory.INCOME_EMPLOYMENT),
     "commission_income_statement": (Tier.TIER_2, DocumentCategory.INCOME_EMPLOYMENT),
-    "employment_offer_letter": (Tier.TIER_2, DocumentCategory.INCOME_EMPLOYMENT),
+    "employment_offer_letter": (Tier.TIER_1, DocumentCategory.INCOME_EMPLOYMENT),
     # ===================================================================== #
     # Assets
     # ===================================================================== #
@@ -83,11 +83,11 @@ CATALOG: dict[str, tuple[Tier, DocumentCategory]] = {
     "investment_account": (Tier.TIER_1, DocumentCategory.ASSETS),  # T1
     "retirement_account": (Tier.TIER_1, DocumentCategory.ASSETS),  # T1
     "gift_letter": (Tier.TIER_1, DocumentCategory.ASSETS),  # T1
-    "verification_of_deposit": (Tier.TIER_2, DocumentCategory.ASSETS),
+    "verification_of_deposit": (Tier.TIER_1, DocumentCategory.ASSETS),
     "brokerage_statement": (Tier.TIER_2, DocumentCategory.ASSETS),
     "money_market_statement": (Tier.TIER_2, DocumentCategory.ASSETS),
     "certificate_of_deposit": (Tier.TIER_2, DocumentCategory.ASSETS),
-    "earnest_money_receipt": (Tier.TIER_2, DocumentCategory.ASSETS),
+    "earnest_money_receipt": (Tier.TIER_1, DocumentCategory.ASSETS),
     "gift_donor_bank_statement": (Tier.TIER_2, DocumentCategory.ASSETS),
     "life_insurance_statement": (Tier.TIER_2, DocumentCategory.ASSETS),
     "sale_of_asset_proof": (Tier.TIER_2, DocumentCategory.ASSETS),
@@ -100,26 +100,26 @@ CATALOG: dict[str, tuple[Tier, DocumentCategory]] = {
     "mortgage_statement": (Tier.TIER_1, DocumentCategory.PROPERTY),  # T1
     "property_tax_bill": (Tier.TIER_1, DocumentCategory.PROPERTY),  # T1
     "hoa_statement": (Tier.TIER_1, DocumentCategory.PROPERTY),  # T1
-    "appraisal": (Tier.TIER_2, DocumentCategory.PROPERTY),
-    "title_commitment": (Tier.TIER_2, DocumentCategory.PROPERTY),
+    "appraisal": (Tier.TIER_1, DocumentCategory.PROPERTY),
+    "title_commitment": (Tier.TIER_1, DocumentCategory.PROPERTY),
     "preliminary_title_report": (Tier.TIER_2, DocumentCategory.PROPERTY),
-    "flood_certification": (Tier.TIER_2, DocumentCategory.PROPERTY),
-    "flood_insurance_policy": (Tier.TIER_2, DocumentCategory.PROPERTY),
-    "survey": (Tier.TIER_2, DocumentCategory.PROPERTY),
+    "flood_certification": (Tier.TIER_1, DocumentCategory.PROPERTY),
+    "flood_insurance_policy": (Tier.TIER_1, DocumentCategory.PROPERTY),
+    "survey": (Tier.TIER_1, DocumentCategory.PROPERTY),
     "warranty_deed": (Tier.TIER_2, DocumentCategory.PROPERTY),
     "home_inspection_report": (Tier.TIER_2, DocumentCategory.PROPERTY),
     "pest_inspection_report": (Tier.TIER_2, DocumentCategory.PROPERTY),
     "well_septic_certification": (Tier.TIER_2, DocumentCategory.PROPERTY),
-    "condo_questionnaire": (Tier.TIER_2, DocumentCategory.PROPERTY),
+    "condo_questionnaire": (Tier.TIER_1, DocumentCategory.PROPERTY),
     "payoff_statement": (Tier.TIER_2, DocumentCategory.PROPERTY),
-    "lease_agreement": (Tier.TIER_2, DocumentCategory.PROPERTY),
+    "lease_agreement": (Tier.TIER_1, DocumentCategory.PROPERTY),
     # ===================================================================== #
     # Credit
     # ===================================================================== #
-    "credit_report": (Tier.TIER_2, DocumentCategory.CREDIT),
+    "credit_report": (Tier.TIER_1, DocumentCategory.CREDIT),
     "credit_explanation_letter": (Tier.TIER_2, DocumentCategory.CREDIT),
     "credit_supplement": (Tier.TIER_2, DocumentCategory.CREDIT),
-    "bankruptcy_discharge": (Tier.TIER_2, DocumentCategory.CREDIT),
+    "bankruptcy_discharge": (Tier.TIER_1, DocumentCategory.CREDIT),
     "foreclosure_documentation": (Tier.TIER_2, DocumentCategory.CREDIT),
     "judgment_documentation": (Tier.TIER_2, DocumentCategory.CREDIT),
     "collection_account_letter": (Tier.TIER_2, DocumentCategory.CREDIT),
@@ -146,10 +146,10 @@ CATALOG: dict[str, tuple[Tier, DocumentCategory]] = {
     "divorce_decree": (Tier.TIER_1, DocumentCategory.BORROWER_INFO),  # T1
     "letter_of_explanation": (Tier.TIER_1, DocumentCategory.BORROWER_INFO),  # T1
     "passport": (Tier.TIER_2, DocumentCategory.BORROWER_INFO),
-    "social_security_card": (Tier.TIER_2, DocumentCategory.BORROWER_INFO),
-    "permanent_resident_card": (Tier.TIER_2, DocumentCategory.BORROWER_INFO),
+    "social_security_card": (Tier.TIER_1, DocumentCategory.BORROWER_INFO),
+    "permanent_resident_card": (Tier.TIER_1, DocumentCategory.BORROWER_INFO),
     "visa_documentation": (Tier.TIER_2, DocumentCategory.BORROWER_INFO),
-    "birth_certificate": (Tier.TIER_2, DocumentCategory.BORROWER_INFO),
+    "birth_certificate": (Tier.TIER_1, DocumentCategory.BORROWER_INFO),
     "marriage_certificate": (Tier.TIER_2, DocumentCategory.BORROWER_INFO),
     "military_id": (Tier.TIER_2, DocumentCategory.BORROWER_INFO),
     "power_of_attorney": (Tier.TIER_2, DocumentCategory.BORROWER_INFO),
@@ -159,7 +159,7 @@ CATALOG: dict[str, tuple[Tier, DocumentCategory]] = {
     # Misc — recognized loan-file documents that don't fit the buckets above.
     # (The Tier-3 default below catches anything UNCATALOGED; these are known.)
     # ===================================================================== #
-    "uniform_residential_loan_application": (Tier.TIER_2, DocumentCategory.MISC),
+    "uniform_residential_loan_application": (Tier.TIER_1, DocumentCategory.MISC),
     "underwriting_approval": (Tier.TIER_2, DocumentCategory.MISC),
     "rate_lock_agreement": (Tier.TIER_2, DocumentCategory.MISC),
     "general_correspondence": (Tier.TIER_2, DocumentCategory.MISC),

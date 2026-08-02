@@ -1,5 +1,5 @@
 {
-  "document_type": "business_federal_tax_returns",
+  "document_type": "business_tax_return",
   "slug": "business-federal-tax-returns",
   "tier": 3,
   "rules_served": [],

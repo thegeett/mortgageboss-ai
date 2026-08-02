@@ -1,5 +1,5 @@
 {
-  "document_type": "form_1099",
+  "document_type": "1099",
   "slug": "1099-form",
   "tier": 3,
   "rules_served": ["IN-13"],

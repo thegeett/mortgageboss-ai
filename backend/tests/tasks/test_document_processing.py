@@ -227,9 +227,11 @@ async def test_tier2_summarized_and_terminal(
     _patch_storage(monkeypatch)
     _patch_classify(
         monkeypatch,
-        ClassificationResult(document_type="credit_report", confidence=0.9, reasoning="x"),
+        ClassificationResult(
+            document_type="collection_account_letter", confidence=0.9, reasoning="x"
+        ),
     )
-    gist = "Tri-merge consumer credit report dated 2026-06-01 for the borrower."
+    gist = "Collection-account notice dated 2026-06-01 for the borrower."
     summarize = _patch_summarize(monkeypatch, gist)
 
     await pipeline._process_document(db_session, str(doc.id))
@@ -237,7 +239,7 @@ async def test_tier2_summarized_and_terminal(
 
     assert summarize.call_count == 1  # the shared summarize path ran
     assert doc.status == DocumentStatus.COMPLETED  # terminal
-    assert doc.document_type == "credit_report"
+    assert doc.document_type == "collection_account_letter"  # LP-441: credit_report is now Tier-1
     assert doc.tier == Tier.TIER_2
     assert doc.category == DocumentCategory.CREDIT
     assert doc.summary == gist  # the gist is stored
@@ -248,10 +250,12 @@ async def test_tier2_summarized_and_terminal(
 @pytest.mark.parametrize(
     ("document_type", "category"),
     [
-        ("credit_report", DocumentCategory.CREDIT),
-        ("flood_certification", DocumentCategory.PROPERTY),
+        # LP-441: credit_report / flood_certification / verification_of_deposit were promoted to Tier-1
+        # by the merge (they have specs) — use spec-less types that stay Tier-2.
+        ("collection_account_letter", DocumentCategory.CREDIT),
+        ("warranty_deed", DocumentCategory.PROPERTY),
         ("closing_disclosure", DocumentCategory.DISCLOSURES),
-        ("verification_of_deposit", DocumentCategory.ASSETS),
+        ("money_market_statement", DocumentCategory.ASSETS),
     ],
 )
 async def test_tier2_one_shared_path_for_every_type(
@@ -288,7 +292,9 @@ async def test_tier2_summary_failure_is_graceful(
     _patch_storage(monkeypatch)
     _patch_classify(
         monkeypatch,
-        ClassificationResult(document_type="credit_report", confidence=0.9, reasoning="x"),
+        ClassificationResult(
+            document_type="collection_account_letter", confidence=0.9, reasoning="x"
+        ),  # LP-441: a still-Tier-2 type (credit_report was promoted)
     )
     _patch_summarize(monkeypatch, None)  # summarization "failed" (returns None)
 
@@ -921,15 +927,46 @@ def test_tax_return_registered() -> None:
     assert EXTRACTORS["tax_return"] is extract_tax_return
 
 
-def test_every_tier_1_catalog_type_has_an_extractor() -> None:
-    """LP-60..64 complete: no Tier-1 catalog type falls to the classified-only fallback."""
+def test_every_registered_extractor_is_a_tier_1_type() -> None:
+    """LP-441 (replaces 'every Tier-1 has an extractor'): the tier merge made Tier-1 mean 'this document
+    DESERVES extraction' (it has a schema spec), NOT 'its extractor is built' — 18 Tier-1 types have no
+    registered extractor until step 7 wires them, and route to classified-only (asserted below). The
+    remaining invariant runs the OTHER direction: every REGISTERED extractor's type IS Tier-1, so a wired
+    extractor is never dispatched on a Tier-2/Tier-3 document. That keeps extraction deliberate without
+    requiring coverage to be complete."""
     from app.ai.extraction import EXTRACTORS
     from app.documents.catalog import CATALOG
     from app.models.document import Tier
 
-    tier_1 = {slug for slug, (tier, _) in CATALOG.items() if tier is Tier.TIER_1}
-    missing = sorted(tier_1 - set(EXTRACTORS))
-    assert missing == [], f"Tier-1 types still without an extractor: {missing}"
+    non_tier1 = sorted(
+        dt for dt in EXTRACTORS if CATALOG.get(dt, (Tier.TIER_3, None))[0] is not Tier.TIER_1
+    )
+    assert non_tier1 == [], f"registered extractors whose type is not Tier-1: {non_tier1}"
+
+
+async def test_a_newly_promoted_tier1_type_with_no_extractor_completes_cleanly(
+    monkeypatch: pytest.MonkeyPatch, db_session: AsyncSession
+) -> None:
+    """THE D3 SAFETY GATE (LP-441): a real newly-promoted Tier-1 type (credit_report) with NO registered
+    extractor must COMPLETE as classified-only — never error, never FAILED. This is the whole reason the
+    merge is safe before step 7 wires the extractors."""
+    from app.ai.extraction import EXTRACTORS
+
+    assert "credit_report" not in EXTRACTORS  # promoted to Tier-1, extractor not wired yet
+    doc = await _setup_document(db_session)
+    _patch_storage(monkeypatch)
+    _patch_classify(
+        monkeypatch,
+        ClassificationResult(document_type="credit_report", confidence=0.9, reasoning="x"),
+    )
+
+    await pipeline._process_document(db_session, str(doc.id))
+    await db_session.refresh(doc)
+
+    assert doc.status == DocumentStatus.COMPLETED  # classified-only, NOT errored / FAILED
+    assert doc.tier == Tier.TIER_1
+    assert doc.document_type == "credit_report"
+    assert await _current_extraction(db_session, doc.id) is None  # no extractor ran
 
 
 async def test_tax_return_routes_to_its_extractor(

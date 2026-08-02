@@ -1,5 +1,5 @@
 {
-  "document_type": "rental_agreements_lease_agreements",
+  "document_type": "lease_agreement",
   "slug": "rental-agreements-lease-agreements",
   "tier": 2,
   "rules_served": ["DT-6", "IN-14", "OC-3"],
