@@ -139,6 +139,21 @@ def _stdlib_imports(spec: Spec) -> str:
     return "\n".join(lines) + "\n"
 
 
+def max_tokens_for(spec: Spec) -> int:
+    """Derive ``_MAX_TOKENS`` from output shape (guide §7; D3), respecting the CI budget guard.
+
+    A list-bearing spec is NOT a 4096 document — the model emits the whole list in its response, so the
+    OUTPUT is large even though the module is flat. Sizing:
+      * no nested list → 4096 (bounded fixed-form, the scaffold budget);
+      * one nested list → 8192 (an unbounded "capture every X" — bank_statement / investment shape);
+      * two or more nested lists → 16384 (the densest — the tax-return / credit-report shape).
+    """
+    n = len(spec.nested_lists)
+    if n == 0:
+        return 4096
+    return 8192 if n == 1 else 16384
+
+
 def emit_module(spec: Spec) -> str:
     """Generate the extractor module source for a flat, validated spec."""
     _require_identifier(spec.document_type)
@@ -147,6 +162,13 @@ def emit_module(spec: Spec) -> str:
     ttl = title(dt)
     extraction = f"{prefix}Extraction"
     result = f"{prefix}ExtractionResult"
+    max_tokens = max_tokens_for(spec)
+    budget_note = (
+        "Bounded fixed-form output → the 4096 scaffold budget (guide §7)."
+        if max_tokens == 4096
+        else f"Unbounded list output → {max_tokens} (guide §7 sizing rule; {len(spec.nested_lists)} nested "
+        "list(s))."
+    )
 
     field_decls = "\n".join(
         f"    {f.name}: TypedField[{TYPE_TO_ANNOTATION[f.type]}] = Field(default_factory=TypedField)"
@@ -182,9 +204,9 @@ logger = structlog.get_logger(__name__)
 
 _PROMPT_PATH = "extraction/{dt}.txt"
 _SUPPORTED_MEDIA_TYPES = frozenset({{"application/pdf", "image/jpeg", "image/png", "image/jpg"}})
-# Bounded fixed-form output → the 4096 scaffold budget (guide §7). Tune per the sizing
-# rule; the test_extraction_budget_sizing CI guard enforces consistency.
-_MAX_TOKENS = 4096
+# {budget_note}
+# The test_extraction_budget_sizing CI guard enforces the sizing rule.
+_MAX_TOKENS = {max_tokens}
 
 
 class {extraction}(BaseModel):
@@ -437,6 +459,25 @@ def emit_registration(spec: Spec) -> str:
         f"from app.ai.extraction.{dt} import extract_{dt}\n"
         f"# ... and inside the EXTRACTORS dict:\n"
         f'    "{dt}": extract_{dt},\n'
+    )
+
+
+def emit_pii_registration(spec: Spec) -> str:
+    """The ``_PII_FIELDS`` snippet for this spec's PII typed-core fields (step 7 wires it), or ``""``.
+
+    ``pii.kind`` (already remapped to the live enum by LP-439 → ``SSN`` / ``ACCOUNT``) → a
+    ``documents_section._PII_FIELDS`` entry ``field → (PiiKind.X, pre_masked)``. A snippet, never a patch.
+    """
+    lines = [
+        f'    "{f.name}": (PiiKind.{f.pii_kind}, {f.pii_pre_masked}),'
+        for f in spec.typed_core
+        if f.pii_kind in VALID_PII_KINDS
+    ]
+    if not lines:
+        return ""
+    return (
+        "# Add to app/verification/snapshot/documents_section.py::_PII_FIELDS "
+        "(a snippet, never a patch):\n" + "\n".join(lines) + "\n"
     )
 
 

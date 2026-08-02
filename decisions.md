@@ -13042,3 +13042,17 @@ follow-on. Nested lists are no longer a stop condition; the validate pass count 
 **Cross-refs.** ADR-343 (the LP-437 mechanism + the coexist / no-bump / AI-invisibility rulings),
 `docs/schema-specs/_GENERATION_GUIDE.md` §4 (rewritten), `_FORMAT.md` (the per-list declaration), LP-439 (the
 extractor generation that consumes these emissions).
+
+## ADR-345: A document_type with a leading digit cannot be generated — four tax-transcript specs need a rename or hand-writing (LP-440)
+
+**Context.** LP-440 ran the generator across all 108 specs. Four failed with `GenerationError`: `1040_personal_tax_transcripts`, `1065_partnership_tax_transcripts`, `1120_corporate_tax_transcripts`, `4506_t_request_for_transcript_of_tax_returns` (specs 040–043). LP-434 flagged this class up front: a `document_type` with a leading digit is not a valid Python identifier, so the generator cannot derive a class name (`1040PersonalTaxTranscriptsExtraction`) or module import. The ticket asked to record if a spec CLASS cannot be generated at all — this is it.
+
+**The decision — leave them ungenerated; step 1/7 chooses a fix.** The generator refuses loudly rather than emitting broken code (the LP-434 stop-on-non-identifier guard). Two clean fixes, deferred to the wiring/tier step:
+(a) **rename the `document_type`** to a non-digit-leading slug — the mortgage convention is a `form_` prefix (`form_1040`, `form_1065`, `form_1120`, `form_4506t`), mirroring the shipping `form_1099` extractor (whose slug is already `form_1099`, not `1099`); or
+(b) **hand-write** the four modules.
+
+Option (a) is preferred and cheap — it makes them generatable and matches the existing `form_1099` precedent — but it is a catalog/slug decision (step 1), not a generation decision, so LP-440 does not apply it. The other 86 new-type specs generated cleanly; the 18 shipping specs got diff reports.
+
+**No other spec class failed.** `_MAX_TOKENS` sizing (D3) is derivable from the nested-list count (0 → 4096, 1 → 8192, ≥2 → 16384) — no rule the generator cannot derive — so no ADR there.
+
+**Cross-refs.** LP-434 (the non-identifier stop guard), LP-440 (`docs/tickets/LP-440.md`, the generation run), `docs/schema-specs/_REGISTRATION_SNIPPETS.md`.

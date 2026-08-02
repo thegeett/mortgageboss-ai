@@ -37,8 +37,8 @@ logger = structlog.get_logger(__name__)
 
 _PROMPT_PATH = "extraction/cpa_letter.txt"
 _SUPPORTED_MEDIA_TYPES = frozenset({"application/pdf", "image/jpeg", "image/png", "image/jpg"})
-# Bounded fixed-form output → the 4096 scaffold budget (guide §7). Tune per the sizing
-# rule; the test_extraction_budget_sizing CI guard enforces consistency.
+# Bounded fixed-form output → the 4096 scaffold budget (guide §7).
+# The test_extraction_budget_sizing CI guard enforces the sizing rule.
 _MAX_TOKENS = 4096
 
 
