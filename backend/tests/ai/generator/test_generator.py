@@ -335,7 +335,24 @@ def test_bogus_count_field_is_refused(tmp_path: Path) -> None:
         ),
     )
     refusals = validate(spec)
-    assert any("count_field" in str(r) for r in refusals)
+    assert any("count_field" in str(r) and r.condition == 6 for r in refusals)
+
+
+def test_non_int_count_field_is_refused(tmp_path: Path) -> None:
+    # LP-445 review: a str-typed count_field would emit `"n" != len(list)` — ALWAYS True → every
+    # extraction wrongly PARTIAL. The int-type check refuses it (condition 6, not the coercer bucket).
+    spec = _load(
+        tmp_path,
+        _spec_dict(
+            typed_core=[
+                _field("issuer", "str"),
+                _field("row_count", "str", reason_class="processor"),
+            ],
+            nested_lists=[{"name": "rows", "fields": [], "count_field": "row_count"}],
+        ),
+    )
+    refusals = validate(spec)
+    assert any("must be an int" in str(r) and r.condition == 6 for r in refusals)
 
 
 # --------------------------------------------------------------------------- #

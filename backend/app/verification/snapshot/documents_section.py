@@ -229,6 +229,17 @@ _PII_FIELDS: dict[str, tuple[PiiKind, bool]] = {
     "wire_or_remittance_instructions": (PiiKind.ACCOUNT, False),
 }
 
+# Free-text typed-core fields that are NOT whole-value PII (so not in ``_PII_FIELDS`` — masking the
+# whole value would destroy the signal, e.g. "Requires Investigation") but that a misbehaving model
+# could embed a raw SSN/account run into. Their value is passed through the same 9+-digit scrub the
+# list-row backstop uses (``_DESC_REDACT``) at the snapshot boundary: a leaked 9-digit SSN becomes
+# ``[redacted]`` while the alert wording survives (LP-445 review — the credit_report free-text alert
+# fields sit beside a MASKED ``borrower_ssn``; without this they would store unmasked). Keyed by
+# document_type; keep in sync with the spec's promoted free-text fields.
+_SCRUB_FREE_TEXT_FIELDS: dict[str, frozenset[str]] = {
+    "credit_report": frozenset({"ssn_alert_status", "address_usage_alert"}),
+}
+
 
 def _scalar(value: Any) -> str | int | float | bool | None:
     """A JSON scalar, or None to skip a nested (list/dict) extracted value."""
@@ -275,6 +286,12 @@ def build_document_fields(
         scalar = _scalar(value)
         if scalar is None:  # nested/non-scalar — not surfaced here
             continue
+        if isinstance(scalar, str) and key in _SCRUB_FREE_TEXT_FIELDS.get(
+            document_type or "", frozenset()
+        ):
+            scalar = _DESC_REDACT.sub(
+                _REDACTED, scalar
+            )  # scrub an embedded SSN/account run (LP-445)
         fields[key] = Field.present(scalar, source=_EXTRACTED, confidence=confidence)
 
     # ``asserted_name`` — a stable, doc-type-agnostic alias of the RAW borrower-name

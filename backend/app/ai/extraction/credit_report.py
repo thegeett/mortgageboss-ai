@@ -80,7 +80,7 @@ class CreditReportExtraction(BaseModel):
     ssn_alert_status: TypedField[str] = Field(default_factory=TypedField)
     ssn_first_reported_date: TypedField[date] = Field(default_factory=TypedField)
     address_usage_alert: TypedField[str] = Field(default_factory=TypedField)
-    address_tenure_months: TypedField[int] = Field(default_factory=TypedField)
+    address_tenure: TypedField[str] = Field(default_factory=TypedField)
     credit_report_current_employer: TypedField[str] = Field(default_factory=TypedField)
     credit_report_previous_employer: TypedField[str] = Field(default_factory=TypedField)
     credit_report_occupation: TypedField[str] = Field(default_factory=TypedField)
@@ -141,7 +141,7 @@ _CORE_SPEC: CoreSpec = (
     ("ssn_alert_status", coerce_str),
     ("ssn_first_reported_date", coerce_date),
     ("address_usage_alert", coerce_str),
-    ("address_tenure_months", coerce_int),
+    ("address_tenure", coerce_str),
     ("credit_report_current_employer", coerce_str),
     ("credit_report_previous_employer", coerce_str),
     ("credit_report_occupation", coerce_str),

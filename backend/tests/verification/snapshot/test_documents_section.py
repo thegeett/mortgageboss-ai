@@ -212,6 +212,29 @@ async def test_confidence_surfaced_faithfully_never_fabricated(db_session: Async
     assert all(f.source is FieldSource.EXTRACTED for f in pay.fields.values())
 
 
+def test_credit_report_free_text_alert_scrubs_embedded_ssn() -> None:
+    """LP-445 review: ssn_alert_status is free text (not whole-value PII), but a model could embed a raw
+    SSN. The snapshot passes it through the 9+-digit scrub — the alert wording survives, a leaked SSN is
+    redacted — so it can't sit unmasked beside the MASKED borrower_ssn."""
+    lf = uuid4()
+    fields = build_document_fields(
+        {
+            "ssn_alert_status": _field("SSN 123-45-6789 requires investigation", None),
+            "address_usage_alert": _field("USED 006 TIMES IN THE LAST 30 DAYS", None),
+        },
+        "credit_report",
+        loan_file_id=lf,
+    )
+    # The embedded 9-digit SSN is redacted; the surrounding alert wording is kept.
+    assert isinstance(fields["ssn_alert_status"], Field)
+    assert "123456789" not in fields["ssn_alert_status"].value
+    assert "123-45-6789" not in fields["ssn_alert_status"].value
+    assert "[redacted]" in fields["ssn_alert_status"].value
+    assert "requires investigation" in fields["ssn_alert_status"].value
+    # A clean alert with no digit run is untouched.
+    assert fields["address_usage_alert"].value == "USED 006 TIMES IN THE LAST 30 DAYS"
+
+
 def test_business_tax_ids_are_masked_not_plaintext() -> None:
     """employer_ein (W-2) and payer_tin (1099) are 9-digit tax ids → masked, no raw run.
 

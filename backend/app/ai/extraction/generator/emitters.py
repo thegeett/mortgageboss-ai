@@ -517,8 +517,10 @@ def emit_prompt(spec: Spec) -> str:
             blk.append(f"     {nl.name} — each row: " + ", ".join(f.name for f in nl.fields))
         if count_crosscheck_pairs(spec):
             blk.append(
-                "   Read the TOTAL COUNT from the document's summary FIRST, then list every item "
-                "(a count that disagrees with the rows marks the extraction PARTIAL)."
+                "   List EVERY item in full — never stop at a summary count. Fill a total/count field "
+                "ONLY from a total the document explicitly states; if only a partial or filtered count is "
+                "shown (e.g. OPEN vs ALL), leave that field null rather than inferring or summing one. "
+                "A stated total that disagrees with the number of rows you list marks the extraction PARTIAL."
             )
         nested_block = "\n".join(blk) + "\n"
         for nl in spec.nested_lists:

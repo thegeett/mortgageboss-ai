@@ -35,7 +35,9 @@ VALID_PII_KINDS: frozenset[str] = frozenset(k.name for k in PiiKind)
 
 @dataclass(frozen=True)
 class Refusal:
-    """One reason a spec cannot be generated. ``condition`` is the guide §0 number (1-5)."""
+    """One reason a spec cannot be generated. ``condition`` is the guide §0 number (1-5), plus
+    ``6`` for the LP-445 ``count_field`` integrity check (a declaration that must name an int
+    typed-core field) — an internal check beyond the guide's original five."""
 
     condition: int
     field: str | None
@@ -111,16 +113,30 @@ def validate(spec: Spec) -> list[Refusal]:
                     )
                 )
 
-    # A declared ``count_field`` (LP-445) must name a real typed-core field, or its emitted cross-check
-    # would reference ``data.<missing>.value`` — an AttributeError, or a silently dead check. Fail loudly.
-    core_names = {f.name for f in spec.typed_core}
+    # A declared ``count_field`` (LP-445, condition 6 — an integrity check beyond the guide's original
+    # five) must name a real, INT typed-core field. If it names no field, the emitted cross-check
+    # references ``data.<missing>.value`` → AttributeError / a dead check. If it names a non-int field, the
+    # emitted ``<field>.value != len(list)`` compares mismatched types — for a ``str`` count that is ALWAYS
+    # True → every extraction wrongly PARTIAL. Fail loudly on both.
+    core_types = {f.name: f.type for f in spec.typed_core}
     for nested in spec.nested_lists:
-        if nested.count_field and nested.count_field not in core_names:
+        if not nested.count_field:
+            continue
+        if nested.count_field not in core_types:
             refusals.append(
                 Refusal(
-                    2,
+                    6,
                     f"{nested.name}.count_field",
                     f"count_field {nested.count_field!r} is not a typed-core field",
+                )
+            )
+        elif core_types[nested.count_field] != "int":
+            refusals.append(
+                Refusal(
+                    6,
+                    f"{nested.name}.count_field",
+                    f"count_field {nested.count_field!r} must be an int field, "
+                    f"not {core_types[nested.count_field]!r} (a non-int count never equals len(list))",
                 )
             )
 

@@ -26,7 +26,7 @@ CAPTURE EVERYTHING ON THE DOCUMENT — lose nothing. There are two buckets:
      score_transunion                 (integer)
      score_model                      (string) Capture the model exactly as printed. Beacon = Equifax FICO; Empirica = TransUnion FICO. Never compare a Vantage score to a FICO minimum
      open_tradeline_count             (integer) The count of OPEN/active tradelines as stated in the report summary — the tradelines list contains ALL tradelines, open and closed
-     total_tradeline_count            (integer) The TOTAL number of tradelines, open and closed, if the report states one. Null if only an open/active count is given
+     total_tradeline_count            (integer) The TOTAL number of tradelines, open and closed, ONLY if the report explicitly prints a total-of-all-tradelines. Leave null if the summary shows only an open/active count — do NOT sum the list yourself and do NOT infer a total
      total_monthly_debt_payment       (number)
      public_record_count              (integer)
      inquiry_count                    (integer)
@@ -34,7 +34,7 @@ CAPTURE EVERYTHING ON THE DOCUMENT — lose nothing. There are two buckets:
      ssn_alert_status                 (string) The SSN verification/alert status exactly as stated (e.g. 'Requires Investigation', or an issuance/mismatch alert). Null if the report states no SSN alert. Never place the SSN digits here
      ssn_first_reported_date          (date (YYYY-MM-DD))
      address_usage_alert              (string) The address-usage/velocity alert text as stated. Null if none. Do NOT put a street address here — only the alert wording
-     address_tenure_months            (integer) Tenure at the current address in MONTHS (e.g. '016 MONTH(S)' -> 16)
+     address_tenure                   (string) The reported tenure at the current address, exactly as stated (e.g. '016 MONTH(S)' or '1 YR 4 MO'). Null if not stated
      credit_report_current_employer   (string) The CURRENT employer as reported on the credit report (bureau-sourced, may be stale)
      credit_report_previous_employer  (string)
      credit_report_occupation         (string)
@@ -46,7 +46,7 @@ CAPTURE EVERYTHING ON THE DOCUMENT — lose nothing. There are two buckets:
      tradelines — each row: creditor_name, account_type, account_number_masked, account_ownership, date_opened, balance, credit_limit_or_high_credit, monthly_payment, past_due_amount, account_status, payment_status, payment_history_24mo, worst_delinquency, is_disputed
      public_records — each row: record_type, filing_date, discharge_or_satisfied_date, status, amount, court_or_jurisdiction
      inquiries — each row: inquiry_date, creditor_name, inquiry_type
-   Read the TOTAL COUNT from the document's summary FIRST, then list every item (a count that disagrees with the rows marks the extraction PARTIAL).
+   List EVERY item in full — never stop at a summary count. Fill a total/count field ONLY from a total the document explicitly states; if only a partial or filtered count is shown (e.g. OPEN vs ALL), leave that field null rather than inferring or summing one. A stated total that disagrees with the number of rows you list marks the extraction PARTIAL.
 
 FOR EVERY FIELD include WHERE you read it:
   - "page"    (integer)  the 1-based page the value appears on
@@ -91,7 +91,7 @@ Respond with ONLY a single JSON object, no markdown fences and no prose, exactly
     "ssn_alert_status": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
     "ssn_first_reported_date": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
     "address_usage_alert": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
-    "address_tenure_months": {"value": <int|null>, "page": <int|null>, "snippet": <string|null>},
+    "address_tenure": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
     "credit_report_current_employer": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
     "credit_report_previous_employer": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
     "credit_report_occupation": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>}

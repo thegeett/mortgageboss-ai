@@ -54,7 +54,7 @@ FULL_PAYLOAD = {
         "ssn_alert_status": _core("Requires Investigation"),
         "ssn_first_reported_date": _core("2017-09-24"),
         "address_usage_alert": _core("USED 006 TIMES IN THE LAST 30 DAYS"),
-        "address_tenure_months": _core(16),
+        "address_tenure": _core("016 MONTH(S)"),
         "credit_report_current_employer": _core("SAMPLE EMPLOYER"),
         "credit_report_previous_employer": _core("SAMPLE PRIOR"),
         "credit_report_occupation": _core("SAMPLE OCCUPATION"),
@@ -231,9 +231,20 @@ def test_promoted_fields_parse() -> None:
     assert d.ssn_alert_status.value == "Requires Investigation"
     assert str(d.ssn_first_reported_date.value) == "2017-09-24"
     assert d.address_usage_alert.value == "USED 006 TIMES IN THE LAST 30 DAYS"
-    assert d.address_tenure_months.value == 16
+    assert d.address_tenure.value == "016 MONTH(S)"
     assert d.credit_report_current_employer.value == "SAMPLE EMPLOYER"
     assert d.credit_report_occupation.value == "SAMPLE OCCUPATION"
+
+
+def test_unit_bearing_tenure_does_not_cause_partial() -> None:
+    # LP-445 review: address_tenure is str, so the unit-bearing source ('016 MONTH(S)') coerces cleanly
+    # instead of failing an int coercer (which would flag coercion_lost -> a false PARTIAL).
+    payload = _payload(n_tradelines=2)
+    payload["typed_core"]["address_tenure"] = _core("016 MONTH(S)")
+    parsed = _parse_credit_report_json(json.dumps(payload))
+    assert parsed is not None
+    assert parsed.data.address_tenure.value == "016 MONTH(S)"
+    assert parsed.status == ExtractionStatus.SUCCEEDED  # no coercion loss, no false PARTIAL
 
 
 def test_absent_promoted_fields_do_not_cause_partial() -> None:
