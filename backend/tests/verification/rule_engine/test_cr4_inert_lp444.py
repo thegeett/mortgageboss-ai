@@ -132,7 +132,9 @@ async def _cr4_verdict_via_group(report: list[str], liab: list[str]) -> str:
 # --------------------------------------------------------------------------- #
 def test_cr4_is_inert() -> None:
     assert "CR-4" not in ACTIVE_RULE_IDS  # not evaluated on a live file
-    assert len(ACTIVE_RULE_IDS) == 36  # the 36 live rules are unmoved
+    assert (
+        len(ACTIVE_RULE_IDS) == 37
+    )  # CR-4 stays inert; the live count is 37 (LP-447 +IH-1, not CR-4)
     spec = load_rule_spec("CR-4")  # but the spec exists (loadable, verdict-shaped)
     assert spec.reference_values.priya_validated is False  # awaits calibration + Priya's bar
 

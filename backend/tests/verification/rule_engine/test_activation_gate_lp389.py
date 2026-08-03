@@ -62,6 +62,7 @@ _ACTIVATED = frozenset(
         "AS-6",  # LP-429 — account ownership (calibratable-now; routing 11/11, Priya signed off 0.95)
         "IN-15",  # LP-430 — terminated-employment documentation (no-ai-dependency; deterministic date compare)
         "IN-16",  # LP-433 — pay-stub-only documentation (no-ai-dependency; deterministic doc-type presence)
+        "IH-1",  # LP-447 — insurance adequacy / dwelling settlement basis (no-ai-dependency; deterministic normalise)
     }
 )
 
@@ -94,6 +95,7 @@ def test_eligible_rule_ids_is_sorted_and_matches() -> None:
         "AS-8",  # LP-406-2b
         "AS-9",
         "ID-5",
+        "IH-1",  # LP-447 (sorts between ID-5 and IH-3)
         "IH-3",  # LP-417 (sorts between ID-5 and IN-1)
         "IN-1",
         "IN-10",

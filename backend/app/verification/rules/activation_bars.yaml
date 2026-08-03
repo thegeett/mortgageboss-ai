@@ -598,6 +598,40 @@ IH-3:
     IH-3 COULDNT_CHECKS there — an honest absence, not a bug; the branches are proven on the binder scenarios
     (LP-417 tests). A missing binder is couldnt_check, not not_applicable (insurance is required — D5).
 
+IH-1:
+  # LP-447 — the second Bucket 3 insurance rule live, unblocked by LP-446. BLOCKED at LP-431 because the dwelling
+  # loss-settlement basis was not extracted; LP-446 added the typed-core field, LP-447 normalises it
+  # (ins.dwelling_settlement_basis, the derived recipe) and writes the rule. NO AI tag (a deterministic
+  # normalise-then-compare) and NO Priya threshold (her ruling is a BOOLEAN basis check, not a percentage —
+  # ADR-340) → the AS-8 / IH-3 no-ai-dependency path, eligible on input_resolves alone.
+  status: no-ai-dependency
+  ships: auto
+  threshold: null
+  validated: false
+  input_resolves: true    # LP-447: resolves on the binder fixtures (build_insurance_replacement_cost_snapshot ->
+                          # SATISFIED; build_insurance_acv_snapshot -> FIRED) — the IH-3 pattern, a scenario
+                          # fixture, not base LF-6T3N (which has no binder). Also proven on the 4 REAL policies.
+  load_bearing_ai_tags: []
+  fp_fn: >-
+    FN (misses an inadequate ACV dwelling policy) vs FP (a false flag — a human re-reads the settlement clause).
+    FAIL CLOSED: an unrecognised / absent basis is couldnt_check, never a guessed satisfied, so a false PASS is
+    structurally impossible; a novel carrier phrasing degrades to couldnt_check, not a wrong verdict.
+  rationale: >-
+    ⚠️ THE RULE'S SHAPE RESTS ON A REGULATORY RULING (ADR-340, recorded for re-check): Priya's ruling that
+    Fannie/Freddie RETIRED the coverage-vs-loan / 80%-of-replacement-cost comparison, effective 2026-03-18, and
+    replaced it with a dwelling loss-settlement BASIS check — replacement cost -> satisfied, actual cash value ->
+    fired, missing/unreadable -> couldnt_check. So IH-1 reclassifies from the catalog's `calculative` to
+    `structural` (no ratio, no threshold) and needs no sign-off. No AI load-bearing tag: ins.dwelling_settlement_
+    basis is a DETERMINISTIC normalisation (an explicit allow-list, not a fuzzy matcher — D3) of the binder's
+    typed-core replacement_cost_or_coinsurance_basis field (LP-446), read ONLY from the typed field, never the
+    forms_and_endorsements list (the ACV-roof / personal-property anti-conflation, ADR-351). The input RESOLVES on
+    a binder fixture (replacement cost -> SATISFIED; actual cash value -> FIRED), so it is eligible. FAIL CLOSED:
+    an unrecognised or absent basis -> couldnt_check, never a fabricated pass. Per-document, scoped to
+    homeowners_insurance binders — a file with no binder is NOT_APPLICABLE (Priya's table: IH-1 judges an existing
+    policy's adequacy, so no policy = nothing to judge — DIFFERENT from IH-3, which couldnt_checks a missing
+    binder). IH-7 (condo master policy) is a separate test on a separate document, NOT bundled; IH-1 needs no
+    condo exclusion because it never reads a master policy (and no reliable property.type signal exists anyway).
+
 IN-15:
   # LP-430 — Priya's B14 SEPARATE documentation check, finally built (a terminated job's 2 years still count as
   # HISTORY — IN-11's concern — but whether it is documented as CURRENT is this check). DETERMINISTIC: it reads

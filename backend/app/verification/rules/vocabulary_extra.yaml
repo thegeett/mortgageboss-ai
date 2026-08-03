@@ -115,6 +115,20 @@ tags:
       ins.effective_date (LP-417 — ins.effective_date itself stays a document fact). Feeds IH-3.
       "unknown" when no binder states an effective date, or binders disagree on it.
     produced_by: derived
+  # LP-447 — the homeowners binder's DWELLING loss-settlement basis, normalised from the free-form typed-core
+  # replacement_cost_or_coinsurance_basis field (LP-446) to a controlled vocabulary. Feeds IH-1 (ADR-340 —
+  # Priya's replacement-cost-basis adequacy ruling). Per-document (the binder subject). "unknown" for a
+  # non-binder subject, an absent basis, or an UNRECOGNISED value (fail closed — IH-1 couldnt_check, never a
+  # guessed pass). Reads ONLY the typed field, never the forms_and_endorsements list (the anti-conflation).
+  ins.dwelling_settlement_basis:
+    entity: doc
+    value_type: enum
+    allowed_values: ["replacement_cost", "actual_cash_value", "unknown"]
+    description: >-
+      The homeowners binder's dwelling loss-settlement basis (replacement cost vs actual cash value),
+      normalised from the typed-core replacement_cost_or_coinsurance_basis field (LP-446/LP-447). Feeds IH-1.
+      "unknown" when no binder states the basis, or the stated basis is not a recognised term.
+    produced_by: derived
 
   # --- LP-323-IN-B — the income family's DERIVED arithmetic tags (loan-level aggregates; the derived
   #     producer is loan-only, so per-borrower granularity is deferred — see the LP-323-IN-B doc).

@@ -38,8 +38,8 @@ def test_the_sign_off_activated_as6() -> None:
     from tests.expected_active import EXPECTED_ACTIVE_RULE_COUNT
 
     assert (
-        len(eligible_rule_ids()) == 25
-    )  # +AS-8 +PC-2 +IH-3 +PC-3 +IN-12 +IN-8 +IN-9 +AS-6 +IN-15 +IN-16 (LP-433 — pay-stub-only, no-ai)
+        len(eligible_rule_ids()) == 26
+    )  # +AS-8 +PC-2 +IH-3 +PC-3 +IN-12 +IN-8 +IN-9 +AS-6 +IN-15 +IN-16 +IH-1 (LP-447 — insurance adequacy)
     assert len(ACTIVE_RULE_IDS) == EXPECTED_ACTIVE_RULE_COUNT
 
 

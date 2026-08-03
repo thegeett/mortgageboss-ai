@@ -286,6 +286,9 @@ def test_active_set_is_base_plus_lp389() -> None:
             # LP-433 — IN-16 (pay-stub-only documentation): no-ai-dependency, deterministic (a derived
             # document-type presence read). Priya's B12 separate check. Structural → ships auto.
             "IN-16",
+            # LP-447 — IH-1 (insurance adequacy): no-ai-dependency, deterministic (a normalised dwelling
+            # settlement-basis compare). Priya's ADR-340 basis ruling. Structural → ships auto.
+            "IH-1",
         )
     )
     # A bar persists after activation as the record of WHY the rule went live, so the bars now intersect the
@@ -318,6 +321,7 @@ def test_active_set_is_base_plus_lp389() -> None:
             "AS-6",  # LP-429 — live via its bar (calibratable-now, validated; routing 11/11, Priya signed off)
             "IN-15",  # LP-430 — live via its bar (no-ai-dependency, input resolves; terminated-employment)
             "IN-16",  # LP-433 — live via its bar (no-ai-dependency, input resolves; pay-stub-only documentation)
+            "IH-1",  # LP-447 — live via its bar (no-ai-dependency, input resolves; dwelling settlement basis)
         }
     )
     assert not (set(load_activation_bars()) & set(_BASE_ACTIVE))

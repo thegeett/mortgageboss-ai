@@ -1,0 +1,120 @@
+# IH-1 — Insurance adequacy (the DWELLING loss-settlement basis) — DETERMINISTIC structural rule SPEC (LP-447).
+#
+# ⚠️ PRIYA'S RULING REPLACED THE CATALOGUED RULE (ADR-340, effective 2026-03-18). The catalog planned IH-1 as
+# CALCULATIVE — "dwelling coverage vs loan amount / 80%-of-replacement-cost — numeric compare". Priya RETIRED that:
+# Fannie/Freddie dropped the coverage-vs-loan comparison. Her replacement is a BASIS check, no percentage:
+#   replacement cost  -> satisfied ;  actual cash value -> fired (inadequate) ;
+#   null / unreadable -> couldnt_check (never a fabricated pass) ; no homeowners policy -> not_applicable.
+#
+# BLOCKED at LP-431 because the basis was not extracted. LP-446 added the typed-core field
+# `replacement_cost_or_coinsurance_basis`; LP-447 normalises it (ins.dwelling_settlement_basis, the derived recipe)
+# and writes this rule. NO AI tag, NO Priya threshold (a boolean basis check) → no-ai-dependency → it ACTIVATES.
+#
+# ⚠️ THE VALUE VOCABULARY (LP-447 D3). The field is a FREE-FORM STRING (real policies returned "replacement cost"
+# and "Replacement Cost"). ins.dwelling_settlement_basis normalises it against an EXPLICIT allow-list (casefold +
+# collapsed whitespace, NOT a fuzzy matcher) to replacement_cost / actual_cash_value / unknown. An unrecognised
+# string -> "unknown" -> the gate -> couldnt_check. FAIL CLOSED: an unreadable basis is never `satisfied`.
+#
+# ⚠️ THE ANTI-CONFLATION (LP-447 D4 / ADR-351). The recipe reads ONLY the typed dwelling-basis field, NEVER the
+# forms_and_endorsements list — so an ACV-ROOF or personal-property replacement-cost endorsement (a list row) can
+# never be read as the dwelling basis. This is the Occidental case: its dwelling basis stayed null (couldnt_check),
+# the PP endorsement stayed a list row.
+#
+# ⚠️ THE IH-3 BOUNDARY. IH-3 (live) reads the binder's DATES (effective vs closing — a coverage-gap-in-time check);
+# IH-1 reads the binder's dwelling SETTLEMENT BASIS (adequacy of the settlement terms). Different input, different
+# reason — they never overlap. IH-7 (condo master policy ≥100% replacement cost) is a DIFFERENT test on a
+# DIFFERENT document (the master policy) — NOT bundled here; IH-1 needs no condo exclusion because it never reads a
+# master policy, and no reliable property.type / condo signal exists to exclude on anyway (ADR-340).
+#
+# ⚠️ no homeowners binder -> NOT_APPLICABLE (Priya's table), NOT couldnt_check. This DIFFERS from IH-3 (which
+# couldnt_checks a missing binder, treating insurance-existence as its concern). IH-1 judges the adequacy of a
+# policy that EXISTS; if none exists there is nothing to judge — so the applicability predicate scopes IH-1 to
+# homeowners_insurance documents and the rule is deliberately NOT declared "expected" (a missing binder is
+# out-of-scope, not a gap). Whether a policy must exist is IH-3's / another rule's honest gap, not IH-1's.
+
+rule_id: IH-1
+name: Insurance adequacy
+category: Insurance
+
+kind: structural          # must equal rule_kinds.csv (LP-447 updates IH-1 calculative -> structural)
+numeric_check: false      # a basis (enum) check, not a ratio — Priya retired the arithmetic (ADR-340)
+
+criteria: >-
+  The homeowners insurance must settle a dwelling loss on a REPLACEMENT-COST basis: agency guidance
+  (effective 2026-03-18) requires replacement-cost settlement for the dwelling and no longer compares coverage
+  to the loan amount. A policy that settles the dwelling on an actual-cash-value (depreciated) basis is
+  inadequate. This reads the binder's stated dwelling loss-settlement basis. A basis that is absent or not a
+  recognised term -> couldnt_check, never a guessed pass. A file with no homeowners policy is not_applicable —
+  there is no policy whose adequacy to judge.
+
+applicability:
+  scope: the homeowners insurance binder's dwelling loss-settlement basis
+  trigger: >-
+    Evaluated once per homeowners_insurance binder, on its stated dwelling loss-settlement basis. A file with no
+    homeowners policy is not_applicable (IH-1 judges an existing policy's adequacy; whether a policy must exist is
+    not IH-1's concern). A binder whose basis is absent or unreadable couldnt_checks — never a guessed pass.
+
+required_inputs:
+  - name: dwelling_settlement_basis
+    snapshot_path: 'tags.by_subject[<binder content_id>]["ins.dwelling_settlement_basis"]'
+    description: >-
+      the binder's dwelling loss-settlement basis, normalised from the typed-core
+      replacement_cost_or_coinsurance_basis field (LP-446) to replacement_cost / actual_cash_value / unknown by
+      the derived recipe (LP-447). "unknown" when no basis is stated or the stated basis is not a recognised term
+      (fail closed). Reads ONLY the typed field, never the forms_and_endorsements list (the anti-conflation).
+
+# A basis (enum) check carries no numeric threshold and no Priya sign-off (her ruling is a boolean, not a
+# percentage) — priya_validated / threshold_needs_signoff both false, mirroring IH-3 and rule_kinds.csv.
+reference_values:
+  priya_validated: false
+  threshold_needs_signoff: false
+
+subject_enumeration: per_document      # per binder (like AS-6) — gives not_applicable for a non-binder / no binder
+subject_key_fields:
+  - content_id
+
+evidence_required: >-
+  The binder's stated dwelling loss-settlement basis (the exact phrasing) inline on the finding, so the
+  processor sees what the policy says and why the verdict followed.
+
+guideline_reference: "Fannie Mae Selling Guide B7-3 — property insurance must provide replacement-cost coverage for the insurable improvements (Priya's ruling, effective 2026-03-18; the coverage-vs-loan comparison retired)."
+
+spec_version: 1
+
+# The MACHINE-READABLE deterministic body (the generic evaluator runs THIS — zero per-rule Python). Per-document,
+# scoped to homeowners_insurance binders via the applicability predicate (a non-binder subject -> not_applicable;
+# no binder in the file -> every subject not_applicable, i.e. IH-1 does not apply). The single load-bearing tag is
+# gated: "unknown" (absent / unreadable / unrecognised basis) -> couldnt_check, never a guessed pass.
+deterministic:
+  applicability:
+    tag: document.document_type
+    op: eq
+    value: homeowners_insurance
+  load_bearing_tags:
+    - ins.dwelling_settlement_basis
+  gated_tags:
+    - ins.dwelling_settlement_basis
+  outcomes:
+    # An ACTUAL-CASH-VALUE (depreciated) dwelling settlement — inadequate. An OPEN finding.
+    - verdict: fired
+      when_tags:
+        - {tag: ins.dwelling_settlement_basis, op: eq, value: actual_cash_value}
+      reasoning: >-
+        the policy settles a dwelling loss on an actual-cash-value (depreciated) basis; agency guidance requires
+        replacement-cost settlement for the dwelling, so the coverage is inadequate — obtain a replacement-cost
+        endorsement or policy before submission
+      how_to_fix: >-
+        Obtain a homeowners policy (or endorsement) that settles the dwelling on a replacement-cost basis, and
+        replace the binder in the file.
+    # A REPLACEMENT-COST dwelling settlement — adequate under Priya's ruling.
+    - verdict: satisfied
+      when_tags:
+        - {tag: ins.dwelling_settlement_basis, op: eq, value: replacement_cost}
+      reasoning: the policy settles a dwelling loss on a replacement-cost basis, which meets agency guidance
+    # The basis passed no branch (neither recognised value) — fail closed, never a silent pass. In practice the
+    # gate above already routes an "unknown" basis to couldnt_check; this is the fail-closed backstop.
+    - verdict: couldnt_check
+      default: true
+      reasoning: >-
+        the policy's dwelling loss-settlement basis could not be determined — the binder does not state a
+        recognised replacement-cost or actual-cash-value basis

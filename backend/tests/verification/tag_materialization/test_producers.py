@@ -479,15 +479,15 @@ def test_derived_declaration_accepts_a_non_loan_subject(tmp_path, monkeypatch) -
 
 
 def test_derived_declaration_on_a_per_row_subject_fails_loud(tmp_path, monkeypatch) -> None:
-    # LP-332 generalized derived production, but the recipes are written only for the loan / borrower
-    # subjects. A derived tag declared on a per-row subject (document/transaction) would run a
-    # loan/borrower recipe against the wrong raw object and silently mis-key garbage — reject it at load.
+    # LP-332 generalized derived production; loan / borrower / document (LP-447) recipes read the subject's
+    # OWN raw object and key under its subject_id — supported. But `transaction` has no recipe (no recipe
+    # reads a TransactionRecord), so a derived tag on it would mis-key garbage — reject it at load.
     import app.verification.tag_materialization.declarations as d
 
     bad = tmp_path / "tag_production.yaml"
     bad.write_text(
         "tags:\n"
-        "  x.foo: {mode: derived, subject: document, data: app_required_fields_present}\n"
+        "  x.foo: {mode: derived, subject: transaction, data: app_required_fields_present}\n"
         "ai_groups: {}\n"
     )
     monkeypatch.setattr(d, "_PRODUCTION_YAML", bad)
@@ -497,7 +497,7 @@ def test_derived_declaration_on_a_per_row_subject_fails_loud(tmp_path, monkeypat
     from app.verification.tag_materialization.derived import KNOWN_RECIPES
     from app.verification.tag_materialization.subjects import KNOWN_CONTEXT_BUILDERS
 
-    with pytest.raises(DeclarationError, match="derived subject 'document' is not supported"):
+    with pytest.raises(DeclarationError, match="derived subject 'transaction' is not supported"):
         d.validate_declarations(
             known_recipes=KNOWN_RECIPES, known_context_builders=KNOWN_CONTEXT_BUILDERS
         )

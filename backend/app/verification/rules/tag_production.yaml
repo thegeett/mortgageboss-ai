@@ -195,6 +195,13 @@ tags:
   #     the same id.id_expiration leak-guard), never every subject carrying the tag. --------------------------- #
   ins.effective_date: {mode: parsed, subject: document, data: effective_date}
   ins.loan_effective_date: {mode: derived, subject: loan, data: loan_effective_date}
+  # --- LP-447 — IH-1's input. The homeowners binder's DWELLING loss-settlement basis, read from the typed-core
+  #     replacement_cost_or_coinsurance_basis field (LP-446) and NORMALISED to a controlled vocabulary
+  #     (replacement_cost / actual_cash_value / unknown) by the derived recipe. PER-DOCUMENT (the binder subject,
+  #     like AS-6) — IH-1 is per_document, so no loan promotion. The recipe reads ONLY the typed field, never the
+  #     forms_and_endorsements list (an ACV-roof / personal-property endorsement cannot drive the dwelling basis —
+  #     the Occidental anti-conflation, ADR-351), and fails closed to "unknown" on an unrecognised value. --------- #
+  ins.dwelling_settlement_basis: {mode: derived, subject: document, data: dwelling_settlement_basis}
 
   # --- property.address_normalized_match — PC-3's input (LP-407-4). Does the purchase contract's subject-property
   #     address match the loan file's (MISMO) subject-property address? DERIVED (a deterministic compare using the

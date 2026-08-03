@@ -42,10 +42,13 @@ _VOCAB_EXTRA_YAML = _RULES_DIR / "vocabulary_extra.yaml"
 KNOWN_SUBJECTS = frozenset({"transaction", "document", "loan", "borrower"})
 
 # The subjects a DERIVED recipe may be declared for. LP-332 generalized the derived producer beyond
-# loan-only, but the recipes are written to read either loan-level MISMO (loan) or a single borrower's
-# facts + documents (borrower). A derived tag on a per-row subject (transaction/document) would run a
-# loan/borrower recipe against the wrong raw object and silently mis-key garbage — fail loud at load.
-_DERIVED_SUBJECTS = frozenset({"loan", "borrower"})
+# loan-only; the producer enumerates the subject registry and passes the subject's own raw object to the
+# recipe, keyed under its subject_id. loan/borrower recipes read loan-level MISMO / a borrower's facts.
+# LP-447 adds DOCUMENT: a per-document derived recipe (ins.dwelling_settlement_basis) that reads its OWN
+# DocumentEntry and keys under the content_id — the producer already handles this correctly (verified), so
+# a document recipe does NOT mis-key. A derived tag on `transaction` stays unsupported (no recipe reads a
+# TransactionRecord). Each recipe still asserts its expected raw type, so a wrong subject fails loudly.
+_DERIVED_SUBJECTS = frozenset({"loan", "borrower", "document"})
 
 
 class DeclarationError(Exception):

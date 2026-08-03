@@ -19,6 +19,7 @@ from pydantic import JsonValue
 from app.ai.extraction.parsing import coerce_date
 from app.verification.snapshot.fields import Field
 from app.verification.snapshot.model import DocumentEntry, Snapshot
+from app.verification.snapshot.pii import PiiField
 from app.verification.snapshot.tag import Tag, TagProducedBy, TagRole, TagStage
 from app.verification.tag_materialization.declarations import TagDeclaration
 from app.verification.tag_materialization.subjects import (
@@ -764,6 +765,82 @@ def _loan_effective_date(
     return (
         effective,
         f"the loan's insurance effective date {effective} (from the homeowners binder)",
+    )
+
+
+# --------------------------------------------------------------------------- #
+# LP-447 — ins.dwelling_settlement_basis: the homeowners binder's DWELLING loss-settlement basis, normalised
+# to a controlled vocabulary for IH-1 (insurance adequacy, ADR-340 — Priya's replacement-cost-basis ruling,
+# effective 2026-03-18). Per-DOCUMENT (the binder subject), reading ONLY the typed-core field LP-446 added —
+# NEVER the forms_and_endorsements list — so a personal-property or ACV-ROOF endorsement (a list row) can
+# never be read as the dwelling basis (the Occidental anti-conflation, ADR-351). A free-form string is
+# matched against an EXPLICIT allow-list of known phrasings (casefold + collapsed whitespace, NOT a fuzzy
+# matcher, D3): a term outside it → "unknown" → IH-1 couldnt_check (fail closed — an unreadable basis is
+# never a fabricated pass, LP-447 D3).
+# --------------------------------------------------------------------------- #
+# Known replacement-cost phrasings (all settle the dwelling at replacement cost — IH-1 satisfied). Guaranteed/
+# extended RC are STRONGER forms, still replacement-cost. Matched after casefold + whitespace-collapse.
+_REPLACEMENT_COST_BASIS_TERMS = frozenset(
+    {
+        "replacement cost",
+        "replacement cost value",
+        "replacement cost coverage",
+        "rcv",
+        "guaranteed replacement cost",
+        "extended replacement cost",
+        "full replacement cost",
+    }
+)
+# Known actual-cash-value phrasings (depreciated settlement — IH-1 fired, inadequate).
+_ACTUAL_CASH_VALUE_BASIS_TERMS = frozenset({"actual cash value", "acv"})
+
+
+def _normalize_settlement_basis(raw: str) -> str | None:
+    """Map a free-form dwelling loss-settlement string to the controlled vocabulary, or None if unrecognised.
+
+    An EXPLICIT allow-list (D3), not a fuzzy matcher: casefold + collapse internal whitespace, then an EXACT
+    membership test. "Replacement Cost" and "replacement cost" both normalise to ``replacement_cost``; an
+    unknown phrasing ("guaranteed replacement cost NOT included", a carrier's novel wording) returns None so
+    the caller fails closed to "unknown" — never a guessed ``satisfied``."""
+    key = " ".join(raw.casefold().split())
+    if key in _REPLACEMENT_COST_BASIS_TERMS:
+        return "replacement_cost"
+    if key in _ACTUAL_CASH_VALUE_BASIS_TERMS:
+        return "actual_cash_value"
+    return None
+
+
+def _dwelling_settlement_basis(
+    _snapshot: Snapshot, _subject_id: str, subject_raw: object
+) -> tuple[JsonValue, str]:
+    """ins.dwelling_settlement_basis — the homeowners binder's DWELLING loss-settlement basis (LP-447), read
+    from the typed-core ``replacement_cost_or_coinsurance_basis`` field (LP-446) and normalised to
+    ``replacement_cost`` / ``actual_cash_value`` / ``unknown``. Per-document: abstains ("unknown") for any
+    non-binder subject, an absent basis, or an UNRECOGNISED value (fail closed — D3). DESCRIPTIVE: whether
+    the basis is adequate is IH-1's judgment (ADR-340). Reads ONLY the typed field, never the
+    forms_and_endorsements list — an ACV-roof / personal-property endorsement cannot drive it (ADR-351)."""
+    if not isinstance(subject_raw, DocumentEntry):
+        return _UNKNOWN, "not a document subject"
+    if subject_raw.document_type != "homeowners_insurance":
+        return _UNKNOWN, "not a homeowners insurance binder"
+    field = subject_raw.fields.get("replacement_cost_or_coinsurance_basis")
+    # The basis is a plain (non-PII) typed field; if it were ever PII-routed it would be masked, so treat that
+    # as unreadable → couldnt_check (fail closed) rather than compare a masked display.
+    raw = (
+        field.value
+        if isinstance(field, Field) and not isinstance(field, PiiField) and field.is_present
+        else None
+    )
+    if raw is None or not str(raw).strip():
+        return _UNKNOWN, "the binder does not state a dwelling loss-settlement basis"
+    normalized = _normalize_settlement_basis(str(raw))
+    if normalized is None:
+        return _UNKNOWN, (
+            f"the stated loss-settlement basis {str(raw)!r} is not a recognised replacement-cost or "
+            f"actual-cash-value term — fail closed (couldnt_check, never a guessed pass)"
+        )
+    return normalized, (
+        f"the binder's dwelling loss-settlement basis is {normalized} (stated: {str(raw)!r})"
     )
 
 
@@ -1672,6 +1749,10 @@ _RECIPES: dict[str, Recipe] = {
     # LP-417 — the loan's homeowners-insurance effective date (promoted from the document-subject
     # ins.effective_date), for IH-3 (effective <= closing). Mirrors loan_closing_date + the multi-binder abstain.
     "loan_effective_date": _loan_effective_date,
+    # LP-447 — the homeowners binder's DWELLING loss-settlement basis, normalised to replacement_cost /
+    # actual_cash_value / unknown, for IH-1 (insurance adequacy, ADR-340). Per-document; fails closed on an
+    # unrecognised value; reads ONLY the typed field, never forms_and_endorsements (the anti-conflation).
+    "dwelling_settlement_basis": _dwelling_settlement_basis,
     # LP-407-4 — does the purchase contract's subject-property address match the loan file's (MISMO)? For PC-3.
     # DESCRIPTIVE enum (yes/no/unknown); PC-3 routes "no" to needs_review (ADR-325). Reuses the consistency
     # normalizers; reads the MISMO SUBJECT address (never a mailing address / a retained-property tax bill).
