@@ -13019,3 +13019,95 @@ long-lived client becomes safe everywhere and this ADR can be revisited as one c
 
 **Cross-refs.** ADR-342 (the dependency/credential/validation half), LP-41 (the sync→async Celery bridge and its
 fresh-loop-per-task design), LP-35 (the storage factory's `lru_cache`), C0 (this ticket).
+
+## ADR-344: The API and the worker ship as ONE image with different commands — and the consequence is that a baked HEALTHCHECK cannot be right for both (C1)
+
+**Context.** Fargate deploys images, not source. Three services need one: the worker (already had
+`backend/Dockerfile`), the API (nothing), and the frontend (nothing). The obvious alternative to a shared
+backend image is a second Dockerfile tuned for the API.
+
+**The decision — one image, two commands.** `backend/Dockerfile` is unchanged in what it builds; the API is a
+`command` override (`uv run uvicorn app.main:app --host 0.0.0.0 --port 8000`). This is the pattern compose
+already uses for the worker, and it is what C3's task definitions will do. Two images built from one codebase
+means two build paths that drift: a dependency added for the API silently absent from the worker, two base
+images to patch, two things to keep in sync at review time. The API and worker import the SAME application
+package — `app.main` and `app.tasks.celery_app` both pull in the models, services, storage, and AI layers — so
+a "slimmer API image" would not actually be slimmer.
+
+**Verified, not assumed:** the existing worker image runs uvicorn with no Dockerfile change. All three health
+endpoints answered 200 from a container built off the current Dockerfile, with the database and Redis reached
+over the compose network.
+
+**`--host 0.0.0.0` is load-bearing.** Uvicorn defaults to `127.0.0.1`, which binds inside the container only.
+The failure mode is an ALB health check that times out with no application-side error to read — the app looks
+fine in its own logs. The same trap applies to Next (`HOSTNAME=0.0.0.0`), so it is worth naming once: in a
+container, "it works on localhost" and "it is reachable" are different claims.
+
+**The health path for the ALB is `/health/live`, not `/health`.** There are three
+(`backend/app/main.py:156`, `:178`, `:189`). `/health` and `/health/ready` both check Postgres and Redis and
+return **503** when either is down. Wiring an ALB target group to those means a database blip deregisters
+*every* API task at once, turning a recoverable dependency wobble into a total outage — and since all tasks fail
+together, replacements fail their health checks too. `/health/live` returns 200 whenever the process is alive,
+which is the question an ALB is actually asking ("should I restart/replace this task?"). `/health/ready` remains
+the right probe for a deployment gate, where refusing traffic until dependencies are up is the point.
+
+**The consequence — a baked HEALTHCHECK cannot serve both roles.** C1 adds a Celery `inspect ping` HEALTHCHECK
+to the image, because a Celery worker has no HTTP endpoint and an orchestrator otherwise cannot distinguish
+"alive" from "alive but no longer consuming" — a worker that lost its broker keeps its process up and silently
+stops processing documents. But `HEALTHCHECK` is an **image** property: it applies regardless of the command, so
+the API container inherits a probe for a Celery node it does not run, and would sit unhealthy forever.
+
+This is the accepted cost of the one-image decision, and it is handled by **always overriding the healthcheck
+wherever this image runs the API** — `healthcheck:` in `docker-compose.images.yml`, `healthCheck` in the ECS task
+definition (C3). The alternative (no image-level healthcheck, define it per-service everywhere) was rejected
+because it makes the *worker's* liveness opt-in, and the worker is the service where a missing healthcheck fails
+silently. Better to have the default be correct for the harder case and require an explicit override for the
+easy one. Measured: the probe flips to `unhealthy` ~100 s after the broker dies (30 s interval × 3 retries) and
+back to `healthy` ~25 s after it returns.
+
+**Cross-refs.** LP-41 (the Dockerfile and the worker container), LP-73 (worker starts by default), ADR-345 (the
+frontend image and its build-time boundary), C0/ADR-342 (S3 — the other Fargate prerequisite), C3 (task
+definitions, which must set both the command and the healthcheck override).
+
+## ADR-345: The frontend's API URL is BUILD-TIME configuration — `output: 'standalone'` plus a `--build-arg`, and changing it requires a rebuild (C1)
+
+**Context.** The frontend had no Dockerfile. Two properties of Next.js decide its shape, and both are the kind
+that look like details until they cause an outage.
+
+**The decision — `output: 'standalone'`.** Added to `frontend/next.config.ts`. Next traces the modules actually
+reached and emits a self-contained bundle with its own minimal `node_modules` and a `server.js` entrypoint, so
+the runtime stage carries neither the full dependency tree nor the build toolchain. Without it the runner needs
+the whole `node_modules` for `next start`. Result: a **265 MB** image on a 194 MB `node:20-alpine` base — about
+71 MB of application. It changes no routing or rendering; local `pnpm dev` / `pnpm build` are unaffected. Two
+non-obvious details: `public/` and `.next/static/` are **not** part of the standalone output and must be copied
+alongside it (omit them and the server boots fine and serves no CSS, images, or client chunks), and the
+entrypoint is plain `node server.js` — the bundle contains no Next CLI and no pnpm.
+
+**The decision — `NEXT_PUBLIC_API_URL` is a build arg, and that is a boundary, not a preference.**
+`NEXT_PUBLIC_*` values are **inlined into the JavaScript at build time**. They are not read at runtime, so
+setting `NEXT_PUBLIC_API_URL` in an ECS task definition does **nothing** — the value is already compiled into
+the shipped bundle. Both `frontend/lib/config.ts:2` and `frontend/lib/api/client.ts:5` fall back to
+`http://localhost:8000` when it is unset, so an image built without the arg ships a frontend that asks the
+user's own machine for the API. It fails **only in the browser**, with no server-side error and a green ECS
+health check — the worst possible shape for a misconfiguration.
+
+So: **changing the API URL requires rebuilding and redeploying the image, not editing a task definition.** This
+is recorded as an ADR precisely because the instinct ("it's an env var, put it in the task definition") is
+wrong here and will be tried by someone.
+
+**Scope limit — only `NEXT_PUBLIC_*` values may be build args.** A build arg is visible in `docker history`, so
+a secret passed this way is a leak, not a shortcut. Audited before writing the Dockerfile: `NEXT_PUBLIC_API_URL`
+is the *only* non-`NODE_ENV` environment variable the frontend reads, so nothing secret is needed at build time
+and the boundary holds. If that ever stops being true, the answer is a runtime-fetched config endpoint, not a
+second build arg.
+
+**Supporting choices.** Node 20 matches CI, the only place the version is pinned
+(`.github/workflows/frontend-ci.yml:38`). pnpm comes from `corepack` at a pinned version rather than
+`npm i -g pnpm`, so the package manager is provisioned the supported way and does not float with the registry.
+`pnpm install --frozen-lockfile` fails rather than silently resolving differently from the committed lockfile.
+The runner stage runs as the `node` user (uid 1000) that `node:20-alpine` already ships.
+
+**Cross-refs.** ADR-344 (the backend image and the `0.0.0.0` binding trap this shares), A2 §10 (the recon that
+first flagged the `localhost:8000` fallback as silent and dangerous), A1 `docs/worktree-setup.md`
+(the same fallback biting local development), C2 (ECR), C3 (ECS services — the frontend task definition must
+NOT try to set `NEXT_PUBLIC_API_URL`).

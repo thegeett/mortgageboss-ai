@@ -1,0 +1,18 @@
+# Keep the build context small and free of local-only / secret files (C1).
+node_modules/
+.next/
+.turbo/
+out/
+*.tsbuildinfo
+.pnpm-store/
+
+# NEVER bake an env file into an image. NEXT_PUBLIC_* values are baked at BUILD time
+# via --build-arg (see Dockerfile); everything else comes from the ECS task definition.
+# A stray .env.local in the context would silently override the build arg.
+.env*.local
+.env
+
+# Local tooling / editor noise.
+.DS_Store
+*.log
+coverage/

@@ -1,0 +1,120 @@
+# Local rehearsal of the Fargate topology (C1) — api, worker, and frontend all running
+# FROM BUILT IMAGES, with no bind mounts and no host processes. This is the closest
+# local approximation of ECS: the only thing shared with the host is a published port.
+#
+# It reuses this worktree's ALREADY-RUNNING postgres and redis (declared external
+# below) rather than starting its own, so nothing here touches their data.
+#
+# ---------------------------------------------------------------------------
+# RUN IT WITH AN EXPLICIT PROJECT NAME:
+#
+#     docker compose -p mbai-images -f docker-compose.images.yml up -d
+#     docker compose -p mbai-images -f docker-compose.images.yml logs -f worker
+#     docker compose -p mbai-images -f docker-compose.images.yml down
+#
+# The `-p mbai-images` is NOT optional. The repo-root .env sets
+# COMPOSE_PROJECT_NAME=mbai-bedrock (A1), and that takes precedence over the `name:`
+# key below. Without -p this file runs INSIDE the mbai-bedrock project, where its
+# `worker` service collides with the existing `worker` service in docker-compose.yml —
+# compose would recreate the long-running worker container, and it would report
+# postgres/redis/mailhog as orphans (which `--remove-orphans` would then DELETE).
+# `down` without -p is worse: it would tear down the real stack.
+# ---------------------------------------------------------------------------
+#
+# Build the images first:
+#   docker build -t mbai-api:test ./backend
+#   docker build -t mbai-frontend:test --build-arg NEXT_PUBLIC_API_URL=http://localhost:8102 ./frontend
+#
+# Ports 8102/3102 deliberately avoid 8100/3100, which the host-run dev servers use.
+
+name: mbai-images
+
+services:
+  # The API and the worker are the SAME image with different commands — the pattern
+  # compose already uses for the worker, and what C3's task definitions will do.
+  api:
+    image: mbai-api:test
+    container_name: mbai-images-api
+    restart: unless-stopped
+    command:
+      ["uv", "run", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    env_file:
+      - ./backend/.env
+    environment:
+      # Service names on the shared network, not localhost — same override the
+      # existing worker service uses.
+      DATABASE_URL: postgresql+asyncpg://mortgageboss:mortgageboss_dev_password@postgres:5432/mortgageboss_dev  # pragma: allowlist secret
+      REDIS_URL: redis://redis:6379/0
+      # The browser loads the frontend from the host, so its origin is localhost:3102.
+      CORS_ALLOWED_ORIGINS: '["http://localhost:3102"]'
+    ports:
+      - "8102:8000"
+    # REQUIRED override. The image bakes a CELERY healthcheck (backend/Dockerfile) and
+    # it applies regardless of the command, so without this the API would probe for a
+    # Celery node that does not exist here and sit unhealthy forever. urllib, not curl:
+    # python:3.12-slim ships no curl. /health/live is the liveness probe (no dependency
+    # checks) — the same path C3 should give the ALB target group.
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/health/live', timeout=5).status==200 else 1)",
+        ]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
+
+  worker:
+    image: mbai-api:test
+    container_name: mbai-images-worker
+    restart: unless-stopped
+    command: ["uv", "run", "celery", "-A", "app.tasks.celery_app", "worker", "--loglevel=info"]
+    env_file:
+      - ./backend/.env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://mortgageboss:mortgageboss_dev_password@postgres:5432/mortgageboss_dev  # pragma: allowlist secret
+      REDIS_URL: redis://redis:6379/0
+    # NO storage bind mount — that is the point of this rehearsal. On Fargate the API
+    # and worker have no shared filesystem, so with STORAGE_BACKEND=local the worker
+    # cannot see the API's uploads and document PROCESSING fails at the storage read
+    # (app/tasks/document_processing.py:115). That is the exact gap C0's S3 backend
+    # closes; this file leaves it open on purpose so the failure is visible rather than
+    # masked by a mount. Tasks that do not touch storage (health.ping, health.db_ping)
+    # work fine, which is what the C1 verification exercises.
+    # The image's own Celery HEALTHCHECK is correct here, so it is NOT overridden.
+
+  frontend:
+    # Built with --build-arg NEXT_PUBLIC_API_URL=http://localhost:8102. That URL is
+    # COMPILED INTO the bundle and is resolved by the BROWSER, so it must be the
+    # host-published address, not the compose service name.
+    image: mbai-frontend:test
+    container_name: mbai-images-frontend
+    restart: unless-stopped
+    ports:
+      - "3102:3000"
+    depends_on:
+      api:
+        condition: service_healthy
+    # node:alpine has no curl either; the standalone server has node, so use it.
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3000/').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
+
+networks:
+  # This worktree's EXISTING network, joined as external so postgres/redis resolve by
+  # service name. Declared external so `down` on this project can never remove it.
+  default:
+    name: mbai-bedrock_mortgageboss-network
+    external: true

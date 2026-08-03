@@ -5,6 +5,14 @@ __pycache__/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+# NEVER bake an env file into an image (C1). Runtime config comes from the ECS task
+# definition and Secrets Manager. The pattern covers .env.local / .env.production too;
+# .env.example is excluded as well — it is documentation, not something the image needs.
 .env
+.env.*
+# 228 MB / 4,562 dev documents. Would bloat the build context AND the image, and they
+# are borrower NPI — an image is a far wider distribution boundary than a dev machine.
 storage/
+# Test suite (12 MB): not run inside the image, and it carries fixtures.
+tests/
 *.log

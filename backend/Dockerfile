@@ -17,5 +17,23 @@ RUN uv sync --frozen --no-dev --no-install-project
 COPY . .
 RUN uv sync --frozen --no-dev
 
+# Worker liveness (C1). A Celery worker has no HTTP endpoint, so without this an
+# orchestrator cannot tell "alive" from "alive but not consuming" — a worker that lost
+# its broker connection keeps its process up and silently stops processing documents.
+# `inspect ping` goes out over the BROKER and back, so it fails exactly in that case.
+#
+# -d celery@$HOSTNAME pins the probe to THIS container's own node (Docker sets
+# HOSTNAME to the container id, and Celery names its node celery@<hostname>), so a
+# second healthy worker on the same broker cannot mask this one being dead.
+# Shell form, deliberately: $HOSTNAME must expand at runtime, not build time.
+#
+# NOTE (C1): a HEALTHCHECK is baked into the IMAGE, so it also applies to the API
+# container, which runs this same image with a uvicorn command and no Celery node —
+# it would report unhealthy forever. Anything running the API from this image MUST
+# override the healthcheck: `healthcheck: {test: [...]}` in compose (see
+# docker-compose.images.yml), or `healthCheck` in the ECS task definition (C3).
+HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
+  CMD uv run celery -A app.tasks.celery_app inspect ping -d celery@$HOSTNAME || exit 1
+
 # Default command: run the Celery worker (overridable by the compose service).
 CMD ["uv", "run", "celery", "-A", "app.tasks.celery_app", "worker", "--loglevel=info"]
