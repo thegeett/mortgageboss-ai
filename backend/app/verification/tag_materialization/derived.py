@@ -20,6 +20,7 @@ from app.ai.extraction.parsing import coerce_date
 from app.verification.snapshot.fields import Field
 from app.verification.snapshot.model import DocumentEntry, Snapshot
 from app.verification.snapshot.tag import Tag, TagProducedBy, TagRole, TagStage
+from app.verification.snapshot.traversal import all_list_rows
 from app.verification.tag_materialization.declarations import TagDeclaration
 from app.verification.tag_materialization.subjects import (
     LOAN_SUBJECT,
@@ -842,6 +843,64 @@ def _dwelling_settlement_basis(
         )
     return normalized, (
         f"the binder's dwelling loss-settlement basis is {normalized} (stated: {str(raw)!r})"
+    )
+
+
+# --------------------------------------------------------------------------- #
+# LP-453 (step D.2) — the tradelines list consumer: DETERMINISTIC numeric OBSERVATIONS over the credit
+# report's `tradelines` list (the only list keyed `tradelines`, so scoped to credit_report implicitly).
+#
+# ⚠️ THE D3 FINDING (the LP-448 lesson, second instance): the row VOCABULARY is OPEN-ENDED bureau text —
+# account_type is terse bureau codes (AUTO / INST / REV, and elsewhere MTG / EDU / COLL / CHG …), account_status
+# is bureau phrasing (AS AGREED / PAID …), payment_status is Metro-2 codes (I1 / R1 …), is_disputed is FREE-TEXT
+# that includes NON-disputes (forbearance, "closed by grantor"), and payment_history_24mo is a VARIABLE-LENGTH
+# 0/- string (16 to 84 chars on one real report), NOT a fixed position-per-month encoding. So classifying
+# mortgage / student / collection, interpreting a dispute, or parsing "recent lates" is JUDGMENT, not a lookup —
+# a Priya/AI question, deferred to the rule tickets (ADR). This consumer therefore emits ONLY pure numeric
+# aggregates that need no classification: a COUNT and a MONTHLY-PAYMENT TOTAL. Tags DESCRIBE; rules judge —
+# NEVER a threshold, a "is_derogatory", a "has_unacceptable_lates". Fail closed: no tradelines captured → the
+# tag is ABSENT (unknown), NEVER a fabricated 0 (absent ≠ empty).
+#
+# LIMITATION (reported): loan-level aggregate — a file with MULTIPLE overlapping bureau reports could
+# double-count. LF-96SV has one 18-row report + one empty; no double-count. Multi-report dedup is a future
+# concern (a rule's, once it reconciles bureaus).
+# --------------------------------------------------------------------------- #
+def _credit_tradeline_count(
+    snapshot: Snapshot, _subject_id: str, _subject_raw: object
+) -> tuple[JsonValue, str]:
+    """credit.tradeline_count — how many tradelines the file's credit report(s) list (a pure OBSERVATION, no
+    open/closed classification). ABSENT (unknown) when no tradelines are captured — never a fabricated 0."""
+    rows = all_list_rows(snapshot, "tradelines")
+    if not rows:
+        return _UNKNOWN, "no credit-report tradelines captured in the file"
+    return len(rows), f"{len(rows)} tradelines observed across the file's credit report(s)"
+
+
+def _credit_tradeline_monthly_payment_total(
+    snapshot: Snapshot, _subject_id: str, _subject_raw: object
+) -> tuple[JsonValue, str]:
+    """credit.tradeline_monthly_payment_total — the sum of the tradelines' monthly_payment (a coerced number
+    per row), the OBSERVATION CR-1 cross-checks against the DTI's liability payments. A present 0 (a paid-off
+    account) contributes 0 honestly. ABSTAINS to unknown (NEVER 0) when no tradeline carries a payment figure —
+    fail-closed, so a rule reads couldnt_check on missing data rather than a fabricated 0."""
+    rows = all_list_rows(snapshot, "tradelines")
+    if not rows:
+        return _UNKNOWN, "no credit-report tradelines captured in the file"
+    total = Decimal(0)
+    seen = False
+    for row in rows:
+        field = row.fields.get("monthly_payment")
+        if field is not None and field.is_present and field.value is not None:
+            try:
+                total += Decimal(str(field.value))
+                seen = True
+            except (InvalidOperation, ValueError):
+                continue  # an unparseable payment is skipped, never guessed
+    if not seen:
+        return _UNKNOWN, f"{len(rows)} tradelines but none carry a monthly payment figure"
+    return (
+        str(total),
+        f"total monthly tradeline payment {total} (sum across {len(rows)} tradelines' monthly_payment)",
     )
 
 
@@ -1754,6 +1813,11 @@ _RECIPES: dict[str, Recipe] = {
     # actual_cash_value / unknown, for IH-1 (insurance adequacy, ADR-340). Per-document; fails closed on an
     # unrecognised value; reads ONLY the typed field, never forms_and_endorsements (the anti-conflation).
     "dwelling_settlement_basis": _dwelling_settlement_basis,
+    # LP-453 — DETERMINISTIC numeric observations over the credit report's tradelines list (loan-level). Pure
+    # aggregates only (count + monthly-payment total) — the open-ended bureau vocabulary makes classification a
+    # Priya/AI question (ADR). Fail closed: no tradelines → absent, never a fabricated 0.
+    "credit_tradeline_count": _credit_tradeline_count,
+    "credit_tradeline_monthly_payment_total": _credit_tradeline_monthly_payment_total,
     # LP-407-4 — does the purchase contract's subject-property address match the loan file's (MISMO)? For PC-3.
     # DESCRIPTIVE enum (yes/no/unknown); PC-3 routes "no" to needs_review (ADR-325). Reuses the consistency
     # normalizers; reads the MISMO SUBJECT address (never a mailing address / a retained-property tax bill).

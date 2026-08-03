@@ -385,3 +385,23 @@ tags:
       loan.purpose fact to a loan-subject tag, so a purchase-only rule can scope out a refinance. Absent when
       the file states no purpose.
     produced_by: parsed
+  # LP-453 (step D.2) — DETERMINISTIC numeric OBSERVATIONS over the credit report's tradelines list (loan-level).
+  # Pure aggregates only; the open-ended bureau vocabulary makes classification a Priya/AI question (ADR). Tags
+  # describe, rules judge — no threshold. Absent when no tradelines are captured (never a fabricated 0).
+  credit.tradeline_count:
+    entity: loan
+    value_type: number
+    allowed_values: null
+    description: >-
+      How many tradelines the file's credit report(s) list (a pure count observation, no open/closed
+      classification). Absent when no tradelines are captured. Loan-level aggregate.
+    produced_by: derived
+  credit.tradeline_monthly_payment_total:
+    entity: loan
+    value_type: number
+    allowed_values: null
+    description: >-
+      The sum of the tradelines' monthly_payment — the observation CR-1 cross-checks against the DTI's
+      liability payments. A present 0 (paid-off account) contributes 0; absent when no tradeline carries a
+      payment figure (never a fabricated 0). Loan-level aggregate.
+    produced_by: derived

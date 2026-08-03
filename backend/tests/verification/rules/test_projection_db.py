@@ -39,7 +39,7 @@ async def test_projection_counts_match_files(db_session: AsyncSession) -> None:
     assert result.rules.inserted == 135  # LP-430 +IN-15; LP-433 +IN-16
     assert (
         result.tags.inserted
-        == 173  # LP-447 +1 (ins.dwelling_settlement_basis — IH-1); LP-444 +1 (CR-4, inert); LP-430 +2; LP-433 +1
+        == 175  # LP-453 +2 (credit.tradeline_count/_monthly_payment_total); LP-447 +1 (ins.dwelling_settlement_basis); LP-444 +1; LP-430 +2; LP-433 +1
     )  # +4 assets (LP-323-AS-B) +2 ID-5 (LP-389-A) +2 stmt +1 LP-417 (ins.loan_effective_date)
     # variance/co-holder (LP-400) +3 LP-410 derived-producer wave (days_until_closing / continuity / coverage)
     # +1 LP-407-2 (contract.loan_sales_price — the PC-2 loan promotion)
