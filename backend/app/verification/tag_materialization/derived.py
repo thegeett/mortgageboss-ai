@@ -19,7 +19,6 @@ from pydantic import JsonValue
 from app.ai.extraction.parsing import coerce_date
 from app.verification.snapshot.fields import Field
 from app.verification.snapshot.model import DocumentEntry, Snapshot
-from app.verification.snapshot.pii import PiiField
 from app.verification.snapshot.tag import Tag, TagProducedBy, TagRole, TagStage
 from app.verification.tag_materialization.declarations import TagDeclaration
 from app.verification.tag_materialization.subjects import (
@@ -32,7 +31,9 @@ from app.verification.tag_materialization.subjects import (
 # cannot compute. LP-332 added the subject arguments so a recipe can be PER-SUBJECT (a borrower recipe
 # reads THIS borrower's facts). A loan-level recipe (subject_id == "loan") ignores both — its logic is
 # unchanged (the regression canary, _app_required_fields_present).
-Recipe = Callable[[Snapshot, str, object], tuple[JsonValue, str]]
+# A recipe returns ``(value, reasoning)``; a ``None`` value DECLINES the subject (LP-447 — the producer
+# materialises no tag), for a recipe scoped narrower than its subject type (e.g. one document_type).
+Recipe = Callable[[Snapshot, str, object], tuple[JsonValue | None, str]]
 
 _UNKNOWN = "unknown"
 
@@ -812,25 +813,25 @@ def _normalize_settlement_basis(raw: str) -> str | None:
 
 def _dwelling_settlement_basis(
     _snapshot: Snapshot, _subject_id: str, subject_raw: object
-) -> tuple[JsonValue, str]:
+) -> tuple[JsonValue | None, str]:
     """ins.dwelling_settlement_basis — the homeowners binder's DWELLING loss-settlement basis (LP-447), read
     from the typed-core ``replacement_cost_or_coinsurance_basis`` field (LP-446) and normalised to
-    ``replacement_cost`` / ``actual_cash_value`` / ``unknown``. Per-document: abstains ("unknown") for any
-    non-binder subject, an absent basis, or an UNRECOGNISED value (fail closed — D3). DESCRIPTIVE: whether
-    the basis is adequate is IH-1's judgment (ADR-340). Reads ONLY the typed field, never the
-    forms_and_endorsements list — an ACV-roof / personal-property endorsement cannot drive it (ADR-351)."""
-    if not isinstance(subject_raw, DocumentEntry):
-        return _UNKNOWN, "not a document subject"
-    if subject_raw.document_type != "homeowners_insurance":
-        return _UNKNOWN, "not a homeowners insurance binder"
+    ``replacement_cost`` / ``actual_cash_value`` / ``unknown``. Per-document, but scoped to binders: returns
+    ``None`` (DECLINE — the producer materialises no tag) for any NON-homeowners subject, so the tag lands only
+    on the documents IH-1 reads instead of an ``unknown`` on every document (LP-447 review). For a binder it
+    abstains ("unknown") on an absent or UNRECOGNISED basis (fail closed — D3). DESCRIPTIVE: whether the basis
+    is adequate is IH-1's judgment (ADR-340). Reads ONLY the typed field, never the forms_and_endorsements list
+    — an ACV-roof / personal-property endorsement cannot drive it (ADR-351)."""
+    if (
+        not isinstance(subject_raw, DocumentEntry)
+        or subject_raw.document_type != "homeowners_insurance"
+    ):
+        return None, "not a homeowners insurance binder — no basis tag"
     field = subject_raw.fields.get("replacement_cost_or_coinsurance_basis")
-    # The basis is a plain (non-PII) typed field; if it were ever PII-routed it would be masked, so treat that
-    # as unreadable → couldnt_check (fail closed) rather than compare a masked display.
-    raw = (
-        field.value
-        if isinstance(field, Field) and not isinstance(field, PiiField) and field.is_present
-        else None
-    )
+    # A plain (non-PII) typed field. A PiiField is a SEPARATE type (not a Field subclass), so
+    # ``isinstance(field, Field)`` already excludes a masked value → unreadable → unknown (fail closed): the
+    # masked display is never compared, and no PiiField-specific check is needed.
+    raw = field.value if isinstance(field, Field) and field.is_present else None
     if raw is None or not str(raw).strip():
         return _UNKNOWN, "the binder does not state a dwelling loss-settlement basis"
     normalized = _normalize_settlement_basis(str(raw))
@@ -1814,6 +1815,11 @@ def produce_derived_tags(decl: TagDeclaration, snapshot: Snapshot) -> dict[str, 
     out: dict[str, dict[str, Tag]] = {}
     for subject_id, subject_raw in subject_type(decl.subject).enumerate(snapshot):
         value, reasoning = recipe(snapshot, subject_id, subject_raw)
+        if value is None:
+            # A recipe returns ``None`` to DECLINE producing a tag for an out-of-scope subject (LP-447) —
+            # e.g. a per-document recipe scoped to one document_type. Skip it, so a document-subject derived
+            # tag lands only on the documents it is about, not an unread ``unknown`` on every document.
+            continue
         out[subject_id] = {
             decl.tag_id: Tag(
                 value=value,

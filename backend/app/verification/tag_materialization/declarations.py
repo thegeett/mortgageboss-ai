@@ -351,9 +351,11 @@ def validate_declarations(
                 f"(known: {sorted(known_context_builders)})"
             )
     for decl in load_declarations().values():
-        # LP-332: derived recipes now run for a declared subject (the producer enumerates the subject
-        # registry, like parsed/ai) — loan OR borrower, the two the recipes are written for. A derived
-        # tag on any other subject (transaction/document) would mis-key garbage, so reject it at load.
+        # LP-332: derived recipes run for a declared subject (the producer enumerates the subject registry,
+        # like parsed/ai). Supported subjects are in _DERIVED_SUBJECTS — loan, borrower, and (LP-447) document
+        # (a per-document recipe reads its own DocumentEntry, keyed under content_id; the producer handles
+        # this and each recipe asserts its raw type). `transaction` stays unsupported (no recipe reads a
+        # TransactionRecord), so a derived tag declared for it is rejected at load.
         if decl.mode is ProductionMode.DERIVED:
             if decl.subject not in _DERIVED_SUBJECTS:
                 raise DeclarationError(

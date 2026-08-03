@@ -300,6 +300,20 @@ def build_insurance_two_binder_snapshot() -> Snapshot:
     )
 
 
+def build_insurance_two_basis_binders_snapshot() -> Snapshot:
+    """TWO current binders with DIFFERENT dwelling settlement bases — one replacement cost, one actual cash
+    value. IH-1 is per_document, so it judges EACH: SATISFIED on the RC binder AND FIRED on the ACV binder,
+    on the same file (LP-447 review — pins the per-binder behavior; whether multiple binders should be
+    reconciled to an operative policy is an OPEN Priya question, see IH-1.yaml)."""
+    return _snapshot(
+        _LOAN_INS_AMBIG,
+        [
+            _binder("95-binder-rc", "2026-06-01", settlement_basis="Replacement Cost"),
+            _binder("95-binder-acv", "2026-06-01", settlement_basis="Actual Cash Value"),
+        ],
+    )
+
+
 def _divorce_decree(cid: str, effective_date: str) -> DocumentEntry:
     # A divorce_decree ALSO carries an `effective_date` field (the divorce_decree extractor's typed core) — the
     # SAME field name the homeowners_insurance binder uses. The parsed ins.effective_date tag is scoped by field

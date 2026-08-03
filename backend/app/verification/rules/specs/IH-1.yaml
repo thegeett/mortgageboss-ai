@@ -31,6 +31,16 @@
 # policy that EXISTS; if none exists there is nothing to judge — so the applicability predicate scopes IH-1 to
 # homeowners_insurance documents and the rule is deliberately NOT declared "expected" (a missing binder is
 # out-of-scope, not a gap). Whether a policy must exist is IH-3's / another rule's honest gap, not IH-1's.
+#
+# ⚠️ MULTIPLE HOMEOWNERS BINDERS (LP-447 review — an OPEN domain question for Priya). IH-1 is per_document, so a
+# file with more than one current homeowners_insurance binder judges EACH independently: an ACV binder → fired,
+# a replacement-cost binder → satisfied, both on the same file. This is DELIBERATE and fail-closed — the system
+# has no reliable "operative policy" signal, so surfacing every inadequate binder for the processor to reconcile
+# is safer than silently passing when ANY binder is adequate. But it CAN flag a superseded/non-operative ACV
+# binder alongside the current RC policy. IH-3 avoids this by promoting to loan and abstaining on multi-binder
+# disagreement; IH-1 does NOT, because "which policy governs adequacy when several are on file" is a Priya
+# ruling we do not guess (repo convention: flag the domain question, never invent the mortgage logic). Until she
+# rules, the per-binder behavior stands and is pinned by test_ih1.py::test_multiple_binders_are_judged_per_binder.
 
 rule_id: IH-1
 name: Insurance adequacy

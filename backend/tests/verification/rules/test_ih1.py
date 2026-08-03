@@ -22,6 +22,7 @@ from app.verification.eval.fire_path_scenarios import (
     build_insurance_acv_snapshot,
     build_insurance_in_force_snapshot,
     build_insurance_replacement_cost_snapshot,
+    build_insurance_two_basis_binders_snapshot,
     build_insurance_unreadable_basis_snapshot,
     build_statement_break_snapshot,
 )
@@ -85,10 +86,12 @@ def test_unrecognised_basis_returns_none_fail_closed(raw: str) -> None:
 # --------------------------------------------------------------------------- #
 # The recipe — reads ONLY the typed dwelling field, never a non-binder / a list (the anti-conflation)
 # --------------------------------------------------------------------------- #
-def test_recipe_abstains_for_a_non_binder_subject() -> None:
+def test_recipe_declines_for_a_non_binder_subject() -> None:
+    # LP-447 review: a non-homeowners subject returns None (DECLINE) — the producer materialises NO tag, so
+    # ins.dwelling_settlement_basis lands only on binders, not an unread "unknown" on every document.
     doc = DocumentEntry(content_id="x", document_type="pay_stub", belongs_to=None, fields={})
     value, _ = _dwelling_settlement_basis(None, "x", doc)  # type: ignore[arg-type]
-    assert value == "unknown"
+    assert value is None
 
 
 def test_recipe_reads_the_typed_dwelling_field_only_not_a_list() -> None:
@@ -154,6 +157,18 @@ async def test_binder_with_no_stated_basis_couldnt_checks() -> None:
     # This is DISTINCT from "no binder at all" (not_applicable, below): a policy exists but its basis is absent.
     mat = await _materialize(build_insurance_in_force_snapshot())
     assert _binder_verdicts(evaluate_deterministic_rule(_SPEC, mat)) == [Verdict.COULDNT_CHECK]
+
+
+async def test_multiple_binders_are_judged_per_binder() -> None:
+    # LP-447 review (an OPEN Priya question, pinned): with two current binders of different bases, IH-1 —
+    # being per_document — judges EACH: SATISFIED on the replacement-cost binder AND FIRED on the ACV binder.
+    # This is deliberate/fail-closed (no operative-policy signal), but it CAN flag a superseded ACV binder.
+    # If Priya later rules that multiple binders reconcile to one operative policy, this test changes with it.
+    mat = await _materialize(build_insurance_two_basis_binders_snapshot())
+    verdicts = _binder_verdicts(evaluate_deterministic_rule(_SPEC, mat))
+    assert sorted(v.value for v in verdicts) == sorted(
+        [Verdict.SATISFIED.value, Verdict.FIRED.value]
+    )
 
 
 async def test_no_homeowners_policy_is_not_applicable() -> None:
