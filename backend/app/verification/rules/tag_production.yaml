@@ -183,6 +183,17 @@ tags:
   contract.sales_price: {mode: parsed, subject: document, data: sales_price}
   contract.loan_sales_price: {mode: derived, subject: loan, data: loan_sales_price}
   property.purchase_price: {mode: parsed, subject: loan, data: property.purchase_price}
+  # LP-452 (step D.1) — the loan's subject-property TYPE, promoted from the MISMO property.type fact (the
+  # authoritative loan-level source), exactly like program.type reads loan.program / property.purchase_price
+  # reads property.purchase_price. Gates five rules (CO-1/CO-3/CO-5/IH-7/PR-3) that must know condo vs SFR vs
+  # PUD before they can scope. DESCRIPTIVE — the RAW MISMO value passes through verbatim (produce_parsed_tag),
+  # NOT normalised: whether a value "is a condo" is a rule's branch or a later derived tag, never a re-labelling
+  # here (tags describe, rules judge). Absent MISMO property.type → the tag is ABSENT (fail closed), never a
+  # default. ⚠️ On the current fixtures MISMO property_type is null on all three files, so the tag is null today
+  # (an honest source-data gap — the appraisal / purchase_agreement extractors DO carry a property_type, but
+  # reading a document source or reconciling across sources is a separate ticket, LP-452 D3). Guarded by LP-450
+  # (`property.type` is in the MISMO loan-key universe).
+  property.type: {mode: parsed, subject: loan, data: property.type}
 
   # --- ins.* — IH-3's input (LP-417). The homeowners_insurance binder's effective_date (typed-core) is read
   #     as a DOCUMENT parsed tag (ins.effective_date, in fact_tags.csv), then PROMOTED to loan level
