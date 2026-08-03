@@ -12921,3 +12921,101 @@ worker service and its start-by-default footgun), [`docs/worktree-setup.md`](doc
 operational guide — port map, the three `.env` files, troubleshooting), A1 (this ticket). The two cross-talk
 defaults this had to work around — `NEXT_PUBLIC_API_URL` falling back to `:8000` and `cors_allowed_origins` to
 `:3000` — are deliberately left alone in code and fixed by env files, since the main worktree depends on them.
+
+## ADR-342: S3 uses aioboto3 (not boto3) and the AWS CREDENTIAL CHAIN (never key settings); a missing bucket fails at STARTUP, not at the first document read (C0)
+
+**Context.** Today the host-run API and the containerised Celery worker share document bytes through a Docker
+bind mount (`./backend/storage:/app/storage`). On Fargate they are **separate tasks on separate hosts with no
+shared filesystem**, so the worker's read at `app/tasks/document_processing.py:115` fails for every document.
+Object storage is the hard prerequisite for deployment, not an optimization. The `StorageBackend` ABC
+(`app/storage/base.py:69-109`) already reserved the seam — the `"s3"` branch had been sitting commented out at
+`app/storage/__init__.py:36-38` since LP-35.
+
+**The decision — aioboto3, not boto3.** The interface is `async` (`save`/`read`/`delete`/`get_url` are all
+coroutines) and the app is async end to end: asyncpg, async SQLAlchemy, the async AI wrapper. Plain boto3 is
+synchronous, so every call would need `asyncio.to_thread` — correct, but it spends a thread per call, and under
+Celery prefork concurrency those threads multiply against a pool that exists to run documents in parallel. The
+local backend does exactly that thread-wrapping (`app/storage/local.py:62`) and it is right *there*, because the
+work is a blocking `read_bytes()` with no async alternative. S3 has one. Resolution added 18 transitive packages
+(aiobotocore/botocore/aiohttp and friends) with **no conflict against any existing pin**.
+
+**The decision — credentials come from the provider chain, and there are NO key settings.** `s3_bucket`,
+`s3_region`, `s3_endpoint_url`, `s3_presign_expiry_seconds`, and `s3_kms_key_id` are settings; access key and
+secret key are **deliberately absent**, and a test asserts they stay absent
+(`tests/storage/test_s3_storage.py::test_no_aws_credential_settings_exist`). Botocore's default chain resolves
+SSO/profile locally and the **task role** on ECS. Adding key settings would defeat the entire task-role design —
+it invites long-lived credentials into `.env` files and container images, which is the specific failure mode
+IAM roles exist to remove. The `.env.example` block says this in prose so the next person does not "helpfully"
+add them.
+
+**The decision — encryption is not optional.** Every `put_object` sends `ServerSideEncryption`: `aws:kms` with
+`SSEKMSKeyId` when `s3_kms_key_id` is set, else `AES256` (SSE-S3). There is no code path that writes an
+unencrypted object, and a test asserts that across both configurations. Documents are borrower NPI; the default
+had to be "encrypted" rather than "encrypted if configured".
+
+**The decision — validate at startup, not at first use.** A `model_validator` refuses to construct `Settings`
+when `storage_backend == "s3"` and `s3_bucket` is unset. This closes the gap the A2 recon recorded (§10 item
+14): the `Literal["local", "s3"]` accepts `"s3"` at boot, so the misconfiguration previously surfaced at the
+**first document read** — inside a Celery task, as a generic processing failure. On Fargate that means a task
+that reports healthy and then fails every document, which is the worst shape a config error can take. The
+project convention in `CLAUDE.md` is already "required vars missing → app refuses to start"; this makes S3 obey
+it. Deliberately narrow: only the setting with no safe default is validated. Region has one, and credentials are
+the chain's problem, not config's.
+
+A companion `field_validator` normalizes blank S3 strings to `None`, because `.env.example` ships the keys
+present-but-empty for discoverability and an empty `endpoint_url` handed to botocore is not "use the default AWS
+endpoint" — it is an invalid endpoint.
+
+**Not decided here.** `get_url()` now returns a real presigned URL where local returns `None`, but **nothing
+consumes it**: the download endpoint (`app/api/documents.py:381-400`) streams bytes via `read()`, and a repo-wide
+grep finds no application call site for `get_url` at all. Serving documents by redirect instead of by proxy is a
+real choice with auth implications, and it is a different ticket.
+
+**Cross-refs.** ADR-343 (the client-lifecycle half of this work), ADR-055 (bytes live in storage, not the DB),
+LP-35 (the `StorageBackend` abstraction and the `get_url` slot this fills), A2 §8 and §10 item 14 (the recon that
+scoped this), C0 (this ticket), C1–C5 (the ECS work this unblocks).
+
+## ADR-343: The S3 backend holds a SESSION and opens a CLIENT PER OPERATION — because the Celery bridge runs a fresh event loop per task (C0)
+
+**Context.** The obvious optimization for an S3 client is to build it once and keep it: a client owns a
+connection pool, so a long-lived client amortizes TLS handshakes across calls. C0's ticket text asked for exactly
+that — *"Do not create a client per call — that is a TLS handshake per document read."* That instinct is right in
+a normal async service and **wrong in this codebase**, for a reason worth recording so nobody "fixes" it later.
+
+**The blocking fact.** `aioboto3` clients are built on `aiohttp`, so a client is bound to the event loop that
+created it. The Celery async bridge runs **a fresh event loop per task**: `run_async` is literally
+`asyncio.run(coro)` (`app/tasks/base.py:41-43`). The storage backend instance outlives tasks because the factory
+is `@lru_cache(maxsize=1)` (`app/storage/__init__.py`). So a client cached on that instance would be created in
+task N's loop and reused in task N+1's *different, already-closed* loop — "Event loop is closed" /
+"attached to a different loop". The `lru_cache` does not make that failure unlikely; it makes it **certain**.
+
+**The precedent.** The codebase already hit this exact problem with the database and answered it the same way:
+`task_session` builds a **fresh engine per task with `NullPool`** because "the app's module-level engine is bound
+to the loop that first used it… asyncpg connections are loop-bound" (`app/tasks/base.py:46-65`). Inventing a
+second, contradictory answer for storage would leave two loop-lifetime models in one worker.
+
+**The decision.** The `aioboto3.Session` is created once in `__init__` and held; a **client is opened per
+operation** via `async with session.client(...)`. A session is a credential/config resolver holding **no
+sockets**, which makes it both loop-agnostic and **fork-safe** — this is also the standard boto3 guidance (share
+a session, never share clients). That is precisely what keeps the `@lru_cache` on `get_storage_backend()` safe
+under Celery prefork: the cached instance carries no socket across a fork, and each child lazily builds its own
+instance anyway.
+
+**The cost, recorded honestly rather than hidden.** A new client means a new connection pool, so each operation
+pays a TLS handshake.
+
+* **On the worker this is not an amplification.** The pipeline performs exactly **one** storage read per document
+  (`app/tasks/document_processing.py:115`), so it is one handshake per task either way — the per-operation client
+  costs nothing over a per-task one.
+* **On the API it is a genuine per-request cost.** Uvicorn runs one long-lived loop, so a cached client would be
+  safe *there* and would save a handshake per upload/download.
+
+**Why not special-case the API.** A per-event-loop client cache would fix the API path and stay correct on the
+worker, but it needs a close hook when the loop ends. `asyncio.run` provides none, so every task would leak an
+unclosed `aiohttp` connector — trading a handshake for an fd leak and a stream of "Unclosed client session"
+warnings. Correctness first. **The clean fix is upstream**: give the worker a persistent loop (the "revisit
+loop/pool reuse if throughput grows" caveat already written at `app/tasks/base.py:9-10`), after which a
+long-lived client becomes safe everywhere and this ADR can be revisited as one change instead of two.
+
+**Cross-refs.** ADR-342 (the dependency/credential/validation half), LP-41 (the sync→async Celery bridge and its
+fresh-loop-per-task design), LP-35 (the storage factory's `lru_cache`), C0 (this ticket).

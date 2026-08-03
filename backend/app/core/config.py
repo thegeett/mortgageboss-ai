@@ -3,7 +3,14 @@
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import Field, PostgresDsn, RedisDsn, computed_field
+from pydantic import (
+    Field,
+    PostgresDsn,
+    RedisDsn,
+    computed_field,
+    field_validator,
+    model_validator,
+)
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -113,6 +120,18 @@ class Settings(BaseSettings):
     storage_backend: Literal["local", "s3"] = "local"
     storage_local_path: str = "./storage"
 
+    # S3 storage (C0) — used only when storage_backend == "s3".
+    # NOTE: there are deliberately NO access-key/secret-key settings. Credentials come
+    # from botocore's default provider chain (SSO/profile locally, the task role on
+    # ECS). Adding key settings would defeat the task-role design entirely.
+    s3_bucket: str | None = None
+    s3_region: str = "us-east-1"
+    # Set for MinIO/LocalStack; None means the real AWS endpoint for the region.
+    s3_endpoint_url: str | None = None
+    s3_presign_expiry_seconds: int = 900  # 15 minutes
+    # When set, objects are written with SSE-KMS using this key; otherwise SSE-S3.
+    s3_kms_key_id: str | None = None
+
     # Email (SMTP)
     smtp_host: str = "localhost"
     smtp_port: int = 1025  # MailHog default
@@ -148,6 +167,38 @@ class Settings(BaseSettings):
     def celery_result_backend(self) -> str:
         """Celery result backend URL — the override if set, else the configured Redis."""
         return self.celery_result_backend_override or str(self.redis_url)
+
+    @field_validator("s3_bucket", "s3_endpoint_url", "s3_kms_key_id", mode="before")
+    @classmethod
+    def _blank_s3_str_is_none(cls, value: object) -> object:
+        """Treat a blank/whitespace S3 string as unset (C0).
+
+        ``.env.example`` ships these keys present-but-empty (``S3_ENDPOINT_URL=``) so the
+        full surface is discoverable. Pydantic would otherwise read ``""`` — and an empty
+        ``endpoint_url`` passed to botocore is not "use the default AWS endpoint", it is
+        an invalid endpoint. Normalizing here keeps a blank line in a ``.env`` meaning
+        exactly what it looks like: not set.
+        """
+        if isinstance(value, str) and not value.strip():
+            return None
+        return value
+
+    @model_validator(mode="after")
+    def _require_s3_bucket_when_s3(self) -> "Settings":
+        """Refuse to start with ``storage_backend="s3"`` and no ``s3_bucket`` (C0).
+
+        Without this the misconfiguration is accepted at boot (the ``Literal`` permits
+        ``"s3"``) and surfaces only at the FIRST DOCUMENT READ — inside a Celery task,
+        as a generic processing failure. That defeats the project's
+        "required vars missing → refuse to start" convention, and on Fargate it would
+        mean a task that reports healthy and then fails every document.
+
+        Deliberately narrow: it validates only the setting that has no safe default.
+        Region has one, and credentials are the provider chain's job, not config's.
+        """
+        if self.storage_backend == "s3" and not self.s3_bucket:
+            raise ValueError('S3_BUCKET is required when STORAGE_BACKEND is "s3"')
+        return self
 
 
 @lru_cache(maxsize=1)

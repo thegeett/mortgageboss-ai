@@ -26,6 +26,11 @@ dependencies = [
     "pyjwt>=2.13.0",
     "pymupdf>=1.27.2.3",
     "lxml>=6.1.1",
+    # aioboto3 (NOT plain boto3): the StorageBackend interface is async, and the app
+    # runs async end to end (asyncpg, async SQLAlchemy, the async AI wrapper). Wrapping
+    # sync boto3 in asyncio.to_thread would work but costs a thread per call under
+    # Celery concurrency. See app/storage/s3.py and decisions.md ADR-342.
+    "aioboto3>=15.5.0",
 ]
 
 [dependency-groups]
