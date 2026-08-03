@@ -8,7 +8,8 @@ document types absent from all three files (appraisal/title/AUS/condo/master pol
 window + a date recipe; PC-5 also needs the emd_sourced AI match) — they are honest scaffolding, not unblocks.
 
 These pin: each tag materialises verbatim from its document field; an absent field → an absent tag (fail closed);
-and the LP-450 guard accepts both references.
+each tag is document_type-scoped so a field-name shared across extractors (report_date, earnest_money_amount)
+cannot mis-materialise it on the wrong document type (LP-454 review); and the declarations are parsed:document.
 """
 
 from __future__ import annotations
@@ -110,13 +111,28 @@ def test_declarations_are_parsed_document_tags() -> None:
         assert decls[tag].data == data
 
 
-def test_lp450_guard_accepts_both_references() -> None:
-    from tests.verification.tag_materialization.test_parsed_declaration_fields import (
-        _document_field_universe,
-        _resolves,
-    )
-
+def test_declarations_carry_their_document_type_scope() -> None:
+    # LP-454 review: both fields are shared across extractors (report_date: credit_report + appraisal +
+    # termite + property_profile; earnest_money_amount: purchase_agreement + earnest_money_receipt), so each
+    # tag is scoped to its intended document type. (The global test_parsed_declaration_fields guard already
+    # validates that both field names resolve — not re-checked here to avoid importing its internals.)
     decls = load_declarations()
-    universe = _document_field_universe()
-    assert _resolves(decls["credit.report_date"], universe) is True
-    assert _resolves(decls["contract.emd_amount"], universe) is True
+    assert decls["credit.report_date"].document_type == "credit_report"
+    assert decls["contract.emd_amount"].document_type == "purchase_agreement"
+
+
+async def test_credit_report_date_does_not_materialise_on_a_non_credit_report() -> None:
+    # THE POLLUTION FIX: an appraisal ALSO emits report_date, but the document_type scope keeps
+    # credit.report_date OFF it — the appraisal's date is never mislabelled as the credit pull date.
+    appraisal = _doc("appr", "appraisal", report_date="2026-01-15")
+    credit = _doc("cr", "credit_report", report_date="2026-07-17")
+    assert await _tag_on("appr", "credit.report_date", appraisal, credit) is None
+    assert str(await _tag_on("cr", "credit.report_date", appraisal, credit)) == "2026-07-17"
+
+
+async def test_emd_amount_does_not_materialise_on_an_earnest_money_receipt() -> None:
+    # earnest_money_receipt ALSO emits earnest_money_amount, but contract.emd_amount is the CONTRACT's figure.
+    receipt = _doc("rcpt", "earnest_money_receipt", earnest_money_amount="9999.00")
+    contract = _doc("pa", "purchase_agreement", earnest_money_amount="5000.00")
+    assert await _tag_on("rcpt", "contract.emd_amount", receipt, contract) is None
+    assert str(await _tag_on("pa", "contract.emd_amount", receipt, contract)) == "5000.00"

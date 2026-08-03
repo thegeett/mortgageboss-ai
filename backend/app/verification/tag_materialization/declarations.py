@@ -70,6 +70,13 @@ class TagDeclaration:
     subject: str
     data: str  # parsed: field[:hash] · derived: recipe key · ai: group key
     allowed_values: tuple[str, ...] | None  # the vocabulary's allowed_values (for ai coercion)
+    # LP-454 review — an optional document_type FILTER for a parsed:document tag. A field-name is not unique
+    # across extractors (``report_date`` is emitted by credit_report AND appraisal / termite / property_profile;
+    # ``earnest_money_amount`` by purchase_agreement AND earnest_money_receipt), and the parsed producer
+    # enumerates EVERY document — so without a filter a tag mis-materialises on the wrong document type. When
+    # set, the tag is produced ONLY on documents of this type (mirrors the AI group's ``applies_to``). None =
+    # every document type (the prior behaviour, correct for a field that IS unique / genuinely doc-agnostic).
+    document_type: str | None = None
 
 
 @dataclass(frozen=True)
@@ -328,8 +335,25 @@ def load_declarations() -> dict[str, TagDeclaration]:
             raise DeclarationError(
                 f"tag {tag_id!r}: declared for production but absent from the fact-tag vocabulary"
             )
+        document_type = body.get("document_type")
+        if document_type is not None:
+            # A document_type FILTER only makes sense for a parsed:document tag (AI groups have applies_to;
+            # loan/borrower/transaction subjects are not per-document). Fail loud on a misuse.
+            if not isinstance(document_type, str) or not document_type.strip():
+                raise DeclarationError(f"tag {tag_id!r}: document_type must be a non-empty string")
+            if mode is not ProductionMode.PARSED or subject != "document":
+                raise DeclarationError(
+                    f"tag {tag_id!r}: document_type is only valid on a parsed:document tag "
+                    f"(got mode={mode.value}, subject={subject!r})"
+                )
+            document_type = document_type.strip()
         declarations[tag_id] = TagDeclaration(
-            tag_id=tag_id, mode=mode, subject=subject, data=data, allowed_values=allowed[tag_id]
+            tag_id=tag_id,
+            mode=mode,
+            subject=subject,
+            data=data,
+            allowed_values=allowed[tag_id],
+            document_type=document_type if isinstance(document_type, str) else None,
         )
     return declarations
 

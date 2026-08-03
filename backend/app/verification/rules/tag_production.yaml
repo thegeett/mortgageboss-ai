@@ -187,7 +187,10 @@ tags:
   # from the purchase_agreement extractor's earnest_money_amount field — POPULATED + clean (a number: 5000.0 on
   # LF-6T3N). ⚠️ NOT an unblock on its own: PC-5 also needs contract.emd_sourced (the sourced-debit AI match
   # tying AS-2), so the rule stays blocked. Was a vocabulary orphan (fact_tags, no producer); this gives it one.
-  contract.emd_amount: {mode: parsed, subject: document, data: earnest_money_amount}
+  # document_type-SCOPED to purchase_agreement (LP-454 review): earnest_money_amount is ALSO emitted by the
+  # earnest_money_receipt extractor, so an unscoped tag would mis-materialise the receipt's amount here — this
+  # tag is the CONTRACT's stated EMD (a receipt-EMD tag, if a rule ever needs it, is its own declaration).
+  contract.emd_amount: {mode: parsed, subject: document, data: earnest_money_amount, document_type: purchase_agreement}
   # LP-452 (step D.1) — the loan's subject-property TYPE, promoted from the MISMO property.type fact (the
   # authoritative loan-level source), exactly like program.type reads loan.program / property.purchase_price
   # reads property.purchase_price. Gates five rules (CO-1/CO-3/CO-5/IH-7/PR-3) that must know condo vs SFR vs
@@ -260,7 +263,11 @@ tags:
   # extractor's report_date field — POPULATED + clean (a date: 2026-07-17 on LF-96SV). ⚠️ NOT an unblock on its
   # own: CR-13 also needs a Priya validity WINDOW + a derived date-vs-today (closing − report_date), so the rule
   # stays blocked. Was a vocabulary orphan (fact_tags, no producer); this gives it one.
-  credit.report_date: {mode: parsed, subject: document, data: report_date}
+  # document_type-SCOPED to credit_report (LP-454 review): report_date is ALSO emitted by appraisal /
+  # termite_completion / property_profile_* — an unscoped tag mis-materialised THEIR dates here (an appraisal's
+  # date read as a credit pull date). As a PARSED tag it is the date or ABSENT when no credit report is present
+  # (never the literal "unknown" the vocabulary lists — a gated rule reads couldnt_check on the absence).
+  credit.report_date: {mode: parsed, subject: document, data: report_date, document_type: credit_report}
 
 # --- AI GROUPS — one structuring pass each: a subject, the tags it co-produces, a context-builder
 #     key, and the system prompt (the perceiver question, as DATA). The model answers per subject
