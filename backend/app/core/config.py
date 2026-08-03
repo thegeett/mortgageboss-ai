@@ -7,15 +7,30 @@ from pydantic import (
     Field,
     PostgresDsn,
     RedisDsn,
+    ValidationInfo,
     computed_field,
     field_validator,
     model_validator,
 )
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-#: Fallback for a blank ``S3_REGION``. Named rather than inlined so the field default
-#: and the blank-normalizing validator below cannot drift apart.
 _DEFAULT_S3_REGION = "us-east-1"
+_DEFAULT_S3_PRESIGN_EXPIRY_SECONDS = 900  # 15 minutes
+
+#: S3 settings where a blank ``.env`` value means "unset — use this default", rather than
+#: ``None`` (see ``Settings._blank_s3_str_is_none`` for the optional-string half). These
+#: are the fields with a real default and a non-optional annotation, so ``""`` is neither
+#: a usable value nor an acceptable one.
+#:
+#: A mapping, not a hand-kept list of validators, because the recurring defect here has
+#: been THE FIELD SOMEONE FORGOT: ``s3_region`` was left out of the string normalizer, and
+#: ``s3_presign_expiry_seconds`` was then the only S3 setting left with no normalizer at
+#: all. The validator below registers itself from these keys, so adding an entry is the
+#: whole change — there is no second place to remember.
+_BLANK_S3_MEANS_DEFAULT: dict[str, str | int] = {
+    "s3_region": _DEFAULT_S3_REGION,
+    "s3_presign_expiry_seconds": _DEFAULT_S3_PRESIGN_EXPIRY_SECONDS,
+}
 
 
 class Settings(BaseSettings):
@@ -132,7 +147,7 @@ class Settings(BaseSettings):
     s3_region: str = _DEFAULT_S3_REGION
     # Set for MinIO/LocalStack; None means the real AWS endpoint for the region.
     s3_endpoint_url: str | None = None
-    s3_presign_expiry_seconds: int = 900  # 15 minutes
+    s3_presign_expiry_seconds: int = _DEFAULT_S3_PRESIGN_EXPIRY_SECONDS
     # When set, objects are written with SSE-KMS using this key; otherwise SSE-S3.
     s3_kms_key_id: str | None = None
 
@@ -187,23 +202,33 @@ class Settings(BaseSettings):
             return None
         return value
 
-    @field_validator("s3_region", mode="before")
+    @field_validator(*_BLANK_S3_MEANS_DEFAULT, mode="before")
     @classmethod
-    def _blank_s3_region_is_the_default(cls, value: object) -> object:
-        """Treat a blank ``S3_REGION`` as unset, meaning the default (C0).
+    def _blank_s3_value_is_the_default(cls, value: object, info: ValidationInfo) -> object:
+        """Treat a blank S3 setting with a real default as unset (C0).
 
-        Separate from :meth:`_blank_s3_str_is_none` because region differs in kind: it
-        is a plain ``str`` with a safe default, so "unset" here resolves to that default
-        rather than to ``None`` (which the annotation would reject).
+        Separate from :meth:`_blank_s3_str_is_none` because these fields differ in kind:
+        each has a safe default and a non-optional annotation, so "unset" resolves to that
+        default rather than to ``None`` (which the annotation would reject).
 
-        Without this, a blank ``S3_REGION=`` — which ``.env.example`` invites, heading
-        the S3 block with "Leave blank for local dev" — validates as ``""`` and reaches
-        botocore as an empty region name, failing at the first S3 call. That is exactly
-        the late-failure mode :meth:`_require_s3_bucket_when_s3` exists to prevent, so
-        it must not be reintroduced one field over.
+        The two failure modes this closes are opposite in timing but identical in cause —
+        ``.env.example`` heads the S3 block with "Leave blank for local dev", and a blank
+        value was not honoured:
+
+        * ``S3_REGION=`` validated as ``""`` and reached botocore as an empty region name,
+          failing at the FIRST S3 CALL — the late failure
+          :meth:`_require_s3_bucket_when_s3` exists to prevent.
+        * ``S3_PRESIGN_EXPIRY_SECONDS=`` raised ``int_parsing`` at construction and refused
+          to start the app **even under** ``STORAGE_BACKEND=local``, where the value is
+          never read — a boot failure over a setting the process does not use.
+
+        The validator registers itself from :data:`_BLANK_S3_MEANS_DEFAULT`, so a new
+        field is covered by adding one entry there and nothing else.
         """
         if isinstance(value, str) and not value.strip():
-            return _DEFAULT_S3_REGION
+            # ``field_name`` is always populated for a field validator; the empty-string
+            # fallback raises KeyError rather than silently passing ``""`` through.
+            return _BLANK_S3_MEANS_DEFAULT[info.field_name or ""]
         return value
 
     @model_validator(mode="after")

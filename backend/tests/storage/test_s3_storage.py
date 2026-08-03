@@ -20,11 +20,11 @@ orphan every stored document.
 """
 
 from pathlib import Path
-from typing import Any
+from typing import Any, get_args
 from uuid import UUID
 
 import pytest
-from app.core.config import Settings, settings
+from app.core.config import _BLANK_S3_MEANS_DEFAULT, Settings, settings
 from app.storage import get_storage_backend
 from app.storage.base import StorageError
 from app.storage.local import LocalStorageBackend
@@ -540,6 +540,11 @@ def _settings_kwargs(**overrides: Any) -> dict[str, Any]:
     return base
 
 
+def _is_optional(annotation: Any) -> bool:
+    """True for ``X | None`` — i.e. a setting whose 'unset' is expressible as None."""
+    return type(None) in get_args(annotation)
+
+
 def test_settings_reject_s3_backend_without_a_bucket() -> None:
     """Misconfiguration must fail at STARTUP, not at the first document read."""
     with pytest.raises(ValidationError, match="S3_BUCKET is required"):
@@ -568,6 +573,51 @@ def test_blank_optional_s3_strings_normalize_to_none() -> None:
     cfg = Settings(**_settings_kwargs(s3_endpoint_url="", s3_kms_key_id="  "))
     assert cfg.s3_endpoint_url is None
     assert cfg.s3_kms_key_id is None
+
+
+def test_blank_s3_presign_expiry_falls_back_to_the_default() -> None:
+    """A blank S3_PRESIGN_EXPIRY_SECONDS= must not refuse to start the app.
+
+    This one failed EARLIER than the region case, not later: ``int_parsing`` fired at
+    Settings construction, so a blank line broke boot even under STORAGE_BACKEND=local,
+    where the value is never read.
+    """
+    cfg = Settings(**_settings_kwargs(s3_presign_expiry_seconds=""))
+    assert cfg.s3_presign_expiry_seconds == 900
+
+
+def test_blank_s3_presign_expiry_does_not_break_the_local_backend() -> None:
+    """The sharpest form: an unused S3 setting must never block a local-backend boot."""
+    cfg = Settings(**_settings_kwargs(storage_backend="local", s3_presign_expiry_seconds="   "))
+    assert cfg.storage_backend == "local"
+    assert cfg.s3_presign_expiry_seconds == 900
+
+
+def test_explicit_s3_presign_expiry_is_untouched() -> None:
+    """The normalizer must not override a real value — including from a string env var."""
+    assert (
+        Settings(**_settings_kwargs(s3_presign_expiry_seconds="60")).s3_presign_expiry_seconds == 60
+    )
+    assert (
+        Settings(**_settings_kwargs(s3_presign_expiry_seconds=60)).s3_presign_expiry_seconds == 60
+    )
+
+
+def test_every_defaulted_s3_setting_has_a_blank_normalizer() -> None:
+    """The structural guard: the recurring defect here has been the field left out.
+
+    Any non-optional S3 setting with a default must appear in _BLANK_S3_MEANS_DEFAULT,
+    or a blank line in `.env` breaks it the way S3_REGION and S3_PRESIGN_EXPIRY_SECONDS
+    each did in turn.
+    """
+    defaulted = {
+        name
+        for name, field in Settings.model_fields.items()
+        if name.startswith("s3_") and not _is_optional(field.annotation)
+    }
+    assert defaulted == set(_BLANK_S3_MEANS_DEFAULT), (
+        "an S3 setting with a default is missing from _BLANK_S3_MEANS_DEFAULT"
+    )
 
 
 def test_blank_s3_region_falls_back_to_the_default() -> None:

@@ -427,11 +427,18 @@ something broken, and each cost real reasoning to reach.
 
 ---
 
-## Follow-up — three review findings fixed
+## Follow-up — four review findings fixed, over two rounds
 
-A code review of the branch raised three defects in this commit. All three shared one shape:
+Two code reviews of the branch raised four defects in this commit. Three shared one shape:
 **a deployment-scoped fault disguised as an ordinary, per-document outcome** — the exact
 late-failure mode the startup bucket validator was written to prevent, reintroduced elsewhere.
+The fourth (§3) is its mirror image: a boot refused over a setting the process never reads.
+
+The second review re-examined `s3.py` directly and filed **nothing** against it, confirming
+`generate_presigned_url` is genuinely a coroutine in the pinned aiobotocore, that `ClientError`
+and `BotoCoreError` are siblings so the two-clause mapping is both required and correctly
+ordered, that the body is read inside the client context, and that `NoSuchBucket` now falls
+through to a hard raise.
 
 ### 1. `NoSuchBucket` classified as "object missing" (`s3.py`)
 
@@ -457,31 +464,55 @@ Added an `except BotoCoreError` clause to all four operations. In `delete` it de
 **not** take the idempotent path: an unanswered call is no evidence the object is absent, so
 reporting success there would be a silent no-op.
 
-### 3. `s3_region` omitted from the blank-string normalizer (`config.py`)
+### 3. Blank values not honoured on the two defaulted S3 settings (`config.py`)
 
 `_blank_s3_str_is_none` covered `s3_bucket`, `s3_endpoint_url` and `s3_kms_key_id` but not
 `s3_region`, while `.env.example` heads the block with "Leave blank for local dev". A blank
 `S3_REGION=` validated as `""` and reached botocore as an invalid region name at the first S3
 call.
 
-Region differs in kind from the other three — it is a plain `str` with a safe default — so it
-gets its own validator resolving blank to the default rather than to `None` (which the
-annotation would reject). `_DEFAULT_S3_REGION` is now named so the field default and the
-validator cannot drift.
+A follow-up review then caught the field that fix left behind: `s3_presign_expiry_seconds`
+was the only S3 setting with no normalizer at all, and it failed *earlier* rather than later —
+a blank `S3_PRESIGN_EXPIRY_SECONDS=` raised `int_parsing` at `Settings` construction and
+refused to start the app **even under `STORAGE_BACKEND=local`**, where the value is never
+read. Verified by probing both backends against the pre-fix commit:
+
+```
+PRE-FIX,  blank S3_PRESIGN_EXPIRY_SECONDS=
+  storage_backend=local: REFUSED TO START -> ValidationError: s3_presign_expiry_seconds
+  storage_backend=s3:    REFUSED TO START -> ValidationError: s3_presign_expiry_seconds
+POST-FIX
+  storage_backend=local: OK -> expiry=900
+  storage_backend=s3:    OK -> expiry=900
+```
+
+Both are fixed by one validator, because the recurring defect in this area has been **the
+field someone forgot** — three times now. These fields differ in kind from the optional
+strings: each has a safe default and a non-optional annotation, so "unset" resolves to the
+default rather than to `None` (which the annotation would reject). The validator registers
+itself from `_BLANK_S3_MEANS_DEFAULT` via `@field_validator(*_BLANK_S3_MEANS_DEFAULT)`, so
+its field list *is* the registry — adding an entry is the whole change, with no second place
+to remember. `_DEFAULT_S3_REGION` and `_DEFAULT_S3_PRESIGN_EXPIRY_SECONDS` are named so a
+field default and its normalizer cannot drift.
+
+`test_every_defaulted_s3_setting_has_a_blank_normalizer` closes the loop structurally: it
+reflects over `Settings.model_fields` and asserts every non-optional `s3_*` field appears in
+the registry, so a fourth omission fails the suite rather than shipping.
 
 ### Verification
 
-Ten tests added. Nine were confirmed to **fail against the pre-fix code** and pass after; the
-tenth (`test_explicit_s3_region_is_untouched`) passes both ways by design, guarding against
-over-correcting a real region to the default.
+Fourteen tests added across the two rounds. Every one that targets a defect was confirmed to
+**fail against the pre-fix code**; two (`test_explicit_s3_region_is_untouched`,
+`test_explicit_s3_presign_expiry_is_untouched`) pass both ways by design, guarding against
+over-correcting a real configured value to the default.
 
-Full gate green: **2954 passed, 5 skipped, 1 xfailed** (up from 2944 — the ten new tests),
-`ruff check` clean, `ruff format` clean on 650 files, `mypy` strict clean on 297 source files.
+Full gate green: **2958 passed, 5 skipped, 1 xfailed** (up from 2944), `ruff check` clean,
+`ruff format` clean on 650 files, `mypy` strict clean on 297 source files.
 
 No ADR: these are defect fixes within ADR-342's stated intent, not new decisions.
 
-**Not fixed here** — the review raised thirteen findings in total; the other ten sit in
-*earlier* branch commits and remain open: `derived.py` ×5 (the four-finding AS-8 continuity
-cluster plus the IN-6 abstention), `check-stack.sh` ×2, `seed-from-main.sh` ×2, and `dti.py` ×1
-(the HOA gate reaching only the `/dti` display, not the snapshot or AS-4 reserves). Those are
-out of this commit's scope.
+**Not fixed here.** Both reviews raised findings against *earlier* branch commits, all still
+open and out of this commit's scope — chiefly the `derived.py` bank-statement continuity
+cluster (AS-8), the `dti.py` HOA gate reaching only the `/dti` display rather than the snapshot
+or AS-4 reserves, `eval/stubs.py` converting abstention into a fabricated `"no"`, and the
+`check-stack.sh` / `seed-from-main.sh` / `.env.stack.example` infra items from A1.
