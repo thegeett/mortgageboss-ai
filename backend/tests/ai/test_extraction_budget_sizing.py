@@ -121,14 +121,20 @@ def test_unbounded_types_raised_to_8192() -> None:
     assert investment_account._MAX_TOKENS == 8192  # confirmed live failure on LF-6T3N
     assert retirement_account._MAX_TOKENS == 8192  # same holdings shape
     assert profit_and_loss._MAX_TOKENS == 8192
-    assert purchase_agreement._MAX_TOKENS == 8192
+
+
+def test_two_list_types_use_the_16384_tier() -> None:
+    # LP-446 review: a type with TWO nested lists sits at the ≥2-list tier (16384), like tax_return —
+    # 8192 under-budgeted it below the sizing rule. purchase_agreement (addenda + contingencies) and
+    # pay_stub (earnings_lines + deduction_lines) each carry two lists on top of a verbose catch-all.
+    assert purchase_agreement._MAX_TOKENS == 16384
+    assert pay_stub._MAX_TOKENS == 16384
 
 
 def test_correctly_sized_types_are_unchanged_no_blanket_raise() -> None:
     # Already right-sized (bumped earlier) — left as-is.
     assert tax_return._MAX_TOKENS == 16384
     assert bank_statement._MAX_TOKENS == 8192
-    assert pay_stub._MAX_TOKENS == 8192  # LP-102
     assert divorce_decree._MAX_TOKENS == 6144
     # Bounded / semi-bounded fixed-form types — small budget is CORRECT; the LP-102 guard backstops
     # any rare overflow. NOT preemptively raised (that removes the size-expectation signal).
@@ -220,7 +226,7 @@ async def test_purchase_agreement_dense_extracts_fully(monkeypatch: pytest.Monke
     result = await purchase_agreement.extract_purchase_agreement(_PDF, "application/pdf")
     assert result.status == ExtractionStatus.SUCCEEDED
     assert result.data.sales_price.value is not None
-    assert mock.await_args_list[0].kwargs["max_tokens"] == 8192
+    assert mock.await_args_list[0].kwargs["max_tokens"] == 16384  # LP-446: 2 lists → ≥2-list tier
 
 
 # --------------------------------------------------------------------------- #

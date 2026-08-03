@@ -69,8 +69,10 @@ _SUPPORTED_MEDIA_TYPES = frozenset({"application/pdf", "image/jpeg", "image/png"
 # A pay stub enumerates MANY line items (current + YTD for every earning/deduction/tax), each
 # emitted with a verbatim snippet — a long list = long JSON (as with bank_statement). 4096 was too
 # small: the response truncated mid-JSON → silently failed to parse → empty NEEDS_REVIEW (LP-102).
-# Right-sized to 8192; the shared truncation guard (app.ai.extraction.model_call) covers overflow.
-_MAX_TOKENS = 8192
+# LP-446 added TWO nested lists (earnings_lines + deduction_lines) on top of the verbose catch-all →
+# the ≥2-nested-list tier of the sizing rule (16384), matching every other 2+-list type. The shared
+# truncation guard (app.ai.extraction.model_call) still backstops any overflow.
+_MAX_TOKENS = 16384
 
 
 class PayStubExtraction(BaseModel):

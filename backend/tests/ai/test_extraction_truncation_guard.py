@@ -145,18 +145,19 @@ async def test_ai_error_is_not_retried(monkeypatch: pytest.MonkeyPatch) -> None:
 # --------------------------------------------------------------------------- #
 
 
-def test_pay_stub_budget_is_8192() -> None:
-    assert pay_stub_module._MAX_TOKENS == 8192
+def test_pay_stub_budget_is_16384() -> None:
+    # LP-446 added a 2nd nested list (earnings_lines + deduction_lines) → the ≥2-list tier (16384).
+    assert pay_stub_module._MAX_TOKENS == 16384
 
 
-async def test_pay_stub_first_attempt_uses_8192_and_succeeds(
+async def test_pay_stub_first_attempt_uses_its_budget_and_succeeds(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     mock = _patch_complete(monkeypatch, side_effect=[_resp(VALID_PAY_STUB_JSON)])
     result = await pay_stub_module.extract_pay_stub(_PDF, "application/pdf")
     assert result.status == ExtractionStatus.SUCCEEDED
     assert result.data.employer_name.value == "ACME Corp"  # fields populate — no longer empty
-    assert mock.await_args_list[0].kwargs["max_tokens"] == 8192
+    assert mock.await_args_list[0].kwargs["max_tokens"] == 16384
 
 
 # --------------------------------------------------------------------------- #

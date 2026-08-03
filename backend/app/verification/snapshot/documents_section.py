@@ -1315,7 +1315,14 @@ def _list_field(raw: Any) -> Field:
 
 def _list_row_fields(row: dict[str, Any], spec: ListSpec) -> dict[str, Field]:
     """One raw extraction row → its ``{name: Field}`` map (declared + derived + redacted)."""
-    fields: dict[str, Field] = {name: _list_field(row.get(name)) for name in spec.fields}
+    # ``source`` is the RESERVED per-row provenance key (the bare-row bridge stores {page,snippet} under
+    # it), never a data field — yet 27 specs mistakenly declared a ``source`` field ("provenance wrapper")
+    # that carries through to their ListSpecs. Skip it here so no list surfaces a junk ``source`` Field
+    # regardless of the declaration (LP-446 review). A follow-up sweep should drop it from the specs +
+    # regenerate so the extractors also stop suppressing real provenance.
+    fields: dict[str, Field] = {
+        name: _list_field(row.get(name)) for name in spec.fields if name != "source"
+    }
     for dspec in spec.derived:
         fields[dspec.field] = _derive_field(row, dspec)
     for name in spec.redact:

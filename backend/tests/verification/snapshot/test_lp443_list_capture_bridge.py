@@ -156,6 +156,22 @@ def test_appraisal_captures_list_rows() -> None:
     assert dumped["sale_price"] == "440000" and dumped["comp_number"] == 1
 
 
+def test_reserved_source_field_is_never_surfaced() -> None:
+    # LP-446 review: 27 specs mistakenly declared a `source` row field (the reserved per-row provenance
+    # key). The snapshot must NEVER surface it as a data Field, regardless of the ListSpec declaration —
+    # else every such list carries a junk `source` Field holding the provenance value.
+    spec = ds.ListSpec(name="probe", fields=("amount", "source"))
+    fields = ds._list_row_fields({"amount": "100.00", "source": "junk-or-provenance"}, spec)
+    assert "amount" in fields and fields["amount"].value == "100.00"
+    assert "source" not in fields  # reserved key skipped
+    # And on a real source-bearing shipping list (security_positions), no `source` Field surfaces.
+    real = ds._list_row_fields(
+        {"description": "VANGUARD 500", "market_value": "1000", "source": "x"},
+        ds._SECURITY_POSITIONS_LIST,
+    )
+    assert "source" not in real and real["description"].value == "VANGUARD 500"
+
+
 def test_list_row_pii_has_a_redact_backstop() -> None:
     # LP-443 review: list-row PII is not _PII_FIELDS-routed, so a model masking failure would persist a
     # full account number / TIN. Every list with a PII-shaped row field declares it in `redact`, so the
