@@ -26,3 +26,9 @@ if [ "$HOST_PORT" != "$EXPECTED_PORT" ]; then
   exit 1
 fi
 echo "OK: ${STACK:-mbai-bedrock}-postgres published on $HOST_PORT."
+
+DB_PORT=$(grep -E '^DATABASE_URL=' backend/.env | sed -E 's/.*@[^:]+:([0-9]+)\/.*/\1/')
+if [ "$DB_PORT" != "$EXPECTED_PORT" ]; then
+  echo "REFUSING: DATABASE_URL points at port $DB_PORT, expected $EXPECTED_PORT." >&2
+  exit 1
+fi
