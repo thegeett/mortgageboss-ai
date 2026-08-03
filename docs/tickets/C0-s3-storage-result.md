@@ -424,3 +424,64 @@ something broken, and each cost real reasoning to reach.
 - **The `seed_dev_data.py` filesystem assumption** — reported above, deliberately not fixed.
 - **The flaky `test_inbox_token_is_independent_of_display_id`** — reported above, deliberately
   not fixed.
+
+---
+
+## Follow-up — three review findings fixed
+
+A code review of the branch raised three defects in this commit. All three shared one shape:
+**a deployment-scoped fault disguised as an ordinary, per-document outcome** — the exact
+late-failure mode the startup bucket validator was written to prevent, reintroduced elsewhere.
+
+### 1. `NoSuchBucket` classified as "object missing" (`s3.py`)
+
+`_MISSING_CODES` contained `NoSuchBucket`. A typo'd `S3_BUCKET`, or a bucket in another
+account, therefore made every `read()` raise `StorageError("No stored file at …")` —
+indistinguishable from a genuinely deleted document — and made every `delete()` return the
+idempotent success **having deleted nothing**. One config error would read as per-document
+data loss across an entire tenant.
+
+Removed from the set, with the reasoning recorded at the definition. Bucket-level errors now
+fall through to the generic branch and raise.
+
+### 2. Only `ClientError` mapped to `StorageError` (`s3.py`)
+
+`ClientError` and `BotoCoreError` are **siblings** — both derive straight from `Exception` —
+so catching the first does not catch the second. `NoCredentialsError`,
+`EndpointConnectionError`, `ConnectTimeoutError` and `ResponseStreamingError` (a reset during
+`await response["Body"].read()`) all escaped raw, against a module docstring and a test
+asserting botocore never escapes. That set is precisely the Fargate day-one list: task role not
+yet attached, NAT/VPC-endpoint hiccup.
+
+Added an `except BotoCoreError` clause to all four operations. In `delete` it deliberately does
+**not** take the idempotent path: an unanswered call is no evidence the object is absent, so
+reporting success there would be a silent no-op.
+
+### 3. `s3_region` omitted from the blank-string normalizer (`config.py`)
+
+`_blank_s3_str_is_none` covered `s3_bucket`, `s3_endpoint_url` and `s3_kms_key_id` but not
+`s3_region`, while `.env.example` heads the block with "Leave blank for local dev". A blank
+`S3_REGION=` validated as `""` and reached botocore as an invalid region name at the first S3
+call.
+
+Region differs in kind from the other three — it is a plain `str` with a safe default — so it
+gets its own validator resolving blank to the default rather than to `None` (which the
+annotation would reject). `_DEFAULT_S3_REGION` is now named so the field default and the
+validator cannot drift.
+
+### Verification
+
+Ten tests added. Nine were confirmed to **fail against the pre-fix code** and pass after; the
+tenth (`test_explicit_s3_region_is_untouched`) passes both ways by design, guarding against
+over-correcting a real region to the default.
+
+Full gate green: **2954 passed, 5 skipped, 1 xfailed** (up from 2944 — the ten new tests),
+`ruff check` clean, `ruff format` clean on 650 files, `mypy` strict clean on 297 source files.
+
+No ADR: these are defect fixes within ADR-342's stated intent, not new decisions.
+
+**Not fixed here** — the review raised thirteen findings in total; the other ten sit in
+*earlier* branch commits and remain open: `derived.py` ×5 (the four-finding AS-8 continuity
+cluster plus the IN-6 abstention), `check-stack.sh` ×2, `seed-from-main.sh` ×2, and `dti.py` ×1
+(the HOA gate reaching only the `/dti` display, not the snapshot or AS-4 reserves). Those are
+out of this commit's scope.

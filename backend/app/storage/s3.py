@@ -22,6 +22,24 @@ Every object is written encrypted at rest: **SSE-KMS** with ``s3_kms_key_id`` wh
 that setting is present, otherwise **SSE-S3** (``AES256``). There is no unencrypted
 path — the ``ServerSideEncryption`` parameter is always sent.
 
+## Error mapping — BOTH botocore exception families
+
+Nothing from botocore escapes this module; every failure surfaces as
+:class:`~app.storage.base.StorageError`. That takes two ``except`` clauses per
+operation, because botocore's two error families are **siblings, not parent and
+child** — ``ClientError`` and ``BotoCoreError`` each derive straight from
+``Exception``, so catching one does not catch the other:
+
+* ``ClientError`` — the service answered, with an error (``NoSuchKey``,
+  ``AccessDenied``). It carries a code, so it can be classified; see ``_MISSING_CODES``.
+* ``BotoCoreError`` — the call never got a usable answer: ``NoCredentialsError``,
+  ``EndpointConnectionError``, ``ConnectTimeoutError``, ``ResponseStreamingError``
+  (a reset mid-``Body.read()``). There is no code to classify, so these are never
+  "missing" — always a hard failure.
+
+The second family is not hypothetical; it is the Fargate day-one set: the task role
+not yet attached, a NAT/VPC-endpoint hiccup.
+
 ## Client lifecycle — a SESSION on the instance, a CLIENT per operation
 
 This is the deliberate choice, and the reasoning matters because the obvious
@@ -68,7 +86,7 @@ from uuid import UUID
 
 import aioboto3
 import structlog
-from botocore.exceptions import ClientError
+from botocore.exceptions import BotoCoreError, ClientError
 
 from app.storage.base import StorageBackend, StorageError, build_storage_path
 
@@ -91,7 +109,16 @@ _DEFAULT_CONTENT_TYPE = "application/octet-stream"
 #: Botocore error codes meaning "the object is not there". ``NoSuchKey`` comes from
 #: GetObject; ``404`` / ``NotFound`` appear on HeadObject and on some S3-compatible
 #: implementations. All map to StorageError, never a botocore exception.
-_MISSING_CODES = frozenset({"NoSuchKey", "NoSuchBucket", "404", "NotFound"})
+#:
+#: ``NoSuchBucket`` is deliberately NOT here. It is an object-scoped-looking code for a
+#: deployment-scoped fault: a typo'd ``S3_BUCKET``, or a bucket in another account, makes
+#: EVERY key report the same way a genuinely deleted document would — and would make
+#: :meth:`S3StorageBackend.delete` return the idempotent "already gone" success having
+#: deleted nothing. Treating it as missing turns one config error into an apparent
+#: per-document data-loss story across the whole tenant, which is precisely what the
+#: startup bucket validator exists to prevent. It falls through to the generic branch
+#: and raises, loudly.
+_MISSING_CODES = frozenset({"NoSuchKey", "404", "NotFound"})
 
 
 def _content_type_for(storage_path: str) -> str:
@@ -158,6 +185,9 @@ class S3StorageBackend(StorageBackend):
             # Metadata only — the key is server-controlled UUIDs, never document bytes.
             logger.warning("s3_save_failed", key=storage_path, error_code=_error_code(exc))
             raise StorageError(f"Failed to store object at {storage_path!r}") from exc
+        except BotoCoreError as exc:
+            logger.warning("s3_save_failed", key=storage_path, error_type=type(exc).__name__)
+            raise StorageError(f"Failed to store object at {storage_path!r}") from exc
         return storage_path
 
     async def read(self, storage_path: str) -> bytes:
@@ -173,6 +203,10 @@ class S3StorageBackend(StorageBackend):
                 raise StorageError(f"No stored file at {storage_path!r}") from exc
             logger.warning("s3_read_failed", key=storage_path, error_code=code)
             raise StorageError(f"Failed to read object at {storage_path!r}") from exc
+        except BotoCoreError as exc:
+            # Includes a stream reset during ``Body.read()`` above (ResponseStreamingError).
+            logger.warning("s3_read_failed", key=storage_path, error_type=type(exc).__name__)
+            raise StorageError(f"Failed to read object at {storage_path!r}") from exc
 
     async def delete(self, storage_path: str) -> None:
         # IDEMPOTENT, matching local.py's unlink(missing_ok=True): S3's DeleteObject
@@ -186,6 +220,11 @@ class S3StorageBackend(StorageBackend):
             if code in _MISSING_CODES:
                 return  # already gone — the idempotent outcome
             logger.warning("s3_delete_failed", key=storage_path, error_code=code)
+            raise StorageError(f"Failed to delete object at {storage_path!r}") from exc
+        except BotoCoreError as exc:
+            # Never the idempotent "already gone" path: an unanswered call is no evidence
+            # the object is absent, so reporting success here would be a silent no-op.
+            logger.warning("s3_delete_failed", key=storage_path, error_type=type(exc).__name__)
             raise StorageError(f"Failed to delete object at {storage_path!r}") from exc
 
     async def get_url(self, storage_path: str) -> str | None:
@@ -206,6 +245,11 @@ class S3StorageBackend(StorageBackend):
                 return url
         except ClientError as exc:
             logger.warning("s3_presign_failed", key=storage_path, error_code=_error_code(exc))
+            raise StorageError(f"Failed to presign {storage_path!r}") from exc
+        except BotoCoreError as exc:
+            # Signing is local, so this is the credential-resolution failure
+            # (NoCredentialsError) rather than anything network-shaped.
+            logger.warning("s3_presign_failed", key=storage_path, error_type=type(exc).__name__)
             raise StorageError(f"Failed to presign {storage_path!r}") from exc
 
 

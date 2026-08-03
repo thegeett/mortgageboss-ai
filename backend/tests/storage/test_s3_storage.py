@@ -29,7 +29,12 @@ from app.storage import get_storage_backend
 from app.storage.base import StorageError
 from app.storage.local import LocalStorageBackend
 from app.storage.s3 import S3StorageBackend
-from botocore.exceptions import ClientError
+from botocore.exceptions import (
+    ClientError,
+    EndpointConnectionError,
+    NoCredentialsError,
+    ResponseStreamingError,
+)
 from pydantic import ValidationError
 
 # The same stable UUIDs test_local_storage.py uses, so the parity assertion below
@@ -280,6 +285,72 @@ async def test_read_non_missing_client_error_also_becomes_storage_error() -> Non
         await backend.read("a/b/c.pdf")
 
 
+async def test_read_no_such_bucket_is_a_hard_failure_not_a_missing_object() -> None:
+    """A typo'd S3_BUCKET must not read as 'this document was deleted'.
+
+    NoSuchBucket is deployment-scoped but arrives per-key, so classifying it as missing
+    would report one config error as data loss on every document in the tenant.
+    """
+    backend, client, _ = make_backend()
+
+    async def _no_bucket(**_kwargs: Any) -> dict[str, Any]:
+        raise _client_error("NoSuchBucket", "GetObject")
+
+    client.get_object = _no_bucket  # type: ignore[method-assign]
+    with pytest.raises(StorageError, match="Failed to read") as exc_info:
+        await backend.read("a/b/c.pdf")
+    assert "No stored file" not in str(exc_info.value)
+
+
+async def test_read_maps_botocore_errors_that_are_not_client_errors() -> None:
+    """BotoCoreError is a SIBLING of ClientError, so it needs its own except clause.
+
+    EndpointConnectionError is the Fargate day-one case: a NAT/VPC-endpoint hiccup.
+    """
+    backend, client, _ = make_backend()
+
+    async def _unreachable(**_kwargs: Any) -> dict[str, Any]:
+        raise EndpointConnectionError(endpoint_url="https://s3.us-east-1.amazonaws.com")
+
+    client.get_object = _unreachable  # type: ignore[method-assign]
+    with pytest.raises(StorageError, match="Failed to read"):
+        await backend.read("a/b/c.pdf")
+
+
+async def test_read_maps_a_stream_reset_during_body_read() -> None:
+    """The failure that happens AFTER get_object returns, inside ``Body.read()``."""
+    backend, client, _ = make_backend()
+
+    class _BrokenBody:
+        async def read(self) -> bytes:
+            raise ResponseStreamingError(error="connection reset")
+
+    async def _streaming_boom(**_kwargs: Any) -> dict[str, Any]:
+        return {"Body": _BrokenBody()}
+
+    client.get_object = _streaming_boom  # type: ignore[method-assign]
+    with pytest.raises(StorageError, match="Failed to read"):
+        await backend.read("a/b/c.pdf")
+
+
+async def test_save_maps_missing_credentials_to_storage_error() -> None:
+    """The task role not yet attached must surface as StorageError, not NoCredentialsError."""
+    backend, client, _ = make_backend()
+
+    async def _no_creds(**_kwargs: Any) -> dict[str, Any]:
+        raise NoCredentialsError()
+
+    client.put_object = _no_creds  # type: ignore[method-assign]
+    with pytest.raises(StorageError, match="Failed to store"):
+        await backend.save(
+            company_id=COMPANY_ID,
+            file_id=FILE_ID,
+            document_id=DOCUMENT_ID,
+            filename="a.pdf",
+            content=b"x",
+        )
+
+
 # --------------------------------------------------------------------------- #
 # delete — idempotent, matching local.py's unlink(missing_ok=True)
 # --------------------------------------------------------------------------- #
@@ -326,6 +397,34 @@ async def test_delete_surfaces_a_real_failure() -> None:
         await backend.delete("a/b/c.pdf")
 
 
+async def test_delete_no_such_bucket_does_not_report_a_phantom_success() -> None:
+    """The worst shape of the NoSuchBucket bug: delete() claiming it deleted something.
+
+    Idempotency means 'the object is gone', which a bucket-level error does not
+    establish — so this must raise rather than take the 'already gone' path.
+    """
+    backend, client, _ = make_backend()
+
+    async def _no_bucket(**_kwargs: Any) -> dict[str, Any]:
+        raise _client_error("NoSuchBucket", "DeleteObject")
+
+    client.delete_object = _no_bucket  # type: ignore[method-assign]
+    with pytest.raises(StorageError, match="Failed to delete"):
+        await backend.delete("a/b/c.pdf")
+
+
+async def test_delete_does_not_swallow_an_unanswered_call() -> None:
+    """An unreachable endpoint is no evidence of absence, so it must not look idempotent."""
+    backend, client, _ = make_backend()
+
+    async def _unreachable(**_kwargs: Any) -> dict[str, Any]:
+        raise EndpointConnectionError(endpoint_url="https://s3.us-east-1.amazonaws.com")
+
+    client.delete_object = _unreachable  # type: ignore[method-assign]
+    with pytest.raises(StorageError, match="Failed to delete"):
+        await backend.delete("a/b/c.pdf")
+
+
 # --------------------------------------------------------------------------- #
 # get_url — the one capability gain over local
 # --------------------------------------------------------------------------- #
@@ -347,6 +446,18 @@ async def test_get_url_uses_the_configured_expiry() -> None:
     await backend.get_url("a/b/c.pdf")
     assert client.presign_calls[0]["expires"] == 60
     assert client.presign_calls[0]["op"] == "get_object"
+
+
+async def test_get_url_maps_missing_credentials_to_storage_error() -> None:
+    """Signing is local, so the realistic failure here is credential resolution."""
+    backend, client, _ = make_backend()
+
+    async def _no_creds(operation: str, *, Params: dict[str, Any], ExpiresIn: int) -> str:
+        raise NoCredentialsError()
+
+    client.generate_presigned_url = _no_creds  # type: ignore[method-assign]
+    with pytest.raises(StorageError, match="Failed to presign"):
+        await backend.get_url("a/b/c.pdf")
 
 
 async def test_get_url_differs_from_local_which_returns_none(tmp_path: Path) -> None:
@@ -457,6 +568,29 @@ def test_blank_optional_s3_strings_normalize_to_none() -> None:
     cfg = Settings(**_settings_kwargs(s3_endpoint_url="", s3_kms_key_id="  "))
     assert cfg.s3_endpoint_url is None
     assert cfg.s3_kms_key_id is None
+
+
+def test_blank_s3_region_falls_back_to_the_default() -> None:
+    """`.env.example` says 'leave blank for local dev', so a blank region must not be ''.
+
+    An empty region reaches botocore as an invalid region name and fails at the FIRST S3
+    call — the late-failure mode the startup bucket check exists to prevent.
+    """
+    cfg = Settings(**_settings_kwargs(s3_region=""))
+    assert cfg.s3_region == "us-east-1"
+    assert Settings(**_settings_kwargs(s3_region="   ")).s3_region == "us-east-1"
+
+
+def test_explicit_s3_region_is_untouched() -> None:
+    """The blank-normalizer must not override a real value."""
+    assert Settings(**_settings_kwargs(s3_region="eu-west-2")).s3_region == "eu-west-2"
+
+
+def test_s3_backend_is_never_constructed_with_a_blank_region() -> None:
+    """The end-to-end property: a blank S3_REGION= must not reach the client."""
+    cfg = Settings(**_settings_kwargs(storage_backend="s3", s3_bucket=BUCKET, s3_region=""))
+    backend = S3StorageBackend(bucket=cfg.s3_bucket or "", region=cfg.s3_region)
+    assert backend._region == "us-east-1"
 
 
 def test_no_aws_credential_settings_exist() -> None:

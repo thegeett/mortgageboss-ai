@@ -13,6 +13,10 @@ from pydantic import (
 )
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+#: Fallback for a blank ``S3_REGION``. Named rather than inlined so the field default
+#: and the blank-normalizing validator below cannot drift apart.
+_DEFAULT_S3_REGION = "us-east-1"
+
 
 class Settings(BaseSettings):
     """Application settings loaded from environment variables.
@@ -125,7 +129,7 @@ class Settings(BaseSettings):
     # from botocore's default provider chain (SSO/profile locally, the task role on
     # ECS). Adding key settings would defeat the task-role design entirely.
     s3_bucket: str | None = None
-    s3_region: str = "us-east-1"
+    s3_region: str = _DEFAULT_S3_REGION
     # Set for MinIO/LocalStack; None means the real AWS endpoint for the region.
     s3_endpoint_url: str | None = None
     s3_presign_expiry_seconds: int = 900  # 15 minutes
@@ -181,6 +185,25 @@ class Settings(BaseSettings):
         """
         if isinstance(value, str) and not value.strip():
             return None
+        return value
+
+    @field_validator("s3_region", mode="before")
+    @classmethod
+    def _blank_s3_region_is_the_default(cls, value: object) -> object:
+        """Treat a blank ``S3_REGION`` as unset, meaning the default (C0).
+
+        Separate from :meth:`_blank_s3_str_is_none` because region differs in kind: it
+        is a plain ``str`` with a safe default, so "unset" here resolves to that default
+        rather than to ``None`` (which the annotation would reject).
+
+        Without this, a blank ``S3_REGION=`` — which ``.env.example`` invites, heading
+        the S3 block with "Leave blank for local dev" — validates as ``""`` and reaches
+        botocore as an empty region name, failing at the first S3 call. That is exactly
+        the late-failure mode :meth:`_require_s3_bucket_when_s3` exists to prevent, so
+        it must not be reintroduced one field over.
+        """
+        if isinstance(value, str) and not value.strip():
+            return _DEFAULT_S3_REGION
         return value
 
     @model_validator(mode="after")
