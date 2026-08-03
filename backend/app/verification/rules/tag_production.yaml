@@ -247,7 +247,7 @@ tags:
   #     bureau text (account_type = AUTO/INST/REV/…, is_disputed = free-text incl. non-disputes,
   #     payment_history_24mo = a variable-length 0/- string), so classifying mortgage/student/collection or
   #     interpreting a dispute/late is a Priya/AI question (ADR), NOT this recipe. Tags DESCRIBE, rules judge:
-  #     no threshold, no is_derogatory. Fail closed: no tradelines → the tag is ABSENT (never a fabricated 0).
+  #     no threshold, no is_derogatory. Fail closed: no tradelines → the tag abstains to "unknown" (never a 0).
   #     Feeds CR-1's DTI cross-check; the per-row classification rules (CR-8/9/10/12) are deferred. ------------ #
   credit.tradeline_count: {mode: derived, subject: loan, data: credit_tradeline_count}
   credit.tradeline_monthly_payment_total: {mode: derived, subject: loan, data: credit_tradeline_monthly_payment_total}

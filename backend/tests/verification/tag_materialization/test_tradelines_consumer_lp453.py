@@ -6,10 +6,11 @@ non-disputes, payment_history_24mo = a variable-length 0/- string), so classifyi
 or interpreting a dispute/late is a Priya/AI question (ADR-353), NOT this recipe. It emits ONLY pure aggregates:
 a COUNT and a MONTHLY-PAYMENT TOTAL. Tags describe, rules judge — no threshold, no is_derogatory.
 
-These pin: the count + payment-total computed from real-shaped rows; fail-closed (no tradelines → ABSENT, never
-a fabricated 0 — absent ≠ empty); a present 0 payment counts, an absent one does not; an unparseable payment is
-skipped, never guessed; the loan-level aggregate spans multiple credit reports; and the derived recipe keys are
-registered (the validate_declarations guard).
+These pin: the count + payment-total computed from real-shaped rows; fail-closed (no tradelines → "unknown",
+never a fabricated 0 — absent ≠ empty); a present 0 payment counts, an absent one does not; an unparseable
+payment is skipped, never guessed; the loan-level aggregate spans multiple credit reports; the aggregate is
+SCOPED to credit_report documents (a `tradelines` list on another doc type cannot pollute it); and the derived
+recipe keys are registered (the validate_declarations guard).
 """
 
 from __future__ import annotations
@@ -85,7 +86,7 @@ async def test_count_and_payment_total_over_real_shaped_rows() -> None:
         _row(account_type="REV", account_status="AS AGREED", monthly_payment="269"),
     ]
     count, total = await _tags(rows)
-    assert count == 4
+    assert count == "4"  # numeric STRING (the derived numeric convention — matches stmt.nsf_count)
     assert str(total) == "1157"  # 502 + 386 + 0 + 269 — a present 0 contributes 0 honestly
 
 
@@ -98,7 +99,40 @@ async def test_loan_level_aggregate_spans_multiple_reports() -> None:
             _row(account_type="REV", monthly_payment="50"),
         ],
     )
-    assert count == 2 and str(total) == "150"
+    assert count == "2" and str(total) == "150"
+
+
+async def test_aggregate_is_scoped_to_credit_report_documents() -> None:
+    # LP-453 review: a list-name is not a unique key. A NON-credit_report document that also carries a
+    # `tradelines` list must NOT pollute the credit aggregate — the recipe filters by document_type.
+    other = DocumentEntry(
+        content_id="not-a-credit-report",
+        document_type="bank_statement",
+        belongs_to=None,
+        fields={},
+        lists={"tradelines": (_row(account_type="AUTO", monthly_payment="9999"),)},
+    )
+    credit = DocumentEntry(
+        content_id="cr0",
+        document_type="credit_report",
+        belongs_to=None,
+        fields={},
+        lists={"tradelines": (_row(account_type="REV", monthly_payment="100"),)},
+    )
+    snap = Snapshot(
+        loan_file_id=uuid4(),
+        run_id=uuid4(),
+        created_at=datetime(2026, 8, 1, tzinfo=UTC),
+        documents=DocumentsSection.present([other, credit]),
+        mismo=MismoSection.present({}),
+        tags=TagsSection.present({}),
+    )
+    mat = await materialize_tags(snap, only_groups=frozenset())
+    loan = mat.tags.by_subject.get(_LOAN, {})
+    assert (
+        loan["credit.tradeline_count"].value == "1"
+    )  # only the credit_report row, not the bank statement
+    assert loan["credit.tradeline_monthly_payment_total"].value == "100"  # 9999 excluded
 
 
 # --------------------------------------------------------------------------- #
@@ -123,14 +157,14 @@ async def test_rows_present_but_no_payment_figure_abstains_payment_not_zero() ->
     # "unknown", never a fabricated 0 — fail-closed on missing payment data.
     rows = [_row(account_type="AUTO"), _row(account_type="REV")]  # no monthly_payment field
     count, total = await _tags(rows)
-    assert count == 2
+    assert count == "2"
     assert total == "unknown" and total != 0
 
 
 async def test_unparseable_payment_is_skipped_never_guessed() -> None:
     rows = [_row(monthly_payment="502"), _row(monthly_payment="n/a"), _row(monthly_payment="200")]
     count, total = await _tags(rows)
-    assert count == 3  # every row is still counted
+    assert count == "3"  # every row is still counted
     assert str(total) == "702"  # the unparseable "n/a" is skipped, not guessed
 
 

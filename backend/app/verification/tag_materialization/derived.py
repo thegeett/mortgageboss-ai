@@ -848,7 +848,9 @@ def _dwelling_settlement_basis(
 
 # --------------------------------------------------------------------------- #
 # LP-453 (step D.2) — the tradelines list consumer: DETERMINISTIC numeric OBSERVATIONS over the credit
-# report's `tradelines` list (the only list keyed `tradelines`, so scoped to credit_report implicitly).
+# report's `tradelines` list. Scoped EXPLICITLY to credit_report documents (document_type filter, LP-453
+# review) — a list-name is not a unique key, so a future extractor reusing `tradelines` cannot pollute the
+# credit aggregate.
 #
 # ⚠️ THE D3 FINDING (the LP-448 lesson, second instance): the row VOCABULARY is OPEN-ENDED bureau text —
 # account_type is terse bureau codes (AUTO / INST / REV, and elsewhere MTG / EDU / COLL / CHG …), account_status
@@ -859,7 +861,8 @@ def _dwelling_settlement_basis(
 # a Priya/AI question, deferred to the rule tickets (ADR). This consumer therefore emits ONLY pure numeric
 # aggregates that need no classification: a COUNT and a MONTHLY-PAYMENT TOTAL. Tags DESCRIBE; rules judge —
 # NEVER a threshold, a "is_derogatory", a "has_unacceptable_lates". Fail closed: no tradelines captured → the
-# tag is ABSENT (unknown), NEVER a fabricated 0 (absent ≠ empty).
+# tag abstains to "unknown" (the standard derived-abstain value, materialised on the loan subject — a gated
+# rule reads couldnt_check), NEVER a fabricated 0.
 #
 # LIMITATION (reported): loan-level aggregate — a file with MULTIPLE overlapping bureau reports could
 # double-count. LF-96SV has one 18-row report + one empty; no double-count. Multi-report dedup is a future
@@ -869,11 +872,13 @@ def _credit_tradeline_count(
     snapshot: Snapshot, _subject_id: str, _subject_raw: object
 ) -> tuple[JsonValue, str]:
     """credit.tradeline_count — how many tradelines the file's credit report(s) list (a pure OBSERVATION, no
-    open/closed classification). ABSENT (unknown) when no tradelines are captured — never a fabricated 0."""
-    rows = all_list_rows(snapshot, "tradelines")
+    open/closed classification — distinct from the extractor's open_tradeline_count). Abstains to "unknown"
+    when no tradelines are captured — never a fabricated 0. Returned as a numeric STRING (the derived numeric
+    convention, matching stmt.nsf_count)."""
+    rows = all_list_rows(snapshot, "tradelines", document_type="credit_report")
     if not rows:
         return _UNKNOWN, "no credit-report tradelines captured in the file"
-    return len(rows), f"{len(rows)} tradelines observed across the file's credit report(s)"
+    return str(len(rows)), f"{len(rows)} tradelines observed across the file's credit report(s)"
 
 
 def _credit_tradeline_monthly_payment_total(
@@ -883,7 +888,7 @@ def _credit_tradeline_monthly_payment_total(
     per row), the OBSERVATION CR-1 cross-checks against the DTI's liability payments. A present 0 (a paid-off
     account) contributes 0 honestly. ABSTAINS to unknown (NEVER 0) when no tradeline carries a payment figure —
     fail-closed, so a rule reads couldnt_check on missing data rather than a fabricated 0."""
-    rows = all_list_rows(snapshot, "tradelines")
+    rows = all_list_rows(snapshot, "tradelines", document_type="credit_report")
     if not rows:
         return _UNKNOWN, "no credit-report tradelines captured in the file"
     total = Decimal(0)

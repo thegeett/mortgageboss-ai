@@ -29,13 +29,25 @@ def all_transactions(snapshot: Snapshot) -> list[TransactionRecord]:
     return [txn for entry in snapshot.documents.entries for txn in (entry.transactions or ())]
 
 
-def all_list_rows(snapshot: Snapshot, list_name: str) -> list[ListRow]:
+def all_list_rows(
+    snapshot: Snapshot, list_name: str, *, document_type: str | None = None
+) -> list[ListRow]:
     """Every row of the named GENERIC list across the snapshot's documents (LP-437), in order.
 
     The generic counterpart to :func:`all_transactions` — a derived recipe or a per-row enumerator
     reads ``entry.lists.get(list_name, ())`` cleanly through this one helper, never reaching into the
     dict per consumer. Empty when the documents section is absent or no document carries the list.
+
+    ``document_type`` scopes the gather to one document type (LP-453 review) — a list-name is NOT a
+    unique key (66+ lists exist; a future extractor could reuse ``tradelines``/``transactions``), so a
+    consumer that means "the credit report's tradelines" passes ``document_type="credit_report"`` rather
+    than trusting global name uniqueness. ``None`` gathers across every document type (the prior behavior).
     """
     if snapshot.documents.absent:
         return []
-    return [row for entry in snapshot.documents.entries for row in entry.lists.get(list_name, ())]
+    return [
+        row
+        for entry in snapshot.documents.entries
+        if document_type is None or entry.document_type == document_type
+        for row in entry.lists.get(list_name, ())
+    ]
