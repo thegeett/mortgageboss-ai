@@ -61,6 +61,9 @@ logger = structlog.get_logger(__name__)
 # reachable, not stranded), so a runaway output still stops well before the API limit and a >32K response
 # genuinely warrants a human look. The per-type first-attempt tiers (4096/8192/16384) are UNCHANGED — they
 # still encode the size expectation the sizing guard asserts; only this decisive retry ceiling moves.
+# FAIL-SAFE if that ceiling assumption is ever wrong: were a model's real max_output below a requested
+# max_tokens, the API rejects the call, ``_attempt`` catches it (AIClientError) and returns None → an honest
+# "AI call failed", never a crash. So 32768 being reachable is a COST/coverage property, not a safety one.
 RETRY_MAX_TOKENS = 32768
 
 # The HONEST reason surfaced when even the high-ceiling retry truncates — deliberately NOT the

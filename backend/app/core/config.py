@@ -50,11 +50,10 @@ class Settings(BaseSettings):
     # Model identifiers for the AI features. CONFIGURATION, not baked-in facts — model
     # strings change over time. TODO(models): verify against the current Anthropic docs.
     #
-    # LP-457 — THREE tiers, ONE per PURPOSE (a single constant would drag the reasoning
-    # callers onto whatever extraction uses — precisely the problem this split fixes). Each
-    # is env-overridable (ANTHROPIC_MODEL_CLASSIFICATION / _EXTRACTION / _REASONING) from
-    # THIS one home; the default is the safe value, so a missing env var never silently
-    # falls back to a wrong (costlier) model.
+    # LP-457 — FOUR tiers, ONE per PURPOSE (a single constant would drag one purpose's callers
+    # onto whatever another uses — precisely the problem this split fixes). Each is env-overridable
+    # (ANTHROPIC_MODEL_CLASSIFICATION / _EXTRACTION / _REASONING / _ANALYSIS) from THIS one home;
+    # the default is the safe value, so a missing env var never silently falls back to a wrong model.
     #   - classification/summarization: cheap, high-volume perception -> Haiku.
     #   - extraction: document field extraction -> Haiku 4.5 (LP-457 switched it from Sonnet
     #     4.5 for cost; verified field-by-field on a dense credit report + pay stub, LP-457
@@ -63,10 +62,18 @@ class Settings(BaseSettings):
     #     -> STAYS on Sonnet 4.5. ⚠️ The 37 live rules were CALIBRATED on Sonnet reasoning;
     #     moving the reasoning model would invalidate every activation bar. Kept separate so
     #     extraction can be cheapened WITHOUT touching calibrated reasoning.
+    #   - analysis: the Tier-3 generic analyzer ("understand anything" for unrecognised docs)
+    #     -> Sonnet 4.5 for open-ended comprehension. Its OWN tier (LP-457 review), NOT the
+    #     reasoning tier: it is a document-PERCEPTION task, not calibration-sensitive, so it must
+    #     not be dragged along when reasoning is re-pointed for CALIBRATION (that is exactly the
+    #     cross-purpose coupling this split exists to prevent). Same default value, distinct knob.
     anthropic_model_classification: str = "claude-haiku-4-5"
     anthropic_model_extraction: str = "claude-haiku-4-5"  # LP-457: switched from Sonnet 4.5 (cost)
     anthropic_model_reasoning: str = (
         "claude-sonnet-4-5"  # STAYS Sonnet — the live bars are calibrated on it
+    )
+    anthropic_model_analysis: str = (
+        "claude-sonnet-4-5"  # Tier-3 generic analysis — Sonnet, but its own knob (LP-457 review)
     )
     # AI retry policy (LP-37): transient failures (429/5xx/connection) are retried with
     # exponential backoff + jitter, capped at this many attempts.

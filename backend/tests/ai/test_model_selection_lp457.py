@@ -1,10 +1,11 @@
-"""LP-457 — model selection is centralised in ONE home (config.py), three tiers, one per purpose.
+"""LP-457 — model selection is centralised in ONE home (config.py), four tiers, one per purpose.
 
-A single constant would drag the ~12 reasoning callers onto whatever extraction uses — exactly the problem
-this split fixes. So there are THREE settings (classification / extraction / reasoning), and NO caller may
-hard-code a model string: a future hard-coded model would silently escape the switch. This guard fails CI on
-any literal ``claude-*`` model string in ``app/`` outside the config home and the two data-not-selection
-exemptions.
+A single constant would drag one purpose's callers onto whatever another uses — exactly the problem this
+split fixes. So there are FOUR settings (classification / extraction / reasoning / analysis — the Tier-3
+generic analyzer got its own knob in the LP-457 review, decoupled from the calibrated reasoning tier), and NO
+caller may hard-code a model string: a future hard-coded model would silently escape the switch. This guard
+fails CI on any literal ``claude-*`` model string in ``app/`` outside the config home and the two
+data-not-selection exemptions.
 """
 
 from __future__ import annotations
@@ -42,18 +43,21 @@ def test_no_hardcoded_model_string_outside_the_config_home() -> None:
     )
 
 
-def test_three_model_tiers_exist_and_default_correctly() -> None:
-    # The three purposes. Extraction is Haiku (LP-457 switch); reasoning STAYS Sonnet (the live rules were
-    # calibrated on Sonnet reasoning — moving it invalidates every activation bar); classification is Haiku.
+def test_four_model_tiers_exist_and_default_correctly() -> None:
+    # The four purposes. Extraction is Haiku (LP-457 switch); reasoning STAYS Sonnet (the live rules were
+    # calibrated on Sonnet reasoning — moving it invalidates every activation bar); classification is Haiku;
+    # analysis (Tier-3 generic analyzer) is Sonnet on its OWN knob (LP-457 review — decoupled from reasoning).
     assert settings.anthropic_model_classification == "claude-haiku-4-5"
     assert settings.anthropic_model_extraction == "claude-haiku-4-5"
     assert settings.anthropic_model_reasoning == "claude-sonnet-4-5"
+    assert settings.anthropic_model_analysis == "claude-sonnet-4-5"
 
 
-def test_reasoning_and_extraction_are_independently_configurable() -> None:
-    # The point of the split: they are DIFFERENT settings, so extraction can be cheapened without touching
-    # calibrated reasoning. (They may hold the same value, but they are not the same knob.)
+def test_reasoning_and_extraction_and_analysis_are_independently_configurable() -> None:
+    # The point of the split: they are DIFFERENT settings, so extraction can be cheapened, and the Tier-3
+    # analyzer re-pointed, WITHOUT touching calibrated reasoning. (They may hold the same value; not the same knob.)
     assert type(settings).model_fields.keys() >= {
         "anthropic_model_extraction",
         "anthropic_model_reasoning",
+        "anthropic_model_analysis",
     }
