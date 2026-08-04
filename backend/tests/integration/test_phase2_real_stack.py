@@ -209,12 +209,14 @@ async def test_tier3_real_upload_analyzes(
     company, lf = await _loan_file(db_session)
     doc = await _stage_real_file(db_session, company, lf)
     # A high-confidence type NOT in the catalog → Tier 3 (generic analyzer).
+    # (LP-442 cataloged every schema'd type — incl. the former example trust_agreement — so this
+    # uses boat_registration, a genuinely-uncataloged type, to exercise the Tier-3 fallback.)
     monkeypatch.setattr(
         pipeline,
         "classify_document",
         AsyncMock(
             return_value=ClassificationResult(
-                document_type="trust_agreement", confidence=0.95, reasoning="x"
+                document_type="boat_registration", confidence=0.95, reasoning="x"
             )
         ),
     )
@@ -224,9 +226,9 @@ async def test_tier3_real_upload_analyzes(
         AsyncMock(
             return_value=GenericAnalysis(
                 key_findings=[
-                    AnalyzedFinding(finding_type="other", description="A revocable trust.")
+                    AnalyzedFinding(finding_type="other", description="A boat registration.")
                 ],
-                summary="A revocable living trust.",
+                summary="A recreational boat registration.",
             )
         ),
     )

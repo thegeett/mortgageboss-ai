@@ -18,7 +18,7 @@ still show their original **13-day** uptime and its database is byte-for-byte un
 | `scripts/seed-from-main.sh` | **Created** (`chmod +x`) — read-only `pg_dump` from the main DB → `pg_restore` here, plus the storage files. |
 | `docs/worktree-setup.md` | **Created** — setup, port map, Docker/DB commands, troubleshooting. |
 | `docs/README.md` | **Modified** — one index row for `worktree-setup.md`. |
-| `decisions.md` | **Modified** — appended ADR-341 (max was ADR-340). |
+| `decisions.md` | **Modified** — appended one ADR. Written as ADR-341; **renumbered to ADR-355** when `phase3_bucket_2` merged in, because that branch had independently used 341–354. |
 | `docs/tickets/A1-worktree-isolation-result.md` | **Created** — this file. |
 
 **Not created, because they already existed in this worktree with correct contents:**
@@ -307,7 +307,7 @@ Rewritten so the shell environment wins, matching Compose. Both guards were then
 but its compose entry still resolves to 1025/8025 here, so starting it would collide.
 Consequently `SMTP_HOST=localhost` / `SMTP_PORT=1025` in this worktree's `backend/.env`
 reaches the **main worktree's** Mailhog — genuine cross-talk, harmless for a dev mail
-catcher. Documented in `docs/worktree-setup.md` and ADR-341 rather than fixed with a fourth
+catcher. Documented in `docs/worktree-setup.md` and ADR-355 rather than fixed with a fourth
 port. `SMTP_PORT` / `MAILHOG_UI_PORT` are parameterized and available if that changes.
 
 **5. `.claude/settings.local.json` does not exist in this worktree.** The ticket asked me to
@@ -339,7 +339,9 @@ file the user did not ask for is out of scope.
   `docker exec` is correct.
 - **Loan-file table name** — read from `backend/app/models/loan_file.py:128`:
   `__tablename__ = "loan_files"`. Not guessed.
-- **Next ADR number** — `decisions.md` maximum was **ADR-340** (340 ADRs total, LP-431); appended **ADR-341**.
+- **Next ADR number** — `decisions.md` maximum was **ADR-340** (340 ADRs total, LP-431) at the time,
+  so this was written as ADR-341. It is now **ADR-355**: `phase3_bucket_2` had independently
+  appended 341–354, so the Bedrock-side ADRs were renumbered on merge.
 
 ---
 
@@ -389,5 +391,5 @@ healthy on 5433 / 6380, database seeded to parity with the main worktree.
 ## See also
 
 - [`docs/worktree-setup.md`](../worktree-setup.md) — the operational guide
-- `decisions.md` ADR-341 — why parameterized defaults, and why seed rather than migrate
+- `decisions.md` ADR-355 — why parameterized defaults, and why seed rather than migrate
 - [`A1-worktree-isolation.md`](A1-worktree-isolation.md) — the ticket

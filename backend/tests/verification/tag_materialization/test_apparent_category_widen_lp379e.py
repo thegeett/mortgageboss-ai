@@ -195,5 +195,6 @@ def test_no_rule_activation_changed() -> None:
             "AS-6",  # LP-429 — account ownership (Priya signed off the 0.95 bar)
             "IN-15",  # LP-430 — terminated-employment documentation (no-ai-dependency, activated)
             "IN-16",  # LP-433 — pay-stub-only documentation (no-ai-dependency; deterministic)
+            "IH-1",  # LP-447 — insurance adequacy / dwelling settlement basis (no-ai-dependency)
         )
     )

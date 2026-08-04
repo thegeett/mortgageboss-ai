@@ -15,7 +15,7 @@ it drives the real :class:`app.storage.s3.S3StorageBackend` against a real bucke
     uv run python scripts/verify-s3.py --bucket my-bucket --endpoint-url http://localhost:9000
 
 Credentials come from botocore's default provider chain — SSO or a profile locally, the
-task role on ECS. There is no credential flag here on purpose; see ADR-342.
+task role on ECS. There is no credential flag here on purpose; see ADR-356.
 
 Steps, in order (encryption is checked BEFORE deletion, since the object must exist):
 

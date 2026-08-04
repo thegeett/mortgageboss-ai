@@ -13,7 +13,7 @@ proven separately). Returns a NEW frozen snapshot; the raw layer is never touche
 
 from __future__ import annotations
 
-from app.verification.snapshot.model import Snapshot, TagsSection
+from app.verification.snapshot.model import DocumentEntry, Snapshot, TagsSection
 from app.verification.snapshot.tag import Tag
 from app.verification.tag_materialization.ai import AiTagCache, Reasoner, produce_ai_group_tags
 from app.verification.tag_materialization.declarations import (
@@ -71,6 +71,13 @@ async def materialize_tags(
         st = subject_type(decl.subject)
         field_name = decl.data.split(":", 1)[0]
         for subject_id, raw in st.enumerate(snapshot):
+            # LP-454 review — a document_type filter scopes a parsed:document tag to its intended document
+            # type, so a field-name shared by several extractors (report_date, earnest_money_amount) does not
+            # mis-materialise the tag on the wrong document. Only document subjects carry a document_type.
+            if decl.document_type is not None and (
+                not isinstance(raw, DocumentEntry) or raw.document_type != decl.document_type
+            ):
+                continue
             tag = produce_parsed_tag(decl, subject_id, st.read_field(raw, field_name))
             if tag is not None:
                 by_subject.setdefault(subject_id, {})[decl.tag_id] = tag

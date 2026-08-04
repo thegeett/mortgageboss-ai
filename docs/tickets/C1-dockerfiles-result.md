@@ -21,7 +21,7 @@ One deviation from the Verify block, for safety: the images stack must be run wi
 | `frontend/.dockerignore` | **Created** |
 | `frontend/next.config.ts` | **Modified** — added `output: "standalone"` |
 | `docker-compose.images.yml` | **Created** — the local Fargate rehearsal |
-| `decisions.md` | **Modified** — appended ADR-344 and ADR-345 (max was ADR-343) |
+| `decisions.md` | **Modified** — appended ADR-358 and ADR-359 (max was ADR-357) |
 | `docs/tickets/C1-dockerfiles-result.md` | **Created** — this file |
 
 `docker-compose.yml` was **not** modified. No Alembic migration. `STORAGE_BACKEND` still
@@ -375,7 +375,7 @@ immediately and everything reconnected.
 ## For C2 and C3
 
 - **ALB target group health path: `/health/live`** — not `/health` or `/health/ready` (reasoning
-  above and in ADR-344).
+  above and in ADR-358).
 - **Every API task definition must override the healthcheck.** The image's baked Celery
   `HEALTHCHECK` applies regardless of command, so an API container that does not override it
   sits unhealthy forever.
@@ -390,11 +390,11 @@ immediately and everything reconnected.
 
 ## Decisions recorded
 
-`decisions.md` maximum was **ADR-343** (C0). Appended:
+`decisions.md` maximum was **ADR-357** (C0). Appended:
 
-- **ADR-344** — one image for api + worker; the `/health/live` choice; and the baked-HEALTHCHECK
+- **ADR-358** — one image for api + worker; the `/health/live` choice; and the baked-HEALTHCHECK
   consequence with its required override.
-- **ADR-345** — `output: 'standalone'` and the build-time `NEXT_PUBLIC_API_URL` boundary.
+- **ADR-359** — `output: 'standalone'` and the build-time `NEXT_PUBLIC_API_URL` boundary.
 
 Both qualify: each would otherwise have to be reverse-engineered from a production failure.
 

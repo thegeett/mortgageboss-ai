@@ -1,0 +1,79 @@
+{
+  "document_type": "building_permits",
+  "slug": "building-permits",
+  "tier": 3,
+  "rules_served": [],
+  "summary_hint": "<Permit type> permit #<number> from <jurisdiction> for <property address>, status <status>, issued <issue date>; <type of work> at $<estimated cost>.",
+  "existing_extractor": null,
+  "catalog_coverage": "full",
+
+  "typed_core": [
+    {"name":"issuing_jurisdiction_or_department","type":"str","why":"identity/source — which authority issued the permit","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"permit_number","type":"str","why":"identity — the permit's unique reference","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"Capture the jurisdiction and permit number verbatim for independent lookup."},
+    {"name":"parent_job_or_plan_number","type":"str","why":"disambiguator — links sub-permits to a parent job/plan","rules":[],"reason_class":"disambiguator","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"permit_type","type":"str","why":"identity/processor — building/electrical/plumbing/mechanical (degraded from enum)","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"permit_status","type":"str","why":"processor — issued/active/finaled/expired (degraded from enum)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"property_address","type":"str","why":"identity/linkage — the job/property; must match subject (flattened from address)","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"address","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"parcel_or_tax_map_number","type":"str","why":"identity — parcel key for property matching","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"owner_name","type":"str","why":"identity — the property owner (flattened from owner_name_and_address object)","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"owner_address","type":"str","why":"disambiguator — owner mailing address vs job address (flattened from object)","rules":[],"reason_class":"disambiguator","rule_floor":false,"degraded_from":"object","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"structure_type","type":"str","why":"processor — single-family/multi/ADU (degraded from enum)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"type_of_work","type":"str","why":"processor — new/addition/alteration/repair (degraded from enum)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"project_description","type":"str","why":"processor — scope of work a reviewer reads","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"estimated_construction_cost","type":"Decimal","why":"processor — scale of work (money stays string)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"occupancy_or_use_classification","type":"str","why":"processor — permitted use classification","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"application_date","type":"date","why":"processor — when applied","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"issue_date","type":"date","why":"processor — when issued; work-completion timeline","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"final_or_close_date","type":"date","why":"processor — whether the permit was finaled/closed","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"expiration_date","type":"date","why":"processor — whether the permit lapsed","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"applicant_name","type":"str","why":"identity — who pulled the permit (flattened from object)","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"contractor_company","type":"str","why":"identity — the contractor (flattened from object)","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"owner_as_contractor_indicator","type":"str","why":"processor — owner-builder flag (degraded from boolean)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"bool","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"account_case_reference_number","type":"str","why":"identity — cross-document matching/dedup","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null}
+  ],
+
+  "nested_lists": [
+    {
+      "name":"inspection_results","shape":"flat_row",
+      "shape_reason":"chosen over required_inspections because results carry the pass/fail outcome a reviewer needs; the two overlap and one list fits the budget (flat-row + one source)",
+      "expected_item_count":"few-to-several","rules":[],
+      "exists_today":false,"plumbing_sites":5,
+      "fields":[
+        {"name":"type","type":"str","why":"processor confirms permitted work passed — the kind of inspection"},
+        {"name":"date","type":"date","why":"processor — when the inspection occurred"},
+        {"name":"result","type":"str","why":"processor — the pass/fail outcome a reviewer needs"}
+      ]
+    }
+  ],
+
+  "rejected": [
+    {"name":"the 8 TECHNICAL provenance fields","reason":"already in the TypedField wrapper"},
+    {"name":"party_names / party_addresses","reason":"generic; superseded by typed owner/applicant/contractor fields"},
+    {"name":"loan_number","reason":"rarely present on a municipal permit; no consumer here"},
+    {"name":"document_title, form_number, form_revision_date, document_status_or_version","reason":"jurisdiction-specific; no consumer"},
+    {"name":"document_issue_date, effective_date, statement_period_start/end","reason":"duplicate the permit's own dates"},
+    {"name":"contractor_license_numbers, required_inspections, open_violations_or_corrections","reason":"candidate lists deferred — budget one list, zero rules"},
+    {"name":"certificate_of_occupancy_or_completion","reason":"narrative object; the close date + status capture the substance"},
+    {"name":"fees_paid_or_due","reason":"no consumer"},
+    {"name":"signature_blocks, notary_block, authorized_signature_and_date","reason":"execution detail; no rule"}
+  ],
+
+  "encoding_variations": [
+    "Permit status vocabulary varies by jurisdiction ('Finaled', 'Closed', 'C of O issued', 'Expired'); permit_status + final_or_close_date together disambiguate a genuinely completed permit from a lapsed one.",
+    "issue_date (permit identity) vs document_issue_date (generic) can collide — prefer the permit's own issue date; the generic field is rejected to avoid duplication.",
+    "Multiple dates (application/issue/final/expiration) all appear — keep them distinct; a reviewer reconstructs the timeline."
+  ],
+
+  "open_questions": [
+    {"id":1,"q":"Which inspection list — inspection_results (chosen) vs required_inspections. They overlap; results carry outcomes.","options":["inspection_results","required_inspections"],"recommendation":"keep inspection_results; fold 'required' into it if a jurisdiction lists both. Flag if a rule ever needs the required-vs-performed gap GEET'S DECISION (LP-438): BUILD IT — LP-437 made nested lists cheap (one declaration + the generic mechanism); the one-list-budget / defer / no-consumer concern is overturned. Build as flat_row; the per-rule consumer is separate follow-up.","blocks_implementation":false},
+    {"id":2,"q":"Completion evidence — certificate_of_occupancy_or_completion is rejected in favor of status+close-date.","options":["rely on permit_status + final_or_close_date","add certificate_of_occupancy_or_completion as its own typed field"],"recommendation":"confirm with the domain expert that C-of-O presence isn't needed as its own typed field for renovation loans","blocks_implementation":false}
+  ],
+
+  "notes": [
+    "No rules read this document today, so there is no rule floor; a building permit supports property condition / completed-work verification (renovation, ADU, post-repair).",
+    "Prompt hint (doc-level): this supports completed-work / property-condition verification — the reviewer wants correct property, work described, and evidence the permit reached final/closed status without open violations.",
+    "Prompt hint (doc-level): do not judge whether work is 'complete' — capture permit_status, final_or_close_date, and inspection results as stated.",
+    "PII: no personal SSN/account field in this catalog. owner_name/owner_address are property-owner identity at standard sensitivity — flag owner_address for review as a home address. loan_number (confidential) exists in the catalog but is rejected (rarely on a permit).",
+    "Ambiguity: permit_type's why is 'identity/processor' (classified identity, first listed)."
+  ]
+}

@@ -1,0 +1,67 @@
+{
+  "document_type": "credit_card_authorization",
+  "slug": "credit-card-authorization",
+  "tier": 3,
+  "rules_served": [],
+  "summary_hint": "Card authorization by {cardholder}, {card_brand} ...{last4}, up to {authorized_amount} for {charge_purpose}, {one_time/recurring}, dated {authorization_date}.",
+  "existing_extractor": null,
+  "catalog_coverage": "full",
+
+  "typed_core": [
+    {"name":"issuer_name","type":"str","why":"identity — the form's originator","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"merchant_or_lender_name","type":"str","why":"identity — who is authorized to charge (flattened from entity)","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"borrower_or_customer_name","type":"str","why":"identity — the borrower this fee ties to (flattened from person)","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"cardholder_name","type":"str","why":"identity — whose card (may differ from borrower); flattened from person","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"billing_address","type":"str","why":"PII — cardholder billing address (flattened from address)","rules":[],"reason_class":"pii","rule_floor":false,"degraded_from":"address","pii":null,"exists_today":false,"prompt_hint":"Billing address is cardholder PII — extract verbatim; the snapshot masks it"},
+    {"name":"card_brand","type":"str","why":"disambiguator for the card last-4","rules":[],"reason_class":"disambiguator","rule_floor":false,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":"Keep the stated brand verbatim"},
+    {"name":"card_number_last4_or_token","type":"str","why":"PII (restricted) — last-4/token identity of the card","rules":[],"reason_class":"pii","rule_floor":false,"degraded_from":null,"pii":{"kind":"ACCOUNT","pre_masked":true},"exists_today":false,"prompt_hint":"Never emit a full card number; reduce to last-4 or the printed token"},
+    {"name":"expiration_month_year","type":"str","why":"PII (restricted) — card expiry; disambiguates the card","rules":[],"reason_class":"pii","rule_floor":false,"degraded_from":null,"pii":{"kind":"ACCOUNT","pre_masked":false},"exists_today":false,"prompt_hint":null},
+    {"name":"authorized_amount_or_maximum","type":"Decimal","why":"processor — the cap the borrower authorized","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"charge_description_or_purpose","type":"str","why":"processor — what the charge is for (appraisal, credit fee)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"one_time_or_recurring_authorization","type":"str","why":"processor — one-time vs recurring","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"authorization_date","type":"date","why":"identity — when authorization was given","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"authorization_expiration_or_cancel_terms","type":"str","why":"processor — how long the authorization stands","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"loan_number_property_or_invoice","type":"str","why":"identity — links the charge to the loan/property","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"cardholder_signature","type":"str","why":"processor/execution — signature presence (flattened from signature)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"object","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"charged_amount","type":"Decimal","why":"processor — what was actually charged, if the receipt half is present","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"transaction_status","type":"str","why":"processor — approved/declined","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"authorization_or_transaction_id","type":"str","why":"audit/identity — processor reconciliation (restricted)","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null}
+  ],
+
+  "nested_lists": [],
+
+  "rejected": [
+    {"name":"document_title, form_number, form_revision_date","reason":"not load-bearing"},
+    {"name":"issuer_address, issuer_phone, issuer_email_or_url","reason":"no consumer"},
+    {"name":"effective_date, expiration_date, statement_period_start/end","reason":"duplicate authorization_date/terms"},
+    {"name":"party_names, party_addresses","reason":"captured by borrower/cardholder fields"},
+    {"name":"property_address, loan_number, account_case_reference_number","reason":"covered by loan_number_property_or_invoice"},
+    {"name":"signature_blocks, notary_block","reason":"single cardholder_signature; not notarized"},
+    {"name":"document_status_or_version","reason":"duplicates transaction_status"},
+    {"name":"merchant_contact","reason":"free-form contact; no consumer -> catch-all"},
+    {"name":"transaction_date_time","reason":"duplicates authorization_date; no datetime coercer"},
+    {"name":"refund_or_reversal","reason":"rare; no consumer -> catch-all"},
+    {"name":"cvv_cvc_cid_present_on_source","reason":"TECHNICAL — security routing flag, not a fact; never persist the code"},
+    {"name":"cvv_storage_prohibited","reason":"TECHNICAL — security control, not extractable data"}
+  ],
+
+  "encoding_variations": [
+    "Card is stated as last-4, a tokenized PAN, or (dangerously) a full PAN — always reduce to last-4/token; never persist a full PAN even if printed.",
+    "Amount may be an exact charge or a 'not to exceed' maximum — authorized_amount_or_maximum vs charged_amount disambiguate authorization from settlement.",
+    "Card brand may be a word ('Visa') or inferable from the BIN — keep the stated brand verbatim."
+  ],
+
+  "open_questions": [
+    {"id":1,"q":"Two-in-one authorization + receipt. Some forms carry both the authorization (top) and the settled charge (bottom).","options":["two amount fields as designed (authorized_amount_or_maximum + charged_amount)","split into two doc types"],"recommendation":"keep both fields; flag only if receipts routinely arrive separately GEET'S DECISION (LP-439): keep BOTH amount fields (authorized + charged) — one document carrying both.","blocks_implementation":false},
+    {"id":2,"q":"expiration_month_year retention. Card expiry is restricted data with little downstream use once the charge clears.","options":["promote+register","drop entirely"],"recommendation":"register and keep — dropping to catch-all would store it unmasked, which is worse GEET'S DECISION (LP-439): register and keep card expiry (dropping to catch-all would store it unmasked).","blocks_implementation":false},
+    {"id":3,"q":"Is this document even needed post-charge? A processor mostly needs proof the fee was paid.","options":["keep as its own doc type","overlap with Evidence of Payment (068)"],"recommendation":"consider whether charged_amount/transaction_status overlap with Evidence of Payment (068)","blocks_implementation":false}
+  ],
+
+  "notes": [
+    "Assumes one document per extraction — the pipeline does not split multi-document PDFs today (LP-439). Revisit if splitting is added.",
+    "No rules today, so no rule floor. This form authorizes a lender/vendor to charge a borrower's card (typically for an appraisal or credit-report fee). It is PII-dense — card number, billing address, expiry — and carries a hard security constraint: the CVV/CVC must never be persisted.",
+    "PII registrations needed: card_number_last4_or_token (pre_masked true, last-4/token only); billing_address (pre_masked false, raw address; snapshot masks); expiration_month_year (restricted card data, pre_masked false). Flag.",
+    "authorization_or_transaction_id is restricted; treated as a typed field (reason_class identity, not a _PII_FIELDS entry) and flagged for review.",
+    "Prompt hint (doc-level, CRITICAL security): if a CVV/CVC/CID is visible, do NOT extract or persist it. The catalog's cvv_* fields are TECHNICAL routing flags, not data to store."
+  ]
+}

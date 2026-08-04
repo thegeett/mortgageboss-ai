@@ -23,7 +23,7 @@ It does not block Fargate and did not change the implementation — §"Stop-and-
 | `backend/app/storage/__init__.py` | **Modified** — the `"s3"` factory branch, `__all__`, docstring |
 | `backend/tests/storage/test_s3_storage.py` | **Created** — 28 tests |
 | `backend/scripts/verify-s3.py` | **Created** (`chmod +x`) — real-bucket verification, 6 steps |
-| `decisions.md` | **Modified** — appended ADR-342 and ADR-343 (max was ADR-341) |
+| `decisions.md` | **Modified** — appended ADR-356 and ADR-357 (max was ADR-355) |
 | `docs/tickets/C0-s3-storage-result.md` | **Created** — this file |
 
 **Not modified, per the ticket:** `app/storage/local.py`, the ABC in `app/storage/base.py`,
@@ -196,7 +196,7 @@ factory still resolves to `LocalStorageBackend`.
 ## The client-lifecycle decision, and why
 
 **Chosen: an `aioboto3.Session` held on the instance, a client opened per operation.**
-Recorded as ADR-343.
+Recorded as ADR-357.
 
 The ticket asked me not to create a client per call, because that is a TLS handshake per
 document read. That instinct is right in a normal async service and **wrong here**, and the
@@ -267,7 +267,7 @@ touch the endpoint.
 Worth flagging for a later ticket, not this one: switching downloads from proxy-through-API to
 a presigned redirect would cut egress and API load, but it moves the authorization boundary
 from the endpoint to the URL's expiry window. That is a real security decision, and C0
-deliberately does not make it. Noted in ADR-342 under "Not decided here".
+deliberately does not make it. Noted in ADR-356 under "Not decided here".
 
 ---
 
@@ -401,11 +401,11 @@ setting without copying would find every existing document unreadable.
 
 ## Decisions recorded
 
-`decisions.md` maximum was **ADR-341** (A1). Appended:
+`decisions.md` maximum was **ADR-355** (A1). Appended:
 
-- **ADR-342** — aioboto3 over boto3; credential chain and never key settings; encryption always
+- **ADR-356** — aioboto3 over boto3; credential chain and never key settings; encryption always
   on; startup validation over deferred failure.
-- **ADR-343** — the client-lifecycle choice, why the obvious optimization is wrong here, and the
+- **ADR-357** — the client-lifecycle choice, why the obvious optimization is wrong here, and the
   upstream fix that would let it be revisited.
 
 Both qualify: each is non-obvious, each would otherwise be "fixed" by a future reader into
@@ -509,7 +509,7 @@ over-correcting a real configured value to the default.
 Full gate green: **2958 passed, 5 skipped, 1 xfailed** (up from 2944), `ruff check` clean,
 `ruff format` clean on 650 files, `mypy` strict clean on 297 source files.
 
-No ADR: these are defect fixes within ADR-342's stated intent, not new decisions.
+No ADR: these are defect fixes within ADR-356's stated intent, not new decisions.
 
 **Not fixed here.** Both reviews raised findings against *earlier* branch commits, all still
 open and out of this commit's scope — chiefly the `derived.py` bank-statement continuity

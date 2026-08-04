@@ -1,0 +1,82 @@
+{
+  "document_type": "employment_offer_letter",
+  "slug": "employment-offer-letter",
+  "tier": 2,
+  "rules_served": ["IN-7", "IN-9"],
+  "summary_hint": "New-hire offer from <employer> for <position title>, base <salary/rate> <frequency>, start date <start_date> — the future employment IN-9 verifies and the role IN-7 assesses for same-line-of-work.",
+  "existing_extractor": null,
+  "catalog_coverage": "full",
+
+  "typed_core": [
+    {"name":"candidate_or_borrower_name","type":"str","why":"identity — whose income this is; attaches the document to the borrower","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"person","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"position_title","type":"str","why":"IN-7 (rule reads it) — the new role, compared against employment history to judge same line of work","rules":["IN-7"],"reason_class":"rule","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"start_date","type":"date","why":"IN-9 (rule reads it) — the future/just-started employment start date the rule detects","rules":["IN-9"],"reason_class":"rule","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"employer_legal_name","type":"str","why":"identity — the employer; IN-7 same-line-of-work employer context; processor VOE","rules":["IN-7"],"reason_class":"identity","rule_floor":false,"degraded_from":"entity","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"employer_address","type":"str","why":"processor — independent verification / VOE follow-up; employer identity","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"address","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"employer_contact","type":"str","why":"processor — independent-verification contact (name/phone/email of HR signer)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"object","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"base_salary_or_hourly_rate","type":"Decimal","why":"processor — income usability; IN-7 example keys on equal pay; needs pay_frequency to interpret","rules":["IN-7"],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"Distinguish base guaranteed compensation from sign-on bonus, relocation, and overtime/bonus/commission terms (those are one-time or variable and are not the qualifying base)"},
+    {"name":"pay_frequency","type":"str","why":"disambiguator for base_salary_or_hourly_rate — annual vs hourly vs monthly changes the number's meaning","rules":[],"reason_class":"disambiguator","rule_floor":false,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":"Capture pay_frequency verbatim next to the rate; if hourly, capture guaranteed_hours_per_week"},
+    {"name":"employment_type","type":"str","why":"processor — full-time/part-time/contract drives income stability and usability for IN-7/IN-9","rules":["IN-7","IN-9"],"reason_class":"processor","rule_floor":false,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"guaranteed_hours_per_week","type":"Decimal","why":"disambiguator — an hourly rate cannot be annualized without guaranteed hours","rules":[],"reason_class":"disambiguator","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"document_issue_date","type":"date","why":"identity/processor — when the offer was issued; IN-9 recency of the offer letter on file","rules":["IN-9"],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"offer_expiration_date","type":"date","why":"processor — whether the offer is still open; a lapsed offer weakens IN-9 usability","rules":["IN-9"],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"start_date_confirmed_or_employment_commenced","type":"str","why":"disambiguator for IN-9 — whether employment already started, which decides if a first pay stub is still required","rules":["IN-9"],"reason_class":"disambiguator","rule_floor":false,"degraded_from":"bool","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"employer_signer_name_title","type":"str","why":"processor — who executed the offer; authenticity / third-party independence","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"employer_signature_and_date","type":"str","why":"processor — the offer is executed by the employer; presence supports IN-9 usability","rules":["IN-9"],"reason_class":"processor","rule_floor":false,"degraded_from":"signature","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"candidate_acceptance_signature_and_date","type":"str","why":"processor — whether the candidate accepted; an unaccepted offer is weaker evidence for IN-9","rules":["IN-9"],"reason_class":"processor","rule_floor":false,"degraded_from":"signature","pii":null,"exists_today":false,"prompt_hint":"The candidate acceptance signature and the employer signature are distinct blocks; capture both dates"}
+  ],
+
+  "nested_lists": [
+    {
+      "name":"employment_contingencies","shape":"flat_row",
+      "shape_reason":"a handful of short strings (background check, drug screen, I-9, references); far under the 16,384-token ceiling, so a flat list is cheapest and per-field wrapping is unwarranted",
+      "expected_item_count":"a handful","rules":["IN-9"],
+      "exists_today":false,"plumbing_sites":5,
+      "fields":[
+        {"name":"contingency","type":"str","why":"IN-9 context — an unsatisfied contingency means the offer/income is not yet firm; extract each as listed"}
+      ]
+    }
+  ],
+
+  "rejected": [
+    {"name":"document_title","reason":"classification happens before extraction; no rule/processor use"},
+    {"name":"form_number, form_revision_date","reason":"an offer letter is not a standardized form"},
+    {"name":"issuer_name","reason":"duplicates employer_legal_name (the offer's issuer is the employer)"},
+    {"name":"issuer_address, issuer_phone, issuer_email_or_url","reason":"duplicate employer_address / employer_contact"},
+    {"name":"effective_date","reason":"duplicates start_date"},
+    {"name":"expiration_date","reason":"duplicates offer_expiration_date"},
+    {"name":"statement_period_start, statement_period_end","reason":"not applicable to an offer letter"},
+    {"name":"party_names, party_addresses","reason":"covered by flattened candidate_or_borrower_name + employer fields"},
+    {"name":"property_address, loan_number, account_case_reference_number","reason":"not present on an offer letter; no consumer"},
+    {"name":"signature_blocks","reason":"covered by employer_signature_and_date + candidate_acceptance_signature_and_date"},
+    {"name":"notary_block","reason":"an offer letter is not notarized"},
+    {"name":"document_status_or_version","reason":"draft/final rarely stated; marginal, catch-all suffices"},
+    {"name":"work_location","reason":"no rule; marginal processor value; catch-all suffices"},
+    {"name":"sign_on_bonus, relocation_or_allowances","reason":"one-time; not qualifying base income; no rule; catch-all"},
+    {"name":"overtime_bonus_commission_terms","reason":"variable-comp terms are a judgment for IN-7, not a fact this schema should conclude; base fields + pay_frequency suffice"},
+    {"name":"probationary_period","reason":"no rule; marginal; catch-all"},
+    {"name":"exempt_or_nonexempt_status","reason":"disambiguates OT eligibility only; no consumer; catch-all"},
+    {"name":"at_will_statement","reason":"no consumer"}
+  ],
+
+  "encoding_variations": [
+    "pay_frequency / base_salary — the same compensation is stated as $120,000/yr, $57.69/hour, or $10,000/month; the rate is meaningless without its frequency and (for hourly) guaranteed hours. Carry pay_frequency and guaranteed_hours_per_week alongside the number.",
+    "start_date vs effective_date — offer letters may say 'start date', 'first day', or 'effective date of employment'; treat the employment commencement date as start_date (effective_date is rejected as a duplicate).",
+    "employment_type / exempt status — enums with no coercer; issuers write 'Full-Time / Exempt', 'Regular FT', 'W-2 salaried'. Degraded to str; downstream interprets.",
+    "start_date_confirmed_or_employment_commenced — a boolean with no coercer; appears as 'employment commenced', a checkbox, or an addendum. Degraded to str."
+  ],
+
+  "open_questions": [
+    {"id":1,"q":"employment_contingencies shape — nested flat-row string list vs flattened single str.","options":["keep as a one-off nested list","join to a single string"],"recommendation":"keep flat-row for now; revisit to flatten if real offers typically list <=2 contingencies (cheaper, no bespoke plumbing)","blocks_implementation":false},
+    {"id":2,"q":"Variable pay for IN-7 — should the schema extract structured overtime/bonus/commission terms, or is that a downstream judgment?","options":["extract structured overtime/bonus/commission terms","leave to catch-all; IN-7 judges from base fields + pay_frequency"],"recommendation":"leave overtime_bonus_commission_terms to the catch-all and let IN-7 judge from base fields + pay_frequency; flag whether IN-7 needs a variable_pay_present tag rather than a structured field","blocks_implementation":false},
+    {"id":3,"q":"IN-7 field granularity — confirm position_title (raw) is the field IN-7 reads, versus a normalized job-family.","options":["extract raw position_title","normalized job-family"],"recommendation":"extract raw position_title; job-family normalization is a downstream tag, not an extraction field","blocks_implementation":false},
+    {"id":4,"q":"IN-9 first-pay-stub linkage — confirm that start_date_confirmed_or_employment_commenced as boolean-degraded-to-str is acceptable or whether a coercer/enum is warranted.","options":["boolean-degraded-to-str (chosen)","add a coercer/enum"],"recommendation":"start_date_confirmed_or_employment_commenced is the disambiguator for whether a first pay stub is still outstanding; boolean-degraded-to-str acceptable now","blocks_implementation":false}
+  ],
+
+  "notes": [
+    "16 typed-core rows — below the 20-25 target, which is expected for a Tier-2 document whose two rules key on just two fields (position_title, start_date); the remainder are identity, disambiguators, and processor-review fields. No field is padded in.",
+    "This is not a standardized form — do not expect a form number or revision date; the issuer is the employer, not an independent third party.",
+    "Contingencies (background/drug/I-9/references) indicate the offer is not yet firm — extract each as listed.",
+    "No new _PII_FIELDS registration required. An offer letter carries no SSN, DOB, or account/TIN number; candidate name, employer address, and employer contact are standard sensitivity and promoted for identity/processor reasons, not masking. If a future issuer variant includes the candidate's SSN or home address, that field must be added as a named typed field and registered (raw), never left to the catch-all."
+  ]
+}

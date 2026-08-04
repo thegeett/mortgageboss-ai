@@ -49,24 +49,17 @@ Respond with ONLY a single JSON object, no markdown fences and no prose, exactly
   "typed_core": {
     "party_1_name":   {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
     "party_2_name":   {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
-    "effective_date": {"value": <date|null>, "page": <int|null>, "snippet": <string|null>}
+    "effective_date": {"value": <date|null>, "page": <int|null>, "snippet": <string|null>},
+    "court_name": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "court_jurisdiction": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "case_number": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "decree_final_date": {"value": <YYYY-MM-DD|null>, "page": <int|null>, "snippet": <string|null>},
+    "decree_status": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "dissolution_granted_indicator": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "marriage_date": {"value": <YYYY-MM-DD|null>, "page": <int|null>, "snippet": <string|null>},
+    "separation_date": {"value": <YYYY-MM-DD|null>, "page": <int|null>, "snippet": <string|null>},
+    "name_change_order": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "incorporated_settlement_agreement": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "judge_name": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "appeal_or_stay_indicator": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>}
   },
-  "support_obligations": [
-    {"obligation_type": <string|null>, "amount": <number|null>, "frequency": <string|null>,
-     "payer": <string|null>, "page": <int|null>, "snippet": <string|null>}
-  ],
-  "property_awards": [
-    {"description": <string|null>, "awarded_to": <string|null>, "page": <int|null>, "snippet": <string|null>}
-  ],
-  "additional_sections": [
-    {"section": "<section name>", "fields": [
-      {"label": "<field label>", "value": <string|null>, "page": <int|null>, "snippet": <string|null>}
-    ]}
-  ],
-  "field_confidence": {"<typed_core field name>": <0.0-1.0|null>, "...": <0.0-1.0|null>},
-  "confidence": <number 0.0-1.0>,
-  "reasoning": "<one short sentence describing the document>"
-}
-
-Example (values illustrative; use null for anything absent):
-{"typed_core": {"party_1_name": {"value": "Jane Doe", "page": 1, "snippet": "Petitioner Jane Doe"}, "effective_date": {"value": "2022-06-01", "page": 1, "snippet": "entered June 1, 2022"}}, "support_obligations": [{"obligation_type": "child_support", "amount": "1200.00", "frequency": "monthly", "payer": "John Doe", "page": 3, "snippet": "Respondent shall pay $1,200/month child support"}], "property_awards": [{"description": "marital residence", "awarded_to": "Jane Doe", "page": 4, "snippet": "residence awarded to Petitioner"}], "additional_sections": [{"section": "Case Info", "fields": [{"label": "Case number", "value": "FD-2022-1234", "page": 1, "snippet": "Case No. FD-2022-1234"}]}], "confidence": 0.88, "reasoning": "Dissolution decree with a child-support obligation and a property award."}

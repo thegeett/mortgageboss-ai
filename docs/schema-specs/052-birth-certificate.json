@@ -1,0 +1,66 @@
+{
+  "document_type": "birth_certificate",
+  "slug": "birth-certificate",
+  "tier": 3,
+  "rules_served": [],
+  "summary_hint": "<child_name_at_birth>, born <date_of_birth> in <place_of_birth>, certified copy <yes/no> from <issuing_vital_records_office> (<issuing_state>), file no. …<last4>.",
+  "existing_extractor": null,
+  "catalog_coverage": "full",
+
+  "typed_core": [
+    {"name":"child_name_at_birth","type":"str","why":"identity: whose birth record this is — the person being identified; matches to the borrower/dependent","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"Keep the name at birth separate from any current/amended name"},
+    {"name":"current_or_amended_name","type":"str","why":"disambiguator: the current/amended name when it differs from the name at birth — needed to match a borrower whose name changed","rules":[],"reason_class":"disambiguator","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"date_of_birth","type":"date","why":"PII (highly_restricted) / processor: the DOB — the primary reason a birth certificate is in the file (age/identity); MUST be typed, never catch-all","rules":[],"reason_class":"pii","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"DOB is highly restricted PII. Extract into date_of_birth, NEVER the catch-all"},
+    {"name":"sex","type":"str","why":"processor: identity attribute for matching","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"place_of_birth","type":"str","why":"identity: city/county/state of birth — an identity attribute and citizenship/eligibility context","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"object","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"issuing_country_state_or_territory","type":"str","why":"identity: the issuing jurisdiction — authenticity and citizenship context","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"issuing_vital_records_office","type":"str","why":"identity: the issuing office — provenance/authenticity of the certificate","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"certificate_or_state_file_number","type":"str","why":"PII (highly_restricted) / identity: the state file number that uniquely keys the record; MUST be typed, never catch-all","rules":[],"reason_class":"pii","rule_floor":false,"degraded_from":null,"pii":{"kind":"ACCOUNT","pre_masked":false},"exists_today":false,"prompt_hint":"The state file number is highly restricted PII. Extract into certificate_or_state_file_number, NEVER the catch-all"},
+    {"name":"local_file_or_registration_number","type":"str","why":"PII (restricted) / identity: the local registration number — a second key for the record","rules":[],"reason_class":"pii","rule_floor":false,"degraded_from":null,"pii":{"kind":"ACCOUNT","pre_masked":false},"exists_today":false,"prompt_hint":null},
+    {"name":"registration_date","type":"date","why":"processor: when the birth was registered — authenticity (a long gap → delayed registration)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"certificate_issue_date","type":"date","why":"processor: when this copy was issued — recency of the certified copy","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"certified_copy_indicator","type":"str","why":"processor: whether this is a certified copy vs an informational/photocopy — the acceptability signal for identity use","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"bool","pii":null,"exists_today":false,"prompt_hint":"Distinguish a certified copy from an informational/souvenir copy — read the document's own statement, do not assume"},
+    {"name":"amended_or_corrected_indicator","type":"str","why":"disambiguator: whether the record was amended/corrected — which name/facts govern","rules":[],"reason_class":"disambiguator","rule_floor":false,"degraded_from":"bool","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"delayed_registration_indicator","type":"str","why":"disambiguator: a delayed registration is an authenticity/reliability signal","rules":[],"reason_class":"disambiguator","rule_floor":false,"degraded_from":"bool","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"parent_1_name","type":"str","why":"identity: a parent name — corroborating identity attribute","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"parent_2_name","type":"str","why":"identity: second parent name — corroborating identity attribute","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"registrar_name_or_seal","type":"str","why":"processor: the registrar signature/seal — the authenticity mark that makes the copy official","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"object","pii":null,"exists_today":false,"prompt_hint":"Capture the registrar seal/signature and registration date as authenticity signals — describe them; do NOT judge whether the document is acceptable"},
+    {"name":"facility_or_place_of_birth","type":"str","why":"disambiguator for place_of_birth: the hospital/facility, when needed to distinguish records","rules":[],"reason_class":"disambiguator","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null}
+  ],
+
+  "nested_lists": [],
+
+  "rejected": [
+    {"name":"the 8 TECHNICAL provenance fields","reason":"already in the TypedField wrapper"},
+    {"name":"document_title, form_number, form_revision_date, document_status_or_version","reason":"vital-records forms vary by state; classified upstream, no rule reads a form number"},
+    {"name":"issuer_name, issuer_address, issuer_phone, issuer_email_or_url","reason":"the issuer is the vital-records office, captured by issuing_vital_records_office / issuing_country_state_or_territory"},
+    {"name":"effective_date, expiration_date, statement_period_start, statement_period_end","reason":"a birth certificate has no coverage/validity period; dates captured by registration/issue"},
+    {"name":"party_names, party_addresses","reason":"redundant — the parties are the child and parents (captured)"},
+    {"name":"property_address, loan_number (kept only if stated), account_case_reference_number","reason":"a birth certificate carries no property/loan/account reference; keyed by file number"},
+    {"name":"signature_blocks, notary_block","reason":"authentication is the registrar seal (registrar_name_or_seal), not a party signature/notary"},
+    {"name":"time_of_birth, plurality_or_birth_order","reason":"OPTIONAL; no mortgage consumer"},
+    {"name":"parent_1_birthplace_and_date, parent_2_birthplace_and_date","reason":"parents' own birth details — no consumer; parent names suffice for corroboration"},
+    {"name":"informant_name_and_relationship, attendant_or_certifier_name_title","reason":"OPTIONAL registration detail with no consumer"},
+    {"name":"amendment_annotations","reason":"object[] with no consumer; the amended_or_corrected_indicator flag suffices — defer to catch-all"}
+  ],
+
+  "encoding_variations": [
+    "Name at birth vs current name: an amended certificate carries both — child_name_at_birth and current_or_amended_name must be kept distinct so a borrower whose name changed can be matched",
+    "Certified vs informational: the certificate states 'CERTIFIED COPY' or 'INFORMATIONAL, NOT A VALID DOCUMENT TO ESTABLISH IDENTITY' — certified_copy_indicator captures which; misreading it accepts an invalid copy",
+    "Two file numbers: the state file number and the local registration number are different identifiers — keep both, do not conflate",
+    "Delayed / amended: a delayed registration or an amendment annotation is stamped on the certificate — delayed_registration_indicator / amended_or_corrected_indicator capture these authenticity signals"
+  ],
+
+  "open_questions": [
+    {"id":1,"q":"No rule consumes this document today (Tier 3, rule_count 0), and its mortgage use is narrow.","options":["(a) minimal identity set (name + DOB + certified-copy + file number)","(b) the ~18-field set here for identity-matching and authenticity"],"recommendation":"(b) trimmed toward identity — but confirm the actual use case (is a birth certificate an accepted identity/age document in this program?), which would tell us which fields a future rule needs","blocks_implementation":false},
+    {"id":2,"q":"PII registration scope — date_of_birth, certificate_or_state_file_number, local_file_or_registration_number are all high-sensitivity and unregistered.","options":["register all three","leave unregistered"],"recommendation":"register all three regardless of rule status — the PII-protection reason stands alone GEET'S DECISION (LP-438): mask account-like identifiers (policy/account/plan numbers, wire/ACH trace, check references) via _PII_FIELDS; leave addresses and public-record case numbers PLAIN; DOB is unmasked (pii null).","blocks_implementation":false},
+    {"id":3,"q":"Multiple bools degraded (certified_copy, amended, delayed).","options":["degrade to str + prompt hint","add a bool coercer"],"recommendation":"degrade to str + prompt hint; add a bool coercer only if a rule branches on certified-copy status","blocks_implementation":false},
+    {"id":4,"q":"place_of_birth flattened from object to str.","options":["flatten to one str","keep structured (city/county/state)"],"recommendation":"flatten to one str; revisit only if a citizenship/eligibility rule needs structured place","blocks_implementation":false}
+  ],
+
+  "notes": [
+    "A birth certificate appears in a mortgage file mainly as an identity / DOB / age document; the field set is intentionally lean.",
+    "Do NOT judge whether the document is acceptable (that is an underwriter/rule call) — capture the authenticity signals.",
+    "Ambiguity: certificate_or_state_file_number and local_file_or_registration_number use pii.kind 'FILE_NUMBER', which is not a standard registered PII kind today — flagged for review (open question 2)."
+  ]
+}

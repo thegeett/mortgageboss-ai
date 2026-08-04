@@ -1,0 +1,77 @@
+{
+  "document_type": "affiliated_business_disclosure",
+  "slug": "aba",
+  "tier": 3,
+  "rules_served": [],
+  "summary_hint": "AfBA disclosure dated <disclosure_date> from <referring_party_name> (<referring_party_role>) to <consumer_name>: discloses affiliated providers, required-use = <required_use_indicator>, signed <consumer_signatures_and_dates>.",
+  "existing_extractor": null,
+  "catalog_coverage": "full",
+
+  "typed_core": [
+    {"name":"issuer_name","type":"str","why":"source — the referring party's organization","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"disclosure_date","type":"date","why":"identity/recency — RESPA requires the disclosure at/before referral; timing vs application matters","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"consumer_name","type":"str","why":"identity — the borrower being disclosed to","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"object","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"consumer_name_2","type":"str","why":"identity — co-borrower","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"object","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"consumer_name_count","type":"int","why":"disambiguator — signals whether the name split is right","rules":[],"reason_class":"disambiguator","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"referring_party_name","type":"str","why":"identity — the entity making the affiliated referral","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"referring_party_role","type":"str","why":"processor — lender / broker / agent making the referral","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"property_address_or_loan_reference","type":"str","why":"identity — links the disclosure to the loan file","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"If a specific loan/account number appears here, treat per the confidential loan-number convention, not the catch-all"},
+    {"name":"required_use_indicator","type":"str","why":"processor/compliance — RESPA generally prohibits required use of an affiliate; a 'yes' is a red flag","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"bool","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"required_use_exception_or_discount","type":"str","why":"disambiguator for required_use_indicator — the permitted-exception language (e.g. lender-required attorney) that makes a required use lawful","rules":[],"reason_class":"disambiguator","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"Capture any required-use exception verbatim"},
+    {"name":"consumer_free_to_shop_statement","type":"str","why":"processor/compliance — the mandatory 'you are NOT required to use' statement present","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"bool","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"no_guarantee_of_lowest_price_statement","type":"str","why":"processor — the no-guarantee statement present","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"bool","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"consumer_acknowledgment_text","type":"str","why":"processor — the acknowledgment language the borrower signed","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"consumer_signatures_and_dates","type":"str","why":"processor — execution: signed and dated by the consumer(s)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"signature","pii":null,"exists_today":false,"prompt_hint":"The disclosure must be signed and dated by the consumer(s) — capture execution"}
+  ],
+
+  "nested_lists": [
+    {
+      "name":"affiliate_entries","shape":"flat_row",
+      "shape_reason":"each affiliated provider and its estimated charge genuinely repeats (title, escrow, insurance, appraisal affiliates); typically <=~8, so flat rows are cheap and well under the ceiling. This is the substance of the disclosure",
+      "expected_item_count":"<=8","rules":[],
+      "exists_today":false,"plumbing_sites":5,
+      "fields":[
+        {"name":"provider_name","type":"str","why":"the affiliated provider disclosed"},
+        {"name":"service_type","type":"str","why":"the service the affiliate provides (title, escrow, insurance, appraisal)"},
+        {"name":"nature_of_relationship","type":"str","why":"the ownership/affiliate interest disclosed"},
+        {"name":"estimated_charge_or_range","type":"str","why":"the expected cost; may be a point estimate, a range, or 'varies' — no money coercer fits a range, keep as str"},
+        {"name":"source","type":"str","why":"the source reference"}
+      ]
+    }
+  ],
+
+  "rejected": [
+    {"name":"the 8 TECHNICAL provenance fields","reason":"already in the TypedField wrapper"},
+    {"name":"document_title","reason":"classification precedes extraction"},
+    {"name":"form_number, form_revision_date","reason":"the AfBA disclosure is not a numbered standardized form"},
+    {"name":"issuer_address, issuer_phone, issuer_email_or_url","reason":"contact only; catch-all"},
+    {"name":"document_issue_date, effective_date, expiration_date","reason":"duplicate disclosure_date; the disclosure does not expire"},
+    {"name":"statement_period_start, statement_period_end","reason":"not a statement period"},
+    {"name":"party_names, party_addresses","reason":"covered by consumer_name / referring_party_name"},
+    {"name":"property_address","reason":"property_address_or_loan_reference covers the linkage"},
+    {"name":"loan_number, account_case_reference_number","reason":"folded into property_address_or_loan_reference"},
+    {"name":"signature_blocks, notary_block","reason":"consumer_signatures_and_dates covers execution; not notarized"},
+    {"name":"document_status_or_version","reason":"no consumer"},
+    {"name":"delivery_method","reason":"OPTIONAL; no rule/processor gate; catch-all"}
+  ],
+
+  "encoding_variations": [
+    "required_use — RESPA prohibits requiring use of an affiliate except narrow exceptions (lender may require its own attorney, credit report, or appraisal). A 'required use = yes' is only lawful with an exception; required_use_exception_or_discount is the disambiguator",
+    "estimated charge — a point estimate ('$450') or a range ('$400-$600') or 'varies'; no money coercer fits a range, keep the estimated-charge cell as str inside the nested row",
+    "AfBA vs ABA — 'Affiliated Business Arrangement' and 'Affiliated Business Disclosure' name the same RESPA form; classification handles it",
+    "free-to-shop language — mandatory statement wording varies slightly; degrade the boolean to str and keep the sentence"
+  ],
+
+  "open_questions": [
+    {"id":1,"q":"Affiliate-entry shape — affiliate_entries flat rows carry an estimated charge that may be a range or 'varies'","options":["keep the charge as str in the row","split into low/high Decimals"],"recommendation":"(a) keep the charge as str in the row","blocks_implementation":false},
+    {"id":2,"q":"Consumer signatures — flatten vs list — flattened to a single verbatim consumer_signatures_and_dates string; if a rule must confirm each borrower signed (1-2 signers), a small flat list may be warranted","options":["flatten to a single verbatim string","a small flat list"],"recommendation":"flatten now, revisit if a completeness rule needs per-signer dates","blocks_implementation":false},
+    {"id":3,"q":"No attached rule — 0 rules; the disclosure's value is compliance (required-use prohibition, free-to-shop, timely signature); confirm whether a RESPA compliance rule is planned so required_use_indicator / consumer_free_to_shop_statement / signature timing gain a consumer","options":["plan a RESPA compliance rule","leave without a consumer"],"recommendation":"confirm whether a RESPA compliance rule is planned","blocks_implementation":false}
+  ],
+
+  "notes": [
+    "Serves 0 rules — no rule in the packet names this document; it is the RESPA Section 8 Affiliated Business Arrangement disclosure. Fields justified by identity, processor use, and compliance review.",
+    "14 typed-core rows — appropriate for a single-purpose disclosure. Compliance fields (required-use, free-to-shop, acknowledgment, signatures) are the processor's review points; the affiliate detail lives in the nested list.",
+    "This is the RESPA Section 8(c)(4) Affiliated Business Arrangement (AfBA) disclosure — its purpose is to disclose that the referring party has an ownership/affiliate interest in a provider it is referring, and the estimated charges. The mandatory borrower protections are the free-to-shop statement and the general prohibition on required use.",
+    "No new _PII_FIELDS registration proposed — the ABA disclosure carries consumer names and a property reference, all standard sensitivity (identity), and no SSN/account/DOB. If a specific loan/account number appears in property_address_or_loan_reference, treat per the confidential loan-number convention, not the catch-all."
+  ]
+}

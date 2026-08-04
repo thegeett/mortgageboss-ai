@@ -1,0 +1,69 @@
+{
+  "document_type": "authorization_to_run_credit",
+  "slug": "authorization-to-run-credit",
+  "tier": 3,
+  "rules_served": [],
+  "summary_hint": "<borrower(s)> authorized <authorized_company_name> to pull credit for <authorization_purpose>, signed <signature_date>; scope <authorization_scope>, expires <authorization_expiration>.",
+  "existing_extractor": null,
+  "catalog_coverage": "full",
+
+  "typed_core": [
+    {"name":"borrower_name","type":"str","why":"identity: who gave consent; attaches the authorization to a borrower","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"borrower_name_2","type":"str","why":"identity: co-borrower consent on a joint form","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"borrower_ssn_or_itin","type":"str","why":"PII (highly_restricted): the SSN/ITIN on the form; MUST be a typed field or it lands unmasked in the catch-all","rules":[],"reason_class":"pii","rule_floor":false,"degraded_from":null,"pii":{"kind":"SSN","pre_masked":false},"exists_today":false,"prompt_hint":"This form collects SSN/ITIN — highly restricted PII. Extract into borrower_ssn_or_itin (and _2), NEVER into the free-form catch-all"},
+    {"name":"borrower_ssn_or_itin_2","type":"str","why":"PII (highly_restricted): co-borrower SSN/ITIN","rules":[],"reason_class":"pii","rule_floor":false,"degraded_from":null,"pii":{"kind":"SSN","pre_masked":false},"exists_today":false,"prompt_hint":null},
+    {"name":"borrower_dob","type":"date","why":"PII (highly_restricted): the DOB on the form; MUST be typed, never catch-all","rules":[],"reason_class":"pii","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"DOB is highly restricted PII. Extract into borrower_dob (and _2), NEVER into the free-form catch-all"},
+    {"name":"borrower_dob_2","type":"date","why":"PII (highly_restricted): co-borrower DOB","rules":[],"reason_class":"pii","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"borrower_address","type":"str","why":"identity: the borrower address on the form; identity/consistency","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"address","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"authorized_company_name","type":"str","why":"identity / processor: who is authorized to pull — must match this lender/broker; the core consent fact","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"Capture the authorized company verbatim — a compliance-relevant fact"},
+    {"name":"authorization_purpose","type":"str","why":"processor: mortgage-application purpose — permissible-purpose compliance","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"permissible_purpose_statement","type":"str","why":"processor: the FCRA permissible-purpose language present on the form — a compliance completeness check","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"Capture the permissible-purpose statement verbatim — a compliance-relevant fact"},
+    {"name":"authorization_scope","type":"str","why":"processor: what the borrower authorized (single pull vs ongoing) — scope of consent","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"authorization_expiration_or_duration","type":"str","why":"processor / disambiguator: how long the authorization is valid — whether it is still effective at pull time","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"authorized_bureaus_or_report_types","type":"str","why":"processor: which bureaus/report types are covered — a light string list, not a wrapped record","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"list","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"soft_or_hard_inquiry_disclosure","type":"str","why":"disambiguator: whether the disclosure states a soft vs hard pull — affects the borrower's credit and the disclosure's adequacy","rules":[],"reason_class":"disambiguator","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"borrower_signature_present","type":"str","why":"processor: scalar signature-present indicator — is the authorization executed","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"bool","pii":null,"exists_today":false,"prompt_hint":"Assess signature presence as yes/no per borrower; do NOT judge whether the authorization is legally sufficient"},
+    {"name":"borrower_signature_date","type":"date","why":"processor: the consent date — the authorization's effective date and recency","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"borrower_signature_date_2","type":"date","why":"processor: co-borrower consent date","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"issuer_name","type":"str","why":"identity: the form's originator (lender/broker) — source","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"document_issue_date","type":"date","why":"processor: form date; disambiguates from signature date when they differ","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"loan_number","type":"str","why":"identity: links the authorization to the loan file (confidential)","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"property_address","type":"str","why":"identity: subject property when stated — loan-file linkage","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"address","pii":null,"exists_today":false,"prompt_hint":null}
+  ],
+
+  "nested_lists": [],
+
+  "rejected": [
+    {"name":"the 8 TECHNICAL provenance fields","reason":"already in the TypedField wrapper"},
+    {"name":"document_title, form_number, form_revision_date, document_status_or_version","reason":"authorization forms are lender-specific, not standardized"},
+    {"name":"issuer_address, issuer_phone, issuer_email_or_url","reason":"contact detail with no consumer"},
+    {"name":"effective_date, expiration_date, statement_period_start, statement_period_end","reason":"duplicate borrower_signature_date / authorization_expiration_or_duration; no coverage period"},
+    {"name":"party_names, party_addresses","reason":"redundant — the parties are the borrowers (borrower_names / borrower_addresses)"},
+    {"name":"account_case_reference_number","reason":"not present on a consent form; keyed by loan_number"},
+    {"name":"signature_blocks, notary_block","reason":"authorization is not notarized; execution captured via borrower_signature_*"},
+    {"name":"authorized_agents_or_service_providers","reason":"no consumer; the authorized party is authorized_company_name — defer to catch-all"},
+    {"name":"initial_and_refresh_pull_authorization","reason":"an object with no consumer; authorization_scope + soft_or_hard_inquiry_disclosure cover the relevant facts"},
+    {"name":"revocation_process","reason":"OPTIONAL boilerplate; no consumer"},
+    {"name":"electronic_consent_metadata","reason":"an object with no rule/processor consumer; defer to catch-all"}
+  ],
+
+  "encoding_variations": [
+    "SSN vs ITIN: the form may label it 'SSN', 'Social Security No.', 'Tax ID', or 'ITIN' — all map to borrower_ssn_or_itin; keep the value, note which in the snippet",
+    "Purpose: 'credit for mortgage application', 'pre-qualification', 'loan servicing' — authorization_purpose degrades to text; the permissible-purpose statement disambiguates the FCRA basis",
+    "Duration: 'valid for 120 days', 'for the life of the loan', 'until revoked' — authorization_expiration_or_duration holds all forms as text",
+    "Soft vs hard: some forms disclose the inquiry type explicitly, some are silent — soft_or_hard_inquiry_disclosure records the disclosure text, not an inference"
+  ],
+
+  "open_questions": [
+    {"id":1,"q":"No rule consumes this document today (Tier 3, rule_count 0), yet it carries the highest-sensitivity PII in this batch (full SSN + DOB). Even absent a rule, these MUST be typed + registered so they are masked.","options":["register borrower_ssn_or_itin(_2) and borrower_dob(_2) now","wait until a rule exists"],"recommendation":"register now regardless of rule status — the PII-protection reason stands alone GEET'S DECISION (LP-438): mask account-like identifiers (policy/account/plan numbers, wire/ACH trace, check references) via _PII_FIELDS; leave addresses and public-record case numbers PLAIN; DOB is unmasked (pii null).","blocks_implementation":false},
+    {"id":2,"q":"Flatten-to-two vs nested borrowers[].","options":["flatten to two borrowers","nested borrowers[] list (with its own PII redactor)"],"recommendation":"flatten to two borrowers; revisit to a nested list only if 3+ authorizers on one form prove common GEET'S DECISION (LP-438): BUILD IT — LP-437 made nested lists cheap (one declaration + the generic mechanism); the one-list-budget / defer / no-consumer concern is overturned. Build as flat_row; the per-rule consumer is separate follow-up.","blocks_implementation":false},
+    {"id":3,"q":"authorized_bureaus_or_report_types as flat str[] vs nested.","options":["flat str[]","nested list"],"recommendation":"flat str[] (a handful of bureau names — light, no per-item source needed) GEET'S DECISION (LP-438): BUILD IT — LP-437 made nested lists cheap (one declaration + the generic mechanism); the one-list-budget / defer / no-consumer concern is overturned. Build as flat_row; the per-rule consumer is separate follow-up.","blocks_implementation":false},
+    {"id":4,"q":"authorization_purpose / soft_or_hard_inquiry_disclosure enum/text.","options":["degrade to str + prompt hint","add a coercer"],"recommendation":"degrade to str + prompt hint","blocks_implementation":false}
+  ],
+
+  "notes": [
+    "Report each borrower's name, SSN, DOB, and signature date as a matched set (borrower 1 vs borrower 2).",
+    "Ambiguity: authorized_bureaus_or_report_types is a flat str[] in the markdown; typed as str with degraded_from 'list' since the five coercers do not include a list type.",
+    "borrower_address is promoted to typed core so it is not left raw in the catch-all, but is not registered as a masked PII kind (standard/PII-adjacent)."
+  ]
+}

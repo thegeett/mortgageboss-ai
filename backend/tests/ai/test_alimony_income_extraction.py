@@ -1,0 +1,119 @@
+"""Tests for alimony income extraction (GENERATED, LP-434) — the AI wrapper is MOCKED.
+
+Shape/mechanism, not accuracy (guide §10): the typed core is coerced with source, an
+all-null core is FAILED, unparseable JSON returns None, and the ``.failed()`` factory
+holds. No real samples exist — accuracy is validated as real documents flow through.
+"""
+
+import json
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
+
+import pytest
+from app.ai.client import AIClientError
+from app.ai.extraction import model_call
+from app.ai.extraction.alimony_income import (
+    AlimonyIncomeExtraction,
+    AlimonyIncomeExtractionResult,
+    _parse_alimony_income_json,
+    extract_alimony_income,
+)
+from app.models.extraction import ExtractionStatus
+
+PDF_BYTES = b"%PDF-1.7 dummy alimony_income"
+
+
+def _core(value: object, page: int | None = 1, snippet: str | None = "snip") -> dict:
+    return {"value": value, "page": page, "snippet": snippet}
+
+
+FULL_PAYLOAD = {
+    "typed_core": {
+        "document_title": _core("SAMPLE"),
+        "issuer_name": _core("SAMPLE"),
+        "recipient_name": _core("SAMPLE"),
+        "payer_name": _core("SAMPLE"),
+        "court_or_agreement_type": _core("SAMPLE"),
+        "court_name": _core("SAMPLE"),
+        "case_number": _core("SAMPLE"),
+        "order_or_agreement_date": _core("2024-01-15"),
+        "modification_date": _core("2024-01-15"),
+        "support_type": _core("SAMPLE"),
+        "ordered_amount": _core("1234.56"),
+        "payment_frequency": _core("SAMPLE"),
+        "start_date": _core("2024-01-15"),
+        "end_date_or_termination_events": _core("SAMPLE"),
+        "escalation_or_cost_of_living_terms": _core("SAMPLE"),
+        "arrears_balance": _core("1234.56"),
+        "current_payment_status": _core("SAMPLE"),
+        "third_party_collection_or_sdu": _core("SAMPLE"),
+        "deposit_account_last4": _core("SAMPLE"),
+        "document_issue_date": _core("2024-01-15"),
+        "loan_number": _core("SAMPLE"),
+    },
+    "additional_sections": [{"section": "Other", "fields": [{"label": "Note", "value": "x"}]}],
+    "payment_history": [
+        {
+            "date": "2024-01-15",
+            "amount": "1234.56",
+            "status": "SAMPLE",
+            "source": "SAMPLE",
+            "page": 1,
+            "snippet": "s",
+        }
+    ],
+    "confidence": 0.9,
+    "reasoning": "generated test fixture.",
+}
+FULL_JSON = json.dumps(FULL_PAYLOAD)
+
+
+def _mock_complete(
+    monkeypatch: pytest.MonkeyPatch, *, text: str | None = None, exc: Exception | None = None
+) -> AsyncMock:
+    if exc is not None:
+        mock = AsyncMock(side_effect=exc)
+    else:
+        mock = AsyncMock(
+            return_value=SimpleNamespace(
+                text=text, input_tokens=150, output_tokens=60, model="m", stop_reason="end_turn"
+            )
+        )
+    monkeypatch.setattr(model_call, "complete", mock)
+    return mock
+
+
+def test_typed_core_coerced_with_source() -> None:
+    d = _parse_alimony_income_json(FULL_JSON).data  # type: ignore[union-attr]
+    assert d.document_title.value == "SAMPLE"
+    assert d.document_title.source is not None
+
+
+def test_all_null_core_is_failed() -> None:
+    payload = {"typed_core": {"document_title": _core(None)}}
+    parsed = _parse_alimony_income_json(json.dumps(payload))
+    assert parsed is not None
+    assert parsed.status == ExtractionStatus.FAILED
+
+
+@pytest.mark.parametrize("raw", ["not json", "", "{ broken"])
+def test_parse_unparseable_returns_none(raw: str) -> None:
+    assert _parse_alimony_income_json(raw) is None
+
+
+async def test_extract_success(monkeypatch: pytest.MonkeyPatch) -> None:
+    _mock_complete(monkeypatch, text=FULL_JSON)
+    result = await extract_alimony_income(PDF_BYTES, "application/pdf")
+    assert result.status == ExtractionStatus.SUCCEEDED
+
+
+async def test_extract_ai_failure_returns_failed(monkeypatch: pytest.MonkeyPatch) -> None:
+    _mock_complete(monkeypatch, exc=AIClientError("boom"))
+    result = await extract_alimony_income(PDF_BYTES, "application/pdf")
+    assert result.status == ExtractionStatus.FAILED
+
+
+def test_failed_factory() -> None:
+    result = AlimonyIncomeExtractionResult.failed("nope")
+    assert result.status == ExtractionStatus.FAILED
+    assert result.data == AlimonyIncomeExtraction()

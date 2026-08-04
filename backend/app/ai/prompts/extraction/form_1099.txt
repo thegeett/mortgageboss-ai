@@ -59,17 +59,12 @@ Respond with ONLY a single JSON object, no markdown fences and no prose, exactly
     "recipient_name": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
     "recipient_tin":  {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
     "tax_year":       {"value": <int|null>, "page": <int|null>, "snippet": <string|null>},
-    "income_amount":  {"value": <number|null>, "page": <int|null>, "snippet": <string|null>}
+    "income_amount":  {"value": <number|null>, "page": <int|null>, "snippet": <string|null>},
+    "corrected_indicator": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "payer_address": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "recipient_address": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "distribution_code": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "taxable_amount_not_determined": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "account_number": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "second_tin_notice": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>}
   },
-  "additional_sections": [
-    {"section": "<section name>", "fields": [
-      {"label": "<field label>", "value": <string|null>, "page": <int|null>, "snippet": <string|null>}
-    ]}
-  ],
-  "field_confidence": {"<typed_core field name>": <0.0-1.0|null>, "...": <0.0-1.0|null>},
-  "confidence": <number 0.0-1.0>,
-  "reasoning": "<one short sentence; do NOT quote the full recipient TIN/SSN>"
-}
-
-Example (values illustrative; use null for anything absent):
-{"typed_core": {"form_subtype": {"value": "NEC", "page": 1, "snippet": "Form 1099-NEC"}, "payer_name": {"value": "Globex LLC", "page": 1, "snippet": "PAYER Globex LLC"}, "income_amount": {"value": "48250.00", "page": 1, "snippet": "1 Nonemployee compensation 48,250.00"}, "tax_year": {"value": 2024, "page": 1, "snippet": "For calendar year 2024"}}, "additional_sections": [{"section": "Withholding", "fields": [{"label": "Federal income tax withheld", "value": "0.00", "page": 1, "snippet": "4 Federal income tax withheld 0.00"}]}], "confidence": 0.9, "reasoning": "Clear 1099-NEC with a single nonemployee compensation box."}

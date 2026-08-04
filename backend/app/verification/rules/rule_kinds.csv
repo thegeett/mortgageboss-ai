@@ -74,7 +74,7 @@ TI-3,Existing liens / unreleased mortgage,Title,structural,ai_fuzzy_match,false,
 TI-4,Judgments / tax liens on title,Title,structural,deterministic_only,false,true,false,false,Detect judgments/liens on title — presence.
 TI-5,Vesting,Title,judgmental,ai_judgment,false,,false,false,Vesting vs borrower/marital — judgment.
 TI-6,Chain of title / rapid transfer,Title,judgmental,ai_judgment,false,,false,false,Recent transfers/price jumps — flip/fraud judgment.
-IH-1,Insurance adequacy,Insurance,calculative,deterministic_bookend,true,,false,true,dwelling coverage vs loan amount/replacement — numeric compare.
+IH-1,Insurance adequacy,Insurance,structural,deterministic_only,false,true,false,false,dwelling loss-settlement basis == replacement cost (ADR-340 — Priya retired the coverage-vs-loan arithmetic 2026-03-18); a basis check.
 IH-2,Mortgagee clause,Insurance,structural,ai_fuzzy_match,false,false,false,false,Clause names correct lender — presence/parse (AI for clause text).
 IH-3,Insurance effective date,Insurance,structural,deterministic_only,false,true,false,false,effective date <= closing — date compare.
 IH-4,Premium matches DTI,Insurance,calculative,deterministic_bookend,true,,false,false,premium used vs binder — numeric compare (dup DT-5).

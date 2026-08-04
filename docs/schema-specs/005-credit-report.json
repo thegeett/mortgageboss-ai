@@ -1,0 +1,136 @@
+{
+  "document_type": "credit_report",
+  "slug": "credit-report",
+  "tier": 1,
+  "rules_served": ["CR-4","CR-5","CR-6","CR-7","CR-9","CR-10","CR-11","CR-12","CR-13","DT-7","ID-2","ID-4","PE-1","RE-1"],
+  "summary_hint": "bureaus, pull date, the three scores, and tradeline/public-record/inquiry counts",
+  "existing_extractor": null,
+  "catalog_coverage": "none",
+
+  "typed_core": [
+    {"name":"borrower_name","type":"str","why":"identity — whose report; attaches the document to a borrower; the subject for ID-2/ID-4/RE-1","rules":["ID-2","ID-4","RE-1"],"reason_class":"identity","rule_floor":true,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"co_borrower_name","type":"str","why":"a joint or merged report carries a second subject; attribution for ID-2/ID-4","rules":["ID-2","ID-4"],"reason_class":"identity","rule_floor":true,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"borrower_ssn","type":"str","why":"ID-2 — 'EXACT match, no fuzzy'. Stored raw so the snapshot can salt-hash for cross-document matching","rules":["ID-2"],"reason_class":"pii","rule_floor":true,"degraded_from":null,"pii":{"kind":"SSN","pre_masked":false},"exists_today":false,"prompt_hint":"Never place an SSN in additional_sections — catch-all values are stored unmasked"},
+    {"name":"co_borrower_ssn","type":"str","why":"ID-2 for the second subject on a joint pull","rules":["ID-2"],"reason_class":"pii","rule_floor":true,"degraded_from":null,"pii":{"kind":"SSN","pre_masked":false},"exists_today":false,"prompt_hint":null},
+    {"name":"borrower_date_of_birth","type":"date","why":"identity disambiguator — distinguishes two same-name subjects; a secondary ID cross-check","rules":["ID-2"],"reason_class":"pii","rule_floor":true,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"borrower_current_address","type":"str","why":"ID-4 — current-address consistency against the application, bank statement and pay stub","rules":["ID-4"],"reason_class":"rule","rule_floor":true,"degraded_from":"address","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"borrower_former_address","type":"str","why":"disambiguator for ID-4 — reports list prior addresses, so an apparent mismatch may be a known former address","rules":["ID-4"],"reason_class":"disambiguator","rule_floor":true,"degraded_from":"address","pii":null,"exists_today":false,"prompt_hint":"Distinguish CURRENT from FORMER — never report a former address as current"},
+
+    {"name":"report_date","type":"date","why":"CR-13 — 'closing_date minus report_date vs the validity window'. The single field CR-13 exists to read","rules":["CR-13"],"reason_class":"rule","rule_floor":true,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"The PULL/issue date, not the score as-of date"},
+    {"name":"score_date","type":"date","why":"disambiguator — the score as-of date can differ from the pull date; CR-13 must use the pull date","rules":["CR-13"],"reason_class":"disambiguator","rule_floor":true,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"report_provider","type":"str","why":"identity — the reseller/CRA that issued the merge (CoreLogic, Factual Data); distinguishes two pulls","rules":[],"reason_class":"identity","rule_floor":true,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"report_reference_number","type":"str","why":"identity — distinguishes reissues for the same borrower","rules":[],"reason_class":"identity","rule_floor":true,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"credit_report_type","type":"str","why":"CR-7 disambiguator — tri-merge vs single-bureau decides middle-of-three vs lower-of-two","rules":["CR-7"],"reason_class":"disambiguator","rule_floor":true,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":null},
+
+    {"name":"score_equifax","type":"int","why":"CR-7, PE-1 — one of the three inputs to the representative score","rules":["CR-7","PE-1"],"reason_class":"rule","rule_floor":true,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"score_experian","type":"int","why":"CR-7, PE-1","rules":["CR-7","PE-1"],"reason_class":"rule","rule_floor":true,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"score_transunion","type":"int","why":"CR-7, PE-1","rules":["CR-7","PE-1"],"reason_class":"rule","rule_floor":true,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"score_model","type":"str","why":"CR-7 disambiguator — FICO v2/v4/v5 (mortgage classic) vs FICO 8 vs VantageScore are NOT comparable to a program minimum","rules":["CR-7"],"reason_class":"disambiguator","rule_floor":true,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":"Capture the model exactly as printed. Beacon = Equifax FICO; Empirica = TransUnion FICO. Never compare a Vantage score to a FICO minimum"},
+
+    {"name":"open_tradeline_count","type":"int","why":"DT-7 completeness signal — the OPEN/active tradeline count the report summary quotes. NOT a list-length cross-check: the tradelines list carries ALL tradelines (open and closed), so this counts a different population (LP-445 — the LF-96SV false PARTIAL: 9 open vs 18 total)","rules":["DT-7"],"reason_class":"processor","rule_floor":true,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"The count of OPEN/active tradelines as stated in the report summary — the tradelines list contains ALL tradelines, open and closed"},
+    {"name":"total_tradeline_count","type":"int","why":"INFORMATIONAL ONLY (LP-446): the total number of tradelines incl. closed, IF the report EXPLICITLY prints one. DELIBERATELY NOT a completeness cross-check — it is rarely printed and unreliable when it is (a model estimate of 'total incl. closed' vs the tradelines actually listed), and it false-PARTIAL'd a correct 18-row extraction (declared 20). Tradelines have NO completeness gate (a guard that misfires more than it catches is worse than none). The tradelines list has NO count_field for this reason","rules":["DT-7"],"reason_class":"processor","rule_floor":true,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"Populate ONLY if the report EXPLICITLY prints a total tradeline count INCLUDING closed accounts. Do NOT compute, estimate, or infer it. If only an open/active count is stated, leave null. (Informational only — never used to judge completeness.)"},
+    {"name":"total_monthly_debt_payment","type":"Decimal","why":"DT-7, supports CR-4 — the report's summed monthly obligations, reconciled against the application's stated liabilities","rules":["CR-4","DT-7"],"reason_class":"processor","rule_floor":true,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"public_record_count","type":"int","why":"presence gate for CR-6/CR-11 — a cheap 'are there any?' before walking the list","rules":["CR-6","CR-11"],"reason_class":"rule","rule_floor":true,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"inquiry_count","type":"int","why":"presence gate for CR-5 — how many hard inquiries need an LOE or matching tradeline","rules":["CR-5"],"reason_class":"rule","rule_floor":true,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"security_freeze_or_fraud_alert","type":"str","why":"processor — a freeze or fraud alert blocks a clean pull and is a common condition","rules":[],"reason_class":"processor","rule_floor":true,"degraded_from":"bool","pii":null,"exists_today":false,"prompt_hint":null},
+
+    {"name":"ssn_alert_status","type":"str","why":"fraud/identity — the report's SSN verification/alert status (e.g. 'Requires Investigation', an issuance/mismatch alert). A processor stops on this. Named for the FACT, not one bureau's layout (LP-445 — promoted from the catch-all, the third IH-1 instance). Capture the stated status text; a rule judges","rules":[],"reason_class":"processor","rule_floor":true,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"The SSN verification/alert status exactly as stated (e.g. 'Requires Investigation', or an issuance/mismatch alert). Null if the report states no SSN alert. Never place the SSN digits here"},
+    {"name":"ssn_first_reported_date","type":"date","why":"fraud/identity disambiguator — the date the SSN was first reported for the consumer; a very recent date on an established borrower is a flag. A date, not the SSN — not raw-sensitive","rules":[],"reason_class":"processor","rule_floor":true,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"address_usage_alert","type":"str","why":"fraud/identity — an address-velocity alert (e.g. 'current address used N times in 30 days on different inquiries'). The alert text only — the address itself stays in borrower_current_address","rules":[],"reason_class":"processor","rule_floor":true,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"The address-usage/velocity alert text as stated. Null if none. Do NOT put a street address here — only the alert wording"},
+    {"name":"address_tenure","type":"str","why":"identity — the reported tenure at the current address; short tenure corroborates an address-velocity flag. Captured as STATED text, not coerced to int: the source is unit-bearing ('016 MONTH(S)') and an int coercer would return null on a present value -> coercion_lost -> a false PARTIAL (LP-445 review). A rule parses the number","rules":[],"reason_class":"processor","rule_floor":true,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"The reported tenure at the current address, exactly as stated (e.g. '016 MONTH(S)' or '1 YR 4 MO'). Null if not stated"},
+    {"name":"credit_report_current_employer","type":"str","why":"IN-5 corroboration — an INDEPENDENT, bureau-reported employer to cross-check against the documented employer (pay stub / W-2 / VOE). The credit_report_ prefix (the aus_ precedent) marks the SOURCE so no rule mistakes it for the documented employer","rules":["IN-5"],"reason_class":"processor","rule_floor":true,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"The CURRENT employer as reported on the credit report (bureau-sourced, may be stale)"},
+    {"name":"credit_report_previous_employer","type":"str","why":"IN-5 disambiguator — a bureau-reported prior employer explains an apparent employer mismatch (a known former employer, not a discrepancy)","rules":["IN-5"],"reason_class":"processor","rule_floor":true,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"credit_report_occupation","type":"str","why":"IN-7 — the bureau-reported occupation/job title, an independent signal for the income-source reasonableness check","rules":["IN-7"],"reason_class":"processor","rule_floor":true,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null}
+  ],
+
+  "nested_lists": [
+    {
+      "name":"tradelines","shape":"flat_row",
+      "shape_reason":"a tri-merge routinely carries 20+ tradelines; per-field wrapping would risk the 16,384-token output ceiling",
+      "expected_item_count":"10-30","rules":["CR-4","CR-5","CR-8","CR-9","CR-10","CR-12","RE-1"],
+      "exists_today":false,"plumbing_sites":5,
+      "fields":[
+        {"name":"creditor_name","type":"str","why":"CR-4 — 'match by creditor + approx balance/payment'"},
+        {"name":"account_type","type":"str","why":"CR-9 (student loans), CR-8 (mortgage), CR-10 (collections)"},
+        {"name":"account_number_masked","type":"str","why":"identity within the report","pii_note":"pre-masked last-4; the nested list needs a row redactor, not _PII_FIELDS"},
+        {"name":"account_ownership","type":"str","why":"CR-4 — ECOA individual/joint/authorized-user. An AU tradeline is NOT the borrower's obligation"},
+        {"name":"date_opened","type":"date","why":"CR-5 — matching an inquiry to a resulting new account"},
+        {"name":"balance","type":"Decimal","why":"CR-4, CR-10"},
+        {"name":"credit_limit_or_high_credit","type":"Decimal","why":"CR-2 — HCLTV uses the limit, not the balance"},
+        {"name":"monthly_payment","type":"Decimal","why":"CR-4 ('payment>0'), CR-9"},
+        {"name":"past_due_amount","type":"Decimal","why":"CR-8, CR-10"},
+        {"name":"account_status","type":"str","why":"CR-10 — open/closed/paid"},
+        {"name":"payment_status","type":"str","why":"CR-10 — current/collection/charge-off/delinquent"},
+        {"name":"payment_history_24mo","type":"str","why":"CR-8 — 'recent lates against program tolerance'. A COMPACT STRING, never 24 sub-objects"},
+        {"name":"worst_delinquency","type":"str","why":"CR-8"},
+        {"name":"is_disputed","type":"str","why":"CR-12 — 'detect dispute flags; flag for AUS rerun'"}
+      ]
+    },
+    {
+      "name":"public_records","shape":"flat_row",
+      "shape_reason":"typically 0-5 items; flat rows keep the token cost trivial",
+      "expected_item_count":"0-5","rules":["CR-6","CR-11"],
+      "count_field":"public_record_count",
+      "exists_today":false,"plumbing_sites":5,
+      "fields":[
+        {"name":"record_type","type":"str","why":"CR-6 — bankruptcy chapter / tax lien / judgment"},
+        {"name":"filing_date","type":"date","why":"CR-6 — the seasoning clock's start for a lien or judgment"},
+        {"name":"discharge_or_satisfied_date","type":"date","why":"CR-6 — for a bankruptcy, seasoning runs from DISCHARGE, not filing"},
+        {"name":"status","type":"str","why":"CR-11 — 'fire if unresolved'"},
+        {"name":"amount","type":"Decimal","why":"CR-11"},
+        {"name":"court_or_jurisdiction","type":"str","why":"CR-11 identity"}
+      ]
+    },
+    {
+      "name":"inquiries","shape":"flat_row",
+      "shape_reason":"typically 0-10 items; flat rows keep the token cost trivial",
+      "expected_item_count":"0-10","rules":["CR-5"],
+      "count_field":"inquiry_count",
+      "exists_today":false,"plumbing_sites":5,
+      "fields":[
+        {"name":"inquiry_date","type":"date","why":"CR-5 — 'each inquiry within the window'"},
+        {"name":"creditor_name","type":"str","why":"CR-5 — matching an inquiry to a resulting tradeline"},
+        {"name":"inquiry_type","type":"str","why":"CR-5 — ONLY hard inquiries count; soft pulls are excluded"}
+      ]
+    }
+  ],
+
+  "rejected": [
+    {"name":"representative_score","reason":"a conclusion — CR-7 COMPUTES it (middle-of-three / lower-of-two) from the three bureau scores. Tags describe; rules judge"},
+    {"name":"has_derogatory / derogatory_count","reason":"a conclusion — CR-6 judges seasoning from public_records"},
+    {"name":"large_collection_flag","reason":"a conclusion — CR-10 applies program thresholds"},
+    {"name":"dti / total_debt_ratio","reason":"not on a credit report; computed downstream from income and liabilities"},
+    {"name":"total_open_balance","reason":"a summary with no rule consumer; balances live per tradeline"},
+    {"name":"accounts_in_good_standing_count","reason":"a summary conclusion; no rule"},
+    {"name":"employment_history (bureau-reported)","reason":"REVISED (LP-445): the FULL bureau employment history stays rejected (unreliable/stale), but the current/previous employer + occupation ARE now promoted as credit_report_current_employer / credit_report_previous_employer / credit_report_occupation — INDEPENDENT corroboration for IN-5/IN-7, source-prefixed so no rule mistakes them for the documented employer. Tags describe; a rule decides how much to trust a bureau source"},
+    {"name":"score_factors / reason codes","reason":"no rule reads them"},
+    {"name":"the 8 TECHNICAL provenance fields","reason":"already in the TypedField wrapper"}
+  ],
+
+  "encoding_variations": [
+    "Every bureau formats differently; a tri-merge from Factual Data reads nothing like one from CBC",
+    "Scores are labelled differently per bureau — Equifax 'Beacon', TransUnion 'FICO Classic/Risk', Experian 'FICO v2'. The MODEL must ride alongside the number",
+    "Report date, score as-of date, and 'in file since' date can all appear; CR-13 needs the PULL date",
+    "Collections may appear as a tradeline with a status code, in a separate collections section, or as a public record — the same fact in three locations",
+    "Bankruptcy: chapter 7 vs 13, and filed / discharged / dismissed dates differ. Seasoning runs from the DISCHARGE date",
+    "Disputes appear as 'consumer disputes this account', compliance codes (XB/XC), or free-text remarks — no single flag",
+    "MOP (Manner of Payment) codes 1-9 encode delinquency",
+    "ECOA codes govern ownership: Individual / Joint / Authorized User / Co-signer"
+  ],
+
+  "open_questions": [
+    {"id":1,"q":"Three nested lists (~15 plumbing sites) — ship all now or phase?","options":["all three now","tradelines only, defer public_records and inquiries"],"recommendation":"all three — CR-5/CR-6/CR-11 are otherwise dead, and both extra lists are small (0-5 items), so the token cost is minor GEET'S DECISION (LP-435): build ALL THREE nested lists (tradelines, public_records, inquiries).","blocks_implementation":false},
+    {"id":2,"q":"SSN storage vs ID-2's exact match","options":["raw + snapshot salt-hash","masked last-4"],"recommendation":"raw + snapshot hash — a last-4 mask defeats the 'differs in the first five digits' case ID-2 exists to catch GEET'S DECISION (LP-438): mask account-like identifiers (policy/account/plan numbers, wire/ACH trace, check references) via _PII_FIELDS; leave addresses and public-record case numbers PLAIN; DOB is unmasked (pii null).","blocks_implementation":false},
+    {"id":3,"q":"Token ceiling on a large report","options":["flat rows (chosen)","phase the lists"],"recommendation":"test against a real 30-page tri-merge before committing; 20+ tradelines x 14 fields plus two more lists is the largest output in the set GEET'S DECISION (LP-439): flat rows; test on a real 30-page tri-merge.","blocks_implementation":false},
+    {"id":4,"q":"Where collections live","options":["tradelines only","public_records only","both"],"recommendation":"capture as tradelines AND let CR-10 scan public_records; document the dual location for the rule author","blocks_implementation":false},
+    {"id":5,"q":"How does the report enter the system?","options":["processor upload (confirmed)","a separate lender feed"],"recommendation":"processor upload — confirmed; classification and routing are the standard path","blocks_implementation":false}
+  ],
+
+  "notes": [
+    "NO v2 catalog entry exists for this document — the rule floor IS the entire schema. Every field is therefore rule_floor: true.",
+    "The largest single unlock in the project: 11 of its 14 rules are BLOCKED on this extractor.",
+    "The most PII-dense document in a mortgage file. _PII_FIELDS covers typed-core only; anything in additional_sections is stored UNMASKED.",
+    "No PiiKind exists today for DOB or ADDRESS — both are needed here (see also the 1003).",
+    "A nested-list PII field has no _PII_FIELDS path; the transaction-description redactor is the precedent for per-row redaction."
+  ]
+}

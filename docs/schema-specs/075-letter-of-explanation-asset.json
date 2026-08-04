@@ -1,0 +1,74 @@
+{
+  "document_type": "letter_of_explanation_asset",
+  "slug": "letter-of-explanation-asset",
+  "tier": 3,
+  "rules_served": [],
+  "summary_hint": "Borrower LOE from Jordan Rivera dated 07/12/2026 — explains a $25,000 deposit sourced from sale of a vehicle, not borrowed, funds now in Chase ..4471.",
+  "existing_extractor": null,
+  "catalog_coverage": "full",
+
+  "typed_core": [
+    {"name":"borrower_name","type":"str","why":"identity — whose letter; borrower match","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"person","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"borrower_name_2","type":"str","why":"identity — co-borrower","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"borrower_count","type":"int","why":"disambiguator — flags a bad name split","rules":[],"reason_class":"disambiguator","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"letter_date","type":"date","why":"processor — recency; ties the explanation to a file state","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"financial_institution_or_custodian","type":"str","why":"processor — where the asset is held (paper-trail anchor)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"account_number_last4","type":"str","why":"PII (restricted) — account grouping key to the underlying statement","rules":[],"reason_class":"pii","rule_floor":false,"degraded_from":null,"pii":{"kind":"ACCOUNT","pre_masked":true},"exists_today":false,"prompt_hint":"Keep the account number last-4 only; do not reconstruct a full number even if the letter states it"},
+    {"name":"asset_type","type":"str","why":"processor — checking / gift / sale proceeds / retirement","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"asset_issue_type","type":"str","why":"identity — what is being explained: large deposit / new account / transfer","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"source_or_origin_of_funds","type":"str","why":"headline — the explanation itself","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"source_party_name_and_relationship","type":"str","why":"processor — donor/counterparty and relationship","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"object","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"borrowed_funds_indicator","type":"str","why":"processor — borrowed funds are ineligible as assets","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"bool","pii":null,"exists_today":false,"prompt_hint":"Borrowed funds (unsecured loans, cash advances) are not acceptable assets unless secured by an owned asset — borrowed_funds_indicator + repayment_obligation_terms are the signal. Capture the explicit statement, do not infer from prose alone"},
+    {"name":"repayment_obligation_terms","type":"str","why":"processor — if borrowed, the repayment liability (DTI)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"current_availability_or_balance","type":"Decimal","why":"processor — funds available for cash-to-close","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"borrower_certification","type":"str","why":"processor — the attestation language","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null}
+  ],
+
+  "nested_lists": [
+    {
+      "name":"transfer_path_or_chronology","shape":"flat_row",
+      "shape_reason":"1–5 hops; flat rows (date, from, to, amount) reconstruct the paper trail. Serves large-deposit sourcing",
+      "expected_item_count":"1–5","rules":[],
+      "exists_today":false,"plumbing_sites":5,
+      "fields":[
+        {"name":"date","type":"date","why":"keeps each amount tied to its transfer step for the paper trail"},
+        {"name":"from","type":"str","why":"the origin of the hop in the transfer chain"},
+        {"name":"to","type":"str","why":"the destination of the hop in the transfer chain"},
+        {"name":"amount","type":"Decimal","why":"the amount moved at this step; stays bound to its date"}
+      ]
+    }
+  ],
+
+  "rejected": [
+    {"name":"document_title, form_number, form_revision_date, document_status_or_version","reason":"classification/version metadata; no consumer"},
+    {"name":"issuer_name, issuer_address, issuer_phone, issuer_email_or_url","reason":"the borrower is the author; no third-party source"},
+    {"name":"party_names, party_addresses","reason":"duplicate borrower_names / source-party field"},
+    {"name":"property_address, loan_number, account_case_reference_number","reason":"linkage nice-to-have; no consumer"},
+    {"name":"effective_date, expiration_date, statement_period_start/end, document_issue_date","reason":"duplicate/adjacent to letter_date"},
+    {"name":"signature_blocks, notary_block","reason":"borrower_signatures_and_dates covers execution; signature presence is not rule-checked here"},
+    {"name":"borrower_signatures_and_dates","reason":"signature block; attestation carried by borrower_certification; no rule reads individual signatures"},
+    {"name":"ownership_and_access_explanation","reason":"overlaps source_or_origin_of_funds; catch-all"},
+    {"name":"supporting_document_list","reason":"a string[] of referenced exhibits; no consumer; catch-all"},
+    {"name":"transaction_or_valuation_dates, amounts_involved","reason":"folded into transfer_path_or_chronology; separate parallel arrays would fragment the trail"},
+    {"name":"the 8 TECHNICAL provenance fields","reason":"already in the TypedField wrapper"}
+  ],
+
+  "encoding_variations": [
+    "borrowed_funds_indicator — stated as an explicit 'these funds are NOT borrowed', a checkbox, or only implied by the source narrative; capture the explicit statement, do not infer from prose alone",
+    "amounts / dates — a letter may state one deposit or a chain of transfers with several amounts and dates; the chronology list keeps each amount tied to its date and step rather than losing them into parallel arrays",
+    "asset_issue_type — 'large deposit', 'source of funds', 'new asset', 'cash-out from sale'; drives which sourcing rule would apply"
+  ],
+
+  "open_questions": [
+    {"id":1,"q":"Chronology vs parallel arrays — amounts_involved (money[]) and transaction_or_valuation_dates (date[]) could be kept as flat scalar lists instead of one object list","options":["one transfer_path_or_chronology list","two parallel scalar lists"],"recommendation":"one transfer_path_or_chronology list so each amount stays bound to its date/step; revisit only if letters routinely give a single amount+date (then flatten to two scalars) GEET'S DECISION (LP-438): BUILD IT — LP-437 made nested lists cheap (one declaration + the generic mechanism); the one-list-budget / defer / no-consumer concern is overturned. Build as flat_row; the per-rule consumer is separate follow-up.","blocks_implementation":false},
+    {"id":2,"q":"borrowed_funds_indicator degraded from bool — a tri-state ('yes / no / not stated') is more honest than a bool","options":["string capturing the stated language","bool"],"recommendation":"keep as string capturing the stated language","blocks_implementation":false},
+    {"id":3,"q":"supporting_document_list — genuinely a list but no consumer","options":["catch-all","second nested list"],"recommendation":"catch-all rather than a second nested list","blocks_implementation":false}
+  ],
+
+  "notes": [
+    "No rules consume this type today, so there is no rule floor. An asset LOE exists to source a large deposit / asset for AS-1-style large-deposit sourcing (future). The load-bearing facts are: what is being explained, the origin of funds, whether the funds are borrowed, and the paper trail — plus the last-4 account PII.",
+    "PII: account_number_last4 (restricted, pre-masked last-4) maps to the existing account_number_masked registry kind; register/confirm, pre_masked true. Borrower and source-party names are standard.",
+    "Prompt hint (doc-level): Large-deposit sourcing (Fannie/Freddie) — a deposit exceeding ~50% of monthly qualifying income generally needs sourcing; the LOE + transfer_path is that source; capture amounts and the paper trail, do not judge sufficiency.",
+    "Ambiguity: source_or_origin_of_funds is tagged 'headline' (not a defined reason_class); classified as processor (the explanation the processor consumes)."
+  ]
+}

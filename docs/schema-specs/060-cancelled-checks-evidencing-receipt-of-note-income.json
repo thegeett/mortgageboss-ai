@@ -1,0 +1,67 @@
+{
+  "document_type": "cancelled_checks_evidencing_receipt_of_note_income",
+  "slug": "cancelled-checks-evidencing-receipt-of-note-income",
+  "tier": 3,
+  "rules_served": [],
+  "summary_hint": "Cancelled check #<number> from <drawer> to <borrower> for $<amount>, dated <check date>, cleared <cleared date> — evidences a $<note payment> installment for period <period>.",
+  "existing_extractor": null,
+  "catalog_coverage": "full",
+
+  "typed_core": [
+    {"name":"drawer_or_maker_name","type":"str","why":"identity — who paid the note (flattened from person_or_entity)","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"drawer_bank_name","type":"str","why":"identity/source — the paying bank","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"drawer_account_last4","type":"str","why":"PII (restricted, pre-masked) — the payer's account","rules":[],"reason_class":"pii","rule_floor":false,"degraded_from":null,"pii":{"kind":"ACCOUNT","pre_masked":true},"exists_today":false,"prompt_hint":null},
+    {"name":"payee_or_borrower_name","type":"str","why":"identity — the borrower receiving note income (flattened from person_or_entity)","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"check_number","type":"str","why":"identity — the check's unique reference; sequence tracking","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"check_date","type":"date","why":"processor — when written; matches the payment period","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"check_amount_numeric","type":"Decimal","why":"processor — the received amount","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"check_amount_written","type":"str","why":"disambiguator — the written words confirm the numeric amount (misread protection)","rules":[],"reason_class":"disambiguator","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"Capture the written amount exactly — it is the legal amount"},
+    {"name":"memo_or_note_reference","type":"str","why":"processor — ties the check to the specific note","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"front_image_present","type":"str","why":"processor — whether the front image is legible/present","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"bool","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"back_image_present","type":"str","why":"processor — whether the endorsed back is present (proof of deposit)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"bool","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"payee_endorsement","type":"str","why":"processor — the endorsement confirms the borrower deposited it","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"Prioritize the back-of-check endorsement as proof of receipt"},
+    {"name":"deposit_account_last4","type":"str","why":"PII (restricted, pre-masked) — the account the borrower deposited into","rules":[],"reason_class":"pii","rule_floor":false,"degraded_from":null,"pii":{"kind":"ACCOUNT","pre_masked":true},"exists_today":false,"prompt_hint":null},
+    {"name":"bank_paid_or_cleared_stamp","type":"str","why":"processor — the clearing stamp text proving the check paid","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"cleared_date","type":"date","why":"processor — the check actually cleared (not just written)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"deposit_or_posting_date","type":"date","why":"processor — when deposited/posted","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"return_stop_or_void_indicator","type":"str","why":"processor — a returned/stopped/void check is not evidence of receipt","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"bool","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"statement_or_transaction_reference","type":"str","why":"identity — ties the check to a bank-statement line","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"related_note_date","type":"date","why":"processor — links to the underlying note","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"related_note_payment_amount","type":"Decimal","why":"processor/disambiguator — the required note payment to match against the check amount","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"related_note_maturity_date","type":"date","why":"processor — note still active / income continues","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"payment_period_start","type":"date","why":"processor — which installment period this check covers (flattened from date_range)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"payment_period_end","type":"date","why":"processor — period end (flattened from date_range)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null}
+  ],
+
+  "nested_lists": [],
+
+  "rejected": [
+    {"name":"the 8 TECHNICAL provenance fields","reason":"already in the TypedField wrapper"},
+    {"name":"sequential_payment_history","reason":"TECHNICAL/derived position — a conclusion computed across checks; tags describe, rules judge"},
+    {"name":"party_names / party_addresses","reason":"generic; superseded by typed drawer/payee names"},
+    {"name":"property_address, loan_number","reason":"not on a cancelled check"},
+    {"name":"issuer_name, issuer_address, issuer_phone, issuer_email_or_url, form_number, form_revision_date","reason":"a check is self-identifying via drawer/bank/check number"},
+    {"name":"document_issue_date, effective_date, expiration_date, statement_period_start/end","reason":"duplicate check/clearing/period dates"},
+    {"name":"account_case_reference_number","reason":"duplicated by statement_or_transaction_reference / check_number"},
+    {"name":"document_title, document_status_or_version, signature_blocks, notary_block","reason":"the endorsement (payee_endorsement) is the relevant execution mark"}
+  ],
+
+  "encoding_variations": [
+    "The amount appears twice: numeric (courtesy amount) and written (legal amount). Keep both — check_amount_written is the disambiguator when the numeric field is smudged or altered.",
+    "'Cleared' is evidenced variously: a bank paid/cleared stamp, a posting date, or an endorsement on the back; keep bank_paid_or_cleared_stamp, cleared_date, and back_image_present so a reviewer can confirm the check truly paid rather than was merely written.",
+    "The check date, deposit date, and cleared date differ — keep them distinct."
+  ],
+
+  "open_questions": [
+    {"id":1,"q":"One check vs a bundle — packets often bundle multiple cancelled checks.","options":["single-check schema + splitter emits one extraction per check","nested checks[] list"],"recommendation":"keep the schema single-check and rely on the splitter to emit one extraction per check; only introduce a nested checks[] list if the pipeline cannot split and a rule needs all checks in one record. Flag the splitter behavior with the domain expert GEET'S DECISION (LP-439): SINGLE-CHECK schema — no checks[] list; one extraction per document as uploaded.","blocks_implementation":false},
+    {"id":2,"q":"Boolean degradation — front_image_present, back_image_present, and return_stop_or_void_indicator degrade to strings.","options":["accept str degradation","add a typed boolean coercer"],"recommendation":"accept and rely on the snippet; the returned/void flag is the one most likely to need a typed boolean if a rule is built","blocks_implementation":false}
+  ],
+
+  "notes": [
+    "Assumes one document per extraction — the pipeline does not split multi-document PDFs today (LP-439). Revisit if splitting is added.",
+    "No rules read this document today, so there is no rule floor. A cancelled check proves the borrower actually received a note/installment payment; fields earn their place on identity, PII protection (masked account last-4s), and processor review.",
+    "Both drawer_account_last4 and deposit_account_last4 are pre_masked true and need _PII_FIELDS registration.",
+    "Endorsement text may contain a full account number written by hand; the model must mask it — do not file a full account number to the catch-all.",
+    "Prompt hint (doc-level): the purpose is proving receipt of note income, not just that a check was written. Prioritize the back-of-check endorsement, the deposit account, and the clearing/paid evidence. Comparing check_amount_numeric against related_note_payment_amount is a downstream check — capture both verbatim, do not judge whether they match. Mask account numbers to last-4."
+  ]
+}

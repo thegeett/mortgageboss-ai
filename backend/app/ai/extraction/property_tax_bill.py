@@ -26,10 +26,12 @@ from app.ai.extraction.model_call import run_extraction_completion
 from app.ai.extraction.parsing import (
     CoreSpec,
     coerce_decimal,
+    coerce_int,
     coerce_str,
     derive_status,
     parse_catch_all,
     parse_typed_core,
+    source_payload,
 )
 from app.ai.extraction.shape import CatchAllSection, TypedField
 from app.ai.parsing import coerce_confidence, extract_json_object
@@ -40,7 +42,7 @@ logger = structlog.get_logger(__name__)
 
 _PROMPT_PATH = "extraction/property_tax_bill.txt"
 _SUPPORTED_MEDIA_TYPES = frozenset({"application/pdf", "image/jpeg", "image/png", "image/jpg"})
-_MAX_TOKENS = 4096
+_MAX_TOKENS = 8192  # LP-446: list-bearing (installments_and_due_dates) → unbounded-list budget
 
 
 class PropertyTaxBillExtraction(BaseModel):
@@ -62,6 +64,25 @@ class PropertyTaxBillExtraction(BaseModel):
     taxing_authority: TypedField[str] = Field(default_factory=TypedField)
 
     # --- Grouped catch-all — everything else -------------------------------- #
+    # --- LP-446 diff — the exists_today:false additions --------------------- #
+    issuer_name: TypedField[str] = Field(default_factory=TypedField)
+    taxpayer_or_owner_names_raw: TypedField[str] = Field(default_factory=TypedField)
+    taxpayer_or_owner_name_2: TypedField[str] = Field(default_factory=TypedField)
+    parcel_or_apn: TypedField[str] = Field(default_factory=TypedField)
+    tax_bill_or_account_number: TypedField[str] = Field(default_factory=TypedField)
+    tax_year: TypedField[int] = Field(default_factory=TypedField)
+    assessment_period: TypedField[str] = Field(default_factory=TypedField)
+    assessed_land_value: TypedField[Decimal] = Field(default_factory=TypedField)
+    assessed_improvement_value: TypedField[Decimal] = Field(default_factory=TypedField)
+    taxable_value: TypedField[Decimal] = Field(default_factory=TypedField)
+    base_tax_amount: TypedField[Decimal] = Field(default_factory=TypedField)
+    current_balance: TypedField[Decimal] = Field(default_factory=TypedField)
+    penalties_and_interest: TypedField[Decimal] = Field(default_factory=TypedField)
+    delinquent_or_lien_status: TypedField[str] = Field(default_factory=TypedField)
+
+    # --- LP-446 diff — captured nested list(s) (bare rows) --------------------- #
+    installments_and_due_dates: list[dict[str, Any]] = Field(default_factory=list)
+
     additional_sections: list[CatchAllSection] = Field(default_factory=list)
 
 
@@ -93,7 +114,47 @@ _CORE_SPEC: CoreSpec = (
     ("annual_tax_amount", coerce_decimal),
     ("due_dates", coerce_str),
     ("taxing_authority", coerce_str),
+    # LP-446 diff additions
+    ("issuer_name", coerce_str),
+    ("taxpayer_or_owner_names_raw", coerce_str),
+    ("taxpayer_or_owner_name_2", coerce_str),
+    ("parcel_or_apn", coerce_str),
+    ("tax_bill_or_account_number", coerce_str),
+    ("tax_year", coerce_int),
+    ("assessment_period", coerce_str),
+    ("assessed_land_value", coerce_decimal),
+    ("assessed_improvement_value", coerce_decimal),
+    ("taxable_value", coerce_decimal),
+    ("base_tax_amount", coerce_decimal),
+    ("current_balance", coerce_decimal),
+    ("penalties_and_interest", coerce_decimal),
+    ("delinquent_or_lien_status", coerce_str),
 )
+
+_INSTALLMENTS_AND_DUE_DATES_ROW: CoreSpec = (
+    ("installment_label", coerce_str),
+    ("amount", coerce_str),
+    ("due_date", coerce_str),
+    ("paid_status", coerce_str),
+    ("paid_date", coerce_str),
+    ("source", coerce_str),
+)
+
+
+def _parse_rows(raw: Any, row_spec: CoreSpec) -> list[dict[str, Any]]:
+    """LP-446 — coerce a bare-row list (each declared field coerced, a per-row source kept, empty rows
+    dropped). Mirrors bank_statement's transactions parse; row values are read as strings by the snapshot."""
+    rows: list[dict[str, Any]] = []
+    if not isinstance(raw, list):
+        return rows
+    for entry in raw:
+        if not isinstance(entry, dict):
+            continue
+        row: dict[str, Any] = {name: coerce(entry.get(name)) for name, coerce in row_spec}
+        row["source"] = source_payload(entry)
+        if any(row[name] is not None for name, _ in row_spec):
+            rows.append(row)
+    return rows
 
 
 def _parse_property_tax_bill_json(text: str) -> PropertyTaxBillExtractionResult | None:
@@ -109,16 +170,23 @@ def _parse_property_tax_bill_json(text: str) -> PropertyTaxBillExtractionResult 
         return None
 
     core_payload, non_null, coercion_lost = parse_typed_core(payload, _CORE_SPEC)
+    installments_and_due_dates = _parse_rows(
+        payload.get("installments_and_due_dates"), _INSTALLMENTS_AND_DUE_DATES_ROW
+    )
     sections = parse_catch_all(payload.get("additional_sections"))
 
     try:
         data = PropertyTaxBillExtraction.model_validate(
-            {**core_payload, "additional_sections": sections}
+            {
+                **core_payload,
+                "installments_and_due_dates": installments_and_due_dates,
+                "additional_sections": sections,
+            }
         )
     except ValidationError:
         return None
 
-    status = derive_status(non_null, coercion_lost)
+    status = derive_status(non_null + len(installments_and_due_dates), coercion_lost)
     confidence = coerce_confidence(payload.get("confidence"))
     raw_reasoning = payload.get("reasoning")
     reasoning = (

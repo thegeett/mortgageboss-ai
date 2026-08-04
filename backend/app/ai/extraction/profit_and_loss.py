@@ -32,6 +32,7 @@ from app.ai.extraction.parsing import (
     derive_status,
     parse_catch_all,
     parse_typed_core,
+    source_payload,
 )
 from app.ai.extraction.shape import CatchAllSection, TypedField
 from app.ai.parsing import coerce_confidence, extract_json_object
@@ -66,6 +67,27 @@ class ProfitAndLossExtraction(BaseModel):
     net_profit: TypedField[Decimal] = Field(default_factory=TypedField)  # the KEY figure
 
     # --- Grouped catch-all — everything else, by section -------------------- #
+    # --- LP-446 diff — the exists_today:false additions --------------------- #
+    issuer_name: TypedField[str] = Field(default_factory=TypedField)
+    statement_type: TypedField[str] = Field(default_factory=TypedField)
+    accounting_basis: TypedField[str] = Field(default_factory=TypedField)
+    prepared_by: TypedField[str] = Field(default_factory=TypedField)
+    preparer_relationship: TypedField[str] = Field(default_factory=TypedField)
+    cpa_review_compilation_or_audit_level: TypedField[str] = Field(default_factory=TypedField)
+    total_cost_of_goods_sold: TypedField[Decimal] = Field(default_factory=TypedField)
+    gross_profit: TypedField[Decimal] = Field(default_factory=TypedField)
+    operating_income: TypedField[Decimal] = Field(default_factory=TypedField)
+    total_assets: TypedField[Decimal] = Field(default_factory=TypedField)
+    cash_and_cash_equivalents: TypedField[Decimal] = Field(default_factory=TypedField)
+    total_liabilities: TypedField[Decimal] = Field(default_factory=TypedField)
+    owner_or_shareholder_equity: TypedField[Decimal] = Field(default_factory=TypedField)
+    management_certification: TypedField[str] = Field(default_factory=TypedField)
+    signer_name_title: TypedField[str] = Field(default_factory=TypedField)
+    signature_and_date: TypedField[str] = Field(default_factory=TypedField)
+
+    # --- LP-446 diff — captured nested list(s) (bare rows) --------------------- #
+    financial_line_items: list[dict[str, Any]] = Field(default_factory=list)
+
     additional_sections: list[CatchAllSection] = Field(default_factory=list)
 
 
@@ -97,7 +119,47 @@ _CORE_SPEC: CoreSpec = (
     ("total_revenue", coerce_decimal),
     ("total_expenses", coerce_decimal),
     ("net_profit", coerce_decimal),
+    # LP-446 diff additions
+    ("issuer_name", coerce_str),
+    ("statement_type", coerce_str),
+    ("accounting_basis", coerce_str),
+    ("prepared_by", coerce_str),
+    ("preparer_relationship", coerce_str),
+    ("cpa_review_compilation_or_audit_level", coerce_str),
+    ("total_cost_of_goods_sold", coerce_decimal),
+    ("gross_profit", coerce_decimal),
+    ("operating_income", coerce_decimal),
+    ("total_assets", coerce_decimal),
+    ("cash_and_cash_equivalents", coerce_decimal),
+    ("total_liabilities", coerce_decimal),
+    ("owner_or_shareholder_equity", coerce_decimal),
+    ("management_certification", coerce_str),
+    ("signer_name_title", coerce_str),
+    ("signature_and_date", coerce_str),
 )
+
+_FINANCIAL_LINE_ITEMS_ROW: CoreSpec = (
+    ("section", coerce_str),
+    ("label", coerce_str),
+    ("amount", coerce_str),
+    ("source", coerce_str),
+)
+
+
+def _parse_rows(raw: Any, row_spec: CoreSpec) -> list[dict[str, Any]]:
+    """LP-446 — coerce a bare-row list (each declared field coerced, a per-row source kept, empty rows
+    dropped). Mirrors bank_statement's transactions parse; row values are read as strings by the snapshot."""
+    rows: list[dict[str, Any]] = []
+    if not isinstance(raw, list):
+        return rows
+    for entry in raw:
+        if not isinstance(entry, dict):
+            continue
+        row: dict[str, Any] = {name: coerce(entry.get(name)) for name, coerce in row_spec}
+        row["source"] = source_payload(entry)
+        if any(row[name] is not None for name, _ in row_spec):
+            rows.append(row)
+    return rows
 
 
 def _parse_pnl_json(text: str) -> ProfitAndLossExtractionResult | None:
@@ -113,16 +175,23 @@ def _parse_pnl_json(text: str) -> ProfitAndLossExtractionResult | None:
         return None
 
     core_payload, non_null, coercion_lost = parse_typed_core(payload, _CORE_SPEC)
+    financial_line_items = _parse_rows(
+        payload.get("financial_line_items"), _FINANCIAL_LINE_ITEMS_ROW
+    )
     sections = parse_catch_all(payload.get("additional_sections"))
 
     try:
         data = ProfitAndLossExtraction.model_validate(
-            {**core_payload, "additional_sections": sections}
+            {
+                **core_payload,
+                "financial_line_items": financial_line_items,
+                "additional_sections": sections,
+            }
         )
     except ValidationError:
         return None
 
-    status = derive_status(non_null, coercion_lost)
+    status = derive_status(non_null + len(financial_line_items), coercion_lost)
     confidence = coerce_confidence(payload.get("confidence"))
     raw_reasoning = payload.get("reasoning")
     reasoning = (

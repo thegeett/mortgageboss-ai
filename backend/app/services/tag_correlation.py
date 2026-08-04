@@ -465,7 +465,7 @@ async def produce_stage_b_sourcing_tags(
             input_tokens=input_tokens,
             output_tokens=output_tokens,
             cost_estimate=estimate_cost(
-                model=settings.anthropic_model_extraction,
+                model=settings.anthropic_model_reasoning,
                 input_tokens=input_tokens,
                 output_tokens=output_tokens,
             ),

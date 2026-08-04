@@ -1,0 +1,84 @@
+{
+  "document_type": "statement_of_account",
+  "slug": "statement-of-account",
+  "tier": 3,
+  "rules_served": [],
+  "summary_hint": "Tells a processor whose account, the balance, the monthly payment, and whether it is current.",
+  "existing_extractor": null,
+  "catalog_coverage": "full",
+
+  "typed_core": [
+    {"name":"issuer_name","type":"str","why":"identity/source — issuing institution; authenticity","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"creditor_or_servicer_name","type":"str","why":"identity — the creditor/servicer that owns the account; liability attribution","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"customer_or_debtor_name","type":"str","why":"identity — the account holder; match to borrower (flattened from person[])","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"object","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"customer_or_debtor_name_2","type":"str","why":"identity — second holder on a joint account","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"customer_or_debtor_count","type":"int","why":"disambiguator — how many holders, so a bad name split is visible","rules":[],"reason_class":"disambiguator","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"account_number_masked","type":"str","why":"PII (restricted, pre_masked); identity — account grouping/dedup key","rules":[],"reason_class":"pii","rule_floor":false,"degraded_from":null,"pii":{"kind":"ACCOUNT","pre_masked":true},"exists_today":false,"prompt_hint":null},
+    {"name":"account_type","type":"str","why":"processor — installment vs revolving vs mortgage drives DTI treatment (degraded from enum)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":"This is a generic account statement — it may be a mortgage, auto, student, credit-card, or utility account; capture account_type verbatim to disambiguate"},
+    {"name":"statement_date","type":"date","why":"identity/recency — which statement this is","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"statement_period_start","type":"date","why":"disambiguator — period covered, distinguishes two statements for one account","rules":[],"reason_class":"disambiguator","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"statement_period_end","type":"date","why":"disambiguator/recency — period end","rules":[],"reason_class":"disambiguator","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"previous_balance","type":"Decimal","why":"processor — opening balance for the cycle","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"current_balance","type":"Decimal","why":"processor — the liability balance a DTI/reserve review reads","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"minimum_or_scheduled_payment","type":"Decimal","why":"processor — monthly obligation for DTI","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"The contractual monthly obligation, not the amount the borrower chose to pay"},
+    {"name":"payment_due_date","type":"date","why":"processor — when the payment is due","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"past_due_amount","type":"Decimal","why":"processor — delinquency signal","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"days_past_due","type":"int","why":"processor — delinquency magnitude","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"delinquency_or_collection_stage","type":"str","why":"processor — collection stage (degraded from enum)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"current_account_status","type":"str","why":"processor — open/closed/current/charged-off headline (degraded from enum)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"credit_limit_or_original_amount","type":"Decimal","why":"processor — utilization / original loan amount","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"payoff_or_settlement_amount","type":"Decimal","why":"processor — payoff figure when the account is to be paid off at closing","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"Distinguish the statement balance from a payoff/settlement amount (payoff includes accrued interest/fees and has a good-through date)"},
+    {"name":"payoff_good_through_date","type":"date","why":"disambiguator — the date the payoff amount is valid through","rules":[],"reason_class":"disambiguator","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"property_address","type":"str","why":"identity/linkage — links a mortgage/HELOC statement to the subject property (degraded from address)","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"address","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"loan_number","type":"str","why":"identity/linkage — links to the loan file (confidential)","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null}
+  ],
+
+  "nested_lists": [
+    {
+      "name":"transactions_or_activity","shape":"flat_row",
+      "shape_reason":"a statement's activity can run to dozens of lines; per-field wrapping would risk the 16,384-token ceiling, so a flat row with one source each is the light choice",
+      "expected_item_count":"a few to dozens","rules":[],
+      "exists_today":false,"plumbing_sites":5,
+      "fields":[
+        {"name":"date","type":"date","why":"processor review / large-deposit / payment-history recipe"},
+        {"name":"description","type":"str","why":"processor review of activity","pii_note":"transaction descriptions may embed PII — apply the transaction-description redactor pattern, not the raw catch-all"},
+        {"name":"amount","type":"Decimal","why":"processor review of activity"},
+        {"name":"type","type":"str","why":"processor — debit vs credit classification"},
+        {"name":"running_balance","type":"Decimal","why":"processor — balance chain support"}
+      ]
+    }
+  ],
+
+  "rejected": [
+    {"name":"the 8 TECHNICAL provenance fields","reason":"already in the TypedField wrapper"},
+    {"name":"form_number, form_revision_date, document_title","reason":"not a standardized titled form"},
+    {"name":"issuer_address, issuer_phone, issuer_email_or_url, creditor_contact_information","reason":"contact detail; no rule, no processor use"},
+    {"name":"document_issue_date, effective_date, expiration_date","reason":"duplicate statement_date / statement_period"},
+    {"name":"party_names, party_addresses","reason":"duplicate customer_or_debtor_name (flattened)"},
+    {"name":"account_case_reference_number","reason":"duplicates account_number_masked / loan_number"},
+    {"name":"signature_blocks, notary_block, document_status_or_version","reason":"a statement is not executed/notarized/versioned"},
+    {"name":"interest_charged, fees_charged","reason":"cycle detail with no consumer; captured in transactions_or_activity if needed"},
+    {"name":"available_credit","reason":"derivable from credit_limit_or_original_amount minus current_balance; no consumer"},
+    {"name":"statement_period (date_range)","reason":"no date_range coercer; split into statement_period_start/_end"},
+    {"name":"dispute_or_legal_status","reason":"rare; leave to catch-all until a rule needs it"}
+  ],
+
+  "encoding_variations": [
+    "'Statement date' vs a 'statement period' range — some issuers give only one; both statement_date and statement_period_start/_end are captured so the period is unambiguous",
+    "Account number appears masked as bullet-1234 or XXXX-1234; retain the last-4 verbatim",
+    "Balances may be labeled 'New Balance', 'Current Balance', 'Outstanding Principal', or 'Payoff' — the payoff amount is distinct from the statement balance and needs payoff_good_through_date beside it to be trusted",
+    "Status may be words ('Current', '30 days late') or a code; days_past_due beside current_account_status disambiguates"
+  ],
+
+  "open_questions": [
+    {"id":1,"q":"transactions_or_activity shape and inclusion. Item count spans a few (mortgage statement) to dozens (credit card).","options":["flat-row list","omit until a rule needs transaction-level data"],"recommendation":"flat-row list — token-safe and reusable GEET'S DECISION (LP-438): BUILD IT — LP-437 made nested lists cheap (one declaration + the generic mechanism); the one-list-budget / defer / no-consumer concern is overturned. Build as flat_row; the per-rule consumer is separate follow-up.","blocks_implementation":false},
+    {"id":2,"q":"property_address presence. Only appears on secured-account statements (mortgage/HELOC).","options":["keep as identity/linkage","make it conditional in guidance"],"recommendation":"kept as identity/linkage; confirm it is worth the field for the unsecured-account majority, or make it conditional in guidance","blocks_implementation":false},
+    {"id":3,"q":"Statement period as two dates vs the catalog's date_range.","options":["split to _start/_end","single date_range field"],"recommendation":"split to _start/_end because there is no date_range coercer; confirm downstream does not expect a single range field","blocks_implementation":false}
+  ],
+
+  "notes": [
+    "Do not compute or judge delinquency — record the stated status, days-past-due, and past-due amount as printed.",
+    "account_number_masked is already registered in _PII_FIELDS (restricted, pre_masked true); no new registration.",
+    "Transaction descriptions in the nested list may embed PII — apply the transaction-description redactor pattern, not the raw catch-all."
+  ]
+}

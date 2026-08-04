@@ -1,0 +1,65 @@
+{
+  "document_type": "custom",
+  "slug": "custom",
+  "tier": 3,
+  "rules_served": [],
+  "summary_hint": "{document_title or subtype} from {issuer}, re {borrower/property}, dated {document_issue_date}.",
+  "existing_extractor": null,
+  "catalog_coverage": "full",
+
+  "typed_core": [
+    {"name":"document_title","type":"str","why":"identity — the only reliable signal of what a Custom doc actually is","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"document_subtype","type":"str","why":"disambiguator — which family this instance belongs to (asset / credit / disclosure), collapsed from the catalog's three parallel *_subtype fields","rules":[],"reason_class":"disambiguator","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"issuer_name","type":"str","why":"identity — who produced the document","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"party_name","type":"str","why":"identity — primary named party (flattened from party_names / owner/borrower blocks)","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"party_name_2","type":"str","why":"identity — second named party","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"party_count","type":"int","why":"disambiguator — how many parties the raw string held","rules":[],"reason_class":"disambiguator","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"document_issue_date","type":"date","why":"identity — when (collapses document_date / disclosure_date / valuation_date)","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"property_address","type":"str","why":"identity — links to subject/non-subject property when present","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"address","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"loan_number","type":"str","why":"identity — links to the loan file","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"account_case_reference_number","type":"str","why":"identity — cross-document dedup key","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"primary_amount","type":"Decimal","why":"processor — the headline money value when the doc has one (market value / balance / fee)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"current_status","type":"str","why":"processor — status/state the document reports","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":null}
+  ],
+
+  "nested_lists": [
+    {
+      "name":"unmapped_key_value_pairs","shape":"flat_row",
+      "redact":["value"],
+      "shape_reason":"a Custom document's real content is unknown at schema-design time, so the only safe structure is a generic key/value passthrough. Flat rows keep it light. This is the single nested list. Item count is unbounded",
+      "expected_item_count":"unbounded","rules":[],
+      "exists_today":false,"plumbing_sites":5,
+      "fields":[
+        {"name":"label","type":"str","why":"the verbatim label of an unmapped fact on the document"},
+        {"name":"value","type":"str","why":"the verbatim value paired with the label","pii_note":"any PII the model reads on a Custom document will land here unmasked; the list needs the transaction-description redactor pattern or a per-value PII sweep before it is trusted"}
+      ]
+    }
+  ],
+
+  "rejected": [
+    {"name":"the three *_document_subtype / disclosure_subtype variants","reason":"collapsed into one document_subtype"},
+    {"name":"asset_owner_names, borrower_or_debtor_names, borrower_names, asset_type, asset_institution_or_custodian","reason":"family-specific; only meaningful once the doc is classified — belong to the real doc type, not Custom"},
+    {"name":"credit_item_type, creditor_or_reporting_party, current_balance, monthly_payment, past_due_amount, original_amount","reason":"credit-family specific; collapse to primary_amount/catch-all"},
+    {"name":"current_or_market_value, cash_or_liquid_value, net_available_value, ownership_percentage, encumbrance_or_loan_balance, valuation_date","reason":"asset-family specific; collapse to primary_amount/catch-all"},
+    {"name":"disclosure_title, creditor_broker_or_provider, disclosed_terms, disclosure_date, opt_in_or_opt_out_status, acknowledgment_or_consent_text","reason":"disclosure-family specific -> catch-all"},
+    {"name":"supporting_line_items, fees_or_amounts, consumer_choices_or_elections, deductions_or_offsets, event_or_delinquency_dates","reason":"family-specific repeating structures; unknowable for a generic doc"},
+    {"name":"form_number, form_revision_date, issuer_address/phone/email, effective/expiration/statement dates, signature_blocks, notary_block, document_status_or_version, account_or_case_number_masked","reason":"not load-bearing for a generic bucket -> catch-all"}
+  ],
+
+  "encoding_variations": [
+    "Because 'Custom' spans many document families, the same fact (a date, an amount, a party) is encoded differently every time. document_subtype is the disambiguator that tells the rest of the pipeline how to interpret the generic fields."
+  ],
+
+  "open_questions": [
+    {"id":1,"q":"Should 'Custom' have a schema at all? It is a fallback for unclassified documents.","options":["thin identity + unmapped_key_value_pairs (this draft)","no dedicated schema — route to a pure catch-all extractor"],"recommendation":"(a), because even a generic identity header lets a processor attach the document to a borrower/loan GEET'S DECISION (LP-439): yes — a thin identity schema lets a processor attach the document to a borrower/loan.","blocks_implementation":false},
+    {"id":2,"q":"unmapped_key_value_pairs and PII. A key/value passthrough can capture SSNs, account numbers, addresses unmasked.","options":["require a redactor sweep over this list before it is persisted","cap it to non-sensitive labels"],"recommendation":"require a redactor sweep over this list before it is persisted, or cap it to non-sensitive labels. Must be resolved before Custom is trusted GEET'S DECISION (LP-439): declare a redact over unmapped_key_value_pairs' value (LP-437's _DESC_REDACT) — the explicit safety gate; Custom is not trusted until the redactor is declared.","blocks_implementation":false},
+    {"id":3,"q":"primary_amount ambiguity. Collapsing market value / balance / fee into one field loses meaning.","options":["keep as a rough headline","drop if reviewers find it misleading"],"recommendation":"keep it only as a rough headline and rely on document_subtype; drop if reviewers find it misleading","blocks_implementation":false},
+    {"id":4,"q":"document_subtype collapse. The catalog offers three distinct subtype fields.","options":["single collapsed field","keep three distinct subtype fields"],"recommendation":"confirm a single collapsed field is acceptable, or whether classification upstream already resolves family","blocks_implementation":false}
+  ],
+
+  "notes": [
+    "No rules today, and this is not a real document type — it is a catch-all bucket whose catalog stacks three unrelated family blocks (asset, credit, disclosure) plus the shared identity header. A single typed-core schema cannot faithfully serve an arbitrary document. The design is deliberately thin and under the ~20-field target: a small identity core that always applies, one subtype disambiguator, and a key/value passthrough.",
+    "No PII field is promoted here because the content is unknown. Risk: any PII the model reads on a Custom document will land in unmapped_key_value_pairs or the catch-all unmasked. The key/value list needs the transaction-description redactor pattern, or a per-value PII sweep, before it is trusted for arbitrary documents.",
+    "Prompt hint (doc-level): tell the model this is an unclassified / vendor-specific document — extract the identity header faithfully, put everything else into unmapped_key_value_pairs with verbatim labels, and never invent structure. Do not force values into asset/credit/disclosure shapes; if the document is not that family, those fields are null."
+  ]
+}

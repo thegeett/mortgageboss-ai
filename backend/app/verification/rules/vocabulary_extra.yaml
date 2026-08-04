@@ -115,6 +115,20 @@ tags:
       ins.effective_date (LP-417 — ins.effective_date itself stays a document fact). Feeds IH-3.
       "unknown" when no binder states an effective date, or binders disagree on it.
     produced_by: derived
+  # LP-447 — the homeowners binder's DWELLING loss-settlement basis, normalised from the free-form typed-core
+  # replacement_cost_or_coinsurance_basis field (LP-446) to a controlled vocabulary. Feeds IH-1 (ADR-340 —
+  # Priya's replacement-cost-basis adequacy ruling). Per-document (the binder subject). "unknown" for a
+  # non-binder subject, an absent basis, or an UNRECOGNISED value (fail closed — IH-1 couldnt_check, never a
+  # guessed pass). Reads ONLY the typed field, never the forms_and_endorsements list (the anti-conflation).
+  ins.dwelling_settlement_basis:
+    entity: doc
+    value_type: enum
+    allowed_values: ["replacement_cost", "actual_cash_value", "unknown"]
+    description: >-
+      The homeowners binder's dwelling loss-settlement basis (replacement cost vs actual cash value),
+      normalised from the typed-core replacement_cost_or_coinsurance_basis field (LP-446/LP-447). Feeds IH-1.
+      "unknown" when no binder states the basis, or the stated basis is not a recognised term.
+    produced_by: derived
 
   # --- LP-323-IN-B — the income family's DERIVED arithmetic tags (loan-level aggregates; the derived
   #     producer is loan-only, so per-borrower granularity is deferred — see the LP-323-IN-B doc).
@@ -151,6 +165,21 @@ tags:
       Days from the most recent pay date to the file (snapshot) date. Feeds IN-2. "unknown" when no pay
       date is present.
     produced_by: derived
+
+  # --- LP-444 — the FIRST consumer of list visibility (CR-4). A per-borrower AI verdict comparing the
+  #     credit report's tradelines (a generic list, now visible) against the app's file-level stated
+  #     liabilities (the MISMO comparison set). Ships INERT (CR-4 is not in ACTIVE_RULE_IDS) pending
+  #     calibration + Priya's bar — a new AI judgment is never activated on arrival. ------------------- #
+  credit.undisclosed_tradeline:
+    entity: borrower
+    value_type: enum
+    allowed_values: ["yes", "no", "unknown"]
+    description: >-
+      Does the credit report show a tradeline with a monthly payment > 0 that is NOT reflected in the
+      app's stated liabilities (CR-4, report-vs-app)? "yes" = an undisclosed tradeline exists; "no" =
+      every payment-bearing tradeline is disclosed; "unknown" = cannot compare (a truncated list, no
+      credit report, or no stated liabilities). NEVER a confident "no" over a list marked truncated.
+    produced_by: AI
 
   # --- LP-410 — the derived-producer wave: three descriptive tags that unblock PC-7 / AS-8 / IN-6. The
   #     rules were blocked not on inputs but on EXPRESSIBILITY (PC-7 no `today`; AS-8 ordered-pairwise,
@@ -356,3 +385,25 @@ tags:
       loan.purpose fact to a loan-subject tag, so a purchase-only rule can scope out a refinance. Absent when
       the file states no purpose.
     produced_by: parsed
+  # LP-453 (step D.2) — DETERMINISTIC numeric OBSERVATIONS over the credit report's tradelines list (loan-level).
+  # Pure aggregates only; the open-ended bureau vocabulary makes classification a Priya/AI question (ADR). Tags
+  # describe, rules judge — no threshold. "unknown" when no tradelines are captured (never a fabricated 0). Both
+  # values are numeric STRINGS (the derived numeric convention).
+  credit.tradeline_count:
+    entity: loan
+    value_type: number
+    allowed_values: null
+    description: >-
+      How many tradelines the file's credit report(s) list — ALL of them, open and closed (a pure count
+      observation, no classification). DISTINCT from the extractor's open_tradeline_count (the open/active
+      subset); this counts every captured row. "unknown" when no tradelines are captured. Loan-level aggregate.
+    produced_by: derived
+  credit.tradeline_monthly_payment_total:
+    entity: loan
+    value_type: number
+    allowed_values: null
+    description: >-
+      The sum of the tradelines' monthly_payment — the observation CR-1 cross-checks against the DTI's
+      liability payments. A present 0 (paid-off account) contributes 0; "unknown" when no tradeline carries a
+      payment figure (never a fabricated 0). Loan-level aggregate.
+    produced_by: derived

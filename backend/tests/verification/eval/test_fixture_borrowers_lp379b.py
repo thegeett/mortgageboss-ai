@@ -23,7 +23,7 @@ from app.verification.eval.lf6t3n_fixture import _B1_ID, _B2_ID, build_lf6t3n_sn
 from app.verification.eval.worksheet import build_worksheet, compute_capacity, write_worksheets
 from app.verification.tag_materialization.ai import AiGroupResult, AiSubjectJudgment, AiTagJudgment
 from app.verification.tag_materialization.producer import materialize_tags
-from app.verification.tag_materialization.subjects import subject_type
+from app.verification.tag_materialization.subjects import ContextOptions, subject_type
 
 pytestmark = pytest.mark.anyio
 
@@ -55,7 +55,9 @@ def test_fixture_has_two_wired_borrowers() -> None:
 
 def test_each_borrower_owns_a_two_year_history_no_cross_feed() -> None:
     st = subject_type("borrower")
-    by_id = {bid: st.build_context(bsub, None) for bid, bsub in st.enumerate(_snap())}
+    by_id = {
+        bid: st.build_context(bsub, None, ContextOptions()) for bid, bsub in st.enumerate(_snap())
+    }
 
     b1_income = [d for d in by_id[str(_B1_ID)]["documents"] if d["document_type"] in _INCOME_TYPES]
     b2_income = [d for d in by_id[str(_B2_ID)]["documents"] if d["document_type"] in _INCOME_TYPES]

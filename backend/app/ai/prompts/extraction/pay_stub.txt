@@ -21,12 +21,23 @@ CAPTURE EVERYTHING ON THE DOCUMENT — lose nothing. There are two buckets:
      pay_frequency      (string)  weekly / biweekly / semimonthly / monthly (if stated/derivable)
      hours              (number)  hours worked this period, if shown
      rate               (number)  pay rate (hourly or per-period), if shown
+     employer_address   (string)  the employer's address
+     employee_address   (string)  the employee's address
+     employee_ssn_masked (string) the employee SSN — LAST 4 ONLY (masked, e.g. "XXX-XX-1234"); NEVER the full SSN
+     position_or_title  (string)  the employee's job title / position, if shown
+     employment_start_date (date) the hire / employment start date, if shown
+     total_deductions_current (number) total deductions for THIS pay period
 
-2. ADDITIONAL SECTIONS — EVERY OTHER field on the stub (specific earnings/
-   deduction/tax line items, employer address, check number, filing status,
-   direct-deposit info, etc.), grouped by the document's sections (e.g.
-   "Earnings", "Deductions", "Taxes", "Employer", "Other"). Do not force these
-   into the typed core — capture them here so nothing is lost.
+2. ADDITIONAL SECTIONS — anything that fits no slot above and no list below
+   (filing status, check number, direct-deposit info, employer/other), grouped by
+   section. Do not force these into the typed core — capture them here.
+
+3. EARNINGS & DEDUCTION LINES — two LISTS, one FLAT ROW per line item. This is the
+   base/overtime/bonus split a downstream rule needs — capture EVERY line:
+     earnings_lines  — each row: earning_type (e.g. "Regular"/"Overtime"/"Bonus"/"Holiday"),
+                       hours, rate, current_amount, ytd_amount
+     deduction_lines — each row: label (e.g. "401(k)"/"Medical"/"Federal Tax"),
+                       category (pretax/posttax/tax, if determinable), current_amount, ytd_amount
 
 FOR EVERY FIELD (typed core AND additional sections) include WHERE you read it:
   - "page"    (integer)  the 1-based page the value appears on
@@ -58,13 +69,21 @@ Respond with ONLY a single JSON object, no markdown fences and no prose, exactly
     "ytd_gross":        {"value": <number|null>, "page": <int|null>, "snippet": <string|null>},
     "pay_frequency":    {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
     "hours":            {"value": <number|null>, "page": <int|null>, "snippet": <string|null>},
-    "rate":             {"value": <number|null>, "page": <int|null>, "snippet": <string|null>}
+    "rate":             {"value": <number|null>, "page": <int|null>, "snippet": <string|null>},
+    "employer_address": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "employee_address": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "employee_ssn_masked": {"value": <string|null last-4 only>, "page": <int|null>, "snippet": <string|null>},
+    "position_or_title": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "employment_start_date": {"value": <YYYY-MM-DD|null>, "page": <int|null>, "snippet": <string|null>},
+    "total_deductions_current": {"value": <number|null>, "page": <int|null>, "snippet": <string|null>}
   },
   "additional_sections": [
     {"section": "<section name>", "fields": [
       {"label": "<field label>", "value": <string|null>, "page": <int|null>, "snippet": <string|null>}
     ]}
   ],
+  "earnings_lines": [{"earning_type": <string|null>, "hours": <number|null>, "rate": <number|null>, "current_amount": <number|null>, "ytd_amount": <number|null>, "page": <int|null>, "snippet": <string|null>}],
+  "deduction_lines": [{"label": <string|null>, "category": <string|null>, "current_amount": <number|null>, "ytd_amount": <number|null>, "page": <int|null>, "snippet": <string|null>}],
   "field_confidence": {"<typed_core field name>": <0.0-1.0|null>, "...": <0.0-1.0|null>},
   "confidence": <number 0.0-1.0>,
   "reasoning": "<one short sentence; do NOT quote SSNs or account numbers>"

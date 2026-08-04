@@ -1,0 +1,85 @@
+{
+  "document_type": "homeowners_insurance",
+  "slug": "homeowner-s-insurance",
+  "tier": 2,
+  "rules_served": ["DT-5", "IH-1", "IH-2", "IH-3", "IH-4", "IH-7", "IH-8"],
+  "summary_hint": "carrier, named insured, insured property, dwelling (Coverage A) limit and its loss-settlement basis, annual premium, effective→expiration dates, and whether the lender is named as mortgagee — the headline a processor wants without opening the declarations page.",
+  "existing_extractor": "app/ai/extraction/homeowners_insurance.py",
+  "catalog_coverage": "full",
+
+  "typed_core": [
+    {"name": "named_insured", "type": "str", "why": "PII; identity — whose policy; attach to borrower. Flatten from named_insureds/party_names.", "rules": [], "reason_class": "identity", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": true, "prompt_hint": null},
+    {"name": "named_insured_2", "type": "str", "why": "PII; identity — co-insured (joint policy).", "rules": [], "reason_class": "identity", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "named_insured_raw", "type": "str", "why": "disambiguator — verbatim insured line so a bad name split stays visible (bank_statement pattern).", "rules": [], "reason_class": "disambiguator", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "insurance_carrier", "type": "str", "why": "identity — which carrier; issuer_name folds here.", "rules": [], "reason_class": "identity", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": true, "prompt_hint": null},
+    {"name": "agency_producer_name", "type": "str", "why": "processor — agency/producer for follow-up; flatten from agency_or_producer.", "rules": [], "reason_class": "processor", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "policy_number", "type": "str", "why": "PII (restricted); identity — cross-document key.", "rules": [], "reason_class": "pii", "rule_floor": false, "degraded_from": null, "pii": {"kind": "ACCOUNT", "pre_masked": true}, "exists_today": true, "prompt_hint": null},
+    {"name": "policy_form", "type": "str", "why": "disambiguator — HO-3 vs HO-6 unit-owner triggers IH-7; the ISO form code (e.g. HO 00 03) also disambiguates the loss-settlement basis for IH-1.", "rules": ["IH-7", "IH-1"], "reason_class": "disambiguator", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": "ISO homeowners form codes: HO 00 03 (special form, replacement cost), HO 00 06 (condo unit-owner → triggers IH-7 master-policy requirement), HO 00 05, HO 00 08 (ACV). Capture the code even when settlement basis is not spelled out in words."},
+    {"name": "policy_status", "type": "str", "why": "processor — active/in-force evidence.", "rules": [], "reason_class": "processor", "rule_floor": false, "degraded_from": "enum", "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "insured_property_address", "type": "str", "why": "identity — links policy to the subject property; IH-1 compares to loan/property. PII.", "rules": ["IH-1"], "reason_class": "identity", "rule_floor": false, "degraded_from": "address", "pii": null, "exists_today": true, "prompt_hint": null},
+    {"name": "effective_date", "type": "date", "why": "IH-3 — must be on/before closing.", "rules": ["IH-3"], "reason_class": "rule", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": true, "prompt_hint": null},
+    {"name": "expiration_date", "type": "date", "why": "processor — coverage must run through closing; recency.", "rules": [], "reason_class": "processor", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": true, "prompt_hint": null},
+    {"name": "dwelling_coverage_a", "type": "Decimal", "why": "IH-1, IH-7 — coverage vs loan amount/replacement cost.", "rules": ["IH-1", "IH-7"], "reason_class": "rule", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": true, "prompt_hint": "Coverage letters A–F map to Dwelling / Other Structures / Personal Property / Loss of Use / Personal Liability / Medical Payments — read Coverage A for the dwelling; do not read the personal-property (C) replacement-cost row for the dwelling basis."},
+    {"name": "replacement_cost_or_coinsurance_basis", "type": "str", "why": "IH-1 — the dwelling loss-settlement basis; this is the LP-431 field that was read but discarded to the catch-all, killing IH-1.", "rules": ["IH-1"], "reason_class": "rule", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "wind_hail_hurricane_coverage", "type": "str", "why": "IH-8 — wind/hail presence in applicable states. (IH-8 status BLOCKED.)", "rules": ["IH-8"], "reason_class": "rule", "rule_floor": false, "degraded_from": "object", "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "wind_hail_deductible", "type": "str", "why": "disambiguator — a distinct wind/hail/named-storm deductible is evidence wind coverage exists, disambiguating IH-8.", "rules": ["IH-8"], "reason_class": "disambiguator", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "annual_premium", "type": "Decimal", "why": "DT-5, IH-4 — premium used in payment vs binder.", "rules": ["DT-5", "IH-4"], "reason_class": "rule", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": true, "prompt_hint": null},
+    {"name": "premium_paid_or_due_status", "type": "str", "why": "processor — paid-in-full is in-force evidence.", "rules": [], "reason_class": "processor", "rule_floor": false, "degraded_from": "enum", "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "mortgagee_name", "type": "str", "why": "IH-2 — the named mortgagee must match the lender.", "rules": ["IH-2"], "reason_class": "rule", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "mortgagee_clause_raw", "type": "str", "why": "disambiguator — verbatim clause for the DET+AI clause parse (ISAOA/ATIMA, loan #).", "rules": [], "reason_class": "disambiguator", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": "Mortgagee clause = lender's interest; expect ISAOA ATIMA and the lender loan number."},
+    {"name": "mortgagee_count", "type": "int", "why": "disambiguator — number of lienholder entries so a second lienholder is not silently dropped.", "rules": [], "reason_class": "disambiguator", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "document_issue_date", "type": "date", "why": "processor — binder preparation date; document-age.", "rules": [], "reason_class": "processor", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": null}
+  ],
+
+  "nested_lists": [
+    {
+      "name": "forms_and_endorsements",
+      "shape": "flat_row",
+      "shape_reason": "few items (typically 2–6 form/endorsement codes), so token cost is trivial and well under the 16,384 ceiling — flat rows suffice.",
+      "expected_item_count": "2-6",
+      "rules": ["IH-1", "IH-8"],
+      "exists_today": false,
+      "plumbing_sites": 5,
+      "fields": [
+        {"name": "code_or_label", "type": "str", "why": "IH-1 — the HO 00 03-class form code that encodes replacement-cost settlement when no words appear (the Occidental case)"},
+        {"name": "description", "type": "str", "why": "IH-8 — a separate wind/hail endorsement description"}
+      ]
+    }
+  ],
+
+  "rejected": [
+    {"name": "the 8 TECHNICAL provenance fields", "reason": "already in the TypedField wrapper"},
+    {"name": "other_structures_coverage_b, personal_property_coverage_c, loss_of_use_coverage_d, personal_liability_coverage_e, medical_payments_coverage_f", "reason": "no rule reads them; a processor rarely needs them pre-submission — catch-all"},
+    {"name": "deductibles (general)", "reason": "no rule reads the amount; wind/hail deductible kept as a flattened disambiguator, the rest to catch-all"},
+    {"name": "ordinance_or_law_coverage, cancellation_or_nonrenewal_notice", "reason": "no consumer; catch-all"},
+    {"name": "issuer_name", "reason": "duplicates insurance_carrier / agency_producer_name"},
+    {"name": "issuer_address, issuer_phone, issuer_email_or_url", "reason": "contact detail with no rule; catch-all"},
+    {"name": "statement_period_start / _end", "reason": "insurance uses effective/expiration; these duplicate them"},
+    {"name": "document_title, form_number, form_revision_date", "reason": "a policy is not a standardized single form; policy_form carries the ISO code"},
+    {"name": "party_addresses", "reason": "insured address captured via insured_property_address; mailing address to catch-all"},
+    {"name": "account_case_reference_number", "reason": "policy_number is the reference; duplicate"},
+    {"name": "signature_blocks, notary_block", "reason": "a binder/dec page is not executed/notarized"},
+    {"name": "covered_perils (as a conclusion)", "reason": "tags describe; capture forms/endorsements verbatim, let the rule judge adequacy"}
+  ],
+
+  "encoding_variations": [
+    "Loss-settlement basis stated three ways: explicit Dwelling Replacement Cost: Y flag (Universal — beware the adjacent Personal Property Replacement Cost: N), a bare ISO form code HO 00 03 (Occidental — no words), or prose 'replacement cost settlement applies'. Carry policy_form / forms_and_endorsements alongside replacement_cost_or_coinsurance_basis so the value is trustable.",
+    "Premium stated as annual vs monthly (a $140/mo binder = $1,680/yr); DT-5/IH-4 compare against the monthly figure used in the payment — annual_premium needs the annual/monthly label as its disambiguator.",
+    "Mortgagee clause with ISAOA/ATIMA suffixes and an embedded loan number — retain mortgagee_clause_raw for the AI parse.",
+    "Coverage A labelled 'Dwelling', 'Coverage A', or 'Section I-A' — same fact."
+  ],
+
+  "open_questions": [
+    {"id": 1, "q": "forms_and_endorsements as a nested list vs flattened string.", "options": ["ship the flat-row list now", "defer the list and keep a single joined endorsements_raw string until IH-8 unblocks"], "recommendation": "(a) — the list is cheap (few items) and is the durable home for the disambiguator the standard was written around. GEET'S DECISION (LP-438): BUILD IT — LP-437 made nested lists cheap (one declaration + the generic mechanism); the one-list-budget / defer / no-consumer concern is overturned. Build as flat_row; the per-rule consumer is separate follow-up.", "blocks_implementation": false},
+    {"id": 2, "q": "wind_hail_hurricane_coverage degradation. It is an object in the catalog (limit + separate deductible + sub-limit). Flattened to a str presence/summary here.", "options": ["keep the str summary plus the separate wind_hail_deductible", "add a coercer / numeric limit"], "recommendation": "keep the str summary plus the separate wind_hail_deductible; revisit a coercer only if IH-8 needs a numeric limit.", "blocks_implementation": false},
+    {"id": 3, "q": "IH-7 lives on a different document. The master-policy adequacy check reads the condo master policy, not this HO-6 dec page. Here only policy_form (HO-6) triggers the requirement.", "options": ["confirm IH-7's snapshot_path points at the master-policy schema", "point IH-7 at this schema"], "recommendation": "confirm IH-7's snapshot_path points at the master-policy schema, not this one.", "blocks_implementation": false},
+    {"id": 4, "q": "Mortgagee as flat vs nested. Kept flat (mortgagee_name + _raw + _count) on the assumption of 1–2 lienholders.", "options": ["keep flat", "revisit as a list if a second-lien scenario needs each entry addressed individually"], "recommendation": "revisit as a list only if a second-lien scenario needs each entry addressed individually. GEET'S DECISION (LP-438): BUILD IT — LP-437 made nested lists cheap (one declaration + the generic mechanism); the one-list-budget / defer / no-consumer concern is overturned. Build as flat_row; the per-rule consumer is separate follow-up.", "blocks_implementation": false}
+  ],
+
+  "notes": [
+    "'Binder', 'Declarations Page', 'Evidence of Insurance' are the same document family.",
+    "PII section flags named_insured, named_insured_2, named_insured_raw (person names, pre_masked false), policy_number (restricted, pre_masked true), and insured_property_address (real address, pre_masked false) for _PII_FIELDS registration — none are in the 7-field registry today.",
+    "Ambiguity: insured_property_address is tagged identity (test 3) but also serves IH-1 (could read as reason_class rule); classified identity to match the borrower_name/identity precedent, with IH-1 carried in rules.",
+    "Ambiguity: person-name PII fields (named_insured*) are registered with an invented kind 'NAME' (pre_masked false) since the markdown explicitly lists them for _PII_FIELDS; the worked examples left names unregistered."
+  ]
+}

@@ -1,0 +1,79 @@
+{
+  "document_type": "verification_of_rent",
+  "slug": "verification-of-rent",
+  "tier": 3,
+  "rules_served": [],
+  "summary_hint": "who the landlord is, the rental property and tenant, the monthly rent, the lease start, and the late-payment count — so a processor can evaluate the borrower's housing-payment history and confirm an independent, arm's-length verifier without opening the form",
+  "existing_extractor": null,
+  "catalog_coverage": "full",
+
+  "typed_core": [
+    {"name":"document_title","type":"str","why":"identity — confirms this is a VOR","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"landlord_or_property_manager_name","type":"str","why":"identity — the certifying source","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"landlord_contact_phone","type":"str","why":"processor — landlord callback for follow-up (flattened from landlord_contact_information object)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"object","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"landlord_relationship_to_borrower","type":"str","why":"disambiguator — arm's-length vs a relative-landlord; independence is meaningless without it","rules":[],"reason_class":"disambiguator","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"A related-party landlord (family member) undermines the VOR; capture the relationship even when it is only implied by a shared surname or address"},
+    {"name":"tenant_name","type":"str","why":"identity — the borrower/tenant (flattened from person[])","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"person","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"tenant_name_2","type":"str","why":"identity — co-tenant when present (flattened)","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"person","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"rental_property_address","type":"str","why":"identity — which property the tenancy covers (degraded from address)","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"address","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"lease_start_date","type":"date","why":"processor — establishes the 12-month history window","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"lease_end_date","type":"date","why":"processor — remaining term / whether tenancy is ending","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"current_tenant_indicator","type":"str","why":"processor — is the borrower still the tenant (degraded from boolean)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"bool","pii":null,"exists_today":false,"prompt_hint":"'Current tenant' vs a move-out date distinguishes an ongoing tenancy from a prior one — read this explicitly"},
+    {"name":"monthly_rent","type":"Decimal","why":"processor — headline rent; payment-shock and rental-history context","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"rent_due_day","type":"int","why":"processor — the due day used to judge lateness","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"subsidy_or_concession","type":"str","why":"disambiguator — a subsidy/concession changes the effective rent beside monthly_rent (flattened from object)","rules":[],"reason_class":"disambiguator","rule_floor":false,"degraded_from":"object","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"late_payment_count","type":"int","why":"processor — number of late rent payments (0x30 rental history)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"Rental-history convention: '0x30' = zero payments 30+ days late in the window; the target is the late count, not prose"},
+    {"name":"returned_payment_count","type":"int","why":"processor — NSF/returned rent payments","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"current_arrears","type":"Decimal","why":"processor — amount currently past due","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"eviction_or_collection_status","type":"str","why":"processor — an eviction/collection is a material adverse signal (degraded from enum)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"verifier_name_title","type":"str","why":"processor — who certified and their title (authority)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"verification_date","type":"date","why":"identity/recency — certification date","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"independent_source_indicator","type":"str","why":"processor — whether the verifier is an independent/arm's-length source (degraded from boolean)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"bool","pii":null,"exists_today":false,"prompt_hint":null}
+  ],
+
+  "nested_lists": [
+    {
+      "name":"rent_payment_history","shape":"flat_row",
+      "shape_reason":"monthly rent history genuinely repeats and a VOR commonly spans 12-24 months, so flat rows keep it under the 16,384 ceiling",
+      "expected_item_count":"12-24","rules":[],
+      "exists_today":false,"plumbing_sites":5,
+      "fields":[
+        {"name":"month","type":"str","why":"the payment month for the row"},
+        {"name":"amount_due","type":"Decimal","why":"rent due that month"},
+        {"name":"amount_paid","type":"Decimal","why":"rent actually paid that month"},
+        {"name":"payment_status","type":"str","why":"on-time / late / returned status for the row (housing-payment performance)"},
+        {"name":"source","type":"str","why":"the source of the row's data"}
+      ]
+    }
+  ],
+
+  "rejected": [
+    {"name":"issuer_name","reason":"duplicates landlord_or_property_manager_name"},
+    {"name":"issuer_address / issuer_phone / issuer_email_or_url","reason":"duplicate landlord_contact_phone / no consumer"},
+    {"name":"form_number / form_revision_date","reason":"VOR templates vary; no standardized-form consumer"},
+    {"name":"document_issue_date / effective_date / expiration_date","reason":"duplicate verification_date / lease dates"},
+    {"name":"statement_period_start / statement_period_end","reason":"a VOR is a certification, not a statement period"},
+    {"name":"party_names / party_addresses","reason":"duplicate tenant_names / rental_property_address"},
+    {"name":"property_address (generic)","reason":"duplicated by the specific rental_property_address"},
+    {"name":"loan_number / account_case_reference_number","reason":"not core to a VOR; catch-all captures if present"},
+    {"name":"occupancy_start_and_end_dates","reason":"duplicates lease_start_date / lease_end_date"},
+    {"name":"security_deposit","reason":"OPTIONAL; no consumer for rental-history evaluation"},
+    {"name":"signature_blocks / notary_block / document_status_or_version","reason":"execution captured by verifier + independent_source_indicator; a VOR is not notarized"}
+  ],
+
+  "encoding_variations": [
+    "Rent stated as gross vs net-of-concession — a '$1,800 (with $200 concession)' line means the effective rent is $1,600; always pair monthly_rent with subsidy_or_concession",
+    "Late history appears as a count ('2 late in 12 months'), a rating ('0x30'), or only in the month-by-month rows — read the explicit count and let the rows corroborate",
+    "Landlord relationship is the independence crux: 'professional property manager' vs 'borrower's father' carry very different weight — capture verbatim"
+  ],
+
+  "open_questions": [
+    {"id":1,"q":"other_monthly_charges — second nested list. Utilities/parking/pet charges could matter for total housing cost.","options":["(a) keep only rent_payment_history now","(b) add a second flat list for other_monthly_charges"],"recommendation":"(a) keep only rent_payment_history now — no rule consumes ancillary charges yet, and monthly_rent + subsidy_or_concession carry the core figure GEET'S DECISION (LP-438): BUILD IT — LP-437 made nested lists cheap (one declaration + the generic mechanism); the one-list-budget / defer / no-consumer concern is overturned. Build as flat_row; the per-rule consumer is separate follow-up.","blocks_implementation":false},
+    {"id":2,"q":"eviction_or_collection_status enum degradation. Stored as free str; the value set is uncontrolled until a real corpus is seen.","options":["keep str (free text)","introduce a controlled enum"],"recommendation":"keeping str; normalize in a future rule","blocks_implementation":false}
+  ],
+
+  "notes": [
+    "No rules read this document today (rule floor is empty). Fields are justified by identity, disambiguation, and processor use.",
+    "No SSN/account PII on a VOR. Tenant/landlord names are 'standard' sensitivity and stay in typed core for identity. Nothing needs _PII_FIELDS registration.",
+    "Budget is one nested list — other_monthly_charges is NOT nested (see open question 1)."
+  ]
+}

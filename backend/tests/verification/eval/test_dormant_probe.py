@@ -48,6 +48,9 @@ _DORMANT_EXPECTED = frozenset(
         # (income_docs left in LP-428, stmt_facts in LP-429 — as their rules went live.)
         "txn_nsf",
         "occupancy_rental",
+        # LP-444 — credit_profile (CR-4's producer, borrower-subject) is declared but CR-4 is inert, so it is
+        # dormant until CR-4 activates (its own calibration ticket).
+        "credit_profile",
     }
 )
 _LIVE_EXPECTED = frozenset(

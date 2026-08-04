@@ -1,0 +1,74 @@
+{
+  "document_type": "verification_of_assets",
+  "slug": "verification-of-assets",
+  "tier": 3,
+  "rules_served": [],
+  "summary_hint": "which provider generated the asset report, when it was generated/refreshed, whose accounts it covers, the total verified/available assets, and the per-account balances",
+  "existing_extractor": null,
+  "catalog_coverage": "full",
+
+  "typed_core": [
+    {"name":"document_title","type":"str","why":"identity — confirms this is an asset-verification report","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"verification_provider_name","type":"str","why":"identity — the aggregator that produced the report (the source of authority)","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"report_id","type":"str","why":"identity/dedup — the provider's report identifier","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"report_generated_date_time","type":"str","why":"identity/recency — when the report was produced (degraded from datetime)","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"datetime","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"data_refresh_date_time","type":"str","why":"disambiguator — as-of timestamp for the balances; a report can be generated later than its data was pulled (degraded from datetime)","rules":[],"reason_class":"disambiguator","rule_floor":false,"degraded_from":"datetime","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"verification_method","type":"str","why":"processor — direct/aggregation/manual; independence weight (degraded from enum)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"borrower_name","type":"str","why":"identity — whose assets; attaches to the borrower (flattened from person[])","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"object","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"borrower_name_2","type":"str","why":"identity — co-borrower when present (flattened)","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"object","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"borrower_count","type":"int","why":"disambiguator — how many borrowers the report covers","rules":[],"reason_class":"disambiguator","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"consent_or_authorization_reference","type":"str","why":"processor — the borrower-consent record backing the pull (compliance review)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"total_verified_assets","type":"Decimal","why":"processor — headline verified total","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"total_available_assets","type":"Decimal","why":"processor — headline available/liquid total (may differ from verified)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null}
+  ],
+
+  "nested_lists": [
+    {
+      "name":"verified_accounts","shape":"flat_row",
+      "shape_reason":"accounts genuinely repeat (a borrower can have several checking/savings/investment accounts across institutions) and this is the primary content of the report; a borrower rarely has more than ~10 accounts, but flat rows keep it well under the 16,384 ceiling and carry the masked account number cleanly",
+      "expected_item_count":"~10 (< ~15)","rules":[],
+      "exists_today":false,"plumbing_sites":5,
+      "fields":[
+        {"name":"institution_name","type":"str","why":"the institution holding the account"},
+        {"name":"account_number_masked","type":"str","why":"identifies the account within the report","pii_note":"already in the 7-field _PII_FIELDS registry, pre_masked=true; carried inside the nested record with the standard redactor"},
+        {"name":"account_type","type":"str","why":"account type (DDA/checking, SAV/savings, brokerage/investment) captured verbatim"},
+        {"name":"account_holder_name","type":"str","why":"the per-account holder name for ownership review; may differ from the borrower (joint/third-party)"},
+        {"name":"current_balance","type":"Decimal","why":"the point-in-time current balance"},
+        {"name":"available_balance","type":"Decimal","why":"available/liquid balance (excludes holds)"},
+        {"name":"average_balance","type":"Decimal","why":"average balance evidencing seasoning"},
+        {"name":"source","type":"str","why":"provenance of the row"}
+      ]
+    }
+  ],
+
+  "rejected": [
+    {"name":"issuer_name","reason":"duplicates verification_provider_name"},
+    {"name":"issuer_address / issuer_phone / issuer_email_or_url","reason":"provider contact fields with no consumer"},
+    {"name":"form_number / form_revision_date","reason":"an aggregator report is not a standardized form"},
+    {"name":"document_issue_date / effective_date / expiration_date","reason":"duplicate report_generated_date_time"},
+    {"name":"statement_period_start / statement_period_end","reason":"the report is a point-in-time pull, not a statement period"},
+    {"name":"party_names / party_addresses","reason":"duplicate borrower_names; addresses have no consumer here"},
+    {"name":"property_address / loan_number / account_case_reference_number","reason":"not core to an asset report; catch-all captures loan_number if present"},
+    {"name":"signature_blocks / notary_block / document_status_or_version","reason":"an aggregator report is unsigned/unnotarized"},
+    {"name":"large_deposit_or_anomaly_flags","reason":"a judgment, not a fact — flagging large deposits is a rule's job (from transactions); tags describe, rules judge"},
+    {"name":"report_completeness_or_error_codes","reason":"provider status codes with no consumer; catch-all captures"}
+  ],
+
+  "encoding_variations": [
+    "\"Verified\" vs \"available\" vs \"current\" balance are three different numbers per account (available excludes holds; verified is the provider's attested figure) — keep all three per row; do not collapse",
+    "Generated vs refresh timestamps: some providers show only one, some both; the refresh time is the true as-of for balances and must not be overwritten by the generation time",
+    "Account type stated as \"DDA\"/\"checking\", \"SAV\"/\"savings\", \"brokerage\"/\"investment\" — capture the provider's label verbatim"
+  ],
+
+  "open_questions": [
+    {"id":1,"q":"account_transactions — second nested list. The catalog offers a transactions object[] that would let a future large-deposit/NSF rule run (mirroring bank_statement.transactions).","options":["keep only verified_accounts now","add account_transactions as a second flat list pre-emptively"],"recommendation":"keep only verified_accounts now — no rule consumes transactions yet, and two nested lists doubles the ~5-site plumbing cost; add when the first asset rule that needs transaction-level data is built GEET'S DECISION (LP-438): BUILD IT — LP-437 made nested lists cheap (one declaration + the generic mechanism); the one-list-budget / defer / no-consumer concern is overturned. Build as flat_row; the per-rule consumer is separate follow-up.","blocks_implementation":false},
+    {"id":2,"q":"verified_accounts item count — assumed small (< ~15).","options":["flat-row (chosen)","reconsider shape after a real sample"],"recommendation":"flat-row chosen for token safety; confirm against a real multi-institution report","blocks_implementation":false},
+    {"id":3,"q":"Degraded datetimes — both timestamps degrade to str (no datetime coercer).","options":["keep ISO strings","add a datetime coercer"],"recommendation":"keep ISO strings; a recency rule parses downstream","blocks_implementation":false}
+  ],
+
+  "notes": [
+    "No rules read this document today (rule floor is empty); fields are justified by identity, disambiguation, PII, and processor use. A Verification of Assets is a third-party aggregator report (e.g. FormFree/AccountChek/Finicity); its value is confirming eligible funds and account ownership, and its trustworthiness depends on the generated/refresh timestamps.",
+    "These are aggregator reports; provider vocabulary (FormFree AccountChek, Finicity, Plaid Assets) with the report ID and timestamps in a header block. Account numbers are already masked to last-4 by the provider — capture as-is; never reconstruct a full number.",
+    "account_number_masked is already in the 7-field _PII_FIELDS registry, pre_masked=true; nothing new needs registration."
+  ]
+}

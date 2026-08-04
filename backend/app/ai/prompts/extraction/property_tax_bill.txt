@@ -49,17 +49,20 @@ Respond with ONLY a single JSON object, no markdown fences and no prose, exactly
     "assessed_value":    {"value": <number|null>, "page": <int|null>, "snippet": <string|null>},
     "annual_tax_amount": {"value": <number|null>, "page": <int|null>, "snippet": <string|null>},
     "due_dates":         {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
-    "taxing_authority":  {"value": <string|null>, "page": <int|null>, "snippet": <string|null>}
+    "taxing_authority":  {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "issuer_name": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "taxpayer_or_owner_names_raw": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "taxpayer_or_owner_name_2": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "parcel_or_apn": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "tax_bill_or_account_number": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "tax_year": {"value": <int|null>, "page": <int|null>, "snippet": <string|null>},
+    "assessment_period": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "assessed_land_value": {"value": <number|null>, "page": <int|null>, "snippet": <string|null>},
+    "assessed_improvement_value": {"value": <number|null>, "page": <int|null>, "snippet": <string|null>},
+    "taxable_value": {"value": <number|null>, "page": <int|null>, "snippet": <string|null>},
+    "base_tax_amount": {"value": <number|null>, "page": <int|null>, "snippet": <string|null>},
+    "current_balance": {"value": <number|null>, "page": <int|null>, "snippet": <string|null>},
+    "penalties_and_interest": {"value": <number|null>, "page": <int|null>, "snippet": <string|null>},
+    "delinquent_or_lien_status": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>}
   },
-  "additional_sections": [
-    {"section": "<section name>", "fields": [
-      {"label": "<field label>", "value": <string|null>, "page": <int|null>, "snippet": <string|null>}
-    ]}
-  ],
-  "field_confidence": {"<typed_core field name>": <0.0-1.0|null>, "...": <0.0-1.0|null>},
-  "confidence": <number 0.0-1.0>,
-  "reasoning": "<one short sentence describing the document>"
-}
-
-Example (values illustrative; use null for anything absent):
-{"typed_core": {"property_address": {"value": "123 Main St", "page": 1, "snippet": "123 Main St"}, "annual_tax_amount": {"value": "8400.00", "page": 1, "snippet": "Total Tax 8,400.00"}, "due_dates": {"value": "1st 11/01/2024; 2nd 02/01/2025", "page": 1, "snippet": "Installments due 11/01 and 02/01"}, "taxing_authority": {"value": "Santa Clara County", "page": 1, "snippet": "Santa Clara County Tax Collector"}}, "additional_sections": [{"section": "Parcel", "fields": [{"label": "APN", "value": "123-45-678", "page": 1, "snippet": "APN 123-45-678"}]}], "confidence": 0.9, "reasoning": "Annual county property tax bill with two installments."}
+  "installments_and_due_dates": [{"installment_label": <string|null>, "amount": <string|null>, "due_date": <string|null>, "paid_status": <string|null>, "paid_date": <string|null>, "source": <string|null>, "page": <int|null>, "snippet": <string|null>}],

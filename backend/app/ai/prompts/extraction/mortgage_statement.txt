@@ -49,17 +49,17 @@ Respond with ONLY a single JSON object, no markdown fences and no prose, exactly
     "monthly_payment":  {"value": <number|null>, "page": <int|null>, "snippet": <string|null>},
     "unpaid_balance":   {"value": <number|null>, "page": <int|null>, "snippet": <string|null>},
     "escrow_amount":    {"value": <number|null>, "page": <int|null>, "snippet": <string|null>},
-    "due_date":         {"value": <date|null>, "page": <int|null>, "snippet": <string|null>}
+    "due_date":         {"value": <date|null>, "page": <int|null>, "snippet": <string|null>},
+    "borrower_name_2": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "loan_number_masked": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "statement_date": {"value": <YYYY-MM-DD|null>, "page": <int|null>, "snippet": <string|null>},
+    "billing_cycle_or_period": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "principal_amount": {"value": <number|null>, "page": <int|null>, "snippet": <string|null>},
+    "interest_amount": {"value": <number|null>, "page": <int|null>, "snippet": <string|null>},
+    "interest_rate": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "escrow_balance": {"value": <number|null>, "page": <int|null>, "snippet": <string|null>},
+    "past_due_amount": {"value": <number|null>, "page": <int|null>, "snippet": <string|null>},
+    "maturity_date": {"value": <YYYY-MM-DD|null>, "page": <int|null>, "snippet": <string|null>},
+    "delinquency_status": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "loss_mitigation_or_bankruptcy_messages": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>}
   },
-  "additional_sections": [
-    {"section": "<section name>", "fields": [
-      {"label": "<field label>", "value": <string|null>, "page": <int|null>, "snippet": <string|null>}
-    ]}
-  ],
-  "field_confidence": {"<typed_core field name>": <0.0-1.0|null>, "...": <0.0-1.0|null>},
-  "confidence": <number 0.0-1.0>,
-  "reasoning": "<one short sentence describing the document>"
-}
-
-Example (values illustrative; use null for anything absent):
-{"typed_core": {"lender_name": {"value": "Wells Fargo", "page": 1, "snippet": "Wells Fargo Home Mortgage"}, "property_address": {"value": "456 Oak Ave", "page": 1, "snippet": "Property: 456 Oak Ave"}, "monthly_payment": {"value": "2150.00", "page": 1, "snippet": "Total Payment Due 2,150.00"}, "unpaid_balance": {"value": "312000.00", "page": 1, "snippet": "Principal Balance 312,000.00"}}, "additional_sections": [{"section": "Payment Breakdown", "fields": [{"label": "Escrow", "value": "450.00", "page": 1, "snippet": "Escrow 450.00"}]}], "confidence": 0.9, "reasoning": "Monthly mortgage statement for an existing loan."}

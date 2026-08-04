@@ -1,0 +1,81 @@
+{
+  "document_type": "lease_agreement",
+  "slug": "rental-agreements-lease-agreements",
+  "tier": 2,
+  "rules_served": ["DT-6", "IN-14", "OC-3"],
+  "summary_hint": "whose rental property, at what address, leased to whom, for what monthly rent, over what term",
+  "existing_extractor": null,
+  "catalog_coverage": "full",
+
+  "typed_core": [
+    {"name": "document_title", "type": "str", "why": "identity/processor — distinguishes a residential lease from a commercial or month-to-month rental form; cheap review anchor", "rules": [], "reason_class": "identity", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "issuer_name", "type": "str", "why": "identity/source — form publisher (e.g. state realtor association) or property-management firm; validates the document is a real lease instrument", "rules": [], "reason_class": "identity", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "landlord_or_lessor_names_raw", "type": "str", "why": "disambiguator — verbatim lessor string so a bad split ('SMITH FAMILY TRUST AND JOHN SMITH') is visible to the tag layer", "rules": [], "reason_class": "disambiguator", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "landlord_or_lessor_name", "type": "str", "why": "identity — DT-6/IN-14/OC-3 require the borrower to be the property owner/lessor to claim the rental offset/income; primary match key", "rules": ["DT-6", "IN-14", "OC-3"], "reason_class": "identity", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "landlord_or_lessor_name_2", "type": "str", "why": "identity — co-owner/second lessor (joint ownership of the REO)", "rules": [], "reason_class": "identity", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "tenant_or_lessee_names_raw", "type": "str", "why": "disambiguator — verbatim lessee string preserving an ambiguous split", "rules": [], "reason_class": "disambiguator", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "tenant_or_lessee_name", "type": "str", "why": "identity — the paying tenant; processor confirms an arm's-length lease exists (IN-14 support)", "rules": ["IN-14"], "reason_class": "identity", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "tenant_or_lessee_name_2", "type": "str", "why": "identity — co-tenant", "rules": [], "reason_class": "identity", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "rental_property_address", "type": "str", "why": "DT-6 (match to retained REO), IN-14, OC-3 (which property the rental income supports)", "rules": ["DT-6", "IN-14", "OC-3"], "reason_class": "rule", "rule_floor": true, "degraded_from": "address", "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "unit_or_premises_description", "type": "str", "why": "disambiguator for rental_property_address — which unit of a multi-unit building the lease covers, so it matches the correct REO line", "rules": [], "reason_class": "disambiguator", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "lease_start_date", "type": "date", "why": "IN-14/OC-3 (proves an active lease), DT-6", "rules": ["IN-14", "OC-3", "DT-6"], "reason_class": "rule", "rule_floor": true, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": "Do not force effective/renewal dates into lease_start_date; use the operative lease term, and read the most recent amendment's rent if one supersedes the base lease"},
+    {"name": "lease_end_date", "type": "date", "why": "proves the lease is still in force through closing; a lapsed lease weakens the rental-income support", "rules": ["IN-14", "OC-3"], "reason_class": "rule", "rule_floor": true, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "lease_term_type", "type": "str", "why": "disambiguator — month-to-month vs fixed-term changes how IN-14/OC-3 treat the rental income", "rules": ["IN-14", "OC-3"], "reason_class": "disambiguator", "rule_floor": false, "degraded_from": "enum", "pii": null, "exists_today": false, "prompt_hint": "lease_term_type canonical values are not enumerated in the catalog; pass through the stated term type and normalize 'month-to-month' vs 'fixed-term'"},
+    {"name": "monthly_rent", "type": "Decimal", "why": "DT-6 (net-rental basis in DTI), IN-14, OC-3", "rules": ["DT-6", "IN-14", "OC-3"], "reason_class": "rule", "rule_floor": true, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": "Distinguish gross monthly rent (the lease figure) from any net/effective figure; put the stated contractual rent in monthly_rent and leave net-rental computation to the engine (DT-6 applies its own vacancy/expense factor)"},
+    {"name": "rent_due_date_or_day", "type": "str", "why": "processor — confirms a normal recurring rent obligation vs an irregular arrangement", "rules": [], "reason_class": "processor", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "security_deposit", "type": "Decimal", "why": "processor — presence of a real deposit is a signal of a genuine arm's-length lease (IN-14 authenticity)", "rules": ["IN-14"], "reason_class": "processor", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "renewal_and_termination_terms", "type": "str", "why": "processor — tells whether the lease auto-renews/continues past lease_end_date, affecting income durability", "rules": [], "reason_class": "processor", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "landlord_signature_date", "type": "date", "why": "execution — the lease is only binding support for IN-14/OC-3 once the lessor executes it", "rules": ["IN-14", "OC-3"], "reason_class": "processor", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "tenant_signature_date", "type": "date", "why": "execution — tenant execution completes the binding lease", "rules": [], "reason_class": "processor", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": null}
+  ],
+
+  "nested_lists": [],
+
+  "rejected": [
+    {"name": "form_number, form_revision_date", "reason": "a lease is not a standardized numbered form with a schema version"},
+    {"name": "issuer_address, issuer_phone, issuer_email_or_url", "reason": "no rule/processor consumer; catch-all captures if present"},
+    {"name": "document_issue_date, effective_date", "reason": "duplicate lease_start_date"},
+    {"name": "expiration_date", "reason": "duplicates lease_end_date"},
+    {"name": "statement_period_start, statement_period_end", "reason": "not a statement; duplicate the lease term"},
+    {"name": "party_names, party_addresses", "reason": "generic; superseded by the specific landlord/tenant name fields"},
+    {"name": "property_address", "reason": "generic; rental_property_address is the lease-specific field the rules read"},
+    {"name": "loan_number", "reason": "not present on a lease"},
+    {"name": "account_case_reference_number", "reason": "no cross-doc consumer for a lease"},
+    {"name": "signature_blocks", "reason": "generic; superseded by landlord/tenant signature-date fields"},
+    {"name": "notary_block", "reason": "residential leases are not notarized"},
+    {"name": "document_status_or_version", "reason": "no consumer; draft/final rarely marked on leases"},
+    {"name": "permitted_occupants", "reason": "no rule; occupant list not needed for income/DTI"},
+    {"name": "other_deposits_or_prepaid_rent", "reason": "no rule consumer; catch-all"},
+    {"name": "concessions_or_free_rent", "reason": "affects effective rent but no rule reads it in V1; engine uses stated monthly_rent"},
+    {"name": "late_fees_and_returned_payment_terms", "reason": "no consumer"},
+    {"name": "rent_increase_or_escalation_terms", "reason": "no consumer in V1"},
+    {"name": "utilities_and_services_responsibility", "reason": "no rule; catch-all"},
+    {"name": "maintenance_and_repair_responsibility", "reason": "no consumer"},
+    {"name": "sublease_or_assignment_terms", "reason": "no consumer"},
+    {"name": "property_management_agent", "reason": "no rule; not needed to establish income"},
+    {"name": "electronic_signature_audit_data", "reason": "provenance-like; no consumer"},
+    {"name": "lease_amendments_or_addenda", "reason": "see Open questions #1 — deferred, not adopted as typed core in V1"}
+  ],
+
+  "encoding_variations": [
+    "Lessor/lessee labels vary — 'Landlord/Tenant', 'Lessor/Lessee', 'Owner/Resident', 'Management/Occupant'; the raw fields preserve the original wording for split-checking",
+    "Term type — stated as '12-month lease', 'fixed term', 'month-to-month', 'at will', or implied only by start/end dates; lease_term_type degrades from enum, so the prompt must map prose to a canonical value",
+    "Monthly rent — may appear as '$2,400', '2,400.00', or 'Rent: Two Thousand Four Hundred Dollars ($2,400)'; effective rent may be reduced by concessions/free-rent (captured only in catch-all in V1)",
+    "Property address vs unit — the building street address and the unit ('Apt 3B', 'Unit B', 'upstairs') may be on separate lines; unit_or_premises_description disambiguates"
+  ],
+
+  "open_questions": [
+    {"id": 1, "q": "Nested list — lease_amendments_or_addenda is CORE and can override monthly_rent/term", "options": ["no list, read the operative terms into the flat fields", "flat-row nested list {title, effective_date, changed_term, source}"], "recommendation": "no list for V1 — items are few/rare and the catch-all preserves the raw addendum; item count uncertain (usually 0-2), flag for Priya GEET'S DECISION (LP-438): BUILD IT — LP-437 made nested lists cheap (one declaration + the generic mechanism); the one-list-budget / defer / no-consumer concern is overturned. Build as flat_row; the per-rule consumer is separate follow-up.", "blocks_implementation": false},
+    {"id": 2, "q": "lease_term_type enum — enum_values is null", "options": ["str passthrough + prompt hint normalizing to {fixed-term, month-to-month, week-to-week, at-will}", "add a coercer/enum"], "recommendation": "str passthrough plus a prompt hint; add a coercer/enum later if a rule needs to branch on it", "blocks_implementation": false},
+    {"id": 3, "q": "REO matching — DT-6 must attach this lease to the correct retained property; rental_property_address + unit_or_premises_description is the only key", "options": ["downstream address-match", "a schema field"], "recommendation": "downstream address-match rather than a schema field", "blocks_implementation": false},
+    {"id": 4, "q": "Signature capture — flatten to landlord_signature_date/tenant_signature_date vs a signatures nested list", "options": ["flatten to two dated fields", "a signatures nested list"], "recommendation": "flatten — exactly two parties GEET'S DECISION (LP-438): FLATTEN signatures to signature_present + signature_date — no signature nested list.", "blocks_implementation": false},
+    {"id": 5, "q": "Third-party tenant PII — tenant_or_lessee_name (+ address via the raw string) is a non-borrower's PII at standard sensitivity", "options": ["no _PII_FIELDS registration", "mask tenant identity"], "recommendation": "no _PII_FIELDS registration; confirm with Priya whether tenant identity should be masked GEET'S DECISION (LP-438): mask account-like identifiers (policy/account/plan numbers, wire/ACH trace, check references) via _PII_FIELDS; leave addresses and public-record case numbers PLAIN; DOB is unmasked (pii null).", "blocks_implementation": false}
+  ],
+
+  "notes": [
+    "No existing_extractor for this document type — new schema.",
+    "This is an asset/income-support document: the borrower is expected to be the landlord/lessor, not the tenant. Capture the lessor names in landlord slots regardless of who signs first.",
+    "No fields require _PII_FIELDS registration in V1; party names and rental_property_address are standard sensitivity; there is no SSN/DOB on a standard lease.",
+    "landlord_signature_date and tenant_signature_date carry reason_class 'execution' in the doc, which is not one of the five classes; both were mapped to processor (execution/completeness) as a best guess — flagged as ambiguity."
+  ]
+}

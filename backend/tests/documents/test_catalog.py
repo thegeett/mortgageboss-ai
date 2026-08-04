@@ -66,10 +66,12 @@ def test_planned_tier_1_types(document_type: str, category: DocumentCategory) ->
 @pytest.mark.parametrize(
     ("document_type", "category"),
     [
-        ("credit_report", DocumentCategory.CREDIT),
+        # LP-441: types WITHOUT a schema spec stay Tier-2 (credit_report / flood_certification /
+        # verification_of_deposit were promoted by the tier merge — they have specs).
+        ("collection_account_letter", DocumentCategory.CREDIT),
         ("closing_disclosure", DocumentCategory.DISCLOSURES),
-        ("flood_certification", DocumentCategory.PROPERTY),
-        ("verification_of_deposit", DocumentCategory.ASSETS),
+        ("warranty_deed", DocumentCategory.PROPERTY),
+        ("money_market_statement", DocumentCategory.ASSETS),
         ("passport", DocumentCategory.BORROWER_INFO),
     ],
 )
@@ -133,10 +135,96 @@ def test_catalog_is_comprehensive() -> None:
     assert len(CATALOG) >= 80
 
 
-def test_eighteen_tier_1_types() -> None:
-    """The ~18 first-class extraction types (LP-58); the rest are Tier 2."""
-    tier_1 = [slug for slug, (tier, _) in CATALOG.items() if tier is Tier.TIER_1]
-    assert len(tier_1) == 18
+def _spec_document_types() -> set[str]:
+    """Every ``document_type`` declared by a schema spec under docs/schema-specs/."""
+    import json
+    from pathlib import Path
+
+    specs = Path(__file__).resolve().parents[3] / "docs" / "schema-specs"
+    return {
+        json.loads(p.read_text(encoding="utf-8"))["document_type"]
+        for p in specs.glob("[0-9]*.json")
+    }
+
+
+def _tier1_spec_drift(
+    catalog: dict[str, tuple[Tier, DocumentCategory]], spec_types: set[str]
+) -> tuple[set[str], set[str]]:
+    """The invariant's engine (LP-441): a catalog type is Tier-1 IFF it has a schema spec.
+
+    Returns ``(tier1_without_spec, cataloged_with_spec_not_tier1)`` — both empty ⇔ the invariant holds.
+    """
+    tier_1 = {slug for slug, (tier, _) in catalog.items() if tier is Tier.TIER_1}
+    with_spec = {slug for slug in catalog if slug in spec_types}
+    return tier_1 - with_spec, with_spec - tier_1
+
+
+def test_tier_1_iff_the_type_has_a_schema_spec() -> None:
+    """LP-441 (replaces the == 18 count): extraction coverage is a DELIBERATE property, not drift — a
+    catalog type is Tier-1 (deserves full extraction) IF AND ONLY IF it has a schema spec. This replaces
+    ``test_eighteen_tier_1_types``: the tier merge (Geet) moved every spec'd type to Tier-1, so a raw count
+    is meaningless; the bijection with the spec corpus is the property that must hold. A count assertion
+    would pass no matter what drifted; this fails both ways (a Tier-1 with no spec, or a spec'd type left
+    at Tier-2)."""
+    missing, tier2_with_spec = _tier1_spec_drift(CATALOG, _spec_document_types())
+    assert missing == set(), f"Tier-1 types with NO schema spec (undeliberate coverage): {missing}"
+    assert tier2_with_spec == set(), (
+        f"spec'd catalog types left at Tier-2 (missed the merge): {tier2_with_spec}"
+    )
+
+
+def test_the_invariant_fails_on_a_drift_case() -> None:
+    """The replacement invariant is a real guard, not a tautology: it flags both drift directions."""
+    # A Tier-1 type with no spec.
+    drift_a = {"made_up_type": (Tier.TIER_1, DocumentCategory.MISC)}
+    assert _tier1_spec_drift(drift_a, set())[0] == {"made_up_type"}
+    # A spec'd catalog type left at Tier-2.
+    drift_b = {"has_a_spec": (Tier.TIER_2, DocumentCategory.MISC)}
+    assert _tier1_spec_drift(drift_b, {"has_a_spec"})[1] == {"has_a_spec"}
+
+
+def test_every_spec_document_type_resolves_to_a_catalog_entry() -> None:
+    """LP-442 — THE MEASURE, and the whole point of the ticket: the schema and catalog vocabularies
+    are reconciled, so EVERY spec ``document_type`` the extractors are keyed by is a catalog key the
+    classifier can emit. An unreconciled type routes to classified-only forever with no error — the
+    silent-routing failure. Was 36/108 before this ticket; now every spec resolves.
+    """
+    spec_types = _spec_document_types()
+    unresolved = spec_types - set(CATALOG)
+    assert unresolved == set(), (
+        f"spec types the classifier can never emit (silent routing): {unresolved}"
+    )
+    assert len(spec_types) == 109  # 108 + the alimony/child-support split
+
+
+def test_the_four_merges_and_the_split_resolve() -> None:
+    """LP-442 decisions 1-3: the merged spec types now live under their catalog keys, and the split
+    produced two distinct catalog keys (both promoted to Tier-1 by the LP-441 invariant)."""
+    spec_types = _spec_document_types()
+    # The 4 merges: the OLD spec names are gone; the catalog TARGETS carry the spec (→ Tier-1).
+    for old in (
+        "aba",
+        "consent_to_use_electronic_records_and_signatures",
+        "k_1_schedule_1065_1120s",
+        "mortgage_payoff",
+    ):
+        assert old not in spec_types, f"{old} should have been merged/renamed away"
+    for target in (
+        "affiliated_business_disclosure",
+        "e_consent_disclosure",
+        "k1_statement",
+        "payoff_statement",
+    ):
+        assert target in spec_types, f"{target} should now carry a spec"
+        assert get_tier(target) is Tier.TIER_1
+    # payoff_statement (PROPERTY), not debt_payoff_statement (CREDIT) — the verified mortgage-payoff target.
+    assert get_category("payoff_statement") is DocumentCategory.PROPERTY
+    # The split: one spec became two, both distinct catalog keys, both Tier-1.
+    assert "alimony_income_verification" not in spec_types
+    for split in ("alimony_income", "child_support_income"):
+        assert split in spec_types and get_tier(split) is Tier.TIER_1
+    # Decision 2: the generic borrower_authorization is retired.
+    assert "borrower_authorization" not in CATALOG
 
 
 def test_all_seven_categories_represented() -> None:
@@ -157,18 +245,22 @@ def test_all_seven_categories_represented() -> None:
     [
         # A spread across categories + both tiers (LP-59 additions).
         ("tax_transcript", Tier.TIER_2, DocumentCategory.INCOME_EMPLOYMENT),
-        ("k1_statement", Tier.TIER_2, DocumentCategory.INCOME_EMPLOYMENT),
+        # LP-442: k1_statement was promoted to Tier-1 (the k_1_schedule spec merged into it);
+        # unemployment_income_letter is a spec-less INCOME type that stays Tier-2.
+        ("unemployment_income_letter", Tier.TIER_2, DocumentCategory.INCOME_EMPLOYMENT),
         ("brokerage_statement", Tier.TIER_2, DocumentCategory.ASSETS),
         ("certificate_of_deposit", Tier.TIER_2, DocumentCategory.ASSETS),
-        ("appraisal", Tier.TIER_2, DocumentCategory.PROPERTY),
+        # LP-441: appraisal / bankruptcy_discharge / permanent_resident_card / URLA were promoted to
+        # Tier-1 by the merge (they have specs) — swapped for spec-less types that stay Tier-2.
+        ("home_inspection_report", Tier.TIER_2, DocumentCategory.PROPERTY),
         ("warranty_deed", Tier.TIER_2, DocumentCategory.PROPERTY),
-        ("bankruptcy_discharge", Tier.TIER_2, DocumentCategory.CREDIT),
+        ("credit_supplement", Tier.TIER_2, DocumentCategory.CREDIT),
         ("student_loan_statement", Tier.TIER_2, DocumentCategory.CREDIT),
         ("notice_of_right_to_cancel", Tier.TIER_2, DocumentCategory.DISCLOSURES),
         ("intent_to_proceed", Tier.TIER_2, DocumentCategory.DISCLOSURES),
-        ("permanent_resident_card", Tier.TIER_2, DocumentCategory.BORROWER_INFO),
+        ("military_id", Tier.TIER_2, DocumentCategory.BORROWER_INFO),
         ("power_of_attorney", Tier.TIER_2, DocumentCategory.BORROWER_INFO),
-        ("uniform_residential_loan_application", Tier.TIER_2, DocumentCategory.MISC),
+        ("underwriting_approval", Tier.TIER_2, DocumentCategory.MISC),
         ("rate_lock_agreement", Tier.TIER_2, DocumentCategory.MISC),
     ],
 )

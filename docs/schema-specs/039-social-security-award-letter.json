@@ -1,0 +1,75 @@
+{
+  "document_type": "social_security_award_letter",
+  "slug": "social-security-award-letter",
+  "tier": 3,
+  "rules_served": ["IN-13"],
+  "summary_hint": "SSA <benefit_type> award for <beneficiary_name> (claim <claim_number_masked>), letter dated <award_or_benefit_verification_letter_date>: gross <gross_monthly_benefit>/mo, net <net_monthly_payment>/mo; continuance <benefit_end_or_review_date>.",
+  "existing_extractor": null,
+  "catalog_coverage": "full",
+
+  "typed_core": [
+    {"name":"social_security_administration","type":"str","why":"source/identity — the issuing SSA office/program","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"beneficiary_name","type":"str","why":"identity — whose income; match to the borrower","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"person","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"claim_number_masked","type":"str","why":"PII (highly_restricted) + identity — the SSA claim key","rules":[],"reason_class":"pii","rule_floor":false,"degraded_from":"identifier","pii":{"kind":"ACCOUNT","pre_masked":true},"exists_today":false,"prompt_hint":"Capture the claim-number suffix (A=wage earner, B=spouse, C=child, D=widow(er)) — it signals continuance risk (child benefits end)"},
+    {"name":"benefit_type","type":"str","why":"IN-13 — the income type detection (retirement / SSDI / SSI / survivors); determines usability and continuance","rules":["IN-13"],"reason_class":"rule","rule_floor":false,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":"SSI (needs-based) and SSDI (disability) differ from retirement in usability and continuance under IN-13"},
+    {"name":"award_or_benefit_verification_letter_date","type":"date","why":"IN-13 — recency of the award/verification evidence","rules":["IN-13"],"reason_class":"rule","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"entitlement_or_effective_date","type":"date","why":"IN-13 — when the benefit began (history)","rules":["IN-13"],"reason_class":"rule","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"gross_monthly_benefit","type":"Decimal","why":"IN-13 — the qualifying benefit amount","rules":["IN-13"],"reason_class":"rule","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"net_monthly_payment","type":"Decimal","why":"processor — matches to the bank-deposit proof of receipt","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"Net monthly payment = gross − Medicare/other deductions; the deposit on bank statements matches the net"},
+    {"name":"payment_schedule_or_day","type":"str","why":"processor — receipt-matching (which day of month deposits land)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"next_payment_date","type":"date","why":"processor — receipt corroboration","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"retroactive_benefit_amount","type":"Decimal","why":"processor — explains large one-time deposits","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"cost_of_living_adjustment","type":"Decimal","why":"processor — income trend / current amount","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"benefit_end_or_review_date","type":"date","why":"IN-13 — the continuance test (3-year likelihood; a review/end date within the window flags)","rules":["IN-13"],"reason_class":"rule","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"continuation_or_age_dependency_terms","type":"str","why":"IN-13 — continuance terms (e.g. child/survivor benefits ending at a dependent's age)","rules":["IN-13"],"reason_class":"rule","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"representative_payee","type":"str","why":"processor/identity — a payee ≠ beneficiary flag","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"person","pii":null,"exists_today":false,"prompt_hint":null}
+  ],
+
+  "nested_lists": [
+    {
+      "name":"medicare_or_other_deductions","shape":"flat_row",
+      "shape_reason":"reconciles gross → net; genuinely repeats (Medicare Part B, Part D, tax withholding) but is small (≤~4 items), so flat rows are cheap",
+      "expected_item_count":"≤4","rules":["IN-13"],
+      "exists_today":false,"plumbing_sites":5,
+      "fields":[
+        {"name":"label","type":"str","why":"IN-13 — the deduction label (Medicare Part B/D, tax withholding)"},
+        {"name":"amount","type":"Decimal","why":"IN-13 — the deduction amount; reconciles gross → net"},
+        {"name":"source","type":"str","why":"provenance — the row the value came from"}
+      ]
+    }
+  ],
+
+  "rejected": [
+    {"name":"the 8 TECHNICAL provenance fields","reason":"already in the TypedField wrapper"},
+    {"name":"document_title","reason":"classification precedes extraction"},
+    {"name":"form_number, form_revision_date","reason":"an SSA award letter is not a standardized filled form"},
+    {"name":"issuer_name","reason":"duplicates social_security_administration"},
+    {"name":"issuer_address, issuer_phone, issuer_email_or_url","reason":"contact only; catch-all"},
+    {"name":"document_issue_date, effective_date, expiration_date","reason":"duplicate the letter date / entitlement date"},
+    {"name":"statement_period_start, statement_period_end","reason":"not a statement period"},
+    {"name":"party_names, party_addresses","reason":"beneficiary covered by beneficiary_name"},
+    {"name":"property_address, loan_number, account_case_reference_number","reason":"not on an award letter"},
+    {"name":"signature_blocks, notary_block","reason":"SSA letters are agency-issued, not executed/notarized"},
+    {"name":"document_status_or_version","reason":"no consumer"},
+    {"name":"ssa_contact_or_verification_reference","reason":"contact/reference only; no rule or processor gate; catch-all"}
+  ],
+
+  "encoding_variations": [
+    "benefit_type — 'Retirement', 'Disability (SSDI)', 'Supplemental Security Income (SSI)', 'Survivors'; SSI is need-based and may not be usable/continuing — a critical IN-13 distinction; degrade enum to str",
+    "claim-number suffix — the letters after the SSN-based claim number (A = wage earner, B = spouse, C = child, D = widow(er)) signal continuance risk (child benefits end); capture verbatim as the continuance disambiguator",
+    "gross vs net — 'Monthly benefit amount' (gross) vs 'amount you receive' (net after Medicare); keep both",
+    "award vs verification letter — an original award letter vs an annual Benefit Verification / COLA letter; award_or_benefit_verification_letter_date covers both"
+  ],
+
+  "open_questions": [
+    {"id":1,"q":"Deductions as a nested list vs catch-all — medicare_or_other_deductions is small and only supports gross→net reconciliation","options":["one flat nested list","drop it to the catch-all and keep only gross/net scalars"],"recommendation":"(b) drop to catch-all unless a rule needs itemized deductions GEET'S DECISION (LP-438): BUILD IT — LP-437 made nested lists cheap (one declaration + the generic mechanism); the one-list-budget / defer / no-consumer concern is overturned. Build as flat_row; the per-rule consumer is separate follow-up.","blocks_implementation":false},
+    {"id":2,"q":"Continuance derivation — IN-13 flags 'short/undocumented continuance'","options":["leave benefit_end_or_review_date + continuation_or_age_dependency_terms for the rule to interpret","add a derived months-to-end"],"recommendation":"(a) leave the fields for the rule; months-to-end is a conclusion, not a fact","blocks_implementation":false},
+    {"id":3,"q":"SSI usability — SSI may be non-continuing/non-qualifying","options":["benefit_type alone suffices","add a separate program-eligibility flag"],"recommendation":"confirm whether benefit_type alone suffices for IN-13 or a separate program-eligibility flag is wanted","blocks_implementation":false}
+  ],
+
+  "notes": [
+    "A 'Benefit Verification Letter' (a.k.a. 'budget letter', 'proof of income letter') is the common re-issued form; treat it as the same document type.",
+    "claim_number_masked is registered pre_masked true — the SSA claim number is SSN-derived; beneficiary_name / representative_payee are standard-sensitivity names, not registry PII.",
+    "Ambiguity: representative_payee is tagged 'processor/identity' — classed processor as primary (a payee ≠ beneficiary flag); flagged."
+  ]
+}

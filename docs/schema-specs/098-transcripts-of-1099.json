@@ -1,0 +1,70 @@
+{
+  "document_type": "transcripts_of_1099",
+  "slug": "transcripts-of-1099",
+  "tier": 3,
+  "rules_served": [],
+  "summary_hint": "Tells a processor whose IRS-sourced 1099 income record this is, for which year, and how many payer records it contains.",
+  "existing_extractor": null,
+  "catalog_coverage": "full",
+
+  "typed_core": [
+    {"name":"document_title","type":"str","why":"identity — confirms this is an IRS transcript vs a borrower-provided 1099","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"issuer_name","type":"str","why":"identity/source — the issuing authority (IRS); authenticity","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"transcript_type","type":"str","why":"identity/disambiguator — 'Wage & Income' vs other transcript types (degraded from enum)","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":"Capture transcript_type verbatim ('Wage and Income Transcript'); the 1099 records are a subset"},
+    {"name":"transcript_request_or_run_date","type":"date","why":"recency — when the transcript was pulled","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"tax_year","type":"int","why":"identity/disambiguator — the year the records belong to; a record amount is meaningless without its year","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"tax_year at the header applies to every record and must accompany any amount downstream"},
+    {"name":"recipient_name","type":"str","why":"identity — the taxpayer; match to borrower (degraded from person_or_entity)","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"object","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"recipient_tin_masked","type":"str","why":"PII (highly_restricted); identity — the TIN the records are filed under","rules":[],"reason_class":"pii","rule_floor":false,"degraded_from":null,"pii":{"kind":"ACCOUNT","pre_masked":true},"exists_today":false,"prompt_hint":"TINs masked as XXX-XX-1234; retain last-4. Never emit to the catch-all"},
+    {"name":"address_or_customer_file_number","type":"str","why":"processor/matching — customer file number or address used to order the transcript","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null}
+  ],
+
+  "nested_lists": [
+    {
+      "name":"information_return_records","shape":"flat_row",
+      "shape_reason":"the 1099 records are the document's payload and genuinely repeat (a few to ~20 payers); flat rows with one source each are token-safe and let a processor reconcile line-by-line",
+      "expected_item_count":"a few to ~20","rules":[],
+      "exists_today":false,"plumbing_sites":5,
+      "fields":[
+        {"name":"form_type","type":"str","why":"reconciliation — IRS form code e.g. 1099-NEC/MISC/INT/DIV/R"},
+        {"name":"payer_name","type":"str","why":"reconciliation — the payer that reported the income"},
+        {"name":"payer_tin_masked","type":"str","why":"identity of the payer within the record","pii_note":"PII (registry has payer_tin masked) — the nested list needs its own redactor, not the raw catch-all"},
+        {"name":"box_or_income_type","type":"str","why":"reconciliation — the box/income-type; the same dollar figure means different things by box"},
+        {"name":"amount","type":"Decimal","why":"reconciliation — the reported amount (whole-dollar on transcripts)"},
+        {"name":"account_number_masked","type":"str","why":"identity within the record","pii_note":"PII (registered) — the nested list needs its own redactor so it is masked, not stored raw in a catch-all"}
+      ]
+    }
+  ],
+
+  "rejected": [
+    {"name":"the 8 TECHNICAL provenance fields","reason":"already in the TypedField wrapper"},
+    {"name":"form_number, form_revision_date","reason":"a transcript is not a numbered form"},
+    {"name":"issuer_address, issuer_phone, issuer_email_or_url","reason":"IRS contact detail; no consumer"},
+    {"name":"effective_date, expiration_date, statement_period_start/_end, document_issue_date","reason":"not applicable; transcript_request_or_run_date + tax_year cover timing"},
+    {"name":"party_names, party_addresses","reason":"duplicate recipient_name / address_or_customer_file_number"},
+    {"name":"property_address, loan_number","reason":"not on an IRS transcript"},
+    {"name":"signature_blocks, notary_block, document_status_or_version","reason":"not an executed/notarized/versioned document"},
+    {"name":"aggregate_amounts_by_form_and_box (TECHNICAL)","reason":"a computed conclusion, not a fact — summing is a rule's job; tags describe, rules judge"},
+    {"name":"missing_or_unmatched_payer_records (TECHNICAL)","reason":"a reconciliation finding/judgment — produced by comparing against borrower 1099s, not read from this document"}
+  ],
+
+  "encoding_variations": [
+    "Transcript type printed as 'Wage and Income Transcript'; the 1099 records are a subset — capture transcript_type verbatim",
+    "Each record's form is labeled by IRS form code (1099-NEC, 1099-MISC, 1099-INT, 1099-DIV, 1099-R, 1099-G, 1099-K) with box numbers — capture the form code AND the box/income-type together, because the same dollar figure means different things by box",
+    "Amounts are whole-dollar on transcripts; retain as printed",
+    "TINs masked as XXX-XX-1234 / XX-XXX1234; retain last-4"
+  ],
+
+  "open_questions": [
+    {"id":1,"q":"information_return_records column set. Recommended flat-row columns: form_type, payer_name, payer_tin_masked, box/income_type, amount, account_number_masked.","options":["the recommended six columns","finer box granularity (some transcripts print multiple boxes per record)"],"recommendation":"confirm the box/income-type granularity is sufficient (some transcripts print multiple boxes per record)","blocks_implementation":false},
+    {"id":2,"q":"Masked-TIN registration. recipient_tin_masked and nested payer_tin_masked are masked variants not literally in the 7-field registry.","options":["register the masked field names (pre_masked true)","rely on the raw-name registry entries"],"recommendation":"register the masked field names (pre_masked true); confirm the registry keys on exact field name GEET'S DECISION (LP-438): mask account-like identifiers (policy/account/plan numbers, wire/ACH trace, check references) via _PII_FIELDS; leave addresses and public-record case numbers PLAIN; DOB is unmasked (pii null).","blocks_implementation":false},
+    {"id":3,"q":"Recipient could be an entity. recipient_name is person_or_entity; flattened to str.","options":["flatten to str (no flag)","add a person-vs-entity flag"],"recommendation":"confirm no downstream needs a person-vs-entity flag (relevant for business 1099 income)","blocks_implementation":false}
+  ],
+
+  "notes": [
+    "This is an IRS-sourced record (authoritative), distinct from borrower-provided 1099s — one transcript can list many payers.",
+    "Capture each record's IRS form code and box number together; tax_year at the header applies to every record and must accompany any amount downstream.",
+    "Do not aggregate or reconcile — emit each payer record as-is; totals and unmatched-payer findings are a rule's job, not the extractor's.",
+    "recipient_tin_masked needs _PII_FIELDS registration, pre_masked true (the transcript already masks it); the registry lists recipient_tin raw, not the masked variant.",
+    "Within information_return_records, payer_tin_masked and account_number_masked are PII — the nested list needs its own redactor so these are masked, not stored raw in a catch-all."
+  ]
+}

@@ -1,0 +1,59 @@
+{
+  "document_type": "letter_of_explanation_misc",
+  "slug": "letter-of-explanation-misc",
+  "tier": 3,
+  "rules_served": [],
+  "summary_hint": "Borrower LOE addressing <issue/question>, resolution <status>, signed <letter_date>.",
+  "existing_extractor": null,
+  "catalog_coverage": "full",
+
+  "typed_core": [
+    {"name":"document_title","type":"str","why":"identity/classification — human review of which LOE this is","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"This subtype is a fallback; if the letter is clearly about income or property it should have been classified as 077/079 — capture document_title verbatim so a misclassification is visible"},
+    {"name":"letter_date","type":"date","why":"identity — when written; recency (processor)","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"borrower_name","type":"str","why":"identity — whose LOE (flattened from borrower_names person[])","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"borrower_name_2","type":"str","why":"identity — co-borrower on a joint letter","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"borrower_names_raw","type":"str","why":"disambiguator — verbatim signer string so a bad split stays visible","rules":[],"reason_class":"disambiguator","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"issuer_name","type":"str","why":"identity/source — confirms borrower-authored vs third-party","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"The issuer is normally the borrower, not an institution"},
+    {"name":"recipient_name","type":"str","why":"identity — to whom the letter is addressed (lender/underwriter); processor","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"issue_orquestion","type":"str","why":"processor — the question being answered; the letter's subject line","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"reason_or_cause","type":"str","why":"processor — the substance of the explanation","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"resolution_and_current_status","type":"str","why":"processor — whether the matter is resolved (cheap future rule)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"Do not infer a resolution the borrower did not state"},
+    {"name":"supporting_documents_summary","type":"str","why":"processor — evidence the borrower references (flattened)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"accuracy_certification","type":"str","why":"processor; presence of the truthfulness attestation","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"bool","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"signature_date","type":"date","why":"execution — date signed (flattened from borrower_signatures_and_dates)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"property_address","type":"str","why":"identity linkage (flattened) — ties to the file when stated","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"address","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"loan_number","type":"str","why":"identity linkage — ties to the loan file when stated","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null}
+  ],
+
+  "nested_lists": [],
+
+  "rejected": [
+    {"name":"the 8 TECHNICAL provenance fields","reason":"already in the TypedField wrapper"},
+    {"name":"form_number, form_revision_date","reason":"not a standardized form"},
+    {"name":"issuer_address, issuer_phone, issuer_email_or_url","reason":"no consumer; issuer is the borrower"},
+    {"name":"effective_date, expiration_date, statement_period_start/end","reason":"a LOE has no coverage period"},
+    {"name":"party_names, party_addresses","reason":"duplicate borrower_names; no per-party rule"},
+    {"name":"account_case_reference_number","reason":"no consumer on a borrower letter"},
+    {"name":"notary_block, signature_blocks","reason":"not notarized; signature captured flat"},
+    {"name":"document_status_or_version","reason":"no draft/final lifecycle"},
+    {"name":"involved_parties, relevant_dates, relevant_amounts_orreferences, facts_and_chronology","reason":"no rule; catch-all captures the narrative"}
+  ],
+
+  "encoding_variations": [
+    "accuracy_certification is catalog boolean — issuers write it as a sentence ('I certify the above is true...'), not a checkbox. Degrade to str; the presence and wording matter more than a T/F.",
+    "issue_orquestion may appear as a 'RE:' subject line or only in the body — capture whichever is present.",
+    "Name may differ between body and signature — borrower_names_raw preserves the signature form."
+  ],
+
+  "open_questions": [
+    {"id":1,"q":"facts_and_chronology typed vs catch-all.","options":["catch-all","typed timeline (nested list)"],"recommendation":"catch-all — no consumer today; flag if a future rule needs a typed timeline GEET'S DECISION (LP-438): BUILD IT — LP-437 made nested lists cheap (one declaration + the generic mechanism); the one-list-budget / defer / no-consumer concern is overturned. Build as flat_row; the per-rule consumer is separate follow-up.","blocks_implementation":false},
+    {"id":2,"q":"supporting_documents shape.","options":["flat supporting_documents_summary str","nested list"],"recommendation":"flat str; escalate to a list only if attachment-matching becomes a rule GEET'S DECISION (LP-438): BUILD IT — LP-437 made nested lists cheap (one declaration + the generic mechanism); the one-list-budget / defer / no-consumer concern is overturned. Build as flat_row; the per-rule consumer is separate follow-up.","blocks_implementation":false},
+    {"id":3,"q":"Overlap with 077/079.","options":["retain document_title verbatim","re-route to a specific subtype"],"recommendation":"because this is the fallback LOE, document_title should be retained verbatim so downstream can detect a document that belongs in a more specific subtype","blocks_implementation":false}
+  ],
+
+  "notes": [
+    "No rules in the packet → no rule floor. This is the catch-all LOE subtype: an unstructured borrower letter about anything not covered by the income/property variants. The typed core stays deliberately thin — identity + the issue + resolution — and lets the narrative body fall to the catch-all. Every field is justified by identity or processor review.",
+    "loan_number (confidential) treated as identity/linkage, not registered. No SSN/DOB/account number on this document type.",
+    "Ambiguity: signature_date is described as 'execution', which is not one of the five reason_class values; classified as processor as best guess."
+  ]
+}

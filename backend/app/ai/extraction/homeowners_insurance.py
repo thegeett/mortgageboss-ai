@@ -26,10 +26,12 @@ from app.ai.extraction.parsing import (
     CoreSpec,
     coerce_date,
     coerce_decimal,
+    coerce_int,
     coerce_str,
     derive_status,
     parse_catch_all,
     parse_typed_core,
+    source_payload,
 )
 from app.ai.extraction.shape import CatchAllSection, TypedField
 from app.ai.parsing import coerce_confidence, extract_json_object
@@ -40,7 +42,8 @@ logger = structlog.get_logger(__name__)
 
 _PROMPT_PATH = "extraction/homeowners_insurance.txt"
 _SUPPORTED_MEDIA_TYPES = frozenset({"application/pdf", "image/jpeg", "image/png", "image/jpg"})
-_MAX_TOKENS = 4096
+# LP-446 — now list-bearing (forms_and_endorsements) → the unbounded-list budget (guide §7; was 4096).
+_MAX_TOKENS = 8192
 
 
 class HomeownersInsuranceExtraction(BaseModel):
@@ -61,6 +64,26 @@ class HomeownersInsuranceExtraction(BaseModel):
     annual_premium: TypedField[Decimal] = Field(default_factory=TypedField)  # housing expense
     effective_date: TypedField[date] = Field(default_factory=TypedField)
     expiration_date: TypedField[date] = Field(default_factory=TypedField)
+
+    # --- LP-446 diff (011 spec) — the exists_today:false additions ----------- #
+    named_insured_2: TypedField[str] = Field(default_factory=TypedField)
+    named_insured_raw: TypedField[str] = Field(default_factory=TypedField)
+    agency_producer_name: TypedField[str] = Field(default_factory=TypedField)
+    policy_form: TypedField[str] = Field(default_factory=TypedField)  # e.g. "HO 00 03" (form code)
+    policy_status: TypedField[str] = Field(default_factory=TypedField)
+    # The DWELLING's loss-settlement basis (replacement cost vs ACV vs coinsurance) — the IH-1 signal,
+    # kept DISTINCT from any personal-property endorsement in forms_and_endorsements (the anti-conflation).
+    replacement_cost_or_coinsurance_basis: TypedField[str] = Field(default_factory=TypedField)
+    wind_hail_hurricane_coverage: TypedField[str] = Field(default_factory=TypedField)
+    wind_hail_deductible: TypedField[str] = Field(default_factory=TypedField)
+    premium_paid_or_due_status: TypedField[str] = Field(default_factory=TypedField)
+    mortgagee_name: TypedField[str] = Field(default_factory=TypedField)
+    mortgagee_clause_raw: TypedField[str] = Field(default_factory=TypedField)
+    mortgagee_count: TypedField[int] = Field(default_factory=TypedField)
+    document_issue_date: TypedField[date] = Field(default_factory=TypedField)
+
+    # --- Captured nested list (LP-446 / LP-437) — bare rows, snapshot-read generically ------- #
+    forms_and_endorsements: list[dict[str, Any]] = Field(default_factory=list)
 
     # --- Grouped catch-all — everything else -------------------------------- #
     additional_sections: list[CatchAllSection] = Field(default_factory=list)
@@ -96,7 +119,48 @@ _CORE_SPEC: CoreSpec = (
     ("annual_premium", coerce_decimal),
     ("effective_date", coerce_date),
     ("expiration_date", coerce_date),
+    # LP-446 diff additions
+    ("named_insured_2", coerce_str),
+    ("named_insured_raw", coerce_str),
+    ("agency_producer_name", coerce_str),
+    ("policy_form", coerce_str),
+    ("policy_status", coerce_str),
+    ("replacement_cost_or_coinsurance_basis", coerce_str),
+    ("wind_hail_hurricane_coverage", coerce_str),
+    ("wind_hail_deductible", coerce_str),
+    ("premium_paid_or_due_status", coerce_str),
+    ("mortgagee_name", coerce_str),
+    ("mortgagee_clause_raw", coerce_str),
+    ("mortgagee_count", coerce_int),
+    ("document_issue_date", coerce_date),
 )
+
+# LP-446 — the forms_and_endorsements list: bare rows (mirrors bank_statement's transactions parse).
+_FORMS_AND_ENDORSEMENTS_ROW: CoreSpec = (
+    ("code_or_label", coerce_str),
+    ("description", coerce_str),
+)
+
+
+def _parse_forms_and_endorsements(raw: Any) -> list[dict[str, Any]]:
+    """Coerce the forms_and_endorsements rows — bare scalars + a per-row page/snippet source (LP-446).
+
+    Each declared field is coerced, a per-row source kept, and a fully-empty row dropped (no hallucinated
+    rows). A PERSONAL-PROPERTY replacement-cost endorsement lands HERE as a row — never conflated with the
+    dwelling's ``replacement_cost_or_coinsurance_basis`` typed field."""
+    rows: list[dict[str, Any]] = []
+    if not isinstance(raw, list):
+        return rows
+    for entry in raw:
+        if not isinstance(entry, dict):
+            continue
+        row: dict[str, Any] = {
+            name: coerce(entry.get(name)) for name, coerce in _FORMS_AND_ENDORSEMENTS_ROW
+        }
+        row["source"] = source_payload(entry)
+        if any(row[name] is not None for name, _ in _FORMS_AND_ENDORSEMENTS_ROW):
+            rows.append(row)
+    return rows
 
 
 def _parse_homeowners_insurance_json(text: str) -> HomeownersInsuranceExtractionResult | None:
@@ -112,16 +176,21 @@ def _parse_homeowners_insurance_json(text: str) -> HomeownersInsuranceExtraction
         return None
 
     core_payload, non_null, coercion_lost = parse_typed_core(payload, _CORE_SPEC)
+    forms_and_endorsements = _parse_forms_and_endorsements(payload.get("forms_and_endorsements"))
     sections = parse_catch_all(payload.get("additional_sections"))
 
     try:
         data = HomeownersInsuranceExtraction.model_validate(
-            {**core_payload, "additional_sections": sections}
+            {
+                **core_payload,
+                "forms_and_endorsements": forms_and_endorsements,
+                "additional_sections": sections,
+            }
         )
     except ValidationError:
         return None
 
-    status = derive_status(non_null, coercion_lost)
+    status = derive_status(non_null + len(forms_and_endorsements), coercion_lost)
     confidence = coerce_confidence(payload.get("confidence"))
     raw_reasoning = payload.get("reasoning")
     reasoning = (
@@ -174,5 +243,6 @@ async def extract_homeowners_insurance(
         confidence=result.confidence,
         core_fields_present=core_present,
         catch_all_sections=len(result.data.additional_sections),
+        forms_and_endorsements=len(result.data.forms_and_endorsements),
     )
     return result

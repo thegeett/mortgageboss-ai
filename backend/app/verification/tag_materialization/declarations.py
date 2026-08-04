@@ -42,10 +42,13 @@ _VOCAB_EXTRA_YAML = _RULES_DIR / "vocabulary_extra.yaml"
 KNOWN_SUBJECTS = frozenset({"transaction", "document", "loan", "borrower"})
 
 # The subjects a DERIVED recipe may be declared for. LP-332 generalized the derived producer beyond
-# loan-only, but the recipes are written to read either loan-level MISMO (loan) or a single borrower's
-# facts + documents (borrower). A derived tag on a per-row subject (transaction/document) would run a
-# loan/borrower recipe against the wrong raw object and silently mis-key garbage — fail loud at load.
-_DERIVED_SUBJECTS = frozenset({"loan", "borrower"})
+# loan-only; the producer enumerates the subject registry and passes the subject's own raw object to the
+# recipe, keyed under its subject_id. loan/borrower recipes read loan-level MISMO / a borrower's facts.
+# LP-447 adds DOCUMENT: a per-document derived recipe (ins.dwelling_settlement_basis) that reads its OWN
+# DocumentEntry and keys under the content_id — the producer already handles this correctly (verified), so
+# a document recipe does NOT mis-key. A derived tag on `transaction` stays unsupported (no recipe reads a
+# TransactionRecord). Each recipe still asserts its expected raw type, so a wrong subject fails loudly.
+_DERIVED_SUBJECTS = frozenset({"loan", "borrower", "document"})
 
 
 class DeclarationError(Exception):
@@ -67,6 +70,13 @@ class TagDeclaration:
     subject: str
     data: str  # parsed: field[:hash] · derived: recipe key · ai: group key
     allowed_values: tuple[str, ...] | None  # the vocabulary's allowed_values (for ai coercion)
+    # LP-454 review — an optional document_type FILTER for a parsed:document tag. A field-name is not unique
+    # across extractors (``report_date`` is emitted by credit_report AND appraisal / termite / property_profile;
+    # ``earnest_money_amount`` by purchase_agreement AND earnest_money_receipt), and the parsed producer
+    # enumerates EVERY document — so without a filter a tag mis-materialises on the wrong document type. When
+    # set, the tag is produced ONLY on documents of this type (mirrors the AI group's ``applies_to``). None =
+    # every document type (the prior behaviour, correct for a field that IS unique / genuinely doc-agnostic).
+    document_type: str | None = None
 
 
 @dataclass(frozen=True)
@@ -90,6 +100,18 @@ class AiGroup:
     # (stmt.owner_matches_borrower) declares this; the producer then adds the loan's borrower roster to the
     # group's context. DECLARED (not a per-group code branch): a group that does not set it is byte-unchanged.
     include_borrower_roster: bool = False
+    # LP-444 — a group that needs a document's GENERIC LISTS (LP-437: entry.lists — tradelines, etc.) in its
+    # context OPTS IN here. DECLARED, opt-in only: a group that does not set it sees NO list data, so every
+    # existing group's context is byte-unchanged. The serialiser caps each list + marks truncation + scrubs
+    # list-row values (subjects.py); only document/borrower subjects carry documents (hence lists).
+    include_lists: bool = False
+    # LP-444 — the per-list row cap (how many rows are serialised before the truncation marker fires).
+    # Per-group so a dense list (a long credit report) can be given more rows; default is the module default.
+    list_row_cap: int = 50
+    # LP-444 — a BORROWER group that must compare against the app's file-level MISMO liabilities (CR-4:
+    # undisclosed tradeline) opts in here; the borrower context then adds `stated_liabilities`. Off by
+    # default → an existing borrower group is byte-unchanged.
+    include_stated_liabilities: bool = False
 
 
 def _parse_allowed(raw: str) -> tuple[str, ...] | None:
@@ -204,6 +226,31 @@ def load_ai_groups() -> dict[str, AiGroup]:
                 f"ai group {key!r}: `include_borrower_roster` is only for a document-subject group "
                 f"(the roster is the comparison context for a document's stated party), got subject={subject!r}"
             )
+        include_lists = body.get("include_lists", False)
+        if not isinstance(include_lists, bool):
+            raise DeclarationError(
+                f"ai group {key!r}: `include_lists` must be a boolean, got {include_lists!r}"
+            )
+        if include_lists and subject not in ("document", "borrower"):
+            raise DeclarationError(
+                f"ai group {key!r}: `include_lists` is only for a document- or borrower-subject group "
+                f"(only those carry documents, hence generic lists), got subject={subject!r}"
+            )
+        cap = body.get("list_row_cap", 50)
+        if not isinstance(cap, int) or isinstance(cap, bool) or cap < 1:
+            raise DeclarationError(
+                f"ai group {key!r}: `list_row_cap` must be a positive integer, got {cap!r}"
+            )
+        include_liabilities = body.get("include_stated_liabilities", False)
+        if not isinstance(include_liabilities, bool):
+            raise DeclarationError(
+                f"ai group {key!r}: `include_stated_liabilities` must be a boolean, got {include_liabilities!r}"
+            )
+        if include_liabilities and subject != "borrower":
+            raise DeclarationError(
+                f"ai group {key!r}: `include_stated_liabilities` is only for a borrower-subject group "
+                f"(the file-level liabilities are the per-borrower comparison set), got subject={subject!r}"
+            )
         groups[key] = AiGroup(
             key=key,
             subject=subject,
@@ -212,6 +259,9 @@ def load_ai_groups() -> dict[str, AiGroup]:
             system_prompt=prompt,
             applies_to=_parse_applies_to(key, subject, body.get("applies_to")),
             include_borrower_roster=roster,
+            include_lists=include_lists,
+            list_row_cap=cap,
+            include_stated_liabilities=include_liabilities,
         )
     return groups
 
@@ -285,8 +335,25 @@ def load_declarations() -> dict[str, TagDeclaration]:
             raise DeclarationError(
                 f"tag {tag_id!r}: declared for production but absent from the fact-tag vocabulary"
             )
+        document_type = body.get("document_type")
+        if document_type is not None:
+            # A document_type FILTER only makes sense for a parsed:document tag (AI groups have applies_to;
+            # loan/borrower/transaction subjects are not per-document). Fail loud on a misuse.
+            if not isinstance(document_type, str) or not document_type.strip():
+                raise DeclarationError(f"tag {tag_id!r}: document_type must be a non-empty string")
+            if mode is not ProductionMode.PARSED or subject != "document":
+                raise DeclarationError(
+                    f"tag {tag_id!r}: document_type is only valid on a parsed:document tag "
+                    f"(got mode={mode.value}, subject={subject!r})"
+                )
+            document_type = document_type.strip()
         declarations[tag_id] = TagDeclaration(
-            tag_id=tag_id, mode=mode, subject=subject, data=data, allowed_values=allowed[tag_id]
+            tag_id=tag_id,
+            mode=mode,
+            subject=subject,
+            data=data,
+            allowed_values=allowed[tag_id],
+            document_type=document_type if isinstance(document_type, str) else None,
         )
     return declarations
 
@@ -308,9 +375,11 @@ def validate_declarations(
                 f"(known: {sorted(known_context_builders)})"
             )
     for decl in load_declarations().values():
-        # LP-332: derived recipes now run for a declared subject (the producer enumerates the subject
-        # registry, like parsed/ai) — loan OR borrower, the two the recipes are written for. A derived
-        # tag on any other subject (transaction/document) would mis-key garbage, so reject it at load.
+        # LP-332: derived recipes run for a declared subject (the producer enumerates the subject registry,
+        # like parsed/ai). Supported subjects are in _DERIVED_SUBJECTS — loan, borrower, and (LP-447) document
+        # (a per-document recipe reads its own DocumentEntry, keyed under content_id; the producer handles
+        # this and each recipe asserts its raw type). `transaction` stays unsupported (no recipe reads a
+        # TransactionRecord), so a derived tag declared for it is rejected at load.
         if decl.mode is ProductionMode.DERIVED:
             if decl.subject not in _DERIVED_SUBJECTS:
                 raise DeclarationError(

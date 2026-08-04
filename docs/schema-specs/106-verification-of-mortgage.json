@@ -1,0 +1,90 @@
+{
+  "document_type": "verification_of_mortgage",
+  "slug": "verification-of-mortgage",
+  "tier": 3,
+  "rules_served": [],
+  "summary_hint": "which servicer holds the borrower's existing mortgage on which property, the current balance and scheduled payment, the delinquency status and 30/60/90 late counts",
+  "existing_extractor": null,
+  "catalog_coverage": "full",
+
+  "typed_core": [
+    {"name":"document_title","type":"str","why":"identity — confirms this is a VOM","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"property_address","type":"str","why":"identity — which property the lien is on (degraded from address)","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"address","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"mortgage_holder_or_servicer","type":"str","why":"identity — the servicer certifying the loan (the source)","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"A VOM is servicer-certified; read the servicer (holder) as the source and the verifier as the signing representative"},
+    {"name":"borrower_name","type":"str","why":"identity — the mortgagor; attaches to the borrower (flattened from person[])","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"object","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"borrower_name_2","type":"str","why":"identity — co-borrower when present (flattened)","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"object","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"loan_number_masked","type":"str","why":"PII + identity/dedup — the existing loan's masked number","rules":[],"reason_class":"pii","rule_floor":false,"degraded_from":null,"pii":{"kind":"ACCOUNT","pre_masked":true},"exists_today":false,"prompt_hint":null},
+    {"name":"origination_date","type":"date","why":"processor — loan vintage/seasoning","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"original_loan_amount","type":"Decimal","why":"processor — original balance for LTV/pay-down context","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"loan_type","type":"str","why":"processor — conventional/FHA/VA affects treatment (degraded from enum)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"interest_rate","type":"str","why":"processor — note rate on the existing loan (degraded from percent)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"percent","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"maturity_date","type":"date","why":"processor — remaining term of the obligation","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"current_principal_balance","type":"Decimal","why":"processor — current payoff/obligation","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"scheduled_monthly_payment","type":"Decimal","why":"processor — the DTI housing payment","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"principal_and_interest_payment","type":"Decimal","why":"disambiguator — P&I vs full PITI; without it scheduled_monthly_payment is ambiguous","rules":[],"reason_class":"disambiguator","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"escrow_payment","type":"Decimal","why":"disambiguator — the escrow (T&I) portion beside the P&I","rules":[],"reason_class":"disambiguator","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"next_payment_due_date","type":"date","why":"processor — current standing (paid-through date)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"taxes_and_insurance_current","type":"str","why":"processor — escrowed T&I current indicator (degraded from boolean)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"bool","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"late_30_count","type":"int","why":"processor — number of 30-day lates (housing history 0x30 test) (flattened from late_payment_counts object)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"object","pii":null,"exists_today":false,"prompt_hint":"Housing-history convention: \"0x30\" means zero 30-day lates in the window; the goal is the count of each late bucket, not prose"},
+    {"name":"late_60_count","type":"int","why":"processor — number of 60-day lates (flattened)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"object","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"late_90_count","type":"int","why":"processor — number of 90+-day lates (flattened)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"object","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"late_120_plus_count","type":"int","why":"mortgage-history rule — count of 120+-day lates; conventional reads 30-day, FHA 60-day, and Priya has seen a servicer report 120+ at least once. A bucket outside the captured 30/60/90 set would be SILENTLY INVISIBLE — the worst kind of miss on a mortgage-history check (LP-439-C)","rules":[],"reason_class":"rule","rule_floor":true,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"The count of 120+-day (or worse) late payments — a fourth bucket beyond the 30/60/90 counts"},
+    {"name":"worst_rating","type":"str","why":"mortgage-history rule — a catch-all for any late/rating a servicer reports OUTSIDE the fixed 30/60/90/120 buckets (e.g. 'worst rating', charge-off), so an unusual format is VISIBLE rather than dropped (LP-439-C)","rules":[],"reason_class":"rule","rule_floor":true,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"The worst payment rating the servicer states in any format outside the fixed 30/60/90/120 buckets — verbatim"},
+    {"name":"current_delinquency_status","type":"str","why":"processor — headline current/delinquent status (degraded from enum)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"past_due_amount","type":"Decimal","why":"processor — amount currently past due","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"foreclosure_or_loss_mitigation_status","type":"str","why":"processor — active FC/loss-mit is a material adverse signal (degraded from enum)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":"Loss-mitigation/forbearance/modification flags are material — capture them even when they appear only as a checkbox or a one-line note"},
+    {"name":"forbearance_or_modification_terms","type":"str","why":"processor — a mod/forbearance changes how the payment history reads (flattened from object)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"object","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"verifier_name_title","type":"str","why":"processor — who at the servicer certified (authority)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"verifier_phone_or_contact","type":"str","why":"processor — servicer callback (degraded from phone)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"phone","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"verification_date","type":"date","why":"identity/recency — certification date","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"direct_source_indicator","type":"str","why":"processor — whether it came directly from the servicer (independence) (degraded from boolean)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"bool","pii":null,"exists_today":false,"prompt_hint":null}
+  ],
+
+  "nested_lists": [
+    {
+      "name":"payment_history_months","shape":"flat_row",
+      "shape_reason":"monthly payment history genuinely repeats and a VOM often spans 12-24 months, so flat rows keep it under the 16,384 ceiling",
+      "expected_item_count":"12-24","rules":[],
+      "exists_today":false,"plumbing_sites":5,
+      "fields":[
+        {"name":"month","type":"str","why":"the month the row covers"},
+        {"name":"payment_status","type":"str","why":"paid/late/delinquent status for the month; corroborates the late-bucket counts"},
+        {"name":"amount_paid","type":"Decimal","why":"the amount paid that month"},
+        {"name":"source","type":"str","why":"provenance of the row"}
+      ]
+    }
+  ],
+
+  "rejected": [
+    {"name":"issuer_name","reason":"duplicates mortgage_holder_or_servicer"},
+    {"name":"issuer_address / issuer_phone / issuer_email_or_url","reason":"duplicate verifier_phone_or_contact / no consumer"},
+    {"name":"form_number / form_revision_date","reason":"VOM templates vary; no standardized-form consumer"},
+    {"name":"document_issue_date / effective_date / expiration_date","reason":"duplicate origination_date / verification_date / maturity_date"},
+    {"name":"statement_period_start / statement_period_end","reason":"a VOM is a certification, not a statement period"},
+    {"name":"party_names / party_addresses","reason":"duplicate borrower_names / property_address"},
+    {"name":"loan_number","reason":"duplicates loan_number_masked (the restricted, masked form is the one to keep)"},
+    {"name":"account_case_reference_number","reason":"duplicates loan_number_masked for dedup"},
+    {"name":"other_payment_components","reason":"object[] with no consumer; P&I + escrow already capture the split"},
+    {"name":"escrow_balance","reason":"OPTIONAL; no consumer (next_payment_due_date + taxes_and_insurance_current carry standing)"},
+    {"name":"assumable_or_subordinate_lien_information","reason":"OPTIONAL narrative with no consumer"},
+    {"name":"signature_blocks / notary_block / document_status_or_version","reason":"execution captured by verifier + direct_source_indicator; a VOM is not notarized"}
+  ],
+
+  "encoding_variations": [
+    "Scheduled payment ambiguity: some VOMs report P&I only, others full PITI — always pair scheduled_monthly_payment with principal_and_interest_payment and escrow_payment so the composition is unambiguous",
+    "Late counts appear as a grid (\"30-day: 2, 60-day: 0, 90-day: 0\"), as a rating string (\"0x30\"), or embedded in the payment-history months — read the grid into the three scalar counts and let the month rows corroborate",
+    "Delinquency status stated as \"Current\", \"Paid as agreed\", or a code — capture the label; a future rule normalizes it"
+  ],
+
+  "open_questions": [
+    {"id":1,"q":"loan_number_masked registration + policy — needs adding to _PII_FIELDS (pre_masked=true).","options":["arrive pre-masked (registered pre_masked=true)","mask extractor-side to last-4"],"recommendation":"confirm whether VOMs in practice arrive pre-masked or need extractor-side masking GEET'S DECISION (LP-438): mask account-like identifiers (policy/account/plan numbers, wire/ACH trace, check references) via _PII_FIELDS; leave addresses and public-record case numbers PLAIN; DOB is unmasked (pii null).","blocks_implementation":false},
+    {"id":2,"q":"late_payment_counts flattening — flattened to late_30/60/90 scalar ints assuming the fixed Fannie/Freddie 30/60/90 buckets.","options":["keep three scalar counts","add a fourth field for other buckets (120+, worst rating)"],"recommendation":"if servicers report other buckets (120+, \"worst rating\"), the shape may need a fourth field; flag for a real-sample check GEET'S DECISION (LP-439): capture four buckets (late_30/60/90 + late_120_plus_count) PLUS worst_rating — a bucket outside the captured set would be silently invisible; conventional reads 30d, FHA 60d, 120+ has been seen.","blocks_implementation":false},
+    {"id":3,"q":"Field count (~28) above the 20-25 target.","options":["keep all","trim interest_rate/loan_type/maturity_date first if a reviewer wants to shrink"],"recommendation":"keep all — a VOM carries both the full existing-obligation terms (for DTI) and the delinquency history (for housing performance), two distinct consumer groups; trim interest_rate/loan_type/maturity_date first if a reviewer wants to shrink","blocks_implementation":false}
+  ],
+
+  "notes": [
+    "No rules read this document today (rule floor is empty); fields are justified by identity, disambiguation, PII, and processor use. A VOM is a servicer-certified record of an existing mortgage; its value is the housing-payment history (0x30 vs delinquencies) and the current obligation for DTI.",
+    "loan_number_masked is restricted sensitivity and NOT in the 7-field _PII_FIELDS registry (the registered account_number_masked is a different field); needs registration, pre_masked=true (mask to last-4 in the extractor if a full number appears).",
+    "late_payment_counts is flattened to three scalar counts (a fixed 30/60/90 object, not a repeating list)."
+  ]
+}

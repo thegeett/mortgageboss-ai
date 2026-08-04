@@ -20,6 +20,7 @@ from app.ai.extraction.parsing import coerce_date
 from app.verification.snapshot.fields import Field
 from app.verification.snapshot.model import DocumentEntry, Snapshot
 from app.verification.snapshot.tag import Tag, TagProducedBy, TagRole, TagStage
+from app.verification.snapshot.traversal import all_list_rows
 from app.verification.tag_materialization.declarations import TagDeclaration
 from app.verification.tag_materialization.subjects import (
     LOAN_SUBJECT,
@@ -31,7 +32,9 @@ from app.verification.tag_materialization.subjects import (
 # cannot compute. LP-332 added the subject arguments so a recipe can be PER-SUBJECT (a borrower recipe
 # reads THIS borrower's facts). A loan-level recipe (subject_id == "loan") ignores both — its logic is
 # unchanged (the regression canary, _app_required_fields_present).
-Recipe = Callable[[Snapshot, str, object], tuple[JsonValue, str]]
+# A recipe returns ``(value, reasoning)``; a ``None`` value DECLINES the subject (LP-447 — the producer
+# materialises no tag), for a recipe scoped narrower than its subject type (e.g. one document_type).
+Recipe = Callable[[Snapshot, str, object], tuple[JsonValue | None, str]]
 
 _UNKNOWN = "unknown"
 
@@ -764,6 +767,145 @@ def _loan_effective_date(
     return (
         effective,
         f"the loan's insurance effective date {effective} (from the homeowners binder)",
+    )
+
+
+# --------------------------------------------------------------------------- #
+# LP-447 — ins.dwelling_settlement_basis: the homeowners binder's DWELLING loss-settlement basis, normalised
+# to a controlled vocabulary for IH-1 (insurance adequacy, ADR-340 — Priya's replacement-cost-basis ruling,
+# effective 2026-03-18). Per-DOCUMENT (the binder subject), reading ONLY the typed-core field LP-446 added —
+# NEVER the forms_and_endorsements list — so a personal-property or ACV-ROOF endorsement (a list row) can
+# never be read as the dwelling basis (the Occidental anti-conflation, ADR-351). A free-form string is
+# matched against an EXPLICIT allow-list of known phrasings (casefold + collapsed whitespace, NOT a fuzzy
+# matcher, D3): a term outside it → "unknown" → IH-1 couldnt_check (fail closed — an unreadable basis is
+# never a fabricated pass, LP-447 D3).
+# --------------------------------------------------------------------------- #
+# Known replacement-cost phrasings (all settle the dwelling at replacement cost — IH-1 satisfied). Guaranteed/
+# extended RC are STRONGER forms, still replacement-cost. Matched after casefold + whitespace-collapse.
+_REPLACEMENT_COST_BASIS_TERMS = frozenset(
+    {
+        "replacement cost",
+        "replacement cost value",
+        "replacement cost coverage",
+        "rcv",
+        "guaranteed replacement cost",
+        "extended replacement cost",
+        "full replacement cost",
+    }
+)
+# Known actual-cash-value phrasings (depreciated settlement — IH-1 fired, inadequate).
+_ACTUAL_CASH_VALUE_BASIS_TERMS = frozenset({"actual cash value", "acv"})
+
+
+def _normalize_settlement_basis(raw: str) -> str | None:
+    """Map a free-form dwelling loss-settlement string to the controlled vocabulary, or None if unrecognised.
+
+    An EXPLICIT allow-list (D3), not a fuzzy matcher: casefold + collapse internal whitespace, then an EXACT
+    membership test. "Replacement Cost" and "replacement cost" both normalise to ``replacement_cost``; an
+    unknown phrasing ("guaranteed replacement cost NOT included", a carrier's novel wording) returns None so
+    the caller fails closed to "unknown" — never a guessed ``satisfied``."""
+    key = " ".join(raw.casefold().split())
+    if key in _REPLACEMENT_COST_BASIS_TERMS:
+        return "replacement_cost"
+    if key in _ACTUAL_CASH_VALUE_BASIS_TERMS:
+        return "actual_cash_value"
+    return None
+
+
+def _dwelling_settlement_basis(
+    _snapshot: Snapshot, _subject_id: str, subject_raw: object
+) -> tuple[JsonValue | None, str]:
+    """ins.dwelling_settlement_basis — the homeowners binder's DWELLING loss-settlement basis (LP-447), read
+    from the typed-core ``replacement_cost_or_coinsurance_basis`` field (LP-446) and normalised to
+    ``replacement_cost`` / ``actual_cash_value`` / ``unknown``. Per-document, but scoped to binders: returns
+    ``None`` (DECLINE — the producer materialises no tag) for any NON-homeowners subject, so the tag lands only
+    on the documents IH-1 reads instead of an ``unknown`` on every document (LP-447 review). For a binder it
+    abstains ("unknown") on an absent or UNRECOGNISED basis (fail closed — D3). DESCRIPTIVE: whether the basis
+    is adequate is IH-1's judgment (ADR-340). Reads ONLY the typed field, never the forms_and_endorsements list
+    — an ACV-roof / personal-property endorsement cannot drive it (ADR-351)."""
+    if (
+        not isinstance(subject_raw, DocumentEntry)
+        or subject_raw.document_type != "homeowners_insurance"
+    ):
+        return None, "not a homeowners insurance binder — no basis tag"
+    field = subject_raw.fields.get("replacement_cost_or_coinsurance_basis")
+    # A plain (non-PII) typed field. A PiiField is a SEPARATE type (not a Field subclass), so
+    # ``isinstance(field, Field)`` already excludes a masked value → unreadable → unknown (fail closed): the
+    # masked display is never compared, and no PiiField-specific check is needed.
+    raw = field.value if isinstance(field, Field) and field.is_present else None
+    if raw is None or not str(raw).strip():
+        return _UNKNOWN, "the binder does not state a dwelling loss-settlement basis"
+    normalized = _normalize_settlement_basis(str(raw))
+    if normalized is None:
+        return _UNKNOWN, (
+            f"the stated loss-settlement basis {str(raw)!r} is not a recognised replacement-cost or "
+            f"actual-cash-value term — fail closed (couldnt_check, never a guessed pass)"
+        )
+    return normalized, (
+        f"the binder's dwelling loss-settlement basis is {normalized} (stated: {str(raw)!r})"
+    )
+
+
+# --------------------------------------------------------------------------- #
+# LP-453 (step D.2) — the tradelines list consumer: DETERMINISTIC numeric OBSERVATIONS over the credit
+# report's `tradelines` list. Scoped EXPLICITLY to credit_report documents (document_type filter, LP-453
+# review) — a list-name is not a unique key, so a future extractor reusing `tradelines` cannot pollute the
+# credit aggregate.
+#
+# ⚠️ THE D3 FINDING (the LP-448 lesson, second instance): the row VOCABULARY is OPEN-ENDED bureau text —
+# account_type is terse bureau codes (AUTO / INST / REV, and elsewhere MTG / EDU / COLL / CHG …), account_status
+# is bureau phrasing (AS AGREED / PAID …), payment_status is Metro-2 codes (I1 / R1 …), is_disputed is FREE-TEXT
+# that includes NON-disputes (forbearance, "closed by grantor"), and payment_history_24mo is a VARIABLE-LENGTH
+# 0/- string (16 to 84 chars on one real report), NOT a fixed position-per-month encoding. So classifying
+# mortgage / student / collection, interpreting a dispute, or parsing "recent lates" is JUDGMENT, not a lookup —
+# a Priya/AI question, deferred to the rule tickets (ADR). This consumer therefore emits ONLY pure numeric
+# aggregates that need no classification: a COUNT and a MONTHLY-PAYMENT TOTAL. Tags DESCRIBE; rules judge —
+# NEVER a threshold, a "is_derogatory", a "has_unacceptable_lates". Fail closed: no tradelines captured → the
+# tag abstains to "unknown" (the standard derived-abstain value, materialised on the loan subject — a gated
+# rule reads couldnt_check), NEVER a fabricated 0.
+#
+# LIMITATION (reported): loan-level aggregate — a file with MULTIPLE overlapping bureau reports could
+# double-count. LF-96SV has one 18-row report + one empty; no double-count. Multi-report dedup is a future
+# concern (a rule's, once it reconciles bureaus).
+# --------------------------------------------------------------------------- #
+def _credit_tradeline_count(
+    snapshot: Snapshot, _subject_id: str, _subject_raw: object
+) -> tuple[JsonValue, str]:
+    """credit.tradeline_count — how many tradelines the file's credit report(s) list (a pure OBSERVATION, no
+    open/closed classification — distinct from the extractor's open_tradeline_count). Abstains to "unknown"
+    when no tradelines are captured — never a fabricated 0. Returned as a numeric STRING (the derived numeric
+    convention, matching stmt.nsf_count)."""
+    rows = all_list_rows(snapshot, "tradelines", document_type="credit_report")
+    if not rows:
+        return _UNKNOWN, "no credit-report tradelines captured in the file"
+    return str(len(rows)), f"{len(rows)} tradelines observed across the file's credit report(s)"
+
+
+def _credit_tradeline_monthly_payment_total(
+    snapshot: Snapshot, _subject_id: str, _subject_raw: object
+) -> tuple[JsonValue, str]:
+    """credit.tradeline_monthly_payment_total — the sum of the tradelines' monthly_payment (a coerced number
+    per row), the OBSERVATION CR-1 cross-checks against the DTI's liability payments. A present 0 (a paid-off
+    account) contributes 0 honestly. ABSTAINS to unknown (NEVER 0) when no tradeline carries a payment figure —
+    fail-closed, so a rule reads couldnt_check on missing data rather than a fabricated 0."""
+    rows = all_list_rows(snapshot, "tradelines", document_type="credit_report")
+    if not rows:
+        return _UNKNOWN, "no credit-report tradelines captured in the file"
+    total = Decimal(0)
+    seen = False
+    for row in rows:
+        field = row.fields.get("monthly_payment")
+        if field is not None and field.is_present and field.value is not None:
+            try:
+                total += Decimal(str(field.value))
+                seen = True
+            except (InvalidOperation, ValueError):
+                continue  # an unparseable payment is skipped, never guessed
+    if not seen:
+        return _UNKNOWN, f"{len(rows)} tradelines but none carry a monthly payment figure"
+    return (
+        str(total),
+        f"total monthly tradeline payment {total} (sum across {len(rows)} tradelines' monthly_payment)",
     )
 
 
@@ -1672,6 +1814,15 @@ _RECIPES: dict[str, Recipe] = {
     # LP-417 — the loan's homeowners-insurance effective date (promoted from the document-subject
     # ins.effective_date), for IH-3 (effective <= closing). Mirrors loan_closing_date + the multi-binder abstain.
     "loan_effective_date": _loan_effective_date,
+    # LP-447 — the homeowners binder's DWELLING loss-settlement basis, normalised to replacement_cost /
+    # actual_cash_value / unknown, for IH-1 (insurance adequacy, ADR-340). Per-document; fails closed on an
+    # unrecognised value; reads ONLY the typed field, never forms_and_endorsements (the anti-conflation).
+    "dwelling_settlement_basis": _dwelling_settlement_basis,
+    # LP-453 — DETERMINISTIC numeric observations over the credit report's tradelines list (loan-level). Pure
+    # aggregates only (count + monthly-payment total) — the open-ended bureau vocabulary makes classification a
+    # Priya/AI question (ADR). Fail closed: no tradelines → absent, never a fabricated 0.
+    "credit_tradeline_count": _credit_tradeline_count,
+    "credit_tradeline_monthly_payment_total": _credit_tradeline_monthly_payment_total,
     # LP-407-4 — does the purchase contract's subject-property address match the loan file's (MISMO)? For PC-3.
     # DESCRIPTIVE enum (yes/no/unknown); PC-3 routes "no" to needs_review (ADR-325). Reuses the consistency
     # normalizers; reads the MISMO SUBJECT address (never a mailing address / a retained-property tax bill).
@@ -1733,6 +1884,11 @@ def produce_derived_tags(decl: TagDeclaration, snapshot: Snapshot) -> dict[str, 
     out: dict[str, dict[str, Tag]] = {}
     for subject_id, subject_raw in subject_type(decl.subject).enumerate(snapshot):
         value, reasoning = recipe(snapshot, subject_id, subject_raw)
+        if value is None:
+            # A recipe returns ``None`` to DECLINE producing a tag for an out-of-scope subject (LP-447) —
+            # e.g. a per-document recipe scoped to one document_type. Skip it, so a document-subject derived
+            # tag lands only on the documents it is about, not an unread ``unknown`` on every document.
+            continue
         out[subject_id] = {
             decl.tag_id: Tag(
                 value=value,

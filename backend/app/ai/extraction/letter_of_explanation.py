@@ -66,6 +66,21 @@ class LetterOfExplanationExtraction(BaseModel):
     referenced_amount: TypedField[Decimal] = Field(default_factory=TypedField)
 
     # --- Grouped catch-all — additional references, by section -------------- #
+    # --- LP-446 diff — the exists_today:false additions --------------------- #
+    borrower_name: TypedField[str] = Field(default_factory=TypedField)
+    borrower_name_2: TypedField[str] = Field(default_factory=TypedField)
+    creditor_or_inquiry_company: TypedField[str] = Field(default_factory=TypedField)
+    account_number_last4: TypedField[str] = Field(default_factory=TypedField)
+    credit_report_bureau_or_reference: TypedField[str] = Field(default_factory=TypedField)
+    new_debt_resulted_from_inquiry: TypedField[str] = Field(default_factory=TypedField)
+    one_time_or_recurring_indicator: TypedField[str] = Field(default_factory=TypedField)
+    resolution_or_payoff_action: TypedField[str] = Field(default_factory=TypedField)
+    current_account_orissue_status: TypedField[str] = Field(default_factory=TypedField)
+    supporting_documents: TypedField[str] = Field(default_factory=TypedField)
+    borrower_certification: TypedField[str] = Field(default_factory=TypedField)
+    borrower_signature_present: TypedField[str] = Field(default_factory=TypedField)
+    borrower_signature_date: TypedField[date] = Field(default_factory=TypedField)
+
     additional_sections: list[CatchAllSection] = Field(default_factory=list)
 
 
@@ -96,6 +111,20 @@ _CORE_SPEC: CoreSpec = (
     ("referenced_employer", coerce_str),
     ("referenced_date", coerce_date),
     ("referenced_amount", coerce_decimal),
+    # LP-446 diff additions
+    ("borrower_name", coerce_str),
+    ("borrower_name_2", coerce_str),
+    ("creditor_or_inquiry_company", coerce_str),
+    ("account_number_last4", coerce_str),
+    ("credit_report_bureau_or_reference", coerce_str),
+    ("new_debt_resulted_from_inquiry", coerce_str),
+    ("one_time_or_recurring_indicator", coerce_str),
+    ("resolution_or_payoff_action", coerce_str),
+    ("current_account_orissue_status", coerce_str),
+    ("supporting_documents", coerce_str),
+    ("borrower_certification", coerce_str),
+    ("borrower_signature_present", coerce_str),
+    ("borrower_signature_date", coerce_date),
 )
 
 

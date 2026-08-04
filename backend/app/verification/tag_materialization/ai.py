@@ -28,7 +28,11 @@ from app.verification.snapshot.content_id import content_fingerprint
 from app.verification.snapshot.model import DocumentEntry, Snapshot
 from app.verification.snapshot.tag import Tag, TagProducedBy, TagRole, TagStage
 from app.verification.tag_materialization.declarations import AiGroup
-from app.verification.tag_materialization.subjects import loan_borrower_roster, subject_type
+from app.verification.tag_materialization.subjects import (
+    ContextOptions,
+    loan_borrower_roster,
+    subject_type,
+)
 
 logger = get_logger(__name__)
 
@@ -103,7 +107,7 @@ async def reason_ai_group(system_prompt: str, context_json: str) -> AiGroupResul
     try:
         result = await asyncio.wait_for(
             complete(
-                model=settings.anthropic_model_extraction,
+                model=settings.anthropic_model_reasoning,
                 system=system_prompt,
                 messages=[{"role": "user", "content": context_json}],
                 max_tokens=_MAX_TOKENS,
@@ -291,8 +295,14 @@ async def produce_ai_group_tags(
     # group that does not declare it is byte-unchanged. Reuses the LP-332 borrower resolution — no second path.
     roster = loan_borrower_roster(snapshot) if group.include_borrower_roster else None
 
+    opts = ContextOptions(
+        include_lists=group.include_lists,
+        list_row_cap=group.list_row_cap,
+        include_stated_liabilities=group.include_stated_liabilities,
+    )
+
     def _context(raw: object) -> dict[str, object]:
-        ctx = st.build_context(raw, group.applies_to)
+        ctx = st.build_context(raw, group.applies_to, opts)
         return {**ctx, "loan_borrowers": roster} if roster is not None else ctx
 
     subjects = _gate_subjects(

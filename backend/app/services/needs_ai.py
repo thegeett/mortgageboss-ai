@@ -343,7 +343,7 @@ async def propose_needs(db: AsyncSession, loan_file: LoanFile) -> list[ProposedN
     )
     try:
         result = await complete(
-            model=settings.anthropic_model_extraction,  # Opus — real reasoning over context
+            model=settings.anthropic_model_reasoning,  # reasoning tier (Sonnet by default) — real reasoning over context
             system=system_prompt,
             messages=[{"role": "user", "content": user_content}],
             max_tokens=_MAX_TOKENS,

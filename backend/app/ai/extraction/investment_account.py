@@ -32,10 +32,12 @@ from app.ai.extraction.parsing import (
     CoreSpec,
     coerce_date,
     coerce_decimal,
+    coerce_int,
     coerce_str,
     derive_status,
     parse_catch_all,
     parse_typed_core,
+    source_payload,
 )
 from app.ai.extraction.shape import CatchAllSection, TypedField
 from app.ai.parsing import coerce_confidence, extract_json_object
@@ -73,6 +75,26 @@ class InvestmentAccountExtraction(BaseModel):
     total_value: TypedField[Decimal] = Field(default_factory=TypedField)  # KEY reserves figure
 
     # --- Grouped catch-all — everything else (holdings, etc.) --------------- #
+    # --- LP-446 diff — the exists_today:false additions --------------------- #
+    brokerage_or_custodian_name: TypedField[str] = Field(default_factory=TypedField)
+    document_title: TypedField[str] = Field(default_factory=TypedField)
+    account_registration_names_raw: TypedField[str] = Field(default_factory=TypedField)
+    account_owner_name_2: TypedField[str] = Field(default_factory=TypedField)
+    account_owner_count: TypedField[int] = Field(default_factory=TypedField)
+    statement_date: TypedField[date] = Field(default_factory=TypedField)
+    cash_and_cash_equivalents: TypedField[Decimal] = Field(default_factory=TypedField)
+    securities_market_value: TypedField[Decimal] = Field(default_factory=TypedField)
+    margin_or_securities_backed_loan_balance: TypedField[Decimal] = Field(
+        default_factory=TypedField
+    )
+    net_liquidation_value: TypedField[Decimal] = Field(default_factory=TypedField)
+    vested_or_available_value: TypedField[Decimal] = Field(default_factory=TypedField)
+    liquidation_restrictions: TypedField[str] = Field(default_factory=TypedField)
+    document_status_or_version: TypedField[str] = Field(default_factory=TypedField)
+
+    # --- LP-446 diff — captured nested list(s) (bare rows) --------------------- #
+    security_positions: list[dict[str, Any]] = Field(default_factory=list)
+
     additional_sections: list[CatchAllSection] = Field(default_factory=list)
 
 
@@ -105,7 +127,46 @@ _CORE_SPEC: CoreSpec = (
     ("statement_period_start", coerce_date),
     ("statement_period_end", coerce_date),
     ("total_value", coerce_decimal),
+    # LP-446 diff additions
+    ("brokerage_or_custodian_name", coerce_str),
+    ("document_title", coerce_str),
+    ("account_registration_names_raw", coerce_str),
+    ("account_owner_name_2", coerce_str),
+    ("account_owner_count", coerce_int),
+    ("statement_date", coerce_date),
+    ("cash_and_cash_equivalents", coerce_decimal),
+    ("securities_market_value", coerce_decimal),
+    ("margin_or_securities_backed_loan_balance", coerce_decimal),
+    ("net_liquidation_value", coerce_decimal),
+    ("vested_or_available_value", coerce_decimal),
+    ("liquidation_restrictions", coerce_str),
+    ("document_status_or_version", coerce_str),
 )
+
+_SECURITY_POSITIONS_ROW: CoreSpec = (
+    ("description", coerce_str),
+    ("ticker_or_cusip", coerce_str),
+    ("quantity", coerce_str),
+    ("market_value", coerce_str),
+    ("asset_class", coerce_str),
+    ("source", coerce_str),
+)
+
+
+def _parse_rows(raw: Any, row_spec: CoreSpec) -> list[dict[str, Any]]:
+    """LP-446 — coerce a bare-row list (each declared field coerced, a per-row source kept, empty rows
+    dropped). Mirrors bank_statement's transactions parse; row values are read as strings by the snapshot."""
+    rows: list[dict[str, Any]] = []
+    if not isinstance(raw, list):
+        return rows
+    for entry in raw:
+        if not isinstance(entry, dict):
+            continue
+        row: dict[str, Any] = {name: coerce(entry.get(name)) for name, coerce in row_spec}
+        row["source"] = source_payload(entry)
+        if any(row[name] is not None for name, _ in row_spec):
+            rows.append(row)
+    return rows
 
 
 def _parse_investment_json(text: str) -> InvestmentAccountExtractionResult | None:
@@ -121,16 +182,21 @@ def _parse_investment_json(text: str) -> InvestmentAccountExtractionResult | Non
         return None
 
     core_payload, non_null, coercion_lost = parse_typed_core(payload, _CORE_SPEC)
+    security_positions = _parse_rows(payload.get("security_positions"), _SECURITY_POSITIONS_ROW)
     sections = parse_catch_all(payload.get("additional_sections"))
 
     try:
         data = InvestmentAccountExtraction.model_validate(
-            {**core_payload, "additional_sections": sections}
+            {
+                **core_payload,
+                "security_positions": security_positions,
+                "additional_sections": sections,
+            }
         )
     except ValidationError:
         return None
 
-    status = derive_status(non_null, coercion_lost)
+    status = derive_status(non_null + len(security_positions), coercion_lost)
     confidence = coerce_confidence(payload.get("confidence"))
     raw_reasoning = payload.get("reasoning")
     reasoning = (

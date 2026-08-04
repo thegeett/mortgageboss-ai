@@ -74,40 +74,19 @@ Respond with ONLY a single JSON object, no markdown fences and no prose, exactly
     "total_income":          {"value": <number|null>, "page": <int|null>, "snippet": <string|null>},
     "adjusted_gross_income": {"value": <number|null>, "page": <int|null>, "snippet": <string|null>},
     "wages":                 {"value": <number|null>, "page": <int|null>, "snippet": <string|null>},
-    "taxable_income":        {"value": <number|null>, "page": <int|null>, "snippet": <string|null>}
-  },
-  "schedule_c": [
-    {"business_name": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
-     "gross_receipts": {"value": <number|null>, "page": <int|null>, "snippet": <string|null>},
-     "total_expenses": {"value": <number|null>, "page": <int|null>, "snippet": <string|null>},
-     "net_profit": {"value": <number|null>, "page": <int|null>, "snippet": <string|null>}}
-  ],
-  "schedule_e": {
-    "properties": [
-      {"address": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
-       "rents_received": {"value": <number|null>, "page": <int|null>, "snippet": <string|null>},
-       "total_expenses": {"value": <number|null>, "page": <int|null>, "snippet": <string|null>},
-       "net_income": {"value": <number|null>, "page": <int|null>, "snippet": <string|null>}}
-    ],
+    "taxable_income":        {"value": <number|null>, "page": <int|null>, "snippet": <string|null>},
+    "amended_return_indicator": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "spouse_name": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "spouse_ssn_masked": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "home_address": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "wages_salaries_tips": {"value": <number|null>, "page": <int|null>, "snippet": <string|null>},
+    "business_income_or_loss": {"value": <number|null>, "page": <int|null>, "snippet": <string|null>},
     "total_net_rental_income": {"value": <number|null>, "page": <int|null>, "snippet": <string|null>},
-    "depreciation": {"value": <number|null>, "page": <int|null>, "snippet": <string|null>}
+    "standard_or_itemized_deduction": {"value": <number|null>, "page": <int|null>, "snippet": <string|null>},
+    "total_tax": {"value": <number|null>, "page": <int|null>, "snippet": <string|null>},
+    "federal_income_tax_withheld": {"value": <number|null>, "page": <int|null>, "snippet": <string|null>},
+    "total_payments": {"value": <number|null>, "page": <int|null>, "snippet": <string|null>},
+    "attached_schedules_and_forms": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "return_signed_date": {"value": <YYYY-MM-DD|null>, "page": <int|null>, "snippet": <string|null>},
+    "signatures_present": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>}
   },
-  "k1s": [
-    {"entity_name": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
-     "ownership_pct": {"value": <number|null>, "page": <int|null>, "snippet": <string|null>},
-     "ordinary_income": {"value": <number|null>, "page": <int|null>, "snippet": <string|null>}}
-  ],
-  "additional_sections": [
-    {"section": "<section name>", "fields": [
-      {"label": "<field label>", "value": <string|null>, "page": <int|null>, "snippet": <string|null>}
-    ]}
-  ],
-  "field_confidence": {"<typed_core field name>": <0.0-1.0|null>, "...": <0.0-1.0|null>},
-  "confidence": <number 0.0-1.0>,
-  "reasoning": "<one short sentence; do NOT quote the full SSN>"
-}
-
-If a schedule is absent, use an empty list (schedule_c / k1s) or null (schedule_e).
-
-Example (values illustrative; a self-employed return with one Schedule C):
-{"typed_core": {"tax_year": {"value": 2023, "page": 1, "snippet": "2023"}, "filing_status": {"value": "married_filing_jointly", "page": 1, "snippet": "Married filing jointly"}, "adjusted_gross_income": {"value": "142500.00", "page": 1, "snippet": "AGI 142,500"}}, "schedule_c": [{"business_name": {"value": "Swad Mania LLC", "page": 3, "snippet": "Swad Mania LLC"}, "net_profit": {"value": "88200.00", "page": 3, "snippet": "Net profit 88,200"}}], "schedule_e": null, "k1s": [], "additional_sections": [{"section": "Schedule B", "fields": [{"label": "Interest income", "value": "320.00", "page": 5, "snippet": "Interest 320"}]}], "confidence": 0.85, "reasoning": "A 1040 with one Schedule C for a self-employed borrower."}

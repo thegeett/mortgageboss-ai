@@ -1,0 +1,70 @@
+{
+  "document_type": "form_4506t_request_for_transcript",
+  "slug": "4506-t-request-for-transcript-of-tax-returns",
+  "tier": 3,
+  "rules_served": [],
+  "summary_hint": "IRS <form_revision> signed by <taxpayer_name_on_return> (TIN <taxpayer_tin>) on <taxpayer_signature_and_date>, requesting <tax_form_number_requested> transcripts for <years_or_periods_requested>.",
+  "existing_extractor": null,
+  "catalog_coverage": "full",
+
+  "typed_core": [
+    {"name":"issuer_name","type":"str","why":"source — IRS form","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"form_revision","type":"str","why":"disambiguator — 4506-T vs 4506-T-EZ vs 4506-C (the current IVES form that replaced 4506-T); each has different line numbers","rules":[],"reason_class":"disambiguator","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"The 4506-C is the current IVES form; if the document says 4506-C treat line 6/7/8 boxes accordingly. Capture form_revision verbatim"},
+    {"name":"tax_form_number_requested","type":"str","why":"identity — which return is being pulled (1040 / 1065 / 1120 / W-2)","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"taxpayer_name_on_return","type":"str","why":"identity — match to the borrower","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"object","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"taxpayer_tin","type":"str","why":"PII (highly_restricted, RAW) — the full SSN/ITIN/EIN prints unmasked on this form","rules":[],"reason_class":"pii","rule_floor":false,"degraded_from":"identifier","pii":{"kind":"SSN","pre_masked":false},"exists_today":false,"prompt_hint":"The borrower's SSN is entered in full here — it is NOT masked like the transcript; it must be a named typed field and registered PII, never the catch-all"},
+    {"name":"spouse_name_on_joint_return","type":"str","why":"identity — joint filer / co-borrower","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"object","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"spouse_tin","type":"str","why":"PII (highly_restricted, RAW) — full spouse SSN","rules":[],"reason_class":"pii","rule_floor":false,"degraded_from":"identifier","pii":{"kind":"SSN","pre_masked":false},"exists_today":false,"prompt_hint":null},
+    {"name":"current_address","type":"str","why":"identity/processor — address-consistency check","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"address","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"previous_address_on_last_return","type":"str","why":"processor — address history","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"customer_file_number","type":"str","why":"identity — the lender's file-linkage number echoed onto the transcript","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"taxpayer_phone","type":"str","why":"PII (phone) / processor — contact on the request","rules":[],"reason_class":"pii","rule_floor":false,"degraded_from":"phone","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"tax_years_or_periods_requested","type":"str","why":"processor — the requested years (verbatim; see Open questions on list vs flat)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"object","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"return_transcript_selected","type":"str","why":"processor — which product box was checked","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"bool","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"account_transcript_selected","type":"str","why":"processor — which product box was checked","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"bool","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"record_of_account_selected","type":"str","why":"processor — which product box was checked","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"bool","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"verification_of_nonfiling_selected","type":"str","why":"processor — nonfiling box","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"bool","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"w2_1099_1098_5498_transcript_selected","type":"str","why":"processor — wage/income box","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"bool","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"signatory_attestation_checked","type":"str","why":"processor — the attestation checkbox (required for IRS acceptance)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"bool","pii":null,"exists_today":false,"prompt_hint":"The attestation checkbox (near the signature) must be checked for the IRS to process the request"},
+    {"name":"taxpayer_signature_and_date","type":"str","why":"processor — execution + the date the 120-day IRS validity window runs from","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"signature","pii":null,"exists_today":false,"prompt_hint":"The signature date starts the IRS 120-day acceptance window — capture it precisely; do not compute the age (that is a downstream conclusion)"},
+    {"name":"spouse_signature_and_date","type":"str","why":"processor — joint execution","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"signature","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"signer_title_or_capacity","type":"str","why":"processor — who signed for an entity (officer/partner/POA)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null}
+  ],
+
+  "nested_lists": [],
+
+  "rejected": [
+    {"name":"the 8 TECHNICAL provenance fields","reason":"already in the TypedField wrapper"},
+    {"name":"document_title","reason":"duplicates form_revision / classification"},
+    {"name":"form_number, form_revision_date","reason":"folded into form_revision"},
+    {"name":"issuer_address, issuer_phone, issuer_email_or_url","reason":"IRS mailing addresses are boilerplate on the form; catch-all"},
+    {"name":"document_issue_date, effective_date, expiration_date","reason":"duplicate the signature date; the request has no separate effective/expiry"},
+    {"name":"statement_period_start, statement_period_end","reason":"the requested years are captured in tax_years_or_periods_requested"},
+    {"name":"party_names, party_addresses","reason":"covered by taxpayer/spouse name + current/previous address"},
+    {"name":"property_address, loan_number","reason":"not on a 4506-T"},
+    {"name":"account_case_reference_number","reason":"customer_file_number covers the linkage key"},
+    {"name":"signature_blocks, notary_block","reason":"the taxpayer/spouse signature fields cover execution; not notarized"},
+    {"name":"document_status_or_version","reason":"no consumer"},
+    {"name":"signature_age_days","reason":"derived conclusion — compute from taxpayer_signature_and_date against the 120-day window; tags describe, rules judge"}
+  ],
+
+  "encoding_variations": [
+    "4506-T vs 4506-C — the IRS replaced the 4506-T with the 4506-C for third-party (IVES) transcript orders; line numbering differs (e.g. checkbox lines shift). form_revision disambiguates which line map to apply",
+    "checkbox lines — Return Transcript (line 6a), Account Transcript (6b), Record of Account (6c), Verification of Nonfiling (line 7), W-2/1099/1098/5498 (line 8); degrade booleans to str and keep the box label",
+    "TIN raw — entered in full by the borrower; not masked (unlike the resulting transcript)",
+    "years — '12/31/2023, 12/31/2022' or '2023, 2022, 2021, 2020' on line 9; keep verbatim",
+    "entity signer — for business returns, a title/capacity line appears; capture it"
+  ],
+
+  "open_questions": [
+    {"id":1,"q":"Years as a list vs flat string — years_or_periods_requested is date[] but <=4 tiny values","options":["flatten to one verbatim string","a nested flat-row list if a rule must iterate years"],"recommendation":"(a) flatten to one verbatim string — avoids ~5 sites of plumbing GEET'S DECISION (LP-438): BUILD IT — LP-437 made nested lists cheap (one declaration + the generic mechanism); the one-list-budget / defer / no-consumer concern is overturned. Build as flat_row; the per-rule consumer is separate follow-up.","blocks_implementation":false},
+    {"id":2,"q":"Raw-SSN handling — this form is a rare place a full unmasked SSN appears; confirm registration as raw PII (pre_masked false) so the snapshot masks it; verify the catch-all cannot receive it","options":["register raw PII (pre_masked false)","mask on capture"],"recommendation":"register raw (snapshot masks + hashes), consistent with recipient_tin GEET'S DECISION (LP-438): mask account-like identifiers (policy/account/plan numbers, wire/ACH trace, check references) via _PII_FIELDS; leave addresses and public-record case numbers PLAIN; DOB is unmasked (pii null).","blocks_implementation":false},
+    {"id":3,"q":"No attached rule — 0 rules; the form primarily documents that transcripts were authorized/ordered; confirm whether a completeness rule (attestation checked, signature within 120 days, correct boxes) is planned so the checkbox/signature fields have a consumer","options":["plan a completeness rule","leave without a consumer"],"recommendation":"confirm whether a completeness/validity rule is planned","blocks_implementation":false}
+  ],
+
+  "notes": [
+    "Serves 0 rules — no rule in the packet names this document; it is the borrower's signed IRS authorization to release transcripts. Fields justified by identity, PII, and processor use.",
+    "21 typed-core rows — within target. No rule floor, but the form is dense with PII and processor/compliance checkboxes; the selections and signature date are what a completeness/validity check reads.",
+    "PII: three fields need _PII_FIELDS registration (none registered under these names) — taxpayer_tin (pre_masked false, critical: the 4506-T/4506-C prints the full unmasked SSN; register raw so the snapshot masks + hashes, consistent with recipient_tin), spouse_tin (pre_masked false, full spouse SSN), taxpayer_phone (pre_masked false, borderline PII but the borrower's personal number — flag for review)."
+  ]
+}

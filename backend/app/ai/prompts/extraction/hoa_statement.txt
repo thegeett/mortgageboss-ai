@@ -48,17 +48,18 @@ Respond with ONLY a single JSON object, no markdown fences and no prose, exactly
     "dues_amount":      {"value": <number|null>, "page": <int|null>, "snippet": <string|null>},
     "dues_frequency":   {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
     "balance":          {"value": <number|null>, "page": <int|null>, "snippet": <string|null>},
-    "due_date":         {"value": <date|null>, "page": <int|null>, "snippet": <string|null>}
+    "due_date":         {"value": <date|null>, "page": <int|null>, "snippet": <string|null>},
+    "issuer_name": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "management_company": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "association_contact_phone": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "association_contact_email_or_url": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "association_contact_address": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "unit_owner_name_2": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "owner_account_number_masked": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "statement_date": {"value": <YYYY-MM-DD|null>, "page": <int|null>, "snippet": <string|null>},
+    "past_due_amount": {"value": <number|null>, "page": <int|null>, "snippet": <string|null>},
+    "paid_current_indicator": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "collection_or_lien_status": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "reserve_percentage": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>}
   },
-  "additional_sections": [
-    {"section": "<section name>", "fields": [
-      {"label": "<field label>", "value": <string|null>, "page": <int|null>, "snippet": <string|null>}
-    ]}
-  ],
-  "field_confidence": {"<typed_core field name>": <0.0-1.0|null>, "...": <0.0-1.0|null>},
-  "confidence": <number 0.0-1.0>,
-  "reasoning": "<one short sentence describing the document>"
-}
-
-Example (values illustrative; use null for anything absent):
-{"typed_core": {"association_name": {"value": "Oak Ridge HOA", "page": 1, "snippet": "Oak Ridge HOA"}, "property_address": {"value": "789 Pine Ct", "page": 1, "snippet": "789 Pine Ct"}, "dues_amount": {"value": "350.00", "page": 1, "snippet": "Monthly Dues 350.00"}, "dues_frequency": {"value": "monthly", "page": 1, "snippet": "Monthly Dues"}}, "additional_sections": [{"section": "Late Fees", "fields": [{"label": "Late fee", "value": "25.00", "page": 1, "snippet": "Late fee 25.00"}]}], "confidence": 0.9, "reasoning": "HOA statement showing monthly dues and balance."}
+  "special_assessment_items": [{"description": <string|null>, "amount": <string|null>, "duration": <string|null>, "page": <int|null>, "snippet": <string|null>}],

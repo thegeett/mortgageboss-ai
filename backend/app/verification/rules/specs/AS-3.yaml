@@ -1,3 +1,4 @@
+# DOMAIN (Priya, Aug 2026): see docs/domain/priya-rulings-2026-08.md — Rulings 4 (agency-versioned thresholds) & 5 (reserve eligibility). Recorded LP-456; NOT yet implemented.
 rule_id: AS-3
 name: Cash-to-close sufficiency
 category: Assets

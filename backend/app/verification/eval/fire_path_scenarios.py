@@ -88,6 +88,15 @@ _LOAN_TERMINATED = UUID(
 _LOAN_PAY_STUB_ONLY = UUID(
     "95000000-0000-4000-8000-000000000014"
 )  # LP-433 — pay-stub-only documentation scenario
+_LOAN_INS_RC = UUID(
+    "95000000-0000-4000-8000-000000000015"
+)  # LP-447 — replacement-cost basis (IH-1 satisfied)
+_LOAN_INS_ACV = UUID(
+    "95000000-0000-4000-8000-000000000016"
+)  # LP-447 — actual-cash-value basis (IH-1 fired)
+_LOAN_INS_BASIS_UNREADABLE = UUID(
+    "95000000-0000-4000-8000-000000000017"
+)  # LP-447 — an UNRECOGNISED basis string (IH-1 couldnt_check — fail closed)
 _RUN = UUID("95000000-0000-4000-8000-0000000000ff")
 # The file (snapshot) date every closing date is measured against (deterministic — never a wall-clock now()).
 _FILE_DATE = datetime(2026, 7, 1, tzinfo=UTC)
@@ -234,17 +243,20 @@ def build_subject_housing_snapshot() -> Snapshot:
 # (the effective date) + a purchase agreement (the closing date, which contract.loan_closing_date promotes).
 # IH-3 is loan-enumerated; ins.loan_effective_date + contract.loan_closing_date are both loan-level.
 # --------------------------------------------------------------------------- #
-def _binder(cid: str, effective_date: str) -> DocumentEntry:
-    return _doc(
-        cid,
-        "homeowners_insurance",
-        carrier_name="Rivertown Mutual",
-        policy_number="RM-0001",
-        coverage_amount="300000.00",
-        annual_premium="1200.00",
-        effective_date=effective_date,
-        expiration_date="2027-06-01",
-    )
+def _binder(cid: str, effective_date: str, *, settlement_basis: str | None = None) -> DocumentEntry:
+    fields = {
+        "carrier_name": "Rivertown Mutual",
+        "policy_number": "RM-0001",
+        "coverage_amount": "300000.00",
+        "annual_premium": "1200.00",
+        "effective_date": effective_date,
+        "expiration_date": "2027-06-01",
+    }
+    # LP-447 — the dwelling loss-settlement basis (IH-1's input). Omitted by default so the IH-3 scenarios
+    # (which read only the effective date) keep byte-identical contexts.
+    if settlement_basis is not None:
+        fields["replacement_cost_or_coinsurance_basis"] = settlement_basis
+    return _doc(cid, "homeowners_insurance", **fields)
 
 
 def _contract(cid: str, closing_date: str) -> DocumentEntry:
@@ -288,6 +300,20 @@ def build_insurance_two_binder_snapshot() -> Snapshot:
     )
 
 
+def build_insurance_two_basis_binders_snapshot() -> Snapshot:
+    """TWO current binders with DIFFERENT dwelling settlement bases — one replacement cost, one actual cash
+    value. IH-1 is per_document, so it judges EACH: SATISFIED on the RC binder AND FIRED on the ACV binder,
+    on the same file (LP-447 review — pins the per-binder behavior; whether multiple binders should be
+    reconciled to an operative policy is an OPEN Priya question, see IH-1.yaml)."""
+    return _snapshot(
+        _LOAN_INS_AMBIG,
+        [
+            _binder("95-binder-rc", "2026-06-01", settlement_basis="Replacement Cost"),
+            _binder("95-binder-acv", "2026-06-01", settlement_basis="Actual Cash Value"),
+        ],
+    )
+
+
 def _divorce_decree(cid: str, effective_date: str) -> DocumentEntry:
     # A divorce_decree ALSO carries an `effective_date` field (the divorce_decree extractor's typed core) — the
     # SAME field name the homeowners_insurance binder uses. The parsed ins.effective_date tag is scoped by field
@@ -325,6 +351,37 @@ def build_insurance_binder_plus_decree_snapshot() -> Snapshot:
             _divorce_decree("95-decree-plus", "2026-09-01"),
             _contract("95-pa-decree-plus", "2026-07-15"),
         ],
+    )
+
+
+# --------------------------------------------------------------------------- #
+# IH-1 (LP-447) — insurance adequacy: the binder's DWELLING loss-settlement basis. Each scenario carries a
+# homeowners_insurance binder whose replacement_cost_or_coinsurance_basis field drives ins.dwelling_settlement_
+# basis (the derived normalisation). IH-1 is per_document; no closing date needed (unlike IH-3).
+# --------------------------------------------------------------------------- #
+def build_insurance_replacement_cost_snapshot() -> Snapshot:
+    """A binder stating a REPLACEMENT-COST dwelling basis (mixed casing, as real policies do) → IH-1 SATISFIED.
+    The clean adequate case; also proves the normaliser folds 'Replacement Cost' → replacement_cost."""
+    return _snapshot(
+        _LOAN_INS_RC,
+        [_binder("95-binder-rc", "2026-06-01", settlement_basis="Replacement Cost")],
+    )
+
+
+def build_insurance_acv_snapshot() -> Snapshot:
+    """A binder stating an ACTUAL-CASH-VALUE dwelling basis → IH-1 FIRED (inadequate, a depreciated settlement)."""
+    return _snapshot(
+        _LOAN_INS_ACV,
+        [_binder("95-binder-acv", "2026-06-01", settlement_basis="Actual Cash Value")],
+    )
+
+
+def build_insurance_unreadable_basis_snapshot() -> Snapshot:
+    """A binder whose stated basis is NOT a recognised replacement-cost/actual-cash-value term → the normaliser
+    abstains → ins.dwelling_settlement_basis "unknown" → IH-1 COULDNT_CHECK (fail closed, never a guessed pass)."""
+    return _snapshot(
+        _LOAN_INS_BASIS_UNREADABLE,
+        [_binder("95-binder-basis-x", "2026-06-01", settlement_basis="see policy declarations")],
     )
 
 
@@ -775,9 +832,15 @@ EXPECTED_TAXES_MONTHLY = "500.00"  # 6000 / 12
 EXPECTED_HOA_MONTHLY = "300.00"  # 300 monthly
 EXPECTED_INS_EFFECTIVE_IN_FORCE = "2026-06-01"  # <= 2026-07-15 closing → satisfied
 EXPECTED_INS_EFFECTIVE_LATE = "2026-08-15"  # > 2026-07-15 closing → fired
+EXPECTED_INS_BASIS_RC = (
+    "replacement_cost"  # LP-447 — "Replacement Cost" normalises here → IH-1 satisfied
+)
+EXPECTED_INS_BASIS_ACV = "actual_cash_value"  # LP-447 — "Actual Cash Value" → IH-1 fired
 
 __all__ = [
     "EXPECTED_HOA_MONTHLY",
+    "EXPECTED_INS_BASIS_ACV",
+    "EXPECTED_INS_BASIS_RC",
     "EXPECTED_INS_EFFECTIVE_IN_FORCE",
     "EXPECTED_INS_EFFECTIVE_LATE",
     "EXPECTED_TAXES_MONTHLY",
@@ -787,11 +850,14 @@ __all__ = [
     "build_address_mismatch_snapshot",
     "build_address_unit_variant_snapshot",
     "build_far_future_closing_snapshot",
+    "build_insurance_acv_snapshot",
     "build_insurance_binder_plus_decree_snapshot",
     "build_insurance_decree_only_snapshot",
     "build_insurance_in_force_snapshot",
     "build_insurance_late_snapshot",
+    "build_insurance_replacement_cost_snapshot",
     "build_insurance_two_binder_snapshot",
+    "build_insurance_unreadable_basis_snapshot",
     "build_other_income_continuance_snapshot",
     "build_past_closing_snapshot",
     "build_pay_stub_only_snapshot",

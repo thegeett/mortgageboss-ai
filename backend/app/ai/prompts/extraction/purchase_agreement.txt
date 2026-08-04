@@ -45,17 +45,34 @@ Respond with ONLY a single JSON object, no markdown fences and no prose, exactly
     "property_address":     {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
     "sales_price":          {"value": <number|null>, "page": <int|null>, "snippet": <string|null>},
     "closing_date":         {"value": <date|null>, "page": <int|null>, "snippet": <string|null>},
-    "earnest_money_amount": {"value": <number|null>, "page": <int|null>, "snippet": <string|null>}
+    "earnest_money_amount": {"value": <number|null>, "page": <int|null>, "snippet": <string|null>},
+    "buyer_name_2": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "buyer_names_raw": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "buyer_count": {"value": <int|null>, "page": <int|null>, "snippet": <string|null>},
+    "seller_name_2": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "seller_names_raw": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "seller_count": {"value": <int|null>, "page": <int|null>, "snippet": <string|null>},
+    "parties_relationship_disclosed": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "listing_agent_name": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "selling_agent_name": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "legal_description": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "property_type": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "hoa_indicator": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "hoa_dues_amount": {"value": <number|null>, "page": <int|null>, "snippet": <string|null>},
+    "annual_property_tax": {"value": <number|null>, "page": <int|null>, "snippet": <string|null>},
+    "earnest_money_due_date": {"value": <YYYY-MM-DD|null>, "page": <int|null>, "snippet": <string|null>},
+    "earnest_money_holder": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "seller_credit_amount": {"value": <number|null>, "page": <int|null>, "snippet": <string|null>},
+    "seller_credit_purpose": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "other_concessions_amount": {"value": <number|null>, "page": <int|null>, "snippet": <string|null>},
+    "down_payment_amount": {"value": <number|null>, "page": <int|null>, "snippet": <string|null>},
+    "loan_amount_stated": {"value": <number|null>, "page": <int|null>, "snippet": <string|null>},
+    "contract_date": {"value": <YYYY-MM-DD|null>, "page": <int|null>, "snippet": <string|null>},
+    "contract_expiration_date": {"value": <YYYY-MM-DD|null>, "page": <int|null>, "snippet": <string|null>},
+    "all_parties_signed": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "personal_property_included": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "personal_property_value": {"value": <number|null>, "page": <int|null>, "snippet": <string|null>},
+    "side_agreements_referenced": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>}
   },
-  "additional_sections": [
-    {"section": "<section name>", "fields": [
-      {"label": "<field label>", "value": <string|null>, "page": <int|null>, "snippet": <string|null>}
-    ]}
-  ],
-  "field_confidence": {"<typed_core field name>": <0.0-1.0|null>, "...": <0.0-1.0|null>},
-  "confidence": <number 0.0-1.0>,
-  "reasoning": "<one short sentence describing the document>"
-}
-
-Example (values illustrative; use null for anything absent):
-{"typed_core": {"property_address": {"value": "123 Main St, Anytown CA", "page": 1, "snippet": "Property: 123 Main St"}, "sales_price": {"value": "1380000.00", "page": 1, "snippet": "Purchase Price $1,380,000"}, "closing_date": {"value": "2024-11-15", "page": 2, "snippet": "close on or before 11/15/2024"}}, "additional_sections": [{"section": "Contingencies", "fields": [{"label": "Financing", "value": "30 days", "page": 2, "snippet": "financing contingency 30 days"}]}], "confidence": 0.9, "reasoning": "Residential purchase agreement with price and closing date."}
+  "addenda": [{"addendum_name": <string|null>, "addendum_type": <string|null>, "addendum_date": <string|null>, "is_signed": <string|null>, "is_attached": <string|null>, "page": <int|null>, "snippet": <string|null>}],
+  "contingencies": [{"contingency_type": <string|null>, "deadline_date": <string|null>, "is_waived": <string|null>, "page": <int|null>, "snippet": <string|null>}],

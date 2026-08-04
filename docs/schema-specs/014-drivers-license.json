@@ -1,0 +1,67 @@
+{
+  "document_type": "drivers_license",
+  "slug": "drivers-license",
+  "tier": 2,
+  "rules_served": ["ID-1", "ID-3", "ID-5", "OC-1"],
+  "summary_hint": "whose ID this is (name components), which jurisdiction and credential type, and whether it is currently valid (expiration vs today) — plus DOB and residential address for cross-document identity and occupancy matching.",
+  "existing_extractor": "app/ai/extraction/drivers_license.py",
+  "catalog_coverage": "full",
+
+  "typed_core": [
+    {"name": "credential_type", "type": "str", "why": "identity + disambiguator — DL vs state ID vs CDL vs passport; ID-5's 'government-issued ID' scope depends on it.", "rules": ["ID-5"], "reason_class": "disambiguator", "rule_floor": false, "degraded_from": "enum", "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "issuing_jurisdiction", "type": "str", "why": "identity — which state issued; context for ID-1 name rules and OC-1 address; processor.", "rules": [], "reason_class": "identity", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": true, "prompt_hint": null},
+    {"name": "issuer_name", "type": "str", "why": "issuer/source — the DMV/authority; processor authenticity check.", "rules": [], "reason_class": "processor", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": true, "prompt_hint": null},
+    {"name": "license_or_id_number_masked", "type": "str", "why": "PII (pre-masked, last-4) — identity/dedup key; already in _PII_FIELDS as id_number_masked.", "rules": [], "reason_class": "pii", "rule_floor": false, "degraded_from": null, "pii": {"kind": "ACCOUNT", "pre_masked": true}, "exists_today": true, "prompt_hint": "Mask the license/ID number to last-4 everywhere; never emit the full number, DOB, or address in reasoning."},
+    {"name": "full_name_raw", "type": "str", "why": "ID-1 disambiguator — the name exactly as printed, so a wrong surname/given split stays visible to the tag layer. Flattened from person[].", "rules": ["ID-1"], "reason_class": "disambiguator", "rule_floor": false, "degraded_from": "object", "pii": null, "exists_today": true, "prompt_hint": "Capture the name as components (family/given/middle/suffix) in addition to the raw printed line — ID-1 canonicalizes each part."},
+    {"name": "family_name", "type": "str", "why": "ID-1 — surname for tolerant/containment match (suffix strip, maiden vs married).", "rules": ["ID-1"], "reason_class": "rule", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "given_names", "type": "str", "why": "ID-1 — given name(s) for nickname-map / containment match.", "rules": ["ID-1"], "reason_class": "rule", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "middle_name", "type": "str", "why": "ID-1 — middle-initial tolerance.", "rules": ["ID-1"], "reason_class": "rule", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "suffix", "type": "str", "why": "ID-1 — suffix strip (Jr/Sr/III) before comparison.", "rules": ["ID-1"], "reason_class": "rule", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "date_of_birth", "type": "date", "why": "ID-3 (DOB match across ID and application); PII (highly_restricted).", "rules": ["ID-3"], "reason_class": "pii", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": true, "prompt_hint": "Dates may be MM/DD/YYYY or ISO; keep the value parseable as a real date so ID-3/ID-5 can compare."},
+    {"name": "expiration_date", "type": "date", "why": "ID-5 — compare expiration_date >= today (and at closing).", "rules": ["ID-5"], "reason_class": "rule", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": true, "prompt_hint": null},
+    {"name": "issue_date", "type": "date", "why": "processor (document age) + disambiguator — issue vs expiration are both dates on the card; carrying issue date prevents reading one for the other.", "rules": [], "reason_class": "disambiguator", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": "Distinguish DL field codes: 4a = issue, 4b = expiration, 4d = license number, 3 = DOB."},
+    {"name": "residential_address", "type": "str", "why": "OC-1 — the address signal compared against stated occupancy. Flattened from address.", "rules": ["OC-1"], "reason_class": "rule", "rule_floor": false, "degraded_from": "address", "pii": null, "exists_today": true, "prompt_hint": null},
+    {"name": "photo_present", "type": "str", "why": "processor/authenticity — a photo ID without a photo is a red flag; CORE.", "rules": [], "reason_class": "processor", "rule_floor": false, "degraded_from": "bool", "pii": null, "exists_today": false, "prompt_hint": null}
+  ],
+
+  "nested_lists": [],
+
+  "rejected": [
+    {"name": "the 8 TECHNICAL provenance fields", "reason": "already in the TypedField wrapper"},
+    {"name": "document_title, form_number, form_revision_date", "reason": "a license is not a filed form; classification handles the type"},
+    {"name": "issuer_address / issuer_phone / issuer_email_or_url", "reason": "no consumer"},
+    {"name": "document_issue_date, effective_date, statement_period_start/_end", "reason": "issue_date/expiration_date are the credential dates; the rest duplicate or don't apply"},
+    {"name": "party_names (person[])", "reason": "single holder — flattened to full_name_raw + components"},
+    {"name": "party_addresses (address[])", "reason": "one address — residential_address"},
+    {"name": "property_address, loan_number, account_case_reference_number", "reason": "not on an ID"},
+    {"name": "signature_blocks / notary_block", "reason": "an ID is not executed/notarized; photo_present covers authenticity"},
+    {"name": "document_status_or_version", "reason": "no rule"},
+    {"name": "document_discriminator", "reason": "restricted, no rule/consumer — do not surface a restricted number needlessly"},
+    {"name": "real_id_compliance_indicator, limited_duration_indicator, under_21_indicator", "reason": "no rule; catch-all"},
+    {"name": "sex, height, eye_color", "reason": "physical descriptors — no rule, no processor use"},
+    {"name": "signature_present", "reason": "photo_present is the authenticity signal a rule/processor uses; signature adds nothing"},
+    {"name": "vehicle_class, restrictions, endorsements", "reason": "driving attributes irrelevant to a mortgage file"},
+    {"name": "barcode_aamva_fields (key_value[])", "reason": "machine-zone dump — cross-check only; catch-all, not a nested list"},
+    {"name": "name_truncation_indicators", "reason": "full_name_raw already preserves the printed form for audit"}
+  ],
+
+  "encoding_variations": [
+    "Expiration may read 'EXP 05/01/2028', '4b 2028-05-01', or an AAMVA-coded date in the PDF417 barcode; must be the expiration, not the issue date '4a' — hence issue_date is carried alongside as its disambiguator.",
+    "Name may print as one line ('SMITH, ROBERT J JR'), as separate DL fields (1=family, 2=given), and truncated with a truncation flag — capture components and full_name_raw so a bad split is auditable.",
+    "Jurisdiction appears as the state name, a state seal, or a two-letter code; normalize but keep as printed.",
+    "Credential type distinguishes a REAL-ID DL, a standard DL, a CDL, and a non-driver state ID — all valid identity docs but different credential_type."
+  ],
+
+  "open_questions": [
+    {"id": 1, "q": "DOB masking vs comparison. ID-3 compares actual dates, so DOB must be registered pre_masked=false and compared via the snapshot match-hash — confirm the snapshot exposes a date-comparable hash (not just an opaque string) so date-format tolerance still works.", "options": ["register raw + rely on the normalized snapshot date for the compare, hash for storage/display", "mask the DOB"], "recommendation": "register raw + rely on the normalized snapshot date for the compare, hash for storage/display. GEET'S DECISION (LP-438): mask account-like identifiers (policy/account/plan numbers, wire/ACH trace, check references) via _PII_FIELDS; leave addresses and public-record case numbers PLAIN; DOB is unmasked (pii null).", "blocks_implementation": false},
+    {"id": 2, "q": "Name components vs raw only. ID-1 could split full_name_raw at runtime instead of storing components.", "options": ["store both components and raw", "store raw only and split at runtime"], "recommendation": "store both — components make the canonicalization deterministic and the raw line keeps a bad split auditable; cost is four cheap str fields. GEET'S DECISION (LP-439): store BOTH the name components and the raw line.", "blocks_implementation": false},
+    {"id": 3, "q": "credential_type / issuing_jurisdiction as enums. No enum coercer exists; both degrade to str.", "options": ["degrade to str + downstream normalization", "add an enum coercer"], "recommendation": "confirm downstream normalization (state code, credential taxonomy) rather than adding a coercer.", "blocks_implementation": false}
+  ],
+
+  "notes": [
+    "Every rule on this document is an identity/validity comparison, so the floor is small but exacting: the name must be captured as components (ID-1), DOB and expiration must be real dates (ID-3, ID-5), and the address must survive for OC-1.",
+    "PII: license_or_id_number_masked already registered as id_number_masked (rename/alias on build). date_of_birth is a typed field but absent from _PII_FIELDS today, so it is stored unmasked — the fix that matters most is registering it pre_masked=false. residential_address is standard sensitivity, promoted to typed to keep it out of the unmasked catch-all but not proposed for masking (flag for Priya) — pii object left null accordingly.",
+    "Ambiguity: credential_type is tagged identity + disambiguator; classified disambiguator (ID-5 scope) with ID-5 in rules.",
+    "Ambiguity: issue_date is tagged processor (document age) + disambiguator; classified disambiguator (prevents misreading expiration)."
+  ]
+}

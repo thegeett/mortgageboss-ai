@@ -1,0 +1,61 @@
+{
+  "document_type": "social_security_administration_ssa_89",
+  "slug": "social-security-administration-ssa-89",
+  "tier": 3,
+  "rules_served": [],
+  "summary_hint": "SSA-89 consent — printed_name, DOB, authorizing company_name to verify SSN, signed date; whose SSN-verification authorization this is and whether it is executed",
+  "existing_extractor": null,
+  "catalog_coverage": "full",
+
+  "typed_core": [
+    {"name":"document_title","type":"str","why":"identity — confirms this is an SSA-89 authorization vs another SSA form","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"form_number","type":"str","why":"disambiguator — the form code 'SSA-89' pins the field map","rules":[],"reason_class":"disambiguator","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"form_revision","type":"str","why":"disambiguator — SSA revises the form; version governs which layout/fields apply","rules":[],"reason_class":"disambiguator","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"issuer_name","type":"str","why":"identity/source — issuing authority (Social Security Administration)","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"printed_name","type":"str","why":"identity — the individual whose SSN is being verified; match to borrower","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"date_of_birth","type":"date","why":"PII (highly_restricted); identity — DOB disambiguates same-named individuals","rules":[],"reason_class":"pii","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"social_security_number","type":"str","why":"PII (highly_restricted); identity — the number the consent authorizes verification of","rules":[],"reason_class":"pii","rule_floor":false,"degraded_from":null,"pii":{"kind":"SSN","pre_masked":false},"exists_today":false,"prompt_hint":"Capture DOB and SSN verbatim even when partially handwritten"},
+    {"name":"consent_reason","type":"str","why":"processor — why consent is authorized; SSA reason codes are open-ended","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":"A checkbox set with an 'Other' write-in; capture both the checked reason and the write-in text"},
+    {"name":"other_consent_reason","type":"str","why":"disambiguator — free-text reason when consent_reason is 'other'","rules":[],"reason_class":"disambiguator","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"company_name","type":"str","why":"identity — the company authorized to receive verification (the requesting lender/processor)","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"The requesting company_name/company_address is the lender or its agent, not the SSA"},
+    {"name":"company_address","type":"str","why":"identity — locates the authorized company","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"address","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"agent_name","type":"str","why":"processor — named company agent acting on the request, when present","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"consent_validity_days","type":"int","why":"processor — how long the authorization stays valid (age/expiry check)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"custom_validity_initials","type":"str","why":"disambiguator — initials that confirm a custom (non-default) validity window was elected","rules":[],"reason_class":"disambiguator","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"one_time_use_acknowledgment","type":"str","why":"processor — acknowledgment the consent is single-use","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"bool","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"individual_signature","type":"str","why":"processor/execution — signature-present indicator","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"signature","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"date_signed","type":"date","why":"identity/recency — when the borrower executed the authorization","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"signer_relationship_if_representative","type":"str","why":"disambiguator — if signed by a representative, the capacity, so the signature can be trusted","rules":[],"reason_class":"disambiguator","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null}
+  ],
+
+  "nested_lists": [],
+
+  "rejected": [
+    {"name":"the 8 TECHNICAL provenance fields","reason":"already in the TypedField wrapper"},
+    {"name":"issuer_address, issuer_phone, issuer_email_or_url","reason":"SSA contact detail; no consumer, no rule"},
+    {"name":"document_issue_date, effective_date, expiration_date","reason":"duplicate/derive from date_signed + consent_validity_days"},
+    {"name":"statement_period_start / _end","reason":"not a statement; no period on a consent form"},
+    {"name":"party_names, party_addresses","reason":"duplicate printed_name and the company fields already flattened"},
+    {"name":"property_address, loan_number, account_case_reference_number","reason":"not present on an SSA-89"},
+    {"name":"signature_blocks, notary_block","reason":"the single individual_signature covers execution; SSA-89 is not notarized"},
+    {"name":"document_status_or_version","reason":"not a draft/final/amended form; form_revision covers version"}
+  ],
+
+  "encoding_variations": [
+    "The form is titled variably ('Authorization for the Social Security Administration to Release Social Security Number Verification'); rely on form_number = SSA-89 rather than the title",
+    "SSN appears as NNN-NN-NNNN or NNNNNNNNN — normalize on read, retain the raw snippet",
+    "Validity period may be stated as a preprinted default OR a hand-initialed custom window — custom_validity_initials beside consent_validity_days is the disambiguator",
+    "Signature may be wet-ink or e-signature; individual_signature records presence only"
+  ],
+
+  "open_questions": [
+    {"id":1,"q":"DOB + SSN together on one low-value document — two highly-restricted PII elements with no rule consuming them.","options":["extract and register both","omit and rely on other documents"],"recommendation":"(a) extract and register both — identity matching may become a future rule and catch-all storage is unmasked/unsafe GEET'S DECISION (LP-438): mask account-like identifiers (policy/account/plan numbers, wire/ACH trace, check references) via _PII_FIELDS; leave addresses and public-record case numbers PLAIN; DOB is unmasked (pii null).","blocks_implementation":false},
+    {"id":2,"q":"agent_name/agent_address inclusion — CONDITIONAL and rarely decision-relevant. Kept agent_name, dropped agent_address.","options":["keep agent_name","drop the agent block entirely"],"recommendation":"confirm the agent block ever matters to a processor; if not, drop both","blocks_implementation":false}
+  ],
+
+  "notes": [
+    "The SSA-89 is the borrower's signed authorization for SSA to release SSN verification to a named company (an anti-fraud/identity consent form, not an income or asset document). No rule in the packet reads it; every field earns its place on identity, PII, or processor review. Lean consent-form schema.",
+    "social_security_number needs _PII_FIELDS registration, pre_masked false (stored raw on the form; snapshot must mask + add match-hash); distinct from the registered taxpayer_ssn_masked/employee_ssn. date_of_birth needs _PII_FIELDS registration, pre_masked false; highly restricted, must never land in the unmasked catch-all. printed_name is kept typed for identity but not a registry element under the current 7-field pattern.",
+    "Prompt hint (doc-level): Tell the model SSA-89 is a consent/authorization form, not an SSN verification result — do not expect a verification outcome."
+  ]
+}

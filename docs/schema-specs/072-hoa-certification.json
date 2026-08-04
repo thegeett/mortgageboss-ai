@@ -1,0 +1,85 @@
+{
+  "document_type": "hoa_certification",
+  "slug": "hoa-certification",
+  "tier": 3,
+  "rules_served": [],
+  "summary_hint": "HOA certification for Maple Court Condominium, Unit 4B — 120 units, 68% owner-occupied, dues $385/mo, 4% delinquent, no pending litigation.",
+  "existing_extractor": null,
+  "catalog_coverage": "full",
+
+  "typed_core": [
+    {"name":"association_or_project_name","type":"str","why":"identity — the project","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"entity","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"project_address","type":"str","why":"identity — property link","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"address","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"unit_address_or_number","type":"str","why":"identity — which unit the subject loan is on","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"association_management_company","type":"str","why":"processor — management vs self-managed","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"entity","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"association_contact_phone","type":"str","why":"processor — reverification contact","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"object","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"project_type","type":"str","why":"identity — condominium / PUD / co-op","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"total_units","type":"int","why":"processor — denominator for every ratio","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"units_sold_or_conveyed","type":"int","why":"processor — presale % (warrantability)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"developer_control_status","type":"str","why":"processor — developer vs owner control (warrantability)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":"'Developer/declarant in control' vs 'turned over to owners' is the control-status signal; a turnover date implies owner control"},
+    {"name":"owner_occupied_units","type":"int","why":"processor — owner-occupancy ratio","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"Distinguish owner-occupied, second-home, and investor as three separate buckets — collapsing them inverts the occupancy ratio"},
+    {"name":"investor_owned_units","type":"int","why":"processor — investor-concentration ratio","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"rental_or_short_term_rental_restrictions","type":"str","why":"processor — rental cap / STR ban","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"single_entity_ownership_concentration","type":"str","why":"processor — single-owner concentration limit","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"object","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"commercial_space_percentage","type":"str","why":"processor — commercial-use limit","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"percent","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"regular_hoa_dues","type":"Decimal","why":"headline — DTI (housing expense)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"dues_frequency","type":"str","why":"disambiguator — monthly vs quarterly vs annual; the dues figure is unreadable without it","rules":[],"reason_class":"disambiguator","rule_floor":false,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"delinquent_units_percentage","type":"str","why":"processor — >15% delinquency is a warrantability fail","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"object","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"annual_budget","type":"Decimal","why":"processor — reserve-adequacy context","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"master_insurance_carrier","type":"str","why":"processor — hazard coverage in force","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"object","pii":null,"exists_today":false,"prompt_hint":"Capture carrier alongside amount so an unlabeled figure can be judged"},
+    {"name":"master_insurance_amount","type":"Decimal","why":"processor — coverage amount vs replacement cost","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"completed_by_name_title","type":"str","why":"processor — who certified; third-party independence","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"completion_date","type":"date","why":"identity — recency of the certification","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null}
+  ],
+
+  "nested_lists": [
+    {
+      "name":"special_assessments","shape":"flat_row",
+      "shape_reason":"a certification lists 0–5 assessments; flat rows are light and support an assessment-review check. Serves future warrantability",
+      "expected_item_count":"0–5","rules":[],
+      "exists_today":false,"plumbing_sites":5,
+      "fields":[
+        {"name":"description","type":"str","why":"the assessment description for an assessment-review check"},
+        {"name":"amount","type":"Decimal","why":"amount a processor sums across assessments"},
+        {"name":"status","type":"str","why":"assessment status"},
+        {"name":"date","type":"date","why":"assessment date"}
+      ]
+    }
+  ],
+
+  "rejected": [
+    {"name":"document_title, form_number, form_revision_date, document_status_or_version","reason":"classification/version metadata; no consumer"},
+    {"name":"issuer_name, issuer_address, issuer_phone, issuer_email_or_url","reason":"association_management_company / association_contact_phone carry the source and contact"},
+    {"name":"party_names, party_addresses","reason":"not the relevant parties on a project cert"},
+    {"name":"loan_number, account_case_reference_number","reason":"linkage nice-to-have; no consumer"},
+    {"name":"effective_date, expiration_date, statement_period_start/end, document_issue_date","reason":"duplicate/adjacent to completion_date"},
+    {"name":"signature_blocks, notary_block, signature_or_certification","reason":"completed_by_name_title carries attribution; execution not rule-checked"},
+    {"name":"project_phase_and_completion_status","reason":"overlaps units_sold_or_conveyed / developer_control_status"},
+    {"name":"reserve_balance_and_contribution, reserve_study_date_and_findings","reason":"reserve detail; annual_budget is the processor proxy; leave detail to catch-all until a reserve rule lands"},
+    {"name":"structural_or_deferred_maintenance, building_safety_or_inspection_status","reason":"second/third nested lists; over budget — catch-all"},
+    {"name":"fidelity_or_crime_coverage, ordinance detail","reason":"insurance detail beyond carrier/amount; catch-all"},
+    {"name":"right_of_first_refusal_or_resale_restrictions, amenities_or_mandatory_memberships","reason":"no consumer"},
+    {"name":"the 8 TECHNICAL provenance fields","reason":"already in the TypedField wrapper"}
+  ],
+
+  "encoding_variations": [
+    "regular_hoa_dues / dues_frequency — '$385/mo', '$1,155/quarter', '$4,620 annually'; always carry the frequency",
+    "delinquent_units — stated as a count, a percentage, or both, and the delinquency threshold (30 vs 60 days) varies; capture the stated count and % verbatim, and note the aging basis if given",
+    "owner_occupied vs investor — sometimes a count, sometimes a percentage; second-home units are a third bucket that must not be folded into either",
+    "master_insurance — carrier + dwelling/replacement amount stated together or on an attached ACORD; capture carrier alongside amount so an unlabeled figure can be judged"
+  ],
+
+  "open_questions": [
+    {"id":1,"q":"Which one nested list? special_assessments vs pending_litigation — both are CORE-adjacent object[] warrantability signals","options":["nest special_assessments","nest pending_litigation"],"recommendation":"nest special_assessments (amounts a processor sums) and carry pending-litigation as a flat presence flag; revisit if a litigation rule needs case-level detail GEET'S DECISION (LP-438): BUILD IT — LP-437 made nested lists cheap (one declaration + the generic mechanism); the one-list-budget / defer / no-consumer concern is overturned. Build as flat_row; the per-rule consumer is separate follow-up.","blocks_implementation":false},
+    {"id":2,"q":"delinquent_units flattening — flattened to delinquent_units_percentage. If a rule needs both count and denominator separately, split into delinquent_units_count + _percentage","options":["keep flattened to _percentage","split into _count + _percentage"],"recommendation":"keep flattened until a rule needs the count and denominator separately","blocks_implementation":false},
+    {"id":3,"q":"master_insurance flattening — flattened to carrier + amount. If a rule needs deductible / replacement-cost basis (the IH-1 pattern), add those two fields rather than the whole object","options":["keep carrier + amount only","add deductible / replacement-cost basis fields"],"recommendation":"keep carrier + amount; add the two fields only if an IH-1-pattern rule needs them","blocks_implementation":false}
+  ],
+
+  "notes": [
+    "No rules consume this type today, so there is no rule floor. This is effectively a project-warrantability worksheet; even absent rules, the fields chosen are the ones a condo/PUD warrantability rule will need (occupancy ratio, delinquency, single-entity concentration, insurance, litigation) plus identity and dues.",
+    "pending_litigation is NOT nested (one-list budget) — its presence/absence is the load-bearing signal; capture the summary in the catch-all.",
+    "No borrower PII. completed_by_name_title and association_contact_phone are business-contact, standard sensitivity. Nothing needs _PII_FIELDS.",
+    "Prompt hint (doc-level): Fannie Mae condo warrantability thresholds the fields feed: <=15% delinquency, single-entity concentration limits, <=35% commercial space, adequate reserves (>=10% budget), fidelity/crime coverage for >20 units — capture the stated numbers, do not evaluate them.",
+    "Ambiguity: regular_hoa_dues is tagged 'headline' in the markdown, which is not a defined reason_class; classified as processor (the DTI/housing-expense figure a processor wants)."
+  ]
+}

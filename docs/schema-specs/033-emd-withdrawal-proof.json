@@ -1,0 +1,69 @@
+{
+  "document_type": "emd_withdrawal_proof",
+  "slug": "emd-withdrawal-proof",
+  "tier": 3,
+  "rules_served": ["AS-2"],
+  "summary_hint": "<withdrawal_amount> debited <transaction_date> from <financial_institution_name> a/c <account_number_masked> (<account_owner_names>) to <payee_or_recipient> — the sourced EMD debit AS-2 matches to the contract",
+  "existing_extractor": null,
+  "catalog_coverage": "full",
+
+  "typed_core": [
+    {"name": "financial_institution_name", "type": "str", "why": "AS-2 (rule reads it) — identifies the account the debit came from; must be a verified borrower account", "rules": ["AS-2"], "reason_class": "rule", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "account_owner_names", "type": "str", "why": "AS-2 — the account must be the borrower's, 'not an undisclosed source'; flattened person[] -> primary + _2 + _count", "rules": ["AS-2"], "reason_class": "rule", "rule_floor": false, "degraded_from": "person", "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "account_number_masked", "type": "str", "why": "PII (registered masked) — the account key AS-2 uses to confirm the debit left a verified account", "rules": ["AS-2"], "reason_class": "pii", "rule_floor": false, "degraded_from": null, "pii": {"kind": "ACCOUNT", "pre_masked": true}, "exists_today": false, "prompt_hint": "Mask the account number to last-4"},
+    {"name": "statement_period_start", "type": "date", "why": "context/recency — flattened from statement_period date_range; frames the debit's timeframe", "rules": [], "reason_class": "processor", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "statement_period_end", "type": "date", "why": "context/recency — the other half of the flattened statement_period", "rules": [], "reason_class": "processor", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "transaction_date", "type": "date", "why": "AS-2 — the debit date; must fall within the sourcing timeframe relative to the contract", "rules": ["AS-2"], "reason_class": "rule", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "posting_date", "type": "str", "why": "disambiguator for transaction_date — the cleared/posted date can differ from the transaction date (degraded from date)", "rules": [], "reason_class": "disambiguator", "rule_floor": false, "degraded_from": "date", "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "withdrawal_amount", "type": "Decimal", "why": "AS-2 — the debit amount matched against the contract EMD", "rules": ["AS-2"], "reason_class": "rule", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "transaction_type", "type": "str", "why": "AS-2 — debit / wire / check / ACH; how the EMD left the account", "rules": ["AS-2"], "reason_class": "rule", "rule_floor": false, "degraded_from": "enum", "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "payee_or_recipient", "type": "str", "why": "AS-2 — the funds must go to escrow/title/seller, not an undisclosed party", "rules": ["AS-2"], "reason_class": "rule", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "check_number", "type": "str", "why": "disambiguator/evidence — ties the debit to a cancelled check", "rules": [], "reason_class": "disambiguator", "rule_floor": false, "degraded_from": "identifier", "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "wire_ach_trace_number", "type": "str", "why": "PII (restricted) — ties the debit to a wire/ACH; promote so it is masked, not left unmasked in the catch-all", "rules": [], "reason_class": "pii", "rule_floor": false, "degraded_from": "identifier", "pii": {"kind": "ACCOUNT", "pre_masked": false}, "exists_today": false, "prompt_hint": null},
+    {"name": "transaction_description", "type": "str", "why": "processor — the memo (may read 'EMD'/'escrow deposit'); corroborates purpose", "rules": [], "reason_class": "processor", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "balance_after_transaction", "type": "Decimal", "why": "processor — shows the account held the funds; sufficiency context", "rules": [], "reason_class": "processor", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "check_cleared_or_transaction_completed", "type": "str", "why": "AS-2 — 'fire if unshown': confirms the debit actually cleared, not just initiated", "rules": ["AS-2"], "reason_class": "rule", "rule_floor": false, "degraded_from": "bool", "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "related_emd_receipt_reference", "type": "str", "why": "reconciliation — escrow/title receipt reference to tie the debit to the EMD receipt", "rules": [], "reason_class": "processor", "rule_floor": false, "degraded_from": "identifier", "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "related_purchase_contract_amount", "type": "Decimal", "why": "AS-2 — the contract EMD amount this debit is matched against", "rules": ["AS-2"], "reason_class": "rule", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "property_address", "type": "str", "why": "identity/linkage — links the EMD to the subject transaction", "rules": [], "reason_class": "identity", "rule_floor": false, "degraded_from": "address", "pii": null, "exists_today": false, "prompt_hint": null}
+  ],
+
+  "nested_lists": [],
+
+  "rejected": [
+    {"name": "document_title, form_number, form_revision_date", "reason": "classification/version before extraction; not a form"},
+    {"name": "issuer_name", "reason": "duplicates financial_institution_name"},
+    {"name": "issuer_address, issuer_phone, issuer_email_or_url", "reason": "bank contact; catch-all"},
+    {"name": "document_issue_date, effective_date, expiration_date", "reason": "a debit proof does not have effective/expiry; transaction_date is the event date"},
+    {"name": "party_names, party_addresses", "reason": "covered by account_owner_names + payee_or_recipient"},
+    {"name": "loan_number", "reason": "not on an EMD debit proof"},
+    {"name": "account_case_reference_number", "reason": "duplicates related_emd_receipt_reference"},
+    {"name": "signature_blocks", "reason": "a cancelled check's endorsement is on the reverse; captured via check_front_and_back_available flag, marginal — catch-all"},
+    {"name": "notary_block", "reason": "not notarized"},
+    {"name": "document_status_or_version", "reason": "no consumer"},
+    {"name": "check_front_and_back_available", "reason": "evidence-completeness flag; marginal, no AS-2 gate; catch-all"}
+  ],
+
+  "encoding_variations": [
+    "transaction_type — no enum coercer; 'Withdrawal', 'Debit', 'Wire Out', 'Online Transfer', 'Check', 'ACH Debit'. Degrade to str",
+    "transaction_date vs posting_date — statements print one or both; a wire confirmation prints a value date; a cancelled check prints the paid date. Keep both so a timeframe test uses the right one",
+    "check_number vs wire_ach_trace_number — mutually exclusive by instrument (check vs wire/ACH); which one is present is itself evidence of the payment rail",
+    "withdrawal_amount — with $/commas/parentheses (a debit may show as (10,000.00) or -10,000.00); parsed to Decimal",
+    "check_cleared_or_transaction_completed — 'Cleared', 'Posted', 'Paid', 'Completed' vs 'Pending'. Degrade the boolean to str"
+  ],
+
+  "open_questions": [
+    {"id": 1, "q": "statement_period date_range flattening — there is no date_range coercer; flattened to statement_period_start/_end", "options": ["two dates (chosen)", "a single str"], "recommendation": "two dates, so a timeframe test can compare", "blocks_implementation": false},
+    {"id": 2, "q": "related_purchase_contract_amount presence — the contract EMD amount is often NOT restated on the debit proof (it lives on the purchase agreement); AS-2 already cross-reads the contract", "options": ["keep the field for when it is restated", "drop it and always read the contract"], "recommendation": "(a) — capturing it when present lets AS-2 match in one place and flags contract-vs-proof mismatches", "blocks_implementation": false},
+    {"id": 3, "q": "Wire trace as PII — wire_ach_trace_number is restricted", "options": ["register in _PII_FIELDS (pre_masked false)", "leave to the catch-all"], "recommendation": "confirm registration (pre_masked false) so it is masked at the snapshot rather than stored raw in the catch-all GEET'S DECISION (LP-438): mask account-like identifiers (policy/account/plan numbers, wire/ACH trace, check references) via _PII_FIELDS; leave addresses and public-record case numbers PLAIN; DOB is unmasked (pii null).", "blocks_implementation": false},
+    {"id": 4, "q": "Cancelled-check image — when the proof is a check image, front/back availability and the endorsement carry authenticity signal but no AS-2 field", "options": ["leave to the catch-all", "add typed fields"], "recommendation": "confirm the catch-all is acceptable for those", "blocks_implementation": false}
+  ],
+
+  "notes": [
+    "No existing_extractor for this document type — new schema.",
+    "18 typed-core rows. AS-2 keys on withdrawal_amount + transaction_date + account identity/ownership + payee + cleared-flag + the contract amount to match; the rest are disambiguators and reconciliation. Within range for a one-rule (but active/NOW) document.",
+    "This document proves the earnest money LEFT the borrower's account — the three common forms are a bank-statement line showing the debit, a cancelled check (front/back), or a wire/ACH confirmation. If the proof is a full bank statement, the transaction list belongs to the bank_statement schema, not here.",
+    "PII: account_number_masked already in _PII_FIELDS (pre_masked true); wire_ach_trace_number needs _PII_FIELDS registration pre_masked false (restricted; otherwise lands unmasked in the catch-all). transaction_description is not itself a PII field, but free-text memos can carry names/partial account numbers; note for the redactor (the transaction-description pattern). account_owner_names are person names at standard sensitivity (identity).",
+    "posting_date is typed str with a '(date)' annotation in the doc — recorded as degraded_from 'date' (kept as str rather than a coerced date); flagged as ambiguity because degrading a coercer-eligible date to str is unusual."
+  ]
+}

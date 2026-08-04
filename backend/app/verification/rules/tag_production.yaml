@@ -183,6 +183,25 @@ tags:
   contract.sales_price: {mode: parsed, subject: document, data: sales_price}
   contract.loan_sales_price: {mode: derived, subject: loan, data: loan_sales_price}
   property.purchase_price: {mode: parsed, subject: loan, data: property.purchase_price}
+  # LP-454 (step D.3) — the purchase agreement's earnest-money amount (PC-5 / AS-2). A PARSED document fact
+  # from the purchase_agreement extractor's earnest_money_amount field — POPULATED + clean (a number: 5000.0 on
+  # LF-6T3N). ⚠️ NOT an unblock on its own: PC-5 also needs contract.emd_sourced (the sourced-debit AI match
+  # tying AS-2), so the rule stays blocked. Was a vocabulary orphan (fact_tags, no producer); this gives it one.
+  # document_type-SCOPED to purchase_agreement (LP-454 review): earnest_money_amount is ALSO emitted by the
+  # earnest_money_receipt extractor, so an unscoped tag would mis-materialise the receipt's amount here — this
+  # tag is the CONTRACT's stated EMD (a receipt-EMD tag, if a rule ever needs it, is its own declaration).
+  contract.emd_amount: {mode: parsed, subject: document, data: earnest_money_amount, document_type: purchase_agreement}
+  # LP-452 (step D.1) — the loan's subject-property TYPE, promoted from the MISMO property.type fact (the
+  # authoritative loan-level source), exactly like program.type reads loan.program / property.purchase_price
+  # reads property.purchase_price. Gates five rules (CO-1/CO-3/CO-5/IH-7/PR-3) that must know condo vs SFR vs
+  # PUD before they can scope. DESCRIPTIVE — the RAW MISMO value passes through verbatim (produce_parsed_tag),
+  # NOT normalised: whether a value "is a condo" is a rule's branch or a later derived tag, never a re-labelling
+  # here (tags describe, rules judge). Absent MISMO property.type → the tag is ABSENT (fail closed), never a
+  # default. ⚠️ On the current fixtures MISMO property_type is null on all three files, so the tag is null today
+  # (an honest source-data gap — the appraisal / purchase_agreement extractors DO carry a property_type, but
+  # reading a document source or reconciling across sources is a separate ticket, LP-452 D3). Guarded by LP-450
+  # (`property.type` is in the MISMO loan-key universe).
+  property.type: {mode: parsed, subject: loan, data: property.type}
 
   # --- ins.* — IH-3's input (LP-417). The homeowners_insurance binder's effective_date (typed-core) is read
   #     as a DOCUMENT parsed tag (ins.effective_date, in fact_tags.csv), then PROMOTED to loan level
@@ -195,6 +214,13 @@ tags:
   #     the same id.id_expiration leak-guard), never every subject carrying the tag. --------------------------- #
   ins.effective_date: {mode: parsed, subject: document, data: effective_date}
   ins.loan_effective_date: {mode: derived, subject: loan, data: loan_effective_date}
+  # --- LP-447 — IH-1's input. The homeowners binder's DWELLING loss-settlement basis, read from the typed-core
+  #     replacement_cost_or_coinsurance_basis field (LP-446) and NORMALISED to a controlled vocabulary
+  #     (replacement_cost / actual_cash_value / unknown) by the derived recipe. PER-DOCUMENT (the binder subject,
+  #     like AS-6) — IH-1 is per_document, so no loan promotion. The recipe reads ONLY the typed field, never the
+  #     forms_and_endorsements list (an ACV-roof / personal-property endorsement cannot drive the dwelling basis —
+  #     the Occidental anti-conflation, ADR-351), and fails closed to "unknown" on an unrecognised value. --------- #
+  ins.dwelling_settlement_basis: {mode: derived, subject: document, data: dwelling_settlement_basis}
 
   # --- property.address_normalized_match — PC-3's input (LP-407-4). Does the purchase contract's subject-property
   #     address match the loan file's (MISMO) subject-property address? DERIVED (a deterministic compare using the
@@ -221,12 +247,85 @@ tags:
   # LOAN subject (the occupancy group's shape). Unblocks IN-14 (which ships RATIFY — a human ratifies, so its
   # rule does not need this tag calibrated for auto-ship) and OC-3. Fail-closed: n/a when not investment/rental.
   occupancy.rental_support: {mode: ai, subject: loan, data: occupancy_rental}
+  # LP-444 — CR-4's verdict tag (INERT: CR-4 not in ACTIVE_RULE_IDS, so credit_profile is not required
+  # and does not run live). Produced by the credit_profile borrower group (list-visibility's first consumer).
+  credit.undisclosed_tradeline: {mode: ai, subject: borrower, data: credit_profile}
+  # --- LP-453 (step D.2) — the tradelines list consumer: DETERMINISTIC numeric OBSERVATIONS over the credit
+  #     report's tradelines list (loan-level aggregate). Pure aggregates ONLY — the row vocabulary is open-ended
+  #     bureau text (account_type = AUTO/INST/REV/…, is_disputed = free-text incl. non-disputes,
+  #     payment_history_24mo = a variable-length 0/- string), so classifying mortgage/student/collection or
+  #     interpreting a dispute/late is a Priya/AI question (ADR), NOT this recipe. Tags DESCRIBE, rules judge:
+  #     no threshold, no is_derogatory. Fail closed: no tradelines → the tag abstains to "unknown" (never a 0).
+  #     Feeds CR-1's DTI cross-check; the per-row classification rules (CR-8/9/10/12) are deferred. ------------ #
+  credit.tradeline_count: {mode: derived, subject: loan, data: credit_tradeline_count}
+  credit.tradeline_monthly_payment_total: {mode: derived, subject: loan, data: credit_tradeline_monthly_payment_total}
+  # LP-454 (step D.3) — the credit report's PULL DATE (CR-13). A PARSED document fact from the credit_report
+  # extractor's report_date field — POPULATED + clean (a date: 2026-07-17 on LF-96SV). ⚠️ NOT an unblock on its
+  # own: CR-13 also needs a Priya validity WINDOW + a derived date-vs-today (closing − report_date), so the rule
+  # stays blocked. Was a vocabulary orphan (fact_tags, no producer); this gives it one.
+  # document_type-SCOPED to credit_report (LP-454 review): report_date is ALSO emitted by appraisal /
+  # termite_completion / property_profile_* — an unscoped tag mis-materialised THEIR dates here (an appraisal's
+  # date read as a credit pull date). As a PARSED tag it is the date or ABSENT when no credit report is present
+  # (never the literal "unknown" the vocabulary lists — a gated rule reads couldnt_check on the absence).
+  credit.report_date: {mode: parsed, subject: document, data: report_date, document_type: credit_report}
 
 # --- AI GROUPS — one structuring pass each: a subject, the tags it co-produces, a context-builder
 #     key, and the system prompt (the perceiver question, as DATA). The model answers per subject
 #     index with one JSON object per tag keyed by the tag's LAST segment; "unknown" is always legal
 #     and never coerced away. ---------------------------------------------------------------------- #
 ai_groups:
+  # LP-444 — credit_profile: the FIRST consumer of list visibility. A per-BORROWER group that compares the
+  # credit report's TRADELINES (a generic list, opt-in via include_lists) against the app's file-level
+  # STATED LIABILITIES (include_stated_liabilities — the MISMO comparison set), producing CR-4's verdict.
+  # INERT: CR-4 is not in ACTIVE_RULE_IDS, so this group is not required and does not run on a live file.
+  credit_profile:
+    subject: borrower
+    context_builder: borrower
+    applies_to: [credit_report, uniform_residential_loan_application]
+    include_lists: true
+    include_stated_liabilities: true
+    list_row_cap: 50
+    tags: [credit.undisclosed_tradeline]
+    system_prompt: |
+      You are a senior mortgage loan processor STRUCTURING one factual credit tag for ONE borrower. Your
+      only job is to compare what the credit report shows against what the loan application (1003) states —
+      you do NOT decide the consequence; a downstream rule (CR-4) does. It can only be correct if your fact
+      is accurate.
+
+      NORTH STAR — ACCURACY AND HONESTY:
+      - A WRONG tag silently corrupts CR-4. When you cannot determine the answer, return "unknown".
+        "unknown" is a correct, expected answer — NEVER guess "yes" (a false undisclosed-debt flag on the
+        borrower) or "no" (missing a real one) to look complete.
+
+      THE CONTEXT you are given for this borrower:
+      - documents[].lists.tradelines.rows — the CREDIT REPORT's tradelines (creditor, balance, monthly
+        payment, status). These are the debts the bureaus see.
+      - stated_liabilities — the debts the borrower DISCLOSED on the 1003 (creditor, monthly payment).
+      - Match a report tradeline to a stated liability by CREDITOR and, where present, the payment/balance.
+        Creditor names vary (BANK OF AMERICA vs BofA, CHASE vs JPMCB) — match on meaning, tolerantly.
+
+      PRODUCE ONE TAG — undisclosed_tradeline — with value:
+      - "yes"  — at least ONE credit-report tradeline with a monthly payment > 0 (an active, DTI-relevant
+                 debt) matches NO stated liability. That debt is undisclosed on the application.
+      - "no"   — EVERY payment-bearing tradeline you can see is reflected in the stated liabilities.
+      - "unknown" — you cannot compare: there is NO credit report (no tradelines) or NO stated
+                 liabilities, OR a list you needed is marked truncated (see below).
+
+      ⚠️ TRUNCATION DISCIPLINE (this is the whole point of the marker): a list in the context may carry
+      "truncated": true with "shown"/"total" counts — you were given only the first `shown` of `total`
+      rows. If the tradelines OR the liabilities you must compare are truncated, an item you cannot match
+      may simply be among the rows you were NOT shown. In that case you MUST answer "unknown" — NEVER a
+      confident "no" (you did not see every row) and NEVER a "yes" you cannot fully substantiate. A
+      confident verdict over an unseen row is exactly the error this tag must not make.
+
+      Judge ONLY from the tradelines and liabilities in front of you. Do not invent a debt, a creditor, or
+      a match the context does not support. Ignore a tradeline with a zero or absent monthly payment (paid
+      off / not DTI-relevant) for the undisclosed test.
+
+      Respond with ONLY a JSON array, one object per borrower by the index you were given, exactly:
+      [{"index": <n>, "undisclosed_tradeline": {"value": "yes|no|unknown", "confidence": <0.0-1.0>,
+      "reasoning": "<one short sentence; name the unmatched creditor if yes; do NOT quote account numbers>"}}]
+
   # LP-344: this text is CONVERGED with the shipped standalone STAGE_A_TRANSACTION_SYSTEM_PROMPT
   # (app/ai/tag_production.py) — the prompt LIVE AS-1 actually runs. A drift guard
   # (test_txn_stage_a_prompt_convergence) fails if the two texts ever diverge again, so the measured

@@ -1,0 +1,81 @@
+{
+  "document_type": "survey",
+  "slug": "property-survey",
+  "tier": 3,
+  "rules_served": [],
+  "summary_hint": "who surveyed which parcel, when, under what standard, and the headline findings (encroachments/easements) — e.g. 'ALTA/NSPS survey, 41 Oak St, Smith Surveying (PLS #12345 CA), 2026-05, 2 encroachments noted.'",
+  "existing_extractor": null,
+  "catalog_coverage": "full",
+
+  "typed_core": [
+    {"name":"document_title","type":"str","why":"processor — distinguishes survey type/source","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"survey_type","type":"str","why":"identity — CORE; ALTA/NSPS vs boundary vs mortgage-location (governs what the survey certifies)","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"survey_date","type":"date","why":"identity — CORE; plat/drawing date, drives recency","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"fieldwork_date","type":"date","why":"disambiguator — the on-the-ground date can differ materially from the drawing date","rules":[],"reason_class":"disambiguator","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"surveyor_name","type":"str","why":"identity — CORE; the surveyor","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"object","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"surveyor_firm","type":"str","why":"identity — the firm (source independence)","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"object","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"surveyor_license_number","type":"str","why":"identity — CORE; the PLS license credential","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"object","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"surveyor_license_state","type":"str","why":"disambiguator — a license number is only meaningful with its issuing state","rules":[],"reason_class":"disambiguator","rule_floor":false,"degraded_from":"object","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"client_name","type":"str","why":"identity — CORE; who ordered/is certified (the lender must be a certified party)","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"client_name_2","type":"str","why":"identity — second certified party","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"client_count","type":"int","why":"disambiguator — guards the certified-parties split","rules":[],"reason_class":"disambiguator","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"property_address","type":"str","why":"identity — CORE; the surveyed property","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"parcel_or_apn","type":"str","why":"identity — the parcel match key","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"legal_description","type":"str","why":"identity/disambiguator — CORE; the surveyed legal parcel","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"Do NOT transcribe the full metes-and-bounds boundary courses — the legal description captures the parcel; boundary detail belongs in the catch-all (token cost)"},
+    {"name":"record_owner","type":"str","why":"identity — record owner per the survey (ownership match)","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"person_or_entity","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"project_or_job_number","type":"str","why":"processor — surveyor's job reference for follow-up","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"area_or_land_quantity","type":"str","why":"processor — surveyed lot area","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"measurement","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"flood_zone","type":"str","why":"processor — flood zone shown on the survey (insurance implication)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"object","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"flood_map_panel","type":"str","why":"disambiguator — the FEMA panel/date the zone was read from","rules":[],"reason_class":"disambiguator","rule_floor":false,"degraded_from":"object","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"surveyor_certification_text","type":"str","why":"processor — the certification language names who may rely on the survey","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"'Certified to' language enumerates who may rely on the survey — capture the full certification text so a processor can confirm the lender/title company is named"},
+    {"name":"surveyor_signature_date","type":"date","why":"processor — execution date of the sealed survey","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"signature","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"seal_present","type":"str","why":"processor — whether a surveyor's seal is present (a survey is only valid when sealed)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"bool","pii":null,"exists_today":false,"prompt_hint":"An unsealed/unsigned survey is not final; capture seal_present and surveyor_signature_date verbatim"},
+    {"name":"loan_number","type":"str","why":"identity — links the survey to the loan file","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null}
+  ],
+
+  "nested_lists": [
+    {
+      "name":"encroachments_or_overlaps","shape":"flat_row",
+      "shape_reason":"encroachments genuinely repeat and are the single most decision-relevant recurring finding on a survey (they can block clear title/marketability); a flat row (description + affected boundary + location) keeps well under the 16,384-token ceiling; serves processor review (no rule yet). One list only per the token budget",
+      "expected_item_count":"0+","rules":[],
+      "exists_today":false,"plumbing_sites":5,
+      "fields":[
+        {"name":"description","type":"str","why":"processor — the encroachment/overlap finding text"},
+        {"name":"affected_boundary","type":"str","why":"processor — which boundary the encroachment affects"},
+        {"name":"location","type":"str","why":"processor — where on the parcel the encroachment sits"}
+      ]
+    }
+  ],
+
+  "rejected": [
+    {"name":"party_names / party_addresses","reason":"duplicate client_or_certified_parties / record_owner"},
+    {"name":"boundary_courses_and_distances","reason":"metes-and-bounds detail; huge token cost, no consumer; legal description suffices"},
+    {"name":"monuments_found_or_set","reason":"survey detail with no consumer"},
+    {"name":"improvements_and_structures","reason":"detail; no rule; the appraisal carries improvements for the subject"},
+    {"name":"setback_and_zoning_lines","reason":"detail, no consumer"},
+    {"name":"utilities_and_access","reason":"detail, no consumer"},
+    {"name":"recorded_plat_deed_or_title_references","reason":"object[]; the title commitment is authoritative on recorded references"},
+    {"name":"survey_standard_or_table_a_items","reason":"ALTA Table A checklist detail; no consumer"},
+    {"name":"easements_rights_of_way_and_restrictions","reason":"deferred to catch-all — only one nested list is budgeted (see Open questions)"},
+    {"name":"exceptions_or_notes","reason":"string[]; free-text notes with no consumer, stays in catch-all"},
+    {"name":"signature_blocks / notary_block","reason":"superseded by surveyor_signature_date / seal_present"},
+    {"name":"form_number / effective / expiration / statement period","reason":"not a standardized form; no consumer"},
+    {"name":"issuer_name / issuer_address / phone / email","reason":"duplicate the surveyor/firm fields"}
+  ],
+
+  "encoding_variations": [
+    "Surveyor credential appears as 'PLS 12345,' 'RLS 12345,' or 'License No. 12345' and the state may be separate — surveyor_license_state is the disambiguator",
+    "Area is stated in acres and/or square feet ('0.34 AC / 14,810 SF') — capture verbatim as a string",
+    "Flood zone on a survey references a FEMA panel number and effective date; keep the panel with the zone"
+  ],
+
+  "open_questions": [
+    {"id":1,"q":"Which findings list gets the one nested-list slot: encroachments vs easements? Both repeat and both matter for title.","options":["encroachments (drafted) — they most often trigger conditions","easements — more numerous, affect lien priority","a single merged survey_exceptions list with a finding_type column"],"recommendation":"a single merged survey_exceptions list if a survey-findings rule is ever built; encroachments-only for now GEET'S DECISION (LP-438): BUILD IT — LP-437 made nested lists cheap (one declaration + the generic mechanism); the one-list-budget / defer / no-consumer concern is overturned. Build as flat_row; the per-rule consumer is separate follow-up.","blocks_implementation":false},
+    {"id":2,"q":"surveyor_certification_text length — the certification block can be long.","options":["keep full text (drafted)","a truncated summary"],"recommendation":"full text — processors need the exact 'certified to' parties and a rule cannot re-derive them from a summary","blocks_implementation":false}
+  ],
+
+  "notes": [
+    "No rules read this document today (rule_count 0); there is no rule floor. A boundary/ALTA survey is findings-heavy; most detail lists have no consumer and stay in the catch-all. Fields earn a place by identity, disambiguation, or processor use.",
+    "No restricted fields on this doc. Names are standard sensitivity -> identity fields, not registry PII. No _PII_FIELDS additions."
+  ]
+}

@@ -1,0 +1,70 @@
+{
+  "document_type": "bankruptcy_filing",
+  "slug": "bankruptcy-filing",
+  "tier": 3,
+  "rules_served": [],
+  "summary_hint": "<debtor(s)> filed Chapter <bankruptcy_chapter> bankruptcy on <filing_date> in <court> (case <case_number>); debts primarily <consumer/business>, amended <yes/no>.",
+  "existing_extractor": null,
+  "catalog_coverage": "full",
+
+  "typed_core": [
+    {"name":"debtor_1_legal_name","type":"str","why":"identity: the primary filer; matches to the borrower","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"debtor_2_legal_name","type":"str","why":"identity: joint filer (spouse/co-borrower)","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"ssn_or_itin_last4","type":"str","why":"PII (highly_restricted, last-4): the debtor's SSN last-4 on the petition; MUST be typed, never catch-all","rules":[],"reason_class":"pii","rule_floor":false,"degraded_from":null,"pii":{"kind":"SSN","pre_masked":true},"exists_today":false,"prompt_hint":"The petition carries SSN last-4 — file it in ssn_or_itin_last4 (and _2), NEVER the catch-all"},
+    {"name":"ssn_or_itin_last4_2","type":"str","why":"PII (highly_restricted, last-4): joint debtor's SSN last-4","rules":[],"reason_class":"pii","rule_floor":false,"degraded_from":null,"pii":{"kind":"SSN","pre_masked":true},"exists_today":false,"prompt_hint":null},
+    {"name":"debtor_address","type":"str","why":"identity: the debtor address on the petition; identity/consistency","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"address","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"county_of_residence","type":"str","why":"identity / disambiguator: venue/residence context","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"bankruptcy_court_name","type":"str","why":"identity: the filing court — provenance/authenticity","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"case_number","type":"str","why":"PII (confidential) / identity: the case key that ties the filing to the discharge (#050) and to the credit-report public record","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"bankruptcy_chapter","type":"str","why":"disambiguator: Chapter 7 vs 11 vs 13 — drives the seasoning period and the meaning of the filing","rules":[],"reason_class":"disambiguator","rule_floor":false,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":"The chapter is a load-bearing fact (seasoning context) — keep verbatim"},
+    {"name":"amended_filing_indicator","type":"str","why":"disambiguator: whether this is an amended petition — which version governs","rules":[],"reason_class":"disambiguator","rule_floor":false,"degraded_from":"bool","pii":null,"exists_today":false,"prompt_hint":"Distinguish the amended petition from the original — the amended version governs"},
+    {"name":"filing_date","type":"date","why":"processor: the petition date — the bankruptcy event date used for timeline/seasoning context","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"The filing date is a load-bearing fact (bankruptcy event date) — extract precisely; do NOT judge whether the bankruptcy is seasoned or disqualifying"},
+    {"name":"debts_primarily_consumer_or_business","type":"str","why":"processor / disambiguator: consumer vs business debts — affects means test and how the bankruptcy is weighed","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":"Capture consumer vs business debt classification verbatim (the means-test selection)"},
+    {"name":"filing_basis_and_venue","type":"str","why":"processor: the stated basis/venue — completeness of the filing profile","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"estimated_asset_range","type":"str","why":"processor: rough asset scale — context for the case","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"estimated_liability_range","type":"str","why":"processor: rough liability scale — context for the case","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"rental_property_eviction_judgment","type":"str","why":"processor: an eviction judgment on a rented residence signals housing-payment history risk","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"object","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"attorney_name","type":"str","why":"processor: representing counsel — an authenticity/verification contact","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"object","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"document_issue_date","type":"date","why":"processor: petition preparation date when distinct from filing_date","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"loan_number","type":"str","why":"identity: links the filing to the loan file, when stated (confidential)","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"property_address","type":"str","why":"identity: subject/non-subject property when referenced","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"address","pii":null,"exists_today":false,"prompt_hint":null}
+  ],
+
+  "nested_lists": [],
+
+  "rejected": [
+    {"name":"the 8 TECHNICAL provenance fields","reason":"already in the TypedField wrapper"},
+    {"name":"document_title, form_number, form_revision_date, document_status_or_version","reason":"classified upstream; the petition is a standard federal form but no rule reads its form number here"},
+    {"name":"issuer_name, issuer_address, issuer_phone, issuer_email_or_url","reason":"the 'issuer' is the court/preparer; court captured by bankruptcy_court_name"},
+    {"name":"effective_date, expiration_date, statement_period_start, statement_period_end","reason":"duplicate filing_date; no coverage period"},
+    {"name":"party_names, party_addresses","reason":"redundant — the parties are the debtors (debtor_*)"},
+    {"name":"account_case_reference_number","reason":"duplicates case_number"},
+    {"name":"signature_blocks, notary_block","reason":"a petition's execution is the debtor/attorney signature, retained as debtor_signatures_and_dates/attorney_name where relevant; generic signature objects have no consumer"},
+    {"name":"debtor_signatures_and_dates, attorney_or_preparer_signature","reason":"execution details with no rule/processor consumer beyond confirming who filed; defer"},
+    {"name":"other_names_used, business_names_and_eins, prior_bankruptcy_cases, pending_related_cases","reason":"object[]/person_or_entity[] with no consumer today; defer to catch-all (business EINs would need a redactor if promoted)"},
+    {"name":"estimated_creditor_count_range, funds_available_for_unsecured_creditors","reason":"low-value case-profile detail with no consumer"},
+    {"name":"bankruptcy_petition_preparer, filing_fee_payment_method","reason":"no consumer"}
+  ],
+
+  "encoding_variations": [
+    "SSN presentation: petitions (official Form 101) show SSN as xxx-xx-1234 (last-4 only) — file under ssn_or_itin_last4; if a full SSN ever appears, it is still PII and must be typed",
+    "Chapter / amended: 'Chapter 7', 'Amended Voluntary Petition' — bankruptcy_chapter and amended_filing_indicator degrade to text; keep verbatim",
+    "Consumer vs business: the means-test checkbox — debts_primarily_consumer_or_business degrades to text; keep the exact selection",
+    "Ranges: assets/liabilities/creditors are stated as banded ranges ('$0–$50,000', '50–99 creditors') — estimated_asset_range / estimated_liability_range degrade to text as reported"
+  ],
+
+  "open_questions": [
+    {"id":1,"q":"No rule consumes this document today (Tier 3, rule_count 0). The filing pairs with the discharge (#050) for seasoning.","options":["keep filing_date, bankruptcy_chapter, amended_filing_indicator, debts_primarily_consumer_or_business","trim if no rule materializes"],"recommendation":"keep those fields so a seasoning/means-test rule can be built without re-extraction","blocks_implementation":false},
+    {"id":2,"q":"Nested-list candidate — prior_bankruptcy_cases is the strongest repeating structure with mortgage relevance (multiple/serial bankruptcies affect eligibility).","options":["defer to catch-all","promote to a flat-row nested list"],"recommendation":"defer until a multiple-bankruptcy rule exists; flag then GEET'S DECISION (LP-438): BUILD IT — LP-437 made nested lists cheap (one declaration + the generic mechanism); the one-list-budget / defer / no-consumer concern is overturned. Build as flat_row; the per-rule consumer is separate follow-up.","blocks_implementation":false},
+    {"id":3,"q":"business_names_and_eins PII — if promoted, EINs need masking (registered kind employer_ein).","options":["keep deferred","promote and build with a redactor"],"recommendation":"keep deferred; if promoted, build with a redactor, never catch-all GEET'S DECISION (LP-438): mask account-like identifiers (policy/account/plan numbers, wire/ACH trace, check references) via _PII_FIELDS; leave addresses and public-record case numbers PLAIN; DOB is unmasked (pii null).","blocks_implementation":false},
+    {"id":4,"q":"case_number PII treatment — same question as #050 (confidential, keys a public record).","options":["register as a masked PII field","keep as typed identity, unmasked"],"recommendation":"typed identity, unmasked, but flag for the privacy reviewer GEET'S DECISION (LP-438): mask account-like identifiers (policy/account/plan numbers, wire/ACH trace, check references) via _PII_FIELDS; leave addresses and public-record case numbers PLAIN; DOB is unmasked (pii null).","blocks_implementation":false},
+    {"id":5,"q":"Multiple enums/bools degraded (chapter, amended, consumer/business, asset/liability ranges).","options":["degrade to str + prompt hint","add a coercer"],"recommendation":"degrade to str + prompt hint","blocks_implementation":false}
+  ],
+
+  "notes": [
+    "The filing date and chapter are the load-bearing facts (bankruptcy event date + seasoning context).",
+    "Do NOT judge whether the bankruptcy is seasoned or disqualifying — capture the facts; rules/underwriters judge.",
+    "Ambiguity: case_number is tagged PII (confidential) but the design recommends keeping it as a typed identity field, unmasked — reason_class set to identity and pii left null pending the privacy reviewer (open question 4 blocks).",
+    "business_names_and_eins (deferred) would carry EINs; an EIN is a registered PII kind (employer_ein, masked). If promoted, it MUST be a typed/redacted field, never catch-all."
+  ]
+}

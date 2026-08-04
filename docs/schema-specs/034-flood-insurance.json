@@ -1,0 +1,90 @@
+{
+  "document_type": "flood_insurance_policy",
+  "slug": "flood-insurance",
+  "tier": 3,
+  "rules_served": ["IH-6"],
+  "summary_hint": "Flood policy <policy_number> from <insurance_carrier_or_nfip_wyo_company> on <insured_property_address>, <effective_date>-<expiration_date>, building coverage <building_coverage_limit> / deductible <building_deductible>, status <policy_status>, premium <premium_paid_status> — the adequacy inputs IH-6 checks against the SFHA zone",
+  "existing_extractor": null,
+  "catalog_coverage": "full",
+
+  "typed_core": [
+    {"name": "insurance_carrier_or_nfip_wyo_company", "type": "str", "why": "IH-6 — the policy's source; NFIP vs WYO vs private governs the adequacy standard", "rules": ["IH-6"], "reason_class": "rule", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "named_insureds", "type": "str", "why": "IH-6 — must include the borrower; flattened person_or_entity[] -> primary + _2", "rules": ["IH-6"], "reason_class": "rule", "rule_floor": false, "degraded_from": "person_or_entity", "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "insured_property_address", "type": "str", "why": "IH-6 — must match the subject property the SFHA determination covers", "rules": ["IH-6"], "reason_class": "rule", "rule_floor": false, "degraded_from": "address", "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "policy_number", "type": "str", "why": "PII (restricted) — policy identity; promote so it is masked, not left unmasked in the catch-all", "rules": [], "reason_class": "pii", "rule_floor": false, "degraded_from": "identifier", "pii": {"kind": "ACCOUNT", "pre_masked": false}, "exists_today": false, "prompt_hint": "Mask the policy number"},
+    {"name": "policy_form_or_program", "type": "str", "why": "disambiguator — NFIP Dwelling Form vs General Property vs private 'equivalent'; the form sets what 'adequate' means", "rules": [], "reason_class": "disambiguator", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "effective_date", "type": "date", "why": "IH-6 — policy must be in force at/through closing", "rules": ["IH-6"], "reason_class": "rule", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "expiration_date", "type": "date", "why": "IH-6 — must remain valid through closing", "rules": ["IH-6"], "reason_class": "rule", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "policy_status", "type": "str", "why": "IH-6 — active vs cancelled/expired/pending", "rules": ["IH-6"], "reason_class": "rule", "rule_floor": false, "degraded_from": "enum", "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "flood_zone", "type": "str", "why": "IH-6 disambiguator — the SFHA trigger; the dec page often restates the zone so it can be cross-checked against the flood determination", "rules": ["IH-6"], "reason_class": "disambiguator", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": "Capture the restated flood zone to cross-check the determination; surface conflicts rather than trusting one source"},
+    {"name": "community_and_map_information", "type": "str", "why": "disambiguator for flood_zone — NFIP community/panel that anchors the zone", "rules": [], "reason_class": "disambiguator", "rule_floor": false, "degraded_from": "object", "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "building_coverage_limit", "type": "Decimal", "why": "IH-6 — the primary adequacy input (compared to loan balance / replacement cost / NFIP max)", "rules": ["IH-6"], "reason_class": "rule", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": "Distinguish the dwelling/building coverage from contents coverage; the building limit is the IH-6 input"},
+    {"name": "contents_coverage_limit", "type": "Decimal", "why": "processor/IH-6 — contents adequacy where required", "rules": ["IH-6"], "reason_class": "processor", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "building_deductible", "type": "Decimal", "why": "IH-6 — an excessive deductible can make coverage inadequate", "rules": ["IH-6"], "reason_class": "rule", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "contents_deductible", "type": "Decimal", "why": "processor — contents deductible", "rules": [], "reason_class": "processor", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "replacement_cost_or_actual_cash_value_basis", "type": "str", "why": "IH-6 disambiguator — RCV vs ACV changes whether the limit is adequate (the IH-1 settlement-basis lesson: the same word can mean the dwelling or contents row)", "rules": ["IH-6"], "reason_class": "disambiguator", "rule_floor": false, "degraded_from": "enum", "pii": null, "exists_today": false, "prompt_hint": "Capture the row it belongs to (the dwelling/building basis); don't grab the first 'replacement cost' on the page"},
+    {"name": "annual_premium", "type": "Decimal", "why": "processor — escrow/closing-cost input", "rules": [], "reason_class": "processor", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "premium_paid_status", "type": "str", "why": "IH-6 — coverage is only in force if the (first) premium is paid", "rules": ["IH-6"], "reason_class": "rule", "rule_floor": false, "degraded_from": "enum", "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "waiting_period_or_effective_condition", "type": "str", "why": "IH-6 — the NFIP 30-day waiting period vs the closing date determines whether the policy is actually effective at closing", "rules": ["IH-6"], "reason_class": "rule", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "lender_loan_number", "type": "str", "why": "identity/linkage — ties the policy to the loan file (confidential)", "rules": [], "reason_class": "identity", "rule_floor": false, "degraded_from": "identifier", "pii": null, "exists_today": false, "prompt_hint": null}
+  ],
+
+  "nested_lists": [
+    {
+      "name": "mortgagee_clause_entries",
+      "shape": "flat_row",
+      "shape_reason": "a policy lists 1-3 mortgagees/loss-payees (lender, servicer, trustee) — few items, so a flat row is light",
+      "expected_item_count": "1-3",
+      "rules": ["IH-6"],
+      "exists_today": false,
+      "plumbing_sites": 5,
+      "fields": [
+        {"name": "mortgagee_name", "type": "str", "why": "IH-6 — the lender must be named as mortgagee; warrantability"},
+        {"name": "mortgagee_address", "type": "str", "why": "IH-6 — the mortgagee clause address"},
+        {"name": "loan_number", "type": "str", "why": "IH-6 — ties the mortgagee entry to the loan file"},
+        {"name": "capacity", "type": "str", "why": "IH-6 — mortgagee / loss-payee / additional-insured role"},
+        {"name": "source", "type": "str", "why": "provenance — where on the dec page this entry was read"}
+      ]
+    }
+  ],
+
+  "rejected": [
+    {"name": "document_title, form_number, form_revision_date", "reason": "classification/version before extraction (policy_form_or_program identifies the program)"},
+    {"name": "issuer_name", "reason": "duplicates insurance_carrier_or_nfip_wyo_company"},
+    {"name": "issuer_address, issuer_phone, issuer_email_or_url", "reason": "carrier contact; catch-all"},
+    {"name": "document_issue_date, declarations_or_endorsement_date", "reason": "issue/endorsement dates are marginal beside effective/expiration; catch-all"},
+    {"name": "statement_period_start/_end", "reason": "the policy term is effective/expiration, not a statement period"},
+    {"name": "party_names, party_addresses", "reason": "covered by named_insureds + insured_property_address + the mortgagee list"},
+    {"name": "property_address", "reason": "duplicates insured_property_address"},
+    {"name": "loan_number", "reason": "duplicates lender_loan_number"},
+    {"name": "account_case_reference_number", "reason": "duplicates policy_number"},
+    {"name": "signature_blocks, notary_block", "reason": "a dec page is issued by the carrier, not executed/notarized; catch-all"},
+    {"name": "document_status_or_version", "reason": "policy_status carries the material state"},
+    {"name": "basement_or_other_limitations", "reason": "coverage nuance; marginal for IH-6 adequacy; catch-all"},
+    {"name": "payment_due_date", "reason": "marginal beside premium_paid_status; catch-all"},
+    {"name": "agent_or_producer_contact", "reason": "producer contact; no IH-6 gate; catch-all"}
+  ],
+
+  "encoding_variations": [
+    "flood_zone — SFHA set A/AE/AO/AH/AR/A99, V/VE vs non-SFHA X/B/C/D. The authoritative zone is on the flood determination; the policy dec page restates it and can lag — capture it as a cross-check, flag conflicts",
+    "replacement_cost_or_actual_cash_value_basis — 'Replacement Cost', 'RCV', 'ACV', 'Actual Cash Value'. No enum coercer; the dwelling basis can sit beside a different contents basis — capture the row it belongs to, don't grab the first 'replacement cost' on the page",
+    "policy_status / premium_paid_status — 'Active/In Force', 'Cancelled', 'Expired', 'Pending' and 'Paid', 'Paid in Full', 'Balance Due', 'Not Paid'. No enum coercer; degrade to str",
+    "insurance_carrier_or_nfip_wyo_company — NFIP Direct vs a WYO (Write-Your-Own) carrier issuing NFIP policies vs a private flood carrier; the program governs adequacy",
+    "waiting_period — usually 30 days for new NFIP purchases (waived on loan closing); capture the stated condition"
+  ],
+
+  "open_questions": [
+    {"id": 1, "q": "BLOCKED status — IH-6 has no producer yet. Should the schema land the adequacy fields now so the rule lights up when unblocked, rather than the values reaching the discarded catch-all?", "options": ["land the fields now (rule-floor-first)", "wait until IH-6 has a producer"], "recommendation": "yes — land now", "blocks_implementation": false},
+    {"id": 2, "q": "RCV/ACV basis disambiguation — the biggest misread risk: the dwelling basis vs the contents basis", "options": ["one replacement_cost_or_actual_cash_value_basis str + a prompt hint to read the dwelling row", "split into building_ and contents_ basis fields"], "recommendation": "(a) now, flag (b) if misreads appear", "blocks_implementation": false},
+    {"id": 3, "q": "Zone-source conflict — the policy's restated zone may disagree with the flood determination (the authoritative source)", "options": ["capture both and surface conflicts", "trust one source"], "recommendation": "capture both; IH-6 keys on the determination; surface conflicts for review", "blocks_implementation": false},
+    {"id": 4, "q": "Adequacy threshold owner — the 'adequate' comparison (limit vs lesser of loan/replacement/NFIP max) is a rule computation, not an extracted fact", "options": ["land only the inputs (limits/deductible/basis)", "compute adequacy in the extractor"], "recommendation": "confirm the schema only lands the inputs and leaves the adequacy judgment to IH-6", "blocks_implementation": false}
+  ],
+
+  "notes": [
+    "No existing_extractor for this document type — new schema.",
+    "IH-6 status is BLOCKED (no producer yet); the fields must still land now so IH-6 activates when unblocked rather than the values going to the discarded catch-all.",
+    "19 typed-core rows + one nested list. IH-6 keys on presence (policy_number/dates/status), adequacy (building limit/deductible/basis), the SFHA zone, and the mortgagee clause. Within range.",
+    "This is a flood policy / declarations page (NFIP Dwelling Form, WYO, or private-flood equivalent), not the flood determination — the determination gives the SFHA zone; the policy gives coverage. Distinguish the dwelling/building coverage from contents coverage; the building limit is the IH-6 input. Money with $/commas -> Decimal; mask the policy number.",
+    "PII: policy_number needs _PII_FIELDS registration, pre_masked false (restricted; otherwise stored unmasked in the catch-all). named_insureds are person/entity names at standard sensitivity (identity). insured_property_address is the subject collateral, not restricted borrower PII. lender_loan_number is confidential but a loan identifier, not a maskable PII kind."
+  ]
+}

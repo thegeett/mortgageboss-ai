@@ -12873,7 +12873,356 @@ ADR-333 (the extraction→snapshot boundary — a field must be typed-core to be
 rules from Priya's B14-adjacent answers (IH-1 here; PE-1 an FHFA table; the pay-stub-only rule) each have their
 own ticket; LP-430 built the terminated-employment one.
 
-## ADR-341: A second worktree's stack is separated by SHELL-VARIABLE DEFAULTS in `docker-compose.yml`, and its database is SEEDED from the main one rather than migrated from empty (A1)
+## ADR-341: The extractor generator emits validated flat schemas and REFUSES the rest — the structure is scriptable, the prose is not (LP-434)
+
+**Context.** `docs/schema-specs/` holds 108 JSON specs describing each document type's extraction schema;
+`_GENERATION_GUIDE.md` defines how a spec becomes code. LP-434 built the generator. Because every future extractor
+will be produced this way, a template error would propagate silently across ~98 types — so the contract, and the
+one place the guide is optimistic, are recorded here.
+
+**The decision — validate first, refuse loudly, generate only the flat/clean part.** The generator
+(`app/ai/extraction/generator/`) runs the guide's five §0 stop conditions BEFORE any emitter and refuses a spec
+outright — with reasons — rather than emitting partial or guessed code:
+(1) a blocking `open_questions` entry; (2) a field `type` with no coercer (`str`/`Decimal`/`date`/`int` only);
+(3) a `pii.kind` not in the live `PiiKind` enum (**DOB and ADDRESS do not exist today**); (4) **any** nested list
+(~5 bespoke files each, no generic mechanism); (5) a field with no `reason_class`. The valid PII kinds are read
+from the live enum, not hard-coded, so adding a kind (with its mask strategy) unblocks its specs with no edit to
+the validator. A passing spec emits the module, the prompt scaffold, the `EXTRACTORS` registration snippet, and
+the test skeleton. Review metadata (`why` / `reason_class` / `rejected` / `open_questions` / `rule_floor` /
+`plumbing_sites`) is NEVER emitted into code. A spec with a shipping `existing_extractor` produces a **diff-mode
+report** of the `exists_today: false` additions, never a module and never a patch (a bad patch to a shipping
+extractor is worse than a manual edit).
+
+**What it refuses is the point.** All ten of the top specs refuse — the CORRECT outcome, since they are
+nested-heavy by design. Notably **008-w2 refuses** (its `employee_address` carries `pii.kind: "ADDRESS"`,
+absent from `PiiKind`), correcting the LP-434 ticket's prediction that w2 would pass. `condo_questionnaire` is one
+resolved blocking question from generating; `w2`'s four non-address additions generate fine.
+
+**The round-trip is the proof.** A spec describing `property_tax_bill` as it ships (`existing_extractor: null`)
+generates a module whose `_CORE_SPEC` is **byte-identical** to the shipping one (same fields, same coercers,
+same imports, same function bodies); the ONLY differences are docstrings/comments. Pinned by two tests comparing
+the generated `_CORE_SPEC` and model field names/annotations against the live shipping module.
+
+**D2 — mechanism.** f-string templates normalized through ruff itself (`ruff check --fix --select I` +
+`ruff format`, via `--stdin-filename` so first-party `app` detection is correct). This is the simplest way to
+GUARANTEE byte-clean, import-sorted, ruff- and mypy-passing output for any field set, rather than hand-guessing
+where ruff wraps a long call for a long class prefix. ruff is a dev dependency, always present in-repo.
+
+**The D1 finding — the guide's §12 is slightly optimistic about uniformity.** Diffing two shipping flat modules,
+the *code* is near-identical (imports modulo the coercer line, the Result class, `.failed()`, the parse/extract
+bodies, the logging — all byte-identical modulo substituted names), BUT the module docstring, class docstrings,
+and inline field comments are **bespoke prose per module**. The generator therefore emits *neutral, honest*
+docstrings/comments — a "GENERATED STARTER — accuracy UNVALIDATED" banner — rather than imitating hand-written
+prose it cannot reconstruct from the spec. **The structure is scriptable; the prose (and accuracy) are not.** A
+generated extractor ships structurally correct and mechanically tested, tuned by a human prompt pass and Priya's
+review of real extractions — never presented as already tuned.
+
+**Consequences.** Sizing the 108 is guide §12: scripted generation for the flat/clean thin majority · ~15–20 real
+tickets for the nested / PII-heavy / new-coercer documents · a Priya validation pass over all. Adding a `PiiKind`
+(DOB/ADDRESS) with a genuine mask strategy unblocks six of the top ten at condition 3. Nested lists stay bespoke.
+
+**Cross-refs.** `docs/schema-specs/_GENERATION_GUIDE.md` (the authoritative contract), `_FORMAT.md` (the spec
+shape), ADR-333 (the extraction→snapshot boundary — a field must be typed-core to be rule-visible), ADR-340
+(the extractor-extension boundary that stopped IH-1), LP-62 (the flat-extractor fan-out this scales).
+
+## ADR-342: The schema-spec pass set is the thin Tier-2/3 tail, not the flat valuable middle — the generator's leverage is smaller and differently shaped than guide §12 predicted (LP-435)
+
+**Context.** LP-435 applied Geet's four spec decisions (addresses unmasked; credit-report/appraisal/condo open
+questions answered), validated all 108 schema specs, and generated every passing spec. The ADR note asked to
+record if the pass rate is far from what `_GENERATION_GUIDE.md` §12 predicts ("scripted generation for the flat
+majority · a bounded set of bespoke tickets for the nested/PII-heavy tail"), since that resizes the remaining work.
+
+**The finding — it is far off, in shape more than count.** 14 of 108 pass. But the passing set is the **thin
+tail**: by their own declared tier, the 13 generated new-type modules are **1 Tier-1** (condo_questionnaire, 7
+rules), **3 Tier-2**, and **9 Tier-3 documents with 0–1 rules each**. They pass precisely *because* they are
+simple — no nested lists, no blocking questions, no DOB/ADDRESS. **Every high-value document refuses:** the 1003,
+credit report, appraisal, bank statement, title commitment, AUS findings, and the tax-return family all carry a
+nested list (61 specs), a DOB/ADDRESS PII kind (27 specs), or an unresolved blocking question (85 specs) — usually
+several. There are **66 nested lists across the specs**, each a bespoke ~5-file ticket (guide §4).
+
+**The decision — the generator's leverage is real but bounded, and it is in the tail.** Guide §12's "scripted
+generation for the flat majority" is only half right: the flat, all-coercible, no-blocking-question majority that
+the generator *can* emit today is the low-rule-count Tier-2/3 tail, not the flat-but-valuable middle. Sizing the
+remaining work accordingly: (a) the **66-nested-list backlog** is the critical path — every valuable document is
+gated on hand-built lists; (b) a **DOB `PiiKind`** decision (11 fields / 9 specs) plus the accepted address
+unmasking are prerequisites for the identity-heavy docs; (c) the ~85 **blocking open questions** are the cheapest
+lever — 20 specs are one answer from passing (the near-miss list). The generator remains the right tool for the
+thin tail and for the flat additions to shipping extractors (the 18 diff reports), but it does not, by itself,
+unlock the documents the rules actually need.
+
+**What LP-435 did with the finding.** Generated + placed the 13 passing modules (unwired, per Geet — the pipeline
+extracts only Tier-1, a hard `== 18` invariant forbids silent promotion, and 9 of 13 are near-ruleless Tier-3);
+produced a wiring backlog + 18 diff reports (`docs/schema-specs/_WIRING_BACKLOG.md`); left DOB masked and flagged
+it. No rule moved; the 18 shipping extractors are byte-unchanged.
+
+**Cross-refs.** ADR-341 (the generator contract), `_GENERATION_GUIDE.md` §4/§12, `docs/tickets/LP-435.md` (the
+full validate table + roll-up), `docs/schema-specs/_WIRING_BACKLOG.md` (wiring + diff reports).
+
+## ADR-343: Generic nested lists — one mechanism for all 66, coexisting with the three bespoke attributes, and deliberately invisible to AI (LP-437)
+
+**Context.** 61 of 108 schema specs refuse on the nested-list stop condition; each list currently costs ~5 hand-
+written files (a snapshot record class + a `DocumentEntry` attribute + a `build_*` reshaper, per LP-421/ADR-061),
+i.e. ~330 edits. LP-436 investigated whether the plumbing can be generic and found it can, because the reason the
+bespoke path looked unavoidable does not hold: **there is no executable path resolver.** `snapshot_path` in a rule
+spec is `snapshot_path: str` documentation (specs.py) — never parsed — and real consumption is a Python attribute
+read (`all_transactions` reads `entry.transactions`; a derived recipe reads `entry.schedule_c`). LP-437 builds the
+generic mechanism.
+
+**The decision — one additive generic channel, driven by a per-list declaration.** `DocumentEntry` gains
+`lists: dict[str, tuple[ListRow, ...]] = {}`, where `ListRow.fields` is the same `{name: Field}` map a document's
+flat `fields` uses. One converter (`build_list_rows` + `finalize_lists` in documents_section.py) reshapes every
+declared list for a document, reading each row field with the SAME `_typed_field` the schedules use (the extractor
+already coerced values at extraction time; the snapshot-time step is a read, not a re-coercion). A per-document-type
+`ListSpec` (name + declared field names + three helper declarations) drives it; the registry `_LIST_SPECS` is EMPTY
+today (LP-438 emits the real specs), so every real document gets `lists={}` — nothing changes for any live rule. A
+generic reader `all_list_rows(snapshot, name)` mirrors `all_transactions` so a consumer reads
+`entry.lists.get(name, ())` through one helper.
+
+**Why generic here where bespoke was needed before.** Nothing is lost relative to a bespoke list: a row `Field`
+carries value + confidence + provenance `source`, exactly what a `TransactionRecord`/`ScheduleCRecord` field carries
+(page/snippet are not in the snapshot `Field` for ANY field — flat, transaction, or schedule — so the generic list
+matches the bespoke fidelity). Because consumption is a plain attribute read and there is no resolver to teach a new
+grammar, the storage side (record class + attribute + reshaper) collapses to one build + a declaration; only the
+consumer (a rule enumerator or a derived recipe) stays per-list, which is the rule's own logic.
+
+**Coexist, do NOT migrate (a STOP, not a refactor).** `transactions` feeds live AS-1; `schedule_c` feeds live
+IN-12; `schedule_e` feeds IN-13. The three bespoke attributes are left byte-unchanged; `lists` is for the 66 NEW
+lists only. Migrating a live-rule attribute is out of scope by construction.
+
+**No `SNAPSHOT_VERSION` bump (the LP-421 precedent exactly).** `lists` is additive with a default, so the committed
+v4 golden fixture (which carries no `lists` key) still validates — the default fills it. Bumping is the failure mode
+LP-421 already paid for (74 failures from the strict version validator rejecting the committed fixture). Verified: no
+test byte-compares a snapshot to the fixture; the fixture loads via tolerant `model_validate`.
+
+**The three declarable helpers and the fail-closed contract.** `redact` runs the shared `_DESC_REDACT`
+(`\d(?:[\s-]?\d){8,}`) over named fields (zero new logic). `stable_row_id` calls the already-generic
+`assign_content_ids` with one guard-safe `lst` prefix (the list name folded into the hashed content). `derived` maps
+a source value to a new field and **MUST fail closed: an unmapped value produces an ABSENT Field, never a fabricated
+value** — copying `_direction`'s absent-on-unknown discipline, the guard that stops a forged deposit tripping AS-1.
+Tested explicitly (`test_derived_is_fail_closed_absent_on_unknown`).
+
+**The deliberate boundary — list data is INVISIBLE to AI reasoning.** `subjects.py::_doc_context` /
+`_borrower_context` build the AI context from `DocumentEntry.fields` only; `lists` (like the catch-all) is not sent.
+This is the exact boundary that made the homeowners-insurance catch-all unreachable and killed IH-1 (LP-431). It is
+a KNOWN, deliberate, SEPARATE decision (LP-436 step 8) — this ticket does not change it; deterministic
+`snapshot_path`-style enumerators and derived recipes reach list data, AI reasoners do not until a future ticket
+teaches the context builders to emit rows (opt-in + row cap, because a 20-tradeline row set is a real token cost).
+
+**Cross-refs.** LP-436 (`docs/tickets/LP-436.md`, the investigation), ADR-061 (the first-class typed-path pattern
+the three bespoke lists follow), LP-421 (the additive-no-bump precedent), ADR-248 (the transaction redaction/direction
+discipline), ADR-251 (content-ids). LP-438 adds the `_FORMAT.md` list declaration + the generator emitting `ListSpec`s.
+
+## ADR-344: The generator emits generic-list registration as a SNIPPET, not a shared-file patch — and wiring is deferred because the ListSpec type lives in the snapshot layer (LP-438)
+
+**Context.** LP-437 built the generic nested-list mechanism (`ListSpec` / `DocumentEntry.lists` / `_LIST_SPECS`
++ three helpers) and shipped `_LIST_SPECS` empty. LP-438 extended the generator to emit a `ListSpec` per
+`nested_lists` entry. D2 asked how a generated module registers its lists WITHOUT every module editing one
+shared file (a merge-conflict factory).
+
+**The decision — emit the `_LIST_SPECS` registration as a SNIPPET, never a patch; defer wiring.** The generator
+emits, per list, the `ListSpec` construction plus a one-line registration snippet (`"<type>": (_<LIST>_LIST,)`)
+— exactly the shape of the existing `EXTRACTORS` registration snippet, which the generator also emits but never
+applies. Nothing patches `documents_section._LIST_SPECS`. This keeps generation side-effect-free and avoids the
+merge-conflict factory a shared-file edit would create at 66-list scale.
+
+**The layering reason wiring is a separate step.** The `ListSpec` / `DerivedSpec` types live in the SNAPSHOT
+layer (`app/verification/snapshot/documents_section.py`), because that is where the generic converter consumes
+them. A generated EXTRACTION module (`app/ai/extraction/<type>.py`) therefore cannot define its own `ListSpec`
+and self-register at import time without importing the verification layer — an inversion of the established
+`verification → app.ai` dependency direction. So the registry is populated by a deliberate wiring step (step 7),
+not by generation. Two clean shapes remain open for that step: (a) a generated registry module in the snapshot
+layer that aggregates per-type `ListSpec`s, or (b) moving the `ListSpec` type to a neutral module both layers
+import. LP-438 does not choose between them (it does not wire); it records that a shared-file-per-module edit is
+the one shape to avoid.
+
+**Consequences.** The generator is complete for emission; wiring 70 specs' lists into `_LIST_SPECS` (and writing
+each list's per-rule consumer — an enumerator or a derived recipe, which is the rule's own logic) is the
+follow-on. Nested lists are no longer a stop condition; the validate pass count rose 14 → 70.
+
+**Cross-refs.** ADR-343 (the LP-437 mechanism + the coexist / no-bump / AI-invisibility rulings),
+`docs/schema-specs/_GENERATION_GUIDE.md` §4 (rewritten), `_FORMAT.md` (the per-list declaration), LP-439 (the
+extractor generation that consumes these emissions).
+
+## ADR-345: A document_type with a leading digit cannot be generated — four tax-transcript specs need a rename or hand-writing (LP-440)
+
+**Context.** LP-440 ran the generator across all 108 specs. Four failed with `GenerationError`: `1040_personal_tax_transcripts`, `1065_partnership_tax_transcripts`, `1120_corporate_tax_transcripts`, `4506_t_request_for_transcript_of_tax_returns` (specs 040–043). LP-434 flagged this class up front: a `document_type` with a leading digit is not a valid Python identifier, so the generator cannot derive a class name (`1040PersonalTaxTranscriptsExtraction`) or module import. The ticket asked to record if a spec CLASS cannot be generated at all — this is it.
+
+**The decision — leave them ungenerated; step 1/7 chooses a fix.** The generator refuses loudly rather than emitting broken code (the LP-434 stop-on-non-identifier guard). Two clean fixes, deferred to the wiring/tier step:
+(a) **rename the `document_type`** to a non-digit-leading slug — the mortgage convention is a `form_` prefix (`form_1040`, `form_1065`, `form_1120`, `form_4506t`), mirroring the shipping `form_1099` extractor (whose slug is already `form_1099`, not `1099`); or
+(b) **hand-write** the four modules.
+
+Option (a) is preferred and cheap — it makes them generatable and matches the existing `form_1099` precedent — but it is a catalog/slug decision (step 1), not a generation decision, so LP-440 does not apply it. The other 86 new-type specs generated cleanly; the 18 shipping specs got diff reports.
+
+**No other spec class failed.** `_MAX_TOKENS` sizing (D3) is derivable from the nested-list count (0 → 4096, 1 → 8192, ≥2 → 16384) — no rule the generator cannot derive — so no ADR there.
+
+**Cross-refs.** LP-434 (the non-identifier stop guard), LP-440 (`docs/tickets/LP-440.md`, the generation run), `docs/schema-specs/_REGISTRATION_SNIPPETS.md`.
+
+## ADR-346: Merge Tier 2 into Tier 1 (every schema'd document gets full extraction); the ==18 invariant becomes "Tier-1 IFF it has a spec"; and the schema/catalog vocabularies must be reconciled (LP-441)
+
+**Context.** The document catalog had three tiers because only 18 documents had extraction schemas: Tier-1 (extract), Tier-2 (a cheap Haiku summary), Tier-3/uncataloged (generic analysis). That constraint is gone — 108 schema specs exist (LP-434…440). Geet's decision: *"we are not doing three different tiers. Since we have all schema information we will merge tier 2 into tier 1 and extract all; only unknown will be generic analysis."*
+
+**The decision — merge Tier-2 into Tier-1 for every type that has a schema spec.** A catalog type with a JSON spec is promoted to Tier-1 (it DESERVES extraction); a catalog type without a spec stays Tier-2 (summary); an uncataloged type stays the Tier-3 generic-analysis fallback. This ticket promoted 18 catalog types (Tier-1 18 → 36) and touched no `EXTRACTORS`/`_LIST_SPECS`/`_PII_FIELDS` — the tier says "this document deserves extraction," the registry (step 7) says "here is the extractor," and keeping them separate let the merge land with nothing running.
+
+**The replacement invariant.** `test_eighteen_tier_1_types` (`len(tier_1) == 18`) existed so extraction coverage was a DELIBERATE decision, not drift. A raw count is meaningless after the merge, and a count that just tracks the catalog is a tautology. It is replaced by two real guards: (a) **a catalog type is Tier-1 IFF it has a schema spec** (`test_tier_1_iff_the_type_has_a_schema_spec`) — fails both ways (a Tier-1 with no spec, or a spec'd type left at Tier-2), pinned by a drift-case test; and (b) **every registered extractor's type is Tier-1** (`test_every_registered_extractor_is_a_tier_1_type`, replacing "every Tier-1 has an extractor") — so a wired extractor is never dispatched on a Tier-2/3 document. Together they preserve the deliberate-coverage property without requiring coverage to be complete.
+
+**The routing is safe before step 7 (the D3 gate).** `_route_by_tier` dispatches extraction only for Tier-1 and only when `EXTRACTORS.get(document_type)` is non-None; otherwise it calls `_complete_classified_only` (COMPLETED, terminal, no extraction, no crash, no FAILED). So the 18 newly-promoted Tier-1 types with no wired extractor complete cleanly as classified-only until step 7 — asserted with a real promoted type (credit_report). The only behavioural change is that a promoted type loses its interim Haiku summary and becomes classified-only until its extractor is wired.
+
+**The four leading-digit renames (ADR-345, applied).** `1040_/1065_/1120_/4506_t_…` → `form_1040_…/form_1065_…/form_1120_…/form_4506t_…` (the `form_1099` precedent), so they form valid Python identifiers and generate (86 → 90 modules). They are not in the catalog, so they remain uncataloged (Tier-3) pending a catalog decision.
+
+**⚠️ The vocabulary reconciliation (a NEW GAP this surfaced).** The schema `document_type` vocabulary diverged from the catalog/classifier vocabulary: only 26 of 108 spec types were in the catalog. The classifier emits catalog keys; the generated extractors are keyed by spec type — so an unreconciled type is never reached (the exact silent-routing failure the merge exists to think about). This ticket reconciled the UNAMBIGUOUS cases: 10 spec `document_type`s were renamed to their exact catalog key (`application_1003` → `uniform_residential_loan_application`, `form_1099` → `1099`, …), which also made those catalog types promotable. **72 spec types remain uncataloged** — recorded in `docs/schema-specs/_VOCABULARY_MAPPING.md` as UNSURE-with-candidate (21) or NO MATCH (the rest). Per Geet, **no mapping was guessed** — a wrong rename silently breaks routing. Reconciling the 72 (add a catalog entry + a classifier indicator, or confirm the UNSURE candidates) is the follow-up that makes the remaining generated extractors reachable.
+
+**Cross-refs.** ADR-345 (the leading-digit rename), `app/tasks/document_processing.py::_route_by_tier` (the D3 gate), `tests/documents/test_catalog.py` (the replacement invariant), `docs/schema-specs/_VOCABULARY_MAPPING.md` (the 82-type map), LP-440/`_REGISTRATION_SNIPPETS.md` (what step 7 applies).
+
+## ADR-347: Reconcile the schema and catalog vocabularies — the SCHEMA vocabulary moves to the CATALOG's, because the classifier is already trained on catalog keys (LP-442)
+
+**Context.** ADR-346 surfaced the blocker: two vocabularies existed and had diverged. The classifier emits **catalog** keys; `EXTRACTORS` is keyed by **spec** `document_type`. After LP-441's 10 unambiguous renames, 72 of 108 spec types were still not in the catalog — so the classifier could never emit them and their generated extractors were unreachable, silently, with no error. A **wrong** mapping produces the identical silent failure, which is why LP-441 applied only the unambiguous set and reported the rest.
+
+**The decision — one vocabulary, and it is the catalog's.** The schema vocabulary moves to the catalog vocabulary, not the reverse, for one asymmetric reason: **the Haiku classifier is already trained/prompted on catalog keys.** Renaming the catalog would mean retraining recognition; renaming the schema side (or adding catalog entries the classifier learns) is cheap. So every schema'd type is made reachable by either (a) renaming its spec `document_type` to an existing catalog key (a merge), or (b) adding a new catalog key + a classifier indicator under the spec's own name. The measure: **every spec `document_type` now resolves to a catalog entry — 109/109, up from 36.**
+
+**Geet's three decisions.** (1) **Split** `alimony_income_verification` into `alimony_income` + `child_support_income` (both pre-existing catalog keys) — Priya ruled they qualify differently: child support terminates at the child's emancipation age, alimony runs to the court order. The split reuses the shared income-analysis field set; child support **adds** `child_ages_or_dates_of_birth` + `support_termination_age_or_event` (the continuance facts), the only divergence. (2) **Both authorization docs get distinct names**; the generic `borrower_authorization` catalog entry is **retired** (verified unused — no rule, fixture, test, or registry reference). `authorization_to_run_credit` (credit-pull consent) and `borrower_authorization_and_certification` (broad verify-and-certify) are different documents and cannot share a key. (3) **Merge `mortgage_payoff` — target verified before merging.** Two candidates: `payoff_statement` (PROPERTY, "a lienholder demand to fully pay off an existing loan") and `debt_payoff_statement` (CREDIT, "a debt paid off to exclude it from DTI"). The spec serves CR-3 (paid-off liability) + TI-3 (lien on title) and carries `property_address`/`lien_release_timing` — it is the real-estate lien payoff → **`payoff_statement`**. Merging into `debt_payoff_statement` would have been the silent-routing failure.
+
+**The four merges.** `aba` → `affiliated_business_disclosure`, `consent_to_use_electronic_records_and_signatures` → `e_consent_disclosure`, `k_1_schedule_1065_1120s` → `k1_statement`, `mortgage_payoff` → `payoff_statement`. Each spec `document_type` was renamed and its module/prompt/test regenerated under the catalog name; the old-named files were deleted; the six merge/split target catalog keys were promoted Tier-2 → Tier-1 (they now have specs, so the LP-441 invariant requires it).
+
+**The 17 deliberate NON-merges (each a document a processor treats differently).** These were NOT merged onto a plausible-looking catalog key — the candidate would conflate two things: `life_insurance_policy` (coverage) vs `life_insurance_statement` (cash value, which AS-4 reads); `retirement_pension_award_letter` / `disability_award_letter` (the award WITH continuance — Priya named award letters) vs the income/statement variants; `verbal_voe` (a phone-call record) vs `voe` (a signed form IN-8 checks); `verification_of_assets` (a multi-account aggregator report) vs `verification_of_deposit` (one bank, one account); `k_1_shareholder_profit_and_loss_transcripts` / `transcripts_of_1099` / the three `form_1040_/1065_/1120_…transcripts` (IRS transcripts) vs the forms and the generic `tax_transcript` (which would collapse them); `work_visa_ead_card` (a USCIS work-authorization card ID-8 checks) vs `visa_documentation` (a travel visa); `prior_closing_disclosure_final_cd_from_purchase` (a PRIOR purchase's CD — seasoning evidence) vs `closing_disclosure` (this loan's — conflating them is genuinely dangerous); `government_issued_id` (a generic fallback by design); the two authorization docs (decision 2); the alimony/child-support split (decision 1). **These reasons are exactly why the classifier indicators can tell each apart** — an indicator must distinguish, not describe.
+
+**The bulk — 67 new catalog types + 67 classifier indicators.** Every NO-MATCH/keep-separate spec type is now a Tier-1 catalog entry with a distinguishing recognition indicator; the catalog↔classifier pair is CI-locked (a type without an indicator fails the parity test). **No mapping was guessed** — a name match alone never justified a merge.
+
+**Recorded classification risks (inexpressible from the document alone).** `trust_documents` (a trust certification/excerpt) vs the pre-existing `trust_documentation`, and `trust_agreement` — three trust-paperwork keys that are hard to separate from a single document; `ira_401k` vs the generic `retirement_account`; `statement_of_account` is asset-or-liability ambiguous; the five `custom`/`miscellaneous_document`/`general_correspondence`/`letter_of_explanation_misc` catch-alls overlap by design. These are flagged, not papered over — real per-type accuracy is refine-with-Priya / real-labeled-document work.
+
+**What did NOT move.** Nothing is wired (`EXTRACTORS`/`_LIST_SPECS`/`_PII_FIELDS` untouched — step 7). The 18 shipping extractors are byte-unchanged; `ACTIVE_RULE_IDS` = 36 and the live rules are identical. Newly-cataloged Tier-1 types with no wired extractor complete cleanly as classified-only (the ADR-346 D3 gate) until step 7 wires them.
+
+**Cross-refs.** ADR-346 (the tier merge + the vocabulary gap this closes), `app/documents/catalog.py` + `app/ai/classification_prompt.py` (the CI-locked pair), `docs/schema-specs/_VOCABULARY_MAPPING.md` (updated to final resolution), `tests/documents/test_catalog.py::test_every_spec_document_type_resolves_to_a_catalog_entry` (THE MEASURE), `docs/tickets/LP-442.md` (the full reconciliation table + every indicator written).
+
+## ADR-348: The list-capture bridge — generic-list rows are stored BARE (matching bank_statement.transactions), read bare by the snapshot, with an honest None per-field confidence; the legacy transactions path coexists (LP-443)
+
+**Context.** LP-437 built a generic nested-list mechanism and LP-440 generated ~90 extractors + ~50 `ListSpec`s — but none ran, because the chain had a hole in the middle. Three layers, two mismatches: the **prompt** asks for a list as BARE rows (`{"date": <scalar>, …, "page": …, "snippet": …}`); the **generated extractor** had NO model field to store them (typed-core + catch-all only); and the **snapshot** reader (`build_list_rows` → `_typed_field`) expected `{value}`-WRAPPED rows. So even a shipping type's list produced zero rows. LP-437's own test proved nothing — it fed the reader `{value}`-wrapped rows that no extractor produces.
+
+**The bridge decision — read BARE in the snapshot (option b), not wrap-at-extraction (option a).** Two independent reasons converge: (1) **shape-match** — `bank_statement.transactions` already stores BARE rows (`_parse_transactions`: coerced scalars + one `source` per row); wrapping at extraction would give the generated lists a SECOND stored shape for the same concept, the exact divergence LP-441/442 just repaired. (2) **forced by the proof** — bank_statement's transactions are bare and immutable (live AS-1 reads them; migrating is a STOP), so for the generic mechanism to read them AT ALL the reader must read bare; option (a) cannot prove on bank_statement. So the fix is in ONE place — a `_list_field` bare reader in `documents_section.py` — and `_typed_field` (the tax-return schedules, genuinely `{value}`-wrapped) is left untouched. The generator now emits the extractor-side capture (a `list[dict[str, Any]]` field + a `_parse_<list>` mirroring `_parse_transactions`) so every regeneration carries it.
+
+**A row field's confidence is honestly None.** A bare-row prompt supplies one `page`/`snippet` source per row and NO per-field confidence (the `field_confidence` map covers typed core only). So each list-row `Field` is `Field.present(value, source=EXTRACTED, confidence=None)` — never a fabricated number. This is the one behavioural correction to LP-437's demo, whose `{value, confidence}` rows carried a per-field confidence real extractor output never has.
+
+**Coexistence for bank_statement (the reported position).** Registering `_TRANSACTIONS_LIST` makes `build_list_rows` read the SAME `extracted["transactions"]` the legacy `transaction_field_sets`→`build_transactions` reads. The same rows populate BOTH `entry.transactions` (legacy, byte-unchanged, feeds live AS-1) AND `entry.lists["transactions"]` (generic, read by no rule yet). Belt-and-braces, additive, NEVER a migration. Caveat recorded in the registration: the generic `direction` uses the minimal ListSpec mapping (deposit/withdrawal); the legacy `_direction` maps a richer vocabulary — a future per-rule consumer of the generic list must not read its `direction` as AS-1's.
+
+**Two guards + one collision handled.** (a) **Count cross-check** (guide §8) is now inlined into the generated parse: a declared `*_count` that disagrees with the captured row count downgrades SUCCEEDED→PARTIAL (never a silent success when the model drops rows the API did not truncate; a FAILED stays FAILED). (b) The **budget-sizing guard** now covers every wired generated module (`_MAX_TOKENS == max_tokens_for(spec)`), not just the 18 shipping named ones. (c) A list field literally named `source` (verification_of_mortgage) would collide with the capture's reserved provenance key — the parser keeps the declared data field and skips provenance for that list.
+
+**Wiring (steps 7 B+C).** All 91 generated extractors are registered in `EXTRACTORS` (every Tier-1 catalog type — 109 — now routes to its extractor; the D3 gate's synthetic test simulates the now-absent unwired case). 52 lists are wired in `_LIST_SPECS`; 65 typed-core PII fields in `_PII_FIELDS` (no name conflicts). **Reported gap:** PII inside a captured LIST row (e.g. a tradeline's `account_number_masked`) is NOT `_PII_FIELDS`-routed — it relies on the prompt masking it; a per-list redact/route step is a follow-up. The generated extractors are UNVALIDATED STARTERS — accuracy tuning with Priya is separate.
+
+**Equivalence.** `ACTIVE_RULE_IDS` = 36 and every rule verdict identical (no rule reads the new lists; list drafts are NOT folded into any content_id — every existing id is byte-identical). The 18 shipping extractors are byte-unchanged. Full suite green; ruff + mypy clean.
+
+**Cross-refs.** ADR-343 (the generic-list mechanism this completes), `app/verification/snapshot/documents_section.py::_list_field` / `_LIST_SPECS` / `_PII_FIELDS`, `app/ai/extraction/generator/emitters.py` (the capture emission), `app/ai/extraction/__init__.py::EXTRACTORS`, `tests/verification/snapshot/test_lp443_list_capture_bridge.py`, `docs/tickets/LP-443.md`.
+
+## ADR-349: Generic list data becomes AI-visible — OPT-IN per group, capped (per-group), truncation-marked, and PII-scrubbed at the context boundary; CR-4 is its first (inert) consumer (LP-444)
+
+**Context.** LP-443 wired the generic lists onto the snapshot (`entry.lists`), but no AI reasoner could see them: the tag-materialization context builders (`subjects.py::_doc_context` / `_borrower_context`) predate lists — they serialise `entry.fields` only. So a rule that needs a list (CR-4: is a credit-report tradeline undisclosed on the app?) had no way to perceive it.
+
+**Why it was invisible, and the opt-in decision.** The context is fingerprinted for the AI cache, and every existing group's context must stay byte-identical (a change re-judges every subject). So list data is **OPT-IN, never automatic**: an `AiGroup` DECLARES `include_lists` (and, for a borrower group comparing against the app's debts, `include_stated_liabilities`), exactly like the existing `include_borrower_roster` / `applies_to` opt-ins — a group that declares neither is byte-unchanged. The builder threads a small `ContextOptions` bundle so a document/borrower context serialises `entry.lists` only when asked.
+
+**The cap is per-group.** Each list is capped (default 50 rows, raisable per group via `list_row_cap`) to bound the token cost — a credit report can carry 30–50 tradelines; the CR-4 context measured ~900 tokens for the lists.
+
+**Truncation visibility — the count-cross-check discipline, applied to reasoning.** A capped list serialises with a MARKER (`"truncated": true, "shown": M, "total": N`), and the consuming prompt carries the paired instruction: *an item you cannot match may be among the rows not shown → answer `unknown`, never a confirmed absence.* Both are required — the marker without the prompt line is ignored; the prompt line without the marker has nothing to act on. A confident "not found" over an unseen row is the exact error this prevents. An unmatched item under a cap is `unknown`, never a confirmed absence.
+
+**The list-row PII position — scrub at the context boundary.** A `ListRow.fields` value is a PLAIN `Field`, never a `PiiField` — so unlike a document's top-level fields (which contribute only a PiiField's masked display), a list-row value would reach the reasoner as stored. The LP-443 review already added a per-list DECLARED redact at snapshot storage for the known account/SSN fields, but that covers only the fields a spec named. So the context serialiser adds a UNIVERSAL backstop — every list-row string is run through the shared 9+-digit scrub (`documents_section._DESC_REDACT`) at the LAST gate before an AI, where a leak is worst (sending unmasked PII to a reasoner is worse than the unmasked catch-all, which never leaves the database). A masked last-4 / date / short id survives; a leaked long identifier becomes `[redacted]`, even for an undeclared field or a future list.
+
+**CR-4 (undisclosed tradeline) is the first consumer — and ships INERT.** The `credit_profile` borrower group (opts into lists + liabilities, cap 50) produces `credit.undisclosed_tradeline` (yes/no/unknown) by comparing the report's tradelines to the app's file-level MISMO liabilities; CR-4's deterministic per-borrower spec reads it (yes → fired, no → satisfied, unknown/absent → couldnt_check — never a finding on a missing document). CR-4 is NOT in `ACTIVE_RULE_IDS`, so the group is not required and does not run on a live file — a new AI judgment is never activated on arrival (needs calibration + Priya's bar). Proven end-to-end on a deliberate-undisclosed fixture (fired) and a clean one (satisfied). **The two inputs were asymmetric** (Phase-A finding): the report tradelines are a generic list (this mechanism), the app liabilities are file-level MISMO facts — so the borrower context was extended to surface `stated_liabilities` (Geet's call), and now carries both in one place.
+
+**Equivalence.** Every existing AI group's context is byte-identical (opt-out is the default). `ACTIVE_RULE_IDS` = 36, unchanged. Full suite green; ruff + mypy clean.
+
+**Cross-refs.** ADR-343/348 (the list mechanism + capture bridge this makes visible), `app/verification/tag_materialization/subjects.py` (`ContextOptions` / `_serialize_lists` / `_stated_liabilities` / `_scrub_list_value`), `app/verification/tag_materialization/declarations.py::AiGroup`, `app/verification/rules/specs/CR-4.yaml` + `tag_production.yaml::credit_profile`, `tests/verification/tag_materialization/test_lp444_list_visibility.py`, `tests/verification/rule_engine/test_cr4_inert_lp444.py`, `docs/tickets/LP-444.md`.
+
+## ADR-350: The count cross-check must compare the SAME population as the list; a `<list>_count` that counts a different population (open vs all) is a false completeness signal — plus retry headroom and the third IH-1 instance (LP-445)
+
+**Context — the first real credit report broke three things.** LF-96SV (a real 18-tradeline tri-merge) was the first real test of a generated extractor. It extracted correctly but was stamped **PARTIAL**, and the dump found four issues; three generalize beyond credit reports.
+
+**1. The count cross-check invariant was wrong (the general lesson).** The guard (`derive_status` → then a `declared_count != len(list)` → PARTIAL) assumes the declared scalar and the list measure the SAME thing. On a credit report they do not: `tradeline_count` is the **OPEN/active** count a report summary quotes (9), while the `tradelines` list enumerates **ALL** tradelines, open and closed (18). Σ(monthly_payment) over all 18 rows equalled the declared `total_monthly_debt_payment` exactly — proof no rows were dropped — yet 9≠18 downgraded a complete extraction. **The invariant a count cross-check needs is "the count and the list count the same population," and the generator's name heuristic (`<stem>_count` ↔ `<stem>s`) silently assumed it.** Fix: rename `tradeline_count` → `open_tradeline_count` (a signal, never cross-checked), add `total_tradeline_count` (all tradelines, if stated) and cross-check THAT. When a report states no all-in total the field is null and the check does not fire — the fail-closed shape (absent ≠ mismatched). This is a general risk: any document whose summary quotes a filtered sub-count (open, late, delinquent) beside a full list has the same shape.
+
+**Expressing "cross-check the total, not the open" — an explicit spec declaration.** The generator's name heuristic could not express this (`total_tradeline_count`/`open_tradeline_count` neither map to `tradelines`), and separately missed `inquiry_count`↔`inquiries` (an irregular plural — `inquiry` is not a substring of `inquiries`). So a nested list now carries an explicit `count_field` naming the typed-core count equal to its FULL length; `count_crosscheck_pairs` honours it first and falls back to the name heuristic for every spec that does not opt in (appraisal, aus_findings — byte-identical). The validator refuses a `count_field` that names no real typed-core field. **The spec is the source of truth: the module + prompt are REGENERATED from it (byte-identical to a hand-write), so a future regeneration reproduces the fix, not the bug.**
+
+**The `<list>_count` audit (all specs).** Only three specs produced cross-checks: credit_report (fixed), appraisal (`comparable_count`↔`comparable_sales` ✓), aus_findings (`condition_count`↔`aus_required_conditions` ✓). Every other `*_count` across all specs counts a DIFFERENT population than any list (`late_30_count` vs `payment_history_months`; `returned_payment_count` vs `payment_history`; borrower/owner/party counts) and is correctly NOT cross-checked. The ONLY same-population miss in the entire set was `inquiry_count`↔`inquiries`. **SUCCEEDED-gating is safe:** the check only downgrades SUCCEEDED, so a coercion-driven PARTIAL masks the count signal — but PARTIAL is PARTIAL (the status is correct either way) and nothing downstream reads a per-reason field; the only cost is diagnostic, documented as a known limitation.
+
+**2. The truncation retry had zero headroom.** `credit_report._MAX_TOKENS` and `RETRY_MAX_TOKENS` were both 16384 (the ≥2-nested-list tier == the retry ceiling), so the "single decisive retry" re-rolled the SAME budget — a genuine truncation would truncate again → a wrongful FAILED. Raised `RETRY_MAX_TOKENS` to **32768** (a decisive 2× jump above the top first-attempt tier, half of claude-sonnet-4-5's 64K output ceiling). The per-type first-attempt tiers (4096/8192/16384) are UNCHANGED — they still encode the size expectation the sizing guard asserts; only the retry ceiling moved.
+
+**3. The third IH-1 instance — the model read fraud + employer data the schema never asked for, and it was discarded.** The catch-all (`additional_sections`) is dropped at the snapshot boundary and reaches no rule and no reasoner, yet it held the report's **ID-risk alerts** (SSN check "Requires Investigation", an SSN-issuance alert, an address-velocity alert, address tenure) and **bureau-reported employment** (employer, prior employer, occupation) — textbook fraud/identity signals and an independent IN-5/IN-7 corroboration source. Promoted to typed core, named for the FACT not one bureau's layout (`ssn_alert_status`, `ssn_first_reported_date`, `address_usage_alert`, `address_tenure_months`, and `credit_report_current_employer`/`_previous_employer`/`_occupation` — the `credit_report_` prefix mirrors the `aus_*` precedent so no rule mistakes a bureau-reported employer for the documented one). All optional and null-tolerant (an absent ID-risk section does not cause PARTIAL). **No judgment field** (no `has_fraud_alert`) — the alert text is captured; a rule judges. This reverses the spec's prior `rejected: employment_history` for the current/previous/occupation subset (annotated in the spec). **This is the standing argument for step A2:** three documents (IH-1 insurance, the credit report here) have now shown rule-worthy data read-and-discarded — the catch-all needs a path to reasoners.
+
+**The re-extraction proof (reported, not predicted).** Re-running the real LF-96SV report through the fixed extractor: **18 tradelines**, all 7 promoted fields populated with real values (`credit_report_current_employer` = "AMBIO INC", `credit_report_occupation` = "FORMULATION SCIENTIST", `ssn_alert_status` = "Requires Investigation", `address_tenure_months` = 16, …), and the "ID Risk Review Alerts" + "Employer Information" catch-all sections GONE. The `open_tradeline_count` (9) with 18 rows no longer downgrades — **the false PARTIAL is fixed.** The run was still PARTIAL, but for a NEW, legitimate reason: the model declared `total_tradeline_count` = 20 while enumerating 18 rows — the completeness check now firing on the RIGHT population (either 2 rows genuinely dropped or the model misread the total; the PDF settles it). **NEW GAP:** whether a bureau states an all-in total reliably, and whether the model over-populates `total_tradeline_count`, needs real-sample tuning — the honest tradeoff named in D1 (a stated-but-wrong total will PARTIAL; that is fail-closed toward human review).
+
+**Equivalence.** `ACTIVE_RULE_IDS` = 36, the 36 live rules identical, the 18 shipping extractors byte-unchanged (only the generated `credit_report` module + prompt regenerated), appraisal/aus_findings cross-checks byte-identical, full suite green, ruff + mypy clean.
+
+**Cross-refs.** ADR-348 (the list-capture bridge + count cross-check this corrects), `docs/schema-specs/005-credit-report.json` (spec = source of truth: renamed/added fields + `count_field`), `app/ai/extraction/credit_report.py` (regenerated), `app/ai/extraction/model_call.py::RETRY_MAX_TOKENS`, `app/ai/extraction/generator/{spec,emitters,validator}.py` (`count_field` honoured/validated), `tests/ai/test_credit_report_extraction.py`, `tests/ai/generator/test_generator.py`, `docs/tickets/LP-445.md`. Step A2 (surface the catch-all) and step F (the 18 diff reports) remain OUT.
+
+## ADR-351: Apply the 18 extractor diffs by hand (the generator emits a report, not a patch, for a shipping extractor); and RETRACT the `total_tradeline_count` completeness gate — a guard that misfires more than it catches is worse than none (LP-446, step F)
+
+**Context.** LP-440 deliberately emitted DIFF REPORTS (not patches) for the 18 document types that already had hand-written extractors (ADR-344/345: a bad patch to a shipping module is worse than a manual edit). The 91 rarer types got the designed schemas; the 18 most-common — pay stubs, bank statements, W-2s, homeowners insurance — never had their reports applied, so they were still running their ORIGINAL Phase-1 field lists while the audit showed live rules starved: IH-1 dead (the dwelling loss-settlement basis unextracted), IN-10/IN-11 unable to split base from variable income (no earnings list), AS-6 partly blind on joint accounts (one holder captured).
+
+**The decision — apply the diffs BY HAND, not by regeneration.** For a diff-mode spec (one with `existing_extractor`) the generator produces a *report*, not a module — regeneration is not available, and would destroy hand-written logic the modules carry (bank_statement's `_parse_transactions` + deterministic `pdf_page_count` for AS-9, the `source_payload` handling). So the ADD items are applied by hand: the `exists_today:false` typed-core fields (into the model + `_CORE_SPEC` + prompt contract), and any new generic list (a `list[dict]` capture + a bare-row parser mirroring `_parse_transactions`, registered in `_LIST_SPECS`). Purely additive → a stored extraction that predates a field validates to an empty `TypedField`; `SNAPSHOT_VERSION` does NOT bump (the LP-421 additive rule). The legacy list attributes (`transactions`/`schedule_c`/`schedule_e`, live for AS-1/IN-12/IN-13) are never touched — a new list coexists.
+
+**The insurance anti-conflation is the headline, and it's a SCHEMA distinction, not a wiring one.** The IH-1 signal the spec calls `replacement_cost_or_coinsurance_basis` (not the name `loss_settlement_basis` — that lives only in LP-431) is the DWELLING (Coverage A) basis, kept DISTINCT from any PERSONAL-PROPERTY replacement-cost endorsement (which lands as a `forms_and_endorsements` row). Proven on 3 real policies: the dwelling basis is reachable as a typed field on 2 of 3; on the Occidental policy it is honestly `null` because the document only IMPLIES it via a form code (`HO 00 03`) + a personal-property endorsement — and the schema correctly did NOT let the PP endorsement set the dwelling field (the exact conflation the audit found still-unprevented). So IH-1 stays `couldnt_check` on a policy that never states the dwelling basis — a document limit, not a wiring one; reported, not papered over.
+
+**The `total_tradeline_count` reversal (D5).** LP-445 added the count cross-check; the re-extraction then produced a NEW false PARTIAL — the model declared 20 tradelines against a correct 18 rows (Geet counted the PDF). `total_tradeline_count` is rarely printed and unreliable when it is (an estimate of "total incl. closed" vs the tradelines actually listed), so it is **REMOVED from the status cross-check** (the field is kept for information; its prompt hint is tightened to "only if explicitly printed incl. closed; never compute/estimate/infer"). Tradelines are left with **NO completeness gate** rather than a second misfiring one — a guard that misfires more than it catches is worse than none. The `public_record_count` / `inquiry_count` checks STAY (they count the same population they gate). The `Σ(monthly_payment) == total_monthly_debt_payment` idea (which held exactly on the one real report) was **NOT** adopted: an exact or ±1 gate is unjustifiable on n=1 — a report whose total excludes a $0-payment closed account or rounds would false-PARTIAL, and any tolerance is arbitrary.
+
+**Equivalence.** `ACTIVE_RULE_IDS` = 36 with identical verdicts (the new fields are read by no rule yet — a rule reading them is a separate ticket); `SNAPSHOT_VERSION` = 4 unchanged, the golden fixture loads; the new lists are additive; full suite green; ruff + mypy clean. The `_MAX_TOKENS` of homeowners_insurance rose 4096 → 8192 (it is now list-bearing — the sizing rule).
+
+**Phase B — the remaining 15 diffs, same discipline (LP-446).** The pattern replicated across the other 15 diff-mode types (+199 typed-core fields; the per-type field/list breakdown is in `docs/tickets/LP-446.md`). Two lessons from Phase A recurred and were honored: (1) **STOP where a diff would disturb hand-written logic.** The diff proposed a `schedule_c` list for `tax_return` and a `support_obligations` list for `divorce_decree`; both were **deferred** — `tax_return.schedule_c` duplicates the LIVE legacy list attribute feeding IN-12/IN-13 (proven intact: a real return still extracts 2 schedule_c rows post-diff), and `support_obligations` needs bespoke award/obligation logic a bare-row capture can't carry. Their typed-core ADD fields WERE applied; only the bespoke lists were held. (2) **A list-bearing type must get the unbounded-list budget.** Three types gained a generic list but had been left at the 4096 scaffold — `voe` (gross_earnings_history), `hoa_statement` (special_assessment_items), `property_tax_bill` (installments_and_due_dates) — a real truncation risk found and fixed here (→ 8192, the 1-list sizing rule), mirroring homeowners_insurance in Phase A. Six new generic lists total wired into `_LIST_SPECS` (purchase_agreement's addenda + contingencies, voe, investment_account, property_tax_bill, profit_and_loss, hoa_statement). The equivalence held again: `ACTIVE_RULE_IDS` = 36 with identical verdicts (no rule reads the new fields yet — a moved verdict would have surfaced as a suite failure and none did), `SNAPSHOT_VERSION` = 4, full suite green (3854 passed), ruff + mypy clean.
+
+**Cross-refs.** ADR-344/345 (report-not-patch), ADR-350 (the count-cross-check population lesson this continues), `app/ai/extraction/*.py` (the 18 shipping extractors) + their prompts, `docs/schema-specs/_REGISTRATION_SNIPPETS.md` (the diff reports), `app/verification/snapshot/documents_section.py::_LIST_SPECS`/`_PII_FIELDS`, `docs/tickets/LP-446.md`.
+
+---
+
+## ADR-352: Turning two LP-446 extraction gains into live verdicts — IH-1 (the dwelling loss-settlement basis, ADR-340) via a deterministic vocabulary-normalising DERIVED tag that FAILS CLOSED, on a per-DOCUMENT subject (a new derived-subject); and AS-6 needed NOTHING, because the co-holder fields were already reasoner-visible (LP-447)
+
+**Context.** LP-446 added two extractor fields feeding rules that were one small change from working: `account_owner_name_2` / `account_owner_count` (the joint-account co-holder, for AS-6, LIVE) and `replacement_cost_or_coinsurance_basis` (the dwelling settlement basis, for IH-1, dead since LP-431). LP-447 turns both into live behaviour. The two halves reached OPPOSITE outcomes, and both are the honest answer.
+
+**AS-6 — nothing to build (D1). The fields were already reasoner-visible.** AS-6's three tags are produced by the `stmt_facts` AI group over `_doc_context`, which emits EVERY present document field. So the new fields reached the reasoner with NO code change — and because `_doc_context` OMITS absent fields, a single-holder statement's context is byte-identical to pre-LP-446, so the AS-6 11/11 calibration (which ships AUTO at 0.95) is preserved BY CONSTRUCTION; only a joint account gains the second-holder line. Adding a prompt hint would have been a material change to an auto-shipping rule requiring a re-scoring STOP — so it was NOT added. Proven on the REAL dev-DB documents (a subagent run, `claude-sonnet-4-5`): the co-holder extraction is real (BofA joint savings → `account_owner_count = 2`, second holder populated); AS-6's FP-safety holds (zero false flags — every genuine borrower match stays `satisfied`); and the `needs_review` surface-don't-reject path works (a genuine non-borrower co-holder → `needs_review` while the statement STILL COUNTS, the co-holder named on the load-bearing tag). **Two ticket premises were found factually wrong and are corrected on record:** the joint BofA account is on LF-6T3N (not LF-96SV, which has no bank statements), and on LF-6T3N the co-holder is HERSELF a borrower, so the correct verdict is `satisfied`, not `needs_review` (the `needs_review` path needs a NON-borrower co-holder). No verdict moved; nothing was adjusted. A guard test pins that the co-holder fields stay non-PII (masking them would silently blind AS-6).
+
+**IH-1 — build it, and the crux is D3: a free-form STRING basis, matched FAIL-CLOSED.** LP-431 STOPped IH-1 because the basis was unextracted; ADR-340 recorded Priya's ruling that RETIRED the coverage-vs-loan arithmetic (effective 2026-03-18) and replaced it with a boolean settlement-basis check. LP-446 shipped the field as a FREE-FORM string (real policies returned `"replacement cost"` AND `"Replacement Cost"` — the same policy returned different casing across two runs), NOT the enum ADR-340 imagined. So an exact `eq` cannot match. The decision: a DETERMINISTIC derived tag `ins.dwelling_settlement_basis` normalises the string against an EXPLICIT allow-list (casefold + collapse whitespace, then exact membership — NOT a fuzzy matcher) to `replacement_cost` / `actual_cash_value` / `unknown`. An UNRECOGNISED value → `unknown` → the gate → `couldnt_check`, NEVER a guessed `satisfied` (fail closed — an unreadable adequacy basis is not a pass, D3). The rule is then a trivial deterministic compare with NO AI and NO threshold → it ACTIVATES on the no-ai-dependency gate (36 → 37).
+
+**The anti-conflation is structural, and it held on the real problem case (ADR-351).** The recipe reads ONLY the typed dwelling field, NEVER the `forms_and_endorsements` list — so a personal-property or ACV-ROOF endorsement (a list row) can never be read as the dwelling basis. Proven on the 4 REAL policies (reported, not predicted): 2 explicit `replacement cost` → **satisfied**; the Occidental policy (dwelling basis `null` but **11 endorsements, one a personal-property replacement-cost endorsement**) → **couldnt_check**, the endorsements did NOT leak into the dwelling field; the 2 KB stub → couldnt_check.
+
+**A new derived-tag subject: DOCUMENT (a widened guard).** IH-1 is PER-DOCUMENT (like AS-6), which gives Priya's `not_applicable` for free (no binder → no in-scope subject) and distinguishes it from IH-3's `couldnt_check`-on-missing-binder — the two rules read the same binder but IH-1 judges the settlement BASIS (adequacy) while IH-3 judges the effective DATE (a coverage gap in time), so their reasons and load-bearing tags never overlap. This required the normalising tag on the DOCUMENT subject. The declaration loader restricted derived tags to `loan`/`borrower` ("a per-row subject would mis-key garbage"), but LP-332 had already generalised `produce_derived_tags` to enumerate ANY subject and key under its `subject_id` — a document recipe reads its OWN `DocumentEntry` and keys under the `content_id`, which does NOT mis-key (verified end-to-end). So `_DERIVED_SUBJECTS` was widened to add `document`; `transaction` stays unsupported (no recipe reads a `TransactionRecord`), and each recipe still asserts its expected raw type. IH-1 does NOT bundle the hazards/deductible checks, IH-7 (condo master policy — a different test on a different document; IH-1 needs no condo exclusion because it never reads a master policy, and no reliable `property.type` signal exists), or a rule reading `earnings_lines` (the next ticket).
+
+**Equivalence.** `ACTIVE_RULE_IDS` = 37 (+IH-1); no EXISTING rule's verdict moved — the LF-6T3N distribution's satisfied/fired/needs_review are UNCHANGED (23/2/2), IH-1 only adds 26 `not_applicable` + 4 `couldnt_check` where LF-6T3N has no binder to judge. `SNAPSHOT_VERSION` unchanged; full suite green (3886 passed); ruff + mypy clean. IH-1's activation bar records the regulatory basis (ADR-340, effective 2026-03-18) so a future reader can re-check the ruling the rule's SHAPE rests on.
+
+**Cross-refs.** ADR-340 (Priya's ruling — the regulatory premise IH-1 rests on), ADR-351 (the anti-conflation, LP-446), LP-431 (the STOP this resolves), LP-417/IH-3 (the sibling shape + the boundary), `app/verification/tag_materialization/derived.py::_dwelling_settlement_basis`, `app/verification/rules/specs/IH-1.yaml`, `app/verification/rules/activation_bars.yaml::IH-1`, `docs/tickets/LP-447.md`.
+
+---
+
+## ADR-353: The credit tradelines list consumer emits ONLY deterministic numeric aggregates — the row vocabulary (account_type/status/dispute/payment-history) is OPEN-ENDED bureau text, so classifying mortgage/student/collection or interpreting a dispute/late is a Priya/AI question, not a lookup (LP-453, step D.2 — the LP-448 lesson's second instance)
+
+**Context.** LP-451 named the credit `tradelines` list consumer the single biggest unblock (8 rules: CR-1/3/5/6/8/9/10/12). Before building it, D3 checked the ACTUAL value vocabulary on LF-96SV's 18 real stored rows (the LP-448 discipline — verify the vocabulary before assuming a lookup).
+
+**The finding (the LP-448 lesson, second instance).** The row fields the rules turn on are OPEN-ENDED bureau text, not a clean enum:
+- **`account_type`** = terse bureau codes — `AUTO / INST / REV` on this report, and elsewhere `MTG / EDU / COLL / CHG / …`. Classifying "mortgage" (CR-8), "student loan" (CR-9), or "collection" (CR-10) from these is not a deterministic lookup on one report — a different bureau uses different codes.
+- **`account_status`** = bureau phrasing (`AS AGREED / PAID / …`); **`payment_status`** = Metro-2 codes (`I1 / R1 / …`).
+- **`is_disputed`** = FREE-TEXT that INCLUDES NON-disputes — on LF-96SV, `"ACCOUNT IN FORBEARANCE"` and `"ACCOUNT CLOSED BY CREDIT GRANTOR"` sit in the same field as an actual `"PREVIOUSLY IN DISPUTE-NOW RESOLVED"`. Counting non-empty `is_disputed` would OVERCOUNT disputes — CR-12's "detect disputes" is interpretation, not a boolean.
+- **`payment_history_24mo`** = a VARIABLE-LENGTH `0`/`-` string (16 to 84 chars across the 18 rows — the field name's "24mo" is misleading), NOT a fixed position-per-month encoding. A position parser that works on one report is a trap (a bureau-varying format).
+
+**The decision — emit ONLY pure numeric aggregates that need no classification.** The consumer is two loan-level DERIVED recipes emitting OBSERVATIONS: `credit.tradeline_count` (how many tradelines) and `credit.tradeline_monthly_payment_total` (the sum of `monthly_payment`, the observation CR-1 cross-checks against the DTI). Both DESCRIBE; neither judges — no `is_derogatory`, no `has_unacceptable_lates`, no threshold (a tag that embeds a program tolerance is a rule in disguise — five rules have died from that confusion). Fail-closed: no tradelines captured → the tag ABSTAINS to `unknown` (the gate → couldnt_check), NEVER a fabricated 0 (`absent ≠ empty`); an unparseable payment is skipped, never guessed. Proven on LF-96SV's 18 real stored rows: count = 18, payment total = 1432 (no re-extraction).
+
+**What is DEFERRED to Priya / the rule tickets (the open-vocabulary consequence).** account-type classification (CR-8/9/10), dispute interpretation (CR-12), delinquency / payment-history parsing (CR-8), paid-off detection (CR-3) — each needs a normalization ruling over the open bureau vocabulary (which codes/phrasings mean mortgage / student / collection / dispute / late), exactly as LP-448 concluded the earnings four-bucket classification needs Priya, not a recipe. The per-row ENUMERATOR (AS-1 shape — "THIS tradeline is disputed") is deferred with those rules, since they need the classification judgment anyway. So one recipe pattern (aggregate observations), a small correct set, and the classification is a named Priya question — not guessed into a lookup.
+
+**Cross-refs.** LP-448 (the earnings four-bucket lesson this repeats), LP-451 (the audit that scoped the 8 rules), `app/verification/tag_materialization/derived.py::_credit_tradeline_count` / `_credit_tradeline_monthly_payment_total`, `documents_section.py::_TRADELINES_LIST`, `docs/tickets/LP-453.md`. The multi-report double-count (a loan-level aggregate over multiple overlapping bureau pulls) is a reported limitation, deferred to a reconciliation rule.
+
+---
+
+## ADR-354: The tag-coverage audit measured the field SURFACE (does the schema declare it), not the field DATA (is it populated, are its values usable) — three D-steps under-delivered for that single reason, so the standing rule is: verify a field is populated with clean values on real data BEFORE declaring a tag on it (LP-454, after LP-452 / LP-453)
+
+**Context.** LP-451 audited the 83 unwritten rules and produced a build order whose cheapest tiers were `needs-parsed-tag` (~16 rules whose fields "now EXIST" post-LP-446) and `needs-list-consumer`. The next three D-steps built from that order — and all three delivered materially LESS than the audit projected, for the SAME reason each time.
+
+**The three instances.**
+- **LP-452 (`property.type`).** The audit said "MISMO carries it" — true of the KEY. But `property_type` is `None` on all three stored files. A legal, guarded tag that resolves to nothing on every file. *Surface present, data empty.*
+- **LP-453 (the tradelines consumer).** The audit said "the tradelines list feeds 8 rules." True of the LIST. But the row VALUES are open-ended bureau text (`AUTO/INST/REV`, `is_disputed` free-text including non-disputes) — so 7 of the 8 need classification judgment (Priya/AI), and the consumer deterministically served 1 (the payment-total cross-check). *Surface present, values not usable as a lookup* (ADR-353).
+- **LP-454 (the parsed-tag dividend).** The audit said "~16 fields now EXIST → declare a tag." True of the SCHEMA. But (1) the +232 LP-446 fields are ABSENT from the stored extractions, which predate LP-446, and re-extraction is budget-forbidden (no model calls); and (2) 10 of the 16 rules need `appraisal / title_commitment / aus_findings / condo_questionnaire / master_insurance` documents, NONE of which exist on any of the three files. Only **2** of 16 fields are populated with clean values in stored data (`credit_report.report_date` → CR-13, a date; `purchase_agreement.earnest_money_amount` → PC-5, a number) — and NEITHER finishes its rule (CR-13 still needs a Priya window + a date recipe; PC-5 still needs the `emd_sourced` AI match). So this ticket declares exactly those 2 (honest scaffolding, not unblocks), and declares nothing else. *Surface present, data unmeasurable/empty.*
+
+**The decision — the standing rule.** The audit's `needs-parsed-tag` / `field exists` verdicts were computed from the extractor SCHEMA (does a `*Extraction` model declare the field). That is NECESSARY but NOT SUFFICIENT. Before declaring a parsed tag on a field, VERIFY on real data: (1) the field is POPULATED on at least one available file, and (2) its VALUES are clean (a date, a number, a genuinely bounded flag), not an open-ended bureau/carrier/employer-authored vocabulary that needs classification. A field that is schema-present but null-on-every-file is not an unblock (LP-452), and a field whose values are open-ended is a Priya/AI question, not a parsed tag (LP-453/ADR-353, and the earnings four-bucket lesson LP-448). **Schema presence ≠ populated, usable data.** A tag declared on absence looks like progress and is not.
+
+**What step D is now blocked on (recorded in the repo, not just the conversation).** Two blockers, NEITHER fixable by another ticket:
+- **API credit.** The stored extractions predate LP-446, so its 232 new typed fields are not present in stored data and cannot be measured without RE-EXTRACTION — which costs model calls the budget forbids (~$0.95 remaining). Every rule whose input is an LP-446 field is unverifiable until the corpus is re-extracted.
+- **Documents.** No `appraisal`, `title_commitment`, `aus_findings`, `condo_questionnaire`, or `master_insurance_policy` document exists on ANY of the three measurement files (LF-96SV / LF-6T3N / LF-XU26). ~10 rules (PR-2/4/5/6, TI-3/4/5, AU-3, CO-1, IH-7) wait on a corpus that contains those documents.
+
+So the parsed-tag dividend the audit projected at ~16 is, on the CURRENT corpus and budget, **2** — and the rest is a data/corpus problem, not a coding one. Step D pauses here until the corpus grows or re-extraction is funded.
+
+**Cross-refs.** LP-451 (the audit whose surface-not-data method this corrects), LP-452 (null MISMO), LP-453 / ADR-353 (open vocabulary), LP-448 (the earnings four-bucket lesson), `docs/tickets/LP-454.md`. The two tags declared: `credit.report_date` (CR-13), `contract.emd_amount` (PC-5) — both parsed document facts, populated and clean, both still short of finishing their rule.
+
+## ADR-355: A second worktree's stack is separated by SHELL-VARIABLE DEFAULTS in `docker-compose.yml`, and its database is SEEDED from the main one rather than migrated from empty (A1)
 
 **Context.** The Bedrock integration branch runs as a second `git worktree` (`../mbai-bedrock`) alongside the
 rule-engine worktree on one machine. `git worktree` isolates **files only** — containers, Postgres, Redis, and
@@ -12922,7 +13271,7 @@ operational guide — port map, the three `.env` files, troubleshooting), A1 (th
 defaults this had to work around — `NEXT_PUBLIC_API_URL` falling back to `:8000` and `cors_allowed_origins` to
 `:3000` — are deliberately left alone in code and fixed by env files, since the main worktree depends on them.
 
-## ADR-342: S3 uses aioboto3 (not boto3) and the AWS CREDENTIAL CHAIN (never key settings); a missing bucket fails at STARTUP, not at the first document read (C0)
+## ADR-356: S3 uses aioboto3 (not boto3) and the AWS CREDENTIAL CHAIN (never key settings); a missing bucket fails at STARTUP, not at the first document read (C0)
 
 **Context.** Today the host-run API and the containerised Celery worker share document bytes through a Docker
 bind mount (`./backend/storage:/app/storage`). On Fargate they are **separate tasks on separate hosts with no
@@ -12971,11 +13320,11 @@ consumes it**: the download endpoint (`app/api/documents.py:381-400`) streams by
 grep finds no application call site for `get_url` at all. Serving documents by redirect instead of by proxy is a
 real choice with auth implications, and it is a different ticket.
 
-**Cross-refs.** ADR-343 (the client-lifecycle half of this work), ADR-055 (bytes live in storage, not the DB),
+**Cross-refs.** ADR-357 (the client-lifecycle half of this work), ADR-055 (bytes live in storage, not the DB),
 LP-35 (the `StorageBackend` abstraction and the `get_url` slot this fills), A2 §8 and §10 item 14 (the recon that
 scoped this), C0 (this ticket), C1–C5 (the ECS work this unblocks).
 
-## ADR-343: The S3 backend holds a SESSION and opens a CLIENT PER OPERATION — because the Celery bridge runs a fresh event loop per task (C0)
+## ADR-357: The S3 backend holds a SESSION and opens a CLIENT PER OPERATION — because the Celery bridge runs a fresh event loop per task (C0)
 
 **Context.** The obvious optimization for an S3 client is to build it once and keep it: a client owns a
 connection pool, so a long-lived client amortizes TLS handshakes across calls. C0's ticket text asked for exactly
@@ -13017,10 +13366,10 @@ warnings. Correctness first. **The clean fix is upstream**: give the worker a pe
 loop/pool reuse if throughput grows" caveat already written at `app/tasks/base.py:9-10`), after which a
 long-lived client becomes safe everywhere and this ADR can be revisited as one change instead of two.
 
-**Cross-refs.** ADR-342 (the dependency/credential/validation half), LP-41 (the sync→async Celery bridge and its
+**Cross-refs.** ADR-356 (the dependency/credential/validation half), LP-41 (the sync→async Celery bridge and its
 fresh-loop-per-task design), LP-35 (the storage factory's `lru_cache`), C0 (this ticket).
 
-## ADR-344: The API and the worker ship as ONE image with different commands — and the consequence is that a baked HEALTHCHECK cannot be right for both (C1)
+## ADR-358: The API and the worker ship as ONE image with different commands — and the consequence is that a baked HEALTHCHECK cannot be right for both (C1)
 
 **Context.** Fargate deploys images, not source. Three services need one: the worker (already had
 `backend/Dockerfile`), the API (nothing), and the frontend (nothing). The obvious alternative to a shared
@@ -13065,11 +13414,11 @@ silently. Better to have the default be correct for the harder case and require 
 easy one. Measured: the probe flips to `unhealthy` ~100 s after the broker dies (30 s interval × 3 retries) and
 back to `healthy` ~25 s after it returns.
 
-**Cross-refs.** LP-41 (the Dockerfile and the worker container), LP-73 (worker starts by default), ADR-345 (the
-frontend image and its build-time boundary), C0/ADR-342 (S3 — the other Fargate prerequisite), C3 (task
+**Cross-refs.** LP-41 (the Dockerfile and the worker container), LP-73 (worker starts by default), ADR-359 (the
+frontend image and its build-time boundary), C0/ADR-356 (S3 — the other Fargate prerequisite), C3 (task
 definitions, which must set both the command and the healthcheck override).
 
-## ADR-345: The frontend's API URL is BUILD-TIME configuration — `output: 'standalone'` plus a `--build-arg`, and changing it requires a rebuild (C1)
+## ADR-359: The frontend's API URL is BUILD-TIME configuration — `output: 'standalone'` plus a `--build-arg`, and changing it requires a rebuild (C1)
 
 **Context.** The frontend had no Dockerfile. Two properties of Next.js decide its shape, and both are the kind
 that look like details until they cause an outage.
@@ -13107,7 +13456,7 @@ second build arg.
 `pnpm install --frozen-lockfile` fails rather than silently resolving differently from the committed lockfile.
 The runner stage runs as the `node` user (uid 1000) that `node:20-alpine` already ships.
 
-**Cross-refs.** ADR-344 (the backend image and the `0.0.0.0` binding trap this shares), A2 §10 (the recon that
+**Cross-refs.** ADR-358 (the backend image and the `0.0.0.0` binding trap this shares), A2 §10 (the recon that
 first flagged the `localhost:8000` fallback as silent and dangerous), A1 `docs/worktree-setup.md`
 (the same fallback biting local development), C2 (ECR), C3 (ECS services — the frontend task definition must
 NOT try to set `NEXT_PUBLIC_API_URL`).

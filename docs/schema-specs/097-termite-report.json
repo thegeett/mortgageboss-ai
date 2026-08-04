@@ -1,0 +1,76 @@
+{
+  "document_type": "termite_report",
+  "slug": "termite-report",
+  "tier": 3,
+  "rules_served": [],
+  "summary_hint": "Tells a processor which property, who inspected, when, and whether the property is clear.",
+  "existing_extractor": null,
+  "catalog_coverage": "full",
+
+  "typed_core": [
+    {"name":"document_title","type":"str","why":"identity — confirms this is an inspection report vs a completion certificate","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"form_version","type":"str","why":"disambiguator — NPMA-33 vs state form governs the field map and section letters","rules":[],"reason_class":"disambiguator","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"issuer_name","type":"str","why":"identity/source — issuing organization","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"property_address","type":"str","why":"identity — the subject property inspected (degraded from address)","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"address","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"inspection_company_name","type":"str","why":"identity/source — the inspecting company (flattened from object)","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"object","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"inspection_company_phone","type":"str","why":"processor — company contact for follow-up (flattened from object)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"object","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"pest_control_business_license_number","type":"str","why":"processor — company licensure, so the report can be trusted","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"inspection_date","type":"date","why":"processor/recency — when the inspection occurred (validity through closing)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"inspector_name","type":"str","why":"processor — the individual inspector (flattened from object)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"object","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"inspector_license","type":"str","why":"processor — inspector license number","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"structures_inspected","type":"str","why":"processor — scope of inspection (degraded/joined from string[])","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"object","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"no_visible_evidence_indicator","type":"str","why":"processor — headline clearance flag: no visible evidence found (degraded from bool)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"bool","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"wood_destroying_insect_types","type":"str","why":"processor/disambiguator — which insect types, when evidence exists (degraded from string[])","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"object","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"no_action_recommended_indicator","type":"str","why":"processor — headline: whether any action is recommended (degraded from bool)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"bool","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"conducive_conditions","type":"str","why":"processor — moisture/earth-wood-contact conditions noted (degraded from string[])","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"object","pii":null,"exists_today":false,"prompt_hint":"Moisture, earth-to-wood contact are risk notes, not active infestation — record separately from findings"},
+    {"name":"account_case_reference_number","type":"str","why":"identity/dedup — report/case number to match a later completion (confidential)","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null}
+  ],
+
+  "nested_lists": [
+    {
+      "name":"findings","shape":"flat_row",
+      "shape_reason":"adverse findings genuinely repeat (typically a handful); one consolidated flat-row list carrying a category column collapses the catalog's live_insects_findings, dead_insects_or_evidence_findings, and visible_damage_findings into a single token-safe list",
+      "expected_item_count":"a handful","rules":[],
+      "exists_today":false,"plumbing_sites":5,
+      "fields":[
+        {"name":"category","type":"str","why":"processor — live insect / dead-or-evidence / visible damage"},
+        {"name":"insect_or_damage_type","type":"str","why":"processor — the insect or damage type of the finding"},
+        {"name":"location","type":"str","why":"processor — where the finding was observed"},
+        {"name":"description","type":"str","why":"processor — the finding description"}
+      ]
+    }
+  ],
+
+  "rejected": [
+    {"name":"the 8 TECHNICAL provenance fields","reason":"already in the TypedField wrapper"},
+    {"name":"form_number, form_revision_date","reason":"superseded by form_version for this document family"},
+    {"name":"issuer_address, issuer_phone, issuer_email_or_url","reason":"folded into the flattened inspection-company fields"},
+    {"name":"effective_date, expiration_date, statement_period_start/_end, document_issue_date","reason":"not applicable; inspection_date is the operative date"},
+    {"name":"party_names, party_addresses","reason":"seller/buyer names rarely drive a decision here; leave to catch-all"},
+    {"name":"loan_number","reason":"rarely on a termite report"},
+    {"name":"signature_blocks, notary_block, document_status_or_version","reason":"inspector signature folded into inspector_name; not notarized/versioned"},
+    {"name":"live_insects_findings, dead_insects_or_evidence_findings, visible_damage_findings","reason":"consolidated into the single findings list"},
+    {"name":"recommended_actions_or_treatments","reason":"folded into findings (or catch-all); a second list is not justified by any rule"},
+    {"name":"additional_comments_and_attachments","reason":"no consumer"},
+    {"name":"seller_or_owner_disclosure_signature, buyer_acknowledgment_signature","reason":"acknowledgment signatures; no rule, low processor value"}
+  ],
+
+  "encoding_variations": [
+    "Clearance is stated three ways: an explicit 'no visible evidence' checkbox (no_visible_evidence_indicator), a 'no action recommended' checkbox (no_action_recommended_indicator), or prose in the findings section — the two flags plus the findings list together disambiguate, since a report can find evidence yet recommend no action (old, treated damage)",
+    "Form section letters differ (NPMA-33 uses graphic diagrams and Section II/III; state forms use 'Section 1/Section 2') — form_version is the disambiguator",
+    "Insect types abbreviated ('SUBT' subterranean termite, 'DW' drywood, 'PPB' powderpost beetle) — capture verbatim"
+  ],
+
+  "open_questions": [
+    {"id":1,"q":"Consolidating three finding lists into one.","options":["a single findings flat-row list with a category column (live insect / dead-or-evidence / visible damage)","preserving the catalog's three separate object[] fields"],"recommendation":"a single findings flat-row list with a category column; confirm this is acceptable vs preserving the catalog's three separate object[] fields GEET'S DECISION (LP-438): BUILD IT — LP-437 made nested lists cheap (one declaration + the generic mechanism); the one-list-budget / defer / no-consumer concern is overturned. Build as flat_row; the per-rule consumer is separate follow-up.","blocks_implementation":false},
+    {"id":2,"q":"obstructions_and_inaccessible_areas (CORE object[]) not nested. It genuinely repeats and is CORE (limits of inspection completeness), but a second nested list exceeds the one-list budget with no rule demanding it.","options":["flatten to a joined str (leaner)","add a second list"],"recommendation":"flatten to a joined str unless a completeness rule is planned GEET'S DECISION (LP-438): BUILD IT — LP-437 made nested lists cheap (one declaration + the generic mechanism); the one-list-budget / defer / no-consumer concern is overturned. Build as flat_row; the per-rule consumer is separate follow-up.","blocks_implementation":false},
+    {"id":3,"q":"Boolean flags degraded to str. no_visible_evidence_indicator / no_action_recommended_indicator have no bool coercer.","options":["str ('Yes'/'No'/checkbox state)","typed booleans"],"recommendation":"confirm downstream reads them as strings, not typed booleans","blocks_implementation":false}
+  ],
+
+  "notes": [
+    "This is the inspection (findings) document, distinct from the completion/clearance certificate (packet 096).",
+    "The two boolean-ish flags can disagree with the findings prose (evidence of prior, treated activity with no current action) — capture all three; do not force consistency.",
+    "Capture the inspector's license and the business license as distinct numbers.",
+    "No PII requiring registration — business/inspector license numbers are professional identifiers, not personal PII; no SSN/DOB/account fields appear on a termite report."
+  ]
+}

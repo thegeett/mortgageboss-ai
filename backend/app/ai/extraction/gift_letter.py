@@ -14,6 +14,7 @@ gift letters flow through (no samples were available when this was built).
 """
 
 import json
+from datetime import date
 from decimal import Decimal
 from typing import Any
 
@@ -24,6 +25,7 @@ from app.ai.client import build_document_message
 from app.ai.extraction.model_call import run_extraction_completion
 from app.ai.extraction.parsing import (
     CoreSpec,
+    coerce_date,
     coerce_decimal,
     coerce_str,
     derive_status,
@@ -62,6 +64,26 @@ class GiftLetterExtraction(BaseModel):
     no_repayment_attestation: TypedField[str] = Field(default_factory=TypedField)  # gift vs. debt
 
     # --- Grouped catch-all — everything else -------------------------------- #
+    # --- LP-446 diff — the exists_today:false additions --------------------- #
+    issuer_name: TypedField[str] = Field(default_factory=TypedField)
+    donor_names_raw: TypedField[str] = Field(default_factory=TypedField)
+    donor_name_2: TypedField[str] = Field(default_factory=TypedField)
+    donor_address: TypedField[str] = Field(default_factory=TypedField)
+    donor_phone: TypedField[str] = Field(default_factory=TypedField)
+    borrower_recipient_name_2: TypedField[str] = Field(default_factory=TypedField)
+    gift_date_or_expected_transfer_date: TypedField[date] = Field(default_factory=TypedField)
+    funds_already_transferred: TypedField[str] = Field(default_factory=TypedField)
+    transfer_method: TypedField[str] = Field(default_factory=TypedField)
+    gift_source_account_institution: TypedField[str] = Field(default_factory=TypedField)
+    gift_source_account_last4: TypedField[str] = Field(default_factory=TypedField)
+    recipient_or_escrow_account_last4: TypedField[str] = Field(default_factory=TypedField)
+    gift_purpose: TypedField[str] = Field(default_factory=TypedField)
+    no_ownership_or_lien_interest_statement: TypedField[str] = Field(default_factory=TypedField)
+    lender_name: TypedField[str] = Field(default_factory=TypedField)
+    document_issue_date: TypedField[date] = Field(default_factory=TypedField)
+    donor_signature_present: TypedField[str] = Field(default_factory=TypedField)
+    donor_signature_date: TypedField[date] = Field(default_factory=TypedField)
+
     additional_sections: list[CatchAllSection] = Field(default_factory=list)
 
 
@@ -93,6 +115,25 @@ _CORE_SPEC: CoreSpec = (
     ("gift_amount", coerce_decimal),
     ("property_address", coerce_str),
     ("no_repayment_attestation", coerce_str),
+    # LP-446 diff additions
+    ("issuer_name", coerce_str),
+    ("donor_names_raw", coerce_str),
+    ("donor_name_2", coerce_str),
+    ("donor_address", coerce_str),
+    ("donor_phone", coerce_str),
+    ("borrower_recipient_name_2", coerce_str),
+    ("gift_date_or_expected_transfer_date", coerce_date),
+    ("funds_already_transferred", coerce_str),
+    ("transfer_method", coerce_str),
+    ("gift_source_account_institution", coerce_str),
+    ("gift_source_account_last4", coerce_str),
+    ("recipient_or_escrow_account_last4", coerce_str),
+    ("gift_purpose", coerce_str),
+    ("no_ownership_or_lien_interest_statement", coerce_str),
+    ("lender_name", coerce_str),
+    ("document_issue_date", coerce_date),
+    ("donor_signature_present", coerce_str),
+    ("donor_signature_date", coerce_date),
 )
 
 

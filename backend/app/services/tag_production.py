@@ -175,7 +175,7 @@ async def produce_stage_a_transaction_tags(
 
     resolved: TransactionTagCache = dict(persistent)
     input_tokens = output_tokens = 0
-    model = settings.anthropic_model_extraction
+    model = settings.anthropic_model_reasoning
 
     for batch in _chunks(representatives, _BATCH_SIZE):
         context_json = json.dumps(_build_context([txn for _, txn in batch]))

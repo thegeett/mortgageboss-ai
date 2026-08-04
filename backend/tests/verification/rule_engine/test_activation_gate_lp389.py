@@ -62,6 +62,7 @@ _ACTIVATED = frozenset(
         "AS-6",  # LP-429 — account ownership (calibratable-now; routing 11/11, Priya signed off 0.95)
         "IN-15",  # LP-430 — terminated-employment documentation (no-ai-dependency; deterministic date compare)
         "IN-16",  # LP-433 — pay-stub-only documentation (no-ai-dependency; deterministic doc-type presence)
+        "IH-1",  # LP-447 — insurance adequacy / dwelling settlement basis (no-ai-dependency; deterministic normalise)
     }
 )
 
@@ -79,10 +80,9 @@ def test_exactly_the_eligible_candidates_pass() -> None:
     held = set(bars) - eligible
     # IN-1/IN-5/AS-2/AS-12/IN-3 (AI, validated, measured >= bar); ID-5 + AS-9/IN-4/AS-10 (no-AI, input resolves).
     assert eligible == set(_ACTIVATED)
-    # Still 7 held after LP-430/LP-433: IN-15 and IN-16 are NEW candidates that activated IMMEDIATELY
-    # (no-ai-dependency, input resolves) — never in the held set, so held is unchanged. The held rest: OC-1 /
-    # IN-13 / AS-4/5/7 / IN-14.
-    assert len(held) == 7 and not (held & _ACTIVATED)  # every other candidate is held
+    # 8 held after LP-444: +CR-4 (not-calibratable-yet — its new AI tag credit.undisclosed_tradeline is
+    # unscored, so it is held, never eligible). The rest: OC-1 / IN-13 / AS-4/5/7 / IN-14.
+    assert len(held) == 8 and not (held & _ACTIVATED)  # every other candidate is held
 
 
 def test_eligible_rule_ids_is_sorted_and_matches() -> None:
@@ -95,6 +95,7 @@ def test_eligible_rule_ids_is_sorted_and_matches() -> None:
         "AS-8",  # LP-406-2b
         "AS-9",
         "ID-5",
+        "IH-1",  # LP-447 (sorts between ID-5 and IH-3)
         "IH-3",  # LP-417 (sorts between ID-5 and IN-1)
         "IN-1",
         "IN-10",

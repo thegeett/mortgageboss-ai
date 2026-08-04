@@ -95,7 +95,7 @@ async def reason_observation(context_json: str) -> ObservationResult:
     try:
         result = await asyncio.wait_for(
             complete(
-                model=settings.anthropic_model_extraction,
+                model=settings.anthropic_model_reasoning,
                 system=OBSERVATION_SYSTEM_PROMPT,
                 messages=[{"role": "user", "content": context_json}],
                 max_tokens=_MAX_TOKENS,

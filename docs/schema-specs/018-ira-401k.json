@@ -1,0 +1,68 @@
+{
+  "document_type": "ira_401k",
+  "slug": "ira-401k",
+  "tier": 2,
+  "rules_served": ["AS-11", "AS-3", "AS-4"],
+  "summary_hint": "plan type + custodian, participant, statement period, and the total vs vested balance with the accessible (net-of-plan-loan, withdrawal-eligible) portion",
+  "existing_extractor": null,
+  "catalog_coverage": "full",
+
+  "typed_core": [
+    {"name": "issuer_name", "type": "str", "why": "identity — validates source/independence of the statement", "rules": [], "reason_class": "identity", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "plan_administrator_or_custodian", "type": "str", "why": "identity — the custodian/administrator holding the plan assets", "rules": [], "reason_class": "identity", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "plan_sponsor_or_employer", "type": "str", "why": "identity/processor — the sponsoring employer; cross-checks employment and distinguishes employer plans", "rules": [], "reason_class": "identity", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "participant_name", "type": "str", "why": "identity — attach the plan to the borrower (AS-3/AS-4 count only borrower assets)", "rules": [], "reason_class": "identity", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "plan_type", "type": "str", "why": "AS-11/AS-3/AS-4 disambiguator — Traditional/Roth IRA vs 401(k)/403(b) changes access, penalty, and vesting rules", "rules": ["AS-11", "AS-3", "AS-4"], "reason_class": "disambiguator", "rule_floor": false, "degraded_from": "enum", "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "account_number_masked", "type": "str", "why": "PII (restricted); account-grouping key", "rules": [], "reason_class": "pii", "rule_floor": false, "degraded_from": null, "pii": {"kind": "ACCOUNT", "pre_masked": true}, "exists_today": false, "prompt_hint": "Never emit the full account number; mask to last 4"},
+    {"name": "statement_date", "type": "date", "why": "identity/recency — as-of date of the balances", "rules": [], "reason_class": "identity", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "statement_period_start", "type": "date", "why": "recency/coverage — statement window opening", "rules": [], "reason_class": "processor", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "statement_period_end", "type": "date", "why": "AS-3/AS-4 use the most-recent balance; recency test key", "rules": ["AS-3", "AS-4"], "reason_class": "rule", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "total_account_balance", "type": "Decimal", "why": "AS-11 (balance vs vested), AS-4 (reserve base before vesting/loan haircuts)", "rules": ["AS-11", "AS-4"], "reason_class": "rule", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "vested_balance", "type": "Decimal", "why": "AS-11 (only the vested portion counts), AS-3, AS-4 — the true usable balance", "rules": ["AS-11", "AS-3", "AS-4"], "reason_class": "rule", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "vested_percentage", "type": "str", "why": "AS-11 disambiguator — used to compute the usable portion (the '60% vested' example)", "rules": ["AS-11"], "reason_class": "disambiguator", "rule_floor": false, "degraded_from": "percent", "pii": null, "exists_today": false, "prompt_hint": "Capture vested_percentage verbatim (e.g. '60%') alongside vested_balance so the engine can reconcile percent vs dollars"},
+    {"name": "plan_loan_balance", "type": "Decimal", "why": "AS-11 — loans outstanding reduce the accessible portion", "rules": ["AS-11"], "reason_class": "rule", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": "A negative plan-loan line reduces the accessible portion; capture it as a positive balance in its own field"},
+    {"name": "plan_loan_payment", "type": "Decimal", "why": "processor — outstanding-loan monthly obligation; cheap future DTI/liability cross-check", "rules": [], "reason_class": "processor", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "available_for_withdrawal_or_loan", "type": "Decimal", "why": "AS-11 (the usable/accessible amount), AS-3 (cash-to-close contribution)", "rules": ["AS-11", "AS-3"], "reason_class": "rule", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "withdrawal_eligible_indicator", "type": "str", "why": "AS-11 — whether terms permit access at all", "rules": ["AS-11"], "reason_class": "rule", "rule_floor": false, "degraded_from": "bool", "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "withdrawal_penalty_or_tax", "type": "str", "why": "AS-11 — penalty/tax terms that affect usability", "rules": ["AS-11"], "reason_class": "rule", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "document_title", "type": "str", "why": "identity/classification — separates a periodic statement from a year-end/1099-R summary", "rules": [], "reason_class": "identity", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "document_status_or_version", "type": "str", "why": "processor — draft/final/corrected affects trust in the value", "rules": [], "reason_class": "processor", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": null}
+  ],
+
+  "nested_lists": [],
+
+  "rejected": [
+    {"name": "the 8 TECHNICAL provenance fields", "reason": "already in the TypedField wrapper"},
+    {"name": "employee_contributions_ytd / employer_contributions_ytd", "reason": "OPTIONAL; no asset rule consumer (contribution flow, not usable balance)"},
+    {"name": "required_minimum_distribution", "reason": "no consumer; RMD is a retiree concern, not reserves"},
+    {"name": "plan_loan_payoff_terms", "reason": "OPTIONAL; AS-11 needs balance + restrictions, not the amortization schedule"},
+    {"name": "investment_allocation", "reason": "no rule reads per-fund allocation; aggregate balances suffice"},
+    {"name": "distribution_history", "reason": "no rule consumer"},
+    {"name": "issuer_address / issuer_phone / issuer_email_or_url", "reason": "contact-only; no consumer"},
+    {"name": "party_addresses / property_address / loan_number", "reason": "not on a plan statement / no consumer"},
+    {"name": "signature_blocks / notary_block", "reason": "a plan statement is not executed"},
+    {"name": "form_number / form_revision_date", "reason": "not a standardized form"},
+    {"name": "effective_date / expiration_date", "reason": "duplicate the statement period"}
+  ],
+
+  "encoding_variations": [
+    "Vested amount stated as a dollar vested_balance, a vested_percentage, or both — capture both; a percent alone requires the total to compute the usable dollars (the AS-11 example)",
+    "Plan loan appears as 'Outstanding Loan Balance', 'Loan(s) Payable', or a negative line in the balance roll-up — a negative is a liability, not a balance",
+    "Plan type stated as words ('Traditional IRA', 'Roth 401(k)'), a plan section code, or only in a fine-print disclosure — Roth vs Traditional changes withdrawal tax/penalty",
+    "Availability stated as 'Available to Withdraw', 'Loan Available', or 'Distributable Amount' — all map to available_for_withdrawal_or_loan; keep the label context"
+  ],
+
+  "open_questions": [
+    {"id": 1, "q": "No nested list — AS rules use aggregate vested/available balances", "options": ["no list", "add investment_allocation (flat-row) if a rule discounts reserves by fund/asset class"], "recommendation": "none — confirm with Priya that no rule discounts reserves by fund/asset class; if one lands, investment_allocation (flat-row) becomes the one list", "blocks_implementation": false},
+    {"id": 2, "q": "vested_percentage degraded to str — no percent coercer exists", "options": ["str verbatim ('60%'), parsed downstream", "dollar vested_balance is the sole rule input"], "recommendation": "confirm the engine parses '60%' to 0.60 downstream for the AS-11 usable-portion compute, or whether the dollar vested_balance should be the sole rule input", "blocks_implementation": false},
+    {"id": 3, "q": "withdrawal_eligible_indicator bool to str — no boolean coercer", "options": ["str verbatim ('Yes'/'Eligible'/'Not eligible until 59.5')"], "recommendation": "stored as verbatim str; confirm AS-11 reads it as a string flag", "blocks_implementation": false},
+    {"id": 4, "q": "plan_loan_payment inclusion — weak consumer (no DTI rule in this packet)", "options": ["keep for processor/future-rule value", "drop to stay tight"], "recommendation": "keep — cheap and a likely liability cross-check", "blocks_implementation": false},
+    {"id": 5, "q": "statement_date vs statement_period_end — may coincide on some plan statements", "options": ["keep both", "collapse"], "recommendation": "keep both for snapshot-vs-period disambiguation", "blocks_implementation": false}
+  ],
+
+  "notes": [
+    "This is a RETIREMENT asset: the decision-relevant figure is the accessible amount — vested, net of any plan loan, and withdrawal/loan-eligible — not the gross balance.",
+    "Report penalty/eligibility language verbatim; do not judge usability — rules judge, the extractor describes.",
+    "statement_period_start reason_class was set to processor as a best guess: its 'recency/coverage' why cites no rule id and names no explicit reason_class."
+  ]
+}

@@ -1,0 +1,82 @@
+{
+  "document_type": "investment_account",
+  "slug": "investment-account-statements",
+  "tier": 2,
+  "rules_served": ["AS-11", "AS-3", "AS-4"],
+  "summary_hint": "brokerage/custodian, registration (owner + type), statement period, and the account's ending value with its usable (net-of-margin, vested) portion",
+  "existing_extractor": "app/ai/extraction/investment_account.py",
+  "catalog_coverage": "full",
+
+  "typed_core": [
+    {"name": "issuer_name", "type": "str", "why": "identity — validates source/third-party independence of the statement", "rules": [], "reason_class": "identity", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": true, "prompt_hint": null},
+    {"name": "brokerage_or_custodian_name", "type": "str", "why": "identity — the custodian holding the assets (independence check); may differ from the branding issuer", "rules": [], "reason_class": "identity", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "document_title", "type": "str", "why": "identity/disambiguator — separates a periodic statement from a trade confirmation or year-end summary (different value semantics)", "rules": [], "reason_class": "identity", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "account_registration_names_raw", "type": "str", "why": "disambiguator — verbatim registration line; lets the tag layer re-judge a bad owner split", "rules": [], "reason_class": "disambiguator", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "account_owner_name", "type": "str", "why": "identity — attach the account to a borrower (AS-3/AS-4 count only borrower-owned assets)", "rules": ["AS-3", "AS-4"], "reason_class": "identity", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": true, "prompt_hint": null},
+    {"name": "account_owner_name_2", "type": "str", "why": "identity — joint registration second owner", "rules": [], "reason_class": "identity", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "account_owner_count", "type": "int", "why": "disambiguator — how many owners the registration names (joint vs individual affects attribution)", "rules": [], "reason_class": "disambiguator", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "registration_type", "type": "str", "why": "AS-3/AS-4 disambiguator — individual/joint/trust/UTMA/IRA affects ownership eligibility and reserve treatment", "rules": ["AS-3", "AS-4"], "reason_class": "disambiguator", "rule_floor": false, "degraded_from": "enum", "pii": null, "exists_today": true, "prompt_hint": null},
+    {"name": "account_number_masked", "type": "str", "why": "PII (restricted); account-grouping key across statements", "rules": [], "reason_class": "pii", "rule_floor": false, "degraded_from": null, "pii": {"kind": "ACCOUNT", "pre_masked": true}, "exists_today": true, "prompt_hint": "Never emit the full account number; mask to last 4"},
+    {"name": "statement_date", "type": "date", "why": "identity/recency — as-of date of the values", "rules": [], "reason_class": "identity", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "statement_period_start", "type": "date", "why": "recency/coverage — statement window opening", "rules": [], "reason_class": "processor", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": true, "prompt_hint": null},
+    {"name": "statement_period_end", "type": "date", "why": "AS-3/AS-4 use the most-recent value; recency test key", "rules": ["AS-3", "AS-4"], "reason_class": "rule", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": true, "prompt_hint": null},
+    {"name": "ending_account_value", "type": "Decimal", "why": "AS-3 (liquid asset sum), AS-4 (reserve base) — the headline value", "rules": ["AS-3", "AS-4"], "reason_class": "rule", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": true, "prompt_hint": null},
+    {"name": "cash_and_cash_equivalents", "type": "Decimal", "why": "AS-3 — the most-liquid slice usable for cash-to-close", "rules": ["AS-3"], "reason_class": "rule", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "securities_market_value", "type": "Decimal", "why": "AS-4 — marketable-securities value (often discounted to reserve-eligible), AS-3", "rules": ["AS-4", "AS-3"], "reason_class": "rule", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "margin_or_securities_backed_loan_balance", "type": "Decimal", "why": "AS-11 (loans outstanding reduce usable portion), AS-3 (net liquid, not gross)", "rules": ["AS-11", "AS-3"], "reason_class": "rule", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": "A negative margin/loan line reduces usable value; capture it as a positive balance in its own field, not folded into the total"},
+    {"name": "net_liquidation_value", "type": "Decimal", "why": "AS-3, AS-4 — value after margin/SBL payoff; the true usable figure", "rules": ["AS-3", "AS-4"], "reason_class": "rule", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "vested_or_available_value", "type": "Decimal", "why": "AS-11 — the accessible/vested portion that actually counts", "rules": ["AS-11"], "reason_class": "rule", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "liquidation_restrictions", "type": "str", "why": "AS-11 — restriction/penalty terms; without it AS-11 cannot flag restricted use", "rules": ["AS-11"], "reason_class": "rule", "rule_floor": false, "degraded_from": "list", "pii": null, "exists_today": false, "prompt_hint": "Report restriction/penalty language verbatim; do not judge usability — rules judge, the extractor describes"},
+    {"name": "document_status_or_version", "type": "str", "why": "processor — draft/final/corrected/amended changes whether the value is trustworthy", "rules": [], "reason_class": "processor", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": null}
+  ],
+
+  "nested_lists": [
+    {
+      "name": "security_positions", "shape": "flat_row",
+      "shape_reason": "a portfolio commonly holds 20-100+ positions, so per-field wrapping risks the 16,384-token ceiling — flat rows keep it light",
+      "expected_item_count": "20-100+", "rules": ["AS-4", "AS-3"],
+      "exists_today": false, "plumbing_sites": 5,
+      "fields": [
+        {"name": "description", "type": "str", "why": "AS-4/AS-3 position-level marketability — position identity for restricted vs marketable classification"},
+        {"name": "ticker_or_cusip", "type": "str", "why": "AS-4/AS-3 — the security identifier"},
+        {"name": "quantity", "type": "Decimal", "why": "AS-4/AS-3 — units held"},
+        {"name": "market_value", "type": "Decimal", "why": "AS-4/AS-3 — per-position value feeding the marketability discount"},
+        {"name": "asset_class", "type": "str", "why": "AS-4/AS-3 — marketable fund vs restricted/thinly-traded stock"},
+        {"name": "source", "type": "str", "why": "per-row provenance wrapper"}
+      ]
+    }
+  ],
+
+  "rejected": [
+    {"name": "the 8 TECHNICAL provenance fields", "reason": "already in the TypedField wrapper"},
+    {"name": "beginning_account_value", "reason": "no continuity rule for investment accounts (unlike bank AS-8); no consumer"},
+    {"name": "accrued_income", "reason": "no rule/processor consumer"},
+    {"name": "investment_objective_or_account_type", "reason": "OPTIONAL; ownership captured by registration_type, no separate consumer"},
+    {"name": "issuer_address / issuer_phone / issuer_email_or_url", "reason": "no consumer; contact-only"},
+    {"name": "party_addresses / property_address / loan_number", "reason": "not on a brokerage statement / no consumer"},
+    {"name": "signature_blocks / notary_block", "reason": "a brokerage statement is not executed"},
+    {"name": "form_number / form_revision_date", "reason": "not a standardized form"},
+    {"name": "account_transactions", "reason": "no rule reads investment transaction detail; large-deposit sourcing is a bank-statement concern"},
+    {"name": "contributions_and_distributions", "reason": "no rule consumer for a taxable brokerage account"},
+    {"name": "effective_date / expiration_date", "reason": "duplicate the statement period"}
+  ],
+
+  "encoding_variations": [
+    "Total value appears as 'Total Account Value', 'Ending Value', 'Total Portfolio Value', or 'Net Portfolio Value' — the last may already net a margin loan, so capture margin_or_securities_backed_loan_balance and net_liquidation_value separately to disambiguate gross vs net",
+    "Cash may be 'Cash & Cash Equivalents', 'Sweep/Money Market', or 'Core Account' — all belong in cash_and_cash_equivalents",
+    "Registration stated as a code ('JT TEN', 'IND', 'TOD', 'TRUST') or spelled out — carry the raw line so the split can be re-judged",
+    "Margin/SBL shown as 'Margin Balance', 'Loan Balance', or a negative line in the value roll-up — a negative number is a liability, not a value"
+  ],
+
+  "open_questions": [
+    {"id": 1, "q": "security_positions necessity/shape — AS-3/AS-4 operate on aggregate values; position detail only matters if reserves are discounted per-security (restricted vs marketable)", "options": ["keep as the one flat-row nested list", "drop it and rely on securities_market_value"], "recommendation": "keep as flat-row for now, but confirm with Priya whether any rule discounts by position class before paying the ~5-site plumbing cost GEET'S DECISION (LP-438): BUILD IT — LP-437 made nested lists cheap (one declaration + the generic mechanism); the one-list-budget / defer / no-consumer concern is overturned. Build as flat_row; the per-rule consumer is separate follow-up.", "blocks_implementation": false},
+    {"id": 2, "q": "liquidation_restrictions flattening — catalog type is string[]", "options": ["single concatenated str (verbatim)", "a nested list"], "recommendation": "single str — AS-11 needs to detect presence/terms, not enumerate items; keeps the one-list budget for security_positions GEET'S DECISION (LP-438): BUILD IT — LP-437 made nested lists cheap (one declaration + the generic mechanism); the one-list-budget / defer / no-consumer concern is overturned. Build as flat_row; the per-rule consumer is separate follow-up.", "blocks_implementation": false},
+    {"id": 3, "q": "Dropped activity lists — confirm no large-deposit / sourcing rule (AS-1-style) applies to investment accounts", "options": ["no activity list", "add account_transactions if a rule lands later"], "recommendation": "confirm no large-deposit / sourcing rule applies; if one lands later, account_transactions becomes a rule floor field", "blocks_implementation": false},
+    {"id": 4, "q": "statement_date vs statement_period_end — these may coincide on some issuers", "options": ["keep both", "collapse"], "recommendation": "keep both; cheap and disambiguates snapshot vs period statements", "blocks_implementation": false}
+  ],
+
+  "notes": [
+    "This is an asset toward RESERVES and cash-to-close; the decision-relevant figures are the usable ones — value net of any margin/securities-backed loan, and the vested/accessible portion — not just the gross total.",
+    "statement_period_start reason_class was set to processor as a best guess: its 'recency/coverage' why cites no rule id and names no explicit reason_class."
+  ]
+}

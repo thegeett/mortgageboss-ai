@@ -78,7 +78,7 @@ the API (a single long-lived uvicorn loop) it *is* a real per-request cost, and
 that is the case for revisiting this: a per-event-loop client cache would fix the
 API path, but needs a close hook that ``asyncio.run`` does not provide without
 leaking an unclosed ``aiohttp`` connector per task. Correctness first; see
-``decisions.md`` ADR-343.
+``decisions.md`` ADR-357.
 """
 
 from typing import Any

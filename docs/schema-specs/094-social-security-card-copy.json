@@ -1,0 +1,49 @@
+{
+  "document_type": "social_security_card",
+  "slug": "social-security-card-copy",
+  "tier": 3,
+  "rules_served": [],
+  "summary_hint": "SSN card copy — name_on_card, SSN, employment_restriction_legend or 'unrestricted'; whose card this is and whether the card carries a work-authorization legend",
+  "existing_extractor": null,
+  "catalog_coverage": "full",
+
+  "typed_core": [
+    {"name":"issuer_name","type":"str","why":"identity/source — issuing authority (Social Security Administration); authenticity signal","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"name_on_card","type":"str","why":"identity — the individual on the card; match to borrower","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"person","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"social_security_number","type":"str","why":"PII (highly_restricted); identity — the card's headline value","rules":[],"reason_class":"pii","rule_floor":false,"degraded_from":null,"pii":{"kind":"SSN","pre_masked":false},"exists_today":false,"prompt_hint":null},
+    {"name":"employment_restriction_legend","type":"str","why":"processor — work-authorization legend, the card's only eligibility-relevant fact","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":"Capture the employment-restriction legend verbatim; absence of a legend means unrestricted and should be recorded as null, not fabricated"},
+    {"name":"signature_present","type":"str","why":"processor — whether the card is signed (authenticity/validity indicator)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"bool","pii":null,"exists_today":false,"prompt_hint":"The signature line presence is an authenticity signal, not a name — record present/absent only"},
+    {"name":"copy_front_present","type":"str","why":"processor/completeness — confirms the front image is present","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"bool","pii":null,"exists_today":false,"prompt_hint":"If both front and back are imaged, note each; a back-only or number-only copy is incomplete"},
+    {"name":"copy_back_present","type":"str","why":"processor/completeness — confirms the back image is present","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"bool","pii":null,"exists_today":false,"prompt_hint":null}
+  ],
+
+  "nested_lists": [],
+
+  "rejected": [
+    {"name":"the 8 TECHNICAL provenance fields","reason":"already in the TypedField wrapper"},
+    {"name":"document_title, form_number, form_revision_date","reason":"the card is not a titled/numbered form"},
+    {"name":"issuer_address, issuer_phone, issuer_email_or_url","reason":"not printed on the card"},
+    {"name":"all Dates fields (issue/effective/expiration/statement period)","reason":"a Social Security card carries no dates"},
+    {"name":"party_names, party_addresses","reason":"duplicate name_on_card; no address on the card"},
+    {"name":"property_address, loan_number, account_case_reference_number","reason":"not present on the card"},
+    {"name":"signature_blocks, notary_block, document_status_or_version","reason":"not an executed/notarized/versioned document"},
+    {"name":"card_version_or_design","reason":"cosmetic; no rule, no processor use"}
+  ],
+
+  "encoding_variations": [
+    "SSN prints as NNN-NN-NNNN; capture the grouping verbatim, normalize on read",
+    "The work-restriction legend appears in three forms: no legend (unrestricted), 'VALID FOR WORK ONLY WITH DHS AUTHORIZATION', or 'NOT VALID FOR EMPLOYMENT' — these invert eligibility, so the legend text is its own disambiguator and must be captured verbatim, not collapsed to a boolean",
+    "Card design/era varies (blue newer vs older stock); not decision-relevant, dropped"
+  ],
+
+  "open_questions": [
+    {"id":1,"q":"copy_back_present value — OPTIONAL in the catalog; kept as a cheap completeness flag.","options":["keep copy_back_present","keep only copy_front_present"],"recommendation":"if processors never require the back, drop it and keep only copy_front_present","blocks_implementation":false},
+    {"id":2,"q":"Legend as enum vs verbatim str — no enum coercer exists, and the three legend states invert work eligibility.","options":["verbatim str (kept)","a normalized enum"],"recommendation":"verbatim str; flag if downstream wants a normalized enum added deliberately","blocks_implementation":false}
+  ],
+
+  "notes": [
+    "A photocopy/scan of the physical Social Security card. It carries almost no structured data: a name, the SSN, and possibly a work-restriction legend. No rule reads it. The schema exists mainly to promote the SSN out of the unmasked catch-all and to record the work-eligibility legend, the only decision-relevant fact the card can add.",
+    "social_security_number needs _PII_FIELDS registration, pre_masked false (the card shows the full number; snapshot must mask + add match-hash); distinct from the registered taxpayer_ssn_masked. name_on_card is kept typed for identity, not a registry element under the current 7-field pattern.",
+    "Prompt hint (doc-level): Tell the model this is an image of the physical card, not an SSA letter — expect only name, number, and possibly a legend."
+  ]
+}

@@ -202,6 +202,15 @@ _LP430_ACTIVATED: tuple[str, ...] = ("IN-15",)
 # reachable without new document capability (LP-432).
 _LP433_ACTIVATED: tuple[str, ...] = ("IN-16",)
 
+# LP-447 — IH-1 (insurance adequacy) goes live (36 -> 37), unblocked by LP-446. The dwelling loss-settlement
+# BASIS check Priya's ruling replaced the retired coverage-vs-loan arithmetic with (ADR-340, effective
+# 2026-03-18): ins.dwelling_settlement_basis (derived normalisation of the LP-446 typed-core field) ==
+# replacement_cost -> satisfied / actual_cash_value -> fired / unknown -> couldnt_check. NO AI, NO threshold
+# (a boolean basis check) -> the AS-8/IH-3 no-ai-dependency path, eligible on input_resolves alone (resolves on
+# the binder fixtures; proven on the 4 real policies). Structural -> ships auto. Fails closed on an unrecognised
+# basis; per-document, so a file with no binder is not_applicable (DIFFERENT from IH-3's missing-binder couldnt_check).
+_LP447_ACTIVATED: tuple[str, ...] = ("IH-1",)
+
 # The gate is the source of truth: test_activation_gate_lp389 asserts ACTIVE_RULE_IDS - _BASE_ACTIVE ==
 # eligible_rule_ids() — a rule CANNOT enter this set without meeting the eligibility gate (not a hand-list).
 ACTIVE_RULE_IDS: tuple[str, ...] = (
@@ -221,6 +230,7 @@ ACTIVE_RULE_IDS: tuple[str, ...] = (
     *_LP429_ACTIVATED,
     *_LP430_ACTIVATED,
     *_LP433_ACTIVATED,
+    *_LP447_ACTIVATED,
 )
 
 

@@ -1,0 +1,64 @@
+{
+  "document_type": "borrower_s_authorization_for_counseling",
+  "slug": "borrower-s-authorization-for-counseling",
+  "tier": 3,
+  "rules_served": [],
+  "summary_hint": "<Borrower> authorized <counseling type> counseling by <agency> (HUD ID <id>); completion status <status> as of <counseling date>, signed <signature date>.",
+  "existing_extractor": null,
+  "catalog_coverage": "full",
+
+  "typed_core": [
+    {"name":"issuer_name","type":"str","why":"identity/source — who prepared the form","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"document_title","type":"str","why":"disambiguator — distinguishes from the general authorization (055)","rules":[],"reason_class":"disambiguator","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"borrower_name","type":"str","why":"identity — whose counseling/consent (flattened; primary borrower)","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"borrower_name_2","type":"str","why":"identity — co-borrower on a joint form (flattened from person[])","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"lender_or_servicer_name","type":"str","why":"identity — the party authorized to receive shared loan information","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"property_address","type":"str","why":"identity/linkage — attaches to the subject property (flattened from address)","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"address","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"loan_number","type":"str","why":"linkage — attaches document to the loan file (confidential identifier)","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"counseling_type","type":"str","why":"identity/processor — HECM vs homebuyer vs default counseling (degraded from enum)","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"counseling_agency_name","type":"str","why":"processor — must be a HUD-approved agency","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"hud_agency_id","type":"str","why":"processor — the HUD approval identifier a reviewer checks","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"A HUD-assigned agency approval number — capture it verbatim."},
+    {"name":"counselor_name","type":"str","why":"processor — the individual counselor (flattened from person)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"counseling_date","type":"date","why":"processor — when counseling occurred; recency vs application","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"counseling_delivery_method","type":"str","why":"processor — in-person/phone/online (degraded from enum)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"counseling_certificate_number","type":"str","why":"identity — the certificate reference for verification","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"completion_status","type":"str","why":"processor — whether counseling was completed (degraded from enum)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"authorization_to_share_loan_information","type":"str","why":"processor — consent to share loan info (degraded from boolean)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"bool","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"borrower_election_or_waiver","type":"str","why":"processor — whether the borrower elected or waived counseling (degraded from enum)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"borrower_signature_present","type":"str","why":"execution/identity — whether signed (degraded from signature)","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"signature","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"borrower_signature_date","type":"date","why":"execution — when signed","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"document_issue_date","type":"date","why":"processor — form/preparation date","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"account_case_reference_number","type":"str","why":"identity — cross-document matching/dedup","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null}
+  ],
+
+  "nested_lists": [],
+
+  "rejected": [
+    {"name":"the 8 TECHNICAL provenance fields","reason":"already in the TypedField wrapper"},
+    {"name":"party_names / party_addresses","reason":"generic; superseded by typed borrower/lender/counselor names and property_address"},
+    {"name":"counseling_topics_or_certificate_type","reason":"low-value narrative; catch-all suffices (certificate number retained separately)"},
+    {"name":"authorized_information_scope","reason":"boilerplate scope text; no consumer"},
+    {"name":"issuer_address, issuer_phone, issuer_email_or_url","reason":"no consumer"},
+    {"name":"form_number, form_revision_date","reason":"rarely a standardized numbered form"},
+    {"name":"effective_date, expiration_date, statement_period_start/end","reason":"duplicate counseling/signature dates"},
+    {"name":"signature_blocks, notary_block, document_status_or_version","reason":"not required to be notarized; no consumer"}
+  ],
+
+  "encoding_variations": [
+    "completion_status and borrower_election_or_waiver may both appear ('completed' vs 'borrower waived counseling'); keep both so a reviewer can distinguish a completed session from a waiver.",
+    "Counseling date vs certificate issue date vs signature date can all differ; counseling_date is the substantive event, the signature date the consent event — keep them separate."
+  ],
+
+  "open_questions": [
+    {"id":1,"q":"Certificate vs authorization — this catalog conflates the counseling authorization and the counseling completion certificate.","options":["keep both completion_status and counseling_certificate_number typed","split into two document types"],"recommendation":"keep both completion_status and counseling_certificate_number typed so either variant is captured; flag to the domain expert whether these should be two document types","blocks_implementation":false},
+    {"id":2,"q":"Enum degradation — counseling_type, completion_status, delivery_method, and borrower_election_or_waiver all degrade to strings.","options":["accept and rely on snippets","add a coercer"],"recommendation":"accept and rely on snippets; add a coercer only if a future FHA/HECM rule needs a typed status","blocks_implementation":false}
+  ],
+
+  "notes": [
+    "No rules read this document today, so there is no rule floor; this is a HUD counseling consent/completion artifact (common for FHA, HECM, and first-time-homebuyer programs).",
+    "Prompt hint (doc-level): the reviewer checks approved agency (HUD ID present), completion status, and that it predates the relevant milestone.",
+    "Prompt hint (doc-level): distinguish from the general borrower authorization (055): this one is specifically about counseling and sharing loan info with the counseling agency.",
+    "PII: loan_number is a confidential identifier flagged for review. hud_agency_id and counseling_certificate_number are organizational identifiers, not personal PII; no masking needed. No SSN/account field in this catalog.",
+    "Ambiguity: loan_number's why is 'linkage' (classified identity); counseling_type's why is 'identity/processor' (classified identity, first listed); borrower_signature_date's why is 'execution' — not one of the five reason classes; classified as processor."
+  ]
+}

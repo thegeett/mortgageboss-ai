@@ -1,0 +1,92 @@
+{
+  "document_type": "prior_closing_disclosure_final_cd_from_purchase",
+  "slug": "prior-closing-disclosure-final-cd-from-purchase",
+  "tier": 2,
+  "rules_served": ["AS-3", "CL-3", "DC-3", "DC-4", "DC-5"],
+  "summary_hint": "borrower(s), property, lender, closing date, loan amount / rate / APR, total closing costs and cash-to-close, and whether this is the final or a corrected CD — the headline a processor wants without opening the five-page disclosure.",
+  "existing_extractor": null,
+  "catalog_coverage": "full",
+
+  "typed_core": [
+    {"name": "borrower_name", "type": "str", "why": "PII; identity — attach to borrower. Flatten from borrower_names.", "rules": [], "reason_class": "identity", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "borrower_name_2", "type": "str", "why": "PII; identity — co-borrower.", "rules": [], "reason_class": "identity", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "borrower_names_raw", "type": "str", "why": "disambiguator — verbatim borrower line so a bad split stays visible.", "rules": [], "reason_class": "disambiguator", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "seller_name", "type": "str", "why": "PII; identity — prior-purchase seller; flatten from seller_names.", "rules": [], "reason_class": "identity", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "property_address", "type": "str", "why": "identity — which property this CD documents. PII.", "rules": [], "reason_class": "identity", "rule_floor": false, "degraded_from": "address", "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "lender_name", "type": "str", "why": "identity — the lender on the prior loan; cross-check against payoff/mortgagee.", "rules": [], "reason_class": "identity", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "settlement_agent_name", "type": "str", "why": "processor — which settlement/closing; flatten from settlement_agent_or_file_number.", "rules": [], "reason_class": "processor", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "settlement_file_number", "type": "str", "why": "identity — cross-document matching/dedup.", "rules": [], "reason_class": "identity", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "loan_number", "type": "str", "why": "PII (confidential); identity — links the CD to the loan file.", "rules": [], "reason_class": "pii", "rule_floor": false, "degraded_from": null, "pii": {"kind": "ACCOUNT", "pre_masked": true}, "exists_today": false, "prompt_hint": null},
+    {"name": "closing_date", "type": "date", "why": "DC-3 — the 3-day window anchor; also AS-3 context.", "rules": ["DC-3", "AS-3"], "reason_class": "rule", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "disbursement_date", "type": "date", "why": "processor — funding date; DC-3 context.", "rules": [], "reason_class": "processor", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "cd_delivery_or_received_date", "type": "date", "why": "DC-3 — the borrower-received/delivery date the 3-business-day count runs from.", "rules": ["DC-3"], "reason_class": "rule", "rule_floor": true, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": "The 3-business-day clock (DC-3) runs from the borrower's received/delivery date, which is not always printed on the form — this is the rule-floor gap."},
+    {"name": "final_or_corrected_indicator", "type": "str", "why": "disambiguator — final vs corrected CD; DC-4/DC-5 must compare the correct version.", "rules": ["DC-4", "DC-5"], "reason_class": "disambiguator", "rule_floor": false, "degraded_from": "enum", "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "loan_amount", "type": "Decimal", "why": "AS-3 — down payment = sale price − loan amount; identity.", "rules": ["AS-3"], "reason_class": "rule", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": "Loan amount, sale price, and total credits together yield the down payment for AS-3."},
+    {"name": "sale_price", "type": "Decimal", "why": "AS-3 — the other half of the down-payment derivation.", "rules": ["AS-3"], "reason_class": "rule", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "loan_purpose", "type": "str", "why": "identity — confirms this is a purchase CD.", "rules": [], "reason_class": "identity", "rule_floor": false, "degraded_from": "enum", "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "interest_rate", "type": "str", "why": "disambiguator — note rate vs APR; processor.", "rules": [], "reason_class": "disambiguator", "rule_floor": false, "degraded_from": "percent", "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "apr", "type": "str", "why": "DC-5 — APR-change tolerance across disclosures.", "rules": ["DC-5"], "reason_class": "rule", "rule_floor": false, "degraded_from": "percent", "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "monthly_principal_and_interest", "type": "Decimal", "why": "processor — payment sanity/DTI cross-check.", "rules": [], "reason_class": "processor", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "total_closing_costs", "type": "Decimal", "why": "AS-3, DC-4, CL-3 — the costs term of cash-to-close and the tolerance total.", "rules": ["AS-3", "DC-4", "CL-3"], "reason_class": "rule", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "cash_to_close", "type": "Decimal", "why": "AS-3, CL-3 — the figure AS-3 compares verified assets against.", "rules": ["AS-3", "CL-3"], "reason_class": "rule", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "lender_credits", "type": "Decimal", "why": "AS-3 — reduces cash-to-close; DC-4 (a 0%-tolerance cure often appears here).", "rules": ["AS-3", "DC-4"], "reason_class": "rule", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "seller_credits", "type": "Decimal", "why": "AS-3 — reduces cash-to-close; DC-4 seller-paid reconciliation.", "rules": ["AS-3", "DC-4"], "reason_class": "rule", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "deposit_or_earnest_money", "type": "Decimal", "why": "AS-3 — earnest money already paid is a credit toward cash-to-close.", "rules": ["AS-3"], "reason_class": "rule", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": null}
+  ],
+
+  "nested_lists": [
+    {
+      "name": "closing_cost_line_items",
+      "shape": "flat_row",
+      "shape_reason": "a CD carries 20–40 fee lines across sections A–J; per-field wrapping would risk the 16,384 ceiling, so flat rows with one source each.",
+      "expected_item_count": "20-40",
+      "rules": ["DC-4", "CL-3"],
+      "exists_today": false,
+      "plumbing_sites": 5,
+      "fields": [
+        {"name": "label", "type": "str", "why": "DC-4/CL-3 — the fee line label for per-fee tolerance comparison LE→CD"},
+        {"name": "section", "type": "str", "why": "DC-4 — the A–J section discriminator that drives the 0%/10% tolerance bucket"},
+        {"name": "amount", "type": "Decimal", "why": "DC-4 (per-fee 0%/10% tolerance), CL-3 (fee accuracy)"},
+        {"name": "paid_by", "type": "str", "why": "DC-4 — a fee's tolerance bucket depends on who paid (Borrower/Seller/Others/Lender credits)"}
+      ]
+    }
+  ],
+
+  "rejected": [
+    {"name": "the 8 TECHNICAL provenance fields", "reason": "already in the TypedField wrapper"},
+    {"name": "party_names, party_addresses", "reason": "duplicate borrower_names/seller_names and the addresses; catch-all"},
+    {"name": "issuer_name, issuer_address/phone/email_or_url", "reason": "duplicate lender_name/settlement_agent_name; contacts to catch-all"},
+    {"name": "document_title, form_number, form_revision_date", "reason": "the CD is one standardized form; final_or_corrected_indicator carries the version"},
+    {"name": "effective_date, expiration_date, statement_period_start/_end, document_issue_date", "reason": "a CD has closing/disbursement dates, not these; duplicative"},
+    {"name": "prepayment_penalty_indicator, balloon_payment_indicator", "reason": "no rule; informational loan-terms flags on a prior CD — catch-all"},
+    {"name": "finance_charge, amount_financed, total_payments, total_interest_percentage", "reason": "TILA page-5 boxes with no rule (only apr via DC-5); catch-all"},
+    {"name": "projected_payment_schedule, estimated_taxes_insurance_assessments", "reason": "escrow detail; no rule reads it pre-submission; second nested list not budgeted"},
+    {"name": "borrower_transaction_lines, seller_transaction_lines, adjustments_and_prorations, existing_loan_payoffs", "reason": "transaction-summary tables; key totals flattened (cash_to_close, deposit_or_earnest_money); rest to catch-all"},
+    {"name": "contact_information", "reason": "flattened to settlement_agent_name/lender_name; remaining contacts to catch-all"},
+    {"name": "signature_blocks, notary_block, consumer_signature_or_confirmation", "reason": "CL-6 (signing/notarization) is BLOCKED/OUT (post-close); no in-scope consumer"},
+    {"name": "account_case_reference_number", "reason": "loan_number / settlement_file_number are the references"}
+  ],
+
+  "encoding_variations": [
+    "Cash-to-close appears twice: the 'Calculating Cash to Close' table (page 3) and the borrower transaction-summary bottom line (page 3, Section K−L). Same fact; capture the disclosed cash_to_close total and note which page.",
+    "'To Borrower' vs 'From Borrower' — cash-to-close carries a direction; a sign flip inverts AS-3. Capture the sign/direction, not just the magnitude.",
+    "Fee 'paid by' columns — Borrower-Paid At Closing / Before Closing, Seller-Paid, Paid by Others, (Lender credits) — a fee's tolerance bucket depends on who paid; each line item needs its paid_by column as its disambiguator.",
+    "Final vs Corrected CD — the same fee set can appear on multiple CDs; final_or_corrected_indicator plus disbursement_date distinguish the operative version.",
+    "APR vs interest rate — the CD states both; do not read the note rate for DC-5."
+  ],
+
+  "open_questions": [
+    {"id": 1, "q": "cd_delivery_or_received_date derivability (DC-3). The 3-business-day clock runs from the date the borrower received the CD, which many CDs do not print.", "options": ["add the field and accept frequent nulls", "treat DC-3 as reading a delivery timestamp from the LOS/e-sign audit trail, not this document"], "recommendation": "keep the field (marked absent-from-catalog) so the AI captures it when present, and flag to the rule author that the authoritative source is likely the delivery log, not the PDF.", "blocks_implementation": false},
+    {"id": 2, "q": "One combined line-item list vs two (loan costs A–D and other costs E–J). Combined here with a section discriminator.", "options": ["one combined list with a section discriminator", "two lists split by loan-costs vs other-costs"], "recommendation": "keep combined — DC-4 needs every fee regardless of section, and one list is one plumbing site. GEET'S DECISION (LP-438): BUILD IT — LP-437 made nested lists cheap (one declaration + the generic mechanism); the one-list-budget / defer / no-consumer concern is overturned. Build as flat_row; the per-rule consumer is separate follow-up.", "blocks_implementation": false},
+    {"id": 3, "q": "Tolerance bucket is derived, not printed. The CD does not label fees '0%' or '10%'; closing_cost_line_items carries section + paid_by and DC-4 derives the bucket. Do not invent a bucket field.", "options": ["carry section + paid_by and let DC-4 derive the bucket", "add a printed bucket field"], "recommendation": "confirm DC-4's mapping from section → bucket lives in the rule, not the schema.", "blocks_implementation": false},
+    {"id": 4, "q": "Second nested list for the cash-to-close summary? AS-3 could benefit from the page-3 transaction-summary lines (deposit, adjustments, payoffs) rather than flattened totals.", "options": ["start with flattened totals", "add a transaction_summary_lines list"], "recommendation": "start with flattened totals; add a transaction_summary_lines list only if AS-3's author needs line-level detail. GEET'S DECISION (LP-438): BUILD IT — LP-437 made nested lists cheap (one declaration + the generic mechanism); the one-list-budget / defer / no-consumer concern is overturned. Build as flat_row; the per-rule consumer is separate follow-up.", "blocks_implementation": false},
+    {"id": 5, "q": "Degraded percent/bool/enum types. apr, interest_rate (percent), loan_purpose, final_or_corrected_indicator (enum) all degrade to str (no coercer).", "options": ["accept str now", "add a percent coercer"], "recommendation": "accept str now; consider a percent coercer if DC-5 arithmetic proves fragile against string rates.", "blocks_implementation": false}
+  ],
+
+  "notes": [
+    "Scope note: only AS-3 is NOW/IN. CL-3 and CL-6 are BLOCKED/OUT (post-close), and DC-3/DC-4/DC-5 are SCOPE?. The fields each rule will read are still derived so the schema is ready when scope is confirmed. CL-6 has no field consumer so it is absent from rules_served.",
+    "No existing_extractor for this document — no diff section; all fields exists_today false.",
+    "This is the CFPB/TRID Closing Disclosure, a fixed 5-page form (page 1 Loan Terms + Projected Payments; page 2 Closing Cost Details A–J; page 3 Calculating Cash to Close + Summaries of Transactions K–N; page 4 loan disclosures; page 5 Loan Calculations + contacts). Closing-cost sections: A Origination, B/C Services (B cannot-shop = 0% tolerance, C can-shop = 10% bucket), E Taxes/Recording, F Prepaids, G Escrow, H Other. The A/B vs C distinction drives DC-4.",
+    "PII section flags borrower_name, borrower_name_2, borrower_names_raw, seller_name (person names, pre_masked false), property_address (real address, pre_masked false), and loan_number (confidential, pre_masked true) for _PII_FIELDS registration; person names use an invented kind 'NAME'."
+  ]
+}

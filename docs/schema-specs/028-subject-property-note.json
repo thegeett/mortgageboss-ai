@@ -1,0 +1,79 @@
+{
+  "document_type": "subject_property_note",
+  "slug": "subject-property-note",
+  "tier": 2,
+  "rules_served": ["CL-6", "CR-8"],
+  "summary_hint": "Borrower(s), lender, property, note date, and the loan terms — original principal, rate and rate type, monthly P&I, first-payment and maturity dates — the authoritative source of the mortgage's contractual terms.",
+  "existing_extractor": null,
+  "catalog_coverage": "full",
+
+  "typed_core": [
+    {"name":"property_address","type":"str","why":"identity — the property the note is secured by; match to the loan file","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"address","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"borrower_names_raw","type":"str","why":"identity/disambiguator — signers verbatim (flattened from person[]); a bad name split stays visible","rules":[],"reason_class":"disambiguator","rule_floor":false,"degraded_from":"object","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"borrower_name","type":"str","why":"identity — first borrower obligated on the note","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"borrower_name_2","type":"str","why":"identity — co-borrower","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"lender_name","type":"str","why":"identity — the payee/lender named on the note","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"entity","pii":null,"exists_today":false,"prompt_hint":"The lender name may be the originator, differing from the eventual investor named in an endorsement; distinguish the originating lender from any endorsee"},
+    {"name":"note_date","type":"date","why":"identity/attribution — the note's execution date; CL-6 execution timing; distinguishes an amended/re-executed note","rules":["CL-6"],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"Note date vs first-payment date vs maturity date — three dates that are easily confused; keep all three distinct"},
+    {"name":"note_city_and_state","type":"str","why":"identity — jurisdiction the note recites","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"loan_number","type":"str","why":"identity — links the note to the loan file (confidential)","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"identifier","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"original_principal_amount","type":"Decimal","why":"processor / CR-8 corroboration — the mortgage principal the payment history tracks","rules":["CR-8"],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"Capture the principal as figures; principal is written both in words and figures ('$350,000.00 ... three hundred fifty thousand') — use the figure"},
+    {"name":"interest_rate","type":"Decimal","why":"processor — note rate","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"percent","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"rate_type","type":"str","why":"processor / disambiguator — fixed vs adjustable determines which special-terms fields apply","rules":[],"reason_class":"disambiguator","rule_floor":false,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":"Read rate_type first; only populate ARM fields when the note is adjustable, and balloon_* / interest_only_* only when the product recites them"},
+    {"name":"payment_due_day","type":"int","why":"processor — day of month payments are due; anchors lateness","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"first_payment_date","type":"date","why":"processor / CR-8 corroboration — start of the payment-history window","rules":["CR-8"],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"maturity_date","type":"date","why":"processor — loan term end","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"monthly_principal_and_interest","type":"Decimal","why":"processor / CR-8 corroboration — the contractual P&I amount","rules":["CR-8"],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"late_charge_terms","type":"str","why":"processor — grace-period days and late-charge %; the tolerance boundary CR-8's lateness check is defined against","rules":["CR-8"],"reason_class":"processor","rule_floor":false,"degraded_from":"object","pii":null,"exists_today":false,"prompt_hint":"Late charge stated as a percentage of overdue P&I plus a grace-period in days ('15 days'); both belong in late_charge_terms"},
+    {"name":"prepayment_terms","type":"str","why":"processor — prepayment penalty presence materially affects program eligibility","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"balloon_payment_terms","type":"str","why":"processor — a balloon changes the qualifying/fully-amortizing picture (populated only for balloon notes)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"object","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"interest_only_or_negative_amortization_terms","type":"str","why":"processor — IO / neg-am bears directly on ATR/eligibility (populated only for such products)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"borrower_signature_present","type":"str","why":"CL-6 — whether the note is signed (flattened from signature[])","rules":["CL-6"],"reason_class":"rule","rule_floor":false,"degraded_from":"bool","pii":null,"exists_today":false,"prompt_hint":"The note is signed but generally not notarized — notarization lives on the deed of trust; do not expect a notary block here"},
+    {"name":"borrower_signature_date","type":"date","why":"CL-6 — execution date of the borrower signature(s)","rules":["CL-6"],"reason_class":"rule","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null}
+  ],
+
+  "nested_lists": [],
+
+  "rejected": [
+    {"name":"the 8 TECHNICAL provenance fields","reason":"already in the TypedField wrapper"},
+    {"name":"subject_property_indicator","reason":"a judgment the extractor cannot read faithfully — a note never declares itself the 'subject'; classification/matching decides it (same call as doc 027)"},
+    {"name":"issuer_name","reason":"a note has no issuing organization; the relevant party is the lender/payee -> lender_name"},
+    {"name":"party_names / party_addresses","reason":"duplicate borrower_names + lender_name"},
+    {"name":"default_and_notice_terms, acceleration_terms","reason":"uniform-instrument boilerplate identical across all standard notes -> no per-loan discriminator; catch-all suffices (flagged)"},
+    {"name":"payment_address_or_place","reason":"no rule/processor consumer; catch-all"},
+    {"name":"document_title, form_number, form_revision_date","reason":"the note's form number (e.g. Form 3200-series) has no consumer rule today; catch-all"},
+    {"name":"issuer_address, issuer_phone, issuer_email_or_url","reason":"not applicable to a note"},
+    {"name":"effective_date, expiration_date","reason":"duplicate note_date / maturity_date"},
+    {"name":"statement_period_start / _end, document_issue_date","reason":"a note is not a periodic statement"},
+    {"name":"account_case_reference_number","reason":"duplicates loan_number"},
+    {"name":"notary_block","reason":"a note is signed, not notarized (the deed of trust carries the notary)"},
+    {"name":"document_status_or_version","reason":"no discriminating value on a signed note"},
+    {"name":"change_dates_and_index, margin_and_caps, payment_change_terms","reason":"ARM-only object/text; catch-all unless a rate rule is built (no consumer today)"},
+    {"name":"rider_or_addendum_references","reason":"string[] with no consumer; catch-all"},
+    {"name":"allonge_or_endorsement","reason":"object[] endorsement chain; no in-scope consumer (CR-8 reads the credit report) -> catch-all"},
+    {"name":"borrower_signatures (as a nested list)","reason":"flattened to borrower_signature_present + borrower_signature_date; 1-2 signers do not justify a bespoke list for an out-of-scope rule"}
+  ],
+
+  "encoding_variations": [
+    "Rate type stated as 'Fixed Rate Note' title vs an ARM note's index/margin recital — rate_type must be read from the instrument type, and it disambiguates which special-terms fields are non-null.",
+    "Note date vs first-payment date vs maturity date — three dates that are easily confused; keep all three distinct.",
+    "Late charge stated as a percentage of overdue P&I plus a grace-period in days ('15 days'); both belong in late_charge_terms.",
+    "Principal written both in words and figures ('$350,000.00 ... three hundred fifty thousand') — use the figure.",
+    "Lender name may be the originator, differing from the eventual investor named in an endorsement."
+  ],
+
+  "open_questions": [
+    {"id":1,"q":"Both rules are BLOCKED — build now or defer? Per the standard's Tier-3 guidance, a thin doc is 'written when the rule is built.' This doc is Tier-2 (2 rules) but both are blocked.","options":["ship the loan-terms typed core now","defer until CL-6/CR-8 unblock"],"recommendation":"ship the loan-terms typed core anyway (it is the authoritative source many future rules will read), but treat the field list as provisional until CL-6/CR-8 unblock","blocks_implementation":false},
+    {"id":2,"q":"CR-8's field is on another document. how_engine_checks says it extracts the credit report's mortgage tradeline payment history — nothing on the Note. The direct payment-history field is underivable on this document.","options":["record CR-8 as served by the credit-report schema, not this one","attribute CR-8 to the Note"],"recommendation":"record CR-8 as served by the credit-report schema, not this one; keep the note's terms as corroboration only","blocks_implementation":false},
+    {"id":3,"q":"subject_property_indicator (CORE) — fact or judgment? Same as doc 027: a note does not declare itself the subject.","options":["keep as a typed field","reject as a conclusion"],"recommendation":"reject as a conclusion; classification owns it","blocks_implementation":false},
+    {"id":4,"q":"Signature handling — flatten vs nest. With 1-2 borrowers and CL-6 out of scope.","options":["flatten (borrower_signature_present + borrower_signature_date)","nested signature list"],"recommendation":"flatten (adopted). Revisit as a nested list only if CL-6 comes in scope and per-signer signed/date is required","blocks_implementation":false},
+    {"id":5,"q":"Uniform-instrument boilerplate. default_and_notice_terms / acceleration_terms are CORE but identical on every standard note. Rejected here as no-signal.","options":["drop as no-signal","keep the CORE fields"],"recommendation":"confirm the domain expert agrees they add nothing per-loan before dropping","blocks_implementation":false}
+  ],
+
+  "notes": [
+    "21 typed-core fields. Both rules are BLOCKED, so the floor contributes little directly; the count is carried by the catalog CORE loan-terms set, which is the reason this document exists and the corpus of future cheap rules (rate, term, P&I, prepay).",
+    "Rule-status caveat: both rules are BLOCKED. CL-6 is post-close / out of scope (execution & notarization). CR-8's how_engine_checks reads the credit report's mortgage tradeline, not the Note — the note's terms (original_principal_amount, monthly_principal_and_interest, first_payment_date) corroborate only.",
+    "This is a Fannie/Freddie uniform instrument: default_and_notice_terms and acceleration_terms are boilerplate paragraphs identical across notes — rejected as no per-loan signal (pending domain-expert confirmation).",
+    "borrower_name(s), property_address, and loan_number (catalog sensitivity confidential) are typed so they are protected from the raw catch-all; no SSN/DOB appears on a note. Recommend registering none for masking (a recorded note is a public instrument, and the loan number is the link key) — pre_masked=false if registered.",
+    "Ambiguity: rate_type classed disambiguator ('processor / disambiguator' — it determines which special-terms fields apply); note_date classed identity with CL-6 in rules ('identity/attribution ... CL-6 execution timing')."
+  ]
+}

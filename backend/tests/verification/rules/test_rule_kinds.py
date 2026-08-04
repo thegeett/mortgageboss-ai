@@ -24,8 +24,8 @@ from app.verification.rules.kinds import (
 
 # Phase-0 counts from the xlsx (formalized as-is; the file's "130" title is off by 3).
 _EXPECTED = {
-    RuleKindName.CALCULATIVE: 29,
-    RuleKindName.STRUCTURAL: 62,  # LP-430 +IN-15; LP-433 +IN-16 (both deterministic documentation checks)
+    RuleKindName.CALCULATIVE: 28,  # LP-447 IH-1 reclassified calculative -> structural (ADR-340, Priya's ruling)
+    RuleKindName.STRUCTURAL: 63,  # LP-430 +IN-15; LP-433 +IN-16 (deterministic doc checks); LP-447 +IH-1
     RuleKindName.JUDGMENTAL: 29,
     RuleKindName.OUT_OF_SCOPE: 15,
 }
@@ -102,10 +102,11 @@ def test_validation_gate_all_pending_and_signoff_set() -> None:
     assert all(not rk.priya_validated for rk in rules.values())
     assert len(unvalidated_rules()) == _TOTAL
 
-    # Threshold sign-off set: calculative rules with a regulatory threshold (22 of 29).
+    # Threshold sign-off set: calculative rules with a regulatory threshold (21 of 28 after LP-447 —
+    # IH-1's threshold_needs_signoff went false when it reclassified structural, ADR-340/Priya's basis ruling).
     needs = rules_needing_threshold_signoff()
     assert all(rk.kind is RuleKindName.CALCULATIVE for rk in needs)
-    assert len(needs) == 22
+    assert len(needs) == 21
     # The named examples from the architecture summary must be in it.
     ids = {rk.rule_id for rk in needs}
     for rid in ("AS-1", "IN-1", "CR-6", "PC-4", "PE-1", "DT-1"):

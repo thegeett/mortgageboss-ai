@@ -58,17 +58,20 @@ Respond with ONLY a single JSON object, no markdown fences and no prose, exactly
     "income_frequency":                    {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
     "ytd_income":                          {"value": <number|null>, "page": <int|null>, "snippet": <string|null>},
     "hours":                               {"value": <number|null>, "page": <int|null>, "snippet": <string|null>},
-    "probability_of_continued_employment": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>}
+    "probability_of_continued_employment": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "issuer_name": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "document_issue_date": {"value": <YYYY-MM-DD|null>, "page": <int|null>, "snippet": <string|null>},
+    "employer_address": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "lender_name": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "applicant_address": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "employee_number": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "previous_employment_hire_date": {"value": <YYYY-MM-DD|null>, "page": <int|null>, "snippet": <string|null>},
+    "position_held": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "employer_signer_name": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "employer_signer_title": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "employer_signer_phone": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "employer_signature_and_date": {"value": <YYYY-MM-DD|null>, "page": <int|null>, "snippet": <string|null>},
+    "direct_return_to_lender_indicator": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "applicant_authorization_signature": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>}
   },
-  "additional_sections": [
-    {"section": "<section name>", "fields": [
-      {"label": "<field label>", "value": <string|null>, "page": <int|null>, "snippet": <string|null>}
-    ]}
-  ],
-  "field_confidence": {"<typed_core field name>": <0.0-1.0|null>, "...": <0.0-1.0|null>},
-  "confidence": <number 0.0-1.0>,
-  "reasoning": "<one short sentence describing the document>"
-}
-
-Example (values illustrative; use null for anything absent):
-{"typed_core": {"employer_name": {"value": "ACME Corp", "page": 1, "snippet": "Employer: ACME Corp"}, "employment_status": {"value": "current", "page": 1, "snippet": "Currently employed"}, "current_income_amount": {"value": "85000.00", "page": 1, "snippet": "Base pay 85,000.00 / year"}, "income_frequency": {"value": "annual", "page": 1, "snippet": "per year"}}, "additional_sections": [{"section": "Prior Year Earnings", "fields": [{"label": "2023 base", "value": "82000.00", "page": 1, "snippet": "2023 Base 82,000.00"}]}], "confidence": 0.9, "reasoning": "Standard employer-completed VOE confirming current employment and base pay."}
+  "gross_earnings_history": [{"period": <string|null>, "base": <string|null>, "overtime": <string|null>, "commission": <string|null>, "bonus": <string|null>, "page": <int|null>, "snippet": <string|null>}],

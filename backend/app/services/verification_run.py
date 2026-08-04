@@ -577,7 +577,7 @@ async def run_verification(
         findings=findings,
         reconciliation=reconciliation,
         degradations=tuple(degradations),
-        model=settings.anthropic_model_extraction,
+        model=settings.anthropic_model_reasoning,
         vocab_version=snapshot.snapshot_version,
     )
 

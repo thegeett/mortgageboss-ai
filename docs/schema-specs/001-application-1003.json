@@ -1,0 +1,86 @@
+{
+  "document_type": "uniform_residential_loan_application",
+  "slug": "1003-loan-application-urla",
+  "tier": 1,
+  "rules_served": ["CR-1","CR-2","CR-3","CR-4","DC-1","DT-6","ID-1","ID-2","ID-3","ID-4","ID-6","ID-7","ID-8","IN-1","IN-4","IN-5","IN-7","OC-1","OC-2","PC-1","PC-2","PC-3","PE-1","PR-3","PR-7","RE-1","TI-1","TI-5"],
+  "summary_hint": "borrower(s), loan purpose and amount, subject property, occupancy intent",
+  "existing_extractor": null,
+  "catalog_coverage": "full",
+
+  "typed_core": [
+    {"name":"borrower_legal_name","type":"str","why":"ID-1 — name consistency across five documents","rules":["ID-1"],"reason_class":"rule","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"borrower_name_2","type":"str","why":"co-borrower; a joint application is the norm","rules":["ID-1"],"reason_class":"rule","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"URLA 2020 uses a separate form per borrower; the legacy 1003 uses parallel columns"},
+    {"name":"borrower_count","type":"int","why":"disambiguator — how many parties the file has","rules":["ID-1"],"reason_class":"disambiguator","rule_floor":true,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"social_security_number","type":"str","why":"ID-2 — 'EXACT match, no fuzzy'","rules":["ID-2"],"reason_class":"pii","rule_floor":false,"degraded_from":null,"pii":{"kind":"SSN","pre_masked":false},"exists_today":false,"prompt_hint":"Never place an SSN in additional_sections — catch-all values are stored unmasked"},
+    {"name":"social_security_number_2","type":"str","why":"ID-2 for the co-borrower","rules":["ID-2"],"reason_class":"pii","rule_floor":false,"degraded_from":null,"pii":{"kind":"SSN","pre_masked":false},"exists_today":false,"prompt_hint":null},
+    {"name":"date_of_birth","type":"date","why":"ID-3","rules":["ID-3"],"reason_class":"pii","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"date_of_birth_2","type":"date","why":"ID-3 for the co-borrower","rules":["ID-3"],"reason_class":"pii","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"marital_status","type":"str","why":"ID-7 (title consistency), TI-5 (vesting)","rules":["ID-7","TI-5"],"reason_class":"rule","rule_floor":false,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"citizenship_residency_status","type":"str","why":"ID-8 — eligibility","rules":["ID-8"],"reason_class":"rule","rule_floor":false,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"current_address","type":"str","why":"ID-4, OC-1, OC-2","rules":["ID-4","OC-1","OC-2"],"reason_class":"rule","rule_floor":false,"degraded_from":"address","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"current_address_type","type":"str","why":"KNOWN TRAP — the MISMO parser stores the first ADDRESS regardless of type, so a mailing address can masquerade as a residence and produce false ID-4 mismatches. Confirmed in the sample MISMO: only 3 of 10 ADDRESS elements carry an AddressType","rules":["ID-4"],"reason_class":"disambiguator","rule_floor":true,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":"State whether the address is PRESENT/RESIDENCE or MAILING. Never report a mailing address as the current residence"},
+    {"name":"mailing_address","type":"str","why":"disambiguator for current_address","rules":["ID-4"],"reason_class":"disambiguator","rule_floor":false,"degraded_from":"address","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"current_address_duration_months","type":"int","why":"OC-2 — 'address not changing' reasonableness","rules":["OC-2"],"reason_class":"rule","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"current_housing_status","type":"str","why":"OC-2, DT-6 — own vs rent","rules":["OC-2","DT-6"],"reason_class":"rule","rule_floor":false,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":null},
+
+    {"name":"stated_monthly_income_total","type":"Decimal","why":"IN-1 — compares STATED income to documented; the catalog has income components but no single stated total to read","rules":["IN-1"],"reason_class":"rule","rule_floor":true,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"loan_amount","type":"Decimal","why":"PE-1 (eligibility), CR-2 (HCLTV)","rules":["CR-2","PE-1"],"reason_class":"rule","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"loan_purpose","type":"str","why":"PE-1; also the loan.purpose signal PC-2/PC-7 need to scope a refinance to not_applicable","rules":["PE-1","PC-2","PC-7"],"reason_class":"rule","rule_floor":false,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"property_value_or_purchase_price","type":"Decimal","why":"PC-2 — 'compare contract price to MISMO price'","rules":["PC-2"],"reason_class":"rule","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"lender_loan_number","type":"str","why":"identity — joins to other documents","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"universal_loan_identifier","type":"str","why":"identity","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+
+    {"name":"subject_property_address","type":"str","why":"PC-3, PR-7, TI-1, RE-1 — matched across four documents","rules":["PC-3","PR-7","TI-1","RE-1"],"reason_class":"rule","rule_floor":false,"degraded_from":"address","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"number_of_units","type":"int","why":"PE-1 (limits vary 1-4 units), PR-3","rules":["PE-1","PR-3"],"reason_class":"rule","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"property_type","type":"str","why":"PR-3 — 'extract/classify the property type'","rules":["PR-3"],"reason_class":"rule","rule_floor":false,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"occupancy_intent","type":"str","why":"OC-1, OC-2","rules":["OC-1","OC-2"],"reason_class":"rule","rule_floor":false,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"estate_type","type":"str","why":"TI-5 (vesting) — fee simple vs leasehold","rules":["TI-5"],"reason_class":"rule","rule_floor":false,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"manufactured_home_indicator","type":"str","why":"PR-3 eligibility","rules":["PR-3"],"reason_class":"rule","rule_floor":false,"degraded_from":"bool","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"mixed_use_indicator","type":"str","why":"PR-3 eligibility","rules":["PR-3"],"reason_class":"rule","rule_floor":false,"degraded_from":"bool","pii":null,"exists_today":false,"prompt_hint":null},
+
+    {"name":"declaration_borrowed_down_payment","type":"str","why":"AS-12 (borrowed funds) — the direct disclosure","rules":["AS-12"],"reason_class":"rule","rule_floor":false,"degraded_from":"bool","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"declaration_primary_residence","type":"str","why":"OC-1 — occupancy.consistent_with_signals reads exactly this class of declaration","rules":["OC-1"],"reason_class":"rule","rule_floor":false,"degraded_from":"bool","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"declaration_other_mortgage_application","type":"str","why":"CR-4, RE-1 — undisclosed obligations","rules":["CR-4","RE-1"],"reason_class":"rule","rule_floor":false,"degraded_from":"bool","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"demographic_section_present","type":"str","why":"ID-6 completeness — a PRESENCE flag only, so the regulated HMDA responses are never pulled into typed core","rules":["ID-6"],"reason_class":"rule","rule_floor":true,"degraded_from":"bool","pii":null,"exists_today":false,"prompt_hint":"Report only whether the demographic section is present and answered. NEVER extract the ethnicity/race/sex responses themselves"},
+
+    {"name":"application_signed_date","type":"date","why":"DC-1 — TRID window vs the application date","rules":["DC-1"],"reason_class":"rule","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"application_taken_date","type":"date","why":"DC-1","rules":["DC-1"],"reason_class":"rule","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"is_signed","type":"str","why":"ID-6 completeness — an unsigned 1003 is incomplete","rules":["ID-6"],"reason_class":"rule","rule_floor":true,"degraded_from":"bool","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"form_version","type":"str","why":"ID-6 disambiguator — URLA 2020 and the legacy 1003 have different required sections, so 'required fields' differ by version","rules":["ID-6"],"reason_class":"disambiguator","rule_floor":true,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":"Determine this FIRST — it dictates where every other field lives"}
+  ],
+
+  "nested_lists": [],
+
+  "rejected": [
+    {"name":"employment_records (nested list)","reason":"MISMO SUPPLIES IT — the sample carries EMPLOYMENT x3 with EmploymentStartDate, EmploymentEndDate, EmploymentMonthlyIncomeAmount, EmploymentPositionDescription, EmploymentStatusType. ~5 plumbing sites avoided"},
+    {"name":"credit_liabilities (nested list)","reason":"MISMO SUPPLIES IT — LIABILITY x7 with LiabilityMonthlyPaymentAmount, LiabilityUnpaidBalanceAmount, LiabilityType, LiabilityExclusionIndicator (CR-1/CR-3), LiabilityPayoffStatusIndicator (CR-3). ~5 plumbing sites avoided"},
+    {"name":"real_estate_owned (nested list)","reason":"MISMO SUPPLIES IT — OWNED_PROPERTY / OWNED_PROPERTY_DETAIL. ~5 plumbing sites avoided"},
+    {"name":"other_income_sources (nested list)","reason":"MISMO SUPPLIES IT — CURRENT_INCOME_ITEM x3 with IncomeType and CurrentIncomeMonthlyTotalAmount. ~5 plumbing sites avoided"},
+    {"name":"ethnicity_responses / race_responses / sex_responses / demographic_collection_method","reason":"HMDA data — regulated PII with no rule consumer. Replaced by demographic_section_present, which satisfies ID-6 without capturing it"},
+    {"name":"12 of the 15 declarations","reason":"no consumer today — revisit when the credit rules are written"},
+    {"name":"loan_originator_* (7 fields)","reason":"LOS metadata; no rule reads it"},
+    {"name":"total_assets / financial_accounts","reason":"AS-3/AS-4 compute assets FROM STATEMENTS. Using the borrower's self-report would defeat the verification"},
+    {"name":"undisclosed_borrowed_funds_amount","reason":"a judgment, not a fact — AS-12's job. Tags describe; rules judge"},
+    {"name":"notary_block / signature_blocks","reason":"superseded by the simpler is_signed"},
+    {"name":"the 8 TECHNICAL provenance fields","reason":"already in the TypedField wrapper"}
+  ],
+
+  "encoding_variations": [
+    "URLA 2020 vs the legacy 1003 — different section numbering and field names",
+    "Declarations are Y/N checkboxes, sometimes lettered (a-m), sometimes numbered",
+    "Multi-borrower: URLA 2020 uses a separate form per borrower; the legacy 1003 uses parallel columns — this changes how borrower_name_2 is found"
+  ],
+
+  "open_questions": [
+    {"id":1,"q":"Does a PDF 1003 need extraction at all, given MISMO is authoritative?","options":["signature/completeness only (is_signed, form_version, demographic_section_present)","full typed core as specified"],"recommendation":"full typed core — the PDF is the cross-check against MISMO, and if the two can disagree that is an unwritten rule worth surfacing GEET'S DECISION (LP-439): full typed core (the PDF is the cross-check against MISMO).","blocks_implementation":false},
+    {"id":2,"q":"No PiiKind exists for DOB or ADDRESS","options":["add both kinds","store as date/str and rely on snapshot handling"],"recommendation":"add both — the credit report needs them too GEET'S DECISION (LP-438): mask account-like identifiers (policy/account/plan numbers, wire/ACH trace, check references) via _PII_FIELDS; leave addresses and public-record case numbers PLAIN; DOB is unmasked (pii null).","blocks_implementation":false},
+    {"id":3,"q":"12 unused declarations — include now or when the credit rules are written?","options":["include now","defer"],"recommendation":"defer — cheap to add later, and unused fields are cost","blocks_implementation":false},
+    {"id":4,"q":"MISMO's AddressType is sparse (3 of 10 in the sample)","options":["rely on the PDF's current_address_type","fix the MISMO mapping"],"recommendation":"both — the PDF field is the cross-check, but the MISMO mapping is where ID-4's false mismatches originate","blocks_implementation":false}
+  ],
+
+  "notes": [
+    "MISMO SAMPLE VERIFIED (DU_MISMO_16973013.xml): EMPLOYMENT x3, LIABILITY x7, OWNED_PROPERTY, CURRENT_INCOME_ITEM x3, DECLARATION x2, and EmploymentBorrowerSelfEmployedIndicator x3 are all present. All four proposed nested lists were dropped as a result — ~20 plumbing sites avoided, the single largest cost saving in the top ten.",
+    "EmploymentBorrowerSelfEmployedIndicator exists in MISMO — IN-12's self-employment gate may be available directly, without the tax-return Schedule C path built in LP-421/422.",
+    "LiabilityExclusionIndicator and LiabilityPayoffStatusIndicator are present in MISMO — CR-1 and CR-3 may be blocked on wiring rather than extraction."
+  ]
+}

@@ -1,0 +1,80 @@
+{
+  "document_type": "evidence_of_payment",
+  "slug": "evidence-of-payment",
+  "tier": 3,
+  "rules_served": [],
+  "summary_hint": "Payment of {payment_amount} from {payer} to {payee} for {obligation_type}, {payment_method}, {payment_date}, {cleared/paid-in-full}.",
+  "existing_extractor": null,
+  "catalog_coverage": "full",
+
+  "typed_core": [
+    {"name":"issuer_name","type":"str","why":"identity — who produced the evidence (bank, creditor, servicer)","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"payer_name","type":"str","why":"identity — who paid (flattened from person)","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"object","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"payee_or_creditor_name","type":"str","why":"identity — who was paid","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"obligation_type","type":"str","why":"disambiguator — what kind of obligation was paid","rules":[],"reason_class":"disambiguator","rule_floor":false,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"account_or_case_number_masked","type":"str","why":"PII — ties the payment to the obligation/account","rules":[],"reason_class":"pii","rule_floor":false,"degraded_from":null,"pii":{"kind":"ACCOUNT","pre_masked":true},"exists_today":false,"prompt_hint":null},
+    {"name":"property_address_if_applicable","type":"str","why":"identity — links to a property when relevant (flattened from address)","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"address","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"payment_amount","type":"Decimal","why":"processor — the headline amount paid","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"payment_date","type":"date","why":"identity — when the payment was made","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"posting_or_cleared_date","type":"date","why":"processor — when it actually cleared","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"payment_method","type":"str","why":"processor — check / ACH / wire / card","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"check_reference_or_trace_number","type":"str","why":"processor — trace the payment (restricted)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"source_institution","type":"str","why":"processor — paying institution (sourcing)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"source_account_last4","type":"str","why":"PII — ties the payment to the borrower's account","rules":[],"reason_class":"pii","rule_floor":false,"degraded_from":null,"pii":{"kind":"ACCOUNT","pre_masked":true},"exists_today":false,"prompt_hint":"Exists to tie the payment to the borrower's own funds — capture last-4 verbatim, never infer full digits"},
+    {"name":"payment_description_or_memo","type":"str","why":"processor — memo context (what/why)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"cleared_or_completed_indicator","type":"str","why":"processor — did the payment actually clear","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"bool","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"balance_before_payment","type":"Decimal","why":"processor — obligation size before","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"balance_after_payment","type":"Decimal","why":"processor — remaining balance (DTI)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"paid_in_full_indicator","type":"str","why":"processor — debt fully paid -> excludable from DTI","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"bool","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"account_status_after_payment","type":"str","why":"processor — resulting account state","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"billing_or_due_period","type":"str","why":"processor — which period this payment covers","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"date_range","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"loan_number","type":"str","why":"identity — links to the loan file","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null}
+  ],
+
+  "nested_lists": [
+    {
+      "name":"recurring_payment_history","shape":"flat_row",
+      "shape_reason":"when the document is a payment history rather than a single receipt, each period is a row; can be many rows, so flat + one source keeps it under the 16,384 ceiling",
+      "expected_item_count":"varies — often empty (presence/count uncertain, flag)","rules":[],
+      "exists_today":false,"plumbing_sites":5,
+      "fields":[
+        {"name":"date","type":"date","why":"the period's payment date"},
+        {"name":"amount","type":"Decimal","why":"the period's payment amount"},
+        {"name":"status","type":"str","why":"the period's payment status"},
+        {"name":"source","type":"str","why":"provenance snippet for the payment row"}
+      ]
+    }
+  ],
+
+  "rejected": [
+    {"name":"document_title, form_number, form_revision_date","reason":"not load-bearing"},
+    {"name":"issuer_address, issuer_phone, issuer_email_or_url","reason":"no consumer"},
+    {"name":"effective_date, expiration_date, statement_period_start/end","reason":"duplicate payment/period dates"},
+    {"name":"party_names, party_addresses","reason":"captured by payer/payee fields"},
+    {"name":"property_address","reason":"duplicates property_address_if_applicable"},
+    {"name":"account_case_reference_number","reason":"duplicates account_or_case_number_masked"},
+    {"name":"signature_blocks, notary_block","reason":"a payment receipt is not executed/notarized"},
+    {"name":"document_status_or_version","reason":"duplicates cleared_or_completed_indicator"},
+    {"name":"creditor_receipt_or_confirmation","reason":"free-form object; presence covered by cleared/paid-in-full -> catch-all"}
+  ],
+
+  "encoding_variations": [
+    "'Payment date' vs 'posted/cleared date' can differ by days — keep both; DTI/sourcing cares about cleared funds",
+    "Paid-off status appears as a 'paid in full' stamp, a '$0.00 balance' line, or an 'account closed' status — keep paid_in_full_indicator, balance_after_payment, and account_status_after_payment so a bare stamp is corroborated",
+    "Obligation type may be prose ('auto loan', 'collection', 'credit card') — keep verbatim; it drives whether the payoff helps qualification"
+  ],
+
+  "open_questions": [
+    {"id":1,"q":"Single receipt vs payment history. The document may be one payment or a ledger.","options":["populate recurring_payment_history only when a ledger is present, else leave []"],"recommendation":"keep the one flat nested list; flag that most instances leave it empty","blocks_implementation":false},
+    {"id":2,"q":"Which cleared signal is authoritative? cleared_or_completed_indicator, paid_in_full_indicator, and account_status_after_payment overlap.","options":["pick one trusted signal","keep all three"],"recommendation":"keep all three (they corroborate); let a future DTI-exclusion rule pick the trusted one","blocks_implementation":false},
+    {"id":3,"q":"check_reference_or_trace_number PII class. Restricted but not last-4-masked.","options":["register as raw","keep as a plain restricted typed field"],"recommendation":"keep typed, flag GEET'S DECISION (LP-438): mask account-like identifiers (policy/account/plan numbers, wire/ACH trace, check references) via _PII_FIELDS; leave addresses and public-record case numbers PLAIN; DOB is unmasked (pii null).","blocks_implementation":false}
+  ],
+
+  "notes": [
+    "No rules consume this type today, so there is no rule floor; every field earns its place on identity, PII, processor use, or disambiguation.",
+    "account_or_case_number_masked and source_account_last4 both need _PII_FIELDS registration (pre_masked true).",
+    "check_reference_or_trace_number is a restricted trace identifier kept as a typed field and flagged for possible PII registration; its reason_class is processor (not registered as PII in this draft).",
+    "Prompt hint (doc-level): this proves a payment/payoff — the load-bearing outputs are the amount, the cleared status, and the resulting balance / paid-in-full flag.",
+    "Prompt hint (doc-level): distinguish a single payment receipt from a payment history (the latter fills the nested list)."
+  ]
+}

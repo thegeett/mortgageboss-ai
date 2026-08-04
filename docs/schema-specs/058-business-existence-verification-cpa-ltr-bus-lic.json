@@ -1,0 +1,70 @@
+{
+  "document_type": "business_existence_verification_cpa_ltr_bus_lic",
+  "slug": "business-existence-verification-cpa-ltr-bus-lic",
+  "tier": 3,
+  "rules_served": [],
+  "summary_hint": "<Business legal name> (<entity type>) verified <active/good-standing> as of <status date> via <verification document type> from <verifying authority>; borrower owns <ownership %>.",
+  "existing_extractor": null,
+  "catalog_coverage": "full",
+
+  "typed_core": [
+    {"name":"business_legal_name","type":"str","why":"identity — which business is being verified (flattened from entity)","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"entity_type","type":"str","why":"processor — LLC/S-corp/sole-prop affects income analysis (degraded from enum)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"business_address","type":"str","why":"identity/linkage — where the business operates (flattened from address)","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"address","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"ein_or_state_entity_number_masked","type":"str","why":"PII (restricted, pre-masked) — the business tax/entity ID","rules":[],"reason_class":"pii","rule_floor":false,"degraded_from":null,"pii":{"kind":"ACCOUNT","pre_masked":true},"exists_today":false,"prompt_hint":null},
+    {"name":"formation_or_incorporation_date","type":"date","why":"processor — supports 2-year self-employment history","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"business_start_date","type":"date","why":"processor — self-employment duration for income eligibility","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"industry_or_business_activity","type":"str","why":"processor/identity — the nature of the business","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"active_or_good_standing_status","type":"str","why":"processor — the headline: is the business active/in good standing (degraded from enum)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"status_as_of_date","type":"date","why":"processor — recency of the standing determination","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"borrower_owner_name","type":"str","why":"identity — the borrower/owner (flattened from person[]; primary)","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"borrower_owner_name_2","type":"str","why":"identity — a second owner (flattened from person[])","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"ownership_percentage","type":"str","why":"processor — % ownership affects income treatment (degraded from percent; no coercer)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"percent","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"owner_title_or_role","type":"str","why":"processor — the borrower's role (owner/officer/member)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"verification_document_type","type":"str","why":"identity/disambiguator — CPA letter vs business license vs SOS record (degraded from enum)","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"license_or_registration_number","type":"str","why":"identity — the license/registration reference","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"license_issue_date","type":"date","why":"processor — license validity start (flattened from date_range)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"license_expiration_date","type":"date","why":"processor — whether the license is current through closing (flattened from date_range)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"verifying_authority_or_cpa","type":"str","why":"identity/source — who attested (independence matters) (flattened from object)","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"Capture the verifier including the CPA's own license number/state where present (flattened)."},
+    {"name":"verification_method","type":"str","why":"processor — how verified (degraded from enum)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"verification_date","type":"date","why":"processor — recency of the verification","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"issuer_name","type":"str","why":"identity/source — originating organization","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"account_case_reference_number","type":"str","why":"identity — cross-document matching/dedup","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null}
+  ],
+
+  "nested_lists": [],
+
+  "rejected": [
+    {"name":"the 8 TECHNICAL provenance fields","reason":"already in the TypedField wrapper"},
+    {"name":"self_employment_duration","reason":"TECHNICAL/derived conclusion — computed from business_start_date; tags describe, rules judge"},
+    {"name":"party_names / party_addresses","reason":"generic; superseded by typed business/owner fields"},
+    {"name":"dba_names","reason":"rarely repeats meaningfully; no consumer"},
+    {"name":"business_phone","reason":"no consumer"},
+    {"name":"cpa_license_number_and_state","reason":"folded into verifying_authority_or_cpa (flattened); revisit if a rule needs the CPA license typed"},
+    {"name":"cpa_relationship_and_duration","reason":"narrative; no consumer"},
+    {"name":"property_address, loan_number","reason":"not central to business existence; catch-all suffices"},
+    {"name":"website_or_public_record_reference","reason":"audit-trail only; no consumer"},
+    {"name":"issuer_address, issuer_phone, issuer_email_or_url, form_number, form_revision_date","reason":"no consumer"},
+    {"name":"document_issue_date, effective_date, expiration_date, statement_period_start/end","reason":"duplicate status/verification/license dates"},
+    {"name":"signature_blocks, notary_block, document_status_or_version","reason":"execution detail; no rule"}
+  ],
+
+  "encoding_variations": [
+    "Existence is attested three ways with different vocabularies: a CPA letter (prose attestation + CPA license/state), a business license (issuing authority + license number + dates), or a Secretary-of-State good-standing record (entity number + status). verification_document_type is the required disambiguator — a 'good standing' phrase means different things across the three.",
+    "Good-standing status may read 'Active', 'Good Standing', 'Current', or 'In Compliance'; keep the verbatim phrase in the snippet since it degrades to a string."
+  ],
+
+  "open_questions": [
+    {"id":1,"q":"CPA license as its own field — cpa_license_number_and_state is folded into the flattened verifying_authority_or_cpa.","options":["keep folded","promote to a typed field"],"recommendation":"keep folded for now; promote to a typed field if a rule ever verifies the CPA's licensure independently","blocks_implementation":false},
+    {"id":2,"q":"percent degradation — ownership_percentage degrades to a string (no percent coercer). A self-employment rule may later need a typed number.","options":["accept string now","add a percent coercer"],"recommendation":"accept string now; flag for a coercer when such a rule is built","blocks_implementation":false},
+    {"id":3,"q":"Three-document conflation — CPA letter, business license, and SOS record are quite different artifacts under one type.","options":["one type disambiguated by verification_document_type","split into separate document types"],"recommendation":"verification_document_type disambiguates; flag to the domain expert whether they should split","blocks_implementation":false}
+  ],
+
+  "notes": [
+    "No rules read this document today, so there is no rule floor; this document proves a self-employed borrower's business exists and is active (a CPA letter, a business license, or a Secretary-of-State record).",
+    "Prompt hint (doc-level): this is a self-employment support document — the reviewer wants: business exists, is active/current as of a recent date, the borrower's ownership %, and an independent verifier.",
+    "Prompt hint (doc-level): do not compute self-employment duration (a derived figure) — capture business_start_date and formation_or_incorporation_date as stated.",
+    "PII: ein_or_state_entity_number_masked (pre_masked true) needs _PII_FIELDS registration. The registry's employer_ein is masked; this is analogous but a distinct field name and must be registered. No borrower SSN in this catalog.",
+    "Ambiguity: industry_or_business_activity's why is 'processor/identity' (classified processor, first listed); verification_document_type's why is 'identity/disambiguator' (classified identity, first listed)."
+  ]
+}

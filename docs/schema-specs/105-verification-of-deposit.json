@@ -1,0 +1,76 @@
+{
+  "document_type": "verification_of_deposit",
+  "slug": "verification-of-deposit",
+  "tier": 3,
+  "rules_served": [],
+  "summary_hint": "which depository institution certified the borrower's accounts, the total current and average balances, and the certifying representative and date",
+  "existing_extractor": null,
+  "catalog_coverage": "full",
+
+  "typed_core": [
+    {"name":"document_title","type":"str","why":"identity — confirms this is a VOD (vs a bank statement)","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"form_number","type":"str","why":"disambiguator — the \"1006\"/\"90\" form code identifying the standardized VOD template","rules":[],"reason_class":"disambiguator","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"depository_institution_name","type":"str","why":"identity — the bank certifying the funds (flattened from object)","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"object","pii":null,"exists_today":false,"prompt_hint":"Institution names on the request block vs the certification block can differ (branch vs legal entity) — read the certifying entity"},
+    {"name":"depository_institution_address","type":"str","why":"processor — institution location for follow-up (flattened)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"object","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"lender_name","type":"str","why":"processor/identity — the requesting lender (flattened from object)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"object","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"applicant_name","type":"str","why":"identity — the borrower whose accounts are certified (flattened from object)","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"object","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"applicant_name_2","type":"str","why":"identity — co-applicant when present (flattened)","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"object","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"applicant_address","type":"str","why":"identity — applicant address; supports address-consistency review (flattened)","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"object","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"total_current_balance","type":"Decimal","why":"processor — headline funds available","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"total_average_balance","type":"Decimal","why":"processor — average balance evidences seasoning (not just a point balance)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"pledged_or_restricted_accounts","type":"str","why":"processor — pledged/restricted funds must be excluded from available assets","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"institution_representative_name_title","type":"str","why":"processor — who at the bank certified (authority/audit)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"verification_date","type":"date","why":"identity/recency — the certification date","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"institution_phone","type":"str","why":"processor — institution callback number (degraded from phone)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"phone","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"direct_delivery_indicator","type":"str","why":"processor — whether the form was sent directly by the institution (independence) (degraded from boolean)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"bool","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"applicant_authorized","type":"str","why":"processor — did the applicant authorize the release (compliance) (degraded from signature)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"signature","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"institution_representative_signed","type":"str","why":"processor — was the certification executed by the bank rep (degraded from signature)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"signature","pii":null,"exists_today":false,"prompt_hint":null}
+  ],
+
+  "nested_lists": [
+    {
+      "name":"deposit_accounts","shape":"flat_row",
+      "shape_reason":"a VOD certifies one or more deposit accounts and this is the substantive content; a borrower rarely has more than a handful at one institution, so flat rows are safely under the ceiling and carry the masked account number",
+      "expected_item_count":"a handful","rules":[],
+      "exists_today":false,"plumbing_sites":5,
+      "fields":[
+        {"name":"account_type","type":"str","why":"the type of deposit account"},
+        {"name":"account_number_masked","type":"str","why":"identifies the account, masked to last-4","pii_note":"already in the 7-field _PII_FIELDS registry, pre_masked=true; carried in the nested record"},
+        {"name":"current_balance","type":"Decimal","why":"the certified current balance"},
+        {"name":"average_balance","type":"Decimal","why":"average balance for previous two months (seasoning control)"},
+        {"name":"date_opened","type":"date","why":"account age/seasoning"},
+        {"name":"source","type":"str","why":"provenance of the row"}
+      ]
+    }
+  ],
+
+  "rejected": [
+    {"name":"issuer_name","reason":"duplicates depository_institution_name"},
+    {"name":"issuer_address / issuer_phone / issuer_email_or_url","reason":"duplicate depository_institution_address / institution_phone"},
+    {"name":"form_revision_date","reason":"version detail with no consumer; form_number carries the identity"},
+    {"name":"document_issue_date / effective_date / expiration_date","reason":"duplicate verification_date"},
+    {"name":"statement_period_start / statement_period_end","reason":"a VOD is a certification, not a statement period"},
+    {"name":"party_names / party_addresses","reason":"duplicate applicant/institution fields already typed"},
+    {"name":"property_address / loan_number / account_case_reference_number","reason":"not core to a VOD; catch-all captures loan_number if present"},
+    {"name":"lender_number","reason":"OPTIONAL identifier with no consumer"},
+    {"name":"lender_signature_title_date","reason":"the lender's request signature has no consumer; the certifying party is the institution rep"},
+    {"name":"signature_blocks / notary_block / document_status_or_version","reason":"execution captured by the two signed indicators; a VOD is not notarized"}
+  ],
+
+  "encoding_variations": [
+    "Current vs average balance are distinct on a VOD (the average balance is the anti-\"just deposited\" control) — keep both per account; never collapse to one balance",
+    "Direct delivery is stated as a checkbox (\"Sent directly to lender\"), a stamp, or an implied transmittal — capture whichever appears; the independence signal is easily lost to the catch-all",
+    "Institution names on the request block vs the certification block can differ (branch vs legal entity) — read the certifying entity for depository_institution_name"
+  ],
+
+  "open_questions": [
+    {"id":1,"q":"loans_secured_by_or_held_at_institution — second nested list. The VOD's loan section can surface undisclosed debts or pledged assets (real mortgage value).","options":["keep only deposit_accounts now","add it as a second flat list"],"recommendation":"keep only deposit_accounts now — no rule consumes the loan section yet, and a second list is ~5 extra plumbing sites; flatten the presence signal into pledged_or_restricted_accounts for now and revisit when an undisclosed-debt rule exists GEET'S DECISION (LP-438): BUILD IT — LP-437 made nested lists cheap (one declaration + the generic mechanism); the one-list-budget / defer / no-consumer concern is overturned. Build as flat_row; the per-rule consumer is separate follow-up.","blocks_implementation":false},
+    {"id":2,"q":"Signatures degraded to presence strings — applicant_authorized / institution_representative_signed degrade signature to str (no coercer).","options":["keep a presence/label string","add signer name"],"recommendation":"keep a presence/label string; add signer name only if a rule needs it","blocks_implementation":false}
+  ],
+
+  "notes": [
+    "No rules read this document today (rule floor is empty); fields are justified by identity, disambiguation, PII, and processor use. A VOD (typically Fannie Mae Form 1006 / Freddie Mac Form 90) is a bank-certified statement of a borrower's deposit balances; its value hinges on the average balance (seasoning) and direct-delivery independence.",
+    "Layout: the request block (lender, applicant, authorization signature) is at top, the certified accounts in the middle, and the institution certification (rep name/title/signature/date, direct-delivery) at bottom. \"Average balance for previous two months\" maps to average_balance, not current_balance.",
+    "account_number_masked (nested) is already in the 7-field _PII_FIELDS registry, pre_masked=true; nothing new needs registration."
+  ]
+}

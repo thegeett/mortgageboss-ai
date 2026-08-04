@@ -2,11 +2,11 @@
 
 Generated from `backend/app/verification/rules/rule_kinds.csv` (the source of truth) via `app.scripts.generate_rule_kinds_md` — do not edit by hand. See ADR-247 / LP-301.
 
-**135 rules** — calculative 29, structural 62, judgmental 29, out-of-scope 15. Numeric-check (deterministic bookend): 29. Priya-validated: 0/135. Thresholds needing sign-off: 22.
+**135 rules** — calculative 28, structural 63, judgmental 29, out-of-scope 15. Numeric-check (deterministic bookend): 28. Priya-validated: 0/135. Thresholds needing sign-off: 21.
 
 `exact_match` applies to structural rules only (true = deterministic-only, no AI; false = AI fuzzy entity match). `numeric_check` = the calculative bookend. `signoff` = a regulatory threshold Priya must sign off before ship. All rules are `priya_validated=false` until confirmed.
 
-## calculative (29)
+## calculative (28)
 
 | rule_id | name | category | kind | evaluation_path | numeric | exact_match | validated | signoff |
 |---|---|---|---|---|---|---|---|---|
@@ -30,7 +30,6 @@ Generated from `backend/app/verification/rules/rule_kinds.csv` (the source of tr
 | PR-1 | LTV / CLTV / HCLTV limits | Property | calculative | deterministic_bookend+ai | true | — | false | true |
 | PR-2 | Appraised value vs purchase price | Property | calculative | deterministic_bookend | true | — | false | false |
 | PR-6 | Appraisal validity at closing | Property | calculative | deterministic_bookend | true | — | false | true |
-| IH-1 | Insurance adequacy | Insurance | calculative | deterministic_bookend | true | — | false | true |
 | IH-4 | Premium matches DTI | Insurance | calculative | deterministic_bookend | true | — | false | false |
 | CO-4 | HOA budget / reserves | Condo | calculative | deterministic_bookend+ai | true | — | false | true |
 | PC-4 | Seller credit / IPC limit | Contract | calculative | deterministic_bookend | true | — | false | true |
@@ -40,7 +39,7 @@ Generated from `backend/app/verification/rules/rule_kinds.csv` (the source of tr
 | PE-1 | Conventional eligibility | Program | calculative | deterministic_bookend+ai | true | — | false | true |
 | PE-3 | FHA minimum required investment | Program | calculative | deterministic_bookend | true | — | false | true |
 
-## structural (62)
+## structural (63)
 
 | rule_id | name | category | kind | evaluation_path | numeric | exact_match | validated | signoff |
 |---|---|---|---|---|---|---|---|---|
@@ -80,6 +79,7 @@ Generated from `backend/app/verification/rules/rule_kinds.csv` (the source of tr
 | TI-1 | Title commitment parties | Title | structural | ai_fuzzy_match | false | false | false | false |
 | TI-3 | Existing liens / unreleased mortgage | Title | structural | ai_fuzzy_match | false | false | false | false |
 | TI-4 | Judgments / tax liens on title | Title | structural | deterministic_only | false | true | false | false |
+| IH-1 | Insurance adequacy | Insurance | structural | deterministic_only | false | true | false | false |
 | IH-2 | Mortgagee clause | Insurance | structural | ai_fuzzy_match | false | false | false | false |
 | IH-3 | Insurance effective date | Insurance | structural | deterministic_only | false | true | false | false |
 | IH-5 | Flood zone determination | Insurance | structural | deterministic_only | false | true | false | false |

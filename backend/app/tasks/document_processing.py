@@ -181,10 +181,12 @@ async def _route_by_tier(db: AsyncSession, document: Document, content: bytes) -
     The tier was set from the catalog during classification. Exactly one branch
     runs and every branch reaches a terminal status:
 
-      * **Tier 1** → the existing EXTRACTORS registry (unchanged for the 3 built
-        types). A Tier-1 type whose extractor isn't built yet (LP-60..64) has no
-        registry entry → handled gracefully as *classified-only* (a terminal
-        status), NOT a crash; its extractor arrives in a later ticket.
+      * **Tier 1** → the existing EXTRACTORS registry (deep extraction). A Tier-1
+        type whose extractor isn't registered yet (LP-441 promoted 18 spec'd types
+        to Tier-1 before step 7 wires their extractors) falls back to the SAME
+        interim treatment a Tier-2 type gets — a lightweight summary — so a
+        promoted type keeps its human-reference gist until deep extraction lands,
+        rather than silently losing it (LP-441 review). NOT a crash.
       * **Tier 2** → the shared recognize/summarize path (LP-65) — one mechanism
         for every Tier-2 type: a lightweight summary, then a terminal status.
       * **Tier 3** → the shared generic-analyzer path (LP-66) — one flexible
@@ -198,54 +200,39 @@ async def _route_by_tier(db: AsyncSession, document: Document, content: bytes) -
         if extractor is not None:
             await _extract_branch(db, document, content, extractor)
         else:
-            # A Tier-1 type whose extractor isn't registered yet (LP-60..64).
-            # Classified-only — the same terminal handling the pipeline has always
-            # used for a type with no extractor; deep extraction arrives later.
-            await _complete_classified_only(db, document, reason="tier1_extractor_pending")
+            # A Tier-1 type whose extractor isn't registered yet (LP-441 — promoted before its
+            # extractor is wired). Give it the Tier-2 interim summary (not classified-only): a
+            # promoted type keeps its gist until deep extraction lands (LP-441 review).
+            await _summarize_document(db, document, content)
     elif document.tier == Tier.TIER_2:
-        await _tier2_summarize(db, document, content)
+        await _summarize_document(db, document, content)
     else:  # Tier.TIER_3 (the catalog default for uncataloged long-tail types)
         await _tier3_analyze(db, document, content)
 
 
-async def _complete_classified_only(db: AsyncSession, document: Document, *, reason: str) -> None:
-    """Mark a correctly-classified document COMPLETED with no extraction (terminal).
+async def _summarize_document(db: AsyncSession, document: Document, content: bytes) -> None:
+    """The shared recognize/summarize path (LP-65) — the interim treatment for a document that
+    reaches a terminal status WITHOUT deep extraction: every Tier-2 type, and a Tier-1 type whose
+    extractor isn't wired yet (LP-441 review — a promoted-but-unwired type keeps its gist).
 
-    Used when no extractor runs: a Tier-1 type whose extractor isn't built yet
-    (LP-60..64). The document is classified + categorized; it simply has no deep
-    extraction. Metadata-only log (no PII).
-    """
-    document.status = DocumentStatus.COMPLETED
-    await db.commit()
-    logger.info(
-        "document_classified_only",
-        document_id=str(document.id),
-        document_type=document.document_type,
-        reason=reason,
-    )
+    No per-type logic: the document (already classified + categorized, LP-59) gets a single
+    lightweight 1-2 sentence AI **summary** (a human-reference gist, not extraction —
+    :func:`app.ai.summarization.summarize_document`, a cheap Haiku call) and reaches a terminal
+    status. The document is a normal, package-eligible file document filed under its category.
 
-
-async def _tier2_summarize(db: AsyncSession, document: Document, content: bytes) -> None:
-    """Tier 2 (recognized) handling — the ONE shared path for every Tier-2 type (LP-65).
-
-    No per-type logic: any Tier-2 document (already classified + categorized, LP-59)
-    gets a single lightweight 1-2 sentence AI **summary** (a human-reference gist,
-    not extraction — :func:`app.ai.summarization.summarize_document`, a cheap Haiku
-    call) and reaches a terminal status. The document is a normal, package-eligible
-    file document filed under its category.
-
-    **Graceful** (resilience): ``summarize_document`` never raises and returns
-    ``None`` on failure; a failed summary still finalizes the document (recognized +
-    categorized, ``summary`` null) — never stuck, never a crash. Metadata-only log
-    (the summary text itself is never logged — it can quote document PII).
+    **Graceful** (resilience): ``summarize_document`` never raises and returns ``None`` on failure;
+    a failed summary still finalizes the document (recognized + categorized, ``summary`` null) —
+    never stuck, never a crash. Metadata-only log (the summary text itself is never logged — it can
+    quote document PII).
     """
     document.summary = await summarize_document(content, document.mime_type)
     document.status = DocumentStatus.COMPLETED
     await db.commit()
     logger.info(
-        "document_tier2_recognized",
+        "document_summarized",
         document_id=str(document.id),
         document_type=document.document_type,
+        tier=document.tier,
         category=document.category,
         has_summary=document.summary is not None,
     )

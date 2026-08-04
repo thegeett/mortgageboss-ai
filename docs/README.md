@@ -15,6 +15,7 @@ mortgage processors. Start here to find your way around.
 | [api.md](api.md)                                     | HTTP API surface: conventions, tenant scoping, loan-file CRUD |
 | [document-model.md](document-model.md)               | The three-tier document model: tiers, the type catalog, tier-aware routing |
 | [glossary.md](glossary.md)                           | Mortgage domain terms and technical terms                 |
+| [domain/priya-rulings-2026-08.md](domain/priya-rulings-2026-08.md) | The domain expert's Aug-2026 rulings (earnings, declining income, NSF, agency precedence, reserves, gifts) |
 | [poc-learnings.md](poc-learnings.md)                 | Lessons from the prototype (with a developer TODO section)|
 | [project-structure.md](project-structure.md)         | Repository layout and "where does X go?" conventions      |
 | [development-workflow.md](development-workflow.md)    | CI/CD pipelines and pre-commit hooks                      |

@@ -1,0 +1,81 @@
+{
+  "document_type": "termite_completion",
+  "slug": "termite-completion",
+  "tier": 3,
+  "rules_served": [],
+  "summary_hint": "Tells a processor which property, who did the work, when it was finished, and whether the property cleared.",
+  "existing_extractor": null,
+  "catalog_coverage": "full",
+
+  "typed_core": [
+    {"name":"document_title","type":"str","why":"identity — confirms this is a completion/clearance vs an inspection report","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"issuer_name","type":"str","why":"identity/source — issuing organization (often the pest-control company)","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"property_address","type":"str","why":"identity — the subject property the clearance attaches to (degraded from address)","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"address","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"owner_buyer_or_builder_name","type":"str","why":"identity — owner/buyer named on the certificate; match to borrower/seller (flattened from person_or_entity[])","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"object","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"owner_buyer_or_builder_name_2","type":"str","why":"identity — second named party (co-owner/co-buyer)","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"pest_control_or_treatment_company","type":"str","why":"identity/source — the licensed company performing the work (degraded from entity)","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"object","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"company_license_number","type":"str","why":"processor — company licensure, so the certificate can be trusted","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"technician_or_applicator_name","type":"str","why":"processor — applicator identity (degraded/flattened from object)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"object","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"technician_or_applicator_license","type":"str","why":"processor — applicator license number","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"original_inspection_report_date","type":"date","why":"disambiguator — ties the completion to the report whose findings it clears","rules":[],"reason_class":"disambiguator","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"original_inspection_report_number","type":"str","why":"disambiguator — the report number being cleared","rules":[],"reason_class":"disambiguator","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"completion_date","type":"date","why":"processor — headline: when the work was finished (recency/validity through closing)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"areas_or_structures_treated","type":"str","why":"processor — what was treated (degraded/joined from string[])","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"object","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"warranty_or_guarantee_terms","type":"str","why":"processor — warranty/guarantee offered on the work","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"clearance_or_no_remaining_evidence_statement","type":"str","why":"processor — headline: the clearance/no-remaining-evidence statement","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"Capture the clearance/no-remaining-evidence statement verbatim; a completion can be full or partial (Section 1 vs Section 2 items)"},
+    {"name":"follow_up_inspection_required","type":"str","why":"processor — whether a re-inspection is still outstanding (degraded from bool)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"bool","pii":null,"exists_today":false,"prompt_hint":"true means the file is not yet fully cleared even though work was done"},
+    {"name":"invoice_amount","type":"Decimal","why":"processor — cost of the work (flattened from invoice object)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"object","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"invoice_paid_status","type":"str","why":"processor — whether the work is paid (who owes at closing)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"Invoice paid status matters for who bears the cost at closing — record amount and paid/unpaid as stated"},
+    {"name":"company_representative_name","type":"str","why":"execution — the signer certifying completion (flattened from signature)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"object","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"company_representative_signed_date","type":"date","why":"execution — when completion was certified","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null}
+  ],
+
+  "nested_lists": [
+    {
+      "name":"treatment_or_repair_items_completed","shape":"flat_row",
+      "shape_reason":"the itemized work done repeats (a handful to ~20 items); flat rows with one source each are token-safe and let a processor see line-by-line what was completed",
+      "expected_item_count":"a handful to ~20","rules":[],
+      "exists_today":false,"plumbing_sites":5,
+      "fields":[
+        {"name":"item","type":"str","why":"processor — the work item completed"},
+        {"name":"method_or_chemical","type":"str","why":"processor — treatment method / chemical used (brand or active ingredient)"},
+        {"name":"area","type":"str","why":"processor — the area the item was completed in"},
+        {"name":"status","type":"str","why":"processor — completion status of the item"}
+      ]
+    }
+  ],
+
+  "rejected": [
+    {"name":"the 8 TECHNICAL provenance fields","reason":"already in the TypedField wrapper"},
+    {"name":"form_number, form_revision_date","reason":"state forms are inconsistently numbered; document_title suffices"},
+    {"name":"issuer_address, issuer_phone, issuer_email_or_url","reason":"contact detail; no consumer"},
+    {"name":"effective_date, expiration_date, statement_period_start/_end","reason":"not applicable; completion_date is the operative date"},
+    {"name":"document_issue_date","reason":"duplicates completion_date / company_representative_signed_date"},
+    {"name":"party_names, party_addresses","reason":"duplicate the flattened owner/buyer fields"},
+    {"name":"loan_number, account_case_reference_number","reason":"rarely on a WDO completion; leave to catch-all"},
+    {"name":"signature_blocks, notary_block, document_status_or_version","reason":"single rep signature covers execution; not notarized/versioned"},
+    {"name":"treatment_method_and_chemical (separate object[])","reason":"folded into the one nested item list to stay within the one-list budget"},
+    {"name":"contractor_repair_details (separate object[])","reason":"folded into the nested item list; a second list is not justified by any rule"},
+    {"name":"owner_builder_or_buyer_acknowledgment","reason":"rarely present; captured in catch-all if it appears"},
+    {"name":"attachments_and_photos","reason":"no consumer"}
+  ],
+
+  "encoding_variations": [
+    "Titles vary by state form ('Notice of Completion', 'Wood Destroying Pest Completion', NPMA/state clearance forms); rely on content, not title",
+    "'Clearance' may be an explicit clearance statement, a 'Section 1 cleared' notation, or a 'no remaining evidence' sentence — capture the statement verbatim; do not reduce to a boolean, because partial clearances exist",
+    "Treatment chemicals may be named by brand or active ingredient — captured inside the nested item list",
+    "Original inspection reference may appear as a date, a report number, or both — both fields carry it so the completion can be matched to its report"
+  ],
+
+  "open_questions": [
+    {"id":1,"q":"Which repeating list to keep. The catalog splits completed work across treatment_or_repair_items_completed, treatment_method_and_chemical, and contractor_repair_details.","options":["one consolidated treatment_or_repair_items_completed flat-row list carrying method/chemical and area as columns","three separate lists"],"recommendation":"one consolidated flat-row list; confirm this consolidation is acceptable vs three separate lists GEET'S DECISION (LP-438): BUILD IT — LP-437 made nested lists cheap (one declaration + the generic mechanism); the one-list-budget / defer / no-consumer concern is overturned. Build as flat_row; the per-rule consumer is separate follow-up.","blocks_implementation":false},
+    {"id":2,"q":"areas_or_structures_treated flattened to str, joined into one string rather than a second list.","options":["joined str (leaner)","a queryable structure list"],"recommendation":"joined str, since it is short and the item list already carries per-item area; flag if a queryable structure list is wanted GEET'S DECISION (LP-438): BUILD IT — LP-437 made nested lists cheap (one declaration + the generic mechanism); the one-list-budget / defer / no-consumer concern is overturned. Build as flat_row; the per-rule consumer is separate follow-up.","blocks_implementation":false},
+    {"id":3,"q":"Clearance as verbatim str vs boolean.","options":["verbatim str","pass/fail boolean flag"],"recommendation":"kept verbatim because partial clearances exist; confirm no downstream consumer expects a clean pass/fail flag (which would misread partials)","blocks_implementation":false}
+  ],
+
+  "notes": [
+    "A completion certifies that previously-called-out work was done, distinct from the inspection report that called it out (packet 097).",
+    "No PII requiring registration — company and applicator license numbers are business identifiers, not personal PII; owner_buyer_or_builder_name is a personal name kept typed for identity, not a registry element.",
+    "Ambiguity: company_representative_name and company_representative_signed_date are tagged 'execution' in the markdown, which is not one of the five reason classes; both mapped to reason_class 'processor' (execution status is a processor-facing verification concern)."
+  ]
+}

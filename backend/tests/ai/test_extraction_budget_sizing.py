@@ -121,30 +121,73 @@ def test_unbounded_types_raised_to_8192() -> None:
     assert investment_account._MAX_TOKENS == 8192  # confirmed live failure on LF-6T3N
     assert retirement_account._MAX_TOKENS == 8192  # same holdings shape
     assert profit_and_loss._MAX_TOKENS == 8192
-    assert purchase_agreement._MAX_TOKENS == 8192
+
+
+def test_two_list_types_use_the_16384_tier() -> None:
+    # LP-446 review: a type with TWO nested lists sits at the ≥2-list tier (16384), like tax_return —
+    # 8192 under-budgeted it below the sizing rule. purchase_agreement (addenda + contingencies) and
+    # pay_stub (earnings_lines + deduction_lines) each carry two lists on top of a verbose catch-all.
+    assert purchase_agreement._MAX_TOKENS == 16384
+    assert pay_stub._MAX_TOKENS == 16384
 
 
 def test_correctly_sized_types_are_unchanged_no_blanket_raise() -> None:
     # Already right-sized (bumped earlier) — left as-is.
     assert tax_return._MAX_TOKENS == 16384
     assert bank_statement._MAX_TOKENS == 8192
-    assert pay_stub._MAX_TOKENS == 8192  # LP-102
     assert divorce_decree._MAX_TOKENS == 6144
     # Bounded / semi-bounded fixed-form types — small budget is CORRECT; the LP-102 guard backstops
     # any rare overflow. NOT preemptively raised (that removes the size-expectation signal).
     assert drivers_license._MAX_TOKENS == 2048
     for mod in (
         w2,
-        voe,
         letter_of_explanation,
-        homeowners_insurance,
         mortgage_statement,
-        hoa_statement,
-        property_tax_bill,
         form_1099,
         gift_letter,
     ):
         assert mod._MAX_TOKENS == 4096
+    # LP-446: these gained a generic list capture → the unbounded-list budget (1 list → 8192).
+    assert homeowners_insurance._MAX_TOKENS == 8192  # forms_and_endorsements
+    assert voe._MAX_TOKENS == 8192  # gross_earnings_history
+    assert hoa_statement._MAX_TOKENS == 8192  # special_assessment_items
+    assert property_tax_bill._MAX_TOKENS == 8192  # installments_and_due_dates
+
+
+def test_every_wired_generated_extractor_matches_the_sizing_rule() -> None:
+    """LP-443 (step 7) extends the guard to the wired GENERATED modules — LP-440 noted this test only
+    named the 18 shipping types. Every generated extractor's ``_MAX_TOKENS`` must equal the sizing rule
+    (``max_tokens_for``: 0 lists → 4096, 1 → 8192, ≥2 → 16384) derived from its spec's nested-list count,
+    so a regeneration can never silently under-budget a list-bearing type."""
+    import importlib
+    import json
+    from pathlib import Path
+
+    from app.ai.extraction import EXTRACTORS
+    from app.ai.extraction.generator.emitters import max_tokens_for
+    from app.ai.extraction.generator.spec import load_spec
+
+    backend = Path(__file__).resolve().parents[2]
+    specs = backend.parent / "docs" / "schema-specs"
+    ext_dir = backend / "app" / "ai" / "extraction"
+    by_dt = {json.loads(p.read_text())["document_type"]: p for p in specs.glob("[0-9]*.json")}
+    marker = "GENERATED from a schema spec by the LP-434 generator"
+
+    checked, mismatches = 0, []
+    for dt in EXTRACTORS:
+        spec_path = by_dt.get(dt)
+        module_file = ext_dir / f"{dt}.py"
+        # Skip a type whose module isn't a same-named generated file: shipping extractors, and the
+        # diff-mode "1099" (its extractor lives in form_1099.py — not a generated module named "1099").
+        if spec_path is None or not module_file.exists() or marker not in module_file.read_text():
+            continue
+        module = importlib.import_module(f"app.ai.extraction.{dt}")
+        checked += 1
+        expected = max_tokens_for(load_spec(str(spec_path)))
+        if expected != module._MAX_TOKENS:
+            mismatches.append((dt, module._MAX_TOKENS, expected))
+    assert checked >= 80, f"expected the full generated fleet to be wired, only checked {checked}"
+    assert mismatches == [], f"generated modules mis-budgeted (module != sizing rule): {mismatches}"
 
 
 # --------------------------------------------------------------------------- #
@@ -183,7 +226,7 @@ async def test_purchase_agreement_dense_extracts_fully(monkeypatch: pytest.Monke
     result = await purchase_agreement.extract_purchase_agreement(_PDF, "application/pdf")
     assert result.status == ExtractionStatus.SUCCEEDED
     assert result.data.sales_price.value is not None
-    assert mock.await_args_list[0].kwargs["max_tokens"] == 8192
+    assert mock.await_args_list[0].kwargs["max_tokens"] == 16384  # LP-446: 2 lists → ≥2-list tier
 
 
 # --------------------------------------------------------------------------- #
@@ -206,5 +249,5 @@ async def test_raised_type_still_backstopped_by_the_guard(monkeypatch: pytest.Mo
     assert (
         mock.await_args_list[0].kwargs["max_tokens"] == 8192
     )  # first attempt at the raised budget
-    assert mock.await_args_list[1].kwargs["max_tokens"] == 16384  # guard's retry ceiling
+    assert mock.await_args_list[1].kwargs["max_tokens"] == 32768  # guard's retry ceiling (LP-445)
     assert result.status == ExtractionStatus.SUCCEEDED

@@ -50,17 +50,12 @@ Respond with ONLY a single JSON object, no markdown fences and no prose, exactly
     "id_number_masked":  {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
     "issuing_state":     {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
     "issuing_authority": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
-    "expiration_date":   {"value": <date|null>, "page": <int|null>, "snippet": <string|null>}
+    "expiration_date":   {"value": <date|null>, "page": <int|null>, "snippet": <string|null>},
+    "credential_type": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "family_name": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "given_names": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "middle_name": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "suffix": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "issue_date": {"value": <YYYY-MM-DD|null>, "page": <int|null>, "snippet": <string|null>},
+    "photo_present": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>}
   },
-  "additional_sections": [
-    {"section": "<section name>", "fields": [
-      {"label": "<field label>", "value": <string|null>, "page": <int|null>, "snippet": <string|null>}
-    ]}
-  ],
-  "field_confidence": {"<typed_core field name>": <0.0-1.0|null>, "...": <0.0-1.0|null>},
-  "confidence": <number 0.0-1.0>,
-  "reasoning": "<one short sentence; do NOT quote the DOB or the full ID number>"
-}
-
-Example (values illustrative; use null for anything absent):
-{"typed_core": {"full_name": {"value": "Jane A Doe", "page": 1, "snippet": "Jane A Doe"}, "id_number_masked": {"value": "****1234", "page": 1, "snippet": "DL ****1234"}, "issuing_state": {"value": "CA", "page": 1, "snippet": "California"}, "expiration_date": {"value": "2028-05-01", "page": 1, "snippet": "EXP 05/01/2028"}}, "additional_sections": [{"section": "License Details", "fields": [{"label": "Class", "value": "C", "page": 1, "snippet": "CLASS C"}]}], "confidence": 0.92, "reasoning": "A state driver's license with a clear expiration date."}

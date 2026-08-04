@@ -31,6 +31,7 @@ from app.ai.extraction.parsing import (
     derive_status,
     parse_catch_all,
     parse_typed_core,
+    source_payload,
 )
 from app.ai.extraction.shape import CatchAllSection, TypedField
 from app.ai.parsing import coerce_confidence, extract_json_object
@@ -41,7 +42,7 @@ logger = structlog.get_logger(__name__)
 
 _PROMPT_PATH = "extraction/voe.txt"
 _SUPPORTED_MEDIA_TYPES = frozenset({"application/pdf", "image/jpeg", "image/png", "image/jpg"})
-_MAX_TOKENS = 4096
+_MAX_TOKENS = 8192  # LP-446: list-bearing (gross_earnings_history) → unbounded-list budget
 
 
 class VOEExtraction(BaseModel):
@@ -67,6 +68,25 @@ class VOEExtraction(BaseModel):
     probability_of_continued_employment: TypedField[str] = Field(default_factory=TypedField)
 
     # --- Grouped catch-all — everything else, by section -------------------- #
+    # --- LP-446 diff — the exists_today:false additions --------------------- #
+    issuer_name: TypedField[str] = Field(default_factory=TypedField)
+    document_issue_date: TypedField[date] = Field(default_factory=TypedField)
+    employer_address: TypedField[str] = Field(default_factory=TypedField)
+    lender_name: TypedField[str] = Field(default_factory=TypedField)
+    applicant_address: TypedField[str] = Field(default_factory=TypedField)
+    employee_number: TypedField[str] = Field(default_factory=TypedField)
+    previous_employment_hire_date: TypedField[date] = Field(default_factory=TypedField)
+    position_held: TypedField[str] = Field(default_factory=TypedField)
+    employer_signer_name: TypedField[str] = Field(default_factory=TypedField)
+    employer_signer_title: TypedField[str] = Field(default_factory=TypedField)
+    employer_signer_phone: TypedField[str] = Field(default_factory=TypedField)
+    employer_signature_and_date: TypedField[date] = Field(default_factory=TypedField)
+    direct_return_to_lender_indicator: TypedField[str] = Field(default_factory=TypedField)
+    applicant_authorization_signature: TypedField[str] = Field(default_factory=TypedField)
+
+    # --- LP-446 diff — captured nested list(s) (bare rows) --------------------- #
+    gross_earnings_history: list[dict[str, Any]] = Field(default_factory=list)
+
     additional_sections: list[CatchAllSection] = Field(default_factory=list)
 
 
@@ -103,7 +123,46 @@ _CORE_SPEC: CoreSpec = (
     ("ytd_income", coerce_decimal),
     ("hours", coerce_decimal),
     ("probability_of_continued_employment", coerce_str),
+    # LP-446 diff additions
+    ("issuer_name", coerce_str),
+    ("document_issue_date", coerce_date),
+    ("employer_address", coerce_str),
+    ("lender_name", coerce_str),
+    ("applicant_address", coerce_str),
+    ("employee_number", coerce_str),
+    ("previous_employment_hire_date", coerce_date),
+    ("position_held", coerce_str),
+    ("employer_signer_name", coerce_str),
+    ("employer_signer_title", coerce_str),
+    ("employer_signer_phone", coerce_str),
+    ("employer_signature_and_date", coerce_date),
+    ("direct_return_to_lender_indicator", coerce_str),
+    ("applicant_authorization_signature", coerce_str),
 )
+
+_GROSS_EARNINGS_HISTORY_ROW: CoreSpec = (
+    ("period", coerce_str),
+    ("base", coerce_str),
+    ("overtime", coerce_str),
+    ("commission", coerce_str),
+    ("bonus", coerce_str),
+)
+
+
+def _parse_rows(raw: Any, row_spec: CoreSpec) -> list[dict[str, Any]]:
+    """LP-446 — coerce a bare-row list (each declared field coerced, a per-row source kept, empty rows
+    dropped). Mirrors bank_statement's transactions parse; row values are read as strings by the snapshot."""
+    rows: list[dict[str, Any]] = []
+    if not isinstance(raw, list):
+        return rows
+    for entry in raw:
+        if not isinstance(entry, dict):
+            continue
+        row: dict[str, Any] = {name: coerce(entry.get(name)) for name, coerce in row_spec}
+        row["source"] = source_payload(entry)
+        if any(row[name] is not None for name, _ in row_spec):
+            rows.append(row)
+    return rows
 
 
 def _parse_voe_json(text: str) -> VOEExtractionResult | None:
@@ -119,14 +178,23 @@ def _parse_voe_json(text: str) -> VOEExtractionResult | None:
         return None
 
     core_payload, non_null, coercion_lost = parse_typed_core(payload, _CORE_SPEC)
+    gross_earnings_history = _parse_rows(
+        payload.get("gross_earnings_history"), _GROSS_EARNINGS_HISTORY_ROW
+    )
     sections = parse_catch_all(payload.get("additional_sections"))
 
     try:
-        data = VOEExtraction.model_validate({**core_payload, "additional_sections": sections})
+        data = VOEExtraction.model_validate(
+            {
+                **core_payload,
+                "gross_earnings_history": gross_earnings_history,
+                "additional_sections": sections,
+            }
+        )
     except ValidationError:
         return None
 
-    status = derive_status(non_null, coercion_lost)
+    status = derive_status(non_null + len(gross_earnings_history), coercion_lost)
     confidence = coerce_confidence(payload.get("confidence"))
     raw_reasoning = payload.get("reasoning")
     reasoning = (

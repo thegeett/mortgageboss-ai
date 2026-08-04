@@ -217,6 +217,26 @@ class ScheduleERecord(BaseModel):
     depreciation: Field
 
 
+class ListRow(BaseModel):
+    """One row of a GENERIC nested list (LP-437) — the same typed shape as a document's flat fields.
+
+    ``fields`` is a ``{name: Field}`` map, exactly like :attr:`DocumentEntry.fields`, so a row field
+    keeps its value + confidence + provenance ``source`` (page/snippet are not carried into the snapshot
+    ``Field`` for a row any more than for a flat field or a transaction — the fidelity matches a bespoke
+    list). ``row_id`` is a STABLE content-derived id (via :func:`assign_content_ids`), populated ONLY where
+    a list declares ``stable_row_id`` (a list whose rows a rule enumerates as finding subjects, like
+    transactions); ``None`` otherwise (a list read only in aggregate needs no per-row id).
+
+    This is the generic counterpart to the bespoke :class:`TransactionRecord` / :class:`ScheduleCRecord`:
+    the three legacy nested attributes (``transactions`` / ``schedule_c`` / ``schedule_e``) are UNTOUCHED
+    (they feed live AS-1 / IN-12 / IN-13); ``lists`` is for the 66 NEW lists only (LP-436 coexist ruling)."""
+
+    model_config = {"frozen": True}
+
+    fields: dict[str, Field]
+    row_id: str | None = None
+
+
 class DocumentEntry(BaseModel):
     """One document's contribution: type + resolved borrower(s) + extracted fields.
 
@@ -253,6 +273,14 @@ class DocumentEntry(BaseModel):
     # NOT surfaced — no consumer today (LP-421 D2).
     schedule_c: tuple[ScheduleCRecord, ...] | None = None
     schedule_e: ScheduleERecord | None = None
+    # LP-437 — the GENERIC nested-list channel: ``{list_name: (ListRow, ...)}``, one attribute for any
+    # number of lists. ADDITIVE with a default (present-empty ``{}`` for every document today), the LP-421
+    # precedent EXACTLY — so SNAPSHOT_VERSION is NOT bumped and the committed v4 golden fixture (which
+    # carries no ``lists`` key) still validates (the default fills it). Coexists with the three legacy
+    # attributes above, which are left untouched (they feed live rules). List data is deliberately NOT
+    # surfaced to the AI context builders (``_doc_context`` reads only ``fields``) — the same catch-all
+    # boundary that gated IH-1, a known and separate decision (LP-436 step 8 / ADR).
+    lists: dict[str, tuple[ListRow, ...]] = PydField(default_factory=dict)
 
     @model_validator(mode="after")
     def _belongs_to_null_or_nonempty(self) -> DocumentEntry:

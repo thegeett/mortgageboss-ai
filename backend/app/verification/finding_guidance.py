@@ -312,7 +312,7 @@ async def generate_guidance(
     """
     try:
         result = await complete_fn(
-            model=settings.anthropic_model_extraction,
+            model=settings.anthropic_model_reasoning,
             system=_GUIDANCE_SYSTEM_PROMPT,
             messages=[
                 {

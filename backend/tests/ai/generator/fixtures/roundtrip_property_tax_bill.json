@@ -1,0 +1,313 @@
+{
+  "document_type": "property_tax_bill",
+  "slug": "property-tax-bill-roundtrip",
+  "tier": 2,
+  "rules_served": [
+    "DT-4",
+    "RE-2"
+  ],
+  "summary_hint": "assessed owner, property address, assessed value, annual tax, due date(s), taxing authority",
+  "existing_extractor": null,
+  "catalog_coverage": "full",
+  "typed_core": [
+    {
+      "name": "owner_name",
+      "type": "str",
+      "why": "the assessed owner named on the bill",
+      "rules": [],
+      "reason_class": "identity",
+      "rule_floor": false,
+      "degraded_from": null,
+      "pii": null,
+      "exists_today": false,
+      "prompt_hint": "the assessed owner(s) named on the bill"
+    },
+    {
+      "name": "property_address",
+      "type": "str",
+      "why": "the taxed property; matched subject-vs-other in Phase 3",
+      "rules": [
+        "RE-2"
+      ],
+      "reason_class": "rule",
+      "rule_floor": false,
+      "degraded_from": "address",
+      "pii": null,
+      "exists_today": false,
+      "prompt_hint": "the taxed property's address (capture it; do NOT decide which property it is)"
+    },
+    {
+      "name": "assessed_value",
+      "type": "Decimal",
+      "why": "DT-4 \u2014 the assessed / taxable value",
+      "rules": [
+        "DT-4"
+      ],
+      "reason_class": "rule",
+      "rule_floor": false,
+      "degraded_from": null,
+      "pii": null,
+      "exists_today": false,
+      "prompt_hint": "the assessed / taxable value"
+    },
+    {
+      "name": "annual_tax_amount",
+      "type": "Decimal",
+      "why": "DT-4 \u2014 the housing-expense / DTI figure",
+      "rules": [
+        "DT-4"
+      ],
+      "reason_class": "rule",
+      "rule_floor": false,
+      "degraded_from": null,
+      "pii": null,
+      "exists_today": false,
+      "prompt_hint": "the total annual property tax"
+    },
+    {
+      "name": "due_dates",
+      "type": "str",
+      "why": "a bill often has two installment due dates; capture verbatim",
+      "rules": [
+        "DT-4"
+      ],
+      "reason_class": "processor",
+      "rule_floor": false,
+      "degraded_from": null,
+      "pii": null,
+      "exists_today": false,
+      "prompt_hint": "the due date(s) AS WRITTEN \u2014 often two installments; capture verbatim"
+    },
+    {
+      "name": "taxing_authority",
+      "type": "str",
+      "why": "DT-4 context \u2014 county / municipality / taxing body",
+      "rules": [
+        "DT-4"
+      ],
+      "reason_class": "identity",
+      "rule_floor": false,
+      "degraded_from": null,
+      "pii": null,
+      "exists_today": false,
+      "prompt_hint": "the county / municipality / taxing body"
+    },
+    {
+      "name": "issuer_name",
+      "type": "str",
+      "why": "LP-446 diff field",
+      "rules": [],
+      "reason_class": "processor",
+      "rule_floor": false,
+      "degraded_from": null,
+      "pii": null,
+      "exists_today": false,
+      "prompt_hint": null
+    },
+    {
+      "name": "taxpayer_or_owner_names_raw",
+      "type": "str",
+      "why": "LP-446 diff field",
+      "rules": [],
+      "reason_class": "processor",
+      "rule_floor": false,
+      "degraded_from": null,
+      "pii": null,
+      "exists_today": false,
+      "prompt_hint": null
+    },
+    {
+      "name": "taxpayer_or_owner_name_2",
+      "type": "str",
+      "why": "LP-446 diff field",
+      "rules": [],
+      "reason_class": "processor",
+      "rule_floor": false,
+      "degraded_from": null,
+      "pii": null,
+      "exists_today": false,
+      "prompt_hint": null
+    },
+    {
+      "name": "parcel_or_apn",
+      "type": "str",
+      "why": "LP-446 diff field",
+      "rules": [],
+      "reason_class": "processor",
+      "rule_floor": false,
+      "degraded_from": null,
+      "pii": null,
+      "exists_today": false,
+      "prompt_hint": null
+    },
+    {
+      "name": "tax_bill_or_account_number",
+      "type": "str",
+      "why": "LP-446 diff field",
+      "rules": [],
+      "reason_class": "processor",
+      "rule_floor": false,
+      "degraded_from": null,
+      "pii": null,
+      "exists_today": false,
+      "prompt_hint": null
+    },
+    {
+      "name": "tax_year",
+      "type": "int",
+      "why": "LP-446 diff field",
+      "rules": [],
+      "reason_class": "processor",
+      "rule_floor": false,
+      "degraded_from": null,
+      "pii": null,
+      "exists_today": false,
+      "prompt_hint": null
+    },
+    {
+      "name": "assessment_period",
+      "type": "str",
+      "why": "LP-446 diff field",
+      "rules": [],
+      "reason_class": "processor",
+      "rule_floor": false,
+      "degraded_from": null,
+      "pii": null,
+      "exists_today": false,
+      "prompt_hint": null
+    },
+    {
+      "name": "assessed_land_value",
+      "type": "Decimal",
+      "why": "LP-446 diff field",
+      "rules": [],
+      "reason_class": "processor",
+      "rule_floor": false,
+      "degraded_from": null,
+      "pii": null,
+      "exists_today": false,
+      "prompt_hint": null
+    },
+    {
+      "name": "assessed_improvement_value",
+      "type": "Decimal",
+      "why": "LP-446 diff field",
+      "rules": [],
+      "reason_class": "processor",
+      "rule_floor": false,
+      "degraded_from": null,
+      "pii": null,
+      "exists_today": false,
+      "prompt_hint": null
+    },
+    {
+      "name": "taxable_value",
+      "type": "Decimal",
+      "why": "LP-446 diff field",
+      "rules": [],
+      "reason_class": "processor",
+      "rule_floor": false,
+      "degraded_from": null,
+      "pii": null,
+      "exists_today": false,
+      "prompt_hint": null
+    },
+    {
+      "name": "base_tax_amount",
+      "type": "Decimal",
+      "why": "LP-446 diff field",
+      "rules": [],
+      "reason_class": "processor",
+      "rule_floor": false,
+      "degraded_from": null,
+      "pii": null,
+      "exists_today": false,
+      "prompt_hint": null
+    },
+    {
+      "name": "current_balance",
+      "type": "Decimal",
+      "why": "LP-446 diff field",
+      "rules": [],
+      "reason_class": "processor",
+      "rule_floor": false,
+      "degraded_from": null,
+      "pii": null,
+      "exists_today": false,
+      "prompt_hint": null
+    },
+    {
+      "name": "penalties_and_interest",
+      "type": "Decimal",
+      "why": "LP-446 diff field",
+      "rules": [],
+      "reason_class": "processor",
+      "rule_floor": false,
+      "degraded_from": null,
+      "pii": null,
+      "exists_today": false,
+      "prompt_hint": null
+    },
+    {
+      "name": "delinquent_or_lien_status",
+      "type": "str",
+      "why": "LP-446 diff field",
+      "rules": [],
+      "reason_class": "processor",
+      "rule_floor": false,
+      "degraded_from": null,
+      "pii": null,
+      "exists_today": false,
+      "prompt_hint": null
+    }
+  ],
+  "nested_lists": [
+    {
+      "name": "installments_and_due_dates",
+      "shape": "flat_row",
+      "shape_reason": "LP-446 diff",
+      "expected_item_count": "a handful",
+      "rules": [],
+      "exists_today": false,
+      "plumbing_sites": 5,
+      "fields": [
+        {
+          "name": "installment_label",
+          "type": "str",
+          "why": "LP-446 diff row field"
+        },
+        {
+          "name": "amount",
+          "type": "str",
+          "why": "LP-446 diff row field"
+        },
+        {
+          "name": "due_date",
+          "type": "str",
+          "why": "LP-446 diff row field"
+        },
+        {
+          "name": "paid_status",
+          "type": "str",
+          "why": "LP-446 diff row field"
+        },
+        {
+          "name": "paid_date",
+          "type": "str",
+          "why": "LP-446 diff row field"
+        },
+        {
+          "name": "source",
+          "type": "str",
+          "why": "LP-446 diff row field"
+        }
+      ]
+    }
+  ],
+  "rejected": [],
+  "encoding_variations": [],
+  "open_questions": [],
+  "notes": [
+    "Round-trip fixture (LP-434): describes property_tax_bill as it ships today so the generated module can be diffed against app/ai/extraction/property_tax_bill.py. existing_extractor is null so a full module is generated."
+  ]
+}

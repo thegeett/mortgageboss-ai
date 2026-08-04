@@ -71,6 +71,15 @@ class DriversLicenseExtraction(BaseModel):
     expiration_date: TypedField[date] = Field(default_factory=TypedField)  # expired = invalid
 
     # --- Grouped catch-all — everything else -------------------------------- #
+    # --- LP-446 diff — the exists_today:false additions --------------------- #
+    credential_type: TypedField[str] = Field(default_factory=TypedField)
+    family_name: TypedField[str] = Field(default_factory=TypedField)
+    given_names: TypedField[str] = Field(default_factory=TypedField)
+    middle_name: TypedField[str] = Field(default_factory=TypedField)
+    suffix: TypedField[str] = Field(default_factory=TypedField)
+    issue_date: TypedField[date] = Field(default_factory=TypedField)
+    photo_present: TypedField[str] = Field(default_factory=TypedField)
+
     additional_sections: list[CatchAllSection] = Field(default_factory=list)
 
 
@@ -103,6 +112,14 @@ _CORE_SPEC: CoreSpec = (
     ("issuing_state", coerce_str),
     ("issuing_authority", coerce_str),
     ("expiration_date", coerce_date),
+    # LP-446 diff additions
+    ("credential_type", coerce_str),
+    ("family_name", coerce_str),
+    ("given_names", coerce_str),
+    ("middle_name", coerce_str),
+    ("suffix", coerce_str),
+    ("issue_date", coerce_date),
+    ("photo_present", coerce_str),
 )
 
 
