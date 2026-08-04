@@ -16,8 +16,9 @@ ANY document:
   * ``summary`` — a short narrative
   * ``full_text`` — the document's text, stored + indexed for search
 
-One mechanism for all Tier 3 docs (no per-type logic). Runs the extraction/reasoning
-tier (Sonnet by default, env-overridable) — it is
+One mechanism for all Tier 3 docs (no per-type logic). Runs the ANALYSIS tier
+(``settings.anthropic_model_analysis``, Sonnet by default, env-overridable — its own knob,
+decoupled from the calibrated reasoning tier, LP-457 review) — it is
 *understanding*, not a cheap one-liner — but it is *surfacing for a human*, not
 calculation-grade extraction, so accuracy is **moderate-stakes**). Like the other
 AI helpers it **never raises**: any failure returns ``None`` and the pipeline still
@@ -185,7 +186,7 @@ async def analyze_document(content: bytes, media_type: str) -> GenericAnalysis |
 
     try:
         result = await complete(
-            model=settings.anthropic_model_reasoning,  # reasoning tier (Sonnet by default) — understanding, not a one-liner
+            model=settings.anthropic_model_analysis,  # analysis tier (Sonnet by default) — its OWN knob, not the calibrated reasoning tier (LP-457 review)
             system=system_prompt,
             messages=[message],
             max_tokens=_MAX_TOKENS,
