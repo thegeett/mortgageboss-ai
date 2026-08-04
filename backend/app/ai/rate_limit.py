@@ -56,7 +56,6 @@ class RateLimiter:
         self._clock = clock or time.monotonic
         self._sleep = sleep or asyncio.sleep
         self._next_allowed_at: float = 0.0
-        self._lock = asyncio.Lock()
 
     @property
     def interval_seconds(self) -> float:
@@ -69,27 +68,46 @@ class RateLimiter:
         """Wait until the next call is permitted. Returns the seconds actually waited.
 
         ``None``/non-positive RPM is unlimited and returns immediately, so the default
-        configuration imposes no delay and no lock contention beyond one uncontended
-        acquire.
+        configuration imposes no delay at all.
+
+        ## Why there is NO ``asyncio.Lock`` here
+
+        There was one, and it was a latent crash. An ``asyncio.Lock`` binds itself to the
+        running loop the first time it takes the *contended* path, but this limiter is a
+        process-wide singleton while the Celery bridge runs **a fresh event loop per task**
+        (``app/tasks/base.py:41-43``) — so the second paced task in a worker raised
+        ``RuntimeError: ... is bound to a different event loop``. Contention was guaranteed,
+        not incidental: ``rule_engine/judgment.py`` gathers up to 8 concurrent judgments,
+        each of which calls through here.
+
+        A lock is unnecessary anyway. Its only job was making the read-modify-write of
+        ``_next_allowed_at`` atomic, and asyncio is single-threaded: a critical section with
+        **no await inside it** cannot be interleaved. So the slot is claimed synchronously
+        below and the sleep happens *after* — which also fixes a second-order problem, since
+        the old code slept while HOLDING the lock and thereby serialized waiters that should
+        simply each wait for their own slot.
+
+        This keeps the deliberate ``time.monotonic`` choice working as documented: pacing
+        state survives across tasks precisely because nothing here is loop-bound.
         """
         interval = self.interval_seconds
         if interval <= 0.0:
             return 0.0
 
-        async with self._lock:
-            now = self._clock()
-            wait = self._next_allowed_at - now
-            if wait > 0:
-                # INFO, not debug: at a low ceiling this is the dominant latency term, and
-                # an operator staring at a slow run needs to see pacing rather than guess.
-                logger.info("ai_rate_limit_wait", label=label, wait_seconds=round(wait, 3))
-                await self._sleep(wait)
-                start = self._next_allowed_at
-            else:
-                wait = 0.0
-                start = now
-            self._next_allowed_at = start + interval
+        # Claim this call's slot. No await between the read and the write, so this is
+        # atomic under asyncio without any lock.
+        now = self._clock()
+        start = max(now, self._next_allowed_at)
+        self._next_allowed_at = start + interval
+
+        wait = start - now
+        if wait > 0:
+            # INFO, not debug: at a low ceiling this is the dominant latency term, and an
+            # operator staring at a slow run needs to see pacing rather than guess.
+            logger.info("ai_rate_limit_wait", label=label, wait_seconds=round(wait, 3))
+            await self._sleep(wait)
             return wait
+        return 0.0
 
 
 # The process-wide limiter, rebuilt when the resolved RPM changes (a settings monkeypatch

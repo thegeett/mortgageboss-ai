@@ -13,7 +13,6 @@ id.current_address_type land on the same document subject), so a downstream gath
 
 from __future__ import annotations
 
-import asyncio
 import json
 import re
 from collections.abc import Awaitable, Callable
@@ -104,20 +103,15 @@ async def reason_ai_group(system_prompt: str, context_json: str) -> AiGroupResul
     """Run one structuring pass over a bounded batch. Opus, temperature 0, truncation-guarded,
     defensively parsed. Raises :class:`AIClientError` on transport failure/timeout. Never logs the
     context or the response — counts only."""
-    try:
-        result = await asyncio.wait_for(
-            complete(
-                model=settings.anthropic_model_reasoning,
-                system=system_prompt,
-                messages=[{"role": "user", "content": context_json}],
-                max_tokens=_MAX_TOKENS,
-                temperature=0.0,
-            ),
-            timeout=settings.ai_request_timeout_seconds,
-        )
-    except TimeoutError as exc:
-        logger.warning("ai_group_reason_timeout", timeout_s=settings.ai_request_timeout_seconds)
-        raise AIClientError("AI group structuring timed out") from exc
+    # NOT wrapped in asyncio.wait_for: complete() bounds every attempt itself (B1), and an
+    # outer wrapper would also bill the rate limiter's queueing time to this call's budget.
+    result = await complete(
+        model=settings.anthropic_model_reasoning,
+        system=system_prompt,
+        messages=[{"role": "user", "content": context_json}],
+        max_tokens=_MAX_TOKENS,
+        temperature=0.0,
+    )
 
     truncated = result.stop_reason == "max_tokens"
     if truncated:

@@ -10,7 +10,6 @@ in the evaluator, not here.
 
 from __future__ import annotations
 
-import asyncio
 import json
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
@@ -60,20 +59,16 @@ async def reason_rule_judgment(system_prompt: str, context_json: str) -> RuleJud
     :class:`~app.ai.client.AIClientError` on a transport failure OR a timeout. NEVER logs the context
     or the response — only counts + the single verdict.
     """
-    try:
-        result = await asyncio.wait_for(
-            complete(
-                model=settings.anthropic_model_reasoning,  # reasoning tier (Sonnet by default) — real judgment over the facts
-                system=system_prompt,
-                messages=[{"role": "user", "content": context_json}],
-                max_tokens=_MAX_TOKENS,
-                temperature=0.0,
-            ),
-            timeout=settings.ai_request_timeout_seconds,
-        )
-    except TimeoutError as exc:
-        logger.warning("rule_judgment_timeout", timeout_s=settings.ai_request_timeout_seconds)
-        raise AIClientError("rule judgment timed out") from exc
+    # NOT wrapped in asyncio.wait_for: complete() bounds every attempt itself (B1), and an
+    # outer wrapper would also bill the rate limiter's queueing time to this call's budget.
+    # At a low RPM that made pacing look like a provider timeout — see complete()'s docstring.
+    result = await complete(
+        model=settings.anthropic_model_reasoning,  # reasoning tier (Sonnet by default) — real judgment over the facts
+        system=system_prompt,
+        messages=[{"role": "user", "content": context_json}],
+        max_tokens=_MAX_TOKENS,
+        temperature=0.0,
+    )
 
     truncated = result.stop_reason == "max_tokens"
     if truncated:

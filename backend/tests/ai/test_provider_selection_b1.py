@@ -369,12 +369,12 @@ async def test_limiter_does_not_wait_when_enough_time_has_passed() -> None:
 
 
 async def test_limiter_is_safe_under_concurrency() -> None:
-    """Concurrent callers serialise behind the lock, one interval apart.
+    """Concurrent callers each claim their own slot, one interval apart.
 
-    Each waiter returns ~one interval, not a cumulative backlog: the lock means only
-    one waits at a time, and the clock advances as each sleeps. What matters is the
-    resulting SCHEDULE — four calls at 10s spacing start at t=0/10/20/30 — which is
-    exactly what a per-minute server-side quota measures.
+    There is no lock (see ``RateLimiter.acquire``): each caller claims its slot in a
+    critical section with no await in it, then sleeps. What matters is the resulting
+    SCHEDULE — four calls at 10s spacing start at t=0/10/20/30 — which is exactly what a
+    per-minute server-side quota measures.
     """
     clock = FakeClock()
     limiter = RateLimiter(6, clock=clock, sleep=clock.sleep)  # 10s spacing
@@ -383,6 +383,52 @@ async def test_limiter_is_safe_under_concurrency() -> None:
     assert waits[0] == 0.0  # the first call is never delayed
     assert all(w == pytest.approx(10.0) for w in waits[1:])
     assert clock.now == pytest.approx(30.0)  # 4th call starts at t=30, i.e. 6 RPM
+
+
+def test_limiter_survives_a_fresh_event_loop_per_task() -> None:
+    """The Celery shape: ONE process-wide limiter used from many short-lived loops.
+
+    ``run_async`` is ``asyncio.run`` (``app/tasks/base.py:41-43``), so every Celery task
+    gets a brand-new event loop while the limiter singleton persists. An ``asyncio.Lock``
+    on the limiter bound itself to the FIRST loop that contended for it and then raised
+    ``RuntimeError: ... is bound to a different event loop`` on every later task — and
+    contention is guaranteed, since the rule engine gathers up to 8 concurrent judgments.
+
+    Deliberately NOT using the fake clock: this must exercise real ``asyncio`` primitives
+    across real loops, which is precisely what the fake sleep would hide.
+    """
+    limiter = RateLimiter(60_000)  # 1ms spacing — real, but too small to slow the suite
+
+    async def burst() -> None:
+        await asyncio.gather(*(limiter.acquire() for _ in range(4)))
+
+    for _ in range(3):
+        asyncio.run(burst())  # a fresh loop each time, exactly like a new Celery task
+
+
+async def test_limiter_failure_surfaces_as_ai_client_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A limiter error must not escape ``complete()`` raw.
+
+    ``rule_engine/judgment.py`` catches only ``AIClientError`` in order to fail ONE subject
+    closed. Anything else slips past that handler and aborts the entire verification run,
+    so pacing must obey the same contract as every other failure inside ``complete()``.
+    """
+
+    class _Exploding:
+        async def acquire(self, *, label: str = "ai_call") -> float:
+            raise RuntimeError("is bound to a different event loop")
+
+    monkeypatch.setattr(client_module, "get_rate_limiter", lambda: _Exploding())
+    monkeypatch.setattr(client_module.settings, "ai_max_retries", 1)
+
+    with pytest.raises(AIClientError):
+        await client_module.complete(
+            model=settings.anthropic_model_reasoning,
+            messages=[{"role": "user", "content": "x"}],
+            max_tokens=16,
+        )
 
 
 def test_rpm_resolver_picks_the_active_provider(monkeypatch: pytest.MonkeyPatch) -> None:

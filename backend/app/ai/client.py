@@ -149,11 +149,16 @@ def get_anthropic_client() -> AsyncAnthropic | AsyncAnthropicBedrock:
     clients expose the same ``messages.create`` surface and return the same response
     shape, so :func:`complete` and all 13 callers are provider-agnostic.
 
-    The missing-key check fires here, at first *use*, not at import — so the app and the
-    test suite load without a key, and only an actual AI call requires one. Under
-    ``bedrock`` there is no key at all: credentials come from the AWS provider chain (SSO
-    locally, task role on ECS), which is why ``anthropic_api_key`` is only conditionally
-    required (see ``Settings._require_provider_credentials``).
+    The missing-key check below is now **defence in depth, not the primary gate**. It used
+    to be the only check, firing at first *use*; B1's ``Settings._require_provider_credentials``
+    moved the real one to settings construction, so under ``ai_provider="anthropic"`` a
+    missing key refuses to start the app and this branch is unreachable in production. It is
+    kept for tests and any direct construction that bypasses that validator — but a reader
+    chasing "where does a missing key surface?" should look at the settings validator first.
+
+    Under ``bedrock`` there is no key at all: credentials come from the AWS provider chain
+    (SSO locally, task role on ECS), which is why ``anthropic_api_key`` is only conditionally
+    required.
 
     The wrapper owns retries, so the SDK's built-in retries stay disabled
     (``max_retries=0``) for BOTH providers — otherwise the SDK would retry inside our
@@ -344,11 +349,20 @@ async def complete(
 
     last_exc: Exception | None = None
     for attempt in range(1, max_attempts + 1):
-        # Pace BEFORE sending: a rejected request still counts against the provider's
-        # quota, so retry-after-throttle spends allowance to learn nothing.
-        await limiter.acquire(label="complete")
+        # Bound before the try so the handler below can always compute a latency, even if
+        # pacing itself is what failed.
         start = time.perf_counter()
         try:
+            # Pace BEFORE sending: a rejected request still counts against the provider's
+            # quota, so retry-after-throttle spends allowance to learn nothing.
+            #
+            # INSIDE the try deliberately. Callers are written against the contract that
+            # everything leaving complete() is an AIClientError — rule_engine/judgment.py
+            # catches only that, in order to fail ONE subject closed. A raw exception from
+            # pacing would slip past that handler and abort the whole verification run.
+            await limiter.acquire(label="complete")
+            # Re-stamp so the latency metric measures the provider call, not the queueing.
+            start = time.perf_counter()
             resp = await asyncio.wait_for(client.messages.create(**kwargs), timeout=timeout_s)
         except Exception as exc:
             latency_ms = int((time.perf_counter() - start) * 1000)

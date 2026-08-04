@@ -7,6 +7,10 @@ and the added timeout failing closed as an AIClientError.
 
 from __future__ import annotations
 
+import ast
+import inspect
+from collections.abc import Callable
+from typing import Any
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -24,6 +28,22 @@ _ARRAY = """
    "apparent_category": {"value": "vendor", "confidence": 0.6, "reasoning": "merchant"}}
 ]
 """
+
+
+def _wait_for_calls(fn: Callable[..., Any]) -> list[ast.Call]:
+    """Every ``*.wait_for(...)`` call in ``fn``'s body.
+
+    Parsed rather than grepped: the function's own comments explain *why* there is no
+    wrapper, so a substring check would match its own explanation.
+    """
+    tree = ast.parse(inspect.getsource(fn))
+    return [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "wait_for"
+    ]
 
 
 def test_parses_a_bare_json_array() -> None:
@@ -93,12 +113,35 @@ async def test_reasoner_flags_truncation() -> None:
     assert result.truncated is True
 
 
-async def test_timeout_fails_closed_as_ai_client_error() -> None:
-    with (
-        patch.object(tag_production, "complete", AsyncMock(side_effect=TimeoutError())),
-        pytest.raises(AIClientError, match="timed out"),
-    ):
+async def test_timeout_fails_closed_as_ai_client_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A hung request still fails closed — but the conversion now happens in complete().
+
+    This used to stub ``complete`` itself with a raw TimeoutError, which asserted the
+    behaviour of a second, outer ``asyncio.wait_for`` in this module. That wrapper is gone
+    (B1 made complete() bound every attempt itself, and an outer one also billed rate-limiter
+    queueing to the call). So the timeout is injected where it really originates — the
+    transport — and must still arrive as AIClientError.
+    """
+    from types import SimpleNamespace
+
+    from app.ai import client as client_module
+
+    monkeypatch.setattr(client_module.settings, "ai_max_retries", 1)  # no backoff sleep
+    fake = SimpleNamespace(messages=SimpleNamespace(create=AsyncMock(side_effect=TimeoutError())))
+    monkeypatch.setattr(client_module, "get_anthropic_client", lambda: fake)
+
+    with pytest.raises(AIClientError):
         await reason_stage_a_transactions('{"transactions": []}')
+
+
+async def test_does_not_wrap_complete_in_a_second_timeout() -> None:
+    """Regression guard for the pacing bug: no outer ``asyncio.wait_for`` in this module.
+
+    An outer wrapper puts the rate limiter's queueing time inside the caller's per-request
+    budget, so at a low RPM the later calls in a burst time out before a request is ever
+    sent — pacing misreported as a provider failure.
+    """
+    assert not _wait_for_calls(tag_production.reason_stage_a_transactions)
 
 
 async def test_transport_error_propagates_as_ai_client_error() -> None:

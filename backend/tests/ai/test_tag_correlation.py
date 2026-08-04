@@ -70,12 +70,29 @@ async def test_reasoner_flags_truncation() -> None:
     assert result.truncated is True
 
 
-async def test_timeout_fails_closed_as_ai_client_error() -> None:
-    with (
-        patch.object(tag_correlation, "complete", AsyncMock(side_effect=TimeoutError())),
-        pytest.raises(AIClientError, match="timed out"),
-    ):
+async def test_timeout_fails_closed_as_ai_client_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A hung request still fails closed — the conversion now happens inside complete().
+
+    See the twin in ``test_tag_production.py``: the outer ``asyncio.wait_for`` this used to
+    assert is gone, so the timeout is injected at the transport where it really originates.
+    """
+    from types import SimpleNamespace
+
+    from app.ai import client as client_module
+
+    monkeypatch.setattr(client_module.settings, "ai_max_retries", 1)  # no backoff sleep
+    fake = SimpleNamespace(messages=SimpleNamespace(create=AsyncMock(side_effect=TimeoutError())))
+    monkeypatch.setattr(client_module, "get_anthropic_client", lambda: fake)
+
+    with pytest.raises(AIClientError):
         await reason_stage_b_sourcing('{"deposit": {}, "candidates": []}')
+
+
+async def test_does_not_wrap_complete_in_a_second_timeout() -> None:
+    """Regression guard for the pacing bug — see the twin in ``test_tag_production.py``."""
+    from tests.ai.test_tag_production import _wait_for_calls
+
+    assert not _wait_for_calls(tag_correlation.reason_stage_b_sourcing)
 
 
 async def test_transport_error_propagates() -> None:

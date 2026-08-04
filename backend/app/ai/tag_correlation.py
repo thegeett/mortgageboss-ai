@@ -13,14 +13,15 @@ The honesty contract (§3D) — the critical distinction this pass turns on:
 * ``"unknown"`` means "genuinely cannot determine" — reserved for when the input itself is
   unknown; the orchestrator, not this judge, produces that case (DAG propagation).
 
-``complete()`` has no timeout, so the call is wrapped in one — a hung request fails closed
-(raises ``AIClientError`` → the orchestrator writes an unknown-with-reason tag), never a
-fabricated ``"yes"``. PII flows through the call but is NEVER logged (counts only).
+``complete()`` bounds each attempt itself (B1), so the call is NOT wrapped again here — a hung
+request still fails closed (raises ``AIClientError`` → the orchestrator writes an
+unknown-with-reason tag), never a fabricated ``"yes"``. An outer wrapper would additionally
+bill rate-limiter queueing to the call and make pacing look like a provider timeout.
+PII flows through the call but is NEVER logged (counts only).
 """
 
 from __future__ import annotations
 
-import asyncio
 import json
 from dataclasses import dataclass
 
@@ -118,20 +119,15 @@ async def reason_stage_b_sourcing(context_json: str) -> SourcingResult:
     to unknown-with-reason). Raises :class:`~app.ai.client.AIClientError` on a transport failure
     OR a timeout. NEVER logs the context or the response — only counts.
     """
-    try:
-        result = await asyncio.wait_for(
-            complete(
-                model=settings.anthropic_model_reasoning,  # reasoning tier (Sonnet by default) — real judgment over the facts
-                system=STAGE_B_SOURCING_SYSTEM_PROMPT,
-                messages=[{"role": "user", "content": context_json}],
-                max_tokens=_MAX_TOKENS,
-                temperature=0.0,
-            ),
-            timeout=settings.ai_request_timeout_seconds,
-        )
-    except TimeoutError as exc:
-        logger.warning("stage_b_reason_timeout", timeout_s=settings.ai_request_timeout_seconds)
-        raise AIClientError("Stage-B sourcing judgment timed out") from exc
+    # NOT wrapped in asyncio.wait_for: complete() bounds every attempt itself (B1), and an
+    # outer wrapper would also bill the rate limiter's queueing time to this call's budget.
+    result = await complete(
+        model=settings.anthropic_model_reasoning,  # reasoning tier (Sonnet by default) — real judgment over the facts
+        system=STAGE_B_SOURCING_SYSTEM_PROMPT,
+        messages=[{"role": "user", "content": context_json}],
+        max_tokens=_MAX_TOKENS,
+        temperature=0.0,
+    )
 
     truncated = result.stop_reason == "max_tokens"
     if truncated:

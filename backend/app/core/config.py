@@ -133,9 +133,12 @@ class Settings(BaseSettings):
     # exponential backoff + jitter, capped at this many attempts.
     ai_max_retries: int = 3
     ai_base_retry_delay_seconds: float = 1.0
-    # Wall-clock ceiling for one AI reasoning call (LP-313). ``complete()`` itself has no
-    # timeout; tag production wraps its call so a hung request fails closed (the affected
-    # tags become unknown-with-reason) instead of blocking a run indefinitely.
+    # Wall-clock ceiling for ONE ATTEMPT of an AI call (LP-313; per-attempt since B1).
+    # ``complete()`` applies it itself, so callers must NOT wrap it in a second
+    # asyncio.wait_for — an outer wrapper also bills rate-limiter queueing time to the
+    # call, which at a low RPM makes pacing look like a provider timeout. A hung request
+    # still fails closed (the affected tags become unknown-with-reason); the total ceiling
+    # for a call is this value x ai_max_retries plus backoff and pacing.
     ai_request_timeout_seconds: float = 60.0
     # Needs consolidation (LP-111): after the deterministic collapse, an AI pass FLAGS the
     # semantic-duplicate residue for the processor to confirm (never a silent delete). Gated so the
@@ -236,17 +239,30 @@ class Settings(BaseSettings):
         "bedrock_model_classification",
         "bedrock_model_extraction",
         "bedrock_model_reasoning",
+        "ai_requests_per_minute_anthropic",
+        "ai_requests_per_minute_bedrock",
         mode="before",
     )
     @classmethod
-    def _blank_ai_str_is_none(cls, value: object) -> object:
-        """Treat a blank/whitespace AI string as unset (B1).
+    def _blank_ai_value_is_none(cls, value: object) -> object:
+        """Treat a blank/whitespace AI setting as unset (B1).
 
         Same reasoning as the S3 normalizer below, applied to the provider settings:
         ``.env.example`` ships ``BEDROCK_MODEL_EXTRACTION=`` present-but-empty so the
         surface is discoverable, and a blank ``ANTHROPIC_API_KEY=`` is how an operator
         writes "not using the direct API". Without this, ``""`` is truthy enough to pass
         the required-key validator and then fails at the first call as a 401.
+
+        The two ``ai_requests_per_minute_*`` fields are here for a sharper reason: they are
+        ``int | None`` and ship blank, so without normalizing, ``cp .env.example .env`` — the
+        documented onboarding path — made the app REFUSE TO START with
+        ``Input should be a valid integer, unable to parse string as an integer``. Blank
+        already means "unlimited" in the prose beside them; ``None`` is that meaning.
+
+        This is the fourth time a blank line in ``.env`` has broken a setting in this file
+        (``s3_region``, ``s3_presign_expiry_seconds``, then both of these), which is why
+        ``test_env_example_still_boots_the_app`` now asserts the whole file end to end
+        rather than any single field.
         """
         if isinstance(value, str) and not value.strip():
             return None

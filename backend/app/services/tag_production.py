@@ -42,7 +42,7 @@ from app.ai.tag_production import (
     TagJudgment,
     reason_stage_a_transactions,
 )
-from app.core.config import settings
+from app.core.config import resolve_model, settings
 from app.verification.snapshot.content_id import content_fingerprint
 from app.verification.snapshot.fields import Field
 from app.verification.snapshot.model import Snapshot, TagsSection, TransactionRecord
@@ -175,7 +175,12 @@ async def produce_stage_a_transaction_tags(
 
     resolved: TransactionTagCache = dict(persistent)
     input_tokens = output_tokens = 0
-    model = settings.anthropic_model_reasoning
+    # Pricing must be keyed on the model that ACTUALLY ran. Under Bedrock that is the
+    # cross-region inference-profile id, not the tier value this module asks for, so
+    # reading the tier setting here would price the call against the wrong key the moment
+    # the Bedrock rows in cost.py stop matching the direct-API rates. StageAResult.model
+    # carries the completion's own resolved id — the authoritative answer.
+    invoked_model: str | None = None
 
     for batch in _chunks(representatives, _BATCH_SIZE):
         context_json = json.dumps(_build_context([txn for _, txn in batch]))
@@ -191,6 +196,7 @@ async def produce_stage_a_transaction_tags(
 
         input_tokens += result.input_tokens
         output_tokens += result.output_tokens
+        invoked_model = result.model
         by_index = {j.index: j for j in result.judgments}
         # The batch addresses transactions by 1-based index (1..len(batch)); the model must
         # echo those. A returned index OUTSIDE that set (e.g. a 0-based echo) means the model
@@ -222,6 +228,8 @@ async def produce_stage_a_transaction_tags(
                 persistent[fp] = entry
 
     if input_tokens or output_tokens:
+        # invoked_model is set whenever a batch succeeded, and tokens are only accumulated
+        # on success — so the fallback is unreachable, and resolves rather than guessing.
         logger.info(
             "stage_a_production_done",
             transactions=len(transactions),
@@ -229,7 +237,9 @@ async def produce_stage_a_transaction_tags(
             input_tokens=input_tokens,
             output_tokens=output_tokens,
             cost_estimate=estimate_cost(
-                model=model, input_tokens=input_tokens, output_tokens=output_tokens
+                model=invoked_model or resolve_model(settings.anthropic_model_reasoning),
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
             ),
         )
 

@@ -42,7 +42,7 @@ from app.ai.tag_correlation import (
     SourcingResult,
     reason_stage_b_sourcing,
 )
-from app.core.config import settings
+from app.core.config import resolve_model, settings
 from app.verification.snapshot.content_id import content_fingerprint
 from app.verification.snapshot.model import Snapshot, TagsSection, TransactionRecord
 from app.verification.snapshot.tag import Tag, TagProducedBy, TagRole, TagStage
@@ -386,6 +386,10 @@ async def produce_stage_b_sourcing_tags(
 
     by_subject = {cid: dict(tags) for cid, tags in snapshot.tags.by_subject.items()}
     input_tokens = output_tokens = deposits_judged = 0
+    # Pricing must be keyed on the model that ACTUALLY ran — under Bedrock the inference-
+    # profile id, not the tier value read from settings. SourcingResult.model carries the
+    # completion's own resolved id. See the matching note in services/tag_production.py.
+    invoked_model: str | None = None
 
     for txn in transactions:
         subject = snapshot.tags.by_subject.get(txn.content_id, {})
@@ -431,6 +435,7 @@ async def produce_stage_b_sourcing_tags(
             else:
                 input_tokens += result.input_tokens
                 output_tokens += result.output_tokens
+                invoked_model = result.model
                 resolved = _resolve(
                     result, candidates, _stage_a_value(subject, _TAG_APPARENT_CATEGORY)
                 )
@@ -465,7 +470,9 @@ async def produce_stage_b_sourcing_tags(
             input_tokens=input_tokens,
             output_tokens=output_tokens,
             cost_estimate=estimate_cost(
-                model=settings.anthropic_model_reasoning,
+                # Unreachable fallback: tokens only accumulate on a successful judgment,
+                # which is exactly when invoked_model is set.
+                model=invoked_model or resolve_model(settings.anthropic_model_reasoning),
                 input_tokens=input_tokens,
                 output_tokens=output_tokens,
             ),

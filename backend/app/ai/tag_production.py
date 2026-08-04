@@ -17,7 +17,6 @@ fabricated value. PII flows through the call but is NEVER logged (counts only).
 
 from __future__ import annotations
 
-import asyncio
 import json
 import re
 from dataclasses import dataclass
@@ -151,23 +150,17 @@ async def reason_stage_a_transactions(context_json: str) -> StageAResult:
     temperature 0 (same file → same tags), guards truncation, and parses defensively (a
     malformed response yields no judgments — the orchestrator falls back to unknown). Raises
     :class:`~app.ai.client.AIClientError` on a transport failure OR a timeout (``complete()``
-    has none). NEVER logs the context or the response — only counts.
+    bounds each attempt itself since B1). NEVER logs the context or the response — only counts.
     """
-    try:
-        result = await asyncio.wait_for(
-            complete(
-                model=settings.anthropic_model_reasoning,  # reasoning tier (Sonnet by default) — real reasoning over the facts
-                system=STAGE_A_TRANSACTION_SYSTEM_PROMPT,
-                messages=[{"role": "user", "content": context_json}],
-                max_tokens=_MAX_TOKENS,
-                temperature=0.0,
-            ),
-            timeout=settings.ai_request_timeout_seconds,
-        )
-    except TimeoutError as exc:
-        # complete() has no timeout; wrap it so a hung call fails closed like any AI error.
-        logger.warning("stage_a_reason_timeout", timeout_s=settings.ai_request_timeout_seconds)
-        raise AIClientError("Stage-A structuring timed out") from exc
+    # NOT wrapped in asyncio.wait_for: complete() bounds every attempt itself (B1), and an
+    # outer wrapper would also bill the rate limiter's queueing time to this call's budget.
+    result = await complete(
+        model=settings.anthropic_model_reasoning,  # reasoning tier (Sonnet by default) — real reasoning over the facts
+        system=STAGE_A_TRANSACTION_SYSTEM_PROMPT,
+        messages=[{"role": "user", "content": context_json}],
+        max_tokens=_MAX_TOKENS,
+        temperature=0.0,
+    )
 
     truncated = result.stop_reason == "max_tokens"
     if truncated:

@@ -10,7 +10,6 @@ temperature 0, truncation guard, honest defensive parse, never logs the context/
 
 from __future__ import annotations
 
-import asyncio
 import json
 from dataclasses import dataclass, field
 from typing import Any
@@ -92,20 +91,15 @@ async def reason_observation(context_json: str) -> ObservationResult:
     the info). Raises :class:`~app.ai.client.AIClientError` on a transport failure OR a timeout.
     NEVER logs the context or the response — only counts + the chosen type.
     """
-    try:
-        result = await asyncio.wait_for(
-            complete(
-                model=settings.anthropic_model_reasoning,
-                system=OBSERVATION_SYSTEM_PROMPT,
-                messages=[{"role": "user", "content": context_json}],
-                max_tokens=_MAX_TOKENS,
-                temperature=0.0,
-            ),
-            timeout=settings.ai_request_timeout_seconds,
-        )
-    except TimeoutError as exc:
-        logger.warning("observation_reason_timeout", timeout_s=settings.ai_request_timeout_seconds)
-        raise AIClientError("observation structuring timed out") from exc
+    # NOT wrapped in asyncio.wait_for: complete() bounds every attempt itself (B1), and an
+    # outer wrapper would also bill the rate limiter's queueing time to this call's budget.
+    result = await complete(
+        model=settings.anthropic_model_reasoning,
+        system=OBSERVATION_SYSTEM_PROMPT,
+        messages=[{"role": "user", "content": context_json}],
+        max_tokens=_MAX_TOKENS,
+        temperature=0.0,
+    )
 
     truncated = result.stop_reason == "max_tokens"
     if truncated:
