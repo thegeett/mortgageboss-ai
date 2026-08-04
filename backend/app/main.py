@@ -141,6 +141,15 @@ if not settings.is_production:
 
     app.include_router(dev_router, prefix=f"{API_V1_PREFIX}/dev")
 
+# Extraction bench (dev tool) — gated STRICTER than the LP-40 block: DEVELOPMENT ONLY (not staging,
+# not prod), because it runs real documents through the model and spends money. The router is only
+# INCLUDED here when is_development, AND every handler also depends on _require_dev (a second, independent
+# guard that 404s otherwise). Two checks so a misconfigured mount still cannot serve it in prod.
+if settings.is_development:
+    from app.api.dev_bench import router as dev_bench_router
+
+    app.include_router(dev_bench_router, prefix=API_V1_PREFIX)
+
 
 @app.get("/")
 async def root() -> dict[str, str]:

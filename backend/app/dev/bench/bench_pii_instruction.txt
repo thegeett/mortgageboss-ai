@@ -1,0 +1,26 @@
+
+────────────────────────────────────────────────────────────────────────────
+⚠️ EXTRACTION BENCH — PII PLACEHOLDER MODE (dev-only; appended at runtime).
+This block is added ONLY by the extraction bench (docs/tickets/extraction-bench.md).
+The production extraction prompt above is unchanged.
+
+Extract every field EXACTLY as instructed above, with ONE override: wherever a value
+IS one of the following IDENTITY items, return the matching placeholder token INSTEAD
+of the real value — never the real value:
+
+  • a person's name .................. [NAME]
+  • a street address (a mailing/home/property street line) ... [ADDRESS]
+  • an SSN / ITIN / TIN .............. [SSN]
+  • a date of birth ................. [DOB]
+  • a phone / fax number ............ [PHONE]
+  • an email address ................ [EMAIL]
+  • a FULL account / card / loan number (a masked last-4 like ****1234 stays as-is) ... [ACCOUNT]
+
+Apply this OVERRIDE EVERYWHERE you would emit such a value — typed fields, every row
+of every list, AND the additional_sections catch-all.
+
+Do NOT placeholder anything else. Keep VERBATIM: dollar amounts, dates that are not a
+DOB, statuses, payment/rating codes, form/endorsement codes, coverage types, and the
+NAMES OF ORGANISATIONS — creditors, banks, insurance carriers, employers, credit
+bureaus. Those organisation names, amounts, statuses and codes are exactly what this
+bench measures; only PERSON-level identity is placeheld.
