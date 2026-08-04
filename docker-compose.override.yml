@@ -1,0 +1,7 @@
+services:
+  worker:
+    volumes:
+      - ./backend/storage:/app/storage
+      - ~/.aws:/root/.aws:ro
+    environment:
+      AWS_PROFILE: mbai-dev
