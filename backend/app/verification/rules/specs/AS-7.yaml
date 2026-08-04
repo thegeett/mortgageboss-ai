@@ -1,3 +1,4 @@
+# DOMAIN (Priya, Aug 2026): see docs/domain/priya-rulings-2026-08.md — Ruling 3 (NSF/overdraft — an INTERNAL processing policy, not an agency rule; event TYPE matters). Recorded LP-456; NOT yet implemented.
 rule_id: AS-7
 name: NSF / overdraft flag
 category: Assets
