@@ -46,7 +46,7 @@ from typing import Any
 
 import structlog
 
-from app.ai.client import AIClientError, AICompletion, complete
+from app.ai.client import TRUNCATED_STOP_REASON, AIClientError, AICompletion, complete
 from app.core.config import settings
 
 logger = structlog.get_logger(__name__)
@@ -121,7 +121,7 @@ async def run_extraction_completion(
     )
     if first is None:
         return ExtractionCall(None, None, None, "AI call failed", False)
-    if first.stop_reason != "max_tokens":
+    if first.stop_reason != TRUNCATED_STOP_REASON:
         return ExtractionCall(first.text, first.input_tokens, first.output_tokens, None, False)
 
     # Truncated: the model was cut off mid-JSON. Log distinctly (NOT a parse failure) + retry once.
@@ -140,7 +140,7 @@ async def run_extraction_completion(
     )
     if second is None:
         return ExtractionCall(None, None, None, "AI call failed", False)
-    if second.stop_reason == "max_tokens":
+    if second.stop_reason == TRUNCATED_STOP_REASON:
         # Still truncated at the high ceiling — give up honestly (never "could not parse").
         logger.warning(
             "extraction_truncated_after_retry",

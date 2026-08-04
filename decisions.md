@@ -13460,3 +13460,121 @@ The runner stage runs as the `node` user (uid 1000) that `node:20-alpine` alread
 first flagged the `localhost:8000` fallback as silent and dangerous), A1 `docs/worktree-setup.md`
 (the same fallback biting local development), C2 (ECR), C3 (ECS services — the frontend task definition must
 NOT try to set `NEXT_PUBLIC_API_URL`).
+
+## ADR-360: BOTH provider paths stay live behind one flag, with a PARALLEL model-id triplet — a provider flip is one variable, not three hand-edited model strings (B1)
+
+**Context.** Staging will hold real borrower files (GLBA-covered NPI). Running that through Bedrock keeps
+inference inside the AWS trust boundary under AWS's terms, which is the compliance story the whole deployment
+rests on — so the provider swap had to land before staging, not after. The A2 recon established the seam is a
+single line: `app/ai/client.py:153` is the only `AsyncAnthropic` construction in application code, and all 13
+`complete()` callers are provider-agnostic.
+
+**The decision — a flag with both paths live, defaulting to the direct API.** `ai_provider` is a
+`Literal["anthropic", "bedrock"]` defaulting to `"anthropic"`. The alternative — replace the client outright —
+was rejected because Bedrock is the *unproven* side here: a fresh account at **10 RPM**, unverified throttle
+semantics, and model ids that only exist as cross-region inference profiles. A flag means a Bedrock problem is
+an env-var rollback, not a revert-and-redeploy. Under `"anthropic"` the model resolver is the identity function
+and the limiter is unlimited, so the default path is byte-identical, not merely equivalent.
+
+**The decision — a PARALLEL triplet, not a reuse of the existing three settings.** `bedrock_model_*` sits
+alongside `anthropic_model_*` rather than the same three settings holding whichever vocabulary is active. If
+one triplet served both, flipping provider would mean hand-editing three model strings, and the failure mode
+for getting one wrong is the worst kind: a direct-API name sent to Bedrock is rejected at **invoke time**, in
+production, per call, as a validation error — not at boot. With both triplets resident, `ai_provider` alone
+decides and neither vocabulary can go stale.
+
+The ids must be the `us.` **cross-region inference profiles**; the bare `anthropic.claude-*` forms are rejected
+for these models (no on-demand throughput). At 44 characters the longest fits `Extraction.model_used`'s
+`varchar(64)` with room to spare — verified, because it is exactly the kind of thing that fails only once real
+data flows.
+
+**The resolver is keyed on the caller's VALUE, not a new `purpose` argument.** Callers keep passing
+`settings.anthropic_model_{classification,extraction,reasoning}` — the setting they read *is* their tier — and
+`resolve_model()` maps that value to the same tier's Bedrock id. Adding a `purpose` parameter to `complete()`
+would have meant touching all 13 call sites, and a provider swap that edits 13 files is a provider swap that
+will be done wrong once. The cost of value-keying is a genuine ambiguity: two tiers sharing one Anthropic value
+(classification and extraction are both Haiku today) collapse to one map key. Harmless while their Bedrock ids
+also match, and a silent mis-route the moment they diverge — so the startup validator **refuses** that
+configuration rather than resolving it by dict insertion order.
+
+**`anthropic_api_key` becomes conditionally required.** It was a `Field` with no default, so the app refused to
+start without it. Under Bedrock there is no key at all — credentials come from the AWS chain — so requiring one
+would have forced a dummy value, and a dummy key is worse than no key: it makes a real misconfiguration
+indistinguishable from the intended state. The model validator requires it for `anthropic` and requires all
+three Bedrock ids for `bedrock`, both at boot. **No AWS credential settings exist**, and a test asserts they
+stay absent.
+
+**Cross-refs.** A2 §4 (the recon that found the single construction site and the 13 callers), ADR-361 (the
+runtime half — throttling, timeouts, pacing, truncation), ADR-342 (the same credential-chain-only stance for
+S3), C0/C1 (the deployment work this unblocks), C3 (task roles — the worker needs `bedrock:InvokeModel`, the
+API does not; see `docs/bedrock-call-sites.md`).
+
+## ADR-361: The wrapper is the single retry authority for Bedrock too — throttles classified by CODE not status, every attempt paced and timed out, and `stop_reason` normalised at ONE boundary (B1)
+
+**Context.** Bedrock changes the failure modes, not the interface. Three of them fail *silently*, which is why
+they are recorded rather than left to the code to explain: a misclassified throttle, an unrecognised
+truncation marker, and a cost table that misses the new model ids.
+
+**The decision — keep `max_retries=0` on both clients.** The SDK's own retries stay disabled for Bedrock
+exactly as for the direct API, so the wrapper remains the single observable retry authority. Letting the SDK
+retry inside our retry would multiply attempts invisibly — and against a 10 RPM quota, an invisible multiplier
+is not a tidiness concern, it is the difference between pacing and a self-inflicted outage.
+
+**Throttles are classified by ERROR CODE, not only by HTTP status.** `_is_transient` already treated 429 and
+5xx as transient. Bedrock *should* surface throttling as 429, but that is an assumption, and the consequence
+of it being wrong is severe: at 10 RPM a misclassified throttle fails the **common** path, not an edge case —
+a burst would fail fast instead of retrying. So the classifier additionally matches `ThrottlingException`,
+`ModelNotReadyException`, and `ServiceUnavailableException` in the exception type, message, **and response
+body** (Bedrock puts the code in the body; `str(exc)` is only the SDK's summary line — matching the message
+alone would have missed the very case this exists for). The addition is deliberately narrow: it does not relax
+4xx-fails-fast for genuine client errors, and a test pins that a 400/401/403/404/422 still fails immediately.
+**The real exception shape is still PENDING** — `scripts/verify-bedrock.py` step 3 prints it; the
+classification is written to be correct either way rather than resting on the assumption.
+
+**`stop_reason` is normalised at ONE boundary, and the alias map is deliberately empty.** `model_call.py`
+compared `stop_reason == "max_tokens"` to fire the LP-102 truncation guard. If Bedrock spelled it differently
+the guard would stop working *silently* and a cut-off extraction would be misreported as "could not parse
+extraction" — precisely the bug LP-102 exists to prevent. The comparison now goes through a shared
+`TRUNCATED_STOP_REASON` constant, normalised where the SDK response becomes an `AICompletion`, so provider
+knowledge stays out of `model_call.py` and the 13 callers. The alias map is **empty on purpose**: the Bedrock
+client returns the Messages API shape, so the value is *expected* to be identical, and inventing speculative
+aliases would be a guess dressed as a fix. If the verify script shows otherwise, the fix is one entry in one
+map. A test asserts the guard never carries its own literal again.
+
+**Timeouts and pacing apply per ATTEMPT, not per call.** `ai_request_timeout_seconds` existed but neither
+classification nor extraction applied it — on Fargate a hung call holds a Celery worker slot indefinitely. Both
+paths now do, inside the retry loop, so each attempt is bounded and a timeout is classified transient (it is a
+network-class failure) and retried. Pacing is likewise per attempt, because **a rejected request still counts
+against the quota** — retry-after-throttle spends allowance to learn nothing. Spacing, not a token bucket: a
+bucket permits a burst and then stalls, which is exactly the shape that trips a per-minute server-side quota.
+
+⚠️ **The limiter is PROCESS-LOCAL, and this is the part most likely to be misread as a bug.** N worker tasks
+pace at N × the setting. The deployed value must be *the account quota divided by task count*, never the quota
+itself — two tasks each pacing at 8 against a 10 RPM account still throttle, and it looks like a broken
+limiter. A shared limiter would need Redis coordination on the hot path of every model call; that is a heavier
+decision and is not made here.
+
+**Cost: a missing key is worse than a crash.** `estimate_cost` returns **$0.00** with only a warning for an
+unknown model, so Bedrock ids would have silently zeroed every `Extraction.cost_estimate` while looking
+healthy — destroying the telemetry you would use to notice. The Bedrock profiles are now priced, the pipeline
+records the model that **actually ran** (`resolve_model(...)`, not the tier value, so `model_used` and the
+price key agree), and a test fails when any configured model has no price. Verifying the table also surfaced a
+pre-existing error: **Opus 4.8 was priced at $15/$75, three times its real $5/$25** — every Opus-tier estimate
+recorded before 2026-08-04 is overstated threefold. The Bedrock rows assume Bedrock's per-token rates equal the
+direct API's, which is the ticket's premise and is **not** independently confirmed: Anthropic's documentation
+describes Bedrock as partner-operated with separately published pricing. Recorded in the table as an estimate
+to reconcile against AWS's pricing page and the first invoice.
+
+**Client caching is safe for both providers — measured, not assumed.** C0 found `aioboto3` clients are
+event-loop-bound while the Celery bridge builds a fresh loop per task, so the same question had to be answered
+here. Both Anthropic clients are httpx-based (the *same* `AsyncHttpxClientWrapper` class), and httpx
+re-establishes a pooled connection whose loop has gone rather than raising: one client instance issuing
+**successful** requests across three separate `asyncio.run()` loops returned 200 each time. `AsyncAnthropicBedrock`
+also signs **per request** and resolves credentials through a cached `boto3.Session`, so a rotating ECS task
+role refreshes normally and a cached client does not pin expiring credentials. The `@lru_cache` therefore
+stays, for both.
+
+**Cross-refs.** ADR-360 (the settings/provider half), LP-37 (the wrapper's retry policy and metadata-only
+logging), LP-102 (the truncation guard this protects), ADR-343 (C0's client-lifecycle finding, which this
+re-tested rather than assumed), `scripts/verify-bedrock.py` (the empirical follow-up for the two PENDING
+findings).

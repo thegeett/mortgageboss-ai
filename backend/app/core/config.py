@@ -72,7 +72,13 @@ class Settings(BaseSettings):
     celery_result_backend_override: str | None = Field(default=None, alias="CELERY_RESULT_BACKEND")
 
     # Anthropic
-    anthropic_api_key: str = Field(description="Anthropic API key for Claude access")
+    # CONDITIONALLY required (B1): the direct API needs it; Bedrock authenticates through
+    # the AWS credential chain and must not be forced to carry a key it never sends.
+    # Enforced by `_require_provider_credentials` below, so a bedrock deployment starts
+    # with no key at all rather than a dummy value that would mask a real misconfiguration.
+    anthropic_api_key: str | None = Field(
+        default=None, description="Anthropic API key — required when AI_PROVIDER=anthropic"
+    )
     # Model identifiers for the AI features. CONFIGURATION, not baked-in facts — model
     # strings change over time. TODO(models): verify against the current Anthropic docs.
     #
@@ -94,6 +100,35 @@ class Settings(BaseSettings):
     anthropic_model_reasoning: str = (
         "claude-sonnet-4-5"  # STAYS Sonnet — the live bars are calibrated on it
     )
+
+    # --- Provider selection (B1) ------------------------------------------------------ #
+    # Which API the SDK client talks to. Both paths stay LIVE: "anthropic" is the direct
+    # API (unchanged default, byte-identical behaviour), "bedrock" routes the same calls
+    # through Amazon Bedrock so inference stays inside the AWS trust boundary — the
+    # compliance basis for putting real borrower NPI in staging.
+    ai_provider: Literal["anthropic", "bedrock"] = "anthropic"
+    bedrock_region: str = "us-east-1"
+
+    # A PARALLEL triplet, deliberately not a reuse of the three settings above. Flipping
+    # provider must be ONE variable: if the same three settings held both vocabularies, a
+    # flip would mean hand-editing three model strings, and a direct-API name sent to
+    # Bedrock fails at INVOKE time — in production, as a validation error, per call.
+    # With both triplets resident, `ai_provider` alone decides and neither can go stale.
+    #
+    # These must be the `us.` CROSS-REGION INFERENCE PROFILE ids. The bare
+    # `anthropic.claude-*` forms are rejected for these models — on-demand throughput is
+    # not offered for them. Left None so an anthropic-provider deployment carries no
+    # Bedrock config; the validator below requires all three when the provider is bedrock.
+    bedrock_model_classification: str | None = None
+    bedrock_model_extraction: str | None = None
+    bedrock_model_reasoning: str | None = None
+
+    # Client-side pacing, PER PROVIDER because their ceilings differ by orders of
+    # magnitude. None = unlimited (today's behaviour). See `resolve_requests_per_minute`.
+    # ⚠️ PROCESS-LOCAL: N worker tasks pace at N x this value. Deploy the account quota
+    # DIVIDED BY task count, never the quota itself.
+    ai_requests_per_minute_anthropic: int | None = None
+    ai_requests_per_minute_bedrock: int | None = None
     # AI retry policy (LP-37): transient failures (429/5xx/connection) are retried with
     # exponential backoff + jitter, capped at this many attempts.
     ai_max_retries: int = 3
@@ -196,6 +231,27 @@ class Settings(BaseSettings):
         """Celery result backend URL — the override if set, else the configured Redis."""
         return self.celery_result_backend_override or str(self.redis_url)
 
+    @field_validator(
+        "anthropic_api_key",
+        "bedrock_model_classification",
+        "bedrock_model_extraction",
+        "bedrock_model_reasoning",
+        mode="before",
+    )
+    @classmethod
+    def _blank_ai_str_is_none(cls, value: object) -> object:
+        """Treat a blank/whitespace AI string as unset (B1).
+
+        Same reasoning as the S3 normalizer below, applied to the provider settings:
+        ``.env.example`` ships ``BEDROCK_MODEL_EXTRACTION=`` present-but-empty so the
+        surface is discoverable, and a blank ``ANTHROPIC_API_KEY=`` is how an operator
+        writes "not using the direct API". Without this, ``""`` is truthy enough to pass
+        the required-key validator and then fails at the first call as a 401.
+        """
+        if isinstance(value, str) and not value.strip():
+            return None
+        return value
+
     @field_validator("s3_bucket", "s3_endpoint_url", "s3_kms_key_id", mode="before")
     @classmethod
     def _blank_s3_str_is_none(cls, value: object) -> object:
@@ -241,6 +297,56 @@ class Settings(BaseSettings):
         return value
 
     @model_validator(mode="after")
+    def _require_provider_credentials(self) -> "Settings":
+        """Refuse to start with a provider whose configuration is incomplete (B1).
+
+        Both halves fail at BOOT rather than at the first model call, matching the C0
+        precedent. The failure this prevents is specific: a missing Bedrock model id is
+        only detectable at invoke time, where it arrives as a per-call validation error
+        inside a Celery task — a worker that reports healthy and then fails every
+        document, which is the worst shape a config error can take.
+        """
+        if self.ai_provider == "anthropic" and not self.anthropic_api_key:
+            raise ValueError('ANTHROPIC_API_KEY is required when AI_PROVIDER is "anthropic"')
+
+        if self.ai_provider == "bedrock":
+            missing = [
+                name.upper()
+                for name in (
+                    "bedrock_model_classification",
+                    "bedrock_model_extraction",
+                    "bedrock_model_reasoning",
+                )
+                if not getattr(self, name)
+            ]
+            if missing:
+                raise ValueError(
+                    f'AI_PROVIDER is "bedrock" but {", ".join(missing)} '
+                    f"{'is' if len(missing) == 1 else 'are'} not set"
+                )
+
+            # The tier map is keyed by the DIRECT-API value a caller passes (see
+            # `resolve_model`). If two tiers share that value they collapse to one key —
+            # harmless while their Bedrock ids also match (classification and extraction
+            # are both Haiku today), but a silent mis-route the moment they diverge.
+            # Refuse the ambiguous configuration instead of resolving it by dict order.
+            pairs: dict[str, set[str]] = {}
+            for anthropic_value, bedrock_value in (
+                (self.anthropic_model_classification, self.bedrock_model_classification),
+                (self.anthropic_model_extraction, self.bedrock_model_extraction),
+                (self.anthropic_model_reasoning, self.bedrock_model_reasoning),
+            ):
+                pairs.setdefault(anthropic_value, set()).add(bedrock_value or "")
+            ambiguous = {k: sorted(v) for k, v in pairs.items() if len(v) > 1}
+            if ambiguous:
+                raise ValueError(
+                    "ambiguous Bedrock model mapping — tiers sharing one ANTHROPIC_MODEL_* "
+                    f"value map to different BEDROCK_MODEL_* ids: {ambiguous}. Give those "
+                    "tiers distinct ANTHROPIC_MODEL_* values, or the same Bedrock id."
+                )
+        return self
+
+    @model_validator(mode="after")
     def _require_s3_bucket_when_s3(self) -> "Settings":
         """Refuse to start with ``storage_backend="s3"`` and no ``s3_bucket`` (C0).
 
@@ -266,3 +372,56 @@ def get_settings() -> Settings:
 
 # Convenience export
 settings = get_settings()
+
+
+# --------------------------------------------------------------------------- #
+# Provider resolution (B1) — the ONE place a provider changes an outgoing value
+# --------------------------------------------------------------------------- #
+
+
+class ModelResolutionError(ValueError):
+    """A caller's model value has no identifier under the active provider."""
+
+
+def resolve_model(requested: str) -> str:
+    """Translate a caller's tier model value into the ACTIVE provider's identifier.
+
+    Callers keep passing ``settings.anthropic_model_{classification,extraction,reasoning}``
+    — the setting they read IS their tier — and this maps that value to the Bedrock id for
+    the same tier when the provider is bedrock. Deliberately keyed on the VALUE rather
+    than a new ``purpose`` argument: adding a parameter to :func:`app.ai.client.complete`
+    would mean touching all 13 call sites, and a provider swap that edits 13 files is a
+    provider swap that will be done wrong once.
+
+    Under ``ai_provider="anthropic"`` this is the identity function, which is what keeps
+    the default path byte-identical.
+
+    Raises :class:`ModelResolutionError` for a value that is not one of the three tiers —
+    that means a caller hard-coded a model, which the LP-457 guard also forbids, and under
+    Bedrock it would otherwise be sent verbatim and rejected at invoke time.
+    """
+    if settings.ai_provider == "anthropic":
+        return requested
+    for anthropic_value, bedrock_value in (
+        (settings.anthropic_model_classification, settings.bedrock_model_classification),
+        (settings.anthropic_model_extraction, settings.bedrock_model_extraction),
+        (settings.anthropic_model_reasoning, settings.bedrock_model_reasoning),
+    ):
+        if requested == anthropic_value and bedrock_value:
+            return bedrock_value
+    raise ModelResolutionError(
+        f"no BEDROCK_MODEL_* configured for model {requested!r} — it matches none of the "
+        "three ANTHROPIC_MODEL_* tiers, so it cannot be mapped to a Bedrock identifier"
+    )
+
+
+def resolve_requests_per_minute() -> int | None:
+    """The client-side pacing ceiling for the ACTIVE provider, or ``None`` for unlimited.
+
+    Two settings rather than one because the ceilings differ by orders of magnitude: the
+    direct API is generous, while a fresh Bedrock account is at 10 RPM. One shared value
+    would either throttle the direct API pointlessly or fail to pace Bedrock at all.
+    """
+    if settings.ai_provider == "bedrock":
+        return settings.ai_requests_per_minute_bedrock
+    return settings.ai_requests_per_minute_anthropic

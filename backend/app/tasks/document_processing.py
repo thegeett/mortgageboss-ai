@@ -49,7 +49,7 @@ from app.ai.extraction import EXTRACTORS, Extractor
 from app.ai.extraction.parsing import document_confidence_provenance
 from app.ai.generic_analyzer import analyze_document
 from app.ai.summarization import summarize_document
-from app.core.config import settings
+from app.core.config import resolve_model, settings
 from app.documents.catalog import get_category, get_tier
 from app.models.activity_log import ActivityType
 from app.models.document import Document, DocumentStatus, Tier
@@ -296,12 +296,17 @@ async def _extract_branch(
 
     result = await extractor(content, document.mime_type)
 
+    # The model that ACTUALLY ran (B1): under AI_PROVIDER=bedrock this is the
+    # inference-profile id, not the tier value. Recording the tier value instead would
+    # both mislabel `model_used` and price the call against the wrong key.
+    invoked_model = resolve_model(settings.anthropic_model_extraction)
+
     tokens_used: int | None = None
     cost_estimate: float | None = None
     if result.input_tokens is not None and result.output_tokens is not None:
         tokens_used = result.input_tokens + result.output_tokens
         cost_estimate = estimate_cost(
-            model=settings.anthropic_model_extraction,
+            model=invoked_model,
             input_tokens=result.input_tokens,
             output_tokens=result.output_tokens,
         )
@@ -314,7 +319,7 @@ async def _extract_branch(
         document_id=document.id,
         extracted_data=result.data.model_dump(mode="json"),
         extraction_status=result.status,
-        model_used=settings.anthropic_model_extraction,
+        model_used=invoked_model,
         tokens_used=tokens_used,
         cost_estimate=cost_estimate,
         error_detail=result.reasoning if result.status == ExtractionStatus.FAILED else None,

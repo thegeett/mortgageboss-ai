@@ -41,9 +41,11 @@ from anthropic import (
     APIConnectionError,
     APIStatusError,
     AsyncAnthropic,
+    AsyncAnthropicBedrock,
 )
 
-from app.core.config import settings
+from app.ai.rate_limit import get_rate_limiter
+from app.core.config import ModelResolutionError, resolve_model, settings
 
 logger = structlog.get_logger(__name__)
 
@@ -140,21 +142,94 @@ def build_document_message(
 
 
 @lru_cache(maxsize=1)
-def get_anthropic_client() -> AsyncAnthropic:
-    """The shared singleton async client (lazy, cached — LP-35 factory style).
+def get_anthropic_client() -> AsyncAnthropic | AsyncAnthropicBedrock:
+    """The shared singleton async client for the ACTIVE provider (lazy, cached — LP-35 style).
 
-    The missing-key check fires here, at first *use*, not at import — so the app
-    and the test suite load without a key, and only an actual AI call requires
-    one. The wrapper owns retries, so the SDK's built-in retries are disabled
-    (``max_retries=0``).
+    ``settings.ai_provider`` selects the construction and nothing else changes: both
+    clients expose the same ``messages.create`` surface and return the same response
+    shape, so :func:`complete` and all 13 callers are provider-agnostic.
+
+    The missing-key check fires here, at first *use*, not at import — so the app and the
+    test suite load without a key, and only an actual AI call requires one. Under
+    ``bedrock`` there is no key at all: credentials come from the AWS provider chain (SSO
+    locally, task role on ECS), which is why ``anthropic_api_key`` is only conditionally
+    required (see ``Settings._require_provider_credentials``).
+
+    The wrapper owns retries, so the SDK's built-in retries stay disabled
+    (``max_retries=0``) for BOTH providers — otherwise the SDK would retry inside our
+    retry, multiplying attempts invisibly and, on Bedrock, burning a 10 RPM quota.
+
+    **Caching is safe for both providers, verified rather than assumed (B1):**
+
+    * *Event loops.* C0 found ``aioboto3`` clients are event-loop-bound, and the Celery
+      bridge builds a fresh loop per task (``app/tasks/base.py:41-43``). Both Anthropic
+      clients are **httpx**-based (``AsyncHttpxClientWrapper`` — the same wrapper class
+      for direct and Bedrock), and httpx re-establishes a pooled connection whose loop has
+      gone rather than raising. Measured: one client instance issuing SUCCESSFUL requests
+      across three separate ``asyncio.run()`` loops returned 200 each time. So this is not
+      the aioboto3 situation, and Bedrock adds no constraint the direct client did not
+      already have under the same ``lru_cache``.
+    * *Credential refresh.* ``AsyncAnthropicBedrock`` signs **per request** (its
+      ``_prepare_request`` calls the SigV4 signer), and the cached ``boto3.Session`` it
+      signs with resolves credentials through the provider chain, so a rotating ECS task
+      role refreshes normally. A cached client does not pin expiring credentials.
+    * *Fork.* The factory is lazy, and Celery forks before any task runs, so each child
+      builds its own client — as today.
+
+    Tests that flip ``ai_provider`` must call ``get_anthropic_client.cache_clear()``; the
+    cache is keyed on nothing, so a stale client would otherwise survive the flip.
     """
+    if settings.ai_provider == "bedrock":
+        # No api_key: the SDK resolves AWS credentials from the default chain.
+        return AsyncAnthropicBedrock(aws_region=settings.bedrock_region, max_retries=0)
     if not settings.anthropic_api_key:
         raise AIClientError("ANTHROPIC_API_KEY is not configured")
     return AsyncAnthropic(api_key=settings.anthropic_api_key, max_retries=0)
 
 
+#: Bedrock error codes that mean "try again shortly", matched on the SDK exception's
+#: message/body when the HTTP status alone does not already say so (B1, task 4).
+#:
+#: ``ThrottlingException`` is the quota case — at a 10 RPM account it is the COMMON path,
+#: not an edge case, so misclassifying it as a hard client error would fail the majority
+#: of a burst instead of retrying it. ``ModelNotReadyException`` and
+#: ``ServiceUnavailableException`` are capacity pressure, equally retryable.
+#:
+#: This is a NARROW addition on purpose: it does not relax the 4xx-fails-fast rule for
+#: genuine client errors (a malformed request, a bad model id, a denied IAM action all
+#: still fail immediately). Only these named codes are promoted.
+_BEDROCK_TRANSIENT_CODES = (
+    "throttlingexception",
+    "modelnotreadyexception",
+    "serviceunavailableexception",
+    "toomanyrequestsexception",
+)
+
+
+def _looks_like_bedrock_throttle(exc: BaseException) -> bool:
+    """True when an SDK exception carries one of the retryable Bedrock error codes.
+
+    Bedrock's throttle SHOULD arrive as HTTP 429, which ``_is_transient`` already treats
+    as transient. This is the belt-and-braces path for the case where it does not — the
+    exact behaviour is pending empirical confirmation (``scripts/verify-bedrock.py``
+    step 3 prints the real type and status). Matching on the code string means the
+    classification is correct either way, rather than resting on an assumption about the
+    status code.
+    """
+    # The exception TYPE name and message, plus — for an APIStatusError — the response
+    # body. Bedrock puts the error code in the body (``{"message": "ThrottlingException:
+    # ..."}``) while ``str(exc)`` is only the SDK's summary line, so matching on the
+    # message alone would miss the very case this exists for.
+    parts = [type(exc).__name__, str(exc)]
+    body = getattr(exc, "body", None)
+    if body is not None:
+        parts.append(str(body))
+    text = " ".join(parts).lower()
+    return any(code in text for code in _BEDROCK_TRANSIENT_CODES)
+
+
 def _is_transient(exc: Exception) -> bool:
-    """True for retryable errors: rate limit (429), 5xx, or connection/timeout.
+    """True for retryable errors: rate limit (429), 5xx, connection, or timeout.
 
     Uses the SDK's exception hierarchy: :class:`APIConnectionError` (which
     includes ``APITimeoutError``) is always transient; an :class:`APIStatusError`
@@ -162,12 +237,51 @@ def _is_transient(exc: Exception) -> bool:
     4xx client errors (``BadRequestError`` 400, ``AuthenticationError`` 401,
     ``PermissionDeniedError`` 403, ``NotFoundError`` 404) — is NOT transient and
     fails fast.
+
+    Two additions (B1):
+
+    * :class:`TimeoutError` — :func:`complete` now bounds every attempt with
+      ``asyncio.wait_for``, and a timeout is a network-class failure, so the existing
+      retry loop should cover it exactly as it covers a connection error.
+    * Bedrock throttling / capacity codes — see :func:`_looks_like_bedrock_throttle`.
     """
+    if isinstance(exc, TimeoutError):
+        return True
     if isinstance(exc, APIConnectionError):
         return True
     if isinstance(exc, APIStatusError):
-        return exc.status_code == _RATE_LIMIT_STATUS or exc.status_code >= _SERVER_ERROR_FLOOR
-    return False
+        if exc.status_code == _RATE_LIMIT_STATUS or exc.status_code >= _SERVER_ERROR_FLOOR:
+            return True
+        return _looks_like_bedrock_throttle(exc)
+    return _looks_like_bedrock_throttle(exc)
+
+
+#: Canonical truncation marker. ``app/ai/extraction/model_call.py`` compares
+#: ``stop_reason == "max_tokens"`` to fire the LP-102 truncation guard; if a provider
+#: spelled it differently the guard would silently stop working and a cut-off response
+#: would be misreported as "could not parse extraction" — the exact bug LP-102 exists to
+#: prevent.
+TRUNCATED_STOP_REASON = "max_tokens"
+
+#: Provider spellings folded onto the canonical values. Normalising HERE — at the one
+#: place an SDK response becomes an :class:`AICompletion` — keeps provider knowledge out
+#: of ``model_call.py`` and out of all 13 callers.
+#:
+#: ⚠️ PENDING EMPIRICAL CONFIRMATION (B1 task 5). The Anthropic SDK's Bedrock client
+#: returns the Messages API shape, so ``stop_reason`` is EXPECTED to be identical
+#: ("max_tokens" / "end_turn" / "stop_sequence" / "tool_use"). That expectation is not
+#: yet verified against a live call — ``scripts/verify-bedrock.py`` step 2 forces a
+#: truncation and prints the exact string. If it differs, add the alias here and nowhere
+#: else; the map is empty today because inventing speculative aliases would be a guess
+#: dressed as a fix.
+_STOP_REASON_ALIASES: dict[str, str] = {}
+
+
+def _normalize_stop_reason(raw: str | None) -> str | None:
+    """Fold a provider's stop reason onto the canonical vocabulary (B1)."""
+    if raw is None:
+        return None
+    return _STOP_REASON_ALIASES.get(raw, raw)
 
 
 def _backoff_delay(*, attempt: int, base_delay: float) -> float:
@@ -195,12 +309,34 @@ async def complete(
     Logs metadata only (never prompt/response content). Raises
     :class:`AIClientError` on a non-retryable error or once retries are
     exhausted, wrapping the underlying SDK exception as the cause.
+
+    ``model`` is the caller's TIER value (one of the three ``anthropic_model_*``
+    settings). Under ``ai_provider="bedrock"`` it is translated to that tier's Bedrock
+    inference-profile id here, so no caller knows which provider is active (B1).
+
+    Every ATTEMPT — not merely every call — is paced by the process-local rate limiter
+    and bounded by ``settings.ai_request_timeout_seconds``. Per attempt because a retry
+    is a fresh request that counts against the provider quota just as the first did, and
+    because a hung attempt would otherwise hold a Celery worker slot indefinitely.
     """
     client = get_anthropic_client()
     max_attempts = max(1, settings.ai_max_retries)
     base_delay = settings.ai_base_retry_delay_seconds
+    timeout_s = settings.ai_request_timeout_seconds
+    limiter = get_rate_limiter()
 
-    kwargs: dict[str, Any] = {"model": model, "messages": messages, "max_tokens": max_tokens}
+    try:
+        resolved_model = resolve_model(model)
+    except ModelResolutionError as exc:
+        # Fail before spending an attempt: under Bedrock an unmapped model is rejected at
+        # invoke time anyway, and this says why instead of surfacing a validation error.
+        raise AIClientError(str(exc)) from exc
+
+    kwargs: dict[str, Any] = {
+        "model": resolved_model,
+        "messages": messages,
+        "max_tokens": max_tokens,
+    }
     if system is not None:
         kwargs["system"] = system
     if temperature is not None:
@@ -208,9 +344,12 @@ async def complete(
 
     last_exc: Exception | None = None
     for attempt in range(1, max_attempts + 1):
+        # Pace BEFORE sending: a rejected request still counts against the provider's
+        # quota, so retry-after-throttle spends allowance to learn nothing.
+        await limiter.acquire(label="complete")
         start = time.perf_counter()
         try:
-            resp = await client.messages.create(**kwargs)
+            resp = await asyncio.wait_for(client.messages.create(**kwargs), timeout=timeout_s)
         except Exception as exc:
             latency_ms = int((time.perf_counter() - start) * 1000)
             transient = _is_transient(exc)
@@ -236,11 +375,12 @@ async def complete(
         )
         input_tokens = resp.usage.input_tokens
         output_tokens = resp.usage.output_tokens
-        stop_reason = getattr(resp, "stop_reason", None)
+        stop_reason = _normalize_stop_reason(getattr(resp, "stop_reason", None))
         # METADATA ONLY — token counts, timing, finish reason; never the content.
         logger.info(
             "ai_call_succeeded",
-            model=model,
+            model=resolved_model,
+            provider=settings.ai_provider,
             input_tokens=input_tokens,
             output_tokens=output_tokens,
             latency_ms=latency_ms,
@@ -251,7 +391,9 @@ async def complete(
             text=text,
             input_tokens=input_tokens,
             output_tokens=output_tokens,
-            model=model,
+            # The model that ACTUALLY ran, not the tier value the caller asked for — this
+            # is what a cost estimate and a persisted ``model_used`` should reflect.
+            model=resolved_model,
             stop_reason=stop_reason,
         )
 
