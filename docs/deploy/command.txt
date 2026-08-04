@@ -1,0 +1,58 @@
+AWS profile login:
+
+	mbai-dev:
+
+		export AWS_PROFILE=mbai-dev && aws sso login   or aws sso login --profile mbai-dev-admin
+
+	To get identity after login:
+
+		 aws sts get-caller-identity --query Account --output text
+
+AWS Bedrock LLM status:
+
+	Haiku:
+
+		aws bedrock-runtime converse --region us-east-1 \\n  --model-id us.anthropic.claude-haiku-4-5-20251001-v1:0 \\n  --messages '[{"role":"user","content":[{"text":"Say OK"}]}]'
+
+	Sonnet:
+
+		aws bedrock-runtime converse --region us-east-1 \\n  --model-id us.anthropic.claude-sonnet-4-5-20250929-v1:0 \\n  --messages '[{"role":"user","content":[{"text":"Say OK"}]}]'
+
+Docker:
+
+	Get all worker:
+
+		docker compose ps
+
+	Down the docker:
+
+		1. docker compose -p mbai-images -f docker-compose.images.yml down
+
+		2. This is used last: docker compose up -d worker
+
+	Build worker:
+
+		docker compose up -d --build worker
+
+	List all worker:
+
+		docker ps --format '{{.Names}}' | sort
+
+
+	Check whether Docker can reach to bedrock:
+
+		docker exec mbai-bedrock-worker python -c "
+import boto3
+c = boto3.Session().get_credentials()
+print('credentials:', 'OK' if c else 'NONE')
+print('region:', boto3.Session().region_name)
+"
+
+
+	Backend run:
+
+		uv run uvicorn app.main:app --reload --port 8100
+
+	Frontend run:
+
+		pnpm dev --port 3100
