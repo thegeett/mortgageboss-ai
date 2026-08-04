@@ -31,8 +31,8 @@ Input is the **full document** (PDF/image bytes), sent to the Opus-class model f
 content block (LP-37 revision, ADR-126; this change ADR-128). Reuses the LP-38
 patterns: the file-based prompt (``load_prompt``), the shared defensive parser
 (``app.ai.parsing``), graceful failure, and metadata-only logging. Uses
-``settings.anthropic_model_extraction`` — a more capable Opus-class model, versus
-classification's cheaper one.
+``settings.anthropic_model_extraction`` — the extraction tier (Haiku 4.5 as of
+LP-457), distinct from the reasoning tier (Sonnet) and classification's model.
 """
 
 import json

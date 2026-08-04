@@ -63,7 +63,7 @@ async def reason_rule_judgment(system_prompt: str, context_json: str) -> RuleJud
     try:
         result = await asyncio.wait_for(
             complete(
-                model=settings.anthropic_model_extraction,  # Sonnet by default — real judgment over the facts
+                model=settings.anthropic_model_reasoning,  # reasoning tier (Sonnet by default) — real judgment over the facts
                 system=system_prompt,
                 messages=[{"role": "user", "content": context_json}],
                 max_tokens=_MAX_TOKENS,

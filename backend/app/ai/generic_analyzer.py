@@ -185,7 +185,7 @@ async def analyze_document(content: bytes, media_type: str) -> GenericAnalysis |
 
     try:
         result = await complete(
-            model=settings.anthropic_model_extraction,  # Sonnet by default — understanding, not a one-liner
+            model=settings.anthropic_model_reasoning,  # reasoning tier (Sonnet by default) — understanding, not a one-liner
             system=system_prompt,
             messages=[message],
             max_tokens=_MAX_TOKENS,

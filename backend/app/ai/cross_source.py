@@ -152,7 +152,7 @@ async def reason_cross_source(context_json: str) -> CrossSourceResult:
     the run FAILED). **Never logs the context or the response** — only counts.
     """
     result = await complete(
-        model=settings.anthropic_model_extraction,  # Sonnet by default — real reasoning over context
+        model=settings.anthropic_model_reasoning,  # reasoning tier (Sonnet by default) — real reasoning over context
         system=CROSS_SOURCE_SYSTEM_PROMPT,
         messages=[{"role": "user", "content": context_json}],
         max_tokens=_MAX_TOKENS,

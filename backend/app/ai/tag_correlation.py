@@ -121,7 +121,7 @@ async def reason_stage_b_sourcing(context_json: str) -> SourcingResult:
     try:
         result = await asyncio.wait_for(
             complete(
-                model=settings.anthropic_model_extraction,  # Sonnet by default — real judgment over the facts
+                model=settings.anthropic_model_reasoning,  # reasoning tier (Sonnet by default) — real judgment over the facts
                 system=STAGE_B_SOURCING_SYSTEM_PROMPT,
                 messages=[{"role": "user", "content": context_json}],
                 max_tokens=_MAX_TOKENS,

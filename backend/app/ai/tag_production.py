@@ -156,7 +156,7 @@ async def reason_stage_a_transactions(context_json: str) -> StageAResult:
     try:
         result = await asyncio.wait_for(
             complete(
-                model=settings.anthropic_model_extraction,  # Sonnet by default — real reasoning over the facts
+                model=settings.anthropic_model_reasoning,  # reasoning tier (Sonnet by default) — real reasoning over the facts
                 system=STAGE_A_TRANSACTION_SYSTEM_PROMPT,
                 messages=[{"role": "user", "content": context_json}],
                 max_tokens=_MAX_TOKENS,

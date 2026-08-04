@@ -107,7 +107,7 @@ async def reason_ai_group(system_prompt: str, context_json: str) -> AiGroupResul
     try:
         result = await asyncio.wait_for(
             complete(
-                model=settings.anthropic_model_extraction,
+                model=settings.anthropic_model_reasoning,
                 system=system_prompt,
                 messages=[{"role": "user", "content": context_json}],
                 max_tokens=_MAX_TOKENS,

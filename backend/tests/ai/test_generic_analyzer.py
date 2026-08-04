@@ -89,7 +89,9 @@ async def test_analyze_success_uses_sonnet_and_generous_budget(
     a = await analyze_document(PDF_BYTES, "application/pdf")
     assert a is not None and a.document_type_guess == "civil court judgment"
     kwargs = mock.await_args.kwargs
-    assert kwargs["model"] == analyzer_module.settings.anthropic_model_extraction  # Opus
+    # LP-457: the generic analyzer is a REASONING caller (Tier-3 understanding, not extraction), so it reads
+    # the reasoning tier (Sonnet), NOT the extraction tier (now Haiku). Kept on Sonnet deliberately.
+    assert kwargs["model"] == analyzer_module.settings.anthropic_model_reasoning  # Sonnet
     assert kwargs["max_tokens"] >= 8000  # generous (the analysis incl. full text)
     block = kwargs["messages"][0]["content"][0]
     assert block["type"] == "document"  # reads the doc natively
