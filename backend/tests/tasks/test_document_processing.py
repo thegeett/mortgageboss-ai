@@ -182,7 +182,12 @@ async def test_happy_path_pay_stub(
     assert extraction.extraction_status == ExtractionStatus.SUCCEEDED
     assert extraction.tokens_used == 390  # 300 + 90
     assert extraction.cost_estimate is not None and extraction.cost_estimate > 0
-    assert extraction.model_used == pipeline.settings.anthropic_model_extraction
+    # the pipeline records the model it ACTUALLY invoked — the active provider's resolved id, which is the
+    # tier value under anthropic and the mapped Bedrock profile under bedrock. Asserting the behaviour
+    # (records the invoked model) rather than the anthropic literal keeps this provider-agnostic.
+    assert extraction.model_used == pipeline.resolve_model(
+        pipeline.settings.anthropic_model_extraction
+    )
 
 
 # --------------------------------------------------------------------------- #
