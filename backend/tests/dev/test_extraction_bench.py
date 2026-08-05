@@ -7,6 +7,7 @@ in two layers, and the rule engine is untouched (ACTIVE_RULE_IDS == 37). It meas
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -226,6 +227,61 @@ def test_write_record_and_load_records_roundtrip(tmp_path: Path) -> None:
     assert load_records(tmp_path) == [rec]  # resume log round-trips
 
 
+def test_load_records_skips_a_corrupt_line(tmp_path: Path) -> None:
+    # LP review: a partial/corrupt line (a hard crash mid-write, or a manual edit) must NOT make the
+    # whole run unresumable — load_records skips it and returns the intact records.
+    from app.dev.bench.findings import RECORDS_LOG
+
+    good = {"source_filename": "a.pdf", "classified_type": "w2"}
+    (tmp_path / RECORDS_LOG).write_text(
+        json.dumps(good) + "\n" + '{"partial": ' + "\n", encoding="utf-8"
+    )
+    assert load_records(tmp_path) == [good]  # the good line survives; the truncated one is dropped
+
+
+async def test_run_records_source_relpath_for_stable_resume_dedup(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # LP review: resume must dedup by PATH, not bare filename — two same-named files in different
+    # subfolders are DISTINCT documents. _run stamps each record with source_relpath (path under root).
+    from app.api import dev_bench
+
+    (tmp_path / "alice").mkdir()
+    (tmp_path / "bob").mkdir()
+    files = [
+        SimpleNamespace(path=tmp_path / "alice" / "paystub.pdf"),
+        SimpleNamespace(path=tmp_path / "bob" / "paystub.pdf"),  # SAME name, different folder
+    ]
+
+    async def fake_run_one(f: object) -> dict[str, object]:
+        return {
+            "source_filename": f.path.name,  # type: ignore[attr-defined]
+            "classified_type": "pay_stub",
+            "classification_confidence": 0.9,
+            "rate_limited": False,
+            "extraction": {
+                "status": "success",
+                "typed_core": {},
+                "lists": {},
+                "catch_all": [],
+                "cost_estimate": 0.0,
+            },
+        }
+
+    monkeypatch.setattr(dev_bench, "run_one", fake_run_one)
+    progress = dev_bench.RunProgress(total=len(files))
+    out = tmp_path / "out"
+    await dev_bench._run("rid", tmp_path, files, out, progress, 0)
+
+    # read back from the resume log (progress.records is freed after finalize) — both distinct relpaths,
+    # so a resume dedup keyed on them keeps the two same-named files separate.
+    relpaths = {r["source_relpath"] for r in load_records(out)}
+    assert relpaths == {
+        "alice/paystub.pdf",
+        "bob/paystub.pdf",
+    }  # distinct keys despite the same filename
+
+
 def test_finalize_excludes_rate_limited_from_findings(tmp_path: Path) -> None:
     records = [
         {
@@ -272,7 +328,8 @@ async def test_run_aborts_after_consecutive_throttles(
     from app.api import dev_bench
     from app.dev.bench.engine import RunProgress
 
-    files = [SimpleNamespace(path=SimpleNamespace(name=f"d{i}.pdf")) for i in range(10)]
+    # Real Paths under root so _run can compute source_relpath = path.relative_to(root).
+    files = [SimpleNamespace(path=tmp_path / f"d{i}.pdf") for i in range(10)]
 
     async def fake_run_one(f: object) -> dict[str, object]:
         return {

@@ -213,8 +213,14 @@ def load_records(out_dir: Path) -> list[dict[str, Any]]:
     records: list[dict[str, Any]] = []
     for line in log.read_text(encoding="utf-8").splitlines():
         line = line.strip()
-        if line:
+        if not line:
+            continue
+        try:
             records.append(json.loads(line))
+        except json.JSONDecodeError:
+            # A partial/corrupt line (a hard crash mid-write of a large record, or a manual edit) must
+            # not make the whole run unresumable — skip it and resume from the rest.
+            continue
     return records
 
 

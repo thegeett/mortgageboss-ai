@@ -126,17 +126,25 @@ async def bench_start(req: StartRequest) -> StartResponse:
         if not out_dir.is_dir():
             raise HTTPException(status_code=404, detail=f"no run to resume: {run_id}")
         prior = load_records(out_dir)
-        done_names = {
-            r["source_filename"] for r in prior
-        }  # dedup by name (dev tool; rare collisions ok)
-        to_run = [f for f in all_readable if f.path.name not in done_names]
+        # Skip only the SUCCESSFULLY-processed docs; RE-RUN throttled/errored ones (an infrastructure
+        # failure is the very reason to resume). Drop their stale records so the re-run replaces them in
+        # the aggregate (their old per-document JSON stays on disk, harmless). Dedup by source_relpath —
+        # a bare filename is not unique across the nested directories the bench walks (every borrower
+        # folder has "paystub.pdf"), so name-dedup would skip un-processed same-named files.
+        keep = [
+            r for r in prior if not r.get("rate_limited") and r.get("classified_type") != "error"
+        ]
+        done_paths = {r.get("source_relpath") for r in keep}
+        to_run = [f for f in all_readable if str(f.path.relative_to(root)) not in done_paths]
         progress = RunProgress(total=len(all_readable))
-        progress.records = prior
-        progress.done = len(prior)
-        progress.rate_limited = sum(1 for r in prior if r.get("rate_limited"))
+        progress.records = keep
+        progress.done = len(keep)
+        progress.rate_limited = 0  # keep has no rate_limited by construction; re-runs recount live
         progress.cost_so_far = sum(
-            (r.get("extraction") or {}).get("cost_estimate") or 0 for r in prior
+            (r.get("extraction") or {}).get("cost_estimate") or 0 for r in keep
         )
+        # Index continues past EVERY prior record (incl. dropped ones) so a re-run never overwrites an
+        # existing per-document JSON file.
         start_index = len(prior)
     else:
         run_id = uuid4().hex[:12]
@@ -183,6 +191,9 @@ async def _run(
                 "error": redact_string(str(exc))[0][:200],
             }
             logger.warning("bench_document_failed", file=f.path.name, error_type=type(exc).__name__)
+        # The STABLE per-document key for resume dedup — a bare filename is not unique across the nested
+        # directories the bench walks; the path relative to root is. Set on both the success and error record.
+        record["source_relpath"] = str(f.path.relative_to(root))
         progress.records.append(record)
         write_record(out_dir, record, index)  # incremental: a crash loses at most this one document
         index += 1

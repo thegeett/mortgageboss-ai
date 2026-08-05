@@ -48,10 +48,12 @@ def bench_pii_instruction() -> str:
 
 @dataclass
 class CallTally:
-    """Run-scoped throttle bookkeeping, populated by the patched ``complete`` (see below).
+    """Per-context throttle bookkeeping, populated by the patched ``complete`` (see below).
 
-    ``current_doc_throttled`` is reset by the engine before each document and read after, to tag that
-    document's record; ``throttled_calls`` is the cumulative count of throttled model calls in the run.
+    One tally lives per ``bench_run_context`` — i.e. per document (the engine enters the context inside
+    ``run_one``). ``current_doc_throttled`` is read after the block to tag that document's record;
+    ``throttled_calls`` counts the throttled model calls WITHIN this document (0-2+, incl. retries), NOT a
+    run total. The run-level rollup is the engine's ``progress.rate_limited`` (a count of throttled docs).
     """
 
     current_doc_throttled: bool = False
