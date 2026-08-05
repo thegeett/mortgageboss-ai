@@ -1,0 +1,98 @@
+# Staging values — EXAMPLE ONLY. The staging environment itself is not built by
+# ticket C2 (that ticket is dev). This file exists to prove the modules accept
+# staging values without modification, and to make every dev-vs-staging
+# difference visible in one place.
+#
+# To build staging: copy ../dev/main.tf, ../dev/variables.tf and ../dev/outputs.tf
+# here unchanged, copy this file to terraform.tfvars, and write a backend.tf with
+# key = "staging/terraform.tfstate". No module edit is required — that is the
+# acceptance test for §6b.
+
+aws_account_id = "REPLACE_WITH_STAGING_ACCOUNT_ID"
+aws_region     = "us-east-1"
+environment    = "staging"
+name_prefix    = "mbai-staging"
+
+# --- Network --------------------------------------------------------------- #
+
+# ⚠️ MUST differ from dev's 10.20.0.0/16 — identical ranges cannot be peered.
+vpc_cidr           = "10.30.0.0/16"
+availability_zones = ["us-east-1a", "us-east-1b"]
+
+# FLIPPED FROM DEV. Staging holds real borrower NPI, so the requirement is not
+# cost but that task egress never touches the public internet — the same reason
+# inference was moved to Bedrock. Endpoints cost ~$73/mo against NAT's ~$33/mo;
+# that delta buys the compliance property.
+#
+# ⚠️ Verify com.amazonaws.<region>.bedrock-runtime exists before applying:
+#   aws ec2 describe-vpc-endpoint-services \
+#     --query "ServiceNames[?contains(@,'bedrock')]"
+enable_nat_gateway   = false
+enable_vpc_endpoints = true
+
+interface_endpoint_services = [
+  "ecr.api",
+  "ecr.dkr",
+  "logs",
+  "secretsmanager",
+  "bedrock-runtime",
+]
+
+# --- Secrets --------------------------------------------------------------- #
+
+# 30, NOT 0. Zero means a fat-fingered destroy is unrecoverable. Staging is not
+# a destroy-and-rebuild environment.
+secret_recovery_window_days = 30
+kms_deletion_window_days    = 30
+
+# --- Registry -------------------------------------------------------------- #
+
+ecr_repository_names     = ["mbai/api", "mbai/frontend"]
+ecr_keep_last_images     = 20
+ecr_untagged_expire_days = 7
+# false — a destroy must not silently discard image history.
+ecr_force_delete = false
+
+# --- Database -------------------------------------------------------------- #
+
+postgres_version = "16"
+postgres_family  = "postgres16"
+
+rds_instance_class        = "db.t4g.small"
+rds_allocated_storage     = 50
+rds_max_allocated_storage = 500
+rds_backup_retention_days = 30
+
+# ALL THREE FLIPPED FROM DEV — this is the difference that matters most.
+rds_multi_az            = true
+rds_deletion_protection = true
+rds_skip_final_snapshot = false
+
+rds_performance_insights_enabled = true
+
+database_name     = "mortgageboss"
+database_username = "mbai_admin"
+
+# --- Cache ----------------------------------------------------------------- #
+
+redis_node_type = "cache.t4g.small"
+redis_version   = "7.1"
+redis_family    = "redis7"
+
+# true for staging: defence in depth alongside security-group isolation. Makes
+# REDIS_URL a SECRET (the token is embedded in it) and creates the redis-url
+# secret container automatically.
+redis_auth_enabled = true
+
+# --- Logs ------------------------------------------------------------------ #
+
+log_retention_days = 90
+
+# --- Budget ---------------------------------------------------------------- #
+
+budget_limit_usd          = 400
+budget_notification_email = "REPLACE_WITH_REAL_ADDRESS"
+
+# --- External -------------------------------------------------------------- #
+
+documents_bucket_name = "REPLACE_WITH_STAGING_DOCUMENTS_BUCKET"

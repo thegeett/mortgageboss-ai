@@ -1,0 +1,29 @@
+# Terraform working directories and provider binaries — never committed.
+**/.terraform/
+**/.terraform.lock.hcl.bak
+
+# State. The ONLY state file that may be committed is bootstrap/terraform.tfstate,
+# and only after verifying it contains no secret material (see bootstrap/README.md).
+# It is NOT whitelisted here by default — commit it explicitly with `git add -f`
+# after checking, so the decision is always deliberate.
+*.tfstate
+*.tfstate.*
+*.tfstate.backup
+
+# Plan files can contain resolved secret values in cleartext.
+*.tfplan
+*.tfplan.*
+
+# Real variable files. `terraform.tfvars` under envs/ IS committed (non-secret
+# values only, per the ticket) and is re-included below; everything else is not.
+*.auto.tfvars
+secrets.tfvars
+*.secret.tfvars
+
+# Crash logs may contain variable values.
+crash.log
+crash.*.log
+
+# Re-include the committed, non-secret env tfvars.
+!envs/*/terraform.tfvars
+!envs/*/terraform.tfvars.example

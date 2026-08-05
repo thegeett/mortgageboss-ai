@@ -13578,3 +13578,113 @@ stays, for both.
 logging), LP-102 (the truncation guard this protects), ADR-343 (C0's client-lifecycle finding, which this
 re-tested rather than assumed), `scripts/verify-bedrock.py` (the empirical follow-up for the two PENDING
 findings).
+
+---
+
+## ADR-362: Dev routes private egress through a NAT gateway; staging uses interface endpoints — the choice is cost in one environment and compliance in the other (C2)
+
+**Context.** Private-subnet ECS tasks cannot reach ECR, CloudWatch Logs, Secrets Manager, or Bedrock without
+either a NAT gateway or VPC interface endpoints. With neither, a task cannot even pull its image — a failure
+that surfaces as an opaque ECS placement error, so `modules/network` carries a `precondition` that refuses the
+plan when both toggles are false rather than letting it fail at first deploy.
+
+**The arithmetic, which corrects the ticket's premise.** The C2 draft costed interface endpoints at
+"~$7/month each". That is the **single-AZ** price. Endpoints are billed per endpoint *per AZ* at $0.01/hour,
+so across the two AZs an RDS subnet group mandates, each endpoint is $14.60/month:
+
+| Option | Fixed | Data |
+|---|---|---|
+| NAT gateway (one, shared) | **$32.85/mo** | $0.045/GB |
+| 5 interface endpoints, 2 AZ | **$73.00/mo** | $0.010/GB |
+| 5 interface endpoints, 1 AZ | **$36.50/mo** | $0.010/GB |
+
+Endpoints are therefore 2.2x a NAT gateway, not comparable to it. The cheaper per-GB rate does not close the
+gap at any realistic volume: the crossover is **~1,147 GB/month** of egress, and this environment's dominant
+transfer is image pulls measured in tens of GB.
+
+**The decision.** Dev uses **NAT** (`enable_nat_gateway = true`); staging uses **endpoints**
+(`enable_vpc_endpoints = true`, NAT off). Both are variables with no module default, so neither inherits the
+other's setting.
+
+**Why the two environments differ is not cost.** Dev holds no borrower data, so the only axis that matters
+there is price and debuggability — NAT wins both. Staging holds real GLBA-covered NPI, and the property that
+matters is that task egress **never touches the public internet**, which is the same reason inference moved to
+Bedrock in the first place (ADR-360). Paying ~$40/month more to keep the traffic inside AWS is the whole point;
+choosing NAT there to save it would undo the compliance argument the Bedrock work exists to make.
+
+**Consequence.** Dev is not a faithful rehearsal of staging's network path. A staging apply exercises endpoint
+routing for the first time, and `com.amazonaws.<region>.bedrock-runtime` **has not been verified to exist** —
+the credentials available during C2 (`BedrockDeveloper`) lack `ec2:DescribeVpcEndpointServices`. That
+verification is a prerequisite for staging, recorded in `infra/envs/staging/README.md`. The middle option
+(endpoints in one AZ, $36.50) exists if dev ever needs to rehearse endpoint routing cheaply.
+
+**Cross-refs.** `docs/tickets/C2-terraform-result.md` (full arithmetic), ADR-360 (why Bedrock), C3 (the ECS
+services that consume this network).
+
+---
+
+## ADR-363: Two ECR repositories, not three — the worker shares the API image (C2)
+
+**Context.** The stack runs three containers: API, Celery worker, and frontend. The obvious mapping is three
+repositories.
+
+**The decision.** Create **two** — `mbai/api` and `mbai/frontend`. The worker gets none.
+
+**Why.** C1 established that the API and the worker run the **same image** with different commands; only the
+entrypoint differs. A third repository would hold byte-identical copies of every `api` image, doubling storage
+for no benefit and — the real cost — creating a standing opportunity for the two to drift. Two repositories
+that must be pushed in lockstep is a deploy step someone eventually does by halves, and the resulting
+"worker is three builds behind the API" is exactly the class of bug that is invisible until a schema changes
+underneath it. One image cannot drift from itself.
+
+**Also decided here:** repositories are **not** prefixed per environment. One registry serves every
+environment, distinguished by image **tag**. Prefixing per environment would store a duplicate copy of every
+image per environment and make "is this the build that is in staging?" unanswerable. This is why
+`modules/registry` deliberately takes no `name_prefix` — the full repository names arrive as a variable.
+
+**Consequence.** `image_tag_mutability = "IMMUTABLE"` becomes load-bearing rather than decorative: with one
+registry shared across environments and one image shared across two services, a tag that could be re-pointed
+would make "which bytes are running in staging?" unanswerable after the fact and a rollback a guess.
+
+---
+
+## ADR-364: Terraform creates secret CONTAINERS, never secret VALUES — and `ENCRYPTION_KEY` gets no generating resource at all (C2)
+
+**Context.** Terraform can generate and store secrets (`random_password` plus
+`aws_secretsmanager_secret_version`). It is the convenient option and it is wrong here.
+
+**The decision.** `modules/secrets` creates empty `aws_secretsmanager_secret` containers and **no**
+`aws_secretsmanager_secret_version`, **no** `random_password`, and no variable carrying key material. The
+operator populates each secret once with the AWS CLI.
+
+**Why.** A value written by Terraform is stored in plaintext in state, rendered in the plan diff every operator
+reads, and replaceable by a provider upgrade or a forced resource replacement. For `JWT_SECRET_KEY` that is
+careless; for `ENCRYPTION_KEY` it is unrecoverable.
+
+**`ENCRYPTION_KEY` specifically gets no resource, not merely a protected one.** The audit
+(`docs/secrets-audit.md`) established two consumers: single-key Fernet encryption of `borrowers.ssn`
+(`app/core/encryption.py:58`, `app/models/borrower.py:88`) and a derived HMAC key for PII match-hashing
+(`app/verification/snapshot/pii.py:134`). There is **no `MultiFernet` chain and no re-encryption path in the
+repository**, so regenerating the key makes every stored borrower SSN permanently undecryptable.
+
+The ticket offered `lifecycle { prevent_destroy = true }` plus `ignore_changes` on a `random_password` as the
+alternative. That is weaker, and the difference matters: `prevent_destroy` blocks a `destroy`, but a provider
+upgrade that forces replacement, or any state manipulation, still reaches the resource. **The safest resource
+is the one that does not exist.** With no resource, there is nothing Terraform can replace.
+
+**The consequence, stated plainly.** This environment is designed to be destroyed and rebuilt, and that
+workflow is safe **only because RDS is destroyed alongside the secret** — no surviving database means no data
+to lose. The two must never be destroyed independently; destroying the secret while the database survives is
+the unrecoverable case. Recorded in `infra/README.md` and `infra/modules/secrets/README.md`.
+
+**Corollary — `recovery_window_days = 0` for dev.** A non-zero window leaves a deleted secret's **name
+reserved**, so destroy-then-apply fails on a name conflict — fatal for the workflow this environment is built
+around. Staging must use 30, where the opposite risk dominates. The variable has no module default, so the
+choice is explicit in every environment.
+
+**Ordering note.** Ticket B2 adds `MultiFernet` and a re-encryption path. Until it lands, an accidental
+regeneration is unrecoverable; after it, recoverable only while the old key still exists. B2 lowers the
+severity; it does not remove the need for this decision.
+
+**Cross-refs.** `docs/secrets-audit.md` (the two-consumer analysis), ADR-051 (application-level PII
+encryption), B2 (rotation), C3 (the execution role that injects these secrets).
