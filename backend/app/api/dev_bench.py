@@ -5,6 +5,14 @@
 :func:`_require_dev`, which 404s under staging/production. Two independent checks — the mount and
 the guard — so a misconfigured mount still cannot serve it in prod.
 
+⚠️ ARBITRARY LOCAL PATH, NO AUTH — bind LOCALHOST only. ``/preview`` and ``/start`` take a
+caller-supplied ``root`` and walk/read every readable file under it, sending each to the model
+(spending money). That arbitrary-path reach is the tool's PURPOSE (a dev points it at their own
+corpus), so it is intentionally not confined — which means the dev server that mounts it MUST bind
+127.0.0.1, never 0.0.0.0: on a reachable host an unauthenticated caller could read arbitrary files
+and spend. The is_development gate keeps it out of staging/prod; the localhost bind is the operator's
+responsibility here.
+
 It measures COVERAGE, not accuracy. It writes JSON to disk; it persists NOTHING to the database.
 """
 
@@ -22,14 +30,20 @@ from pydantic import BaseModel
 from app.core.config import settings
 from app.dev.bench.engine import RunProgress, preview, run_one, walk_documents
 from app.dev.bench.findings import write_output
+from app.dev.bench.redact import redact_string
 
 logger = structlog.get_logger(__name__)
 
 router = APIRouter(prefix="/dev/extraction-bench", tags=["dev-extraction-bench"])
 
-# In-memory only (dev tool, nothing persisted). run_id -> state.
+# In-memory only (dev tool, nothing persisted). run_id -> state; capped so a long-lived dev server
+# doesn't accumulate run state unboundedly (the heavy `records` list is also dropped post-write).
 _RUNS: dict[str, RunProgress] = {}
-_OUTPUT_ROOT = Path(settings.storage_local_path).resolve().parent / "bench_output"
+_MAX_RUNS = 50
+# INSIDE the storage dir (not a sibling) so it inherits storage's gitignore — bench output derived from
+# borrower documents can never be accidentally committed (LP review). Not web-served: the download
+# endpoint serves by DB storage_path, and these files have no DB row.
+_OUTPUT_ROOT = Path(settings.storage_local_path).resolve() / "bench_output"
 _TASKS: set[asyncio.Task[None]] = (
     set()
 )  # keep strong refs so a background run isn't GC'd mid-flight
@@ -76,6 +90,10 @@ async def bench_start(req: RootRequest) -> StartResponse:
     run_id = uuid4().hex[:12]
     out_dir = _OUTPUT_ROOT / run_id
     progress = RunProgress(total=len(readable))
+    while (
+        len(_RUNS) >= _MAX_RUNS
+    ):  # evict the oldest (insertion order) — its output is already on disk
+        _RUNS.pop(next(iter(_RUNS)))
     _RUNS[run_id] = progress
     task = asyncio.create_task(_run(run_id, root, readable, out_dir, progress))
     _TASKS.add(task)
@@ -96,7 +114,9 @@ async def _run(
             record = {
                 "source_filename": f.path.name,
                 "classified_type": "error",
-                "error": str(exc)[:200],
+                # redact the exception too — a parse/validation error can echo document content, and the
+                # success path already scrubs (mirror it here so the error path isn't a leak).
+                "error": redact_string(str(exc))[0][:200],
             }
             logger.warning("bench_document_failed", file=f.path.name, error_type=type(exc).__name__)
         progress.records.append(record)
@@ -105,6 +125,7 @@ async def _run(
     progress.current = None
     if progress.records:
         write_output(root, progress.records, out_dir)
+        progress.records = []  # output is on disk; free the heavy per-document records (status needs only counts)
 
 
 class StatusResponse(BaseModel):

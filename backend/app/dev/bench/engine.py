@@ -189,9 +189,14 @@ async def run_one(f: DiscoveredFile) -> dict[str, Any]:
     extraction["belt_and_braces_redactions"] = redactions
     extraction["extraction_model"] = resolve_model(settings.anthropic_model_extraction)
     it, ot = extraction["input_tokens"], extraction["output_tokens"]
+    # Price on the RAW Anthropic model string, NOT the resolved id: cost.py's table is keyed by the
+    # Anthropic names, so a Bedrock inference-profile id (us.anthropic.claude-…) resolves to nothing and
+    # would silently estimate 0 (LP review). The resolved id is still the label above.
     extraction["cost_estimate"] = (
         round(
-            estimate_cost(model=extraction["extraction_model"], input_tokens=it, output_tokens=ot),
+            estimate_cost(
+                model=settings.anthropic_model_extraction, input_tokens=it, output_tokens=ot
+            ),
             5,
         )
         if it is not None and ot is not None
