@@ -27,8 +27,8 @@ function errMsg(e: unknown, fallback: string): string {
  * ACCURACY, and persists NOTHING to the database.
  *
  * Gating is defence-in-depth: the backend router is absent (404) outside development, and this page
- * also refuses to render its controls in a production build. PII is placeholder-redacted in two
- * layers before anything is written to disk. See docs/tickets/extraction-bench.md.
+ * also refuses to render its controls in a production build. ⚠️ Redaction was REMOVED — the output
+ * captures REAL PII and must not be committed/shared/moved. See docs/tickets/extraction-bench.md.
  *
  * The flow is deliberate: PREVIEW first (count, breakdown, unreadable, estimated cost) — nothing runs
  * and no model is called — then an explicit Start. A run is pollable and interruptible.
@@ -127,9 +127,15 @@ export default function ExtractionBenchPage() {
         <p className="mt-1 text-gray-500">
           Run a folder of real documents through the live classification + extraction pipeline and
           see what the schemas actually capture. Measures <strong>coverage, not accuracy</strong> —
-          writes JSON to disk and persists <strong>nothing</strong> to the database. PII is
-          placeholder-redacted.
+          writes JSON to disk and persists <strong>nothing</strong> to the database.
         </p>
+      </div>
+
+      {/* REAL-PII warning — redaction was removed; the output captures real borrower PII */}
+      <div className="rounded-md border border-danger/40 bg-danger/5 px-4 py-3 text-sm text-danger">
+        🔴 <strong>This run captures REAL PII</strong> — real SSNs, dates of birth, home addresses,
+        and account numbers are written to the output folder. It{" "}
+        <strong>must not be committed, shared, or moved off this machine</strong>.
       </div>
 
       {/* Folder + preview */}

@@ -1,5 +1,11 @@
 # Extraction bench — result
 
+> 🔴 **SUPERSEDED on PII:** the redaction described below (the placeholder instruction + the regex
+> backstop) was **removed** in a later change — it was blanking data the comparison needs (employer EINs,
+> business addresses). The bench now captures **real values**, so its output contains **real PII** and
+> must not be committed/shared/moved. See [`extraction-bench.md`](extraction-bench.md) → "No redaction".
+> Everything else in this record still holds.
+
 Outcome record for the dev-only extraction bench. The design/reference write-up is in
 [`extraction-bench.md`](extraction-bench.md); this file records what was actually built, verified, and
 found.

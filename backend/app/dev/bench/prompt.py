@@ -1,27 +1,20 @@
-"""Bench PII-placeholder prompt + throttle detection — kept SEPARATE from production, applied at RUNTIME.
+"""Bench runtime context — throttle/failure detection, kept SEPARATE from production.
 
-⚠️ Production must be provably untouched. So this does NOT edit any file in
-``app/ai/prompts/extraction/`` and does NOT add a flag to a production prompt. Instead:
+⚠️ **This context does NOT modify the prompt.** The bench used to append a PII-placeholder instruction
+here so extraction returned ``[NAME]``/``[SSN]``/… — that was **removed** (Geet's decision): the
+redaction was blanking data the comparison needs (employer EINs, business addresses, reference numbers —
+not personal PII). The bench now captures **real values**, so the output contains real borrower PII and
+must never be committed/shared/moved off the machine.
 
-* the extra instruction lives in its OWN file (``bench_pii_instruction.txt``, next to this
-  module — never under the production prompt tree), and
-* it is APPENDED to the extraction system prompt at call time by a scoped monkeypatch of the
-  shared extraction call site (``model_call.complete`` — every extractor funnels through
-  ``run_extraction_completion`` → ``_attempt`` → ``complete``). The patch lives only inside a
-  ``with bench_pii_prompt():`` / ``with bench_run_context():`` block in the dev bench process; production
-  never enters it.
-
-The same runtime patch is where the bench observes **throttling**. When ``complete()`` exhausts its
-transient-retry budget it raises ``AIClientError`` and BOTH call sites swallow it into a generic
-"AI call failed" sentinel (``_attempt`` → ``None``; classification → ``unknown``), losing the fact that
-it was a rate-limit rather than a bad document. So the bench wrapper inspects the exception's cause and,
-if it is transient (429 / Bedrock throttle / capacity / 5xx / timeout), records it in a run-scoped tally
-BEFORE re-raising — so the bench can tag those documents ``rate_limited`` and never mistake a throttle
-for a coverage gap. ``bench_run_context`` also patches ``classification.complete`` so throttling on the
-per-document classification call (not just extraction) is seen too.
-
-A test (``test_extraction_bench.py``) asserts the production prompt files are byte-unchanged and that no
-production module imports this one — so the separation is enforced, not just intended.
+What remains here is failure observation, which touches nothing about production behaviour: when
+``complete()`` exhausts its transient-retry budget it raises ``AIClientError`` and BOTH call sites swallow
+it into a generic "AI call failed" sentinel (``_attempt`` → ``None``; classification → ``unknown``),
+losing whether it was a rate-limit, an auth error, or a bad document. So the bench wraps the two shared
+call sites (``model_call.complete`` for extraction, ``classification.complete``) purely to **inspect the
+exception cause and re-raise** — recording, per document, whether a call failed and whether it was a
+transient throttle. The system prompt reaching ``complete`` is **byte-unchanged**; production is untouched
+(the patches are removed on exit, no file under ``app/ai/`` is edited, and no production module imports
+this one — asserted in ``test_extraction_bench.py``).
 """
 
 from __future__ import annotations
@@ -30,30 +23,20 @@ from collections.abc import Iterator
 from contextlib import ExitStack, contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
-from functools import lru_cache
-from pathlib import Path
 from typing import Any, cast
 from unittest.mock import patch
 
 from app.ai.client import AIClientError, AICompletion, _is_transient
 
-_INSTRUCTION_PATH = Path(__file__).with_name("bench_pii_instruction.txt")
-
-
-@lru_cache(maxsize=1)
-def bench_pii_instruction() -> str:
-    """The dev-only PII-placeholder instruction appended to the extraction prompt."""
-    return _INSTRUCTION_PATH.read_text(encoding="utf-8")
-
 
 @dataclass
 class CallTally:
-    """Per-context throttle bookkeeping, populated by the patched ``complete`` (see below).
+    """Per-context failure bookkeeping, populated by the patched ``complete`` (see below).
 
     One tally lives per ``bench_run_context`` — i.e. per document (the engine enters the context inside
-    ``run_one``). ``current_doc_throttled`` is read after the block to tag that document's record;
-    ``throttled_calls`` counts the throttled model calls WITHIN this document (0-2+, incl. retries), NOT a
-    run total. The run-level rollup is the engine's ``progress.rate_limited`` (a count of throttled docs).
+    ``run_one``). ``current_doc_failed`` / ``current_doc_throttled`` are read after the block to tag that
+    document's record; ``throttled_calls`` counts the throttled model calls WITHIN this document (incl.
+    retries). The run-level rollup is the engine's ``progress.rate_limited`` / ``progress.failed``.
     """
 
     current_doc_failed: bool = False
@@ -84,13 +67,13 @@ def _record_failure(err: AIClientError) -> None:
         tally.throttled_calls += 1
 
 
-def _patched_complete(real: Any, suffix: str) -> Any:
-    """Wrap ``complete``: append ``suffix`` to the system prompt (may be empty) and observe failures.
-    Always re-raises — production's swallow-into-sentinel behaviour is unchanged; the bench only watches."""
+def _patched_complete(real: Any) -> Any:
+    """Wrap ``complete`` to OBSERVE failures only — the call is forwarded byte-for-byte (no prompt
+    change) and always re-raised, so production's behaviour is unchanged; the bench only watches."""
 
-    async def _patched(*, system: str, **kwargs: Any) -> AICompletion:
+    async def _patched(**kwargs: Any) -> AICompletion:
         try:
-            return cast(AICompletion, await real(system=system + suffix, **kwargs))
+            return cast(AICompletion, await real(**kwargs))
         except AIClientError as err:
             _record_failure(err)
             raise
@@ -99,26 +82,13 @@ def _patched_complete(real: Any, suffix: str) -> Any:
 
 
 @contextmanager
-def bench_pii_prompt() -> Iterator[None]:
-    """Within this block, every EXTRACTION model call gets the PII-placeholder instruction appended to
-    its system prompt (and throttling is observed if a tally is active). Scoped: installed on entry,
-    removed on exit — it touches only the bench run, never production."""
-    import app.ai.extraction.model_call as model_call
-
-    real_complete: Any = model_call.complete  # type: ignore[attr-defined]
-    suffix = "\n" + bench_pii_instruction()
-    with patch.object(model_call, "complete", _patched_complete(real_complete, suffix)):
-        yield
-
-
-@contextmanager
 def bench_run_context() -> Iterator[CallTally]:
-    """The umbrella context for one document's work: patches BOTH the extraction call site
-    (``model_call.complete`` — with the PII suffix) and the classification call site
-    (``classification.complete`` — no suffix; its short reasoning is redacted separately) so throttling
-    on EITHER model call is seen, and yields the run-scoped :class:`CallTally`.
+    """The umbrella context for one document's work: wraps BOTH the extraction call site
+    (``model_call.complete``) and the classification call site (``classification.complete``) so a failure
+    on EITHER model call is observed, and yields the run-scoped :class:`CallTally`.
 
-    Production is untouched: the patches are removed on exit and the tally only observes."""
+    It does NOT modify the prompt — the system prompt reaching ``complete`` is byte-unchanged. Production
+    is untouched: the patches are removed on exit and the tally only observes."""
     import app.ai.classification as classification
     import app.ai.extraction.model_call as model_call
 
@@ -126,14 +96,13 @@ def bench_run_context() -> Iterator[CallTally]:
     token = _TALLY.set(tally)
     real_extract: Any = model_call.complete  # type: ignore[attr-defined]
     real_classify: Any = classification.complete  # type: ignore[attr-defined]
-    suffix = "\n" + bench_pii_instruction()
     try:
         with ExitStack() as stack:
             stack.enter_context(
-                patch.object(model_call, "complete", _patched_complete(real_extract, suffix))
+                patch.object(model_call, "complete", _patched_complete(real_extract))
             )
             stack.enter_context(
-                patch.object(classification, "complete", _patched_complete(real_classify, ""))
+                patch.object(classification, "complete", _patched_complete(real_classify))
             )
             yield tally
     finally:

@@ -346,7 +346,13 @@ def _render_summary(
     total = breakdown["total"]
     usable = breakdown["usable"]
     top_err = breakdown.get("top_error_type")
-    lines: list[str] = []
+    # ⚠️ REAL-PII banner FIRST, before anything else — redaction was removed, so this output contains real
+    # SSNs, DOBs, home addresses, and account numbers from real documents.
+    lines: list[str] = [
+        "> 🔴 **This run captures REAL PII.** The output folder contains real SSNs, dates of birth, home"
+        " addresses, and account numbers. **It must not be committed, shared, or moved off this machine.**",
+        "",
+    ]
 
     # If NOTHING succeeded, mark the run FAILED at the very top — it must never read like a coverage
     # result (the 246x "AI call failed" run said "246 documents, types: 1", which read as a finding).
@@ -368,9 +374,9 @@ def _render_summary(
         "# Extraction bench — cross-document report",
         "",
         "> ⚠️ This measures **COVERAGE** (was a field POPULATED), **NOT accuracy** (whether the value is correct).",
-        "> A high fill rate is NOT evidence the extractor reads the field correctly. **PII is placeheld**"
-        " (`[NAME]`/`[SSN]`/… by the model, plus a digit/email regex backstop) — so a `borrower_name` fill"
-        " rate is not evidence names are read. Nothing here was persisted to the database.",
+        "> A high fill rate is NOT evidence the extractor reads the field correctly. Values are captured"
+        " **verbatim** (identity fields included) — nothing is redacted, and nothing is persisted to the"
+        " database.",
         "",
         f"- Root: `{root}`  ·  documents analysed (succeeded): **{usable}** of {total}  ·  types: **{len(findings_by_type)}**",
         f"- Estimated total cost (from real tokens): **${total_cost}**",

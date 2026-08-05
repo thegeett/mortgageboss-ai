@@ -38,45 +38,48 @@ The frontend page is belt-and-braces on top: under a production build (`NODE_ENV
 renders an "unavailable" notice instead of the controls. That is UX only — the backend `404` is the real
 boundary.
 
-## How the bench prompt is kept separate from production
+## How production is kept provably untouched
 
-The bench needs the model to placeholder PII, but **production prompts must be provably untouched.** So
-the PII-placeholder instruction is *not* added to any production prompt:
-
-- It lives in its **own file** — `app/dev/bench/bench_pii_instruction.txt`, next to the bench code,
-  **never** under `app/ai/prompts/extraction/`.
-- It is **appended at call time** by a scoped monkeypatch of the one shared extraction call site
-  (`model_call.complete` — every extractor funnels through `run_extraction_completion` → `_attempt` →
-  `complete`). The patch is installed only inside a `with bench_pii_prompt():` block, which the bench
-  process enters and nothing else does. On exit the original is restored.
+The bench drives the **live** classifier and extractors but must change **nothing** about them. It does
+not edit any file under `app/ai/`, and — since redaction was removed — it no longer modifies the prompt
+at all. Its only runtime touch is a scoped monkeypatch of the two shared call sites
+(`model_call.complete`, `classification.complete`) that **observes failures and re-raises**, forwarding
+the call byte-for-byte. Installed only inside a `with bench_run_context():` block the bench process
+enters; restored on exit.
 
 This is enforced, not just intended, by `tests/dev/test_extraction_bench.py`:
 
-- the instruction file exists and lives outside the production prompt tree;
-- **no** production extraction prompt mentions `PII PLACEHOLDER` / `[SSN]` / "extraction bench";
+- **no** production extraction prompt mentions a bench flag / `PII PLACEHOLDER` / `[SSN]` / "extraction
+  bench";
 - **no** production module imports `app.dev.bench` (allow-list: the dev router + the dev-gated
   `main.py` mount);
-- within `bench_pii_prompt()` the system prompt gets the instruction appended, and outside it the call
-  is byte-unchanged (proven by capturing what reaches a mocked `complete`).
+- within `bench_run_context()` the system prompt reaching `complete` is **byte-unchanged** (proven by
+  capturing what reaches a mocked `complete`) — nothing is appended;
+- both redaction layers are gone: `bench_pii_instruction.txt` and `redact.py` no longer exist.
 
-## PII redaction — two layers
+## ⚠️ No redaction — the output contains REAL PII
 
-Because we run **real** documents, PII is redacted before anything is written:
+The bench **captures real values, identity fields included.** Redaction (both a model-side placeholder
+prompt and a regex backstop) was **removed** — it was blanking data the comparison needs: on a real W-2
+`employer_ein` came back `[redacted]` (a company tax ID) and `employer_address` came back `[ADDRESS]` (a
+business address) — **neither is personal PII**, and IN-5 uses the EIN to distinguish employers with
+similar names. The same loss showed up across pay stubs, HOA docs, bank statements and leases (employer /
+HOA / broker / servicer addresses, phone and reference numbers all blanked). Geet's decision was to
+remove it entirely and extract real values.
 
-- **Layer 1 (model)** — the bench prompt tells the model to return placeholders in place of identity
-  data: person name → `[NAME]`, street address → `[ADDRESS]`, SSN/TIN → `[SSN]`, DOB → `[DOB]`, phone →
-  `[PHONE]`, email → `[EMAIL]`, full account number → `[ACCOUNT]`. A masked last-4 (`****1234`) is kept.
-  It applies **everywhere** — typed core, list rows, and the catch-all. It deliberately **keeps**
-  amounts, dates, statuses, form codes, and organisation names (creditors, banks, carriers, employers,
-  bureaus), because those are what the bench measures.
-- **Layer 2 (regex backstop)** — after extraction, `redact_tree` sweeps every string in the result
-  (typed core, list rows, catch-all — recursively) for missed identity *shapes*: SSNs, long digit runs
-  (account numbers), phones, emails → `[redacted]`. Organisation names, amounts, form codes, and masked
-  last-4 survive it (asserted in tests). The classifier's short free-text reasoning is run through the
-  same string redactor, since it can echo a snippet.
+**Consequence — treat the output as sensitive:** a run's output folder holds real **SSNs, dates of
+birth, home addresses, and account numbers** from real documents. It **must not be committed, shared, or
+moved off the machine.** Safety is now enforced by location, not scrubbing:
 
-Because both layers run before disk I/O, a `borrower_name` "fill rate" reflects *whether the field was
-populated*, not any real name — the report says so explicitly.
+- the default output dir is inside gitignored `storage/`; the in-repo alternative
+  `/mortgageboss-batch-bench-out/` is gitignored too; a `BENCH_OUTPUT_DIR` outside the repo can't be
+  committed at all;
+- every `_SUMMARY.md` opens with a red **"This run captures REAL PII…"** banner, and the bench UI shows
+  the same warning.
+
+This is **bench-only.** Production PII handling is untouched — `_PII_FIELDS`, the snapshot-boundary
+masking, and the transaction-description redactor are all unchanged and out of scope. The bench still
+imports no production file and edits no production prompt (asserted in `test_extraction_bench.py`).
 
 ## The flow
 
@@ -142,8 +145,8 @@ hitting Bedrock, or account for the workers' share in the cap.
 Written under `<storage_local_path>/bench_output/<run_id>/` (inside the storage dir so it inherits
 storage's gitignore; outside the DB, never persisted to it):
 
-- **per-document JSON** at `<type>/<n>-<stem>.json` — the redacted classification + extraction record
-  for one document, written **incrementally** as each document completes. The source extension is
+- **per-document JSON** at `<type>/<n>-<stem>.json` — the (unredacted, real-value) classification +
+  extraction record for one document, written **incrementally** as each document completes. The source extension is
   **stripped** before `.json` (`foo.pdf` → `<n>-foo.json`, not `foo.pdf.json`) so a file browser doesn't
   treat the JSON as a PDF;
 - **`_records.jsonl`** — one record per line, the resume log (source of truth for resuming + the final
@@ -180,11 +183,11 @@ field, and never propose or apply a change.
 
 **Backend** (`app/dev/bench/`, plus the dev router):
 
-- `bench_pii_instruction.txt` — the separate PII-placeholder instruction (not under the prompt tree).
-- `prompt.py` — `bench_pii_instruction()` + the `bench_pii_prompt()` scoped monkeypatch.
-- `redact.py` — the layer-2 regex backstop (`redact_string`, `redact_tree`).
-- `engine.py` — `walk_documents`, `preview`, `run_one` (classify → extract under the bench prompt →
-  redact → cost), and the per-document findings slice.
+- `prompt.py` — `bench_run_context()`: the scoped monkeypatch that OBSERVES failures (throttle/auth) and
+  re-raises; it does not modify the prompt. (The old `bench_pii_instruction.txt` and `redact.py` were
+  removed when redaction was dropped.)
+- `engine.py` — `walk_documents`, `preview`, `preflight`, `run_one` (classify → extract → real values,
+  no redaction → cost), and the per-document findings slice.
 - `findings.py` — the five findings + the JSON / `_SUMMARY.md` / `_FINDINGS.csv` writers.
 - `app/api/dev_bench.py` — the dev-gated router (`/dev/extraction-bench/{preview,start,status,cancel}`).
 - `app/main.py` — the conditional (`is_development`) mount.

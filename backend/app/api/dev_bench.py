@@ -31,7 +31,6 @@ from app.ai.client import AIClientError
 from app.core.config import resolve_requests_per_minute, settings
 from app.dev.bench.engine import RunProgress, preflight, preview, run_one, walk_documents
 from app.dev.bench.findings import finalize_output, load_records, write_record
-from app.dev.bench.redact import redact_string
 
 logger = structlog.get_logger(__name__)
 
@@ -207,9 +206,7 @@ async def _run(
             record = {
                 "source_filename": f.path.name,
                 "classified_type": "error",
-                # redact the exception too — a parse/validation error can echo document content, and the
-                # success path already scrubs (mirror it here so the error path isn't a leak).
-                "error": redact_string(str(exc))[0][:200],
+                "error": str(exc)[:200],  # raw — the bench captures real values, redaction removed
             }
             logger.warning("bench_document_failed", file=f.path.name, error_type=type(exc).__name__)
         # The STABLE per-document key for resume dedup — a bare filename is not unique across the nested

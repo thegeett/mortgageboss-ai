@@ -17,7 +17,6 @@ from app.ai.cost import estimate_cost
 from app.ai.extraction import EXTRACTORS
 from app.core.config import resolve_model, resolve_requests_per_minute, settings
 from app.dev.bench.prompt import CallTally, bench_run_context
-from app.dev.bench.redact import redact_string, redact_tree
 
 _SECONDS_PER_MINUTE = 60
 
@@ -191,13 +190,16 @@ def _result_to_record(data: Any) -> dict[str, Any]:
 
 
 async def run_one(f: DiscoveredFile) -> dict[str, Any]:
-    """Classify one document, then extract it with the LIVE registered extractor under the bench PII
-    prompt, then belt-and-braces redact every string. Returns the per-document record (no persistence).
-    ``f.media_type`` must be non-None (a readable file).
+    """Classify one document, then extract it with the LIVE registered extractor. Returns the
+    per-document record (no persistence). ``f.media_type`` must be non-None (a readable file).
 
-    Both model calls run inside :func:`bench_run_context`, so a throttle on EITHER (classification or
-    extraction) is observed and the record is tagged ``rate_limited`` — a throttled document is an
-    INFRASTRUCTURE failure, not a coverage gap, and the findings must be able to tell them apart."""
+    ⚠️ **No redaction.** The bench captures REAL values (identity fields included) — the redaction was
+    blanking data the comparison needs (employer EINs, business addresses, reference numbers). So the
+    record contains real borrower PII; the output folder must never be committed/shared/moved.
+
+    Both model calls run inside :func:`bench_run_context`, which does NOT change the prompt — it only
+    observes failures, so each record is tagged ``rate_limited`` / ``ai_failed`` and an infrastructure
+    failure is never read as a coverage gap."""
     assert f.media_type is not None
     content = f.path.read_bytes()
 
@@ -208,8 +210,7 @@ async def run_one(f: DiscoveredFile) -> dict[str, Any]:
             "source_filename": f.path.name,
             "classified_type": dtype,
             "classification_confidence": round(classification.confidence, 4),
-            # the classifier's short reason can echo a snippet → belt-and-braces redact it too
-            "classification_reasoning": redact_string(classification.reasoning)[0],
+            "classification_reasoning": classification.reasoning,
             "size_bytes": f.size,
         }
 
@@ -222,9 +223,7 @@ async def run_one(f: DiscoveredFile) -> dict[str, Any]:
             record["findings"] = _per_document_findings(dtype, None)
             return _tag_outcome(record, tally)
 
-        result = await extractor(
-            content, f.media_type
-        )  # layer 1: model returns [NAME]/[SSN]/… placeholders
+        result = await extractor(content, f.media_type)
 
     extraction: dict[str, Any] = {
         "status": result.status.value,
@@ -232,11 +231,8 @@ async def run_one(f: DiscoveredFile) -> dict[str, Any]:
         "input_tokens": getattr(result, "input_tokens", None),
         "output_tokens": getattr(result, "output_tokens", None),
     }
-    body = _result_to_record(result.data)
-    # layer 2: sweep every string value for missed identity shapes (digit runs, emails, phones)
-    scrubbed, redactions = redact_tree(body)
-    extraction.update(scrubbed)
-    extraction["belt_and_braces_redactions"] = redactions
+    body = _result_to_record(result.data)  # REAL values — no redaction (identity fields included)
+    extraction.update(body)
     extraction["extraction_model"] = resolve_model(settings.anthropic_model_extraction)
     it, ot = extraction["input_tokens"], extraction["output_tokens"]
     # Price on the RAW Anthropic model string, NOT the resolved id: cost.py's table is keyed by the
