@@ -8,8 +8,18 @@ import {
   previewBench,
   startBench,
 } from "@/lib/api/extraction-bench";
+import { isAxiosError } from "axios";
 import { FlaskConical } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
+
+/** Surface the backend's error detail (e.g. the 409 "refusing to start — unpaced" message), not a bare "Request failed". */
+function errMsg(e: unknown, fallback: string): string {
+  if (isAxiosError(e)) {
+    const detail = e.response?.data?.detail;
+    if (typeof detail === "string") return detail;
+  }
+  return e instanceof Error ? e.message : fallback;
+}
 
 /**
  * Extraction bench (DEV-ONLY). Runs a folder of real documents through the LIVE classification +
@@ -66,21 +76,22 @@ export default function ExtractionBenchPage() {
     try {
       setPreview(await previewBench(root.trim()));
     } catch (e) {
-      setError(e instanceof Error ? e.message : "preview failed");
+      setError(errMsg(e, "preview failed"));
     } finally {
       setPreviewing(false);
     }
   }
 
-  async function onStart() {
+  async function onStart(resumeRunId?: string) {
     setError(null);
     setStarting(true);
     try {
-      const s = await startBench(root.trim());
+      const s = await startBench(root.trim(), resumeRunId);
       setRunId(s.run_id);
+      setStatus(null);
       void poll(s.run_id);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "start failed");
+      setError(errMsg(e, "start failed"));
     } finally {
       setStarting(false);
     }
@@ -91,7 +102,7 @@ export default function ExtractionBenchPage() {
     try {
       setStatus(await cancelBench(runId));
     } catch (e) {
-      setError(e instanceof Error ? e.message : "cancel failed");
+      setError(errMsg(e, "cancel failed"));
     }
   }
 
@@ -171,6 +182,22 @@ export default function ExtractionBenchPage() {
             /doc
           </div>
 
+          {/* Pacing — surfaced before Start so a multi-hour or unpaced run is never a surprise */}
+          {preview.requests_per_minute != null ? (
+            <div className="text-xs text-gray-500">
+              Paced at {preview.requests_per_minute} requests/min (2 calls/doc) · est.{" "}
+              <strong>~{preview.estimated_minutes} min</strong> for {preview.readable} documents
+            </div>
+          ) : preview.provider === "bedrock" ? (
+            <div className="rounded-md border border-danger/30 bg-danger/5 px-3 py-2 text-xs text-danger">
+              ⚠️ No rate limit set under Bedrock — the bench will <strong>refuse to start</strong>.
+              Set <span className="font-mono">AI_REQUESTS_PER_MINUTE_BEDROCK</span> (e.g. 8) and
+              re-preview.
+            </div>
+          ) : (
+            <div className="text-xs text-gray-500">Unpaced (no request limit configured).</div>
+          )}
+
           {Object.keys(preview.by_extension).length > 0 && (
             <div className="flex flex-wrap gap-2">
               {Object.entries(preview.by_extension).map(([ext, n]) => (
@@ -202,7 +229,7 @@ export default function ExtractionBenchPage() {
           <div className="flex items-center gap-3 border-t border-gray-100 pt-4">
             <button
               type="button"
-              onClick={onStart}
+              onClick={() => onStart()}
               disabled={starting || running || preview.readable === 0}
               className="rounded-md bg-primary px-4 py-2 text-sm font-semibold text-white hover:bg-primary/90 disabled:opacity-50"
             >
@@ -246,15 +273,42 @@ export default function ExtractionBenchPage() {
               {status.done}/{status.total} documents
             </span>
             <span>cost so far ${status.cost_so_far.toFixed(2)}</span>
+            {status.rate_limited > 0 && (
+              <span className="font-medium text-warning">
+                {status.rate_limited} rate-limited (throttled, not coverage gaps)
+              </span>
+            )}
             {status.current && <span className="font-mono">{status.current}</span>}
           </div>
 
+          {status.aborted_reason === "rate_limited" && (
+            <div className="rounded-md border border-danger/30 bg-danger/5 px-3 py-2 text-xs text-danger">
+              🛑 Aborted — too many consecutive throttled documents. The corpus was not fully
+              analysed. Raise <span className="font-mono">AI_REQUESTS_PER_MINUTE_BEDROCK</span>,
+              then resume.
+            </div>
+          )}
+
           {status.finished && (
-            <p className="text-xs text-gray-500">
-              Output written to <span className="font-mono">{status.output_dir}</span> —{" "}
-              <span className="font-mono">_SUMMARY.md</span>,{" "}
-              <span className="font-mono">_FINDINGS.csv</span>, and per-document JSON.
-            </p>
+            <div className="space-y-2 text-xs text-gray-500">
+              <p>
+                Output written to <span className="font-mono">{status.output_dir}</span> —{" "}
+                <span className="font-mono">_SUMMARY.md</span>,{" "}
+                <span className="font-mono">_FINDINGS.csv</span>, and per-document JSON.
+              </p>
+              {status.done < status.total && (
+                <button
+                  type="button"
+                  onClick={() => onStart(status.run_id)}
+                  disabled={starting}
+                  className="rounded-md bg-primary px-3 py-1.5 text-xs font-semibold text-white hover:bg-primary/90 disabled:opacity-50"
+                >
+                  {starting
+                    ? "Resuming…"
+                    : `Resume — ${status.total - status.done} documents remaining`}
+                </button>
+              )}
+            </div>
           )}
         </div>
       )}

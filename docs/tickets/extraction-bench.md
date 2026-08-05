@@ -84,24 +84,62 @@ Deliberately two-step, so a real spend is never a surprise:
 
 1. **Preview** (`POST /preview`) — walks the folder recursively, counts files, breaks them down by
    extension, lists the unreadable ones (zero bytes, unsupported extension, or a `.pdf` without a
-   `%PDF-` header) and their reason, and estimates cost (readable count × a rough per-document figure).
-   **Nothing is sent to a model.**
+   `%PDF-` header) and their reason, estimates cost (readable count × a rough per-document figure), and
+   shows the **pacing** (requests/min + an estimated duration). **Nothing is sent to a model.**
 2. **Start** (`POST /start`) — only on an explicit press. Launches a background task and returns a
-   `run_id`. The page then polls `GET /status/{run_id}` (progress, cost-so-far, current file) until
-   finished. `POST /cancel/{run_id}` interrupts after the in-flight document and writes what it has.
+   `run_id`. The page then polls `GET /status/{run_id}` (progress, cost-so-far, current file,
+   rate-limited count) until finished. `POST /cancel/{run_id}` interrupts after the in-flight document
+   and writes what it has. Pass `resume_run_id` to **continue** an interrupted run (see below).
 
 Estimated cost is a guardrail (midpoint of two real Haiku-4.5 measurements: a credit report ~$0.074, a
 pay stub ~$0.021 → $0.05/doc). **Actual** cost is measured per document from real token counts.
 
+## Rate limiting, throttling & resume
+
+Under Bedrock the account is capped at ~10 requests/min; the bench makes **2 model calls per document**
+(classification + extraction), so at a cap of **8 requests/min** it runs **4 docs/min** — a 200-document
+run is ~50 min (floor). Four things keep a batch from corrupting its own findings:
+
+- **Pacing is enforced by the client limiter** (`resolve_requests_per_minute` → `RateLimiter`), which
+  gates every `complete()` call — both classification and extraction. Set
+  `AI_REQUESTS_PER_MINUTE_BEDROCK=8` (units are **requests**, not documents).
+- **The bench refuses to start unpaced.** If `AI_PROVIDER=bedrock` and no request limit is set, `POST
+  /start` returns **409** — not a warning, a refusal. An accidental unpaced 200-document run is a mistake
+  made impossible, not merely discouraged.
+- **Throttled documents are tagged, not silently failed.** When `complete()` exhausts its retries on a
+  429/throttle it raises `AIClientError`, and both call sites swallow it into a generic `"AI call
+  failed"` — indistinguishable from a genuinely unparseable document. So the bench's runtime wrapper
+  inspects the exception cause and, if transient (throttle/capacity/5xx/timeout), tags the record
+  `rate_limited: true` **before** the sentinel hides it. Rate-limited documents are **excluded from every
+  finding** and **counted separately** in `_SUMMARY.md` — a throttle can never read as a coverage gap.
+  The summary states the rate-limited count on every run (`0` when none), so a rate-limit problem is
+  never mistaken for a schema or network finding.
+- **A run of throttles aborts the run.** After 3 consecutive throttled documents (almost certainly the
+  rate limit, not the corpus) the run stops itself, marks `aborted_reason="rate_limited"`, and writes
+  what it has rather than continuing to log false schema gaps.
+
+**Resume.** Each document's JSON is written **incrementally** as it completes, plus an append to a
+`_records.jsonl` log — so a crash (or an abort, or a cancel) at document 150 of a 50–90 min run loses at
+most the in-flight document. `POST /start` with `resume_run_id` reuses the output dir, skips the
+documents already on disk, and still aggregates the whole corpus into the final findings.
+
+⚠️ **Per-process caveat.** The client limiter is a **process-local** singleton. The bench runs inside the
+dev API process, so its own calls are paced correctly — but if **Celery workers are also processing
+documents** (which hit Bedrock from separate processes) during a bench run, the two limiters do not
+coordinate, and the combined rate can exceed the account's 10/min. Run the bench when nothing else is
+hitting Bedrock, or account for the workers' share in the cap.
+
 ## Output
 
-Written under `bench_output/<run_id>/` (a sibling of the storage root — outside the DB, never persisted
-to it):
+Written under `<storage_local_path>/bench_output/<run_id>/` (inside the storage dir so it inherits
+storage's gitignore; outside the DB, never persisted to it):
 
 - **per-document JSON** at `<type>/<n>-<file>.json` — the redacted classification + extraction record
-  for one document;
+  for one document, written **incrementally** as each document completes;
+- **`_records.jsonl`** — one record per line, the resume log (source of truth for resuming + the final
+  aggregation);
 - **`_SUMMARY.md`** — the cross-document report (the five findings, human-readable), headed by the
-  coverage-not-accuracy warning;
+  coverage-not-accuracy warning and the **rate-limited count**;
 - **`_FINDINGS.csv`** — the same findings as a flat table for spreadsheeting.
 
 ## The five findings and how each is computed

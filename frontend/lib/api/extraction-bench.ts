@@ -19,6 +19,8 @@ export interface BenchPreview {
   estimated_cost: number;
   provider: string;
   extraction_model: string;
+  requests_per_minute: number | null;
+  estimated_minutes: number | null;
   note: string;
 }
 
@@ -26,6 +28,7 @@ export interface BenchStart {
   run_id: string;
   output_dir: string;
   to_run: number;
+  resumed: boolean;
 }
 
 export interface BenchStatus {
@@ -37,6 +40,8 @@ export interface BenchStatus {
   cancelled: boolean;
   finished: boolean;
   output_dir: string;
+  rate_limited: number;
+  aborted_reason: string | null;
 }
 
 export async function previewBench(root: string): Promise<BenchPreview> {
@@ -44,8 +49,11 @@ export async function previewBench(root: string): Promise<BenchPreview> {
   return res.data.preview;
 }
 
-export async function startBench(root: string): Promise<BenchStart> {
-  const res = await apiClient.post<BenchStart>(`${BASE}/start`, { root });
+export async function startBench(root: string, resumeRunId?: string): Promise<BenchStart> {
+  const res = await apiClient.post<BenchStart>(`${BASE}/start`, {
+    root,
+    resume_run_id: resumeRunId ?? null,
+  });
   return res.data;
 }
 

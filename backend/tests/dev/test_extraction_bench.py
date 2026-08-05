@@ -8,11 +8,15 @@ in two layers, and the rule engine is untouched (ACTIVE_RULE_IDS == 37). It meas
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
-from app.dev.bench.prompt import bench_pii_instruction, bench_pii_prompt
+from app.ai.client import AIClientError
+from app.dev.bench.findings import finalize_output, load_records, write_record
+from app.dev.bench.prompt import bench_pii_instruction, bench_pii_prompt, bench_run_context
 from app.dev.bench.redact import redact_string, redact_tree
+from fastapi import HTTPException
 
 _BACKEND = Path(__file__).resolve().parents[2]
 _APP = _BACKEND / "app"
@@ -131,3 +135,157 @@ def test_active_rule_ids_unchanged() -> None:
     from app.verification.rule_engine.registry import ACTIVE_RULE_IDS
 
     assert len(ACTIVE_RULE_IDS) == 37
+
+
+# --------------------------------------------------------------------------- #
+# Rate limiting: refuse an unpaced Bedrock batch (a mistake worth making impossible)
+# --------------------------------------------------------------------------- #
+def test_require_paced_refuses_unpaced_bedrock(monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.api import dev_bench
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "ai_provider", "bedrock")
+    monkeypatch.setattr(settings, "ai_requests_per_minute_bedrock", None)
+    with pytest.raises(HTTPException) as exc:
+        dev_bench._require_paced()
+    assert exc.value.status_code == 409
+    assert "AI_REQUESTS_PER_MINUTE_BEDROCK" in str(exc.value.detail)
+
+
+def test_require_paced_allows_paced_bedrock(monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.api import dev_bench
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "ai_provider", "bedrock")
+    monkeypatch.setattr(settings, "ai_requests_per_minute_bedrock", 8)
+    dev_bench._require_paced()  # no raise
+
+
+def test_require_paced_ignores_anthropic(monkeypatch: pytest.MonkeyPatch) -> None:
+    # The anthropic direct API is generous; an unset limit there is fine, so no refusal.
+    from app.api import dev_bench
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "ai_provider", "anthropic")
+    monkeypatch.setattr(settings, "ai_requests_per_minute_bedrock", None)
+    dev_bench._require_paced()  # no raise
+
+
+# --------------------------------------------------------------------------- #
+# Throttle tagging: a 429/throttle is recorded distinctly, BEFORE the sentinel swallows the type
+# --------------------------------------------------------------------------- #
+def _reload_extract_complete() -> None:
+    import app.ai.extraction.model_call as model_call
+    from app.ai.client import complete as real
+
+    model_call.complete = real  # type: ignore[attr-defined]
+
+
+async def test_throttle_tagged_when_cause_is_transient() -> None:
+    # A transient cause (here TimeoutError) means the AIClientError was an INFRASTRUCTURE failure — the
+    # bench must tag the document rate_limited so it is never read as a coverage gap.
+    import app.ai.extraction.model_call as model_call
+
+    err = AIClientError("AI call failed")
+    err.__cause__ = TimeoutError("throttled")
+    model_call.complete = AsyncMock(side_effect=err)  # type: ignore[assignment]
+    try:
+        with bench_run_context() as tally:
+            with pytest.raises(AIClientError):
+                await model_call.complete(system="s", messages=[], max_tokens=1, model="m")
+            assert tally.current_doc_throttled is True
+            assert tally.throttled_calls == 1
+    finally:
+        _reload_extract_complete()
+
+
+async def test_non_transient_failure_is_not_tagged_as_throttle() -> None:
+    # A non-transient cause (a genuinely bad document/payload) is a real signal, NOT a throttle.
+    import app.ai.extraction.model_call as model_call
+
+    err = AIClientError("AI call failed")
+    err.__cause__ = ValueError("bad payload")
+    model_call.complete = AsyncMock(side_effect=err)  # type: ignore[assignment]
+    try:
+        with bench_run_context() as tally:
+            with pytest.raises(AIClientError):
+                await model_call.complete(system="s", messages=[], max_tokens=1, model="m")
+            assert tally.current_doc_throttled is False
+            assert tally.throttled_calls == 0
+    finally:
+        _reload_extract_complete()
+
+
+# --------------------------------------------------------------------------- #
+# Incremental write + resume + rate-limited partitioning
+# --------------------------------------------------------------------------- #
+def test_write_record_and_load_records_roundtrip(tmp_path: Path) -> None:
+    rec = {"source_filename": "a.pdf", "classified_type": "w2", "rate_limited": False}
+    write_record(tmp_path, rec, 0)
+    assert (tmp_path / "w2" / "0-a.pdf.json").is_file()  # per-doc JSON on disk immediately
+    assert load_records(tmp_path) == [rec]  # resume log round-trips
+
+
+def test_finalize_excludes_rate_limited_from_findings(tmp_path: Path) -> None:
+    records = [
+        {
+            "source_filename": "ok.pdf",
+            "classified_type": "pay_stub",
+            "classification_confidence": 0.9,
+            "rate_limited": False,
+            "extraction": {
+                "status": "success",
+                "typed_core": {"employer": "AMBIO INC"},
+                "lists": {},
+                "catch_all": [],
+                "cost_estimate": 0.01,
+            },
+        },
+        {
+            "source_filename": "throttled.pdf",
+            "classified_type": "credit_report",
+            "classification_confidence": 0.4,
+            "rate_limited": True,
+            "extraction": {
+                "status": "failed",
+                "typed_core": {},
+                "lists": {},
+                "catch_all": [],
+                "cost_estimate": None,
+            },
+        },
+    ]
+    out = finalize_output(tmp_path, records, tmp_path / "o")
+    assert out["rate_limited"] == 1
+    # the throttled doc's type must NOT appear as a (false) coverage finding
+    assert "credit_report" not in out["types"]
+    assert "pay_stub" in out["types"]
+    summary = (tmp_path / "o" / "_SUMMARY.md").read_text(encoding="utf-8")
+    assert "Rate-limited documents: 1" in summary  # count is stated, prominently
+
+
+async def test_run_aborts_after_consecutive_throttles(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Several "AI call failed" in a row is almost certainly the rate limit — the run must abort rather than
+    # keep writing records that read as schema gaps.
+    from app.api import dev_bench
+    from app.dev.bench.engine import RunProgress
+
+    files = [SimpleNamespace(path=SimpleNamespace(name=f"d{i}.pdf")) for i in range(10)]
+
+    async def fake_run_one(f: object) -> dict[str, object]:
+        return {
+            "source_filename": f.path.name,  # type: ignore[attr-defined]
+            "classified_type": "pay_stub",
+            "rate_limited": True,
+            "extraction": {"cost_estimate": 0.0},
+        }
+
+    monkeypatch.setattr(dev_bench, "run_one", fake_run_one)
+    progress = RunProgress(total=len(files))
+    await dev_bench._run("rid", tmp_path, files, tmp_path / "out", progress, 0)
+
+    assert progress.aborted_reason == "rate_limited"
+    assert progress.done == dev_bench._THROTTLE_ABORT_STREAK  # stopped early, not all 10
+    assert progress.rate_limited == dev_bench._THROTTLE_ABORT_STREAK

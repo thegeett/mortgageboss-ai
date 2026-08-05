@@ -182,21 +182,59 @@ def rule_readiness(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return out
 
 
-def write_output(root: Path, records: list[dict[str, Any]], out_dir: Path) -> dict[str, Any]:
-    """Write per-document JSON (output/<type>/<n>-<file>.json), _SUMMARY.md, and _FINDINGS.csv. No DB."""
+#: The resume log — one compact JSON record per line, appended as each document completes. It is the
+#: source of truth for resuming a run that died mid-corpus (a 50-90 min Bedrock run must not be
+#: all-or-nothing) and for the final aggregation.
+RECORDS_LOG = "_records.jsonl"
+
+
+def write_record(out_dir: Path, record: dict[str, Any], index: int) -> None:
+    """Persist ONE document's record immediately: per-document JSON (``<type>/<index>-<file>.json``) plus
+    an append to the resume log. Called as each document completes, so a crash loses at most the
+    in-flight document — everything before it is already on disk and resumable."""
     out_dir.mkdir(parents=True, exist_ok=True)
-    per_type = _by_type(records)
-    # per-document JSON, foldered by type
-    for dtype, recs in per_type.items():
-        type_dir = out_dir / dtype
-        type_dir.mkdir(parents=True, exist_ok=True)
-        for i, r in enumerate(recs, 1):
-            safe = "".join(c if c.isalnum() or c in "-_." else "_" for c in r["source_filename"])[
-                :80
-            ]
-            (type_dir / f"{i}-{safe}.json").write_text(
-                json.dumps(r, indent=1, default=str), encoding="utf-8"
-            )
+    dtype = record["classified_type"]
+    type_dir = out_dir / dtype
+    type_dir.mkdir(parents=True, exist_ok=True)
+    safe = "".join(c if c.isalnum() or c in "-_." else "_" for c in record["source_filename"])[:80]
+    (type_dir / f"{index}-{safe}.json").write_text(
+        json.dumps(record, indent=1, default=str), encoding="utf-8"
+    )
+    with (out_dir / RECORDS_LOG).open("a", encoding="utf-8") as fh:
+        fh.write(json.dumps(record, default=str) + "\n")
+
+
+def load_records(out_dir: Path) -> list[dict[str, Any]]:
+    """Reload the records of a prior (interrupted) run from the resume log, so a resumed run can skip
+    the documents already done and still aggregate the full corpus at the end. Empty if none."""
+    log = out_dir / RECORDS_LOG
+    if not log.is_file():
+        return []
+    records: list[dict[str, Any]] = []
+    for line in log.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if line:
+            records.append(json.loads(line))
+    return records
+
+
+def finalize_output(
+    root: Path,
+    records: list[dict[str, Any]],
+    out_dir: Path,
+    *,
+    aborted_reason: str | None = None,
+) -> dict[str, Any]:
+    """Write the cross-document ``_SUMMARY.md`` + ``_FINDINGS.csv`` from all records. Per-document JSON is
+    already on disk (written incrementally by :func:`write_record`). No DB.
+
+    ⚠️ Rate-limited documents are INFRASTRUCTURE failures (throttling), NOT coverage gaps — they are
+    partitioned OUT of every finding and reported as their own count, so a throttle can never read as a
+    schema gap."""
+    out_dir.mkdir(parents=True, exist_ok=True)
+    rate_limited = [r for r in records if r.get("rate_limited")]
+    usable = [r for r in records if not r.get("rate_limited")]
+    per_type = _by_type(usable)
 
     findings_by_type = {
         dtype: {
@@ -207,13 +245,20 @@ def write_output(root: Path, records: list[dict[str, Any]], out_dir: Path) -> di
         }
         for dtype, recs in sorted(per_type.items())
     }
-    cls = classification(records)
-    readiness = rule_readiness(records)
+    cls = classification(usable)
+    readiness = rule_readiness(usable)
 
     _write_findings_csv(out_dir / "_FINDINGS.csv", findings_by_type)
-    summary = _render_summary(root, records, findings_by_type, cls, readiness)
+    summary = _render_summary(
+        root, usable, findings_by_type, cls, readiness, len(rate_limited), aborted_reason
+    )
     (out_dir / "_SUMMARY.md").write_text(summary, encoding="utf-8")
-    return {"types": findings_by_type, "classification": cls, "rule_readiness": readiness}
+    return {
+        "types": findings_by_type,
+        "classification": cls,
+        "rule_readiness": readiness,
+        "rate_limited": len(rate_limited),
+    }
 
 
 def _write_findings_csv(path: Path, findings_by_type: dict[str, Any]) -> None:
@@ -257,6 +302,8 @@ def _render_summary(
     findings_by_type: dict[str, Any],
     cls: dict[str, Any],
     readiness: list[dict[str, Any]],
+    rate_limited: int,
+    aborted_reason: str | None,
 ) -> str:
     total_cost = round(
         sum((r.get("extraction") or {}).get("cost_estimate") or 0 for r in records), 4
@@ -269,8 +316,26 @@ def _render_summary(
         " (`[NAME]`/`[SSN]`/… by the model, plus a digit/email regex backstop) — so a `borrower_name` fill"
         " rate is not evidence names are read. Nothing here was persisted to the database.",
         "",
-        f"- Root: `{root}`  ·  documents: **{len(records)}**  ·  types: **{len(findings_by_type)}**",
+        f"- Root: `{root}`  ·  documents analysed: **{len(records)}**  ·  types: **{len(findings_by_type)}**",
         f"- Estimated total cost (from real tokens): **${total_cost}**",
+    ]
+    # The rate-limit line must be impossible to miss: a throttled document is an infrastructure failure,
+    # NOT a coverage gap, and is excluded from every finding below. State the count either way.
+    if rate_limited:
+        lines += [
+            f"- ⚠️ **Rate-limited documents: {rate_limited}** — these were THROTTLED (an infrastructure"
+            " failure), **excluded from the findings below**. They are NOT coverage gaps; do not read them"
+            " as schema problems. If this is high, raise the pacing / lower the corpus and re-run.",
+        ]
+    else:
+        lines += ["- Rate-limited documents: **0** (no throttling observed)."]
+    if aborted_reason == "rate_limited":
+        lines += [
+            "- 🛑 **RUN ABORTED** — too many consecutive throttled documents. The findings below cover only"
+            " what completed before the abort; the corpus was NOT fully analysed. Set/raise"
+            " `AI_REQUESTS_PER_MINUTE_BEDROCK` and resume.",
+        ]
+    lines += [
         "",
         "## Finding 4 — classification",
         f"- confidence buckets: `{cls['confidence_buckets']}`",

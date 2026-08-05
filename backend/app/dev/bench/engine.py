@@ -15,9 +15,11 @@ from typing import Any
 from app.ai.classification import classify_document
 from app.ai.cost import estimate_cost
 from app.ai.extraction import EXTRACTORS
-from app.core.config import resolve_model, settings
-from app.dev.bench.prompt import bench_pii_prompt
+from app.core.config import resolve_model, resolve_requests_per_minute, settings
+from app.dev.bench.prompt import bench_run_context
 from app.dev.bench.redact import redact_string, redact_tree
+
+_SECONDS_PER_MINUTE = 60
 
 # The document formats the pipeline can read natively (LP-37 content block). Anything else is
 # "unreadable" for the bench and reported, not sent.
@@ -75,6 +77,12 @@ def _looks_like_pdf(p: Path) -> bool:
         return False
 
 
+#: Model calls per document (classification + extraction). Used for the pacing estimate. It is a FLOOR —
+#: a truncation retry adds an extraction call, and each transient retry re-paces — so a throttled run
+#: makes more.
+CALLS_PER_DOC = 2
+
+
 @dataclass
 class Preview:
     root: str
@@ -86,6 +94,8 @@ class Preview:
     estimated_cost: float
     provider: str
     extraction_model: str
+    requests_per_minute: int | None
+    estimated_minutes: float | None
     note: str = (
         "Estimated cost is count x a rough per-document figure; actual cost is measured per document "
         "after the run. This bench measures COVERAGE (was a field populated), NOT accuracy."
@@ -93,8 +103,8 @@ class Preview:
 
 
 def preview(root: Path) -> Preview:
-    """The PREVIEW shown BEFORE anything runs: counts, breakdown, unreadable files, and an estimated
-    cost. Nothing is sent to a model here."""
+    """The PREVIEW shown BEFORE anything runs: counts, breakdown, unreadable files, an estimated cost,
+    and the pacing (requests/min + estimated duration). Nothing is sent to a model here."""
     files = walk_documents(root)
     readable = [f for f in files if f.media_type is not None]
     by_ext: dict[str, int] = {}
@@ -107,6 +117,14 @@ def preview(root: Path) -> Preview:
         for f in files
         if f.media_type is None
     ]
+    rpm = resolve_requests_per_minute()
+    # Floor duration: CALLS_PER_DOC requests/doc paced at rpm (first request is free). None ⇒ unpaced.
+    n_requests = len(readable) * CALLS_PER_DOC
+    estimated_minutes = (
+        round(max(0, n_requests - 1) * (_SECONDS_PER_MINUTE / rpm) / _SECONDS_PER_MINUTE, 1)
+        if rpm and rpm > 0
+        else None
+    )
     return Preview(
         root=str(root),
         total=len(files),
@@ -117,6 +135,8 @@ def preview(root: Path) -> Preview:
         estimated_cost=round(len(readable) * PER_DOC_COST_ESTIMATE, 2),
         provider=settings.ai_provider,
         extraction_model=resolve_model(settings.anthropic_model_extraction),
+        requests_per_minute=rpm,
+        estimated_minutes=estimated_minutes,
     )
 
 
@@ -149,32 +169,39 @@ def _result_to_record(data: Any) -> dict[str, Any]:
 async def run_one(f: DiscoveredFile) -> dict[str, Any]:
     """Classify one document, then extract it with the LIVE registered extractor under the bench PII
     prompt, then belt-and-braces redact every string. Returns the per-document record (no persistence).
-    ``f.media_type`` must be non-None (a readable file)."""
+    ``f.media_type`` must be non-None (a readable file).
+
+    Both model calls run inside :func:`bench_run_context`, so a throttle on EITHER (classification or
+    extraction) is observed and the record is tagged ``rate_limited`` — a throttled document is an
+    INFRASTRUCTURE failure, not a coverage gap, and the findings must be able to tell them apart."""
     assert f.media_type is not None
     content = f.path.read_bytes()
 
-    classification = await classify_document(content, f.media_type)
-    dtype = classification.document_type
-    record: dict[str, Any] = {
-        "source_filename": f.path.name,
-        "classified_type": dtype,
-        "classification_confidence": round(classification.confidence, 4),
-        # the classifier's short reason can echo a snippet → belt-and-braces redact it too
-        "classification_reasoning": redact_string(classification.reasoning)[0],
-        "size_bytes": f.size,
-    }
-
-    extractor = EXTRACTORS.get(dtype)
-    if extractor is None:
-        record["extraction"] = {
-            "status": "no_extractor",
-            "note": f"no registered extractor for {dtype!r}",
+    with bench_run_context() as tally:
+        classification = await classify_document(content, f.media_type)
+        dtype = classification.document_type
+        record: dict[str, Any] = {
+            "source_filename": f.path.name,
+            "classified_type": dtype,
+            "classification_confidence": round(classification.confidence, 4),
+            # the classifier's short reason can echo a snippet → belt-and-braces redact it too
+            "classification_reasoning": redact_string(classification.reasoning)[0],
+            "size_bytes": f.size,
         }
-        record["findings"] = _per_document_findings(dtype, None)
-        return record
 
-    with bench_pii_prompt():  # layer 1: the model returns [NAME]/[SSN]/… placeholders
-        result = await extractor(content, f.media_type)
+        extractor = EXTRACTORS.get(dtype)
+        if extractor is None:
+            record["extraction"] = {
+                "status": "no_extractor",
+                "note": f"no registered extractor for {dtype!r}",
+            }
+            record["findings"] = _per_document_findings(dtype, None)
+            record["rate_limited"] = tally.current_doc_throttled
+            return record
+
+        result = await extractor(
+            content, f.media_type
+        )  # layer 1: model returns [NAME]/[SSN]/… placeholders
 
     extraction: dict[str, Any] = {
         "status": result.status.value,
@@ -204,6 +231,7 @@ async def run_one(f: DiscoveredFile) -> dict[str, Any]:
     )
     record["extraction"] = extraction
     record["findings"] = _per_document_findings(dtype, body)
+    record["rate_limited"] = tally.current_doc_throttled
     return record
 
 
@@ -231,3 +259,7 @@ class RunProgress:
     records: list[dict[str, Any]] = field(default_factory=list)
     cost_so_far: float = 0.0
     cancelled: bool = False
+    #: documents tagged rate_limited (INFRASTRUCTURE failures — throttling — not coverage gaps)
+    rate_limited: int = 0
+    #: set when the run stopped itself, e.g. "rate_limited" after N consecutive throttled documents
+    aborted_reason: str | None = None
