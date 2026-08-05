@@ -26,7 +26,29 @@ variable "kms_key_arn" {
 }
 
 variable "keep_last_images" {
-  description = "How many tagged images to retain before expiry."
+  description = <<-EOT
+    How many images to retain before expiry, counted across EVERY environment
+    because the registry is shared. This is the ordinary tier — a busy CI pipeline
+    burns through it quickly, so it must not be the only thing protecting an image
+    another environment is running. See protected_tag_prefixes.
+  EOT
+  type        = number
+}
+
+variable "protected_tag_prefixes" {
+  description = <<-EOT
+    Tag prefixes for PROMOTED images, matched by a higher-priority lifecycle rule
+    so they never enter keep_last_images' count.
+
+    Without this the shared registry's global count evicts the oldest image, which
+    is precisely a long-lived staging or production tag; the environment running it
+    then fails to launch replacement tasks with CannotPullContainerError.
+  EOT
+  type        = list(string)
+}
+
+variable "keep_last_protected_images" {
+  description = "How many images to retain per protected prefix. Deliberately deeper than keep_last_images — this is the rollback history that matters."
   type        = number
 }
 

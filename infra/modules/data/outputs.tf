@@ -46,6 +46,11 @@ output "redis_requires_auth_token" {
   description = <<-EOT
     Whether an AUTH token must be applied out of band. When true, REDIS_URL
     carries the token and is therefore a SECRET rather than CONFIG.
+
+    ⚠️ This is the REQUESTED state, not the observed one — it is just
+    var.redis_auth_enabled echoed back. Whether the token is actually on the cache
+    is reported by check "redis_auth_token_applied" (see main.tf), which fires on
+    every plan until it is.
   EOT
   value       = var.redis_auth_enabled
 }

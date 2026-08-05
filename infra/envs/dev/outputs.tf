@@ -39,10 +39,10 @@ output "redis_security_group_id" {
   value       = module.network.redis_security_group_id
 }
 
-output "ecr_repository_urls" {
-  description = "Map of repository name to registry URL — docker push targets and ECS image references."
-  value       = module.registry.repository_urls
-}
+# ecr_repository_urls is deliberately NOT an output here — the registry moved to
+# ../../shared so that destroying this environment cannot delete another
+# environment's images. Get the URLs with:
+#   terraform -chdir=../../shared output ecr_repository_urls
 
 output "rds_endpoint" {
   description = "Database endpoint, host:port. A hostname, not a credential."

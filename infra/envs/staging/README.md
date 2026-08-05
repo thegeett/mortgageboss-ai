@@ -16,6 +16,11 @@ Only three things differ:
 If building staging ever requires editing something under `../../modules/`, that
 is a defect in the module, not a staging requirement.
 
+> **No `ecr_*` settings.** The registry is shared across environments and lives in
+> [`../../shared`](../../shared/README.md) with its own state and KMS key. Staging
+> pulls the same repositories dev pushed to, distinguished by image tag — tag
+> promoted images `staging-*` so the protected retention rule covers them.
+
 ## The differences that matter
 
 | Setting | dev | staging | Why |
@@ -24,7 +29,7 @@ is a defect in the module, not a staging requirement.
 | `rds_deletion_protection` | `false` | **`true`** | Staging holds real borrower NPI. |
 | `rds_skip_final_snapshot` | `true` | **`false`** | A destroy must leave a recovery point. |
 | `secret_recovery_window_days` | `0` | **`30`** | Zero makes a fat-fingered destroy unrecoverable. |
-| `ecr_force_delete` | `true` | **`false`** | Destroy must not silently discard image history. |
+| `kms_create_alias` | `false` | **`true`** | Dev is rebuilt often and a destroy orphans an alias (ADR-365); staging is not. |
 | `enable_nat_gateway` | `true` | **`false`** | ⬇ |
 | `enable_vpc_endpoints` | `false` | **`true`** | Egress must never touch the public internet. |
 | `vpc_cidr` | `10.20.0.0/16` | **`10.30.0.0/16`** | Identical ranges cannot be peered. |

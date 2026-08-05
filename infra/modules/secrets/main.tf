@@ -49,7 +49,17 @@ resource "aws_kms_key" "this" {
   tags = merge(var.tags, { Name = var.name_prefix })
 }
 
+# Optional, and off for throwaway environments — see var.kms_create_alias.
+#
+# `terraform destroy` schedules the KEY for deletion but leaves the ALIAS behind
+# (hashicorp/terraform-provider-aws#35161). The orphaned alias is what makes the
+# next apply fail with AlreadyExistsException, not the key's deletion window: a
+# fresh apply creates a new key without complaint. Skipping the alias removes the
+# only manual step from destroy-and-rebuild, and costs nothing functional —
+# everything references the key by ARN via this module's outputs.
 resource "aws_kms_alias" "this" {
+  count = var.kms_create_alias ? 1 : 0
+
   name          = "alias/${var.name_prefix}"
   target_key_id = aws_kms_key.this.key_id
 }

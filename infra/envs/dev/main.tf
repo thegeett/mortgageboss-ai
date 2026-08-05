@@ -96,23 +96,23 @@ module "secrets" {
 
   recovery_window_days     = var.secret_recovery_window_days
   kms_deletion_window_days = var.kms_deletion_window_days
+  kms_create_alias         = var.kms_create_alias
 
   # Same variable drives the data module's auth setting, so the secret's existence
   # and the cache's auth requirement cannot drift apart.
   create_redis_url_secret = var.redis_auth_enabled
 }
 
-module "registry" {
-  source = "../../modules/registry"
-
-  tags = local.tags
-
-  repository_names     = var.ecr_repository_names
-  kms_key_arn          = module.secrets.kms_key_arn
-  keep_last_images     = var.ecr_keep_last_images
-  untagged_expire_days = var.ecr_untagged_expire_days
-  force_delete         = var.ecr_force_delete
-}
+# The registry is NOT here. It lives in ../../shared, because it is shared across
+# environments (distinguished by image tag, not repository name) and a shared
+# resource cannot be owned by one environment's state.
+#
+# Owning it here meant this environment's documented destroy-and-rebuild — which
+# runs with ecr_force_delete = true — would delete every environment's images, and
+# would schedule deletion of the CMK protecting them. See ../../shared/main.tf.
+#
+# Read the repository URLs with:
+#   terraform -chdir=../../shared output ecr_repository_urls
 
 module "data" {
   source = "../../modules/data"
@@ -160,6 +160,34 @@ resource "aws_budgets_budget" "monthly" {
   limit_amount = tostring(var.budget_limit_usd)
   limit_unit   = "USD"
   time_unit    = "MONTHLY"
+
+  # Scoped to THIS environment's tag. Without the filter the budget aggregated the
+  # whole account, so standing staging up in the same account made a $150 "dev"
+  # budget fire at $120 of COMBINED spend — and both environments' budgets would
+  # alarm on the same number, destroying the alert's only job: saying which
+  # environment was left running.
+  #
+  # Depends on default_tags applying Environment to every resource in this root
+  # module (see the provider block). Untagged/unTaggable spend — the shared registry,
+  # data-transfer lines AWS does not attribute — falls outside every environment
+  # budget by construction; that is the correct trade for an attributable alert.
+  # format(), not a template string. AWS wants the literal form
+  # "user:<TagKey>$<TagValue>", and in HCL `$${` is the ESCAPE for a literal `${` —
+  # so "user:Environment$${var.environment}" evaluates to the literal text
+  # "user:Environment${var.environment}", a tag value nothing ever matches. That
+  # budget would have tracked $0 and never fired, which is worse than no filter at
+  # all because it looks configured. Verified: format() yields "user:Environment$dev".
+  #
+  # ⚠️ DEPENDS ON AN ACCOUNT-LEVEL ACTIVATION. AWS Budgets can only filter on a
+  # user-defined tag once `Environment` is ACTIVATED as a cost allocation tag, which
+  # is an account (payer) setting, not a per-environment one — it is applied by
+  # `aws_ce_cost_allocation_tag.environment` in ../../shared. Without that this
+  # filter matches zero cost records and the budget silently never fires. Activation
+  # is also NOT retroactive, so the first period after enabling is partial.
+  cost_filter {
+    name   = "TagKeyValue"
+    values = [format("user:Environment$%s", var.environment)]
+  }
 
   notification {
     comparison_operator        = "GREATER_THAN"

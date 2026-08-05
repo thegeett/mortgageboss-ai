@@ -42,6 +42,7 @@ nothing is billable yet.
 | 15 | Redis TLS/AUTH finding | ✅ | below |
 | 16 | `bedrock-runtime` / `bedrock-mantle` endpoint findings | ⚠️ **BLOCKED** | below — insufficient IAM permission |
 | 17 | RDS engine 16.x verified available | ⚠️ **BLOCKED, mitigated** | below |
+| 19 | Redis engine version correct | ✅ **CONFIRMED** | 7.1 GA all regions since Nov 2023; highest Redis OSS ElastiCache supports |
 | 18 | `terraform plan` resource count | ⚠️ **N/A by design** | ticket forbids `plan`; static count below |
 
 **Two criteria could not be met** (16, 17) and both are IAM-permission blockers, not
@@ -291,9 +292,11 @@ AWS_PROFILE=mbai-dev-admin aws rds describe-db-engine-versions --engine postgres
   --query "DBEngineVersions[?starts_with(EngineVersion,'16.')].EngineVersion" --output text
 ```
 
-`redis_version = "7.1"` matches local `redis:7-alpine`; same mitigation is not
-available (ElastiCache wants a concrete version), so this one is **worth confirming
-before apply**.
+`redis_version = "7.1"` matches local `redis:7-alpine`. Same mitigation is not
+available (ElastiCache wants a concrete version), but it no longer needs one:
+**CONFIRMED correct** — ElastiCache for Redis 7.1 has been GA in all regions since
+November 2023 and remains the highest Redis OSS version ElastiCache supports. No
+pre-apply check is required.
 
 ### `terraform plan`
 
@@ -314,6 +317,7 @@ Dev, left running a full month, on-demand `us-east-1` pricing:
 | NAT gateway | $32.85 |
 | NAT data processing (~30 GB) | $1.35 |
 | KMS customer-managed key | $1.00 |
+| KMS keys orphaned by a destroy (7-day window, ~$0.23 each) | $0.00–1.15 |
 | Secrets Manager, 3 secrets @ $0.40 | $1.20 |
 | ECR storage (~20 GB) | $2.00 |
 | CloudWatch Logs (ingest + storage, low volume) | $2.00 |
@@ -444,6 +448,10 @@ state) and costs $1/month for no added control — the threat model is "someone
 without S3 access reads it", which the managed key already covers. The application's
 CMK is created in `modules/secrets`.
 
+**No KMS alias in dev.** The alias is the single thing that made
+destroy-and-rebuild need a console step, and it buys only console readability —
+`kms_create_alias = false` here, `true` for staging. **ADR-365.**
+
 **The account guard is a `precondition`, not a `check` block.** A `check` emits only
 a **warning**; applying to the wrong account must be a hard error. Present in both
 `bootstrap` and `envs/dev`.
@@ -486,19 +494,46 @@ configuration is configured so it does not:
 | Resource | Default friction | Handling |
 |---|---|---|
 | Secrets Manager secret | Name reserved 7–30 days after delete → re-apply name conflict | `secret_recovery_window_days = 0` |
-| ECR repository | Destroy fails if it holds images | `ecr_force_delete = true` |
+| ECR repository | Destroy fails if it holds images | **Not applicable** — the registry moved to `infra/shared` (review follow-up), so an environment destroy never touches it. `ecr_force_delete = false` there, and that friction is deliberate |
 | RDS | Destroy fails with deletion protection on | `rds_deletion_protection = false` |
 | RDS | Destroy demands a snapshot name | `rds_skip_final_snapshot = true` |
+| KMS **alias** | `destroy` orphans it → next apply fails `AlreadyExistsException` | `kms_create_alias = false` |
+| KMS key | 7–30 day deletion window is mandatory | `kms_deletion_window_days = 7`; orphaned keys clear in 7 days, **no rebuild friction** |
 | State bucket / lock table | `prevent_destroy` | Intentional; not part of the env destroy |
 
-**One unavoidable exception: the KMS key.** AWS mandates a 7–30 day deletion window;
-there is no immediate delete. `destroy` still succeeds (the key is *scheduled*, not
-blocking), but the key and **its alias** linger. A rebuild inside that window fails
-on the alias, which is still taken. Fix:
+**There is now no manual step. The earlier "unavoidable exception" was a
+misdiagnosis** — worth recording, because the obvious reading is wrong.
 
-```bash
-aws kms cancel-key-deletion --key-id <id>
-```
+The deletion window is **not** what blocks a rebuild. A fresh apply creates a *new*
+key regardless of what state the old one is in. The actual blocker was the
+**alias**: `terraform destroy` schedules the key but leaves the alias behind
+([hashicorp/terraform-provider-aws#35161](https://github.com/hashicorp/terraform-provider-aws/issues/35161)),
+so `alias/mbai-dev` is still taken and the next apply dies with
+`AlreadyExistsException`, needing a manual `aws kms delete-alias`.
+
+So the fix targets the alias, not the key: **`kms_create_alias = false`** for dev.
+The alias is console readability only — every consumer takes the key by ARN through
+the module outputs — so nothing functional is lost. `kms_deletion_window_days`
+stays at the AWS minimum of 7 so orphaned keys clear as fast as allowed.
+
+**Revised residue: cost, not friction.** Each destroy leaves one orphaned key
+pending deletion for 7 days. **Assumption:** a KMS customer-managed key bills at
+$1/month, so a 7-day orphan costs roughly **$0.23**, and orphans accumulate only if
+the environment is rebuilt more than once within a week — e.g. five rebuilds in a
+week ≈ **$1.15** of overlapping keys, on top of the $1.00 already in the cost table
+for the live key. Immaterial at this scale, and reclaimable early with
+`aws kms cancel-key-deletion --key-id <id>`.
+
+**Staging sets `kms_create_alias = true`** — long-lived, so console readability
+outweighs a rebuild friction it will rarely hit. When staging *is* rebuilt, the
+orphaned alias needs `aws kms delete-alias --alias-name alias/mbai-staging`.
+
+**Rejected: moving the KMS key (or the secrets) into `bootstrap`.** It would dodge
+the orphan entirely, but it trades a ~$0.23 cost for a cross-state dependency
+Terraform cannot track — `envs/dev` would consume a key it does not manage, with no
+plan-time link between the two. And the `encryption-key` half of the argument
+protects only against a *targeted* destroy of the secrets module alone, which is a
+narrow case that B2 addresses properly. Not worth the coupling.
 
 Documented in `infra/README.md`. Rebuild time is ~10–15 minutes (RDS and ElastiCache
 create in parallel, 5–10 minutes each), plus secret population and re-seeding.
@@ -509,11 +544,11 @@ create in parallel, 5–10 minutes each), plus secret population and re-seeding.
 
 1. **Verify the Bedrock endpoints** (`bedrock-runtime`, `bedrock-mantle`) with admin
    credentials — **required before staging**, not before dev.
-2. **Confirm `redis_version = "7.1"`** is orderable before applying.
-3. **Set a real `budget_notification_email`** — currently `geet.thaker@gmail.com`; a
-   budget alarm nobody receives is not an alarm.
-4. **C3 must set `PGSSLROOTCERT`** in the image and task definition to reach
+2. **C3 must set `PGSSLROOTCERT`** in the image and task definition to reach
    `verify-full` on the database. `?ssl=require` alone encrypts without verifying.
-5. **Revisit the $150 budget** once C3 (Fargate) and C4 (ALB) land.
-6. **B2** makes `ENCRYPTION_KEY` rotatable; until then an accidental regeneration is
+3. **Revisit the $150 budget** once C3 (Fargate) and C4 (ALB) land.
+4. **B2** makes `ENCRYPTION_KEY` rotatable; until then an accidental regeneration is
    unrecoverable.
+
+*Resolved since first writing:* the `redis_version` check (confirmed — see above)
+and the placeholder budget address (now `budget@mortgageboss.ai`).

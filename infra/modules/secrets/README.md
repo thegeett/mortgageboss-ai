@@ -75,6 +75,28 @@ is built around.
 **Staging and production must use `30`.** The variable has no default, so the
 choice is explicit in every `terraform.tfvars`.
 
+## The KMS alias is optional — and off where rebuilds are frequent
+
+`kms_create_alias` exists because the **alias**, not the key's deletion window, is
+what breaks destroy-and-rebuild.
+
+`terraform destroy` schedules the key for deletion but leaves the alias orphaned
+([hashicorp/terraform-provider-aws#35161](https://github.com/hashicorp/terraform-provider-aws/issues/35161)).
+The name is then still taken, so the next apply fails with `AlreadyExistsException`
+and needs a manual `aws kms delete-alias`. The deletion window is a red herring — a
+fresh apply creates a new key regardless.
+
+The alias is **console readability only**: every consumer takes the key by ARN via
+`output "kms_key_arn"`. So setting `kms_create_alias = false` removes the only
+manual step from a rebuild and costs nothing functional. Long-lived environments
+set it `true` — they are rebuilt rarely, so the friction is paid rarely while the
+readability is used daily.
+
+The residue is cost, not friction: each destroy leaves a key pending deletion for
+`kms_deletion_window_days` (7, the AWS minimum, for throwaway environments) at
+roughly $0.23 per orphan. See **ADR-365**, which also records why moving the key
+into `bootstrap` was rejected.
+
 ## `redis-url`
 
 Created only when `create_redis_url_secret = true`, which must track whether the

@@ -52,6 +52,25 @@ variable "create_redis_url_secret" {
   type        = bool
 }
 
+variable "kms_create_alias" {
+  description = <<-EOT
+    Create a friendly alias for the KMS key.
+
+    The alias is CONSOLE READABILITY ONLY — every consumer references the key by
+    ARN through this module's outputs, so nothing functional depends on it.
+
+    ⚠️ It is also the one thing that breaks destroy-and-rebuild. `terraform destroy`
+    schedules the key for deletion but leaves the ALIAS ORPHANED
+    (hashicorp/terraform-provider-aws#35161), so the next apply fails with
+    AlreadyExistsException and needs a manual `aws kms delete-alias`.
+
+    So: FALSE for a throwaway environment that is rebuilt often, TRUE for a
+    long-lived one where the console readability is worth more than the rebuild
+    friction that will rarely be exercised.
+  EOT
+  type        = bool
+}
+
 variable "kms_deletion_window_days" {
   description = "Waiting period before a scheduled KMS key deletion completes. AWS permits 7-30."
   type        = number

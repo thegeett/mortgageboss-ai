@@ -45,13 +45,24 @@ interface_endpoint_services = [
 secret_recovery_window_days = 30
 kms_deletion_window_days    = 30
 
-# --- Registry -------------------------------------------------------------- #
+# TRUE here, false in dev. Staging is long-lived, so the console readability is
+# worth more than a rebuild friction that will rarely be exercised. When staging
+# IS rebuilt, the orphaned alias must be removed by hand:
+#   aws kms delete-alias --alias-name alias/mbai-staging
+kms_create_alias = true
 
-ecr_repository_names     = ["mbai/api", "mbai/frontend"]
-ecr_keep_last_images     = 20
-ecr_untagged_expire_days = 7
-# false — a destroy must not silently discard image history.
-ecr_force_delete = false
+# --- Registry -------------------------------------------------------------- #
+#
+# NOTHING here. The registry is shared across environments and lives in
+# ../../shared with its own state — staging pulls the SAME repositories dev pushed
+# to, distinguished by image tag, which is what makes promoting the exact tested
+# bytes possible.
+#
+# These four ecr_* settings used to be declared here with the identical repository
+# names as dev. In one account that is a direct collision: staging's apply fails
+# with RepositoryAlreadyExistsException, or forced through, two states manage one
+# resource and dev's `ecr_force_delete = true` destroy takes staging's images and
+# the key protecting them.
 
 # --- Database -------------------------------------------------------------- #
 
@@ -90,8 +101,11 @@ log_retention_days = 90
 
 # --- Budget ---------------------------------------------------------------- #
 
-budget_limit_usd          = 400
-budget_notification_email = "REPLACE_WITH_REAL_ADDRESS"
+budget_limit_usd = 400
+# ⚠️ Must be a mailbox that exists — AWS Budgets does not confirm email subscribers,
+# so a bounce leaves the alert silently dead. And the cost_filter matches nothing
+# until `Environment` is activated as a cost allocation tag by ../../shared.
+budget_notification_email = "budget@mortgageboss.ai"
 
 # --- External -------------------------------------------------------------- #
 

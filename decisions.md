@@ -13688,3 +13688,46 @@ severity; it does not remove the need for this decision.
 
 **Cross-refs.** `docs/secrets-audit.md` (the two-consumer analysis), ADR-051 (application-level PII
 encryption), B2 (rotation), C3 (the execution role that injects these secrets).
+
+---
+
+## ADR-365: The KMS ALIAS, not the key's deletion window, is what breaks destroy-and-rebuild — so the alias is optional and off for throwaway environments (C2)
+
+**Context.** C2's environment is designed to be destroyed and rebuilt. The first pass documented an
+"unavoidable exception" to that: AWS mandates a 7–30 day KMS deletion window, so a rebuild inside the window
+supposedly needed a manual `aws kms cancel-key-deletion`.
+
+**That diagnosis was wrong, and the correction is the point of this ADR.** The deletion window does not block
+anything — a fresh apply creates a *new* key regardless of what state the old one is in. The actual blocker is
+that `terraform destroy` schedules the key for deletion but **leaves the alias orphaned**
+(hashicorp/terraform-provider-aws#35161). `alias/<name_prefix>` is then still taken, and the next apply fails
+with `AlreadyExistsException` — requiring a manual `aws kms delete-alias`.
+
+**The decision.** Make the alias optional (`kms_create_alias`, no module default) and set it **false** for
+rebuild-often environments, **true** for long-lived ones. Keep `kms_deletion_window_days` at the AWS minimum
+of 7 for dev so orphaned keys clear as fast as allowed; staging keeps 30.
+
+**Why this is nearly free.** The alias is **console readability only**. Every consumer — the ECS execution
+role, RDS storage encryption, ECR, the log groups — takes the key by **ARN** through the module's outputs.
+Nothing functional depends on the alias existing, which is what makes deleting the convenience the right trade
+rather than a compromise.
+
+**What the residue becomes.** Cost instead of friction: each destroy leaves one key pending deletion for 7
+days at roughly $0.23 (assuming the standard $1/month per customer-managed key), accumulating only across
+rebuilds inside a single week. Immaterial, and reclaimable early with `cancel-key-deletion`.
+
+**Rejected: moving the KMS key (or the secrets) into `bootstrap`.** This was proposed and is the obvious
+"make the problem disappear" move — a key that is never destroyed is never orphaned. It was rejected because
+it trades ~$0.23 for a **cross-state dependency Terraform cannot track**: `envs/*` would consume a key it does
+not manage, with no plan-time edge between the two states, so a bootstrap change could silently break every
+environment. The variant of the argument that says it also protects `ENCRYPTION_KEY` is narrower than it
+looks — it defends only against a *targeted* destroy of the secrets module alone, leaving RDS alive, which is
+exactly the case B2 (`MultiFernet` + a re-encryption path) addresses properly. Buying a narrow protection with
+permanent architectural coupling is the wrong trade.
+
+**Consequence.** Staging, which sets the alias true, still needs the manual delete when it is rebuilt:
+`aws kms delete-alias --alias-name alias/mbai-staging`. That is acceptable there precisely because staging is
+not rebuilt often — the friction is paid rarely, and the console readability is used daily.
+
+**Cross-refs.** ADR-364 (secret containers, values out of band — why the secrets module exists at all), B2
+(key rotation), `infra/README.md` (destroy-and-rebuild workflow).

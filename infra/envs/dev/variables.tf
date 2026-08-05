@@ -56,31 +56,24 @@ variable "secret_recovery_window_days" {
 }
 
 variable "kms_deletion_window_days" {
-  description = "Waiting period before a scheduled KMS key deletion completes (7-30)."
+  description = "Waiting period before a scheduled KMS key deletion completes (7-30). 7 = the AWS minimum, so orphaned keys clear as fast as allowed."
   type        = number
+}
+
+variable "kms_create_alias" {
+  description = <<-EOT
+    Create a friendly KMS alias. Console readability only — every consumer uses the
+    ARN. ⚠️ An orphaned alias after destroy is what breaks rebuild; false here,
+    true for long-lived environments.
+  EOT
+  type        = bool
 }
 
 # --- Registry -------------------------------------------------------------- #
-
-variable "ecr_repository_names" {
-  description = "ECR repositories to create. Two, not three — api and worker share one image (C1)."
-  type        = list(string)
-}
-
-variable "ecr_keep_last_images" {
-  description = "Tagged images to retain."
-  type        = number
-}
-
-variable "ecr_untagged_expire_days" {
-  description = "Days before an untagged image expires."
-  type        = number
-}
-
-variable "ecr_force_delete" {
-  description = "Let destroy remove repositories that still hold images. ⚠️ Should be false for staging."
-  type        = bool
-}
+#
+# No ecr_* variables here. The registry is shared across environments and now
+# lives in ../../shared with its own state and its own KMS key — see the note in
+# main.tf where the module used to be instantiated.
 
 # --- Database -------------------------------------------------------------- #
 

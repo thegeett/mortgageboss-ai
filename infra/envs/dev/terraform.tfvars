@@ -48,18 +48,26 @@ interface_endpoint_services = [
 # destroy-then-apply fails on a conflict — fatal for a destroy-and-rebuild
 # environment. ⚠️ STAGING MUST USE 30.
 secret_recovery_window_days = 0
-kms_deletion_window_days    = 7
+
+# 7 = the AWS minimum. A destroy leaves the key pending deletion for this long
+# (~$1/month each while it lingers); the minimum clears orphans as fast as AWS
+# allows. ⚠️ Staging uses 30.
+kms_deletion_window_days = 7
+
+# NO alias for this environment. `terraform destroy` schedules the key but leaves
+# the ALIAS orphaned (hashicorp/terraform-provider-aws#35161), and the orphaned
+# alias — not the key — is what makes the next apply fail with
+# AlreadyExistsException. Skipping it removes the only manual step from
+# destroy-and-rebuild. Nothing functional depends on it; every consumer uses the
+# key ARN. ⚠️ Staging sets this true.
+kms_create_alias = false
 
 # --- Registry -------------------------------------------------------------- #
-
-# TWO repositories. The worker does NOT get its own: C1 established that the API
-# and the worker run the same image with different commands.
-ecr_repository_names     = ["mbai/api", "mbai/frontend"]
-ecr_keep_last_images     = 10
-ecr_untagged_expire_days = 7
-# ⚠️ Should be false for staging — destroy should not silently discard image
-# history there.
-ecr_force_delete = true
+#
+# Configured in ../../shared/terraform.tfvars, not here. The registry is shared
+# across environments, so it cannot be owned by this environment's state — this
+# environment is destroy-and-rebuild, and that destroy would have taken every
+# other environment's images with it.
 
 # --- Database -------------------------------------------------------------- #
 
@@ -87,8 +95,10 @@ database_username = "mbai_admin"
 # --- Cache ----------------------------------------------------------------- #
 
 redis_node_type = "cache.t4g.micro"
-redis_version   = "7.1"
-redis_family    = "redis7"
+# CONFIRMED correct: ElastiCache for Redis 7.1 has been GA in all regions since
+# November 2023 and remains the highest Redis OSS version ElastiCache supports.
+redis_version = "7.1"
+redis_family  = "redis7"
 
 # false → REDIS_URL is CONFIG (topology only), protected by security-group
 # isolation. Transit encryption is on regardless, so the URL must still be
@@ -103,9 +113,14 @@ log_retention_days = 30
 # --- Budget ---------------------------------------------------------------- #
 
 budget_limit_usd = 150
-# ⚠️ Replace with the real address before applying — a budget alarm nobody
-# receives is not an alarm.
-budget_notification_email = "geet.thaker@gmail.com"
+# ⚠️ This mailbox must actually EXIST. AWS Budgets does not confirm an email
+# subscriber the way SNS does — if it bounces, the alert is silently dead and
+# nothing in Terraform or the console will say so. Send yourself a test mail before
+# relying on it.
+#
+# The other half of the alarm is the cost-allocation tag: the cost_filter in main.tf
+# matches nothing until `Environment` is activated account-wide by ../../shared.
+budget_notification_email = "budget@mortgageboss.ai"
 
 # --- External -------------------------------------------------------------- #
 

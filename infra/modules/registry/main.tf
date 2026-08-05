@@ -45,8 +45,19 @@ resource "aws_ecr_lifecycle_policy" "this" {
   repository = each.value.name
 
   # Rule order matters: ECR evaluates by ascending priority and applies the first
-  # match. Untagged images are expired first (rule 1) so the "keep last N tagged"
-  # count in rule 2 is not consumed by garbage.
+  # match. Untagged images are expired first (rule 1) so the "keep last N" count in
+  # rule 3 is not consumed by garbage.
+  #
+  # Rule 2 is the PROTECTED tier and exists because this registry is shared. The
+  # count in rule 3 is global across every environment, so a CI pipeline pushing
+  # per commit reaches the ceiling in days and evicts the OLDEST image — which is
+  # exactly where a long-lived promoted tag sits. The symptom would not be a failed
+  # deploy but a deferred one: the environment running that tag cannot launch a
+  # replacement task or scale out, failing with CannotPullContainerError long after
+  # the push that caused it.
+  #
+  # Rule 2 therefore holds a much deeper history for the promotion prefixes, and
+  # because it matches FIRST those images never reach rule 3's count at all.
   policy = jsonencode({
     rules = [
       {
@@ -62,7 +73,18 @@ resource "aws_ecr_lifecycle_policy" "this" {
       },
       {
         rulePriority = 2
-        description  = "Keep only the last ${var.keep_last_images} tagged images."
+        description  = "Keep ${var.keep_last_protected_images} promoted images (${join(", ", var.protected_tag_prefixes)})."
+        selection = {
+          tagStatus     = "tagged"
+          tagPrefixList = var.protected_tag_prefixes
+          countType     = "imageCountMoreThan"
+          countNumber   = var.keep_last_protected_images
+        }
+        action = { type = "expire" }
+      },
+      {
+        rulePriority = 3
+        description  = "Keep only the last ${var.keep_last_images} remaining images."
         selection = {
           tagStatus   = "any"
           countType   = "imageCountMoreThan"
