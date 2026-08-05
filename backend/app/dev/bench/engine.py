@@ -16,10 +16,34 @@ from app.ai.classification import classify_document
 from app.ai.cost import estimate_cost
 from app.ai.extraction import EXTRACTORS
 from app.core.config import resolve_model, resolve_requests_per_minute, settings
-from app.dev.bench.prompt import bench_run_context
+from app.dev.bench.prompt import CallTally, bench_run_context
 from app.dev.bench.redact import redact_string, redact_tree
 
 _SECONDS_PER_MINUTE = 60
+
+
+async def preflight() -> None:
+    """Prove the model backend is REACHABLE and AUTHENTICATED before a batch — one minimal live call
+    (mirrors verify-bedrock.py step 1). Raises ``AIClientError`` (the real cause attached) on failure, so
+    ``/start`` can refuse rather than march an entire corpus into ``"AI call failed"`` records.
+
+    Under Bedrock it also (a) exports ``settings.aws_profile`` into ``os.environ`` when the launching
+    shell provided none — so the backend does not depend on that shell — and (b) rebuilds the cached
+    client, so a freshly refreshed SSO session (``aws sso login``) is picked up WITHOUT a server restart."""
+    from app.ai.client import complete, get_anthropic_client
+
+    if settings.ai_provider == "bedrock":
+        if settings.aws_profile and os.environ.get("AWS_PROFILE") != settings.aws_profile:
+            os.environ["AWS_PROFILE"] = settings.aws_profile
+        # Drop the cached client so this call reconstructs it and re-reads the current AWS credentials.
+        get_anthropic_client.cache_clear()
+
+    await complete(
+        model=settings.anthropic_model_classification,
+        messages=[{"role": "user", "content": "ping"}],
+        max_tokens=1,
+    )
+
 
 # The document formats the pipeline can read natively (LP-37 content block). Anything else is
 # "unreadable" for the bench and reported, not sent.
@@ -196,8 +220,7 @@ async def run_one(f: DiscoveredFile) -> dict[str, Any]:
                 "note": f"no registered extractor for {dtype!r}",
             }
             record["findings"] = _per_document_findings(dtype, None)
-            record["rate_limited"] = tally.current_doc_throttled
-            return record
+            return _tag_outcome(record, tally)
 
         result = await extractor(
             content, f.media_type
@@ -231,7 +254,17 @@ async def run_one(f: DiscoveredFile) -> dict[str, Any]:
     )
     record["extraction"] = extraction
     record["findings"] = _per_document_findings(dtype, body)
+    return _tag_outcome(record, tally)
+
+
+def _tag_outcome(record: dict[str, Any], tally: CallTally) -> dict[str, Any]:
+    """Stamp the per-document infrastructure-outcome flags from the call tally. ``rate_limited`` = the
+    document was throttled; ``ai_failed`` = any model call failed (auth/throttle/bad-request); the
+    ``failure_error_type`` names the cause. These let the report separate infrastructure failures from
+    genuine coverage — a throttle or an auth failure must never read as a schema gap."""
     record["rate_limited"] = tally.current_doc_throttled
+    record["ai_failed"] = tally.current_doc_failed
+    record["failure_error_type"] = tally.last_error_type
     return record
 
 
@@ -261,5 +294,9 @@ class RunProgress:
     cancelled: bool = False
     #: documents tagged rate_limited (INFRASTRUCTURE failures — throttling — not coverage gaps)
     rate_limited: int = 0
-    #: set when the run stopped itself, e.g. "rate_limited" after N consecutive throttled documents
+    #: documents where any model call failed (auth / throttle / bad-request) — never coverage gaps
+    failed: int = 0
+    #: set when the run stopped itself: "rate_limited" (throttling) or "ai_error" (auth/other failures)
     aborted_reason: str | None = None
+    #: the underlying cause type at abort (e.g. "NoCredentialsError"), surfaced in status + summary
+    abort_error_type: str | None = None

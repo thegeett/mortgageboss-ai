@@ -27,8 +27,9 @@ import structlog
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
+from app.ai.client import AIClientError
 from app.core.config import resolve_requests_per_minute, settings
-from app.dev.bench.engine import RunProgress, preview, run_one, walk_documents
+from app.dev.bench.engine import RunProgress, preflight, preview, run_one, walk_documents
 from app.dev.bench.findings import finalize_output, load_records, write_record
 from app.dev.bench.redact import redact_string
 
@@ -40,9 +41,10 @@ router = APIRouter(prefix="/dev/extraction-bench", tags=["dev-extraction-bench"]
 # doesn't accumulate run state unboundedly (the heavy `records` list is also dropped post-write).
 _RUNS: dict[str, RunProgress] = {}
 _MAX_RUNS = 50
-#: Abort the run after this many CONSECUTIVE throttled documents — that is almost certainly the rate
-#: limit, and continuing would only write false schema findings (throttles read as coverage gaps).
-_THROTTLE_ABORT_STREAK = 3
+#: Abort the run after this many CONSECUTIVE failed documents (throttle / auth / error) — that is almost
+#: certainly an infrastructure problem, not the corpus, and continuing would only write records that read
+#: as false schema findings. The 246x "AI call failed" run should have stopped at 5, not marched to 246.
+_FAILURE_ABORT_STREAK = 5
 # INSIDE the storage dir (not a sibling) so it inherits storage's gitignore — bench output derived from
 # borrower documents can never be accidentally committed (LP review). Not web-served: the download
 # endpoint serves by DB storage_path, and these files have no DB row.
@@ -118,6 +120,20 @@ async def bench_start(req: StartRequest) -> StartResponse:
     root = Path(req.root).expanduser()
     if not root.is_dir():
         raise HTTPException(status_code=400, detail=f"not a directory: {root}")
+    # PREFLIGHT — one minimal live call proving the model backend is reachable + authenticated BEFORE we
+    # process anything. Refuse with the REAL cause rather than march the whole corpus into "AI call
+    # failed" records (as the 246-doc run did when the AWS session was not logged in).
+    try:
+        await preflight()
+    except AIClientError as err:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Preflight failed — the model backend is unreachable or unauthenticated: "
+                f"{err.__cause__ or err}. Under Bedrock this is almost always AWS credentials: set "
+                f"AWS_PROFILE (now in .env) and run `aws sso login --profile <name>`, then retry."
+            ),
+        ) from err
     all_readable = [f for f in walk_documents(root) if f.media_type is not None]
 
     if req.resume_run_id:
@@ -175,7 +191,7 @@ async def _run(
     start_index: int,
 ) -> None:
     index = start_index
-    consecutive_throttled = 0
+    consecutive_failed = 0
     for f in readable:
         if progress.cancelled:
             break
@@ -199,20 +215,38 @@ async def _run(
         index += 1
         progress.cost_so_far += (record.get("extraction") or {}).get("cost_estimate") or 0
         progress.done += 1
-        # A run of throttled documents is almost certainly the rate limit, not the corpus — abort rather
-        # than keep writing records that would read as coverage gaps.
         if record.get("rate_limited"):
             progress.rate_limited += 1
-            consecutive_throttled += 1
-            if consecutive_throttled >= _THROTTLE_ABORT_STREAK:
-                progress.aborted_reason = "rate_limited"
-                logger.warning("bench_aborted_throttling", run_id=run_id, done=progress.done)
+        # A run of consecutive FAILURES (throttle / auth / error) is almost certainly infrastructure, not
+        # the corpus — abort rather than keep writing records that would read as coverage gaps.
+        failed = bool(record.get("ai_failed")) or record.get("classified_type") == "error"
+        if failed:
+            progress.failed += 1
+            consecutive_failed += 1
+            if consecutive_failed >= _FAILURE_ABORT_STREAK:
+                progress.aborted_reason = (
+                    "rate_limited" if record.get("rate_limited") else "ai_error"
+                )
+                progress.abort_error_type = record.get("failure_error_type")
+                logger.warning(
+                    "bench_aborted",
+                    run_id=run_id,
+                    done=progress.done,
+                    reason=progress.aborted_reason,
+                    error_type=progress.abort_error_type,
+                )
                 break
         else:
-            consecutive_throttled = 0
+            consecutive_failed = 0
     progress.current = None
     if progress.records:
-        finalize_output(root, progress.records, out_dir, aborted_reason=progress.aborted_reason)
+        finalize_output(
+            root,
+            progress.records,
+            out_dir,
+            aborted_reason=progress.aborted_reason,
+            abort_error_type=progress.abort_error_type,
+        )
         progress.records = []  # output is on disk; free the heavy per-document records (status needs only counts)
 
 
@@ -228,8 +262,12 @@ class StatusResponse(BaseModel):
     #: documents throttled (infrastructure failures, NOT coverage gaps) — surfaced so a rate-limit
     #: problem is never mistaken for a schema/network finding
     rate_limited: int
-    #: set when the run stopped itself, e.g. "rate_limited"; resume to finish the corpus
+    #: documents where any model call failed (auth / throttle / error) — never coverage gaps
+    failed: int
+    #: set when the run stopped itself: "rate_limited" or "ai_error"; resume to finish the corpus
     aborted_reason: str | None
+    #: the underlying cause type at abort (e.g. "NoCredentialsError"), so the UI can name it
+    abort_error_type: str | None
 
 
 @router.get("/status/{run_id}", response_model=StatusResponse)
@@ -248,7 +286,9 @@ def bench_status(run_id: str) -> StatusResponse:
         finished=p.done >= p.total or p.cancelled or p.aborted_reason is not None,
         output_dir=str(_OUTPUT_ROOT / run_id),
         rate_limited=p.rate_limited,
+        failed=p.failed,
         aborted_reason=p.aborted_reason,
+        abort_error_type=p.abort_error_type,
     )
 
 

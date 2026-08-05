@@ -41,7 +41,9 @@ export interface BenchStatus {
   finished: boolean;
   output_dir: string;
   rate_limited: number;
+  failed: number;
   aborted_reason: string | null;
+  abort_error_type: string | null;
 }
 
 export async function previewBench(root: string): Promise<BenchPreview> {

@@ -189,14 +189,18 @@ RECORDS_LOG = "_records.jsonl"
 
 
 def write_record(out_dir: Path, record: dict[str, Any], index: int) -> None:
-    """Persist ONE document's record immediately: per-document JSON (``<type>/<index>-<file>.json``) plus
+    """Persist ONE document's record immediately: per-document JSON (``<type>/<index>-<stem>.json``) plus
     an append to the resume log. Called as each document completes, so a crash loses at most the
-    in-flight document — everything before it is already on disk and resumable."""
+    in-flight document — everything before it is already on disk and resumable.
+
+    The SOURCE extension is stripped before appending ``.json`` (``foo.pdf`` → ``<n>-foo.json``, not
+    ``foo.pdf.json``), so a file browser doesn't try to open the JSON as a PDF."""
     out_dir.mkdir(parents=True, exist_ok=True)
     dtype = record["classified_type"]
     type_dir = out_dir / dtype
     type_dir.mkdir(parents=True, exist_ok=True)
-    safe = "".join(c if c.isalnum() or c in "-_." else "_" for c in record["source_filename"])[:80]
+    stem = Path(record["source_filename"]).stem  # drop the source extension (.pdf/.png/…)
+    safe = "".join(c if c.isalnum() or c in "-_." else "_" for c in stem)[:80]
     (type_dir / f"{index}-{safe}.json").write_text(
         json.dumps(record, indent=1, default=str), encoding="utf-8"
     )
@@ -224,22 +228,33 @@ def load_records(out_dir: Path) -> list[dict[str, Any]]:
     return records
 
 
+def _is_failed(r: dict[str, Any]) -> bool:
+    """A record with NO successful model result — a throttle, an auth/other AI failure, or an unexpected
+    per-document error. These are INFRASTRUCTURE failures, never coverage: they are partitioned out of
+    every finding so a failed call can never read as a schema gap."""
+    return bool(r.get("ai_failed")) or r.get("classified_type") == "error"
+
+
 def finalize_output(
     root: Path,
     records: list[dict[str, Any]],
     out_dir: Path,
     *,
     aborted_reason: str | None = None,
+    abort_error_type: str | None = None,
 ) -> dict[str, Any]:
     """Write the cross-document ``_SUMMARY.md`` + ``_FINDINGS.csv`` from all records. Per-document JSON is
     already on disk (written incrementally by :func:`write_record`). No DB.
 
-    ⚠️ Rate-limited documents are INFRASTRUCTURE failures (throttling), NOT coverage gaps — they are
-    partitioned OUT of every finding and reported as their own count, so a throttle can never read as a
-    schema gap."""
+    ⚠️ Infrastructure failures (throttling, auth, unexpected errors) are NOT coverage gaps — they are
+    partitioned OUT of every finding and reported as their own counts. And if NOTHING succeeded, the
+    summary is marked **FAILED** at the top, so a run where every call failed can never read like a
+    coverage result (as the 246x "AI call failed" run did)."""
     out_dir.mkdir(parents=True, exist_ok=True)
     rate_limited = [r for r in records if r.get("rate_limited")]
-    usable = [r for r in records if not r.get("rate_limited")]
+    auth_or_other = [r for r in records if r.get("ai_failed") and not r.get("rate_limited")]
+    errored = [r for r in records if r.get("classified_type") == "error"]
+    usable = [r for r in records if not _is_failed(r)]
     per_type = _by_type(usable)
 
     findings_by_type = {
@@ -254,16 +269,30 @@ def finalize_output(
     cls = classification(usable)
     readiness = rule_readiness(usable)
 
+    # the most common underlying cause among failures — surfaced so an auth error is named, not guessed
+    error_types = Counter(
+        r.get("failure_error_type") for r in records if r.get("failure_error_type")
+    )
+    breakdown = {
+        "total": len(records),
+        "usable": len(usable),
+        "rate_limited": len(rate_limited),
+        "auth_or_other": len(auth_or_other),
+        "errored": len(errored),
+        "top_error_type": abort_error_type
+        or (error_types.most_common(1)[0][0] if error_types else None),
+    }
+
     _write_findings_csv(out_dir / "_FINDINGS.csv", findings_by_type)
     summary = _render_summary(
-        root, usable, findings_by_type, cls, readiness, len(rate_limited), aborted_reason
+        root, usable, findings_by_type, cls, readiness, breakdown, aborted_reason
     )
     (out_dir / "_SUMMARY.md").write_text(summary, encoding="utf-8")
     return {
         "types": findings_by_type,
         "classification": cls,
         "rule_readiness": readiness,
-        "rate_limited": len(rate_limited),
+        "failed": breakdown,
     }
 
 
@@ -308,13 +337,34 @@ def _render_summary(
     findings_by_type: dict[str, Any],
     cls: dict[str, Any],
     readiness: list[dict[str, Any]],
-    rate_limited: int,
+    breakdown: dict[str, Any],
     aborted_reason: str | None,
 ) -> str:
     total_cost = round(
         sum((r.get("extraction") or {}).get("cost_estimate") or 0 for r in records), 4
     )
-    lines = [
+    total = breakdown["total"]
+    usable = breakdown["usable"]
+    top_err = breakdown.get("top_error_type")
+    lines: list[str] = []
+
+    # If NOTHING succeeded, mark the run FAILED at the very top — it must never read like a coverage
+    # result (the 246x "AI call failed" run said "246 documents, types: 1", which read as a finding).
+    if total > 0 and usable == 0:
+        cause = f" ({top_err})" if top_err else ""
+        lines += [
+            f"# ⚠️ RUN FAILED — 0 of {total} documents produced a result",
+            "",
+            f"> Every model call failed{cause}. This is an **INFRASTRUCTURE failure** (e.g. credentials /"
+            " access / throttling), **NOT a coverage result** — there are no findings below to read. Fix"
+            " the cause (check AWS credentials: `AWS_PROFILE` + `aws sso login`, then the `/start`"
+            " preflight) and re-run.",
+            "",
+            "---",
+            "",
+        ]
+
+    lines += [
         "# Extraction bench — cross-document report",
         "",
         "> ⚠️ This measures **COVERAGE** (was a field POPULATED), **NOT accuracy** (whether the value is correct).",
@@ -322,24 +372,35 @@ def _render_summary(
         " (`[NAME]`/`[SSN]`/… by the model, plus a digit/email regex backstop) — so a `borrower_name` fill"
         " rate is not evidence names are read. Nothing here was persisted to the database.",
         "",
-        f"- Root: `{root}`  ·  documents analysed: **{len(records)}**  ·  types: **{len(findings_by_type)}**",
+        f"- Root: `{root}`  ·  documents analysed (succeeded): **{usable}** of {total}  ·  types: **{len(findings_by_type)}**",
         f"- Estimated total cost (from real tokens): **${total_cost}**",
     ]
-    # The rate-limit line must be impossible to miss: a throttled document is an infrastructure failure,
-    # NOT a coverage gap, and is excluded from every finding below. State the count either way.
-    if rate_limited:
+    # Infrastructure-failure counts must be impossible to miss and are excluded from every finding below.
+    rl, auth, err = breakdown["rate_limited"], breakdown["auth_or_other"], breakdown["errored"]
+    if rl or auth or err:
+        parts = []
+        if rl:
+            parts.append(f"{rl} rate-limited (throttled)")
+        if auth:
+            parts.append(f"{auth} auth/other AI failure{'s' if auth != 1 else ''}")
+        if err:
+            parts.append(f"{err} error{'s' if err != 1 else ''}")
+        cause = f" — top cause: `{top_err}`" if top_err else ""
         lines += [
-            f"- ⚠️ **Rate-limited documents: {rate_limited}** — these were THROTTLED (an infrastructure"
-            " failure), **excluded from the findings below**. They are NOT coverage gaps; do not read them"
-            " as schema problems. If this is high, raise the pacing / lower the corpus and re-run.",
+            f"- ⚠️ **Infrastructure failures (excluded from findings): {', '.join(parts)}**{cause}. These"
+            " are NOT coverage gaps — do not read them as schema problems.",
         ]
     else:
-        lines += ["- Rate-limited documents: **0** (no throttling observed)."]
-    if aborted_reason == "rate_limited":
+        lines += ["- Infrastructure failures: **0** (no throttling / auth / errors observed)."]
+    if aborted_reason:
+        why = (
+            "consecutive throttling"
+            if aborted_reason == "rate_limited"
+            else "consecutive AI failures"
+        )
         lines += [
-            "- 🛑 **RUN ABORTED** — too many consecutive throttled documents. The findings below cover only"
-            " what completed before the abort; the corpus was NOT fully analysed. Set/raise"
-            " `AI_REQUESTS_PER_MINUTE_BEDROCK` and resume.",
+            f"- 🛑 **RUN ABORTED** — {why}. The corpus was NOT fully analysed; findings cover only what"
+            " completed. Fix the cause and resume.",
         ]
     lines += [
         "",

@@ -114,9 +114,17 @@ run is ~50 min (floor). Four things keep a batch from corrupting its own finding
   finding** and **counted separately** in `_SUMMARY.md` — a throttle can never read as a coverage gap.
   The summary states the rate-limited count on every run (`0` when none), so a rate-limit problem is
   never mistaken for a schema or network finding.
-- **A run of throttles aborts the run.** After 3 consecutive throttled documents (almost certainly the
-  rate limit, not the corpus) the run stops itself, marks `aborted_reason="rate_limited"`, and writes
-  what it has rather than continuing to log false schema gaps.
+- **A run of failures aborts the run.** After **5 consecutive failed documents** — throttle, auth, or
+  error (almost certainly infrastructure, not the corpus) — the run stops itself, marks
+  `aborted_reason` (`rate_limited` or `ai_error`, with the cause type), and writes what it has rather
+  than continuing to log false schema gaps. (This is why the 246 × "AI call failed" run should have
+  stopped at 5.)
+- **A preflight refuses a doomed run.** `POST /start` first makes one minimal live call; if the model
+  backend is unreachable/unauthenticated (e.g. no AWS credentials) it returns **409 with the real error**
+  rather than processing the whole corpus into `"AI call failed"` records. See
+  [`extraction-bench-preflight.md`](extraction-bench-preflight.md).
+- **A run where nothing succeeded is marked FAILED.** If 0 documents produced a result, `_SUMMARY.md`
+  opens with a **`⚠️ RUN FAILED`** banner naming the cause — it can never read like a coverage result.
 
 **Resume.** Each document's JSON is written **incrementally** as it completes, plus an append to a
 `_records.jsonl` log — so a crash (or an abort, or a cancel) at document 150 of a 50–90 min run loses at
@@ -134,8 +142,10 @@ hitting Bedrock, or account for the workers' share in the cap.
 Written under `<storage_local_path>/bench_output/<run_id>/` (inside the storage dir so it inherits
 storage's gitignore; outside the DB, never persisted to it):
 
-- **per-document JSON** at `<type>/<n>-<file>.json` — the redacted classification + extraction record
-  for one document, written **incrementally** as each document completes;
+- **per-document JSON** at `<type>/<n>-<stem>.json` — the redacted classification + extraction record
+  for one document, written **incrementally** as each document completes. The source extension is
+  **stripped** before `.json` (`foo.pdf` → `<n>-foo.json`, not `foo.pdf.json`) so a file browser doesn't
+  treat the JSON as a PDF;
 - **`_records.jsonl`** — one record per line, the resume log (source of truth for resuming + the final
   aggregation);
 - **`_SUMMARY.md`** — the cross-document report (the five findings, human-readable), headed by the

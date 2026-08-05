@@ -195,24 +195,29 @@ async def test_throttle_tagged_when_cause_is_transient() -> None:
             with pytest.raises(AIClientError):
                 await model_call.complete(system="s", messages=[], max_tokens=1, model="m")
             assert tally.current_doc_throttled is True
+            assert tally.current_doc_failed is True  # a throttle is also a failure
             assert tally.throttled_calls == 1
     finally:
         _reload_extract_complete()
 
 
-async def test_non_transient_failure_is_not_tagged_as_throttle() -> None:
-    # A non-transient cause (a genuinely bad document/payload) is a real signal, NOT a throttle.
+async def test_non_transient_failure_tagged_as_failure_not_throttle() -> None:
+    # A non-transient cause (e.g. an auth/credentials error) is an infrastructure failure but NOT a
+    # throttle — it must set current_doc_failed (so the run can abort/exclude it) while leaving
+    # current_doc_throttled False, and capture the cause type for the report.
     import app.ai.extraction.model_call as model_call
 
     err = AIClientError("AI call failed")
-    err.__cause__ = ValueError("bad payload")
+    err.__cause__ = ValueError("no credentials")
     model_call.complete = AsyncMock(side_effect=err)  # type: ignore[assignment]
     try:
         with bench_run_context() as tally:
             with pytest.raises(AIClientError):
                 await model_call.complete(system="s", messages=[], max_tokens=1, model="m")
-            assert tally.current_doc_throttled is False
+            assert tally.current_doc_failed is True  # a failure...
+            assert tally.current_doc_throttled is False  # ...but NOT a throttle
             assert tally.throttled_calls == 0
+            assert tally.last_error_type == "ValueError"  # cause captured for the report
     finally:
         _reload_extract_complete()
 
@@ -223,8 +228,17 @@ async def test_non_transient_failure_is_not_tagged_as_throttle() -> None:
 def test_write_record_and_load_records_roundtrip(tmp_path: Path) -> None:
     rec = {"source_filename": "a.pdf", "classified_type": "w2", "rate_limited": False}
     write_record(tmp_path, rec, 0)
-    assert (tmp_path / "w2" / "0-a.pdf.json").is_file()  # per-doc JSON on disk immediately
+    assert (tmp_path / "w2" / "0-a.json").is_file()  # per-doc JSON on disk immediately
     assert load_records(tmp_path) == [rec]  # resume log round-trips
+
+
+def test_write_record_strips_source_extension(tmp_path: Path) -> None:
+    # foo.pdf -> <n>-foo.json (NOT foo.pdf.json), so a file browser doesn't try to open the JSON as a PDF.
+    rec = {"source_filename": "Mortgage statement 304.pdf", "classified_type": "mortgage_statement"}
+    write_record(tmp_path, rec, 12)
+    written = list((tmp_path / "mortgage_statement").glob("*.json"))
+    assert [p.name for p in written] == ["12-Mortgage_statement_304.json"]
+    assert not any(".pdf.json" in p.name for p in written)
 
 
 def test_load_records_skips_a_corrupt_line(tmp_path: Path) -> None:
@@ -302,6 +316,7 @@ def test_finalize_excludes_rate_limited_from_findings(tmp_path: Path) -> None:
             "classified_type": "credit_report",
             "classification_confidence": 0.4,
             "rate_limited": True,
+            "ai_failed": True,  # a real throttled record is also an AI failure
             "extraction": {
                 "status": "failed",
                 "typed_core": {},
@@ -312,23 +327,47 @@ def test_finalize_excludes_rate_limited_from_findings(tmp_path: Path) -> None:
         },
     ]
     out = finalize_output(tmp_path, records, tmp_path / "o")
-    assert out["rate_limited"] == 1
+    assert out["failed"]["rate_limited"] == 1
+    assert out["failed"]["usable"] == 1
     # the throttled doc's type must NOT appear as a (false) coverage finding
     assert "credit_report" not in out["types"]
     assert "pay_stub" in out["types"]
     summary = (tmp_path / "o" / "_SUMMARY.md").read_text(encoding="utf-8")
-    assert "Rate-limited documents: 1" in summary  # count is stated, prominently
+    assert "1 rate-limited (throttled)" in summary  # count is stated, prominently
+    assert "RUN FAILED" not in summary  # something succeeded → not a failed run
+
+
+def test_finalize_marks_run_failed_when_nothing_succeeds(tmp_path: Path) -> None:
+    # The 246 x "AI call failed" case: every doc failed → the summary must be marked FAILED at the top and
+    # must NOT read like a coverage result.
+    records = [
+        {
+            "source_filename": f"d{i}.pdf",
+            "classified_type": "unknown",
+            "classification_confidence": 0.0,
+            "classification_reasoning": "AI call failed",
+            "rate_limited": False,
+            "ai_failed": True,
+            "failure_error_type": "NoCredentialsError",
+            "extraction": {"status": "no_extractor"},
+        }
+        for i in range(6)
+    ]
+    out = finalize_output(tmp_path, records, tmp_path / "o")
+    assert out["failed"]["usable"] == 0
+    assert out["failed"]["auth_or_other"] == 6
+    summary = (tmp_path / "o" / "_SUMMARY.md").read_text(encoding="utf-8")
+    assert summary.startswith("# ⚠️ RUN FAILED")  # FAILED banner at the very top
+    assert "NoCredentialsError" in summary  # the real cause is named
 
 
 async def test_run_aborts_after_consecutive_throttles(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # Several "AI call failed" in a row is almost certainly the rate limit — the run must abort rather than
-    # keep writing records that read as schema gaps.
+    # Several throttles in a row is almost certainly the rate limit — the run must abort, not march on.
     from app.api import dev_bench
     from app.dev.bench.engine import RunProgress
 
-    # Real Paths under root so _run can compute source_relpath = path.relative_to(root).
     files = [SimpleNamespace(path=tmp_path / f"d{i}.pdf") for i in range(10)]
 
     async def fake_run_one(f: object) -> dict[str, object]:
@@ -336,6 +375,7 @@ async def test_run_aborts_after_consecutive_throttles(
             "source_filename": f.path.name,  # type: ignore[attr-defined]
             "classified_type": "pay_stub",
             "rate_limited": True,
+            "ai_failed": True,  # a throttle is a failure
             "extraction": {"cost_estimate": 0.0},
         }
 
@@ -344,5 +384,62 @@ async def test_run_aborts_after_consecutive_throttles(
     await dev_bench._run("rid", tmp_path, files, tmp_path / "out", progress, 0)
 
     assert progress.aborted_reason == "rate_limited"
-    assert progress.done == dev_bench._THROTTLE_ABORT_STREAK  # stopped early, not all 10
-    assert progress.rate_limited == dev_bench._THROTTLE_ABORT_STREAK
+    assert progress.done == dev_bench._FAILURE_ABORT_STREAK  # stopped early (5), not all 10
+    assert progress.rate_limited == dev_bench._FAILURE_ABORT_STREAK
+    assert progress.failed == dev_bench._FAILURE_ABORT_STREAK
+
+
+async def test_run_aborts_after_consecutive_auth_failures(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # This is the 246 x "AI call failed" case: auth failures (non-throttle) must ALSO abort after N, with
+    # the cause reported — it should have stopped at 5, not 246.
+    from app.api import dev_bench
+    from app.dev.bench.engine import RunProgress
+
+    files = [SimpleNamespace(path=tmp_path / f"d{i}.pdf") for i in range(10)]
+
+    async def fake_run_one(f: object) -> dict[str, object]:
+        return {
+            "source_filename": f.path.name,  # type: ignore[attr-defined]
+            "classified_type": "unknown",
+            "rate_limited": False,  # NOT a throttle
+            "ai_failed": True,  # an auth/other AI failure
+            "failure_error_type": "NoCredentialsError",
+            "extraction": {"status": "no_extractor"},
+        }
+
+    monkeypatch.setattr(dev_bench, "run_one", fake_run_one)
+    progress = RunProgress(total=len(files))
+    await dev_bench._run("rid", tmp_path, files, tmp_path / "out", progress, 0)
+
+    assert progress.aborted_reason == "ai_error"  # distinguished from throttling
+    assert progress.abort_error_type == "NoCredentialsError"  # the real cause
+    assert progress.done == dev_bench._FAILURE_ABORT_STREAK
+    assert progress.rate_limited == 0  # not throttling
+
+
+# --------------------------------------------------------------------------- #
+# Preflight: refuse to start when the model backend is unreachable/unauthenticated
+# --------------------------------------------------------------------------- #
+async def test_preflight_raises_when_backend_unreachable(monkeypatch: pytest.MonkeyPatch) -> None:
+    import app.ai.client as client
+    from app.core.config import settings
+    from app.dev.bench.engine import preflight
+
+    monkeypatch.setattr(settings, "ai_provider", "anthropic")  # skip the bedrock env/cache branch
+    err = AIClientError("AI call failed")
+    err.__cause__ = RuntimeError("NoCredentials")
+    monkeypatch.setattr(client, "complete", AsyncMock(side_effect=err))
+    with pytest.raises(AIClientError):
+        await preflight()
+
+
+async def test_preflight_passes_when_backend_reachable(monkeypatch: pytest.MonkeyPatch) -> None:
+    import app.ai.client as client
+    from app.core.config import settings
+    from app.dev.bench.engine import preflight
+
+    monkeypatch.setattr(settings, "ai_provider", "anthropic")
+    monkeypatch.setattr(client, "complete", AsyncMock(return_value=None))
+    await preflight()  # no raise

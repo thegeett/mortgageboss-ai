@@ -273,19 +273,30 @@ export default function ExtractionBenchPage() {
               {status.done}/{status.total} documents
             </span>
             <span>cost so far ${status.cost_so_far.toFixed(2)}</span>
-            {status.rate_limited > 0 && (
+            {status.failed > 0 && (
               <span className="font-medium text-warning">
-                {status.rate_limited} rate-limited (throttled, not coverage gaps)
+                {status.failed} failed
+                {status.rate_limited > 0 ? ` (${status.rate_limited} throttled)` : ""} —
+                infrastructure, not coverage gaps
               </span>
             )}
             {status.current && <span className="font-mono">{status.current}</span>}
           </div>
 
-          {status.aborted_reason === "rate_limited" && (
+          {status.aborted_reason && (
             <div className="rounded-md border border-danger/30 bg-danger/5 px-3 py-2 text-xs text-danger">
-              🛑 Aborted — too many consecutive throttled documents. The corpus was not fully
-              analysed. Raise <span className="font-mono">AI_REQUESTS_PER_MINUTE_BEDROCK</span>,
-              then resume.
+              🛑 Aborted — too many consecutive{" "}
+              {status.aborted_reason === "rate_limited" ? "throttled" : "failed"} documents
+              {status.abort_error_type ? ` (${status.abort_error_type})` : ""}. The corpus was not
+              fully analysed.{" "}
+              {status.aborted_reason === "rate_limited" ? (
+                <>
+                  Raise <span className="font-mono">AI_REQUESTS_PER_MINUTE_BEDROCK</span>, then
+                  resume.
+                </>
+              ) : (
+                <>Fix credentials (AWS_PROFILE + `aws sso login`), then resume.</>
+              )}
             </div>
           )}
 

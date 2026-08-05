@@ -56,8 +56,10 @@ class CallTally:
     run total. The run-level rollup is the engine's ``progress.rate_limited`` (a count of throttled docs).
     """
 
+    current_doc_failed: bool = False
     current_doc_throttled: bool = False
     throttled_calls: int = 0
+    last_error_type: str | None = None
 
 
 # Set by ``bench_run_context``; the patched ``complete`` reads it. A ContextVar (not a global) so it
@@ -65,26 +67,32 @@ class CallTally:
 _TALLY: ContextVar[CallTally | None] = ContextVar("bench_call_tally", default=None)
 
 
-def _record_if_throttled(err: AIClientError) -> None:
-    """If ``err`` was caused by a transient failure (throttle/capacity/5xx/timeout) — i.e. an
-    INFRASTRUCTURE failure, not a bad document — mark the current document and bump the run tally."""
+def _record_failure(err: AIClientError) -> None:
+    """Record an ``AIClientError`` on the current document. EVERY failure sets ``current_doc_failed`` and
+    captures the underlying cause type; a TRANSIENT cause (throttle/capacity/5xx/timeout) additionally sets
+    ``current_doc_throttled``. So a non-transient failure — missing/expired AWS credentials, access denied —
+    is flagged as a failure but NOT a throttle: that is the auth-vs-throttle distinction the report needs."""
+    tally = _TALLY.get()
+    if tally is None:
+        return
     cause = err.__cause__
+    tally.current_doc_failed = True
+    if cause is not None:
+        tally.last_error_type = type(cause).__name__
     if cause is not None and isinstance(cause, Exception) and _is_transient(cause):
-        tally = _TALLY.get()
-        if tally is not None:
-            tally.current_doc_throttled = True
-            tally.throttled_calls += 1
+        tally.current_doc_throttled = True
+        tally.throttled_calls += 1
 
 
 def _patched_complete(real: Any, suffix: str) -> Any:
-    """Wrap ``complete``: append ``suffix`` to the system prompt (may be empty) and observe throttling.
+    """Wrap ``complete``: append ``suffix`` to the system prompt (may be empty) and observe failures.
     Always re-raises — production's swallow-into-sentinel behaviour is unchanged; the bench only watches."""
 
     async def _patched(*, system: str, **kwargs: Any) -> AICompletion:
         try:
             return cast(AICompletion, await real(system=system + suffix, **kwargs))
         except AIClientError as err:
-            _record_if_throttled(err)
+            _record_failure(err)
             raise
 
     return _patched
