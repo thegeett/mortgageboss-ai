@@ -60,6 +60,8 @@ logs/
 # location so a prior run's borrower-derived output can never be committed.
 /bench_output/
 /backend/bench_output/
+# A dev-chosen BENCH_OUTPUT_DIR inside the repo — borrower-derived output must never be committed.
+/mortgageboss-batch-bench-out/
 
 # ---- Databases ----
 *.db

@@ -199,6 +199,11 @@ class Settings(BaseSettings):
     storage_backend: Literal["local", "s3"] = "local"
     storage_local_path: str = "./storage"
 
+    # Where the dev extraction bench writes its output. None → inside storage (``<storage>/bench_output``),
+    # which is gitignored so borrower-derived output cannot be committed. Override to a dev-chosen path;
+    # if that path is inside the repo, add it to .gitignore (bench output is derived from real documents).
+    bench_output_dir: str | None = None
+
     # S3 storage (C0) — used only when storage_backend == "s3".
     # NOTE: there are deliberately NO access-key/secret-key settings. Credentials come
     # from botocore's default provider chain (SSO/profile locally, the task role on

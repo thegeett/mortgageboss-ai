@@ -45,10 +45,15 @@ _MAX_RUNS = 50
 #: certainly an infrastructure problem, not the corpus, and continuing would only write records that read
 #: as false schema findings. The 246x "AI call failed" run should have stopped at 5, not marched to 246.
 _FAILURE_ABORT_STREAK = 5
-# INSIDE the storage dir (not a sibling) so it inherits storage's gitignore — bench output derived from
-# borrower documents can never be accidentally committed (LP review). Not web-served: the download
-# endpoint serves by DB storage_path, and these files have no DB row.
-_OUTPUT_ROOT = Path(settings.storage_local_path).resolve() / "bench_output"
+# Where output is written. Default: INSIDE the storage dir (not a sibling) so it inherits storage's
+# gitignore — bench output derived from borrower documents can never be accidentally committed (LP review).
+# Overridable via BENCH_OUTPUT_DIR for a dev-chosen location (gitignore it if inside the repo). Not
+# web-served: the download endpoint serves by DB storage_path, and these files have no DB row.
+_OUTPUT_ROOT = (
+    Path(settings.bench_output_dir).expanduser().resolve()
+    if settings.bench_output_dir
+    else Path(settings.storage_local_path).resolve() / "bench_output"
+)
 _TASKS: set[asyncio.Task[None]] = (
     set()
 )  # keep strong refs so a background run isn't GC'd mid-flight
