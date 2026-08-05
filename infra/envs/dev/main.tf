@@ -205,3 +205,142 @@ resource "aws_budgets_budget" "monthly" {
     subscriber_email_addresses = [var.budget_notification_email]
   }
 }
+
+# --------------------------------------------------------------------------- #
+# Compute (C3) — ECS cluster, three Fargate services, ALB, per-task IAM
+# --------------------------------------------------------------------------- #
+
+# The images live in the SHARED registry, which is a THIRD state file.
+#
+# Read with `data.aws_ecr_repository`, deliberately NOT `terraform_remote_state`:
+#
+#   * terraform_remote_state reads the ENTIRE shared state, so this environment
+#     would need s3:GetObject on that state object — and would then hold every
+#     attribute of every resource in it, not just the two values wanted here.
+#   * It also couples to shared's OUTPUT NAMES. Renaming an output there would
+#     break every environment, turning a local refactor into a fleet-wide one.
+#   * The repository NAME is the real contract between the two states, and it is
+#     already a variable. Looking it up by name depends on the AWS resource rather
+#     than on how another state file happens to be shaped.
+#
+# Trade-off accepted: no plan-time ordering. If shared has not been applied, this
+# fails with a clear "repository not found" rather than an implicit dependency.
+data "aws_ecr_repository" "api" {
+  name = var.ecr_repository_names["api"]
+}
+
+data "aws_ecr_repository" "frontend" {
+  name = var.ecr_repository_names["frontend"]
+}
+
+locals {
+  # Bedrock ARNs, assembled here so the module stays account- and region-free.
+  #
+  # BOTH lists are required to invoke a cross-region inference profile: the call
+  # authorises against the profile ARN and against the underlying foundation-model
+  # ARN in whichever region Bedrock routes to.
+  bedrock_inference_profile_arns = [
+    for id in values(var.bedrock_model_ids) :
+    "arn:aws:bedrock:${var.aws_region}:${var.aws_account_id}:inference-profile/${id}"
+  ]
+
+  # The foundation-model id is the profile id minus its `us.` routing prefix.
+  bedrock_foundation_model_arns = distinct(flatten([
+    for id in values(var.bedrock_model_ids) : [
+      for r in var.bedrock_profile_regions :
+      "arn:aws:bedrock:${r}::foundation-model/${replace(id, "/^us\\./", "")}"
+    ]
+  ]))
+}
+
+module "compute" {
+  source = "../../modules/compute"
+
+  name_prefix = var.name_prefix
+  tags        = local.tags
+  aws_region  = var.aws_region
+
+  vpc_id                      = module.network.vpc_id
+  public_subnet_ids           = module.network.public_subnet_ids
+  private_subnet_ids          = module.network.private_subnet_ids
+  alb_security_group_id       = module.network.alb_security_group_id
+  ecs_tasks_security_group_id = module.network.ecs_tasks_security_group_id
+
+  api_image        = "${data.aws_ecr_repository.api.repository_url}:${var.image_tag}"
+  frontend_image   = "${data.aws_ecr_repository.frontend.repository_url}:${var.image_tag}"
+  cpu_architecture = var.cpu_architecture
+
+  api_cpu         = var.api_cpu
+  api_memory      = var.api_memory
+  worker_cpu      = var.worker_cpu
+  worker_memory   = var.worker_memory
+  frontend_cpu    = var.frontend_cpu
+  frontend_memory = var.frontend_memory
+  desired_count   = var.desired_count
+
+  # Every one of these has an application default that silently behaves like local
+  # development — see docs/secrets-audit.md Note 5. STORAGE_BACKEND is the sharpest:
+  # left at "local" the app starts happily and writes documents to ephemeral
+  # container disk that vanishes on task replacement, with NO error.
+  environment_variables = {
+    ENVIRONMENT          = var.environment
+    LOG_FORMAT           = "json"
+    STORAGE_BACKEND      = "s3"
+    S3_BUCKET            = var.documents_bucket_name
+    S3_REGION            = var.aws_region
+    CORS_ALLOWED_ORIGINS = jsonencode(var.cors_allowed_origins)
+    AI_PROVIDER          = "bedrock"
+    BEDROCK_REGION       = var.aws_region
+
+    BEDROCK_MODEL_CLASSIFICATION = var.bedrock_model_ids["classification"]
+    BEDROCK_MODEL_EXTRACTION     = var.bedrock_model_ids["extraction"]
+    BEDROCK_MODEL_REASONING      = var.bedrock_model_ids["reasoning"]
+
+    AI_REQUESTS_PER_MINUTE_BEDROCK = tostring(var.ai_requests_per_minute_bedrock)
+
+    # REDIS_URL is CONFIG rather than a secret while the cache has no AUTH token:
+    # the URL is topology only. ⚠️ Both parts of this value matter — transit
+    # encryption makes rediss:// mandatory, and without ?ssl_cert_reqs=required
+    # redis-py verifies the certificate while kombu resolves to CERT_NONE.
+    REDIS_URL = "rediss://${module.data.redis_primary_endpoint}:6379/0?ssl_cert_reqs=required"
+  }
+
+  frontend_environment_variables = {
+    NODE_ENV = "production"
+    # NEXT_PUBLIC_API_URL is absent on purpose — it is inlined into the JavaScript
+    # bundle at BUILD time and is not read at runtime (C1). Setting it here would
+    # do nothing while appearing to work.
+  }
+
+  # DATABASE_URL carries the master password; JWT and encryption keys are secrets
+  # by definition. Injected by the ECS agent via the EXECUTION role, so no task
+  # role needs secretsmanager:GetSecretValue.
+  secret_arns = {
+    DATABASE_URL   = module.secrets.secret_arns["database-url"]
+    JWT_SECRET_KEY = module.secrets.secret_arns["jwt-secret-key"]
+    ENCRYPTION_KEY = module.secrets.secret_arns["encryption-key"]
+  }
+
+  log_group_names = module.data.log_group_names_by_key
+  log_group_arns  = module.data.log_group_arns
+
+  ecr_repository_arns = [
+    data.aws_ecr_repository.api.arn,
+    data.aws_ecr_repository.frontend.arn,
+  ]
+
+  documents_bucket_arn         = data.aws_s3_bucket.documents.arn
+  documents_bucket_kms_key_arn = var.documents_bucket_kms_key_arn
+  secrets_kms_key_arn          = module.secrets.kms_key_arn
+
+  bedrock_foundation_model_arns  = local.bedrock_foundation_model_arns
+  bedrock_inference_profile_arns = local.bedrock_inference_profile_arns
+
+  enable_container_insights = var.enable_container_insights
+  enable_execute_command    = var.enable_execute_command
+  enable_alb_access_logs    = var.enable_alb_access_logs
+  alb_access_logs_bucket    = var.alb_access_logs_bucket
+
+  worker_stop_timeout_seconds  = var.worker_stop_timeout_seconds
+  deregistration_delay_seconds = var.deregistration_delay_seconds
+}

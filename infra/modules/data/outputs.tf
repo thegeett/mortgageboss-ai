@@ -60,6 +60,27 @@ output "log_group_names" {
   value       = [for g in aws_cloudwatch_log_group.this : g.name]
 }
 
+output "log_group_arns" {
+  description = <<-EOT
+    Created CloudWatch log group ARNs.
+
+    Needed so the ECS execution role's logs:PutLogEvents can be scoped to exactly
+    these groups rather than "*" — a role that may write to any log group in the
+    account is a role that may also create noise anywhere in it.
+  EOT
+  value       = [for g in aws_cloudwatch_log_group.this : g.arn]
+}
+
+output "log_group_arns_by_key" {
+  description = "Map of the trailing path segment (api/worker/frontend) to log group ARN."
+  value       = { for k, g in aws_cloudwatch_log_group.this : reverse(split("/", k))[0] => g.arn }
+}
+
+output "log_group_names_by_key" {
+  description = "Map of the trailing path segment (api/worker/frontend) to log group NAME, for the awslogs driver."
+  value       = { for k, g in aws_cloudwatch_log_group.this : reverse(split("/", k))[0] => g.name }
+}
+
 # The master password is deliberately NOT an output. It exists in state (a
 # random_password always does) but nothing surfaces it, so it cannot leak through
 # `terraform output`, a CI log, or a downstream module. The operator assembles

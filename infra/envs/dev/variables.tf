@@ -191,3 +191,156 @@ variable "documents_bucket_name" {
   EOT
   type        = string
 }
+
+# --- Compute (C3) ----------------------------------------------------------- #
+
+variable "ecr_repository_names" {
+  description = <<-EOT
+    Map of service key to the ECR repository NAME in the shared registry.
+
+    Looked up with `data.aws_ecr_repository` rather than read out of shared's state
+    — see the note in main.tf.
+  EOT
+  type        = map(string)
+}
+
+variable "image_tag" {
+  description = <<-EOT
+    Image tag the task definitions reference. Repositories are IMMUTABLE, so a tag
+    always means the same bytes.
+
+    ⚠️ Must already be pushed. A task definition referencing a missing tag fails at
+    launch with CannotPullContainerError, visible only in the service events.
+  EOT
+  type        = string
+}
+
+variable "cpu_architecture" {
+  description = <<-EOT
+    Must match the architecture of the pushed images. ⚠️ A mismatch fails with
+    `exec format error`, visible only in the CloudWatch log stream.
+  EOT
+  type        = string
+}
+
+variable "api_cpu" {
+  description = "API task CPU units."
+  type        = number
+}
+
+variable "api_memory" {
+  description = "API task memory (MiB)."
+  type        = number
+}
+
+variable "worker_cpu" {
+  description = "Worker task CPU units."
+  type        = number
+}
+
+variable "worker_memory" {
+  description = "Worker task memory (MiB). Larger than the API's — extraction base64-encodes whole PDFs in memory."
+  type        = number
+}
+
+variable "frontend_cpu" {
+  description = "Frontend task CPU units."
+  type        = number
+}
+
+variable "frontend_memory" {
+  description = "Frontend task memory (MiB)."
+  type        = number
+}
+
+variable "desired_count" {
+  description = "Task count per service. ⚠️ Raising the worker's requires dividing ai_requests_per_minute_bedrock by it."
+  type        = number
+}
+
+variable "enable_container_insights" {
+  description = "Container Insights on the ECS cluster. Costs money per metric."
+  type        = bool
+}
+
+variable "enable_execute_command" {
+  description = "ECS Exec. ⚠️ A production access path — grants a shell in a task holding borrower data."
+  type        = bool
+}
+
+variable "enable_alb_access_logs" {
+  description = "Write ALB access logs to S3."
+  type        = bool
+}
+
+variable "alb_access_logs_bucket" {
+  description = "Bucket for ALB access logs; ignored when enable_alb_access_logs is false."
+  type        = string
+}
+
+variable "worker_stop_timeout_seconds" {
+  description = "SIGTERM-to-SIGKILL grace for the worker. 120 is the Fargate maximum."
+  type        = number
+}
+
+variable "deregistration_delay_seconds" {
+  description = "Target group draining period; the AWS default of 300s makes every deploy slow."
+  type        = number
+}
+
+variable "ai_requests_per_minute_bedrock" {
+  description = <<-EOT
+    Client-side pacing for Bedrock. ⚠️ PER PROCESS — N worker tasks pace at N x this
+    value. The account quota is 10 RPM, so at desired_count = 1 this must be <= 8.
+  EOT
+  type        = number
+}
+
+variable "bedrock_model_ids" {
+  description = "Map of tier key to the `us.` inference-profile id the application sends."
+  type        = map(string)
+}
+
+variable "bedrock_profile_regions" {
+  description = <<-EOT
+    Regions a `us.` cross-region inference profile may route to.
+
+    ⚠️ VERIFIED, and wider than it looks: `aws bedrock get-inference-profile` shows
+    the us. profiles routing to us-east-1, us-east-2 AND us-west-2. The IAM policy
+    needs the foundation-model ARN in every one — omitting a region produces an
+    INTERMITTENT AccessDeniedException that only fires when Bedrock routes there.
+  EOT
+  type        = list(string)
+}
+
+variable "documents_bucket_kms_key_arn" {
+  description = <<-EOT
+    CMK protecting the documents bucket, or null when it uses SSE-S3.
+
+    ⚠️ PENDING VERIFICATION — the C3 author could not read the bucket's encryption
+    configuration (the available role lacks s3:GetEncryptionConfiguration). Confirm
+    with:
+      aws s3api get-bucket-encryption --bucket <documents bucket>
+    If it returns aws:kms, set this to that key ARN. If SSE-S3, leave it null.
+  EOT
+  type        = string
+}
+
+variable "cors_allowed_origins" {
+  description = <<-EOT
+    Origins the API accepts, as a LIST — Terraform jsonencodes it.
+
+    ⚠️ The application parses this env var as JSON (pydantic-settings complex type).
+    A bare "http://host" string raises SettingsError and the app REFUSES TO START,
+    verified against the installed pydantic-settings. So this fails loudly rather
+    than silently, unlike most of the config traps here.
+
+    ⚠️ CHICKEN AND EGG: the real value is the ALB's DNS name, which does not exist
+    until after the first apply. It cannot be wired from module.compute.alb_dns_name
+    because that would make the compute module depend on its own output. In practice
+    the frontend and API share one ALB origin, so browser calls are SAME-ORIGIN and
+    CORS is not on the critical path until C4 introduces a separate domain.
+    Update this after the first apply, or at C4.
+  EOT
+  type        = list(string)
+}

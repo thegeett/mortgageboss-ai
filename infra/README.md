@@ -51,11 +51,25 @@ terraform plan -out=shared.tfplan
 terraform apply shared.tfplan
 
 # 3. The environment. Now that the bucket exists, the S3 backend resolves.
+#    This creates the foundation (C2) AND the ECS services (C3) in one apply.
 cd ../envs/dev
 terraform init
 terraform plan -out=dev.tfplan     # ← read this before applying
 terraform apply dev.tfplan
+
+# 4. Run the database migration ONCE, before the services are useful.
+terraform output -raw migration_run_task_command    # prints the full invocation
+# run it, then confirm it exited 0:
+aws ecs describe-tasks --cluster <cluster> --tasks <task-arn> \
+  --query 'tasks[0].containers[0].exitCode'
+
+# 5. Reach the stack (HTTP only until C4 adds TLS).
+curl http://$(terraform output -raw alb_dns_name)/health/live
 ```
+
+⚠️ **Work through the pre-deploy checklist below BEFORE step 3.** Several of its
+items cause failures that produce no useful log line — an empty secret, a missing
+image tag, or documents that were never synced.
 
 ### Migrating an already-applied environment
 
@@ -164,6 +178,83 @@ Both directories carry an account guard: a `precondition` on
 `terraform_data.account_guard` fails the plan if the resolved credentials do not
 match `var.aws_account_id`. It is a precondition rather than a `check` block
 because a `check` only warns.
+
+---
+
+## ⚠️ Pre-deploy checklist
+
+Every item here has caused, or would cause, a failure that is hard to diagnose from
+CloudWatch alone. Work through it **before** applying the environment.
+
+### 1. All three secrets populated — with real values, not empty strings
+
+```bash
+for s in database-url jwt-secret-key encryption-key; do
+  printf '%-16s ' "$s"
+  aws secretsmanager get-secret-value --secret-id mbai/dev/$s \
+    --query 'length(SecretString)' --output text 2>/dev/null || echo "MISSING"
+done
+```
+
+A task whose secret is **empty** fails to start, and the ECS event says only that
+the essential container exited. Length, not existence, is the check — the container
+is created by Terraform with no value at all.
+
+Populate them per the section below. ⚠️ `encryption-key` is generate-once: rotating
+it permanently destroys every stored borrower SSN.
+
+### 2. Images pushed, with the tag the task definitions reference
+
+```bash
+terraform output -json container_image_uris
+aws ecr describe-images --repository-name mbai/api      --image-ids imageTag=<tag>
+aws ecr describe-images --repository-name mbai/frontend --image-ids imageTag=<tag>
+```
+
+A missing tag fails at launch with `CannotPullContainerError`, visible only in the
+service events.
+
+⚠️ **The images must be `arm64`.** The task definitions pin
+`cpu_architecture = "ARM64"` to match what C1 actually built. An amd64 image fails
+with `exec format error`, which appears **only in the CloudWatch log stream** — not
+in the ECS console. Check with:
+
+```bash
+docker image inspect <image> --format '{{.Architecture}}'   # expect: arm64
+```
+
+### 3. The 4,562 existing documents synced to S3
+
+```bash
+aws s3 sync ./backend/storage/ s3://mbai-dev-documents-591554480818/ --dryrun | head
+```
+
+Storage keys are **byte-identical across backends** (C0 parity test), so a plain
+`aws s3 sync` preserving relative paths is sufficient. **Without this, every
+existing document 404s after cutover** — the database rows still point at keys that
+have no object behind them.
+
+### 4. Migration run, and confirmed successful
+
+```bash
+terraform output -raw migration_run_task_command
+```
+
+Run it and check `exitCode` is `0`. Alembic deliberately does **not** run at
+container start: three tasks starting at once would race on the same migration, and
+a failure would crash-loop the service instead of failing one visible job.
+
+⚠️ C2's `scripts/check-stack.sh` guard is **local-only** and does not protect this
+path. Nothing stops the migration task running against the wrong environment except
+reading the cluster name in the command.
+
+### 5. Then, and only then, scale the services up
+
+`desired_count` is 1 for all three. Bring them up only after 1–4 are green.
+
+⚠️ **Raising the worker's count requires dividing `AI_REQUESTS_PER_MINUTE_BEDROCK`
+by the new count.** That limiter is per-process: N tasks pace at N × the value,
+against an account quota of 10 RPM.
 
 ---
 

@@ -113,3 +113,63 @@ output "documents_bucket_arn" {
   description = "ARN of the documents bucket — for the ECS task role's S3 policy."
   value       = data.aws_s3_bucket.documents.arn
 }
+
+# --- Compute (C3) ----------------------------------------------------------- #
+
+output "alb_dns_name" {
+  description = "Public DNS name of the load balancer — the application is reachable here over HTTP until C4 adds TLS."
+  value       = module.compute.alb_dns_name
+}
+
+output "alb_zone_id" {
+  description = "Load balancer hosted zone id — C4 needs it for the alias record."
+  value       = module.compute.alb_zone_id
+}
+
+output "http_listener_arn" {
+  description = "HTTP listener ARN — C4 attaches HTTPS alongside it."
+  value       = module.compute.http_listener_arn
+}
+
+output "ecs_cluster_name" {
+  description = "ECS cluster name."
+  value       = module.compute.cluster_name
+}
+
+output "ecs_service_names" {
+  description = "Map of service key to ECS service name."
+  value       = module.compute.service_names
+}
+
+output "ecs_task_definition_arns" {
+  description = "Map of task key to task definition ARN, including the run-once migration task."
+  value       = module.compute.task_definition_arns
+}
+
+output "ecs_task_role_arns" {
+  description = "Map of task key to task role ARN. Identifiers, not credentials."
+  value       = module.compute.task_role_arns
+}
+
+output "ecs_execution_role_arn" {
+  description = "Shared ECS execution role ARN."
+  value       = module.compute.execution_role_arn
+}
+
+output "migration_run_task_command" {
+  description = "Ready-to-paste `aws ecs run-task` invocation for the Alembic migration."
+  value       = module.compute.migration_run_task_command
+}
+
+output "execute_command_invocations" {
+  description = "Map of service key to its `aws ecs execute-command` invocation."
+  value       = module.compute.execute_command_invocations
+}
+
+output "container_image_uris" {
+  description = "The exact image URIs the task definitions reference — check these match what was pushed."
+  value = {
+    api      = "${data.aws_ecr_repository.api.repository_url}:${var.image_tag}"
+    frontend = "${data.aws_ecr_repository.frontend.repository_url}:${var.image_tag}"
+  }
+}

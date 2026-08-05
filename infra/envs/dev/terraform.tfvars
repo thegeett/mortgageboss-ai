@@ -127,3 +127,83 @@ budget_notification_email = "budget@mortgageboss.ai"
 # Hand-created (C0). Looked up, never managed — it holds uploaded files and must
 # survive every terraform destroy.
 documents_bucket_name = "mbai-dev-documents-591554480818"
+
+# --- Compute (C3) ----------------------------------------------------------- #
+
+# Repository NAMES in the shared registry, looked up by data.aws_ecr_repository.
+ecr_repository_names = {
+  api      = "mbai/api"
+  frontend = "mbai/frontend"
+}
+
+# ⚠️ Must already be pushed. Repositories are IMMUTABLE, so a tag is a fixed set
+# of bytes; a missing tag fails at launch with CannotPullContainerError.
+image_tag = "latest"
+
+# ⚠️ VERIFIED EMPIRICALLY, not assumed. The C1 images were built on Apple Silicon:
+#   docker image inspect mbai-api:test      --format '{{.Architecture}}'  -> arm64
+#   docker image inspect mbai-frontend:test --format '{{.Architecture}}'  -> arm64
+# and the live worker container reports `uname -m` = aarch64. Fargate defaults to
+# X86_64, and the mismatch fails with `exec format error` — a message that appears
+# ONLY in the CloudWatch log stream, never in the ECS console's service events.
+cpu_architecture = "ARM64"
+
+api_cpu    = 512
+api_memory = 1024
+
+# Deliberately the largest: extraction holds a whole PDF in memory while base64
+# encoding it, against a 50 MB upload cap.
+worker_cpu    = 1024
+worker_memory = 2048
+
+frontend_cpu    = 256
+frontend_memory = 512
+
+# One of each. There is NO autoscaling — see the result doc.
+desired_count = 1
+
+# Costs money per metric; off for a cost-sensitive throwaway environment.
+enable_container_insights = false
+
+# Fargate has no SSH, and several failure modes here produce no log line at all.
+# ⚠️ This grants a shell inside a task. Fine here; reconsider for staging, which
+# holds real borrower data.
+enable_execute_command = true
+
+enable_alb_access_logs = false
+alb_access_logs_bucket = ""
+
+# 120 is the Fargate maximum. Effective rather than decorative: `uv run` was
+# verified to forward SIGTERM to its child, so Celery does get to finish its task.
+worker_stop_timeout_seconds = 120
+
+# The AWS default of 300s makes every deploy crawl.
+deregistration_delay_seconds = 30
+
+# ⚠️ PER PROCESS. The account is at 10 RPM and desired_count is 1, so 8 leaves
+# headroom. Raising desired_count REQUIRES dividing this by the new count.
+ai_requests_per_minute_bedrock = 8
+
+# The `us.` cross-region inference profile ids the application sends.
+bedrock_model_ids = {
+  classification = "us.anthropic.claude-haiku-4-5-20251001-v1:0"
+  extraction     = "us.anthropic.claude-haiku-4-5-20251001-v1:0"
+  reasoning      = "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
+}
+
+# ⚠️ VERIFIED with `aws bedrock get-inference-profile`: the us. profiles route to
+# THREE regions, not one. The IAM policy needs the foundation-model ARN in each —
+# a us-east-1-only list fails intermittently, whenever Bedrock routes elsewhere.
+bedrock_profile_regions = ["us-east-1", "us-east-2", "us-west-2"]
+
+# ⚠️ PENDING VERIFICATION. Could not read the bucket's encryption configuration —
+# the available role lacks s3:GetEncryptionConfiguration. null assumes SSE-S3, in
+# which case no KMS statement is attached to the task roles. Confirm with:
+#   aws s3api get-bucket-encryption --bucket mbai-dev-documents-591554480818
+# If it reports aws:kms, set this to that key's ARN or uploads fail with AccessDenied.
+documents_bucket_kms_key_arn = null
+
+# ⚠️ Placeholder until the ALB exists — its DNS name is not known before the first
+# apply and cannot be self-referenced. The frontend and API share one ALB origin,
+# so browser calls are same-origin and CORS is not on the critical path until C4.
+cors_allowed_origins = ["http://localhost:3000"]

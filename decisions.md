@@ -13731,3 +13731,117 @@ not rebuilt often — the friction is paid rarely, and the console readability i
 
 **Cross-refs.** ADR-364 (secret containers, values out of band — why the secrets module exists at all), B2
 (key rotation), `infra/README.md` (destroy-and-rebuild workflow).
+
+---
+
+## ADR-366: Fargate task definitions pin `ARM64`, matching the images that were actually built rather than the platform default (C3)
+
+**Context.** Fargate task definitions default `cpu_architecture` to `X86_64`. The C1 images were built on a
+Mac, and `docker build` on Apple Silicon produces arm64 by default. A mismatch fails with
+`exec format error`: the task starts, dies immediately, and the message appears **only in the CloudWatch log
+stream** — never in the ECS console's service events, which is where anyone would look first.
+
+**Verified, not assumed.** `docker image inspect` reports `arm64` for both `mbai-api` and `mbai-frontend`, and
+the live worker container reports `uname -m` = `aarch64`. The arm64 build is not merely producible — it is
+demonstrably running.
+
+**The decision.** Set `cpu_architecture = "ARM64"` via a variable, matching the images, rather than keeping
+the X86_64 default and requiring `docker buildx build --platform linux/amd64` in C5's push step.
+
+**Why this direction.** Graviton is roughly 20% cheaper for identical work, and it matches the local build
+with no cross-compilation — which removes an entire failure mode rather than documenting one. The alternative
+puts a `--platform` flag in a push script, where forgetting it produces exactly the confusing failure above,
+months later, for whoever pushes next.
+
+**Risk checked.** `uv.lock` carries aarch64 wheels alongside x86_64 for the binary dependencies, and the
+strongest evidence is empirical: the arm64 image runs the full local stack today.
+
+**Consequence.** C5's build step must not silently start cross-compiling to amd64. If it ever does, this
+variable must flip in the same change — the two are one decision, not two.
+
+---
+
+## ADR-367: `envs/*` reads the shared registry with `data.aws_ecr_repository`, not `terraform_remote_state` (C3)
+
+**Context.** The ECR repositories live in `infra/shared`, a third state file (ADR from C2's shared split).
+`envs/dev` needs the repository URL to build an image URI and the ARN to scope the execution role's pull
+policy. The obvious mechanism is `data.terraform_remote_state`.
+
+**The decision.** Use `data.aws_ecr_repository`, keyed by repository name.
+
+**Why.**
+
+* `terraform_remote_state` reads the **entire** state object. The environment would need `s3:GetObject` on
+  shared's state file and would then hold every attribute of every resource in it, to obtain two strings.
+  That is a needless widening of both IAM and blast radius.
+* It couples to shared's **output names**. Renaming an output there would break every environment at once,
+  turning a local refactor into a fleet-wide incident — the exact coupling the shared/env split existed to
+  avoid.
+* The repository **name** is the real contract between the two states, and it is already an environment
+  variable. Looking it up by name depends on the AWS resource, not on how another state file happens to be
+  shaped.
+
+**Trade-off accepted.** No plan-time ordering. If `shared` has not been applied, the data source fails with a
+clear "repository not found" rather than an implicit dependency edge. That is the better failure: explicit
+and immediately diagnosable, versus a plan that silently reorders.
+
+---
+
+## ADR-368: The Bedrock policy grants the foundation-model ARN in EVERY region a cross-region profile can route to (C3)
+
+**Context.** The C3 ticket specified four ARNs for the worker's Bedrock policy: two `us.` inference profiles
+and two foundation models, all in `us-east-1`. It also asked for the exact form to be verified rather than
+assumed.
+
+**Verification changed the answer.** `aws bedrock get-inference-profile` shows each `us.` profile routing to
+**three** regions:
+
+```
+us.anthropic.claude-haiku-4-5-20251001-v1:0  -> us-east-1, us-east-2, us-west-2
+us.anthropic.claude-sonnet-4-5-20250929-v1:0 -> us-east-1, us-east-2, us-west-2
+```
+
+A cross-region invocation authorises against the profile ARN **and** the underlying foundation-model ARN in
+whichever region Bedrock actually routes to. With only the `us-east-1` foundation-model ARNs in the policy,
+calls routed to `us-east-2` or `us-west-2` fail with `AccessDeniedException`.
+
+**The failure mode is what makes this worth an ADR.** It is not a clean break — it is **intermittent**,
+determined by Bedrock's routing at call time. It would pass a smoke test, then fail a fraction of production
+extractions with an error that reads like a permissions bug in the application. Routing is the entire *point*
+of a cross-region profile, so the mis-scoped policy is wrong precisely when the feature is working.
+
+**The decision.** Grant `2 models x 3 regions = 6` foundation-model ARNs plus the 2 profile ARNs — 8 total.
+The region list is a variable (`bedrock_profile_regions`) so the module stays region-free and the set can be
+re-verified when AWS adds a region to the profile.
+
+**Consequence.** This list is now a thing that can silently go stale: if AWS extends a `us.` profile to a
+fourth region, the policy under-grants again and the same intermittent failure returns. Re-run
+`aws bedrock get-inference-profile` when adding a model tier or changing regions. The `global.*` profiles seen
+alongside the `us.*` ones would route wider still and would need the same treatment.
+
+---
+
+## ADR-369: ECS Exec is enabled, and it is a production access path rather than a debugging convenience (C3)
+
+**Context.** Fargate has no SSH. Without ECS Exec the only diagnostic surface is CloudWatch logs — and
+several of the failure modes this stack is most likely to hit produce **no log line at all**: an empty
+secret, a `STORAGE_BACKEND` left at `local`, an architecture mismatch whose only trace is `exec format error`
+in a stream that may not exist yet.
+
+**The decision.** `enable_execute_command = true` for this environment, with the four `ssmmessages` actions
+added to each task role, gated on the same variable.
+
+**The part worth recording is what it costs.** ECS Exec grants an **interactive shell inside a running task**
+— a task that holds decrypted secrets in its environment and borrower NPI in memory. It is not a debugging
+convenience; it is a production access path with an audit story attached. For a throwaway environment holding
+no client data the trade is obviously right. **For staging it is not obviously right**, and it should be
+gated behind a break-glass role or disabled outright.
+
+**Why the toggle also drives IAM.** The `ssmmessages` statements are attached only when the flag is true, so
+turning Exec off leaves the frontend task role with genuinely **zero** statements rather than a role that
+still carries channel permissions it cannot use. This also resolves a tension in the ticket, which asked both
+that the frontend have "no permissions" and that every task role carry `ssmmessages`: the frontend has no
+*application* permissions in either case, and no permissions at all when Exec is off.
+
+**Cross-refs.** ADR-364 (secrets never in Terraform — Exec is the other way a secret value can be observed),
+C5 (deploy).
