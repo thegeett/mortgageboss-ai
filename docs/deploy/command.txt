@@ -56,3 +56,86 @@ print('region:', boto3.Session().region_name)
 	Frontend run:
 
 		pnpm dev --port 3100
+
+Extraction bench (CLI):
+
+	Runs a folder of real documents through the live classification + extraction pipeline.
+	Measures COVERAGE (was a field populated), NOT accuracy. Persists nothing to the DB.
+	Output contains REAL PII - never commit, share, or move it off this machine.
+
+	All commands run from the backend dir:
+
+		cd ~/Geet/project/loan-processing/mortgageboss-ai/backend
+
+	Step 0 - AWS session (Bedrock needs a live SSO login, see "AWS profile login" above):
+
+		export AWS_PROFILE=mbai-dev && aws sso login
+		aws sts get-caller-identity --query Account --output text
+
+	Step 1 - Preview (FREE: no model call, nothing spent). Always do this first:
+
+		uv run python scripts/extraction-bench.py ~/path/to/corpus --preview-only
+
+	Step 2a - Run attached (short corpus, watch the live progress bar):
+
+		uv run python scripts/extraction-bench.py ~/path/to/corpus
+
+		Prompts to confirm after the preview. Add --yes to skip the prompt.
+		The terminal owns this run: closing the window KILLS it.
+
+	Step 2b - Run detached (long corpus - survives a closed terminal):
+
+		caffeinate -is nohup uv run python scripts/extraction-bench.py ~/path/to/corpus --yes \
+		  > ~/bench-run.log 2>&1 &
+
+		tail -f ~/bench-run.log
+
+		--yes is REQUIRED here (no terminal to prompt on).
+		caffeinate stops idle sleep; it does NOT stop lid-close sleep - leave the lid open.
+		Ctrl-C out of tail stops the tailing only, not the run.
+
+	Step 2c - Run in tmux (detached AND keeps the live progress bar):
+
+		tmux new -s bench
+		caffeinate -is uv run python scripts/extraction-bench.py ~/path/to/corpus --yes
+		(Ctrl-B then D to detach)
+
+		tmux attach -t bench
+
+	Check on a detached run:
+
+		tail -f ~/bench-run.log                 live progress
+		tail -5 ~/bench-run.log                 just where it is at
+		grep "run id" ~/bench-run.log           the run id, for resuming
+		pgrep -fl extraction-bench.py           is it still alive
+
+	Stop a run gracefully (finishes the in-flight doc, then writes the report):
+
+		Ctrl-C                                  when attached
+		pkill -f "python scripts/extraction-bench.py"    when detached
+
+		pgrep lists the caffeinate wrapper too - pkill -f on the python command
+		hits the run itself. A second signal hard-kills. Per-document JSON is
+		written as it goes, so at most the in-flight doc is lost - then resume.
+
+	Resume an interrupted / aborted run (same root path + the run id):
+
+		uv run python scripts/extraction-bench.py ~/path/to/corpus --resume <run-id> --yes
+
+		Already-done documents are skipped; throttled/failed ones are re-run.
+
+	Read the results (BENCH_OUTPUT_DIR in backend/.env):
+
+		open ~/Geet/project/loan-processing/mortgageboss-batch-bench-out/<run-id>/_SUMMARY.md
+		open ~/Geet/project/loan-processing/mortgageboss-batch-bench-out/<run-id>/_FINDINGS.csv
+
+		Per-document JSON: <run-id>/<document_type>/*.json
+
+	If the run aborts (5 consecutive failures - infrastructure, not a coverage finding):
+
+		rate_limited  -> LOWER AI_REQUESTS_PER_MINUTE_BEDROCK in backend/.env, then resume
+		ai_error      -> fix the cause (usually AWS creds: redo step 0), then resume
+
+	Same run from the UI (shares the output dir; either can resume the other's run id):
+
+		http://localhost:3100/dev/extraction-bench

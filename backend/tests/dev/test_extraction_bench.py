@@ -8,9 +8,11 @@ PII; that safety is handled by gitignore + warnings, not by scrubbing. It measur
 
 from __future__ import annotations
 
+import asyncio
 import json
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 from unittest.mock import AsyncMock
 
 import pytest
@@ -204,7 +206,7 @@ async def test_run_records_source_relpath_for_stable_resume_dedup(
 ) -> None:
     # LP review: resume must dedup by PATH, not bare filename — two same-named files in different
     # subfolders are DISTINCT documents. _run stamps each record with source_relpath (path under root).
-    from app.api import dev_bench
+    from app.dev.bench import engine
 
     (tmp_path / "alice").mkdir()
     (tmp_path / "bob").mkdir()
@@ -228,10 +230,10 @@ async def test_run_records_source_relpath_for_stable_resume_dedup(
             },
         }
 
-    monkeypatch.setattr(dev_bench, "run_one", fake_run_one)
-    progress = dev_bench.RunProgress(total=len(files))
+    monkeypatch.setattr(engine, "run_one", fake_run_one)
+    progress = engine.RunProgress(total=len(files))
     out = tmp_path / "out"
-    await dev_bench._run("rid", tmp_path, files, out, progress, 0)
+    await engine.run_corpus("rid", tmp_path, files, out, progress, 0)
 
     # read back from the resume log (progress.records is freed after finalize) — both distinct relpaths,
     # so a resume dedup keyed on them keeps the two same-named files separate.
@@ -313,7 +315,7 @@ async def test_run_aborts_after_consecutive_throttles(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     # Several throttles in a row is almost certainly the rate limit — the run must abort, not march on.
-    from app.api import dev_bench
+    from app.dev.bench import engine
     from app.dev.bench.engine import RunProgress
 
     files = [SimpleNamespace(path=tmp_path / f"d{i}.pdf") for i in range(10)]
@@ -327,14 +329,14 @@ async def test_run_aborts_after_consecutive_throttles(
             "extraction": {"cost_estimate": 0.0},
         }
 
-    monkeypatch.setattr(dev_bench, "run_one", fake_run_one)
+    monkeypatch.setattr(engine, "run_one", fake_run_one)
     progress = RunProgress(total=len(files))
-    await dev_bench._run("rid", tmp_path, files, tmp_path / "out", progress, 0)
+    await engine.run_corpus("rid", tmp_path, files, tmp_path / "out", progress, 0)
 
     assert progress.aborted_reason == "rate_limited"
-    assert progress.done == dev_bench._FAILURE_ABORT_STREAK  # stopped early (5), not all 10
-    assert progress.rate_limited == dev_bench._FAILURE_ABORT_STREAK
-    assert progress.failed == dev_bench._FAILURE_ABORT_STREAK
+    assert progress.done == engine.FAILURE_ABORT_STREAK  # stopped early (5), not all 10
+    assert progress.rate_limited == engine.FAILURE_ABORT_STREAK
+    assert progress.failed == engine.FAILURE_ABORT_STREAK
 
 
 async def test_run_aborts_after_consecutive_auth_failures(
@@ -342,7 +344,7 @@ async def test_run_aborts_after_consecutive_auth_failures(
 ) -> None:
     # This is the 246 x "AI call failed" case: auth failures (non-throttle) must ALSO abort after N, with
     # the cause reported — it should have stopped at 5, not 246.
-    from app.api import dev_bench
+    from app.dev.bench import engine
     from app.dev.bench.engine import RunProgress
 
     files = [SimpleNamespace(path=tmp_path / f"d{i}.pdf") for i in range(10)]
@@ -357,13 +359,13 @@ async def test_run_aborts_after_consecutive_auth_failures(
             "extraction": {"status": "no_extractor"},
         }
 
-    monkeypatch.setattr(dev_bench, "run_one", fake_run_one)
+    monkeypatch.setattr(engine, "run_one", fake_run_one)
     progress = RunProgress(total=len(files))
-    await dev_bench._run("rid", tmp_path, files, tmp_path / "out", progress, 0)
+    await engine.run_corpus("rid", tmp_path, files, tmp_path / "out", progress, 0)
 
     assert progress.aborted_reason == "ai_error"  # distinguished from throttling
     assert progress.abort_error_type == "NoCredentialsError"  # the real cause
-    assert progress.done == dev_bench._FAILURE_ABORT_STREAK
+    assert progress.done == engine.FAILURE_ABORT_STREAK
     assert progress.rate_limited == 0  # not throttling
 
 
@@ -391,3 +393,287 @@ async def test_preflight_passes_when_backend_reachable(monkeypatch: pytest.Monke
     monkeypatch.setattr(settings, "ai_provider", "anthropic")
     monkeypatch.setattr(client, "complete", AsyncMock(return_value=None))
     await preflight()  # no raise
+
+
+# --------------------------------------------------------------------------- #
+# Run planning (shared by both front doors: the dev API and the CLI)
+# --------------------------------------------------------------------------- #
+def _corpus(root: Path, *names: str) -> Path:
+    """A minimal readable corpus — real PDF headers, so walk_documents counts them as readable."""
+    for name in names:
+        p = root / name
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_bytes(b"%PDF-1.4\n%stub\n")
+    return root
+
+
+def test_prepare_run_fresh_plans_every_readable_document(tmp_path: Path) -> None:
+    from app.dev.bench.engine import prepare_run
+
+    root = _corpus(tmp_path / "corpus", "alice/paystub.pdf", "bob/paystub.pdf", "notes.txt")
+    plan = prepare_run(root)
+    assert plan.resumed is False
+    assert plan.start_index == 0
+    assert len(plan.to_run) == 2  # the .txt is unreadable and never sent
+    assert plan.out_dir.name == plan.run_id  # output dir is named by run id
+
+
+def test_prepare_run_resume_skips_done_and_reruns_failures(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Resume must skip the SUCCESSFUL documents and RE-RUN the throttled one (an infrastructure failure
+    # is the very reason to resume), while the index continues past every prior record.
+    from app.dev.bench import engine
+
+    root = _corpus(tmp_path / "corpus", "a.pdf", "b.pdf", "c.pdf")
+    monkeypatch.setattr(engine, "OUTPUT_ROOT", tmp_path / "out")
+    out_dir = tmp_path / "out" / "run123"
+    write_record(
+        out_dir,
+        {
+            "source_filename": "a.pdf",
+            "classified_type": "w2",
+            "source_relpath": "a.pdf",
+            "rate_limited": False,
+        },
+        0,
+    )
+    write_record(
+        out_dir,
+        {
+            "source_filename": "b.pdf",
+            "classified_type": "pay_stub",
+            "source_relpath": "b.pdf",
+            "rate_limited": True,
+        },
+        1,
+    )
+
+    plan = engine.prepare_run(root, "run123")
+    assert plan.resumed is True
+    assert {f.path.name for f in plan.to_run} == {
+        "b.pdf",
+        "c.pdf",
+    }  # throttled b re-runs; a is done
+    assert plan.progress.done == 1  # the one kept record counts toward the corpus total
+    assert plan.progress.total == 3
+    assert plan.start_index == 2  # past BOTH prior records, so no per-doc JSON is overwritten
+
+
+def test_prepare_run_unknown_resume_id_raises(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app.dev.bench import engine
+
+    monkeypatch.setattr(engine, "OUTPUT_ROOT", tmp_path / "out")
+    with pytest.raises(engine.ResumeNotFoundError):
+        engine.prepare_run(_corpus(tmp_path / "corpus", "a.pdf"), "nope")
+
+
+def test_unpaced_reason_matches_the_api_refusal(monkeypatch: pytest.MonkeyPatch) -> None:
+    # The engine-level condition both front doors refuse on — the API turns it into a 409, the CLI into
+    # a non-zero exit. One source of truth, so they cannot drift.
+    from app.core.config import settings
+    from app.dev.bench.engine import unpaced_reason
+
+    monkeypatch.setattr(settings, "ai_provider", "bedrock")
+    monkeypatch.setattr(settings, "ai_requests_per_minute_bedrock", None)
+    assert "AI_REQUESTS_PER_MINUTE_BEDROCK" in (unpaced_reason() or "")
+    monkeypatch.setattr(settings, "ai_requests_per_minute_bedrock", 8)
+    assert unpaced_reason() is None
+
+
+# --------------------------------------------------------------------------- #
+# The CLI front door (scripts/extraction-bench.py) — same engine, no browser required
+# --------------------------------------------------------------------------- #
+def _cli() -> Any:
+    """Load the CLI as a module (its filename has a dash, so it is not importable by name)."""
+    import importlib.util
+
+    path = _BACKEND / "scripts" / "extraction-bench.py"
+    spec = importlib.util.spec_from_file_location("extraction_bench_cli", path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_cli_preview_only_runs_nothing(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    # --preview-only must print the preview and exit 0 without a preflight or a single model call.
+    root = _corpus(tmp_path / "corpus", "a.pdf")
+    assert _cli().main([str(root), "--preview-only"]) == 0
+    out = capsys.readouterr().out
+    assert "estimated cost" in out and "COVERAGE, not accuracy" in out
+
+
+def test_cli_refuses_unpaced_bedrock(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # The CLI must refuse the same unpaced batch the API 409s on — before preflight, before any spend.
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "ai_provider", "bedrock")
+    monkeypatch.setattr(settings, "ai_requests_per_minute_bedrock", None)
+    root = _corpus(tmp_path / "corpus", "a.pdf")
+    assert _cli().main([str(root), "--yes"]) == 1
+    assert "AI_REQUESTS_PER_MINUTE_BEDROCK" in capsys.readouterr().err
+
+
+def test_cli_rejects_a_bad_root(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    assert _cli().main([str(tmp_path / "nope"), "--yes"]) == 1
+    assert "not a directory" in capsys.readouterr().err
+
+
+def test_cli_end_to_end_writes_the_report(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # The whole CLI path with the model stubbed out: preflight → run → per-document lines → report on
+    # disk → exit 0. This is the run the UI does, with no browser involved.
+    from app.core.config import settings
+    from app.dev.bench import engine
+
+    monkeypatch.setattr(settings, "ai_provider", "anthropic")  # no unpaced-bedrock refusal
+    monkeypatch.setattr(engine, "OUTPUT_ROOT", tmp_path / "out")
+    monkeypatch.setattr(engine, "preflight", AsyncMock(return_value=None))
+
+    async def fake_run_one(f: object) -> dict[str, object]:
+        return {
+            "source_filename": f.path.name,  # type: ignore[attr-defined]
+            "classified_type": "pay_stub",
+            "classification_confidence": 0.95,
+            "rate_limited": False,
+            "extraction": {
+                "status": "success",
+                "typed_core": {"employer": "AMBIO INC"},
+                "lists": {},
+                "catch_all": [],
+                "cost_estimate": 0.02,
+            },
+        }
+
+    monkeypatch.setattr(engine, "run_one", fake_run_one)
+    root = _corpus(tmp_path / "corpus", "alice/a.pdf", "bob/b.pdf")
+
+    assert _cli().main([str(root), "--yes"]) == 0
+    out = capsys.readouterr().out
+    assert "[1/2]" in out and "[2/2]" in out  # a progress line per document, for `tail -f`
+    assert "run id" in out  # printed BEFORE the run, so an interrupted run is resumable
+
+    run_dir = next((tmp_path / "out").iterdir())
+    assert (run_dir / "_SUMMARY.md").is_file() and (run_dir / "_FINDINGS.csv").is_file()
+    assert len(load_records(run_dir)) == 2
+
+
+# --------------------------------------------------------------------------- #
+# Live progress display — the CLI's equivalent of the UI's run panel
+# --------------------------------------------------------------------------- #
+def _progress(**kw: Any) -> Any:
+    from app.dev.bench.engine import RunProgress
+
+    p = RunProgress(total=kw.pop("total", 10))
+    for k, v in kw.items():
+        setattr(p, k, v)
+    return p
+
+
+def test_display_status_line_mirrors_the_ui_panel() -> None:
+    # Same facts the UI's run panel shows: bar, done/total, cost so far, the infrastructure-failure
+    # counts (never coverage gaps), and the document in flight.
+    p = _progress(total=10, done=3, cost_so_far=1.234, failed=2, rate_limited=1, current="w2.pdf")
+    line = _cli()._Display(p, tty=True)._status_line()
+    assert " 30%" in line and "3/10" in line and "$1.23" in line
+    assert "2 failed (1 throttled)" in line
+    assert "w2.pdf" in line
+    assert "█" in line and "░" in line  # a filled/empty bar, not just numbers
+
+
+def test_display_shows_no_eta_before_the_first_document_or_after_the_last() -> None:
+    # No ETA can be honest with zero completions, and "~0s left" on a finished run is noise.
+    cli = _cli()
+    assert cli._Display(_progress(total=10, done=0), tty=True)._eta_seconds() is None
+    assert cli._Display(_progress(total=10, done=10), tty=True)._eta_seconds() is None
+
+
+def test_display_eta_ignores_documents_carried_over_by_a_resume(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # On a resume, progress.done starts at the count already on disk. Those were not run in THIS
+    # session, so counting them would report a wildly optimistic rate — the ETA must use only the
+    # documents this process actually ran.
+    cli = _cli()
+    clock = {"t": 1000.0}
+    monkeypatch.setattr(cli.time, "monotonic", lambda: clock["t"])
+    p = _progress(total=100, done=90)  # resumed: 90 already done, 10 to go
+    display = cli._Display(p, tty=True)
+    clock["t"] += 10.0  # 10s elapsed...
+    p.done = 95  # ...in which 5 documents ran → 2s each → ~10s for the last 5
+    eta = display._eta_seconds()
+    assert eta is not None and 9.0 < eta < 11.0
+
+
+def test_display_prints_no_control_codes_when_not_a_tty(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    # nohup/pipe/CI: carriage returns and clear-line codes would turn the log file into mush, so the
+    # pinned line is suppressed entirely and each document gets one self-contained line instead.
+    p = _progress(total=2, done=1, cost_so_far=0.02)
+    display = _cli()._Display(p, tty=False)
+    display.tick()
+    assert capsys.readouterr().out == ""  # nothing pinned, nothing redrawn
+    display.on_document(
+        {"source_relpath": "a/b.pdf", "classified_type": "w2", "extraction": {"status": "success"}},
+        p,
+    )
+    out = capsys.readouterr().out
+    assert "[1/2] $0.02" in out and "a/b.pdf → w2 · success" in out
+    assert "\r" not in out and "\033" not in out
+
+
+def test_cli_sigterm_still_writes_the_report(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # `kill <pid>` is the ONLY way to stop a detached (nohup'd) run — there is no terminal to Ctrl-C.
+    # Unhandled, SIGTERM kills instantly and _SUMMARY.md/_FINDINGS.csv are never written, which is the
+    # whole point of the run. It must stop after the in-flight document and finalize, like Cancel does.
+    import os
+    import signal
+
+    from app.core.config import settings
+    from app.dev.bench import engine
+
+    monkeypatch.setattr(settings, "ai_provider", "anthropic")
+    monkeypatch.setattr(engine, "OUTPUT_ROOT", tmp_path / "out")
+    monkeypatch.setattr(engine, "preflight", AsyncMock(return_value=None))
+
+    sent = False
+
+    async def fake_run_one(f: object) -> dict[str, object]:
+        nonlocal sent
+        if not sent:  # once — after the handler is removed, a second SIGTERM would hard-kill pytest
+            sent = True
+            os.kill(os.getpid(), signal.SIGTERM)  # arrives while this document is "in flight"
+        # A real await, not sleep(0): the signal reaches the loop through its self-pipe, so it is only
+        # delivered once the selector actually polls.
+        await asyncio.sleep(0.05)
+        return {
+            "source_filename": f.path.name,  # type: ignore[attr-defined]
+            "classified_type": "pay_stub",
+            "classification_confidence": 0.9,
+            "rate_limited": False,
+            "extraction": {
+                "status": "success",
+                "typed_core": {},
+                "lists": {},
+                "catch_all": [],
+                "cost_estimate": 0.01,
+            },
+        }
+
+    monkeypatch.setattr(engine, "run_one", fake_run_one)
+    root = _corpus(tmp_path / "corpus", "a.pdf", "b.pdf", "c.pdf")
+
+    assert _cli().main([str(root), "--yes"]) == 130  # cancelled, not a clean finish
+    run_dir = next((tmp_path / "out").iterdir())
+    assert (run_dir / "_SUMMARY.md").is_file()  # the report exists despite the kill
+    assert (run_dir / "_FINDINGS.csv").is_file()
+    assert len(load_records(run_dir)) == 1  # stopped after the in-flight document, not all three

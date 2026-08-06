@@ -14,6 +14,11 @@ and spend. The is_development gate keeps it out of staging/prod; the localhost b
 responsibility here.
 
 It measures COVERAGE, not accuracy. It writes JSON to disk; it persists NOTHING to the database.
+
+⚠️ THIS MODULE IS A SHELL. All of the bench's behaviour — planning, the per-document loop, the abort
+rules, the report — lives in ``app/dev/bench/engine.py``, shared with the CLI front door
+(``scripts/extraction-bench.py``). Anything added here that the CLI would also need belongs in the
+engine instead, or the two front doors drift.
 """
 
 from __future__ import annotations
@@ -21,16 +26,23 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 from typing import Any
-from uuid import uuid4
 
 import structlog
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from app.ai.client import AIClientError
-from app.core.config import resolve_requests_per_minute, settings
-from app.dev.bench.engine import RunProgress, preflight, preview, run_one, walk_documents
-from app.dev.bench.findings import finalize_output, load_records, write_record
+from app.core.config import settings
+from app.dev.bench.engine import (
+    OUTPUT_ROOT,
+    ResumeNotFoundError,
+    RunProgress,
+    preflight,
+    prepare_run,
+    preview,
+    run_corpus,
+    unpaced_reason,
+)
 
 logger = structlog.get_logger(__name__)
 
@@ -40,19 +52,6 @@ router = APIRouter(prefix="/dev/extraction-bench", tags=["dev-extraction-bench"]
 # doesn't accumulate run state unboundedly (the heavy `records` list is also dropped post-write).
 _RUNS: dict[str, RunProgress] = {}
 _MAX_RUNS = 50
-#: Abort the run after this many CONSECUTIVE failed documents (throttle / auth / error) — that is almost
-#: certainly an infrastructure problem, not the corpus, and continuing would only write records that read
-#: as false schema findings. The 246x "AI call failed" run should have stopped at 5, not marched to 246.
-_FAILURE_ABORT_STREAK = 5
-# Where output is written. Default: INSIDE the storage dir (not a sibling) so it inherits storage's
-# gitignore — bench output derived from borrower documents can never be accidentally committed (LP review).
-# Overridable via BENCH_OUTPUT_DIR for a dev-chosen location (gitignore it if inside the repo). Not
-# web-served: the download endpoint serves by DB storage_path, and these files have no DB row.
-_OUTPUT_ROOT = (
-    Path(settings.bench_output_dir).expanduser().resolve()
-    if settings.bench_output_dir
-    else Path(settings.storage_local_path).resolve() / "bench_output"
-)
 _TASKS: set[asyncio.Task[None]] = (
     set()
 )  # keep strong refs so a background run isn't GC'd mid-flight
@@ -64,20 +63,11 @@ def _require_dev() -> None:
 
 
 def _require_paced() -> None:
-    """REFUSE (not warn) to start an UNPACED batch under Bedrock. The account's Bedrock quota is ~10
-    requests/min; the bench makes 2 calls per document, so an unpaced 200-document run would be throttled
-    within seconds and its findings corrupted by rate-limit failures. An accidental unpaced run is exactly
-    the mistake worth making impossible."""
-    if settings.ai_provider == "bedrock" and resolve_requests_per_minute() is None:
-        raise HTTPException(
-            status_code=409,
-            detail=(
-                "Refusing to start: AI_PROVIDER=bedrock but no client-side rate limit is set "
-                "(AI_REQUESTS_PER_MINUTE_BEDROCK is unset = unlimited). A batch run would exceed the "
-                "account's Bedrock quota and be throttled. Set AI_REQUESTS_PER_MINUTE_BEDROCK (e.g. 8 "
-                "requests/min = 4 docs/min) and retry."
-            ),
-        )
+    """REFUSE (not warn) to start an UNPACED batch under Bedrock — see :func:`unpaced_reason`. The CLI
+    refuses on the same condition; only the shape of the refusal differs (409 here, exit code there)."""
+    reason = unpaced_reason()
+    if reason is not None:
+        raise HTTPException(status_code=409, detail=f"Refusing to start: {reason}")
 
 
 class RootRequest(BaseModel):
@@ -138,118 +128,29 @@ async def bench_start(req: StartRequest) -> StartResponse:
                 f"AWS_PROFILE (now in .env) and run `aws sso login --profile <name>`, then retry."
             ),
         ) from err
-    all_readable = [f for f in walk_documents(root) if f.media_type is not None]
-
-    if req.resume_run_id:
-        run_id = req.resume_run_id
-        out_dir = _OUTPUT_ROOT / run_id
-        if not out_dir.is_dir():
-            raise HTTPException(status_code=404, detail=f"no run to resume: {run_id}")
-        prior = load_records(out_dir)
-        # Skip only the SUCCESSFULLY-processed docs; RE-RUN throttled/errored ones (an infrastructure
-        # failure is the very reason to resume). Drop their stale records so the re-run replaces them in
-        # the aggregate (their old per-document JSON stays on disk, harmless). Dedup by source_relpath —
-        # a bare filename is not unique across the nested directories the bench walks (every borrower
-        # folder has "paystub.pdf"), so name-dedup would skip un-processed same-named files.
-        keep = [
-            r for r in prior if not r.get("rate_limited") and r.get("classified_type") != "error"
-        ]
-        done_paths = {r.get("source_relpath") for r in keep}
-        to_run = [f for f in all_readable if str(f.path.relative_to(root)) not in done_paths]
-        progress = RunProgress(total=len(all_readable))
-        progress.records = keep
-        progress.done = len(keep)
-        progress.rate_limited = 0  # keep has no rate_limited by construction; re-runs recount live
-        progress.cost_so_far = sum(
-            (r.get("extraction") or {}).get("cost_estimate") or 0 for r in keep
-        )
-        # Index continues past EVERY prior record (incl. dropped ones) so a re-run never overwrites an
-        # existing per-document JSON file.
-        start_index = len(prior)
-    else:
-        run_id = uuid4().hex[:12]
-        out_dir = _OUTPUT_ROOT / run_id
-        to_run = all_readable
-        progress = RunProgress(total=len(all_readable))
-        start_index = 0
+    try:
+        plan = prepare_run(root, req.resume_run_id)
+    except ResumeNotFoundError as err:
+        raise HTTPException(
+            status_code=404, detail=f"no run to resume: {req.resume_run_id}"
+        ) from err
 
     while (
         len(_RUNS) >= _MAX_RUNS
     ):  # evict the oldest (insertion order) — its output is already on disk
         _RUNS.pop(next(iter(_RUNS)))
-    _RUNS[run_id] = progress
-    task = asyncio.create_task(_run(run_id, root, to_run, out_dir, progress, start_index))
+    _RUNS[plan.run_id] = plan.progress
+    task = asyncio.create_task(
+        run_corpus(plan.run_id, root, plan.to_run, plan.out_dir, plan.progress, plan.start_index)
+    )
     _TASKS.add(task)
     task.add_done_callback(_TASKS.discard)
     return StartResponse(
-        run_id=run_id, output_dir=str(out_dir), to_run=len(to_run), resumed=bool(req.resume_run_id)
+        run_id=plan.run_id,
+        output_dir=str(plan.out_dir),
+        to_run=len(plan.to_run),
+        resumed=plan.resumed,
     )
-
-
-async def _run(
-    run_id: str,
-    root: Path,
-    readable: list[Any],
-    out_dir: Path,
-    progress: RunProgress,
-    start_index: int,
-) -> None:
-    index = start_index
-    consecutive_failed = 0
-    for f in readable:
-        if progress.cancelled:
-            break
-        progress.current = f.path.name
-        try:
-            record = await run_one(f)
-        except Exception as exc:  # a single document must never abort the whole run
-            record = {
-                "source_filename": f.path.name,
-                "classified_type": "error",
-                "error": str(exc)[:200],  # raw — the bench captures real values, redaction removed
-            }
-            logger.warning("bench_document_failed", file=f.path.name, error_type=type(exc).__name__)
-        # The STABLE per-document key for resume dedup — a bare filename is not unique across the nested
-        # directories the bench walks; the path relative to root is. Set on both the success and error record.
-        record["source_relpath"] = str(f.path.relative_to(root))
-        progress.records.append(record)
-        write_record(out_dir, record, index)  # incremental: a crash loses at most this one document
-        index += 1
-        progress.cost_so_far += (record.get("extraction") or {}).get("cost_estimate") or 0
-        progress.done += 1
-        if record.get("rate_limited"):
-            progress.rate_limited += 1
-        # A run of consecutive FAILURES (throttle / auth / error) is almost certainly infrastructure, not
-        # the corpus — abort rather than keep writing records that would read as coverage gaps.
-        failed = bool(record.get("ai_failed")) or record.get("classified_type") == "error"
-        if failed:
-            progress.failed += 1
-            consecutive_failed += 1
-            if consecutive_failed >= _FAILURE_ABORT_STREAK:
-                progress.aborted_reason = (
-                    "rate_limited" if record.get("rate_limited") else "ai_error"
-                )
-                progress.abort_error_type = record.get("failure_error_type")
-                logger.warning(
-                    "bench_aborted",
-                    run_id=run_id,
-                    done=progress.done,
-                    reason=progress.aborted_reason,
-                    error_type=progress.abort_error_type,
-                )
-                break
-        else:
-            consecutive_failed = 0
-    progress.current = None
-    if progress.records:
-        finalize_output(
-            root,
-            progress.records,
-            out_dir,
-            aborted_reason=progress.aborted_reason,
-            abort_error_type=progress.abort_error_type,
-        )
-        progress.records = []  # output is on disk; free the heavy per-document records (status needs only counts)
 
 
 class StatusResponse(BaseModel):
@@ -286,7 +187,7 @@ def bench_status(run_id: str) -> StatusResponse:
         cost_so_far=round(p.cost_so_far, 4),
         cancelled=p.cancelled,
         finished=p.done >= p.total or p.cancelled or p.aborted_reason is not None,
-        output_dir=str(_OUTPUT_ROOT / run_id),
+        output_dir=str(OUTPUT_ROOT / run_id),
         rate_limited=p.rate_limited,
         failed=p.failed,
         aborted_reason=p.aborted_reason,

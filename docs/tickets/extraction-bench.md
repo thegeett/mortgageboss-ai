@@ -11,6 +11,11 @@ It persists **nothing** to the database. It writes JSON + Markdown + CSV to disk
 changes nothing about the system under test — production prompts are byte-unchanged, the rule engine is
 untouched (`ACTIVE_RULE_IDS == 37`), and no production module imports the bench.
 
+> **Two front doors, one engine.** The dev UI described below, and a CLI
+> (`backend/scripts/extraction-bench.py`) for long runs that must not depend on a browser tab staying
+> open — see [`extraction-bench-cli.md`](extraction-bench-cli.md). Both call the same
+> `app/dev/bench/engine.py`, share an output root, and can resume each other's run ids.
+
 ---
 
 ## What it is for
