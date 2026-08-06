@@ -40,9 +40,9 @@ logger = structlog.get_logger(__name__)
 
 _PROMPT_PATH = "extraction/master_insurance_policy_for_condominium.txt"
 _SUPPORTED_MEDIA_TYPES = frozenset({"application/pdf", "image/jpeg", "image/png", "image/jpg"})
-# Unbounded list output → 8192 (guide §7 sizing rule; 1 nested list(s)).
-# The test_extraction_budget_sizing CI guard enforces the sizing rule.
-_MAX_TOKENS = 8192
+# Unbounded list output → 16384 (guide §7 sizing rule; 2 nested list(s) — building_limits + coverage_lines).
+# The test_extraction_budget_sizing CI guard enforces the sizing rule (derived from the spec's list count).
+_MAX_TOKENS = 16384
 
 
 class MasterInsurancePolicyForCondominiumExtraction(BaseModel):
@@ -74,6 +74,10 @@ class MasterInsurancePolicyForCondominiumExtraction(BaseModel):
 
     # --- Captured nested lists (LP-443) — bare rows, snapshot-read generically ------- #
     building_limits: list[dict[str, Any]] = Field(default_factory=list)
+    # --- LP-460 diff — the coverage lines of the master policy. On an ACORD 24/25 cert these are the
+    # TYPE-OF-INSURANCE rows (Property / Crime-Fidelity / Boiler & Machinery / General Liability) — coverage
+    # LINES of one policy, not separate policies (they share one policy number). ----------------------- #
+    coverage_lines: list[dict[str, Any]] = Field(default_factory=list)
 
     # --- Grouped catch-all — everything else -------------------------------- #
     additional_sections: list[CatchAllSection] = Field(default_factory=list)
@@ -129,28 +133,40 @@ _BUILDING_LIMITS_ROW: CoreSpec = (
     ("source", coerce_str),
 )
 
+# LP-460 — the master policy's coverage LINES (one row per TYPE OF INSURANCE on the cert: Property, Crime /
+# Fidelity, Boiler & Machinery, General Liability, …). ``policy_number`` is captured per row for the
+# multi-insurer ACORD case; the master prompt masks it, mirroring the typed-core policy_number.
+_COVERAGE_LINES_ROW: CoreSpec = (
+    ("type_of_insurance", coerce_str),
+    ("policy_number", coerce_str),
+    ("limit", coerce_decimal),
+    ("deductible", coerce_decimal),
+    ("causes_of_loss", coerce_str),
+)
 
-def _parse_building_limits(raw: Any) -> list[dict[str, Any]]:
-    """Coerce the building_limits rows — bare scalars + a per-row page/snippet source (LP-443 capture).
 
-    Mirrors bank_statement's transactions parse: each declared field is coerced, a per-row source is
-    kept, and a fully-empty row is dropped (no hallucinated rows)."""
+def _parse_rows(raw: Any, row_spec: CoreSpec) -> list[dict[str, Any]]:
+    """Coerce a bare-row list — each declared field coerced, a per-row page/snippet source kept, a
+    fully-empty row dropped (no hallucinated rows). Mirrors bank_statement's transactions parse."""
     rows: list[dict[str, Any]] = []
     if not isinstance(raw, list):
         return rows
     for entry in raw:
         if not isinstance(entry, dict):
             continue
-        row: dict[str, Any] = {
-            name: coerce(entry.get(name)) for name, coerce in _BUILDING_LIMITS_ROW
-        }
+        row: dict[str, Any] = {name: coerce(entry.get(name)) for name, coerce in row_spec}
         if (
             "source" not in row
         ):  # never clobber a declared 'source' data field; else keep provenance
             row["source"] = source_payload(entry)
-        if any(row[name] is not None for name, _ in _BUILDING_LIMITS_ROW):
+        if any(row[name] is not None for name, _ in row_spec):
             rows.append(row)
     return rows
+
+
+def _parse_building_limits(raw: Any) -> list[dict[str, Any]]:
+    """Coerce the building_limits rows (LP-443 capture) via the shared bare-row parser."""
+    return _parse_rows(raw, _BUILDING_LIMITS_ROW)
 
 
 def _parse_master_insurance_policy_for_condominium_json(
@@ -169,16 +185,22 @@ def _parse_master_insurance_policy_for_condominium_json(
 
     core_payload, non_null, coercion_lost = parse_typed_core(payload, _CORE_SPEC)
     building_limits = _parse_building_limits(payload.get("building_limits"))
+    coverage_lines = _parse_rows(payload.get("coverage_lines"), _COVERAGE_LINES_ROW)
     sections = parse_catch_all(payload.get("additional_sections"))
 
     try:
         data = MasterInsurancePolicyForCondominiumExtraction.model_validate(
-            {**core_payload, "building_limits": building_limits, "additional_sections": sections}
+            {
+                **core_payload,
+                "building_limits": building_limits,
+                "coverage_lines": coverage_lines,
+                "additional_sections": sections,
+            }
         )
     except ValidationError:
         return None
 
-    status = derive_status(non_null + len(building_limits), coercion_lost)
+    status = derive_status(non_null + len(building_limits) + len(coverage_lines), coercion_lost)
     confidence = coerce_confidence(payload.get("confidence"))
     raw_reasoning = payload.get("reasoning")
     reasoning = (
@@ -241,6 +263,6 @@ async def extract_master_insurance_policy_for_condominium(
         confidence=result.confidence,
         core_fields_present=core_present,
         catch_all_sections=len(result.data.additional_sections),
-        list_rows_total=len(result.data.building_limits),
+        list_rows_total=len(result.data.building_limits) + len(result.data.coverage_lines),
     )
     return result

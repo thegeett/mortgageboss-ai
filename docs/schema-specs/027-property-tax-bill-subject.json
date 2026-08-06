@@ -43,6 +43,18 @@
         {"name":"paid_date","type":"date","why":"processor — when the installment was paid"},
         {"name":"source","type":"str","why":"provenance of the installment row"}
       ]
+    },
+    {
+      "name":"jurisdiction_breakdown","shape":"flat_row",
+      "shape_reason":"the per-district rate/amount table — a bill splits the total across county / municipality / fire / school districts, each with its own rate. Captured for future tax-composition rules; no live consumer yet (LP-460).",
+      "expected_item_count":"1-several","rules":[],
+      "exists_today":false,"plumbing_sites":5,
+      "fields":[
+        {"name":"taxing_unit","type":"str","why":"the taxing district / unit name"},
+        {"name":"tax_rate","type":"str","why":"the district's rate as written"},
+        {"name":"amount_billed","type":"Decimal","why":"the amount billed for the district"},
+        {"name":"adjusted_billed","type":"Decimal","why":"the adjusted billed amount, if shown"}
+      ]
     }
   ],
 

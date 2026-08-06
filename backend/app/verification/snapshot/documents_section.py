@@ -709,7 +709,11 @@ _MORTGAGEE_OR_LIENHOLDER_ENTRIES_LIST = ListSpec(
 # typed field (the IH-1 anti-conflation). No PII in a form code/description.
 _FORMS_AND_ENDORSEMENTS_LIST = ListSpec(
     name="forms_and_endorsements",
-    fields=("code_or_label", "description"),
+    fields=(
+        "code_or_label",
+        "description",
+        "premium_or_amount",
+    ),  # LP-460 — the endorsement Premium column
 )
 # LP-446 — the pay_stub diff's lists: the earnings split (base/OT/bonus — IN-10/IN-11) + deductions.
 # Legacy pay-stub extraction has NO list attribute, so these are purely additive (no legacy to disturb).
@@ -1193,6 +1197,44 @@ _SPECIAL_ASSESSMENT_ITEMS_LIST = ListSpec(
     ),
 )
 
+# LP-460 — the six missing repeating-row lists (schema-gap phase 2). Each is a flat-row list the extractor
+# now captures; no rule enumerates them yet, so no stable_row_id and no derived. No redact — none of these
+# row shapes carries a per-row account number (those live in the masked typed-core scalars); the row fields
+# are dates, descriptions, amounts, coverage names, and (for the master cert) a shared, prompt-masked policy
+# number.
+_MORTGAGE_STATEMENT__TRANSACTION_ACTIVITY_LIST = ListSpec(
+    name="transaction_activity",
+    fields=("date", "description", "principal", "interest", "escrow", "fees_or_other", "total"),
+)
+_RETIREMENT_ACCOUNT__HOLDINGS_LIST = ListSpec(
+    name="holdings",
+    fields=(
+        "symbol",
+        "description",
+        "quantity",
+        "price",
+        "market_value",
+        "cost_basis",
+        "unrealized_gain_loss",
+    ),
+)
+_HOA_STATEMENT__PAYMENT_LEDGER_LIST = ListSpec(
+    name="payment_ledger",
+    fields=("date", "description", "charge", "paid", "running_balance"),
+)
+_PROPERTY_TAX_BILL__JURISDICTION_BREAKDOWN_LIST = ListSpec(
+    name="jurisdiction_breakdown",
+    fields=("taxing_unit", "tax_rate", "amount_billed", "adjusted_billed"),
+)
+_HOMEOWNERS_INSURANCE__COVERAGE_LINES_LIST = ListSpec(
+    name="coverage_lines",
+    fields=("coverage_name", "limit", "premium"),
+)
+_MASTER_INSURANCE__COVERAGE_LINES_LIST = ListSpec(
+    name="coverage_lines",
+    fields=("type_of_insurance", "policy_number", "limit", "deductible", "causes_of_loss"),
+)
+
 _LIST_SPECS: dict[str, tuple[ListSpec, ...]] = {
     "voe": (_GROSS_EARNINGS_HISTORY_LIST,),  # LP-446 diff (live extractor)
     "investment_account": (_SECURITY_POSITIONS_LIST,),  # LP-446 diff (live extractor)
@@ -1200,11 +1242,17 @@ _LIST_SPECS: dict[str, tuple[ListSpec, ...]] = {
         _ADDENDA_LIST,
         _CONTINGENCIES_LIST,
     ),  # LP-446 diff (live extractor)
-    "property_tax_bill": (
+    "property_tax_bill": (  # LP-446 diff + LP-460 jurisdiction_breakdown
         _PROPERTY_TAX_BILL__INSTALLMENTS_AND_DUE_DATES_LIST,
-    ),  # LP-446 diff (live extractor)
+        _PROPERTY_TAX_BILL__JURISDICTION_BREAKDOWN_LIST,
+    ),
     "profit_and_loss": (_FINANCIAL_LINE_ITEMS_LIST,),  # LP-446 diff (live extractor)
-    "hoa_statement": (_SPECIAL_ASSESSMENT_ITEMS_LIST,),  # LP-446 diff (live extractor)
+    "hoa_statement": (  # LP-446 diff + LP-460 payment_ledger
+        _SPECIAL_ASSESSMENT_ITEMS_LIST,
+        _HOA_STATEMENT__PAYMENT_LEDGER_LIST,
+    ),
+    "mortgage_statement": (_MORTGAGE_STATEMENT__TRANSACTION_ACTIVITY_LIST,),  # LP-460
+    "retirement_account": (_RETIREMENT_ACCOUNT__HOLDINGS_LIST,),  # LP-460
     "bank_statement": (_TRANSACTIONS_LIST,),
     "appraisal": (_COMPARABLE_SALES_LIST,),
     "credit_report": (_TRADELINES_LIST, _PUBLIC_RECORDS_LIST, _INQUIRIES_LIST),
@@ -1213,7 +1261,10 @@ _LIST_SPECS: dict[str, tuple[ListSpec, ...]] = {
     "certificate_of_eligibility": (_PRIOR_VA_LOAN_OR_ENTITLEMENT_CHARGES_LIST,),
     "verification_of_mortgage": (_PAYMENT_HISTORY_MONTHS_LIST,),
     "homeowner_s_insurance_quote": (_MORTGAGEE_OR_LIENHOLDER_ENTRIES_LIST,),
-    "homeowners_insurance": (_FORMS_AND_ENDORSEMENTS_LIST,),  # LP-446 diff (live extractor)
+    "homeowners_insurance": (  # LP-446 diff + LP-460 coverage_lines
+        _FORMS_AND_ENDORSEMENTS_LIST,
+        _HOMEOWNERS_INSURANCE__COVERAGE_LINES_LIST,
+    ),
     "pay_stub": (_EARNINGS_LINES_LIST, _DEDUCTION_LINES_LIST),  # LP-446 diff (live extractor)
     # LP-443 Phase C — the remaining generated list-bearing types.
     "affiliated_business_disclosure": (_AFFILIATE_ENTRIES_LIST,),
@@ -1240,7 +1291,10 @@ _LIST_SPECS: dict[str, tuple[ListSpec, ...]] = {
     "k1_statement": (_K1_BOX_ITEMS_LIST,),
     "k_1_shareholder_profit_and_loss_transcripts": (_TRANSCRIPT_LINE_ITEMS_LIST,),
     "letter_of_explanation_asset": (_TRANSFER_PATH_OR_CHRONOLOGY_LIST,),
-    "master_insurance_policy_for_condominium": (_BUILDING_LIMITS_LIST,),
+    "master_insurance_policy_for_condominium": (
+        _BUILDING_LIMITS_LIST,
+        _MASTER_INSURANCE__COVERAGE_LINES_LIST,
+    ),
     "military_leave_and_earning_statement_les": (_ENTITLEMENTS_LIST,),
     "miscellaneous_document": (_KEY_VALUE_PAIRS_LIST,),
     "mortgage_loan_origination_agreement": (_ORIGINATION_AND_BROKER_FEE_ITEMS_LIST,),

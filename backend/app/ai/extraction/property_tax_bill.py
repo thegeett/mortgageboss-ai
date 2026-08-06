@@ -42,7 +42,9 @@ logger = structlog.get_logger(__name__)
 
 _PROMPT_PATH = "extraction/property_tax_bill.txt"
 _SUPPORTED_MEDIA_TYPES = frozenset({"application/pdf", "image/jpeg", "image/png", "image/jpg"})
-_MAX_TOKENS = 8192  # LP-446: list-bearing (installments_and_due_dates) → unbounded-list budget
+_MAX_TOKENS = (
+    16384  # LP-460: TWO nested lists (installments_and_due_dates + jurisdiction_breakdown)
+)
 
 
 class PropertyTaxBillExtraction(BaseModel):
@@ -82,6 +84,8 @@ class PropertyTaxBillExtraction(BaseModel):
 
     # --- LP-446 diff — captured nested list(s) (bare rows) --------------------- #
     installments_and_due_dates: list[dict[str, Any]] = Field(default_factory=list)
+    # --- LP-460 diff — the per-jurisdiction rate/amount table (county/municipality/district) ---- #
+    jurisdiction_breakdown: list[dict[str, Any]] = Field(default_factory=list)
 
     additional_sections: list[CatchAllSection] = Field(default_factory=list)
 
@@ -140,6 +144,16 @@ _INSTALLMENTS_AND_DUE_DATES_ROW: CoreSpec = (
     ("source", coerce_str),
 )
 
+# LP-460 — the per-jurisdiction rate/amount table (a bill splits the total across county / municipality /
+# fire / school districts, each with its own rate). Row values are read as strings by the snapshot, kept
+# verbatim (coerce_str) — a rate like ".5200" and a per-district amount preserved as written.
+_JURISDICTION_BREAKDOWN_ROW: CoreSpec = (
+    ("taxing_unit", coerce_str),
+    ("tax_rate", coerce_str),
+    ("amount_billed", coerce_str),
+    ("adjusted_billed", coerce_str),
+)
+
 
 def _parse_rows(raw: Any, row_spec: CoreSpec) -> list[dict[str, Any]]:
     """LP-446 — coerce a bare-row list (each declared field coerced, a per-row source kept, empty rows
@@ -173,6 +187,9 @@ def _parse_property_tax_bill_json(text: str) -> PropertyTaxBillExtractionResult 
     installments_and_due_dates = _parse_rows(
         payload.get("installments_and_due_dates"), _INSTALLMENTS_AND_DUE_DATES_ROW
     )
+    jurisdiction_breakdown = _parse_rows(
+        payload.get("jurisdiction_breakdown"), _JURISDICTION_BREAKDOWN_ROW
+    )
     sections = parse_catch_all(payload.get("additional_sections"))
 
     try:
@@ -180,13 +197,16 @@ def _parse_property_tax_bill_json(text: str) -> PropertyTaxBillExtractionResult 
             {
                 **core_payload,
                 "installments_and_due_dates": installments_and_due_dates,
+                "jurisdiction_breakdown": jurisdiction_breakdown,
                 "additional_sections": sections,
             }
         )
     except ValidationError:
         return None
 
-    status = derive_status(non_null + len(installments_and_due_dates), coercion_lost)
+    status = derive_status(
+        non_null + len(installments_and_due_dates) + len(jurisdiction_breakdown), coercion_lost
+    )
     confidence = coerce_confidence(payload.get("confidence"))
     raw_reasoning = payload.get("reasoning")
     reasoning = (

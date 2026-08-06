@@ -31,6 +31,7 @@ from app.ai.extraction.parsing import (
     derive_status,
     parse_catch_all,
     parse_typed_core,
+    source_payload,
 )
 from app.ai.extraction.shape import CatchAllSection, TypedField
 from app.ai.parsing import coerce_confidence, extract_json_object
@@ -41,7 +42,8 @@ logger = structlog.get_logger(__name__)
 
 _PROMPT_PATH = "extraction/mortgage_statement.txt"
 _SUPPORTED_MEDIA_TYPES = frozenset({"application/pdf", "image/jpeg", "image/png", "image/jpg"})
-_MAX_TOKENS = 4096
+# LP-460: now list-bearing (transaction_activity) → the unbounded-list budget (guide §7; was 4096).
+_MAX_TOKENS = 8192
 
 
 class MortgageStatementExtraction(BaseModel):
@@ -76,6 +78,11 @@ class MortgageStatementExtraction(BaseModel):
     maturity_date: TypedField[date] = Field(default_factory=TypedField)
     delinquency_status: TypedField[str] = Field(default_factory=TypedField)
     loss_mitigation_or_bankruptcy_messages: TypedField[str] = Field(default_factory=TypedField)
+
+    # --- LP-460 diff — captured nested list(s) (bare rows) ------------------- #
+    # The Reg-Z "transactions since your last statement" posting table — DISTINCT from the
+    # payment-breakdown / explanation-of-amount-due SUMMARY blocks (those stay in the catch-all).
+    transaction_activity: list[dict[str, Any]] = Field(default_factory=list)
 
     additional_sections: list[CatchAllSection] = Field(default_factory=list)
 
@@ -124,6 +131,35 @@ _CORE_SPEC: CoreSpec = (
     ("loss_mitigation_or_bankruptcy_messages", coerce_str),
 )
 
+# LP-460 — the transaction_activity list: bare rows (mirrors bank_statement's transactions parse). Row
+# values are read as strings by the snapshot, so each field is kept verbatim (coerce_str) — a blank/absent
+# amount stays absent, an "INCL"-style non-numeric value is preserved rather than dropped by coercion.
+_TRANSACTION_ACTIVITY_ROW: CoreSpec = (
+    ("date", coerce_str),
+    ("description", coerce_str),
+    ("principal", coerce_str),
+    ("interest", coerce_str),
+    ("escrow", coerce_str),
+    ("fees_or_other", coerce_str),
+    ("total", coerce_str),
+)
+
+
+def _parse_rows(raw: Any, row_spec: CoreSpec) -> list[dict[str, Any]]:
+    """Coerce a bare-row list (each declared field coerced, a per-row page/snippet source kept, empty rows
+    dropped). Mirrors bank_statement's transactions parse; row values are read as strings by the snapshot."""
+    rows: list[dict[str, Any]] = []
+    if not isinstance(raw, list):
+        return rows
+    for entry in raw:
+        if not isinstance(entry, dict):
+            continue
+        row: dict[str, Any] = {name: coerce(entry.get(name)) for name, coerce in row_spec}
+        row["source"] = source_payload(entry)
+        if any(row[name] is not None for name, _ in row_spec):
+            rows.append(row)
+    return rows
+
 
 def _parse_mortgage_statement_json(text: str) -> MortgageStatementExtractionResult | None:
     """Defensively parse a model response into a mortgage-statement result. Never raises."""
@@ -138,16 +174,23 @@ def _parse_mortgage_statement_json(text: str) -> MortgageStatementExtractionResu
         return None
 
     core_payload, non_null, coercion_lost = parse_typed_core(payload, _CORE_SPEC)
+    transaction_activity = _parse_rows(
+        payload.get("transaction_activity"), _TRANSACTION_ACTIVITY_ROW
+    )
     sections = parse_catch_all(payload.get("additional_sections"))
 
     try:
         data = MortgageStatementExtraction.model_validate(
-            {**core_payload, "additional_sections": sections}
+            {
+                **core_payload,
+                "transaction_activity": transaction_activity,
+                "additional_sections": sections,
+            }
         )
     except ValidationError:
         return None
 
-    status = derive_status(non_null, coercion_lost)
+    status = derive_status(non_null + len(transaction_activity), coercion_lost)
     confidence = coerce_confidence(payload.get("confidence"))
     raw_reasoning = payload.get("reasoning")
     reasoning = (
@@ -200,5 +243,6 @@ async def extract_mortgage_statement(
         confidence=result.confidence,
         core_fields_present=core_present,
         catch_all_sections=len(result.data.additional_sections),
+        list_rows_total=len(result.data.transaction_activity),
     )
     return result

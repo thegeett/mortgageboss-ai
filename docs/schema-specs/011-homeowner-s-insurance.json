@@ -42,7 +42,22 @@
       "plumbing_sites": 5,
       "fields": [
         {"name": "code_or_label", "type": "str", "why": "IH-1 — the HO 00 03-class form code that encodes replacement-cost settlement when no words appear (the Occidental case)"},
-        {"name": "description", "type": "str", "why": "IH-8 — a separate wind/hail endorsement description"}
+        {"name": "description", "type": "str", "why": "IH-8 — a separate wind/hail endorsement description"},
+        {"name": "premium_or_amount", "type": "str", "why": "the endorsement premium/cost column, verbatim (may be INCL, a credit, or a dollar line) — LP-460"}
+      ]
+    },
+    {
+      "name": "coverage_lines",
+      "shape": "flat_row",
+      "shape_reason": "the Coverage B-F schedule (A is the coverage_amount scalar) — each line's limit + premium. Deductibles are policy-level, not per-line on the document. Captured for future coverage-adequacy rules; no live consumer yet (LP-460).",
+      "expected_item_count": "0-several",
+      "rules": [],
+      "exists_today": false,
+      "plumbing_sites": 5,
+      "fields": [
+        {"name": "coverage_name", "type": "str", "why": "the coverage name (Coverage B/C/D/E/F, ...)"},
+        {"name": "limit", "type": "Decimal", "why": "the coverage limit"},
+        {"name": "premium", "type": "str", "why": "the coverage premium as written (may be 'INCL')"}
       ]
     }
   ],

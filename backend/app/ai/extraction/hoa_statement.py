@@ -40,7 +40,9 @@ logger = structlog.get_logger(__name__)
 
 _PROMPT_PATH = "extraction/hoa_statement.txt"
 _SUPPORTED_MEDIA_TYPES = frozenset({"application/pdf", "image/jpeg", "image/png", "image/jpg"})
-_MAX_TOKENS = 8192  # LP-446: list-bearing (special_assessment_items) → unbounded-list budget
+_MAX_TOKENS = (
+    16384  # LP-460: TWO nested lists (special_assessment_items + payment_ledger) → ≥2-list tier
+)
 
 
 class HOAStatementExtraction(BaseModel):
@@ -80,6 +82,8 @@ class HOAStatementExtraction(BaseModel):
 
     # --- LP-446 diff — captured nested list(s) (bare rows) --------------------- #
     special_assessment_items: list[dict[str, Any]] = Field(default_factory=list)
+    # --- LP-460 diff — the account ledger (a posting table with nowhere to land today) ------ #
+    payment_ledger: list[dict[str, Any]] = Field(default_factory=list)
 
     additional_sections: list[CatchAllSection] = Field(default_factory=list)
 
@@ -134,6 +138,17 @@ _SPECIAL_ASSESSMENT_ITEMS_ROW: CoreSpec = (
     ("duration", coerce_str),
 )
 
+# LP-460 — the account ledger rows (Date / Description / Charge / Paid / Balance). Row values are read as
+# strings by the snapshot, kept verbatim (coerce_str). ``running_balance`` (not ``balance``) — the scalar
+# typed-core ``balance`` is the account's current balance; the per-row balance is the running one.
+_PAYMENT_LEDGER_ROW: CoreSpec = (
+    ("date", coerce_str),
+    ("description", coerce_str),
+    ("charge", coerce_str),
+    ("paid", coerce_str),
+    ("running_balance", coerce_str),
+)
+
 
 def _parse_rows(raw: Any, row_spec: CoreSpec) -> list[dict[str, Any]]:
     """LP-446 — coerce a bare-row list (each declared field coerced, a per-row source kept, empty rows
@@ -167,6 +182,7 @@ def _parse_hoa_statement_json(text: str) -> HOAStatementExtractionResult | None:
     special_assessment_items = _parse_rows(
         payload.get("special_assessment_items"), _SPECIAL_ASSESSMENT_ITEMS_ROW
     )
+    payment_ledger = _parse_rows(payload.get("payment_ledger"), _PAYMENT_LEDGER_ROW)
     sections = parse_catch_all(payload.get("additional_sections"))
 
     try:
@@ -174,13 +190,16 @@ def _parse_hoa_statement_json(text: str) -> HOAStatementExtractionResult | None:
             {
                 **core_payload,
                 "special_assessment_items": special_assessment_items,
+                "payment_ledger": payment_ledger,
                 "additional_sections": sections,
             }
         )
     except ValidationError:
         return None
 
-    status = derive_status(non_null + len(special_assessment_items), coercion_lost)
+    status = derive_status(
+        non_null + len(special_assessment_items) + len(payment_ledger), coercion_lost
+    )
     confidence = coerce_confidence(payload.get("confidence"))
     raw_reasoning = payload.get("reasoning")
     reasoning = (

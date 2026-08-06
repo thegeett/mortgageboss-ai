@@ -32,6 +32,20 @@ CAPTURE EVERYTHING ON THE DOCUMENT — lose nothing. There are two buckets:
 
 3. NESTED LISTS — one FLAT ROW per repeating item (bare values + a page/snippet):
      building_limits — each row: building_identifier_or_address, coverage_limit, deductible, wind_hail_named_storm_deductible, source
+     coverage_lines — each row: type_of_insurance, policy_number, limit, deductible, causes_of_loss
+   coverage_lines is the schedule of COVERAGE LINES on the cert — one row per
+   TYPE-OF-INSURANCE SECTION. On an ACORD 24/25 those are the top-level section rows:
+   PROPERTY, INLAND MARINE, CRIME, BOILER & MACHINERY / EQUIPMENT BREAKDOWN, GENERAL
+   LIABILITY, … — coverage LINES of ONE master policy (they usually share a single
+   policy number). ⚠️ TWO rules: (a) ONE row PER SECTION — do NOT split a section into
+   its individual coverage sub-limits (Building / Personal Property / Business Income /
+   Extra Expense / Rental Value / Blanket … all belong to the PROPERTY row; put the
+   section's primary/blanket limit in `limit`). (b) INCLUDE a section even if its
+   limit/deductible cells are BLANK — a "BOILER & MACHINERY / EQUIPMENT BREAKDOWN"
+   section with no dollar amount is STILL one row (type_of_insurance filled,
+   limit/deductible null); do NOT drop it for having no numbers. MASK the policy_number
+   (last 4 only), same as the typed policy_number field. If no such schedule is
+   present, return an empty list.
 
 FOR EVERY FIELD include WHERE you read it:
   - "page"    (integer)  the 1-based page the value appears on
@@ -75,6 +89,7 @@ Respond with ONLY a single JSON object, no markdown fences and no prose, exactly
     ]}
   ],
   "building_limits": [{"building_identifier_or_address": <string|null>, "coverage_limit": <number|null>, "deductible": <number|null>, "wind_hail_named_storm_deductible": <string|null>, "source": <string|null>, "page": <int|null>, "snippet": <string|null>}],
+  "coverage_lines": [{"type_of_insurance": <string|null>, "policy_number": <string|null>, "limit": <number|null>, "deductible": <number|null>, "causes_of_loss": <string|null>, "page": <int|null>, "snippet": <string|null>}],
   "field_confidence": {"<typed_core field name>": <0.0-1.0|null>, "...": <0.0-1.0|null>},
   "confidence": <number 0.0-1.0>,
   "reasoning": "<one short sentence describing the document>"

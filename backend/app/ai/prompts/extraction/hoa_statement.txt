@@ -22,8 +22,16 @@ CAPTURE EVERYTHING ON THE STATEMENT — lose nothing. There are two buckets:
      due_date          (date)    the payment due date
 
 2. ADDITIONAL SECTIONS — EVERYTHING ELSE, grouped by section, e.g. "Special
-   Assessments", "Late Fees / Fines", "Account History", "Management Contact". Do
-   not force these into the typed core — capture them here so nothing is lost.
+   Assessments", "Late Fees / Fines", "Management Contact". Do not force these into
+   the typed core — capture them here so nothing is lost.
+
+3. PAYMENT LEDGER — a LIST, one FLAT ROW per line in the account activity / ledger
+   table (each dated charge or payment with a running balance):
+     payment_ledger — each row: date, description, charge, paid, running_balance
+   Capture EVERY row of the ledger (do not stop at the first page — a ledger often
+   runs to a second page). ``running_balance`` is the per-row balance in that table,
+   NOT the account's current ``balance`` (a typed field). If there is no ledger /
+   activity table, return an empty list.
 
 FOR EVERY FIELD include WHERE you read it:
   - "page"    (integer)  the 1-based page the value appears on
@@ -63,3 +71,4 @@ Respond with ONLY a single JSON object, no markdown fences and no prose, exactly
     "reserve_percentage": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>}
   },
   "special_assessment_items": [{"description": <string|null>, "amount": <string|null>, "duration": <string|null>, "page": <int|null>, "snippet": <string|null>}],
+  "payment_ledger": [{"date": <string|null>, "description": <string|null>, "charge": <string|null>, "paid": <string|null>, "running_balance": <string|null>, "page": <int|null>, "snippet": <string|null>}],

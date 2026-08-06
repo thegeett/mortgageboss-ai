@@ -29,7 +29,26 @@
     {"name": "loss_mitigation_or_bankruptcy_messages", "type": "str", "why": "processor: forbearance/BK flags on a retained property (risk signal; light string list)", "rules": [], "reason_class": "processor", "rule_floor": false, "degraded_from": "list", "pii": null, "exists_today": false, "prompt_hint": null}
   ],
 
-  "nested_lists": [],
+  "nested_lists": [
+    {
+      "name": "transaction_activity",
+      "shape": "flat_row",
+      "shape_reason": "the Reg-Z 'transactions since your last statement' posting table — a handful of dated payment/charge/fee rows; flat_row is cheapest. Captured for future payment-history rules; no live consumer yet (LP-460).",
+      "expected_item_count": "0-several",
+      "rules": [],
+      "exists_today": false,
+      "plumbing_sites": 5,
+      "fields": [
+        {"name": "date", "type": "str", "why": "the posting date of the line"},
+        {"name": "description", "type": "str", "why": "what the posting is (PAYMENT, PRINCIPAL PAYMENT, fee, ...)"},
+        {"name": "principal", "type": "Decimal", "why": "principal portion of the posting"},
+        {"name": "interest", "type": "Decimal", "why": "interest portion of the posting"},
+        {"name": "escrow", "type": "Decimal", "why": "escrow portion of the posting"},
+        {"name": "fees_or_other", "type": "Decimal", "why": "fees / optional products / other portion"},
+        {"name": "total", "type": "Decimal", "why": "the total amount of the posting"}
+      ]
+    }
+  ],
 
   "rejected": [
     {"name": "document_title, form_number, form_revision_date, document_status_or_version", "reason": "a mortgage statement is not a standardized form; classification handles type"},

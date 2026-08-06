@@ -142,16 +142,20 @@ def test_correctly_sized_types_are_unchanged_no_blanket_raise() -> None:
     for mod in (
         w2,
         letter_of_explanation,
-        mortgage_statement,
         form_1099,
         gift_letter,
     ):
         assert mod._MAX_TOKENS == 4096
     # LP-446: these gained a generic list capture → the unbounded-list budget (1 list → 8192).
-    assert homeowners_insurance._MAX_TOKENS == 8192  # forms_and_endorsements
     assert voe._MAX_TOKENS == 8192  # gross_earnings_history
-    assert hoa_statement._MAX_TOKENS == 8192  # special_assessment_items
-    assert property_tax_bill._MAX_TOKENS == 8192  # installments_and_due_dates
+    # LP-460: added a SECOND nested list → the ≥2-list tier (16384). The row tables are large (a 36-row
+    # HOA ledger, a full coverage schedule), so this is the sizing rule working, not a blanket raise.
+    assert mortgage_statement._MAX_TOKENS == 8192  # LP-460 — transaction_activity (0 → 1 list)
+    assert homeowners_insurance._MAX_TOKENS == 16384  # forms_and_endorsements + coverage_lines
+    assert hoa_statement._MAX_TOKENS == 16384  # special_assessment_items + payment_ledger
+    assert (
+        property_tax_bill._MAX_TOKENS == 16384
+    )  # installments_and_due_dates + jurisdiction_breakdown
 
 
 def test_every_wired_generated_extractor_matches_the_sizing_rule() -> None:

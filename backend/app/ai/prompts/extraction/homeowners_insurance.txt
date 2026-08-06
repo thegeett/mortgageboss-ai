@@ -46,10 +46,23 @@ CAPTURE EVERYTHING ON THE DOCUMENT — lose nothing. There are two buckets:
    these into the typed core — capture them here so nothing is lost.
 
 3. FORMS & ENDORSEMENTS — a LIST, one FLAT ROW per form/endorsement on the policy:
-     forms_and_endorsements — each row: code_or_label, description
-   List EVERY form and endorsement (its form code/label and what it does). A
-   personal-property (Coverage C) replacement-cost endorsement is a ROW HERE — it is
-   NOT the dwelling's loss-settlement basis.
+     forms_and_endorsements — each row: code_or_label, description, premium_or_amount
+   List EVERY form and endorsement (its form code/label and what it does). When the
+   endorsement schedule shows a Premium / cost column, capture it VERBATIM in
+   premium_or_amount — including a non-numeric "INCL", a credit like "($300)", and a
+   dollar line like "$1,402"; use null when no amount is shown. A personal-property
+   (Coverage C) replacement-cost endorsement is a ROW HERE — it is NOT the dwelling's
+   loss-settlement basis.
+
+4. COVERAGE LINES — a LIST, one FLAT ROW per coverage in the policy's coverage
+   schedule BELOW Coverage A (Coverage A / dwelling is the coverage_amount typed
+   field above; do NOT repeat it here):
+     coverage_lines — each row: coverage_name, limit, premium
+   Capture Coverage B (Other Structures), C (Personal Property), D (Loss of Use),
+   E (Personal Liability), F (Medical Payments), and any further scheduled coverage,
+   each with its limit and premium as written ("INCL" is a valid premium). Policy
+   DEDUCTIBLES are NOT coverage lines — leave them in their typed fields / the
+   catch-all. If there is no coverage schedule, return an empty list.
 
 FOR EVERY FIELD include WHERE you read it:
   - "page"    (integer)  the 1-based page the value appears on
@@ -103,7 +116,8 @@ Respond with ONLY a single JSON object, no markdown fences and no prose, exactly
       {"label": "<field label>", "value": <string|null>, "page": <int|null>, "snippet": <string|null>}
     ]}
   ],
-  "forms_and_endorsements": [{"code_or_label": <string|null>, "description": <string|null>, "page": <int|null>, "snippet": <string|null>}],
+  "forms_and_endorsements": [{"code_or_label": <string|null>, "description": <string|null>, "premium_or_amount": <string|null>, "page": <int|null>, "snippet": <string|null>}],
+  "coverage_lines": [{"coverage_name": <string|null>, "limit": <string|null>, "premium": <string|null>, "page": <int|null>, "snippet": <string|null>}],
   "field_confidence": {"<typed_core field name>": <0.0-1.0|null>, "...": <0.0-1.0|null>},
   "confidence": <number 0.0-1.0>,
   "reasoning": "<one short sentence describing the document>"

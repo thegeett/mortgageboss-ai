@@ -43,6 +43,22 @@
         {"name": "amount", "type": "Decimal", "why": "the special-assessment amount"},
         {"name": "duration", "type": "str", "why": "how long the special assessment runs (per-item detail for future warrantability/reserve rules)"}
       ]
+    },
+    {
+      "name": "payment_ledger",
+      "shape": "flat_row",
+      "shape_reason": "the account activity ledger (dated charge/payment rows with a running balance) — can run to dozens of rows over multiple pages, so it drives the ≥2-list budget. Captured for future payment-history/delinquency rules; no live consumer yet (LP-460).",
+      "expected_item_count": "0-many",
+      "rules": [],
+      "exists_today": false,
+      "plumbing_sites": 5,
+      "fields": [
+        {"name": "date", "type": "str", "why": "the ledger row date"},
+        {"name": "description", "type": "str", "why": "the charge / payment description"},
+        {"name": "charge", "type": "Decimal", "why": "the charge amount on the row"},
+        {"name": "paid", "type": "Decimal", "why": "the payment amount on the row"},
+        {"name": "running_balance", "type": "Decimal", "why": "the running balance after the row (NOT the scalar balance)"}
+      ]
     }
   ],
 
