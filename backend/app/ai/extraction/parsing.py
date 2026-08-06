@@ -227,6 +227,31 @@ def parse_catch_all(raw: Any) -> list[dict[str, Any]]:
     return sections
 
 
+def parse_flat_rows(raw: Any, row_spec: CoreSpec) -> list[dict[str, Any]]:
+    """Coerce a bare-row list (LP-437 ``flat_row``) — each declared field coerced, a per-row page/snippet
+    ``source`` kept, a fully-empty row dropped (no hallucinated rows). Row values are read as strings by
+    the snapshot; mirrors bank_statement's transactions parse.
+
+    Shared by every flat-row list-bearing extractor (was copied per module). A ``source`` DECLARED in
+    ``row_spec`` (a real data column named "source") is never clobbered — provenance is only added when the
+    row has no field of that name.
+    """
+    rows: list[dict[str, Any]] = []
+    if not isinstance(raw, list):
+        return rows
+    for entry in raw:
+        if not isinstance(entry, dict):
+            continue
+        row: dict[str, Any] = {name: coerce(entry.get(name)) for name, coerce in row_spec}
+        if (
+            "source" not in row
+        ):  # never clobber a declared 'source' data field; else keep provenance
+            row["source"] = source_payload(entry)
+        if any(row[name] is not None for name, _ in row_spec):
+            rows.append(row)
+    return rows
+
+
 def derive_status(non_null: int, coercion_lost: bool) -> ExtractionStatus:
     """Status from the typed core: nothing read → FAILED; a coercion loss → PARTIAL; else SUCCEEDED."""
     if non_null == 0:

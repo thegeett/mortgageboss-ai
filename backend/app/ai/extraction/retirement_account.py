@@ -34,8 +34,8 @@ from app.ai.extraction.parsing import (
     coerce_str,
     derive_status,
     parse_catch_all,
+    parse_flat_rows,
     parse_typed_core,
-    source_payload,
 )
 from app.ai.extraction.shape import CatchAllSection, TypedField
 from app.ai.parsing import coerce_confidence, extract_json_object
@@ -161,22 +161,6 @@ _HOLDINGS_ROW: CoreSpec = (
 )
 
 
-def _parse_rows(raw: Any, row_spec: CoreSpec) -> list[dict[str, Any]]:
-    """Coerce a bare-row list (each declared field coerced, a per-row page/snippet source kept, empty rows
-    dropped). Mirrors bank_statement's transactions parse; row values are read as strings by the snapshot."""
-    rows: list[dict[str, Any]] = []
-    if not isinstance(raw, list):
-        return rows
-    for entry in raw:
-        if not isinstance(entry, dict):
-            continue
-        row: dict[str, Any] = {name: coerce(entry.get(name)) for name, coerce in row_spec}
-        row["source"] = source_payload(entry)
-        if any(row[name] is not None for name, _ in row_spec):
-            rows.append(row)
-    return rows
-
-
 def _parse_retirement_json(text: str) -> RetirementAccountExtractionResult | None:
     """Defensively parse a model response into a retirement result. Never raises."""
     snippet = extract_json_object(text)
@@ -190,7 +174,7 @@ def _parse_retirement_json(text: str) -> RetirementAccountExtractionResult | Non
         return None
 
     core_payload, non_null, coercion_lost = parse_typed_core(payload, _CORE_SPEC)
-    holdings = _parse_rows(payload.get("holdings"), _HOLDINGS_ROW)
+    holdings = parse_flat_rows(payload.get("holdings"), _HOLDINGS_ROW)
     sections = parse_catch_all(payload.get("additional_sections"))
 
     try:

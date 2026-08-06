@@ -1198,10 +1198,11 @@ _SPECIAL_ASSESSMENT_ITEMS_LIST = ListSpec(
 )
 
 # LP-460 — the six missing repeating-row lists (schema-gap phase 2). Each is a flat-row list the extractor
-# now captures; no rule enumerates them yet, so no stable_row_id and no derived. No redact — none of these
-# row shapes carries a per-row account number (those live in the masked typed-core scalars); the row fields
-# are dates, descriptions, amounts, coverage names, and (for the master cert) a shared, prompt-masked policy
-# number.
+# now captures; no rule enumerates them yet, so no stable_row_id and no derived. Five carry no per-row
+# account number (amounts/dates/descriptions/coverage names — those keep their masked typed-core scalars),
+# so no redact. The ONE exception is the master cert's coverage_lines.policy_number: it IS a per-row account
+# number whose masking rests only on the generated prompt, so it gets the same _DESC_REDACT backstop as
+# _TRADELINES_LIST's account_number_masked — a full number the prompt fails to mask is scrubbed here.
 _MORTGAGE_STATEMENT__TRANSACTION_ACTIVITY_LIST = ListSpec(
     name="transaction_activity",
     fields=("date", "description", "principal", "interest", "escrow", "fees_or_other", "total"),
@@ -1233,6 +1234,10 @@ _HOMEOWNERS_INSURANCE__COVERAGE_LINES_LIST = ListSpec(
 _MASTER_INSURANCE__COVERAGE_LINES_LIST = ListSpec(
     name="coverage_lines",
     fields=("type_of_insurance", "policy_number", "limit", "deductible", "causes_of_loss"),
+    # LP-460 review — a row-PII backstop mirroring _TRADELINES_LIST: policy_number is a per-row account
+    # number masked only by the (generated, unvalidated-for-masking) master prompt, so if the model returns
+    # a full number the _DESC_REDACT 9+-digit scrub redacts it here (a genuinely-masked ****4432 is untouched).
+    redact=frozenset({"policy_number"}),
 )
 
 _LIST_SPECS: dict[str, tuple[ListSpec, ...]] = {

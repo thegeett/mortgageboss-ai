@@ -30,8 +30,8 @@ from app.ai.extraction.parsing import (
     coerce_str,
     derive_status,
     parse_catch_all,
+    parse_flat_rows,
     parse_typed_core,
-    source_payload,
 )
 from app.ai.extraction.shape import CatchAllSection, TypedField
 from app.ai.parsing import coerce_confidence, extract_json_object
@@ -158,28 +158,12 @@ _COVERAGE_LINES_ROW: CoreSpec = (
 )
 
 
-def _parse_rows(raw: Any, row_spec: CoreSpec) -> list[dict[str, Any]]:
-    """Coerce a bare-row list (each declared field coerced, a per-row page/snippet source kept, empty rows
-    dropped). Mirrors bank_statement's transactions parse; row values are read as strings by the snapshot."""
-    rows: list[dict[str, Any]] = []
-    if not isinstance(raw, list):
-        return rows
-    for entry in raw:
-        if not isinstance(entry, dict):
-            continue
-        row: dict[str, Any] = {name: coerce(entry.get(name)) for name, coerce in row_spec}
-        row["source"] = source_payload(entry)
-        if any(row[name] is not None for name, _ in row_spec):
-            rows.append(row)
-    return rows
-
-
 def _parse_forms_and_endorsements(raw: Any) -> list[dict[str, Any]]:
     """Coerce the forms_and_endorsements rows — bare scalars + a per-row page/snippet source (LP-446).
 
     A PERSONAL-PROPERTY replacement-cost endorsement lands HERE as a row — never conflated with the
     dwelling's ``replacement_cost_or_coinsurance_basis`` typed field."""
-    return _parse_rows(raw, _FORMS_AND_ENDORSEMENTS_ROW)
+    return parse_flat_rows(raw, _FORMS_AND_ENDORSEMENTS_ROW)
 
 
 def _parse_homeowners_insurance_json(text: str) -> HomeownersInsuranceExtractionResult | None:
@@ -196,7 +180,7 @@ def _parse_homeowners_insurance_json(text: str) -> HomeownersInsuranceExtraction
 
     core_payload, non_null, coercion_lost = parse_typed_core(payload, _CORE_SPEC)
     forms_and_endorsements = _parse_forms_and_endorsements(payload.get("forms_and_endorsements"))
-    coverage_lines = _parse_rows(payload.get("coverage_lines"), _COVERAGE_LINES_ROW)
+    coverage_lines = parse_flat_rows(payload.get("coverage_lines"), _COVERAGE_LINES_ROW)
     sections = parse_catch_all(payload.get("additional_sections"))
 
     try:
