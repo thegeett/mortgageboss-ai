@@ -399,14 +399,19 @@ def _render_summary(
     else:
         lines += ["- Infrastructure failures: **0** (no throttling / auth / errors observed)."]
     if aborted_reason:
-        why = (
-            "consecutive throttling"
-            if aborted_reason == "rate_limited"
-            else "consecutive AI failures"
-        )
+        if aborted_reason == "rate_limited":
+            fix = (
+                "You are being throttled — **lower** `AI_REQUESTS_PER_MINUTE_BEDROCK` (send fewer"
+                " requests to stay under Bedrock's limit), restart the backend, then resume. To go"
+                " faster instead, raise the AWS account's Bedrock quota."
+            )
+            why = "consecutive throttling"
+        else:
+            fix = "Fix the cause (e.g. AWS credentials) and resume."
+            why = "consecutive AI failures"
         lines += [
             f"- 🛑 **RUN ABORTED** — {why}. The corpus was NOT fully analysed; findings cover only what"
-            " completed. Fix the cause and resume.",
+            f" completed. {fix}",
         ]
     lines += [
         "",

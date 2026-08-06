@@ -297,8 +297,10 @@ export default function ExtractionBenchPage() {
               fully analysed.{" "}
               {status.aborted_reason === "rate_limited" ? (
                 <>
-                  Raise <span className="font-mono">AI_REQUESTS_PER_MINUTE_BEDROCK</span>, then
-                  resume.
+                  You&apos;re being throttled — <strong>lower</strong>{" "}
+                  <span className="font-mono">AI_REQUESTS_PER_MINUTE_BEDROCK</span> (send fewer
+                  requests to stay under Bedrock&apos;s limit), restart the backend, then resume. To
+                  go faster instead, raise the AWS account&apos;s Bedrock quota.
                 </>
               ) : (
                 <>Fix credentials (AWS_PROFILE + `aws sso login`), then resume.</>
