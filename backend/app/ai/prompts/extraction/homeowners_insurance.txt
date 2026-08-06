@@ -22,7 +22,11 @@ CAPTURE EVERYTHING ON THE DOCUMENT — lose nothing. There are two buckets:
      named_insured_2   (string)  a SECOND named insured, if the policy lists one
      named_insured_raw (string)  the named-insured block VERBATIM (before any split)
      agency_producer_name (string) the agency / producer / agent name
-     policy_form       (string)  the policy FORM code, e.g. "HO 00 03", "HO-3", "HO 00 05"
+     policy_form       (string)  the policy FORM code — ISO codes ("HO 00 03", "HO-3", "HO 00 05")
+                        OR a carrier-specific homeowners form number printed on the declarations
+                        (e.g. "HO5031"). Do NOT use an Evidence-of-Insurance / document form code
+                        (e.g. "PH-EOI") and do NOT infer a form from a policy-TYPE word alone
+                        (e.g. "Condominium") — null in those cases.
      policy_status     (string)  active / new / renewal / cancelled, if stated
      replacement_cost_or_coinsurance_basis (string)  ⚠️ the DWELLING's (Coverage A) loss-settlement
                         basis ONLY: "replacement cost", "actual cash value / ACV", or a coinsurance %.

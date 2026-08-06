@@ -124,3 +124,28 @@ def test_failed_factory() -> None:
     result = HomeownersInsuranceExtractionResult.failed("nope")
     assert result.status == ExtractionStatus.FAILED
     assert result.data == HomeownersInsuranceExtraction()
+
+
+def test_homeowners_prompt_is_hand_maintained_not_the_bare_starter() -> None:
+    """⚠️ GUARD (LP-458). homeowners_insurance.txt is HAND-MAINTAINED: the generator runs in DIFF-MODE for
+    every shipping extractor (it emits only a STARTER placeholder, never overwrites). LP-446/447 added the
+    DWELLING-vs-personal-property anti-conflation block by hand, and LP-458 added carrier-HO-form-number
+    handling for policy_form. A spec `prompt_hint` does NOT reach this prompt. If a future regeneration
+    ever replaced it with the plain starter, IH-1's precision would break SILENTLY — so this fails LOUD if
+    the hand-added content is gone."""
+    from pathlib import Path
+
+    txt = (
+        Path(__file__).resolve().parents[2]
+        / "app"
+        / "ai"
+        / "prompts"
+        / "extraction"
+        / "homeowners_insurance.txt"
+    ).read_text(encoding="utf-8")
+    assert "DO NOT CONFLATE" in txt, (
+        "the DWELLING vs personal-property anti-conflation block is missing"
+    )
+    assert "carrier-specific homeowners form number" in txt, (
+        "the LP-458 policy_form carrier-form handling is missing"
+    )

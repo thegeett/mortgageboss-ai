@@ -29,7 +29,14 @@ CAPTURE EVERYTHING ON THE FORM — lose nothing. There are two buckets:
                        local wages/tax, locality name)
      "Box 12 Codes" — each Box 12 entry (code + amount, e.g. D = 401(k), W = HSA)
      "Box 13"       — the checkboxes (statutory employee, retirement plan,
-                       third-party sick pay) and whether each is checked
+                       third-party sick pay) and whether each is checked.
+                       ⚠️ For the typed fields statutory_employee_checked and
+                       retirement_plan_checked: return "checked" when the box has a
+                       mark, and "unchecked" when the box is PRESENT but empty — do
+                       NOT return null when Box 13 is visible on the form. null and
+                       "unchecked" are DIFFERENT facts: null = the box could not be
+                       read; "unchecked" = definitively not a statutory employee /
+                       not in a retirement plan (a downstream rule relies on this).
      "Box 14 Other" — any Box 14 "Other" entries
      "Other"        — control number (box d), employer/employee addresses, etc.
    Do not force these into the typed core — capture them here so nothing is lost.
