@@ -16,6 +16,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+import pytest
 from app.core.config import resolve_model, settings
 
 _APP = Path(__file__).resolve().parents[2] / "app"
@@ -48,10 +49,18 @@ def test_the_boundary_resolves_the_model_before_the_sdk_call() -> None:
     assert "resolve_model(" in src, "client.py must resolve the model before the SDK call"
 
 
-def test_resolve_model_returns_anthropic_ids_in_this_worktree() -> None:
-    # This worktree stays on the direct Anthropic API (ai_provider defaults to "anthropic"). An accidental flip
-    # to "bedrock" is the least-visible failure here — the wrong model, working fine, on the wrong provider.
-    assert settings.ai_provider == "anthropic"
+def test_resolve_model_returns_anthropic_ids_under_anthropic(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Under ai_provider="anthropic", resolve_model() is the identity and every configured tier is an
+    # Anthropic model id (never a Bedrock ARN/inference-profile). We PIN the provider rather than read the
+    # ambient one — the suite's baseline must not depend on the gitignored, per-worktree .env.
+    #
+    # NOTE: this replaced a "this worktree stays anthropic" guard that asserted the ambient provider. That
+    # guard is now void by design (this worktree deliberately runs AI_PROVIDER=bedrock in .env). A
+    # provider-is-what-I-expect warning is a deployment/worktree concern, not a unit-test one — if wanted,
+    # it must live OUTSIDE the test suite (e.g. a pre-run env check), never as an assertion on ambient state.
+    monkeypatch.setattr(settings, "ai_provider", "anthropic")
     for tier in ("classification", "extraction", "reasoning", "analysis"):
         value = getattr(settings, f"anthropic_model_{tier}")
         assert (

@@ -24,6 +24,23 @@ from sqlalchemy.ext.asyncio import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _pin_ai_provider(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Deterministic AI-provider baseline for the WHOLE suite.
+
+    ``app/core/config.py`` builds the ``settings`` singleton at import from ``.env`` (``env_file=".env"``),
+    which is gitignored and per-worktree — so without this, a local ``AI_PROVIDER=bedrock`` (or any other
+    override) silently changes the suite's result. This autouse fixture pins the provider to the shipped
+    default (``anthropic``) so every test runs against a known baseline regardless of the ambient ``.env``.
+
+    It is autouse by design: a test must OPT OUT (by monkeypatching the provider itself) to exercise a
+    different provider, rather than opt in to hermeticity. Provider-specific tests already do exactly that
+    (e.g. ``test_provider_selection_b1.py``'s ``_use_bedrock``); their own per-test monkeypatch runs after
+    this fixture and wins within the test body, with both unwound cleanly at teardown.
+    """
+    monkeypatch.setattr(settings, "ai_provider", "anthropic")
+
+
 @pytest.fixture
 async def client() -> AsyncIterator[AsyncClient]:
     """HTTP client for testing the FastAPI app."""
