@@ -513,18 +513,32 @@ def test_unknown_model_still_returns_zero_and_warns() -> None:
 
 
 class _FakeMessages:
+    """Streaming seam for ``complete`` — records the kwargs of each ``stream(...)`` call (so tests can
+    assert the model sent on the wire) and returns a fixed final Message via ``get_final_message()``."""
+
     def __init__(self) -> None:
         self.calls: list[dict[str, Any]] = []
 
-    async def create(self, **kwargs: Any) -> Any:
+    def stream(self, **kwargs: Any) -> Any:
         from types import SimpleNamespace
 
         self.calls.append(kwargs)
-        return SimpleNamespace(
-            content=[SimpleNamespace(type="text", text="ok")],
-            usage=SimpleNamespace(input_tokens=10, output_tokens=5),
-            stop_reason="end_turn",
-        )
+
+        class _Stream:
+            async def __aenter__(self) -> Any:
+                return self
+
+            async def __aexit__(self, *exc: object) -> bool:
+                return False
+
+            async def get_final_message(self) -> Any:
+                return SimpleNamespace(
+                    content=[SimpleNamespace(type="text", text="ok")],
+                    usage=SimpleNamespace(input_tokens=10, output_tokens=5),
+                    stop_reason="end_turn",
+                )
+
+        return _Stream()
 
 
 async def test_complete_sends_the_resolved_bedrock_id(monkeypatch: pytest.MonkeyPatch) -> None:

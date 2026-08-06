@@ -67,8 +67,27 @@ def _bad_request() -> Exception:
 
 
 def _install_fake_client(monkeypatch: pytest.MonkeyPatch, create: AsyncMock) -> AsyncMock:
-    """Replace the singleton client so ``complete`` uses our AsyncMock ``create``."""
-    fake = SimpleNamespace(messages=SimpleNamespace(create=create))
+    """Replace the singleton client so ``complete`` streams through our AsyncMock ``create``.
+
+    ``complete`` now uses the SDK STREAMING seam (``client.messages.stream(...).get_final_message()``),
+    but ``create`` still models the per-attempt call exactly as before — its ``return_value`` is the final
+    Message and its ``side_effect`` list drives retries. We invoke it inside ``get_final_message`` so
+    ``call_count`` / ``await_args`` / raised side-effects all behave identically to the old ``.create``."""
+
+    class _FakeStream:
+        def __init__(self, **kwargs: Any) -> None:
+            self._kwargs = kwargs
+
+        async def __aenter__(self) -> "_FakeStream":
+            return self
+
+        async def __aexit__(self, *exc: object) -> bool:
+            return False
+
+        async def get_final_message(self) -> Any:
+            return await create(**self._kwargs)
+
+    fake = SimpleNamespace(messages=SimpleNamespace(stream=lambda **kw: _FakeStream(**kw)))
     monkeypatch.setattr(client_module, "get_anthropic_client", lambda: fake)
     return create
 

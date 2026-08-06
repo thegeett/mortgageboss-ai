@@ -115,6 +115,12 @@ class Settings(BaseSettings):
     # compliance basis for putting real borrower NPI in staging.
     ai_provider: Literal["anthropic", "bedrock"] = "anthropic"
     bedrock_region: str = "us-east-1"
+    # The AWS profile the Bedrock credential chain should use, when there is no ambient AWS_PROFILE.
+    # ``AsyncAnthropicBedrock`` reads AWS_PROFILE from the process ENVIRONMENT (not from these settings),
+    # and pydantic loads ``.env`` into this object, NOT into os.environ — so a local ``uv run`` backend
+    # would otherwise inherit no profile and resolve NO credentials. This is read by the dev bench, which
+    # exports it into os.environ before its preflight (docker already injects AWS_PROFILE via compose).
+    aws_profile: str | None = None
 
     # A PARALLEL triplet, deliberately not a reuse of the three settings above. Flipping
     # provider must be ONE variable: if the same three settings held both vocabularies, a
@@ -192,6 +198,11 @@ class Settings(BaseSettings):
     # File storage
     storage_backend: Literal["local", "s3"] = "local"
     storage_local_path: str = "./storage"
+
+    # Where the dev extraction bench writes its output. None → inside storage (``<storage>/bench_output``),
+    # which is gitignored so borrower-derived output cannot be committed. Override to a dev-chosen path;
+    # if that path is inside the repo, add it to .gitignore (bench output is derived from real documents).
+    bench_output_dir: str | None = None
 
     # S3 storage (C0) — used only when storage_backend == "s3".
     # NOTE: there are deliberately NO access-key/secret-key settings. Credentials come
