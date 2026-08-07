@@ -103,8 +103,9 @@ def _first_n_pages_sync(content: bytes, max_pages: int) -> bytes | None:
     read as a PDF (the caller then sends it as-is and the existing error path handles any rejection). Never
     raises.
     """
-    if max_pages < 1:
-        return content
+    # A non-positive cap would disable trimming and re-expose the >100-page rejection this exists to
+    # prevent — floor at one page so the cap can never silently become a no-op (LP-462 review).
+    max_pages = max(1, max_pages)
     try:
         src = pymupdf.open(stream=content, filetype="pdf")  # type: ignore[no-untyped-call]
     except Exception:
@@ -113,8 +114,12 @@ def _first_n_pages_sync(content: bytes, max_pages: int) -> bytes | None:
         if int(src.page_count) <= max_pages:
             return content  # already within the cap — byte-identical, no re-encode
         out = pymupdf.open()  # type: ignore[no-untyped-call]
-        out.insert_pdf(src, from_page=0, to_page=max_pages - 1)  # type: ignore[no-untyped-call]
-        return bytes(out.tobytes())  # type: ignore[no-untyped-call]
+        try:
+            out.insert_pdf(src, from_page=0, to_page=max_pages - 1)  # type: ignore[no-untyped-call]
+            return bytes(out.tobytes())  # type: ignore[no-untyped-call]
+        finally:
+            # release the new doc's native handle too (src is closed in the outer finally)
+            out.close()  # type: ignore[no-untyped-call]
     except Exception:
         return None
     finally:

@@ -118,6 +118,37 @@ async def _process_document(db: AsyncSession, document_id: str) -> None:
         document.status = DocumentStatus.CLASSIFYING
         await db.commit()
         classification = await classify_document(content, document.mime_type)
+
+        # --- Infrastructure-failure gate (LP-462) → NEEDS_REVIEW, but DISTINCT - #
+        # A classification that never COMPLETED (throttled, or a payload over the
+        # document-block limit) must be recorded as INFRASTRUCTURE, not a JUDGMENT:
+        # a throttle is not a coverage gap, and framing it as one corrupts every
+        # downstream audit. Gate BEFORE the classification-success block so we never
+        # stamp document_type="unknown" or persist a "Classified as unknown"
+        # activity for a call that never ran — the audit trail instead records the
+        # infrastructure cause (rate_limited / oversized / failed) and the document
+        # stays re-runnable. (Same terminal status; a different, honest cause.)
+        if classification.infra_failure is not None:
+            document.status = DocumentStatus.NEEDS_REVIEW
+            await log_activity(
+                db,
+                loan_file_id=document.loan_file_id,
+                activity_type=ActivityType.STATUS_CHANGED,
+                summary=f"Classification incomplete ({classification.infra_failure}) — needs review",
+                detail={
+                    "document_id": str(document.id),
+                    "infra_failure": classification.infra_failure,
+                },
+            )
+            await db.commit()
+            logger.info(
+                "document_needs_review",
+                document_id=str(document.id),
+                reason=classification.infra_failure,
+                infra_failure=True,
+            )
+            return
+
         document.document_type = classification.document_type
         # Catalog-driven (LP-58): the type's tier (for routing) + category (for
         # filing) both come from the single source of truth, so they never drift.
@@ -137,25 +168,6 @@ async def _process_document(db: AsyncSession, document_id: str) -> None:
                 "confidence": classification.confidence,
             },
         )
-
-        # --- Infrastructure-failure gate (LP-462) → NEEDS_REVIEW, but DISTINCT - #
-        # A classification that never COMPLETED (throttled, or a payload over the
-        # document-block limit) has confidence 0.0 and would otherwise be recorded
-        # by the low-confidence gate below as a JUDGMENT ("low_confidence"). That is
-        # wrong and corrosive: a throttle is not a coverage gap, and recording it as
-        # one corrupts every downstream audit. Record it with the infrastructure
-        # reason (rate_limited / oversized / failed) instead — the document is
-        # re-runnable, not a schema finding. (Same terminal status; different cause.)
-        if classification.infra_failure is not None:
-            document.status = DocumentStatus.NEEDS_REVIEW
-            await db.commit()
-            logger.info(
-                "document_needs_review",
-                document_id=str(document.id),
-                reason=classification.infra_failure,
-                infra_failure=True,
-            )
-            return
 
         # --- Low-confidence gate → human review (LP-59) --------------------- #
         # CONFIDENCE — not the "unknown" slug — decides here. A low-confidence
