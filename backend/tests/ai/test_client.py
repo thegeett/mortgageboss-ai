@@ -129,6 +129,28 @@ def test_is_transient_false_for_other_4xx() -> None:
 
 
 # --------------------------------------------------------------------------- #
+# LP-462 — infra_failure_kind (throttle vs oversize vs other), by __cause__
+# --------------------------------------------------------------------------- #
+
+
+def _wrapped(cause: Exception) -> AIClientError:
+    err = AIClientError(f"AI call failed: {type(cause).__name__}")
+    err.__cause__ = cause
+    return err
+
+
+def test_infra_failure_kind_classifies_by_cause() -> None:
+    from app.ai.client import infra_failure_kind
+
+    assert infra_failure_kind(_wrapped(_rate_limit())) == "rate_limited"  # 429
+    assert infra_failure_kind(_wrapped(_server_error())) == "rate_limited"  # 5xx is transient
+    assert infra_failure_kind(_wrapped(APITimeoutError(request=_REQUEST))) == "rate_limited"
+    assert infra_failure_kind(_wrapped(_bad_request())) == "oversized"  # 400 = payload/over-limit
+    assert infra_failure_kind(_wrapped(_status_error(AuthenticationError, 401))) == "failed"
+    assert infra_failure_kind(AIClientError("no cause")) == "failed"
+
+
+# --------------------------------------------------------------------------- #
 # Success
 # --------------------------------------------------------------------------- #
 

@@ -153,6 +153,13 @@ class Settings(BaseSettings):
     # still fails closed (the affected tags become unknown-with-reason); the total ceiling
     # for a call is this value x ai_max_retries plus backoff and pacing.
     ai_request_timeout_seconds: float = 60.0
+    # LP-462: classification reads only the FIRST N pages of a PDF. The whole document was being sent, so a
+    # >100-page file (a closing package, a condo declaration) exceeded the Anthropic/Bedrock 100-page document
+    # limit and Bedrock rejected the call (BadRequestError). Classification identifies the LEAD document, which
+    # needs few pages; 15 is far under the limit with headroom for an early second document. Classification
+    # ONLY — extraction still reads the whole document (it needs the substantive pages); large-doc extraction
+    # is the splitter's problem, not this cap.
+    classification_max_pages: int = 15
     # Needs consolidation (LP-111): after the deterministic collapse, an AI pass FLAGS the
     # semantic-duplicate residue for the processor to confirm (never a silent delete). Gated so the
     # extra per-run classification call can be turned off; the deterministic layers run regardless.

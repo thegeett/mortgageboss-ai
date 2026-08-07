@@ -94,6 +94,42 @@ async def pdf_page_count(content: bytes) -> int | None:
     return await asyncio.to_thread(_page_count_sync, content)
 
 
+def _first_n_pages_sync(content: bytes, max_pages: int) -> bytes | None:
+    """Return a PDF of the first ``max_pages`` pages, or None if the input isn't a slice-able PDF. Blocking.
+
+    Used by classification (LP-462): the Anthropic/Bedrock document block caps at 100 pages / 32 MB, so a
+    long package must be trimmed to the lead document before the call. Returns the ORIGINAL bytes untouched
+    when the document already has ``<= max_pages`` pages (no re-encode, byte-identical) or when it can't be
+    read as a PDF (the caller then sends it as-is and the existing error path handles any rejection). Never
+    raises.
+    """
+    if max_pages < 1:
+        return content
+    try:
+        src = pymupdf.open(stream=content, filetype="pdf")  # type: ignore[no-untyped-call]
+    except Exception:
+        return None  # not a readable PDF → caller sends the original bytes unchanged
+    try:
+        if int(src.page_count) <= max_pages:
+            return content  # already within the cap — byte-identical, no re-encode
+        out = pymupdf.open()  # type: ignore[no-untyped-call]
+        out.insert_pdf(src, from_page=0, to_page=max_pages - 1)  # type: ignore[no-untyped-call]
+        return bytes(out.tobytes())  # type: ignore[no-untyped-call]
+    except Exception:
+        return None
+    finally:
+        src.close()  # type: ignore[no-untyped-call]
+
+
+async def first_n_pages(content: bytes, max_pages: int) -> bytes | None:
+    """The first ``max_pages`` pages of a PDF as new PDF bytes, or None if not a slice-able PDF (LP-462).
+
+    Async wrapper (threaded) around :func:`_first_n_pages_sync`. Returns the original bytes unchanged when the
+    document is already within the cap; None when the bytes aren't a readable PDF (the caller sends them
+    as-is). Never raises; never logs content (PII)."""
+    return await asyncio.to_thread(_first_n_pages_sync, content, max_pages)
+
+
 async def extract_text_from_pdf(content: bytes) -> PdfTextExtractionResult:
     """Extract a PDF's text layer from bytes (multi-page). Async; never raises.
 

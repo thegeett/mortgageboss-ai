@@ -484,6 +484,39 @@ async def test_low_confidence_or_unknown_needs_review(
 
 
 # --------------------------------------------------------------------------- #
+# LP-462 — an INFRASTRUCTURE failure → NEEDS_REVIEW, but recorded DISTINCTLY
+# (a throttle must never read as a low-confidence judgment / coverage gap)
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.parametrize("infra", ["rate_limited", "oversized", "failed"])
+async def test_infra_failure_needs_review_with_distinct_reason(
+    monkeypatch: pytest.MonkeyPatch, db_session: AsyncSession, infra: str
+) -> None:
+    import structlog
+
+    doc = await _setup_document(db_session)
+    _patch_storage(monkeypatch)
+    _patch_classify(
+        monkeypatch,
+        ClassificationResult.unknown("AI call failed", infra_failure=infra),
+    )
+    extract = _patch_extract(monkeypatch, _paystub_success())
+
+    with structlog.testing.capture_logs() as logs:
+        await pipeline._process_document(db_session, str(doc.id))
+    await db_session.refresh(doc)
+
+    assert doc.status == DocumentStatus.NEEDS_REVIEW
+    assert extract.call_count == 0
+    review = [e for e in logs if e["event"] == "document_needs_review"]
+    assert len(review) == 1
+    # The reason is the infrastructure cause, NOT "low_confidence" — that is the whole point.
+    assert review[0]["reason"] == infra
+    assert review[0].get("infra_failure") is True
+
+
+# --------------------------------------------------------------------------- #
 # Extraction failure → NEEDS_REVIEW (a FAILED extraction version is recorded)
 # --------------------------------------------------------------------------- #
 

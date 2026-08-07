@@ -54,6 +54,9 @@ logger = structlog.get_logger(__name__)
 # is a deterministic client error and is NOT retried.
 _RATE_LIMIT_STATUS = 429
 _SERVER_ERROR_FLOOR = 500
+_BAD_REQUEST_STATUS = (
+    400  # LP-462: an over-limit document payload comes back as a 400 BadRequestError
+)
 
 
 class AIClientError(Exception):
@@ -259,6 +262,34 @@ def _is_transient(exc: Exception) -> bool:
             return True
         return _looks_like_bedrock_throttle(exc)
     return _looks_like_bedrock_throttle(exc)
+
+
+#: The infrastructure-outcome tags :func:`infra_failure_kind` returns — a call that never completed, by cause.
+INFRA_RATE_LIMITED = "rate_limited"
+INFRA_OVERSIZED = "oversized"
+INFRA_FAILED = "failed"
+
+
+def infra_failure_kind(err: AIClientError) -> str:
+    """Classify a caught :class:`AIClientError` by its underlying cause, for observability + routing (LP-462).
+
+    ``complete`` raises ``AIClientError(...) from exc``, so the ORIGINAL SDK exception is on ``__cause__``.
+    Returns ``INFRA_RATE_LIMITED`` for a throttle/transient cause (429, Bedrock throttle codes, 5xx,
+    connection/timeout — the same test the retry loop and the bench use), ``INFRA_OVERSIZED`` for an HTTP 400
+    (a payload/bad-request rejection — an over-limit document is the case LP-462 fixes), or ``INFRA_FAILED``
+    for anything else (auth, permission, an exhausted non-throttle, …). This lets a caller record a THROTTLE
+    distinctly from a JUDGMENT: a throttled document persisted as "low confidence" would read as a coverage
+    gap and corrupt every downstream audit. Keeps SDK-exception knowledge in this module, beside
+    ``_is_transient``.
+    """
+    cause = err.__cause__
+    if isinstance(cause, Exception) and _is_transient(cause):
+        return INFRA_RATE_LIMITED
+    # An HTTP 400 is a request-shape rejection; for a document call that is an over-limit payload (>100 pages
+    # / >32 MB). Not transient — the page cap is the fix, not a retry.
+    if isinstance(cause, APIStatusError) and cause.status_code == _BAD_REQUEST_STATUS:
+        return INFRA_OVERSIZED
+    return INFRA_FAILED
 
 
 #: Canonical truncation marker. ``app/ai/extraction/model_call.py`` compares

@@ -138,6 +138,25 @@ async def _process_document(db: AsyncSession, document_id: str) -> None:
             },
         )
 
+        # --- Infrastructure-failure gate (LP-462) → NEEDS_REVIEW, but DISTINCT - #
+        # A classification that never COMPLETED (throttled, or a payload over the
+        # document-block limit) has confidence 0.0 and would otherwise be recorded
+        # by the low-confidence gate below as a JUDGMENT ("low_confidence"). That is
+        # wrong and corrosive: a throttle is not a coverage gap, and recording it as
+        # one corrupts every downstream audit. Record it with the infrastructure
+        # reason (rate_limited / oversized / failed) instead — the document is
+        # re-runnable, not a schema finding. (Same terminal status; different cause.)
+        if classification.infra_failure is not None:
+            document.status = DocumentStatus.NEEDS_REVIEW
+            await db.commit()
+            logger.info(
+                "document_needs_review",
+                document_id=str(document.id),
+                reason=classification.infra_failure,
+                infra_failure=True,
+            )
+            return
+
         # --- Low-confidence gate → human review (LP-59) --------------------- #
         # CONFIDENCE — not the "unknown" slug — decides here. A low-confidence
         # result means the model is unsure WHICH type it is (it could be a known

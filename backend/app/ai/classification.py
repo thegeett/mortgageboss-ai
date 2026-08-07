@@ -36,9 +36,17 @@ import structlog
 from pydantic import BaseModel, Field, ValidationError
 
 from app.ai.classification_prompt import render_classification_prompt
-from app.ai.client import AIClientError, build_document_message, complete
+from app.ai.client import (
+    AIClientError,
+    build_document_message,
+    complete,
+    infra_failure_kind,
+)
 from app.ai.parsing import coerce_confidence, extract_json_object
 from app.core.config import settings
+from app.services.pdf_utils import first_n_pages
+
+_PDF_MEDIA_TYPE = "application/pdf"
 
 logger = structlog.get_logger(__name__)
 
@@ -63,11 +71,21 @@ class ClassificationResult(BaseModel):
     confidence: float = Field(ge=0.0, le=1.0)
     reasoning: str
     category: str | None = None
+    #: LP-462 — set ONLY when the model call never completed for an infrastructure reason: "rate_limited"
+    #: (throttled) or "oversized" (payload over the 100-page/32 MB document limit), else "failed" for another
+    #: AI error, else None (a genuine classification, including a low-confidence/unknown JUDGMENT). This is
+    #: the throttled-vs-failed distinction: a throttled document must NEVER be recorded as a low-confidence
+    #: judgment — that reads as a coverage gap and corrupts every downstream audit. The document is
+    #: re-runnable, not a schema finding.
+    infra_failure: str | None = None
 
     @classmethod
-    def unknown(cls, reason: str) -> "ClassificationResult":
-        """The graceful fallback: an ``unknown`` type at zero confidence."""
-        return cls(document_type="unknown", confidence=0.0, reasoning=reason)
+    def unknown(cls, reason: str, *, infra_failure: str | None = None) -> "ClassificationResult":
+        """The graceful fallback: an ``unknown`` type at zero confidence (LP-462: with an optional
+        infrastructure-outcome tag when the call never completed — throttle / oversize / other AI error)."""
+        return cls(
+            document_type="unknown", confidence=0.0, reasoning=reason, infra_failure=infra_failure
+        )
 
 
 def _parse_classification_json(text: str) -> ClassificationResult | None:
@@ -131,11 +149,22 @@ async def classify_document(content: bytes, media_type: str) -> ClassificationRe
     if not content or media_type.lower().strip() not in _SUPPORTED_MEDIA_TYPES:
         return ClassificationResult.unknown("empty or unsupported document")
 
+    # LP-462 — classification identifies the LEAD document and needs only its first pages; sending the whole
+    # PDF made a >100-page package exceed the document-block limit (Bedrock → BadRequestError). Trim to the
+    # first ``classification_max_pages`` pages. A PDF already within the cap comes back byte-identical; a
+    # non-PDF (image) or unreadable-PDF returns None → send the original bytes unchanged. This is
+    # classification-only: extraction still reads the whole document.
+    payload = content
+    if media_type.lower().strip() == _PDF_MEDIA_TYPE:
+        capped = await first_n_pages(content, settings.classification_max_pages)
+        if capped is not None:
+            payload = capped
+
     system_prompt = render_classification_prompt()
     try:
         # build_document_message base64-encodes the bytes into a document/image
         # block; it raises ValueError on an unsupported type (already filtered).
-        message = build_document_message(content=content, media_type=media_type)
+        message = build_document_message(content=payload, media_type=media_type)
     except ValueError:
         return ClassificationResult.unknown("unsupported document media type")
 
@@ -146,9 +175,13 @@ async def classify_document(content: bytes, media_type: str) -> ClassificationRe
             messages=[message],
             max_tokens=_MAX_TOKENS,
         )
-    except AIClientError:
-        logger.warning("classification_ai_failed")  # metadata only — no bytes/content
-        return ClassificationResult.unknown("AI call failed")
+    except AIClientError as err:
+        # LP-462 — distinguish a call that never COMPLETED (throttle / oversize / other AI error) from a
+        # judgment. A throttled document recorded as low-confidence would look like a coverage gap; here it
+        # is tagged infrastructure and stays re-runnable. Metadata only — never bytes/content.
+        kind = infra_failure_kind(err)
+        logger.warning("classification_ai_failed", infra_failure=kind)
+        return ClassificationResult.unknown("AI call failed", infra_failure=kind)
 
     parsed = _parse_classification_json(result.text)
     if parsed is None:
