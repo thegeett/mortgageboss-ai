@@ -97,8 +97,12 @@ def test_legacy_transactions_coexist_unchanged() -> None:
 
 def test_bank_statement_list_is_wired() -> None:
     # bank_statement was the Phase-A proof; Phase B wired the generated list-bearing batch alongside it.
+    # LP-461 added additional_accounts (combined-statement recovery) as a SECOND wired list.
     assert "bank_statement" in ds._LIST_SPECS
-    assert ds._LIST_SPECS["bank_statement"] == (ds._TRANSACTIONS_LIST,)
+    assert ds._LIST_SPECS["bank_statement"] == (
+        ds._TRANSACTIONS_LIST,
+        ds._BANK_STATEMENT__ADDITIONAL_ACCOUNTS_LIST,
+    )
 
 
 # --------------------------------------------------------------------------- #

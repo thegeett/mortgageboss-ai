@@ -84,6 +84,12 @@ class VOEExtraction(BaseModel):
     direct_return_to_lender_indicator: TypedField[str] = Field(default_factory=TypedField)
     applicant_authorization_signature: TypedField[str] = Field(default_factory=TypedField)
 
+    # --- LP-461 diff — verified scalar additions --------------------------- #
+    # For a staffing-agency VOE the employer of record differs from where the person actually works:
+    # ``employer_address`` is the corporate address; these capture the worksite + the client placement.
+    work_location: TypedField[str] = Field(default_factory=TypedField)
+    client_or_assignment_name: TypedField[str] = Field(default_factory=TypedField)
+
     # --- LP-446 diff — captured nested list(s) (bare rows) --------------------- #
     gross_earnings_history: list[dict[str, Any]] = Field(default_factory=list)
 
@@ -138,6 +144,9 @@ _CORE_SPEC: CoreSpec = (
     ("employer_signature_and_date", coerce_date),
     ("direct_return_to_lender_indicator", coerce_str),
     ("applicant_authorization_signature", coerce_str),
+    # LP-461 diff additions
+    ("work_location", coerce_str),
+    ("client_or_assignment_name", coerce_str),
 )
 
 _GROSS_EARNINGS_HISTORY_ROW: CoreSpec = (

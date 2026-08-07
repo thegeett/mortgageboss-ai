@@ -22,10 +22,30 @@
     {"name":"federal_income_tax_withheld","type":"Decimal","why":"Box 2 — processor reference, and FR-1 reconciliation context","rules":["FR-1"],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":true,"prompt_hint":null},
     {"name":"retirement_plan_checked","type":"str","why":"Box 13 — AS-4 may need a retirement-plan signal","rules":["AS-4"],"reason_class":"processor","rule_floor":false,"degraded_from":"bool","pii":null,"exists_today":false,"prompt_hint":null},
     {"name":"statutory_employee_checked","type":"str","why":"Box 13 — IN-12 distinguishes self-employed borrowers; a statutory employee is the hybrid case","rules":["IN-12"],"reason_class":"rule","rule_floor":true,"degraded_from":"bool","pii":null,"exists_today":false,"prompt_hint": "Box 13. Return 'checked' if the box has a mark, 'unchecked' if the box is present but empty — never null when Box 13 is visible. null vs 'unchecked' are different facts (IN-12 relies on the explicit negative)."},
-    {"name":"is_corrected_w2","type":"str","why":"disambiguator — a W-2c SUPERSEDES the original. Without it, two W-2s for one tax year look like a contradiction to IN-11 and IN-6","rules":["IN-6","IN-11"],"reason_class":"disambiguator","rule_floor":true,"degraded_from":"bool","pii":null,"exists_today":false,"prompt_hint":"If the form is a W-2c, set this and read the CORRECTED amounts"}
+    {"name":"is_corrected_w2","type":"str","why":"disambiguator — a W-2c SUPERSEDES the original. Without it, two W-2s for one tax year look like a contradiction to IN-11 and IN-6","rules":["IN-6","IN-11"],"reason_class":"disambiguator","rule_floor":true,"degraded_from":"bool","pii":null,"exists_today":false,"prompt_hint":"If the form is a W-2c, set this and read the CORRECTED amounts"},
+    {"name":"control_number","type":"str","why":"Box d control number","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"third_party_sick_pay_checked","type":"str","why":"Box 13 third-party sick pay checkbox: checked/unchecked/null","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"state_code","type":"str","why":"Box 15 state","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"state_employer_id","type":"str","why":"Box 15 employer state ID number","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"state_wages","type":"Decimal","why":"Box 16 state wages, tips, etc.","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"state_income_tax","type":"Decimal","why":"Box 17 state income tax","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"local_wages","type":"Decimal","why":"Box 18 local wages, tips, etc.","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"local_income_tax","type":"Decimal","why":"Box 19 local income tax","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"locality_name","type":"str","why":"Box 20 locality name","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null}
   ],
 
-  "nested_lists": [],
+  "nested_lists": [
+    {
+      "name":"box_12_items","shape":"flat_row",
+      "shape_reason":"Box 12 codes A-HH with amounts - typically 0-4 per W-2",
+      "expected_item_count":"0-4","rules":[],
+      "exists_today":false,"plumbing_sites":5,
+      "fields":[
+        {"name":"code","type":"str","why":"the Box 12 letter code (D, DD, W, ...)"},
+        {"name":"amount","type":"Decimal","why":"the Box 12 amount for that code"}
+      ]
+    }
+  ],
 
   "rejected": [
     {"name":"state_wages / local_wages","reason":"no rule reads them; catch-all"},

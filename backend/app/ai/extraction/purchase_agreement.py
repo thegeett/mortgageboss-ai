@@ -98,6 +98,12 @@ class PurchaseAgreementExtraction(BaseModel):
     personal_property_value: TypedField[Decimal] = Field(default_factory=TypedField)
     side_agreements_referenced: TypedField[str] = Field(default_factory=TypedField)
 
+    # --- LP-461 diff — verified scalar addition ---------------------------- #
+    # The NC due-diligence fee (non-refundable, credited at closing) — a DISTINCT concept from earnest
+    # money. LP-461 Phase A: the other purchase-agreement claims (additional-EMD, LTV/DSCR, TREC option
+    # fee) were the free reader over-recalling on a base NC 2-T form, and were dropped.
+    due_diligence_fee: TypedField[Decimal] = Field(default_factory=TypedField)
+
     # --- LP-446 diff — captured nested list(s) (bare rows) --------------------- #
     addenda: list[dict[str, Any]] = Field(default_factory=list)
     contingencies: list[dict[str, Any]] = Field(default_factory=list)
@@ -161,6 +167,8 @@ _CORE_SPEC: CoreSpec = (
     ("personal_property_included", coerce_str),
     ("personal_property_value", coerce_decimal),
     ("side_agreements_referenced", coerce_str),
+    # LP-461 diff addition
+    ("due_diligence_fee", coerce_decimal),
 )
 
 _ADDENDA_ROW: CoreSpec = (

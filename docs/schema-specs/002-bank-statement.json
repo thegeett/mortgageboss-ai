@@ -54,7 +54,9 @@
 
     {"name":"holds_or_pledges","type":"str","why":"AS-4 — pledged or held funds are not reserve-eligible","rules":["AS-4"],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"Any statement that funds are held, pledged, or restricted"},
 
-    {"name":"interest_paid","type":"Decimal","why":"processor reference","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null}
+    {"name":"interest_paid","type":"Decimal","why":"processor reference","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"service_fee_waived_indicator","type":"str","why":"whether the monthly service fee was waived/avoided this period","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"fee_waiver_options","type":"str","why":"the fee-waiver qualifying options listed (min balance / deposits / linked accounts)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null}
   ],
 
   "nested_lists": [
@@ -72,6 +74,18 @@
         {"name":"amount","type":"Decimal","why":"AS-1 large-deposit sweep, AS-2/PC-5 EMD match"},
         {"name":"transaction_type","type":"str","why":"AS-1 deposits vs withdrawals"},
         {"name":"running_balance","type":"Decimal","why":"AS-8 chain support"}
+      ]
+    },
+    {
+      "name":"additional_accounts","shape":"flat_row",
+      "shape_reason":"a COMBINED statement lists >1 deposit account; the single-account typed core + transactions capture only the FIRST. This surfaces the existence + balances of the others (reserves). NOTE: the extra account's TRANSACTIONS are still not captured - AS-8 chaining and AS-1 deposit sweep see only account 1 (LP-461 ADR; future accounts[] restructure).",
+      "expected_item_count":"0-several","rules":[],
+      "exists_today":false,"plumbing_sites":5,
+      "fields":[
+        {"name":"account_number_masked","type":"str","why":"the additional account number, masked (last 4)"},
+        {"name":"account_type","type":"str","why":"checking / savings / money market"},
+        {"name":"beginning_balance","type":"Decimal","why":"the additional account's beginning balance"},
+        {"name":"ending_balance","type":"Decimal","why":"the additional account's ending balance"}
       ]
     }
   ],

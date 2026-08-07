@@ -15,6 +15,7 @@ accuracy validated as real bills flow through (no samples were available).
 """
 
 import json
+from datetime import date
 from decimal import Decimal
 from typing import Any
 
@@ -25,6 +26,7 @@ from app.ai.client import build_document_message
 from app.ai.extraction.model_call import run_extraction_completion
 from app.ai.extraction.parsing import (
     CoreSpec,
+    coerce_date,
     coerce_decimal,
     coerce_int,
     coerce_str,
@@ -82,6 +84,12 @@ class PropertyTaxBillExtraction(BaseModel):
     penalties_and_interest: TypedField[Decimal] = Field(default_factory=TypedField)
     delinquent_or_lien_status: TypedField[str] = Field(default_factory=TypedField)
 
+    # --- LP-461 diff — verified scalar additions --------------------------- #
+    # ``interest_begins_date`` — when interest/penalty starts accruing (169: "Interest Begins 01/06/2026").
+    # ``legal_description`` — lot/block/subdivision text (distinct from parcel_or_apn / the PIN).
+    interest_begins_date: TypedField[date] = Field(default_factory=TypedField)
+    legal_description: TypedField[str] = Field(default_factory=TypedField)
+
     # --- LP-446 diff — captured nested list(s) (bare rows) --------------------- #
     installments_and_due_dates: list[dict[str, Any]] = Field(default_factory=list)
     # --- LP-460 diff — the per-jurisdiction rate/amount table (county/municipality/district) ---- #
@@ -133,6 +141,9 @@ _CORE_SPEC: CoreSpec = (
     ("current_balance", coerce_decimal),
     ("penalties_and_interest", coerce_decimal),
     ("delinquent_or_lien_status", coerce_str),
+    # LP-461 diff additions
+    ("interest_begins_date", coerce_date),
+    ("legal_description", coerce_str),
 )
 
 _INSTALLMENTS_AND_DUE_DATES_ROW: CoreSpec = (

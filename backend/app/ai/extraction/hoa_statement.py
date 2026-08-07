@@ -80,6 +80,12 @@ class HOAStatementExtraction(BaseModel):
     collection_or_lien_status: TypedField[str] = Field(default_factory=TypedField)
     reserve_percentage: TypedField[str] = Field(default_factory=TypedField)
 
+    # --- LP-461 diff — verified scalar additions --------------------------- #
+    statement_period_start: TypedField[date] = Field(default_factory=TypedField)
+    statement_period_end: TypedField[date] = Field(default_factory=TypedField)
+    prior_balance: TypedField[Decimal] = Field(default_factory=TypedField)
+    unit_owner_email: TypedField[str] = Field(default_factory=TypedField)  # not the association's
+
     # --- LP-446 diff — captured nested list(s) (bare rows) --------------------- #
     special_assessment_items: list[dict[str, Any]] = Field(default_factory=list)
     # --- LP-460 diff — the account ledger (a posting table with nowhere to land today) ------ #
@@ -130,6 +136,11 @@ _CORE_SPEC: CoreSpec = (
     ("paid_current_indicator", coerce_str),
     ("collection_or_lien_status", coerce_str),
     ("reserve_percentage", coerce_str),
+    # LP-461 diff additions
+    ("statement_period_start", coerce_date),
+    ("statement_period_end", coerce_date),
+    ("prior_balance", coerce_decimal),
+    ("unit_owner_email", coerce_str),
 )
 
 _SPECIAL_ASSESSMENT_ITEMS_ROW: CoreSpec = (

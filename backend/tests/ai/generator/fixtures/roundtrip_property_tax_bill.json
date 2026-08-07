@@ -259,6 +259,16 @@
       "pii": null,
       "exists_today": false,
       "prompt_hint": null
+    },
+    {
+      "name": "interest_begins_date",
+      "type": "date",
+      "why": "LP-461 diff"
+    },
+    {
+      "name": "legal_description",
+      "type": "str",
+      "why": "LP-461 diff"
     }
   ],
   "nested_lists": [

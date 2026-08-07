@@ -113,6 +113,17 @@ class PayStubExtraction(BaseModel):
     employment_start_date: TypedField[date] = Field(default_factory=TypedField)
     total_deductions_current: TypedField[Decimal] = Field(default_factory=TypedField)
 
+    # --- LP-461 diff — verified scalar additions --------------------------- #
+    # ``net_pay_ytd`` — YTD net (schema had current net_pay + ytd_gross, not net YTD).
+    # ``federal_taxable_wages_*`` — the taxable base (gross less pre-tax) shown on fuller ADP stubs.
+    net_pay_ytd: TypedField[Decimal] = Field(default_factory=TypedField)
+    federal_taxable_wages_current: TypedField[Decimal] = Field(default_factory=TypedField)
+    federal_taxable_wages_ytd: TypedField[Decimal] = Field(default_factory=TypedField)
+    employer_phone: TypedField[str] = Field(default_factory=TypedField)
+    check_or_payment_status: TypedField[str] = Field(
+        default_factory=TypedField
+    )  # VOID / non-negotiable
+
     # --- Captured nested lists (LP-446 / LP-437) — bare rows, snapshot-read generically ------ #
     # earnings_lines is the base/OT/bonus split IN-10/IN-11 need (Priya's B12 case).
     earnings_lines: list[dict[str, Any]] = Field(default_factory=list)
@@ -173,6 +184,12 @@ _CORE_SPEC: CoreSpec = (
     ("position_or_title", coerce_str),
     ("employment_start_date", coerce_date),
     ("total_deductions_current", coerce_decimal),
+    # LP-461 diff additions
+    ("net_pay_ytd", coerce_decimal),
+    ("federal_taxable_wages_current", coerce_decimal),
+    ("federal_taxable_wages_ytd", coerce_decimal),
+    ("employer_phone", coerce_str),
+    ("check_or_payment_status", coerce_str),
 )
 
 # LP-446 — the two pay-stub lines lists: bare rows (mirrors bank_statement's transactions parse).

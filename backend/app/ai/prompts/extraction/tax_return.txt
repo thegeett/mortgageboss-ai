@@ -26,6 +26,13 @@ Capture these buckets:
      adjusted_gross_income  (number)   AGI
      wages                  (number)   wages (1040 line 1)
      taxable_income         (number)   taxable income
+     state_code             (string)   the STATE RETURN's state, if a state return is bundled
+                                        (e.g. "PA" for PA-40, "NC" for D-400, "AZ" for 140)
+     state_taxable_income   (number)   state taxable income (from the bundled state return)
+     state_tax_liability    (number)   state tax liability
+     state_tax_withheld     (number)   state tax withheld
+     preparer_name          (string)   the paid preparer's name, if the return was professionally prepared
+     preparer_ptin          (string)   the paid preparer's PTIN
 
 2. schedule_c — a LIST, one entry per Schedule C (self-employment business):
      business_name   (string)
@@ -44,10 +51,15 @@ Capture these buckets:
      ownership_pct    (number)
      ordinary_income  (number)
 
-5. additional_sections — EVERY OTHER schedule / attachment, grouped by section, e.g.
-   "Schedule B" (interest/dividends), "Schedule D" (capital gains), "Schedule 1/2/3",
-   "W-2s", "1099s", "Other". Do not force these into the typed schedules — capture
-   them here so nothing is lost.
+5. w2_forms — a LIST, one FLAT ROW per attached W-2 (the per-employer breakdown behind
+   the 1040 wage total): {employer_name, wages, federal_withheld}. Empty list if none.
+
+6. capital_gains_transactions — a LIST, one FLAT ROW per Schedule D / Form 8949 sale:
+   {description, proceeds, cost_basis, gain_or_loss}. Empty list if there is no Sch D / 8949.
+
+7. additional_sections — EVERY OTHER schedule / attachment, grouped by section, e.g.
+   "Schedule B" (interest/dividends), "Schedule 1/2/3", "1099s", "Other". Do not force
+   these into the typed schedules/lists — capture them here so nothing is lost.
 
 FOR EVERY FIELD (typed_core, every schedule entry, additional sections) include WHERE
 you read it: "page" (integer) and "snippet" (string, verbatim).
@@ -88,5 +100,13 @@ Respond with ONLY a single JSON object, no markdown fences and no prose, exactly
     "total_payments": {"value": <number|null>, "page": <int|null>, "snippet": <string|null>},
     "attached_schedules_and_forms": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
     "return_signed_date": {"value": <YYYY-MM-DD|null>, "page": <int|null>, "snippet": <string|null>},
-    "signatures_present": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>}
+    "signatures_present": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "state_code": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "state_taxable_income": {"value": <number|null>, "page": <int|null>, "snippet": <string|null>},
+    "state_tax_liability": {"value": <number|null>, "page": <int|null>, "snippet": <string|null>},
+    "state_tax_withheld": {"value": <number|null>, "page": <int|null>, "snippet": <string|null>},
+    "preparer_name": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "preparer_ptin": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>}
   },
+  "capital_gains_transactions": [{"description": <string|null>, "proceeds": <string|null>, "cost_basis": <string|null>, "gain_or_loss": <string|null>, "page": <int|null>, "snippet": <string|null>}],
+  "w2_forms": [{"employer_name": <string|null>, "wages": <string|null>, "federal_withheld": <string|null>, "page": <int|null>, "snippet": <string|null>}],

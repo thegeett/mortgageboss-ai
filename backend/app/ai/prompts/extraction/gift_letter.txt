@@ -24,6 +24,8 @@ CAPTURE EVERYTHING IN THE LETTER — lose nothing. There are two buckets:
                                           This is the key field. If the letter does
                                           NOT contain such a statement, leave it null
                                           (do not invent one).
+     loan_number               (string)  the loan number the gift is tied to, if stated (capture it
+                                          AS SHOWN — it is used to match the gift to the loan file)
 
 2. ADDITIONAL SECTIONS — EVERYTHING ELSE, grouped by section, e.g. "Source of Funds"
    (donor's bank/account), "Signatures", "Dates", "Other". Do not force these into
@@ -70,5 +72,6 @@ Respond with ONLY a single JSON object, no markdown fences and no prose, exactly
     "lender_name": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
     "document_issue_date": {"value": <YYYY-MM-DD|null>, "page": <int|null>, "snippet": <string|null>},
     "donor_signature_present": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
-    "donor_signature_date": {"value": <YYYY-MM-DD|null>, "page": <int|null>, "snippet": <string|null>}
+    "donor_signature_date": {"value": <YYYY-MM-DD|null>, "page": <int|null>, "snippet": <string|null>},
+    "loan_number": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>}
   },

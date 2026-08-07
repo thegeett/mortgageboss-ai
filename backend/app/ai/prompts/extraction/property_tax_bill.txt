@@ -27,6 +27,10 @@ CAPTURE EVERYTHING ON THE BILL — lose nothing. There are two buckets:
                                    two installments; capture them verbatim (e.g.
                                    "1st: 11/01/2024; 2nd: 02/01/2025")
      taxing_authority   (string)  the county / municipality / taxing body
+     interest_begins_date (date)  the date interest / penalty BEGINS to accrue on the unpaid bill
+                                   (e.g. "Interest Begins: 01/06/2026"), if shown
+     legal_description  (string)  the property's legal description (lot / block / subdivision text),
+                                   distinct from the parcel_or_apn / PIN number
 
 2. ADDITIONAL SECTIONS — EVERYTHING ELSE, grouped by section, e.g. "Installments"
    (each installment amount + date), "Exemptions", "Parcel/APN", "Special
@@ -78,7 +82,9 @@ Respond with ONLY a single JSON object, no markdown fences and no prose, exactly
     "base_tax_amount": {"value": <number|null>, "page": <int|null>, "snippet": <string|null>},
     "current_balance": {"value": <number|null>, "page": <int|null>, "snippet": <string|null>},
     "penalties_and_interest": {"value": <number|null>, "page": <int|null>, "snippet": <string|null>},
-    "delinquent_or_lien_status": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>}
+    "delinquent_or_lien_status": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "interest_begins_date": {"value": <YYYY-MM-DD|null>, "page": <int|null>, "snippet": <string|null>},
+    "legal_description": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>}
   },
   "installments_and_due_dates": [{"installment_label": <string|null>, "amount": <string|null>, "due_date": <string|null>, "paid_status": <string|null>, "paid_date": <string|null>, "source": <string|null>, "page": <int|null>, "snippet": <string|null>}],
   "jurisdiction_breakdown": [{"taxing_unit": <string|null>, "tax_rate": <string|null>, "amount_billed": <string|null>, "adjusted_billed": <string|null>, "page": <int|null>, "snippet": <string|null>}],

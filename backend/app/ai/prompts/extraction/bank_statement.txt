@@ -38,6 +38,17 @@ CAPTURE EVERYTHING. There are three buckets:
      page_count_declared     (int)     the TOTAL page count the statement PRINTS, e.g. the "5" in
                                        "Page 1 of 5" / "Page 3 of 5". Report the total N, not the
                                        current page. null if no such "of N" is printed anywhere.
+     service_fee_waived_indicator (string) whether the monthly/maintenance service fee was WAIVED or
+                                       avoided this period ("waived" / "not waived" / "$0"), if stated
+     fee_waiver_options      (string)  the fee-waiver qualifying options listed (e.g. minimum balance,
+                                       qualifying deposits, linked accounts), if the statement lists them
+
+⚠️ COMBINED / MULTIPLE-ACCOUNT STATEMENTS: a single statement sometimes covers MORE THAN ONE deposit
+account (e.g. a "combined statement" listing a checking AND a savings account, each with its own account
+number, summary, and activity). The TYPED CORE + TRANSACTIONS above are for the FIRST/primary account
+ONLY. Put EACH ADDITIONAL account in the additional_accounts LIST (bucket 4) — its masked number, type,
+and beginning/ending balance. Do NOT merge a second account's balances into the primary fields, and do NOT
+mix a second account's transactions into the primary transaction list.
 
 2. TRANSACTIONS — capture EVERY transaction across ALL pages, in order, each as:
      date              (date)    the transaction/posting date
@@ -53,6 +64,14 @@ CAPTURE EVERYTHING. There are three buckets:
 3. ADDITIONAL SECTIONS — everything else (account/mailing address, statement
    messages, interest detail, fee summaries, check images list, etc.), grouped by
    section with label/value.
+
+4. ADDITIONAL ACCOUNTS — a LIST, one FLAT ROW per ADDITIONAL deposit account on a
+   combined statement (NOT the primary account, which is the typed core above):
+     additional_accounts — each row: account_number_masked, account_type,
+                           beginning_balance, ending_balance
+   Mask the account number (last 4). Return an empty list for an ordinary
+   single-account statement. (This surfaces the other accounts' BALANCES; their
+   individual transactions are not captured in this list.)
 
 FOR EVERY FIELD (typed core, each transaction, and each catch-all field) include:
   - "page"    (integer)  the 1-based page it appears on
@@ -95,8 +114,11 @@ Respond with ONLY a single JSON object, no markdown fences and no prose, exactly
     "minimum_balance_requirement": {"value": <number|null>, "page": <int|null>, "snippet": <string|null>},
     "holds_or_pledges":       {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
     "interest_paid":          {"value": <number|null>, "page": <int|null>, "snippet": <string|null>},
-    "page_count_declared":    {"value": <int|null>, "page": <int|null>, "snippet": <string|null>}
+    "page_count_declared":    {"value": <int|null>, "page": <int|null>, "snippet": <string|null>},
+    "service_fee_waived_indicator": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "fee_waiver_options": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>}
   },
+  "additional_accounts": [{"account_number_masked": <string|null>, "account_type": <string|null>, "beginning_balance": <string|null>, "ending_balance": <string|null>, "page": <int|null>, "snippet": <string|null>}],
   "transactions": [
     {"date": <YYYY-MM-DD|null>, "description": <string|null>, "amount": <number|null>,
      "transaction_type": <string|null>, "running_balance": <number|null>,

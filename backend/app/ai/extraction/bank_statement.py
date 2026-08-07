@@ -40,6 +40,7 @@ from app.ai.extraction.parsing import (
     coerce_str,
     derive_status,
     parse_catch_all,
+    parse_flat_rows,
     parse_typed_core,
     source_payload,
 )
@@ -54,8 +55,9 @@ logger = structlog.get_logger(__name__)
 _PROMPT_PATH = "extraction/bank_statement.txt"
 _SUPPORTED_MEDIA_TYPES = frozenset({"application/pdf", "image/jpeg", "image/png", "image/jpg"})
 # Bank statements can have long, multi-page transaction lists → generous cap so the
-# list isn't truncated. A truncated/malformed response still fails gracefully.
-_MAX_TOKENS = 8192
+# list isn't truncated. LP-461 adds a SECOND nested list (additional_accounts on a combined statement)
+# → the sizing rule's ≥2-list tier (16384). A truncated/malformed response still fails gracefully.
+_MAX_TOKENS = 16384
 
 
 class Transaction(BaseModel):
@@ -88,6 +90,10 @@ class BankStatementExtraction(BaseModel):
     statement_period_start: TypedField[datetime.date] = Field(default_factory=TypedField)
     statement_period_end: TypedField[datetime.date] = Field(default_factory=TypedField)
     beginning_balance: TypedField[Decimal] = Field(default_factory=TypedField)
+    # ⚠️ LP-461: on a COMBINED statement (>1 deposit account) this ending_balance is only the FIRST
+    # account's — see the additional_accounts note below. A future rule reading it as "the statement
+    # balance" would understate a multi-account holder. The proper fix is the accounts[] restructure
+    # (LP-461 ADR / future ticket), not this field.
     ending_balance: TypedField[Decimal] = Field(default_factory=TypedField)
     total_deposits: TypedField[Decimal] = Field(default_factory=TypedField)
     total_withdrawals: TypedField[Decimal] = Field(default_factory=TypedField)
@@ -108,8 +114,20 @@ class BankStatementExtraction(BaseModel):
     holds_or_pledges: TypedField[str] = Field(default_factory=TypedField)
     interest_paid: TypedField[Decimal] = Field(default_factory=TypedField)
 
+    # --- LP-461 diff — verified scalar additions --------------------------- #
+    service_fee_waived_indicator: TypedField[str] = Field(default_factory=TypedField)
+    fee_waiver_options: TypedField[str] = Field(default_factory=TypedField)
+
     # --- Transactions (the structurally-new part, ADR-061) ------------------ #
+    # ⚠️ LP-461: these are the FIRST account's transactions only. On a combined statement the additional
+    # accounts' rows are NOT captured (additional_accounts carries balances, not rows) — so AS-8's chaining
+    # and AS-1's deposit sweep see only account 1. The accounts[] restructure (future ticket) is the fix.
     transactions: list[Transaction] = Field(default_factory=list)
+
+    # --- LP-461 diff — additional accounts on a COMBINED statement (bare rows) -------------- #
+    # A "combined statement" lists >1 deposit account; the typed core + transactions above capture only
+    # the FIRST. This surfaces the OTHERS' existence + balances (reserves) — but NOT their transactions.
+    additional_accounts: list[dict[str, Any]] = Field(default_factory=list)
 
     # --- Page completeness (LP-381, AS-9) ----------------------------------- #
     # page_count_declared: the "of N" the statement PRINTS ("Page 1 of 5") — a MODEL read (null if not printed).
@@ -172,6 +190,17 @@ _CORE_SPEC: CoreSpec = (
         "page_count_declared",
         coerce_int,
     ),  # LP-381 — the printed "of N"; page_count_present is set separately
+    # LP-461 diff additions
+    ("service_fee_waived_indicator", coerce_str),
+    ("fee_waiver_options", coerce_str),
+)
+
+# LP-461 — additional deposit accounts on a combined statement (bare rows; balances only, not txns).
+_ADDITIONAL_ACCOUNTS_ROW: CoreSpec = (
+    ("account_number_masked", coerce_str),
+    ("account_type", coerce_str),
+    ("beginning_balance", coerce_str),
+    ("ending_balance", coerce_str),
 )
 
 
@@ -222,17 +251,25 @@ def _parse_bank_statement_json(text: str) -> BankStatementExtractionResult | Non
 
     core_payload, non_null, coercion_lost = parse_typed_core(payload, _CORE_SPEC)
     transactions = _parse_transactions(payload.get("transactions"))
+    additional_accounts = parse_flat_rows(
+        payload.get("additional_accounts"), _ADDITIONAL_ACCOUNTS_ROW
+    )
     sections = parse_catch_all(payload.get("additional_sections"))
 
     try:
         data = BankStatementExtraction.model_validate(
-            {**core_payload, "transactions": transactions, "additional_sections": sections}
+            {
+                **core_payload,
+                "transactions": transactions,
+                "additional_accounts": additional_accounts,
+                "additional_sections": sections,
+            }
         )
     except ValidationError:
         return None
 
     # Transactions count as extracted content (a statement may be mostly its list).
-    status = derive_status(non_null + len(transactions), coercion_lost)
+    status = derive_status(non_null + len(transactions) + len(additional_accounts), coercion_lost)
     confidence = coerce_confidence(payload.get("confidence"))
     raw_reasoning = payload.get("reasoning")
     reasoning = (
@@ -295,6 +332,7 @@ async def extract_bank_statement(content: bytes, media_type: str) -> BankStateme
         confidence=result.confidence,
         core_fields_present=core_present,
         transaction_count=len(result.data.transactions),
+        additional_accounts=len(result.data.additional_accounts),
         catch_all_sections=len(result.data.additional_sections),
     )
     return result

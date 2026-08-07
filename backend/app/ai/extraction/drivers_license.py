@@ -80,6 +80,12 @@ class DriversLicenseExtraction(BaseModel):
     issue_date: TypedField[date] = Field(default_factory=TypedField)
     photo_present: TypedField[str] = Field(default_factory=TypedField)
 
+    # --- LP-461 diff — verified scalar additions --------------------------- #
+    license_class: TypedField[str] = Field(default_factory=TypedField)
+    restrictions: TypedField[str] = Field(default_factory=TypedField)  # may encode legal-presence
+    endorsements: TypedField[str] = Field(default_factory=TypedField)
+    document_discriminator: TypedField[str] = Field(default_factory=TypedField)  # DD audit number
+
     additional_sections: list[CatchAllSection] = Field(default_factory=list)
 
 
@@ -120,6 +126,11 @@ _CORE_SPEC: CoreSpec = (
     ("suffix", coerce_str),
     ("issue_date", coerce_date),
     ("photo_present", coerce_str),
+    # LP-461 diff additions
+    ("license_class", coerce_str),
+    ("restrictions", coerce_str),
+    ("endorsements", coerce_str),
+    ("document_discriminator", coerce_str),
 )
 
 

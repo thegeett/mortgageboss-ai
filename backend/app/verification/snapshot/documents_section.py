@@ -1240,6 +1240,31 @@ _MASTER_INSURANCE__COVERAGE_LINES_LIST = ListSpec(
     redact=frozenset({"policy_number"}),
 )
 
+# LP-461 — the schema-gap phase-3 flat-row lists. No stable_row_id / derived (no rule enumerates them yet).
+_W2__BOX_12_ITEMS_LIST = ListSpec(
+    name="box_12_items",
+    fields=("code", "amount"),
+)
+_TAX_RETURN__W2_FORMS_LIST = ListSpec(
+    name="w2_forms",
+    fields=("employer_name", "wages", "federal_withheld"),
+)
+_TAX_RETURN__CAPITAL_GAINS_LIST = ListSpec(
+    name="capital_gains_transactions",
+    fields=("description", "proceeds", "cost_basis", "gain_or_loss"),
+)
+_LETTER_OF_EXPLANATION__EXPLANATION_ITEMS_LIST = ListSpec(
+    name="explanation_items",
+    fields=("item_topic", "item_date_or_period", "item_explanation"),
+)
+_BANK_STATEMENT__ADDITIONAL_ACCOUNTS_LIST = ListSpec(
+    name="additional_accounts",
+    fields=("account_number_masked", "account_type", "beginning_balance", "ending_balance"),
+    # row-PII backstop (mirrors _TRADELINES_LIST): the prompt masks account_number_masked to last 4; if a
+    # full number leaks the _DESC_REDACT 9+-digit scrub redacts it here (a genuine ****6290 is untouched).
+    redact=frozenset({"account_number_masked"}),
+)
+
 _LIST_SPECS: dict[str, tuple[ListSpec, ...]] = {
     "voe": (_GROSS_EARNINGS_HISTORY_LIST,),  # LP-446 diff (live extractor)
     "investment_account": (_SECURITY_POSITIONS_LIST,),  # LP-446 diff (live extractor)
@@ -1258,7 +1283,13 @@ _LIST_SPECS: dict[str, tuple[ListSpec, ...]] = {
     ),
     "mortgage_statement": (_MORTGAGE_STATEMENT__TRANSACTION_ACTIVITY_LIST,),  # LP-460
     "retirement_account": (_RETIREMENT_ACCOUNT__HOLDINGS_LIST,),  # LP-460
-    "bank_statement": (_TRANSACTIONS_LIST,),
+    "bank_statement": (  # LP-461 + additional_accounts (combined-statement recovery)
+        _TRANSACTIONS_LIST,
+        _BANK_STATEMENT__ADDITIONAL_ACCOUNTS_LIST,
+    ),
+    "w2": (_W2__BOX_12_ITEMS_LIST,),  # LP-461
+    "tax_return": (_TAX_RETURN__W2_FORMS_LIST, _TAX_RETURN__CAPITAL_GAINS_LIST),  # LP-461
+    "letter_of_explanation": (_LETTER_OF_EXPLANATION__EXPLANATION_ITEMS_LIST,),  # LP-461
     "appraisal": (_COMPARABLE_SALES_LIST,),
     "credit_report": (_TRADELINES_LIST, _PUBLIC_RECORDS_LIST, _INQUIRIES_LIST),
     "title_commitment": (_SCHEDULE_B_ITEMS_LIST, _CHAIN_OF_TITLE_LIST),

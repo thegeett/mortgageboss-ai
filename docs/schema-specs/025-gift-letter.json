@@ -31,7 +31,8 @@
     {"name":"lender_name","type":"str","why":"identity — which loan/lender the gift is tied to; cross-document attribution","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
     {"name":"document_issue_date","type":"date","why":"identity/recency — the letter's own date (age testing)","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
     {"name":"donor_signature_present","type":"str","why":"AS-5 / processor — an unexecuted gift letter does not satisfy the chain link","rules":["AS-5"],"reason_class":"rule","rule_floor":false,"degraded_from":"signature","pii":null,"exists_today":false,"prompt_hint":null},
-    {"name":"donor_signature_date","type":"date","why":"processor — execution date of the donor signature","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null}
+    {"name":"donor_signature_date","type":"date","why":"processor — execution date of the donor signature","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"loan_number","type":"str","why":"the loan this gift is tied to (unmasked - used to match the gift to THE loan file)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null}
   ],
 
   "nested_lists": [],

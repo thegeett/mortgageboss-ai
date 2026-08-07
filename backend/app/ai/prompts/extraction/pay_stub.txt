@@ -27,6 +27,13 @@ CAPTURE EVERYTHING ON THE DOCUMENT — lose nothing. There are two buckets:
      position_or_title  (string)  the employee's job title / position, if shown
      employment_start_date (date) the hire / employment start date, if shown
      total_deductions_current (number) total deductions for THIS pay period
+     net_pay_ytd        (number)  YEAR-TO-DATE net pay (the YTD column of the net-pay line), if shown
+     federal_taxable_wages_current (number) federal TAXABLE wages this period (gross less pre-tax
+                                      deductions), if the stub shows a taxable-wages line
+     federal_taxable_wages_ytd (number) federal taxable wages YEAR-TO-DATE, if shown
+     employer_phone     (string)  the employer's phone number, if shown
+     check_or_payment_status (string) any check/payment status printed, e.g. "VOID",
+                                      "NON-NEGOTIABLE", "For Record Purposes Only"
 
 2. ADDITIONAL SECTIONS — anything that fits no slot above and no list below
    (filing status, check number, direct-deposit info, employer/other), grouped by
@@ -75,7 +82,12 @@ Respond with ONLY a single JSON object, no markdown fences and no prose, exactly
     "employee_ssn_masked": {"value": <string|null last-4 only>, "page": <int|null>, "snippet": <string|null>},
     "position_or_title": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
     "employment_start_date": {"value": <YYYY-MM-DD|null>, "page": <int|null>, "snippet": <string|null>},
-    "total_deductions_current": {"value": <number|null>, "page": <int|null>, "snippet": <string|null>}
+    "total_deductions_current": {"value": <number|null>, "page": <int|null>, "snippet": <string|null>},
+    "net_pay_ytd": {"value": <number|null>, "page": <int|null>, "snippet": <string|null>},
+    "federal_taxable_wages_current": {"value": <number|null>, "page": <int|null>, "snippet": <string|null>},
+    "federal_taxable_wages_ytd": {"value": <number|null>, "page": <int|null>, "snippet": <string|null>},
+    "employer_phone": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "check_or_payment_status": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>}
   },
   "additional_sections": [
     {"section": "<section name>", "fields": [

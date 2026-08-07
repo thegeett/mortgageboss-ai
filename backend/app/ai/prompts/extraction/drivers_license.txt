@@ -20,11 +20,22 @@ CAPTURE THE FIELDS — lose nothing. There are two buckets:
      issuing_state      (string)  the issuing state (e.g. "CA")
      issuing_authority  (string)  the issuing authority (e.g. "DMV"), if shown
      expiration_date    (date)     the ID expiration date (an expired ID is invalid)
+     license_class      (string)  the license class (e.g. "C"), if shown
+     restrictions       (string)  the restrictions AS WRITTEN. ⚠️ Capture the FULL text — a
+                                   restriction often encodes legal-presence / immigration status
+                                   (e.g. "*9-U.S. GOV. LEGAL PRESENCE EXP 09/06/2027"), which is
+                                   mortgage-relevant. Use "NONE" if the ID says none.
+     endorsements       (string)  the endorsements (e.g. "NONE"), if shown
+     document_discriminator (string) the DD / document-discriminator — a long inventory/audit
+                                   number labeled "DD" (sometimes prefixed with a field number, e.g.
+                                   "5 DD 0040242988" → capture "0040242988"). It is DISTINCT from the
+                                   license number; it often sits near the bottom edge of the front. Read
+                                   the full number that follows the "DD" label, if shown.
 
-2. ADDITIONAL SECTIONS — EVERYTHING ELSE, grouped by section, e.g. "License Details"
-   (class, endorsements, restrictions), "Physical" (height, eye color, sex), "Other".
-   Do not force these into the typed core — capture them here so nothing is lost. Do
-   NOT put the full ID number anywhere (only the masked last-4 in the typed core).
+2. ADDITIONAL SECTIONS — EVERYTHING ELSE, grouped by section, e.g. "Physical" (height, eye
+   color, sex), "Other". Do not force these into the typed core — capture them here so
+   nothing is lost. Do NOT put the full ID number anywhere (only the masked last-4 in the
+   typed core).
 
 FOR EVERY FIELD include WHERE you read it:
   - "page"    (integer)  the 1-based page the value appears on
@@ -57,5 +68,9 @@ Respond with ONLY a single JSON object, no markdown fences and no prose, exactly
     "middle_name": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
     "suffix": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
     "issue_date": {"value": <YYYY-MM-DD|null>, "page": <int|null>, "snippet": <string|null>},
-    "photo_present": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>}
+    "photo_present": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "license_class": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "restrictions": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "endorsements": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "document_discriminator": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>}
   },
