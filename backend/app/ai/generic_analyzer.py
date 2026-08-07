@@ -45,9 +45,7 @@ from app.ai.extraction.parsing import coerce_decimal, coerce_str
 from app.ai.parsing import extract_json_object
 from app.ai.prompt_loader import load_prompt
 from app.core.config import settings
-from app.services.pdf_utils import first_n_pages
-
-_PDF_MEDIA_TYPE = "application/pdf"
+from app.services.pdf_utils import cap_pdf_pages
 
 logger = structlog.get_logger(__name__)
 
@@ -191,13 +189,9 @@ async def analyze_document(content: bytes, media_type: str) -> GenericAnalysis |
 
     # LP-463 — free extraction reads the document natively and so hits the SAME 100-page/32 MB document-block
     # limit LP-462 fixed for classification (a 177-page condo declaration would be rejected). Cap to the first
-    # ``tier3_max_pages`` (mortgage-relevant facts cluster in the lead pages). A PDF already within the cap is
-    # byte-identical; a non-PDF/None sends the original. Tier-3-only — the typed extractors are NOT capped.
-    payload = content
-    if media_type.lower().strip() == _PDF_MEDIA_TYPE:
-        capped = await first_n_pages(content, settings.tier3_max_pages)
-        if capped is not None:
-            payload = capped
+    # ``tier3_max_pages`` (mortgage-relevant facts cluster in the lead pages). Tier-3-only — typed extractors
+    # are NOT capped.
+    payload = await cap_pdf_pages(content, media_type, settings.tier3_max_pages)
 
     system_prompt = load_prompt(_PROMPT_PATH)
     try:

@@ -144,24 +144,33 @@ _REDACTED = "[redacted]"
 
 
 def _scrub_untyped(value: Any) -> Any:
-    """Recursively scrub a Tier-3 free-extraction structure of any long identifier run (LP-463).
+    """Scrub a Tier-3 free-extraction structure of any long identifier run (LP-463).
 
     The untyped section carries model-extracted free text (party names, contexts, a summary). The prompt is
     told not to quote full SSNs/account numbers, but this is the belt-and-braces backstop at the snapshot
     boundary — the SAME 9+-digit scrub (:data:`_DESC_REDACT`) the generic lists use — so a leaked identifier
     cannot land in the snapshot at rest (which ``_assert_no_raw_pii`` guards) or reach an AI reasoner. A
-    masked last-4 / date / short id is kept (an honest signal); a long run becomes ``[redacted]``. Returns
-    ``None`` for a falsy input (no untyped read), so a typed document's entry stays ``untyped_extraction=None``.
+    masked last-4 / date / short id is kept (an honest signal); a long run becomes ``[redacted]``.
+
+    Returns ``None`` for a falsy TOP-LEVEL input (no untyped read), so a typed document's entry stays
+    ``untyped_extraction=None``. The empty-check is top-level ONLY: the recursion (:func:`_scrub_value`)
+    preserves falsy LEAVES (``0`` / ``False`` / ``""`` / ``[]``) — collapsing those to ``None`` would silently
+    distort the very facts this section surfaces.
     """
     if not value:
         return None
+    return _scrub_value(value)
+
+
+def _scrub_value(value: Any) -> Any:
+    """Recurse a scrubbed structure, redacting long identifier runs in strings; falsy leaves are KEPT."""
     if isinstance(value, str):
         return _DESC_REDACT.sub(_REDACTED, value)
     if isinstance(value, dict):
-        return {k: _scrub_untyped(v) for k, v in value.items()}
+        return {k: _scrub_value(v) for k, v in value.items()}
     if isinstance(value, list):
-        return [_scrub_untyped(v) for v in value]
-    return value  # numbers / bools cannot carry an identifier string
+        return [_scrub_value(v) for v in value]
+    return value  # numbers / bools / None — cannot carry an identifier string
 
 
 # The catch-all list key inside extracted_data (not a typed field).

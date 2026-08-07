@@ -211,12 +211,18 @@ async def _process_document(db: AsyncSession, document_id: str) -> None:
         if review_reason is not None:
             logger.info("document_needs_review", document_id=str(document.id), reason=review_reason)
             await _tier3_analyze(db, document, content, review_reason=review_reason)
-        else:
-            # --- Route by tier (catalog-driven, LP-58) ---------------------- #
-            # A confidently-classified, self-consistent type. Each tier has one
-            # handling path, every path terminal. A confident "unknown" routes here
-            # to Tier 3 free extraction (the catalog default) and COMPLETES.
-            await _route_by_tier(db, document, content)
+            # A flagged document's LABEL is not trusted, so it must NOT auto-advance a need (the pre-LP-463
+            # low-confidence gate returned here too). Its untrusted document_type would drive a matching OPEN
+            # need RECEIVED→REJECTED, and REJECTED is not in the matcher's OPEN set — so the genuine document
+            # could never advance that need later. The LP-44 human override advances it once the type is
+            # confirmed. type_mismatch stores "unknown" (matches no need) so this only bites low_confidence.
+            return
+
+        # --- Route by tier (catalog-driven, LP-58) -------------------------- #
+        # A confidently-classified, self-consistent type. Each tier has one handling
+        # path, every path terminal. A confident "unknown" routes here to Tier 3 free
+        # extraction (the catalog default) and COMPLETES.
+        await _route_by_tier(db, document, content)
 
         # --- Update the needs list (LP-68) — SERIALIZED per loan file -------- #
         # The document is now terminal + committed; advance any matching need in a

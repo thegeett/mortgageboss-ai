@@ -135,6 +135,22 @@ async def first_n_pages(content: bytes, max_pages: int) -> bytes | None:
     return await asyncio.to_thread(_first_n_pages_sync, content, max_pages)
 
 
+_PDF_MEDIA_TYPE = "application/pdf"
+
+
+async def cap_pdf_pages(content: bytes, media_type: str, max_pages: int) -> bytes:
+    """The document payload for an AI call, trimmed to the first ``max_pages`` if it's an over-cap PDF.
+
+    The boilerplate both classification (LP-462) and Tier-3 free extraction (LP-463) share around
+    :func:`first_n_pages`: only ``application/pdf`` is trimmed; a PDF already within the cap comes back
+    byte-identical; a non-PDF, or an unreadable PDF (``first_n_pages`` → None), is sent unchanged. Never raises.
+    """
+    if media_type.lower().strip() != _PDF_MEDIA_TYPE:
+        return content
+    capped = await first_n_pages(content, max_pages)
+    return capped if capped is not None else content
+
+
 async def extract_text_from_pdf(content: bytes) -> PdfTextExtractionResult:
     """Extract a PDF's text layer from bytes (multi-page). Async; never raises.
 

@@ -146,7 +146,7 @@ def _doc_context(
     # already identifier-scrubbed at snapshot-build time; a group that did not declare include_untyped gets a
     # byte-identical context. This is the ONLY path from the untyped section to a reasoner — never a rule.
     if opts.include_untyped and raw.untyped_extraction:
-        fields["untyped_extraction"] = raw.untyped_extraction
+        fields["untyped_extraction"] = _serialize_untyped(raw.untyped_extraction, opts.list_row_cap)
     return fields
 
 
@@ -220,6 +220,23 @@ def _serialize_lists(entry: DocumentEntry, cap: int) -> dict[str, object]:
             block["shown"] = len(shown)
             block["total"] = len(rows)
         out[name] = block
+    return out
+
+
+def _serialize_untyped(untyped: dict[str, object], cap: int) -> dict[str, object]:
+    """The marked-untyped section for an AI context (LP-463) — capped + truncation-marked like the lists.
+
+    ``untyped`` is already identifier-scrubbed at snapshot-build time. Any LIST-valued member longer than
+    ``cap`` (the group's ``list_row_cap``) is trimmed to the first ``cap`` items with a parallel
+    ``<name>__truncated`` marker (shown/total) — so a reasoner knows an item may lie beyond what's shown,
+    the same count-cross-check discipline the lists use. Scalar members (a type guess, a summary) pass through."""
+    out: dict[str, object] = {}
+    for name, value in untyped.items():
+        if isinstance(value, list) and len(value) > cap:
+            out[name] = value[:cap]
+            out[f"{name}__truncated"] = {"shown": cap, "total": len(value)}
+        else:
+            out[name] = value
     return out
 
 

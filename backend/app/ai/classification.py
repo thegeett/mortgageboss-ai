@@ -44,9 +44,7 @@ from app.ai.client import (
 )
 from app.ai.parsing import coerce_confidence, extract_json_object
 from app.core.config import settings
-from app.services.pdf_utils import first_n_pages
-
-_PDF_MEDIA_TYPE = "application/pdf"
+from app.services.pdf_utils import cap_pdf_pages
 
 logger = structlog.get_logger(__name__)
 
@@ -135,10 +133,16 @@ def _parse_classification_json(text: str) -> ClassificationResult | None:
     # LP-463 — the free-text document name (named first) + the self-check.
     raw_name = data.get("document_name")
     document_name = raw_name.strip() if isinstance(raw_name, str) and raw_name.strip() else None
-    # ``type_matches_document`` flags an admitted mismatch. Default TRUE and only a literal ``false`` flags:
-    # a missing/garbled value must not spuriously send a good classification to review (the guard fails
-    # SAFE toward trusting the label, since the mismatch case is the model volunteering "this does not fit").
-    type_matches_document = data.get("type_matches_document") is not False
+    # ``type_matches_document`` flags an admitted mismatch. Default TRUE and only an EXPLICIT negative flags:
+    # a missing/garbled value must not spuriously send a good classification to review (the guard fails SAFE
+    # toward trusting the label, since the mismatch case is the model volunteering "this does not fit"). Accept
+    # the negative in any common shape — JSON ``false``, or a stringified ``"false"``/``"no"``/``"0"`` — so a
+    # model formatting slip cannot silently defeat the guard (the T4→w2 harm it exists to catch).
+    raw_match = data.get("type_matches_document")
+    if isinstance(raw_match, str):
+        type_matches_document = raw_match.strip().lower() not in {"false", "no", "n", "0"}
+    else:
+        type_matches_document = raw_match not in (False, 0)
 
     try:
         return ClassificationResult(
@@ -170,14 +174,8 @@ async def classify_document(content: bytes, media_type: str) -> ClassificationRe
 
     # LP-462 — classification identifies the LEAD document and needs only its first pages; sending the whole
     # PDF made a >100-page package exceed the document-block limit (Bedrock → BadRequestError). Trim to the
-    # first ``classification_max_pages`` pages. A PDF already within the cap comes back byte-identical; a
-    # non-PDF (image) or unreadable-PDF returns None → send the original bytes unchanged. This is
-    # classification-only: extraction still reads the whole document.
-    payload = content
-    if media_type.lower().strip() == _PDF_MEDIA_TYPE:
-        capped = await first_n_pages(content, settings.classification_max_pages)
-        if capped is not None:
-            payload = capped
+    # first ``classification_max_pages`` pages (classification-only — extraction still reads the whole doc).
+    payload = await cap_pdf_pages(content, media_type, settings.classification_max_pages)
 
     system_prompt = render_classification_prompt()
     try:
