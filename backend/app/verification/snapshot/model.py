@@ -36,6 +36,7 @@ empty list). Both survive JSON round-trip losslessly.
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Any
 from uuid import UUID
 
 from pydantic import BaseModel, field_validator, model_validator
@@ -281,6 +282,15 @@ class DocumentEntry(BaseModel):
     # surfaced to the AI context builders (``_doc_context`` reads only ``fields``) — the same catch-all
     # boundary that gated IH-1, a known and separate decision (LP-436 step 8 / ADR).
     lists: dict[str, tuple[ListRow, ...]] = PydField(default_factory=dict)
+    # LP-463 — the MARKED-UNTYPED section: the Tier 3 scoped free-extraction output (parties/dates/amounts/
+    # findings/summary) for a document with no fitting catalog type. ⚠️ Labels are model-chosen and values
+    # uncoerced — it is available to a PROCESSOR and to AI cross-source reasoning (opt-in, via
+    # ``ContextOptions.include_untyped``), but **NO DETERMINISTIC RULE MAY READ IT**: the typed ``read_field``
+    # paths every rule uses reach ``fields`` / ``transactions`` / ``schedule_*`` only, never this. Structural
+    # enforcement + a test (LP-463). ADDITIVE with a ``None`` default — the LP-437 ``lists`` precedent — so
+    # ``SNAPSHOT_VERSION`` is NOT bumped and the v4 golden fixture (no ``untyped_extraction`` key) still
+    # validates. ``None`` = a typed/catalog document (no untyped read); a dict = the scoped free extraction.
+    untyped_extraction: dict[str, Any] | None = None
 
     @model_validator(mode="after")
     def _belongs_to_null_or_nonempty(self) -> DocumentEntry:

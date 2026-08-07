@@ -160,6 +160,13 @@ class Settings(BaseSettings):
     # ONLY — extraction still reads the whole document (it needs the substantive pages); large-doc extraction
     # is the splitter's problem, not this cap.
     classification_max_pages: int = 15
+    # LP-463: Tier 3 scoped free extraction also reads the document natively, so it hits the SAME
+    # 100-page/32 MB document-block limit (a 177-page condo declaration would be rejected). Free extraction
+    # surfaces mortgage-relevant facts for a human + AI reasoning (moderate stakes), and those cluster in the
+    # lead pages, so a generous cap well under 100 both prevents the rejection and bounds token cost. Larger
+    # than classification's cap (which only needs to IDENTIFY) because free extraction READS for terms.
+    # NOTE: this is Tier-3-only — the Tier-1 typed extractors are deliberately NOT capped (LP-462).
+    tier3_max_pages: int = 50
     # Needs consolidation (LP-111): after the deterministic collapse, an AI pass FLAGS the
     # semantic-duplicate residue for the processor to confirm (never a silent delete). Gated so the
     # extra per-run classification call can be turned off; the deterministic layers run regardless.

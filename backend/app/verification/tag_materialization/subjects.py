@@ -40,11 +40,16 @@ class ContextOptions:
     * ``include_lists`` — serialise a document's generic lists (LP-437 ``entry.lists``) into the context.
     * ``list_row_cap`` — the per-list row cap (default 50), raisable per group for a dense list.
     * ``include_stated_liabilities`` — add the app's file-level MISMO liabilities to a BORROWER context
-      (the comparison set a report-vs-app rule like CR-4 matches report tradelines against)."""
+      (the comparison set a report-vs-app rule like CR-4 matches report tradelines against).
+    * ``include_untyped`` — serialise a document's MARKED-UNTYPED section (LP-463 ``entry.untyped_extraction``
+      — the Tier-3 scoped free-extraction output) into an AI cross-source context. Opt-in exactly like
+      ``include_lists``: a group that leaves it False gets a byte-identical context. This is the ONLY way the
+      untyped section reaches a reasoner; NO deterministic rule reads it."""
 
     include_lists: bool = False
     list_row_cap: int = _DEFAULT_LIST_ROW_CAP
     include_stated_liabilities: bool = False
+    include_untyped: bool = False
 
 
 _DEFAULT_CONTEXT_OPTIONS = ContextOptions()
@@ -137,6 +142,11 @@ def _doc_context(
     # that did not declare include_lists gets a byte-identical context (this branch never runs for it).
     if opts.include_lists and raw.lists:
         fields["lists"] = _serialize_lists(raw, opts.list_row_cap)
+    # LP-463 — opt-in: add the document's MARKED-UNTYPED section (Tier-3 scoped free extraction). It is
+    # already identifier-scrubbed at snapshot-build time; a group that did not declare include_untyped gets a
+    # byte-identical context. This is the ONLY path from the untyped section to a reasoner — never a rule.
+    if opts.include_untyped and raw.untyped_extraction:
+        fields["untyped_extraction"] = raw.untyped_extraction
     return fields
 
 

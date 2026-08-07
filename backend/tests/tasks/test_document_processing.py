@@ -362,6 +362,123 @@ async def test_tier3_analyzed_findings_recorded_and_text_indexed(
     assert await _current_extraction(db_session, doc.id) is None  # not a Tier 1 extraction
 
 
+# --------------------------------------------------------------------------- #
+# LP-463 — decline / guard / free-extraction routing
+# --------------------------------------------------------------------------- #
+
+
+async def test_type_mismatch_not_applied_and_free_extracted_for_review(
+    monkeypatch: pytest.MonkeyPatch, db_session: AsyncSession
+) -> None:
+    """The T4→w2 harm: the model flags type_matches_document=False. The wrong label is NOT applied
+    (stored as unknown), the document is still READ via Tier 3 free extraction, and it lands in
+    NEEDS_REVIEW — never a silent wrong-schema extraction."""
+    doc = await _setup_document(db_session)
+    _patch_storage(monkeypatch)
+    _patch_classify(
+        monkeypatch,
+        ClassificationResult(
+            document_type="w2",  # the model's pick …
+            confidence=0.85,
+            reasoning="a Canadian T4",
+            document_name="a Canadian T4 slip",
+            type_matches_document=False,  # … which it admits does not fit
+        ),
+    )
+    analyze = _patch_analyze(monkeypatch, _generic_analysis_with_finding())
+    extract = _patch_extract(
+        monkeypatch, _paystub_success()
+    )  # w2 has no extractor, but prove none runs
+
+    with structlog.testing.capture_logs() as logs:
+        await pipeline._process_document(db_session, str(doc.id))
+    await db_session.refresh(doc)
+
+    assert doc.status == DocumentStatus.NEEDS_REVIEW
+    assert doc.document_type == "unknown"  # ⚠️ the wrong w2 label was NOT applied
+    assert analyze.call_count == 1  # still read (free extraction)
+    assert extract.call_count == 0
+    assert doc.generic_analysis is not None
+    review = [e for e in logs if e["event"] == "document_needs_review"]
+    assert review and review[0]["reason"] == "type_mismatch"
+
+
+async def test_low_confidence_free_extracted_for_review(
+    monkeypatch: pytest.MonkeyPatch, db_session: AsyncSession
+) -> None:
+    """A low-confidence document is now READ (free extraction) before NEEDS_REVIEW — not left unread."""
+    doc = await _setup_document(db_session)
+    _patch_storage(monkeypatch)
+    _patch_classify(
+        monkeypatch,
+        ClassificationResult(document_type="pay_stub", confidence=0.3, reasoning="unsure"),
+    )
+    analyze = _patch_analyze(monkeypatch, _generic_analysis_with_finding())
+    extract = _patch_extract(monkeypatch, _paystub_success())
+
+    await pipeline._process_document(db_session, str(doc.id))
+    await db_session.refresh(doc)
+
+    assert doc.status == DocumentStatus.NEEDS_REVIEW
+    assert analyze.call_count == 1  # read via Tier 3
+    assert extract.call_count == 0  # the dubious label's extractor did NOT run
+    assert doc.generic_analysis is not None
+
+
+async def test_confident_unknown_free_extracts_and_completes(
+    monkeypatch: pytest.MonkeyPatch, db_session: AsyncSession
+) -> None:
+    """A confident decline → Tier 3 free extraction → COMPLETED (declining is cheap, loses no data)."""
+    doc = await _setup_document(db_session)
+    _patch_storage(monkeypatch)
+    _patch_classify(
+        monkeypatch,
+        ClassificationResult(
+            document_type="unknown",
+            confidence=0.9,
+            reasoning="no known type",
+            document_name="an HOA annual budget",
+        ),
+    )
+    analyze = _patch_analyze(monkeypatch, _generic_analysis_with_finding())
+
+    await pipeline._process_document(db_session, str(doc.id))
+    await db_session.refresh(doc)
+
+    assert doc.status == DocumentStatus.COMPLETED  # not flagged — an honest, confident unknown
+    assert analyze.call_count == 1
+    assert doc.generic_analysis is not None
+
+
+async def test_correct_classification_unaffected_no_free_extraction(
+    monkeypatch: pytest.MonkeyPatch, db_session: AsyncSession
+) -> None:
+    """The control: a confidently, self-consistently classified type takes its normal path — deep
+    extraction, no free-extraction call. LP-463 must not touch the 79% happy path."""
+    doc = await _setup_document(db_session)
+    _patch_storage(monkeypatch)
+    _patch_classify(
+        monkeypatch,
+        ClassificationResult(
+            document_type="pay_stub",
+            confidence=0.95,
+            reasoning="earnings",
+            document_name="a pay stub",
+            type_matches_document=True,
+        ),
+    )
+    analyze = _patch_analyze(monkeypatch, _generic_analysis_with_finding())
+    extract = _patch_extract(monkeypatch, _paystub_success())
+
+    await pipeline._process_document(db_session, str(doc.id))
+    await db_session.refresh(doc)
+
+    assert doc.status == DocumentStatus.COMPLETED
+    assert doc.document_type == "pay_stub"  # its type, unchanged
+    assert extract.call_count == 1  # deep extraction ran
+    assert analyze.call_count == 0  # free extraction did NOT run
+
+
 @pytest.mark.parametrize("document_type", ["boat_registration", "unknown", "mystery_affidavit"])
 async def test_tier3_one_shared_path_for_any_unknown(
     monkeypatch: pytest.MonkeyPatch, db_session: AsyncSession, document_type: str

@@ -1,20 +1,28 @@
-"""Tier 3 generic analyzer (LP-66) — "understand anything" for unrecognized docs.
+"""Tier 3 scoped free extraction (LP-463; was the LP-66 generic analyzer) — read any unrecognized doc.
 
 Tier 3 is the long-tail: a document no predefined schema anticipates (a court
-order, a trust, an unusual asset statement, a personal-loan agreement, a
-handwritten letter). One **flexible** analysis makes any such document *legible*
-without a per-type schema — the typed-core + catch-all philosophy at its most
-flexible. The output is structured-but-flexible **generic slots** that work for
-ANY document:
+order, a trust, wiring instructions, an employee compensation letter, an HOA
+budget, a lease amendment). One **flexible** read makes any such document *legible*
+without a per-type schema — but **scoped to MORTGAGE-RELEVANT data, not everything**
+(LP-463 A4): a free reader that returns a W-2's IRS "Notice to Employee" boilerplate
+or a pay stub's voucher furniture is noise. The prompt captures loan-relevant facts
+and skips disclaimers / instructions / page furniture. The output is
+structured-but-flexible **generic slots** that work for ANY document:
 
   * ``document_type_guess`` — the model's best guess at what it is
   * ``key_parties`` — names + roles
-  * ``key_dates`` — date + description
-  * ``key_amounts`` — value + context
+  * ``key_dates`` — mortgage-relevant date + description
+  * ``key_amounts`` — mortgage-relevant value + context
   * ``key_findings`` — things that may affect the loan (obligations, property
     interests, income items, discrepancies) — recorded as :class:`DocumentFinding`\\ s
   * ``summary`` — a short narrative
-  * ``full_text`` — the document's text, stored + indexed for search
+
+The output goes to the snapshot's MARKED-UNTYPED section (LP-463) — visible to a
+processor + AI cross-source reasoning, **never a deterministic rule**. (LP-463 also
+dropped the old ``full_text`` transcription: it WAS the "extract everything" noise
+this scoping exists to avoid; full-text search over unrecognized documents is a
+low-value feature that carried the boilerplate — the ``full_text`` field remains for
+back-compat but the prompt no longer produces it.)
 
 One mechanism for all Tier 3 docs (no per-type logic). Runs the ANALYSIS tier
 (``settings.anthropic_model_analysis``, Sonnet by default, env-overridable — its own knob,
@@ -37,6 +45,9 @@ from app.ai.extraction.parsing import coerce_decimal, coerce_str
 from app.ai.parsing import extract_json_object
 from app.ai.prompt_loader import load_prompt
 from app.core.config import settings
+from app.services.pdf_utils import first_n_pages
+
+_PDF_MEDIA_TYPE = "application/pdf"
 
 logger = structlog.get_logger(__name__)
 
@@ -178,9 +189,19 @@ async def analyze_document(content: bytes, media_type: str) -> GenericAnalysis |
     if not content or media_type.lower().strip() not in _SUPPORTED_MEDIA_TYPES:
         return None
 
+    # LP-463 — free extraction reads the document natively and so hits the SAME 100-page/32 MB document-block
+    # limit LP-462 fixed for classification (a 177-page condo declaration would be rejected). Cap to the first
+    # ``tier3_max_pages`` (mortgage-relevant facts cluster in the lead pages). A PDF already within the cap is
+    # byte-identical; a non-PDF/None sends the original. Tier-3-only — the typed extractors are NOT capped.
+    payload = content
+    if media_type.lower().strip() == _PDF_MEDIA_TYPE:
+        capped = await first_n_pages(content, settings.tier3_max_pages)
+        if capped is not None:
+            payload = capped
+
     system_prompt = load_prompt(_PROMPT_PATH)
     try:
-        message = build_document_message(content=content, media_type=media_type)
+        message = build_document_message(content=payload, media_type=media_type)
     except ValueError:
         return None
 

@@ -137,3 +137,43 @@ async def test_never_logs_content_or_values(monkeypatch: pytest.MonkeyPatch) -> 
     assert "CIRCUIT COURT" not in blob  # the full text
     done = [e for e in logs if e["event"] == "generic_analysis_done"]
     assert len(done) == 1 and done[0]["findings"] == 1  # only counts
+
+
+# --------------------------------------------------------------------------- #
+# LP-463 — the Tier-3 page cap (free extraction hits the same 100-page limit)
+# --------------------------------------------------------------------------- #
+
+
+def _make_pdf(pages: int) -> bytes:
+    import pymupdf
+
+    doc = pymupdf.open()
+    for i in range(pages):
+        doc.new_page().insert_text((72, 72), f"page {i + 1}")
+    return bytes(doc.tobytes())
+
+
+async def test_free_extraction_caps_pages(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A long document is trimmed to tier3_max_pages before the call — otherwise a 177-page condo
+    declaration would hit the same 100-page document-block limit LP-462 fixed for classification."""
+    import base64
+
+    import pymupdf
+
+    monkeypatch.setattr(analyzer_module.settings, "tier3_max_pages", 50)
+    mock = _mock_complete(monkeypatch, text=FULL_JSON)
+    await analyzer_module.analyze_document(_make_pdf(120), "application/pdf")
+    data = mock.await_args.kwargs["messages"][0]["content"][0]["source"]["data"]
+    sent = pymupdf.open(stream=base64.b64decode(data), filetype="pdf")
+    assert sent.page_count == 50  # only the first 50 pages were sent
+    sent.close()
+
+
+async def test_free_extraction_drops_full_text(monkeypatch: pytest.MonkeyPatch) -> None:
+    """LP-463 dropped the full_text transcription (the 'extract everything' noise). Even if a model
+    still returns it, the pipeline stores generic_analysis WITHOUT full_text (its own column), and the
+    scoped fields are what matter."""
+    a = _parse_analysis_json(FULL_JSON)
+    assert a is not None
+    dumped = a.model_dump(mode="json", exclude={"full_text"})
+    assert "full_text" not in dumped  # the untyped snapshot section never carries the transcription

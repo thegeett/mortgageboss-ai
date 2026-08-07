@@ -71,6 +71,15 @@ class ClassificationResult(BaseModel):
     confidence: float = Field(ge=0.0, le=1.0)
     reasoning: str
     category: str | None = None
+    #: LP-463 — the model's free-text name for what the document ACTUALLY is, produced BEFORE it picks a
+    #: type (a more reliable signal than the constrained pick; on 158 the name "wiring instructions from a
+    #: law firm" was right while the pick was not). On an ``unknown`` this names the missing catalog type.
+    document_name: str | None = None
+    #: LP-463 — the model's self-check: does ``document_type`` faithfully describe ``document_name``? False =
+    #: the model applied a type it knows does NOT fit (the T4→w2 harm). The pipeline flags a False for review
+    #: rather than trusting the label. Defaults True (no contradiction) when the model didn't answer, so an
+    #: older/degraded response never spuriously flags.
+    type_matches_document: bool = True
     #: LP-462 — set ONLY when the model call never completed for an infrastructure reason: "rate_limited"
     #: (throttled) or "oversized" (payload over the 100-page/32 MB document limit), else "failed" for another
     #: AI error, else None (a genuine classification, including a low-confidence/unknown JUDGMENT). This is
@@ -123,12 +132,22 @@ def _parse_classification_json(text: str) -> ClassificationResult | None:
         else None
     )
 
+    # LP-463 — the free-text document name (named first) + the self-check.
+    raw_name = data.get("document_name")
+    document_name = raw_name.strip() if isinstance(raw_name, str) and raw_name.strip() else None
+    # ``type_matches_document`` flags an admitted mismatch. Default TRUE and only a literal ``false`` flags:
+    # a missing/garbled value must not spuriously send a good classification to review (the guard fails
+    # SAFE toward trusting the label, since the mismatch case is the model volunteering "this does not fit").
+    type_matches_document = data.get("type_matches_document") is not False
+
     try:
         return ClassificationResult(
             document_type=document_type,
             confidence=confidence,
             reasoning=reasoning,
             category=category,
+            document_name=document_name,
+            type_matches_document=type_matches_document,
         )
     except ValidationError:
         return None
@@ -188,12 +207,14 @@ async def classify_document(content: bytes, media_type: str) -> ClassificationRe
         logger.warning("classification_parse_failed")  # no raw response logged
         return ClassificationResult.unknown("could not parse classification")
 
-    # Metadata only: the classified type, confidence, + advisory category — never
-    # the bytes/response.
+    # Metadata only: the classified type, confidence, + advisory category, + the LP-463 self-check flag
+    # (a boolean, safe to log) — never the bytes/response, and never ``document_name`` (free text that may
+    # name a party, PII-adjacent like ``reasoning``).
     logger.info(
         "classification_succeeded",
         document_type=parsed.document_type,
         confidence=parsed.confidence,
         model_category=parsed.category,
+        type_matches_document=parsed.type_matches_document,
     )
     return parsed

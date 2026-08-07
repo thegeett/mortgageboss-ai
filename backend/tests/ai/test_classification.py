@@ -303,6 +303,64 @@ async def test_image_is_not_page_capped(monkeypatch: pytest.MonkeyPatch) -> None
     assert sent == PNG_BYTES
 
 
+# --------------------------------------------------------------------------- #
+# LP-463 — document_name (named first) + type_matches_document (the guard)
+# --------------------------------------------------------------------------- #
+
+
+async def test_document_name_and_self_check_parsed(monkeypatch: pytest.MonkeyPatch) -> None:
+    _mock_complete(
+        monkeypatch,
+        text=(
+            '{"document_name": "wiring instructions from a law firm", "document_type": "unknown", '
+            '"type_matches_document": true, "confidence": 0.9, "reasoning": "law-firm wire"}'
+        ),
+    )
+    r = await classify_document(PDF_BYTES, "application/pdf")
+    assert r.document_name == "wiring instructions from a law firm"
+    assert r.type_matches_document is True
+    assert r.document_type == "unknown"
+
+
+async def test_type_mismatch_false_is_parsed(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The 158/T4 shape: the model picks a type but flags it as NOT matching the document it named."""
+    _mock_complete(
+        monkeypatch,
+        text=(
+            '{"document_name": "a Canadian T4 slip", "document_type": "w2", '
+            '"type_matches_document": false, "confidence": 0.85, "reasoning": "T4, closest is w2"}'
+        ),
+    )
+    r = await classify_document(PDF_BYTES, "application/pdf")
+    assert r.type_matches_document is False  # flagged; the pipeline will not apply the w2 label
+    assert r.document_name == "a Canadian T4 slip"
+
+
+async def test_self_check_defaults_true_when_absent(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A response without the field (older/degraded) must NOT spuriously flag — default True (fail safe)."""
+    _mock_complete(
+        monkeypatch, text='{"document_type": "pay_stub", "confidence": 0.9, "reasoning": "x"}'
+    )
+    r = await classify_document(PDF_BYTES, "application/pdf")
+    assert r.type_matches_document is True and r.document_name is None
+
+
+async def test_self_check_log_flag(monkeypatch: pytest.MonkeyPatch) -> None:
+    _mock_complete(
+        monkeypatch,
+        text=(
+            '{"document_name": "wire instructions", "document_type": "general_correspondence", '
+            '"type_matches_document": false, "confidence": 0.85, "reasoning": "x"}'
+        ),
+    )
+    with structlog.testing.capture_logs() as logs:
+        await classify_document(PDF_BYTES, "application/pdf")
+    ok = [e for e in logs if e["event"] == "classification_succeeded"]
+    assert len(ok) == 1 and ok[0]["type_matches_document"] is False
+    # ⚠️ the free-text document_name (PII-adjacent) is NEVER logged
+    assert "wire instructions" not in " ".join(repr(e) for e in logs)
+
+
 async def test_empty_document_skips_api(monkeypatch: pytest.MonkeyPatch) -> None:
     mock = _mock_complete(monkeypatch, text="{}")
     result = await classify_document(b"", "application/pdf")

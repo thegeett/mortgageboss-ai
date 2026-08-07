@@ -142,6 +142,28 @@ _DEBIT_TYPES = frozenset(
 _DESC_REDACT = re.compile(r"\d(?:[\s-]?\d){8,}")
 _REDACTED = "[redacted]"
 
+
+def _scrub_untyped(value: Any) -> Any:
+    """Recursively scrub a Tier-3 free-extraction structure of any long identifier run (LP-463).
+
+    The untyped section carries model-extracted free text (party names, contexts, a summary). The prompt is
+    told not to quote full SSNs/account numbers, but this is the belt-and-braces backstop at the snapshot
+    boundary — the SAME 9+-digit scrub (:data:`_DESC_REDACT`) the generic lists use — so a leaked identifier
+    cannot land in the snapshot at rest (which ``_assert_no_raw_pii`` guards) or reach an AI reasoner. A
+    masked last-4 / date / short id is kept (an honest signal); a long run becomes ``[redacted]``. Returns
+    ``None`` for a falsy input (no untyped read), so a typed document's entry stays ``untyped_extraction=None``.
+    """
+    if not value:
+        return None
+    if isinstance(value, str):
+        return _DESC_REDACT.sub(_REDACTED, value)
+    if isinstance(value, dict):
+        return {k: _scrub_untyped(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_scrub_untyped(v) for v in value]
+    return value  # numbers / bools cannot carry an identifier string
+
+
 # The catch-all list key inside extracted_data (not a typed field).
 _CATCH_ALL_KEY = "additional_sections"
 
@@ -1644,7 +1666,7 @@ async def build_documents_section(db: AsyncSession, loan_file: LoanFile) -> list
     """
     _documents, reshaped, doc_ids = await _reshape_and_assign_ids(db, loan_file)
     entries: list[DocumentEntry] = []
-    for d, doc_id in zip(reshaped, doc_ids, strict=True):
+    for document, d, doc_id in zip(_documents, reshaped, doc_ids, strict=True):
         entries.append(
             DocumentEntry(
                 content_id=doc_id,
@@ -1659,6 +1681,10 @@ async def build_documents_section(db: AsyncSession, loan_file: LoanFile) -> list
                 lists=finalize_lists(
                     d.list_drafts, document_content_id=doc_id
                 ),  # LP-437 — {} today
+                # LP-463 — the marked-untyped section: the Tier 3 scoped free-extraction output, scrubbed of
+                # any long identifier run so no raw account/SSN reaches the snapshot at rest. None for a
+                # typed/catalog document. NEVER read by a deterministic rule (see DocumentEntry docstring).
+                untyped_extraction=_scrub_untyped(document.generic_analysis),
             )
         )
     return entries
