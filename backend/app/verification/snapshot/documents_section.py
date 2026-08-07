@@ -201,6 +201,9 @@ _PII_FIELDS: dict[str, tuple[PiiKind, bool]] = {
     "claim_or_account_number_masked": (PiiKind.ACCOUNT, True),
     "deposit_account_last4": (PiiKind.ACCOUNT, True),
     "direct_deposit_account_last4": (PiiKind.ACCOUNT, True),
+    # LP-461 review — the DL document discriminator is a unique per-card security identifier captured RAW
+    # (not prompt-masked); mask + hash it like its sibling document_or_card_number rather than persist it plain.
+    "document_discriminator": (PiiKind.ACCOUNT, False),
     "document_number": (PiiKind.ACCOUNT, True),
     "document_or_card_number": (PiiKind.ACCOUNT, True),
     "drawer_account_last4": (PiiKind.ACCOUNT, True),
@@ -211,7 +214,11 @@ _PII_FIELDS: dict[str, tuple[PiiKind, bool]] = {
     "entity_ein_masked": (PiiKind.ACCOUNT, True),
     "expiration_month_year": (PiiKind.ACCOUNT, False),
     "i94_admission_number": (PiiKind.ACCOUNT, True),
-    "loan_number": (PiiKind.ACCOUNT, True),
+    # LP-461 review — stored RAW (every extractor's prompt captures the loan number verbatim; the
+    # pre-masked variant is the separate "loan_number_masked" above). from_raw masks the DISPLAY and
+    # computes a per-file match_hash, so it stays a usable cross-document join key; pre_masked=True would
+    # discard the raw to last-4 with match_hash=None (non-joinable).
+    "loan_number": (PiiKind.ACCOUNT, False),
     "local_file_or_registration_number": (PiiKind.ACCOUNT, False),
     "partner_or_shareholder_tin": (PiiKind.SSN, False),
     "passport_number": (PiiKind.ACCOUNT, True),
