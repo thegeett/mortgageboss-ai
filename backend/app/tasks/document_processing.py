@@ -223,7 +223,15 @@ async def _process_document(db: AsyncSession, document_id: str) -> None:
         # A confidently-classified, self-consistent type. Each tier has one handling
         # path, every path terminal. A confident "unknown" routes here to Tier 3 free
         # extraction (the catalog default) and COMPLETES.
-        await _route_by_tier(db, document, content)
+        rerunnable_infra = await _route_by_tier(db, document, content)
+
+        # A re-runnable infrastructure outcome (a THROTTLED Tier-1 extraction) must NOT
+        # advance needs (LP-464 review): the classification is valid and the document
+        # will be re-run, but a needs update would drive the matching OPEN need
+        # RECEIVED→REJECTED — and REJECTED is not re-matched, so the successful re-run
+        # could never advance it. Skip it here; the re-run enqueues it on success.
+        if rerunnable_infra:
+            return
 
         # --- Update the needs list (LP-68) — SERIALIZED per loan file -------- #
         # The document is now terminal + committed; advance any matching need in a
@@ -239,7 +247,7 @@ async def _process_document(db: AsyncSession, document_id: str) -> None:
         await _mark_failed(db, document, document_id)
 
 
-async def _route_by_tier(db: AsyncSession, document: Document, content: bytes) -> None:
+async def _route_by_tier(db: AsyncSession, document: Document, content: bytes) -> bool:
     """Dispatch a classified document to its tier's handling path (LP-58).
 
     The tier was set from the catalog during classification. Exactly one branch
@@ -260,20 +268,23 @@ async def _route_by_tier(db: AsyncSession, document: Document, content: bytes) -
     low-confidence) — the LP-463 review gate routes a flagged/declined document
     straight to :func:`_tier3_analyze` before this point. A confident ``unknown``
     still lands in the Tier 3 branch here and COMPLETES.
+
+    Returns ``True`` only when a Tier-1 extraction was THROTTLED (re-runnable infra whose need must not be
+    advanced — :func:`_extract_branch`); ``False`` for every other path.
     """
     if document.tier == Tier.TIER_1:
         extractor = EXTRACTORS.get(document.document_type or "")
         if extractor is not None:
-            await _extract_branch(db, document, content, extractor)
-        else:
-            # A Tier-1 type whose extractor isn't registered yet (LP-441 — promoted before its
-            # extractor is wired). Give it the Tier-2 interim summary (not classified-only): a
-            # promoted type keeps its gist until deep extraction lands (LP-441 review).
-            await _summarize_document(db, document, content)
+            return await _extract_branch(db, document, content, extractor)
+        # A Tier-1 type whose extractor isn't registered yet (LP-441 — promoted before its
+        # extractor is wired). Give it the Tier-2 interim summary (not classified-only): a
+        # promoted type keeps its gist until deep extraction lands (LP-441 review).
+        await _summarize_document(db, document, content)
     elif document.tier == Tier.TIER_2:
         await _summarize_document(db, document, content)
     else:  # Tier.TIER_3 (the catalog default for uncataloged long-tail types)
         await _tier3_analyze(db, document, content)
+    return False  # only a throttled Tier-1 extraction defers the needs update
 
 
 async def _summarize_document(db: AsyncSession, document: Document, content: bytes) -> None:
@@ -360,12 +371,16 @@ async def _tier3_analyze(
 
 async def _extract_branch(
     db: AsyncSession, document: Document, content: bytes, extractor: Extractor
-) -> None:
+) -> bool:
     """Run the registered extractor, persist a versioned extraction (+ cost), set terminal status.
 
     Type-agnostic (LP-39c): any extractor result is stored uniformly via
     ``create_extraction_version`` (its ``data.model_dump`` JSON), and the
     typed-core/transactions/catch-all shape just rides in that JSON.
+
+    Returns ``True`` when the extraction was a re-runnable infrastructure outcome (a THROTTLE) whose need
+    must NOT be advanced — the caller skips the needs update so a transient blip cannot drive the matching
+    OPEN need to REJECTED (unrecoverable on re-run). ``False`` for a completed or content-failed extraction.
     """
     document.status = DocumentStatus.EXTRACTING
     await db.commit()
@@ -391,7 +406,7 @@ async def _extract_branch(
             reason="rate_limited",
             infra_failure=True,
         )
-        return
+        return True  # re-runnable infra — the caller must NOT advance needs (see docstring)
 
     # The model that ACTUALLY ran (B1): under AI_PROVIDER=bedrock this is the
     # inference-profile id, not the tier value. Recording the tier value instead would
@@ -429,7 +444,9 @@ async def _extract_branch(
         document.processing_error = "extraction failed or low confidence"
         await db.commit()
         logger.info("document_needs_review", document_id=str(document.id), reason="extraction")
-        return
+        # A CONTENT failure (unreadable document), not a throttle — the need is correctly advanced to
+        # REJECTED below ("a document arrived but did not pass"), so this is NOT the re-runnable case.
+        return False
 
     document.status = DocumentStatus.COMPLETED
     # The needs update (satisfaction-matching) is enqueued once, per-file-serialized,
@@ -446,6 +463,7 @@ async def _extract_branch(
         cost_estimate=cost_estimate,
         findings_count=findings_count,
     )
+    return False  # completed normally — advance needs as usual
 
 
 async def _mark_failed(db: AsyncSession, document: Document, document_id: str) -> None:
