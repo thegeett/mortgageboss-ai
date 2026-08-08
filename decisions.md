@@ -13578,3 +13578,33 @@ stays, for both.
 logging), LP-102 (the truncation guard this protects), ADR-343 (C0's client-lifecycle finding, which this
 re-tested rather than assumed), `scripts/verify-bedrock.py` (the empirical follow-up for the two PENDING
 findings).
+
+## ADR-362: A document type earns a catalog entry when a RULE reads it OR a processor needs it reliably — Tier 3 gives visibility, never reliability (LP-465)
+
+**Context.** The catalog spans ~156 types; the temptation on every `unknown` a bench surfaces is to add a type
+"so the processor can see it." LP-465 added two (`temporary_buydown_agreement`, `uscis_notice_of_action`), and
+the question is what *principle* justified them so the next dozen `unknown`s are decided consistently rather
+than by whoever is looking.
+
+**The decision — a type earns a Tier-1/Tier-2 catalog entry when EITHER a verification rule reads its fields,
+OR a processor needs those fields reliably enough to justify a typed extractor.** "A processor glances at it"
+is *not* sufficient on its own — that is what Tier 3 is for. The buydown qualifies on both counts: it alters
+the borrower's actual payment (a future qualifying-payment/DTI rule reads it) and a processor needs the
+schedule reliably today. The USCIS notice qualifies because it feeds ID-8 (citizenship/residency) directly.
+
+**Why the distinction is real and not bureaucratic.** Tier 3 (free extraction) gives *visibility* — the
+document is classified, filed, and its gist surfaced — but its output is untyped, unvalidated, rule-inaccessible
+(ADR of LP-463), and unstable field-to-field. A rule cannot depend on it and a processor cannot trust a
+specific field to be present and correctly typed. Promoting a type to Tier 1 buys *reliability*: a typed core,
+per-field confidence, PII routing, and a generated test. That reliability has a cost (a spec, a prompt to tune
+with Priya, plumbing), so it must be earned by a consumer that needs reliability — a rule, or a processor task
+that breaks without it — not spent on visibility that Tier 3 already provides for free.
+
+**The corollary that kept scope honest.** The four I-797 misroutes (to `visa_documentation` /
+`work_visa_ead_card`) proved the *absence* of a reliable home was actively harming an existing rule's inputs —
+which is exactly the "a rule reads it" test being failed. That is the signal to add a type; a pile of
+`unknown`s that no rule and no processor task consumes is the signal to leave them in Tier 3.
+
+**Cross-refs.** LP-465 (`docs/tickets/LP-465.md`), LP-58/ADR-053/ADR-167 (the catalog as app-layer
+tier/category knowledge), LP-463 (the Tier-3-is-rule-inaccessible ADR this leans on), LP-434/LP-437 (the
+generator + generic-list mechanism that made the promotion cheap).

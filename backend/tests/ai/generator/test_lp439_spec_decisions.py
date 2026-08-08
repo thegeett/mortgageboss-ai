@@ -20,11 +20,12 @@ _ALL = sorted(_SPECS.glob("[0-9]*.json"))
 _VALID_KINDS = {k.name for k in PiiKind}
 
 
-def test_there_are_109_specs() -> None:
+def test_there_are_111_specs() -> None:
     # LP-442 split alimony_income_verification into alimony_income + child_support_income (Geet's
     # decision 1 — child support terminates at the child's emancipation age, alimony runs to the
-    # court order), so the corpus grew 108 → 109.
-    assert len(_ALL) == 109
+    # court order), so the corpus grew 108 → 109. LP-465 added two rule-relevant NEW types
+    # (temporary_buydown_agreement, uscis_notice_of_action) → 111.
+    assert len(_ALL) == 111
 
 
 @pytest.mark.parametrize("path", _ALL, ids=lambda p: p.stem)

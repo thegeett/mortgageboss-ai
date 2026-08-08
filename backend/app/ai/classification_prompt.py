@@ -174,6 +174,7 @@ DOCUMENT_TYPE_INDICATORS: dict[str, str] = {
     "social_security_administration_ssa_89": "an SSA-89: a borrower's signed consent authorizing a company to verify the SSN with the Social Security Administration — an SSN-verification consent form",
     "mortgage_loan_origination_agreement": "a mortgage loan ORIGINATION agreement between the borrower and the broker/originator (NMLS ID, compensation method) — the origination/broker agreement",
     "prior_closing_disclosure_final_cd_from_purchase": "a FINAL Closing Disclosure from a PRIOR/previous purchase transaction (seasoning/ownership evidence) — a past loan's CD; NOT the current loan's closing_disclosure (conflating them is dangerous)",
+    "temporary_buydown_agreement": "a Temporary Buydown Agreement — a standalone agreement (often titled 'Temporary Buydown Agreement') funding a temporary reduction of the borrower's rate/payment for the first 1-2 years (a 2-1 or 1-0 buydown) via a subsidy held in a separate escrow account; carries a per-period PAYMENT SCHEDULE of reduced rates, borrower payments, and the monthly subsidy applied. NOT the note, loan_estimate, or closing_disclosure — the standalone subsidy agreement",
     # --- Borrower Info ---
     "drivers_license": "a state-issued driver's license or ID card; photo, name, date of birth, and address",
     "divorce_decree": "a court divorce decree / judgment of dissolution; may set support obligations and property division",
@@ -181,7 +182,7 @@ DOCUMENT_TYPE_INDICATORS: dict[str, str] = {
     "passport": "a government passport used as photo identification; the photo page and passport number",
     "social_security_card": "a Social Security card showing the name and SSN",
     "permanent_resident_card": "a Permanent Resident Card (green card / Form I-551) evidencing lawful permanent residency",
-    "visa_documentation": "a visa or work-authorization document (e.g. an EAD) evidencing non-citizen status to reside/work",
+    "visa_documentation": "a TRAVEL VISA stamp/foil (typically in a passport) evidencing non-citizen status to enter/reside — NOT a USCIS Notice of Action (route an I-797 to uscis_notice_of_action) and NOT an EAD card (work_visa_ead_card)",
     "birth_certificate": "an official birth certificate",
     "marriage_certificate": "an official marriage certificate or license",
     "military_id": "a U.S. military identification card",
@@ -190,7 +191,8 @@ DOCUMENT_TYPE_INDICATORS: dict[str, str] = {
     "name_affidavit": "a name/signature affidavit attesting to name variations (aka) for the same borrower",
     # LP-442 borrower-info additions (incl. the topical LOE variants)
     "government_issued_id": "a generic government-issued photo ID used for identity when it is not clearly a driver's license, passport, or military ID — a fallback ID type by design (prefer drivers_license/passport/military_id when the specific kind is clear)",
-    "work_visa_ead_card": "a USCIS Employment Authorization Document (EAD) or work-visa card evidencing authorization to WORK (category, valid-from/expiration) — the work-authorization card ID-8 checks, distinct from visa_documentation (a travel visa) and permanent_resident_card",
+    "work_visa_ead_card": "a USCIS Employment Authorization Document (EAD) or work-visa CARD evidencing authorization to WORK (category, valid-from/expiration) — the physical work-authorization card ID-8 checks, distinct from visa_documentation (a travel visa), permanent_resident_card, and uscis_notice_of_action (an I-797 NOTICE, not a card)",
+    "uscis_notice_of_action": "a USCIS Notice of Action (Form I-797A/B/C) — USCIS correspondence receipting or APPROVING a petition: shows a receipt number, a case type (e.g. I-129), notice/received/validity dates, a petitioner + beneficiary, and often a tear-off I-94 block. A NOTICE about a petition, NOT a travel visa / green card / EAD card / passport (the form itself states 'THIS NOTICE IS NOT A VISA'); route the I-797 here even when it concerns a work class (H-1B)",
     "court_order_documents": "a court order (other than a divorce decree) setting an obligation — a support award, judgment, or similar — with the obligation type, amount, and END date; distinct from divorce_decree (dissolution) and judgment_documentation",
     "trust_agreement": "the TRUST AGREEMENT instrument itself: which trust, the trustee(s), and whether the trust may encumber the property — the governing trust document, distinct from trust_documents (certifications/ancillary) and the existing trust_documentation",
     "trust_documents": "trust CERTIFICATION or ancillary trust paperwork (certificate of trust, trustee-powers excerpt) accompanying the agreement — hard to separate from the existing trust_documentation and from trust_agreement; use this for a certification/excerpt, trust_agreement for the full instrument",

@@ -142,6 +142,7 @@ from app.ai.extraction.statement_of_account import extract_statement_of_account
 from app.ai.extraction.subject_property_note import extract_subject_property_note
 from app.ai.extraction.survey import extract_survey
 from app.ai.extraction.tax_return import extract_tax_return
+from app.ai.extraction.temporary_buydown_agreement import extract_temporary_buydown_agreement
 from app.ai.extraction.termite_completion import extract_termite_completion
 from app.ai.extraction.termite_report import extract_termite_report
 from app.ai.extraction.title_commitment import extract_title_commitment
@@ -153,6 +154,7 @@ from app.ai.extraction.uniform_residential_loan_application import (
     extract_uniform_residential_loan_application,
 )
 from app.ai.extraction.unsecured_note import extract_unsecured_note
+from app.ai.extraction.uscis_notice_of_action import extract_uscis_notice_of_action
 from app.ai.extraction.verbal_voe import extract_verbal_voe
 from app.ai.extraction.verification_of_assets import extract_verification_of_assets
 from app.ai.extraction.verification_of_deposit import extract_verification_of_deposit
@@ -306,6 +308,10 @@ EXTRACTORS: dict[str, Extractor] = {
     "verification_of_deposit": extract_verification_of_deposit,
     "verification_of_rent": extract_verification_of_rent,
     "work_visa_ead_card": extract_work_visa_ead_card,
+    # LP-465 — two rule-relevant types promoted from `unknown` (a buydown alters the qualifying
+    # payment; a USCIS Notice of Action feeds ID-8). New-type generation, real modules.
+    "temporary_buydown_agreement": extract_temporary_buydown_agreement,
+    "uscis_notice_of_action": extract_uscis_notice_of_action,
 }
 
 __all__ = ["EXTRACTORS", "ExtractionResult", "Extractor"]

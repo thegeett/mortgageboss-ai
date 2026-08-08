@@ -1,0 +1,64 @@
+{
+  "document_type": "uscis_notice_of_action",
+  "slug": "uscis-notice-of-action",
+  "tier": 1,
+  "rules_served": ["ID-8"],
+  "summary_hint": "USCIS <form_type> <notice_type> (case <case_type>) for <beneficiary_name>, petitioner <petitioner_name>: <classification> valid <validity_from>–<validity_to>; notice dated <notice_date>.",
+  "existing_extractor": null,
+  "catalog_coverage": "full",
+
+  "typed_core": [
+    {"name":"form_type","type":"str","why":"ID-8 — which I-797 this is (I-797A carries an I-94 / status; I-797C is a receipt/action notice); shapes what the notice proves","rules":["ID-8"],"reason_class":"rule","rule_floor":false,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":"I-797A / I-797B / I-797C, exactly as printed in the masthead"},
+    {"name":"notice_type","type":"str","why":"ID-8 — the notice's own label (Approval Notice / Receipt Notice / etc.); a printed FACT, not a judgment","rules":["ID-8"],"reason_class":"rule","rule_floor":false,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":"The 'Notice Type' as printed (e.g. 'Approval Notice'); do NOT infer eligibility or work authorization"},
+    {"name":"receipt_number","type":"str","why":"identity — the USCIS case reference","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"Capture the receipt number VERBATIM (e.g. 'IOE0929461289'); it is masked at the snapshot boundary by the global PII registry — do not mask it here"},
+    {"name":"case_type","type":"str","why":"ID-8 — the petition form (e.g. I-129 nonimmigrant worker); classifies what was filed","rules":["ID-8"],"reason_class":"rule","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"The case type as printed (e.g. 'I129 - Petition for a Nonimmigrant Worker')"},
+    {"name":"received_date","type":"date","why":"ID-8 — when USCIS received the petition (case timeline)","rules":["ID-8"],"reason_class":"rule","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"notice_date","type":"date","why":"ID-8 — recency of the notice evidence","rules":["ID-8"],"reason_class":"rule","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"petitioner_name","type":"str","why":"ID-8 — the sponsoring employer/petitioner (a work-classification notice sponsors employment)","rules":["ID-8"],"reason_class":"rule","rule_floor":false,"degraded_from":"person","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"beneficiary_name","type":"str","why":"ID-8 — WHOSE status this proves; match to the borrower (kept UNMASKED for name matching)","rules":["ID-8"],"reason_class":"rule","rule_floor":false,"degraded_from":"person","pii":null,"exists_today":false,"prompt_hint":"The beneficiary's full name, as printed ('LAST, FIRST' is fine)"},
+    {"name":"beneficiary_a_number","type":"str","why":"PII + identity — the beneficiary's Alien Registration Number (A-number)","rules":[],"reason_class":"pii","rule_floor":false,"degraded_from":null,"pii":{"kind":"ACCOUNT","pre_masked":false},"exists_today":false,"prompt_hint":"The A-number as printed (e.g. 'A220 831 209'); captured verbatim, masked + hashed at the snapshot boundary"},
+    {"name":"beneficiary_date_of_birth","type":"date","why":"ID-8 — the borrower-match discriminator; kept UNMASKED (matching needs it; DOB is not a maskable PiiKind)","rules":["ID-8"],"reason_class":"rule","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"beneficiary_country_of_citizenship","type":"str","why":"ID-8 — the printed 'Country of Citizenship' on the I-94 block (residency/citizenship signal)","rules":["ID-8"],"reason_class":"rule","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"The 'Country of Citizenship' as printed — NOT country of birth (the form has no birth-country field)"},
+    {"name":"classification","type":"str","why":"ID-8 — the immigration class the notice grants (e.g. H-1B); the work-authorization category","rules":["ID-8"],"reason_class":"rule","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"The 'Class' as printed (e.g. 'H1B')"},
+    {"name":"validity_from","type":"date","why":"ID-8 — start of the I-94 admission validity (the status window the person is authorized for)","rules":["ID-8"],"reason_class":"rule","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"The I-94 'VALID FROM' date (the tear-off I-94 block) — may differ from the petition validity by a grace period"},
+    {"name":"validity_to","type":"date","why":"ID-8 — end of the I-94 admission validity (does status extend past the loan? the continuance test)","rules":["ID-8"],"reason_class":"rule","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"The I-94 'UNTIL' date"},
+    {"name":"petition_valid_from","type":"date","why":"ID-8 — start of the petition/approval validity (the notice header 'Valid from'); distinct from the I-94 window","rules":["ID-8"],"reason_class":"rule","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"The 'Valid from' date under Notice Type — the PETITION validity, which may differ from the I-94 by a grace period"},
+    {"name":"petition_valid_to","type":"date","why":"ID-8 — end of the petition/approval validity (the notice header 'to')","rules":["ID-8"],"reason_class":"rule","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"The 'to' date under Notice Type"},
+    {"name":"i94_number","type":"str","why":"PII + identity — the I-94 arrival/departure record number from the tear-off block","rules":[],"reason_class":"pii","rule_floor":false,"degraded_from":null,"pii":{"kind":"ACCOUNT","pre_masked":false},"exists_today":false,"prompt_hint":"The I-94# as printed (e.g. '472830079 A3'); captured verbatim, masked + hashed at the snapshot boundary"},
+    {"name":"i94_class_of_admission","type":"str","why":"ID-8 — the I-94 class of admission (corroborates classification)","rules":["ID-8"],"reason_class":"rule","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"The I-94 'CLASS' (e.g. 'H1B')"},
+    {"name":"priority_date","type":"date","why":"processor — the petition priority date, when printed (often blank on a nonimmigrant notice)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"Only if a 'Priority Date' is printed; leave null when the field is blank"},
+    {"name":"service_center","type":"str","why":"processor — the issuing USCIS service center (provenance)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"e.g. 'Vermont Service Center'"}
+  ],
+
+  "nested_lists": [],
+
+  "rejected": [
+    {"name":"is_eligible / work_authorized / status_valid","reason":"JUDGMENTS, not facts — whether the beneficiary is eligible or currently work-authorized is ID-8's / the program's call. The notice itself states 'THIS NOTICE IS NOT A VISA'. Tags describe (form_type, class, validity dates); rules judge."},
+    {"name":"beneficiary_country_of_birth","reason":"NOT on the form — the I-94 block prints 'Country of Citizenship', not country of birth. Renamed to beneficiary_country_of_citizenship (LP-461 lesson: capture what is printed)."},
+    {"name":"the 8 TECHNICAL provenance fields","reason":"already in the TypedField wrapper"},
+    {"name":"petitioner_address / service_center_address","reason":"contact only — catch-all"},
+    {"name":"beneficiary_address","reason":"not reliably on the notice; the I-94 block carries name/DOB/citizenship, not a residence"},
+    {"name":"signature_block / notary_block","reason":"an agency-issued notice is not executed or notarized"}
+  ],
+
+  "encoding_variations": [
+    "form_type — I-797A (carries the tear-off I-94 / grants status), I-797B (approval, consular — no I-94), I-797C (receipt/action); the I-94 block and validity fields are present only on I-797A",
+    "TWO validity ranges that genuinely differ: the notice-header 'Valid from ... to ...' (petition) and the I-94 'VALID FROM ... UNTIL ...' (admission) — the I-94 often extends a grace period past the petition end. Capture BOTH pairs; do not collapse them",
+    "notice_type — 'Approval Notice', 'Receipt Notice', 'Request for Evidence', etc.; degrade enum to str",
+    "the A-number may print as 'A220 831 209', 'A220831209', or 'A# 220-831-209'",
+    "case_type prints as 'I129 - PETITION FOR A NONIMMIGRANT WORKER' or just 'I-129'",
+    "the misroute risk: an I-797 is NOT a visa (it says so), NOT a green card, NOT an EAD card, NOT a passport — classification must route it here even when it concerns a work class (H-1B)"
+  ],
+
+  "open_questions": [
+    {"id":1,"q":"notice_type — capture it or omit as too close to a judgment?","options":["capture the printed label","omit"],"recommendation":"capture (GEET'S DECISION, LP-465): it is the document's OWN printed label, a fact, not our conclusion; is_eligible/work_authorized remain rejected","blocks_implementation":false},
+    {"id":2,"q":"validity_* vs petition_valid_* mapping","options":["validity_*=I-94 admission, petition_valid_*=notice header","the reverse"],"recommendation":"validity_*=the I-94 admission window (the status the person holds), petition_valid_*=the notice-header petition window — both printed and distinct on I-797A","blocks_implementation":false}
+  ],
+
+  "notes": [
+    "receipt_number is captured VERBATIM (full) and masked at the snapshot boundary by the EXISTING global _PII_FIELDS 'receipt_number' registration (a 10-digit run would otherwise trip the LP-209 at-rest guard). No new registry entry needed for it.",
+    "beneficiary_a_number and i94_number BOTH contain 9+ digit runs and MUST be routed through _PII_FIELDS or the at-rest guard fails — beneficiary_a_number is called out by LP-465; i94_number is an ADDITION found while reading 065 (the ticket did not flag it). Both registered (ACCOUNT, pre_masked=false) → masked + per-file match-hash (the A-number can then correlate to an EAD card's A-number).",
+    "beneficiary_name and beneficiary_date_of_birth stay UNMASKED — ID-8 matches the borrower on them; DOB is not a maskable PiiKind and its 8-digit run does not trip the guard.",
+    "No nested list — the notice is flat. All rule-relevant facts are scalars."
+  ]
+}

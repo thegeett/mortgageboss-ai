@@ -220,6 +220,10 @@ CATALOG: dict[str, tuple[Tier, DocumentCategory]] = {
     "social_security_administration_ssa_89": (Tier.TIER_1, DocumentCategory.DISCLOSURES),
     "mortgage_loan_origination_agreement": (Tier.TIER_1, DocumentCategory.DISCLOSURES),
     "prior_closing_disclosure_final_cd_from_purchase": (Tier.TIER_1, DocumentCategory.DISCLOSURES),
+    # LP-465 — a temporary buydown reduces the borrower's actual payment below the note
+    # payment for the first 1-2 years; the per-period schedule + rates are structured data a
+    # rule (and the processor) reads → Tier 1. (Promoted from `unknown`.)
+    "temporary_buydown_agreement": (Tier.TIER_1, DocumentCategory.DISCLOSURES),
     # ===================================================================== #
     # Borrower Info
     # ===================================================================== #
@@ -248,6 +252,11 @@ CATALOG: dict[str, tuple[Tier, DocumentCategory]] = {
     "letter_of_explanation_income": (Tier.TIER_1, DocumentCategory.BORROWER_INFO),
     "letter_of_explanation_misc": (Tier.TIER_1, DocumentCategory.BORROWER_INFO),
     "letter_of_explanation_property": (Tier.TIER_1, DocumentCategory.BORROWER_INFO),
+    # LP-465 — a USCIS Notice of Action (Form I-797A/B/C) feeds ID-8 (citizenship/residency);
+    # its receipt/case/validity + I-94 block are structured facts → Tier 1. Sits with the
+    # immigration/identity family. (Promoted from `unknown`; absorbs I-797 misroutes to
+    # visa_documentation / work_visa_ead_card.)
+    "uscis_notice_of_action": (Tier.TIER_1, DocumentCategory.BORROWER_INFO),
     # ===================================================================== #
     # Misc — recognized loan-file documents that don't fit the buckets above.
     # (The Tier-3 default below catches anything UNCATALOGED; these are known.)

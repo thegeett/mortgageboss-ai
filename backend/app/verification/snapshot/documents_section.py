@@ -276,6 +276,13 @@ _PII_FIELDS: dict[str, tuple[PiiKind, bool]] = {
     "visa_number": (PiiKind.ACCOUNT, True),
     "wire_ach_trace_number": (PiiKind.ACCOUNT, False),
     "wire_or_remittance_instructions": (PiiKind.ACCOUNT, False),
+    # LP-465 — uscis_notice_of_action. Both carry 9+-digit runs that would otherwise trip the LP-209
+    # at-rest guard; from_raw masks display to last-4 + a per-file match-hash (so the A-number can
+    # correlate to an EAD card's). ``receipt_number`` is ALREADY routed above (existing entry); the
+    # ``i94_number`` route is an addition found while reading 065 — the ticket flagged only the A-number.
+    # ``beneficiary_name`` / ``beneficiary_date_of_birth`` stay UNMASKED (ID-8 matches on them).
+    "beneficiary_a_number": (PiiKind.ACCOUNT, False),
+    "i94_number": (PiiKind.ACCOUNT, False),
 }
 
 # Free-text typed-core fields that are NOT whole-value PII (so not in ``_PII_FIELDS`` — masking the
@@ -1303,7 +1310,22 @@ _BANK_STATEMENT__ADDITIONAL_ACCOUNTS_LIST = ListSpec(
     redact=frozenset({"account_number_masked"}),
 )
 
+# LP-465 — the temporary buydown's per-period payment schedule (the substance of the type: reduced
+# rate, borrower's reduced payment, and the monthly subsidy per year-range). No PII (rates/amounts/dates).
+_PAYMENT_SCHEDULE_LIST = ListSpec(
+    name="payment_schedule",
+    fields=(
+        "period_label",
+        "period_start",
+        "effective_rate",
+        "borrower_payment",
+        "monthly_subsidy",
+        "source",
+    ),
+)
+
 _LIST_SPECS: dict[str, tuple[ListSpec, ...]] = {
+    "temporary_buydown_agreement": (_PAYMENT_SCHEDULE_LIST,),  # LP-465
     "voe": (_GROSS_EARNINGS_HISTORY_LIST,),  # LP-446 diff (live extractor)
     "investment_account": (_SECURITY_POSITIONS_LIST,),  # LP-446 diff (live extractor)
     "purchase_agreement": (

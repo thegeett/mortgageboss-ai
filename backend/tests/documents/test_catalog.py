@@ -194,7 +194,9 @@ def test_every_spec_document_type_resolves_to_a_catalog_entry() -> None:
     assert unresolved == set(), (
         f"spec types the classifier can never emit (silent routing): {unresolved}"
     )
-    assert len(spec_types) == 109  # 108 + the alimony/child-support split
+    assert (
+        len(spec_types) == 111
+    )  # 109 + LP-465 (temporary_buydown_agreement, uscis_notice_of_action)
 
 
 def test_the_four_merges_and_the_split_resolve() -> None:
