@@ -173,6 +173,9 @@ CATALOG: dict[str, tuple[Tier, DocumentCategory]] = {
     "subject_property_note": (Tier.TIER_1, DocumentCategory.PROPERTY),
     "other_property_note": (Tier.TIER_1, DocumentCategory.PROPERTY),
     "seller_signature_authority": (Tier.TIER_1, DocumentCategory.PROPERTY),
+    # LP-466 — an AVM / Home Value Estimate. NOT an appraisal and NOT evidence of value for
+    # underwriting (see the indicator + ADR); a non-binding estimate a processor may glance at.
+    "home_value_estimate": (Tier.TIER_1, DocumentCategory.PROPERTY),
     # ===================================================================== #
     # Credit
     # ===================================================================== #
@@ -272,6 +275,11 @@ CATALOG: dict[str, tuple[Tier, DocumentCategory]] = {
     "evidence_of_payment": (Tier.TIER_1, DocumentCategory.MISC),
     "custom": (Tier.TIER_1, DocumentCategory.MISC),
     "miscellaneous_document": (Tier.TIER_1, DocumentCategory.MISC),
+    # LP-466 — closing/settlement wire instructions (typed + MASKED routing/account; was landing in
+    # general_correspondence free-form + unmasked) and a lender-portal dashboard screenshot (identity
+    # only — a software capture, extracts almost nothing by design; stops diluting `unknown`).
+    "wire_instructions": (Tier.TIER_1, DocumentCategory.MISC),
+    "lender_dashboard_screenshot": (Tier.TIER_1, DocumentCategory.MISC),
 }
 
 # The default for any type not in the catalog: the long-tail Tier 3 / Misc bucket.

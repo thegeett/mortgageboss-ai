@@ -84,6 +84,7 @@ from app.ai.extraction.gift_letter import extract_gift_letter
 from app.ai.extraction.government_issued_id import extract_government_issued_id
 from app.ai.extraction.hoa_certification import extract_hoa_certification
 from app.ai.extraction.hoa_statement import extract_hoa_statement
+from app.ai.extraction.home_value_estimate import extract_home_value_estimate
 from app.ai.extraction.homeowner_s_insurance_quote import extract_homeowner_s_insurance_quote
 from app.ai.extraction.homeowners_insurance import extract_homeowners_insurance
 from app.ai.extraction.investment_account import extract_investment_account
@@ -93,6 +94,7 @@ from app.ai.extraction.k_1_shareholder_profit_and_loss_transcripts import (
     extract_k_1_shareholder_profit_and_loss_transcripts,
 )
 from app.ai.extraction.lease_agreement import extract_lease_agreement
+from app.ai.extraction.lender_dashboard_screenshot import extract_lender_dashboard_screenshot
 from app.ai.extraction.letter_of_explanation import extract_letter_of_explanation
 from app.ai.extraction.letter_of_explanation_asset import extract_letter_of_explanation_asset
 from app.ai.extraction.letter_of_explanation_child_care import (
@@ -162,6 +164,7 @@ from app.ai.extraction.verification_of_mortgage import extract_verification_of_m
 from app.ai.extraction.verification_of_rent import extract_verification_of_rent
 from app.ai.extraction.voe import extract_voe
 from app.ai.extraction.w2 import extract_w2
+from app.ai.extraction.wire_instructions import extract_wire_instructions
 from app.ai.extraction.work_visa_ead_card import extract_work_visa_ead_card
 from app.models.extraction import ExtractionStatus
 
@@ -312,6 +315,12 @@ EXTRACTORS: dict[str, Extractor] = {
     # payment; a USCIS Notice of Action feeds ID-8). New-type generation, real modules.
     "temporary_buydown_agreement": extract_temporary_buydown_agreement,
     "uscis_notice_of_action": extract_uscis_notice_of_action,
+    # LP-466 — three types from `unknown`: an AVM home-value estimate (NOT an appraisal), closing
+    # wire instructions (typed + masked, was free-form general_correspondence), and a lender-portal
+    # dashboard screenshot (identity only, extracts almost nothing by design).
+    "home_value_estimate": extract_home_value_estimate,
+    "wire_instructions": extract_wire_instructions,
+    "lender_dashboard_screenshot": extract_lender_dashboard_screenshot,
 }
 
 __all__ = ["EXTRACTORS", "ExtractionResult", "Extractor"]

@@ -1,0 +1,50 @@
+{
+  "document_type": "home_value_estimate",
+  "slug": "home-value-estimate",
+  "tier": 1,
+  "rules_served": [],
+  "summary_hint": "AVM home-value estimate for <property_address> (<property_type>): <estimated_value> (range <value_range_low>-<value_range_high>). NOT an appraisal.",
+  "existing_extractor": null,
+  "catalog_coverage": "full",
+
+  "typed_core": [
+    {"name":"property_address","type":"str","why":"identity — which property the estimate is for; match to the subject property","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"address","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"property_type","type":"str","why":"processor — the property description (Single Family Detached, condo, etc.), as stated","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":"As printed, e.g. 'Single Family Detached'"},
+    {"name":"bedrooms","type":"int","why":"processor — a basic property fact the estimate is based on","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"Capture 0 faithfully if the estimate states 0 (the AVM's own data)"},
+    {"name":"bathrooms","type":"Decimal","why":"processor — a basic property fact (may be fractional, e.g. 2.5)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"square_feet","type":"int","why":"processor — living area the estimate is based on","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"estimated_value","type":"Decimal","why":"processor — the single point AVM value. NOTE: this is a NON-BINDING estimate, NOT an appraised value; capture the number, do not treat it as evidence of value","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"The '*Estimated Value' figure"},
+    {"name":"value_range_low","type":"Decimal","why":"processor — the low end of the estimate's value range","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"The low end of 'Range: L to H'"},
+    {"name":"value_range_high","type":"Decimal","why":"processor — the high end of the estimate's value range","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"The high end of 'Range: L to H'"},
+    {"name":"annual_property_taxes","type":"Decimal","why":"processor — the annual property taxes the tool reports for the property","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"disclaimer_text","type":"str","why":"processor — the tool's own disclaimer; the printed proof this is NOT an appraisal ('do not constitute an appraisal; should not be relied upon in lieu of an appraisal'). Capturing it keeps the not-an-appraisal fact attached to the value","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"The '*Estimated property values are...' disclaimer, verbatim if present"}
+  ],
+
+  "nested_lists": [],
+
+  "rejected": [
+    {"name":"appraised_value / value_conclusion / opinion_of_value","reason":"an AVM is NOT an appraisal and produces NO appraised value or opinion of value. Naming a field 'appraised_value' would invite wiring the estimate into a property rule as certified value — the exact error the type name and disclaimer exist to prevent. Tags describe; rules judge."},
+    {"name":"comparable_sales","reason":"an AVM is not a comparable-grid appraisal; no comps are printed on the estimate. That is appraisal territory (the appraisal type)."},
+    {"name":"estimate_date","reason":"NOT printed on either sample capture (070, 197). Drop rather than invent (LP-461). Re-add if a full HVE PDF report with a date appears."},
+    {"name":"provider_name / avm_vendor","reason":"NOT printed — the captures are the lender portal's own 'Home Value Estimator' with no named third-party AVM vendor. Drop; re-add if a vendor-attributed report appears."},
+    {"name":"confidence_score / forecast_standard_deviation","reason":"no numeric confidence/FSD is printed — only the disclaimer text (captured as disclaimer_text)."},
+    {"name":"the 8 TECHNICAL provenance fields","reason":"already in the TypedField wrapper"}
+  ],
+
+  "encoding_variations": [
+    "the estimate is often a screenshot of a lender-portal 'Home Value Estimator' tool (with or without the tool's tab bar); the value block is the substance",
+    "bedrooms may legitimately be 0 (the AVM's own data), e.g. 197 shows '0 Bedroom' — capture it faithfully, do not treat 0 as absent",
+    "the value range prints as 'Range: $L to $H'; the point value as '*Estimated Value $V'",
+    "the disclaimer ('do not constitute an appraisal') is always present on these tools and is the key not-an-appraisal signal"
+  ],
+
+  "open_questions": [
+    {"id":1,"q":"Keep provider_name / estimate_date as optional despite being absent on the two samples?","options":["drop (not on the page)","keep optional for full HVE PDF reports"],"recommendation":"drop (GEET'S DECISION, LP-466): neither is printed on 070 or 197; re-add when a full HVE PDF report sample shows them","blocks_implementation":false}
+  ],
+
+  "notes": [
+    "No PII: every number is < 9 digits (value, range, taxes, sq ft), so nothing trips the LP-209 at-rest guard; home_value_estimate has zero _PII_FIELDS entries.",
+    "No rule reads this type (rules_served empty) — an AVM is deliberately NOT evidence of value for underwriting. It earns a catalog type on processor visibility + to anchor the dashboard/AVM routing pair (ADR-465's rule; see ADR for LP-466).",
+    "The whole design intent is captured by the type NAME and disclaimer_text: this is an estimate, not an appraisal."
+  ]
+}

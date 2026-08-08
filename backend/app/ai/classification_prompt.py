@@ -140,6 +140,7 @@ DOCUMENT_TYPE_INDICATORS: dict[str, str] = {
     "subject_property_note": "the promissory NOTE for the loan on the SUBJECT property (original principal, rate, P&I, maturity) — this loan's mortgage note, distinct from other_property_note (a note on another property)",
     "other_property_note": "a promissory NOTE on ANOTHER (non-subject) property the borrower owns (its principal, rate, P&I) — distinct from subject_property_note (this loan's note)",
     "seller_signature_authority": "documentation of who may sign for a SELLER entity (trust, LLC, estate) and under what authority, scoped to a property — a seller-side signing-authority document",
+    "home_value_estimate": "an Automated Valuation Model (AVM) / Home Value Estimate — a software-generated estimated market value (an estimated value, a value range, and basic property facts: beds/baths/sq ft/taxes), typically from a lender portal's 'Home Value Estimator' tool, that EXPLICITLY states it is NOT an appraisal ('does not constitute an appraisal; should not be relied upon in lieu of an appraisal'). NOT an appraisal (a licensed URAR/Form 1004 with comparables, condition, and a certified value) and NOT a property_profile_subject (a data-vendor profile with APN/owner/tax status). A non-binding value estimate only",
     # --- Credit ---
     "credit_report": "a tri-merge or single-bureau consumer credit report listing tradelines, balances, inquiries, and scores",
     "credit_explanation_letter": "a borrower letter explaining specific credit events (late payments, inquiries) — a credit-specific LOE",
@@ -214,6 +215,8 @@ DOCUMENT_TYPE_INDICATORS: dict[str, str] = {
     "evidence_of_payment": "generic evidence that a payment/obligation was made or paid in full (payer, payee, amount, method, date) — a catch-all payment proof when no more specific type fits",
     "custom": "a processor-defined CUSTOM document type that fits none of the known types — an explicit escape hatch (title + issuer + date); its contents are extracted generically",
     "miscellaneous_document": "a miscellaneous loan-file document (title, issuer, date) that fits no other known type — the long-tail catch-all",
+    "wire_instructions": "closing/settlement wire instructions — a payee sheet from a title company, law firm, or escrow/settlement agent giving where to send closing funds: a beneficiary name/address, a receiving bank name/address, an ABA routing number and account number, often a callback phone to verify. Transactional funds-routing, NOT general_correspondence, and NOT a bank_statement or verification_of_deposit (it moves funds, it does not evidence a borrower's assets)",
+    "lender_dashboard_screenshot": "a screenshot/print of a lender or broker PORTAL (e.g. uwm.com/dashboard) — software UI chrome: navigation, pipeline/loan alerts, rankings/points, marketing tiles, embedded tools. A capture of an application, NOT the underlying document — the loan/borrower data it displays (a status, an AVM block, a rate) is not itself this type. Route a capture DOMINATED by one embedded artifact (e.g. the Home Value Estimator screen) to that artifact's type (home_value_estimate); use this only for a broad dashboard where no single embedded document dominates",
 }
 
 

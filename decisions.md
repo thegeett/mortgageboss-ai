@@ -13608,3 +13608,52 @@ which is exactly the "a rule reads it" test being failed. That is the signal to 
 **Cross-refs.** LP-465 (`docs/tickets/LP-465.md`), LP-58/ADR-053/ADR-167 (the catalog as app-layer
 tier/category knowledge), LP-463 (the Tier-3-is-rule-inaccessible ADR this leans on), LP-434/LP-437 (the
 generator + generic-list mechanism that made the promotion cheap).
+
+## ADR-363: A type can earn a catalog entry to keep `unknown` meaningful and to ANCHOR routing — not to extract; and an AVM is named so it can never be mistaken for an appraisal (LP-466)
+
+**Context.** LP-466 added three types, two of which stress the "what earns a type" rule (ADR-362) from the
+opposite side of a rule-reads-it justification: `lender_dashboard_screenshot` extracts almost nothing, and
+`home_value_estimate` is a value document that must **never** be read as evidence of value. Both decisions are
+recorded because both are easy to get wrong later — someone will want to schematize the dashboard, or wire the
+AVM into a property rule.
+
+**A type can be worth adding with almost no schema.** `lender_dashboard_screenshot` is a software screenshot
+(a UWM portal capture), not a document. Its typed core is five identity fields (platform, section label,
+loan_number, borrower_name, capture_date) — and in practice three (loan/borrower are usually null on a loan
+officer's home page). It exists for two reasons, neither of which is extraction:
+1. **It keeps `unknown` a real signal.** Screenshots were diluting the `unknown` bucket; every one that lands
+   in `unknown` is noise that hides an actual missing type. Giving the screenshots a home makes the residual
+   `unknown` count mean "a type we still lack," not "someone printed their dashboard."
+2. **It anchors a routing pair.** The portal embeds a Home Value Estimator block. The dashboard type exists so
+   the classifier can *route by dominance*: an HVE-dominant capture goes to `home_value_estimate` (value
+   extracted); a broad dashboard with a buried HVE goes here (value deliberately NOT extracted). One label per
+   document — the closing-package limit in miniature.
+
+**The deliberate anti-goal: do NOT grow a dashboard content schema.** A portal's panels change with every
+software release; a schema built on today's layout is obsolete on the next deploy. The typed core is identity
+only; the panel text falls to the generic catch-all (rule-inaccessible), never a typed schema. Phase C
+confirmed it: the three dashboards returned 3 typed fields each, with the pipeline/ranking/alert furniture in
+the catch-all — the scoping held.
+
+**An AVM is not an appraisal, and the NAME is the primary defense.** `home_value_estimate` is an Automated
+Valuation Model — a non-binding software estimate. It is not an `appraisal` (a licensed URAR/Form 1004 with
+comparables, condition, and a certified value) and not a `property_profile_subject` (a data-vendor profile).
+The separation is enforced in three places so no single reader has to remember it:
+- **the type name** — `home_value_estimate`, not `home_value` or `valuation`, so a field consumer sees
+  "estimate";
+- **the indicator** — quotes the document's own disclaimer ("does not constitute an appraisal; should not be
+  relied upon in lieu of an appraisal") and explicitly excludes `appraisal` and `property_profile_subject`;
+- **the schema** — `rules_served` is empty and `appraised_value`/`value_conclusion`/`comparable_sales` are
+  explicitly *rejected* fields, with the reason recorded: naming an `appraised_value` field would invite wiring
+  the estimate into a property rule as certified value, the exact error the type exists to prevent. The one
+  free-text field that survives, `disclaimer_text`, carries the not-an-appraisal language *with* the value so
+  the caveat travels attached to the number.
+
+**Why it matters downstream.** Mistaking an AVM for an appraisal (or the reverse) is a serious valuation error.
+The Phase-C regression check — a real appraisal must still classify as `appraisal`, not `home_value_estimate`
+— is the standing guard against the new neighbor pulling the appraisal family in; it held at 0.95.
+
+**Cross-refs.** LP-466 (`docs/tickets/LP-466.md`), ADR-362 (the "what earns a type" rule this extends to the
+no-schema and no-rule cases), LP-441 (the Tier-1-iff-spec invariant the dashboard's minimal spec honors rather
+than special-cases), LP-465 (the prior missing-types ticket + the `_PII_FIELDS` at-rest-guard pattern reused
+for the wire routing/account numbers).
