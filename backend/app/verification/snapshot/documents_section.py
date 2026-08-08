@@ -257,7 +257,11 @@ _PII_FIELDS: dict[str, tuple[PiiKind, bool]] = {
     "plan_claim_or_account_last4": (PiiKind.ACCOUNT, True),
     "plan_or_claim_number_masked": (PiiKind.ACCOUNT, True),
     "policy_number_masked": (PiiKind.ACCOUNT, True),
-    "receipt_number": (PiiKind.ACCOUNT, True),
+    # LP-465 review — stored RAW (appraisal_payment / work_visa_ead_card / uscis_notice_of_action all
+    # capture it VERBATIM; the uscis prompt says so explicitly), so from_raw masks the display AND computes a
+    # per-file match_hash — consistent with the sibling beneficiary_a_number / i94_number. pre_masked=True
+    # would discard the raw to last-4 with match_hash=None (the LP-461 loan_number bug).
+    "receipt_number": (PiiKind.ACCOUNT, False),
     "recipient_account_last4": (PiiKind.ACCOUNT, True),
     "recipient_tin_masked": (PiiKind.ACCOUNT, True),
     "shareholder_or_partner_tin_masked": (PiiKind.SSN, True),
