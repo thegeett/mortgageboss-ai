@@ -25,6 +25,23 @@ variable "kms_key_arn" {
   type        = string
 }
 
+variable "pull_account_ids" {
+  description = <<-EOT
+    Account ids allowed to PULL from these repositories.
+
+    Empty (the default) means same-account only. Any environment running in a
+    different account from the registry MUST appear here, or its ECS tasks fail at
+    launch with an authorization error.
+
+    ⚠️ A repository policy alone is not sufficient when images are KMS-encrypted:
+    the pulling account also needs `kms:Decrypt` on the key, which the registry's
+    owning state grants separately. A missing KMS grant fails with a message naming
+    KMS rather than ECR, which is a confusing way to learn this.
+  EOT
+  type        = list(string)
+  default     = []
+}
+
 variable "keep_last_images" {
   description = <<-EOT
     How many images to retain before expiry, counted across EVERY environment

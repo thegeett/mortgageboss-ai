@@ -95,3 +95,35 @@ resource "aws_ecr_lifecycle_policy" "this" {
     ]
   })
 }
+
+# Cross-account pull.
+#
+# Created only when pull_account_ids is non-empty, so a single-account deployment
+# carries no policy at all rather than one granting nothing.
+#
+# ecr:GetAuthorizationToken is deliberately ABSENT: it is an account-level action
+# that the PULLING account grants its own principals, and it cannot be granted by a
+# repository policy. The three actions here are the ones a repository can authorise.
+resource "aws_ecr_repository_policy" "cross_account_pull" {
+  for_each = length(var.pull_account_ids) > 0 ? aws_ecr_repository.this : {}
+
+  repository = each.value.name
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid    = "AllowCrossAccountPull"
+        Effect = "Allow"
+        Principal = {
+          AWS = [for id in var.pull_account_ids : "arn:aws:iam::${id}:root"]
+        }
+        Action = [
+          "ecr:BatchCheckLayerAvailability",
+          "ecr:BatchGetImage",
+          "ecr:GetDownloadUrlForLayer",
+        ]
+      },
+    ]
+  })
+}

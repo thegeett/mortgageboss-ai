@@ -109,6 +109,43 @@ locals {
   registry_kms_key_arn = coalesce(var.registry_kms_key_arn, one(aws_kms_key.registry[*].arn))
 }
 
+# The second half of a cross-account pull. ECR encrypts the layers with this key, so
+# a workload account holding only a repository-policy grant still fails — and fails
+# with an error naming KMS, not ECR, which sends people to the wrong place.
+#
+# Skipped when the key is adopted (registry_kms_key_arn set): that key belongs to
+# another state, and writing a policy for a key this state does not own would either
+# fail or silently fight the owner.
+resource "aws_kms_key_policy" "registry" {
+  count = var.registry_kms_key_arn == null && length(var.ecr_pull_account_ids) > 0 ? 1 : 0
+
+  key_id = aws_kms_key.registry[0].id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid       = "EnableIAMUserPermissions"
+        Effect    = "Allow"
+        Principal = { AWS = "arn:aws:iam::${var.aws_account_id}:root" }
+        Action    = "kms:*"
+        Resource  = "*"
+      },
+      {
+        Sid    = "AllowCrossAccountImageDecrypt"
+        Effect = "Allow"
+        Principal = {
+          AWS = [for id in var.ecr_pull_account_ids : "arn:aws:iam::${id}:root"]
+        }
+        # Decrypt-only. A puller never needs to encrypt: pushes happen in this
+        # account, and CreateGrant would let the workload account delegate further.
+        Action   = ["kms:Decrypt", "kms:DescribeKey"]
+        Resource = "*"
+      },
+    ]
+  })
+}
+
 # --------------------------------------------------------------------------- #
 # Cost allocation
 #
@@ -141,6 +178,11 @@ module "registry" {
 
   protected_tag_prefixes     = var.ecr_protected_tag_prefixes
   keep_last_protected_images = var.ecr_keep_last_protected_images
+
+  # Workload accounts that pull from here. The matching kms:Decrypt grant is in the
+  # key policy below — a repository policy alone does not authorise a pull of
+  # KMS-encrypted layers.
+  pull_account_ids = var.ecr_pull_account_ids
 
   # ⚠️ false, and it should stay false. This registry now holds EVERY
   # environment's images, so a destroy here is not a dev rebuild — it is the loss

@@ -103,7 +103,7 @@ variable "rds_max_allocated_storage" {
 }
 
 variable "rds_multi_az" {
-  description = "Standby in a second AZ. ⚠️ MUST BE true FOR STAGING."
+  description = "Standby in a second AZ. Single-AZ is accepted here (see terraform.tfvars, which sets false); production must be true."
   type        = bool
 }
 
@@ -182,24 +182,48 @@ variable "budget_notification_email" {
   type        = string
 }
 
-# --- External, not managed here -------------------------------------------- #
+# --- Documents ------------------------------------------------------------- #
 
 variable "documents_bucket_name" {
   description = <<-EOT
-    The hand-created documents bucket (C0). Looked up with a data source, NEVER
-    managed: it holds uploaded files and must survive every terraform destroy.
+    Name of the documents bucket, CREATED AND MANAGED by `module.documents`.
+
+    ⚠️ This description used to say the bucket was hand-made and "NEVER managed —
+    must survive every terraform destroy". C4 changed that: Terraform now creates it
+    (main.tf), CMK-encrypted, because it holds real borrower files and a CMK gives a
+    separate audit trail and a revocation lever.
+
+    It survives a destroy because the module sets `prevent_destroy`, NOT because it
+    is outside Terraform. The bucket holds the only copy of every uploaded document —
+    the database stores keys, not content.
   EOT
   type        = string
 }
 
 # --- Compute (C3) ----------------------------------------------------------- #
 
+variable "ecr_registry_account_id" {
+  description = <<-EOT
+    Account holding the SHARED ECR registry — the tooling account, NOT this
+    environment's `aws_account_id`.
+
+    The image URLs and repository ARNs are assembled from this rather than read with
+    `data.aws_ecr_repository`, because a data source resolves through this
+    environment's provider and would look the repositories up in the wrong account.
+
+    ⚠️ Cross-account pull also needs a repository policy and `kms:Decrypt` on the
+    registry's key, both granted by `infra/shared` via `ecr_pull_account_ids`.
+  EOT
+  type        = string
+}
+
 variable "ecr_repository_names" {
   description = <<-EOT
     Map of service key to the ECR repository NAME in the shared registry.
 
-    Looked up with `data.aws_ecr_repository` rather than read out of shared's state
-    — see the note in main.tf.
+    The name is the contract between this state and shared's — deliberately not
+    `terraform_remote_state`, which would read the whole shared state and couple to
+    its output names. See the note in main.tf.
   EOT
   type        = map(string)
 }
@@ -315,15 +339,20 @@ variable "bedrock_profile_regions" {
 
 variable "documents_bucket_kms_key_arn" {
   description = <<-EOT
-    CMK protecting the documents bucket, or null when it uses SSE-S3.
+    CMK protecting the documents bucket. Null (the default) means "use this
+    environment's own CMK", which is what `module.documents` receives.
 
-    ⚠️ PENDING VERIFICATION — the C3 author could not read the bucket's encryption
-    configuration (the available role lacks s3:GetEncryptionConfiguration). Confirm
-    with:
-      aws s3api get-bucket-encryption --bucket <documents bucket>
-    If it returns aws:kms, set this to that key ARN. If SSE-S3, leave it null.
+    The bucket is now created by Terraform with SSE-KMS, so the earlier "PENDING
+    VERIFICATION / confirm with get-bucket-encryption" note is obsolete — the
+    encryption is declared here, not discovered.
+
+    Override only to protect documents with a key from another state (e.g. a
+    separate compliance-owned CMK). ⚠️ Whatever key is used must also be the one the
+    application sends as S3_KMS_KEY_ID, or every upload fails against the bucket's
+    default encryption.
   EOT
   type        = string
+  default     = null
 }
 
 variable "cors_allowed_origins" {

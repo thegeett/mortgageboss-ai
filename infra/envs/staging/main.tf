@@ -1,7 +1,7 @@
-# Development environment — wires the four modules together.
+# Staging environment — the first and only environment that is applied.
 #
-# Staging is a sibling directory with different variable values, not different
-# code. Nothing environment-specific may move from here into a module.
+# `../dev` is a reference template that is never applied. Every difference between
+# the two is a VALUE, not code: nothing environment-specific may move into a module.
 
 terraform {
   required_version = ">= 1.9"
@@ -73,7 +73,17 @@ module "documents" {
 
   bucket_name = var.documents_bucket_name
   tags        = local.tags
-  kms_key_arn = module.secrets.kms_key_arn
+  kms_key_arn = local.documents_kms_key_arn
+}
+
+locals {
+  # documents_bucket_kms_key_arn was a DEAD input — declared, set to null, and never
+  # read, so changing it looked like it configured the bucket CMK and did nothing.
+  # Null still means "this environment's own CMK"; an override now actually applies.
+  #
+  # The same value feeds S3_KMS_KEY_ID below, because the application must send the
+  # key the bucket's default encryption expects — otherwise every upload is rejected.
+  documents_kms_key_arn = coalesce(var.documents_bucket_kms_key_arn, module.secrets.kms_key_arn)
 }
 
 # --------------------------------------------------------------------------- #
@@ -198,8 +208,10 @@ module "data" {
 # --------------------------------------------------------------------------- #
 # Budget alarm
 #
-# This environment is meant to be destroyed between uses. The budget is what
-# catches the case where it was not.
+# Unlike the dev template, this environment is NOT destroyed between uses — it has
+# 30-day recovery windows, deletion protection, and prevent_destroy on the documents
+# bucket. The budget here is an ordinary cost guard: it catches an unintended scale-up
+# or a runaway workload, not a forgotten teardown.
 # --------------------------------------------------------------------------- #
 
 resource "aws_budgets_budget" "monthly" {
@@ -260,25 +272,43 @@ resource "aws_budgets_budget" "monthly" {
 
 # The images live in the SHARED registry, which is a THIRD state file.
 #
-# Read with `data.aws_ecr_repository`, deliberately NOT `terraform_remote_state`:
+# ...and that registry is in a DIFFERENT AWS ACCOUNT from this environment.
 #
-#   * terraform_remote_state reads the ENTIRE shared state, so this environment
-#     would need s3:GetObject on that state object — and would then hold every
-#     attribute of every resource in it, not just the two values wanted here.
-#   * It also couples to shared's OUTPUT NAMES. Renaming an output there would
-#     break every environment, turning a local refactor into a fleet-wide one.
-#   * The repository NAME is the real contract between the two states, and it is
-#     already a variable. Looking it up by name depends on the AWS resource rather
-#     than on how another state file happens to be shaped.
+# `ecr_registry_account_id` (591…, the tooling account that also holds the state
+# bucket) is not `aws_account_id` (058…, this workload account). That is the whole
+# reason the URLs and ARNs are ASSEMBLED here rather than read with
+# `data.aws_ecr_repository`: a data source resolves through THIS environment's
+# provider, so it looked the repositories up in the workload account, found nothing,
+# and failed the plan with RepositoryNotFoundException. Adding a second provider
+# would mean holding credentials for the tooling account during a workload apply,
+# which is worse than composing two strings.
 #
-# Trade-off accepted: no plan-time ordering. If shared has not been applied, this
-# fails with a clear "repository not found" rather than an implicit dependency.
-data "aws_ecr_repository" "api" {
-  name = var.ecr_repository_names["api"]
-}
+# The same reasoning that ruled out `terraform_remote_state` still holds and is why
+# nothing here reaches into shared's state:
+#
+#   * It reads the ENTIRE shared state, so this environment would need s3:GetObject
+#     on that object — and would then hold every attribute of every resource in it.
+#   * It couples to shared's OUTPUT NAMES, turning a local refactor there into a
+#     fleet-wide break.
+#
+# The repository NAME remains the contract between the two states; the account id
+# and region are the only additions, and both are already environment values.
+#
+# ⚠️ Cross-account pull needs TWO grants in the registry account, both applied by
+# `infra/shared` from its `ecr_pull_account_ids`: a repository policy allowing this
+# account to pull, and `kms:Decrypt` on the key encrypting the image layers. Without
+# the second, the pull fails with an authorization error that names KMS, not ECR.
+locals {
+  ecr_registry_host = "${var.ecr_registry_account_id}.dkr.ecr.${var.aws_region}.amazonaws.com"
 
-data "aws_ecr_repository" "frontend" {
-  name = var.ecr_repository_names["frontend"]
+  ecr_repository_urls = {
+    for key, name in var.ecr_repository_names : key => "${local.ecr_registry_host}/${name}"
+  }
+
+  ecr_repository_arns_by_key = {
+    for key, name in var.ecr_repository_names :
+    key => "arn:aws:ecr:${var.aws_region}:${var.ecr_registry_account_id}:repository/${name}"
+  }
 }
 
 locals {
@@ -323,8 +353,8 @@ module "compute" {
 
   ecs_tasks_security_group_id = module.network.ecs_tasks_security_group_id
 
-  api_image        = "${data.aws_ecr_repository.api.repository_url}:${var.image_tag}"
-  frontend_image   = "${data.aws_ecr_repository.frontend.repository_url}:${var.image_tag}"
+  api_image        = "${local.ecr_repository_urls["api"]}:${var.image_tag}"
+  frontend_image   = "${local.ecr_repository_urls["frontend"]}:${var.image_tag}"
   cpu_architecture = var.cpu_architecture
 
   api_cpu         = var.api_cpu
@@ -339,7 +369,7 @@ module "compute" {
   # development — see docs/secrets-audit.md Note 5. STORAGE_BACKEND is the sharpest:
   # left at "local" the app starts happily and writes documents to ephemeral
   # container disk that vanishes on task replacement, with NO error.
-  environment_variables = {
+  environment_variables = merge({
     ENVIRONMENT     = var.environment
     LOG_FORMAT      = "json"
     STORAGE_BACKEND = "s3"
@@ -349,7 +379,7 @@ module "compute" {
     # ⚠️ REQUIRED for a CMK-encrypted bucket. app/storage/s3.py sends
     # ServerSideEncryption=aws:kms + SSEKMSKeyId ONLY when this is set; unset, it
     # sends AES256 (SSE-S3) instead, which conflicts with the bucket's KMS default.
-    S3_KMS_KEY_ID        = module.secrets.kms_key_arn
+    S3_KMS_KEY_ID        = local.documents_kms_key_arn
     CORS_ALLOWED_ORIGINS = jsonencode(var.cors_allowed_origins)
     AI_PROVIDER          = "bedrock"
     BEDROCK_REGION       = var.aws_region
@@ -360,12 +390,26 @@ module "compute" {
 
     AI_REQUESTS_PER_MINUTE_BEDROCK = tostring(var.ai_requests_per_minute_bedrock)
 
-    # REDIS_URL is CONFIG rather than a secret while the cache has no AUTH token:
-    # the URL is topology only. ⚠️ Both parts of this value matter — transit
-    # encryption makes rediss:// mandatory, and without ?ssl_cert_reqs=required
-    # redis-py verifies the certificate while kombu resolves to CERT_NONE.
-    REDIS_URL = "rediss://${module.data.redis_primary_endpoint}:6379/0?ssl_cert_reqs=required"
-  }
+    # ⚠️ REDIS_URL IS NOT HERE. redis_auth_enabled is true in this environment, so
+    # the URL carries an AUTH token and is a CREDENTIAL — it is injected from the
+    # redis-url secret in secret_arns below.
+    #
+    # It was a plain env var holding host/port only, which worked exactly until the
+    # operator applied the AUTH token that check "redis_auth_token_applied" demands.
+    # From that moment every Redis and Celery call failed NOAUTH Authentication
+    # required, with a correctly populated secret sitting unused.
+    #
+    # It must appear in ONE of the two maps, never both: ECS rejects a container
+    # definition that names the same key in `environment` and `secrets`.
+    },
+    # With auth OFF the URL is topology only, so it stays config. ⚠️ Both parts of
+    # this value matter — transit encryption makes rediss:// mandatory, and without
+    # ?ssl_cert_reqs=required redis-py verifies the certificate while kombu resolves
+    # to CERT_NONE.
+    var.redis_auth_enabled ? {} : {
+      REDIS_URL = "rediss://${module.data.redis_primary_endpoint}:6379/0?ssl_cert_reqs=required"
+    },
+  )
 
   frontend_environment_variables = {
     NODE_ENV = "production"
@@ -377,18 +421,26 @@ module "compute" {
   # DATABASE_URL carries the master password; JWT and encryption keys are secrets
   # by definition. Injected by the ECS agent via the EXECUTION role, so no task
   # role needs secretsmanager:GetSecretValue.
-  secret_arns = {
-    DATABASE_URL   = module.secrets.secret_arns["database-url"]
-    JWT_SECRET_KEY = module.secrets.secret_arns["jwt-secret-key"]
-    ENCRYPTION_KEY = module.secrets.secret_arns["encryption-key"]
-  }
+  secret_arns = merge(
+    {
+      DATABASE_URL   = module.secrets.secret_arns["database-url"]
+      JWT_SECRET_KEY = module.secrets.secret_arns["jwt-secret-key"]
+      ENCRYPTION_KEY = module.secrets.secret_arns["encryption-key"]
+    },
+    # Conditional on the SAME variable that creates the secret and arms the cache's
+    # auth check, so the three can never disagree: with auth off there is no
+    # redis-url secret to reference, and REDIS_URL stays plain config.
+    var.redis_auth_enabled ? {
+      REDIS_URL = module.secrets.secret_arns["redis-url"]
+    } : {},
+  )
 
   log_group_names = module.data.log_group_names_by_key
   log_group_arns  = module.data.log_group_arns
 
   ecr_repository_arns = [
-    data.aws_ecr_repository.api.arn,
-    data.aws_ecr_repository.frontend.arn,
+    local.ecr_repository_arns_by_key["api"],
+    local.ecr_repository_arns_by_key["frontend"],
   ]
 
   documents_bucket_arn = module.documents.bucket_arn

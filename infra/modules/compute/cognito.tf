@@ -76,6 +76,13 @@ resource "aws_cognito_user_pool_client" "this" {
   # client secret. This is a confidential client, not a public one.
   generate_secret = true
 
+  # Unset, Cognito defaults to LEGACY, which returns DISTINGUISHABLE errors for an
+  # existing versus a non-existent username — so the hosted UI enumerates the user
+  # list. Self-signup is off and accounts are admin-created, which makes that list
+  # small and complete rather than harmless: it is the whole set of people with
+  # access to an environment holding borrower NPI.
+  prevent_user_existence_errors = "ENABLED"
+
   allowed_oauth_flows                  = ["code"]
   allowed_oauth_flows_user_pool_client = true
   allowed_oauth_scopes                 = ["openid", "email", "profile"]

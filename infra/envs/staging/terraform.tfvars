@@ -63,9 +63,17 @@ ssl_policy = "ELBSecurityPolicy-TLS13-1-2-2021-06"
 # Independent of the application's own JWT auth, and that is the point: this is the
 # environment where an application auth bug would first appear, so an unauthenticated
 # request must never reach a task.
-# ⚠️ Requires enable_tls — a precondition fails the plan otherwise, rather than
-# quietly coming up with no authentication.
-enable_cognito        = true
+#
+# ⚠️ THIS FLAG MOVES WITH enable_tls ABOVE — flip BOTH in phase 2, neither in
+# phase 1. An ALB cannot attach authenticate-cognito to an HTTP listener, so
+# terraform_data.auth_guard (modules/compute/alb.tf) fails the plan on the pair
+# (cognito = true, tls = false) rather than letting the environment come up with no
+# authentication while appearing configured.
+#
+# It shipped as `true` alongside `enable_tls = false`, which meant the guard fired
+# on the very first phase-1 plan and NOTHING could be created. The guard was right;
+# the value was wrong.
+enable_cognito        = false # ⚠️ phase 2: set true at the same time as enable_tls
 cognito_domain_prefix = "mbai-staging-auth"
 
 # OPTIONAL, not ON: enforcing MFA before any user exists locks out the first
@@ -129,6 +137,12 @@ redis_family    = "redis7"
 redis_auth_enabled = true
 
 # --- Compute ------------------------------------------------------------------ #
+
+# ⚠️ The TOOLING account, not this environment's. The registry is shared and lives
+# in the same account as the Terraform state bucket; this environment's workloads
+# run in aws_account_id above. Cross-account pull is granted from ../../shared
+# (ecr_pull_account_ids), which adds both the repository policy and kms:Decrypt.
+ecr_registry_account_id = "591554480818"
 
 ecr_repository_names = {
   api      = "mbai/api"

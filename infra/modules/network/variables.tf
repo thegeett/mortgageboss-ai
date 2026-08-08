@@ -64,6 +64,12 @@ variable "endpoint_availability_zones" {
   description = <<-EOT
     AZs that receive interface endpoints. Empty means ALL of availability_zones.
 
+    ⚠️ "Empty means all" is THIS module's rule. A caller that maps this list through
+    `private_subnet_ids_by_az` to place tasks gets the opposite — an empty list there
+    yields ZERO subnets, and `awsvpc` requires at least one. Either list the AZs
+    explicitly on both sides, or read the module's `private_subnet_ids` output, which
+    already resolves the empty case.
+
     Interface endpoints are ENIs billed PER ENDPOINT PER AZ, so this is the main
     lever on their cost — five endpoints in one AZ cost about half of five in two.
 
@@ -77,6 +83,15 @@ variable "endpoint_availability_zones" {
   EOT
   type        = list(string)
   default     = []
+
+  # A name not present in availability_zones matches no subnet, so endpoint_subnet_ids
+  # silently becomes [] and AWS rejects the endpoint mid-apply. Where NAT is off,
+  # interface endpoints are the ONLY egress path — the difference between a working
+  # VPC and one where tasks cannot pull an image. Fail at plan time, by name.
+  validation {
+    condition     = length(setsubtract(var.endpoint_availability_zones, var.availability_zones)) == 0
+    error_message = "endpoint_availability_zones must be a subset of availability_zones. Unknown: ${join(", ", setsubtract(var.endpoint_availability_zones, var.availability_zones))}."
+  }
 }
 
 variable "interface_endpoint_services" {

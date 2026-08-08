@@ -164,8 +164,8 @@ output "execute_command_invocations" {
 output "container_image_uris" {
   description = "The exact image URIs the task definitions reference — check these match what was pushed."
   value = {
-    api      = "${data.aws_ecr_repository.api.repository_url}:${var.image_tag}"
-    frontend = "${data.aws_ecr_repository.frontend.repository_url}:${var.image_tag}"
+    api      = "${local.ecr_repository_urls["api"]}:${var.image_tag}"
+    frontend = "${local.ecr_repository_urls["frontend"]}:${var.image_tag}"
   }
 }
 

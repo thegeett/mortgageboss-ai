@@ -12,16 +12,20 @@ work, which was the acceptance test for §6b.
 
 ACM validates by DNS, and the zone's nameservers must be live at the registrar
 before validation can succeed — but they do not exist until the zone is created.
-`enable_tls` in `terraform.tfvars` is the phase gate.
+`enable_tls` and `enable_cognito` in `terraform.tfvars` are the phase gate, and
+**they move together** — Cognito cannot attach to an HTTP listener, so
+`terraform_data.auth_guard` fails the plan on `cognito = true, tls = false`.
 
 ```
-enable_tls = false   →  apply  →  outputs four nameservers
+enable_tls     = false
+enable_cognito = false   →  apply  →  outputs four nameservers
                                         ↓
                          MANUAL: add four NS records at Namecheap,
                                  host "staging", then verify:
                                  dig +short NS staging.mortgageboss.ai
                                         ↓
-enable_tls = true    →  apply  →  certificate, HTTPS listener, redirect, Cognito
+enable_tls     = true
+enable_cognito = true    →  apply  →  certificate, HTTPS listener, redirect, Cognito
 ```
 
 Running phase 2 early is not destructive — ACM sits in `PENDING_VALIDATION` until
@@ -44,7 +48,7 @@ Do **not** use `-target` to work around the ordering. Full walkthrough in
 | `kms_create_alias` | `false` | **`true`** | Long-lived, so readability beats rebuild friction (ADR-365). |
 | `redis_auth_enabled` | `false` | **`true`** | Makes `REDIS_URL` a credential. |
 | `enable_execute_command` | `true` | **`false`** | A shell into borrower NPI (ADR-372). |
-| `enable_cognito` / `enable_tls` | n/a | **`true`** | Must not be openly reachable. |
+| `enable_cognito` / `enable_tls` | n/a | **`true` in phase 2** | Must not be openly reachable. Both `false` in phase 1 — see the phase gate above. |
 | `documents bucket` | hand-made, SSE-S3 | **Terraform, SSE-KMS** | Real files; CMK gives audit + revocation. |
 | `budget_limit_usd` | `150` | **`300`** | dev's would fire immediately here. |
 | `vpc_cidr` | `10.20.0.0/16` | **`10.30.0.0/16`** | Identical ranges cannot be peered. |

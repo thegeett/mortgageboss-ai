@@ -109,3 +109,18 @@ variable "ecr_force_delete" {
   type        = bool
   default     = false
 }
+
+variable "ecr_pull_account_ids" {
+  description = <<-EOT
+    Workload accounts allowed to pull images from this registry.
+
+    Required for any environment running in a different account from the registry.
+    Setting it applies BOTH halves of a cross-account pull: the repository policy in
+    the registry module, and a kms:Decrypt grant in the key policy here. Granting
+    only the first fails at task launch with an error that names KMS, not ECR.
+
+    Empty means same-account only.
+  EOT
+  type        = list(string)
+  default     = []
+}
