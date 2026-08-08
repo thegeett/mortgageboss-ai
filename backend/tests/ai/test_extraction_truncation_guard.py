@@ -14,8 +14,11 @@ from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock
 
+import anthropic
+import httpx
 import pytest
-from app.ai.client import AIClientError
+import structlog
+from app.ai.client import INFRA_RATE_LIMITED, AIClientError
 from app.ai.extraction import model_call
 from app.ai.extraction import pay_stub as pay_stub_module
 from app.ai.extraction import w2 as w2_module
@@ -225,3 +228,77 @@ async def test_w2_persistent_truncation_is_honest_too(monkeypatch: pytest.Monkey
     result = await w2_module.extract_w2(_PDF, "application/pdf")
     assert result.status == ExtractionStatus.FAILED
     assert result.reasoning == TRUNCATED_REASON  # honest for every extractor, via the shared path
+
+
+# --------------------------------------------------------------------------- #
+# LP-464 — extraction throttled-vs-failed surfacing + the 1a cause log
+# --------------------------------------------------------------------------- #
+
+
+def _client_error(cause: Exception) -> AIClientError:
+    err = AIClientError(f"AI call failed: {type(cause).__name__}")
+    err.__cause__ = cause
+    return err
+
+
+def _rate_limit_cause() -> Exception:
+    resp = httpx.Response(429, request=httpx.Request("POST", "http://x"))
+    return anthropic.RateLimitError("throttled", response=resp, body=None)
+
+
+async def test_rate_limited_call_surfaces_infra_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A throttled extraction is tagged rate_limited (NOT a content failure) so the pipeline can record
+    it as re-runnable — the LP-462 distinction, now on the extraction path."""
+    _patch_complete(monkeypatch, side_effect=_client_error(_rate_limit_cause()))
+    call = await run_extraction_completion(
+        system="s", message=_MSG, max_tokens=8192, log_label="investment_account"
+    )
+    assert call.text is None
+    assert call.infra_failure == INFRA_RATE_LIMITED
+    assert (
+        call.failure_reason == INFRA_RATE_LIMITED
+    )  # the marker the 109 extractors surface as reasoning
+
+
+async def test_non_throttle_failure_keeps_ai_call_failed(monkeypatch: pytest.MonkeyPatch) -> None:
+    """An auth/other AI error is NOT a throttle — it keeps the human 'AI call failed' reason."""
+    resp = httpx.Response(401, request=httpx.Request("POST", "http://x"))
+    _patch_complete(
+        monkeypatch,
+        side_effect=_client_error(anthropic.AuthenticationError("no", response=resp, body=None)),
+    )
+    call = await run_extraction_completion(
+        system="s", message=_MSG, max_tokens=8192, log_label="pay_stub"
+    )
+    assert call.infra_failure == "failed"
+    assert call.failure_reason == "AI call failed"  # not the throttle marker
+
+
+async def test_truncation_then_throttle_surfaces_rate_limited(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """First attempt truncates, the high-ceiling retry is throttled → still surfaced as rate_limited."""
+    _patch_complete(
+        monkeypatch,
+        side_effect=[_resp("{trunc", stop_reason="max_tokens"), _client_error(_rate_limit_cause())],
+    )
+    call = await run_extraction_completion(
+        system="s", message=_MSG, max_tokens=8192, log_label="investment_account"
+    )
+    assert call.infra_failure == INFRA_RATE_LIMITED and call.failure_reason == INFRA_RATE_LIMITED
+
+
+async def test_ai_failed_log_carries_the_cause_type(monkeypatch: pytest.MonkeyPatch) -> None:
+    """1a hardening: the extraction failure log records the underlying cause type (the WHERE) — a
+    ValueError, RateLimitError, etc. — not just an opaque 'extraction_ai_failed'."""
+    _patch_complete(monkeypatch, side_effect=_client_error(ValueError("Streaming is required")))
+    with structlog.testing.capture_logs() as logs:
+        await run_extraction_completion(
+            system="s",
+            message=_MSG,
+            max_tokens=8192,
+            log_label="uniform_residential_loan_application",
+        )
+    failed = [e for e in logs if e["event"] == "extraction_ai_failed"]
+    assert failed and failed[0]["cause_type"] == "ValueError"  # the location a diagnosis needs
+    assert failed[0]["error_kind"] == "failed"  # a ValueError is non-transient

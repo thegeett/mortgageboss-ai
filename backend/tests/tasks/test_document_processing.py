@@ -658,6 +658,32 @@ async def test_extraction_failure_needs_review(
     assert extraction.extraction_status == ExtractionStatus.FAILED
 
 
+async def test_throttled_extraction_is_not_a_content_failure(
+    monkeypatch: pytest.MonkeyPatch, db_session: AsyncSession
+) -> None:
+    """LP-464: a rate-limited extraction (the marker rides ``reasoning``) is recorded as re-runnable
+    INFRASTRUCTURE — NOT a FAILED extraction version — so a throttle never reads as a coverage gap."""
+    from app.ai.client import INFRA_RATE_LIMITED
+
+    doc = await _setup_document(db_session)
+    _patch_storage(monkeypatch)
+    _patch_classify(
+        monkeypatch, ClassificationResult(document_type="pay_stub", confidence=0.9, reasoning="x")
+    )
+    _patch_extract(monkeypatch, PayStubExtractionResult.failed(INFRA_RATE_LIMITED))
+
+    with structlog.testing.capture_logs() as logs:
+        await pipeline._process_document(db_session, str(doc.id))
+    await db_session.refresh(doc)
+
+    assert doc.status == DocumentStatus.NEEDS_REVIEW
+    assert "throttled" in doc.processing_error and "re-runnable" in doc.processing_error
+    # ⚠️ NO FAILED extraction version — the call never produced content, so none is recorded.
+    assert await _current_extraction(db_session, doc.id) is None
+    review = [e for e in logs if e["event"] == "document_needs_review"]
+    assert review and review[0]["reason"] == "rate_limited" and review[0]["infra_failure"] is True
+
+
 # --------------------------------------------------------------------------- #
 # Unexpected error → FAILED (safe message), never crashes
 # --------------------------------------------------------------------------- #

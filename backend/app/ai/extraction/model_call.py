@@ -46,7 +46,14 @@ from typing import Any
 
 import structlog
 
-from app.ai.client import TRUNCATED_STOP_REASON, AIClientError, AICompletion, complete
+from app.ai.client import (
+    INFRA_RATE_LIMITED,
+    TRUNCATED_STOP_REASON,
+    AIClientError,
+    AICompletion,
+    complete,
+    infra_failure_kind,
+)
 from app.core.config import settings
 
 logger = structlog.get_logger(__name__)
@@ -87,22 +94,51 @@ class ExtractionCall:
     output_tokens: int | None
     failure_reason: str | None
     truncated: bool
+    #: LP-464 — set when the call never completed on infrastructure: ``rate_limited`` (throttled),
+    #: ``oversized`` (payload over the document limit), or ``failed`` (other AI error). A THROTTLE must never
+    #: be recorded as a content failure (the LP-462 distinction, now on the extraction path): the pipeline
+    #: reads it (via the extractor's ``reasoning``, which carries ``failure_reason``) to record a throttled
+    #: extraction as re-runnable, not a coverage gap. ``None`` on success or a truncation give-up.
+    infra_failure: str | None = None
 
 
 async def _attempt(
     *, system: str, message: dict[str, Any], max_tokens: int, log_label: str, phase: str
-) -> AICompletion | None:
-    """One model call; ``None`` on an AI error (logged, metadata-only — never content/PII)."""
+) -> tuple[AICompletion | None, str | None]:
+    """One model call → ``(completion, None)`` on success, ``(None, infra_kind)`` on an AI error.
+
+    On failure, classifies the AIClientError by its underlying cause (LP-462 ``infra_failure_kind``:
+    ``rate_limited`` / ``oversized`` / ``failed``) and — LP-464's 1a hardening — logs BOTH that kind AND the
+    raw cause type (``ValueError``, ``RateLimitError``, …). We previously logged only "extraction_ai_failed"
+    with no cause, so a crash gave the *what* but never the *where*; recording the cause type restores the
+    location that a full diagnosis phase otherwise costs. Metadata-only — never content/PII.
+    """
     try:
-        return await complete(
+        completion = await complete(
             model=settings.anthropic_model_extraction,
             system=system,
             messages=[message],
             max_tokens=max_tokens,
         )
-    except AIClientError:
-        logger.warning("extraction_ai_failed", extractor=log_label, phase=phase)
-        return None
+        return completion, None
+    except AIClientError as err:
+        kind = infra_failure_kind(err)
+        cause = err.__cause__
+        logger.warning(
+            "extraction_ai_failed",
+            extractor=log_label,
+            phase=phase,
+            error_kind=kind,  # rate_limited / oversized / failed
+            cause_type=(type(cause).__name__ if cause is not None else None),  # the WHERE (1a)
+        )
+        return None, kind
+
+
+def _failure_reason(infra_kind: str | None) -> str:
+    """The ``failure_reason`` an extractor surfaces for a failed call. A THROTTLE carries the machine
+    constant ``INFRA_RATE_LIMITED`` (so the pipeline records it as re-runnable infrastructure, not a content
+    coverage gap — LP-464); any other AI error keeps the human "AI call failed"."""
+    return INFRA_RATE_LIMITED if infra_kind == INFRA_RATE_LIMITED else "AI call failed"
 
 
 async def run_extraction_completion(
@@ -119,11 +155,11 @@ async def run_extraction_completion(
     with an honest ``failure_reason`` on an AI failure or a persistent truncation. See the module
     docstring for the guard's policy (one retry at ``retry_max_tokens``, truncation-only).
     """
-    first = await _attempt(
+    first, first_kind = await _attempt(
         system=system, message=message, max_tokens=max_tokens, log_label=log_label, phase="first"
     )
     if first is None:
-        return ExtractionCall(None, None, None, "AI call failed", False)
+        return ExtractionCall(None, None, None, _failure_reason(first_kind), False, first_kind)
     if first.stop_reason != TRUNCATED_STOP_REASON:
         return ExtractionCall(first.text, first.input_tokens, first.output_tokens, None, False)
 
@@ -134,7 +170,7 @@ async def run_extraction_completion(
         max_tokens=max_tokens,
         retry_max_tokens=retry_max_tokens,
     )
-    second = await _attempt(
+    second, second_kind = await _attempt(
         system=system,
         message=message,
         max_tokens=retry_max_tokens,
@@ -142,7 +178,7 @@ async def run_extraction_completion(
         phase="retry",
     )
     if second is None:
-        return ExtractionCall(None, None, None, "AI call failed", False)
+        return ExtractionCall(None, None, None, _failure_reason(second_kind), False, second_kind)
     if second.stop_reason == TRUNCATED_STOP_REASON:
         # Still truncated at the high ceiling — give up honestly (never "could not parse").
         logger.warning(

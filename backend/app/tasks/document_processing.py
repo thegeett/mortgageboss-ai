@@ -47,6 +47,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ai.classification import classify_document
+from app.ai.client import INFRA_RATE_LIMITED
 from app.ai.cost import estimate_cost
 from app.ai.extraction import EXTRACTORS, Extractor
 from app.ai.extraction.parsing import document_confidence_provenance
@@ -370,6 +371,27 @@ async def _extract_branch(
     await db.commit()
 
     result = await extractor(content, document.mime_type)
+
+    # --- LP-464: a THROTTLED extraction is infrastructure, not a content failure - #
+    # The extraction call never completed — it was rate-limited (the LP-462 retry is
+    # shared, so this only survives a sustained burst). Recording it as a FAILED
+    # extraction would read as a coverage gap and corrupt every downstream audit —
+    # the exact corrosion LP-462 fixed for classification, now on the extraction
+    # path. Gate BEFORE persisting an extraction version: no content was produced,
+    # so nothing is recorded as content; the document is flagged re-runnable.
+    # (109 extractors surface the call's ``failure_reason`` as ``reasoning``, so the
+    # throttle marker rides that channel — no per-extractor change.)
+    if result.status == ExtractionStatus.FAILED and result.reasoning == INFRA_RATE_LIMITED:
+        document.status = DocumentStatus.NEEDS_REVIEW
+        document.processing_error = "extraction throttled (rate_limited) — re-runnable"
+        await db.commit()
+        logger.info(
+            "document_needs_review",
+            document_id=str(document.id),
+            reason="rate_limited",
+            infra_failure=True,
+        )
+        return
 
     # The model that ACTUALLY ran (B1): under AI_PROVIDER=bedrock this is the
     # inference-profile id, not the tier value. Recording the tier value instead would
