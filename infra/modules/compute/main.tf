@@ -12,11 +12,36 @@ terraform {
 }
 
 locals {
+  # ⚠️ APPLIED TO EVERY BACKEND CONTAINER, and not environment-specific — it is a
+  # property of how the image starts.
+  #
+  # The image CMD is `uv run ...`, and `uv run` performs a dependency SYNC before
+  # executing the command. That sync reaches PyPI. Verified with --network none:
+  # plain `uv run` HANGS indefinitely with no output, while `--no-sync` starts in
+  # about a second; UV_OFFLINE=1 reveals what it wants ("Failed to download
+  # mypy==2.1.0" — a DEV dependency, absent from the runtime venv).
+  #
+  # In a VPC whose only egress is interface endpoints there is no route to PyPI, so
+  # the sync does not fail — it hangs. The container never starts, emits NO
+  # application log line, and with ECS Exec off there is no shell. The circuit
+  # breaker then rolls back, so the visible symptom is "tasks keep dying" with
+  # nothing explaining why.
+  #
+  # Setting it here eliminates the dependency rather than routing around it, and
+  # needs no image or code change. The runtime then depends on the baked
+  # /app/.venv being complete — the correct invariant for a container, which should
+  # not be mutating its own dependencies at boot.
+  runtime_env = {
+    UV_NO_SYNC = "1"
+  }
+
+  merged_api_env = merge(local.runtime_env, var.environment_variables)
+
   # Sorted so the rendered task definitions are stable across plans — an unsorted
   # map would reorder the environment[] array and show a spurious diff every time.
   api_env = [
-    for k in sort(keys(var.environment_variables)) :
-    { name = k, value = var.environment_variables[k] }
+    for k in sort(keys(local.merged_api_env)) :
+    { name = k, value = local.merged_api_env[k] }
   ]
 
   frontend_env = [

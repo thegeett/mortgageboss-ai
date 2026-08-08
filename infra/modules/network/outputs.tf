@@ -47,3 +47,18 @@ output "interface_endpoint_ids" {
   description = "Map of short service name to interface endpoint id."
   value       = { for k, v in aws_vpc_endpoint.interface : k => v.id }
 }
+
+output "private_subnet_ids_by_az" {
+  description = <<-EOT
+    Map of AZ name to its private subnet id.
+
+    Lets an environment pin ECS tasks to exactly the AZs that received interface
+    endpoints — see endpoint_availability_zones.
+  EOT
+  value       = { for i, az in var.availability_zones : az => aws_subnet.private[i].id }
+}
+
+output "endpoint_subnet_ids" {
+  description = "Private subnets that actually received interface endpoints."
+  value       = local.endpoint_subnet_ids
+}

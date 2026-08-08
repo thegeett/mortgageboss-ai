@@ -13845,3 +13845,111 @@ that the frontend have "no permissions" and that every task role carry `ssmmessa
 
 **Cross-refs.** ADR-364 (secrets never in Terraform — Exec is the other way a secret value can be observed),
 C5 (deploy).
+
+---
+
+## ADR-370: `uv run` reaches PyPI at container start, so the no-NAT environment sets `UV_NO_SYNC=1` (C4)
+
+**Context.** The staging VPC has **no NAT gateway**. Egress exists only through interface endpoints for
+`bedrock-runtime`, `ecr.api`, `ecr.dkr`, `logs`, `secretsmanager`, and the free S3 gateway. Anything outside
+that set has no route at all.
+
+C1's image CMD is `uv run celery ...`, and the API overrides it with `uv run uvicorn ...`. **`uv run`
+performs a dependency sync before executing the command**, and that sync reaches PyPI.
+
+**Verified empirically**, running the image with `--network none` to simulate the endpoint-only VPC:
+
+```
+uv run python -c "print('STARTED')"              -> still RUNNING after 15s, no output
+uv run --no-sync python -c "print('STARTED')"    -> exited 0 in ~1s, "STARTED"
+/app/.venv/bin/python -c "print('STARTED')"      -> exited 0 in ~1s, "STARTED"
+UV_OFFLINE=1 uv run python -c "print('STARTED')" -> exit 1: "× Failed to download `mypy==2.1.0`"
+```
+
+The `UV_OFFLINE` line is the diagnosis: uv is trying to sync the **dev dependency group** — `mypy` is not in
+the runtime environment at all — from PyPI, on every container start.
+
+**Why this is severe rather than merely slow.** With no route, the sync does not fail — it **HANGS**. The
+container never starts, so it emits **no application log line**; the ECS event says only that the task
+stopped. ECS Exec is disabled here (ADR-369's recommendation, adopted), so there is no shell. The deployment
+circuit breaker then rolls back, producing a loop whose visible symptom is "tasks keep dying" with nothing
+explaining why. That is the worst diagnostic shape available.
+
+**The decision.** Set **`UV_NO_SYNC=1`** as a task-definition environment variable on every container.
+
+**Why this rather than the alternatives.** It eliminates the dependency instead of routing around it: with
+sync disabled there is no PyPI call to fail. It needs **no image change and no code change**, so it does not
+invalidate C1's images or reopen the Dockerfile. A PyPI VPC endpoint does not exist (PyPI is not an AWS
+service), and a NAT gateway would reintroduce exactly the public-internet egress path this environment was
+built to eliminate. Rewriting the CMD to call the venv interpreter directly would work but requires an image
+rebuild and moves the fix somewhere less visible than the task definition.
+
+**Consequence.** The runtime now depends on the image's baked `/app/.venv` being complete and correct, with
+no startup repair. That is the right invariant for a container — a production image that mutates its own
+dependencies at boot is a worse property than the one being given up — but it means an image built with a
+broken venv fails at runtime rather than being silently patched.
+
+**This also applies to the dev template**, which uses NAT and would therefore hit PyPI on every task start:
+slower, not fatal, and undesirable regardless.
+
+---
+
+## ADR-371: Cognito authentication is attached to EVERY listener rule, not only the default action (C4)
+
+**Context.** The ticket specified `authenticate-cognito` on the **default** listener rule, on the stated
+grounds that the default covers `/api/*` too.
+
+**That is not how an ALB evaluates rules.** Listener rules are matched in priority order and the **first
+match wins** — its actions apply and evaluation stops. The default action runs **only when no rule matches**.
+C3 created explicit rules for `/api/*` (priority 100) and for the root-level `/health`, `/docs`, `/redoc`,
+`/openapi.json` paths (priority 90). A plain forward rule on `/api/*` therefore **bypasses** the listener's
+authentication default rather than inheriting it.
+
+Following the instruction literally would have produced exactly the outcome it was written to prevent: an
+authenticated frontend with **the entire API, including document upload, open to the internet**.
+
+**The decision.** Attach the `authenticate-cognito` action to the default action **and to every explicit
+rule**, ordered ahead of the forward.
+
+**Health checks are unaffected, and this is what makes it safe.** The ALB probes each registered target
+**directly at its IP and port**; the probe never traverses a listener and so never meets the authentication
+action. `health_check` configures the TARGET GROUP, while `authenticate-cognito` is an action on a LISTENER
+RULE — two different objects on two different paths. Were it otherwise, every task would fail its check
+behind Cognito and no service could reach steady state.
+
+**Consequence.** Authentication coverage is now a property of each rule rather than of one place. **Adding a
+listener rule without the auth action silently opens that path** — the failure is invisible in the console,
+which shows a valid rule. The rules carry a comment saying so; a rendered-policy check at review time is the
+real control.
+
+---
+
+## ADR-372: ECS Exec is OFF for the deployed environment, and the friction of turning it on is the point (C4)
+
+**Context.** C3 enabled ECS Exec for the local-only dev template and flagged it for reconsideration. Fargate
+has no SSH, so Exec is the only interactive diagnostic surface, and several failure modes here produce no log
+line at all — including the `uv run` hang in ADR-370, which was found on a laptop precisely because no
+deployed environment could have shown it.
+
+**The decision.** `enable_execute_command = false` for the deployed environment.
+
+**The argument for keeping it on, and why it loses.** Exec grants an **interactive shell inside a running
+task** — a task holding decrypted `DATABASE_URL`, `JWT_SECRET_KEY`, and `ENCRYPTION_KEY` in its environment
+and borrower NPI in memory. That is a standing, credential-free path to the most sensitive data in the
+system, available to anyone holding the IAM permission, and it bypasses every application-level control and
+audit trail the app itself provides. Set against that, the diagnostic value is real but not unique: CloudWatch
+logs, the ALB access log, and the ability to run a one-off task with an arbitrary command cover most of what
+a shell would be used for.
+
+**Is the environment undebuggable without it?** Nearly, for one specific class: a container that fails
+*before* it can log. That class is narrow and now well-understood (architecture mismatch, empty secret,
+startup network hang), and each has a documented pre-deploy check.
+
+**The mitigation is deliberate friction, not prohibition.** The flag can be flipped on for a specific
+debugging session and flipped back. Doing so requires editing tfvars, planning, and applying a **service
+update** — minutes of work, visible in version control and in the ECS deployment history. That is the
+property being bought: turning on a shell into borrower data becomes an auditable act rather than an ambient
+capability.
+
+**Consequence.** The first genuinely opaque startup failure will cost a redeploy cycle to diagnose. Accepted
+— the alternative is a permanent shell into NPI to save one redeploy.

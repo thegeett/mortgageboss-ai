@@ -299,3 +299,101 @@ variable "health_check_path" {
   type        = string
   default     = "/health/live"
 }
+
+# --- TLS and authentication (C4) -------------------------------------------- #
+
+variable "enable_tls" {
+  description = <<-EOT
+    Create the HTTPS listener and turn port 80 into a redirect.
+
+    ⚠️ PHASE GATE. false on the first apply (no certificate exists yet); true on the
+    second, once DNS delegation is live and ACM has issued.
+  EOT
+  type        = bool
+  default     = false
+}
+
+variable "certificate_arn" {
+  description = "ACM certificate ARN for the HTTPS listener. Required when enable_tls is true."
+  type        = string
+  default     = null
+}
+
+variable "ssl_policy" {
+  description = <<-EOT
+    ALB security policy for the HTTPS listener.
+
+    TLS 1.3 with a 1.2 floor: 1.3 removes the negotiated-cipher and renegotiation
+    downgrade classes outright, while keeping 1.2 available for clients that cannot
+    do 1.3.
+  EOT
+  type        = string
+  default     = "ELBSecurityPolicy-TLS13-1-2-2021-06"
+}
+
+variable "domain_name" {
+  description = <<-EOT
+    Public domain the environment is served on. Used to build the Cognito callback
+    URL — deliberately NOT the ALB's generated DNS name, which would create a cycle
+    between the listener and the user pool.
+  EOT
+  type        = string
+  default     = null
+}
+
+variable "enable_cognito" {
+  description = <<-EOT
+    Put an authenticate-cognito action in front of every listener rule.
+
+    ⚠️ Requires enable_tls — an ALB cannot attach this action to an HTTP listener.
+    A precondition fails the plan rather than letting the environment come up
+    unauthenticated while appearing configured.
+  EOT
+  type        = bool
+  default     = false
+}
+
+variable "cognito_domain_prefix" {
+  description = "Prefix for the Cognito hosted UI domain. Globally unique across AWS."
+  type        = string
+  default     = null
+}
+
+variable "cognito_mfa_configuration" {
+  description = <<-EOT
+    "OFF", "OPTIONAL", or "ON".
+
+    OPTIONAL rather than ON by default: ON before any user exists locks out the
+    first admin-created account. Turn it ON once users are enrolled — it is on the
+    pre-handover checklist.
+  EOT
+  type        = string
+  default     = "OPTIONAL"
+
+  validation {
+    condition     = contains(["OFF", "OPTIONAL", "ON"], var.cognito_mfa_configuration)
+    error_message = "cognito_mfa_configuration must be OFF, OPTIONAL, or ON."
+  }
+}
+
+variable "cognito_session_timeout_seconds" {
+  description = <<-EOT
+    ALB authentication session lifetime.
+
+    ⚠️ DELIBERATELY LONG. When a session expires mid-use, an in-flight fetch()
+    receives a 302 toward the hosted login page — which browser JavaScript cannot
+    follow, so the application fails in ways that look like application bugs rather
+    than an expired login. A long session moves expiry to BETWEEN visits.
+  EOT
+  type        = number
+  default     = 604800 # 7 days
+}
+
+variable "cognito_refresh_token_validity_days" {
+  description = <<-EOT
+    Refresh token lifetime in days. Must EXCEED the session timeout, or the ALB
+    cannot silently renew and the user is bounced mid-session anyway.
+  EOT
+  type        = number
+  default     = 30
+}

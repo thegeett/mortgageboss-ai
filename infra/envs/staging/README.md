@@ -1,50 +1,62 @@
-# `envs/staging` — not built yet
+# `envs/staging` — the deployed environment
 
-Ticket C2 builds **dev**. This directory holds only
-`terraform.tfvars.example`, to prove the modules take staging values without a
-single module edit — the acceptance test for §6b of the ticket.
+**This is the first and only environment that gets applied.** `../dev` is a
+reference template that is never applied: local development runs against Docker
+Compose and calls Bedrock from the laptop, so it needs no AWS infrastructure.
 
-## To build staging
+Built by C4 on the modules C2 and C3 validated against `../dev`. Every difference
+between the two is a **value**, not code — no module was edited to make staging
+work, which was the acceptance test for §6b.
 
-`main.tf`, `variables.tf` and `outputs.tf` are **copies of `../dev/`, unchanged.**
-Only three things differ:
+## ⚠️ Applying this takes TWO runs
 
-1. `terraform.tfvars` — copied from `terraform.tfvars.example` here and filled in.
-2. `backend.tf` — same bucket and lock table, but `key = "staging/terraform.tfstate"`.
-3. The account id, if staging lives in a different AWS account.
+ACM validates by DNS, and the zone's nameservers must be live at the registrar
+before validation can succeed — but they do not exist until the zone is created.
+`enable_tls` in `terraform.tfvars` is the phase gate.
 
-If building staging ever requires editing something under `../../modules/`, that
-is a defect in the module, not a staging requirement.
-
-> **No `ecr_*` settings.** The registry is shared across environments and lives in
-> [`../../shared`](../../shared/README.md) with its own state and KMS key. Staging
-> pulls the same repositories dev pushed to, distinguished by image tag — tag
-> promoted images `staging-*` so the protected retention rule covers them.
-
-## The differences that matter
-
-| Setting | dev | staging | Why |
-|---|---|---|---|
-| `rds_multi_az` | `false` | **`true`** | Single-AZ is a dev economy. |
-| `rds_deletion_protection` | `false` | **`true`** | Staging holds real borrower NPI. |
-| `rds_skip_final_snapshot` | `true` | **`false`** | A destroy must leave a recovery point. |
-| `secret_recovery_window_days` | `0` | **`30`** | Zero makes a fat-fingered destroy unrecoverable. |
-| `kms_create_alias` | `false` | **`true`** | Dev is rebuilt often and a destroy orphans an alias (ADR-365); staging is not. |
-| `enable_nat_gateway` | `true` | **`false`** | ⬇ |
-| `enable_vpc_endpoints` | `false` | **`true`** | Egress must never touch the public internet. |
-| `vpc_cidr` | `10.20.0.0/16` | **`10.30.0.0/16`** | Identical ranges cannot be peered. |
-| `redis_auth_enabled` | `false` | **`true`** | Makes `REDIS_URL` a secret; defence in depth. |
-
-## ⚠️ Before applying staging
-
-Verify the Bedrock interface endpoint exists — staging turns endpoints on and NAT
-off, so a missing endpoint means tasks cannot reach Bedrock at all:
-
-```bash
-aws ec2 describe-vpc-endpoint-services \
-  --query "ServiceNames[?contains(@,'bedrock')]" --output text
+```
+enable_tls = false   →  apply  →  outputs four nameservers
+                                        ↓
+                         MANUAL: add four NS records at Namecheap,
+                                 host "staging", then verify:
+                                 dig +short NS staging.mortgageboss.ai
+                                        ↓
+enable_tls = true    →  apply  →  certificate, HTTPS listener, redirect, Cognito
 ```
 
-This was **not** verifiable while C2 was written — the available role
-(`BedrockDeveloper`) lacks `ec2:DescribeVpcEndpointServices`. See
-`docs/tickets/C2-terraform-result.md`.
+Running phase 2 early is not destructive — ACM sits in `PENDING_VALIDATION` until
+the 45-minute timeout and the apply fails. Re-run once `dig` returns four `awsdns`
+nameservers.
+
+Do **not** use `-target` to work around the ordering. Full walkthrough in
+[`../../README.md`](../../README.md) and
+[`docs/tickets/C4-staging-dns-tls-result.md`](../../../docs/tickets/C4-staging-dns-tls-result.md).
+
+## What differs from the `dev` template
+
+| Setting | dev (template) | staging | Why |
+|---|---|---|---|
+| `enable_nat_gateway` | `true` | **`false`** | No egress to the public internet at all. |
+| `enable_vpc_endpoints` | `false` | **`true`** | ⬆ — and confined to **one AZ** for cost. |
+| `rds_deletion_protection` | `false` | **`true`** | Holds real borrower NPI. |
+| `rds_skip_final_snapshot` | `true` | **`false`** | A destroy must leave a recovery point. |
+| `secret_recovery_window_days` | `0` | **`30`** | Not a destroy-and-rebuild environment. |
+| `kms_create_alias` | `false` | **`true`** | Long-lived, so readability beats rebuild friction (ADR-365). |
+| `redis_auth_enabled` | `false` | **`true`** | Makes `REDIS_URL` a credential. |
+| `enable_execute_command` | `true` | **`false`** | A shell into borrower NPI (ADR-372). |
+| `enable_cognito` / `enable_tls` | n/a | **`true`** | Must not be openly reachable. |
+| `documents bucket` | hand-made, SSE-S3 | **Terraform, SSE-KMS** | Real files; CMK gives audit + revocation. |
+| `budget_limit_usd` | `150` | **`300`** | dev's would fire immediately here. |
+| `vpc_cidr` | `10.20.0.0/16` | **`10.30.0.0/16`** | Identical ranges cannot be peered. |
+
+## ⚠️ Starts empty
+
+No document sync from dev, no database seed. Dev documents are development
+artifacts and have no place in an environment holding borrower NPI. The schema
+comes from the migration task run against an empty RDS instance.
+
+## `terraform.tfvars.example`
+
+Kept from C2, when this directory held only that file as proof the modules were
+portable. `terraform.tfvars` is now the real thing and is what applies — the
+example is historical and can be deleted once nobody needs the comparison.

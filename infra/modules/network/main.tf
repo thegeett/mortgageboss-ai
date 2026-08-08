@@ -30,6 +30,15 @@ locals {
   # /16 VPC carved into /20s: public subnets first, then private. newbits = 4.
   public_subnet_cidrs  = [for i in range(local.az_count) : cidrsubnet(var.vpc_cidr, 4, i)]
   private_subnet_cidrs = [for i in range(local.az_count) : cidrsubnet(var.vpc_cidr, 4, i + local.az_count)]
+
+  # AZs that get interface endpoints. Empty (the default) means every AZ — the
+  # redundant, more expensive placement. A subset is the single-AZ cost choice.
+  endpoint_azs = length(var.endpoint_availability_zones) > 0 ? var.endpoint_availability_zones : var.availability_zones
+
+  endpoint_subnet_ids = [
+    for i, az in var.availability_zones : aws_subnet.private[i].id
+    if contains(local.endpoint_azs, az)
+  ]
 }
 
 # Private tasks need SOME route to ECR, Logs, Secrets Manager and Bedrock. With
@@ -175,21 +184,26 @@ resource "aws_security_group" "alb" {
   tags = merge(var.tags, { Name = "${var.name_prefix}-alb" })
 }
 
-resource "aws_vpc_security_group_ingress_rule" "alb_http" {
-  security_group_id = aws_security_group.alb.id
-  description       = "HTTP from anywhere (redirected to HTTPS at the listener)."
-  cidr_ipv4         = "0.0.0.0/0"
-  from_port         = 80
-  to_port           = 80
-  ip_protocol       = "tcp"
+# One rule per (port, CIDR). An empty allowlist yields the usual public pair.
+locals {
+  alb_ingress_cidrs = length(var.alb_ingress_cidr_blocks) > 0 ? var.alb_ingress_cidr_blocks : ["0.0.0.0/0"]
+
+  alb_ingress_rules = merge([
+    for port in [80, 443] : {
+      for cidr in local.alb_ingress_cidrs :
+      "${port}-${cidr}" => { port = port, cidr = cidr }
+    }
+  ]...)
 }
 
-resource "aws_vpc_security_group_ingress_rule" "alb_https" {
+resource "aws_vpc_security_group_ingress_rule" "alb" {
+  for_each = local.alb_ingress_rules
+
   security_group_id = aws_security_group.alb.id
-  description       = "HTTPS from anywhere."
-  cidr_ipv4         = "0.0.0.0/0"
-  from_port         = 443
-  to_port           = 443
+  description       = "Port ${each.value.port} from ${each.value.cidr}."
+  cidr_ipv4         = each.value.cidr
+  from_port         = each.value.port
+  to_port           = each.value.port
   ip_protocol       = "tcp"
 }
 
@@ -298,13 +312,22 @@ resource "aws_vpc_security_group_ingress_rule" "vpce_https" {
 # stores image LAYERS in S3 — an ECR interface endpoint without it cannot pull.
 # --------------------------------------------------------------------------- #
 
+# Interface endpoints are ENIs, billed PER ENDPOINT PER AZ. Placing them in a
+# subset of AZs is the single biggest lever on their cost: five endpoints across
+# two AZs is roughly double the same five in one.
+#
+# ⚠️ TASKS AND ENDPOINTS MUST MOVE TOGETHER. A task in an AZ with no local endpoint
+# still works — private DNS resolves VPC-wide — but every call crosses an AZ
+# boundary, which costs transfer and quietly gives back the AZ independence the
+# placement was supposed to buy. Whatever AZs are listed here, put the tasks in the
+# same ones.
 resource "aws_vpc_endpoint" "interface" {
   for_each = var.enable_vpc_endpoints ? toset(var.interface_endpoint_services) : toset([])
 
   vpc_id              = aws_vpc.this.id
   service_name        = "com.amazonaws.${var.aws_region}.${each.value}"
   vpc_endpoint_type   = "Interface"
-  subnet_ids          = aws_subnet.private[*].id
+  subnet_ids          = local.endpoint_subnet_ids
   security_group_ids  = [aws_security_group.vpc_endpoints[0].id]
   private_dns_enabled = true
 

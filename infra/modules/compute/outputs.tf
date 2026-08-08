@@ -109,3 +109,13 @@ output "execute_command_invocations" {
     ])
   } : {}
 }
+
+output "cognito_user_pool_id" {
+  description = "User pool id, or null when Cognito is disabled. An identifier, not a credential — needed for admin-create-user."
+  value       = var.enable_cognito ? aws_cognito_user_pool.this[0].id : null
+}
+
+output "cognito_hosted_ui_domain" {
+  description = "Cognito hosted UI domain, or null when disabled."
+  value       = var.enable_cognito ? aws_cognito_user_pool_domain.this[0].domain : null
+}

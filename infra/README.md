@@ -13,9 +13,20 @@ infra/
     secrets/          KMS + Secrets Manager containers
   shared/             ECR registry + its KMS key — SHARED across environments
   envs/
-    dev/              the only environment C2 builds
-    staging/          tfvars example only — proves the modules are portable
+    dev/              ⚠️ REFERENCE TEMPLATE — never applied (see below)
+    staging/          the first and ONLY deployed environment
 ```
+
+> ### ⚠️ `envs/dev/` is a template, not a deployed environment
+>
+> Nothing in `envs/dev/` has ever been applied, and nothing is missing as a result.
+> Local development runs against Docker Compose and calls Bedrock from the laptop,
+> so dev needs no AWS infrastructure at all. The directory exists because it is
+> where the modules were exercised and validated, and it keeps a second set of
+> values honest about what is environment-specific.
+>
+> **`envs/staging/` is the real environment.** If you are looking for the running
+> infrastructure, it is there.
 
 **`shared/` is a separate state on purpose.** The registry is shared across
 environments — one repository set, distinguished by image *tag*, so the exact bytes
@@ -57,7 +68,11 @@ terraform init
 terraform plan -out=dev.tfplan     # ← read this before applying
 terraform apply dev.tfplan
 
-# 4. Run the database migration ONCE, before the services are useful.
+# 4. STAGING — see "The two-phase staging apply" below. It cannot be done in one
+#    run: ACM cannot validate until the subdomain's NS records are live at the
+#    registrar, and those do not exist until the zone has been created.
+
+# 5. Run the database migration ONCE, before the services are useful.
 terraform output -raw migration_run_task_command    # prints the full invocation
 # run it, then confirm it exited 0:
 aws ecs describe-tasks --cluster <cluster> --tasks <task-arn> \
@@ -178,6 +193,87 @@ Both directories carry an account guard: a `precondition` on
 `terraform_data.account_guard` fails the plan if the resolved credentials do not
 match `var.aws_account_id`. It is a precondition rather than a `check` block
 because a `check` only warns.
+
+---
+
+## The two-phase staging apply
+
+Terraform cannot complete staging in one run. ACM validates by DNS, and the zone's
+nameservers must be live **at the registrar** before validation can succeed — but
+those nameservers do not exist until the zone is created.
+
+`enable_tls` in `envs/staging/terraform.tfvars` is the phase gate.
+
+### Phase 1 — `enable_tls = false`
+
+```bash
+cd infra/envs/staging
+terraform init
+terraform plan -out=staging.tfplan
+terraform apply staging.tfplan
+```
+
+Everything except the certificate, the HTTPS listener, the port-80 redirect, and
+Cognito. Reachable on the ALB's own DNS name over HTTP.
+
+### MANUAL — delegate the subdomain at Namecheap
+
+The four nameservers **do not exist until phase 1 has been applied**:
+
+```bash
+terraform output -json route53_name_servers
+```
+
+At Namecheap, on `mortgageboss.ai` → *Advanced DNS*, add **four NS records** with
+host `staging`, one per nameserver. The apex stays at Namecheap and is **never**
+delegated to AWS.
+
+Confirm delegation is live before phase 2:
+
+```bash
+dig +short NS staging.mortgageboss.ai
+```
+
+**Four `awsdns` nameservers means it is live.** Anything else means it is not.
+
+### Phase 2 — `enable_tls = true`
+
+Edit `terraform.tfvars`, then plan and apply again.
+
+**If phase 2 runs before delegation propagates**, ACM sits in `PENDING_VALIDATION`
+and Terraform blocks until its 45-minute timeout, then fails. Nothing is broken —
+re-run once `dig` is clean.
+
+Do **not** use `-target` to work around the ordering. It is a debugging escape
+hatch; the phase boundary is a real property of the deployment.
+
+---
+
+## ⚠️ Pre-handover security checklist
+
+Work through this before handing the environment to anyone. Every item is
+something that is safe during build-out and **not** safe once real borrower files
+are in it.
+
+1. **Remove or narrow the standing `AdministratorAccess` permission set** on the
+   staging account. It was needed to build the environment and is not needed to run
+   it.
+2. **Drop the `BedrockDeveloper` permission set.** The worker's **task role**
+   invokes Bedrock — a human does not need to. A standing human Bedrock permission
+   is an unused credential, and unused credentials are the ones nobody notices
+   being used.
+3. **Confirm `enable_execute_command = false`.** ECS Exec is a shell inside a task
+   holding decrypted secrets and borrower NPI (ADR-372). It can be flipped on for a
+   specific session and back off; it must not be left on.
+4. **Confirm all four secrets are populated** — `database-url`, `jwt-secret-key`,
+   `encryption-key`, `redis-url`. Check the LENGTH, not existence: Terraform creates
+   the containers empty, and a task whose secret is empty fails to start with an
+   unhelpful message.
+5. **Confirm MFA is ON for every Cognito user**, and flip
+   `cognito_mfa_configuration` from `OPTIONAL` to `ON`. It starts OPTIONAL only
+   because enforcing it before any user exists locks out the first account.
+6. **Confirm the budget alarm address actually receives mail.** An alarm nobody
+   reads is not an alarm.
 
 ---
 

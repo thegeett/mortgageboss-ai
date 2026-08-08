@@ -60,6 +60,25 @@ variable "enable_vpc_endpoints" {
   type        = bool
 }
 
+variable "endpoint_availability_zones" {
+  description = <<-EOT
+    AZs that receive interface endpoints. Empty means ALL of availability_zones.
+
+    Interface endpoints are ENIs billed PER ENDPOINT PER AZ, so this is the main
+    lever on their cost — five endpoints in one AZ cost about half of five in two.
+
+    ⚠️ Whatever is listed here, place the TASKS in the same AZs. A task in an AZ
+    with no local endpoint still works (private DNS is VPC-wide) but every call
+    crosses an AZ boundary, adding transfer cost and giving back the AZ
+    independence the placement was meant to buy.
+
+    Giving up multi-AZ endpoints only makes sense where there is no redundancy to
+    lose anyway — a single task and a single-AZ database.
+  EOT
+  type        = list(string)
+  default     = []
+}
+
 variable "interface_endpoint_services" {
   description = <<-EOT
     Short service names for interface endpoints, e.g. "ecr.api". The full service
@@ -70,4 +89,18 @@ variable "interface_endpoint_services" {
     which does not use Bedrock is not forced to create a Bedrock endpoint.
   EOT
   type        = list(string)
+}
+
+variable "alb_ingress_cidr_blocks" {
+  description = <<-EOT
+    CIDRs permitted to reach the load balancer on 80/443. EMPTY MEANS UNRESTRICTED
+    (0.0.0.0/0), which is the normal case for a public site.
+
+    Offered as a lever rather than a default. A home or office IP is dynamic, so an
+    allowlist eventually locks out a legitimate user with no visible cause — a poor
+    trade when an authentication layer already gates every request. Use it for a
+    genuinely fixed egress IP, not as a substitute for authentication.
+  EOT
+  type        = list(string)
+  default     = []
 }
