@@ -195,8 +195,8 @@ def test_every_spec_document_type_resolves_to_a_catalog_entry() -> None:
         f"spec types the classifier can never emit (silent routing): {unresolved}"
     )
     assert (
-        len(spec_types) == 114
-    )  # 111 + LP-466 (home_value_estimate, wire_instructions, lender_dashboard_screenshot)
+        len(spec_types) == 116
+    )  # 114 + LP-467 (certificate_of_liability_insurance, service_invoice)
 
 
 def test_the_four_merges_and_the_split_resolve() -> None:

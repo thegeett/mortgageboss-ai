@@ -13657,3 +13657,48 @@ The Phase-C regression check — a real appraisal must still classify as `apprai
 no-schema and no-rule cases), LP-441 (the Tier-1-iff-spec invariant the dashboard's minimal spec honors rather
 than special-cases), LP-465 (the prior missing-types ticket + the `_PII_FIELDS` at-rest-guard pattern reused
 for the wire routing/account numbers).
+
+## ADR-364: A single-document type earns its place when the document is a real, distinct STANDARD form — but only after the redundancy test; and record the correction when a claimed rule tie is wrong (LP-467)
+
+**Context.** LP-467 added `certificate_of_liability_insurance` (ACORD 25) on the strength of a *single*
+corpus document, and `service_invoice` (a generic vendor bill) on six. Two lessons worth pinning: what makes
+a low-count type legitimate, and the discipline that a claimed rule justification must survive contact with the
+document.
+
+**A count of one is a corpus artifact, not a frequency finding.** The corpus happens to hold one ACORD 25; a
+condo/new-construction file routinely carries one. A type earns a catalog entry when the document is a real,
+distinct, STANDARD form (ACORD 25 is an industry-standard certificate) that currently dilutes `unknown` — not
+when it appears N times. Rarity in a 900-document sample says nothing about whether the type belongs.
+
+**But the type must first pass the redundancy test — a split schema is worse than a gap.** Before adding
+`certificate_of_liability_insurance`, the question was whether the existing
+`master_insurance_policy_for_condominium` already covers it. The test: *would forcing one document into the
+other's schema produce usable data or garbage?* Here it produces garbage — an ACORD 25 is a one-page liability
+CERTIFICATE (CGL/Auto/Workers-Comp limits) with none of the dwelling-replacement-cost / deductible /
+causes-of-loss fields the master-POLICY schema exists to capture. Disjoint content, different artifact
+(summary certificate vs governing contract), different purpose (evidence to a holder vs the policy itself). So
+the two are genuinely distinct and both belong. Had the schemas overlapped, the right call would have been the
+opposite — **not** adding the type, because splitting the same documents across two schemas means no rule knows
+which to read. A redundant type is worse than a missing one.
+
+**⚠️ Record the correction when a claimed rule tie is wrong.** The plan and the ticket both justified the ACORD
+25 by CO-3 (a condo project's master policy + fidelity bond). **That tie is wrong, and it is recorded loudly so
+no one acts on it.** CO-3's inputs are master-PROPERTY coverage and a FIDELITY/crime bond, which arrive on an
+**ACORD 27/28** (Evidence of Property Insurance) + a crime certificate — a *different* form. An ACORD 25 is a
+LIABILITY certificate; the sample (073) is a homebuilder's CGL/Auto/WC cert with no property or fidelity line.
+So `certificate_of_liability_insurance` serves **no rule** — anyone building CO-3 must not look for its inputs
+here. The type still earns its place, on **processor visibility** (a real, distinct standard document out of
+`unknown`), the same standard as `wire_instructions` (ADR-362/363). The lesson: a rule justification in a plan
+is a hypothesis; verify it against the document, and when it fails, keep the type on its real merit and record
+the correction rather than quietly leaving the false tie in place.
+
+**A corollary the extraction surfaced — the LP-460 one-row-per-section lesson recurs, and the generator does
+not carry it.** The ACORD 25 `coverage_lines` list must be ONE ROW PER COVERAGE SECTION (CGL/Auto/WC), not per
+sub-limit. The generated STARTER prompt emitted only the row's fields, so the model fragmented one CGL section
+into 6 rows (12 total). The fix was a manual prompt-tuning pass adding the explicit framing (→ 3 rows). The
+generator emits list *fields* but not the spec's shape framing; any list whose unit of capture is a section
+(not a labeled sub-item) needs that tuning pass — a known generator gap, not a per-ticket surprise.
+
+**Cross-refs.** LP-467 (`docs/tickets/LP-467.md`), ADR-362/363 (the "what earns a type" / visibility-only
+rules this applies), LP-460 (the one-row-per-section lesson that recurred), LP-441 (the Tier-1-iff-spec
+invariant both new types honor).

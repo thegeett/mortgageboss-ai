@@ -176,6 +176,10 @@ CATALOG: dict[str, tuple[Tier, DocumentCategory]] = {
     # LP-466 — an AVM / Home Value Estimate. NOT an appraisal and NOT evidence of value for
     # underwriting (see the indicator + ADR); a non-binding estimate a processor may glance at.
     "home_value_estimate": (Tier.TIER_1, DocumentCategory.PROPERTY),
+    # LP-467 — an ACORD 25 liability CERTIFICATE (a summary of coverage, distinct from the master
+    # POLICY; joins the insurance family here as there is no INSURANCE category). Visibility only —
+    # serves no rule; NOTE it is NOT CO-3 evidence (CO-3 wants ACORD 27/28 property + a fidelity cert).
+    "certificate_of_liability_insurance": (Tier.TIER_1, DocumentCategory.PROPERTY),
     # ===================================================================== #
     # Credit
     # ===================================================================== #
@@ -280,6 +284,9 @@ CATALOG: dict[str, tuple[Tier, DocumentCategory]] = {
     # only — a software capture, extracts almost nothing by design; stops diluting `unknown`).
     "wire_instructions": (Tier.TIER_1, DocumentCategory.MISC),
     "lender_dashboard_screenshot": (Tier.TIER_1, DocumentCategory.MISC),
+    # LP-467 — one generic vendor service invoice (a BILL: vendor/amount/loan; distinct from the
+    # evidence_of_payment/appraisal_payment RECEIPT types). Visibility only — serves no rule.
+    "service_invoice": (Tier.TIER_1, DocumentCategory.MISC),
 }
 
 # The default for any type not in the catalog: the long-tail Tier 3 / Misc bucket.

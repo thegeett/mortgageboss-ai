@@ -48,6 +48,9 @@ from app.ai.extraction.cancelled_checks_evidencing_receipt_of_note_income import
     extract_cancelled_checks_evidencing_receipt_of_note_income,
 )
 from app.ai.extraction.certificate_of_eligibility import extract_certificate_of_eligibility
+from app.ai.extraction.certificate_of_liability_insurance import (
+    extract_certificate_of_liability_insurance,
+)
 from app.ai.extraction.child_support_income import extract_child_support_income
 from app.ai.extraction.condo_questionnaire import extract_condo_questionnaire
 from app.ai.extraction.court_order_documents import extract_court_order_documents
@@ -135,6 +138,7 @@ from app.ai.extraction.retirement_pension_award_letter import (
     extract_retirement_pension_award_letter,
 )
 from app.ai.extraction.seller_signature_authority import extract_seller_signature_authority
+from app.ai.extraction.service_invoice import extract_service_invoice
 from app.ai.extraction.social_security_administration_ssa_89 import (
     extract_social_security_administration_ssa_89,
 )
@@ -321,6 +325,10 @@ EXTRACTORS: dict[str, Extractor] = {
     "home_value_estimate": extract_home_value_estimate,
     "wire_instructions": extract_wire_instructions,
     "lender_dashboard_screenshot": extract_lender_dashboard_screenshot,
+    # LP-467 — an ACORD 25 liability CERTIFICATE (a summary, distinct from the master POLICY; visibility
+    # only — serves no rule, NOT CO-3) and a generic vendor service invoice (a bill, not a receipt).
+    "certificate_of_liability_insurance": extract_certificate_of_liability_insurance,
+    "service_invoice": extract_service_invoice,
 }
 
 __all__ = ["EXTRACTORS", "ExtractionResult", "Extractor"]

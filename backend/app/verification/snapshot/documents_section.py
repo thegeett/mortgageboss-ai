@@ -306,6 +306,13 @@ _SCRUB_FREE_TEXT_FIELDS: dict[str, frozenset[str]] = {
     # LP-466 — a wire memo instructs "reference file/loan number …"; a bare ≥9-digit file number embedded
     # there would trip the at-rest guard. Scrub the 9+-digit run (the memo wording survives) as a backstop.
     "wire_instructions": frozenset({"reference_or_memo"}),
+    # LP-467 — the ACORD 101 remarks print a bare loan number ("Loan: 4256229242") inside these free-text
+    # fields, invisible to the field-name PII registry; an invoice's service_description could likewise embed
+    # one. Same shape as the wire-memo scrub — redact the 9+-digit run, keep the wording.
+    "certificate_of_liability_insurance": frozenset(
+        {"description_of_operations", "project_or_property_reference"}
+    ),
+    "service_invoice": frozenset({"service_description"}),
 }
 
 
@@ -1296,6 +1303,23 @@ _MASTER_INSURANCE__COVERAGE_LINES_LIST = ListSpec(
     # a full number the _DESC_REDACT 9+-digit scrub redacts it here (a genuinely-masked ****4432 is untouched).
     redact=frozenset({"policy_number"}),
 )
+# LP-467 — the ACORD 25 certificate's coverage grid, ONE ROW PER COVERAGE SECTION (CGL / Auto / Umbrella /
+# Workers Comp), the section's headline limit per row. policy_number redacted as a row-PII backstop (mirrors
+# the master-policy list) though ACORD policy numbers are usually separator'd and clear the guard.
+_CERTIFICATE_OF_LIABILITY_INSURANCE__COVERAGE_LINES_LIST = ListSpec(
+    name="coverage_lines",
+    fields=(
+        "coverage_type",
+        "insurer_name",
+        "insurer_naic_number",
+        "policy_number",
+        "policy_effective_date",
+        "policy_expiration_date",
+        "limit_description",
+        "limit_amount",
+    ),
+    redact=frozenset({"policy_number"}),
+)
 
 # LP-461 — the schema-gap phase-3 flat-row lists. No stable_row_id / derived (no rule enumerates them yet).
 _W2__BOX_12_ITEMS_LIST = ListSpec(
@@ -1338,6 +1362,9 @@ _PAYMENT_SCHEDULE_LIST = ListSpec(
 
 _LIST_SPECS: dict[str, tuple[ListSpec, ...]] = {
     "temporary_buydown_agreement": (_PAYMENT_SCHEDULE_LIST,),  # LP-465
+    "certificate_of_liability_insurance": (
+        _CERTIFICATE_OF_LIABILITY_INSURANCE__COVERAGE_LINES_LIST,
+    ),  # LP-467
     "voe": (_GROSS_EARNINGS_HISTORY_LIST,),  # LP-446 diff (live extractor)
     "investment_account": (_SECURITY_POSITIONS_LIST,),  # LP-446 diff (live extractor)
     "purchase_agreement": (
