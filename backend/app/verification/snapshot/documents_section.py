@@ -289,9 +289,15 @@ _PII_FIELDS: dict[str, tuple[PiiKind, bool]] = {
     "i94_number": (PiiKind.ACCOUNT, False),
     # LP-466 — wire_instructions. A 9-digit ABA routing number is a bare contiguous run that trips the
     # LP-209 at-rest guard → mask + per-file hash (from_raw). ``account_number`` is already routed above
-    # (form_1099, reused). ``verification_phone`` stays UNMASKED (the anti-fraud callback a processor
-    # reads; a formatted phone is not a bare 9+-digit run, so it does not trip the guard).
+    # (form_1099, reused).
     "aba_routing_number": (PiiKind.ACCOUNT, False),
+    # LP-466/467 review — whole-value NUMERIC identifiers that can arrive as a bare 9+-digit run: an
+    # UNFORMATTED phone (5551234567) or a pure-numeric invoice/service number. Left plain, either would trip
+    # the at-rest guard (``_LONG_DIGITS``) and REFUSE the whole loan file's snapshot. from_raw masks the
+    # snapshot value (last-4 + per-file hash); the raw value stays in the document's extraction for the
+    # processor's document view — so the wire callback number is still readable there, just not at rest.
+    "verification_phone": (PiiKind.ACCOUNT, False),
+    "invoice_number": (PiiKind.ACCOUNT, False),
 }
 
 # Free-text typed-core fields that are NOT whole-value PII (so not in ``_PII_FIELDS`` — masking the
