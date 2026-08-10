@@ -299,11 +299,15 @@ _PII_FIELDS: dict[str, tuple[PiiKind, bool]] = {
     "verification_phone": (PiiKind.ACCOUNT, False),
     "invoice_number": (PiiKind.ACCOUNT, False),
     # LP-469 — form_1098. The borrower TIN is PRE-MASKED on the form (last-4 only, e.g. '*****7007') →
-    # pre_masked display, no hash. ``account_number`` reuses the entry above (from_raw). ``lender_tin`` and
-    # ``lender_phone`` are NOT registered — an EIN is a business id (LP-457) and a servicer phone is not
-    # borrower PII; both are hyphenated on the 1098 (26-1193089 / 877-426-8805) so they clear the at-rest
-    # guard. (Residual: an UNFORMATTED servicer phone would be a bare 9+-digit run — accepted per LP-469 A4.)
+    # pre_masked display, no hash. ``account_number`` reuses the entry above (from_raw).
     "borrower_tin_masked": (PiiKind.SSN, True),
+    # LP-469 review — ``lender_phone`` gets the same from_raw treatment as verification_phone: an UNFORMATTED
+    # servicer phone (bare 9+-digit run) would otherwise trip the at-rest guard and refuse the whole loan
+    # file's snapshot. Masked in the snapshot; the raw stays in the document extraction. ``lender_tin`` is
+    # deliberately NOT registered — it is a business EIN meant to stay VISIBLE (from_raw would hide it, and a
+    # scrub would over-redact the hyphenated form since _DESC_REDACT allows the separators the at-rest guard
+    # does not); an IRS 1098 always hyphenates the EIN (26-1193089), so its residual is effectively zero.
+    "lender_phone": (PiiKind.ACCOUNT, False),
 }
 
 # Free-text typed-core fields that are NOT whole-value PII (so not in ``_PII_FIELDS`` — masking the
