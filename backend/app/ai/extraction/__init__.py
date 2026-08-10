@@ -76,6 +76,7 @@ from app.ai.extraction.form_1040_personal_tax_transcripts import (
 from app.ai.extraction.form_1065_partnership_tax_transcripts import (
     extract_form_1065_partnership_tax_transcripts,
 )
+from app.ai.extraction.form_1098 import extract_form_1098
 from app.ai.extraction.form_1099 import extract_1099
 from app.ai.extraction.form_1120_corporate_tax_transcripts import (
     extract_form_1120_corporate_tax_transcripts,
@@ -333,6 +334,9 @@ EXTRACTORS: dict[str, Extractor] = {
     # LP-468 — W-2 employee compensation statements (base/bonus/equity) that were force-fitting into
     # commission_income_statement (a mortgage sales-commission type) and now divert to Tier 3. Their home.
     "compensation_statement": extract_compensation_statement,
+    # LP-469 — IRS Form 1098 Mortgage Interest Statement. A genuine DT-6 tie (interest + taxes + principal on
+    # a retained property, when Box 8 differs from the borrower address), not visibility-only.
+    "form_1098": extract_form_1098,
 }
 
 __all__ = ["EXTRACTORS", "ExtractionResult", "Extractor"]

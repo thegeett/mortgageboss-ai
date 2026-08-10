@@ -1,0 +1,63 @@
+{
+  "document_type": "form_1098",
+  "slug": "form-1098",
+  "tier": 1,
+  "rules_served": ["DT-6"],
+  "summary_hint": "IRS Form 1098 (tax year <tax_year>) from <lender_name> for <borrower_name>: Box 1 interest <mortgage_interest_received>, Box 2 principal <outstanding_mortgage_principal>, property <property_address>.",
+  "existing_extractor": null,
+  "catalog_coverage": "full",
+
+  "typed_core": [
+    {"name":"borrower_name","type":"str","why":"identity — the payer/borrower; match to the borrower","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"person","pii":null,"exists_today":false,"prompt_hint":"PAYER'S/BORROWER'S name"},
+    {"name":"borrower_address","type":"str","why":"identity — the borrower's address (Box 7 compares the property address to this)","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"address","pii":null,"exists_today":false,"prompt_hint":"PAYER'S/BORROWER'S street address, city, state, ZIP"},
+    {"name":"borrower_tin_masked","type":"str","why":"PII — the payer/borrower's TIN (SSN/ITIN), shown PRE-MASKED on the form (last 4 only)","rules":[],"reason_class":"pii","rule_floor":false,"degraded_from":null,"pii":{"kind":"SSN","pre_masked":true},"exists_today":false,"prompt_hint":"PAYER'S/BORROWER'S TIN — capture the LAST 4 digits ONLY, exactly as shown (the form prints e.g. '*****7007'); never a full SSN"},
+    {"name":"lender_name","type":"str","why":"identity — the recipient/lender (servicer)","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"RECIPIENT'S/LENDER'S name"},
+    {"name":"lender_address","type":"str","why":"identity — the lender's address","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"address","pii":null,"exists_today":false,"prompt_hint":"RECIPIENT'S/LENDER'S street address, city, state, ZIP"},
+    {"name":"lender_tin","type":"str","why":"identity — the recipient/lender's TIN, an EIN (a BUSINESS identifier, NOT personal PII). Kept UNMASKED and readable (LP-457: masking the employer EIN broke IN-5's equivalent); a hyphenated EIN (XX-XXXXXXX) has no 9-contiguous-digit run so it does not trip the at-rest guard","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"RECIPIENT'S/LENDER'S TIN (the lender's EIN, e.g. '26-1193089') — capture VERBATIM, do NOT mask (it is a business tax id, not personal PII)"},
+    {"name":"lender_phone","type":"str","why":"processor — the servicer's contact phone","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"account_number","type":"str","why":"PII — the account/loan number the lender assigned (shown FULL on the form; = the servicer's Loan Number). Masked at the snapshot boundary; its value-hash joins the 1098 to the same loan's mortgage_statement / note","rules":[],"reason_class":"pii","rule_floor":false,"degraded_from":null,"pii":{"kind":"ACCOUNT","pre_masked":false},"exists_today":false,"prompt_hint":"The 'Account number' (= Loan Number), captured VERBATIM/full; masked + hashed at the snapshot boundary"},
+    {"name":"tax_year","type":"int","why":"identity — the calendar/tax year the statement covers","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"The 'For calendar year' value (e.g. 2025)"},
+
+    {"name":"mortgage_interest_received","type":"Decimal","why":"DT-6 — Box 1 mortgage interest received; evidences the housing expense on the (often retained) property","rules":["DT-6"],"reason_class":"rule","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"Box 1 'Mortgage interest received from payer(s)/borrower(s)'"},
+    {"name":"outstanding_mortgage_principal","type":"Decimal","why":"DT-6 — Box 2 outstanding mortgage principal (the debt balance on the property)","rules":["DT-6"],"reason_class":"rule","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"Box 2 'Outstanding mortgage principal'"},
+    {"name":"mortgage_origination_date","type":"date","why":"processor — Box 3 mortgage origination date","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"Box 3"},
+    {"name":"refund_of_overpaid_interest","type":"Decimal","why":"processor — Box 4 refund of overpaid interest","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"Box 4"},
+    {"name":"mortgage_insurance_premiums","type":"Decimal","why":"processor — Box 5 mortgage insurance premiums (MIP/PMI)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"Box 5"},
+    {"name":"points_paid_on_purchase","type":"Decimal","why":"processor — Box 6 points paid on purchase of principal residence","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"Box 6"},
+    {"name":"property_address_same_as_borrower_indicator","type":"str","why":"processor — Box 7 indicator (checked when the property address equals the borrower's; unchecked when Box 8 carries a different address)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"bool","pii":null,"exists_today":false,"prompt_hint":"Box 7 checkbox — 'checked' or 'unchecked' (unchecked when Box 8 is completed with a different address)"},
+    {"name":"property_address","type":"str","why":"identity — Box 8 the property securing the mortgage; when it differs from the borrower address the property is retained/non-owner-occupied (the DT-6 case)","rules":["DT-6"],"reason_class":"identity","rule_floor":false,"degraded_from":"address","pii":null,"exists_today":false,"prompt_hint":"Box 8 'Address or description of property securing mortgage'"},
+    {"name":"number_of_properties","type":"int","why":"processor — Box 9 number of properties securing the mortgage","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"Box 9 (may be blank if one property)"},
+    {"name":"other_information","type":"str","why":"DT-6 — Box 10 free-text 'Other information'; servicers commonly print 'Real Estate Taxes Paid $N' here (the housing-expense taxes), but the content varies","rules":["DT-6"],"reason_class":"rule","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"Box 10 'Other' — capture the text VERBATIM as printed (e.g. 'Real Estate Taxes Paid $1,889.75'); do NOT parse it into a number"},
+    {"name":"mortgage_acquisition_date","type":"date","why":"processor — Box 11 mortgage acquisition date (when the lender acquired the loan mid-year)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"Box 11 — often blank; leave null if not printed"}
+  ],
+
+  "nested_lists": [],
+
+  "rejected": [
+    {"name":"property_taxes_paid (parsed from Box 10)","reason":"⚠️ Box 10 is FREE TEXT ('Other information') — a servicer may print real-estate taxes, insurance-from-escrow, or anything. Parsing it into a typed property_taxes_paid Decimal is the is_disputed lesson: a field that looks like a clean value but holds free text will misfire. Capture Box 10 verbatim as other_information; a rule/reasoner interprets it. Tags describe; rules judge."},
+    {"name":"annual_housing_expense / total_housing_cost","reason":"a COMPUTED figure (interest + taxes + insurance) — a judgment for a rule (DT-6), not a value on the form."},
+    {"name":"is_investment_property / is_owner_occupied","reason":"a JUDGMENT inferred from Box 8 ≠ borrower address — the fact (the two addresses) is captured; the occupancy conclusion is a rule's call."},
+    {"name":"form_number / form_revision_date / omb_number","reason":"the form is identified by classification; these are boilerplate — catch-all."},
+    {"name":"corrected_indicator","reason":"the 'CORRECTED (if checked)' box is unchecked on both samples; low value — catch-all if ever set."},
+    {"name":"the 8 TECHNICAL provenance fields","reason":"already in the TypedField wrapper"}
+  ],
+
+  "encoding_variations": [
+    "Form 1098 is a fixed-box IRS form (like the W-2) — Boxes 1-11 in fixed positions; a servicer cover page ('Annual Tax and Interest Statement') may precede the form and repeat the loan number / customer service phone",
+    "the borrower TIN is PRE-MASKED on the form (last 4 only, e.g. '*****7007') — the full TIN is never printed",
+    "the account number is shown FULL (= the servicer loan number)",
+    "Box 10 'Other' is free text — commonly 'Real Estate Taxes Paid $N', but varies by servicer",
+    "Box 8 property address may differ from the borrower address (a retained/non-owner-occupied property) or match it (Box 7 checked instead)",
+    "Box 11 (mortgage acquisition date) is blank unless the lender acquired the loan mid-year"
+  ],
+
+  "open_questions": [
+    {"id":1,"q":"Parse Box 10 into a typed property_taxes_paid field?","options":["capture Box 10 verbatim as free text","parse the taxes into a Decimal"],"recommendation":"VERBATIM (GEET'S DECISION, LP-469): Box 10 is free text whose content varies by servicer; a typed taxes field would misfire (the is_disputed lesson). A rule/reasoner interprets other_information.","blocks_implementation":false}
+  ],
+
+  "notes": [
+    "⚠️ GENUINE RULE TIE, not visibility-only: on BOTH samples Box 8 (the property securing the mortgage, in WA) differs from the borrower address (NC) — these are RETAINED / non-owner-occupied properties, so the 1098 evidences the housing expense (Box 1 interest + Box 10 taxes) and the debt balance (Box 2) on a retained property, which DT-6 reads. This is better than the plan assumed (it framed the type as processor-visibility); form_1098 has a real DT-6 tie.",
+    "PII: borrower_tin_masked registered (SSN, pre_masked=true — last-4 only). account_number reuses the existing global 'account_number' (ACCOUNT, from_raw) registration — masked display + a value-hash join to the loan's other documents. lender_tin is NOT masked — an EIN is a business identifier (LP-457), and its hyphenated format is guard-safe.",
+    "No nested list — a 1098 is flat (one property per form; Box 9 is a count)."
+  ]
+}

@@ -298,6 +298,12 @@ _PII_FIELDS: dict[str, tuple[PiiKind, bool]] = {
     # processor's document view — so the wire callback number is still readable there, just not at rest.
     "verification_phone": (PiiKind.ACCOUNT, False),
     "invoice_number": (PiiKind.ACCOUNT, False),
+    # LP-469 — form_1098. The borrower TIN is PRE-MASKED on the form (last-4 only, e.g. '*****7007') →
+    # pre_masked display, no hash. ``account_number`` reuses the entry above (from_raw). ``lender_tin`` and
+    # ``lender_phone`` are NOT registered — an EIN is a business id (LP-457) and a servicer phone is not
+    # borrower PII; both are hyphenated on the 1098 (26-1193089 / 877-426-8805) so they clear the at-rest
+    # guard. (Residual: an UNFORMATTED servicer phone would be a bare 9+-digit run — accepted per LP-469 A4.)
+    "borrower_tin_masked": (PiiKind.SSN, True),
 }
 
 # Free-text typed-core fields that are NOT whole-value PII (so not in ``_PII_FIELDS`` — masking the

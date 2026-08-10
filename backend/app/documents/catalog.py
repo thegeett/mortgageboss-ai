@@ -145,6 +145,10 @@ CATALOG: dict[str, tuple[Tier, DocumentCategory]] = {
     "purchase_agreement": (Tier.TIER_1, DocumentCategory.PROPERTY),  # T1
     "homeowners_insurance": (Tier.TIER_1, DocumentCategory.PROPERTY),  # T1
     "mortgage_statement": (Tier.TIER_1, DocumentCategory.PROPERTY),  # T1
+    # LP-469 — IRS Form 1098 Mortgage Interest Statement. PROPERTY (not INCOME like form_1099): its subject is
+    # a mortgage on a property, and its neighbours are mortgage_statement / property_tax_bill. DT-6 reads the
+    # interest + taxes + principal as a housing expense on a (often retained) property.
+    "form_1098": (Tier.TIER_1, DocumentCategory.PROPERTY),
     "property_tax_bill": (Tier.TIER_1, DocumentCategory.PROPERTY),  # T1
     "hoa_statement": (Tier.TIER_1, DocumentCategory.PROPERTY),  # T1
     "appraisal": (Tier.TIER_1, DocumentCategory.PROPERTY),

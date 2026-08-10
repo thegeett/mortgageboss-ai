@@ -112,6 +112,7 @@ DOCUMENT_TYPE_INDICATORS: dict[str, str] = {
     "purchase_agreement": "a signed real-estate purchase and sale contract; buyer/seller, property address, price, and contingencies",
     "homeowners_insurance": "a homeowner's hazard insurance policy or declarations page; coverage amounts, premium, and the insured property",
     "mortgage_statement": "a monthly mortgage billing statement for an existing loan; principal balance, payment, and escrow",
+    "form_1098": "an IRS Form 1098 'Mortgage Interest Statement' — the ANNUAL TAX form a mortgage servicer/lender furnishes for a calendar year, reporting mortgage interest received (Box 1), outstanding principal (Box 2), points, and often real-estate taxes in the free-text Box 10. It prints 'Form 1098', 'Mortgage Interest Statement', 'Copy B For Payer/Borrower', and OMB No. 1545-1380. NOT form_1099 (a different IRS return — reports income, not mortgage interest), NOT mortgage_statement (a MONTHLY servicer bill with an 'amount due by' date — a 1098 is an ANNUAL 'keep for your records' tax form), and NOT property_tax_bill (a taxing authority's bill — a 1098 mentions taxes only as free text in Box 10)",
     "property_tax_bill": "a county/municipal property tax bill or assessment showing the annual tax and the parcel",
     "hoa_statement": "a homeowners-association statement or dues invoice showing the HOA fee and the property",
     "appraisal": "a Uniform Residential Appraisal Report (URAR/Form 1004) with appraised value, comparables, and property condition",
