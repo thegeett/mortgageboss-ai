@@ -20,6 +20,7 @@ mortgage processors. Start here to find your way around.
 | [project-structure.md](project-structure.md)         | Repository layout and "where does X go?" conventions      |
 | [development-workflow.md](development-workflow.md)    | CI/CD pipelines and pre-commit hooks                      |
 | [worktree-setup.md](worktree-setup.md)               | Running a second worktree's Docker stack alongside the main one |
+| [deploy/commands.md](deploy/commands.md)             | Command reference: local services, AWS/Bedrock, the extraction bench |
 | [phases/phase-1.md](phases/phase-1.md)               | Ticket-by-ticket phase plan (Epics 1–6)                   |
 | [tickets/](tickets/)                                 | Per-ticket implementation records (`LP-XXX.md`)           |
 
