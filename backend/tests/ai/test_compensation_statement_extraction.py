@@ -38,7 +38,7 @@ FULL_PAYLOAD = {
         "base_pay_increase_percent": _core("1234.56"),
         "bonus_target_percent": _core("1234.56"),
         "bonus_actual_award": _core("1234.56"),
-        "equity_award_amount": _core("1234.56"),
+        "equity_award_amount": _core("SAMPLE"),
         "equity_award_type": _core("SAMPLE"),
         "one_time_payment_amount": _core("1234.56"),
         "performance_rating": _core("SAMPLE"),

@@ -52,6 +52,7 @@ from app.ai.extraction.certificate_of_liability_insurance import (
     extract_certificate_of_liability_insurance,
 )
 from app.ai.extraction.child_support_income import extract_child_support_income
+from app.ai.extraction.closing_disclosure import extract_closing_disclosure
 from app.ai.extraction.compensation_statement import extract_compensation_statement
 from app.ai.extraction.condo_questionnaire import extract_condo_questionnaire
 from app.ai.extraction.court_order_documents import extract_court_order_documents
@@ -109,6 +110,7 @@ from app.ai.extraction.letter_of_explanation_income import extract_letter_of_exp
 from app.ai.extraction.letter_of_explanation_misc import extract_letter_of_explanation_misc
 from app.ai.extraction.letter_of_explanation_property import extract_letter_of_explanation_property
 from app.ai.extraction.life_insurance_policy import extract_life_insurance_policy
+from app.ai.extraction.loan_estimate import extract_loan_estimate
 from app.ai.extraction.master_insurance_policy_for_condominium import (
     extract_master_insurance_policy_for_condominium,
 )
@@ -337,6 +339,10 @@ EXTRACTORS: dict[str, Extractor] = {
     # LP-469 — IRS Form 1098 Mortgage Interest Statement. A genuine DT-6 tie (interest + taxes + principal on
     # a retained property, when Box 8 differs from the borrower address), not visibility-only.
     "form_1098": extract_form_1098,
+    # LP-470 — the two TRID forms promoted Tier 2 -> Tier 1 with a HEADLINE-block schema (no in-scope rule
+    # reads them; visibility only, like wire_instructions). The full cost tables stay on Tier 3.
+    "closing_disclosure": extract_closing_disclosure,
+    "loan_estimate": extract_loan_estimate,
 }
 
 __all__ = ["EXTRACTORS", "ExtractionResult", "Extractor"]

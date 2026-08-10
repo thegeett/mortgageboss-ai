@@ -13758,3 +13758,76 @@ compensation` banner on the Deloitte statement is deliberately left to the catch
 **Cross-refs.** LP-468 (`docs/tickets/LP-468.md`), LP-463 (the guard whose blind spot this names), LP-465 (the
 prior immigration-family indicator fix + the "NOT A VISA" separator pattern reused here as "NOT VALID FOR
 REENTRY"), ADR-362/363 (the visibility-plus-future-rule standard).
+
+## ADR-366: A document type with no in-scope rule gets the HEADLINE BLOCK, not the full form — and what would change that (LP-470)
+
+**Context.** LP-470 promoted the two densest documents in a loan file — the TRID Closing Disclosure (~140
+fields across five pages: party blocks, projected payments, A–J cost tables, borrower AND seller transaction
+summaries, payoffs, loan calculations, escrow, an ARM table) and its sibling the Loan Estimate — from Tier 2
+to Tier 1. The question was how much of that form to schematize.
+
+**The decision — build the HEADLINE BLOCK only.** ~28 fields per form: the parties, the property, the loan
+terms (amount, rate, P&I, term, product, purpose, type), the numbers a processor actually checks (APR, finance
+charge, TIP, total closing costs, cash to close), and the two indicators (prepayment penalty, balloon). The
+full A–J cost tables, both transaction summaries, the payoffs list, and the ARM/AIR/AP tables are NOT built —
+Tier 3 free extraction carries them until a rule needs them.
+
+**Why — no in-scope rule reads a CD or an LE.** Verified in the LP-467 diagnostic against `rule_kinds.csv`:
+CL-1 reads a rate-LOCK confirmation (not the CD); CL-2…CL-7 are out of pre-submission scope (post-close);
+DC-1…DC-7 are all out_of_scope / "likely an LOS function" (TRID timing, fee tolerance, APR tolerance). So the
+CD and LE earn Tier 1 on **processor visibility**, exactly like `wire_instructions` and the ACORD 25
+(ADR-362/363) — not on rule coverage. Schematizing ~140 fields for zero in-scope rules is disproportionate;
+the headline is what a processor checks at this stage, and the itemization has no consumer.
+
+**The field-partition correction (the LP-461 lesson, applied before building).** The plan listed
+`finance_charge` / `amount_financed` / `total_of_payments` as shared. They are **CD-only** — the LE has no
+"Loan Calculations" box; its page-3 "Comparisons" gives an "In 5 Years" figure + APR + TIP instead. Putting
+the three CD-only fields on the LE would have created three permanently-null fields on every Loan Estimate.
+Caught by reading a real LE (258) in Phase A, before writing the spec rather than after.
+
+**⚠️ What would change this decision — write it down so the boundary is revisited deliberately.** The headline
+is a scoping choice contingent on the pre-submission rule set, not a claim that the rest of the CD is
+worthless. If **the pre-submission scope boundary moves**, or **DC-4 (fee tolerance 0%/10%) or DC-5 (APR
+change threshold) are confirmed in scope**, the CD becomes rule-bearing: DC-4 needs the full A–J cost
+itemization (the LE→CD fee buckets) and DC-5 needs the APR comparison — and the cost tables and both
+transaction summaries become necessary, not optional. At that point the headline schema is extended, not
+replaced. Anyone asked to "add the CD cost tables" should first confirm which rule now reads them.
+
+**Cross-refs.** LP-470 (`docs/tickets/LP-470.md`), ADR-362/363 (the visibility-plus-future-rule standard this
+applies), LP-467 diagnostic (the CD/LE scope verification against `rule_kinds.csv`), LP-461 (the
+drop-fields-not-on-the-page lesson applied to the CD-only partition).
+
+## ADR-367: `general_correspondence` — a thin envelope schema was CONSIDERED AND REJECTED; build nothing (LP-470)
+
+**Context.** The missing-extractor report flagged `general_correspondence` (six documents) as needing an
+extractor. LP-470 had to decide what to build. This ADR records that the answer is **nothing**, and why —
+because "build nothing" is invisible in the code, and without this someone will build the thin schema later.
+
+**What the documents are.** All five in scope (152, 153, 156, 159, 214) are **Gmail email threads** —
+borrower/broker/lender correspondence delivering explanations: an employment history, an arms-length
+relationship disclosure, two paystub/bank-statement address-discrepancy explanations, a Non-QM rationale. The
+**envelope is uniform** (from, to, cc, date, subject, attachments); the **value is entirely in the body, and
+it varies per letter**.
+
+**The option considered and rejected: a thin envelope schema** (from / to / date / subject / attachments,
+plus a "key facts" area). Rejected for three reasons:
+1. **It captures the wrapper and misses the content.** The from/to/date is the least useful part; the
+   employment rows, the disputed addresses, the LOE questions are the point, and they differ every letter.
+2. **Tier 3 already serves the content.** Since LP-463, Tier 3 free extraction lands the body in a
+   marked-untyped snapshot section readable by AI cross-source verification — which is exactly right for
+   per-letter-varying free text. A thin typed schema beside it would be strictly worse (it would look
+   structured while carrying nothing structured).
+3. **Four of the five are Letters of Explanation.** The existing `letter_of_explanation` family (seven types)
+   already covers explanations. Where the classifier routes an explanation-email to `letter_of_explanation` it
+   gets a real schema; where it lands in `general_correspondence` it gets a Tier-2 summary + a Tier-3 body.
+   Both are acceptable; **neither needs a new extractor.**
+
+**So `general_correspondence` stays Tier 2 (recognized + summarized), with no spec and no extractor**, and no
+"key facts" area is built. This is the **third time in this workstream a "missing extractor" turned out to be
+routing, not a missing type** — EAD→passport (LP-468), compensation→commission (LP-468), and now
+correspondence→LOE/Tier-3. The recurring lesson: before building an extractor for a "missing type", confirm
+the documents aren't already served by an existing type reached by a different route.
+
+**Cross-refs.** LP-470 (`docs/tickets/LP-470.md`), LP-463 (Tier-3 scoped free extraction + the untyped
+snapshot section this leans on), LP-468 (the two prior routing-not-missing-type findings), the
+`letter_of_explanation` family (the seven LOE types that cover the explanation content).

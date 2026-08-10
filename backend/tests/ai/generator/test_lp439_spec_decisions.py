@@ -20,15 +20,15 @@ _ALL = sorted(_SPECS.glob("[0-9]*.json"))
 _VALID_KINDS = {k.name for k in PiiKind}
 
 
-def test_there_are_118_specs() -> None:
+def test_there_are_120_specs() -> None:
     # LP-442 split alimony_income_verification into alimony_income + child_support_income (Geet's
     # decision 1 — child support terminates at the child's emancipation age, alimony runs to the
     # court order), so the corpus grew 108 → 109. LP-465 added two rule-relevant NEW types
     # (temporary_buydown_agreement, uscis_notice_of_action) → 111. LP-466 added three
     # (home_value_estimate, wire_instructions, lender_dashboard_screenshot) → 114. LP-467
     # added two (certificate_of_liability_insurance, service_invoice) → 116. LP-468
-    # added one (compensation_statement) → 117. LP-469 added one (form_1098) → 118.
-    assert len(_ALL) == 118
+    # added one (compensation_statement) → 117. LP-469 added one (form_1098) → 118. LP-470 promoted closing_disclosure + loan_estimate to Tier 1 with specs → 120.
+    assert len(_ALL) == 120
 
 
 @pytest.mark.parametrize("path", _ALL, ids=lambda p: p.stem)

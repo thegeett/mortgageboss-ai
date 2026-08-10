@@ -262,7 +262,9 @@ async def test_tier2_summarized_and_terminal(
         # by the merge (they have specs) — use spec-less types that stay Tier-2.
         ("collection_account_letter", DocumentCategory.CREDIT),
         ("warranty_deed", DocumentCategory.PROPERTY),
-        ("closing_disclosure", DocumentCategory.DISCLOSURES),
+        # closing_disclosure was promoted Tier 2 -> Tier 1 (LP-470); truth_in_lending is a spec-less Tier-2
+        # DISCLOSURES type.
+        ("truth_in_lending", DocumentCategory.DISCLOSURES),
         ("money_market_statement", DocumentCategory.ASSETS),
     ],
 )

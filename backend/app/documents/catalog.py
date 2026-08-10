@@ -209,8 +209,11 @@ CATALOG: dict[str, tuple[Tier, DocumentCategory]] = {
     # ===================================================================== #
     # Disclosures
     # ===================================================================== #
-    "closing_disclosure": (Tier.TIER_2, DocumentCategory.DISCLOSURES),
-    "loan_estimate": (Tier.TIER_2, DocumentCategory.DISCLOSURES),
+    # LP-470 — promoted Tier 2 -> Tier 1 with a HEADLINE-block schema (spec 119/120). No in-scope rule reads
+    # a CD/LE (CL-2..7, DC-1..7 are out of pre-submission scope), so they earn Tier 1 on processor visibility;
+    # the full cost tables / transaction summaries stay on Tier 3 (ADR).
+    "closing_disclosure": (Tier.TIER_1, DocumentCategory.DISCLOSURES),
+    "loan_estimate": (Tier.TIER_1, DocumentCategory.DISCLOSURES),
     # LP-442 decision 2: the generic borrower_authorization is RETIRED — the two
     # authorization specs (authorization_to_run_credit, borrower_authorization_and_certification)
     # are distinct documents and cannot share a key. Verified unused (no rule/fixture/test).

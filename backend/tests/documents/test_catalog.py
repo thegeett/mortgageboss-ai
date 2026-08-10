@@ -69,7 +69,9 @@ def test_planned_tier_1_types(document_type: str, category: DocumentCategory) ->
         # LP-441: types WITHOUT a schema spec stay Tier-2 (credit_report / flood_certification /
         # verification_of_deposit were promoted by the tier merge — they have specs).
         ("collection_account_letter", DocumentCategory.CREDIT),
-        ("closing_disclosure", DocumentCategory.DISCLOSURES),
+        # closing_disclosure / loan_estimate were promoted Tier 2 -> Tier 1 (LP-470, headline spec);
+        # truth_in_lending is a still-Tier-2 DISCLOSURES type with no spec.
+        ("truth_in_lending", DocumentCategory.DISCLOSURES),
         ("warranty_deed", DocumentCategory.PROPERTY),
         ("money_market_statement", DocumentCategory.ASSETS),
         ("passport", DocumentCategory.BORROWER_INFO),
@@ -195,7 +197,7 @@ def test_every_spec_document_type_resolves_to_a_catalog_entry() -> None:
         f"spec types the classifier can never emit (silent routing): {unresolved}"
     )
     assert (
-        len(spec_types) == 118
+        len(spec_types) == 120
     )  # 114 + LP-467 (certificate_of_liability_insurance, service_invoice)
 
 

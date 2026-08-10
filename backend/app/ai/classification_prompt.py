@@ -111,7 +111,7 @@ DOCUMENT_TYPE_INDICATORS: dict[str, str] = {
     # --- Property ---
     "purchase_agreement": "a signed real-estate purchase and sale contract; buyer/seller, property address, price, and contingencies",
     "homeowners_insurance": "a homeowner's hazard insurance policy or declarations page; coverage amounts, premium, and the insured property",
-    "mortgage_statement": "a monthly mortgage billing statement for an existing loan; principal balance, payment, and escrow",
+    "mortgage_statement": "a monthly mortgage billing statement for an existing loan — 'Amount Due by [date]', a running principal/escrow balance, and payment history. NOT a TRID loan_estimate or closing_disclosure (no APR, no TIP, no A-J cost tables)",
     "form_1098": "an IRS Form 1098 'Mortgage Interest Statement' — the ANNUAL TAX form a mortgage servicer/lender furnishes for a calendar year, reporting mortgage interest received (Box 1), outstanding principal (Box 2), points, and often real-estate taxes in the free-text Box 10. It prints 'Form 1098', 'Mortgage Interest Statement', 'Copy B For Payer/Borrower', and OMB No. 1545-1380. NOT form_1099 (a different IRS return — reports income, not mortgage interest), NOT mortgage_statement (a MONTHLY servicer bill with an 'amount due by' date — a 1098 is an ANNUAL 'keep for your records' tax form), and NOT property_tax_bill (a taxing authority's bill — a 1098 mentions taxes only as free text in Box 10)",
     "property_tax_bill": "a county/municipal property tax bill or assessment showing the annual tax and the parcel",
     "hoa_statement": "a homeowners-association statement or dues invoice showing the HOA fee and the property",
@@ -161,8 +161,8 @@ DOCUMENT_TYPE_INDICATORS: dict[str, str] = {
     "verification_of_mortgage": "a Verification of Mortgage (VOM): a servicer's confirmation of the borrower's existing mortgage — balance, payment, and 30/60/90-day late history; the mortgage payment-history verification, distinct from mortgage_statement (a billing statement)",
     "verification_of_rent": "a Verification of Rent (VOR): a landlord's confirmation of the borrower's rent amount, lease start, and late-payment history — the rental payment-history verification, distinct from lease_agreement (the contract)",
     # --- Disclosures ---
-    "closing_disclosure": "the TRID Closing Disclosure (CD); FINAL loan terms, closing costs, and cash-to-close in the standard 5-page form",
-    "loan_estimate": "the TRID Loan Estimate (LE); ESTIMATED loan terms and costs in the standard 3-page form",
+    "closing_disclosure": "the TRID Closing Disclosure (CD) — a ~5-page form titled 'Closing Disclosure', 'a statement of FINAL loan terms and closing costs'. It has a Disbursement Date, a SELLER party and seller-paid cost column, payoffs, a page-5 'Loan Calculations' box (APR, Finance Charge, Amount Financed, Total of Payments, TIP), and a 'Confirm Receipt' signature. NOT a loan_estimate (the LE is the ESTIMATE, with an 'In 5 Years' box and a rate-lock expiration, and no seller/disbursement date) and NOT a mortgage_statement (a monthly bill with 'Amount Due by')",
+    "loan_estimate": "the TRID Loan Estimate (LE) — a ~3-page form titled 'Loan Estimate', 'Save this Loan Estimate to compare with your Closing Disclosure'. It has an 'In 5 Years' comparison box, a rate-lock expiration and a closing-cost-estimate expiration, and NO seller column and NO disbursement date. It is the ESTIMATE issued early; the CD is the FINAL form. NOT a mortgage_statement",
     "intent_to_proceed": "a signed Intent to Proceed acknowledging the borrower wishes to continue after the Loan Estimate",
     "notice_of_right_to_cancel": "a Notice of Right to Cancel / right of rescission for a refinance of a primary residence",
     "truth_in_lending": "a Truth in Lending (TIL) disclosure with the APR and finance charge (legacy/Reg Z)",

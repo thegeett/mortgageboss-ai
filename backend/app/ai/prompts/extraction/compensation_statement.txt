@@ -18,7 +18,7 @@ CAPTURE EVERYTHING ON THE DOCUMENT — lose nothing. There are two buckets:
      base_pay_increase_percent  (number) The salary/base-pay change percent
      bonus_target_percent       (number) The 'Bonus Opportunity' / 'Bonus Target' percent; leave null if only an actual award is shown
      bonus_actual_award         (number) The actual bonus/AIP award amount
-     equity_award_amount        (number) The equity award amount EXACTLY as printed — do NOT convert shares to dollars or vice versa. If shares, capture the share count; if a dollar value, capture the dollars. equity_award_type records which.
+     equity_award_amount        (string) The equity award amount EXACTLY as printed — do NOT convert shares to dollars or vice versa. If shares, capture the share count; if a dollar value, capture the dollars. equity_award_type records which.
      equity_award_type          (string) e.g. 'RSU', 'Chairman's Shares', 'stock options' — as stated
      one_time_payment_amount    (number) A 'Special One-Time Payment' / 'Reward Excellence' / additional-award amount
      performance_rating         (string) e.g. 'Exceptional', 'EP - Exceptional Performance' — as stated
@@ -52,7 +52,7 @@ Respond with ONLY a single JSON object, no markdown fences and no prose, exactly
     "base_pay_increase_percent": {"value": <number|null>, "page": <int|null>, "snippet": <string|null>},
     "bonus_target_percent": {"value": <number|null>, "page": <int|null>, "snippet": <string|null>},
     "bonus_actual_award": {"value": <number|null>, "page": <int|null>, "snippet": <string|null>},
-    "equity_award_amount": {"value": <number|null>, "page": <int|null>, "snippet": <string|null>},
+    "equity_award_amount": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
     "equity_award_type": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
     "one_time_payment_amount": {"value": <number|null>, "page": <int|null>, "snippet": <string|null>},
     "performance_rating": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>}
