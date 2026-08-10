@@ -677,3 +677,86 @@ def test_cli_sigterm_still_writes_the_report(
     assert (run_dir / "_SUMMARY.md").is_file()  # the report exists despite the kill
     assert (run_dir / "_FINDINGS.csv").is_file()
     assert len(load_records(run_dir)) == 1  # stopped after the in-flight document, not all three
+
+
+# --------------------------------------------------------------------------- #
+# run_one's LONG-TAIL path: a doc with no TYPED extractor now runs the production tier path (Tier 3 free
+# extraction for unknown/uncataloged, Tier 2 summary otherwise) — so the bench shows what the long tail
+# actually captures instead of a bare "no_extractor" (previously Tier 3 looked like it did nothing).
+# --------------------------------------------------------------------------- #
+def _pdf_file(tmp_path: Path) -> Any:
+    from app.dev.bench.engine import DiscoveredFile
+
+    p = tmp_path / "doc.pdf"
+    p.write_bytes(b"%PDF-1.4\n%mock\n")
+    return DiscoveredFile(path=p, size=p.stat().st_size, media_type="application/pdf")
+
+
+@pytest.mark.asyncio
+async def test_run_one_unknown_runs_tier3_free_extraction(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from app.ai.generic_analyzer import AnalyzedFinding, GenericAnalysis
+    from app.dev.bench import engine
+
+    monkeypatch.setattr(
+        engine,
+        "classify_document",
+        AsyncMock(
+            return_value=SimpleNamespace(document_type="unknown", confidence=0.9, reasoning="?")
+        ),
+    )
+    analysis = GenericAnalysis(
+        document_type_guess="mystery affidavit",
+        summary="a mortgage-relevant affidavit",
+        key_findings=[AnalyzedFinding(finding_type="obligation", description="owes $500/mo")],
+        full_text="THE FULL TEXT THAT MUST BE EXCLUDED",
+    )
+    analyze = AsyncMock(return_value=analysis)
+    monkeypatch.setattr(engine, "analyze_document", analyze)
+    # summarize must NOT be called for a Tier-3 (unknown) document
+    monkeypatch.setattr(
+        engine, "summarize_document", AsyncMock(side_effect=AssertionError("Tier-2 path"))
+    )
+
+    record = await engine.run_one(_pdf_file(tmp_path))
+
+    assert record["classified_type"] == "unknown"
+    ex = record["extraction"]
+    assert ex["status"] == "no_extractor"  # still no TYPED extractor — coverage tally unchanged
+    analyze.assert_awaited_once()
+    t3 = ex["tier3_free_extraction"]
+    assert t3 is not None and t3["summary"] == "a mortgage-relevant affidavit"
+    assert t3["key_findings"][0]["description"] == "owes $500/mo"
+    assert "full_text" not in t3  # excluded from the record (lives in its own column in prod)
+    assert record["findings"]["typed_present"] == 0  # no typed extraction happened
+
+
+@pytest.mark.asyncio
+async def test_run_one_tier2_type_runs_summary_not_free_extraction(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from app.dev.bench import engine
+
+    # passport is a Tier-2 catalog type with no registered extractor.
+    monkeypatch.setattr(
+        engine,
+        "classify_document",
+        AsyncMock(
+            return_value=SimpleNamespace(document_type="passport", confidence=0.95, reasoning="?")
+        ),
+    )
+    monkeypatch.setattr(
+        engine, "summarize_document", AsyncMock(return_value="a passport photo page")
+    )
+    # free extraction must NOT be called for a Tier-2 document
+    monkeypatch.setattr(
+        engine, "analyze_document", AsyncMock(side_effect=AssertionError("Tier-3 path"))
+    )
+
+    record = await engine.run_one(_pdf_file(tmp_path))
+
+    ex = record["extraction"]
+    assert ex["status"] == "no_extractor"
+    assert ex["tier2_summary"] == "a passport photo page"
+    assert "tier3_free_extraction" not in ex
