@@ -195,7 +195,7 @@ def test_every_spec_document_type_resolves_to_a_catalog_entry() -> None:
         f"spec types the classifier can never emit (silent routing): {unresolved}"
     )
     assert (
-        len(spec_types) == 116
+        len(spec_types) == 117
     )  # 114 + LP-467 (certificate_of_liability_insurance, service_invoice)
 
 

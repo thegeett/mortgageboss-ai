@@ -13702,3 +13702,59 @@ generator emits list *fields* but not the spec's shape framing; any list whose u
 **Cross-refs.** LP-467 (`docs/tickets/LP-467.md`), ADR-362/363 (the "what earns a type" / visibility-only
 rules this applies), LP-460 (the one-row-per-section lesson that recurred), LP-441 (the Tier-1-iff-spec
 invariant both new types honor).
+
+## ADR-365: Two limits on classification accuracy — the LP-463 guard cannot catch a confident-but-coherent misread, and an indicator cannot fix an unreadable input (LP-468)
+
+**Context.** LP-468 fixed two misclassifications from the missing-extractor diagnostic. One (compensation
+statements force-fit into `commission_income_statement`) was fixed cleanly by a new type + sharpened
+indicators. The other (an EAD card read as a `passport`) exposed two distinct ceilings on classification
+accuracy that are easy to conflate with "the prompt needs work." Both are recorded because assuming either is
+a prompt problem wastes effort on the wrong layer.
+
+**Limit 1 — the LP-463 reasoning-vs-label guard only catches ADMITTED contradictions.** LP-463 made the
+classifier able to decline, and added a `type_matches_document` guard that fires when the model's chosen label
+disagrees with its own reasoning (the case that diverts a document to Tier 3). That guard caught the
+compensation statements — they returned `commission_income_statement` with `type_matches_document = False`,
+because the model's *own* description ("employee compensation statement … base pay, incentive awards") did not
+match the mortgage-sales-commission label. **But the EAD returned `passport` @0.92 with
+`type_matches_document = TRUE`** — the model's label and its reasoning AGREED ("a U.S. passport photo page").
+A confident, self-consistent, wrong read is invisible to a contradiction guard: there is no contradiction to
+detect. That class needs an *indicator* fix (teach the boundary), not a guard. This is worth knowing before
+anyone assumes the LP-463 guard covers all misclassification — it covers the model second-guessing itself, not
+the model being coherently wrong.
+
+**Limit 2 — an indicator cannot fix an input the model cannot READ.** The indicator fix for the EAD/passport
+boundary is correct and provably works: a *readable* EAD (Harshita's) now classifies as `work_visa_ead_card`
+@0.95, and the whole immigration family held (passport, driver's license, USCIS notice all unchanged). **But
+the ticket's target document, 266, is a 90°-rotated, low-resolution CamScanner photo** — across three runs the
+classifier hallucinated "UK passport" / "UK biometric residence permit" / "UK passport", never once reading
+the card's own separators ("EMPLOYMENT AUTHORIZATION", "Form I-766", "NOT VALID FOR REENTRY"). An indicator
+teaches a boundary between things the model can perceive; it cannot make an unreadable image legible. A second
+EAD, `453__Saikumar_EAD`, → `passport` @0.95, so this is **systemic, not a single bad scan** — ID cards are
+routinely photographed rotated and low-res, and the classifier's default in that state is `passport`.
+
+**The evidence that this is a preprocessing gap, not an illegible document.** The *extractor* — given the same
+image but a prompt primed to look for EAD fields — pulled "Employment Authorization Document / Form I-766" from
+266, at confidence 0.35. So the text IS there and IS partially machine-readable; the classifier fails because
+it is choosing among ~160 type descriptions on a rotated image and latches onto the visual gestalt (a photo-ID
+card with security features → passport). That 0.35 partial read is the strongest signal that **image
+preprocessing — auto-rotation, OCR — would close this**, rather than the image being genuinely illegible. That
+is the follow-up, and it is out of scope for an indicator ticket.
+
+**The combined lesson.** Classification accuracy has at least three separable layers: the guard (catches
+self-contradiction), the indicator (teaches boundaries the model can perceive), and the input pipeline (makes
+the document perceivable). A failure at one layer cannot be fixed at another. Reach for the right layer:
+self-contradiction → guard; coherent boundary confusion → indicator; unreadable input → preprocessing.
+
+**Why `compensation_statement` earns a type with no rule today.** It serves no rule now — but it is the direct
+input to IN-10 and IN-11 once the earnings classifier is built, and a processor needs the base/bonus/equity
+split reliably in the meantime. Same standard as `wire_instructions`/`home_value_estimate` (ADR-362/363):
+processor visibility plus a concrete future rule consumer. Critically, the extractor captures the printed
+components ONLY — no total-compensation figure, no qualifying-income, no variable-vs-base label — because
+earnings classification is a separate decision procedure (Priya's ruling: "do not classify solely from the
+text label", with a fail-closed UNKNOWN branch), not a number to read off the page. The `$195,000 total
+compensation` banner on the Deloitte statement is deliberately left to the catch-all for exactly this reason.
+
+**Cross-refs.** LP-468 (`docs/tickets/LP-468.md`), LP-463 (the guard whose blind spot this names), LP-465 (the
+prior immigration-family indicator fix + the "NOT A VISA" separator pattern reused here as "NOT VALID FOR
+REENTRY"), ADR-362/363 (the visibility-plus-future-rule standard).

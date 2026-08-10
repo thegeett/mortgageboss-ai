@@ -52,6 +52,7 @@ from app.ai.extraction.certificate_of_liability_insurance import (
     extract_certificate_of_liability_insurance,
 )
 from app.ai.extraction.child_support_income import extract_child_support_income
+from app.ai.extraction.compensation_statement import extract_compensation_statement
 from app.ai.extraction.condo_questionnaire import extract_condo_questionnaire
 from app.ai.extraction.court_order_documents import extract_court_order_documents
 from app.ai.extraction.cpa_letter import extract_cpa_letter
@@ -329,6 +330,9 @@ EXTRACTORS: dict[str, Extractor] = {
     # only — serves no rule, NOT CO-3) and a generic vendor service invoice (a bill, not a receipt).
     "certificate_of_liability_insurance": extract_certificate_of_liability_insurance,
     "service_invoice": extract_service_invoice,
+    # LP-468 — W-2 employee compensation statements (base/bonus/equity) that were force-fitting into
+    # commission_income_statement (a mortgage sales-commission type) and now divert to Tier 3. Their home.
+    "compensation_statement": extract_compensation_statement,
 }
 
 __all__ = ["EXTRACTORS", "ExtractionResult", "Extractor"]

@@ -81,6 +81,10 @@ CATALOG: dict[str, tuple[Tier, DocumentCategory]] = {
     "alimony_income": (Tier.TIER_1, DocumentCategory.INCOME_EMPLOYMENT),  # LP-442: split target
     "rental_income_schedule": (Tier.TIER_2, DocumentCategory.INCOME_EMPLOYMENT),
     "commission_income_statement": (Tier.TIER_2, DocumentCategory.INCOME_EMPLOYMENT),
+    # LP-468 — an employer-issued annual compensation/rewards statement (base + bonus + equity). The home
+    # for the Deloitte/Fidelity/PayPal docs that were force-fitting into commission_income_statement. No
+    # rule today; the direct input to IN-10/IN-11 once the earnings classifier exists.
+    "compensation_statement": (Tier.TIER_1, DocumentCategory.INCOME_EMPLOYMENT),
     "employment_offer_letter": (Tier.TIER_1, DocumentCategory.INCOME_EMPLOYMENT),
     # LP-442 — schema'd types reconciled into the catalog (every one has a spec → Tier-1).
     "form_1040_personal_tax_transcripts": (Tier.TIER_1, DocumentCategory.INCOME_EMPLOYMENT),
