@@ -62,7 +62,10 @@ class CompensationStatementExtraction(BaseModel):
     base_pay_increase_percent: TypedField[Decimal] = Field(default_factory=TypedField)
     bonus_target_percent: TypedField[Decimal] = Field(default_factory=TypedField)
     bonus_actual_award: TypedField[Decimal] = Field(default_factory=TypedField)
-    equity_award_amount: TypedField[Decimal] = Field(default_factory=TypedField)
+    # str (not Decimal) — captured EXACTLY as printed: a share COUNT ("625") or a dollar value ("$50,000"),
+    # disambiguated by equity_award_type. Coercing to Decimal would strip the $/commas/units the spec says
+    # to preserve (and a normalized bare 9+-digit value would trip the at-rest guard — LP-468 review).
+    equity_award_amount: TypedField[str] = Field(default_factory=TypedField)
     equity_award_type: TypedField[str] = Field(default_factory=TypedField)
     one_time_payment_amount: TypedField[Decimal] = Field(default_factory=TypedField)
     performance_rating: TypedField[str] = Field(default_factory=TypedField)
@@ -102,7 +105,7 @@ _CORE_SPEC: CoreSpec = (
     ("base_pay_increase_percent", coerce_decimal),
     ("bonus_target_percent", coerce_decimal),
     ("bonus_actual_award", coerce_decimal),
-    ("equity_award_amount", coerce_decimal),
+    ("equity_award_amount", coerce_str),
     ("equity_award_type", coerce_str),
     ("one_time_payment_amount", coerce_decimal),
     ("performance_rating", coerce_str),
