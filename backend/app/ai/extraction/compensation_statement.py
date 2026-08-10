@@ -62,6 +62,9 @@ class CompensationStatementExtraction(BaseModel):
     base_pay_increase_percent: TypedField[Decimal] = Field(default_factory=TypedField)
     bonus_target_percent: TypedField[Decimal] = Field(default_factory=TypedField)
     bonus_actual_award: TypedField[Decimal] = Field(default_factory=TypedField)
+    # str (not Decimal) — captured EXACTLY as printed: a share COUNT ("625") or a dollar value ("$50,000"),
+    # disambiguated by equity_award_type. A Decimal would strip the $/commas the spec preserves, and a
+    # normalized bare 9+-digit value would trip the snapshot at-rest guard (LP-468 review; also spec 117's why).
     equity_award_amount: TypedField[str] = Field(default_factory=TypedField)
     equity_award_type: TypedField[str] = Field(default_factory=TypedField)
     one_time_payment_amount: TypedField[Decimal] = Field(default_factory=TypedField)
