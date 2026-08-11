@@ -57,6 +57,23 @@ logs/
 /storage/
 /backend/storage/
 
+# ---- Terraform ----
+# Saved plans are what `scripts/deploy` applies. They are binary, environment- and
+# state-specific, and a stale one applied later would not mean what it says — the
+# script deletes each on success, so anything matching here is the debris of an
+# aborted run.
+*.tfplan
+.terraform/
+.terraform.lock.hcl.bak
+# ⚠️ Local state, from `infra/bootstrap` and from any accidental local run. It
+# records every resource in the environment and, for a bootstrap that generated
+# one, the RDS master password in cleartext.
+*.tfstate
+*.tfstate.*
+crash.log
+# terraform.tfvars IS committed here by design (non-secret values only) — see the
+# header of infra/envs/staging/terraform.tfvars.
+
 # ---- Databases ----
 *.db
 *.sqlite

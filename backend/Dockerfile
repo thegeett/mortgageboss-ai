@@ -17,6 +17,26 @@ RUN uv sync --frozen --no-dev --no-install-project
 COPY . .
 RUN uv sync --frozen --no-dev
 
+# RDS CA bundle (C5). asyncpg builds its own SSLContext and reads the CA path from
+# the PGSSLROOTCERT ENVIRONMENT VARIABLE only (connect_utils.py:698-702) — it cannot
+# be expressed in DATABASE_URL, because SQLAlchemy forwards unknown query parameters
+# as raw kwargs to asyncpg.connect(), so `?sslrootcert=` crashes the same way
+# `?sslmode=` does. The system ca-certificates package does not chain to the RDS
+# regional CAs, so without this bundle `?ssl=require` encrypts but verifies nothing.
+#
+# The AWS *global* bundle covers every region, so the image stays region-agnostic.
+# ADD fetches it at BUILD time (the image has neither curl nor wget) — the running
+# container never needs egress for it, which matters in a VPC whose only route out
+# is interface endpoints.
+ADD https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem /opt/rds/global-bundle.pem
+RUN chmod 0644 /opt/rds/global-bundle.pem
+
+# Set in the IMAGE, not the task definition, so the variable and the path it points
+# at can never drift apart. Harmless locally: against the Compose Postgres the URL
+# carries no ssl parameter, asyncpg defaults to `prefer`, and that mode never reads
+# PGSSLROOTCERT (connect_utils.py:695-696).
+ENV PGSSLROOTCERT=/opt/rds/global-bundle.pem
+
 # Worker liveness (C1). A Celery worker has no HTTP endpoint, so without this an
 # orchestrator cannot tell "alive" from "alive but not consuming" — a worker that lost
 # its broker connection keeps its process up and silently stops processing documents.

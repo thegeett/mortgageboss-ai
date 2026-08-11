@@ -1,0 +1,1310 @@
+#!/usr/bin/env bash
+# Deployment CLI for a Terraform-managed environment under infra/envs/.
+#
+# The environment is an ARGUMENT. Nothing in this file names one: no account id,
+# no region, no domain, no bucket, no cluster. Adding production means adding
+# infra/envs/production/ with its own terraform.tfvars and an AWS profile -- not
+# editing this script.
+#
+# Everything else is read back from `terraform output` (identifiers) or from the
+# environment's own terraform.tfvars (account, region, domain, phase flags).
+#
+# Steps, order, and hazards come from docs/tickets/C5-deploy-staging.md.
+#
+# TARGETS BASH 3.2 (what macOS ships). See scripts/deploy-lib.sh.
+
+set -euo pipefail
+
+SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+REPO_ROOT=$(cd "$SCRIPT_DIR/.." && pwd)
+# shellcheck source=scripts/deploy-lib.sh
+. "$SCRIPT_DIR/deploy-lib.sh"
+
+STAGES="bootstrap phase1 dns images secrets migrate phase2 smoke all status"
+
+# How long `dns` waits for the registrar's delegation to propagate, and how long
+# `migrate` waits for the one-off task to stop. Both overridable for a slow
+# registrar or a cold Fargate start.
+DNS_TIMEOUT_SECONDS="${DEPLOY_DNS_TIMEOUT_SECONDS:-1800}"
+DNS_POLL_SECONDS="${DEPLOY_DNS_POLL_SECONDS:-30}"
+MIGRATE_TIMEOUT_SECONDS="${DEPLOY_MIGRATE_TIMEOUT_SECONDS:-900}"
+
+usage() {
+  cat <<'EOF'
+deploy -- staged deployment driver for an infra/envs/<env> environment
+
+USAGE
+  ./scripts/deploy <env> <stage> [--yes] [--profile NAME] [--force]
+  ./scripts/deploy --help
+
+ARGUMENTS
+  <env>     A directory name under infra/envs/. Never hardcoded -- adding an
+            environment is a new tfvars file plus an AWS profile, not a code edit.
+  <stage>   One of:
+
+    bootstrap  terraform init + plan + apply in infra/bootstrap (the state bucket).
+    phase1     terraform apply for the environment with TLS and Cognito OFF.
+               Refuses if the plan contains an ACM certificate.
+    dns        Prints the four nameservers and waits for the registrar delegation
+               to go live. Applies nothing.
+    images     ECR login, buildx both images for linux/arm64, push, then verify
+               the pushed architecture.
+    secrets    Generate and populate the four Secrets Manager values, with
+               validation before writing. Refuses to overwrite without --force.
+    migrate    Run the one-off Alembic task on ECS, tail its logs, fail on a
+               non-zero exit code.
+    phase2     Flip TLS + Cognito on and apply. Refuses unless DNS is delegated.
+    smoke      The seven post-deploy checks, in order.
+    all        Every stage in order, pausing at `dns` for the manual registrar
+               step.
+    status     Read-only. Prints the state of every stage. Safe at any time.
+
+OPTIONS
+  --yes            Answer every confirmation with yes. Still prints what it does.
+  --profile NAME   AWS profile. Default: $AWS_PROFILE, else mbai-<env>-admin.
+  --force          secrets only: overwrite a secret that already has a value.
+  --help, -h       This text.
+
+EXIT CODES
+  0  success
+  1  a failure, a refusal, or an operator "no"
+  2  smoke only: every automated check passed, but manual checks are unverified
+
+ENVIRONMENT
+  DEPLOY_DNS_TIMEOUT_SECONDS      default 1800
+  DEPLOY_DNS_POLL_SECONDS         default 30
+  DEPLOY_MIGRATE_TIMEOUT_SECONDS  default 900
+  NO_COLOR                        disable colour
+
+See docs/deployment-runbook.md for the full sequence and recovery steps.
+EOF
+}
+
+# --------------------------------------------------------------------------- #
+# Arguments
+# --------------------------------------------------------------------------- #
+
+ENV_NAME=""
+STAGE=""
+ASSUME_YES=0
+FORCE=0
+PROFILE_OVERRIDE=""
+
+parse_args() {
+  local positional=0
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      -h | --help) usage; exit 0 ;;
+      --yes | -y) ASSUME_YES=1 ;;
+      --force) FORCE=1 ;;
+      --profile)
+        [ $# -ge 2 ] || die "--profile needs a value."
+        PROFILE_OVERRIDE="$2"; shift ;;
+      --profile=*) PROFILE_OVERRIDE="${1#*=}" ;;
+      -*) die "Unknown option: $1" "Run ./scripts/deploy --help" ;;
+      *)
+        positional=$((positional + 1))
+        if [ "$positional" = "1" ]; then ENV_NAME="$1"
+        elif [ "$positional" = "2" ]; then STAGE="$1"
+        else die "Unexpected argument: $1" "Usage: ./scripts/deploy <env> <stage> [options]"
+        fi ;;
+    esac
+    shift
+  done
+
+  if [ -z "$ENV_NAME" ] || [ -z "$STAGE" ]; then
+    usage >&2
+    die "Both <env> and <stage> are required."
+  fi
+
+  local found=0 s
+  for s in $STAGES; do [ "$s" = "$STAGE" ] && found=1; done
+  [ "$found" = "1" ] || die "Unknown stage: $STAGE" "Valid stages: $STAGES"
+}
+
+# --------------------------------------------------------------------------- #
+# Environment resolution
+#
+# The three values every stage needs -- account, region, domain -- come from the
+# environment's tfvars, because Terraform surfaces outputs and never inputs, and
+# because the domain is needed by `images` (baked into the frontend bundle) long
+# before the URL output means anything.
+# --------------------------------------------------------------------------- #
+
+ENV_DIR=""
+TFVARS=""
+ACCOUNT_ID=""
+AWS_REGION=""
+DOMAIN=""
+
+resolve_env() {
+  ENV_DIR=$(env_dir "$ENV_NAME")
+  if [ ! -d "$ENV_DIR" ]; then
+    die "No such environment: '$ENV_NAME' (looked for $ENV_DIR)" \
+      "Available: $(list_envs | tr '\n' ' ')"
+  fi
+  TFVARS="$ENV_DIR/terraform.tfvars"
+  [ -f "$TFVARS" ] || die "Environment '$ENV_NAME' has no terraform.tfvars ($TFVARS)."
+
+  ACCOUNT_ID=$(tfvar_required "$TFVARS" "aws_account_id")
+  AWS_REGION=$(tfvar_required "$TFVARS" "aws_region")
+  # Optional: an environment with no DNS module has no domain, and only the
+  # stages that need one complain.
+  DOMAIN=$(tfvar "$TFVARS" "domain_name" || printf '')
+
+  if [ -n "$PROFILE_OVERRIDE" ]; then
+    AWS_PROFILE="$PROFILE_OVERRIDE"
+  elif [ -n "${AWS_PROFILE:-}" ]; then
+    : # inherit the caller's
+  else
+    # A convention, not a hardcoded environment: production resolves to
+    # mbai-production-admin with no edit here.
+    AWS_PROFILE="mbai-${ENV_NAME}-admin"
+  fi
+  export AWS_PROFILE
+  # Terraform reads the same profile and region from the environment.
+  export AWS_REGION
+  export AWS_DEFAULT_REGION="$AWS_REGION"
+}
+
+require_domain() {
+  [ -n "$DOMAIN" ] || die \
+    "Environment '$ENV_NAME' has no \`domain_name\` in $TFVARS." \
+    "This stage needs it. envs/dev has no DNS, TLS or Cognito module at all, so" \
+    "this stage does not apply to it."
+}
+
+# --------------------------------------------------------------------------- #
+# Temp files
+# --------------------------------------------------------------------------- #
+
+SECRET_TMPDIR=""
+cleanup() {
+  if [ -n "${TF_OUTPUT_CACHE:-}" ]; then rm -f "$TF_OUTPUT_CACHE"; fi
+  # The secret payload directory holds plaintext values on their way to Secrets
+  # Manager. It must not survive the process, including on Ctrl-C.
+  if [ -n "${SECRET_TMPDIR:-}" ] && [ -d "${SECRET_TMPDIR:-}" ]; then
+    rm -rf "$SECRET_TMPDIR"
+  fi
+  return 0
+}
+trap cleanup EXIT INT TERM
+
+# --------------------------------------------------------------------------- #
+# Stage: bootstrap
+# --------------------------------------------------------------------------- #
+
+stage_bootstrap() {
+  banner "bootstrap -- state bucket ($ENV_NAME, account $ACCOUNT_ID)"
+  need_cmd terraform; need_cmd aws; need_cmd jq
+  require_identity "$ACCOUNT_ID"
+
+  local dir plan rc
+  dir=$(bootstrap_dir)
+  plan="$dir/bootstrap.tfplan"
+
+  note "Bootstrap uses LOCAL state -- it creates the bucket every other directory"
+  note "stores its state in, so it cannot store its own state there."
+
+  init_or_explain_lockfile "$dir" "bootstrap"
+
+  set +e; tf_plan "$dir" "$plan"; rc=$?; set -e
+  if [ "$rc" -eq 0 ]; then
+    ok "bootstrap: no changes. The state bucket already exists and matches."
+    rm -f "$plan"
+    return 0
+  fi
+
+  hr
+  hazard "The plan above is the FIRST thing that creates anything in $ACCOUNT_ID."
+  info "The account guard is a Terraform precondition, so a wrong-account apply"
+  info "fails the plan rather than warning."
+  hr
+
+  if ! confirm "Apply this bootstrap plan?"; then
+    rm -f "$plan"
+    die "Aborted by operator. Nothing was applied."
+  fi
+
+  would "terraform -chdir=$dir apply bootstrap.tfplan"
+  tf "$dir" apply -input=false "$(basename "$plan")" || die "bootstrap apply failed."
+  rm -f "$plan"
+  ok "bootstrap applied."
+}
+
+# --------------------------------------------------------------------------- #
+# Stage: phase1
+# --------------------------------------------------------------------------- #
+
+# The two flags move together. modules/compute/alb.tf has a guard that fails the
+# plan on (cognito = true, tls = false), because an ALB cannot attach
+# authenticate-cognito to an HTTP listener -- and that pair shipped once already,
+# which meant the very first phase-1 plan could create nothing at all.
+assert_phase_flags() {
+  local want="$1" tls cognito
+  tls=$(tfvar "$TFVARS" "enable_tls" || printf '')
+  cognito=$(tfvar "$TFVARS" "enable_cognito" || printf '')
+  [ -n "$tls" ] || die "\`enable_tls\` is not set in $TFVARS."
+  [ -n "$cognito" ] || die "\`enable_cognito\` is not set in $TFVARS."
+
+  if [ "$tls" != "$want" ] || [ "$cognito" != "$want" ]; then
+    if [ "$want" = "false" ]; then
+      die "phase1 needs enable_tls = false and enable_cognito = false; $TFVARS has tls=$tls cognito=$cognito." \
+        "If this environment is already past phase 1, the stage you want is phase2." \
+        "If you flipped them by hand and phase 1 never ran, set both back to false:" \
+        "the ACM certificate cannot validate before the registrar delegation is live," \
+        "and it will sit in PENDING_VALIDATION for its full 45-minute timeout."
+    fi
+    return 1
+  fi
+  return 0
+}
+
+stage_phase1() {
+  banner "phase1 -- environment '$ENV_NAME' with TLS and Cognito OFF"
+  need_cmd terraform; need_cmd aws; need_cmd jq
+  require_identity "$ACCOUNT_ID"
+  assert_phase_flags "false"
+
+  local plan rc acm
+  plan="$ENV_DIR/${ENV_NAME}.tfplan"
+
+  init_or_explain_lockfile "$ENV_DIR" "$ENV_NAME"
+
+  set +e; tf_plan "$ENV_DIR" "$plan"; rc=$?; set -e
+  if [ "$rc" -eq 0 ]; then
+    ok "phase1: no changes. This environment is already applied and matches."
+    rm -f "$plan"
+    return 0
+  fi
+
+  # The phase gate, checked against the PLAN rather than against the tfvars --
+  # what matters is what would actually be created.
+  acm=$(tf "$ENV_DIR" show -json "$(basename "$plan")" \
+    | jq -r '[.resource_changes[]?
+              | select(.type == "aws_acm_certificate")
+              | select(.change.actions != ["no-op"])] | length') || die \
+    "Could not read the saved plan back as JSON to check it for an ACM certificate." \
+    "Refusing to apply an unchecked phase-1 plan: the whole point of this gate is" \
+    "that a certificate created before DNS delegation hangs the apply for 45 minutes."
+  if [ "$acm" != "0" ]; then
+    rm -f "$plan"
+    die "This phase-1 plan contains $acm aws_acm_certificate change(s)." \
+      "Phase 1 must create no certificate. ACM validates over DNS, and until the" \
+      "registrar delegation is live it sits in PENDING_VALIDATION until the apply" \
+      "times out 45 minutes later." \
+      "Set enable_tls = false and enable_cognito = false in $TFVARS, then re-run." \
+      "The TLS listener and Cognito belong to the phase2 stage."
+  fi
+  ok "plan contains no ACM certificate."
+
+  hr
+  hazard "This is the point at which the environment becomes BILLABLE."
+  info "Roughly 60 resources. The apply takes 10-15 minutes, mostly RDS."
+  info "Expect the ECS services to start and their tasks to FAIL afterwards --"
+  info "no images have been pushed yet. That is the expected state, not a fault."
+  hr
+
+  if ! confirm "Apply this phase-1 plan?"; then
+    rm -f "$plan"
+    die "Aborted by operator. Nothing was applied."
+  fi
+
+  would "terraform -chdir=$ENV_DIR apply $(basename "$plan")"
+  tf "$ENV_DIR" apply -input=false "$(basename "$plan")" || die "phase1 apply failed." \
+    "A partial apply is recoverable: re-running phase1 plans only the difference."
+  rm -f "$plan"
+  ok "phase1 applied."
+}
+
+# --------------------------------------------------------------------------- #
+# Stage: dns -- waits, applies nothing
+# --------------------------------------------------------------------------- #
+
+stage_dns() {
+  banner "dns -- registrar delegation for $ENV_NAME"
+  need_cmd terraform; need_cmd jq; need_cmd dig
+  require_domain
+  require_outputs "$ENV_DIR"
+
+  local count elapsed=0 parent
+  parent="${DOMAIN#*.}"
+
+  count=$(ns_awsdns_count "$DOMAIN")
+  if [ "$count" -ge 4 ]; then
+    ok "Delegation is already live: $count AWS nameservers answer for $DOMAIN."
+    dig +short NS "$DOMAIN" | sed 's/^/       /'
+    return 0
+  fi
+
+  hr
+  info "${C_BOLD}MANUAL STEP -- this stage applies nothing.${C_RESET}"
+  hr
+  info "Add these FOUR NS records at the registrar for ${C_BOLD}${parent}${C_RESET}:"
+  info ""
+  info "  Type: NS     Host: ${C_BOLD}${DOMAIN%%.*}${C_RESET}     Value: (one record per line below)"
+  info ""
+  out_list route53_name_servers | sed 's/^/       /'
+  info ""
+  info "At Namecheap that is: Domain List -> ${parent} -> Manage -> Advanced DNS"
+  info "-> Add New Record -> NS Record, four times, one nameserver each."
+  hazard "The apex ${parent} stays at the registrar and is never delegated."
+  info ""
+  info "Waiting for delegation (poll every ${DNS_POLL_SECONDS}s, giving up after"
+  info "${DNS_TIMEOUT_SECONDS}s). Ctrl-C is safe -- nothing here mutates anything."
+  hr
+
+  while [ "$elapsed" -lt "$DNS_TIMEOUT_SECONDS" ]; do
+    sleep "$DNS_POLL_SECONDS"
+    elapsed=$((elapsed + DNS_POLL_SECONDS))
+    count=$(ns_awsdns_count "$DOMAIN")
+    if [ "$count" -ge 4 ]; then
+      ok "Delegation live after ${elapsed}s -- $count AWS nameservers answer for $DOMAIN."
+      dig +short NS "$DOMAIN" | sed 's/^/       /'
+      return 0
+    fi
+    note "  ${elapsed}s: $count/4 awsdns nameservers"
+  done
+
+  die "Delegation did not go live within ${DNS_TIMEOUT_SECONDS}s (last seen: $count/4)." \
+    "Nothing was applied, and nothing is broken -- this stage only waits." \
+    "Check at the registrar that all four NS records exist with host '${DOMAIN%%.*}'," \
+    "then re-run:  ./scripts/deploy $ENV_NAME dns" \
+    "Do NOT run phase2 until this is clean: ACM cannot validate without delegation."
+}
+
+# --------------------------------------------------------------------------- #
+# Stage: images
+# --------------------------------------------------------------------------- #
+
+# An x86 image on an ARM64 task definition dies with `exec format error`, visible
+# only in the CloudWatch log stream -- not in ECS service events, where it looks
+# like a task that started and stopped for no reason.
+verify_image_arch() {
+  local uri="$1" inspect
+  inspect=$(docker buildx imagetools inspect "$uri" 2>&1) || die \
+    "Could not inspect $uri after pushing." "$inspect"
+  if printf '%s' "$inspect" | grep -q 'linux/amd64'; then
+    die "$uri contains a linux/amd64 manifest." \
+      "The task definitions pin cpu_architecture = ARM64. An x86 image dies with" \
+      "\`exec format error\`, and that message appears ONLY in the CloudWatch log" \
+      "stream -- the ECS console shows a task that started and stopped." \
+      "ECR tags are immutable, so fixing this means deleting the tag or bumping" \
+      "image_tag in $TFVARS."
+  fi
+  printf '%s' "$inspect" | grep -q 'linux/arm64' || die \
+    "$uri does not report a linux/arm64 platform." \
+    "Refusing to leave an image of unverified architecture in front of an ARM64" \
+    "task definition." \
+    "docker buildx imagetools inspect said:" "$inspect"
+  ok "architecture verified: linux/arm64"
+}
+
+# ECR repositories are IMMUTABLE-tagged (modules/registry/main.tf), so a re-push of
+# the same tag is rejected by the registry. That makes "already pushed" the only
+# possible idempotent behaviour: verify what is there and move on.
+image_already_pushed() {
+  local repo="$1" tag="$2"
+  awsx ecr describe-images --repository-name "$repo" --image-ids "imageTag=$tag" \
+    >/dev/null 2>&1
+}
+
+build_and_push() {
+  local name="$1" uri="$2" context="$3"
+  shift 3
+  local repo tag
+  repo=$(uri_repo "$uri"); tag=$(uri_tag "$uri")
+
+  if image_already_pushed "$repo" "$tag"; then
+    note "$name: $repo:$tag already exists in ECR."
+    note "  Tags are IMMUTABLE, so this cannot be overwritten -- verifying instead."
+    verify_image_arch "$uri"
+    awsx ecr describe-images --repository-name "$repo" --image-ids "imageTag=$tag" \
+      --query 'imageDetails[0].[imageDigest,imagePushedAt]' --output text \
+      | sed 's/^/       /' || true
+    info "  To ship new bytes, bump \`image_tag\` in $TFVARS and re-run phase1 + images."
+    return 0
+  fi
+
+  would "docker buildx build --platform linux/arm64 $* -t $uri --push $context"
+  docker buildx build \
+    --platform linux/arm64 \
+    "$@" \
+    -t "$uri" \
+    --push \
+    "$context" || die "$name: build/push failed." \
+    "Nothing was pushed under this tag, so re-running is safe."
+  ok "$name: pushed $uri"
+  verify_image_arch "$uri"
+}
+
+stage_images() {
+  banner "images -- build and push for $ENV_NAME"
+  need_cmd docker; need_cmd aws; need_cmd jq; need_buildx
+  require_domain
+  require_identity "$ACCOUNT_ID"
+  require_outputs "$ENV_DIR"
+
+  local api_uri fe_uri registry
+  api_uri=$(out_map container_image_uris api)
+  fe_uri=$(out_map container_image_uris frontend)
+  registry=$(uri_registry "$api_uri")
+
+  info "Registry:  $registry"
+  info "API:       $api_uri"
+  info "Frontend:  $fe_uri"
+  info ""
+
+  hazard "The frontend's API URL is baked into the JavaScript bundle at BUILD time."
+  info "NEXT_PUBLIC_API_URL is not read at runtime and cannot be set in the task"
+  info "definition. Build it wrong and the browser calls the wrong host, with"
+  info "nothing whatsoever in the server logs."
+  info "This build uses: ${C_BOLD}https://${DOMAIN}${C_RESET}  (from domain_name in $TFVARS)"
+  info ""
+  note "The backend image must already carry the RDS CA bundle with PGSSLROOTCERT"
+  note "pointing at it (backend/Dockerfile), or the database connection encrypts"
+  note "without verifying anything."
+
+  would "aws ecr get-login-password | docker login $registry"
+  awsx ecr get-login-password | docker login --username AWS --password-stdin "$registry" \
+    >/dev/null || die "ECR login failed for $registry."
+  ok "logged in to $registry"
+
+  build_and_push "api" "$api_uri" "$REPO_ROOT/backend"
+  build_and_push "frontend" "$fe_uri" "$REPO_ROOT/frontend" \
+    --build-arg "NEXT_PUBLIC_API_URL=https://${DOMAIN}"
+
+  ok "images: both pushed and verified arm64."
+}
+
+# --------------------------------------------------------------------------- #
+# Stage: secrets
+# --------------------------------------------------------------------------- #
+
+validate_database_url() {
+  local url="$1"
+  case "$url" in
+    *sslmode=*)
+      die "DATABASE_URL contains \`sslmode\`. Refusing to write it." \
+        "SQLAlchemy's asyncpg dialect forwards unknown query parameters as raw kwargs" \
+        "to asyncpg.connect(), which has no sslmode parameter and no **kwargs. The" \
+        "app would fail to connect at all with:" \
+        "  TypeError: connect() got an unexpected keyword argument 'sslmode'" \
+        "The correct spelling is ?ssl=verify-full  (RDS documentation uses the libpq" \
+        "spelling, which is wrong for this driver)." ;;
+  esac
+  case "$url" in
+    *sslrootcert=*)
+      die "DATABASE_URL contains \`sslrootcert\`. Refusing to write it." \
+        "It fails exactly like sslmode does -- another unexpected kwarg. The CA path" \
+        "reaches asyncpg through the PGSSLROOTCERT environment variable baked into" \
+        "the image, never through the URL." ;;
+  esac
+  case "$url" in
+    postgresql+asyncpg://*) ;;
+    *) die "DATABASE_URL must start with postgresql+asyncpg:// -- got: ${url%%://*}://..." \
+        "The application's engine is async; a bare postgresql:// URL selects psycopg2" \
+        "and fails at startup." ;;
+  esac
+  case "$url" in
+    *"?ssl="* | *"&ssl="*) ;;
+    *) die "DATABASE_URL has no \`ssl=\` parameter. Refusing to write it." \
+        "Over TCP with nothing specified asyncpg defaults to sslmode 'prefer', which" \
+        "encrypts but sets CERT_NONE and no hostname check -- it connects happily and" \
+        "silently gives up every guarantee the CA bundle exists to provide." \
+        "Use ?ssl=verify-full" ;;
+  esac
+  case "$url" in
+    *ssl=verify-full*) ;;
+    *) warn "DATABASE_URL is not ssl=verify-full."
+       warn "  ssl=require verifies the certificate chain (given PGSSLROOTCERT) but"
+       warn "  NOT the hostname -- asyncpg gates check_hostname on verify-full alone."
+       warn "  Accepted, but verify-full is what this environment should run." ;;
+  esac
+  case "$url" in
+    *"<"*">"*) die "DATABASE_URL still contains a placeholder like <PASSWORD>." \
+        "Fill in the real value -- the master password is deliberately not a Terraform" \
+        "output, so it has to come from the console or from state." ;;
+  esac
+}
+
+validate_redis_url() {
+  local url="$1"
+  case "$url" in
+    rediss://*) ;;
+    *) die "REDIS_URL must start with rediss:// -- got: ${url%%://*}://..." \
+        "Transit encryption is unconditional on this cluster, so redis:// cannot" \
+        "connect at all." ;;
+  esac
+  case "$url" in
+    *ssl_cert_reqs=*) ;;
+    *) die "REDIS_URL has no \`ssl_cert_reqs\` parameter. Refusing to write it." \
+        "The two clients disagree on the default: redis-py (the cache) verifies," \
+        "kombu (the Celery broker) resolves to CERT_NONE. Same URL, opposite posture." \
+        "Use ?ssl_cert_reqs=required so both verify." ;;
+  esac
+  case "$url" in
+    *"<"*">"*) die "REDIS_URL still contains a placeholder." \
+        "The AUTH token is applied out of band and is not a Terraform output." ;;
+  esac
+}
+
+# Prompt with a suggestion printed above the prompt. bash 3.2 has no `read -i`, so
+# the suggestion cannot be pre-loaded into the line editor -- pressing Enter
+# accepts it verbatim, which for a value containing <PASSWORD> then fails
+# validation rather than writing something broken.
+prompt_with_suggestion() {
+  local label="$1" suggestion="$2" value
+  info ""
+  info "  ${C_BOLD}${label}${C_RESET}"
+  info "  suggested (from terraform output):"
+  info "    ${suggestion}"
+  info "  Press Enter to accept, or paste the corrected value."
+  printf '  %s> ' "$label"
+  read -r value
+  [ -z "$value" ] && value="$suggestion"
+  printf '%s' "$value"
+}
+
+stage_secrets() {
+  banner "secrets -- populate Secrets Manager for $ENV_NAME"
+  need_cmd aws; need_cmd jq; need_cmd terraform
+  require_identity "$ACCOUNT_ID"
+  require_outputs "$ENV_DIR"
+
+  SECRET_TMPDIR=$(mktemp -d "${TMPDIR:-/tmp}/deploy-secrets.XXXXXX")
+  chmod 700 "$SECRET_TMPDIR"
+
+  local py fernet_py names key id existing wrote_fernet=""
+  py=$(command -v python3 || true)
+  [ -n "$py" ] || die "python3 not found -- needed to generate the JWT secret."
+  fernet_py=$(require_fernet_python)
+  note "fernet/validation python: $fernet_py"
+
+  names=$(jq -r '.secret_names.value | keys[]' "$TF_OUTPUT_CACHE") || die \
+    "The secret_names output is missing or not a map."
+
+  info ""
+  info "Terraform creates these as EMPTY containers. A task whose secret is empty"
+  info "fails to start, so every one of them has to be filled before migrate."
+  info ""
+  info "Secrets in this environment: $(printf '%s' "$names" | tr '\n' ' ')"
+
+  for key in $names; do
+    id=$(out_map secret_names "$key")
+    existing=$(secret_len "$id")
+
+    if [ -n "$existing" ]; then
+      if [ "$FORCE" != "1" ]; then
+        note "skip  $key ($id) -- already has a value, $existing bytes"
+        continue
+      fi
+      hazard "--force: about to OVERWRITE $key, which already holds $existing bytes."
+      if [ "$key" = "encryption-key" ]; then
+        hazard "encryption-key is single-key Fernet with NO re-encryption path until B2."
+        info "  Overwriting it makes every SSN already stored in this environment"
+        info "  permanently undecryptable. There is no recovery."
+      fi
+      confirm "  Overwrite $key?" || { note "skip  $key -- declined"; continue; }
+    fi
+
+    case "$key" in
+      jwt-secret-key)
+        would "put-secret-value $id  (generated, 48 random bytes urlsafe)"
+        put_secret "$id" "$("$py" -c 'import secrets;print(secrets.token_urlsafe(48),end="")')"
+        ok "$key written" ;;
+
+      encryption-key)
+        local fkey
+        fkey=$("$fernet_py" -c 'from cryptography.fernet import Fernet;print(Fernet.generate_key().decode(),end="")')
+        # Construct one from the generated value before writing it: a length check
+        # would accept values Fernet rejects at the first SSN write, inside a
+        # request handler.
+        "$fernet_py" -c 'import sys;from cryptography.fernet import Fernet;Fernet(sys.argv[1])' "$fkey" \
+          || die "Generated encryption-key did not construct as a Fernet key." \
+            "Nothing was written."
+        would "put-secret-value $id  (generated Fernet key, validated by construction)"
+        put_secret "$id" "$fkey"
+        wrote_fernet="$fkey"
+        ok "$key written and validated" ;;
+
+      database-url)
+        local host db user suggestion url
+        host=$(out rds_address); db=$(out rds_database_name); user=$(out rds_username)
+        suggestion="postgresql+asyncpg://${user}:<PASSWORD>@${host}:5432/${db}?ssl=verify-full"
+        info ""
+        hazard "The RDS master password is deliberately NOT a Terraform output."
+        info "  It exists in state but nothing surfaces it, so it cannot leak through"
+        info "  a terraform output or a CI log. Take it from the console or state."
+        url=$(prompt_with_suggestion "DATABASE_URL" "$suggestion")
+        validate_database_url "$url"
+        would "put-secret-value $id  (validated: asyncpg spelling, ssl parameter present)"
+        put_secret "$id" "$url"
+        ok "$key written" ;;
+
+      redis-url)
+        local endpoint scheme suggestion rurl needs_auth
+        endpoint=$(out redis_primary_endpoint)
+        scheme=$(out_opt redis_url_scheme); [ -n "$scheme" ] || scheme="rediss://"
+        needs_auth=$(out_opt redis_requires_auth_token)
+        if [ "$needs_auth" = "true" ]; then
+          suggestion="${scheme}:<AUTH_TOKEN>@${endpoint}:6379/0?ssl_cert_reqs=required"
+          info ""
+          hazard "AUTH is enabled, so REDIS_URL carries a credential."
+          info "  Apply the AUTH token to the replication group out of band first."
+        else
+          suggestion="${scheme}${endpoint}:6379/0?ssl_cert_reqs=required"
+        fi
+        rurl=$(prompt_with_suggestion "REDIS_URL" "$suggestion")
+        validate_redis_url "$rurl"
+        would "put-secret-value $id  (validated: rediss scheme, ssl_cert_reqs present)"
+        put_secret "$id" "$rurl"
+        ok "$key written" ;;
+
+      *)
+        warn "No generator for secret '$key' -- this script does not know it."
+        warn "  Populate it by hand, then re-run: ./scripts/deploy $ENV_NAME status" ;;
+    esac
+  done
+
+  # The one value that is printed. It is generated here, cannot be read back
+  # meaningfully once it starts encrypting, and cannot be rotated at all.
+  if [ -n "$wrote_fernet" ]; then
+    info ""
+    hr
+    hazard "ENCRYPTION KEY -- PRINTED ONCE, HERE, AND NOWHERE ELSE."
+    info ""
+    info "    ${C_BOLD}${wrote_fernet}${C_RESET}"
+    info ""
+    info "Store it in a password manager OUTSIDE this AWS account, now."
+    info "Until B2 lands there is no rotation path: single-key Fernet with no"
+    info "re-encryption. Losing it means losing every stored SSN. Having it leak"
+    info "means choosing between leaving it in place and destroying the same data."
+    hr
+    if [ "${ASSUME_YES:-0}" != "1" ] && [ -t 0 ]; then
+      printf '%sPress Enter once it is saved.%s ' "$C_BOLD" "$C_RESET"
+      read -r _
+    fi
+  fi
+
+  banner "secrets -- verification"
+  local failed=0 len
+  for key in $names; do
+    id=$(out_map secret_names "$key")
+    len=$(secret_len "$id")
+    if [ -z "$len" ]; then
+      bad "$(printf '%-18s' "$key") EMPTY -- a task with this secret cannot start"
+      failed=1
+    else
+      ok "$(printf '%-18s' "$key") $len bytes"
+    fi
+  done
+  [ "$failed" = "0" ] || die "One or more secrets are still empty." \
+    "Re-run this stage, or populate the remainder by hand."
+  ok "all secrets non-empty."
+}
+
+# --------------------------------------------------------------------------- #
+# Stage: migrate
+# --------------------------------------------------------------------------- #
+
+stage_migrate() {
+  banner "migrate -- Alembic upgrade head on ECS ($ENV_NAME)"
+  need_cmd aws; need_cmd jq; need_cmd terraform
+  require_identity "$ACCOUNT_ID"
+  require_outputs "$ENV_DIR"
+
+  local cluster taskdef subnets sgs netcfg arn task_id status exit_code elapsed=0
+  cluster=$(out ecs_cluster_name)
+  taskdef=$(out_map ecs_task_definition_arns migrate)
+
+  # Read the network configuration off the running API service rather than from
+  # the raw subnet list: tasks are pinned to the AZs that have interface
+  # endpoints, and the private_subnet_ids output includes AZs that do not. A task
+  # in the wrong AZ still resolves the endpoints VPC-wide, but pays cross-AZ
+  # transfer for every AWS call it makes.
+  local api_svc
+  api_svc=$(out_map ecs_service_names api)
+  netcfg=$(awsx ecs describe-services --cluster "$cluster" --services "$api_svc" \
+    --query 'services[0].networkConfiguration.awsvpcConfiguration.[join(`,`,subnets),join(`,`,securityGroups)]' \
+    --output text 2>/dev/null || printf '')
+  if [ -n "$netcfg" ] && [ "$netcfg" != "None	None" ]; then
+    subnets=$(printf '%s' "$netcfg" | awk -F'\t' '{print $1}')
+    sgs=$(printf '%s' "$netcfg" | awk -F'\t' '{print $2}')
+    note "network: taken from the running '$api_svc' service, so the task lands in"
+    note "         the same subnets the endpoints are in."
+  else
+    subnets=$(out_list_first private_subnet_ids)
+    sgs=$(out ecs_tasks_security_group_id)
+    warn "Could not read the API service's network configuration; falling back to"
+    warn "  the first private subnet from terraform output. If that AZ has no"
+    warn "  interface endpoints the task still works, but every AWS call is cross-AZ."
+  fi
+
+  info "cluster:  $cluster"
+  info "taskdef:  $taskdef"
+  info "subnets:  $subnets"
+  info "sg:       $sgs"
+  info ""
+  note "alembic upgrade head is idempotent -- against an already-migrated database"
+  note "it reports 'no upgrades' and exits 0, so re-running this stage is safe."
+
+  would "aws ecs run-task --cluster $cluster --task-definition $taskdef --launch-type FARGATE"
+  arn=$(awsx ecs run-task \
+    --cluster "$cluster" \
+    --task-definition "$taskdef" \
+    --launch-type FARGATE \
+    --network-configuration "awsvpcConfiguration={subnets=[$subnets],securityGroups=[$sgs],assignPublicIp=DISABLED}" \
+    --query 'tasks[0].taskArn' --output text) || die "run-task failed."
+
+  if [ -z "$arn" ] || [ "$arn" = "None" ]; then
+    die "run-task returned no task ARN." \
+      "Check the failures[] entry in the API response -- the usual causes are a" \
+      "capacity problem or a subnet/security-group that does not exist."
+  fi
+  task_id="${arn##*/}"
+  ok "task started: $task_id"
+
+  while [ "$elapsed" -lt "$MIGRATE_TIMEOUT_SECONDS" ]; do
+    status=$(awsx ecs describe-tasks --cluster "$cluster" --tasks "$arn" \
+      --query 'tasks[0].lastStatus' --output text 2>/dev/null || printf 'UNKNOWN')
+    [ "$status" = "STOPPED" ] && break
+    note "  ${elapsed}s: $status"
+    sleep 10
+    elapsed=$((elapsed + 10))
+  done
+
+  if [ "$status" != "STOPPED" ]; then
+    die "Migration task did not stop within ${MIGRATE_TIMEOUT_SECONDS}s (last status: $status)." \
+      "A task stuck in PENDING is almost always an image pull: check that the ECR" \
+      "endpoint exists and that the tag is really in the repository." \
+      "Task: $arn"
+  fi
+
+  # Logs before the verdict: when the exit code is non-zero the log IS the reason,
+  # and with ECS Exec off there is no second way to get it.
+  local group stream
+  group=$(log_group_for api)
+  stream="migrate/migrate/${task_id}"
+  hr
+  info "CloudWatch logs -- $group : $stream"
+  hr
+  awsx logs get-log-events --log-group-name "$group" --log-stream-name "$stream" \
+    --start-from-head --query 'events[].message' --output text 2>/dev/null \
+    | tr '\t' '\n' | sed 's/^/  /' \
+    || warn "No log stream. The container died before it logged anything -- with ECS"
+  hr
+
+  exit_code=$(awsx ecs describe-tasks --cluster "$cluster" --tasks "$arn" \
+    --query 'tasks[0].containers[0].exitCode' --output text 2>/dev/null || printf 'None')
+  local stopped_reason
+  stopped_reason=$(awsx ecs describe-tasks --cluster "$cluster" --tasks "$arn" \
+    --query 'tasks[0].stoppedReason' --output text 2>/dev/null || printf '')
+
+  if [ "$exit_code" = "0" ]; then
+    ok "migration exited 0. The database is at head."
+    return 0
+  fi
+  die "Migration task exited with code '$exit_code'." \
+    "stoppedReason: ${stopped_reason:-(none)}" \
+    "The logs above are the reason. An empty log section means the container died" \
+    "before logging: an empty secret, an architecture mismatch, and the uv-run" \
+    "PyPI hang all look identical from the console." \
+    "Nothing else has been changed -- fix the cause and re-run this stage."
+}
+
+# --------------------------------------------------------------------------- #
+# Stage: phase2
+# --------------------------------------------------------------------------- #
+
+stage_phase2() {
+  banner "phase2 -- TLS + Cognito for $ENV_NAME"
+  need_cmd terraform; need_cmd aws; need_cmd jq; need_cmd dig
+  require_domain
+  require_identity "$ACCOUNT_ID"
+
+  # The refusal that matters most in this stage.
+  local count
+  count=$(ns_awsdns_count "$DOMAIN")
+  if [ "$count" -lt 4 ]; then
+    die "Refusing to run phase2: $DOMAIN has $count/4 AWS nameservers." \
+      "ACM validates over DNS. Without delegation the certificate sits in" \
+      "PENDING_VALIDATION until the apply times out 45 minutes later, and the" \
+      "environment is left half-applied in the meantime." \
+      "Run:  ./scripts/deploy $ENV_NAME dns"
+  fi
+  ok "delegation live: $count AWS nameservers answer for $DOMAIN"
+
+  local tls cognito
+  tls=$(tfvar "$TFVARS" "enable_tls" || printf '')
+  cognito=$(tfvar "$TFVARS" "enable_cognito" || printf '')
+
+  if [ "$tls" != "true" ] || [ "$cognito" != "true" ]; then
+    info ""
+    info "phase2 flips BOTH flags in $TFVARS:"
+    info "    enable_tls     $tls  ->  true"
+    info "    enable_cognito $cognito  ->  true"
+    hazard "They move together, always."
+    info "  An ALB cannot attach authenticate-cognito to an HTTP listener, so"
+    info "  modules/compute/alb.tf fails the plan on (cognito = true, tls = false)"
+    info "  rather than letting the environment come up with no authentication while"
+    info "  appearing configured. Flipping only one is a plan failure either way."
+    confirm "Edit $TFVARS to set both to true?" || die "Aborted by operator. Nothing was changed."
+
+    would "sed -i: enable_tls = true, enable_cognito = true in $TFVARS"
+    # Rewrite only the assignment, leaving the trailing comment on the line intact.
+    sed -i.bak \
+      -e 's/^\([[:space:]]*enable_tls[[:space:]]*=[[:space:]]*\)false/\1true/' \
+      -e 's/^\([[:space:]]*enable_cognito[[:space:]]*=[[:space:]]*\)false/\1true/' \
+      "$TFVARS"
+    rm -f "${TFVARS}.bak"
+
+    tls=$(tfvar "$TFVARS" "enable_tls" || printf '')
+    cognito=$(tfvar "$TFVARS" "enable_cognito" || printf '')
+    { [ "$tls" = "true" ] && [ "$cognito" = "true" ]; } || die \
+      "Failed to flip the flags in $TFVARS (now tls=$tls cognito=$cognito)." \
+      "Edit the file by hand and re-run."
+    ok "flags flipped -- this is a tracked file, so it will show in git status."
+  else
+    note "enable_tls and enable_cognito are already true."
+  fi
+
+  local plan rc
+  plan="$ENV_DIR/${ENV_NAME}-tls.tfplan"
+  init_or_explain_lockfile "$ENV_DIR" "$ENV_NAME"
+
+  set +e; tf_plan "$ENV_DIR" "$plan"; rc=$?; set -e
+  if [ "$rc" -eq 0 ]; then
+    ok "phase2: no changes. TLS and Cognito are already applied."
+    rm -f "$plan"
+    return 0
+  fi
+
+  hr
+  info "This creates the ACM certificate and its validation records, waits for"
+  info "issuance, adds the HTTPS listener with authenticate-cognito on EVERY rule,"
+  info "and converts port 80 into a 301 redirect."
+  hazard "Certificate issuance can take several minutes. Do not interrupt the apply."
+  hr
+
+  if ! confirm "Apply this phase-2 plan?"; then
+    rm -f "$plan"
+    die "Aborted by operator. Nothing was applied." \
+      "Note the tfvars flags are already flipped -- either apply, or set them back."
+  fi
+
+  would "terraform -chdir=$ENV_DIR apply $(basename "$plan")"
+  tf "$ENV_DIR" apply -input=false "$(basename "$plan")" || die "phase2 apply failed." \
+    "If ACM is stuck in PENDING_VALIDATION the cause is delegation: re-check" \
+    "  dig +short NS $DOMAIN"
+  rm -f "$plan"
+  ok "phase2 applied."
+}
+
+# --------------------------------------------------------------------------- #
+# Stage: smoke
+# --------------------------------------------------------------------------- #
+
+SMOKE_FAILED=0
+SMOKE_UNVERIFIED=0
+
+http_status() {
+  curl -sS -o /dev/null -w '%{http_code}' -I --max-time 20 "$1" 2>/dev/null || printf '000'
+}
+
+http_location() {
+  curl -sS -o /dev/null -w '%{redirect_url}' -I --max-time 20 "$1" 2>/dev/null || printf ''
+}
+
+# A check that cannot be automated from here. Asked interactively; under --yes it
+# is recorded as unverified rather than quietly passed.
+manual_check() {
+  local label="$1"
+  if [ "${ASSUME_YES:-0}" = "1" ] || [ ! -t 0 ]; then
+    warn "MANUAL  $label -- not verified (non-interactive run)"
+    SMOKE_UNVERIFIED=$((SMOKE_UNVERIFIED + 1))
+    return 0
+  fi
+  if confirm "  Did this pass?"; then
+    ok "$label"
+  else
+    bad "$label"
+    SMOKE_FAILED=$((SMOKE_FAILED + 1))
+  fi
+}
+
+stage_smoke() {
+  banner "smoke -- $ENV_NAME"
+  need_cmd curl; need_cmd aws; need_cmd jq; need_cmd terraform
+  require_domain
+  require_identity "$ACCOUNT_ID"
+  require_outputs "$ENV_DIR"
+
+  local code loc bucket
+
+  # 1 -- the front door is behind Cognito.
+  info ""
+  info "1. https://${DOMAIN} should 302 to Cognito"
+  code=$(http_status "https://${DOMAIN}")
+  if [ "$code" = "302" ]; then
+    ok "1. 302 -- ALB is handing the browser to Cognito"
+  elif [ "$code" = "200" ]; then
+    bad "1. 200, expected 302 -- authentication is NOT applied to the default rule."
+    SMOKE_FAILED=$((SMOKE_FAILED + 1))
+  else
+    bad "1. HTTP $code, expected 302."
+    SMOKE_FAILED=$((SMOKE_FAILED + 1))
+  fi
+
+  # 2 -- the one that is a security incident rather than a test failure.
+  info ""
+  info "2. https://${DOMAIN}/api/v1/health should ALSO 302"
+  code=$(http_status "https://${DOMAIN}/api/v1/health")
+  if [ "$code" = "302" ]; then
+    ok "2. 302 -- the /api/* rule carries its auth action"
+  elif [ "$code" = "200" ]; then
+    SMOKE_FAILED=$((SMOKE_FAILED + 1))
+    info ""
+    hr
+    printf '%s%s  SECURITY FAILURE -- THE API IS OPEN TO THE INTERNET.%s\n' \
+      "$C_BOLD" "$C_RED" "$C_RESET"
+    hr
+    printf '%s' "$C_RED"
+    info "  /api/v1/health returned 200 instead of 302."
+    info ""
+    info "  This is a SECURITY FAILURE, NOT A TEST FAILURE."
+    info ""
+    info "  authenticate-cognito must be attached to EVERY listener rule, not just"
+    info "  the default one. A 200 here means the /api/* rule is missing its auth"
+    info "  action, and every API route in this environment is reachable by anyone"
+    info "  on the internet, without credentials -- borrower documents, extracted"
+    info "  data, the lot."
+    info ""
+    info "  Do not hand this environment to anyone. Do not upload a real loan file."
+    info "  Fix the listener rule, re-apply, and re-run smoke before going further."
+    printf '%s' "$C_RESET"
+    hr
+  else
+    bad "2. HTTP $code, expected 302."
+    SMOKE_FAILED=$((SMOKE_FAILED + 1))
+  fi
+
+  # 3 -- plain HTTP is redirected, not served.
+  info ""
+  info "3. http://${DOMAIN} should 301 to HTTPS"
+  code=$(http_status "http://${DOMAIN}")
+  loc=$(http_location "http://${DOMAIN}")
+  if [ "$code" = "301" ]; then
+    ok "3. 301 -> ${loc:-(no Location)}"
+  else
+    bad "3. HTTP $code, expected 301. Port 80 is still forwarding instead of redirecting."
+    SMOKE_FAILED=$((SMOKE_FAILED + 1))
+  fi
+
+  # 4, 5 -- browser work.
+  info ""
+  info "4. Log in through Cognito, then through the application itself."
+  info "   (Two separate logins: the ALB's, then the app's own.)"
+  manual_check "4. Cognito + application login"
+
+  info ""
+  info "5. Upload one document and let it finish processing."
+  manual_check "5. Document upload"
+
+  # 6 -- the database is private; there is no route to it from here.
+  info ""
+  info "6. Confirm the extraction reached Bedrock. The database is in a private"
+  info "   subnet with no public access, so run this where the database is"
+  info "   reachable and check the result:"
+  info ""
+  info "     select model_used, cost_estimate, extraction_status"
+  info "     from extractions order by created_at desc limit 3;"
+  info ""
+  info "   Expect a us.anthropic.* model with a NON-ZERO cost. A zero cost means"
+  info "   the pricing table is missing that model -- extraction worked but the"
+  info "   telemetry is broken, which is invisible until someone reads a bill."
+  manual_check "6. Bedrock extraction with non-zero cost"
+
+  # 7 -- documents in S3, not on a disk that vanishes.
+  info ""
+  bucket=$(out documents_bucket)
+  info "7. Documents must be in s3://${bucket}/, not on container disk"
+  local count
+  count=$(awsx s3 ls "s3://${bucket}/" --recursive 2>/dev/null | grep -c . | tr -d '[:space:]') || count=0
+  if [ "${count:-0}" -gt 0 ]; then
+    ok "7. $count object(s) in the bucket"
+    awsx s3 ls "s3://${bucket}/" --recursive 2>/dev/null | tail -5 | sed 's/^/       /' || true
+  else
+    bad "7. The bucket is EMPTY after an upload."
+    info "     STORAGE_BACKEND is not 's3'. The application starts happily, writes"
+    info "     uploaded documents to ephemeral container disk, and they vanish on"
+    info "     the next task replacement -- with no error at any point."
+    info "     (If check 5 was skipped, nothing has been uploaded yet and this is"
+    info "     expected: upload one document, then re-run smoke.)"
+    SMOKE_FAILED=$((SMOKE_FAILED + 1))
+  fi
+
+  hr
+  if [ "$SMOKE_FAILED" -gt 0 ]; then
+    die "smoke: $SMOKE_FAILED check(s) failed."
+  fi
+  if [ "$SMOKE_UNVERIFIED" -gt 0 ]; then
+    warn "smoke: every automated check passed, but $SMOKE_UNVERIFIED manual check(s)"
+    warn "  were not verified. Re-run interactively (without --yes) to confirm them."
+    exit 2
+  fi
+  ok "smoke: all seven checks passed."
+}
+
+# --------------------------------------------------------------------------- #
+# Stage: status -- read-only, runnable at any time, never fails the run
+# --------------------------------------------------------------------------- #
+
+status_line() { printf '  %-22s %s\n' "$1" "$2"; }
+
+stage_status() {
+  banner "status -- $ENV_NAME (account $ACCOUNT_ID, $AWS_REGION)"
+  need_cmd terraform; need_cmd jq
+
+  local have_aws=1
+  command -v aws >/dev/null 2>&1 || have_aws=0
+  if [ "$have_aws" = "1" ]; then
+    if ! awsx sts get-caller-identity >/dev/null 2>&1; then
+      warn "AWS is unreachable with profile '$AWS_PROFILE' -- probably an expired SSO"
+      warn "  session. AWS-side checks below will report 'unknown'."
+      have_aws=0
+    fi
+  fi
+
+  # --- bootstrap ---
+  local bucket="" bstate
+  bucket=$(grep -E '^[[:space:]]*bucket[[:space:]]*=' "$ENV_DIR/backend.tf" 2>/dev/null \
+    | head -1 | sed -E 's/.*=[[:space:]]*"([^"]*)".*/\1/' || printf '')
+  if [ -z "$bucket" ]; then
+    bstate="no backend.tf -- this environment uses LOCAL state"
+  elif [ "$have_aws" = "0" ]; then
+    bstate="unknown (no AWS access)"
+  elif awsx s3api head-bucket --bucket "$bucket" >/dev/null 2>&1; then
+    bstate="ok -- s3://$bucket exists"
+  else
+    bstate="MISSING -- s3://$bucket not reachable; run: deploy $ENV_NAME bootstrap"
+  fi
+  status_line "bootstrap" "$bstate"
+
+  # --- phase1 / outputs ---
+  if load_outputs "$ENV_DIR"; then
+    local n
+    n=$(jq -r 'length' "$TF_OUTPUT_CACHE")
+    status_line "phase1" "applied -- $n terraform outputs available"
+  else
+    status_line "phase1" "not applied (no outputs); everything below is unknown"
+    hr
+    info "Next:  ./scripts/deploy $ENV_NAME phase1"
+    return 0
+  fi
+
+  # --- phase flags ---
+  status_line "phase flags" "enable_tls=$(tfvar "$TFVARS" enable_tls || echo '?')  enable_cognito=$(tfvar "$TFVARS" enable_cognito || echo '?')"
+
+  local cert
+  cert=$(out_opt certificate_arn)
+  if [ -n "$cert" ]; then
+    status_line "phase2 (TLS)" "certificate present"
+  else
+    status_line "phase2 (TLS)" "no certificate -- phase 2 not applied"
+  fi
+
+  # --- dns ---
+  if [ -n "$DOMAIN" ] && command -v dig >/dev/null 2>&1; then
+    local c
+    c=$(ns_awsdns_count "$DOMAIN")
+    if [ "$c" -ge 4 ]; then
+      status_line "dns" "delegated -- $c AWS nameservers for $DOMAIN"
+    else
+      status_line "dns" "NOT delegated -- $c/4 for $DOMAIN; run: deploy $ENV_NAME dns"
+    fi
+  else
+    status_line "dns" "n/a (no domain_name, or dig not installed)"
+  fi
+
+  # --- images ---
+  local kind uri repo tag
+  for kind in api frontend; do
+    uri=$(out_map_opt container_image_uris "$kind")
+    if [ -z "$uri" ]; then status_line "image:$kind" "unknown"; continue; fi
+    repo=$(uri_repo "$uri"); tag=$(uri_tag "$uri")
+    if [ "$have_aws" = "0" ]; then
+      status_line "image:$kind" "unknown (no AWS access) -- $repo:$tag"
+    elif awsx ecr describe-images --repository-name "$repo" --image-ids "imageTag=$tag" >/dev/null 2>&1; then
+      status_line "image:$kind" "pushed -- $repo:$tag"
+    else
+      status_line "image:$kind" "MISSING -- $repo:$tag not in ECR; run: deploy $ENV_NAME images"
+    fi
+  done
+
+  # --- secrets ---
+  local names key id len
+  names=$(jq -r '.secret_names.value | keys[]' "$TF_OUTPUT_CACHE" 2>/dev/null || printf '')
+  if [ -z "$names" ]; then
+    status_line "secrets" "unknown (no secret_names output)"
+  elif [ "$have_aws" = "0" ]; then
+    status_line "secrets" "unknown (no AWS access)"
+  else
+    for key in $names; do
+      id=$(out_map secret_names "$key")
+      len=$(secret_len "$id")
+      if [ -n "$len" ]; then
+        status_line "secret:$key" "populated ($len bytes)"
+      else
+        status_line "secret:$key" "EMPTY -- tasks using it cannot start"
+      fi
+    done
+  fi
+
+  # --- migration ---
+  # The database is private, so alembic_version cannot be read from here. The
+  # observable proxy is the most recent migrate task ECS still remembers; stopped
+  # tasks age out of the API after about an hour, so "unknown" is common and does
+  # not mean "not migrated".
+  local cluster mig_family last
+  if [ "$have_aws" = "1" ]; then
+    cluster=$(out_opt ecs_cluster_name)
+    mig_family=$(out_map_opt ecs_task_definition_arns migrate)
+    mig_family="${mig_family##*/}"; mig_family="${mig_family%:*}"
+    if [ -n "$cluster" ] && [ -n "$mig_family" ]; then
+      last=$(awsx ecs list-tasks --cluster "$cluster" --family "$mig_family" \
+        --desired-status STOPPED --query 'taskArns[-1]' --output text 2>/dev/null || printf 'None')
+      if [ -n "$last" ] && [ "$last" != "None" ]; then
+        local ec
+        ec=$(awsx ecs describe-tasks --cluster "$cluster" --tasks "$last" \
+          --query 'tasks[0].containers[0].exitCode' --output text 2>/dev/null || printf '?')
+        if [ "$ec" = "0" ]; then
+          status_line "migration" "last migrate task exited 0"
+        else
+          status_line "migration" "last migrate task exited $ec -- check its logs"
+        fi
+      else
+        status_line "migration" "unknown -- no recent migrate task (they age out ~1h)"
+      fi
+    else
+      status_line "migration" "unknown"
+    fi
+  else
+    status_line "migration" "unknown (no AWS access)"
+  fi
+
+  # --- services ---
+  if [ "$have_aws" = "1" ]; then
+    local svc name running desired
+    cluster=$(out_opt ecs_cluster_name)
+    for svc in api worker frontend; do
+      name=$(out_map_opt ecs_service_names "$svc")
+      [ -n "$name" ] || continue
+      running=$(awsx ecs describe-services --cluster "$cluster" --services "$name" \
+        --query 'services[0].[runningCount,desiredCount]' --output text 2>/dev/null || printf '?	?')
+      desired=$(printf '%s' "$running" | awk -F'\t' '{print $2}')
+      running=$(printf '%s' "$running" | awk -F'\t' '{print $1}')
+      if [ "$running" = "$desired" ] && [ "$running" != "0" ] && [ "$running" != "?" ]; then
+        status_line "service:$svc" "healthy -- $running/$desired running"
+      else
+        status_line "service:$svc" "$running/$desired running -- check the log stream, not ECS events"
+      fi
+    done
+  else
+    status_line "services" "unknown (no AWS access)"
+  fi
+
+  # --- url ---
+  local url
+  url=$(out_opt application_url)
+  [ -n "$url" ] && status_line "url" "$url"
+
+  hr
+  info "status is read-only. Nothing above was changed."
+  return 0
+}
+
+# --------------------------------------------------------------------------- #
+# Stage: all
+# --------------------------------------------------------------------------- #
+
+stage_all() {
+  banner "all -- full sequence for $ENV_NAME"
+  # Checked here rather than only inside `dns`: `all` consults delegation itself
+  # to decide whether to pause, and a missing dig would read as "not delegated".
+  need_cmd dig
+  info "Order: bootstrap -> phase1 -> dns -> images -> secrets -> migrate ->"
+  info "       phase2 -> smoke"
+  info ""
+  note "Each stage is individually idempotent, so re-running \`all\` after a manual"
+  note "step picks up where it stopped rather than repeating work."
+
+  stage_bootstrap
+  stage_phase1
+
+  # The one genuinely manual gate. Rather than block for up to 30 minutes inside
+  # `all`, check once and hand the sequence back to the operator.
+  require_domain
+  local count
+  count=$(ns_awsdns_count "$DOMAIN")
+  if [ "$count" -lt 4 ]; then
+    banner "all -- PAUSED at the manual delegation step"
+    stage_dns_instructions_only
+    hr
+    info "${C_BOLD}The sequence stops here.${C_RESET} Add the NS records at the registrar,"
+    info "then continue with:"
+    info ""
+    info "    ./scripts/deploy $ENV_NAME all"
+    info ""
+    info "(or watch the delegation land first with: ./scripts/deploy $ENV_NAME dns)"
+    hr
+    return 0
+  fi
+  ok "delegation already live -- continuing."
+
+  stage_images
+  stage_secrets
+  stage_migrate
+  stage_phase2
+  stage_smoke
+}
+
+# The instruction half of `dns`, without the polling loop -- used by `all`.
+stage_dns_instructions_only() {
+  require_outputs "$ENV_DIR"
+  local parent="${DOMAIN#*.}"
+  info "Add these FOUR NS records at the registrar for ${C_BOLD}${parent}${C_RESET}:"
+  info ""
+  info "  Type: NS     Host: ${C_BOLD}${DOMAIN%%.*}${C_RESET}"
+  info ""
+  out_list route53_name_servers | sed 's/^/       /'
+  info ""
+  info "Namecheap: Domain List -> ${parent} -> Manage -> Advanced DNS -> Add New"
+  info "Record -> NS Record, four times, one nameserver each."
+  hazard "The apex ${parent} stays at the registrar and is never delegated."
+}
+
+# --------------------------------------------------------------------------- #
+# Main
+# --------------------------------------------------------------------------- #
+
+main() {
+  parse_args "$@"
+  resolve_env
+
+  case "$STAGE" in
+    bootstrap) stage_bootstrap ;;
+    phase1)    stage_phase1 ;;
+    dns)       stage_dns ;;
+    images)    stage_images ;;
+    secrets)   stage_secrets ;;
+    migrate)   stage_migrate ;;
+    phase2)    stage_phase2 ;;
+    smoke)     stage_smoke ;;
+    all)       stage_all ;;
+    status)    stage_status ;;
+    *)         die "Unhandled stage: $STAGE" ;;
+  esac
+}
+
+main "$@"

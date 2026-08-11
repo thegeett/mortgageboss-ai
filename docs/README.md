@@ -19,6 +19,7 @@ mortgage processors. Start here to find your way around.
 | [poc-learnings.md](poc-learnings.md)                 | Lessons from the prototype (with a developer TODO section)|
 | [project-structure.md](project-structure.md)         | Repository layout and "where does X go?" conventions      |
 | [development-workflow.md](development-workflow.md)    | CI/CD pipelines and pre-commit hooks                      |
+| [deployment-runbook.md](deployment-runbook.md)       | `scripts/deploy`: the stage sequence, what each stage does, failure and rollback |
 | [worktree-setup.md](worktree-setup.md)               | Running a second worktree's Docker stack alongside the main one |
 | [phases/phase-1.md](phases/phase-1.md)               | Ticket-by-ticket phase plan (Epics 1–6)                   |
 | [tickets/](tickets/)                                 | Per-ticket implementation records (`LP-XXX.md`)           |
