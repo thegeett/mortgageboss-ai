@@ -25,12 +25,9 @@ from app.ai.classification import classify_document
 from app.ai.cost import estimate_cost
 from app.ai.extraction import EXTRACTORS
 from app.ai.generic_analyzer import analyze_document
-from app.ai.summarization import summarize_document
 from app.core.config import resolve_model, resolve_requests_per_minute, settings
 from app.dev.bench.findings import finalize_output, load_records, write_record
 from app.dev.bench.prompt import CallTally, bench_run_context
-from app.documents.catalog import get_tier
-from app.models.document import Tier
 
 logger = structlog.get_logger(__name__)
 
@@ -268,27 +265,25 @@ async def run_one(f: DiscoveredFile) -> dict[str, Any]:
 
         extractor = EXTRACTORS.get(dtype)
         if extractor is None:
-            # No TYPED (Tier-1) extractor. In production a document does NOT stop here — it routes by
-            # tier (``_route_by_tier``): Tier 3 / uncataloged (incl. ``unknown``) gets scoped FREE
-            # extraction (``analyze_document``, LP-463); Tier 2 gets a summary (``summarize_document``,
-            # LP-65). Mirror that here so the bench shows what the long tail ACTUALLY captures — otherwise
-            # every unknown/Tier-2 document is a bare ``no_extractor`` and Tier 3 looks like it does nothing.
-            # ``status`` stays "no_extractor" (there IS no typed extractor — the coverage tally is unchanged;
-            # ``coverage`` skips a record with no ``typed_core``); the long-tail output is additive.
+            # No TYPED (Tier-1) extractor. In production a document does NOT stop here — LP-471 routes EVERY
+            # no-typed-extractor document (a Tier-2 type, a Tier-1 type promoted before its extractor is wired,
+            # or a Tier-3 uncataloged/``unknown`` type) through the SAME Tier-3 scoped FREE extraction
+            # (``analyze_document``, LP-463); the old Tier-2 ``summarize_document`` path is gone. Mirror that
+            # here so the bench shows what the long tail ACTUALLY captures — otherwise every no-extractor
+            # document is a bare ``no_extractor`` and the long tail looks like it does nothing. ``status`` stays
+            # "no_extractor" (there IS no typed extractor — the coverage tally is unchanged; ``coverage`` skips
+            # a record with no ``typed_core``); the long-tail output is additive.
             long_tail: dict[str, Any] = {
                 "status": "no_extractor",
                 "note": f"no typed extractor for {dtype!r}; ran the production long-tail path",
                 "extraction_model": resolve_model(settings.anthropic_model_extraction),
             }
-            if get_tier(dtype) is Tier.TIER_3:
-                analysis = await analyze_document(content, f.media_type)
-                long_tail["tier3_free_extraction"] = (
-                    analysis.model_dump(mode="json", exclude={"full_text"})
-                    if analysis is not None
-                    else None
-                )
-            else:  # Tier 2 (or a promoted Tier-1 not yet wired) → the interim summary
-                long_tail["tier2_summary"] = await summarize_document(content, f.media_type)
+            analysis = await analyze_document(content, f.media_type)
+            long_tail["tier3_free_extraction"] = (
+                analysis.model_dump(mode="json", exclude={"full_text"})
+                if analysis is not None
+                else None
+            )
             record["extraction"] = long_tail
             record["findings"] = _per_document_findings(dtype, None)
             return _tag_outcome(record, tally)

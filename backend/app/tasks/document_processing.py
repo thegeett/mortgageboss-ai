@@ -419,12 +419,16 @@ async def _extract_branch(
         # version is NOT hidden. If the fallback ALSO fails (069's oversized payload defeats it too),
         # _tier3_analyze is graceful (analysis None) and the document ends NEEDS_REVIEW with no untyped data —
         # that one needs the LP-464 page cap, and the fallback cannot save it.
-        document.processing_error = f"extraction failed ({result.reasoning or 'failed'}) — fell back to Tier 3 free extraction"
+        # ``processing_error`` is UI-shown and MUST stay PII-safe (the module invariant above), and the log
+        # carries no extracted content — so DON'T interpolate ``result.reasoning`` here: for an all-null-parse
+        # FAILED it is the model's free-text reasoning and can quote document details. The raw reason is
+        # already persisted in the FAILED extraction version's ``error_detail`` above, the access-controlled
+        # place for it (LP-471 review).
+        document.processing_error = "extraction failed — fell back to Tier 3 free extraction"
         await _tier3_analyze(db, document, content, review_reason="extraction_error")
         logger.info(
             "document_extraction_fell_back_to_tier3",
             document_id=str(document.id),
-            error_reason=result.reasoning,
         )
         # A CONTENT failure (not a throttle) — the need is correctly advanced to REJECTED below.
         return False

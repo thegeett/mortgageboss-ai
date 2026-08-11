@@ -665,7 +665,10 @@ async def test_extraction_failure_falls_back_to_tier3(
     # failure look like a success).
     extraction = await _current_extraction(db_session, doc.id)
     assert extraction is not None and extraction.extraction_status == ExtractionStatus.FAILED
-    assert "AI call failed" in (doc.processing_error or "")
+    # The reason lives in the FAILED version's error_detail (access-controlled); processing_error stays a
+    # FIXED, PII-safe string (a model reasoning could quote document content — the module invariant).
+    assert "AI call failed" in (extraction.error_detail or "")
+    assert doc.processing_error == "extraction failed — fell back to Tier 3 free extraction"
 
 
 async def test_low_confidence_extraction_does_not_fall_back(
@@ -719,7 +722,9 @@ async def test_extraction_failure_where_fallback_also_fails_stays_empty_but_diag
     assert doc.generic_analysis is None  # ...but produced nothing — honest, not hidden
     extraction = await _current_extraction(db_session, doc.id)
     assert extraction is not None and extraction.extraction_status == ExtractionStatus.FAILED
-    assert "oversized" in (doc.processing_error or "")
+    # The reason is diagnosable in the FAILED version's error_detail; processing_error stays PII-safe fixed.
+    assert "oversized" in (extraction.error_detail or "")
+    assert doc.processing_error == "extraction failed — fell back to Tier 3 free extraction"
 
 
 async def test_throttled_extraction_is_not_a_content_failure(

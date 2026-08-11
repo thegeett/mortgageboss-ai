@@ -714,10 +714,6 @@ async def test_run_one_unknown_runs_tier3_free_extraction(
     )
     analyze = AsyncMock(return_value=analysis)
     monkeypatch.setattr(engine, "analyze_document", analyze)
-    # summarize must NOT be called for a Tier-3 (unknown) document
-    monkeypatch.setattr(
-        engine, "summarize_document", AsyncMock(side_effect=AssertionError("Tier-2 path"))
-    )
 
     record = await engine.run_one(_pdf_file(tmp_path))
 
@@ -733,12 +729,15 @@ async def test_run_one_unknown_runs_tier3_free_extraction(
 
 
 @pytest.mark.asyncio
-async def test_run_one_tier2_type_runs_summary_not_free_extraction(
+async def test_run_one_tier2_type_runs_free_extraction_not_summary(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
+    # LP-471: a Tier-2 catalog type with no registered extractor (passport) no longer gets the LP-65 summary
+    # — production routes EVERY no-typed-extractor document through the SAME Tier-3 scoped free extraction, so
+    # the bench must mirror that (it used to run summarize_document here — the desync LP-471 review fixed).
+    from app.ai.generic_analyzer import GenericAnalysis
     from app.dev.bench import engine
 
-    # passport is a Tier-2 catalog type with no registered extractor.
     monkeypatch.setattr(
         engine,
         "classify_document",
@@ -746,17 +745,19 @@ async def test_run_one_tier2_type_runs_summary_not_free_extraction(
             return_value=SimpleNamespace(document_type="passport", confidence=0.95, reasoning="?")
         ),
     )
-    monkeypatch.setattr(
-        engine, "summarize_document", AsyncMock(return_value="a passport photo page")
+    analysis = GenericAnalysis(
+        document_type_guess="passport",
+        summary="a passport photo page",
+        key_findings=[],
+        full_text="EXCLUDED",
     )
-    # free extraction must NOT be called for a Tier-2 document
-    monkeypatch.setattr(
-        engine, "analyze_document", AsyncMock(side_effect=AssertionError("Tier-3 path"))
-    )
+    analyze = AsyncMock(return_value=analysis)
+    monkeypatch.setattr(engine, "analyze_document", analyze)
 
     record = await engine.run_one(_pdf_file(tmp_path))
 
     ex = record["extraction"]
     assert ex["status"] == "no_extractor"
-    assert ex["tier2_summary"] == "a passport photo page"
-    assert "tier3_free_extraction" not in ex
+    analyze.assert_awaited_once()  # Tier-2 now runs free extraction, not a summary
+    assert ex["tier3_free_extraction"] is not None
+    assert "tier2_summary" not in ex
