@@ -13953,3 +13953,91 @@ capability.
 
 **Consequence.** The first genuinely opaque startup failure will cost a redeploy cycle to diagnose. Accepted
 — the alternative is a permanent shell into NPI to save one redeploy.
+
+---
+
+## ADR-373: One account, one registry — `infra/shared` is dissolved into `envs/staging` (C4b)
+
+**Context.** C2 and C3 assumed two deployed accounts: a **tooling** account holding ECR and
+Terraform state, and a **workload** account holding everything else. `infra/shared` implemented the
+tooling half — a separate state, a dedicated KMS key, repository policies, and cross-account grant
+plumbing.
+
+**That assumption turned out to be false in both directions.** `envs/dev` is never applied — local
+development is Docker Compose plus Bedrock calls from a laptop, creating no AWS infrastructure at
+all. And production, when it exists, will be a separate account with its own registry. So the shared
+registry served **exactly one consumer**: staging.
+
+**The decision.** Delete `infra/shared`. `envs/staging` calls `modules/registry` directly, encrypting
+images with the **environment CMK** rather than a dedicated key.
+
+**Why this is a removal rather than a refactor.** The mechanism was not merely unused overhead — it
+carried a failure mode worth eliminating on its own. A cross-account pull whose `kms:Decrypt` grant is
+missing fails with an authorization error naming **KMS, not ECR**, sending the reader into the wrong
+service entirely. Machinery that serves one consumer and can fail in a misleading way is machinery
+worth not having.
+
+**What this simplifies beyond the deletion.** Three separate consequences, each of which had been
+worked around rather than solved:
+
+* **State.** With nothing in the tooling account, `infra/bootstrap` no longer needs to hold two
+  accounts' state. It stays one directory with one local state — no workspaces, no split.
+* **Image URLs.** C4 recorded that `envs/staging` had to ASSEMBLE repository URLs from a variable
+  because `data.aws_ecr_repository` resolves through the environment's own provider and failed with
+  `RepositoryNotFoundException` against the other account. **That constraint is gone.** A module
+  output is now the correct source, and no lookup is needed at all. The old reasoning is recorded in
+  `envs/staging/main.tf` specifically so it is not re-applied later.
+* **Keys.** One CMK instead of two — one fewer key to create, protect from deletion, and reason
+  about, and ~$1/month.
+
+**The cross-account policy resource is GATED, not deleted.** `modules/registry` keeps
+`aws_ecr_repository_policy.cross_account_pull` behind `length(var.pull_account_ids) > 0`, defaulting
+to `[]`. Production may genuinely need it, and at that point it would serve two accounts rather than
+one. Deleting working code that will be wanted again is worse than leaving it inert.
+
+**⚠️ The accepted trade-off, stated rather than pre-solved.** With one registry per account, promoting
+a staging-validated image to production later means either a cross-account pull (re-introducing this
+complexity where it would finally earn its keep) or rebuilding in production (a different digest from
+the artifact that was validated). **That decision belongs to when production exists, with real
+information.** It is deliberately not decided here.
+
+**One thing that had to move with it.** `infra/shared` also held
+`aws_ce_cost_allocation_tag.environment`, which is **account-level**. The staging budget filters on
+`user:Environment$staging`, and AWS Budgets matches NOTHING until that tag is activated — so deleting
+shared without moving it would have left the budget reporting $0 forever and never firing, while
+looking correctly configured. It now lives in `envs/staging`, with a note that only one root module
+per account may declare it.
+
+---
+
+## ADR-374: State locking uses S3 conditional writes, not a DynamoDB table (C4b)
+
+**Context.** Every `backend.tf` specified `dynamodb_table = "mbai-tf-locks"`, and `infra/bootstrap`
+created that table. The S3 backend has supported native locking via conditional writes
+(`use_lockfile = true`) since Terraform 1.10, and `dynamodb_table` was deprecated in 1.11. The repo
+pins Terraform **v1.15.8**.
+
+**The decision.** `use_lockfile = true` in every backend; the `aws_dynamodb_table` resource and its
+variable removed from bootstrap entirely.
+
+**Why now, and why it is cheap.** **Nothing was ever applied** — the state bucket does not exist and
+bootstrap has no state file — so there is no table to migrate away from and no lock to coordinate
+during a cutover. Adopting the deprecated option in brand-new configuration, then migrating later,
+would be strictly more work than not adopting it. This is the one moment where the change costs
+nothing.
+
+It also removes a resource from the critical path: locking no longer depends on a second AWS service
+being present and reachable before any plan can run.
+
+**⚠️ NOT VERIFIED, and recorded as such.** Confirming that v1.15.8 accepts `use_lockfile` requires
+`terraform init`, which was out of scope for the ticket that made this change. **It is the first thing
+to check on the initial init.** If it is rejected, the fallback is mechanical and fully specified:
+restore `dynamodb_table` in the backends and an `aws_dynamodb_table` resource in bootstrap. That
+fallback is written into `bootstrap/README.md` and the C4b result doc rather than left to be
+rediscovered.
+
+**A correction worth carrying forward.** The S3 backend is a **Terraform core** feature, initialised
+before providers load — the `~> 5.0` AWS provider pin has no bearing on it. An earlier investigation
+reached for the provider version when reasoning about this; the version that matters is Terraform's.
+
+**Never set both.** Terraform treats `use_lockfile` alongside `dynamodb_table` as a conflict.

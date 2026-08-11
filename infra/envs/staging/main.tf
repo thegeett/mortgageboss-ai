@@ -161,16 +161,6 @@ module "secrets" {
   create_redis_url_secret = var.redis_auth_enabled
 }
 
-# The registry is NOT here. It lives in ../../shared, because it is shared across
-# environments (distinguished by image tag, not repository name) and a shared
-# resource cannot be owned by one environment's state.
-#
-# Owning it here meant this environment's documented destroy-and-rebuild — which
-# runs with ecr_force_delete = true — would delete every environment's images, and
-# would schedule deletion of the CMK protecting them. See ../../shared/main.tf.
-#
-# Read the repository URLs with:
-#   terraform -chdir=../../shared output ecr_repository_urls
 
 module "data" {
   source = "../../modules/data"
@@ -228,8 +218,8 @@ resource "aws_budgets_budget" "monthly" {
   # environment was left running.
   #
   # Depends on default_tags applying Environment to every resource in this root
-  # module (see the provider block). Untagged/unTaggable spend — the shared registry,
-  # data-transfer lines AWS does not attribute — falls outside every environment
+  # module (see the provider block). Untagged/unTaggable spend — data-transfer lines
+  # AWS does not attribute — falls outside every environment
   # budget by construction; that is the correct trade for an attributable alert.
   # format(), not a template string. AWS wants the literal form
   # "user:<TagKey>$<TagValue>", and in HCL `$${` is the ESCAPE for a literal `${` —
@@ -241,7 +231,7 @@ resource "aws_budgets_budget" "monthly" {
   # ⚠️ DEPENDS ON AN ACCOUNT-LEVEL ACTIVATION. AWS Budgets can only filter on a
   # user-defined tag once `Environment` is ACTIVATED as a cost allocation tag, which
   # is an account (payer) setting, not a per-environment one — it is applied by
-  # `aws_ce_cost_allocation_tag.environment` in ../../shared. Without that this
+  # `aws_ce_cost_allocation_tag.environment` in THIS root module. Without it this
   # filter matches zero cost records and the budget silently never fires. Activation
   # is also NOT retroactive, so the first period after enabling is partial.
   cost_filter {
@@ -270,45 +260,81 @@ resource "aws_budgets_budget" "monthly" {
 # Compute (C3) — ECS cluster, three Fargate services, ALB, per-task IAM
 # --------------------------------------------------------------------------- #
 
-# The images live in the SHARED registry, which is a THIRD state file.
+# --------------------------------------------------------------------------- #
+# Registry
 #
-# ...and that registry is in a DIFFERENT AWS ACCOUNT from this environment.
+# ECR lives HERE, in the same account as everything that pulls from it.
 #
-# `ecr_registry_account_id` (591…, the tooling account that also holds the state
-# bucket) is not `aws_account_id` (058…, this workload account). That is the whole
-# reason the URLs and ARNs are ASSEMBLED here rather than read with
-# `data.aws_ecr_repository`: a data source resolves through THIS environment's
-# provider, so it looked the repositories up in the workload account, found nothing,
-# and failed the plan with RepositoryNotFoundException. Adding a second provider
-# would mean holding credentials for the tooling account during a workload apply,
-# which is worse than composing two strings.
+# It was previously its own state (`infra/shared`) with a dedicated KMS key,
+# repository policies, and cross-account grant plumbing — a whole mechanism whose
+# only consumer was this environment. It also carried a nasty failure mode: a
+# cross-account pull missing the kms:Decrypt grant fails with an authorization
+# error naming KMS, not ECR, which sends you looking in the wrong service.
 #
-# The same reasoning that ruled out `terraform_remote_state` still holds and is why
-# nothing here reaches into shared's state:
+# ⚠️ C4 recorded that repository URLs had to be ASSEMBLED from a variable because
+# `data.aws_ecr_repository` resolves through THIS environment's provider and failed
+# with RepositoryNotFoundException against the other account. THAT CONSTRAINT IS
+# GONE — the registry is in this account and in this state, so a module output is
+# now the correct source and no lookup is needed at all. Do not re-apply the old
+# reasoning.
 #
-#   * It reads the ENTIRE shared state, so this environment would need s3:GetObject
-#     on that object — and would then hold every attribute of every resource in it.
-#   * It couples to shared's OUTPUT NAMES, turning a local refactor there into a
-#     fleet-wide break.
-#
-# The repository NAME remains the contract between the two states; the account id
-# and region are the only additions, and both are already environment values.
-#
-# ⚠️ Cross-account pull needs TWO grants in the registry account, both applied by
-# `infra/shared` from its `ecr_pull_account_ids`: a repository policy allowing this
-# account to pull, and `kms:Decrypt` on the key encrypting the image layers. Without
-# the second, the pull fails with an authorization error that names KMS, not ECR.
-locals {
-  ecr_registry_host = "${var.ecr_registry_account_id}.dkr.ecr.${var.aws_region}.amazonaws.com"
+# Encryption uses the ENVIRONMENT CMK rather than a dedicated key: one fewer key to
+# create, protect from deletion, and reason about.
+# --------------------------------------------------------------------------- #
 
+module "registry" {
+  source = "../../modules/registry"
+
+  tags = local.tags
+
+  repository_names     = values(var.ecr_repository_names)
+  kms_key_arn          = module.secrets.kms_key_arn
+  keep_last_images     = var.ecr_keep_last_images
+  untagged_expire_days = var.ecr_untagged_expire_days
+
+  protected_tag_prefixes     = var.ecr_protected_tag_prefixes
+  keep_last_protected_images = var.ecr_keep_last_protected_images
+
+  # pull_account_ids is deliberately NOT set, so it takes its empty default and no
+  # repository policy is created at all. The resource remains in the module,
+  # count-gated, because production may genuinely need a cross-account pull later —
+  # at which point it would serve two accounts rather than one.
+
+  force_delete = var.ecr_force_delete
+}
+
+locals {
   ecr_repository_urls = {
-    for key, name in var.ecr_repository_names : key => "${local.ecr_registry_host}/${name}"
+    for key, name in var.ecr_repository_names :
+    key => module.registry.repository_urls[name]
   }
 
   ecr_repository_arns_by_key = {
     for key, name in var.ecr_repository_names :
-    key => "arn:aws:ecr:${var.aws_region}:${var.ecr_registry_account_id}:repository/${name}"
+    key => module.registry.repository_arns[name]
   }
+}
+
+# --------------------------------------------------------------------------- #
+# Cost allocation
+#
+# ⚠️ MOVED HERE FROM THE DISSOLVED SHARED STATE, and it is load-bearing.
+#
+# The budget below filters on user:Environment$<name>, and AWS Budgets matches
+# NOTHING until that tag is ACTIVATED as a cost allocation tag. Without this the
+# budget reports $0 forever and never fires — silently, because it looks configured.
+#
+# The resource is ACCOUNT-level, not environment-level. It lives in this root
+# module because this account has exactly one environment; a second environment in
+# the SAME account must not declare it again, or the two states would fight over
+# one account-wide setting.
+# --------------------------------------------------------------------------- #
+
+resource "aws_ce_cost_allocation_tag" "environment" {
+  count = var.activate_environment_cost_allocation_tag ? 1 : 0
+
+  tag_key = "Environment"
+  status  = "Active"
 }
 
 locals {

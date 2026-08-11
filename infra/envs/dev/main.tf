@@ -1,3 +1,21 @@
+# ┌─────────────────────────────────────────────────────────────────────────────┐
+# │  ⚠️  THIS ENVIRONMENT IS NEVER APPLIED.                                      │
+# │                                                                             │
+# │  It is a REFERENCE TEMPLATE. Local development runs on Docker Compose and    │
+# │  calls Bedrock from the laptop, so it needs no AWS infrastructure at all.    │
+# │                                                                             │
+# │  It exists to prove the modules take a different set of values without any   │
+# │  module edit, and as a starting point for a future environment.              │
+# │                                                                             │
+# │  There is deliberately NO backend.tf — it described a state file that would  │
+# │  never exist. `terraform validate` here runs with -backend=false.            │
+# │                                                                             │
+# │  ⚠️  Do NOT repoint this at staging's backend. An accidental `apply` would   │
+# │      then write to staging's state.                                          │
+# │                                                                             │
+# │  The deployed environment is ../staging.                                     │
+# └─────────────────────────────────────────────────────────────────────────────┘
+
 # Development environment — wires the four modules together.
 #
 # Staging is a sibling directory with different variable values, not different

@@ -4,6 +4,11 @@
 # yet. This directory therefore uses LOCAL state, is applied ONCE, and is then
 # left alone. Everything else (infra/envs/*) uses the S3 backend this creates.
 #
+# ONE ACCOUNT, ONE STATE. This bootstraps the staging account only. There is no
+# tooling account to bootstrap: envs/dev is never applied, and production will be a
+# separate account with its own bootstrap. That is why this stays a single
+# directory with a single local state rather than needing workspaces.
+#
 # See README.md in this directory before touching anything here.
 
 terraform {
@@ -42,11 +47,6 @@ variable "aws_account_id" {
 
 variable "state_bucket_name" {
   description = "Name of the S3 bucket holding Terraform state."
-  type        = string
-}
-
-variable "lock_table_name" {
-  description = "Name of the DynamoDB table used for state locking."
   type        = string
 }
 
@@ -110,27 +110,18 @@ resource "aws_s3_bucket_public_access_block" "state" {
   restrict_public_buckets = true
 }
 
-resource "aws_dynamodb_table" "locks" {
-  name         = var.lock_table_name
-  billing_mode = "PAY_PER_REQUEST"
-  hash_key     = "LockID"
-
-  attribute {
-    name = "LockID"
-    type = "S"
-  }
-
-  lifecycle {
-    prevent_destroy = true
-  }
-}
+# ⚠️ THERE IS NO DYNAMODB LOCK TABLE, deliberately.
+#
+# State locking uses S3 conditional writes (`use_lockfile = true` in every
+# backend), which the S3 backend has supported since Terraform 1.10 and which
+# deprecated `dynamodb_table` in 1.11. One fewer resource, one fewer thing to
+# create before anything else can run, and no second service in the critical path
+# of every plan.
+#
+# Nothing was ever applied, so no table exists to migrate away from — see the
+# result doc.
 
 output "state_bucket" {
-  description = "S3 bucket holding Terraform state — referenced by envs/*/backend.tf."
+  description = "S3 bucket holding Terraform state — referenced by envs/staging/backend.tf."
   value       = aws_s3_bucket.state.id
-}
-
-output "lock_table" {
-  description = "DynamoDB table used for state locking."
-  value       = aws_dynamodb_table.locks.name
 }

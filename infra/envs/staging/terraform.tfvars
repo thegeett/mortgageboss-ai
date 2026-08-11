@@ -136,14 +136,6 @@ redis_family    = "redis7"
 # depth alongside security-group isolation.
 redis_auth_enabled = true
 
-# --- Compute ------------------------------------------------------------------ #
-
-# ⚠️ The TOOLING account, not this environment's. The registry is shared and lives
-# in the same account as the Terraform state bucket; this environment's workloads
-# run in aws_account_id above. Cross-account pull is granted from ../../shared
-# (ecr_pull_account_ids), which adds both the repository policy and kms:Decrypt.
-ecr_registry_account_id = "591554480818"
-
 ecr_repository_names = {
   api      = "mbai/api"
   frontend = "mbai/frontend"
@@ -221,3 +213,23 @@ budget_notification_email = "budget@mortgageboss.ai"
 # raises SettingsError and the app refuses to start (verified in C3), so this one
 # fails loudly rather than silently.
 cors_allowed_origins = ["https://staging.mortgageboss.ai"]
+
+# --- Registry (moved in from the dissolved shared state) ---------------------- #
+
+# Ordinary retention tier. Promoted tags are protected separately below, so a busy
+# pipeline burning through this count cannot evict the image staging is running.
+ecr_keep_last_images     = 30
+ecr_untagged_expire_days = 7
+
+ecr_protected_tag_prefixes     = ["staging-", "prod-", "release-"]
+ecr_keep_last_protected_images = 20
+
+# false, deliberately. A destroy here would discard the image history, which is not
+# something a plan should be able to do quietly.
+ecr_force_delete = false
+
+# ⚠️ ACCOUNT-LEVEL, and required for the budget above to work at all: AWS Budgets
+# matches nothing until `Environment` is activated as a cost allocation tag, so a
+# filtered budget without this reports $0 forever and never fires.
+# Only ONE root module per account may set this true.
+activate_environment_cost_allocation_tag = true

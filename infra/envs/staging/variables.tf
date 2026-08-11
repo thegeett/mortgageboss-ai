@@ -202,21 +202,6 @@ variable "documents_bucket_name" {
 
 # --- Compute (C3) ----------------------------------------------------------- #
 
-variable "ecr_registry_account_id" {
-  description = <<-EOT
-    Account holding the SHARED ECR registry — the tooling account, NOT this
-    environment's `aws_account_id`.
-
-    The image URLs and repository ARNs are assembled from this rather than read with
-    `data.aws_ecr_repository`, because a data source resolves through this
-    environment's provider and would look the repositories up in the wrong account.
-
-    ⚠️ Cross-account pull also needs a repository policy and `kms:Decrypt` on the
-    registry's key, both granted by `infra/shared` via `ecr_pull_account_ids`.
-  EOT
-  type        = string
-}
-
 variable "ecr_repository_names" {
   description = <<-EOT
     Map of service key to the ECR repository NAME in the shared registry.
@@ -453,4 +438,54 @@ variable "allowed_cidr_blocks" {
   EOT
   type        = list(string)
   default     = []
+}
+
+# --- Registry (C4b — moved in from the dissolved shared state) --------------- #
+
+variable "ecr_keep_last_images" {
+  description = "Tagged images retained in the ordinary tier. A busy pipeline burns through this, which is why promoted tags are protected separately."
+  type        = number
+}
+
+variable "ecr_untagged_expire_days" {
+  description = "Days before an untagged image expires."
+  type        = number
+}
+
+variable "ecr_protected_tag_prefixes" {
+  description = <<-EOT
+    Tag prefixes for PROMOTED images, matched by a higher-priority lifecycle rule so
+    they never enter the ordinary count.
+
+    Without this a busy pipeline evicts the OLDEST image — which is exactly a
+    long-lived promoted tag. The environment running it then fails to launch
+    replacement tasks with CannotPullContainerError, long after the push that caused
+    it.
+  EOT
+  type        = list(string)
+}
+
+variable "ecr_keep_last_protected_images" {
+  description = "Images retained per protected prefix. Deliberately deeper — this is the rollback history that matters."
+  type        = number
+}
+
+variable "ecr_force_delete" {
+  description = "Let destroy remove repositories that still hold images. ⚠️ false here — a destroy would discard the image history."
+  type        = bool
+}
+
+variable "activate_environment_cost_allocation_tag" {
+  description = <<-EOT
+    Activate `Environment` as a cost allocation tag. ACCOUNT-LEVEL.
+
+    ⚠️ The budget filters on user:Environment$<name>, and AWS Budgets matches NOTHING
+    until this is active — the budget would report $0 forever and never fire, while
+    looking correctly configured.
+
+    ⚠️ Only ONE root module per account may set this true. A second environment in
+    the same account must leave it false, or the two states fight over one
+    account-wide setting.
+  EOT
+  type        = bool
 }

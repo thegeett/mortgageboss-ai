@@ -1,46 +1,63 @@
 # `infra/` — Terraform for the AWS environments
 
-Foundation only: network, registry, database, cache, keys, secret containers,
-log groups, and a budget alarm. ECS services are ticket C3; DNS and TLS are C4.
+Everything runs in **one AWS account**: staging, `058190633983`, `us-east-1`.
 
 ```
 infra/
-  bootstrap/          state bucket + lock table — LOCAL state, applied once
+  bootstrap/          state bucket — LOCAL state, applied once, staging account
   modules/
     network/          VPC, subnets, egress, security groups
     data/             RDS + ElastiCache + log groups
     registry/         ECR
     secrets/          KMS + Secrets Manager containers
-  shared/             ECR registry + its KMS key — SHARED across environments
+    compute/          ECS cluster, services, ALB, per-task IAM, Cognito
+    dns/              Route 53 zone + ACM
+    documents/        the documents bucket
   envs/
     dev/              ⚠️ REFERENCE TEMPLATE — never applied (see below)
-    staging/          the first and ONLY deployed environment
+    staging/          the ONLY deployed environment
 ```
 
 > ### ⚠️ `envs/dev/` is a template, not a deployed environment
 >
 > Nothing in `envs/dev/` has ever been applied, and nothing is missing as a result.
 > Local development runs against Docker Compose and calls Bedrock from the laptop,
-> so dev needs no AWS infrastructure at all. The directory exists because it is
-> where the modules were exercised and validated, and it keeps a second set of
-> values honest about what is environment-specific.
+> so it needs no AWS infrastructure at all.
 >
-> **`envs/staging/` is the real environment.** If you are looking for the running
-> infrastructure, it is there.
+> It exists to prove the modules take a different set of values without any module
+> edit, and as a starting point for a future environment. It has **no `backend.tf`**
+> — that described a state file which would never exist — and its `terraform.tfvars`
+> carries placeholder account values.
+>
+> ⚠️ **Do not repoint it at staging's backend.** An accidental `apply` there would
+> then write to staging's state.
+>
+> **`envs/staging/` is the real environment.**
 
-**`shared/` is a separate state on purpose.** The registry is shared across
-environments — one repository set, distinguished by image *tag*, so the exact bytes
-tested in dev are what get promoted. A shared resource therefore cannot be owned by
-an environment's state: `envs/dev` is destroy-and-rebuild and ran with
-`ecr_force_delete = true`, so it would have deleted every environment's images and
-scheduled deletion of the CMK protecting them. See `shared/main.tf`.
+### One account, one registry
+
+ECR lives in `envs/staging`, alongside everything that pulls from it. It was
+previously a separate `infra/shared` state in a second account, with a dedicated KMS
+key and cross-account grant plumbing — a whole mechanism serving exactly one
+consumer, and one carrying a nasty failure mode: a cross-account pull missing the
+`kms:Decrypt` grant fails with an authorization error naming **KMS, not ECR**.
+
+Production, when it exists, will be a separate account with its own registry. The
+image-promotion trade-off that implies is recorded in
+[`../docs/tickets/C4b-consolidate-staging-result.md`](../docs/tickets/C4b-consolidate-staging-result.md),
+deliberately not pre-solved.
+
+### State locking
+
+S3 conditional writes (`use_lockfile = true`), **not** a DynamoDB table. There is no
+lock table anywhere. Never set both — Terraform treats that as a conflict.
 
 Modules are **environment-agnostic**. No module contains an account id, a region,
 an environment name, or a `mbai-*` literal — `envs/<env>/terraform.tfvars` supplies
 every one. The acceptance test:
 
 ```bash
-grep -rniE '591554480818|us-east-1|\bdev\b|mbai-dev' infra/modules/    # must be empty
+grep -rniE '058190633983|us-east-1|\bstaging\b|\bdev\b|mbai-' infra/modules/   # comments only
 ```
 
 ---
@@ -50,149 +67,56 @@ grep -rniE '591554480818|us-east-1|\bdev\b|mbai-dev' infra/modules/    # must be
 Every `apply` is run **by a human**, never by an agent.
 
 ```bash
-# 1. Bootstrap — once, ever. Creates the state bucket and lock table.
+# ── 0. Log in. The staging profiles use the `mbai` SSO session.
+aws sso login --sso-session mbai
+
+# ── 1. Bootstrap — ONCE, EVER. Local state; creates the S3 state bucket.
 cd infra/bootstrap
 terraform init
-terraform apply
+AWS_PROFILE=mbai-staging-admin terraform apply
 
-# 2. The shared registry — once per ACCOUNT, not per environment.
-cd ../shared
-terraform init
-terraform plan -out=shared.tfplan
-terraform apply shared.tfplan
+# ── 2. Staging, PHASE 1 — enable_tls = false, enable_cognito = false.
+cd ../envs/staging
+AWS_PROFILE=mbai-staging-admin terraform init      # picks up the S3 backend
+AWS_PROFILE=mbai-staging-admin terraform plan -out=staging.tfplan
+AWS_PROFILE=mbai-staging-admin terraform apply staging.tfplan
 
-# 3. The environment. Now that the bucket exists, the S3 backend resolves.
-#    This creates the foundation (C2) AND the ECS services (C3) in one apply.
-cd ../envs/dev
-terraform init
-terraform plan -out=dev.tfplan     # ← read this before applying
-terraform apply dev.tfplan
+# ── MANUAL: delegate staging.mortgageboss.ai at Namecheap.
+terraform output -json route53_name_servers        # the four NS values
+dig +short NS staging.mortgageboss.ai              # four awsdns = delegation live
 
-# 4. STAGING — see "The two-phase staging apply" below. It cannot be done in one
-#    run: ACM cannot validate until the subdomain's NS records are live at the
-#    registrar, and those do not exist until the zone has been created.
+# ── 3. Staging, PHASE 2 — flip enable_tls and enable_cognito to true.
+AWS_PROFILE=mbai-staging-admin terraform plan -out=staging-tls.tfplan
+AWS_PROFILE=mbai-staging-admin terraform apply staging-tls.tfplan
 
-# 5. Run the database migration ONCE, before the services are useful.
-terraform output -raw migration_run_task_command    # prints the full invocation
+# ── 4. Run the database migration ONCE, before the services are useful.
+terraform output -raw migration_run_task_command   # prints the full invocation
 # run it, then confirm it exited 0:
 aws ecs describe-tasks --cluster <cluster> --tasks <task-arn> \
   --query 'tasks[0].containers[0].exitCode'
 
-# 5. Reach the stack (HTTP only until C4 adds TLS).
-curl http://$(terraform output -raw alb_dns_name)/health/live
+# ── 5. Reach the stack.
+curl https://staging.mortgageboss.ai/health/live
 ```
 
-⚠️ **Work through the pre-deploy checklist below BEFORE step 3.** Several of its
+**Three steps, one account.** There is no tooling-account bootstrap and no
+`infra/shared` apply — both are gone.
+
+`terraform init` in step 2 is a **first** init, not a migration: nothing was ever
+applied under the previous layout, so there is no state to move.
+
+⚠️ **Work through the pre-deploy checklist below BEFORE step 2.** Several of its
 items cause failures that produce no useful log line — an empty secret, a missing
-image tag, or documents that were never synced.
+image tag, or an architecture mismatch.
 
-### Migrating an already-applied environment
+⚠️ **On the first `terraform init`, confirm `use_lockfile` is accepted.** It was not
+verified against the pinned Terraform (v1.15.8). If init rejects it, see the C4b
+result doc for the `dynamodb_table` fallback.
 
-**If `envs/dev` has never been applied, skip this entire section** — the greenfield
-path above is all you need.
-
-If it has, four changes here are replacement-forcing. Read all four before touching
-anything; three of them break a running environment silently.
-
-#### 1. The RDS master password ROTATES
-
-`override_special` narrowed (to keep `#`, `?`, `%` and `:` out of `DATABASE_URL`),
-and that attribute is `ForceNew` on `random_password`:
-
-```
-~ override_special = "!#$%&*()-_=+[]{}<>:?" -> "!$&*()-_=+,.;~" # forces replacement
-Plan: 1 to add, 0 to change, 1 to destroy.
-```
-
-`aws_db_instance.password` reads it, and RDS applies a `MasterUserPassword` change
-**immediately** regardless of `apply_immediately`. The `mbai/dev/database-url`
-secret is populated out of band, so it keeps the old password and every task starts
-failing authentication. **Re-populate the secret in the same maintenance step:**
-
-```bash
-cd infra/envs/dev
-terraform apply                      # rotates the password
-terraform state show random_password.db   # not an output by design; read it here
-# then rebuild the URL and push it:
-aws secretsmanager put-secret-value --secret-id mbai/dev/database-url \
-  --secret-string 'postgresql+asyncpg://mbai_admin:NEW_PASSWORD@HOST:5432/mortgageboss?ssl=require'  # pragma: allowlist secret
-```
-
-#### 2. The RDS log group must be imported first
-
-RDS already auto-created `/aws/rds/instance/mbai-dev/postgresql`, and Terraform
-does **not** adopt existing resources — the apply fails with
-`ResourceAlreadyExistsException`. Import before applying:
-
-```bash
-terraform import 'module.data.aws_cloudwatch_log_group.rds_postgresql' \
-  /aws/rds/instance/mbai-dev/postgresql
-```
-
-#### 3. The ElastiCache parameter group is replaced
-
-Its name changes from `mbai-dev` to `mbai-dev-redis7` (the family is now in the
-name, because `aws_elasticache_parameter_group` has no `name_prefix` and a static
-name plus `create_before_destroy` makes replacement impossible). The next apply
-replaces the group and re-associates the replication group. That is one-time churn
-with no data loss, but do it in a maintenance window: with
-`apply_immediately = false` the association update is deferred, and a deferred
-association plus a same-apply delete of the old group can surface
-`InvalidCacheParameterGroupState`.
-
-#### 4. Moving ECR into `infra/shared`
-
-Move the state — **do not** just apply, which would destroy dev's repositories and
-recreate them in shared's, discarding every image.
-
-```bash
-# Drop them from dev's state WITHOUT touching AWS.
-cd infra/envs/dev
-terraform state rm 'module.registry.aws_ecr_repository.this["mbai/api"]'
-terraform state rm 'module.registry.aws_ecr_repository.this["mbai/frontend"]'
-terraform state rm 'module.registry.aws_ecr_lifecycle_policy.this["mbai/api"]'
-terraform state rm 'module.registry.aws_ecr_lifecycle_policy.this["mbai/frontend"]'
-
-# Adopt them into shared's state.
-cd ../../shared
-terraform init
-terraform import 'module.registry.aws_ecr_repository.this["mbai/api"]' mbai/api
-terraform import 'module.registry.aws_ecr_repository.this["mbai/frontend"]' mbai/frontend
-```
-
-⚠️ **Before you plan, set `registry_kms_key_arn` in `shared/terraform.tfvars` to
-dev's existing CMK.** ECR has no API to re-encrypt a repository, so the provider
-marks `encryption_configuration` `ForceNew`: imported repositories carry dev's key
-in state while the module would otherwise demand a newly created one, and the plan
-becomes **`# must be replaced` on every repository**. Since `ecr_force_delete =
-false` here, that destroy then *fails* on repositories holding images and leaves
-the apply half-done. Setting the variable adopts them in place with no replacement:
-
-```hcl
-# shared/terraform.tfvars — migration only
-registry_kms_key_arn = "arn:aws:kms:us-east-1:591554480818:key/THE-DEV-KEY-ID"
-```
-
-```bash
-terraform plan   # expect: lifecycle policies only. NO repository replacement.
-```
-
-**While `registry_kms_key_arn` is set, the images are still protected by dev's CMK,
-so `terraform destroy` in `envs/dev` schedules that key's deletion and makes every
-image unpullable seven days later.** `terraform -chdir=infra/shared output
-registry_key_is_owned_here` reports `false` for exactly as long as this is true.
-
-To end that coupling, push fresh images to new repository names under the shared
-key, repoint the ECS task definitions, and delete the old repositories. There is no
-in-place path — that is an ECR limitation, not a Terraform one.
-
-**`terraform plan` is the first point at which cost becomes real, and applying it
-is the first point at which anything is billable.** Read the plan.
-
-Both directories carry an account guard: a `precondition` on
+Both `bootstrap` and `envs/staging` carry an account guard: a `precondition` on
 `terraform_data.account_guard` fails the plan if the resolved credentials do not
-match `var.aws_account_id`. It is a precondition rather than a `check` block
-because a `check` only warns.
+match `var.aws_account_id`. A precondition rather than a `check` block, because a
+`check` only warns.
 
 ---
 
@@ -319,16 +243,14 @@ in the ECS console. Check with:
 docker image inspect <image> --format '{{.Architecture}}'   # expect: arm64
 ```
 
-### 3. The 4,562 existing documents synced to S3
+### 3. ⚠️ Do NOT sync documents from anywhere
 
-```bash
-aws s3 sync ./backend/storage/ s3://mbai-dev-documents-591554480818/ --dryrun | head
-```
+**Staging starts empty, deliberately.** There is no document sync and no database
+seed: development documents are development artifacts and have no place in an
+environment holding real borrower NPI.
 
-Storage keys are **byte-identical across backends** (C0 parity test), so a plain
-`aws s3 sync` preserving relative paths is sufficient. **Without this, every
-existing document 404s after cutover** — the database rows still point at keys that
-have no object behind them.
+The documents bucket is created empty by `modules/documents`, and the schema comes
+from the migration task run against an empty RDS instance.
 
 ### 4. Migration run, and confirmed successful
 
@@ -489,92 +411,46 @@ certificate or hostname.
 
 ## The destroy-and-rebuild workflow
 
-This environment is meant to be torn down between uses. That is why
-`secret_recovery_window_days = 0`.
+⚠️ **Staging is NOT a destroy-and-rebuild environment.** The flags that made the
+`envs/dev` template disposable are all inverted here — `rds_deletion_protection =
+true`, `rds_skip_final_snapshot = false`, `secret_recovery_window_days = 30`,
+`ecr_force_delete = false`. A `terraform destroy` will refuse on the database, and
+that is intended.
 
-⚠️ `terraform destroy` here **no longer deletes ECR repositories** — the registry
-moved to `infra/shared`, which is exactly the point: a dev rebuild must not be able
-to delete another environment's images.
-
-⚠️ **That is not yet true of the image BYTES if you migrated an existing
-environment.** While `shared/terraform.tfvars` sets `registry_kms_key_arn` to dev's
-CMK (see migration step 4), the images are encrypted with a key that lives in
-**this** state — so this destroy schedules that key's deletion and every image
-becomes permanently unpullable when the window expires. Check before destroying:
-
-```bash
-terraform -chdir=../../shared output registry_key_is_owned_here   # must be true
-```
-
-If it reports `false`, either finish the migration off dev's key first, or accept
-that the destroy costs every pre-migration image.
-
-```bash
-cd infra/envs/dev
-terraform destroy
-```
+The notes below describe what *would* happen, so the refusals are understood rather
+than worked around.
 
 ### Survives a destroy
 
-- The **state bucket** and **lock table** (`bootstrap/`, both `prevent_destroy`).
-- **The registry** — repositories and images live in `infra/shared`, outside this
-  environment's state. Their KMS key does too **on a greenfield apply**; after a
-  migration it is still this environment's CMK until the images are re-pushed (see
-  the warning above and `registry_key_is_owned_here`).
-- The **documents bucket `mbai-dev-documents-591554480818`** — hand-created in C0,
-  **never managed by this Terraform**. It holds uploaded files. It is referenced
-  by `data.aws_s3_bucket`, never created or imported, so `destroy` cannot touch it.
+- The **state bucket** (`bootstrap/`, `prevent_destroy`).
+- The **documents bucket** — `prevent_destroy` in `modules/documents`. It holds the
+  only copy of every uploaded file, and the database stores keys rather than
+  content.
+- **ECR repositories**, because `ecr_force_delete = false` makes the destroy fail
+  rather than discard image history.
 
 ### Lost
 
-- **All RDS data.** Re-seeding is manual.
+- **All RDS data**, if deletion protection is ever turned off to allow it. A final
+  snapshot is taken (`rds_skip_final_snapshot = false`).
 - All CloudWatch logs.
-- The KMS key enters a 7-day pending-deletion window. It is unusable but not yet
-  gone, and it still bills — see the table below.
+- The KMS key enters a 30-day pending-deletion window — unusable but not yet gone,
+  and still billing.
 
 ### Resources with destroy-time friction — and how each is handled
 
-| Resource | Default behaviour | Handling |
+Unlike the dev template, **most of this friction is deliberate here.**
+
+| Resource | Behaviour | Handling |
 |---|---|---|
-| Secrets Manager secret | Deleted name stays **reserved** 7–30 days → re-apply fails on a name conflict | `recovery_window_days = 0` |
-| ECR repository | Destroy **fails** if it still contains images | Not applicable — the registry is in `infra/shared`, and `ecr_force_delete = false` there so this friction is deliberate |
-| RDS instance | Destroy **fails** when `deletion_protection` is on | `rds_deletion_protection = false` |
-| RDS instance | Destroy **fails** demanding a snapshot name when `skip_final_snapshot = false` | `rds_skip_final_snapshot = true` |
-| KMS **alias** | `destroy` leaves it **orphaned**, so the next apply fails `AlreadyExistsException` | `kms_create_alias = false` — no alias, no orphan |
-| KMS key | Cannot be deleted immediately; 7–30 day window is mandatory | `kms_deletion_window_days = 7` (the AWS minimum). **Orphaned keys pending deletion for 7 days, ~$1/month each — no rebuild friction.** |
-| State bucket / lock table | `prevent_destroy` | Intentional — not part of the environment destroy |
-
-**Every one of these is configured so `terraform destroy` succeeds and the next
-`apply` works with no console intervention.**
-
-The KMS row deserves a note, because the obvious diagnosis is wrong. The deletion
-window is **not** what blocks a rebuild — a fresh apply creates a *new* key without
-complaint, whatever state the old one is in. The blocker was the **alias**:
-`terraform destroy` schedules the key but leaves the alias behind
-([hashicorp/terraform-provider-aws#35161](https://github.com/hashicorp/terraform-provider-aws/issues/35161)),
-and `alias/mbai-dev` is then still taken, so the next apply dies with
-`AlreadyExistsException` and needs a manual `aws kms delete-alias`.
-
-So the fix targets the alias, not the key: `kms_create_alias = false` here. The
-alias is console readability only — every consumer references the key by ARN
-through the module outputs — so nothing functional is lost.
-
-**The residue is cost, not friction.** Each destroy leaves one orphaned key
-pending deletion for 7 days at roughly **$1/month prorated (~$0.23 per key)**,
-and they accumulate if you rebuild repeatedly within a week. That is the accepted
-trade. To reclaim one early:
-
-```bash
-aws kms cancel-key-deletion --key-id <id>   # then re-schedule, or reuse it
-```
-
-⚠️ **Staging sets `kms_create_alias = true`** — it is long-lived, so console
-readability is worth more than a rebuild friction that will rarely be exercised.
-When staging *is* rebuilt, the orphaned alias must be removed by hand:
-
-```bash
-aws kms delete-alias --alias-name alias/mbai-staging
-```
+| RDS instance | Destroy **fails** with deletion protection on | ✅ Intended. Turn it off explicitly, in its own change, if you truly mean it. |
+| RDS instance | Demands a final snapshot name | ✅ Intended — `rds_skip_final_snapshot = false` leaves a recovery point. |
+| ECR repository | Destroy **fails** while it holds images | ✅ Intended — `ecr_force_delete = false`. Emptying a repository is a deliberate console action. |
+| Secrets Manager secret | Deleted name stays **reserved** 30 days → re-apply hits a name conflict | ✅ Intended — a mistaken destroy stays recoverable. |
+| Documents bucket | `prevent_destroy` | ✅ Intended. |
+| State bucket | `prevent_destroy` | ✅ Intended — destroying it orphans every resource. |
+| KMS **alias** | `destroy` orphans it, so a re-apply fails `AlreadyExistsException` | `kms_create_alias = true` here (ADR-365), so a rebuild needs `aws kms delete-alias`. Accepted: staging is rebuilt rarely. |
+| KMS key | 30-day deletion window is mandatory | Unavoidable. |
 
 ### Rebuild time
 

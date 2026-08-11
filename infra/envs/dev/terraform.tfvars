@@ -1,7 +1,9 @@
 # Development environment values. NON-SECRET ONLY — this file is committed.
 # No password, key, token, or connection string with credentials belongs here.
 
-aws_account_id = "591554480818"
+# ⚠️ PLACEHOLDER. This template is never applied, and the account it once named
+# is no longer used by this project. Replace before using it as a starting point.
+aws_account_id = "000000000000"
 aws_region     = "us-east-1"
 environment    = "dev"
 name_prefix    = "mbai-dev"
@@ -126,7 +128,7 @@ budget_notification_email = "budget@mortgageboss.ai"
 
 # Hand-created (C0). Looked up, never managed — it holds uploaded files and must
 # survive every terraform destroy.
-documents_bucket_name = "mbai-dev-documents-591554480818"
+documents_bucket_name = "mbai-dev-documents-000000000000" # placeholder — see above
 
 # --- Compute (C3) ----------------------------------------------------------- #
 
@@ -199,7 +201,7 @@ bedrock_profile_regions = ["us-east-1", "us-east-2", "us-west-2"]
 # ⚠️ PENDING VERIFICATION. Could not read the bucket's encryption configuration —
 # the available role lacks s3:GetEncryptionConfiguration. null assumes SSE-S3, in
 # which case no KMS statement is attached to the task roles. Confirm with:
-#   aws s3api get-bucket-encryption --bucket mbai-dev-documents-591554480818
+#   aws s3api get-bucket-encryption --bucket <documents bucket>
 # If it reports aws:kms, set this to that key's ARN or uploads fail with AccessDenied.
 documents_bucket_kms_key_arn = null
 
