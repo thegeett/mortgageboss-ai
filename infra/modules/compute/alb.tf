@@ -253,13 +253,21 @@ resource "aws_lb_listener_rule" "api" {
   tags = merge(var.tags, { Name = "${var.name_prefix}-api" })
 }
 
-# The health and docs endpoints are served at the APPLICATION ROOT — /health,
-# /health/live, /health/ready — not under the /api/v1 prefix every feature router
-# uses. Without this rule they fall through to the default action and reach the
-# FRONTEND, which does not serve them.
+# The health endpoints are served at the APPLICATION ROOT — /health, /health/live,
+# /health/ready — not under the /api/v1 prefix every feature router uses. Without
+# this rule they fall through to the default action and reach the FRONTEND, which
+# does not serve them.
 #
 # This rule being behind Cognito does NOT affect the target group health check,
 # which probes targets directly and never traverses a listener.
+#
+# ⚠️ FIVE CONDITION VALUES, MAXIMUM — per RULE, counted across every condition
+# block, not per block. This shipped with six (/health, /health/*, /docs, /docs/*,
+# /redoc, /openapi.json) and failed the C5 phase-1 apply with:
+#   ValidationError: A rule can only have '5' condition values and regex values
+# The list is now a variable with a validation block, so a sixth entry fails at
+# PLAN time instead of partway through an apply. See var.api_root_path_patterns
+# for why FastAPI's docs paths are not routed here at all.
 resource "aws_lb_listener_rule" "api_root_paths" {
   listener_arn = local.app_listener_arn
   priority     = 90
@@ -289,14 +297,7 @@ resource "aws_lb_listener_rule" "api_root_paths" {
 
   condition {
     path_pattern {
-      values = [
-        "/health",
-        "/health/*",
-        "/docs",
-        "/docs/*",
-        "/redoc",
-        "/openapi.json",
-      ]
+      values = var.api_root_path_patterns
     }
   }
 

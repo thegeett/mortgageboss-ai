@@ -14041,3 +14041,134 @@ before providers load — the `~> 5.0` AWS provider pin has no bearing on it. An
 reached for the provider version when reasoning about this; the version that matters is Terraform's.
 
 **Never set both.** Terraform treats `use_lockfile` alongside `dynamodb_table` as a conflict.
+
+---
+
+## ADR-375: FastAPI's documentation paths are not routed at the load balancer, and the root-path list is a variable with a 5-value ceiling (C5)
+
+**Context.** The API's health endpoints are served at the application **root** (`/health`,
+`/health/live`, `/health/ready`), not under the `/api/v1` prefix every feature router uses, so they
+need their own listener rule or they fall through to the default action and reach the frontend, which
+does not serve them. That rule shipped with six path patterns — the two health ones plus FastAPI's
+`/docs`, `/docs/*`, `/redoc` and `/openapi.json` — and failed the C5 phase-1 apply:
+
+```
+ValidationError: A rule can only have '5' condition values and regex values
+```
+
+**The limit is per RULE, not per condition block**, counted across every block in it. Six values in a
+single `path_pattern` is the same violation as six spread across three blocks.
+
+**The decision.** Keep **only** `/health` and `/health/*`. Drop the four documentation paths rather
+than splitting them into a second listener rule. Move the list into a module variable
+(`api_root_path_patterns`, default `["/health", "/health/*"]`) with a `validation` block rejecting more
+than five entries.
+
+**Why dropping beats a second rule.** `/docs`, `/redoc` and `/openapi.json` are FastAPI's interactive
+documentation and its OpenAPI schema: a complete, machine-readable map of every endpoint, its
+parameters, and its response shapes. This environment holds real borrower files. From phase 2 onward
+Cognito gates them like everything else, so this is not a hole — but *"an authenticated user can
+enumerate the entire API surface"* is a weaker position than *"the load balancer has no route to it"*,
+and holding the stronger one costs nothing here. Removing them also resolves the limit without adding
+a rule, so the fix for the outage and the better security posture are the same edit. Unrouted, the
+paths reach the frontend's default action and 404; the application still serves them internally, so a
+`curl` from inside the VPC is unaffected.
+
+**Why a variable rather than a shorter literal.** A future environment may legitimately want them — a
+public demo, say — and should not have to edit the module to get them. The variable makes that an
+environment-level choice.
+
+**Why the validation block is the real deliverable.** Without it the next person to add a sixth path
+learns about the limit the way this ticket did: from a `ValidationError` **partway through an apply**,
+with an environment half-created and a 10-15 minute RDS create already spent. The validation moves
+that to **plan time**, before anything is touched, with an error message that names the limit and its
+per-rule scope so the reader does not have to find this ADR to understand it.
+
+⚠️ **`terraform validate` does not catch it** — variable validations are evaluated when values are
+resolved, which is plan and apply, not `validate`. Verified: a scratch module with six entries as the
+default passes `terraform validate` cleanly. "Plan time" is the guarantee; "validate time" is not.
+
+---
+
+## ADR-376: The cost allocation tag resource stays in the configuration, gated to zero, because the manual step it stands for is otherwise invisible (C5)
+
+**Context.** `aws_ce_cost_allocation_tag.environment` failed the C5 phase-1 apply:
+
+```
+AccessDeniedException: Failed to update Cost Allocation Tag: Linked account
+doesn't have access to cost allocation tags.
+```
+
+Cost Explorer tag activation is **management-account only**. `058190633983` is a member account in the
+organization, so this can never succeed there — it is an organizational boundary, not an IAM gap, and
+no permission grant inside the member account changes it.
+
+**The decision.** Set `activate_environment_cost_allocation_tag = false` in
+`envs/staging/terraform.tfvars`. **Keep the resource**, count-gated exactly as it already was. Record
+the manual step in `infra/README.md`'s apply order and on the pre-handover checklist.
+
+**Why not delete the resource.** ADR-373 established what it is load-bearing for: the `$300` budget
+filters on `user:Environment$staging`, and **AWS Budgets matches nothing until that tag is active**. An
+inactive tag does not produce an error, an empty state, or a warning — the budget reports **$0 forever
+and never fires, while looking correctly configured in the console**. It is a silent failure of a
+control whose entire job is to make a different failure loud.
+
+Deleting the resource would remove the only place in the configuration that says this requirement
+exists. What is left behind would be a budget that appears complete and is inert. A commented-out
+resource is a note that decays; a `count = 0` resource is a note that `terraform plan` keeps in front
+of whoever runs it, and that a future management-account root module can adopt by flipping one
+variable **there** rather than rediscovering the requirement.
+
+**The cost of the arrangement, stated.** The configuration now contains a resource that can never apply
+from the account it lives in. That is genuinely odd, and it is the point: the oddity is a marker for a
+manual step that has no other representation. The variable's description and the tfvars comment both
+name the reason as *member account*, not preference, so nobody "tidies it up" by setting it true.
+
+⚠️ **Up to 24 hours** after activation before the tag begins reporting. The budget alarm is inert for
+that window — which includes the period immediately after the first apply, when a misconfiguration is
+most likely to be running up cost.
+
+---
+
+## ADR-377: Strings that reach an AWS API are ASCII-only (C5)
+
+**Context.** This repo uses the em dash (U+2014) as a matter of house style, in comments, variable
+descriptions, and resource arguments alike — 353 lines across `infra/**.tf`. Two of those arguments are
+sent to AWS, and both failed the C5 phase-1 apply:
+
+```
+InvalidParameterValue: The parameter Description must not contain
+non-printable control characters.
+```
+
+— on `aws_db_parameter_group.description` and `aws_elasticache_parameter_group.description`. The em
+dash is not a control character; the RDS and ElastiCache parameter-group APIs simply validate their
+description fields against a narrower charset than the message admits.
+
+**The decision.** **Any string literal that is transmitted to an AWS API is ASCII-only** — resource
+descriptions and comments, tag values, IAM policy documents, Route 53 zone comments. HCL `#` comments,
+`variable` descriptions and `output` descriptions are **exempt**: they are consumed by Terraform and by
+humans and never leave the machine.
+
+**Why the rule is drawn at the API boundary rather than repo-wide.** The house style earns its keep in
+the explanatory prose, which is most of the non-ASCII in this repo and none of the risk. A blanket ban
+would cost a lot of readability to fix a problem that only exists on one side of a line that is easy to
+state and easy to check.
+
+**Why fix the strings that demonstrably worked.** Six resource arguments contained an em dash; only two
+failed. The other four — the KMS key description, the Secrets Manager secret description, the Route 53
+zone comment, and the ElastiCache replication group description — reached APIs that accepted it, or
+were never attempted because a dependency had already failed. All six were normalised anyway. Per-API
+charset tolerance is undocumented, discovered only by an apply failing, and the three already-created
+ones update **in place** (`UpdateKeyDescription`, `UpdateSecret`, `UpdateHostedZoneComment`), so
+normalising costs nothing and removes four future coin flips.
+
+**How it is checked.** A block-aware scan rather than a plain grep, because the distinction that matters
+is the enclosing block, not the line:
+
+```bash
+# non-ASCII outside # comments, grouped by enclosing HCL block type;
+# resource/data/locals/module must be ZERO. variable/output are exempt.
+```
+
+`.tfvars` files are in scope — their values flow into resources — and were clean.

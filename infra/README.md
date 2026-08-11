@@ -99,6 +99,31 @@ aws ecs describe-tasks --cluster <cluster> --tasks <task-arn> \
 curl https://staging.mortgageboss.ai/health/live
 ```
 
+### ⚠️ MANUAL, from the MANAGEMENT account — activate the `Environment` cost allocation tag
+
+**Once, ever. Not a Terraform step, and it cannot become one from here.**
+
+> Billing → **Cost allocation tags** → *User-defined cost allocation tags* →
+> select **`Environment`** → **Activate**
+
+`aws_ce_cost_allocation_tag` is declared in `envs/staging/main.tf` but is gated to
+`count = 0` by `activate_environment_cost_allocation_tag = false`, because Cost
+Explorer tag activation is **management-account only**. The C5 phase-1 apply failed
+on it from the member account with `AccessDeniedException: Failed to update Cost
+Allocation Tag: Linked account doesn't have access to cost allocation tags`. That is
+an organizational boundary — no permission grant inside `058190633983` changes it.
+
+⚠️ **The `$300` budget does nothing until this is done.** Its `cost_filter` is
+`user:Environment$staging`, and AWS Budgets matches **nothing** against an inactive
+tag: it reports **$0 forever and never fires**, while looking correctly configured in
+the console. Nothing surfaces this — no error, no warning, no empty state in the UI.
+
+⚠️ **Up to 24 hours** before it begins reporting after activation. The budget alarm
+is **inert** for that whole window, which includes the period right after the first
+apply, when a misconfiguration is most likely to be running up cost.
+
+Do this at step 2, not at the end. It is also on the pre-handover checklist.
+
 **Three steps, one account.** There is no tooling-account bootstrap and no
 `infra/shared` apply — both are gone.
 
@@ -198,6 +223,12 @@ are in it.
    because enforcing it before any user exists locks out the first account.
 6. **Confirm the budget alarm address actually receives mail.** An alarm nobody
    reads is not an alarm.
+7. **Confirm the `Environment` cost allocation tag is ACTIVE**, from the management
+   account (Billing → Cost allocation tags). Terraform cannot do this from a member
+   account, so nothing in an apply will tell you it is missing. Until it is active
+   **and has been for 24 hours**, the `$300` budget matches nothing, reports $0, and
+   never fires — an alarm that looks configured and cannot go off is worse than no
+   alarm, because it is trusted.
 
 ---
 

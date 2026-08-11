@@ -28,7 +28,7 @@ terraform {
 
 resource "aws_route53_zone" "this" {
   name    = var.domain_name
-  comment = "${var.name_prefix} — delegated subdomain. NS records must be entered at the registrar."
+  comment = "${var.name_prefix} - delegated subdomain. NS records must be entered at the registrar."
 
   tags = merge(var.tags, { Name = var.domain_name })
 }

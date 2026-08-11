@@ -228,8 +228,23 @@ ecr_keep_last_protected_images = 20
 # something a plan should be able to do quietly.
 ecr_force_delete = false
 
-# ⚠️ ACCOUNT-LEVEL, and required for the budget above to work at all: AWS Budgets
-# matches nothing until `Environment` is activated as a cost allocation tag, so a
-# filtered budget without this reports $0 forever and never fires.
-# Only ONE root module per account may set this true.
-activate_environment_cost_allocation_tag = true
+# ⚠️ false BECAUSE IT CANNOT SUCCEED HERE, not because it is unwanted.
+#
+# Cost Explorer tag activation is MANAGEMENT-ACCOUNT ONLY. 058190633983 is a member
+# account in the organization, so the C5 phase-1 apply failed on it with:
+#   AccessDeniedException: Failed to update Cost Allocation Tag: Linked account
+#   doesn't have access to cost allocation tags.
+# No permission grant inside this account can fix that — it is an organizational
+# boundary. Leave this false in every member-account environment.
+#
+# ⚠️ THE REQUIREMENT DOES NOT GO AWAY. AWS Budgets matches NOTHING until
+# `Environment` is active as a cost allocation tag, so the $300 budget above
+# reports $0 forever and never fires while looking correctly configured in the
+# console. That is a silent failure, and turning this flag off does not fix it —
+# it only stops Terraform from failing on something it cannot do.
+#
+# MANUAL, ONE TIME, FROM THE MANAGEMENT ACCOUNT:
+#   Billing -> Cost allocation tags -> user-defined -> Environment -> Activate
+# Up to 24 hours before it begins reporting. The budget alarm is INERT until then.
+# Tracked in infra/README.md (apply order) and the C5 pre-handover checklist.
+activate_environment_cost_allocation_tag = false

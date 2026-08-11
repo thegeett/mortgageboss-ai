@@ -46,7 +46,7 @@ resource "aws_db_subnet_group" "this" {
 resource "aws_db_parameter_group" "this" {
   name_prefix = "${var.name_prefix}-"
   family      = var.postgres_family
-  description = "${var.name_prefix} — forces TLS on every connection."
+  description = "${var.name_prefix} - forces TLS on every connection."
 
   parameter {
     name         = "rds.force_ssl"
@@ -187,7 +187,7 @@ resource "aws_elasticache_subnet_group" "this" {
 resource "aws_elasticache_parameter_group" "this" {
   name        = "${var.name_prefix}-${replace(var.redis_family, ".", "")}"
   family      = var.redis_family
-  description = "${var.name_prefix} — cache parameters."
+  description = "${var.name_prefix} - cache parameters."
 
   lifecycle {
     create_before_destroy = true
@@ -199,7 +199,7 @@ resource "aws_elasticache_parameter_group" "this" {
 # costs the same as a single-node cluster.
 resource "aws_elasticache_replication_group" "this" {
   replication_group_id = var.name_prefix
-  description          = "${var.name_prefix} — cache and Celery broker."
+  description          = "${var.name_prefix} - cache and Celery broker."
 
   engine         = "redis"
   engine_version = var.redis_version

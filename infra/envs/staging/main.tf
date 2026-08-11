@@ -328,6 +328,31 @@ locals {
 # module because this account has exactly one environment; a second environment in
 # the SAME account must not declare it again, or the two states would fight over
 # one account-wide setting.
+#
+# ⚠️ AND IT CANNOT BE APPLIED FROM THIS ACCOUNT AT ALL. C5's phase-1 apply failed
+# here with:
+#   AccessDeniedException: Failed to update Cost Allocation Tag: Linked account
+#   doesn't have access to cost allocation tags.
+# Cost Explorer tag activation is MANAGEMENT-ACCOUNT ONLY. 058190633983 is a member
+# account in the organization, so no permission grant inside it can make this
+# succeed — it is an organizational boundary, not a policy gap.
+#
+# ⚠️ THE RESOURCE STAYS, count-gated to 0 by
+# `activate_environment_cost_allocation_tag = false` in terraform.tfvars. Deleting
+# it would delete the only statement in this configuration that the budget below
+# depends on something nobody has done yet. The failure it guards against is
+# SILENT: an inactive tag makes the budget's cost_filter match nothing, so it
+# reports $0 forever and never fires, while looking correctly configured in the
+# console. A commented-out resource is a note; a count-gated one is a note the
+# `terraform plan` output keeps mentioning.
+#
+# What must happen instead: activate `Environment` from the MANAGEMENT account
+# (Billing -> Cost allocation tags), once, by hand. Up to 24 hours before it
+# reports, and the budget alarm is inert until then. See infra/README.md and the
+# C5 pre-handover checklist.
+#
+# If this ever moves into a management-account root module, set the variable true
+# THERE, not here.
 # --------------------------------------------------------------------------- #
 
 resource "aws_ce_cost_allocation_tag" "environment" {

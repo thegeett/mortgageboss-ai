@@ -42,7 +42,7 @@ locals {
 }
 
 resource "aws_kms_key" "this" {
-  description             = "${var.name_prefix} — application data encryption (RDS, ECR, Secrets Manager, CloudWatch Logs)."
+  description             = "${var.name_prefix} - application data encryption (RDS, ECR, Secrets Manager, CloudWatch Logs)."
   enable_key_rotation     = true
   deletion_window_in_days = var.kms_deletion_window_days
 
@@ -109,7 +109,7 @@ resource "aws_secretsmanager_secret" "this" {
   for_each = toset(local.secret_names)
 
   name        = "${var.secret_path_prefix}/${each.value}"
-  description = "${var.name_prefix} — ${each.value}. Value populated out of band; never by Terraform."
+  description = "${var.name_prefix} - ${each.value}. Value populated out of band; never by Terraform."
   kms_key_id  = aws_kms_key.this.arn
 
   recovery_window_in_days = var.recovery_window_days

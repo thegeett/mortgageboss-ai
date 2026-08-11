@@ -300,6 +300,46 @@ variable "health_check_path" {
   default     = "/health/live"
 }
 
+variable "api_root_path_patterns" {
+  description = <<-EOT
+    Root-level paths routed to the API rather than the frontend.
+
+    The application serves its health endpoints at the ROOT (/health, /health/live,
+    /health/ready), not under the /api/v1 prefix the feature routers use, so they
+    need an explicit rule or they fall through to the frontend.
+
+    ⚠️ FIVE VALUES MAXIMUM. An ALB counts condition values ACROSS THE WHOLE RULE,
+    not per condition block, and the limit is 5. The validation below is what makes
+    a sixth entry a plan-time error rather than an apply-time ValidationError
+    partway through creating an environment.
+
+    ⚠️ FastAPI's /docs, /docs/*, /redoc and /openapi.json are deliberately NOT here.
+    They are the interactive documentation and the OpenAPI schema: a complete,
+    machine-readable map of every endpoint, its parameters and its response shapes.
+    In an environment holding real borrower files there is no reason to route them
+    at all. Cognito would gate them from phase 2 onward, but "authenticated users
+    can enumerate the entire API surface" is a weaker position than "the load
+    balancer has no route to it", and it costs nothing to hold the stronger one.
+    Unrouted, they reach the frontend's default action and 404 — the API still
+    serves them internally, so `curl` from inside the VPC is unaffected.
+
+    A future environment that wants them (a public demo, say) adds them here
+    without editing this module — and gets the 5-value limit checked for it.
+  EOT
+  type        = list(string)
+  default     = ["/health", "/health/*"]
+
+  validation {
+    condition     = length(var.api_root_path_patterns) <= 5
+    error_message = "api_root_path_patterns accepts at most 5 entries: an ALB listener rule permits only 5 condition values and regex values in total, counted across every condition block in the rule. Split the extras into a second aws_lb_listener_rule with its own priority, or drop them."
+  }
+
+  validation {
+    condition     = length(var.api_root_path_patterns) > 0
+    error_message = "api_root_path_patterns must not be empty: an ALB path_pattern condition requires at least one value, and an empty list fails at apply time rather than here."
+  }
+}
+
 # --- TLS and authentication (C4) -------------------------------------------- #
 
 variable "enable_tls" {

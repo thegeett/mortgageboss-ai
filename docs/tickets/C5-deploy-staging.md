@@ -342,7 +342,11 @@ character, and nothing about it feels like a milestone.
 - [ ] Confirm `enable_execute_command = false`
 - [ ] MFA **ON** for every Cognito user
 - [ ] Budget notification address receives mail
-- [ ] `Environment` cost allocation tag activated — up to 24h before it reports
+- [ ] `Environment` cost allocation tag activated **from the MANAGEMENT account**
+      (Billing → Cost allocation tags) — Terraform cannot do this from a member
+      account, and the phase-1 apply failed proving it. Up to 24h before it reports;
+      until then the `$300` budget matches nothing, shows $0, and never fires while
+      looking correctly configured
 - [ ] Bedrock invocation logging **off** (it would write raw borrower documents to S3)
 - [ ] Error tracking scrubbed — an exception payload carrying `extracted_data` is the likeliest
       real leak

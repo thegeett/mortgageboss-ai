@@ -486,6 +486,13 @@ variable "activate_environment_cost_allocation_tag" {
     ⚠️ Only ONE root module per account may set this true. A second environment in
     the same account must leave it false, or the two states fight over one
     account-wide setting.
+
+    ⚠️ MANAGEMENT-ACCOUNT ONLY. Cost Explorer tag activation cannot be performed
+    from a member account at all: the C5 phase-1 apply failed with
+    "Linked account doesn't have access to cost allocation tags". This must be
+    false in every member-account environment, and the activation done by hand from
+    the management account. That is an organizational boundary, not an IAM one — no
+    permission grant inside the member account changes it.
   EOT
   type        = bool
 }
