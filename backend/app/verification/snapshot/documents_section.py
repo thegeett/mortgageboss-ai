@@ -909,6 +909,11 @@ _UNMAPPED_KEY_VALUE_PAIRS_LIST = ListSpec(
         "label",
         "value",
     ),
+    # LP-479 follow-up — the spec (064-custom.json) declared this redaction and the shipped module
+    # dropped it. A "custom" document has no known schema, so ANY PII the model reads lands in this
+    # passthrough unmasked (the spec's own pii_note says so). This is the drift in the direction the
+    # parity test now forbids: spec-declares, module-omits.
+    redact=frozenset({"value"}),
 )
 _DEDUCTIONS_OR_OFFSETS_LIST = ListSpec(
     name="deductions_or_offsets",

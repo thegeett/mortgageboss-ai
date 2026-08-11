@@ -38,6 +38,7 @@
       "rules": ["IH-6"],
       "exists_today": false,
       "plumbing_sites": 5,
+      "redact":["loan_number"],
       "fields": [
         {"name": "mortgagee_name", "type": "str", "why": "IH-6 — the lender must be named as mortgagee; warrantability"},
         {"name": "mortgagee_address", "type": "str", "why": "IH-6 — the mortgagee clause address"},

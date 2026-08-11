@@ -26,6 +26,7 @@
       "shape_reason":"the ACORD 25 lists several COVERAGE SECTIONS (CGL, Auto, Umbrella/Excess, Workers Comp), each with an insurer, policy number, effective/expiration dates, and limits. ONE ROW PER SECTION (the LP-460 lesson: NOT one row per sub-limit). A CGL section prints ~6 sub-limits; the row carries the section's PRIMARY headline limit, the rest fall to the catch-all. Mirrors the master_insurance coverage_lines (one limit per section).",
       "expected_item_count":"1-6","rules":[],
       "exists_today":false,"plumbing_sites":5,
+      "redact":["policy_number"],
       "fields":[
         {"name":"coverage_type","type":"str","why":"the coverage section label: Commercial General Liability / Automobile Liability / Umbrella (Excess) Liability / Workers Compensation / Property / Crime / Fidelity — as printed"},
         {"name":"insurer_name","type":"str","why":"the insurer affording this coverage (Insurer A/B/... resolved to its name)"},

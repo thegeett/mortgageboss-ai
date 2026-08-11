@@ -81,6 +81,7 @@
       "shape_reason":"a COMBINED statement lists >1 deposit account; the single-account typed core + transactions capture only the FIRST. This surfaces the existence + balances of the others (reserves). NOTE: the extra account's TRANSACTIONS are still not captured - AS-8 chaining and AS-1 deposit sweep see only account 1 (LP-461 ADR; future accounts[] restructure).",
       "expected_item_count":"0-several","rules":[],
       "exists_today":false,"plumbing_sites":5,
+      "redact":["account_number_masked"],
       "fields":[
         {"name":"account_number_masked","type":"str","why":"the additional account number, masked (last 4)"},
         {"name":"account_type","type":"str","why":"checking / savings / money market"},

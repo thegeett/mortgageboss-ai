@@ -24,6 +24,7 @@
       "shape_reason":"the 1099 records are the document's payload and genuinely repeat (a few to ~20 payers); flat rows with one source each are token-safe and let a processor reconcile line-by-line",
       "expected_item_count":"a few to ~20","rules":[],
       "exists_today":false,"plumbing_sites":5,
+      "redact":["account_number_masked","payer_tin_masked"],
       "fields":[
         {"name":"form_type","type":"str","why":"reconciliation — IRS form code e.g. 1099-NEC/MISC/INT/DIV/R"},
         {"name":"payer_name","type":"str","why":"reconciliation — the payer that reported the income"},

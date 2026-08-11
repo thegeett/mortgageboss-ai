@@ -28,6 +28,7 @@
       "shape_reason":"accounts genuinely repeat (a borrower can have several checking/savings/investment accounts across institutions) and this is the primary content of the report; a borrower rarely has more than ~10 accounts, but flat rows keep it well under the 16,384 ceiling and carry the masked account number cleanly",
       "expected_item_count":"~10 (< ~15)","rules":[],
       "exists_today":false,"plumbing_sites":5,
+      "redact":["account_number_masked"],
       "fields":[
         {"name":"institution_name","type":"str","why":"the institution holding the account"},
         {"name":"account_number_masked","type":"str","why":"identifies the account within the report","pii_note":"already in the 7-field _PII_FIELDS registry, pre_masked=true; carried inside the nested record with the standard redactor"},

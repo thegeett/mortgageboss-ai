@@ -46,6 +46,7 @@
       "shape_reason":"the coverage LINES on the ACORD cert (one row per type of insurance: Property / Crime-Fidelity / Boiler & Machinery / General Liability) — lines of ONE master policy, not separate policies. Captured for future master-policy-adequacy rules; no live consumer yet (LP-460).",
       "expected_item_count":"1-several","rules":[],
       "exists_today":false,"plumbing_sites":5,
+      "redact":["policy_number"],
       "fields":[
         {"name":"type_of_insurance","type":"str","why":"the coverage type (Property, Crime/Fidelity, Boiler & Machinery, General Liability, ...)"},
         {"name":"policy_number","type":"str","why":"the policy number for the line (masked, last 4)"},
