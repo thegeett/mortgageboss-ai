@@ -356,6 +356,11 @@ async def _extract_branch(
     document.status = DocumentStatus.EXTRACTING
     await db.commit()
 
+    # The FULL, uncapped document — deliberately, unlike classification (15 pages, LP-462) and Tier-3 free
+    # extraction (50 pages, LP-463). A >100-page file therefore hits the provider's document-block limit here
+    # (INFRA_OVERSIZED → a graceful FAILED that LP-471 falls back to Tier-3). Do NOT add a naive page cap: a
+    # 069-style multi-document PACKAGE keeps its 1003 liabilities/REO deep in the file, so a cap trades an
+    # honest crash for SILENT wrong data. The real fix is the splitter (its own ticket) — LP-473 ADR.
     result = await extractor(content, document.mime_type)
 
     # --- LP-464: a THROTTLED extraction is infrastructure, not a content failure - #
