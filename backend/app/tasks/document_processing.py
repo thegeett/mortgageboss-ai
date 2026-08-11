@@ -50,12 +50,14 @@ from app.ai.classification import classify_document
 from app.ai.client import INFRA_RATE_LIMITED
 from app.ai.cost import estimate_cost
 from app.ai.extraction import EXTRACTORS, Extractor
+from app.ai.extraction.consistency import run_consistency_checks
 from app.ai.extraction.parsing import document_confidence_provenance, failure_detail
 from app.ai.generic_analyzer import analyze_document
 from app.core.config import resolve_model, settings
 from app.documents.catalog import get_category, get_tier
 from app.models.activity_log import ActivityType
 from app.models.document import Document, DocumentStatus, Tier
+from app.models.document_finding import DocumentFindingType
 from app.models.extraction import ExtractionStatus
 from app.models.helpers import only_active
 from app.services.activity_log import log_activity
@@ -453,6 +455,18 @@ async def _extract_branch(
     # under concurrent same-file arrivals). Record any findings the extraction
     # surfaced (LP-66) — e.g. a divorce decree's obligations → findings (LP-63 loop).
     findings_count = await record_findings_from_extraction(db, document, result.data)
+    # LP-474 — deterministic self-consistency checks: two extracted values that must DIFFER came out
+    # equal (e.g. state tax == federal tax withheld). FLAG a distinct CONSISTENCY finding — never
+    # rewrite the value, never fail. The coverage status is left untouched, so an accuracy flag is
+    # distinguishable from a coverage PARTIAL. No model call (deterministic).
+    for violation in run_consistency_checks(document.document_type, result.data):
+        await create_document_finding(
+            db,
+            document=document,
+            finding_type=DocumentFindingType.CONSISTENCY,
+            description=f"Possible extraction error — {violation.check.label}",
+            details={"check": violation.check.label, "detail": violation.detail},
+        )
     await db.commit()
     logger.info(
         "document_completed",

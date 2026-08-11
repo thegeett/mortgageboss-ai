@@ -53,6 +53,10 @@ class DocumentFindingType(StrEnum):
     PROPERTY_INTEREST = "property_interest"  # an interest in / award of property
     INCOME_RELATED = "income_related"  # an income item / source
     DISCREPANCY_CANDIDATE = "discrepancy_candidate"  # something that may not match elsewhere
+    # LP-474 — a deterministic self-consistency violation WITHIN one document (two extracted values
+    # that must differ came out equal). Distinct from a coverage PARTIAL (a missing/dropped field) and
+    # from DISCREPANCY_CANDIDATE (a possible mismatch ACROSS documents): this is an in-document accuracy flag.
+    CONSISTENCY = "consistency"
     OTHER = "other"
 
 

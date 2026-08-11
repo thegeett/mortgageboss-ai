@@ -14026,3 +14026,62 @@ finding, doesn't return a confident wrong reading of one). No code change in LP-
 **Cross-refs.** LP-473 (`docs/tickets/LP-473.md`), LP-464 (`dcc2196`, the streaming fix + the image-only note),
 ADR-365 (the image-preprocessing gap), ADR-369 (the A6 confident-misread limit on unreadable scans), 266 / 294
 (the sibling image-gap instances).
+
+## ADR-372: The accuracy-audit layer — deterministic self-consistency checks that FLAG, never correct (LP-474)
+
+**Context.** The extraction pipeline measured **coverage** (did we capture the fields?) and never
+**correctness** (are the values right?). The v2 bench surfaced nine confident-wrong values, and a wrong value
+is worse than a missing one: a rule computes on it and nobody knows. The same error class appeared on Sonnet in
+the free-reader comparison (a tradeline payment scaled 100×, a $650 deposit read as $2,650), and doc 244's Box-1
+= Box-10 misread survived **two escalating prompt-tuning attempts**. So this is not a model problem and prompts
+do not solve it.
+
+**Decision 1 — FLAG, never correct.** The layer emits a distinct `DocumentFinding` (`DocumentFindingType.
+CONSISTENCY`) naming the two equal values; it **never rewrites a value and never fails the extraction**. A
+pipeline that silently repairs its own inputs is worse than one that reports them: a wrong "fix" is undetectable,
+while a flagged value gets a human. The coverage status is left untouched, so an accuracy flag is
+**distinguishable from a coverage `PARTIAL`** (a missing/dropped field) — the LP-462 lesson that recording one
+signal as another corrupts every downstream audit, applied here.
+
+**Decision 2 — deterministic, no model call.** The whole point is model-independence: it keeps working when the
+model changes (extraction is on Haiku and may move again). 244 proves prompts don't fix this class, and the same
+class on Sonnet proves it isn't Haiku-specific. A deterministic arithmetic/equality check is the only thing that
+survives a model swap.
+
+**Decision 3 — one declaration-driven primitive, not per-type code.** Three of the nine collapse into a single
+primitive: *two extracted values that must DIFFER came out equal.* Declared in `app/ai/extraction/consistency.py`
+as `MustDiffer(left, right, label)` entries keyed by document_type; adding a fourth is a line, not new code (the
+LP-437/460 lesson — a declaration scaled where bespoke per-type files did not). It **extends the philosophy** of
+the LP-445 `count_field` cross-check (a declared equality that must HOLD → PARTIAL) with its dual (a declared
+equality that must NOT hold → a finding). The three proven pairs, each measured at **ZERO false positives across
+the 303-doc stored corpus**: `w2` state_income_tax ≠ federal_income_tax_withheld (088), `w2` a box_12 amount ≠
+medicare_tax_withheld (096), `bank_statement` a transaction amount ≠ its running_balance (049).
+
+**The coverage-vs-accuracy distinction, and the boundary.** The bench measures coverage; this is the first layer
+that measures a slice of accuracy. But **self-consistency can only catch a wrong value that contradicts another
+extracted value.** A magnitude error with no internal cross-reference (253: a lone $224,307.94 gift with no
+sibling amount) and a wrong-but-plausible value (293: a check date in range but wrong) are **invisible to this
+layer by construction** — they need source cross-checks or cross-document reconciliation, a later ticket. Stating
+the boundary so the next builder owns it.
+
+**Rejected checks, with evidence (so they are not rebuilt on the same reasoning).**
+- **Full bank-arithmetic reconciliation** (beginning + deposits − withdrawals = ending / per-row chain): tested
+  across all 24 stored bank statements — **~10 broke the chain** from transaction ordering, sign-label, and
+  incompleteness, **not value errors**. A ~40 % false-positive rate is the LP-446 anti-pattern (a guard that
+  misfires more than it catches). The tighter `amount == running_balance` signature is the shippable 0-FP subset.
+- **244 (Box 1 = Box 10):** deferred as **"needs a typed Box-10 field"**, not "uncatchable" — form_1098 currently
+  drops the real-estate-taxes figure into `other_information` free text, so there is no field to compare against.
+  The day a `real_estate_taxes_paid` field is added, a `must_differ(mortgage_interest_received, that_field)` pair
+  drops in for free. That is a schema decision a later ticket may make.
+- **credit_report `date_opened` day-fabrication:** the stored `source.snippet` does not contain the opened-date
+  source, so a snippet-precision check has nothing to read; needs per-field source-precision capture first.
+- **253 / 104 / 146 / 294 / 293:** out of reach of self-consistency (no internal contradiction) or another
+  ticket (image gap ADR-365/371; value-content).
+
+**⚠️ This layer should run BEFORE tags are written at scale.** A tag on a wrong value is worse than a tag on a
+missing one — the wrong tag propagates a confident falsehood into every rule that reads it. The consistency
+flag belongs upstream of tag materialization so a flagged value is visible before it feeds a verdict.
+
+**Cross-refs.** LP-474 (`docs/tickets/LP-474.md`), LP-445 (the `count_field` cross-check this extends), LP-446
+(the FP-gate lesson that rejected the arithmetic chain), LP-437/460 (declaration-over-per-type-code), LP-462
+(signal-distinctness), ADR-368/369 (no-zero-data / the A6 confident-misread the accuracy layer complements).

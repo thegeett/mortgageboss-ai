@@ -1292,3 +1292,81 @@ async def test_reprocess_unregistered_type_is_classified_only(
 
     assert doc.status == DocumentStatus.COMPLETED
     assert await _current_extraction(db_session, doc.id) is None
+
+
+# --------------------------------------------------------------------------- #
+# LP-474 — self-consistency accuracy flag (distinct from a coverage PARTIAL)
+# --------------------------------------------------------------------------- #
+def _w2_state_equals_federal() -> W2ExtractionResult:
+    """The 088 shape: state income tax == federal withheld (fabricated TX tax)."""
+    return W2ExtractionResult(
+        data=W2Extraction(
+            tax_year=TypedField(value=2023),
+            employer_name=TypedField(value="EQUINIX LLC"),
+            federal_income_tax_withheld=TypedField(value=Decimal("35312.86")),
+            state_income_tax=TypedField(value=Decimal("35312.86")),
+            state_code=TypedField(value="TX"),
+        ),
+        status=ExtractionStatus.SUCCEEDED,
+        confidence=0.9,
+        reasoning="x",
+        input_tokens=100,
+        output_tokens=50,
+    )
+
+
+async def test_consistency_flag_is_a_distinct_finding_not_a_coverage_partial(
+    monkeypatch: pytest.MonkeyPatch, db_session: AsyncSession
+) -> None:
+    doc = await _setup_document(db_session)
+    _patch_storage(monkeypatch)
+    _patch_classify(
+        monkeypatch, ClassificationResult(document_type="w2", confidence=0.95, reasoning="x")
+    )
+    _patch_extract(monkeypatch, _w2_state_equals_federal(), document_type="w2")
+
+    await pipeline._process_document(db_session, str(doc.id))
+    await db_session.refresh(doc)
+
+    # Coverage status is UNTOUCHED — the extraction SUCCEEDED; the accuracy flag is NOT a coverage PARTIAL.
+    assert doc.status == DocumentStatus.COMPLETED
+    extraction = await _current_extraction(db_session, doc.id)
+    assert extraction is not None
+    assert extraction.extraction_status == ExtractionStatus.SUCCEEDED
+    # A distinct CONSISTENCY finding surfaces the accuracy problem — visible + distinguishable.
+    findings = await _findings_for(db_session, doc.loan_file_id)
+    consistency = [f for f in findings if f.finding_type == DocumentFindingType.CONSISTENCY]
+    assert len(consistency) == 1
+    assert "federal income tax" in consistency[0].description.lower()
+    # The value is NOT rewritten — the flag reports, it never repairs.
+    assert extraction.extracted_data["state_income_tax"]["value"] == "35312.86"
+
+
+async def test_clean_w2_raises_no_consistency_finding(
+    monkeypatch: pytest.MonkeyPatch, db_session: AsyncSession
+) -> None:
+    doc = await _setup_document(db_session)
+    _patch_storage(monkeypatch)
+    _patch_classify(
+        monkeypatch, ClassificationResult(document_type="w2", confidence=0.95, reasoning="x")
+    )
+    _patch_extract(
+        monkeypatch,
+        W2ExtractionResult(
+            data=W2Extraction(
+                tax_year=TypedField(value=2024),
+                federal_income_tax_withheld=TypedField(value=Decimal("5627.60")),
+                state_income_tax=TypedField(value=Decimal("1499.00")),
+            ),
+            status=ExtractionStatus.SUCCEEDED,
+            confidence=0.95,
+            reasoning="x",
+            input_tokens=100,
+            output_tokens=50,
+        ),
+        document_type="w2",
+    )
+
+    await pipeline._process_document(db_session, str(doc.id))
+    findings = await _findings_for(db_session, doc.loan_file_id)
+    assert [f for f in findings if f.finding_type == DocumentFindingType.CONSISTENCY] == []
