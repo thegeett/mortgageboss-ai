@@ -47,6 +47,9 @@ TXN_PREFIX = "txn"
 # LP-437 — one guard-safe letter prefix for EVERY generic list row (the list name is folded
 # into the hashed content, so rows across different lists never collide despite one prefix).
 LIST_PREFIX = "lst"
+# LP-480 — a MISMO file-level liability (a STATED debt). It has no document to scope it and no account
+# number anywhere in the MISMO chain, so its id is derived from the four fields the projection carries.
+LIABILITY_PREFIX = "lia"
 
 
 def _canonical(payload: Any) -> str:

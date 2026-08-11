@@ -11,11 +11,12 @@ import re
 from collections.abc import Callable, Mapping
 
 from app.verification.rules.specs import DOC_TYPE_TAG
+from app.verification.snapshot.content_id import LIABILITY_PREFIX, assign_content_ids
 from app.verification.snapshot.fields import Field
 from app.verification.snapshot.model import DocumentEntry, Snapshot
 from app.verification.snapshot.pii import PiiField
 from app.verification.snapshot.tag import Tag, TagProducedBy, TagRole, TagStage
-from app.verification.snapshot.traversal import all_transactions
+from app.verification.snapshot.traversal import all_list_rows, all_transactions
 
 # The loan-level subject key: loan-level tags (occupancy.*, id.*, …) live under this single subject
 # in the tags layer (distinct from the per-transaction content_id subjects). Introduced by LP-319.
@@ -28,6 +29,28 @@ _UNKNOWN = "unknown"
 ACCOUNT_UNRESOLVED_TAG = "account.unresolved"
 # Only depository statements carry the (institution, masked-number) account identity this groups on.
 _STATEMENT_DOC_TYPE = "bank_statement"
+
+# --------------------------------------------------------------------------- #
+# LP-480 — the per-liability subject shape (ADR-374: UNION, NO MERGE).
+#
+# Liabilities are described by TWO sources for the same real debts: MISMO file-level ``liability.{n}.*``
+# facts (what the borrower DECLARED) and credit-report ``tradelines`` rows (what the bureau REPORTED).
+# This enumerator unions them and NEVER merges: every row from either source is its own subject, marked
+# with its source. Merging would destroy exactly the signal CR-4 exists to detect — an undisclosed
+# tradeline IS a debt present in one source and absent from the other. See ADR-374 for the rejected
+# alternatives (match-and-merge; single-source-of-truth).
+#
+# ⚠️ These are RESERVED STRUCTURAL MARKERS, not vocabulary tags (the DOC_TYPE_TAG / ACCOUNT_UNRESOLVED_TAG
+# pattern) — they describe the SUBJECT, never the debt. No threshold, no classification: rules judge.
+LIABILITY_SOURCE_TAG = "liability.source"
+LIABILITY_UNRESOLVED_TAG = "liability.unresolved"
+_SOURCE_MISMO = "mismo_stated"
+_SOURCE_CREDIT_REPORT = "credit_report_reported"
+_CREDIT_REPORT_DOC_TYPE = "credit_report"
+_TRADELINES_LIST_NAME = "tradelines"
+# The MISMO liability identity, in the projection's own field order. There is NO account number anywhere
+# in the MISMO chain (parser → model → snapshot), so this is the whole of the available identity.
+_MISMO_LIABILITY_FIELDS = ("type", "monthly_payment", "unpaid_balance", "holder_name")
 
 Subject = tuple[str, Mapping[str, Tag]]
 Enumerator = Callable[[Snapshot], list[Subject]]
@@ -251,13 +274,119 @@ def _per_account(snapshot: Snapshot) -> list[Subject]:
     return subjects
 
 
+def _liability_marker(tag_id: str, value: str, reasoning: str, source_fact: str) -> Tag:
+    """A reserved structural marker on a liability subject (the ``_account_unresolved_tag`` shape)."""
+    return Tag(
+        value=value,
+        confidence=None,
+        reasoning=reasoning,
+        source_facts=(source_fact,),
+        produced_by=TagProducedBy.DERIVED,
+        tag_role=TagRole.STRUCTURAL_FACT,
+        stage=TagStage.A,
+    )
+
+
+def _mismo_liabilities(snapshot: Snapshot) -> list[tuple[dict[str, str | None], str]]:
+    """The file's MISMO liabilities as ``[({field: value}, mismo_key), …]``, in the projection's order.
+
+    Reads the ``liability.{n}.{field}`` facts the MISMO section projects. The ``{n}`` index is POSITIONAL
+    (``mismo_section`` enumerates sorted by row id), so it is used ONLY to gather a row's fields together —
+    never as the subject id (see ``_per_liability``).
+    """
+    if snapshot.mismo.absent:
+        return []
+    rows: dict[str, dict[str, str | None]] = {}
+    for key, field in snapshot.mismo.facts.items():
+        parts = key.split(".")
+        if len(parts) != 3 or parts[0] != "liability":
+            continue
+        _, index, name = parts
+        if name not in _MISMO_LIABILITY_FIELDS:
+            continue
+        rows.setdefault(index, {})[name] = _field_str(field)
+    ordered = sorted(rows, key=lambda i: (len(i), i))  # numeric-ish, deterministic
+    return [
+        ({f: rows[i].get(f) for f in _MISMO_LIABILITY_FIELDS}, f"liability.{i}") for i in ordered
+    ]
+
+
+def _per_liability(snapshot: Snapshot) -> list[Subject]:
+    """One subject per liability, UNIONED across both sources and NEVER merged (LP-480 / ADR-374).
+
+    * a credit-report ``tradelines`` row → its LP-479 ``row_id`` (a content hash over the whole row,
+      already proven unique 35/35 on the stored reports) + ``liability.source = credit_report_reported``;
+    * a MISMO ``liability.{n}.*`` row → a CONTENT-derived id over its four available fields (never the
+      positional ``{n}``, so the id survives a reordering) + ``liability.source = mismo_stated``.
+
+    ⚠️ NO MATCHING between the sources. The same real debt appears twice, once per source, deliberately:
+    CR-4's undisclosed-tradeline signal IS the difference between the two lists, and a merge would erase
+    it. A summing rule must therefore filter on ``liability.source`` rather than sum every subject —
+    stated in ADR-374 because a naive sum double-counts.
+
+    ⚠️ The ``(creditor, account_number_masked)`` composite that ``_per_account`` uses is NOT usable here:
+    the LP-443 redact backstop scrubs unmasked account numbers, leaving 9/35 rows a bare ``[redacted]``
+    and collapsing two distinct SETOYOTA tradelines onto one key — a guess-merge on real data.
+
+    A liability whose identity cannot be established (a MISMO row with no holder name) still gets its own
+    subject, carrying ``liability.unresolved`` — never dropped, never merged (the ``_per_account`` rule).
+    Absent tags yield subjects with EMPTY maps, so the gate reports ``couldnt_check`` per liability rather
+    than the rule silently vanishing.
+    """
+    by_subject = {} if snapshot.tags.absent else snapshot.tags.by_subject
+    subjects: list[Subject] = []
+
+    for row in all_list_rows(
+        snapshot, _TRADELINES_LIST_NAME, document_type=_CREDIT_REPORT_DOC_TYPE
+    ):
+        if row.row_id is None:
+            continue  # no durable identity (stable_row_id off) → not a subject, never a positional id
+        tags = dict(by_subject.get(row.row_id, {}))
+        tags[LIABILITY_SOURCE_TAG] = _liability_marker(
+            LIABILITY_SOURCE_TAG,
+            _SOURCE_CREDIT_REPORT,
+            "reported by the credit bureau on a credit report tradeline",
+            row.row_id,
+        )
+        subjects.append((row.row_id, tags))
+
+    mismo_rows = _mismo_liabilities(snapshot)
+    ids = assign_content_ids(LIABILITY_PREFIX, [{"liability": fields} for fields, _ in mismo_rows])
+    for (fields, mismo_key), subject_id in zip(mismo_rows, ids, strict=True):
+        tags = dict(by_subject.get(subject_id, {}))
+        tags[LIABILITY_SOURCE_TAG] = _liability_marker(
+            LIABILITY_SOURCE_TAG,
+            _SOURCE_MISMO,
+            f"stated by the borrower on the application ({mismo_key})",
+            subject_id,
+        )
+        if fields.get("holder_name") is None:
+            tags[LIABILITY_UNRESOLVED_TAG] = _liability_marker(
+                LIABILITY_UNRESOLVED_TAG,
+                "yes",
+                f"stated liability {mismo_key} names no holder, so it cannot be identified against a "
+                "reported tradeline — surfaced on its own rather than dropped or guess-merged",
+                subject_id,
+            )
+        subjects.append((subject_id, tags))
+    return subjects
+
+
 _ENUMERATORS: dict[str, Enumerator] = {
     "per_deposit": _per_deposit,
     "loan": _loan,
     "per_borrower": _per_borrower,
     "per_document": _per_document,
     "per_account": _per_account,
+    "per_liability": _per_liability,
 }
+
+# The drift guard (the _COERCERS / _NORMALIZERS pattern): a typo in a registry key fails at IMPORT, not
+# at evaluation time on a real file.
+KNOWN_ENUMERATORS = frozenset(
+    {"per_deposit", "loan", "per_borrower", "per_document", "per_account", "per_liability"}
+)
+assert set(_ENUMERATORS) == KNOWN_ENUMERATORS, "enumerator registry drifted from KNOWN_ENUMERATORS"
 
 
 def enumerate_subjects(key: str, snapshot: Snapshot) -> list[Subject]:

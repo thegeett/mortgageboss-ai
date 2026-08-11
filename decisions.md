@@ -14134,3 +14134,66 @@ or **Tier 3** now — never a neighbour.
 ADR-368/LP-471 (making the failure cheap — the precondition for leaving a case alone), LP-465/468 (the
 positive-cue-from-printed-separators mechanism), ADR-365 (the image gap that excludes 265), LP-464 (the sibling
 extractor results that are the evidence of record).
+
+## ADR-374: Declared and reported debt are UNIONED, never merged — the enumerator hands both lists to the rules, because the difference between them IS the signal (LP-480)
+
+**Context.** Liabilities are described by two independent sources for the same real debts: MISMO file-level
+`liability.{n}.*` facts (what the borrower **declared** on the application) and credit-report `tradelines` rows
+(what the bureau **reported**). Seven rules — CR-1, CR-3, CR-5, CR-6, CR-8, CR-10, CR-12 — need a per-liability
+subject to attach a finding to, and LP-480 built the `per_liability` enumerator to provide one. How the two
+sources relate had to be decided before the first of those rules is written.
+
+**The decision: UNION, NO MERGE.** Every row from either source becomes its own subject, carrying a
+`liability.source` marker (`mismo_stated` / `credit_report_reported`). Nothing is matched, nothing is merged.
+A debt appearing in both sources is deliberately present **twice, once per source**.
+
+**⚠️ Why — the signal is the difference.** An undisclosed tradeline is *precisely* a debt present in one source
+and absent from the other. **CR-4 exists to detect exactly that.** Any merge — however careful — destroys the
+evidence CR-4 is built to read, and it destroys it silently: the merged list looks complete. Preserving both
+lists intact and labelled is what keeps that comparison possible at all.
+
+**Rejected: match-and-merge with a fail-closed fallback.** Attractive in the abstract, and it is the option a
+future reader will reach for first. Two independent reasons to refuse it:
+1. **It is not deterministically implementable on the available identity.** MISMO carries **no account number
+   anywhere** in the chain (parser → model → snapshot projection) — only `liability_type`, `holder_name`,
+   `monthly_payment`, `unpaid_balance`. The only shared dimension with a tradeline is a **free-text name in a
+   different convention** (`NR/SMS/CAL` vs `PENNYMAC LOAN SERVICES`), plus amounts that legitimately drift
+   between a stated figure and a reported one. Any matcher is therefore **fuzzy** — which needs an AI tag,
+   which needs a scored bar, which needs Priya. That is CR-4's own job (`rule_kinds.csv` classifies CR-4
+   `ai_fuzzy_match`), and it does not belong in an enumerator.
+2. **It puts domain logic where rules belong.** *Tags describe, rules judge.* An enumerator that decides two
+   rows are "the same debt" has made a credit judgment before any rule ran.
+
+**Rejected: single-source-of-truth** (tradelines when a credit report exists, MISMO otherwise). It solves
+double-counting, but it **destroys CR-4's signal outright** — you cannot detect "reported but not declared"
+having discarded the declared list — and it makes a file's debts depend on which documents happen to be
+present. A rule would silently see a different world before and after a credit report is uploaded.
+
+**⚠️ The cost this accepts, stated so it is not discovered later.** A naive rule that sums `monthly_payment`
+across every liability subject **will double-count** a debt present in both sources. That is why the
+`liability.source` marker is on **every** subject and not only the ambiguous ones: **a summing rule must filter
+by source.** DT-1 (back-end DTI) is the rule that will care most. This is a real sharp edge, chosen knowingly
+over destroying CR-4.
+
+**The identity scheme, and the trap it avoids.** A tradeline subject uses its LP-479 `row_id` (a content hash
+over the whole row); a MISMO liability gets a content-derived id over its four available fields — **never the
+positional `liability.{n}` index**, so the id survives a reordering. ⚠️ **The `_per_account` composite
+`(institution, masked-number)` was measured and rejected for this shape:** the LP-443 redact backstop scrubs
+unmasked account numbers, leaving **9 of 35** real tradelines a bare `[redacted]` and collapsing **two distinct
+SETOYOTA FIN DBA OF WO tradelines onto one key** — a guess-merge on real data, in the one place this design
+exists to prevent it. A liability that cannot be identified at all (a stated liability with no holder name)
+still gets its own subject plus a `liability.unresolved` marker — the `_per_account` fail-closed rule,
+inherited: never dropped, never merged into an equally-anonymous neighbour.
+
+**⚠️ This ships UNVALIDATED against reality, and ADR-332 applies.** The two sources **never co-occur anywhere in
+the repo**: the bench corpus is 303 loose documents with no MISMO at all, and the LF-6T3N fixture carries five
+bank statements and **zero** liability facts. So every cross-source property — the union count, the
+no-double-count arithmetic, the source marking — is proven **against constructed fixtures only**. What is
+proven on real data is single-source: 35 tradeline subjects from documents 250/251, ids unique 35/35,
+deterministic and order-independent. **A real loan file carrying both a credit report and MISMO liabilities is
+the missing evidence**, and it belongs in the same document request LP-476 already recommends batching.
+
+**Cross-refs.** LP-480 (`docs/tickets/LP-480.md`), LP-479 (the `row_id` this reuses), LP-336/ADR (the
+`_per_account` fail-closed marker pattern this inherits), LP-476 (the census that found no enumerator for
+liabilities), ADR-353 (the open-ended bureau row vocabulary that makes interpretation a Priya question),
+ADR-332 (a judgment cannot be calibrated on a fixture you authored).
