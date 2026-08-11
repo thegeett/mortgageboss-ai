@@ -222,7 +222,6 @@ _PII_FIELDS: dict[str, tuple[PiiKind, bool]] = {
     "account_or_reference_number_masked": (PiiKind.ACCOUNT, True),
     "borrower_ssn_or_itin": (PiiKind.SSN, False),
     "borrower_ssn_or_itin_2": (PiiKind.SSN, False),
-    "card_number": (PiiKind.ACCOUNT, False),
     "card_number_last4_or_token": (PiiKind.ACCOUNT, True),
     "card_or_account_last4": (PiiKind.ACCOUNT, True),
     "case_provider_or_account_number_masked": (PiiKind.ACCOUNT, True),
@@ -233,10 +232,13 @@ _PII_FIELDS: dict[str, tuple[PiiKind, bool]] = {
     "deposit_account_last4": (PiiKind.ACCOUNT, True),
     "direct_deposit_account_last4": (PiiKind.ACCOUNT, True),
     # LP-461 review — the DL document discriminator is a unique per-card security identifier captured RAW
-    # (not prompt-masked); mask + hash it like its sibling document_or_card_number rather than persist it plain.
+    # (not prompt-masked); mask + hash it (from_raw) like the sibling document_number rather than persist it plain.
     "document_discriminator": (PiiKind.ACCOUNT, False),
-    "document_number": (PiiKind.ACCOUNT, True),
-    "document_or_card_number": (PiiKind.ACCOUNT, True),
+    # LP-472 review — the shared identity_document captures the primary document number (passport #, EAD /
+    # green-card 'Card #', or the ID number) VERBATIM, so from_raw masks the display AND computes a per-file
+    # match_hash; pre_masked=True would discard the raw to last-4 with match_hash=None. (The old per-type EAD /
+    # PRC names document_or_card_number / card_number were consolidated onto this and removed from the registry.)
+    "document_number": (PiiKind.ACCOUNT, False),
     "drawer_account_last4": (PiiKind.ACCOUNT, True),
     "ein": (PiiKind.ACCOUNT, False),
     "ein_masked": (PiiKind.ACCOUNT, True),
@@ -275,8 +277,11 @@ _PII_FIELDS: dict[str, tuple[PiiKind, bool]] = {
     "tax_identification_number_masked": (PiiKind.ACCOUNT, True),
     "taxpayer_tin": (PiiKind.SSN, False),
     "taxpayer_tin_masked": (PiiKind.ACCOUNT, True),
-    "uscis_number_or_a_number": (PiiKind.ACCOUNT, False),
-    "uscis_or_a_number": (PiiKind.ACCOUNT, True),
+    # LP-472 review — the shared identity_document captures the full A-Number / USCIS# VERBATIM, so from_raw
+    # masks the display + computes a per-file match_hash (consistent with beneficiary_a_number; the future ID-8
+    # cross-document identity match needs the hash). pre_masked=True gave last-4 with match_hash=None. The old
+    # per-type name uscis_number_or_a_number (was from_raw) was consolidated onto this and removed.
+    "uscis_or_a_number": (PiiKind.ACCOUNT, False),
     "visa_number": (PiiKind.ACCOUNT, True),
     "wire_ach_trace_number": (PiiKind.ACCOUNT, False),
     "wire_or_remittance_instructions": (PiiKind.ACCOUNT, False),
