@@ -732,9 +732,10 @@ async def test_run_one_unknown_runs_tier3_free_extraction(
 async def test_run_one_tier2_type_runs_free_extraction_not_summary(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    # LP-471: a Tier-2 catalog type with no registered extractor (passport) no longer gets the LP-65 summary
-    # — production routes EVERY no-typed-extractor document through the SAME Tier-3 scoped free extraction, so
-    # the bench must mirror that (it used to run summarize_document here — the desync LP-471 review fixed).
+    # LP-471: a Tier-2 catalog type with no registered extractor (warranty_deed) no longer gets the LP-65
+    # summary — production routes EVERY no-typed-extractor document through the SAME Tier-3 scoped free
+    # extraction, so the bench must mirror that (it used to run summarize_document here — the desync LP-471
+    # review fixed). (passport was the old example; LP-472 gave it a typed extractor, so it is Tier-1 now.)
     from app.ai.generic_analyzer import GenericAnalysis
     from app.dev.bench import engine
 
@@ -742,12 +743,14 @@ async def test_run_one_tier2_type_runs_free_extraction_not_summary(
         engine,
         "classify_document",
         AsyncMock(
-            return_value=SimpleNamespace(document_type="passport", confidence=0.95, reasoning="?")
+            return_value=SimpleNamespace(
+                document_type="warranty_deed", confidence=0.95, reasoning="?"
+            )
         ),
     )
     analysis = GenericAnalysis(
-        document_type_guess="passport",
-        summary="a passport photo page",
+        document_type_guess="warranty_deed",
+        summary="a warranty deed",
         key_findings=[],
         full_text="EXCLUDED",
     )

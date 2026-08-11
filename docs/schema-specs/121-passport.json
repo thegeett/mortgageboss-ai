@@ -1,11 +1,11 @@
 {
-  "document_type": "work_visa_ead_card",
-  "slug": "work-visa-ead-card",
+  "document_type": "passport",
+  "slug": "passport",
   "tier": 3,
   "rules_served": [
     "ID-8"
   ],
-  "summary_hint": "EAD / work-authorization card (Form I-766) for <full_name>, category <category_code>, valid <valid_from_date> to <expiry_date> — so a processor can confirm the borrower is authorized to work and that authorization extends through closing.",
+  "summary_hint": "passport for <full_name>, nationality <nationality_or_citizenship>, passport no. <document_number>, issued <issue_date> (<place_of_issue>) expiring <expiry_date> — so a processor can confirm identity and that the travel document is unexpired.",
   "existing_extractor": null,
   "catalog_coverage": "full",
   "typed_core": [
@@ -283,8 +283,8 @@
   ],
   "open_questions": [],
   "notes": [
-    "LP-472: consolidated onto the shared identity core; extracts via the shared extract_identity_document. Typed_core IDENTICAL across the family (drift-locked by test).",
-    "The EAD card's mortgage value is lawful work authorization and its expiration relative to closing; category_code + valid_from_date + expiry_date + employment_terms_or_restriction carry that.",
-    "The pre-LP-472 spec 108 carried I-797/visa-foil fields (receipt/i94/visa/passport numbers, employer) that are not printed on the EAD card itself — dropped to the catch-all; see rejected[]."
+    "LP-472: passport was the one family type with NO extractor (Tier-2). Promoted to Tier-1 on the shared identity core; extracts via the shared extract_identity_document. Typed_core IDENTICAL across the family (drift-locked by test).",
+    "A passport is a travel/re-entry document; the MRZ, place_of_issue and back-page fields (father/mother/spouse, file no, prior passport) are captured (MRZ + kin in the catch-all).",
+    "nationality_or_citizenship and place_of_issue are passport-populated; category_code/valid_from_date/resident_since_date/government_id_type stay null."
   ]
 }

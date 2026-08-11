@@ -74,7 +74,7 @@ def test_planned_tier_1_types(document_type: str, category: DocumentCategory) ->
         ("truth_in_lending", DocumentCategory.DISCLOSURES),
         ("warranty_deed", DocumentCategory.PROPERTY),
         ("money_market_statement", DocumentCategory.ASSETS),
-        ("passport", DocumentCategory.BORROWER_INFO),
+        # passport was promoted Tier-2 -> Tier-1 (LP-472, shared identity extractor + spec 121).
     ],
 )
 def test_tier_2_starter_types(document_type: str, category: DocumentCategory) -> None:
@@ -197,8 +197,8 @@ def test_every_spec_document_type_resolves_to_a_catalog_entry() -> None:
         f"spec types the classifier can never emit (silent routing): {unresolved}"
     )
     assert (
-        len(spec_types) == 120
-    )  # 114 + LP-467 (certificate_of_liability_insurance, service_invoice)
+        len(spec_types) == 121
+    )  # 114 + LP-467 (cert_of_liability_insurance, service_invoice) + LP-472 (passport spec 121)
 
 
 def test_the_four_merges_and_the_split_resolve() -> None:

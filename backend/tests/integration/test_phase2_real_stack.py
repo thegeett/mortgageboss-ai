@@ -186,16 +186,19 @@ async def test_tier2_real_upload_free_extracts(
         "classify_document",
         AsyncMock(
             return_value=ClassificationResult(
-                document_type="passport", confidence=0.95, reasoning="x"
+                document_type="warranty_deed", confidence=0.95, reasoning="x"
             )
         ),
     )
-    # LP-471: a Tier-2 type (passport, no typed extractor) now routes to Tier-3 free extraction.
+    # LP-471: a Tier-2 type (warranty_deed, no typed extractor) routes to Tier-3 free extraction.
+    # (passport was the old example here; LP-472 gave it a typed extractor, so it is Tier-1 now.)
     monkeypatch.setattr(
         pipeline,
         "analyze_document",
         AsyncMock(
-            return_value=GenericAnalysis(document_type_guess="passport", summary="A US passport.")
+            return_value=GenericAnalysis(
+                document_type_guess="warranty_deed", summary="A warranty deed."
+            )
         ),
     )
 
@@ -205,7 +208,7 @@ async def test_tier2_real_upload_free_extracts(
     assert doc.status is DocumentStatus.COMPLETED
     assert doc.tier is not None and doc.tier.value == "tier_2"
     assert doc.generic_analysis is not None  # untyped facts captured (not just a summary)
-    assert doc.summary == "A US passport."  # the gist is still kept (from analysis.summary)
+    assert doc.summary == "A warranty deed."  # the gist is still kept (from analysis.summary)
 
 
 # --------------------------------------------------------------------------- #

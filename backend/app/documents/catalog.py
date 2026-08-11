@@ -248,7 +248,7 @@ CATALOG: dict[str, tuple[Tier, DocumentCategory]] = {
     "drivers_license": (Tier.TIER_1, DocumentCategory.BORROWER_INFO),  # T1
     "divorce_decree": (Tier.TIER_1, DocumentCategory.BORROWER_INFO),  # T1
     "letter_of_explanation": (Tier.TIER_1, DocumentCategory.BORROWER_INFO),  # T1
-    "passport": (Tier.TIER_2, DocumentCategory.BORROWER_INFO),
+    "passport": (Tier.TIER_1, DocumentCategory.BORROWER_INFO),  # LP-472 — shared identity extractor
     "social_security_card": (Tier.TIER_1, DocumentCategory.BORROWER_INFO),
     "permanent_resident_card": (Tier.TIER_1, DocumentCategory.BORROWER_INFO),
     "visa_documentation": (Tier.TIER_2, DocumentCategory.BORROWER_INFO),

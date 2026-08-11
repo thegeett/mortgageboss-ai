@@ -13884,3 +13884,82 @@ pretending the document is handled.
 **Cross-refs.** LP-471 (`docs/tickets/LP-471.md`), LP-463 (the Tier-3 free extraction + rule-unreadable untyped
 section this reuses), LP-462/LP-464 (the retry/throttle gates the fallback sits after), LP-472 (the shared
 identity schema — the eventual typed home for the no-extractor identity types).
+
+## ADR-369: Classify precisely, extract in common — one shared identity schema for a whole document family; and a typed extractor can make a bad scan WORSE (LP-472)
+
+**Context.** Four government-identity types — `passport`, `permanent_resident_card`, `work_visa_ead_card`,
+`government_issued_id` — carry the same identity facts (name, DOB, document number, expiry, issuing authority).
+The ticket assumed all four lacked an extractor. The code said otherwise: only `passport` had none (Tier-2);
+the other three each already had a **separate generated extractor with drifting field names for the same fact**
+— `full_name` vs `full_legal_name`, `card_number` vs `document_number` vs `document_or_card_number`,
+`card_expiration_date` vs `expiration_date` vs `expiration_or_admit_until_date`. That drift is exactly what
+defeats the purpose of a family schema: a within-family misclassification (a green card read as an EAD) would
+yield DIFFERENT field names for the borrower's name and expiry, so a downstream reader could not treat the
+family uniformly.
+
+**Decision — classify precisely, extract in common.** The four stay **distinct** in the catalog and the
+classifier (distinct indicators; ID-8 needs the citizenship vs. work-authorization-with-expiry distinction),
+but they **extract through ONE shared module** (`extract_identity_document`) with ONE superset field set and
+ONE prompt. All four `EXTRACTORS` keys point at the same function. The schema is literally identical across the
+family (Geet's principle: *the schema should share all, but it should classify correctly*); a given card fills
+only its printed fields and nulls the rest (a passport nulls `category_code`; an EAD nulls `place_of_issue`).
+`drivers_license` is deliberately **excluded** — it keeps its own tuned extractor (spec 014).
+
+**Why one module, not four-plus-a-sync-test.** The `Tier-1-iff-spec` invariant (LP-441) forces four spec files
+(one per slug), so the spec layer is necessarily four files whose cores are held byte-identical by a CI drift
+test. But the **runtime** truth is a single function: there is nothing to diverge. Four modules kept in sync by
+a test would *detect* drift after someone wrote it; one module *prevents* it. The four specs exist to satisfy
+the invariant and document the field set; the drift test locks their cores identical to each other and to the
+module's `_CORE_SPEC`. This is the generalizable answer to a repeatedly-failing family — the same shape applies
+to any set of types that classify distinctly but share their decision-relevant fields.
+
+**Field decisions.** The shared core reuses the already-registered `_PII_FIELDS` names (`document_number`,
+`uscis_or_a_number`) so consolidation added ZERO new PII wiring. `date_of_birth` and `full_name` stay unmasked
+(ID-1/ID-3 match on them; the `drivers_license` precedent). **`sex` was dropped** — spec 108 had already
+rejected it (no mortgage consumer, protected-class exposure); in a shared schema the most conservative sibling
+wins. **The MRZ was dropped from the typed core** — it re-encodes name/DOB/number/expiry already captured, and
+its contiguous digit run would trip the at-rest `_LONG_DIGITS` guard; it lands in the catch-all if read. The
+EAD's pre-LP-472 I-797/visa-foil fields (receipt/i94/visa/passport numbers, employer) are not printed on the
+EAD card itself and were dropped to the catch-all.
+
+**Verdict-safety window — and why it will close.** Consolidating renamed fields on three live extractors. It is
+safe ONLY because **no active rule reads any family field today** (grep of `app/verification/rules/` is empty;
+ID-1/ID-3/ID-8 are visibility-only, ADR-362/363), so no rename can move a verdict. That window is temporary:
+the moment a rule reads `document_number` or `category_code`, consolidating the family means touching a live
+rule. Doing it now — while the fields are processor-visibility only — is deliberately the cheap time to do it.
+Passport-only (leaving three drifting schemas) was rejected: it is half a fix and guarantees a second ticket.
+
+**⚠️ A limit on the no-zero-data principle (ADR-368): a typed extractor can make a bad scan WORSE.** ADR-368
+established that a missing extractor costs *typed* data, not *all* data, because a no-extractor type falls back
+to Tier-3 free extraction. Promoting `passport` (and giving the family a typed extractor) REMOVES these types
+from that fallback path — they now go through typed extraction. But the LP-471 fallback only fires on `FAILED`
+(a genuinely-empty extraction), **not** on a *confident-but-wrong* read. On an unreadable input — e.g. 266, the
+90°-rotated CamScanner EAD that LP-468 showed the model hallucinates as a UK passport (ADR-365) — a typed
+extractor can return a **confident, coherent, wrong** identity, and the fallback cannot tell that from a
+correct one, so it does not fire. An honest Tier-3 summary ("a low-quality scan of an identity card, largely
+illegible") beats confident garbage, but the confident-misread path bypasses it. So: **adding a typed extractor
+is a strict improvement only for READABLE inputs; for an unreadable scan it can degrade the result below what
+the untyped fallback would have produced.** This is not fixed here (it needs image-preprocessing / a legibility
+gate — ADR-365's open gap); it is recorded as the boundary of the no-zero-data principle. `confidence` +
+`field_confidence` on the typed result are the only current signal a reader has, and neither is a reliable
+legibility detector.
+
+**Confirmed live (LP-472 Phase C), and partially mitigated.** The first shared-prompt run fabricated
+identities on obscured EAD scans — a *readable* EAD got a hallucinated name at conf 0.92; a rotated one became
+"JOHN SMITH, US PASSPORT" at 0.87. An A/B against the deleted per-type prompt (which read the same doc as
+`EAD (Form I-766)`, `C26`, `full_name = null`) proved the *generic shared prompt* caused it: unable to
+pre-declare the type across four kinds, the model guesses on an obscured title band and guesses the more common
+green card, then invents a plausible name. **Prompt discipline closed the dangerous half** — a hard honest-null
+rule ("never emit John Smith / a guessed spelling; a null name is correct, a confident wrong name is a serious
+error") + title-anchoring turned the fabricated names into honest nulls with lower, honest confidence. **The
+residual — mis-reading the EAD's title/category (C26→E26) under glare — is not fixable by prompt alone**, because
+a shared extractor structurally cannot pre-declare its type. The real fix is architectural: **thread the
+already-decided classified `document_type` into the extractor** so it anchors on what classification determined
+(restoring the per-type prompt's advantage without re-introducing schema drift). That changes the uniform
+`(content, media_type)` extractor signature, so it is a deliberate follow-up. The lesson generalizes: a
+one-schema-many-types extractor should be *told what it was classified as*, or it re-litigates classification
+worse than the classifier did.
+
+**Cross-refs.** LP-472 (`docs/tickets/LP-472.md`), ADR-368 (the no-zero-data principle this bounds), ADR-365
+(the confident-coherent-misread + unreadable-scan limits this inherits), ADR-362/363 (the visibility-only
+standard that makes the rename verdict-safe today), LP-441 (Tier-1-iff-spec, which shapes the four-spec layer).

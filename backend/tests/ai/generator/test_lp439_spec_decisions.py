@@ -28,7 +28,9 @@ def test_there_are_120_specs() -> None:
     # (home_value_estimate, wire_instructions, lender_dashboard_screenshot) → 114. LP-467
     # added two (certificate_of_liability_insurance, service_invoice) → 116. LP-468
     # added one (compensation_statement) → 117. LP-469 added one (form_1098) → 118. LP-470 promoted closing_disclosure + loan_estimate to Tier 1 with specs → 120.
-    assert len(_ALL) == 120
+    # LP-472 added the passport spec (121) — the one identity-family type that had no extractor;
+    # 038/071/108 were rewritten onto the shared identity core, not added, so the count grew by one.
+    assert len(_ALL) == 121
 
 
 @pytest.mark.parametrize("path", _ALL, ids=lambda p: p.stem)

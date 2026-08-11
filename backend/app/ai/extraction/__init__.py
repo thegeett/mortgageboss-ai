@@ -87,12 +87,12 @@ from app.ai.extraction.form_4506t_request_for_transcript import (
 )
 from app.ai.extraction.foster_care_verification import extract_foster_care_verification
 from app.ai.extraction.gift_letter import extract_gift_letter
-from app.ai.extraction.government_issued_id import extract_government_issued_id
 from app.ai.extraction.hoa_certification import extract_hoa_certification
 from app.ai.extraction.hoa_statement import extract_hoa_statement
 from app.ai.extraction.home_value_estimate import extract_home_value_estimate
 from app.ai.extraction.homeowner_s_insurance_quote import extract_homeowner_s_insurance_quote
 from app.ai.extraction.homeowners_insurance import extract_homeowners_insurance
+from app.ai.extraction.identity_document import extract_identity_document
 from app.ai.extraction.investment_account import extract_investment_account
 from app.ai.extraction.ira_401k import extract_ira_401k
 from app.ai.extraction.k1_statement import extract_k1_statement
@@ -125,7 +125,6 @@ from app.ai.extraction.mortgage_statement import extract_mortgage_statement
 from app.ai.extraction.other_property_note import extract_other_property_note
 from app.ai.extraction.pay_stub import extract_pay_stub
 from app.ai.extraction.payoff_statement import extract_payoff_statement
-from app.ai.extraction.permanent_resident_card import extract_permanent_resident_card
 from app.ai.extraction.prior_closing_disclosure_final_cd_from_purchase import (
     extract_prior_closing_disclosure_final_cd_from_purchase,
 )
@@ -173,7 +172,6 @@ from app.ai.extraction.verification_of_rent import extract_verification_of_rent
 from app.ai.extraction.voe import extract_voe
 from app.ai.extraction.w2 import extract_w2
 from app.ai.extraction.wire_instructions import extract_wire_instructions
-from app.ai.extraction.work_visa_ead_card import extract_work_visa_ead_card
 from app.models.extraction import ExtractionStatus
 
 
@@ -273,7 +271,10 @@ EXTRACTORS: dict[str, Extractor] = {
     "form_1120_corporate_tax_transcripts": extract_form_1120_corporate_tax_transcripts,
     "form_4506t_request_for_transcript": extract_form_4506t_request_for_transcript,
     "foster_care_verification": extract_foster_care_verification,
-    "government_issued_id": extract_government_issued_id,
+    # LP-472 — the four government-identity types classify precisely (distinct catalog
+    # types + indicators) but extract in common: one shared extractor, one field set,
+    # zero drift. drivers_license is NOT in this family (keeps its own tuned extractor).
+    "government_issued_id": extract_identity_document,
     "hoa_certification": extract_hoa_certification,
     "ira_401k": extract_ira_401k,
     "k1_statement": extract_k1_statement,
@@ -291,7 +292,8 @@ EXTRACTORS: dict[str, Extractor] = {
     "mortgage_loan_origination_agreement": extract_mortgage_loan_origination_agreement,
     "other_property_note": extract_other_property_note,
     "payoff_statement": extract_payoff_statement,
-    "permanent_resident_card": extract_permanent_resident_card,
+    "passport": extract_identity_document,  # LP-472 — promoted Tier-2 → Tier-1 (the one family gap)
+    "permanent_resident_card": extract_identity_document,
     "prior_closing_disclosure_final_cd_from_purchase": extract_prior_closing_disclosure_final_cd_from_purchase,
     "proof_of_occupancy": extract_proof_of_occupancy,
     "property_profile_non_subject": extract_property_profile_non_subject,
@@ -318,7 +320,7 @@ EXTRACTORS: dict[str, Extractor] = {
     "verification_of_assets": extract_verification_of_assets,
     "verification_of_deposit": extract_verification_of_deposit,
     "verification_of_rent": extract_verification_of_rent,
-    "work_visa_ead_card": extract_work_visa_ead_card,
+    "work_visa_ead_card": extract_identity_document,
     # LP-465 — two rule-relevant types promoted from `unknown` (a buydown alters the qualifying
     # payment; a USCIS Notice of Action feeds ID-8). New-type generation, real modules.
     "temporary_buydown_agreement": extract_temporary_buydown_agreement,
