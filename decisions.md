@@ -14085,3 +14085,52 @@ flag belongs upstream of tag materialization so a flagged value is visible befor
 **Cross-refs.** LP-474 (`docs/tickets/LP-474.md`), LP-445 (the `count_field` cross-check this extends), LP-446
 (the FP-gate lesson that rejected the arithmetic chain), LP-437/460 (declaration-over-per-type-code), LP-462
 (signal-distinctness), ADR-368/369 (no-zero-data / the A6 confident-misread the accuracy layer complements).
+
+## ADR-373: We measured the benefit of declining and not its cost — the remedy was to make the failure CHEAP, not to loosen the classifier; and the triage rule for reclassification regressions (LP-475)
+
+**The two-sided lesson.** LP-463 made declining legitimate: a document that matches no catalog type returns
+`unknown` instead of being forced into the nearest neighbour. That fix was **correct and measured** — T4s (a
+Canadian wage slip) stopped emitting plausible US `w2` numbers, HOA budgets and payment-portal screenshots
+stopped becoming `hoa_statement`. What we did **not** measure was the other side: the same guard also made the
+classifier abstain on ~14 documents whose specialised type exists and whose extractor demonstrably works. We
+counted the force-fits removed; we did not count the correct classifications lost. **A guard's benefit and its
+cost are two different measurements, and shipping on one of them is how a fix becomes a regression.**
+
+**⚠️ The remedy was NOT to loosen declining.** The obvious response — lower the confidence threshold, weaken
+`type_matches_document`, make abstention generally harder — would have traded this regression for the strictly
+worse one. A force-fit produces **confident wrong typed data** that flows into deterministic rules; an
+over-decline produces **untyped data** that no rule reads. The two failures are not symmetric, so a general
+loosening is a bad trade even when it fixes more documents than it breaks.
+
+**The remedy that worked was two-part, and neither part touches the decline logic.** (1) **Make the failure
+cheap** — ADR-368/LP-471 routed every no-type/no-extractor/failed document to Tier-3 free extraction, so an
+over-decline now costs typed data rather than all data. That is what buys the right to leave a marginal case
+alone. (2) **Fix only evidence-backed cases**, one document type at a time, with **positive indicator cues
+drawn from the document's own printed separators** (the LP-465/468 mechanism) — never a threshold change.
+LP-475 shipped exactly two cue edits (`earnest_money_receipt`, `title_commitment`), each naming a printed
+heading ("ACKNOWLEDGMENT OF RECEIPT OF MONIES"; "commitment or BINDER (ALTA) … Schedule A/B") that the
+force-fit candidates do not carry. **Proven by the acceptance test, not predicted:** post-change, the T4 still
+declines, the payment-portal screenshot still declines, the compensation statement still reaches
+`compensation_statement` (not `commission_income_statement`).
+
+**The triage rule — when a reclassification regression earns a fix.** All three must hold:
+1. the lost type has a **registered, working extractor**;
+2. that extractor is **proven on a sibling document in the same corpus** (not merely registered);
+3. the document is **genuinely that type** — not a multi-document package, not an addendum, not a near-miss.
+
+**⚠️ "Correctly conservative" is the expected verdict for most of them.** Of 10 candidates, **3 qualified**
+(202, 208, 209). The 7 that did not, and why the honest answer is to leave them declining: **packages** (204's
+73-page URLA bundle, 196's CPA tax package) are the **splitter's** job — classification cannot name a document
+that is five documents; **addenda** (177/178, AZ REALTORS® lease renewal/extension) are genuinely **not** the
+parent type, and forcing them there is the exact failure LP-463 fixed; **portal screenshots** (132) are the
+LP-463/470 correct decline; **`evidence_of_payment`** (211) fails rule 2 — **zero** documents in the corpus
+ever classified as it, so its extractor is registered but **never exercised**, and a cue for it would be
+unbacked; and **236**, an occupancy explanation **by content** but a Gmail thread **by form**, has no printed
+standard-form identity to anchor on — any cue tight enough to catch it must key on content, which is precisely
+how generic correspondence gets pulled back in. The honest destination for a near-miss is a **new type** later
+or **Tier 3** now — never a neighbour.
+
+**Cross-refs.** LP-475 (`docs/tickets/LP-475.md`), LP-463 (the declining guard whose cost this measures),
+ADR-368/LP-471 (making the failure cheap — the precondition for leaving a case alone), LP-465/468 (the
+positive-cue-from-printed-separators mechanism), ADR-365 (the image gap that excludes 265), LP-464 (the sibling
+extractor results that are the evidence of record).
