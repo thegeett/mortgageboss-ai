@@ -84,3 +84,15 @@ confirm it is empty, then remove the `prevent_destroy` block and destroy this la
 `terraform_data.account_guard` fails the plan if the resolved credentials do not
 match `var.aws_account_id`. A `precondition`, not a `check` block — a `check` only
 produces a warning, and applying to the wrong account must be a hard stop.
+
+## If the local state is lost
+
+This directory uses local state, and it is deliberately NOT committed — Terraform
+state trips the detect-secrets hook on high-entropy values that are not secrets
+(the S3 canonical owner id, and a base64 blob of provider timeouts).
+
+The bucket exists in AWS regardless. To rebuild the state record:
+
+    terraform init
+    terraform import aws_s3_bucket.state mbai-tfstate-058190633983
+    terraform plan    # re-import sub-resources if plan proposes recreating them
