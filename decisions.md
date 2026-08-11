@@ -13831,3 +13831,56 @@ the documents aren't already served by an existing type reached by a different r
 **Cross-refs.** LP-470 (`docs/tickets/LP-470.md`), LP-463 (Tier-3 scoped free extraction + the untyped
 snapshot section this leans on), LP-468 (the two prior routing-not-missing-type findings), the
 `letter_of_explanation` family (the seven LOE types that cover the explanation content).
+
+## ADR-368: No document ever yields zero data — a missing type, extractor, or crash costs TYPED data, not ALL data (LP-471)
+
+**Context.** Since LP-463 a document that classifies as `unknown` routes to Tier-3 scoped free extraction and
+is read. But two other paths to "no data" bypassed Tier 3: a type with no registered extractor (Tier-2, or a
+Tier-1 promoted before its extractor is wired) got only a thin LP-65 summary — not surfaced into the snapshot's
+untyped section — and an extractor that FAILED terminated at `NEEDS_REVIEW` with nothing. So a document could
+classify correctly at 0.99 and still yield zero usable data. The v2 bench counted 56 no-extractor + 3 errored.
+
+**The principle — no document should ever yield ZERO data.** A missing type, a missing extractor, or a crash
+should cost **typed** data (the structured fields a rule can read), never **all** data. Both no-data paths now
+fall back to the SAME existing `_tier3_analyze` scoped free extraction: `_route_by_tier` routes every
+no-typed-extractor document there (replacing the summarize path), and `_extract_branch` falls back there on a
+genuinely-empty FAILED extraction. The output lands in the marked-untyped snapshot section
+(`DocumentEntry.untyped_extraction`) — read by a processor and by AI cross-source verification (opt-in
+`include_untyped`), **never by a deterministic rule** (LP-463's constraint, inherited unchanged: no rule reads
+`untyped_extraction`). A missed type now costs untyped data, not nothing.
+
+**⚠️ This deliberately reduces the pressure to re-tune the classifier — and that is the point.** The v2 run
+showed how a type gets missed: `passport` was on the build list, the diagnostic split it, LP-468 fixed the
+misclassification, and the remaining passport step was skipped without anyone deciding to skip it —
+`warranty_deed`, `certificate_of_deposit`, `money_market_statement` are in the same position. A fallback means
+that a lost item, an unwired extractor, or a crash costs untyped data rather than no data — a much cheaper
+mistake, and one that does not depend on nobody ever losing track of a plan item. It also changes the
+classifier calculus: LP-463's declining was CORRECT and caused over-declining, and v2's ~14 reclassification
+regressions hurt precisely because `unknown` meant near-nothing. With this fallback, "no extractor" and
+"crashed" also mean "read anyway", so the pressure to aggressively re-tune the classifier drops. **Making the
+failure mode cheap is a safer fix than loosening the classifier and risking the LP-463 force-fits returning** —
+which is why classifier re-tuning is deliberately a later, narrower ticket, not this one.
+
+**Fallback runs AFTER retries, never instead of them — and never for a re-runnable throttle.** The extractor's
+own retries (the LP-462 rate-limit backoff, the LP-464 truncation retry) run inside the extractor call; only
+its final result reaches `_extract_branch`. The throttle gate (LP-464) sits BEFORE the fallback: a sustained
+rate-limit after retries is recorded as re-runnable `NEEDS_REVIEW` and returns — it must NOT fall back, because
+a re-run may extract fine and a fallback would silently degrade it. Only a *non-throttle* FAILED reaches the
+fallback. So a transient throttle can never trigger it (the LP-462 lesson: a throttle recorded as a plain
+failure corrupts every downstream audit — here it is never recorded as a fallback either).
+
+**A fallback must not make a failure look like a success.** The FAILED extraction version is KEPT (with
+`error_detail = result.reasoning` — oversized / parse / "AI call failed"), the document stays `NEEDS_REVIEW`
+(a human still sees the error), and `processing_error` names the error type. The presence of `generic_analysis`
+marks "fell back to untyped"; it never overwrites or hides the typed failure. A `PARTIAL` or low-confidence
+extraction that DID capture fields does **not** fall back (`derive_status`: FAILED means genuinely empty) —
+mixing typed and untyped data for one document would let a reader conflate them.
+
+**One case the fallback cannot save — recorded honestly.** 069 is an oversized `BadRequestError`; the fallback
+`analyze_document` sends the same oversized content and also fails, so 069 ends `NEEDS_REVIEW` with the FAILED
+version + no untyped data. It needs the LP-464 page-cap work; the fallback is graceful about it rather than
+pretending the document is handled.
+
+**Cross-refs.** LP-471 (`docs/tickets/LP-471.md`), LP-463 (the Tier-3 free extraction + rule-unreadable untyped
+section this reuses), LP-462/LP-464 (the retry/throttle gates the fallback sits after), LP-472 (the shared
+identity schema — the eventual typed home for the no-extractor identity types).

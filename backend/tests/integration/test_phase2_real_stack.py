@@ -170,13 +170,15 @@ async def test_tier1_real_upload_processes_and_satisfies_need(
 
 
 # --------------------------------------------------------------------------- #
-# Tier 2 — real storage read → recognize + summarize
+# Tier 2 — real storage read → Tier-3 scoped free extraction (LP-471)
 # --------------------------------------------------------------------------- #
 
 
-async def test_tier2_real_upload_summarizes(
+async def test_tier2_real_upload_free_extracts(
     db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    from app.ai.generic_analyzer import GenericAnalysis
+
     company, lf = await _loan_file(db_session)
     doc = await _stage_real_file(db_session, company, lf)
     monkeypatch.setattr(
@@ -188,14 +190,22 @@ async def test_tier2_real_upload_summarizes(
             )
         ),
     )
-    monkeypatch.setattr(pipeline, "summarize_document", AsyncMock(return_value="A US passport."))
+    # LP-471: a Tier-2 type (passport, no typed extractor) now routes to Tier-3 free extraction.
+    monkeypatch.setattr(
+        pipeline,
+        "analyze_document",
+        AsyncMock(
+            return_value=GenericAnalysis(document_type_guess="passport", summary="A US passport.")
+        ),
+    )
 
     await pipeline._process_document(db_session, str(doc.id))
 
     await db_session.refresh(doc)
     assert doc.status is DocumentStatus.COMPLETED
     assert doc.tier is not None and doc.tier.value == "tier_2"
-    assert doc.summary == "A US passport."
+    assert doc.generic_analysis is not None  # untyped facts captured (not just a summary)
+    assert doc.summary == "A US passport."  # the gist is still kept (from analysis.summary)
 
 
 # --------------------------------------------------------------------------- #

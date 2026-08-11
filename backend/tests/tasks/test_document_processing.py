@@ -102,13 +102,6 @@ def _patch_extract(
     return mock
 
 
-def _patch_summarize(monkeypatch: pytest.MonkeyPatch, summary: str | None) -> AsyncMock:
-    """Patch the Tier 2 ``summarize_document`` call (no real AI) with a canned gist."""
-    mock = AsyncMock(return_value=summary)
-    monkeypatch.setattr(pipeline, "summarize_document", mock)
-    return mock
-
-
 @pytest.fixture(autouse=True)
 def _mock_needs_enqueue(monkeypatch: pytest.MonkeyPatch):
     """Stub the LP-68 per-file needs-update enqueue so pipeline tests never hit the broker."""
@@ -195,15 +188,15 @@ async def test_happy_path_pay_stub(
 # --------------------------------------------------------------------------- #
 
 
-async def test_tier1_without_extractor_falls_back_to_the_interim_summary(
+async def test_tier1_without_extractor_falls_back_to_tier3(
     monkeypatch: pytest.MonkeyPatch, db_session: AsyncSession
 ) -> None:
-    """A Tier-1 type with no registered extractor → the interim summary (LP-441 review).
+    """A Tier-1 type with no registered extractor → Tier-3 free extraction (LP-471).
 
-    LP-441 promoted 18 spec'd types to Tier-1 before their extractors are wired. Such a
-    promoted-but-unwired type must NOT silently lose the human-reference gist it got as Tier-2 —
-    it falls back to the shared summarize path (a summary, terminal status), NOT classified-only.
-    To exercise the branch we remove a built extractor from the registry.
+    LP-441 promoted spec'd types to Tier-1 before their extractors are wired. LP-471 routes such a
+    promoted-but-unwired type (and every Tier-2 type) to the SAME Tier-3 scoped free extraction so it
+    yields UNTYPED data (not just a thin summary), never nothing. To exercise the branch we remove a
+    built extractor from the registry.
     """
     doc = await _setup_document(db_session)
     _patch_storage(monkeypatch)
@@ -212,7 +205,7 @@ async def test_tier1_without_extractor_falls_back_to_the_interim_summary(
         monkeypatch,
         ClassificationResult(document_type="tax_return", confidence=0.9, reasoning="x"),
     )
-    summarize = _patch_summarize(monkeypatch, "A tax return awaiting deep extraction.")
+    analyze = _patch_analyze(monkeypatch, _generic_analysis_with_finding())
 
     await pipeline._process_document(db_session, str(doc.id))
     await db_session.refresh(doc)
@@ -220,17 +213,19 @@ async def test_tier1_without_extractor_falls_back_to_the_interim_summary(
     assert doc.status == DocumentStatus.COMPLETED  # terminal, never FAILED
     assert doc.document_type == "tax_return"
     assert doc.tier == Tier.TIER_1
-    assert doc.category == DocumentCategory.INCOME_EMPLOYMENT
-    assert await _current_extraction(db_session, doc.id) is None  # no extractor ran
-    assert summarize.call_count == 1  # the interim summary ran (not classified-only)
-    assert doc.summary == "A tax return awaiting deep extraction."  # the gist is kept
+    assert await _current_extraction(db_session, doc.id) is None  # no typed extractor ran
+    assert analyze.call_count == 1  # LP-471: Tier-3 free extraction ran (not the old summary)
+    assert doc.generic_analysis is not None  # untyped facts captured
+    assert (
+        doc.summary == "A civil judgment against the borrower."
+    )  # the gist is still kept (from analysis)
 
 
-async def test_tier2_summarized_and_terminal(
+async def test_tier2_falls_back_to_tier3_free_extraction(
     monkeypatch: pytest.MonkeyPatch, db_session: AsyncSession
 ) -> None:
-    """A Tier-2 type (e.g. credit_report) → the shared summary path (LP-65): a short
-    gist is stored and the doc reaches a terminal status, with NO deep extraction."""
+    """A Tier-2 type (e.g. collection_account_letter) → Tier-3 free extraction (LP-471): untyped
+    facts + findings are captured and the gist kept, with NO typed extraction."""
     doc = await _setup_document(db_session)
     _patch_storage(monkeypatch)
     _patch_classify(
@@ -239,20 +234,21 @@ async def test_tier2_summarized_and_terminal(
             document_type="collection_account_letter", confidence=0.9, reasoning="x"
         ),
     )
-    gist = "Collection-account notice dated 2026-06-01 for the borrower."
-    summarize = _patch_summarize(monkeypatch, gist)
+    analyze = _patch_analyze(monkeypatch, _generic_analysis_with_finding())
 
     await pipeline._process_document(db_session, str(doc.id))
     await db_session.refresh(doc)
 
-    assert summarize.call_count == 1  # the shared summarize path ran
+    assert analyze.call_count == 1  # LP-471: free extraction ran (not the old summarize)
     assert doc.status == DocumentStatus.COMPLETED  # terminal
-    assert doc.document_type == "collection_account_letter"  # LP-441: credit_report is now Tier-1
+    assert doc.document_type == "collection_account_letter"
     assert doc.tier == Tier.TIER_2
     assert doc.category == DocumentCategory.CREDIT
-    assert doc.summary == gist  # the gist is stored
-    assert len(doc.summary) < 200  # a brief gist, not a giant extraction blob
-    assert await _current_extraction(db_session, doc.id) is None  # no deep extraction
+    assert (
+        doc.generic_analysis is not None
+    )  # untyped facts captured (surfaced in the untyped section)
+    assert doc.summary == "A civil judgment against the borrower."  # the gist is kept
+    assert await _current_extraction(db_session, doc.id) is None  # no typed extraction
 
 
 @pytest.mark.parametrize(
@@ -274,30 +270,34 @@ async def test_tier2_one_shared_path_for_every_type(
     document_type: str,
     category: DocumentCategory,
 ) -> None:
-    """Different Tier-2 types all go through the SAME path — no per-type branching."""
+    """Different Tier-2 types all go through the SAME path — no per-type branching (now Tier-3 free
+    extraction, LP-471)."""
     doc = await _setup_document(db_session)
     _patch_storage(monkeypatch)
     _patch_classify(
         monkeypatch,
         ClassificationResult(document_type=document_type, confidence=0.9, reasoning="x"),
     )
-    summarize = _patch_summarize(monkeypatch, "A short recognized-document gist.")
+    analyze = _patch_analyze(monkeypatch, _generic_analysis_with_finding())
 
     await pipeline._process_document(db_session, str(doc.id))
     await db_session.refresh(doc)
 
-    assert summarize.call_count == 1  # one shared mechanism, regardless of type
+    assert (
+        analyze.call_count == 1
+    )  # one shared mechanism (Tier-3 free extraction), regardless of type
     assert doc.tier == Tier.TIER_2
     assert doc.category == category
     assert doc.status == DocumentStatus.COMPLETED
-    assert doc.summary == "A short recognized-document gist."
+    assert doc.generic_analysis is not None
     assert await _current_extraction(db_session, doc.id) is None
 
 
-async def test_tier2_summary_failure_is_graceful(
+async def test_tier2_free_extraction_failure_is_graceful(
     monkeypatch: pytest.MonkeyPatch, db_session: AsyncSession
 ) -> None:
-    """Summarization failure → the doc still reaches a terminal status, summary null."""
+    """Tier-3 free extraction failing (analyze returns None) → the doc still reaches a terminal status,
+    generic_analysis + summary null (LP-471 reuses the graceful _tier3_analyze path)."""
     doc = await _setup_document(db_session)
     _patch_storage(monkeypatch)
     _patch_classify(
@@ -306,14 +306,14 @@ async def test_tier2_summary_failure_is_graceful(
             document_type="collection_account_letter", confidence=0.9, reasoning="x"
         ),  # LP-441: a still-Tier-2 type (credit_report was promoted)
     )
-    _patch_summarize(monkeypatch, None)  # summarization "failed" (returns None)
+    _patch_analyze(monkeypatch, None)  # free extraction "failed" (returns None)
 
     await pipeline._process_document(db_session, str(doc.id))
     await db_session.refresh(doc)
 
     assert doc.status == DocumentStatus.COMPLETED  # terminal, not stuck / crashed
     assert doc.tier == Tier.TIER_2
-    assert doc.summary is None  # recognized + categorized, no gist — forgiving
+    assert doc.generic_analysis is None  # recognized + categorized, no facts — forgiving
 
 
 def _generic_analysis_with_finding():
@@ -640,24 +640,86 @@ async def test_infra_failure_needs_review_with_distinct_reason(
 # --------------------------------------------------------------------------- #
 
 
-async def test_extraction_failure_needs_review(
+async def test_extraction_failure_falls_back_to_tier3(
     monkeypatch: pytest.MonkeyPatch, db_session: AsyncSession
 ) -> None:
+    """LP-471: a FAILED (genuinely-empty) extraction falls back to Tier-3 free extraction — the FAILED
+    version is KEPT (the error stays diagnosable) and untyped facts are captured; still NEEDS_REVIEW."""
     doc = await _setup_document(db_session)
     _patch_storage(monkeypatch)
     _patch_classify(
         monkeypatch, ClassificationResult(document_type="pay_stub", confidence=0.9, reasoning="x")
     )
     _patch_extract(monkeypatch, PayStubExtractionResult.failed("AI call failed"))
+    analyze = _patch_analyze(monkeypatch, _generic_analysis_with_finding())
+
+    await pipeline._process_document(db_session, str(doc.id))
+    await db_session.refresh(doc)
+
+    assert (
+        doc.status == DocumentStatus.NEEDS_REVIEW
+    )  # typed extraction errored — a human still reviews
+    assert analyze.call_count == 1  # fell back to Tier-3 free extraction
+    assert doc.generic_analysis is not None  # untyped facts captured — the document is not empty
+    # the FAILED version is NOT hidden, and the error TYPE is preserved (A2 — a fallback must not make a
+    # failure look like a success).
+    extraction = await _current_extraction(db_session, doc.id)
+    assert extraction is not None and extraction.extraction_status == ExtractionStatus.FAILED
+    assert "AI call failed" in (doc.processing_error or "")
+
+
+async def test_low_confidence_extraction_does_not_fall_back(
+    monkeypatch: pytest.MonkeyPatch, db_session: AsyncSession
+) -> None:
+    """LP-471 A6: a LOW-confidence extraction that DID capture typed fields must NOT fall back — mixing
+    typed + untyped data for one document invites conflation. It keeps its fields; a human reviews."""
+    doc = await _setup_document(db_session)
+    _patch_storage(monkeypatch)
+    _patch_classify(
+        monkeypatch, ClassificationResult(document_type="pay_stub", confidence=0.9, reasoning="x")
+    )
+    low_conf = PayStubExtractionResult(
+        data=PayStubExtraction(employer_name=TypedField(value="ACME Corp")),
+        status=ExtractionStatus.SUCCEEDED,
+        confidence=0.3,  # below _CONFIDENCE_THRESHOLD, but fields WERE captured
+        reasoning="unsure",
+    )
+    _patch_extract(monkeypatch, low_conf)
+    analyze = _patch_analyze(monkeypatch, _generic_analysis_with_finding())
 
     await pipeline._process_document(db_session, str(doc.id))
     await db_session.refresh(doc)
 
     assert doc.status == DocumentStatus.NEEDS_REVIEW
-    assert doc.processing_error == "extraction failed or low confidence"
+    assert analyze.call_count == 0  # NO fallback — the typed fields are kept
+    assert doc.generic_analysis is None
     extraction = await _current_extraction(db_session, doc.id)
-    assert extraction is not None
-    assert extraction.extraction_status == ExtractionStatus.FAILED
+    assert extraction is not None and extraction.extraction_status == ExtractionStatus.SUCCEEDED
+
+
+async def test_extraction_failure_where_fallback_also_fails_stays_empty_but_diagnosable(
+    monkeypatch: pytest.MonkeyPatch, db_session: AsyncSession
+) -> None:
+    """LP-471 (069's shape): if the fallback ALSO fails (analyze returns None — e.g. an oversized payload
+    that defeats both calls), the document ends NEEDS_REVIEW with the FAILED version + no untyped data —
+    the fallback cannot save it, and that stays honest (it needs the LP-464 page cap)."""
+    doc = await _setup_document(db_session)
+    _patch_storage(monkeypatch)
+    _patch_classify(
+        monkeypatch, ClassificationResult(document_type="pay_stub", confidence=0.9, reasoning="x")
+    )
+    _patch_extract(monkeypatch, PayStubExtractionResult.failed("oversized"))
+    analyze = _patch_analyze(monkeypatch, None)  # the fallback also fails (graceful None)
+
+    await pipeline._process_document(db_session, str(doc.id))
+    await db_session.refresh(doc)
+
+    assert doc.status == DocumentStatus.NEEDS_REVIEW
+    assert analyze.call_count == 1  # the fallback was ATTEMPTED
+    assert doc.generic_analysis is None  # ...but produced nothing — honest, not hidden
+    extraction = await _current_extraction(db_session, doc.id)
+    assert extraction is not None and extraction.extraction_status == ExtractionStatus.FAILED
+    assert "oversized" in (doc.processing_error or "")
 
 
 async def test_throttled_extraction_is_not_a_content_failure(
@@ -1134,9 +1196,9 @@ async def test_a_newly_promoted_tier1_type_with_no_extractor_completes_cleanly(
     monkeypatch: pytest.MonkeyPatch, db_session: AsyncSession
 ) -> None:
     """THE D3 SAFETY GATE (LP-441): a Tier-1 type with NO registered extractor must COMPLETE cleanly —
-    never error, never FAILED — with the interim summary it had as Tier-2. SYNTHETIC since LP-443 Phase B
-    wired credit_report: the test removes it from EXTRACTORS to simulate the unwired state, so the gate is
-    proven independent of which types are wired (after LP-443 Phase C every real Tier-1 type IS wired)."""
+    never error, never FAILED. LP-471 routes it to Tier-3 free extraction (was the interim summary), so it
+    yields untyped facts. SYNTHETIC since LP-443 Phase B wired credit_report: the test removes it from
+    EXTRACTORS to simulate the unwired state, so the gate is proven independent of which types are wired."""
     from app.ai.extraction import EXTRACTORS
 
     monkeypatch.delitem(pipeline.EXTRACTORS, "credit_report", raising=False)  # simulate: not wired
@@ -1147,7 +1209,7 @@ async def test_a_newly_promoted_tier1_type_with_no_extractor_completes_cleanly(
         monkeypatch,
         ClassificationResult(document_type="credit_report", confidence=0.9, reasoning="x"),
     )
-    summarize = _patch_summarize(monkeypatch, "A tri-merge credit report for the borrower.")
+    analyze = _patch_analyze(monkeypatch, _generic_analysis_with_finding())
 
     await pipeline._process_document(db_session, str(doc.id))
     await db_session.refresh(doc)
@@ -1155,8 +1217,10 @@ async def test_a_newly_promoted_tier1_type_with_no_extractor_completes_cleanly(
     assert doc.status == DocumentStatus.COMPLETED  # clean terminal, NOT errored / FAILED
     assert doc.tier == Tier.TIER_1
     assert doc.document_type == "credit_report"
-    assert await _current_extraction(db_session, doc.id) is None  # no extractor ran
-    assert summarize.call_count == 1 and doc.summary is not None  # keeps the interim gist
+    assert await _current_extraction(db_session, doc.id) is None  # no typed extractor ran
+    assert (
+        analyze.call_count == 1 and doc.generic_analysis is not None
+    )  # LP-471: free extraction ran
 
 
 async def test_tax_return_routes_to_its_extractor(
