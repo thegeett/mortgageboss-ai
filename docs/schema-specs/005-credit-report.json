@@ -48,7 +48,7 @@
       "name":"tradelines","shape":"flat_row",
       "shape_reason":"a tri-merge routinely carries 20+ tradelines; per-field wrapping would risk the 16,384-token output ceiling",
       "expected_item_count":"10-30","rules":["CR-4","CR-5","CR-8","CR-9","CR-10","CR-12","RE-1"],
-      "exists_today":false,"plumbing_sites":5,
+      "exists_today":false,"plumbing_sites":5,"stable_row_id":true,"redact":["account_number_masked"],
       "fields":[
         {"name":"creditor_name","type":"str","why":"CR-4 — 'match by creditor + approx balance/payment'"},
         {"name":"account_type","type":"str","why":"CR-9 (student loans), CR-8 (mortgage), CR-10 (collections)"},

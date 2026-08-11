@@ -733,6 +733,11 @@ _TRADELINES_LIST = ListSpec(
         "worst_delinquency",
         "is_disputed",
     ),
+    # LP-479 — row ids, so LP-480's per-liability enumerator can anchor a per-row finding to a durable
+    # subject. Content-derived over the WHOLE row (scoped by document id + list name), so it needs no
+    # composite key and cannot collide unless two tradelines are byte-identical in all 14 fields — in
+    # which case assign_content_ids' occurrence tiebreak still separates them.
+    stable_row_id=True,
     # LP-443 review — a row-PII backstop: list-row PII is NOT _PII_FIELDS-routed, so if the (unvalidated,
     # starter) prompt fails to mask, the _DESC_REDACT 9+-digit scrub redacts a leaked full account number
     # (a genuinely-masked ****1234 is untouched). Not a full PiiField route — the deterministic per-list
