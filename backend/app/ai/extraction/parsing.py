@@ -259,3 +259,23 @@ def derive_status(non_null: int, coercion_lost: bool) -> ExtractionStatus:
     if coercion_lost:
         return ExtractionStatus.PARTIAL
     return ExtractionStatus.SUCCEEDED
+
+
+#: The self-explaining reason for a FAILED extraction that carried NO reasoning — i.e. the model
+#: returned a parseable response whose typed core was entirely null (``derive_status``: nothing read).
+#: This is the honest-none case, NOT an exception: an infra/parse failure sets its own reason via
+#: ``.failed(...)`` (oversized / "AI call failed" / "could not parse extraction"), so a FAILED result that
+#: still has no reasoning here is an all-null read. Naming it turns "empty failure, no error type" — a
+#: symptom with no location that cost a diagnosis cycle (LP-473; the LP-464 lesson) — into a self-locating
+#: record.
+FAILED_ALL_NULL_DETAIL = "all typed fields null — model returned no values (no exception)"
+
+
+def failure_detail(status: ExtractionStatus, reasoning: str | None) -> str | None:
+    """The persisted / bench ``why-it-FAILED`` string. ``None`` for a non-FAILED result; the result's own
+    reasoning when it has one (an infra/parse failure); else :data:`FAILED_ALL_NULL_DETAIL` for the
+    honest all-null case. One helper so the production record and the bench name it identically."""
+    if status != ExtractionStatus.FAILED:
+        return None
+    reason = reasoning.strip() if isinstance(reasoning, str) else None
+    return reason or FAILED_ALL_NULL_DETAIL

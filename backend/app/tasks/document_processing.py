@@ -50,7 +50,7 @@ from app.ai.classification import classify_document
 from app.ai.client import INFRA_RATE_LIMITED
 from app.ai.cost import estimate_cost
 from app.ai.extraction import EXTRACTORS, Extractor
-from app.ai.extraction.parsing import document_confidence_provenance
+from app.ai.extraction.parsing import document_confidence_provenance, failure_detail
 from app.ai.generic_analyzer import analyze_document
 from app.core.config import resolve_model, settings
 from app.documents.catalog import get_category, get_tier
@@ -405,7 +405,7 @@ async def _extract_branch(
         model_used=invoked_model,
         tokens_used=tokens_used,
         cost_estimate=cost_estimate,
-        error_detail=result.reasoning if result.status == ExtractionStatus.FAILED else None,
+        error_detail=failure_detail(result.status, result.reasoning),
         confidence=reported_confidence,
         confidence_source=confidence_source,
     )

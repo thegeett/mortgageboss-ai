@@ -13963,3 +13963,66 @@ worse than the classifier did.
 **Cross-refs.** LP-472 (`docs/tickets/LP-472.md`), ADR-368 (the no-zero-data principle this bounds), ADR-365
 (the confident-coherent-misread + unreadable-scan limits this inherits), ADR-362/363 (the visibility-only
 standard that makes the rename verdict-safe today), LP-441 (Tier-1-iff-spec, which shapes the four-spec layer).
+
+## ADR-370: A limit applied to one call path must be checked against every call path — typed extraction is the one uncapped path (LP-473, 069)
+
+**Context.** 069 is a 118-page closing package. Its typed extraction fails with a provider `BadRequestError`
+(HTTP 400): the document exceeds the **100-page / 32 MB document-block limit**. The classification path does
+NOT fail (LP-462 caps it to `classification_max_pages = 15`); the Tier-3 free-extraction path does NOT fail
+(LP-463 caps it to `tier3_max_pages = 50`). **Typed extraction is the ONE call path that sends the full,
+uncapped document** — `_extract_branch` passes the whole `content` to the extractor — so it alone hits the
+100-page wall.
+
+**The lesson.** LP-462 fixed the page limit on classification; LP-463/471 applied a cap on the Tier-3 path;
+neither pass checked the typed-extraction path against the same provider limit. A limit discovered on one call
+path is a property of the *provider*, not of that path — it must be checked against **every** path that sends a
+document. The `client.py` `INFRA_OVERSIZED` classification (a 400 → not-transient) already anticipates this
+("the page cap is the fix, not a retry"), but no cap was ever wired on extraction.
+
+**Decision — do NOT add a naive extraction page cap here.** A page cap is the right trade for *classification*
+(it only needs the lead document's first pages) and *tolerable* for Tier-3 (facts cluster in the lead pages).
+It is the WRONG trade for typed extraction of a **package**: 069 is CD + Note + Deed of Trust + 1003 + riders,
+and a 1003's liabilities / REO sit deep in the file. A 50-page cap would extract the first ~50 pages of a
+118-page package and **silently drop the later documents** — trading a loud crash for silent, wrong data (the
+exact anti-pattern LP-464 warned about: too tight a cap trades a crash for silent loss). The honest fix for a
+multi-document package is **the splitter** (its own ticket; backlog holds 066/167/204/271), which separates the
+package into single documents each under the limit. Until then the crash is already **graceful**: LP-471 falls
+069 back to Tier-3 (capped to 50 pp), which captures the substance ($688,500 loan, 8.070%, a 2-1 buydown,
+$54,184 cash-to-close) as rule-UNREADABLE untyped data. So 069 loses *typed* data, not *all* data (ADR-368),
+and the real recovery is the splitter, not a cap.
+
+**What would change this.** A single oversized document that is NOT a package (one 120-page appraisal, say)
+could take an extraction page cap safely, because there is no "later document" to lose — only later pages of
+the same document, where a cap is a defensible degradation. That is a different case from 069 and should be
+decided on its own when a real instance appears.
+
+**Cross-refs.** LP-473 (`docs/tickets/LP-473.md`), LP-462 (classification page cap), LP-463/471 (the Tier-3
+cap + the no-zero-data fallback that makes 069's crash graceful), ADR-368 (typed-vs-all data), the splitter
+backlog (066/167/204/271).
+
+## ADR-371: 174 is the image-only gap, not a parse bug — a third instance to consolidate (LP-473)
+
+**Context.** 174 (a lease agreement) was tagged in the v2 bench as a `ValueError`. It is **not** a parse bug.
+The `ValueError` was the pre-streaming SDK ceiling — `.create()` raised `ValueError("Streaming is required …")`
+for `max_tokens > 21,333`, client-side, before the call — which `dcc2196` ("Stream completions to fix the
+truncation-retry ValueError") fixed for the whole cluster (8 of v2's 10 failures, incl. 174/175/176). That fix
+**is an ancestor of HEAD** and the extraction path now uses `client.messages.stream`, so that `ValueError`
+cannot recur; 174's siblings 175/176 already succeed on the fixed path. 174's v2 tag is **stale** (the v2 bench
+predates the fix). `build_document_message` and `cap_pdf_pages` both succeed on 174 locally — there is no parse
+error left to fix.
+
+**What actually remains.** 174 is an **image-only scan** (LP-464: 0 extractable text, defeated pypdf on both
+readers). Post-fix, typed extraction runs on the vision model and either reads the scan or returns an honest
+empty → LP-471 falls it back to Tier-3, which captures the lease terms ($3,000/mo rent, deposit, obligations).
+Any residual weakness is **image legibility**, i.e. the **ADR-365 image-preprocessing gap** — the same class as
+266 (the rotated EAD) and 294. No OCR / preprocessing is attempted here (ADR-365 is deliberately deferred).
+
+**Decision.** Record 174 as a **third instance of the image gap** (266, 294, 174), not as an extractor bug.
+The value of naming the third instance is to make the preprocessing case concrete and worth consolidating into
+one ticket: these documents don't need a parser fix or an extractor fix — they need de-rotation / OCR / a
+legibility gate *before* extraction, so the model isn't handed an unreadable image (and, per ADR-369's A6
+finding, doesn't return a confident wrong reading of one). No code change in LP-473.
+
+**Cross-refs.** LP-473 (`docs/tickets/LP-473.md`), LP-464 (`dcc2196`, the streaming fix + the image-only note),
+ADR-365 (the image-preprocessing gap), ADR-369 (the A6 confident-misread limit on unreadable scans), 266 / 294
+(the sibling image-gap instances).

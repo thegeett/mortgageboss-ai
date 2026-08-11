@@ -24,6 +24,7 @@ import structlog
 from app.ai.classification import classify_document
 from app.ai.cost import estimate_cost
 from app.ai.extraction import EXTRACTORS
+from app.ai.extraction.parsing import failure_detail
 from app.ai.generic_analyzer import analyze_document
 from app.core.config import resolve_model, resolve_requests_per_minute, settings
 from app.dev.bench.findings import finalize_output, load_records, write_record
@@ -292,7 +293,10 @@ async def run_one(f: DiscoveredFile) -> dict[str, Any]:
 
     extraction: dict[str, Any] = {
         "status": result.status.value,
-        "failure_reason": getattr(result, "failure_reason", None),
+        # LP-473: the result attribute is ``reasoning`` (not ``failure_reason`` — that getattr always
+        # returned None, so a FAILED extraction showed a blank reason). ``failure_detail`` also names the
+        # honest all-null case, so an empty typed core no longer reads as "empty failure, no error type".
+        "failure_reason": failure_detail(result.status, getattr(result, "reasoning", None)),
         "input_tokens": getattr(result, "input_tokens", None),
         "output_tokens": getattr(result, "output_tokens", None),
     }
