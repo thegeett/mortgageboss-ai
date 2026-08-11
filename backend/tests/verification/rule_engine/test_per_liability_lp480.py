@@ -27,8 +27,10 @@ from app.verification.rule_engine.enumerators import (
     LIABILITY_UNRESOLVED_TAG,
     enumerate_subjects,
     is_known_enumerator,
+    per_liability_source_is_degraded,
 )
 from app.verification.rule_engine.gate import GateStatus, evaluate_gate
+from app.verification.snapshot.content_id import LIABILITY_PREFIX
 from app.verification.snapshot.fields import Field, FieldSource
 from app.verification.snapshot.model import (
     DocumentEntry,
@@ -209,7 +211,14 @@ def test_tradeline_subject_id_is_the_lp479_row_id() -> None:
 
 
 def test_a_tradeline_without_a_row_id_is_not_given_a_positional_one() -> None:
-    """``stable_row_id`` off ⇒ no durable identity ⇒ no subject, rather than an id derived from position."""
+    """``stable_row_id`` off ⇒ no LP-479 id ⇒ a CONTENT-derived id, never one derived from position.
+
+    ⚠️ This assertion CHANGED in the LP-480 review. It originally required no subject at all — the
+    "never positional" guarantee it exists for is preserved and asserted below, but the silent drop it
+    also encoded contradicted the enumerator's own fail-closed contract ("never dropped, never merged"):
+    it turned an unreadable tradeline into "nothing found" rather than ``couldnt_check``. See
+    ``test_a_tradeline_without_a_row_id_becomes_its_own_unresolved_subject``.
+    """
     doc = DocumentEntry(
         content_id="cr1",
         document_type="credit_report",
@@ -221,7 +230,11 @@ def test_a_tradeline_without_a_row_id_is_not_given_a_positional_one() -> None:
             )
         },
     )
-    assert enumerate_subjects(_KEY, _snapshot(documents=[doc])) == []
+    [(subject_id, _)] = enumerate_subjects(_KEY, _snapshot(documents=[doc]))
+    assert subject_id.startswith(LIABILITY_PREFIX), "content-derived"
+    assert "row0" not in subject_id and "cr1" not in subject_id, (
+        "never positional, never doc-scoped"
+    )
 
 
 def test_tradelines_are_scoped_to_credit_reports() -> None:
@@ -263,3 +276,111 @@ def test_an_unregistered_key_raises() -> None:
     assert not is_known_enumerator("per_liabilty")
     with pytest.raises(KeyError):
         enumerate_subjects("per_liabilty", _snapshot())
+
+
+# --------------------------------------------------------------------------- #
+# LP-480 review fixes — the retire guard, the idless row, and the recorded limitations
+# --------------------------------------------------------------------------- #
+def test_a_tradeline_without_a_row_id_becomes_its_own_unresolved_subject() -> None:
+    """⚠️ Reported finding: it was ``continue``d away silently, so a CR rule would report "nothing
+    found" instead of ``couldnt_check`` — a false negative, and (with the retire guard) a false close."""
+    doc = DocumentEntry(
+        content_id="cr1",
+        document_type="credit_report",
+        belongs_to=None,
+        fields={},
+        lists={
+            "tradelines": (
+                ListRow(
+                    fields={
+                        "creditor_name": Field.present("PENNYMAC", source=FieldSource.EXTRACTED)
+                    },
+                    row_id=None,  # an older snapshot, or stable_row_id off
+                ),
+            )
+        },
+    )
+    subjects = enumerate_subjects(_KEY, _snapshot(documents=[doc]))
+    assert len(subjects) == 1, "the row must not be dropped"
+    subject_id, tags = subjects[0]
+    assert subject_id.startswith("lia")  # content-derived, never positional
+    assert _source(tags) == "credit_report_reported"
+    assert LIABILITY_UNRESOLVED_TAG in dict(tags)
+
+
+def test_two_idless_rows_with_identical_content_stay_two_subjects() -> None:
+    """The occurrence tiebreak keeps them distinct — an idless row is never merged into its twin."""
+    row = ListRow(
+        fields={"creditor_name": Field.present("SETOYOTA", source=FieldSource.EXTRACTED)},
+        row_id=None,
+    )
+    doc = DocumentEntry(
+        content_id="cr1",
+        document_type="credit_report",
+        belongs_to=None,
+        fields={},
+        lists={"tradelines": (row, row)},
+    )
+    subjects = enumerate_subjects(_KEY, _snapshot(documents=[doc]))
+    assert len({sid for sid, _ in subjects}) == 2
+
+
+def test_per_liability_is_document_derived_for_the_retire_guard() -> None:
+    """⚠️ Reported finding: absent from ``_DOCUMENT_DERIVED_ENUMERATIONS``, a degraded run would have
+    retired every prior tradeline finding as "no longer applies" — the false-close that set prevents."""
+    from app.services.verification_run import _DOCUMENT_DERIVED_ENUMERATIONS
+
+    assert _KEY in _DOCUMENT_DERIVED_ENUMERATIONS
+
+
+def test_the_credit_report_leg_is_degraded_when_documents_are_absent() -> None:
+    snapshot = _snapshot().model_copy(update={"documents": DocumentsSection.missing()})
+    assert per_liability_source_is_degraded(snapshot)
+
+
+def test_a_file_with_no_credit_report_is_not_degraded() -> None:
+    """An honest "nothing reported" — not a build failure. Retiring here is correct."""
+    assert not per_liability_source_is_degraded(
+        _snapshot(liabilities=[("Auto", "WFBNA", "914", "1")])
+    )
+
+
+def test_a_credit_report_that_contributed_no_rows_is_degraded() -> None:
+    """⚠️ THE MIXED-SOURCE HOLE the review found: the union is NON-EMPTY (MISMO supplied a subject), so
+    the plain "zero subjects" heuristic passes while the whole credit-report half is missing."""
+    empty_report = DocumentEntry(
+        content_id="cr1", document_type="credit_report", belongs_to=None, fields={}, lists={}
+    )
+    snapshot = _snapshot(
+        documents=[empty_report], liabilities=[("MortgageLoan", "PENNYMAC", "4263", "582417")]
+    )
+    assert enumerate_subjects(_KEY, snapshot), (
+        "the union is non-empty — the old heuristic sees health"
+    )
+    assert per_liability_source_is_degraded(snapshot), "but the document-derived source IS degraded"
+
+
+def test_a_healthy_credit_report_is_not_degraded() -> None:
+    doc = _tradeline_doc("cr1", [{"creditor_name": "PENNYMAC"}])
+    assert not per_liability_source_is_degraded(_snapshot(documents=[doc]))
+
+
+def test_the_mismo_subject_id_moves_when_a_balance_moves() -> None:
+    """⚠️ RECORDED CONSEQUENCE, not desired behaviour (see ``_per_liability``'s docstring): the id hashes
+    mutable amounts, so a re-imported 1003 with a moved balance mints a NEW subject — LP-322 retires the
+    prior finding and duplicates it, losing any processor resolution. Pinned so the day someone changes
+    the identity fields, this test tells them what it fixes."""
+    before = enumerate_subjects(_KEY, _snapshot(liabilities=[("Auto", "WFBNA", "914", "25212")]))
+    after = enumerate_subjects(_KEY, _snapshot(liabilities=[("Auto", "WFBNA", "914", "24800")]))
+    assert before[0][0] != after[0][0]
+
+
+def test_two_credit_reports_double_list_the_same_debt() -> None:
+    """⚠️ RECORDED LIMITATION: no dedup WITHIN a source. ``liability.source`` does not protect a summing
+    rule here — both subjects are ``credit_report_reported``."""
+    row = {"creditor_name": "PENNYMAC", "balance": "582417"}
+    subjects = enumerate_subjects(
+        _KEY, _snapshot(documents=[_tradeline_doc("cr1", [row]), _tradeline_doc("cr2", [row])])
+    )
+    assert len(subjects) == 2
+    assert {_source(t) for _, t in subjects} == {"credit_report_reported"}

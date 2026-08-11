@@ -274,8 +274,12 @@ def _per_account(snapshot: Snapshot) -> list[Subject]:
     return subjects
 
 
-def _liability_marker(tag_id: str, value: str, reasoning: str, source_fact: str) -> Tag:
-    """A reserved structural marker on a liability subject (the ``_account_unresolved_tag`` shape)."""
+def _liability_marker(value: str, reasoning: str, source_fact: str) -> Tag:
+    """A reserved structural marker on a liability subject (the ``_account_unresolved_tag`` shape).
+
+    The marker does NOT carry its own tag id — the caller keys it into the subject's tag map. (Reported
+    finding: it previously took a ``tag_id`` it never used, which invited a caller to assume otherwise.)
+    """
     return Tag(
         value=value,
         confidence=None,
@@ -328,41 +332,85 @@ def _per_liability(snapshot: Snapshot) -> list[Subject]:
     the LP-443 redact backstop scrubs unmasked account numbers, leaving 9/35 rows a bare ``[redacted]``
     and collapsing two distinct SETOYOTA tradelines onto one key — a guess-merge on real data.
 
-    A liability whose identity cannot be established (a MISMO row with no holder name) still gets its own
-    subject, carrying ``liability.unresolved`` — never dropped, never merged (the ``_per_account`` rule).
-    Absent tags yield subjects with EMPTY maps, so the gate reports ``couldnt_check`` per liability rather
-    than the rule silently vanishing.
+    A liability whose identity cannot be established (a MISMO row with no holder name, or a tradeline row
+    with no ``row_id``) still gets its own subject, carrying ``liability.unresolved`` — never dropped,
+    never merged (the ``_per_account`` rule). Absent tags yield subjects with EMPTY maps, so the gate
+    reports ``couldnt_check`` per liability rather than the rule silently vanishing.
+
+    ⚠️ **DECIDED, not overlooked — the MISMO subject id is a function of MUTABLE amounts** (reported
+    finding). ``_MISMO_LIABILITY_FIELDS`` includes ``monthly_payment`` and ``unpaid_balance``, so when a
+    borrower re-submits an updated 1003 with a moved balance, the same real debt hashes to a DIFFERENT id
+    — and LP-322 reconciles findings by ``(rule_id, subject_key)``, so the prior finding RETIRES and a
+    duplicate is minted, losing any processor resolution on it. It is kept anyway because the alternative
+    is worse: ``(holder_name, type)`` alone collides on the two SETOYOTA rows in the real file and would
+    fall back to ``assign_content_ids``' order-dependent occurrence tiebreak, making the id depend on
+    projection order — the very thing this shape refuses. MISMO carries no account number anywhere in the
+    chain (parser → model → snapshot), so there is no stable natural key to use instead. Revisit if a rule
+    ever needs a liability finding to survive a re-import; see ADR-374.
+
+    ⚠️ **No dedup WITHIN a source** (reported finding). The union is across sources only. Two
+    ``credit_report`` documents on one file — the same report uploaded twice, or a per-borrower report on
+    a joint file — carry distinct document content-ids, hence distinct ``row_id``s, hence TWO subjects for
+    one debt. ADR-374's "a summing rule must filter on ``liability.source``" does NOT protect against
+    this: a sum over ``credit_report_reported`` still double-counts. Same limitation the loan-level
+    aggregate already records (``tag_materialization/derived.py``, the ``_credit_tradeline_count``
+    preamble); multi-report reconciliation is a rule's concern, once one reconciles bureaus.
     """
     by_subject = {} if snapshot.tags.absent else snapshot.tags.by_subject
     subjects: list[Subject] = []
 
+    idless: list[dict[str, str | None]] = []
     for row in all_list_rows(
         snapshot, _TRADELINES_LIST_NAME, document_type=_CREDIT_REPORT_DOC_TYPE
     ):
         if row.row_id is None:
-            continue  # no durable identity (stable_row_id off) → not a subject, never a positional id
+            # No durable id (an older snapshot, or stable_row_id turned off). NEVER a positional id, and
+            # never a silent drop either (reported finding): the row becomes its own content-identified
+            # subject marked unresolved, so a rule reports couldnt_check on it rather than reporting
+            # "nothing found" — the same fail-closed contract _per_account and the MISMO leg already keep.
+            idless.append({name: _field_str(f) for name, f in sorted(row.fields.items())})
+            continue
         tags = dict(by_subject.get(row.row_id, {}))
         tags[LIABILITY_SOURCE_TAG] = _liability_marker(
-            LIABILITY_SOURCE_TAG,
             _SOURCE_CREDIT_REPORT,
             "reported by the credit bureau on a credit report tradeline",
             row.row_id,
         )
         subjects.append((row.row_id, tags))
 
+    for subject_id in assign_content_ids(
+        LIABILITY_PREFIX, [{"liability": fields} for fields in idless]
+    ):
+        subjects.append(
+            (
+                subject_id,
+                {
+                    LIABILITY_SOURCE_TAG: _liability_marker(
+                        _SOURCE_CREDIT_REPORT,
+                        "reported by the credit bureau on a credit report tradeline",
+                        subject_id,
+                    ),
+                    LIABILITY_UNRESOLVED_TAG: _liability_marker(
+                        "yes",
+                        "the tradeline row carries no stable row_id, so it has no identity durable "
+                        "across runs — surfaced on its own rather than dropped",
+                        subject_id,
+                    ),
+                },
+            )
+        )
+
     mismo_rows = _mismo_liabilities(snapshot)
     ids = assign_content_ids(LIABILITY_PREFIX, [{"liability": fields} for fields, _ in mismo_rows])
     for (fields, mismo_key), subject_id in zip(mismo_rows, ids, strict=True):
         tags = dict(by_subject.get(subject_id, {}))
         tags[LIABILITY_SOURCE_TAG] = _liability_marker(
-            LIABILITY_SOURCE_TAG,
             _SOURCE_MISMO,
             f"stated by the borrower on the application ({mismo_key})",
             subject_id,
         )
         if fields.get("holder_name") is None:
             tags[LIABILITY_UNRESOLVED_TAG] = _liability_marker(
-                LIABILITY_UNRESOLVED_TAG,
                 "yes",
                 f"stated liability {mismo_key} names no holder, so it cannot be identified against a "
                 "reported tradeline — surfaced on its own rather than dropped or guess-merged",
@@ -370,6 +418,31 @@ def _per_liability(snapshot: Snapshot) -> list[Subject]:
             )
         subjects.append((subject_id, tags))
     return subjects
+
+
+def per_liability_source_is_degraded(snapshot: Snapshot) -> bool:
+    """True when the CREDIT-REPORT leg of ``per_liability`` could not contribute (LP-480 review).
+
+    ``_retire_eligible_rules`` (``services/verification_run.py``) protects a document-derived rule from
+    retiring its prior findings on a degraded run by asking "did this enumeration yield zero subjects?".
+    ``per_liability`` is the FIRST enumeration drawing on two sources, and that heuristic does not hold
+    for it: a file with stated MISMO liabilities returns a non-empty union even when the credit report
+    failed to build, so the union looks healthy while half the subjects are missing — and every prior
+    tradeline finding would retire as "no longer applies".
+
+    So the mixed-source shape needs a PER-SOURCE check. The credit-report leg is the document-derived one
+    (the MISMO leg is not: MISMO is parsed, not extracted, and its absence is a real "no stated
+    liabilities" answer). It is degraded when the documents section is absent altogether, or when a
+    credit_report document IS on the file but contributed no tradeline rows.
+    """
+    if snapshot.documents.absent:
+        return True
+    has_credit_report = any(
+        entry.document_type == _CREDIT_REPORT_DOC_TYPE for entry in snapshot.documents.entries
+    )
+    if not has_credit_report:
+        return False  # no credit report on the file at all — an honest "nothing reported", not degraded
+    return not all_list_rows(snapshot, _TRADELINES_LIST_NAME, document_type=_CREDIT_REPORT_DOC_TYPE)
 
 
 _ENUMERATORS: dict[str, Enumerator] = {
@@ -403,8 +476,11 @@ def is_known_enumerator(key: str) -> bool:
 
 __all__ = [
     "ACCOUNT_UNRESOLVED_TAG",
+    "LIABILITY_SOURCE_TAG",
+    "LIABILITY_UNRESOLVED_TAG",
     "LOAN_SUBJECT",
     "enumerate_subjects",
     "is_known_enumerator",
+    "per_liability_source_is_degraded",
     "resolve_accounts",
 ]

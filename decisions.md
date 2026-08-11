@@ -14197,3 +14197,41 @@ the missing evidence**, and it belongs in the same document request LP-476 alrea
 `_per_account` fail-closed marker pattern this inherits), LP-476 (the census that found no enumerator for
 liabilities), ADR-353 (the open-ended bureau row vocabulary that makes interpretation a Priya question),
 ADR-332 (a judgment cannot be calibrated on a fixture you authored).
+
+### Review addendum — three consequences this ADR did not state, now decided
+
+**1. The retire guard needed a PER-SOURCE check, not the empty check.** `_retire_eligible_rules`
+(`services/verification_run.py`) protects a document-derived rule from retiring its prior findings on a
+degraded run by asking *"did this enumeration yield zero subjects?"*. `per_liability` was missing from
+`_DOCUMENT_DERIVED_ENUMERATIONS` entirely — so once LP-481 lands a CR rule, a degraded run would have
+retired every prior tradeline finding as "no longer applies", the exact false-close that set prevents.
+⚠️ **And adding the key is not sufficient**, because this is the first MIXED-SOURCE enumeration: a file with
+stated MISMO liabilities returns a non-empty union even when the credit report failed to build, so the union
+looks healthy while the whole document-derived half is missing. Resolved by adding the key **and** a
+`_MIXED_SOURCE_DEGRADATION` predicate map, whose `per_liability` entry
+(`per_liability_source_is_degraded`) reports the credit-report leg degraded when the documents section is
+absent, or when a `credit_report` document is on the file but contributed no tradeline rows. A file with no
+credit report at all is **not** degraded — that is an honest "nothing reported", and retiring is correct.
+
+**2. The MISMO subject id is a function of MUTABLE amounts — kept, with the consequence stated.**
+`_MISMO_LIABILITY_FIELDS` hashes `monthly_payment` and `unpaid_balance`, so a re-imported 1003 with a moved
+balance mints a **different** id for the same real debt; LP-322 reconciles by `(rule_id, subject_key)`, so
+the prior finding retires and a duplicate appears, **losing any processor resolution on it**. Kept because
+every alternative is worse: `(holder_name, type)` alone collides on the two SETOYOTA rows in the real file
+and falls back to the occurrence tiebreak, making the id depend on projection order — the property this
+shape refuses. MISMO carries no account number anywhere in the chain, so there is no stable natural key.
+**This is a decision, not an oversight** — revisit if a liability finding ever needs to survive a re-import.
+Pinned by a test so that whoever changes the identity fields learns what it fixes.
+
+**3. There is no dedup WITHIN a source, and `liability.source` does not substitute for it.** Two
+`credit_report` documents on one file — the same report uploaded twice, or a per-borrower report on a joint
+file — carry distinct document content-ids, hence distinct `row_id`s, hence **two subjects for one debt**. A
+summing rule filtering on `liability.source == credit_report_reported` still double-counts. This is the same
+limitation the loan-level aggregate already records (`tag_materialization/derived.py`, the
+`_credit_tradeline_count` preamble); multi-report reconciliation is a rule's concern, once one reconciles
+bureaus.
+
+**Also corrected:** a tradeline row with no `row_id` was `continue`d away silently, turning an unreadable
+tradeline into "nothing found" rather than `couldnt_check` — contradicting this enumerator's own
+"never dropped, never merged" contract. It now becomes its own **content-identified** subject (never
+positional — the original guarantee is preserved) carrying `liability.unresolved`.

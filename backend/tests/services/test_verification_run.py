@@ -494,13 +494,20 @@ def test_retire_eligible_excludes_per_borrower_rules_when_no_borrower_resolved()
 
 def test_retire_guard_covers_every_document_derived_shape() -> None:
     # The guard is generalized (LP-327): per_deposit / per_borrower / per_document / per_account (LP-336)
-    # all derive their subjects from the documents section, so a rule on ANY of them (incl. a future
-    # per_account rule) is covered automatically — no per-shape special-casing left to forget.
+    # / per_liability (LP-480) all derive their subjects from the documents section, so a rule on ANY of
+    # them is covered automatically — no per-shape special-casing left to forget.
+    #
+    # ⚠️ Asserted against KNOWN_ENUMERATORS rather than a hand-written literal (the LP-480 review): the
+    # literal form silently went stale when per_liability was added, which is exactly the omission that
+    # would have let a degraded run retire every prior tradeline finding. Now a NEW enumerator fails this
+    # test until someone classifies it. ``loan`` is the sole document-INDEPENDENT shape (always exactly
+    # one subject) → always retire-eligible; every other shape draws on the documents section.
     from app.services.verification_run import _DOCUMENT_DERIVED_ENUMERATIONS
+    from app.verification.rule_engine.enumerators import KNOWN_ENUMERATORS
 
-    assert (
-        frozenset({"per_deposit", "per_borrower", "per_document", "per_account"})
-        == _DOCUMENT_DERIVED_ENUMERATIONS
+    assert KNOWN_ENUMERATORS - {"loan"} == _DOCUMENT_DERIVED_ENUMERATIONS, (
+        "a new subject_enumeration must be classified as document-derived (add it to "
+        "_DOCUMENT_DERIVED_ENUMERATIONS) or document-independent (add it to this test's exclusions)"
     )
     # documents absent → AS-1 (per_deposit) drops via the SAME generic path (not by rule-id name).
     absent = _snapshot(_TXNS, uuid4()).model_copy(
