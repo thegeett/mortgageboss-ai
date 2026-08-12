@@ -14,15 +14,37 @@ from app.core.config import settings
 from app.models import Base
 from sqlalchemy import pool
 from sqlalchemy.engine import Connection
-from sqlalchemy.ext.asyncio import async_engine_from_config
+from sqlalchemy.ext.asyncio import create_async_engine
 
 # Alembic Config object, providing access to values in alembic.ini.
 config = context.config
 
-# Inject the database URL from app settings (single source of truth). The URL
-# already uses the asyncpg driver (postgresql+asyncpg://), which the async
-# engine below requires.
-config.set_main_option("sqlalchemy.url", str(settings.database_url))
+# The database URL from app settings (single source of truth). It already uses
+# the asyncpg driver (postgresql+asyncpg://), which the async engine requires.
+#
+# ⚠️ THIS MUST NOT GO THROUGH config.set_main_option / the alembic.ini section.
+#
+# Alembic keeps main options in a ConfigParser using BasicInterpolation, which
+# treats '%' as an escape character. Any '%' in the URL therefore raises
+#     ValueError: invalid interpolation syntax in '...' at position N
+# BEFORE a connection is ever attempted, and the message names configparser
+# rather than the password, so it reads like a config-file problem.
+#
+# This is not hypothetical and it is not about hand-written passwords:
+# settings.database_url is a Pydantic PostgresDsn, and str() on it RE-ENCODES
+# the userinfo. A password containing a literal ';' -- which the generated
+# charset permits -- comes back out as '%3B'. The staging migration failed
+# exactly this way, twice, while Secrets Manager held a perfectly valid URL with
+# no '%' in it at all. See docs/findings/migrate-interpolation.md.
+#
+# Escaping ('%' -> '%%') would also work, but leaves the trap armed for the next
+# person who sets the option. Handing the URL straight to the engine removes the
+# ini hop entirely. Nothing is lost: alembic.ini deliberately leaves
+# `sqlalchemy.url` commented out and defines no other `sqlalchemy.*` options.
+#
+# Note the ini still uses interpolation elsewhere on purpose (`%(here)s`,
+# `%%(year)d`), so disabling it globally is not an option.
+DATABASE_URL = str(settings.database_url)
 
 # Interpret the config file for Python logging.
 if config.config_file_name is not None:
@@ -34,9 +56,8 @@ target_metadata = Base.metadata
 
 def run_migrations_offline() -> None:
     """Run migrations in 'offline' mode (emit SQL without a DB connection)."""
-    url = config.get_main_option("sqlalchemy.url")
     context.configure(
-        url=url,
+        url=DATABASE_URL,
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
@@ -63,11 +84,12 @@ def do_run_migrations(connection: Connection) -> None:
 
 async def run_async_migrations() -> None:
     """Create an async engine and run migrations through it."""
-    connectable = async_engine_from_config(
-        config.get_section(config.config_ini_section, {}),
-        prefix="sqlalchemy.",
-        poolclass=pool.NullPool,
-    )
+    # create_async_engine, not async_engine_from_config: the latter reads
+    # `sqlalchemy.url` back out of the ini section, which is the hop this module
+    # deliberately avoids. SQLAlchemy percent-DECODES the userinfo when parsing,
+    # so a '%3B' from Pydantic's serialisation becomes ';' again here -- the
+    # password reaching asyncpg is the one in Secrets Manager either way.
+    connectable = create_async_engine(DATABASE_URL, poolclass=pool.NullPool)
 
     async with connectable.connect() as connection:
         await connection.run_sync(do_run_migrations)

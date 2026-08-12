@@ -1237,6 +1237,10 @@ stage_migrate() {
 
   # Logs before the verdict: when the exit code is non-zero the log IS the reason,
   # and with ECS Exec off there is no second way to get it.
+  # The stream name is derived from THIS task's id, so it cannot silently show a
+  # different run's output: either the stream matches the task, or the fetch
+  # fails and says so. Worth stating because a stale log is the first thing
+  # suspected when two runs produce the same traceback.
   local group stream
   group=$(log_group_for api)
   stream="migrate/migrate/${task_id}"
@@ -1246,7 +1250,7 @@ stage_migrate() {
   awsx logs get-log-events --log-group-name "$group" --log-stream-name "$stream" \
     --start-from-head --query 'events[].message' --output text 2>/dev/null \
     | tr '\t' '\n' | sed 's/^/  /' \
-    || warn "No log stream. The container died before it logged anything -- with ECS"
+    || warn "No log stream for this task. The container died before it logged anything: an empty secret, an architecture mismatch, and the uv-run PyPI hang all look identical here. With ECS Exec off, the fastest diagnosis is running the same image locally with the same environment."
   hr
 
   exit_code=$(awsx ecs describe-tasks --cluster "$cluster" --tasks "$arn" \
