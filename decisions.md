@@ -14185,9 +14185,31 @@ exists to prevent it. A liability that cannot be identified at all (a stated lia
 still gets its own subject plus a `liability.unresolved` marker — the `_per_account` fail-closed rule,
 inherited: never dropped, never merged into an equally-anonymous neighbour.
 
-**⚠️ This ships UNVALIDATED against reality, and ADR-332 applies.** The two sources **never co-occur anywhere in
-the repo**: the bench corpus is 303 loose documents with no MISMO at all, and the LF-6T3N fixture carries five
-bank statements and **zero** liability facts. So every cross-source property — the union count, the
+**⚠️ CORRECTED BY LP-483 — this claim was wrong, in two ways.** It read: *"the two sources never co-occur
+anywhere in the repo."* **They do co-occur: LF-96SV carries 5 stated liabilities AND a credit report with 18
+tradelines on one real loan file.**
+
+*The first error is scoping.* The search covered the committed fixtures and the 303-document bench corpus — not
+the **dev database**, where the loan files actually live. "Anywhere in the repo" was true of what was searched
+and false of what exists.
+
+*The second error is the one worth keeping.* **A fixture and its own database row diverge.**
+`build_lf6t3n_snapshot()` produces **0** liability facts while the LF-6T3N database row carries **7**. So even
+a correct search of the fixtures would have concluded liabilities were absent from a file that has them. The
+lesson is not merely "search wider" — it is that **an in-code fixture is not evidence about the data**, and a
+claim about what the corpus contains must be checked against the corpus, not its stand-in.
+
+⚠️ **The evidence was already cited inside this repository when the claim was written:**
+`tag_materialization/derived.py`'s own `_credit_tradeline_count` preamble names LF-96SV's 18 stored rows, and
+LP-453 recorded its payment total. The ADR asserted absence while a neighbouring module documented presence —
+a cross-check of the repo's own prose would have caught it.
+
+**What still stands:** the ADR-374 *policy* (union, no merge) is unchanged, and every property proven against
+authored fixtures at the time remains fixture-proven. LP-483 is the first ticket to test the cross-source path
+against real data.
+
+The original claim, kept for the record: the bench corpus is 303 loose documents with no MISMO at all, and the
+LF-6T3N **fixture** carries five bank statements and **zero** liability facts. So every cross-source property — the union count, the
 no-double-count arithmetic, the source marking — is proven **against constructed fixtures only**. What is
 proven on real data is single-source: 35 tradeline subjects from documents 250/251, ids unique 35/35,
 deterministic and order-independent. **A real loan file carrying both a credit report and MISMO liabilities is
@@ -14235,3 +14257,62 @@ bureaus.
 tradeline into "nothing found" rather than `couldnt_check` — contradicting this enumerator's own
 "never dropped, never merged" contract. It now becomes its own **content-identified** subject (never
 positional — the original guarantee is preserved) carrying `liability.unresolved`.
+
+## ADR-375: The atomic per-liability judgment is the calibration unit — the borrower-level rollup is DERIVED from it, not judged separately (LP-483)
+
+**Context.** CR-1 (undisclosed liability) needs to know *which* debt on the credit report is missing from the
+1003. CR-4 needs to know *whether any* is. Both are the same comparison — report tradelines against stated
+liabilities — and the codebase already had one implementation: the `credit_profile` AI group, borrower-scoped,
+producing `credit.undisclosed_tradeline`, with tolerant creditor matching (`BANK OF AMERICA` vs `BofA`),
+`unknown`-when-uncomparable, and truncation discipline.
+
+Building a second matcher at liability scope was the obvious move and is the one this ADR refuses. **Two
+matchers over one comparison drift, and the day CR-1 and CR-4 disagree about the same file is a bug a
+processor cannot reason about** — one says "this borrower has an undisclosed debt", the other says every debt
+is disclosed, and nothing in the system says which is right.
+
+**The decision — invert the direction.** The **liability-scoped** matcher becomes the single source of truth,
+producing `liab.in_application` per liability. `credit.undisclosed_tradeline` is **demoted from `mode: ai` to
+`mode: derived`**, aggregating it: any `credit_report_reported` liability whose `in_application` is `no` → the
+borrower tag is `yes`. One AI judgment, one comparison, and **CR-1 and CR-4 cannot disagree by construction** —
+the borrower answer is a pure function of the per-liability answers.
+
+**⚠️ Why the atomic judgment is the right calibration unit.** *"Is this tradeline on the application?"* is a
+question Priya can answer per row, against the two lists in front of her, and score. *"Does this borrower have
+any undisclosed debt?"* is a **rollup**: one wrong row flips the whole answer, a right answer can be right for
+the wrong reason (two errors cancelling), and a wrong answer **tells you nothing about which row was wrong** —
+so a failed label produces no actionable correction. Scoring the rollup measures the aggregation as much as the
+perception. **Calibrate the smallest judgment the model actually makes, and derive everything above it.**
+
+**⚠️ The failure direction is NOT one-sided, and whoever sets the bar with Priya must have this.** The
+instinct is that a false MATCH is the dangerous one — it marks an undisclosed debt as disclosed and hides
+exactly what this rule exists to catch. That is true, and it argues for over-flagging. **But the opposite
+error is also expensive:** on a clean file — LF-96SV, where all five stated liabilities correspond 1:1 to the
+five payment-bearing tradelines — a false NON-MATCH **fabricates an undisclosed debt that does not exist**,
+sending a processor to chase a condition that was never there and eroding trust in every future flag. **Both
+directions fail expensively; the bar is a real trade, not a lean.** `unclear` → `couldnt_check` on that
+specific subject exists precisely so the model is not forced to pick a side when it cannot tell.
+
+**Fail-closed at the aggregation step — where a false all-clear would slip in.** The derived recipe abstains to
+`unknown` (never `no`) when there is nothing to aggregate: no credit report, no tradeline subjects, or no
+`liab.in_application` produced. **"No undisclosed debt" on a file with no credit report is a false all-clear**,
+and the aggregation is exactly the seam where an empty list would otherwise read as "nothing wrong". Same
+contract every derived recipe already keeps (`_credit_tradeline_count`: absent ≠ empty, `_UNKNOWN` never `0`).
+
+**The guard relaxation was considered, not incidental.** `declarations.py` restricted
+`include_stated_liabilities` to a **borrower**-subject group, on the reasoning that the file-level liabilities
+are the per-borrower comparison set. That reasoning does not survive the inversion: the comparison set is
+needed by whichever subject performs the match, and that is now the liability. The guard is widened to
+`{borrower, liability}` — **still a closed set**, so a document- or transaction-subject group asking for the
+liabilities remains an error. The alternative (drop the guard) was rejected: it would let any group pull the
+liability list into a prompt that has no business comparing against it.
+
+**What this costs, recorded honestly.** CR-4's input changes producer. CR-4 is INERT (bar
+`not-calibratable-yet`, no measured accuracy), so no live rule is affected today — but a calibration already
+planned against the borrower tag must be re-planned against the per-liability tag. That is the point, not a
+side effect: the per-liability labels are the ones worth collecting.
+
+**Cross-refs.** LP-483 (`docs/tickets/LP-483.md`), ADR-374 (the union-no-merge enumerator this consumes, and
+its corrected scoping note), ADR-353 (the open bureau vocabulary — why `liab.account_type` has no parsed
+producer), ADR-332 (a self-authored fixture leaks its answer — why LF-96SV matters), LP-444 (the
+`include_lists` / `include_stated_liabilities` context opt-ins this widens).

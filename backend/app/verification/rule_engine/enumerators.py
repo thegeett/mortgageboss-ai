@@ -311,6 +311,10 @@ class LiabilityRow:
     values: Mapping[str, str | None]
     origin: str  # the row_id / the ``liability.{n}`` key — for a marker's reasoning
     unresolved_reason: str | None
+    # ADR-375 — the snapshot this row came from, so the LIABILITY production context can reach the app's
+    # stated liabilities (the comparison set the matcher now needs at this scope). NOT part of the content
+    # hash: ids are derived from ``values`` alone, so carrying it cannot move a subject id.
+    snapshot: Snapshot
 
 
 def liability_rows(snapshot: Snapshot) -> list[LiabilityRow]:
@@ -337,6 +341,7 @@ def liability_rows(snapshot: Snapshot) -> list[LiabilityRow]:
                 values=values,
                 origin=row.row_id,
                 unresolved_reason=None,
+                snapshot=snapshot,
             )
         )
     for subject_id, (values, fields) in zip(
@@ -355,6 +360,7 @@ def liability_rows(snapshot: Snapshot) -> list[LiabilityRow]:
                     "the tradeline row carries no stable row_id, so it has no identity durable "
                     "across runs — surfaced on its own rather than dropped"
                 ),
+                snapshot=snapshot,
             )
         )
     mismo = _mismo_liabilities(snapshot)
@@ -379,6 +385,7 @@ def liability_rows(snapshot: Snapshot) -> list[LiabilityRow]:
                         "guess-merged"
                     )
                 ),
+                snapshot=snapshot,
             )
         )
     return rows

@@ -42,6 +42,8 @@ _VOCAB_EXTRA_YAML = _RULES_DIR / "vocabulary_extra.yaml"
 # LP-483 — ``liability`` joins the four originals. Its absence is why every ``liab.*`` tag was declared
 # and unproduced; see tag_materialization/subjects.py's liability section.
 KNOWN_SUBJECTS = frozenset({"transaction", "document", "loan", "borrower", "liability"})
+# The subjects that may pull the app's stated liabilities into an AI context (ADR-375).
+_LIABILITY_CONTEXT_SUBJECTS = frozenset({"borrower", "liability"})
 
 # The subjects a DERIVED recipe may be declared for. LP-332 generalized the derived producer beyond
 # loan-only; the producer enumerates the subject registry and passes the subject's own raw object to the
@@ -248,10 +250,15 @@ def load_ai_groups() -> dict[str, AiGroup]:
             raise DeclarationError(
                 f"ai group {key!r}: `include_stated_liabilities` must be a boolean, got {include_liabilities!r}"
             )
-        if include_liabilities and subject != "borrower":
+        # LP-483 / ADR-375 — WIDENED from borrower-only to {borrower, liability}, deliberately. The original
+        # reasoning ("the file-level liabilities are the per-borrower comparison set") does not survive the
+        # inversion: the comparison set belongs to whichever subject performs the match, and that is now the
+        # LIABILITY. Still a CLOSED set — a document/transaction group asking for the liabilities is an error.
+        if include_liabilities and subject not in _LIABILITY_CONTEXT_SUBJECTS:
             raise DeclarationError(
-                f"ai group {key!r}: `include_stated_liabilities` is only for a borrower-subject group "
-                f"(the file-level liabilities are the per-borrower comparison set), got subject={subject!r}"
+                f"ai group {key!r}: `include_stated_liabilities` is only for a borrower- or "
+                f"liability-subject group (the comparison set belongs to the subject that matches), "
+                f"got subject={subject!r}"
             )
         groups[key] = AiGroup(
             key=key,

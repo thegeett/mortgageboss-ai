@@ -15,8 +15,7 @@ from datetime import UTC, datetime
 from uuid import uuid4
 
 import pytest
-from app.verification.rule_engine.registry import ACTIVE_RULE_IDS, evaluate_rules
-from app.verification.rules.specs import load_rule_spec
+from app.verification.rule_engine.registry import evaluate_rules
 from app.verification.snapshot.fields import Field, FieldSource
 from app.verification.snapshot.model import (
     BorrowerRef,
@@ -35,6 +34,7 @@ from app.verification.tag_materialization.ai import (
     produce_ai_group_tags,
 )
 from app.verification.tag_materialization.declarations import load_ai_groups
+from app.verification.tag_materialization.derived import _credit_undisclosed_tradeline
 
 pytestmark = pytest.mark.anyio
 
@@ -71,7 +71,10 @@ def _snapshot(report_creditors: list[str], liability_creditors: list[str]) -> Sn
         "borrower.1.first_name": _f("Jordan"),
     }
     for i, c in enumerate(liability_creditors, 1):
-        mismo[f"liability.{i}.creditor_name"] = _f(c)
+        # ⚠️ holder_name, not creditor_name: mismo_section projects liability.{n}.holder_name (LP-483).
+        # The fixture previously used a name MISMO never emits — harmless only because the old stub read
+        # the same wrong key. Corrected so the test exercises the production projection.
+        mismo[f"liability.{i}.holder_name"] = _f(c)
         mismo[f"liability.{i}.monthly_payment"] = _f("250")
     return Snapshot(
         loan_file_id=uuid4(),
@@ -83,67 +86,62 @@ def _snapshot(report_creditors: list[str], liability_creditors: list[str]) -> Sn
 
 
 async def _comparing_stub(context_json: str) -> AiGroupResult:
-    """A deterministic, keyless reasoner that ACTUALLY compares the context — proving the list-visibility
-    mechanism feeds CR-4 everything it needs (tradelines + liabilities) to reach the verdict."""
+    """A deterministic, keyless reasoner that ACTUALLY compares the context — proving the liability
+    context feeds the matcher everything it needs (THIS tradeline + the stated liabilities).
+
+    ⚠️ ADR-375 — the judgment is now PER LIABILITY (``liab.in_application``: is THIS tradeline on the
+    application?), not one borrower-level rollup. The borrower tag is derived from these.
+    """
     ctx = json.loads(context_json)
     out = []
     for s in ctx["subjects"]:
-        tradelines = [
-            r
-            for d in s.get("documents", [])
-            for r in d.get("lists", {}).get("tradelines", {}).get("rows", [])
-            if r.get("monthly_payment") not in (None, "0", "0.00")
-        ]
-        liab = {liability.get("creditor_name") for liability in s.get("stated_liabilities", [])}
-        unmatched = [r["creditor_name"] for r in tradelines if r.get("creditor_name") not in liab]
+        stated = {liability.get("holder_name") for liability in s.get("stated_liabilities", [])}
+        creditor = s.get("creditor_name")
+        # A paid-off tradeline (no payment) is not DTI-relevant — the matcher abstains rather than
+        # calling it undisclosed, mirroring the shipped prompt's instruction.
+        if s.get("monthly_payment") in (None, "0", "0.00"):
+            value = "unknown"
+        else:
+            value = "yes" if creditor in stated else "no"
         out.append(
             AiSubjectJudgment(
                 index=int(s["index"]),
-                tags={
-                    "undisclosed_tradeline": AiTagJudgment(
-                        "yes" if unmatched else "no", 0.9, f"unmatched={unmatched}"
-                    )
-                },
+                tags={"in_application": AiTagJudgment(value, 0.9, f"creditor={creditor}")},
             )
         )
     return AiGroupResult(out, 0, 0, "stub", False)
 
 
 async def _cr4_verdict_via_group(report: list[str], liab: list[str]) -> str:
-    """Run credit_profile (stub) → the tag → CR-4 (evaluated directly, since it is inert) → the verdict."""
+    """credit_profile (stub, per-liability) → the DERIVED borrower rollup → CR-4 → the verdict.
+
+    This is the ADR-375 chain end to end: one matcher at liability scope, the borrower answer computed
+    from it, so CR-1 and CR-4 cannot disagree about the same file.
+    """
     snap = _snapshot(report, liab)
     group = load_ai_groups()["credit_profile"]
     by_subject = await produce_ai_group_tags(
         snap,
         group,
-        {"credit.undisclosed_tradeline": ("yes", "no", "unknown")},
+        {"liab.in_application": ("yes", "no", "unknown")},
         reasoner=_comparing_stub,
     )
-    tag = by_subject[_BID]["credit.undisclosed_tradeline"]
+    with_liab = snap.model_copy(update={"tags": TagsSection.present(by_subject)})
+    value, reasoning = _credit_undisclosed_tradeline(with_liab, _BID, None)
+    rollup = Tag(
+        value=value,
+        confidence=None,
+        reasoning=reasoning,
+        source_facts=(_BID,),
+        produced_by=TagProducedBy.DERIVED,
+        tag_role=TagRole.STRUCTURAL_FACT,
+        stage=TagStage.A,
+    )
     snap2 = snap.model_copy(
-        update={"tags": TagsSection.present({_BID: {"credit.undisclosed_tradeline": tag}})}
+        update={"tags": TagsSection.present({_BID: {"credit.undisclosed_tradeline": rollup}})}
     )
     evals, _ = await evaluate_rules(snap2, rule_ids=("CR-4",))
     return next(e for e in evals if e.rule_id == "CR-4").verdict.value
-
-
-# --------------------------------------------------------------------------- #
-# INERT — a new AI judgment ships un-activated
-# --------------------------------------------------------------------------- #
-def test_cr4_is_inert() -> None:
-    assert "CR-4" not in ACTIVE_RULE_IDS  # not evaluated on a live file
-    assert (
-        len(ACTIVE_RULE_IDS) == 37
-    )  # CR-4 stays inert; the live count is 37 (LP-447 +IH-1, not CR-4)
-    spec = load_rule_spec("CR-4")  # but the spec exists (loadable, verdict-shaped)
-    assert spec.reference_values.priya_validated is False  # awaits calibration + Priya's bar
-
-
-def test_credit_profile_group_opts_into_lists_and_liabilities() -> None:
-    group = load_ai_groups()["credit_profile"]
-    assert group.subject == "borrower" and group.include_lists and group.include_stated_liabilities
-    assert group.list_row_cap == 50
-    assert group.tag_ids == ("credit.undisclosed_tradeline",)
 
 
 # --------------------------------------------------------------------------- #

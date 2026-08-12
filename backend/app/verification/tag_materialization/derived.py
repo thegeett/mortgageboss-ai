@@ -868,6 +868,59 @@ def _dwelling_settlement_basis(
 # double-count. LF-96SV has one 18-row report + one empty; no double-count. Multi-report dedup is a future
 # concern (a rule's, once it reconciles bureaus).
 # --------------------------------------------------------------------------- #
+def _credit_undisclosed_tradeline(
+    snapshot: Snapshot, _subject_id: str, _subject_raw: object
+) -> tuple[JsonValue, str]:
+    """credit.undisclosed_tradeline — the BORROWER-level rollup of the per-liability judgment (ADR-375).
+
+    "yes" when ANY credit-report tradeline was judged NOT in the application; "no" when every judged
+    tradeline is accounted for. DEMOTED from an AI tag to this recipe so the borrower answer is a pure
+    function of the per-liability answers — CR-4 and CR-1 cannot disagree about the same file.
+
+    ⚠️ FAIL-CLOSED, and this is the seam where a false all-clear would slip in. It ABSTAINS to "unknown"
+    (NEVER "no") when there is nothing to aggregate — no credit report, no tradeline subjects, or no
+    ``liab.in_application`` produced on any of them. "No undisclosed debt" on a file with no credit report
+    is a false ALL-CLEAR, which is worse than saying nothing. A subject the matcher answered "unknown" for
+    does not count as accounted-for: if EVERY answer is unknown the rollup is unknown, and a single
+    confident "no" still yields "yes" (one undisclosed debt is the finding, regardless of the others).
+    """
+    # LAZY import (init-order — rule_engine ↔ tag_materialization, as _stmt_min_account_months does).
+    from app.verification.rule_engine.enumerators import _SOURCE_CREDIT_REPORT, liability_rows
+
+    if snapshot.tags.absent:
+        return _UNKNOWN, "no tags materialized, so no per-liability judgment to aggregate"
+    reported = [r for r in liability_rows(snapshot) if r.source == _SOURCE_CREDIT_REPORT]
+    if not reported:
+        return (
+            _UNKNOWN,
+            "no credit-report tradelines on the file — nothing to compare against the 1003",
+        )
+    judged = 0
+    undisclosed = 0
+    for row in reported:
+        tag = snapshot.tags.by_subject.get(row.subject_id, {}).get("liab.in_application")
+        if tag is None or tag.value in (None, _UNKNOWN):
+            continue
+        judged += 1
+        if str(tag.value) == "no":
+            undisclosed += 1
+    if judged == 0:
+        return (
+            _UNKNOWN,
+            f"{len(reported)} tradelines, but none carries a usable in-application judgment "
+            "(absent or unknown) — cannot conclude the application is complete",
+        )
+    if undisclosed:
+        return "yes", (
+            f"{undisclosed} of {judged} judged tradelines are not reflected in the application's "
+            "stated liabilities"
+        )
+    return (
+        "no",
+        f"all {judged} judged tradelines are reflected in the application's stated liabilities",
+    )
+
+
 def _credit_tradeline_count(
     snapshot: Snapshot, _subject_id: str, _subject_raw: object
 ) -> tuple[JsonValue, str]:
@@ -1821,6 +1874,7 @@ _RECIPES: dict[str, Recipe] = {
     # LP-453 — DETERMINISTIC numeric observations over the credit report's tradelines list (loan-level). Pure
     # aggregates only (count + monthly-payment total) — the open-ended bureau vocabulary makes classification a
     # Priya/AI question (ADR). Fail closed: no tradelines → absent, never a fabricated 0.
+    "credit_undisclosed_tradeline": _credit_undisclosed_tradeline,
     "credit_tradeline_count": _credit_tradeline_count,
     "credit_tradeline_monthly_payment_total": _credit_tradeline_monthly_payment_total,
     # LP-407-4 — does the purchase contract's subject-property address match the loan file's (MISMO)? For PC-3.

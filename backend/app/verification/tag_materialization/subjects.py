@@ -242,7 +242,7 @@ def _liability_read_field(raw: object, field: str) -> RawField | None:
 
 
 def _liability_context(
-    raw: object, _applies_to: frozenset[str] | None, _opts: ContextOptions
+    raw: object, _applies_to: frozenset[str] | None, opts: ContextOptions
 ) -> dict[str, object]:
     """This liability's own facts, under the family's CANONICAL names, PII-scrubbed.
 
@@ -260,11 +260,11 @@ def _liability_context(
       ``ListSpec.redact`` covers only the fields a spec NAMED — so an account number a bureau prints
       inside ``creditor_name`` would otherwise reach the model unscrubbed.
 
-    ⚠️ There is deliberately NO ``include_stated_liabilities`` opt-in. The docstring previously promised
-    one "the SAME opt-in the borrower context uses", but the body never read ``opts`` and never could:
-    ``load_ai_groups`` raises ``DeclarationError`` for any non-borrower group that sets that flag. A
-    liability-subject group wanting the app's stated set is a real design question (this family already
-    carries BOTH sources as sibling subjects), not a flag to smuggle in.
+    ⚠️ ``include_stated_liabilities`` IS now honoured here — the design question the review deferred has
+    been answered (ADR-375). The matcher is liability-scoped, so the app's stated set is the comparison
+    set THIS subject needs; the loader guard was widened from borrower-only to ``{borrower, liability}``
+    deliberately, not incidentally. It is added ONLY to a ``credit_report_reported`` subject: a
+    mismo_stated liability comparing against the stated list would be comparing a list to itself.
     """
     from app.verification.rule_engine.enumerators import LiabilityRow
 
@@ -272,13 +272,16 @@ def _liability_context(
     canonical = {
         column: name for name, column in _LIABILITY_FIELD_ALIASES.get(raw.source, {}).items()
     }
-    return {
+    context: dict[str, object] = {
         "liability_source": raw.source,
         **{
             canonical.get(column, column): _scrub_list_value(_field_value(field))
             for column, field in sorted(raw.fields.items())
         },
     }
+    if opts.include_stated_liabilities and raw.source == "credit_report_reported":
+        context["stated_liabilities"] = _stated_liabilities(raw.snapshot)
+    return context
 
 
 def _field_value(field: RawField) -> object:
