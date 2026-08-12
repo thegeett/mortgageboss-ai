@@ -1,0 +1,123 @@
+# CR-12 — Disputed accounts — DETERMINISTIC structural rule SPEC (LP-486 / ADR-376).
+#
+# Flags a tradeline the credit report shows as DISPUTED BY THE CONSUMER, so a processor can review it
+# against the applicable agency requirement.
+#
+# ⚠️ SCOPE BOUNDARY (Priya's ruling). CR-12 flags an open dispute for review. It does NOT decide whether the
+# debt is excluded from DTI — that comes from the applicable agency liability rule and the AUS findings.
+# Nothing in this spec touches DTI treatment.
+#
+# ⚠️ RESOLVED DISPUTES: the tag reads the CURRENT report only. A dispute is never carried forward from an
+# older report; if the current report no longer shows a dispute, there is no finding.
+#
+# ⚠️ THE CLOSED-VOCABULARY ABSTAIN (ADR-376) — the whole safety of this rule. `is_disputed` is a clean Y/N
+# on one bureau's reports and FREE TEXT on another's (LF-96SV holds "ACCOUNT IN FORBEARANCE" and
+# "ACCOUNT PREVIOUSLY IN DISPUTE-NOW RESOLVED-REPORTED BY SUBSCRIBER" in the same field). The producer
+# recognises the closed vocabulary below and ABSTAINS to unknown on anything else, which the gate turns
+# into couldnt_check. It never stems, fuzzy-matches or infers.
+#
+# ⚠️ THIS RULE SHIPS `auto` (forced by kind — structural; LP-424 rejects a mismatched `ships`). There is no
+# human in the loop, so the abstain guard is the ONLY protection against a bureau-format surprise.
+
+rule_id: CR-12
+name: Disputed accounts
+category: Credit
+
+kind: structural            # must equal rule_kinds.csv (CR-12 = structural, deterministic_only)
+numeric_check: false        # must equal rule_kinds.csv — a flag presence check, not a ratio
+
+criteria: >-
+  A tradeline the credit report shows as disputed by the consumer must be surfaced for review: an open
+  dispute can suppress the account's data at the bureau and affects how the applicable agency requires the
+  debt to be treated. This reads the derived liab.is_disputed per tradeline. Higher priority when the
+  tradeline is a mortgage, when several accounts are disputed, when the account carries derogatory history,
+  or when balance/payment information is what is being challenged — recorded on the finding, never branched
+  into a different verdict. A dispute field whose value is not in the recognised vocabulary resolves to
+  couldnt_check, never a guessed "not disputed".
+
+applicability:
+  scope: each credit-report tradeline's dispute flag
+  trigger: >-
+    Any tradeline on a credit report in the file. A file with no credit report yields no tradeline subjects;
+    a tradeline whose dispute field is absent or unrecognised couldnt_checks — it is never read as "no
+    dispute".
+
+reference_values:
+  priya_validated: false          # must equal rule_kinds.csv
+  threshold_needs_signoff: false  # must equal rule_kinds.csv — no threshold; this is a vocabulary
+  values:
+    # ⚠️ THE CLOSED VOCABULARY — DOMAIN DATA, Priya's ruling, pipe-delimited and case-insensitive.
+    # The producer mirrors these two lists; test_cr12_vocabulary_matches_the_spec pins them identical so
+    # the spec (where Priya edits) and the recipe (which runs) cannot drift.
+    # ⚠️ "previously in dispute - now resolved" is deliberately in NEITHER list: unrecognised values must
+    # ABSTAIN, and reading a resolution the bureau did not state would be an inference.
+    dispute_phrases: "y|yes|account disputed by consumer|consumer disputes this account|dispute in progress|account information disputed by consumer|consumer disputes account information"
+    not_dispute_phrases: "n|no|account in forbearance|account closed by credit grantor|paid account|transferred|account closed|deferred"
+  guideline_text: >-
+    A tradeline reported as disputed by the consumer must be reviewed before the debt's treatment is
+    settled: an open dispute can suppress the account's payment data at the bureau, and the applicable
+    agency sets whether and how the debt counts. This rule performs the DETECTION only — the treatment
+    decision belongs to the agency liability rule and the AUS findings. The recognised dispute and
+    account-status vocabularies are the domain expert's, recorded in reference_values; anything outside them
+    abstains rather than being classified.
+
+required_inputs:
+  - name: liability_dispute_status
+    snapshot_path: 'tags.by_subject[<tradeline row_id>]["liab.is_disputed"]'
+    description: >-
+      whether THIS tradeline is flagged disputed (derived, LP-486): "yes" / "no" from the closed
+      vocabulary, "unknown" when the field is absent, empty, or holds an unrecognised value.
+
+subject_enumeration: per_liability   # LP-480 — one subject per tradeline row (and per stated liability)
+subject_key_fields: [liability]
+
+evidence_required: >-
+  The tradeline's creditor, the dispute value the report states, and whether the account carries a balance
+  or derogatory history — inline on the finding, so a processor can judge priority without reopening the
+  report.
+
+guideline_reference: "Consumer-disputed tradelines must be reviewed before the debt's treatment is settled; the treatment itself is set by the applicable agency requirement and the AUS findings, not by this rule."
+
+spec_version: 1
+
+# The MACHINE-READABLE deterministic body (LP-324). Two explicit outcomes on the closed vocabulary; an
+# "unknown" tag coerces through the gate to couldnt_check BEFORE this body runs, so an unrecognised or
+# absent dispute value can never reach the default and read as "no dispute".
+deterministic:
+  load_bearing_tags:
+    - liab.is_disputed
+  gated_tags:
+    - liab.is_disputed
+  operands: {}
+  outcomes:
+    - verdict: fired
+      when_tags:
+        - {tag: liab.is_disputed, op: eq, value: "yes"}
+      reasoning: >-
+        the credit report shows this tradeline as DISPUTED by the consumer — review it against the
+        applicable agency requirement before the debt's treatment is settled; a dispute can suppress the
+        account's payment data at the bureau
+      how_to_fix: >-
+        Confirm with the borrower whether the dispute is open or resolved. If resolved, obtain an updated
+        credit report or a creditor statement showing the dispute removed. If open, apply the applicable
+        agency requirement for a disputed account (an FHA file may have separate thresholds and a manual
+        downgrade path).
+    - verdict: satisfied
+      when_tags:
+        - {tag: liab.is_disputed, op: eq, value: "no"}
+      reasoning: >-
+        the credit report states no consumer dispute on this tradeline
+    - verdict: couldnt_check
+      # ⚠️ THE CATCH-ALL IS AN ABSTAIN, NOT A PASS. The gate already routes an absent/"unknown" tag to
+      # couldnt_check before this body runs, so this branch should be unreachable — but a `satisfied`
+      # default would turn any future third value into a silent all-clear on a rule that ships `auto`.
+      # Fail closed at both layers.
+      default: true
+      reasoning: >-
+        the tradeline's dispute status could not be determined from the credit report — the value is not in
+        the recognised dispute or account-status vocabulary, so it is surfaced for review rather than
+        assumed undisputed
+      how_to_fix: >-
+        Read the tradeline's dispute remark on the credit report and confirm with the borrower whether a
+        dispute is open. If the wording is a bureau variant we should recognise, add it to the rule's
+        vocabulary.

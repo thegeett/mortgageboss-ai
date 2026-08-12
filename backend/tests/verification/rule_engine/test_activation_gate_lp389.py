@@ -37,6 +37,8 @@ from app.verification.rule_engine.registry import _BASE_ACTIVE, ACTIVE_RULE_IDS
 _ACTIVATED = frozenset(
     {
         # LP-485 — the date-compare family (deterministic; cited windows, no calibration gate).
+        # LP-486 — CR-12 (disputed accounts; closed-vocabulary abstain, ADR-376).
+        "CR-12",
         "CL-1",
         "CR-13",
         "PR-6",
@@ -103,6 +105,7 @@ def test_eligible_rule_ids_is_sorted_and_matches() -> None:
         "AS-9",
         # LP-485 — the date-compare family, in sort order: CL-1/CR-13 before ID-5, PR-6 after PC-7.
         "CL-1",
+        "CR-12",  # LP-486 (sorts between CL-1 and CR-13)
         "CR-13",
         "ID-5",
         "IH-1",  # LP-447 (sorts between ID-5 and IH-3)

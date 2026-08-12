@@ -279,6 +279,10 @@ tags:
   rate_lock.days_to_closing: {mode: derived, subject: loan, data: rate_lock_days_to_closing}
   credit.report_age_months_at_closing: {mode: derived, subject: loan, data: credit_report_age_months}
   property.appraisal_age_months_at_closing: {mode: derived, subject: loan, data: appraisal_age_months}
+  # LP-486 / ADR-376 — CR-12's dispute flag. DERIVED (not parsed) because the raw field's encoding varies
+  # by bureau (clean Y/N on one, free text on another) and the recipe recognises a CLOSED vocabulary,
+  # abstaining on anything else. A parsed passthrough would emit out-of-domain values silently.
+  liab.is_disputed: {mode: derived, subject: liability, data: liability_dispute_status}
   credit.tradeline_count: {mode: derived, subject: loan, data: credit_tradeline_count}
   credit.tradeline_monthly_payment_total: {mode: derived, subject: loan, data: credit_tradeline_monthly_payment_total}
   # LP-454 (step D.3) — the credit report's PULL DATE (CR-13). A PARSED document fact from the credit_report

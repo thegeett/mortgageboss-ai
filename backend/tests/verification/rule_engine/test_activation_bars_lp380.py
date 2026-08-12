@@ -300,6 +300,7 @@ def test_active_set_is_base_plus_lp389() -> None:
             "CL-1",
             "CR-13",
             "PR-6",
+            "CR-12",
         )
     )
     # A bar persists after activation as the record of WHY the rule went live, so the bars now intersect the
@@ -336,6 +337,7 @@ def test_active_set_is_base_plus_lp389() -> None:
             # LP-485 — eligible: CL-1 (no-ai-dependency), CR-13 + PR-6 (no-ai-threshold-pending, windows
             # researched + cited to Fannie B1-1-03 / B4-1.2-04 in their specs).
             "CL-1",
+            "CR-12",  # LP-486 — disputed accounts (ADR-376)
             "CR-13",
             "PR-6",
         }

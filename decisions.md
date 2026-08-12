@@ -14316,3 +14316,52 @@ side effect: the per-liability labels are the ones worth collecting.
 its corrected scoping note), ADR-353 (the open bureau vocabulary — why `liab.account_type` has no parsed
 producer), ADR-332 (a self-authored fixture leaks its answer — why LF-96SV matters), LP-444 (the
 `include_lists` / `include_stated_liabilities` context opt-ins this widens).
+
+## ADR-376: A field whose ENCODING varies by source must match a CLOSED vocabulary and abstain on anything else — never infer from unfamiliar text (LP-486)
+
+**Context.** CR-12 asks a simple question: is this tradeline disputed? The credit report has a field for it,
+`is_disputed`, and on the two bench reports it is a clean **`Y`/`N`** (34 N, 1 Y across 35 rows). Written the
+obvious way — `is_disputed == "Y"` — the rule is three lines.
+
+**Then the same field was read on LF-96SV, a different bureau's format.** It holds free text:
+`ACCOUNT IN FORBEARANCE` · `ACCOUNT CLOSED BY CREDIT GRANTOR` ·
+`ACCOUNT PREVIOUSLY IN DISPUTE-NOW RESOLVED-REPORTED BY SUBSCRIBER`. **One field, two encodings, both real.**
+
+⚠️ **The obvious rule fails silently on the second format.** `"ACCOUNT PREVIOUSLY IN DISPUTE…" != "Y"`, so
+every tradeline on that report reads **not disputed** — a false negative on a fraud-adjacent rule, with no
+error, no log line, and every test green. And CR-12 **ships `auto`** (forced by kind), so there is no human
+in the loop to notice.
+
+**The decision — recognise a CLOSED SET, abstain on everything else.** The producer normalises (case-fold +
+collapse whitespace, nothing more) and matches against two explicit lists — the dispute phrasings and the
+account-status remarks that are *not* disputes. A value in neither list returns `unknown`, which the gate
+turns into `couldnt_check`. **It never stems, never fuzzy-matches, never infers.**
+
+**⚠️ The case that defines the pattern.** `PREVIOUSLY IN DISPUTE — NOW RESOLVED` is deliberately in
+**neither** list. It is tempting to read it as "not disputed" — the text nearly says so. But that is an
+*inference about what the bureau meant*, and the whole failure mode here is inferring from unfamiliar text.
+It abstains. A processor reads the remark and decides; the rule does not guess on their behalf.
+
+**Why abstain rather than classify.** Classifying open bureau vocabulary is a domain judgment
+(ADR-353's finding, reached the same way: verify the vocabulary before assuming a lookup). A closed set is
+not classification — it is recognition, and recognition can be exhaustively enumerated, reviewed by the
+domain expert, and tested. What it cannot do is quietly extend itself to text nobody has seen.
+
+**Where the vocabulary lives.** In the **spec's `reference_values`** — it is domain data the expert edits,
+not code. The producer mirrors it, and a test pins the two identical, so the list Priya reviews and the list
+that runs cannot drift apart silently.
+
+**⚠️ The asymmetry that sets the default.** A false "not disputed" hides a real dispute and the file closes on
+suppressed bureau data. A `couldnt_check` costs a processor ten seconds of reading a remark. **The catch-all
+branch is therefore `couldnt_check`, not `satisfied`** — belt and braces with the gate, because a `satisfied`
+default would convert any future third encoding into a silent all-clear.
+
+**The shape every future credit rule should copy.** `account_type` (`REV`/`AUTO`/`MTG` vs
+`MortgageLoan`/`Installment`), `payment_status` (Metro-2 codes), `account_status`, `worst_delinquency` — all
+carry the same bureau-varying encoding. Each needs this treatment, and none should be written as an equality
+against one bureau's spelling.
+
+**Cross-refs.** LP-486 (`docs/tickets/LP-486.md`), ADR-353 (the open bureau vocabulary this operationalises),
+LP-424 (`ships` is derived from kind — why there is no human in the loop here), ADR-286/289 (a declaration
+that silently reads absent — the adjacent silent-failure class), `docs/domain/priya-open-questions.md` (the
+vocabulary is listed there for confirmation).

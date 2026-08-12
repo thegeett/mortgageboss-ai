@@ -75,9 +75,13 @@ deterministic:
     - verdict: fired
       # The lock expires strictly BEFORE closing.
       when_compare: {op: "<", left: days, right: zero}
+      # ⚠️ `days` is SIGNED and is NEGATIVE on this branch (it fires on days < 0), so the sentence must not
+      # also say "before" — "expires -14 day(s) before closing" is a double negative a processor reads as
+      # the opposite of the finding. Phrased as a signed margin, which reads correctly negative.
       reasoning: >-
-        the interest-rate lock expires {days} day(s) before the loan's closing date — the lock must be
-        extended or re-locked, or the borrower's rate and pricing will change at closing
+        the interest-rate lock has already expired by the loan's closing date (lock-to-closing margin:
+        {days} day(s)) — the lock must be extended or re-locked, or the borrower's rate and pricing will
+        change at closing
       how_to_fix: >-
         Confirm the current lock expiration with the lender and extend or re-lock through the closing date,
         or obtain the updated loan estimate reflecting the new lock.

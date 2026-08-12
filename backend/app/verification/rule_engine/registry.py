@@ -219,6 +219,11 @@ _LP447_ACTIVATED: tuple[str, ...] = ("IH-1",)
 # every value is listed in docs/domain/priya-open-questions.md for her review.
 _LP485_ACTIVATED: tuple[str, ...] = ("CL-1", "CR-13", "PR-6")
 
+# LP-486 / ADR-376 — CR-12 (disputed accounts). Deterministic detection over a CLOSED vocabulary that
+# abstains on anything unrecognised: the same `is_disputed` field is clean Y/N on one bureau's reports and
+# free text on another's, so a rule that classified open text would silently miss disputes.
+_LP486_ACTIVATED: tuple[str, ...] = ("CR-12",)
+
 # The gate is the source of truth: test_activation_gate_lp389 asserts ACTIVE_RULE_IDS - _BASE_ACTIVE ==
 # eligible_rule_ids() — a rule CANNOT enter this set without meeting the eligibility gate (not a hand-list).
 ACTIVE_RULE_IDS: tuple[str, ...] = (
@@ -240,6 +245,7 @@ ACTIVE_RULE_IDS: tuple[str, ...] = (
     *_LP433_ACTIVATED,
     *_LP447_ACTIVATED,
     *_LP485_ACTIVATED,
+    *_LP486_ACTIVATED,
 )
 
 

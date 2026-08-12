@@ -889,8 +889,11 @@ CL-1:
     FP (a false expiry warning -> a processor checks one date).
   rationale: >-
     No AI tag and NO domain threshold (a date ordering), so nothing awaits calibration — eligibility is
-    input_resolves alone. Held today because ZERO loan_estimate documents exist on any loan file, so
-    rate_lock.expiration cannot resolve. Verified 2026-08-12, not assumed.
+    input_resolves alone. ⚠️ input_resolves here is a DEVELOPMENT-MODE ASSERTION, not measured evidence:
+    ZERO loan_estimate documents exist on any loan file today, so rate_lock.expiration does not resolve
+    anywhere (verified 2026-08-12). The rule is live because the build-first policy ships rules ahead of
+    the corpus; on a file with no loan estimate it fail-closes to couldnt_check, which is the honest
+    outcome. Re-confirm against real loan estimates when the corpus arrives.
 CR-13:
   status: no-ai-threshold-pending
   ships: auto
@@ -921,3 +924,31 @@ PR-6:
     B4-1.2-04, page dated 06/04/2025 — 12 months to the note date, an update required beyond 4; the values
     + citation live in the spec's reference_values, which is the calibration record. LIVE at LP-485 under
     the development-mode policy.
+
+# --------------------------------------------------------------------------- #
+# LP-486 / ADR-376 — CR-12 (disputed accounts). Deterministic: no AI tag in the chain, no threshold (a
+# closed VOCABULARY, not a number), so eligibility is input_resolves alone.
+#
+# ⚠️ `input_resolves: true` here is the LP-485 DEVELOPMENT-MODE meaning: the input is declared, its
+# extraction field exists, and the producer resolves it on real stored data (verified on the two bench
+# credit reports AND on LF-96SV's free-text format). It is NOT the older meaning the 11 pre-LP-485 bars
+# use ("verified end-to-end on a live loan file"). ONE FIELD, TWO SEMANTICS — this bar asserts the former.
+#
+# ⚠️ SHIPS `auto`, forced by kind (structural). There is no human in the loop, which is exactly why the
+# closed-vocabulary ABSTAIN is the rule's safety: an unrecognised bureau encoding couldnt_checks rather
+# than silently reading as "not disputed".
+CR-12:
+  status: no-ai-dependency
+  ships: auto
+  threshold: null
+  validated: false
+  input_resolves: true
+  load_bearing_ai_tags: []
+  fp_fn: >-
+    FN (a genuine open dispute reads as undisputed -> the file closes on suppressed bureau data) >> FP (a
+    flagged dispute a processor confirms in seconds). The abstain guard exists to keep the FN direction
+    closed on an unfamiliar encoding.
+  rationale: >-
+    No AI tag and no threshold — a closed vocabulary recorded in the spec's reference_values (Priya's
+    ruling). The producer recognises it and abstains on anything else, so the rule never classifies open
+    bureau text. Resolves on real stored data in BOTH known encodings (Y/N and free text).

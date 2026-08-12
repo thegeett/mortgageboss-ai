@@ -201,5 +201,6 @@ def test_no_rule_activation_changed() -> None:
             "CL-1",
             "CR-13",
             "PR-6",
+            "CR-12",  # LP-486 — disputed accounts (ADR-376 closed-vocabulary abstain)
         )
     )

@@ -52,7 +52,10 @@ _LIABILITY_CONTEXT_SUBJECTS = frozenset({"borrower", "liability"})
 # DocumentEntry and keys under the content_id — the producer already handles this correctly (verified), so
 # a document recipe does NOT mis-key. A derived tag on `transaction` stays unsupported (no recipe reads a
 # TransactionRecord). Each recipe still asserts its expected raw type, so a wrong subject fails loudly.
-_DERIVED_SUBJECTS = frozenset({"loan", "borrower", "document"})
+# LP-486 — ``liability`` joins the derived subjects. The LP-483 family already supplies enumerate /
+# read_field / context; only this allowlist blocked a per-liability recipe. The producer is generic (it
+# passes each subject's raw object through), and each recipe asserts its own raw type.
+_DERIVED_SUBJECTS = frozenset({"loan", "borrower", "document", "liability"})
 
 
 class DeclarationError(Exception):

@@ -21,6 +21,7 @@ from __future__ import annotations
 # LP-433 (+IN-16) → 36 → LP-447 (+IH-1, insurance adequacy — the dwelling settlement basis) → 37.
 # LP-485 (+CL-1, +CR-13, +PR-6 — the date-compare family: rate lock vs closing, credit age, appraisal age;
 # all deterministic, CR-13/PR-6's windows researched + cited to Fannie B1-1-03 / B4-1.2-04) → 40.
-EXPECTED_ACTIVE_RULE_COUNT: int = 40
+# LP-486 (+CR-12 — disputed accounts, closed-vocabulary abstain, ADR-376) → 41.
+EXPECTED_ACTIVE_RULE_COUNT: int = 41
 
 __all__ = ["EXPECTED_ACTIVE_RULE_COUNT"]

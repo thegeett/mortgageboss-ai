@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Callable
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal, InvalidOperation
 from itertools import pairwise
 
@@ -19,6 +19,7 @@ from pydantic import JsonValue
 from app.ai.extraction.parsing import coerce_date
 from app.verification.snapshot.fields import Field
 from app.verification.snapshot.model import DocumentEntry, Snapshot
+from app.verification.snapshot.pii import PiiField
 from app.verification.snapshot.tag import Tag, TagProducedBy, TagRole, TagStage
 from app.verification.snapshot.traversal import all_list_rows
 from app.verification.tag_materialization.declarations import TagDeclaration
@@ -1179,15 +1180,10 @@ def _contract_days_until_closing(
 # --------------------------------------------------------------------------- #
 
 
-def _single_parsed_date(snapshot: Snapshot, tag_id: str) -> tuple[date | None, str | None]:
-    """The file's ONE parseable value of ``tag_id`` as a date, or ``(None, reason)``.
-
-    The shared gather ``_contract_days_until_closing`` performs inline, extracted so three consumers cannot
-    drift. Dedups by the PARSED date; two DISTINCT dates mean the documents disagree and there is no single
-    answer — that is ``None`` with a reason, never an arbitrary pick.
-    """
+def _parsed_dates(snapshot: Snapshot, tag_id: str) -> dict[date, str]:
+    """Every distinct parseable value of ``tag_id`` across the file's subjects, as {date: raw}."""
     if snapshot.tags.absent:
-        return None, "no tags materialized"
+        return {}
     dates: dict[date, str] = {}
     for tags in snapshot.tags.by_subject.values():
         tag = tags.get(tag_id)
@@ -1196,6 +1192,20 @@ def _single_parsed_date(snapshot: Snapshot, tag_id: str) -> tuple[date | None, s
         parsed = coerce_date(str(tag.value))
         if parsed is not None:
             dates[parsed] = str(tag.value)
+    return dates
+
+
+def _single_parsed_date(snapshot: Snapshot, tag_id: str) -> tuple[date | None, str | None]:
+    """The file's ONE parseable value of ``tag_id`` as a date, or ``(None, reason)``.
+
+    ⚠️ ABSTAIN-ON-DISAGREEMENT. Correct only for a tag that states ONE FACT many times — ``contract
+    .closing_date`` is the case it was written for: every document restates the same closing, so two
+    distinct values mean the file genuinely contradicts itself and there is no answer to pick.
+
+    It is WRONG for a per-document date on a type that legitimately recurs — see
+    :func:`_most_recent_parsed_date`, which those use instead.
+    """
+    dates = _parsed_dates(snapshot, tag_id)
     if not dates:
         return None, "not stated (or not parseable) anywhere in the file"
     if len(dates) > 1:
@@ -1206,17 +1216,66 @@ def _single_parsed_date(snapshot: Snapshot, tag_id: str) -> tuple[date | None, s
     return next(iter(dates)), None
 
 
-def _full_months_between(earlier: date, later: date) -> int:
-    """COMPLETE calendar months from ``earlier`` to ``later`` (negative if ``later`` precedes ``earlier``).
+def _most_recent_parsed_date(snapshot: Snapshot, tag_id: str) -> tuple[date | None, str | None]:
+    """The LATEST parseable value of ``tag_id``, or ``(None, reason)`` when none parses.
+
+    ⚠️ Reported finding, and the fix matters more than it looks. ``rate_lock.expiration``,
+    ``credit.report_date`` and ``property.appraisal_date`` are PER-DOCUMENT tags on document types a real
+    file carries several of: a re-issued loan estimate after a change of circumstance brings a new lock
+    expiration, a re-pull adds a second credit report, a Form 1004D adds a second appraisal date. Under
+    :func:`_single_parsed_date` two dates collapsed to "the documents disagree" → ``couldnt_check``, so
+    these rules abstained on exactly the files they exist for — and CR-13's own ``how_to_fix`` ("order a
+    new credit report") would have turned a ``fired`` into a PERMANENT ``couldnt_check`` instead of a
+    ``satisfied``, because the new pull is a second date, not a replacement.
+
+    Most-recent-wins is also what the guideline says: B1-1-03 ages the credit documents from the MOST
+    RECENT pull, and an appraisal update supersedes its predecessor. This is not a tie-break of
+    convenience — it is the rule the agency states.
+    """
+    dates = _parsed_dates(snapshot, tag_id)
+    if not dates:
+        return None, "not stated (or not parseable) anywhere in the file"
+    return max(dates), None
+
+
+def _shift_months(anchor: date, months: int) -> date:
+    """``anchor`` shifted by ``months`` calendar months, clamped to the target month's last day."""
+    total = (anchor.year * 12 + anchor.month - 1) + months
+    year, month = divmod(total, 12)
+    month += 1
+    if month == 12:
+        last = 31
+    else:
+        last = (date(year + (month // 12), (month % 12) + 1, 1) - timedelta(days=1)).day
+    return date(year, month, min(anchor.day, last))
+
+
+def _age_months_ceiling(earlier: date, later: date) -> int:
+    """Calendar months from ``earlier`` to ``later``, ROUNDED UP on any partial month.
 
     ⚠️ CALENDAR MONTHS, NOT A DAY COUNT. Fannie's B1-1-03 / B4-1.2-04 windows are stated in months, and a
-    30-day approximation differs from the calendar by up to three days at four months — enough to pass a
-    document the guide fails, or fail one it passes. A partial month does NOT count: 04-01 → 08-01 is four
-    months; 04-02 → 08-01 is three.
+    30-day approximation differs from the calendar by up to three days at four months.
+
+    ⚠️ AND IT ROUNDS UP — the reported finding. The previous version floored to COMPLETE months while
+    CR-13/PR-6 compare with strict ``>``, so ``floor(age) > 4`` only fired at five complete months and a
+    document up to a full month past its window passed: a credit report pulled 2026-03-02 against a
+    2026-08-01 closing is **152 days** old — 4 months 30 days — and floored to ``4``, clearing a four-month
+    limit. Measured, not argued. That is the catastrophic FN the bar names (a stale report closes the
+    loan), and it dwarfed the 3-day calendar-vs-day-count drift the floor was chosen to avoid.
+
+    Rounding up makes "is it OVER four months" true the moment it is, while an exact four months
+    (04-01 → 08-01) still returns ``4`` and passes — the guides' "no more than four months" is inclusive.
+
+    It also fixes the month-end case: 01-31 → 02-28 is a full elapsed month and floored to ``0``.
+
+    Negative when ``later`` precedes ``earlier`` (the caller decides what that means — see
+    :func:`_age_in_months_at_closing`, which refuses to age a document dated after closing).
     """
     months = (later.year - earlier.year) * 12 + (later.month - earlier.month)
     if later.day < earlier.day:
         months -= 1
+    if months >= 0 and _shift_months(earlier, months) < later:
+        months += 1  # a partial month remains — round up
     return months
 
 
@@ -1230,18 +1289,31 @@ def _age_in_months_at_closing(
     as an explicit assumption in docs/tickets/LP-485.md rather than silently treated as identical.
 
     Fail-closed: either date absent, unparseable, or disagreed-upon → ``unknown`` (never 0, never a default).
+
+    ⚠️ The document date is the MOST RECENT one (:func:`_most_recent_parsed_date`), not the sole one — a
+    re-pulled credit report or a 1004D update is a second date, and the guideline ages from the newest.
+    The CLOSING date stays abstain-on-disagreement: that is one fact restated, so a contradiction is real.
     """
-    doc_date, why = _single_parsed_date(snapshot, document_date_tag)
+    doc_date, why = _most_recent_parsed_date(snapshot, document_date_tag)
     if doc_date is None:
         return _UNKNOWN, f"the {label} date is {why}"
     closing, why_closing = _single_parsed_date(snapshot, "contract.closing_date")
     if closing is None:
         return _UNKNOWN, f"the closing date is {why_closing} — cannot age the {label}"
-    months = _full_months_between(doc_date, closing)
+    if doc_date > closing:
+        # ⚠️ Reported finding: a negative age matched no `>` outcome and fell through to the DEFAULT
+        # `satisfied`, rendering "-3 complete calendar month(s) before closing" as a clean pass. A document
+        # dated after closing is a mis-parse, a transposition, or a stale closing date — never a fact to
+        # certify. Every other path in this family fails closed; so does this one now.
+        return _UNKNOWN, (
+            f"the {label} date {doc_date.isoformat()} is AFTER the closing date "
+            f"{closing.isoformat()} — the dates are inconsistent, so the age cannot be trusted"
+        )
+    months = _age_months_ceiling(doc_date, closing)
     return (
         str(months),
-        f"the {label} dated {doc_date.isoformat()} is {months} complete calendar month(s) old at the "
-        f"closing date {closing.isoformat()}",
+        f"the {label} dated {doc_date.isoformat()} is {months} calendar month(s) old at the "
+        f"closing date {closing.isoformat()} (a partial month counts as a full one)",
     )
 
 
@@ -1269,7 +1341,7 @@ def _rate_lock_days_to_closing(
     A day count is correct here (unlike the month-stated guideline windows): a lock expires on a date, and
     the question is simply which date comes first. Fail-closed to unknown on either side.
     """
-    expiry, why = _single_parsed_date(snapshot, "rate_lock.expiration")
+    expiry, why = _most_recent_parsed_date(snapshot, "rate_lock.expiration")
     if expiry is None:
         return _UNKNOWN, f"the rate lock expiration is {why}"
     closing, why_closing = _single_parsed_date(snapshot, "contract.closing_date")
@@ -1283,6 +1355,89 @@ def _rate_lock_days_to_closing(
         str(days),
         f"the rate lock expires {expiry.isoformat()}, {days} day(s) "
         f"{'after' if days >= 0 else 'BEFORE'} the closing date {closing.isoformat()}",
+    )
+
+
+# --------------------------------------------------------------------------- #
+# LP-486 / ADR-376 — the CLOSED-VOCABULARY ABSTAIN pattern, for CR-12 (disputed accounts).
+#
+# ⚠️ WHY THIS EXISTS. `is_disputed` carries a CLEAN Y/N on the two bench credit reports (34 N, 1 Y across
+# 35 rows) and FREE TEXT on LF-96SV — a different bureau format — where the same field holds
+# "ACCOUNT IN FORBEARANCE", "ACCOUNT CLOSED BY CREDIT GRANTOR" and
+# "ACCOUNT PREVIOUSLY IN DISPUTE-NOW RESOLVED-REPORTED BY SUBSCRIBER". ONE FIELD, TWO ENCODINGS.
+#
+# A rule written as `is_disputed == "Y"` would read the free-text report as NOT disputed — a silent false
+# negative on a fraud-adjacent rule that ships `auto`. So the recipe recognises a CLOSED SET and ABSTAINS
+# on anything else. It NEVER classifies open vocabulary, never stems, never fuzzy-matches, never infers.
+#
+# ⚠️ "PREVIOUSLY IN DISPUTE-NOW RESOLVED" is deliberately NOT in either list: it is unrecognised, so it
+# abstains. Reading it as "not disputed" would be an inference the bureau did not state.
+#
+# The vocabulary is DOMAIN DATA and is mirrored in CR-12's spec reference_values, where Priya edits it;
+# test_cr12_vocabulary_matches_the_spec pins the two identical so they cannot drift.
+# --------------------------------------------------------------------------- #
+_DISPUTE_PHRASES: frozenset[str] = frozenset(
+    {
+        "y",
+        "yes",
+        "account disputed by consumer",
+        "consumer disputes this account",
+        "dispute in progress",
+        "account information disputed by consumer",
+        "consumer disputes account information",
+    }
+)
+_NOT_DISPUTE_PHRASES: frozenset[str] = frozenset(
+    {
+        "n",
+        "no",
+        "account in forbearance",
+        "account closed by credit grantor",
+        "paid account",
+        "transferred",
+        "account closed",
+        "deferred",
+    }
+)
+_WS = re.compile(r"\s+")
+
+
+def _normalise_vocab(raw: str) -> str:
+    """Case-fold + collapse whitespace. The ONLY normalisation applied — no stemming, no fuzzy match."""
+    return _WS.sub(" ", raw).strip().casefold()
+
+
+def _liability_dispute_status(
+    _snapshot: Snapshot, _subject_id: str, subject_raw: object
+) -> tuple[JsonValue, str]:
+    """liab.is_disputed — is THIS tradeline flagged as disputed by the consumer? (CR-12, ADR-376)
+
+    Recognises a CLOSED vocabulary and abstains on everything else. ⚠️ An unrecognised value is
+    ``unknown``, NOT "no": the encoding varies by bureau, and inferring from unfamiliar text is exactly how
+    a dispute gets missed. Absent field → ``unknown`` too (absent ≠ not disputed).
+    """
+    # LAZY import (init-order — rule_engine ↔ tag_materialization, as _stmt_min_account_months does).
+    from app.verification.rule_engine.enumerators import LiabilityRow
+
+    if not isinstance(subject_raw, LiabilityRow):
+        return _UNKNOWN, "not a liability subject"
+    field = subject_raw.fields.get("is_disputed")
+    if field is None or not field.is_present:
+        return _UNKNOWN, "this tradeline states no dispute flag"
+    # A list-row field is a plain Field, never a PiiField (model.py) — but the union is what the type says,
+    # so read the display for a PiiField rather than assuming. An empty value abstains like an absent one.
+    value = field.display if isinstance(field, PiiField) else field.value
+    if value is None or str(value).strip() == "":
+        return _UNKNOWN, "this tradeline states no dispute flag"
+    raw = str(value)
+    normalised = _normalise_vocab(raw)
+    if normalised in _DISPUTE_PHRASES:
+        return "yes", f"the credit report flags this tradeline as disputed ({raw!r})"
+    if normalised in _NOT_DISPUTE_PHRASES:
+        return "no", f"the credit report states no dispute on this tradeline ({raw!r})"
+    return _UNKNOWN, (
+        f"the dispute field reads {raw!r}, which is not a recognised dispute or account-status value — "
+        "abstaining rather than inferring (the encoding varies by bureau)"
     )
 
 
@@ -2014,6 +2169,7 @@ _RECIPES: dict[str, Recipe] = {
     "stmt_min_account_months": _stmt_min_account_months,
     "cash_to_close_shortfall": _cash_to_close_shortfall,
     # LP-410 — the derived-producer wave (unblocks PC-7 / AS-8 / IN-6; tags describe, rules judge).
+    "liability_dispute_status": _liability_dispute_status,  # LP-486 / ADR-376
     "contract_days_until_closing": _contract_days_until_closing,
     # LP-485 — the date-compare family (CL-1 / CR-13 / PR-6). Descriptive numbers only.
     "rate_lock_days_to_closing": _rate_lock_days_to_closing,

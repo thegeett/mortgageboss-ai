@@ -78,3 +78,67 @@ reading that census will otherwise start here again.
   is a trade, not a lean.
 - **The agency axis.** `LoanProgram` has only `CONVENTIONAL` and `FHA`. CR-9's 1% vs 0.5% is
   Fannie-vs-Freddie *inside* conventional and is not expressible. **Do we need an agency dimension?**
+
+---
+
+## 5. From LP-486 (CR-12 disputed accounts)
+
+**Confirm the dispute vocabulary is complete.** CR-12 recognises exactly these and **abstains on anything
+else** (ADR-376) — it never infers from unfamiliar bureau text:
+
+*Means disputed:* `Y` · `yes` · `account disputed by consumer` · `consumer disputes this account` ·
+`dispute in progress` · `account information disputed by consumer` · `consumer disputes account information`
+
+*Account-status remarks, NOT disputes:* `N` · `no` · `ACCOUNT IN FORBEARANCE` ·
+`ACCOUNT CLOSED BY CREDIT GRANTOR` · `PAID ACCOUNT` · `TRANSFERRED` · `ACCOUNT CLOSED` · `DEFERRED`
+
+⚠️ **One real value abstains today and we want your call on it:** LF-96SV carries
+`ACCOUNT PREVIOUSLY IN DISPUTE-NOW RESOLVED-REPORTED BY SUBSCRIBER`. We deliberately do **not** read that as
+"not disputed" — that would be inferring a resolution the bureau did not state. **Should a
+resolved-dispute remark be treated as no dispute, or stay a review item?**
+
+**The FHA disputed-derogatory branch is NOT built.** FHA sets separate thresholds for disputed derogatory
+accounts and has a manual-downgrade path with aggregate-dollar tests. `loan.agency` does not exist as a fact
+and `LoanProgram` is a two-value enum, so the rule builds the **detection only**, which is
+agency-independent. **What are the FHA thresholds, and should a disputed derogatory account route
+differently?**
+
+## 6. From LP-486 (CR-3 paid-to-qualify) — a missing input, not a missing threshold
+
+**CR-3 could not be built, and the blocker is an input nobody supplies.** Its trigger is
+`liab.excluded_paid_off` — *"marked paid-off/excluded to qualify"*. That is an **underwriting claim**, not a
+bureau fact: the credit report's 14 tradeline fields state balances and statuses, never "this debt is being
+excluded to qualify", and MISMO's liability projection carries only four fields (type, monthly payment,
+unpaid balance, holder name). **Where does the claim that a debt is paid off to qualify come from — the
+1003, a processor entry, or somewhere else?** Until it has a source, CR-3 has no trigger and would
+`couldnt_check` on every file forever.
+
+The researched rules for CR-3 are recorded and ready for when the trigger exists:
+
+| point | value | source |
+|---|---|---|
+| A revolving account paid to $0 **need not be closed** to exclude the payment from DTI | — | Fannie Selling Guide **B3-6-07**, *Debts Paid Off At or Prior to Closing* |
+| An installment loan with **≤ 10 remaining monthly payments** may generally be excluded even if not paid off | 10 | Fannie Selling Guide **B3-6-05**, *Monthly Debt Obligations* |
+
+⚠️ **Neither page was fetched in this ticket** — they are carried from the ticket brief and are marked
+**STARTER** until read from the live guide with its page date, per ADR-361.
+
+**The evidence hierarchy (your ruling), for when it is built:** creditor payoff/zero-balance statement →
+creditor transaction history showing $0 → bank statement or transaction record showing the payoff → Closing
+Disclosure when paid through closing. ⚠️ **A screenshot supports the file but is not equivalent to a creditor
+statement** when qualification depends on it.
+
+**Source of funds** — Freddie requires the funds used to pay down debt for qualification to be documented.
+Noted as a requirement; **not built** (it needs asset-side inputs outside this cohort).
+
+**Reconciliation** — a credit report still showing a balance does **not** defeat newer creditor evidence; the
+newer evidence wins and the discrepancy is surfaced.
+
+## 7. `liab.account_type` — the mapping that keeps it unwired
+
+Unchanged from LP-483 and still blocking: the declared enum is
+`revolving | installment | mortgage | heloc | open_30 | collection | lease | student | other`; the sources
+emit **`REV` / `AUTO` / `MTG` / `INST` / `OPEN`** (credit report) and
+**`MortgageLoan` / `Installment` / `Revolving`** (MISMO). **Which raw code maps to which enum value, and
+should an unmappable code abstain?** ADR-376's closed-vocabulary pattern is the shape to use once the
+mapping is confirmed.

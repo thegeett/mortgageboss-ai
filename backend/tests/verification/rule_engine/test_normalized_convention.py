@@ -263,5 +263,6 @@ def test_registry_drift_guard_and_activation_unchanged() -> None:
             "CL-1",
             "CR-13",
             "PR-6",
+            "CR-12",  # LP-486 — disputed accounts (ADR-376 closed-vocabulary abstain)
         )
     )

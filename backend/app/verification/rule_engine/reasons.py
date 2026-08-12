@@ -44,6 +44,7 @@ _FACT_LABELS: dict[str, str] = {
     "contract.days_until_closing": "days from the file date to the closing date",  # PC-7 (LP-410 / LP-406-1b)
     # LP-485 — the date-compare family. Each label names the MISSING FACT in mortgage terms (never the tag
     # id), because it is what a processor reads when the rule couldnt_checks.
+    "liab.is_disputed": "tradeline's dispute status on the credit report",  # CR-12 (LP-486)
     "rate_lock.days_to_closing": "rate lock's expiration date and the loan's closing date",  # CL-1
     "credit.report_age_months_at_closing": "credit report's pull date and the loan's closing date",  # CR-13
     "property.appraisal_age_months_at_closing": "appraisal's effective date and the loan's closing date",  # PR-6

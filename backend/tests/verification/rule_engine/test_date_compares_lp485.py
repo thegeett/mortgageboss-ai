@@ -2,7 +2,7 @@
 
 ⚠️ CALENDAR MONTHS, NOT DAY APPROXIMATIONS. Fannie states both validity windows in months (B1-1-03: four
 months; B4-1.2-04: twelve months / four for an update). A 30-day approximation differs from the calendar by
-up to three days at four months — enough to pass a document the guide fails. ``_full_months_between`` counts
+up to three days at four months — enough to pass a document the guide fails. ``_age_months_ceiling`` counts
 COMPLETE months and these pin the boundary behaviour.
 
 ⚠️ PR-6 HAS THREE BANDS, and the middle one is a CONDITION, not a failure: an appraisal at six months is
@@ -30,9 +30,9 @@ from app.verification.snapshot.model import (
 )
 from app.verification.snapshot.tag import Tag, TagProducedBy, TagRole, TagStage
 from app.verification.tag_materialization.derived import (
+    _age_months_ceiling,
     _appraisal_age_months,
     _credit_report_age_months,
-    _full_months_between,
     _rate_lock_days_to_closing,
 )
 
@@ -81,16 +81,16 @@ def _with(**dates: str) -> Snapshot:
 @pytest.mark.parametrize(
     ("earlier", "later", "expected"),
     [
-        (date(2026, 4, 1), date(2026, 8, 1), 4),  # exactly four months
-        (date(2026, 4, 2), date(2026, 8, 1), 3),  # one day short — a PARTIAL month does not count
+        (date(2026, 4, 1), date(2026, 8, 1), 4),  # exactly four months — inclusive, still 4
+        (date(2026, 4, 2), date(2026, 8, 1), 4),  # 3m30d — a PARTIAL month ROUNDS UP
         (date(2025, 8, 1), date(2026, 8, 1), 12),  # a full year
         (date(2026, 8, 1), date(2026, 8, 1), 0),  # same day
         (date(2026, 8, 1), date(2026, 7, 1), -1),  # later precedes earlier → negative
-        (date(2026, 1, 31), date(2026, 2, 28), 0),  # month-end: 31 -> 28 is NOT a full month
+        (date(2026, 1, 31), date(2026, 2, 28), 1),  # month-end: a full month HAS elapsed
     ],
 )
-def test_full_months_between(earlier: date, later: date, expected: int) -> None:
-    assert _full_months_between(earlier, later) == expected
+def test_age_months_ceiling(earlier: date, later: date, expected: int) -> None:
+    assert _age_months_ceiling(earlier, later) == expected
 
 
 def test_four_calendar_months_is_not_120_days() -> None:
@@ -98,7 +98,35 @@ def test_four_calendar_months_is_not_120_days() -> None:
     120-day rule would FIRE on it. This is why the tag counts months."""
     earlier, later = date(2026, 4, 1), date(2026, 8, 1)
     assert (later - earlier).days == 122
-    assert _full_months_between(earlier, later) == 4  # within a four-month window
+    assert _age_months_ceiling(earlier, later) == 4  # within a four-month window
+
+
+@pytest.mark.parametrize(
+    ("pulled", "closing", "days_old"),
+    [
+        (date(2026, 3, 25), date(2026, 8, 1), 129),  # 4m 7d
+        (date(2026, 3, 2), date(2026, 8, 1), 152),  # 4m 30d — the worst case
+        (date(2026, 3, 31), date(2026, 8, 1), 123),  # 4m 1d — the first day over
+    ],
+)
+def test_a_document_past_its_window_does_not_clear_it(
+    pulled: date, closing: date, days_old: int
+) -> None:
+    """⚠️ THE REPORTED FN. Flooring to COMPLETE months while the rules compare with strict ``>`` meant
+    ``floor(age) > 4`` only fired at FIVE complete months — so a credit report up to 4 months 30 days old
+    (152 days) returned 4 and CLEARED a four-month limit. Every case here is genuinely over four months
+    and must exceed the limit, not sit on it."""
+    assert (closing - pulled).days == days_old
+    assert _age_months_ceiling(pulled, closing) > 4
+
+
+def test_exactly_at_the_limit_still_passes() -> None:
+    """The other half: rounding up must not make an exactly-conforming document fail. "No more than four
+    months" is INCLUSIVE, so a document exactly four months old sits AT the limit, not over it."""
+    assert _age_months_ceiling(date(2026, 4, 1), date(2026, 8, 1)) == 4
+    assert not _age_months_ceiling(date(2026, 4, 1), date(2026, 8, 1)) > 4
+    assert _age_months_ceiling(date(2025, 8, 1), date(2026, 8, 1)) == 12  # PR-6's 12-month gate
+    assert not _age_months_ceiling(date(2025, 8, 1), date(2026, 8, 1)) > 12
 
 
 # --------------------------------------------------------------------------- #
