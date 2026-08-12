@@ -54,6 +54,27 @@ would() { printf '%s  -> %s%s\n' "$C_BLUE" "$C_RESET" "$*"; }
 # Explicit y/N. Anything other than y/yes is a no, including an empty line.
 # ASSUME_YES short-circuits it but still prints, so the transcript shows the
 # decision that was taken on the operator's behalf.
+# Y/n -- for a step whose safe answer is "go ahead": accepting a value the script
+# derived for itself, where "no" means falling back to typing it by hand. An empty
+# line accepts. Never use this for anything that mutates infrastructure.
+confirm_default_yes() {
+  local prompt="$1" reply
+  if [ "${ASSUME_YES:-0}" = "1" ]; then
+    printf '%s [Y/n] %s(--yes)%s\n' "$prompt" "$C_DIM" "$C_RESET"
+    return 0
+  fi
+  if [ ! -t 0 ]; then
+    die "Cannot ask for confirmation: stdin is not a terminal." \
+      "Re-run interactively, or pass --yes."
+  fi
+  printf '%s%s [Y/n]%s ' "$C_BOLD" "$prompt" "$C_RESET"
+  read -r reply
+  case "$reply" in
+    n | N | no | NO | No) return 1 ;;
+    *) return 0 ;;
+  esac
+}
+
 confirm() {
   local prompt="$1" reply
   if [ "${ASSUME_YES:-0}" = "1" ]; then

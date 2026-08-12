@@ -29,6 +29,10 @@ DNS_TIMEOUT_SECONDS="${DEPLOY_DNS_TIMEOUT_SECONDS:-1800}"
 DNS_POLL_SECONDS="${DEPLOY_DNS_POLL_SECONDS:-30}"
 MIGRATE_TIMEOUT_SECONDS="${DEPLOY_MIGRATE_TIMEOUT_SECONDS:-900}"
 
+# How long `secrets` waits for an ElastiCache AUTH token rotation to become
+# effective. Minutes, not seconds -- the cluster applies it node by node.
+REDIS_AUTH_TIMEOUT_SECONDS="${DEPLOY_REDIS_AUTH_TIMEOUT_SECONDS:-900}"
+
 usage() {
   cat <<'EOF'
 deploy -- staged deployment driver for an infra/envs/<env> environment
@@ -49,8 +53,11 @@ ARGUMENTS
                to go live. Applies nothing.
     images     ECR login, buildx both images for linux/arm64, push, then verify
                the pushed architecture.
-    secrets    Generate and populate the four Secrets Manager values, with
-               validation before writing. Refuses to overwrite without --force.
+    secrets    Populate all four Secrets Manager values. DATABASE_URL is derived
+               from Terraform state and the Redis AUTH token is applied to the
+               cluster, so nothing has to be extracted or pasted by hand. Every
+               value is validated before writing. Refuses to overwrite without
+               --force.
     migrate    Run the one-off Alembic task on ECS, tail its logs, fail on a
                non-zero exit code.
     phase2     Flip TLS + Cognito on and apply. Refuses unless DNS is delegated.
@@ -71,10 +78,11 @@ EXIT CODES
   2  smoke only: every automated check passed, but manual checks are unverified
 
 ENVIRONMENT
-  DEPLOY_DNS_TIMEOUT_SECONDS      default 1800
-  DEPLOY_DNS_POLL_SECONDS         default 30
-  DEPLOY_MIGRATE_TIMEOUT_SECONDS  default 900
-  NO_COLOR                        disable colour
+  DEPLOY_DNS_TIMEOUT_SECONDS         default 1800
+  DEPLOY_DNS_POLL_SECONDS            default 30
+  DEPLOY_MIGRATE_TIMEOUT_SECONDS     default 900
+  DEPLOY_REDIS_AUTH_TIMEOUT_SECONDS  default 900
+  NO_COLOR                           disable colour
 
 See docs/deployment-runbook.md for the full sequence and recovery steps.
 EOF
@@ -550,6 +558,60 @@ validate_redis_url() {
 }
 
 # --------------------------------------------------------------------------- #
+# DATABASE_URL derivation
+#
+# The RDS master password is deliberately NOT a Terraform output -- nothing
+# surfaces it, so it cannot leak through `terraform output` or a CI log. It is
+# nonetheless IN STATE, because a random_password always is, which is why the
+# state bucket is encrypted, versioned and access-blocked.
+#
+# So the stage reads state directly rather than asking the operator to extract
+# and paste a 32-character password. Pasting it was the actual failure mode:
+# three attempts lost to terminal wrapping and clipboard handling, with the only
+# symptom a validator rejection that could not say why.
+#
+# ⚠️ THE PASSWORD MUST NEVER REACH A TERMINAL, ARGV, OR A LOG.
+#   * `terraform state pull` is piped straight into python -- no temp file.
+#   * The extractor is passed with `-c`, which puts the PROGRAM in argv. That is
+#     fine: the program is a fixed string with no secret in it, and the state
+#     itself must stay on stdin. It cannot be a `- <<'HEREDOC'` instead -- the
+#     heredoc would BECOME python's stdin and the piped state would never arrive,
+#     which is exactly the bug the scratch harness caught here.
+#   * The value lands in a shell variable, which is not visible in `ps` and is
+#     not exported, so it is not in /proc/<pid>/environ.
+#   * Display is built from PARTS with a literal `****`, never by substituting
+#     the password out of the real URL -- a redaction that can fail open is not
+#     a redaction.
+#   * The write goes through put_secret, which uses a 0600 file and the printf
+#     BUILTIN, so the value never becomes a process argument.
+# --------------------------------------------------------------------------- #
+
+# Prints the password on stdout for capture, or nothing and returns 1. Callers
+# must not log the result. Deliberately silent on every failure path so the
+# caller can fall back to prompting.
+db_password_from_state() {
+  local py="$1" pw
+  set +x # defensive: never expand this under xtrace, whatever the caller did
+  pw=$(tf "$ENV_DIR" state pull 2>/dev/null | "$py" -c '
+import json, sys
+try:
+    state = json.load(sys.stdin)
+except Exception:
+    sys.exit(1)
+for res in state.get("resources", []):
+    if res.get("type") == "random_password" and res.get("name") == "db":
+        for inst in res.get("instances", []):
+            value = inst.get("attributes", {}).get("result")
+            if value:
+                sys.stdout.write(value)
+                sys.exit(0)
+sys.exit(1)
+') || return 1
+  [ -n "$pw" ] || return 1
+  printf '%s' "$pw"
+}
+
+# --------------------------------------------------------------------------- #
 # Redis AUTH reconciliation
 #
 # Two different facts, easily confused, and the gap between them is silent:
@@ -649,6 +711,109 @@ assert_redis_auth_agrees() {
     info "  Supply the token in the URL, or remove it from the cluster."
   fi
   return 0
+}
+
+# --------------------------------------------------------------------------- #
+# Applying a Redis AUTH token
+#
+# ⚠️ THIS MODIFIES A LIVE CLUSTER. It is gated on an explicit confirmation and
+# runs only when the cluster has NO token yet.
+# --------------------------------------------------------------------------- #
+
+# The token alphabet is RFC 3986 UNRESERVED characters only: ALPHA / DIGIT /
+# "-" / "." / "_" / "~".
+#
+# That satisfies three constraints at once rather than just the AWS one:
+#   * ElastiCache forbids '/', '"', '@' and '%' -- none are here.
+#   * None is special to a shell, so the value cannot be mangled by quoting.
+#   * Unreserved characters need NO percent-encoding in a URL userinfo, so the
+#     token drops into rediss://:TOKEN@host verbatim. This is the same reasoning
+#     that shaped the RDS password's override_special set, and it removes
+#     encoding as a category of error.
+#
+# 32 characters over a 66-character alphabet is about 193 bits. The program is
+# fed to python on STDIN, not with -c, so it never appears in argv.
+generate_redis_auth_token() {
+  "$1" - <<'PY'
+import secrets, string
+alphabet = string.ascii_letters + string.digits + "-._~"
+sys_out = "".join(secrets.choice(alphabet) for _ in range(32))
+print(sys_out, end="")
+PY
+}
+
+# Set by apply_redis_auth_token. A GLOBAL rather than a stdout capture on
+# purpose: a function whose value is captured through $( ) must keep every
+# progress line off stdout, and getting that wrong is exactly the bug that made
+# this stage unusable in the first place. Progress here is genuinely useful --
+# the modify takes minutes -- so the value travels out of band instead.
+REDIS_AUTH_TOKEN=""
+
+apply_redis_auth_token() {
+  local py="$1" endpoint="$2" rg="$3"
+  local token f elapsed=0 status auth
+  REDIS_AUTH_TOKEN=""
+
+  token=$(generate_redis_auth_token "$py") || die "Could not generate an AUTH token."
+  if [ "${#token}" -ne 32 ]; then
+    die "Generated AUTH token is ${#token} characters, expected 32." \
+      "Nothing was changed."
+  fi
+
+  # ⚠️ --cli-input-json, NOT --auth-token on the command line. A token passed as
+  # an argument is visible in `ps` to every user on the machine for as long as
+  # the call runs. The file is 0600 inside the run's own temp directory and is
+  # removed immediately; the exit trap removes the directory even on Ctrl-C.
+  f="$SECRET_TMPDIR/redis-auth.$$.json"
+  (
+    umask 077
+    printf '{"ReplicationGroupId":"%s","AuthToken":"%s","AuthTokenUpdateStrategy":"ROTATE","ApplyImmediately":true}\n' \
+      "$rg" "$token" >"$f"
+  )
+
+  would "aws elasticache modify-replication-group --replication-group-id $rg \\"
+  would "  --auth-token <generated> --auth-token-update-strategy ROTATE --apply-immediately"
+  if ! awsx elasticache modify-replication-group --cli-input-json "file://$f" >/dev/null 2>&1; then
+    rm -f "$f"
+    die "modify-replication-group failed for $rg." \
+      "Nothing was written to Secrets Manager. Re-run once the cause is fixed;" \
+      "if the token WAS applied despite the error, this stage will detect it and" \
+      "fall back to prompting, because it will not rotate a token it does not know."
+  fi
+  rm -f "$f"
+  ok "token submitted; the cluster is now applying it"
+
+  info "  Waiting for status=available AND AuthTokenEnabled=true."
+  info "  This takes minutes. Ctrl-C is safe here -- the modify is already"
+  info "  submitted, and re-running the stage picks up from whatever state the"
+  info "  cluster reaches."
+
+  while [ "$elapsed" -lt "$REDIS_AUTH_TIMEOUT_SECONDS" ]; do
+    status=$(awsx elasticache describe-replication-groups \
+      --query "ReplicationGroups[?NodeGroups[?PrimaryEndpoint.Address=='${endpoint}']].Status | [0]" \
+      --output text 2>/dev/null || printf 'unknown')
+    auth=$(redis_auth_token_enabled "$endpoint")
+    if [ "$status" = "available" ] && [ "$auth" = "True" ]; then
+      ok "AUTH token active after ${elapsed}s (status=$status, AuthTokenEnabled=$auth)"
+      REDIS_AUTH_TOKEN="$token"
+      return 0
+    fi
+    note "  ${elapsed}s: status=${status:-?} AuthTokenEnabled=${auth:-?}"
+    sleep 15
+    elapsed=$((elapsed + 15))
+  done
+
+  die "The cluster did not reach status=available with AuthTokenEnabled=true within ${REDIS_AUTH_TIMEOUT_SECONDS}s." \
+    "Last seen: status=${status:-?} AuthTokenEnabled=${auth:-?}" \
+    "The token WAS submitted, so it may still be applying -- but this run does not" \
+    "know whether it took effect, and it will not write a URL it cannot verify." \
+    "Nothing was written to Secrets Manager." \
+    "" \
+    "⚠️ The generated token is now DISCARDED. If the rotation did complete, the" \
+    "cluster holds a token nobody knows, and the only way forward is another" \
+    "rotation -- re-run this stage once the cluster is available and it will" \
+    "detect the existing token and ask you to supply the URL instead." \
+    "Raise DEPLOY_REDIS_AUTH_TIMEOUT_SECONDS if the cluster is simply slow."
 }
 
 # Does a rediss:// URL carry a credential? Userinfo is whatever precedes '@'
@@ -782,7 +947,12 @@ stage_secrets() {
         # Construct one from the generated value before writing it: a length check
         # would accept values Fernet rejects at the first SSN write, inside a
         # request handler.
-        "$fernet_py" -c 'import sys;from cryptography.fernet import Fernet;Fernet(sys.argv[1])' "$fkey" \
+        # ⚠️ The key goes in on STDIN, not as an argument. `sys.argv[1]` put the
+        # encryption key in the process's command line, where `ps` shows it to
+        # every user on the machine for the life of the call. printf is a shell
+        # builtin, so the value never becomes a process argument at all.
+        printf '%s' "$fkey" \
+          | "$fernet_py" -c 'import sys;from cryptography.fernet import Fernet;Fernet(sys.stdin.read())' \
           || die "Generated encryption-key did not construct as a Fernet key." \
             "Nothing was written."
         would "put-secret-value $id  (generated Fernet key, validated by construction)"
@@ -791,17 +961,45 @@ stage_secrets() {
         ok "$key written and validated" ;;
 
       database-url)
-        local host db user suggestion url
+        local host db user suggestion url redacted pw
         host=$(out rds_address); db=$(out rds_database_name); user=$(out rds_username)
         suggestion="postgresql+asyncpg://${user}:<PASSWORD>@${host}:5432/${db}?ssl=verify-full"
-        info ""
-        hazard "The RDS master password is deliberately NOT a Terraform output."
-        info "  It exists in state but nothing surfaces it, so it cannot leak through"
-        info "  a terraform output or a CI log. Take it from the console or state."
-        url=$(prompt_with_suggestion "DATABASE_URL" "$suggestion")
+        url=""
+
+        pw=$(db_password_from_state "$py") || pw=""
+
+        if [ -n "$pw" ]; then
+          # Built from parts, so the displayed string never contains the
+          # password at any point -- there is nothing to redact and therefore
+          # nothing that can fail to be redacted.
+          redacted="postgresql+asyncpg://${user}:****@${host}:5432/${db}?ssl=verify-full"
+          info ""
+          info "  Derived from Terraform state -- nothing to paste:"
+          info ""
+          info "    ${redacted}"
+          info ""
+          note "  Password read from module.data.random_password.db (${#pw} characters)."
+          note "  It is never displayed, never placed on a command line, and is written"
+          note "  through a 0600 file that this run deletes."
+          if confirm_default_yes "  Use this DATABASE_URL?"; then
+            url="postgresql+asyncpg://${user}:${pw}@${host}:5432/${db}?ssl=verify-full"
+          else
+            note "  Falling back to entering it by hand."
+          fi
+        else
+          info ""
+          hazard "Could not read the master password from Terraform state."
+          info "  The state read failed, or this environment's state has no"
+          info "  module.data.random_password.db. Falling back to entering the URL."
+          info "  The password is deliberately NOT a Terraform output, so take it from"
+          info "  the RDS console or from state by hand."
+        fi
+
+        [ -n "$url" ] || url=$(prompt_with_suggestion "DATABASE_URL" "$suggestion")
         validate_database_url "$url"
         would "put-secret-value $id  (validated: asyncpg spelling, ssl parameter present)"
         put_secret "$id" "$url"
+        url=""; pw=""
         ok "$key written" ;;
 
       redis-url)
@@ -822,29 +1020,99 @@ stage_secrets() {
 
         needs_auth=$(out_opt redis_requires_auth_token)
         has_auth=$(redis_auth_token_enabled "$endpoint")
+        rurl=""
 
-        # The check that did not exist. `redis_requires_auth_token` is what
-        # Terraform was CONFIGURED to expect; AuthTokenEnabled is what the
-        # cluster actually has. They drift because the token is applied out of
-        # band, and nothing reconciles them -- so the mismatch surfaced in the
-        # WORKER as a NOAUTH error long after this stage reported success.
-        assert_redis_auth_agrees "$needs_auth" "$has_auth" "$endpoint"
+        if [ "$needs_auth" = "true" ] && [ "$has_auth" = "False" ]; then
+          # The cluster needs a token and has none. Rather than refusing and
+          # sending the operator away to run the command by hand, apply it here
+          # and build the URL from the token in the SAME RUN -- which is the only
+          # arrangement in which the token never has to be displayed, copied, or
+          # stored anywhere but Secrets Manager.
+          local rg
+          rg=$(redis_replication_group_id "$endpoint")
+          [ -n "$rg" ] || die \
+            "Could not resolve the replication group id for ${endpoint}." \
+            "Nothing was changed."
 
-        if [ "$has_auth" = "True" ]; then
-          suggestion="${scheme}://:<AUTH_TOKEN>@${endpoint}:6379/0?ssl_cert_reqs=required"
           info ""
-          hazard "This cluster REQUIRES an AUTH token, so REDIS_URL carries a credential."
-          info "  Empty username, then the token: rediss://:TOKEN@host -- Redis AUTH"
-          info "  with a single token has no username."
+          hazard "THIS MODIFIES A LIVE CLUSTER."
+          info ""
+          info "  replication group : ${C_BOLD}${rg}${C_RESET}"
+          info "  endpoint          : ${endpoint}"
+          info "  AuthTokenEnabled  : False  ->  true"
+          info ""
+          info "  A 32-character token will be generated, applied with"
+          info "  --auth-token-update-strategy ROTATE (SET is rejected until a"
+          info "  rotation has occurred, and this group has never had one), and used"
+          info "  to build REDIS_URL immediately."
+          info ""
+          info "  The token is never printed. It exists in this process and in the"
+          info "  redis-url secret, and nowhere else -- so if the write fails, the"
+          info "  recovery is another rotation, not a lookup."
+          info ""
+          note "  Existing connections are not interrupted by adding a token, but"
+          note "  anything already using this cache without one will start failing"
+          note "  authentication once it is active. Nothing runs yet in this"
+          note "  environment -- no images are deployed."
+
+          if ! confirm "  Apply an AUTH token to ${rg} now?"; then
+            info ""
+            info "  Declined. To do it by hand instead:"
+            redis_apply_token_instructions "$endpoint"
+            die "Refusing to populate redis-url while the cluster has no AUTH token." \
+              "Nothing was changed and nothing was written."
+          fi
+
+          apply_redis_auth_token "$py" "$endpoint" "$rg"
+          rurl="${scheme}://:${REDIS_AUTH_TOKEN}@${endpoint}:6379/0?ssl_cert_reqs=required"
+          has_auth="True"
+          info ""
+          info "  REDIS_URL built from the token just applied:"
+          info "    ${scheme}://:****@${endpoint}:6379/0?ssl_cert_reqs=required"
+
+        elif [ "$needs_auth" != "true" ] && [ "$has_auth" = "False" ]; then
+          # No token wanted, none present: the URL carries no credential and is
+          # fully derivable.
+          rurl="${scheme}://${endpoint}:6379/0?ssl_cert_reqs=required"
+          info ""
+          info "  Derived -- this cache has no AUTH token, so the URL carries no"
+          info "  credential:"
+          info "    ${rurl}"
+          confirm_default_yes "  Use this REDIS_URL?" || rurl=""
+
         else
-          suggestion="${scheme}://${endpoint}:6379/0?ssl_cert_reqs=required"
+          # Two remaining cases, both of which must NOT rotate:
+          #   has_auth=True  -- a token exists and this script does not know it.
+          #                     Rotating would break every consumer already using
+          #                     it, so the operator supplies the URL.
+          #   has_auth=""    -- the cluster could not be read at all.
+          assert_redis_auth_agrees "$needs_auth" "$has_auth" "$endpoint"
+          if [ "$has_auth" = "True" ]; then
+            info ""
+            hazard "This cluster ALREADY has an AUTH token, so nothing is rotated here."
+            info "  The existing token is not knowable from Terraform state or from any"
+            info "  API -- ElastiCache never returns it. Rotating to a token this script"
+            info "  generated would silently break every consumer still using the old"
+            info "  one, so the URL has to be supplied."
+            info "  Shape: ${scheme}://:TOKEN@${endpoint}:6379/0?ssl_cert_reqs=required"
+            info "  -- empty username, colon immediately after the slashes."
+          fi
         fi
 
-        rurl=$(prompt_with_suggestion "REDIS_URL" "$suggestion")
+        if [ -z "$rurl" ]; then
+          if [ "$has_auth" = "True" ]; then
+            suggestion="${scheme}://:<AUTH_TOKEN>@${endpoint}:6379/0?ssl_cert_reqs=required"
+          else
+            suggestion="${scheme}://${endpoint}:6379/0?ssl_cert_reqs=required"
+          fi
+          rurl=$(prompt_with_suggestion "REDIS_URL" "$suggestion")
+        fi
+
         validate_redis_url "$rurl"
         assert_redis_credential_matches "$rurl" "$has_auth" "$endpoint"
         would "put-secret-value $id  (validated: rediss scheme, ssl_cert_reqs, credential matches cluster)"
         put_secret "$id" "$rurl"
+        rurl=""; REDIS_AUTH_TOKEN=""
         ok "$key written" ;;
 
       *)
