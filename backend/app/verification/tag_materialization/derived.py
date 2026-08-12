@@ -1203,7 +1203,7 @@ def _single_parsed_date(snapshot: Snapshot, tag_id: str) -> tuple[date | None, s
     distinct values mean the file genuinely contradicts itself and there is no answer to pick.
 
     It is WRONG for a per-document date on a type that legitimately recurs — see
-    :func:`_most_recent_parsed_date`, which those use instead.
+    :func:`_most_recent_parsed_date` and :func:`_earliest_parsed_date`, which those use instead.
     """
     dates = _parsed_dates(snapshot, tag_id)
     if not dates:
@@ -1216,26 +1216,58 @@ def _single_parsed_date(snapshot: Snapshot, tag_id: str) -> tuple[date | None, s
     return next(iter(dates)), None
 
 
+# ⚠️ THE DATE-SELECTION POLICY IS PER TAG, NOT PER FAMILY (a reported regression, corrected here).
+#
+# A per-document date tag can appear several times on one file, and the right pick differs by tag. An
+# earlier fix replaced abstain-on-disagreement with most-recent-wins for ALL THREE date tags on the
+# grounds that "a re-pull, a re-issued LE and a 1004D are all second documents". That reasoning holds for
+# exactly one of them and introduced a false-satisfied in the other two:
+#
+#   credit.report_date        max()  — the GUIDELINE says so. B1-1-03 ages credit documents from the MOST
+#                                      RECENT pull, so a fresh pull genuinely resets the clock.
+#   property.appraisal_date   min()  — B4-1.2-04 measures BOTH bands (4-month update, 12-month new
+#                                      appraisal) from the ORIGINAL effective date; a Form 1004D update
+#                                      does NOT restart it. And the classifier has ONE `appraisal` type,
+#                                      so a 1004D is indistinguishable from a replacement report — max()
+#                                      let an update reset the 12-month clock and turned PR-6's
+#                                      "a NEW appraisal is required" band into `satisfied`, contradicting
+#                                      PR-6's own spec text.
+#   rate_lock.expiration      min()  — the value is an EXPIRY, not a document date, so max() means "the
+#                                      most permissive expiry anywhere in the file". A superseded LE
+#                                      locked through September masks a re-lock that expired in July.
+#
+# The rule where the guideline is silent: take the CONSERVATIVE date — the one that makes the rule MORE
+# likely to flag. Both bars call the false-negative the costly direction (a stale appraisal / a lapsed
+# lock closes the loan; the false positive is a processor checking one date).
 def _most_recent_parsed_date(snapshot: Snapshot, tag_id: str) -> tuple[date | None, str | None]:
     """The LATEST parseable value of ``tag_id``, or ``(None, reason)`` when none parses.
 
-    ⚠️ Reported finding, and the fix matters more than it looks. ``rate_lock.expiration``,
-    ``credit.report_date`` and ``property.appraisal_date`` are PER-DOCUMENT tags on document types a real
-    file carries several of: a re-issued loan estimate after a change of circumstance brings a new lock
-    expiration, a re-pull adds a second credit report, a Form 1004D adds a second appraisal date. Under
-    :func:`_single_parsed_date` two dates collapsed to "the documents disagree" → ``couldnt_check``, so
-    these rules abstained on exactly the files they exist for — and CR-13's own ``how_to_fix`` ("order a
-    new credit report") would have turned a ``fired`` into a PERMANENT ``couldnt_check`` instead of a
-    ``satisfied``, because the new pull is a second date, not a replacement.
-
-    Most-recent-wins is also what the guideline says: B1-1-03 ages the credit documents from the MOST
-    RECENT pull, and an appraisal update supersedes its predecessor. This is not a tie-break of
-    convenience — it is the rule the agency states.
+    Correct ONLY where a newer document genuinely supersedes its predecessor for the question being
+    asked — today that is ``credit.report_date`` alone (B1-1-03 ages from the most recent pull). See the
+    policy note above before pointing a new tag at this.
     """
     dates = _parsed_dates(snapshot, tag_id)
     if not dates:
         return None, "not stated (or not parseable) anywhere in the file"
     return max(dates), None
+
+
+def _earliest_parsed_date(snapshot: Snapshot, tag_id: str) -> tuple[date | None, str | None]:
+    """The EARLIEST parseable value of ``tag_id``, or ``(None, reason)`` when none parses.
+
+    The conservative pick, for a tag whose duplicates cannot be ranked by supersession from the snapshot
+    alone (see the policy note above): the oldest appraisal effective date, the soonest lock expiry.
+
+    ⚠️ It trades a known false-positive for an unacceptable false-negative, deliberately. A file carrying
+    a genuinely REPLACED appraisal (a second full report, not a 1004D) ages from the superseded one and
+    may flag when it need not — a processor confirms which report governs. The alternative is closing a
+    loan on a fifteen-month-old value because an update reset the clock. Given PR-6/CL-1's stated
+    FN >> FP asymmetry, flagging is the safe error.
+    """
+    dates = _parsed_dates(snapshot, tag_id)
+    if not dates:
+        return None, "not stated (or not parseable) anywhere in the file"
+    return min(dates), None
 
 
 def _shift_months(anchor: date, months: int) -> date:
@@ -1280,7 +1312,11 @@ def _age_months_ceiling(earlier: date, later: date) -> int:
 
 
 def _age_in_months_at_closing(
-    snapshot: Snapshot, document_date_tag: str, label: str
+    snapshot: Snapshot,
+    document_date_tag: str,
+    label: str,
+    *,
+    pick: Callable[[Snapshot, str], tuple[date | None, str | None]],
 ) -> tuple[JsonValue, str]:
     """Shared body for CR-13 / PR-6: COMPLETE calendar months from a document's date to the closing date.
 
@@ -1290,11 +1326,12 @@ def _age_in_months_at_closing(
 
     Fail-closed: either date absent, unparseable, or disagreed-upon → ``unknown`` (never 0, never a default).
 
-    ⚠️ The document date is the MOST RECENT one (:func:`_most_recent_parsed_date`), not the sole one — a
-    re-pulled credit report or a 1004D update is a second date, and the guideline ages from the newest.
+    ⚠️ ``pick`` is the caller's DATE-SELECTION POLICY and is deliberately explicit — see the policy note
+    above :func:`_most_recent_parsed_date`. Credit ages from the newest pull; an appraisal ages from the
+    ORIGINAL effective date. Defaulting either way silently is how the 1004D regression happened.
     The CLOSING date stays abstain-on-disagreement: that is one fact restated, so a contradiction is real.
     """
-    doc_date, why = _most_recent_parsed_date(snapshot, document_date_tag)
+    doc_date, why = pick(snapshot, document_date_tag)
     if doc_date is None:
         return _UNKNOWN, f"the {label} date is {why}"
     closing, why_closing = _single_parsed_date(snapshot, "contract.closing_date")
@@ -1320,16 +1357,29 @@ def _age_in_months_at_closing(
 def _credit_report_age_months(
     snapshot: Snapshot, _subject_id: str, _subject_raw: object
 ) -> tuple[JsonValue, str]:
-    """credit.report_age_months_at_closing — complete calendar months from the credit pull to closing (CR-13)."""
-    return _age_in_months_at_closing(snapshot, "credit.report_date", "credit report")
+    """credit.report_age_months_at_closing — calendar months from the credit pull to closing (CR-13).
+
+    MOST RECENT pull: B1-1-03 ages the credit documents from the newest report, so a re-pull resets it.
+    """
+    return _age_in_months_at_closing(
+        snapshot, "credit.report_date", "credit report", pick=_most_recent_parsed_date
+    )
 
 
 def _appraisal_age_months(
     snapshot: Snapshot, _subject_id: str, _subject_raw: object
 ) -> tuple[JsonValue, str]:
-    """property.appraisal_age_months_at_closing — complete calendar months from the appraisal's EFFECTIVE
-    date to closing (PR-6). B4-1.2-04 measures from the effective date, not the report/signature date."""
-    return _age_in_months_at_closing(snapshot, "property.appraisal_date", "appraisal")
+    """property.appraisal_age_months_at_closing — calendar months from the appraisal's EFFECTIVE date to
+    closing (PR-6). B4-1.2-04 measures from the effective date, not the report/signature date.
+
+    ⚠️ EARLIEST effective date. Both of PR-6's bands run from the ORIGINAL appraisal — a Form 1004D update
+    does not restart the twelve-month clock, and the classifier cannot tell an update from a replacement
+    (one `appraisal` type). Taking the newest let an update reset the clock and reported a fifteen-month-old
+    value as `satisfied`.
+    """
+    return _age_in_months_at_closing(
+        snapshot, "property.appraisal_date", "appraisal", pick=_earliest_parsed_date
+    )
 
 
 def _rate_lock_days_to_closing(
@@ -1341,7 +1391,10 @@ def _rate_lock_days_to_closing(
     A day count is correct here (unlike the month-stated guideline windows): a lock expires on a date, and
     the question is simply which date comes first. Fail-closed to unknown on either side.
     """
-    expiry, why = _most_recent_parsed_date(snapshot, "rate_lock.expiration")
+    # ⚠️ SOONEST expiry, not the latest. This tag's value is an EXPIRY, not a document date, so "latest"
+    # means "the most permissive lock anywhere in the file" — a superseded loan estimate locked through
+    # September would mask a re-lock that expired in July, and CL-1 would pass an expired lock.
+    expiry, why = _earliest_parsed_date(snapshot, "rate_lock.expiration")
     if expiry is None:
         return _UNKNOWN, f"the rate lock expiration is {why}"
     closing, why_closing = _single_parsed_date(snapshot, "contract.closing_date")
@@ -1353,8 +1406,11 @@ def _rate_lock_days_to_closing(
     days = (expiry - closing).days
     return (
         str(days),
-        f"the rate lock expires {expiry.isoformat()}, {days} day(s) "
-        f"{'after' if days >= 0 else 'BEFORE'} the closing date {closing.isoformat()}",
+        # `days` is SIGNED, so the sentence must not ALSO say before/after — "-14 day(s) BEFORE closing"
+        # is the double negative the CL-1 spec was corrected for; this string is processor-visible too
+        # (CL-1's evidence_required asks for the signed number inline on the finding).
+        f"the rate lock expires {expiry.isoformat()}; lock-to-closing margin {days} day(s) "
+        f"against the closing date {closing.isoformat()} (negative = the lock lapses first)",
     )
 
 
@@ -1421,7 +1477,12 @@ def _liability_dispute_status(
 
     if not isinstance(subject_raw, LiabilityRow):
         return _UNKNOWN, "not a liability subject"
-    field = subject_raw.fields.get("is_disputed")
+    # ⚠️ Resolve the CANONICAL name through the liability alias map, never the raw column. The alias map
+    # is the documented place a ListSpec rename is absorbed; hard-coding the column meant a rename would
+    # keep every other liability reader working while this recipe abstained on every tradeline on every
+    # file — the silent false-negative ADR-376 exists to prevent, and one the tests could not catch
+    # because their fixtures build the field under the literal name.
+    field = subject_type("liability").read_field(subject_raw, "is_disputed")
     if field is None or not field.is_present:
         return _UNKNOWN, "this tradeline states no dispute flag"
     # A list-row field is a plain Field, never a PiiField (model.py) — but the union is what the type says,

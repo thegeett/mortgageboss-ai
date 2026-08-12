@@ -84,6 +84,19 @@ spec_version: 1
 # "unknown" tag coerces through the gate to couldnt_check BEFORE this body runs, so an unrecognised or
 # absent dispute value can never reach the default and read as "no dispute".
 deterministic:
+  # ⚠️ SCOPE THE SUBJECT SET (reported finding). per_liability UNIONS credit-report tradelines with the
+  # application's MISMO stated liabilities, and only the credit-report leg can carry a dispute remark —
+  # the alias map has no `is_disputed` for `mismo_stated`. Without this predicate every stated liability
+  # became a permanent, unfixable couldnt_check whose how_to_fix says "read the tradeline's dispute
+  # remark on the credit report" when there IS no tradeline: a file with 8 stated liabilities produced 8
+  # of them. That is the flooding the applicability layer exists to prevent (§8 Tab 4, not_applicable).
+  #
+  # This narrows the SUBJECTS, never the abstain: a credit-report tradeline whose remark is unreadable
+  # still gates to couldnt_check, which is ADR-376's whole point.
+  applicability:
+    tag: liability.source
+    op: eq
+    value: credit_report_reported
   load_bearing_tags:
     - liab.is_disputed
   gated_tags:

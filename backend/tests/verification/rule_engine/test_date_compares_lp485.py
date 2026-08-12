@@ -136,14 +136,18 @@ def test_lock_expiring_after_closing_is_positive() -> None:
     value, reason = _rate_lock_days_to_closing(
         _with(closing="2026-09-01", lock="2026-09-15"), "loan", None
     )
-    assert value == "14" and "after" in reason
+    assert value == "14" and "margin 14 day(s)" in reason
 
 
 def test_lock_expiring_before_closing_is_negative() -> None:
     value, reason = _rate_lock_days_to_closing(
         _with(closing="2026-09-15", lock="2026-09-01"), "loan", None
     )
-    assert value == "-14" and "BEFORE" in reason
+    # ⚠️ The reasoning must NOT also say "before" — `days` is signed, so "-14 day(s) BEFORE closing" is
+    # the double negative the CL-1 spec was corrected for. This string is processor-visible too.
+    assert value == "-14"
+    assert "margin -14 day(s)" in reason
+    assert "BEFORE" not in reason
 
 
 def test_no_loan_estimate_abstains_never_zero() -> None:
@@ -293,3 +297,52 @@ def test_cl1_carries_no_domain_threshold() -> None:
     spec = load_rule_spec("CL-1")
     assert set(spec.reference_values.values) == {"zero"}
     assert spec.reference_values.threshold_needs_signoff is False
+
+
+# --------------------------------------------------------------------------- #
+# The DATE-SELECTION POLICY is per tag — the reported regression
+# --------------------------------------------------------------------------- #
+def test_an_appraisal_update_does_not_reset_the_twelve_month_clock() -> None:
+    """⚠️ THE REGRESSION. B4-1.2-04 measures BOTH bands from the ORIGINAL effective date, and the
+    classifier has one `appraisal` type — so a Form 1004D update is just a second appraisal date. Taking
+    the MOST RECENT let the update reset the clock: a fifteen-month-old value reported as ~2 months and
+    PR-6 defaulted to `satisfied`, contradicting its own "a NEW appraisal is required" band."""
+    snap = _snapshot(
+        **{
+            "doc-orig": {"property.appraisal_date": _tag("2025-05-01")},
+            "doc-1004d": {"property.appraisal_date": _tag("2026-06-01")},
+            "doc-contract": {"contract.closing_date": _tag("2026-08-01")},
+        }
+    )
+    value, reason = _appraisal_age_months(snap, "loan", None)
+    assert value == "15", reason  # aged from the ORIGINAL, not the update
+    assert int(value) > 12  # PR-6's "new appraisal required" band
+
+
+def test_a_superseded_loan_estimate_cannot_mask_an_expired_lock() -> None:
+    """⚠️ THE REGRESSION. `rate_lock.expiration`'s VALUE is an expiry, not a document date, so taking the
+    latest meant "the most permissive lock anywhere in the file": an initial LE locked through September
+    hid a re-lock that expired in July, and CL-1 passed an expired lock."""
+    snap = _snapshot(
+        **{
+            "doc-le1": {"rate_lock.expiration": _tag("2026-09-30")},
+            "doc-le2": {"rate_lock.expiration": _tag("2026-07-15")},
+            "doc-contract": {"contract.closing_date": _tag("2026-08-01")},
+        }
+    )
+    value, _ = _rate_lock_days_to_closing(snap, "loan", None)
+    assert int(value) < 0, "the soonest expiry governs — the lock lapses before closing"
+
+
+def test_a_credit_re_pull_DOES_reset_the_clock() -> None:
+    """The other half: most-recent-wins is correct here because B1-1-03 SAYS so. A re-pull is the answer,
+    not a contradiction — this is why the policy is per tag rather than one rule for the family."""
+    snap = _snapshot(
+        **{
+            "doc-old": {"credit.report_date": _tag("2026-01-05")},
+            "doc-new": {"credit.report_date": _tag("2026-07-20")},
+            "doc-contract": {"contract.closing_date": _tag("2026-08-01")},
+        }
+    )
+    value, _ = _credit_report_age_months(snap, "loan", None)
+    assert value == "1"  # the fresh pull governs, not the stale one

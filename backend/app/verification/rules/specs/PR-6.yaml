@@ -37,7 +37,7 @@ criteria: >-
   The appraisal must be current at the note date. Fannie Mae requires the property to have been appraised
   within the 12 months prior to the note date; when the appraisal's effective date is more than four months
   before the note date, an appraisal update (Form 1004D) is required; beyond 12 months a new appraisal is
-  required. This compares the derived property.appraisal_age_months_at_closing (complete calendar months
+  required. This compares the derived property.appraisal_age_months_at_closing (calendar months
   from the appraisal's EFFECTIVE date to the loan's closing date) against those two bounds. Absent or
   unparseable dates resolve to couldnt_check, never a guessed pass.
 
@@ -69,14 +69,14 @@ required_inputs:
   - name: appraisal_age_months_at_closing
     snapshot_path: 'tags.by_subject["loan"]["property.appraisal_age_months_at_closing"]'
     description: >-
-      complete calendar months from the appraisal's EFFECTIVE date to the loan's closing date (derived,
+      calendar months from the appraisal's EFFECTIVE date to the loan's closing date (derived,
       LP-485): "unknown" = either date is absent, unparseable, or the file's documents disagree.
 
 subject_enumeration: loan          # property.appraisal_age_months_at_closing is produced at the loan subject
 subject_key_fields: [loan]
 
 evidence_required: >-
-  The appraisal's effective date, the loan's closing date, the complete calendar months between them, and
+  The appraisal's effective date, the loan's closing date, the calendar months between them, and
   which band that falls in (acceptable / update required / new appraisal required) — inline on the finding.
 
 guideline_reference: "Fannie Mae Selling Guide B4-1.2-04 (Appraisal Age and Use Requirements), page dated 06/04/2025 — the property must be appraised within the 12 months prior to the note date; an update is required beyond four months."
@@ -100,7 +100,7 @@ deterministic:
       # BAND 3 — beyond 12 months: a new appraisal. Tested FIRST; ordering is load-bearing here.
       when_compare: {op: ">", left: age_months, right: max_months}
       reasoning: >-
-        the appraisal's effective date is {age_months} complete calendar month(s) before the loan's closing
+        the appraisal's effective date is {age_months} calendar month(s) (a partial month counts as a full one) before the loan's closing
         date, beyond the {max_months}-month limit — a NEW appraisal is required, not an update
       how_to_fix: >-
         Order a new appraisal. An appraisal update (Form 1004D) does not satisfy the requirement once the
@@ -110,7 +110,7 @@ deterministic:
       # the appraisal is usable, it needs one more document. Reporting it `fired` would misstate the file.
       when_compare: {op: ">", left: age_months, right: update_after}
       reasoning: >-
-        the appraisal's effective date is {age_months} complete calendar month(s) before the loan's closing
+        the appraisal's effective date is {age_months} calendar month(s) (a partial month counts as a full one) before the loan's closing
         date — still within the {max_months}-month limit, but beyond {update_after} months, so an appraisal
         update (Form 1004D) is required before closing
       how_to_fix: >-
@@ -119,5 +119,5 @@ deterministic:
     - verdict: satisfied
       default: true
       reasoning: >-
-        the appraisal's effective date is {age_months} complete calendar month(s) before the loan's closing
+        the appraisal's effective date is {age_months} calendar month(s) (a partial month counts as a full one) before the loan's closing
         date, within the {update_after}-month window that needs no update

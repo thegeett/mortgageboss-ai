@@ -45,6 +45,10 @@ _FACT_LABELS: dict[str, str] = {
     # LP-485 — the date-compare family. Each label names the MISSING FACT in mortgage terms (never the tag
     # id), because it is what a processor reads when the rule couldnt_checks.
     "liab.is_disputed": "tradeline's dispute status on the credit report",  # CR-12 (LP-486)
+    # CR-12's applicability predicate: the structural marker saying WHICH source a liability subject came
+    # from (a credit-report tradeline vs an application-stated liability). It scopes CR-12 to the
+    # credit-report leg, so a processor seeing it needs the plain-language reason the check did not apply.
+    "liability.source": "whether the debt came from the credit report or the application",
     "rate_lock.days_to_closing": "rate lock's expiration date and the loan's closing date",  # CL-1
     "credit.report_age_months_at_closing": "credit report's pull date and the loan's closing date",  # CR-13
     "property.appraisal_age_months_at_closing": "appraisal's effective date and the loan's closing date",  # PR-6
