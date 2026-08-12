@@ -230,6 +230,13 @@ def _legal_universe(decl: TagDeclaration, doc_fields: set[str]) -> tuple[str, se
         return "MISMO loan fact", set(_MISMO_LOAN_KEYS)
     if decl.subject == "borrower":
         return "MISMO borrower field", set(_MISMO_BORROWER_SUFFIXES)
+    if decl.subject == "liability":
+        # LP-483 review: ``_resolves`` gained a liability branch and this did not, so a typo'd liability
+        # declaration failed with an EMPTY universe and "no close reference match" — losing exactly the
+        # nearest-legal-name hint this D5 section exists to give.
+        return "liability field", {
+            name for aliases in _LIABILITY_FIELD_ALIASES.values() for name in aliases
+        }
     return "reference", set()
 
 

@@ -202,7 +202,13 @@ _LIABILITY_FIELD_ALIASES: dict[str, dict[str, str]] = {
         "creditor_name": "creditor_name",
         "is_disputed": "is_disputed",
         "payment_status": "payment_status",
-        "heloc_credit_limit": "credit_limit_or_high_credit",
+        # ⚠️ `heloc_credit_limit` was REMOVED here (reported finding). It aliased the vocabulary's
+        # HELOC-specific limit onto `credit_limit_or_high_credit`, which every REVOLVING tradeline
+        # populates — so the mapping is only true when the account IS a HELOC, and deciding that is the
+        # open-vocabulary classification this very block says it refuses to do. It was unconditional, and
+        # the D5 guard treats these keys as the legal universe, so declaring
+        # `liab.heloc_credit_limit: {mode: parsed, subject: liability}` would have passed every check and
+        # fed HCLTV a credit card's limit as a HELOC limit. Restore only behind an account-type classifier.
     },
     # MISMO stated liability (the four fields mismo_section projects — no account number exists)
     "mismo_stated": {
@@ -236,21 +242,43 @@ def _liability_read_field(raw: object, field: str) -> RawField | None:
 
 
 def _liability_context(
-    raw: object, _applies_to: frozenset[str] | None, opts: ContextOptions
+    raw: object, _applies_to: frozenset[str] | None, _opts: ContextOptions
 ) -> dict[str, object]:
-    """This liability's own facts, plus (opt-in) the app's stated liabilities to compare against.
+    """This liability's own facts, under the family's CANONICAL names, PII-scrubbed.
 
-    ``include_stated_liabilities`` is the SAME opt-in the borrower context uses for CR-4's report-vs-app
-    comparison, reused rather than reinvented so the two scopes read one comparison set.
+    Two reported findings shaped this:
+
+    * **Canonical names, not the source's own columns.** Both legs of the union arrive under ONE subject
+      family, so splatting ``raw.fields`` verbatim gave a prompt two different schemas — ``type`` /
+      ``unpaid_balance`` / ``holder_name`` from MISMO against ``account_type`` / ``balance`` /
+      ``creditor_name`` from a tradeline — and a single group would silently under-read one leg. The
+      alias map is applied INVERTED here, so the two legs are comparable. A column with no canonical
+      name (a tradeline field no declaration reads) is still passed through under its own name rather
+      than dropped, so nothing is hidden from a reasoner.
+    * **The universal PII backstop.** Values go through :func:`_scrub_list_value`, like every other
+      list-derived context. A ``ListRow.fields`` value is a plain ``Field``, never a ``PiiField``, and
+      ``ListSpec.redact`` covers only the fields a spec NAMED — so an account number a bureau prints
+      inside ``creditor_name`` would otherwise reach the model unscrubbed.
+
+    ⚠️ There is deliberately NO ``include_stated_liabilities`` opt-in. The docstring previously promised
+    one "the SAME opt-in the borrower context uses", but the body never read ``opts`` and never could:
+    ``load_ai_groups`` raises ``DeclarationError`` for any non-borrower group that sets that flag. A
+    liability-subject group wanting the app's stated set is a real design question (this family already
+    carries BOTH sources as sibling subjects), not a flag to smuggle in.
     """
     from app.verification.rule_engine.enumerators import LiabilityRow
 
     assert isinstance(raw, LiabilityRow)
-    context: dict[str, object] = {
-        "liability_source": raw.source,
-        **{name: _field_value(field) for name, field in sorted(raw.fields.items())},
+    canonical = {
+        column: name for name, column in _LIABILITY_FIELD_ALIASES.get(raw.source, {}).items()
     }
-    return context
+    return {
+        "liability_source": raw.source,
+        **{
+            canonical.get(column, column): _scrub_list_value(_field_value(field))
+            for column, field in sorted(raw.fields.items())
+        },
+    }
 
 
 def _field_value(field: RawField) -> object:

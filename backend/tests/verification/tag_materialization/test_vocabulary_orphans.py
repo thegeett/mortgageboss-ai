@@ -103,6 +103,13 @@ def _vocabulary() -> dict[str, str]:
     return vocab
 
 
+# Subject families a DEDICATED producer materializes, outside the generic
+# ``materialize_tags(only_subjects=_MATERIALIZED_SUBJECTS)`` pass. ``transaction`` is Stage A/B's
+# (``services/tag_production.py`` / ``tag_correlation.py``) — the same hardcoded path
+# ``_PRODUCED_OUTSIDE_DECLARATIONS`` already accounts for.
+_SUBJECTS_MATERIALIZED_ELSEWHERE = frozenset({"transaction"})
+
+
 def _produced() -> set[str]:
     """Every tag SOMETHING produces: a declaration in ``tag_production.yaml``, the hardcoded transaction
     path, or a LIVE judgment rule's ``output_tag`` (produced by the judgment evaluator at rule time)."""
@@ -322,3 +329,32 @@ def test_hardcoded_transaction_producer_tags_are_not_orphans() -> None:
     produced = _produced()
     assert "txn.has_identified_source" in produced
     assert "txn.has_identified_source" in _live_hard_reads()  # it IS live-read, so this matters
+
+
+# --------------------------------------------------------------------------- #
+# LP-483 review — the SECOND way a declared tag can be silently unproduced.
+# --------------------------------------------------------------------------- #
+def test_declared_subjects_are_all_materialized() -> None:
+    """Every declared subject must be in the live orchestrator's ``_MATERIALIZED_SUBJECTS`` scope.
+
+    ⚠️ THE GAP THIS CLOSES, and why the orphan guard above could not. LP-483 declared
+    ``liab.monthly_payment`` with ``subject: liability`` while ``_MATERIALIZED_SUBJECTS`` was still
+    ``{document, loan, borrower}`` — so ``materialize_tags``' ``in_scope()`` skipped it on BOTH live call
+    sites and the tag never materialized on a real file. Measured, not argued: the ticket's own fixture
+    yields 2 tags when ``only_subjects`` is omitted (how the tests call it) and 0 under the live scope.
+
+    The orphan guard is structurally blind to this: ``_produced()`` is built from ``load_declarations()``,
+    so DECLARING a tag marks it produced regardless of whether its subject is ever materialized. That is
+    the same "declared, never written, silent couldnt_check forever" class the guard exists for — entering
+    through the one door the guard does not watch.
+    """
+    from app.services.verification_run import _MATERIALIZED_SUBJECTS
+
+    declared = {decl.subject for decl in load_declarations().values()}
+    unmaterialized = declared - _MATERIALIZED_SUBJECTS - _SUBJECTS_MATERIALIZED_ELSEWHERE
+    assert not unmaterialized, (
+        f"declared subject(s) {sorted(unmaterialized)} are never materialized on a live run: add them to "
+        "_MATERIALIZED_SUBJECTS (services/verification_run.py), or to _SUBJECTS_MATERIALIZED_ELSEWHERE "
+        "here if a dedicated producer writes them. Until then every tag on that subject is absent on "
+        "every real file, and the orphan guard above cannot see it."
+    )

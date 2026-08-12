@@ -143,3 +143,75 @@ async def test_a_liability_without_a_payment_gets_no_tag() -> None:
     snap = _snapshot(documents=[_tradeline_doc([{"creditor_name": "PENNYMAC"}])])
     tagged = await materialize_tags(snap, only_groups=frozenset())
     assert all("liab.monthly_payment" not in tags for tags in tagged.tags.by_subject.values())
+
+
+# --------------------------------------------------------------------------- #
+# LP-483 review fixes — live scope, canonical context names, and the PII backstop
+# --------------------------------------------------------------------------- #
+async def test_monthly_payment_materializes_under_the_LIVE_subject_scope() -> None:
+    """⚠️ The finding: the tests omit ``only_subjects`` (= everything) while the live orchestrator passes
+    ``_MATERIALIZED_SUBJECTS``, which did not contain ``liability`` — so this tag produced 2 values here
+    and 0 on every real file. This asserts the LIVE call shape, not the permissive one."""
+    from app.services.verification_run import _MATERIALIZED_SUBJECTS
+
+    snap = _snapshot(
+        documents=[_tradeline_doc([{"creditor_name": "PENNYMAC", "monthly_payment": "4263"}])],
+        liabilities=[("Installment", "WFBNA AUTO", "914", "25212")],
+    )
+    tagged = await materialize_tags(
+        snap, only_subjects=_MATERIALIZED_SUBJECTS, only_groups=frozenset()
+    )
+    values = sorted(
+        tags["liab.monthly_payment"].value
+        for tags in tagged.tags.by_subject.values()
+        if "liab.monthly_payment" in tags
+    )
+    assert values == ["4263", "914"]
+
+
+def _context(row: object) -> dict[str, object]:
+    from app.verification.tag_materialization.subjects import ContextOptions
+
+    return subject_type("liability").build_context(row, None, ContextOptions())
+
+
+def test_both_sources_present_the_same_canonical_keys_to_a_prompt() -> None:
+    """⚠️ The finding: the context splatted each source's OWN column names, so one prompt saw two schemas
+    (``type``/``unpaid_balance``/``holder_name`` vs ``account_type``/``balance``/``creditor_name``) and
+    would silently under-read one leg of the union."""
+    snap = _snapshot(
+        documents=[
+            _tradeline_doc(
+                [{"creditor_name": "PENNYMAC", "balance": "582417", "account_type": "MTG"}]
+            )
+        ],
+        liabilities=[("MortgageLoan", "PENNYMAC", "4263", "582417")],
+    )
+    contexts = {row.source: _context(row) for row in liability_rows(snap)}
+    for source, ctx in contexts.items():
+        assert {"creditor_name", "balance", "account_type"} <= set(ctx), source
+    assert contexts["mismo_stated"]["creditor_name"] == "PENNYMAC"
+    assert contexts["credit_report_reported"]["creditor_name"] == "PENNYMAC"
+    assert contexts["mismo_stated"]["balance"] == "582417"
+    assert contexts["credit_report_reported"]["balance"] == "582417"
+
+
+def test_the_ai_context_scrubs_a_long_identifier_the_declared_redact_misses() -> None:
+    """⚠️ The finding: ``ListSpec.redact`` covers only the fields a spec NAMED, so an account number a
+    bureau prints inside ``creditor_name`` reached the reasoner unscrubbed. The universal backstop every
+    other list-derived context applies now covers this one too."""
+    snap = _snapshot(documents=[_tradeline_doc([{"creditor_name": "CHASE CARD 4111111111111111"}])])
+    [ctx] = [
+        _context(row) for row in liability_rows(snap) if row.source == "credit_report_reported"
+    ]
+    assert "4111111111111111" not in str(ctx["creditor_name"])
+    assert "CHASE CARD" in str(ctx["creditor_name"])  # the readable part survives
+
+
+def test_heloc_credit_limit_is_not_an_aliased_name() -> None:
+    """⚠️ The finding: it aliased onto ``credit_limit_or_high_credit``, which EVERY revolving tradeline
+    fills — so declaring the parsed tag would have passed the D5 guard and fed HCLTV a credit card's
+    limit. Removed until an account-type classifier exists."""
+    from app.verification.tag_materialization.subjects import _LIABILITY_FIELD_ALIASES
+
+    assert all("heloc_credit_limit" not in a for a in _LIABILITY_FIELD_ALIASES.values())

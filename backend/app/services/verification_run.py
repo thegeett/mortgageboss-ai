@@ -77,7 +77,12 @@ from app.verification.tag_materialization.producer import materialize_tags
 # proven separately) — this stage adds the id.* families keyed under the document / loan subjects, and
 # (LP-332) the borrower subject (borrower-keyed citizenship + the per-borrower income shortfall), which
 # activates ID-8 and IN-1 live.
-_MATERIALIZED_SUBJECTS = frozenset({"document", "loan", "borrower"})
+# LP-483 review: ``liability`` was MISSING here while its declaration shipped, so the "first produced
+# liab.* tag" materialized in tests (which omit ``only_subjects``) and NEVER on a real run. ⚠️ And the
+# orphan guard could not catch it: that guard reads ``load_declarations()``, so DECLARING a tag makes it
+# look produced no matter what this scope says. ``test_declared_subjects_are_all_materialized`` now pins
+# the two together — a new subject family fails until it is added here.
+_MATERIALIZED_SUBJECTS = frozenset({"document", "loan", "borrower", "liability"})
 
 
 # Subject enumerations whose subjects are derived from the DOCUMENTS section (per-transaction /
