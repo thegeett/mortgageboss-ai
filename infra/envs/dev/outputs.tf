@@ -70,7 +70,7 @@ output "redis_primary_endpoint" {
 }
 
 output "redis_url_scheme" {
-  description = "Scheme REDIS_URL must use — always rediss:// (transit encryption is unconditional)."
+  description = "Scheme REDIS_URL must use, WITHOUT the \"://\" separator - the bare string `rediss`. A consumer must add the separator itself."
   value       = module.data.redis_url_scheme
 }
 

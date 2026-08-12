@@ -549,19 +549,181 @@ validate_redis_url() {
   esac
 }
 
-# Prompt with a suggestion printed above the prompt. bash 3.2 has no `read -i`, so
-# the suggestion cannot be pre-loaded into the line editor -- pressing Enter
-# accepts it verbatim, which for a value containing <PASSWORD> then fails
-# validation rather than writing something broken.
+# --------------------------------------------------------------------------- #
+# Redis AUTH reconciliation
+#
+# Two different facts, easily confused, and the gap between them is silent:
+#
+#   redis_requires_auth_token  a TERRAFORM OUTPUT -- what the configuration was
+#                              told to expect (var.redis_auth_enabled). It also
+#                              decides whether the redis-url SECRET exists at all.
+#   AuthTokenEnabled           what the REPLICATION GROUP actually has. The token
+#                              is applied out of band, by hand, so this starts
+#                              false and stays false until someone does it.
+#
+# Terraform cannot close the gap: an ElastiCache auth token is not something it
+# manages here. So the stage reads the live value and refuses to write a secret
+# that contradicts it -- because the contradiction does not fail here, it fails
+# in the WORKER, as a NOAUTH authentication error with nothing pointing back at
+# the secret.
+# --------------------------------------------------------------------------- #
+
+# Looked up by matching the PRIMARY ENDPOINT rather than by guessing the
+# replication group id from name_prefix: the endpoint is already an output, and
+# nothing then depends on a naming convention. Prints True, False, or empty when
+# the group cannot be found.
+redis_auth_token_enabled() {
+  local endpoint="$1" v
+  v=$(awsx elasticache describe-replication-groups \
+    --query "ReplicationGroups[?NodeGroups[?PrimaryEndpoint.Address=='${endpoint}']].AuthTokenEnabled | [0]" \
+    --output text 2>/dev/null) || { printf ''; return 0; }
+  [ "$v" = "None" ] && { printf ''; return 0; }
+  printf '%s' "$v"
+}
+
+redis_replication_group_id() {
+  local endpoint="$1" v
+  v=$(awsx elasticache describe-replication-groups \
+    --query "ReplicationGroups[?NodeGroups[?PrimaryEndpoint.Address=='${endpoint}']].ReplicationGroupId | [0]" \
+    --output text 2>/dev/null) || { printf ''; return 0; }
+  [ "$v" = "None" ] && { printf ''; return 0; }
+  printf '%s' "$v"
+}
+
+# The remediation text, printed by both failure paths.
+redis_apply_token_instructions() {
+  local endpoint="$1" rg
+  rg=$(redis_replication_group_id "$endpoint")
+  [ -n "$rg" ] || rg="<replication-group-id>"
+  info ""
+  info "  Apply the token (16-128 printable ASCII, no / \" @ or %):"
+  info ""
+  info "    TOKEN=\$(LC_ALL=C tr -dc 'A-Za-z0-9!*()-_=+.,;~' </dev/urandom | head -c 32)"
+  info "    aws elasticache modify-replication-group \\"
+  info "      --replication-group-id ${rg} \\"
+  info "      --auth-token \"\$TOKEN\" \\"
+  info "      --auth-token-update-strategy ROTATE \\"
+  info "      --apply-immediately"
+  info ""
+  info "  ROTATE, not SET: the AWS CLI documents SET as \"allowed only after"
+  info "  ROTATE\", and this group has no token yet. Wait for status 'available',"
+  info "  confirm AuthTokenEnabled is true, then re-run this stage."
+}
+
+# Terraform's expectation vs the cluster's reality, checked BEFORE prompting so
+# the operator is not asked for a value that cannot be written.
+assert_redis_auth_agrees() {
+  local needs_auth="$1" has_auth="$2" endpoint="$3"
+
+  if [ -z "$has_auth" ]; then
+    warn "Could not read AuthTokenEnabled for the cache at ${endpoint}."
+    warn "  Proceeding without the cross-check -- verify by hand that the URL you"
+    warn "  supply matches the cluster's actual auth state."
+    return 0
+  fi
+
+  if [ "$needs_auth" = "true" ] && [ "$has_auth" != "True" ]; then
+    hazard "TERRAFORM AND THE CLUSTER DISAGREE ABOUT REDIS AUTH."
+    info ""
+    info "  redis_requires_auth_token (terraform) : true"
+    info "  AuthTokenEnabled (live cluster)       : ${has_auth}"
+    info ""
+    info "  The token is applied out of band and has not been applied. A"
+    info "  token-bearing REDIS_URL written now would pass every check in this"
+    info "  stage and then fail in the WORKER -- redis-py and kombu both raise an"
+    info "  authentication error against a cluster that has no token, and nothing"
+    info "  in that error points back at this secret."
+    redis_apply_token_instructions "$endpoint"
+    info ""
+    info "  Alternatively, if this environment is genuinely not meant to use a"
+    info "  token, set redis_auth_enabled = false in the tfvars and re-apply --"
+    info "  that also removes the redis-url secret, and REDIS_URL becomes plain"
+    info "  configuration in the task definition instead."
+    die "Refusing to populate redis-url while the cluster has no AUTH token." \
+      "Nothing was written. Apply the token, or change the configuration."
+  fi
+
+  if [ "$needs_auth" != "true" ] && [ "$has_auth" = "True" ]; then
+    hazard "The cluster HAS an AUTH token, but this environment is configured without one."
+    info "  A URL with no credential will be rejected by the cluster at connect time."
+    info "  Supply the token in the URL, or remove it from the cluster."
+  fi
+  return 0
+}
+
+# Does a rediss:// URL carry a credential? Userinfo is whatever precedes '@'
+# inside the authority, so the path and query are stripped before looking.
+redis_url_has_credential() {
+  local rest="${1#*://}"
+  rest="${rest%%/*}"
+  rest="${rest%%\?*}"
+  case "$rest" in
+    *@*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# The refusal the report asked for, applied to the value actually supplied --
+# the operator can always paste something other than the suggestion.
+assert_redis_credential_matches() {
+  local url="$1" has_auth="$2" endpoint="$3"
+  [ -n "$has_auth" ] || return 0
+
+  if [ "$has_auth" != "True" ] && redis_url_has_credential "$url"; then
+    hazard "This REDIS_URL carries a credential; the cluster has NO auth token."
+    info ""
+    info "  AuthTokenEnabled is ${has_auth} on the cache at ${endpoint}."
+    info "  Redis rejects AUTH against a server with no password configured, so"
+    info "  every cache read and every Celery broker operation would fail -- in"
+    info "  the worker, at runtime, not here."
+    redis_apply_token_instructions "$endpoint"
+    die "Refusing to write a token-bearing REDIS_URL to a cluster with no token." \
+      "Nothing was written."
+  fi
+
+  if [ "$has_auth" = "True" ] && ! redis_url_has_credential "$url"; then
+    hazard "This REDIS_URL carries no credential; the cluster REQUIRES one."
+    info ""
+    info "  AuthTokenEnabled is True on the cache at ${endpoint}. An"
+    info "  unauthenticated client is refused with NOAUTH at connect time."
+    info "  The shape is  rediss://:TOKEN@host:6379/0?ssl_cert_reqs=required"
+    info "  -- empty username, colon immediately after the slashes."
+    die "Refusing to write an unauthenticated REDIS_URL to a cluster that requires auth." \
+      "Nothing was written."
+  fi
+  return 0
+}
+
+# Prompt with a suggestion printed above the prompt.
 prompt_with_suggestion() {
   local label="$1" suggestion="$2" value
-  info ""
-  info "  ${C_BOLD}${label}${C_RESET}"
-  info "  suggested (from terraform output):"
-  info "    ${suggestion}"
-  info "  Press Enter to accept, or paste the corrected value."
-  printf '  %s> ' "$label"
-  read -r value
+
+  # ⚠️ EVERY PROMPT BYTE GOES TO STDERR, and that is load-bearing.
+  #
+  # The caller reads this function through a command substitution
+  # (`url=$(prompt_with_suggestion ...)`), which captures STDOUT. With the prompt
+  # on stdout the operator saw NOTHING — the whole prompt was swallowed into the
+  # variable and the typed value was appended to it, so validation rejected 260
+  # bytes of prompt text followed by a perfectly good URL. The reported symptom
+  # was "it rejects the DATABASE_URL I paste", with `got:` printing empty.
+  #
+  # Only the value below may reach stdout.
+  {
+    info ""
+    info "  ${C_BOLD}${label}${C_RESET}"
+    info "  suggested (from terraform output):"
+    info "    ${suggestion}"
+    info "  Press Enter to accept, or paste the corrected value."
+    printf '  %s> ' "$label"
+  } >&2
+
+  # -e for readline, so a 130-character URL can be edited rather than only
+  # retyped. bash 3.2 has no `read -i`, so the suggestion still cannot be
+  # pre-loaded into the line editor; pressing Enter accepts it verbatim, which
+  # for a value still containing <PASSWORD> fails validation rather than writing
+  # something broken. With non-terminal stdin `-e` degrades to a plain read
+  # (verified), so piping input still works.
+  read -r -e value
   [ -z "$value" ] && value="$suggestion"
   printf '%s' "$value"
 }
@@ -643,21 +805,45 @@ stage_secrets() {
         ok "$key written" ;;
 
       redis-url)
-        local endpoint scheme suggestion rurl needs_auth
+        local endpoint scheme suggestion rurl needs_auth has_auth
         endpoint=$(out redis_primary_endpoint)
-        scheme=$(out_opt redis_url_scheme); [ -n "$scheme" ] || scheme="rediss://"
+
+        # ⚠️ The output is the BARE scheme -- `rediss`, not `rediss://`
+        # (modules/data/outputs.tf). This once concatenated as though the
+        # separator were included, producing `rediss:<TOKEN>@host` (no slashes)
+        # and, on the no-auth path, `redissmaster.mbai-...` with the scheme fused
+        # to the hostname. Both were rejected by the validator, so the suggested
+        # value could never be accepted by pressing Enter.
+        #
+        # Trailing `://` is stripped first so either spelling of the output
+        # works, now and if it ever changes.
+        scheme=$(out_opt redis_url_scheme); [ -n "$scheme" ] || scheme="rediss"
+        scheme="${scheme%://}"
+
         needs_auth=$(out_opt redis_requires_auth_token)
-        if [ "$needs_auth" = "true" ]; then
-          suggestion="${scheme}:<AUTH_TOKEN>@${endpoint}:6379/0?ssl_cert_reqs=required"
+        has_auth=$(redis_auth_token_enabled "$endpoint")
+
+        # The check that did not exist. `redis_requires_auth_token` is what
+        # Terraform was CONFIGURED to expect; AuthTokenEnabled is what the
+        # cluster actually has. They drift because the token is applied out of
+        # band, and nothing reconciles them -- so the mismatch surfaced in the
+        # WORKER as a NOAUTH error long after this stage reported success.
+        assert_redis_auth_agrees "$needs_auth" "$has_auth" "$endpoint"
+
+        if [ "$has_auth" = "True" ]; then
+          suggestion="${scheme}://:<AUTH_TOKEN>@${endpoint}:6379/0?ssl_cert_reqs=required"
           info ""
-          hazard "AUTH is enabled, so REDIS_URL carries a credential."
-          info "  Apply the AUTH token to the replication group out of band first."
+          hazard "This cluster REQUIRES an AUTH token, so REDIS_URL carries a credential."
+          info "  Empty username, then the token: rediss://:TOKEN@host -- Redis AUTH"
+          info "  with a single token has no username."
         else
-          suggestion="${scheme}${endpoint}:6379/0?ssl_cert_reqs=required"
+          suggestion="${scheme}://${endpoint}:6379/0?ssl_cert_reqs=required"
         fi
+
         rurl=$(prompt_with_suggestion "REDIS_URL" "$suggestion")
         validate_redis_url "$rurl"
-        would "put-secret-value $id  (validated: rediss scheme, ssl_cert_reqs present)"
+        assert_redis_credential_matches "$rurl" "$has_auth" "$endpoint"
+        would "put-secret-value $id  (validated: rediss scheme, ssl_cert_reqs, credential matches cluster)"
         put_secret "$id" "$rurl"
         ok "$key written" ;;
 

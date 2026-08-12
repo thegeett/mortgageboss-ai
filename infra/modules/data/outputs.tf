@@ -35,8 +35,15 @@ output "redis_port" {
 
 output "redis_url_scheme" {
   description = <<-EOT
-    The scheme REDIS_URL must use. Always rediss:// — transit encryption is
-    enabled unconditionally, and a redis:// client cannot connect to a
+    The scheme REDIS_URL must use, WITHOUT the "://" separator — the value is the
+    bare string `rediss`, and a consumer must add the separator itself.
+
+    ⚠️ This description previously read "Always rediss://" while the value was
+    bare, and a consumer built its URL by concatenation on the strength of it:
+    `rediss:<TOKEN>@host` on one path and `redissmaster.example.com` on the
+    other. Both were rejected downstream, so it failed safe — but the wording is
+    what caused it. The scheme is always `rediss` because transit encryption is
+    enabled unconditionally and a redis:// client cannot connect to a
     TLS-required cache.
   EOT
   value       = "rediss"
