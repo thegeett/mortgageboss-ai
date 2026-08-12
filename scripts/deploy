@@ -20,7 +20,7 @@ REPO_ROOT=$(cd "$SCRIPT_DIR/.." && pwd)
 # shellcheck source=scripts/deploy-lib.sh
 . "$SCRIPT_DIR/deploy-lib.sh"
 
-STAGES="bootstrap phase1 dns images secrets migrate phase2 smoke all status"
+STAGES="bootstrap phase1 dns images secrets migrate phase2 smoke all status bootstrap-admin add-user"
 
 # How long `dns` waits for the registrar's delegation to propagate, and how long
 # `migrate` waits for the one-off task to stop. Both overridable for a slow
@@ -65,6 +65,13 @@ ARGUMENTS
     all        Every stage in order, pausing at `dns` for the manual registrar
                step.
     status     Read-only. Prints the state of every stage. Safe at any time.
+
+    bootstrap-admin
+               Create the FIRST company and admin user. Prompts for the details
+               and the password, hashes the password LOCALLY, and sends only the
+               bcrypt hash. Refuses if the database already has any user.
+    add-user   Add one user to an existing company, same mechanism. Refuses an
+               unknown company slug or an email that is already taken.
 
 OPTIONS
   --yes            Answer every confirmation with yes. Still prints what it does.
@@ -187,6 +194,16 @@ require_domain() {
 # --------------------------------------------------------------------------- #
 
 SECRET_TMPDIR=""
+
+# Created on demand by every stage that writes a value to disk on its way to
+# AWS. 0700, inside the run's own mktemp -d, removed by the exit trap even on
+# Ctrl-C.
+ensure_secret_tmpdir() {
+  [ -n "$SECRET_TMPDIR" ] && [ -d "$SECRET_TMPDIR" ] && return 0
+  SECRET_TMPDIR=$(mktemp -d "${TMPDIR:-/tmp}/deploy-secrets.XXXXXX")
+  chmod 700 "$SECRET_TMPDIR"
+}
+
 cleanup() {
   if [ -n "${TF_OUTPUT_CACHE:-}" ]; then rm -f "$TF_OUTPUT_CACHE"; fi
   # The secret payload directory holds plaintext values on their way to Secrets
@@ -899,8 +916,7 @@ stage_secrets() {
   require_identity "$ACCOUNT_ID"
   require_outputs "$ENV_DIR"
 
-  SECRET_TMPDIR=$(mktemp -d "${TMPDIR:-/tmp}/deploy-secrets.XXXXXX")
-  chmod 700 "$SECRET_TMPDIR"
+  ensure_secret_tmpdir
 
   local py fernet_py names key id existing wrote_fernet=""
   py=$(command -v python3 || true)
@@ -1269,6 +1285,345 @@ stage_migrate() {
     "before logging: an empty secret, an architecture mismatch, and the uv-run" \
     "PyPI hang all look identical from the console." \
     "Nothing else has been changed -- fix the cause and re-run this stage."
+}
+
+# --------------------------------------------------------------------------- #
+# Account provisioning -- bootstrap-admin and add-user
+#
+# There is no registration route in this application: no signup endpoint, no
+# users router, no password-reset flow. Accounts are made by a deliberate act,
+# and these two stages are it.
+#
+# ⚠️ THE PASSWORD IS HASHED ON THIS MACHINE AND NEVER SENT.
+#
+# Both stages run a one-off ECS task whose values arrive through
+# `run-task --overrides`. Those are visible in `describe-tasks` for about an
+# hour and are recorded in the CloudTrail RunTask event. A bcrypt hash at cost
+# 12 with a random salt is not meaningfully sensitive in either place; a
+# plaintext password would be. So scripts/hash-password produces the hash
+# locally, and only the hash leaves the machine.
+#
+# ⚠️ AND THE HASH STILL DOES NOT REACH ARGV. The whole run-task request is built
+# with jq reading from the ENVIRONMENT (`env.NAME`, never `--arg`) into a 0600
+# file, and passed as `--cli-input-json file://…`. `ps` shows a process's full
+# command line to every user on the machine; it does not show its environment.
+# --------------------------------------------------------------------------- #
+
+# Prompt for one value. The prompt goes to STDERR so `x=$(ask …)` captures the
+# answer and nothing else -- the same mistake that made the secrets stage
+# unusable, not repeated here.
+ask() {
+  local label="$1" default="${2:-}" reply
+  if [ -n "$default" ]; then
+    printf '  %s [%s]: ' "$label" "$default" >&2
+  else
+    printf '  %s: ' "$label" >&2
+  fi
+  if [ ! -t 0 ]; then
+    die "Cannot prompt: stdin is not a terminal." \
+      "These stages are interactive by design -- they take a password."
+  fi
+  read -r reply
+  [ -z "$reply" ] && reply="$default"
+  printf '%s' "$reply"
+}
+
+ask_required() {
+  local value
+  value=$(ask "$@")
+  [ -n "$value" ] || die "'$1' is required and cannot be empty." "Nothing was run."
+  printf '%s' "$value"
+}
+
+# ⚠️ Both provisioning stages refuse without Cognito. An application login that
+# is not behind the ALB's authentication wall is a state worth refusing to
+# create: the account being made is an ADMIN in an environment that holds real
+# borrower files.
+require_cognito_enabled() {
+  local cognito
+  cognito=$(tfvar "$TFVARS" "enable_cognito" || printf '')
+  [ "$cognito" = "true" ] && return 0
+  die "Refusing: enable_cognito is '${cognito:-unset}' in $TFVARS." \
+    "This stage creates an account that can log in to the application. Without" \
+    "Cognito on the load balancer there is no authentication in front of it, and" \
+    "an admin account in an environment holding borrower files is not something to" \
+    "create into an open door." \
+    "Run phase2 first, or set enable_cognito = true and apply."
+}
+
+# Hash the password on THIS machine. scripts/hash-password prompts on stderr and
+# writes only the 60-character hash to stdout, so this captures the hash alone.
+hash_password_locally() {
+  local helper="$REPO_ROOT/scripts/hash-password" hash
+  [ -x "$helper" ] || die "scripts/hash-password is missing or not executable."
+  hash=$("$helper") || die "Password hashing failed. Nothing was run."
+  if [ "${#hash}" -ne 60 ]; then
+    die "The local hash is ${#hash} characters, expected 60." \
+      "Refusing to send a value that is not a complete bcrypt hash."
+  fi
+  printf '%s' "$hash"
+}
+
+# Resolve the container name from the task definition rather than assuming it.
+oneoff_container_name() {
+  awsx ecs describe-task-definition --task-definition "$1" \
+    --query 'taskDefinition.containerDefinitions[0].name' --output text 2>/dev/null
+}
+
+# Network configuration read off the running API service -- tasks are pinned to
+# the AZs that have interface endpoints, and the raw private_subnet_ids output
+# includes AZs that do not. Identical reasoning to the migrate stage.
+oneoff_network() {
+  local cluster="$1" api_svc netcfg
+  api_svc=$(out_map ecs_service_names api)
+  netcfg=$(awsx ecs describe-services --cluster "$cluster" --services "$api_svc" \
+    --query 'services[0].networkConfiguration.awsvpcConfiguration.[join(`,`,subnets),join(`,`,securityGroups)]' \
+    --output text 2>/dev/null || printf '')
+  if [ -n "$netcfg" ] && [ "$netcfg" != "None	None" ]; then
+    printf '%s' "$netcfg"
+    return 0
+  fi
+  printf '%s\t%s' "$(out_list_first private_subnet_ids)" "$(out ecs_tasks_security_group_id)"
+}
+
+# Run a prepared request, wait for it to stop, print its logs, return its exit
+# code. The request file is written by the caller and removed here.
+ONEOFF_EXIT_CODE=""
+run_oneoff_task() {
+  local label="$1" request="$2" cluster="$3" container="$4"
+  local arn task_id status elapsed=0 group stream reason
+  ONEOFF_EXIT_CODE=""
+
+  would "aws ecs run-task --cli-input-json file://<request>   ($label)"
+  arn=$(awsx ecs run-task --cli-input-json "file://$request" \
+    --query 'tasks[0].taskArn' --output text) || { rm -f "$request"; die "run-task failed for $label."; }
+  rm -f "$request"
+
+  if [ -z "$arn" ] || [ "$arn" = "None" ]; then
+    die "run-task returned no task ARN for $label." \
+      "Check the failures[] entry in the API response."
+  fi
+  task_id="${arn##*/}"
+  ok "task started: $task_id"
+
+  while [ "$elapsed" -lt "$MIGRATE_TIMEOUT_SECONDS" ]; do
+    status=$(awsx ecs describe-tasks --cluster "$cluster" --tasks "$arn" \
+      --query 'tasks[0].lastStatus' --output text 2>/dev/null || printf 'UNKNOWN')
+    [ "$status" = "STOPPED" ] && break
+    note "  ${elapsed}s: $status"
+    sleep 10
+    elapsed=$((elapsed + 10))
+  done
+
+  if [ "$status" != "STOPPED" ]; then
+    die "$label did not stop within ${MIGRATE_TIMEOUT_SECONDS}s (last status: $status)." \
+      "Task: $arn"
+  fi
+
+  group=$(log_group_for api)
+  stream="migrate/${container}/${task_id}"
+  hr
+  info "CloudWatch logs -- $group : $stream"
+  hr
+  awsx logs get-log-events --log-group-name "$group" --log-stream-name "$stream" \
+    --start-from-head --query 'events[].message' --output text 2>/dev/null \
+    | tr '\t' '\n' | sed 's/^/  /' \
+    || warn "No log stream for this task. The container died before it logged anything."
+  hr
+
+  ONEOFF_EXIT_CODE=$(awsx ecs describe-tasks --cluster "$cluster" --tasks "$arn" \
+    --query 'tasks[0].containers[0].exitCode' --output text 2>/dev/null || printf 'None')
+  reason=$(awsx ecs describe-tasks --cluster "$cluster" --tasks "$arn" \
+    --query 'tasks[0].stoppedReason' --output text 2>/dev/null || printf '')
+  [ "$ONEOFF_EXIT_CODE" = "0" ] && return 0
+  die "$label exited with code '${ONEOFF_EXIT_CODE}'." \
+    "stoppedReason: ${reason:-(none)}" \
+    "The logs above are the reason. A REFUSED line means a guard in the script" \
+    "declined and nothing was written."
+}
+
+stage_bootstrap_admin() {
+  banner "bootstrap-admin -- the FIRST company and admin user in '$ENV_NAME'"
+  need_cmd aws; need_cmd jq; need_cmd terraform
+  require_identity "$ACCOUNT_ID"
+  require_cognito_enabled
+  require_outputs "$ENV_DIR"
+
+  local cluster taskdef container subnets sgs netcfg request
+  cluster=$(out ecs_cluster_name)
+  taskdef=$(out_map ecs_task_definition_arns migrate)
+  container=$(oneoff_container_name "$taskdef")
+  [ -n "$container" ] && [ "$container" != "None" ] || die \
+    "Could not resolve the container name from the migrate task definition."
+
+  info ""
+  info "This runs app.scripts.bootstrap_admin as a one-off task on the EXISTING"
+  info "migrate task definition -- it already has DATABASE_URL injected and lands"
+  info "in the subnets that have the interface endpoints."
+  info ""
+  hazard "The script REFUSES if the database already contains any user."
+  info "  It is a bootstrap, not a user-creation tool. Use the add-user stage for"
+  info "  an environment that already has accounts."
+  info ""
+
+  local email first last coname coslug hash
+  email=$(ask_required "Admin email")
+  first=$(ask_required "Admin first name")
+  last=$(ask_required "Admin last name")
+  coname=$(ask_required "Company name")
+  coslug=$(ask_required "Company slug (lowercase, url-safe)")
+
+  info ""
+  info "  The password is hashed HERE and never sent. Only the bcrypt hash travels."
+  hash=$(hash_password_locally)
+  ok "hashed locally (60 chars, never displayed)"
+
+  ensure_secret_tmpdir
+  netcfg=$(oneoff_network "$cluster")
+  subnets=$(printf '%s' "$netcfg" | awk -F'\t' '{print $1}')
+  sgs=$(printf '%s' "$netcfg" | awk -F'\t' '{print $2}')
+
+  hr
+  info "  environment : $ENV_NAME"
+  info "  cluster     : $cluster"
+  info "  container   : $container"
+  info "  admin       : $email"
+  info "  company     : $coname ($coslug)"
+  info "  password    : hashed locally, not shown, not sent"
+  hr
+  confirm "Create this company and admin user?" || die "Aborted. Nothing was run."
+
+  request="$SECRET_TMPDIR/bootstrap-admin.$$.json"
+  # ⚠️ jq reads from the ENVIRONMENT, never --arg: an --arg value would be in
+  # jq's own command line, which `ps` shows to every user on this machine.
+  (
+    umask 077
+    ONEOFF_CLUSTER="$cluster" ONEOFF_TD="$taskdef" ONEOFF_CONTAINER="$container" \
+    ONEOFF_SUBNETS="$subnets" ONEOFF_SGS="$sgs" \
+    BOOTSTRAP_ADMIN_EMAIL="$email" BOOTSTRAP_ADMIN_PASSWORD_HASH="$hash" \
+    BOOTSTRAP_ADMIN_FIRST_NAME="$first" BOOTSTRAP_ADMIN_LAST_NAME="$last" \
+    BOOTSTRAP_COMPANY_NAME="$coname" BOOTSTRAP_COMPANY_SLUG="$coslug" \
+    BOOTSTRAP_ALLOWED_ENVIRONMENTS="$ENV_NAME" \
+      jq -n '{
+        cluster: env.ONEOFF_CLUSTER,
+        taskDefinition: env.ONEOFF_TD,
+        launchType: "FARGATE",
+        networkConfiguration: {awsvpcConfiguration: {
+          subnets: (env.ONEOFF_SUBNETS | split(",")),
+          securityGroups: (env.ONEOFF_SGS | split(",")),
+          assignPublicIp: "DISABLED"}},
+        overrides: {containerOverrides: [{
+          name: env.ONEOFF_CONTAINER,
+          command: ["uv","run","python","-m","app.scripts.bootstrap_admin"],
+          environment: [
+            {name:"BOOTSTRAP_ADMIN_EMAIL",          value: env.BOOTSTRAP_ADMIN_EMAIL},
+            {name:"BOOTSTRAP_ADMIN_PASSWORD_HASH",  value: env.BOOTSTRAP_ADMIN_PASSWORD_HASH},
+            {name:"BOOTSTRAP_ADMIN_FIRST_NAME",     value: env.BOOTSTRAP_ADMIN_FIRST_NAME},
+            {name:"BOOTSTRAP_ADMIN_LAST_NAME",      value: env.BOOTSTRAP_ADMIN_LAST_NAME},
+            {name:"BOOTSTRAP_COMPANY_NAME",         value: env.BOOTSTRAP_COMPANY_NAME},
+            {name:"BOOTSTRAP_COMPANY_SLUG",         value: env.BOOTSTRAP_COMPANY_SLUG},
+            {name:"BOOTSTRAP_ALLOWED_ENVIRONMENTS", value: env.BOOTSTRAP_ALLOWED_ENVIRONMENTS}
+          ]}]}
+      }' >"$request"
+  ) || die "Could not build the run-task request."
+  hash=""
+
+  run_oneoff_task "bootstrap-admin" "$request" "$cluster" "$container"
+  ok "bootstrap-admin complete."
+  info ""
+  info "Next: create the matching COGNITO user -- this account gets you past the"
+  info "application's own login, not past the load balancer:"
+  info "  aws cognito-idp admin-create-user --user-pool-id \$(terraform -chdir=$ENV_DIR output -raw cognito_user_pool_id) \\"
+  info "    --username $email --user-attributes Name=email,Value=$email Name=email_verified,Value=true"
+}
+
+stage_add_user() {
+  banner "add-user -- add a user to an existing company in '$ENV_NAME'"
+  need_cmd aws; need_cmd jq; need_cmd terraform
+  require_identity "$ACCOUNT_ID"
+  require_cognito_enabled
+  require_outputs "$ENV_DIR"
+
+  local cluster taskdef container subnets sgs netcfg request
+  cluster=$(out ecs_cluster_name)
+  taskdef=$(out_map ecs_task_definition_arns migrate)
+  container=$(oneoff_container_name "$taskdef")
+  [ -n "$container" ] && [ "$container" != "None" ] || die \
+    "Could not resolve the container name from the migrate task definition."
+
+  info ""
+  info "Adds ONE user to a company that already exists. The script refuses an"
+  info "unknown company slug rather than creating one, and refuses an email that"
+  info "is already taken -- email is globally unique, not per company."
+  info ""
+
+  local email first last role coslug hash
+  email=$(ask_required "Email")
+  first=$(ask_required "First name")
+  last=$(ask_required "Last name")
+  role=$(ask_required "Role (ADMIN or PROCESSOR)")
+  case "$(printf '%s' "$role" | tr '[:upper:]' '[:lower:]')" in
+    admin | processor) ;;
+    *) die "Role must be ADMIN or PROCESSOR, got '$role'." "Nothing was run." ;;
+  esac
+  coslug=$(ask_required "Company slug (must already exist)")
+
+  info ""
+  info "  The password is hashed HERE and never sent. Only the bcrypt hash travels."
+  hash=$(hash_password_locally)
+  ok "hashed locally (60 chars, never displayed)"
+
+  ensure_secret_tmpdir
+  netcfg=$(oneoff_network "$cluster")
+  subnets=$(printf '%s' "$netcfg" | awk -F'\t' '{print $1}')
+  sgs=$(printf '%s' "$netcfg" | awk -F'\t' '{print $2}')
+
+  hr
+  info "  environment : $ENV_NAME"
+  info "  user        : $email"
+  info "  role        : $role"
+  info "  company     : $coslug"
+  info "  password    : hashed locally, not shown, not sent"
+  hr
+  confirm "Create this user?" || die "Aborted. Nothing was run."
+
+  request="$SECRET_TMPDIR/add-user.$$.json"
+  (
+    umask 077
+    ONEOFF_CLUSTER="$cluster" ONEOFF_TD="$taskdef" ONEOFF_CONTAINER="$container" \
+    ONEOFF_SUBNETS="$subnets" ONEOFF_SGS="$sgs" \
+    ADD_USER_EMAIL="$email" ADD_USER_PASSWORD_HASH="$hash" \
+    ADD_USER_FIRST_NAME="$first" ADD_USER_LAST_NAME="$last" \
+    ADD_USER_ROLE="$role" ADD_USER_COMPANY_SLUG="$coslug" \
+    ADD_USER_ALLOWED_ENVIRONMENTS="$ENV_NAME" \
+      jq -n '{
+        cluster: env.ONEOFF_CLUSTER,
+        taskDefinition: env.ONEOFF_TD,
+        launchType: "FARGATE",
+        networkConfiguration: {awsvpcConfiguration: {
+          subnets: (env.ONEOFF_SUBNETS | split(",")),
+          securityGroups: (env.ONEOFF_SGS | split(",")),
+          assignPublicIp: "DISABLED"}},
+        overrides: {containerOverrides: [{
+          name: env.ONEOFF_CONTAINER,
+          command: ["uv","run","python","-m","app.scripts.add_user"],
+          environment: [
+            {name:"ADD_USER_EMAIL",                value: env.ADD_USER_EMAIL},
+            {name:"ADD_USER_PASSWORD_HASH",        value: env.ADD_USER_PASSWORD_HASH},
+            {name:"ADD_USER_FIRST_NAME",           value: env.ADD_USER_FIRST_NAME},
+            {name:"ADD_USER_LAST_NAME",            value: env.ADD_USER_LAST_NAME},
+            {name:"ADD_USER_ROLE",                 value: env.ADD_USER_ROLE},
+            {name:"ADD_USER_COMPANY_SLUG",         value: env.ADD_USER_COMPANY_SLUG},
+            {name:"ADD_USER_ALLOWED_ENVIRONMENTS", value: env.ADD_USER_ALLOWED_ENVIRONMENTS}
+          ]}]}
+      }' >"$request"
+  ) || die "Could not build the run-task request."
+  hash=""
+
+  run_oneoff_task "add-user" "$request" "$cluster" "$container"
+  ok "add-user complete."
+  info ""
+  info "Remember the matching Cognito user, or they cannot reach the application."
 }
 
 # --------------------------------------------------------------------------- #
@@ -1761,6 +2116,8 @@ main() {
     smoke)     stage_smoke ;;
     all)       stage_all ;;
     status)    stage_status ;;
+    bootstrap-admin) stage_bootstrap_admin ;;
+    add-user)  stage_add_user ;;
     *)         die "Unhandled stage: $STAGE" ;;
   esac
 }
