@@ -79,3 +79,19 @@ tags:
     doc 104 — derived from replacement_cost_or_coinsurance_basis, which the extractor read as "coinsurance
     contract" on a replacement-cost HO3. IH-1's ONLY gated tag, filling on 46.7% of binders, with no
     confidence defence because a parsed passthrough carries confidence=None.
+
+  # ⚠️ THE DERIVED CONSUMERS — the reported gap. Naming the FIELD above protects nothing for these three,
+  # because no rule gates on the parsed tag that reads it; each rule gates on a DERIVED tag computed from
+  # it. Measured before and after: resolving distrusted_tag_ids() against every active spec's gated tags
+  # matched only IH-1 and ID-3, while the ticket claimed ID-5, ID-3, CR-13 and PR-6 were covered.
+  # test_every_distrusted_field_reaches_a_rule now fails if a distrusted field has no rule-visible tag.
+  id.borrower_id_expiration: >-
+    docs 146/294 — derived from drivers_license.expiration_date, which the extractor hallucinated on two
+    hard scans (294 read a licence BACK as a vehicle registration and fabricated a date). ID-5 ships AUTO
+    and gates on THIS tag, so without the entry a hallucinated expiry still auto-asserts "the ID is valid".
+  credit.report_age_months_at_closing: >-
+    derived from credit_report.report_date, whose day-of-month the extractor fabricates from an MM/YY
+    print. CR-13 gates on the age, not the date, so the date entry alone left the rule unprotected.
+  property.appraisal_age_months_at_closing: >-
+    derived from appraisal.appraisal_effective_date. PR-6 gates on the age, not the date — and its bands
+    decide whether a NEW appraisal is required, so a wrong effective date silently changes the band.

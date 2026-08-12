@@ -458,8 +458,14 @@ async def evaluate_consistency_rule(
 
         # 4. The generic fail-closed gate over the gathered instances (unknown value → couldnt_check
         #    distinct; a below-floor confidence → needs_review; verdict_confidence = min).
+        # ⚠️ ``distrust_tag_ids`` is REQUIRED here: the map is keyed by document content_id (the gathered
+        # instances are the SAME tag across many documents, so tag ids would collide), which meant the
+        # gate's distrust check compared a document id against tag ids and never matched. Pass the tag
+        # actually gathered — ID-3 gathers ``id.dob``, which IS on the distrust list.
         gate = evaluate_gate(
-            {inst.source_id: inst.tag for inst in gathered}, confidence_floor=floor
+            {inst.source_id: inst.tag for inst in gathered},
+            confidence_floor=floor,
+            distrust_tag_ids=(con.gather_tag,),
         )
         if gate.status is GateStatus.COULDNT_CHECK:
             results.append(
@@ -496,7 +502,9 @@ async def evaluate_consistency_rule(
                     con.on_agree,
                     gathered,
                     verdict_confidence=gate.verdict_confidence,
-                    ratification_pending=False,
+                    # Carry the gate's ratification flag rather than hardcoding False: a distrusted
+                    # gathered tag must route for human ratification, as it does on the deterministic path.
+                    ratification_pending=gate.ratification_pending,
                     reason_suffix=excluded_note,
                 )
             )
@@ -511,7 +519,9 @@ async def evaluate_consistency_rule(
                     con.on_disagree,
                     gathered,
                     verdict_confidence=gate.verdict_confidence,
-                    ratification_pending=False,
+                    # Carry the gate's ratification flag rather than hardcoding False: a distrusted
+                    # gathered tag must route for human ratification, as it does on the deterministic path.
+                    ratification_pending=gate.ratification_pending,
                     reason_suffix=excluded_note,
                 )
             )

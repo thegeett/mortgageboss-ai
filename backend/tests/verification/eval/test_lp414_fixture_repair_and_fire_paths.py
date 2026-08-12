@@ -105,7 +105,7 @@ async def test_lf6t3n_full_verdict_distribution_is_stable() -> None:
     # LP-447 ACTIVATED IH-1 (per_document over the 30 docs): LF-6T3N has NO homeowners binder, so 26 classified
     # non-binder docs → not_applicable and the 4 unclassified ("unknown"-type) docs → couldnt_check (we cannot
     # rule out an unclassified doc is a policy — the honest §8 abstention, the AS-6 shape). So +26 not_applicable
-    # +4 couldnt_check → 431. ⚠️ THE EQUIVALENCE: satisfied / fired / needs_review are UNCHANGED (23 / 2 / 2) — no
+    # +4 couldnt_check → 431. ⚠️ satisfied / needs_review MOVED at LP-508's review (23/2 → 21/4); fired is UNCHANGED — no
     # existing rule's verdict moved; IH-1 only adds honest not_applicable / couldnt_check where LF-6T3N has no
     # binder to judge. Any OTHER movement would be a regression.
     # LP-485 ACTIVATED CL-1 / CR-13 / PR-6 (all subject_enumeration: loan → ONE eval each): LF-6T3N carries no
@@ -124,9 +124,16 @@ async def test_lf6t3n_full_verdict_distribution_is_stable() -> None:
             "couldnt_check": 207,  # +IH-1 x4 (LP-447); +CL-1/CR-13/PR-6 x1 each (LP-485 — no LE / credit
             # report / appraisal on LF-6T3N, so each abstains rather than clearing)
             "not_applicable": 200,  # +IH-1 x26 (LP-447 — 26 classified non-binder docs; no homeowners policy)
-            "satisfied": 23,  # UNCHANGED — no existing verdict moved
+            # ⚠️ LP-508 review: satisfied 23 -> 21, needs_review 2 -> 4. TWO subjects that used to
+            # AUTO-SATISFY now route to a human. That is the distrusted-field guard finally reaching the
+            # rules it was written for: ID-5 gates on id.borrower_id_expiration, derived from a
+            # driver's-licence expiry the extractor hallucinated on docs 146/294, and until the fix the
+            # guard resolved only IH-1's tag. This shift IS the fix landing on the real fixture — an
+            # auto-asserted "the ID is valid" on a field with a confirmed wrong value is exactly what
+            # ADR-377 exists to stop.
+            "satisfied": 21,
             "fired": 2,  # UNCHANGED
-            "needs_review": 2,  # UNCHANGED
+            "needs_review": 4,
         }
     )
     loan_verdicts = {r.rule_id: r.verdict.value for r in results if r.subject_id == _LOAN}

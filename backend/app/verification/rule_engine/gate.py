@@ -17,7 +17,7 @@ The distinctions that matter (§3D):
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Collection, Mapping
 from dataclasses import dataclass
 from enum import StrEnum
 
@@ -53,6 +53,7 @@ def evaluate_gate(
     *,
     confidence_floor: float,
     contradiction: bool = False,
+    distrust_tag_ids: Collection[str] | None = None,
 ) -> GateResult:
     """Run the fail-closed gate over a subject's load-bearing tags (fixed decision order).
 
@@ -98,9 +99,17 @@ def evaluate_gate(
     # LP-508 / ADR-377 — the fifth defence. Ordered AFTER absent/"unknown" (a missing value is a more
     # specific and more useful message than a distrusted one) and BEFORE contradiction, so a distrusted
     # field is reported as such rather than as a disagreement.
+    # ⚠️ ``distrust_tag_ids`` OVERRIDES the map's keys, and the consistency path REQUIRES it (reported
+    # finding). A consistency rule gathers ONE tag across many documents, so it keys the gate map by
+    # document ``content_id`` to keep the instances distinct — meaning ``tag_id in distrusted`` compared a
+    # document id against tag ids and could never match. ID-3 was on the distrust list and unprotected in
+    # practice. The caller passes the tag id(s) it actually gathered.
     distrusted = distrusted_tag_ids()
-    for tag_id, tag in load_bearing.items():
-        if tag is not None and tag_id in distrusted:
+    checked = distrust_tag_ids if distrust_tag_ids is not None else load_bearing.keys()
+    present = any(tag is not None for tag in load_bearing.values())
+    for tag_id in checked:
+        tag = load_bearing.get(tag_id) if distrust_tag_ids is None else None
+        if (tag is not None or (distrust_tag_ids is not None and present)) and tag_id in distrusted:
             return GateResult(
                 GateStatus.NEEDS_REVIEW,
                 f"the {fact_label(tag_id)} comes from a field the extractor has read wrongly before, so "
