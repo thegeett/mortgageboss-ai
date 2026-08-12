@@ -1,0 +1,123 @@
+# PR-6 — Appraisal validity at closing — DETERMINISTIC calculative rule SPEC (LP-485).
+#
+# ⚠️ THREE BANDS, NOT ONE WINDOW. B4-1.2-04 does not give a single pass/fail age:
+#
+#     effective date -> note date      requirement
+#     ------------------------------   ---------------------------------------------
+#     <= 4 months                      acceptable as-is
+#     >  4 months and <= 12 months     an APPRAISAL UPDATE is required (Form 1004D)
+#     >  12 months                     a NEW appraisal is required
+#
+# ⚠️ THE MIDDLE BAND IS A CONDITION, NOT A FAILURE. An appraisal at six months is perfectly usable WITH an
+# update — reporting it as `fired` would tell a processor the file is broken when it merely needs one more
+# document. It is its own outcome (needs_review), which is what a condition is.
+#
+# ⚠️ ORDERED, FIRST-MATCH-WINS: the >12 band must be tested BEFORE the >4 band, or every stale appraisal
+# would report as "needs an update" and the new-appraisal requirement would never fire.
+#
+# ⚠️ MEASURED FROM THE EFFECTIVE DATE — the date of value — never the report or signature date (B4-1.2-04).
+# property.appraisal_date is declared on the appraisal's `appraisal_effective_date` field for that reason.
+#
+# ⚠️ KNOWN GAP (recorded, not silently dropped): B4-1.2-04 also caps a DESKTOP appraisal at four months
+# (over four months a desktop needs a NEW appraisal, not an update). That band needs an appraisal-TYPE
+# input, and no tag distinguishes desktop from traditional today — classifying the extractor's `form_type`
+# is an open-vocabulary question (the ADR-353 class). Until that tag exists this rule applies the
+# TRADITIONAL bands, which are the more permissive ones for the 4-12 month range: a desktop appraisal aged
+# 5 months reports "update required" where the guide requires a new appraisal. Logged in
+# docs/domain/priya-open-questions.md.
+
+rule_id: PR-6
+name: Appraisal validity at closing
+category: Property
+
+kind: calculative           # must equal rule_kinds.csv (PR-6 = calculative, deterministic_bookend)
+numeric_check: true         # must equal rule_kinds.csv — a months-vs-window compare
+
+criteria: >-
+  The appraisal must be current at the note date. Fannie Mae requires the property to have been appraised
+  within the 12 months prior to the note date; when the appraisal's effective date is more than four months
+  before the note date, an appraisal update (Form 1004D) is required; beyond 12 months a new appraisal is
+  required. This compares the derived property.appraisal_age_months_at_closing (complete calendar months
+  from the appraisal's EFFECTIVE date to the loan's closing date) against those two bounds. Absent or
+  unparseable dates resolve to couldnt_check, never a guessed pass.
+
+applicability:
+  scope: the appraisal's effective date vs the loan's closing (note) date
+  trigger: >-
+    Any file carrying an appraisal with a stated effective date and a known closing date. A file with no
+    appraisal yields an unknown age and couldnt_checks — it is never read as "the appraisal is current".
+
+reference_values:
+  priya_validated: false          # must equal rule_kinds.csv (the CATALOG's column; the bar carries our sign-off)
+  threshold_needs_signoff: true   # must equal rule_kinds.csv
+  values:
+    # ⚠️ SOURCE for BOTH bounds: Fannie Mae Selling Guide B4-1.2-04, "Appraisal Age and Use Requirements",
+    # page dated 06/04/2025 — "the property must be appraised within the 12 months prior to the date of the
+    # note and mortgage"; an update is required when the effective date is more than four months before the
+    # note date. CALENDAR MONTHS, matching the tag.
+    max_appraisal_age_months: "12"           # beyond this -> a NEW appraisal is required
+    appraisal_update_after_months: "4"       # beyond this (but within 12) -> an UPDATE is required
+  guideline_text: >-
+    Fannie Mae Selling Guide B4-1.2-04 (Appraisal Age and Use Requirements), page dated 06/04/2025: "When an
+    appraisal is obtained, the property must be appraised within the 12 months prior to the date of the note
+    and mortgage." When the effective date is more than four months before the note date, an appraisal
+    update (Form 1004D) is required; beyond twelve months a new appraisal is required. A DESKTOP appraisal
+    is capped at four months (a new appraisal, not an update) — a band this rule does not yet distinguish,
+    because no appraisal-type tag exists.
+
+required_inputs:
+  - name: appraisal_age_months_at_closing
+    snapshot_path: 'tags.by_subject["loan"]["property.appraisal_age_months_at_closing"]'
+    description: >-
+      complete calendar months from the appraisal's EFFECTIVE date to the loan's closing date (derived,
+      LP-485): "unknown" = either date is absent, unparseable, or the file's documents disagree.
+
+subject_enumeration: loan          # property.appraisal_age_months_at_closing is produced at the loan subject
+subject_key_fields: [loan]
+
+evidence_required: >-
+  The appraisal's effective date, the loan's closing date, the complete calendar months between them, and
+  which band that falls in (acceptable / update required / new appraisal required) — inline on the finding.
+
+guideline_reference: "Fannie Mae Selling Guide B4-1.2-04 (Appraisal Age and Use Requirements), page dated 06/04/2025 — the property must be appraised within the 12 months prior to the note date; an update is required beyond four months."
+
+spec_version: 1
+
+# The MACHINE-READABLE deterministic body (LP-324). THREE bands, ordered so the widest failure is tested
+# first. An "unknown" age coerces to None → couldnt_check via the gate, so a file with no appraisal can
+# never read as "the appraisal is current" (never clear on a missing document).
+deterministic:
+  load_bearing_tags:
+    - property.appraisal_age_months_at_closing
+  gated_tags:
+    - property.appraisal_age_months_at_closing
+  operands:
+    age_months: {tag: property.appraisal_age_months_at_closing}
+    max_months: {reference: max_appraisal_age_months}
+    update_after: {reference: appraisal_update_after_months}
+  outcomes:
+    - verdict: fired
+      # BAND 3 — beyond 12 months: a new appraisal. Tested FIRST; ordering is load-bearing here.
+      when_compare: {op: ">", left: age_months, right: max_months}
+      reasoning: >-
+        the appraisal's effective date is {age_months} complete calendar month(s) before the loan's closing
+        date, beyond the {max_months}-month limit — a NEW appraisal is required, not an update
+      how_to_fix: >-
+        Order a new appraisal. An appraisal update (Form 1004D) does not satisfy the requirement once the
+        original effective date is more than twelve months before the note date.
+    - verdict: needs_review
+      # BAND 2 — over 4 months but within 12: an UPDATE is required. ⚠️ This is a CONDITION, not a failure:
+      # the appraisal is usable, it needs one more document. Reporting it `fired` would misstate the file.
+      when_compare: {op: ">", left: age_months, right: update_after}
+      reasoning: >-
+        the appraisal's effective date is {age_months} complete calendar month(s) before the loan's closing
+        date — still within the {max_months}-month limit, but beyond {update_after} months, so an appraisal
+        update (Form 1004D) is required before closing
+      how_to_fix: >-
+        Order an appraisal update (Form 1004D) confirming the value has not declined. A new appraisal is not
+        required unless the effective date passes twelve months.
+    - verdict: satisfied
+      default: true
+      reasoning: >-
+        the appraisal's effective date is {age_months} complete calendar month(s) before the loan's closing
+        date, within the {update_after}-month window that needs no update

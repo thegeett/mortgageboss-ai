@@ -144,7 +144,11 @@ async def test_registry_dispatches_the_active_rule_set_by_kind() -> None:
             "AS-6",  # LP-429 — account ownership (Priya signed off 0.95; routing 11/11)
             "IN-15",  # LP-430 — terminated-employment documentation (no-ai-dependency; deterministic)
             "IN-16",  # LP-433 — pay-stub-only documentation (no-ai-dependency; deterministic)
-            "IH-1",  # LP-447 — insurance adequacy / dwelling settlement basis (no-ai-dependency)
+            "IH-1",
+            # LP-485 — the date-compare family, all deterministic (loan-scoped date/number compares).
+            "CL-1",
+            "CR-13",
+            "PR-6",  # LP-447 — insurance adequacy / dwelling settlement basis (no-ai-dependency)
         }
     )
     snapshot = _loan_snapshot(None)  # no occupancy/txn tags → everything fail-closes honestly

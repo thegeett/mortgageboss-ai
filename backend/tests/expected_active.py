@@ -19,6 +19,8 @@ from __future__ import annotations
 # Bumped by each activation: … LP-407-3 (+PC-2) → 28 → LP-417 (+IH-3) → 29 → LP-407-4 (+PC-3) → 30 →
 # LP-423 (+IN-12) → 31 → LP-428 (+IN-8, +IN-9) → 33 → LP-429 (+AS-6) → 34 → LP-430 (+IN-15) → 35 →
 # LP-433 (+IN-16) → 36 → LP-447 (+IH-1, insurance adequacy — the dwelling settlement basis) → 37.
-EXPECTED_ACTIVE_RULE_COUNT: int = 37
+# LP-485 (+CL-1, +CR-13, +PR-6 — the date-compare family: rate lock vs closing, credit age, appraisal age;
+# all deterministic, CR-13/PR-6's windows researched + cited to Fannie B1-1-03 / B4-1.2-04) → 40.
+EXPECTED_ACTIVE_RULE_COUNT: int = 40
 
 __all__ = ["EXPECTED_ACTIVE_RULE_COUNT"]

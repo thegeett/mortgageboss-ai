@@ -60,8 +60,9 @@ def test_the_honest_activation_state_is_reported() -> None:
     )  # +IN-6 (LP-406-3b) +IN-12 (LP-423) +IN-8 +IN-9 (LP-426/LP-428) +AS-6 (LP-397/LP-429) — all now validated
     assert by.get("not-calibratable-yet", 0) >= 1 and by.get("no-ai-dependency", 0) >= 1
     assert (
-        by.get("no-ai-threshold-pending", 0) == 1
-    )  # PC-7 (LP-411 — the third case, held on Priya's window)
+        by.get("no-ai-threshold-pending", 0) == 3
+    )  # PC-7 (LP-411) + CR-13 + PR-6 (LP-485 — both held on input_resolves; their windows are
+    # researched and cited in their specs' reference_values, not in this file)
     # LP-390-7 signed off AS-2 + AS-12; LP-390-9 signed off IN-3; LP-393-6 signed off IN-7/IN-10/IN-11/AS-11;
     # LP-429 signed off AS-6 — all validated calibratable-now rules.
     assert all(
@@ -158,9 +159,13 @@ def test_exactly_the_signed_off_bars_are_validated() -> None:
     validated = {rid for rid, b in bars.items() if b.validated}
     # IN-1/IN-5 (LP-389) + AS-2/AS-12 (LP-390-7) + IN-3 (LP-390-9) + IN-7/IN-10/IN-11/AS-11 (LP-393-6) +
     # IN-6 (calibratable) + PC-7 (no-ai-threshold-pending) — LP-412 signed off the last two.
+    # LP-485 adds CR-13 + PR-6: no-ai-threshold-pending bars whose windows are RESEARCHED AND CITED to the
+    # publisher's live guide (in each spec's reference_values), not Priya-signed. See the file header.
     assert (
         validated
         == {
+            "CR-13",
+            "PR-6",
             "IN-1",
             "IN-5",
             "AS-2",
@@ -289,6 +294,12 @@ def test_active_set_is_base_plus_lp389() -> None:
             # LP-447 — IH-1 (insurance adequacy): no-ai-dependency, deterministic (a normalised dwelling
             # settlement-basis compare). Priya's ADR-340 basis ruling. Structural → ships auto.
             "IH-1",
+            # LP-485 — the date-compare family: CL-1 (rate lock vs closing), CR-13 (credit age), PR-6
+            # (appraisal age). All deterministic; CR-13/PR-6's windows are researched + cited (Fannie
+            # B1-1-03 04/02/2025, B4-1.2-04 06/04/2025) in their specs' reference_values.
+            "CL-1",
+            "CR-13",
+            "PR-6",
         )
     )
     # A bar persists after activation as the record of WHY the rule went live, so the bars now intersect the
@@ -322,6 +333,11 @@ def test_active_set_is_base_plus_lp389() -> None:
             "IN-15",  # LP-430 — live via its bar (no-ai-dependency, input resolves; terminated-employment)
             "IN-16",  # LP-433 — live via its bar (no-ai-dependency, input resolves; pay-stub-only documentation)
             "IH-1",  # LP-447 — live via its bar (no-ai-dependency, input resolves; dwelling settlement basis)
+            # LP-485 — eligible: CL-1 (no-ai-dependency), CR-13 + PR-6 (no-ai-threshold-pending, windows
+            # researched + cited to Fannie B1-1-03 / B4-1.2-04 in their specs).
+            "CL-1",
+            "CR-13",
+            "PR-6",
         }
     )
     assert not (set(load_activation_bars()) & set(_BASE_ACTIVE))

@@ -407,3 +407,34 @@ tags:
       liability payments. A present 0 (paid-off account) contributes 0; "unknown" when no tradeline carries a
       payment figure (never a fabricated 0). Loan-level aggregate.
     produced_by: derived
+
+  # ------------------------------------------------------------------ #
+  # LP-485 — the date-compare family (CL-1 / CR-13 / PR-6). Every tag is DESCRIPTIVE: it emits a number or
+  # a date. The acceptable WINDOW lives in each rule's reference_values, never here (a tag carrying a
+  # threshold is a rule in disguise — five rules have died from that confusion).
+  # ------------------------------------------------------------------ #
+  rate_lock.days_to_closing:
+    entity: loan
+    value_type: number
+    allowed_values: null
+    description: >-
+      SIGNED days from the closing date to the rate lock's expiration. Positive = the lock still has room
+      at closing; negative = it expires BEFORE closing. "unknown" when either date is absent, unparseable,
+      or the file's documents disagree — never 0.
+    produced_by: derived
+  property.appraisal_age_months_at_closing:
+    entity: loan
+    value_type: number
+    allowed_values: null
+    description: >-
+      COMPLETE calendar months from the appraisal's effective date to the loan's closing date. Calendar
+      months, not a 30-day approximation. "unknown" when either date is missing or disputed — never 0.
+    produced_by: derived
+  credit.report_age_months_at_closing:
+    entity: loan
+    value_type: number
+    allowed_values: null
+    description: >-
+      COMPLETE calendar months from the credit report's pull date to the loan's closing date. Calendar
+      months, not a 120-day approximation. "unknown" when either date is missing or disputed — never 0.
+    produced_by: derived

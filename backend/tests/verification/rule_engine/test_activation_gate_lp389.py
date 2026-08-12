@@ -36,6 +36,10 @@ from app.verification.rule_engine.registry import _BASE_ACTIVE, ACTIVE_RULE_IDS
 # LP-393-6 added IN-7/IN-10/IN-11/AS-11 (the scenario-calibrated income/asset rules, signed off by Priya).
 _ACTIVATED = frozenset(
     {
+        # LP-485 — the date-compare family (deterministic; cited windows, no calibration gate).
+        "CL-1",
+        "CR-13",
+        "PR-6",
         "IN-1",
         "IN-5",
         "ID-5",
@@ -82,6 +86,9 @@ def test_exactly_the_eligible_candidates_pass() -> None:
     assert eligible == set(_ACTIVATED)
     # 8 held after LP-444: +CR-4 (not-calibratable-yet — its new AI tag credit.undisclosed_tradeline is
     # unscored, so it is held, never eligible). The rest: OC-1 / IN-13 / AS-4/5/7 / IN-14.
+    # Still 8 held after LP-485 — CL-1 / CR-13 / PR-6 ACTIVATED rather than held (they are deterministic;
+    # their windows are researched + cited in their specs). The 8: CR-4 (LP-444) / OC-1 / IN-13 / AS-3 /
+    # AS-4 / AS-5 / AS-7 / IN-14.
     assert len(held) == 8 and not (held & _ACTIVATED)  # every other candidate is held
 
 
@@ -94,6 +101,9 @@ def test_eligible_rule_ids_is_sorted_and_matches() -> None:
         "AS-6",  # LP-429 (sorts between AS-2 and AS-8)
         "AS-8",  # LP-406-2b
         "AS-9",
+        # LP-485 — the date-compare family, in sort order: CL-1/CR-13 before ID-5, PR-6 after PC-7.
+        "CL-1",
+        "CR-13",
         "ID-5",
         "IH-1",  # LP-447 (sorts between ID-5 and IH-3)
         "IH-3",  # LP-417 (sorts between ID-5 and IN-1)
@@ -113,6 +123,7 @@ def test_eligible_rule_ids_is_sorted_and_matches() -> None:
         "PC-2",  # LP-407-3 (sorts before PC-7)
         "PC-3",  # LP-407-4 (sorts between PC-2 and PC-7)
         "PC-7",  # LP-412
+        "PR-6",  # LP-485 (sorts after PC-7)
     )  # sorted
 
 

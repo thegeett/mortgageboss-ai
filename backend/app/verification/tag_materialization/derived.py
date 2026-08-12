@@ -1169,6 +1169,123 @@ def _contract_days_until_closing(
     )
 
 
+# --------------------------------------------------------------------------- #
+# LP-485 — the date-compare family (CL-1 / CR-13 / PR-6).
+#
+# All three mirror _contract_days_until_closing: gather ONE date across subjects, dedup by the PARSED date
+# (one date rendered two ways is one value), abstain to _UNKNOWN when none parse AND when documents
+# DISAGREE, and emit ONLY the number. ⚠️ The tag is DESCRIPTIVE — the acceptable window belongs to the
+# RULE (its reference_values), never to the tag. A tag carrying a threshold is a rule in disguise.
+# --------------------------------------------------------------------------- #
+
+
+def _single_parsed_date(snapshot: Snapshot, tag_id: str) -> tuple[date | None, str | None]:
+    """The file's ONE parseable value of ``tag_id`` as a date, or ``(None, reason)``.
+
+    The shared gather ``_contract_days_until_closing`` performs inline, extracted so three consumers cannot
+    drift. Dedups by the PARSED date; two DISTINCT dates mean the documents disagree and there is no single
+    answer — that is ``None`` with a reason, never an arbitrary pick.
+    """
+    if snapshot.tags.absent:
+        return None, "no tags materialized"
+    dates: dict[date, str] = {}
+    for tags in snapshot.tags.by_subject.values():
+        tag = tags.get(tag_id)
+        if tag is None or str(tag.value) == _UNKNOWN:
+            continue
+        parsed = coerce_date(str(tag.value))
+        if parsed is not None:
+            dates[parsed] = str(tag.value)
+    if not dates:
+        return None, "not stated (or not parseable) anywhere in the file"
+    if len(dates) > 1:
+        return (
+            None,
+            f"the file's documents disagree ({', '.join(sorted(dates.values()))}) — ambiguous",
+        )
+    return next(iter(dates)), None
+
+
+def _full_months_between(earlier: date, later: date) -> int:
+    """COMPLETE calendar months from ``earlier`` to ``later`` (negative if ``later`` precedes ``earlier``).
+
+    ⚠️ CALENDAR MONTHS, NOT A DAY COUNT. Fannie's B1-1-03 / B4-1.2-04 windows are stated in months, and a
+    30-day approximation differs from the calendar by up to three days at four months — enough to pass a
+    document the guide fails, or fail one it passes. A partial month does NOT count: 04-01 → 08-01 is four
+    months; 04-02 → 08-01 is three.
+    """
+    months = (later.year - earlier.year) * 12 + (later.month - earlier.month)
+    if later.day < earlier.day:
+        months -= 1
+    return months
+
+
+def _age_in_months_at_closing(
+    snapshot: Snapshot, document_date_tag: str, label: str
+) -> tuple[JsonValue, str]:
+    """Shared body for CR-13 / PR-6: COMPLETE calendar months from a document's date to the closing date.
+
+    ⚠️ THE OPERAND SUBSTITUTION, stated where it happens: the guideline measures to the **note date**; the
+    snapshot carries only ``contract.closing_date``. They are usually the same day and not always. Recorded
+    as an explicit assumption in docs/tickets/LP-485.md rather than silently treated as identical.
+
+    Fail-closed: either date absent, unparseable, or disagreed-upon → ``unknown`` (never 0, never a default).
+    """
+    doc_date, why = _single_parsed_date(snapshot, document_date_tag)
+    if doc_date is None:
+        return _UNKNOWN, f"the {label} date is {why}"
+    closing, why_closing = _single_parsed_date(snapshot, "contract.closing_date")
+    if closing is None:
+        return _UNKNOWN, f"the closing date is {why_closing} — cannot age the {label}"
+    months = _full_months_between(doc_date, closing)
+    return (
+        str(months),
+        f"the {label} dated {doc_date.isoformat()} is {months} complete calendar month(s) old at the "
+        f"closing date {closing.isoformat()}",
+    )
+
+
+def _credit_report_age_months(
+    snapshot: Snapshot, _subject_id: str, _subject_raw: object
+) -> tuple[JsonValue, str]:
+    """credit.report_age_months_at_closing — complete calendar months from the credit pull to closing (CR-13)."""
+    return _age_in_months_at_closing(snapshot, "credit.report_date", "credit report")
+
+
+def _appraisal_age_months(
+    snapshot: Snapshot, _subject_id: str, _subject_raw: object
+) -> tuple[JsonValue, str]:
+    """property.appraisal_age_months_at_closing — complete calendar months from the appraisal's EFFECTIVE
+    date to closing (PR-6). B4-1.2-04 measures from the effective date, not the report/signature date."""
+    return _age_in_months_at_closing(snapshot, "property.appraisal_date", "appraisal")
+
+
+def _rate_lock_days_to_closing(
+    snapshot: Snapshot, _subject_id: str, _subject_raw: object
+) -> tuple[JsonValue, str]:
+    """rate_lock.days_to_closing — SIGNED days from the closing date to the rate lock's expiration (CL-1).
+
+    POSITIVE = the lock still has room at closing; NEGATIVE = it expires BEFORE closing (CL-1 fires).
+    A day count is correct here (unlike the month-stated guideline windows): a lock expires on a date, and
+    the question is simply which date comes first. Fail-closed to unknown on either side.
+    """
+    expiry, why = _single_parsed_date(snapshot, "rate_lock.expiration")
+    if expiry is None:
+        return _UNKNOWN, f"the rate lock expiration is {why}"
+    closing, why_closing = _single_parsed_date(snapshot, "contract.closing_date")
+    if closing is None:
+        return (
+            _UNKNOWN,
+            f"the closing date is {why_closing} — cannot compare it to the lock expiration",
+        )
+    days = (expiry - closing).days
+    return (
+        str(days),
+        f"the rate lock expires {expiry.isoformat()}, {days} day(s) "
+        f"{'after' if days >= 0 else 'BEFORE'} the closing date {closing.isoformat()}",
+    )
+
+
 def _decimal_or_none(tag: Tag | None) -> Decimal | None:
     """A statement balance tag's value as a Decimal, or None (absent / unknown / unparseable)."""
     if tag is None or str(tag.value) == _UNKNOWN:
@@ -1898,6 +2015,10 @@ _RECIPES: dict[str, Recipe] = {
     "cash_to_close_shortfall": _cash_to_close_shortfall,
     # LP-410 — the derived-producer wave (unblocks PC-7 / AS-8 / IN-6; tags describe, rules judge).
     "contract_days_until_closing": _contract_days_until_closing,
+    # LP-485 — the date-compare family (CL-1 / CR-13 / PR-6). Descriptive numbers only.
+    "rate_lock_days_to_closing": _rate_lock_days_to_closing,
+    "credit_report_age_months": _credit_report_age_months,
+    "appraisal_age_months": _appraisal_age_months,
     "stmt_continuity": _stmt_continuity,
     "income_employer_coverage": _income_employer_coverage,
     # LP-418 — a DETERMINISTIC per-borrower self-employment signal (promotes the measured income.type), for

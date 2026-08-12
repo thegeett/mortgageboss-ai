@@ -42,6 +42,11 @@ _FACT_LABELS: dict[str, str] = {
     "id.borrower_id_expiration": "borrower's government ID expiration date",  # ID-5
     "contract.loan_closing_date": "loan's closing date",  # ID-5
     "contract.days_until_closing": "days from the file date to the closing date",  # PC-7 (LP-410 / LP-406-1b)
+    # LP-485 — the date-compare family. Each label names the MISSING FACT in mortgage terms (never the tag
+    # id), because it is what a processor reads when the rule couldnt_checks.
+    "rate_lock.days_to_closing": "rate lock's expiration date and the loan's closing date",  # CL-1
+    "credit.report_age_months_at_closing": "credit report's pull date and the loan's closing date",  # CR-13
+    "property.appraisal_age_months_at_closing": "appraisal's effective date and the loan's closing date",  # PR-6
     "contract.loan_sales_price": "purchase contract's sale price",  # PC-2 (LP-407-2 / LP-407-3)
     "property.purchase_price": "purchase price stated in the loan file",  # PC-2 (LP-407-3)
     "ins.loan_effective_date": "insurance policy's effective date",  # IH-3 (LP-417)

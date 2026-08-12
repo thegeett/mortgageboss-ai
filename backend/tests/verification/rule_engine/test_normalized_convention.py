@@ -258,5 +258,10 @@ def test_registry_drift_guard_and_activation_unchanged() -> None:
             "IN-15",  # LP-430 — terminated-employment documentation (no-ai-dependency; deterministic)
             "IN-16",  # LP-433 — pay-stub-only documentation (no-ai-dependency; deterministic)
             "IH-1",  # LP-447 — insurance adequacy / dwelling settlement basis (no-ai-dependency)
+            # LP-485 — the date-compare family: rate lock vs closing, credit age, appraisal age. All
+            # deterministic; CR-13/PR-6's windows researched + cited (Fannie B1-1-03 / B4-1.2-04).
+            "CL-1",
+            "CR-13",
+            "PR-6",
         )
     )

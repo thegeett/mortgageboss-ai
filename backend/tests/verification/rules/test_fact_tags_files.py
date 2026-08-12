@@ -60,7 +60,9 @@ def test_desired_state_shape() -> None:
     # LP-430 — +2 overlay (income.terminated_employment + _end_date); LP-433 — +1 (income.history_documentation).
     # LP-447 +1 (ins.dwelling_settlement_basis — the IH-1 basis tag, a vocabulary_extra overlay).
     # LP-453 +2 (credit.tradeline_count + credit.tradeline_monthly_payment_total — the tradelines consumer).
-    assert len(tags) == 175  # LP-444 +1 (credit.undisclosed_tradeline — CR-4, inert); prior:
+    assert len(tags) == 178  # LP-485 +3 (the date-compare family: rate_lock.days_to_closing,
+    # credit.report_age_months_at_closing, property.appraisal_age_months_at_closing);
+    # LP-444 +1 (credit.undisclosed_tradeline — CR-4, inert); prior:
     # +4 assets (LP-323-AS-B) +2 ID-5 (LP-389-A) +2 stmt variance/co-holder
     # (LP-400) +3 the LP-410 derived-producer wave (days_until_closing / stmt.continuity / employer_coverage)
     # +1 LP-407-2 (contract.loan_sales_price — the PC-2 loan promotion; its 4 other tags already exist in the CSV)

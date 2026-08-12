@@ -211,6 +211,14 @@ _LP433_ACTIVATED: tuple[str, ...] = ("IN-16",)
 # basis; per-document, so a file with no binder is not_applicable (DIFFERENT from IH-3's missing-binder couldnt_check).
 _LP447_ACTIVATED: tuple[str, ...] = ("IH-1",)
 
+# LP-485 — the date-compare family goes LIVE. All three are deterministic (no AI tag in any chain), so none
+# is calibration-gated: CL-1 clears on input_resolves alone (no domain threshold — a date ordering), and
+# CR-13 / PR-6 clear on input_resolves + validated, their windows RESEARCHED AND CITED to the publisher's
+# live guide in each spec's reference_values (Fannie B1-1-03 04/02/2025 — four months; B4-1.2-04 06/04/2025
+# — twelve months, update beyond four). That citation is our calibration and stands until Priya revises it;
+# every value is listed in docs/domain/priya-open-questions.md for her review.
+_LP485_ACTIVATED: tuple[str, ...] = ("CL-1", "CR-13", "PR-6")
+
 # The gate is the source of truth: test_activation_gate_lp389 asserts ACTIVE_RULE_IDS - _BASE_ACTIVE ==
 # eligible_rule_ids() — a rule CANNOT enter this set without meeting the eligibility gate (not a hand-list).
 ACTIVE_RULE_IDS: tuple[str, ...] = (
@@ -231,6 +239,7 @@ ACTIVE_RULE_IDS: tuple[str, ...] = (
     *_LP430_ACTIVATED,
     *_LP433_ACTIVATED,
     *_LP447_ACTIVATED,
+    *_LP485_ACTIVATED,
 )
 
 

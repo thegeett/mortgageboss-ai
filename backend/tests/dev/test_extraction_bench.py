@@ -1,7 +1,7 @@
 """The extraction bench (dev-only) — the SEPARATION and SAFETY guarantees.
 
 The bench must change NOTHING about the system under test: production prompts byte-unchanged, no
-production module depends on the bench, and the rule engine is untouched (ACTIVE_RULE_IDS == 37).
+production module depends on the bench, and the rule engine is untouched (ACTIVE_RULE_IDS == 40).
 Redaction was REMOVED (Geet's decision) — the bench now captures real values, so its output contains real
 PII; that safety is handled by gitignore + warnings, not by scrubbing. It measures COVERAGE, not accuracy.
 """
@@ -83,7 +83,7 @@ async def test_bench_run_context_does_not_modify_the_prompt() -> None:
 def test_active_rule_ids_unchanged() -> None:
     from app.verification.rule_engine.registry import ACTIVE_RULE_IDS
 
-    assert len(ACTIVE_RULE_IDS) == 37
+    assert len(ACTIVE_RULE_IDS) == 40  # LP-485 +CL-1/CR-13/PR-6
 
 
 # --------------------------------------------------------------------------- #

@@ -272,6 +272,13 @@ tags:
   # defers to Priya. A parsed tag is NOT validated against allowed_values, so declaring it would ship
   # out-of-domain values silently. See docs/tickets/LP-483.md.
   liab.monthly_payment: {mode: parsed, subject: liability, data: monthly_payment}
+  # LP-485 — the date-compare family. The two parsed dates are document_type-SCOPED so an unrelated
+  # document sharing a field name can never materialize them (the contract.emd_amount precedent).
+  rate_lock.expiration: {mode: parsed, subject: document, data: rate_lock_expiration, document_type: loan_estimate}
+  property.appraisal_date: {mode: parsed, subject: document, data: appraisal_effective_date, document_type: appraisal}
+  rate_lock.days_to_closing: {mode: derived, subject: loan, data: rate_lock_days_to_closing}
+  credit.report_age_months_at_closing: {mode: derived, subject: loan, data: credit_report_age_months}
+  property.appraisal_age_months_at_closing: {mode: derived, subject: loan, data: appraisal_age_months}
   credit.tradeline_count: {mode: derived, subject: loan, data: credit_tradeline_count}
   credit.tradeline_monthly_payment_total: {mode: derived, subject: loan, data: credit_tradeline_monthly_payment_total}
   # LP-454 (step D.3) — the credit report's PULL DATE (CR-13). A PARSED document fact from the credit_report

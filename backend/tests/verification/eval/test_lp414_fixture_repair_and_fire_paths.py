@@ -108,15 +108,21 @@ async def test_lf6t3n_full_verdict_distribution_is_stable() -> None:
     # +4 couldnt_check → 431. ⚠️ THE EQUIVALENCE: satisfied / fired / needs_review are UNCHANGED (23 / 2 / 2) — no
     # existing rule's verdict moved; IH-1 only adds honest not_applicable / couldnt_check where LF-6T3N has no
     # binder to judge. Any OTHER movement would be a regression.
+    # LP-485 ACTIVATED CL-1 / CR-13 / PR-6 (all subject_enumeration: loan → ONE eval each): LF-6T3N carries no
+    # loan estimate, no credit report and no appraisal, so all three derived numbers are "unknown" and the
+    # gate routes each to couldnt_check. +3 couldnt_check → 434. ⚠️ THIS IS THE PROPERTY, ON A REAL FIXTURE:
+    # a file missing the document reads couldnt_check, NEVER satisfied — the rules do not clear on absence.
+    # satisfied / fired / needs_review stay 23 / 2 / 2.
     mat = await materialize_tags(
         build_lf6t3n_snapshot(), ai_reasoners=stub_materialization_reasoners()
     )
     results, _ = await evaluate_rules(mat)
-    assert len(results) == 431
+    assert len(results) == 434
     assert (
         Counter(r.verdict.value for r in results)
         == {
-            "couldnt_check": 204,  # +IH-1 x4 (LP-447 — 4 unclassified docs; no binder to read a basis from)
+            "couldnt_check": 207,  # +IH-1 x4 (LP-447); +CL-1/CR-13/PR-6 x1 each (LP-485 — no LE / credit
+            # report / appraisal on LF-6T3N, so each abstains rather than clearing)
             "not_applicable": 200,  # +IH-1 x26 (LP-447 — 26 classified non-binder docs; no homeowners policy)
             "satisfied": 23,  # UNCHANGED — no existing verdict moved
             "fired": 2,  # UNCHANGED
@@ -131,6 +137,11 @@ async def test_lf6t3n_full_verdict_distribution_is_stable() -> None:
         "PC-2": "satisfied",  # LP-407-3 — the contract price matches the 1003 (365000)
         "IH-3": "couldnt_check",  # LP-417 — no homeowners binder on LF-6T3N (an honest absence)
         "PC-3": "couldnt_check",  # LP-407-4 — no MISMO subject-property address on LF-6T3N
+        # LP-485 — the date-compare family. LF-6T3N has no loan estimate, no credit report and no
+        # appraisal, so each abstains. ⚠️ NOT "satisfied": a rule must never clear on a missing document.
+        "CL-1": "couldnt_check",
+        "CR-13": "couldnt_check",
+        "PR-6": "couldnt_check",
         "ID-6": "fired",
         "IN-2": "fired",
         "IN-3": "couldnt_check",

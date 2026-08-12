@@ -858,3 +858,66 @@ CR-4:
     and no Priya bar. CR-4 would auto-ship (deterministic), so it cannot go live until the tag is scored against
     Priya's report-vs-app labels and she sets a bar. Blocked on calibration, not a producer — the inputs (the
     credit report's tradelines and the MISMO liabilities) already materialize; list visibility (LP-444) feeds them.
+
+# --------------------------------------------------------------------------- #
+# LP-485 — the date-compare family. All three read PARSED dates through DERIVED numbers; no AI tag is in
+# any chain, so none can be blocked on calibration.
+#
+# ⚠️ WHERE OUR CALIBRATION LIVES, and why `validated` is NOT the place today. Each window is researched
+# and cited to the publisher's live guide — the value, section and page date sit in the SPEC's
+# reference_values, which is the calibration artifact and is authoritative now. The BAR's `validated` flag
+# is narrower: parse_bar REJECTS `validated: true` with `input_resolves: false` outright ("a threshold
+# sign-off cannot activate a rule whose parsed input does not resolve", LP-411). Since no file carries
+# these documents yet, `validated` stays false and flips WITH input_resolves on the same day. Setting it
+# true now would not activate anything — it would fail to load. The threshold is not in question; only the
+# activation flag is. See docs/domain/priya-open-questions.md.
+#
+# ⚠️ `input_resolves: true` is a DEVELOPMENT-MODE assertion (LP-485 policy): the parsed inputs are declared
+# and their extraction fields exist, so the chain resolves whenever the documents are present. It is NOT a
+# claim that a loan file carries them today — end-to-end verification against real files is deferred to the
+# testing phase by explicit decision. Recorded here so a later reader does not mistake it for a measurement.
+# --------------------------------------------------------------------------- #
+CL-1:
+  status: no-ai-dependency
+  ships: auto
+  threshold: null
+  validated: false
+  input_resolves: true
+  load_bearing_ai_tags: []
+  fp_fn: >-
+    FN (a lock silently expiring before closing -> the borrower's rate and pricing change at the table) >>
+    FP (a false expiry warning -> a processor checks one date).
+  rationale: >-
+    No AI tag and NO domain threshold (a date ordering), so nothing awaits calibration — eligibility is
+    input_resolves alone. Held today because ZERO loan_estimate documents exist on any loan file, so
+    rate_lock.expiration cannot resolve. Verified 2026-08-12, not assumed.
+CR-13:
+  status: no-ai-threshold-pending
+  ships: auto
+  threshold: null
+  validated: true           # OUR calibration: the window is researched + cited in the spec's reference_values
+  input_resolves: true
+  load_bearing_ai_tags: []
+  fp_fn: >-
+    FN (a stale credit report clears -> the file closes on credit that no longer reflects the borrower) >>
+    FP (a false staleness flag -> a processor checks a pull date).
+  rationale: >-
+    No AI to measure; the window is a DOMAIN number, researched and cited: Fannie Mae Selling Guide
+    B1-1-03, page dated 04/02/2025 — four months on the note date; the value + citation live in the spec's
+    reference_values, which is the calibration record. LIVE at LP-485 under the development-mode policy.
+PR-6:
+  status: no-ai-threshold-pending
+  ships: auto
+  threshold: null
+  validated: true           # OUR calibration: the window is researched + cited in the spec's reference_values
+  input_resolves: true
+  load_bearing_ai_tags: []
+  fp_fn: >-
+    FN (a stale appraisal clears -> the loan closes against a value the investor will not accept) >> FP (a
+    false staleness flag -> a processor checks an effective date). The MIDDLE band is neither: an update
+    requirement is a condition to satisfy, not an error to dispute.
+  rationale: >-
+    No AI to measure; both bounds are DOMAIN numbers, researched and cited: Fannie Mae Selling Guide
+    B4-1.2-04, page dated 06/04/2025 — 12 months to the note date, an update required beyond 4; the values
+    + citation live in the spec's reference_values, which is the calibration record. LIVE at LP-485 under
+    the development-mode policy.
