@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Callable, Mapping
+from dataclasses import dataclass
 
 from app.verification.rules.specs import DOC_TYPE_TAG
 from app.verification.snapshot.content_id import LIABILITY_PREFIX, assign_content_ids
@@ -291,16 +292,112 @@ def _liability_marker(value: str, reasoning: str, source_fact: str) -> Tag:
     )
 
 
-def _mismo_liabilities(snapshot: Snapshot) -> list[tuple[dict[str, str | None], str]]:
-    """The file's MISMO liabilities as ``[({field: value}, mismo_key), …]``, in the projection's order.
+@dataclass(frozen=True)
+class LiabilityRow:
+    """One liability from either source, with the identity BOTH enumerations must agree on (LP-483).
+
+    ``per_liability`` (the rule-engine subject enumerator) and the ``liability`` PRODUCTION subject family
+    (``tag_materialization/subjects.py``) must key on the SAME ``subject_id``, or a tag materialises under
+    an id no rule ever reads. They therefore both build from this one function rather than deriving ids
+    twice — the drift is removed by construction, not by a comment asking two call sites to stay in step.
+
+    ``fields`` carries the RAW snapshot fields (a producer reads them); ``values`` is the string projection
+    the content hash is taken over (unchanged from LP-480, so existing ids are stable).
+    """
+
+    subject_id: str
+    source: str
+    fields: Mapping[str, Field | PiiField]
+    values: Mapping[str, str | None]
+    origin: str  # the row_id / the ``liability.{n}`` key — for a marker's reasoning
+    unresolved_reason: str | None
+
+
+def liability_rows(snapshot: Snapshot) -> list[LiabilityRow]:
+    """Every liability subject on the file, from BOTH sources, in enumeration order (LP-483).
+
+    The union ADR-374 defines: credit-report tradelines first (keyed by their LP-479 ``row_id``), then the
+    idless tradelines, then the MISMO stated liabilities (keyed by a content hash over their four fields).
+    Nothing is matched or merged here — that is a rule's judgment, never an enumerator's.
+    """
+    rows: list[LiabilityRow] = []
+    idless: list[tuple[dict[str, str | None], dict[str, Field | PiiField]]] = []
+    for row in all_list_rows(
+        snapshot, _TRADELINES_LIST_NAME, document_type=_CREDIT_REPORT_DOC_TYPE
+    ):
+        values = {name: _field_str(f) for name, f in sorted(row.fields.items())}
+        if row.row_id is None:
+            idless.append((values, dict(row.fields)))
+            continue
+        rows.append(
+            LiabilityRow(
+                subject_id=row.row_id,
+                source=_SOURCE_CREDIT_REPORT,
+                fields=dict(row.fields),
+                values=values,
+                origin=row.row_id,
+                unresolved_reason=None,
+            )
+        )
+    for subject_id, (values, fields) in zip(
+        assign_content_ids(LIABILITY_PREFIX, [{"liability": v} for v, _ in idless]),
+        idless,
+        strict=True,
+    ):
+        rows.append(
+            LiabilityRow(
+                subject_id=subject_id,
+                source=_SOURCE_CREDIT_REPORT,
+                fields=fields,
+                values=values,
+                origin=subject_id,
+                unresolved_reason=(
+                    "the tradeline row carries no stable row_id, so it has no identity durable "
+                    "across runs — surfaced on its own rather than dropped"
+                ),
+            )
+        )
+    mismo = _mismo_liabilities(snapshot)
+    for subject_id, (values, mismo_key, fields) in zip(
+        assign_content_ids(LIABILITY_PREFIX, [{"liability": v} for v, _, _ in mismo]),
+        mismo,
+        strict=True,
+    ):
+        rows.append(
+            LiabilityRow(
+                subject_id=subject_id,
+                source=_SOURCE_MISMO,
+                fields=fields,
+                values=values,
+                origin=mismo_key,
+                unresolved_reason=(
+                    None
+                    if values.get("holder_name") is not None
+                    else (
+                        f"stated liability {mismo_key} names no holder, so it cannot be identified "
+                        "against a reported tradeline — surfaced on its own rather than dropped or "
+                        "guess-merged"
+                    )
+                ),
+            )
+        )
+    return rows
+
+
+def _mismo_liabilities(
+    snapshot: Snapshot,
+) -> list[tuple[dict[str, str | None], str, dict[str, Field | PiiField]]]:
+    """The file's MISMO liabilities as ``[({field: value}, mismo_key, {field: raw}), …]``, in projection order.
 
     Reads the ``liability.{n}.{field}`` facts the MISMO section projects. The ``{n}`` index is POSITIONAL
     (``mismo_section`` enumerates sorted by row id), so it is used ONLY to gather a row's fields together —
-    never as the subject id (see ``_per_liability``).
+    never as the subject id (see ``_per_liability``). The third element carries the RAW fields so a parsed
+    producer can read them (LP-483); the hashed ``values`` projection is unchanged, so ids are stable.
     """
     if snapshot.mismo.absent:
         return []
     rows: dict[str, dict[str, str | None]] = {}
+    raw_rows: dict[str, dict[str, Field | PiiField]] = {}
     for key, field in snapshot.mismo.facts.items():
         parts = key.split(".")
         if len(parts) != 3 or parts[0] != "liability":
@@ -309,9 +406,15 @@ def _mismo_liabilities(snapshot: Snapshot) -> list[tuple[dict[str, str | None], 
         if name not in _MISMO_LIABILITY_FIELDS:
             continue
         rows.setdefault(index, {})[name] = _field_str(field)
+        raw_rows.setdefault(index, {})[name] = field
     ordered = sorted(rows, key=lambda i: (len(i), i))  # numeric-ish, deterministic
     return [
-        ({f: rows[i].get(f) for f in _MISMO_LIABILITY_FIELDS}, f"liability.{i}") for i in ordered
+        (
+            {f: rows[i].get(f) for f in _MISMO_LIABILITY_FIELDS},
+            f"liability.{i}",
+            raw_rows.get(i, {}),
+        )
+        for i in ordered
     ]
 
 
@@ -358,65 +461,22 @@ def _per_liability(snapshot: Snapshot) -> list[Subject]:
     """
     by_subject = {} if snapshot.tags.absent else snapshot.tags.by_subject
     subjects: list[Subject] = []
-
-    idless: list[dict[str, str | None]] = []
-    for row in all_list_rows(
-        snapshot, _TRADELINES_LIST_NAME, document_type=_CREDIT_REPORT_DOC_TYPE
-    ):
-        if row.row_id is None:
-            # No durable id (an older snapshot, or stable_row_id turned off). NEVER a positional id, and
-            # never a silent drop either (reported finding): the row becomes its own content-identified
-            # subject marked unresolved, so a rule reports couldnt_check on it rather than reporting
-            # "nothing found" — the same fail-closed contract _per_account and the MISMO leg already keep.
-            idless.append({name: _field_str(f) for name, f in sorted(row.fields.items())})
-            continue
-        tags = dict(by_subject.get(row.row_id, {}))
+    for row in liability_rows(snapshot):
+        tags = dict(by_subject.get(row.subject_id, {}))
         tags[LIABILITY_SOURCE_TAG] = _liability_marker(
-            _SOURCE_CREDIT_REPORT,
-            "reported by the credit bureau on a credit report tradeline",
-            row.row_id,
-        )
-        subjects.append((row.row_id, tags))
-
-    for subject_id in assign_content_ids(
-        LIABILITY_PREFIX, [{"liability": fields} for fields in idless]
-    ):
-        subjects.append(
+            row.source,
             (
-                subject_id,
-                {
-                    LIABILITY_SOURCE_TAG: _liability_marker(
-                        _SOURCE_CREDIT_REPORT,
-                        "reported by the credit bureau on a credit report tradeline",
-                        subject_id,
-                    ),
-                    LIABILITY_UNRESOLVED_TAG: _liability_marker(
-                        "yes",
-                        "the tradeline row carries no stable row_id, so it has no identity durable "
-                        "across runs — surfaced on its own rather than dropped",
-                        subject_id,
-                    ),
-                },
-            )
+                "reported by the credit bureau on a credit report tradeline"
+                if row.source == _SOURCE_CREDIT_REPORT
+                else f"stated by the borrower on the application ({row.origin})"
+            ),
+            row.subject_id,
         )
-
-    mismo_rows = _mismo_liabilities(snapshot)
-    ids = assign_content_ids(LIABILITY_PREFIX, [{"liability": fields} for fields, _ in mismo_rows])
-    for (fields, mismo_key), subject_id in zip(mismo_rows, ids, strict=True):
-        tags = dict(by_subject.get(subject_id, {}))
-        tags[LIABILITY_SOURCE_TAG] = _liability_marker(
-            _SOURCE_MISMO,
-            f"stated by the borrower on the application ({mismo_key})",
-            subject_id,
-        )
-        if fields.get("holder_name") is None:
+        if row.unresolved_reason is not None:
             tags[LIABILITY_UNRESOLVED_TAG] = _liability_marker(
-                "yes",
-                f"stated liability {mismo_key} names no holder, so it cannot be identified against a "
-                "reported tradeline — surfaced on its own rather than dropped or guess-merged",
-                subject_id,
+                "yes", row.unresolved_reason, row.subject_id
             )
-        subjects.append((subject_id, tags))
+        subjects.append((row.subject_id, tags))
     return subjects
 
 

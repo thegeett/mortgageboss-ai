@@ -257,6 +257,15 @@ tags:
   #     interpreting a dispute/late is a Priya/AI question (ADR), NOT this recipe. Tags DESCRIBE, rules judge:
   #     no threshold, no is_derogatory. Fail closed: no tradelines → the tag abstains to "unknown" (never a 0).
   #     Feeds CR-1's DTI cross-check; the per-row classification rules (CR-8/9/10/12) are deferred. ------------ #
+  # LP-483 — the FIRST produced liab.* tag. Parsed from whichever source the subject came from (the
+  # liability family's alias map resolves the column: the tradeline's `monthly_payment`, the MISMO
+  # liability's `monthly_payment`). A raw number, so no classification is involved.
+  # ⚠️ `liab.account_type` is deliberately NOT declared here: its vocabulary enum
+  # (revolving/installment/mortgage/...) does not match either source's raw codes (REV/AUTO/MTG;
+  # MortgageLoan/Installment), and mapping between them is the open-vocabulary classification ADR-353
+  # defers to Priya. A parsed tag is NOT validated against allowed_values, so declaring it would ship
+  # out-of-domain values silently. See docs/tickets/LP-483.md.
+  liab.monthly_payment: {mode: parsed, subject: liability, data: monthly_payment}
   credit.tradeline_count: {mode: derived, subject: loan, data: credit_tradeline_count}
   credit.tradeline_monthly_payment_total: {mode: derived, subject: loan, data: credit_tradeline_monthly_payment_total}
   # LP-454 (step D.3) — the credit report's PULL DATE (CR-13). A PARSED document fact from the credit_report

@@ -173,6 +173,86 @@ def _loan_context(
     return {name: _field_value(field) for name, field in raw.mismo.facts.items()}
 
 
+# --------------------------------------------------------------------------- #
+# liability (LP-483)
+#
+# ⚠️ WHY THIS FAMILY DID NOT EXIST, AND WHAT IT UNBLOCKS. ``KNOWN_SUBJECTS`` held only
+# transaction/document/loan/borrower, so a tag declared with ``entity: liability`` had nowhere to be
+# produced — the loader rejects an unknown subject. That is why ALL 14 ``liab.*`` tags sit in
+# ``fact_tags.csv`` DECLARED AND UNPRODUCED (account_type, balance, dti_payment, in_application,
+# is_disputed, monthly_payment, heloc_credit_limit, derogatory_date/_type, excluded_paid_off,
+# has_open_judgment_lien, is_derogatory, payment_status, representative_score). This family is therefore
+# NOT CR-1 overhead — it is the missing floor under the whole credit tag vocabulary.
+#
+# ⚠️ IDENTITY. The subject ids MUST equal what the rule-engine's ``per_liability`` enumerator emits, or a
+# tag materialises under an id no rule reads. Both call ``liability_rows`` (rule_engine/enumerators.py) —
+# ONE derivation, so they cannot drift.
+# --------------------------------------------------------------------------- #
+
+# The two sources name the same fact differently. This maps a DECLARATION's canonical field name to each
+# source's own column. ⚠️ It normalises NAMES ONLY — never values: mapping a bureau's ``REV`` to the
+# vocabulary's ``revolving`` would be the open-vocabulary CLASSIFICATION that ADR-353 defers to Priya,
+# which is why ``liab.account_type`` has no parsed producer (see LP-483's ticket doc).
+_LIABILITY_FIELD_ALIASES: dict[str, dict[str, str]] = {
+    # credit-report tradeline row (LP-479 ListSpec field names)
+    "credit_report_reported": {
+        "account_type": "account_type",
+        "monthly_payment": "monthly_payment",
+        "balance": "balance",
+        "creditor_name": "creditor_name",
+        "is_disputed": "is_disputed",
+        "payment_status": "payment_status",
+        "heloc_credit_limit": "credit_limit_or_high_credit",
+    },
+    # MISMO stated liability (the four fields mismo_section projects — no account number exists)
+    "mismo_stated": {
+        "account_type": "type",
+        "monthly_payment": "monthly_payment",
+        "balance": "unpaid_balance",
+        "creditor_name": "holder_name",
+    },
+}
+
+
+def _liability_enumerate(snapshot: Snapshot) -> list[Subject]:
+    # LAZY IMPORT — load-bearing, do NOT hoist (the rule_engine ↔ tag_materialization init-order
+    # cycle ``derived.py`` already navigates the same way).
+    from app.verification.rule_engine.enumerators import liability_rows
+
+    return [(row.subject_id, row) for row in liability_rows(snapshot)]
+
+
+def _liability_read_field(raw: object, field: str) -> RawField | None:
+    """The raw field for a declaration's canonical name, resolved through the source's alias map.
+
+    An unknown canonical name, or a name the source does not carry (the MISMO leg has no
+    ``is_disputed``), yields None → an ABSENT tag. Fail-closed: absent ≠ empty ≠ a default.
+    """
+    from app.verification.rule_engine.enumerators import LiabilityRow
+
+    assert isinstance(raw, LiabilityRow)
+    column = _LIABILITY_FIELD_ALIASES.get(raw.source, {}).get(field)
+    return raw.fields.get(column) if column is not None else None
+
+
+def _liability_context(
+    raw: object, _applies_to: frozenset[str] | None, opts: ContextOptions
+) -> dict[str, object]:
+    """This liability's own facts, plus (opt-in) the app's stated liabilities to compare against.
+
+    ``include_stated_liabilities`` is the SAME opt-in the borrower context uses for CR-4's report-vs-app
+    comparison, reused rather than reinvented so the two scopes read one comparison set.
+    """
+    from app.verification.rule_engine.enumerators import LiabilityRow
+
+    assert isinstance(raw, LiabilityRow)
+    context: dict[str, object] = {
+        "liability_source": raw.source,
+        **{name: _field_value(field) for name, field in sorted(raw.fields.items())},
+    }
+    return context
+
+
 def _field_value(field: RawField) -> object:
     if isinstance(field, PiiField):
         return field.display if field.is_present else None
@@ -417,6 +497,8 @@ _SUBJECT_TYPES: dict[str, SubjectType] = {
     "document": SubjectType(_doc_enumerate, _doc_read_field, _doc_context),
     "loan": SubjectType(_loan_enumerate, _loan_read_field, _loan_context),
     "borrower": SubjectType(_borrower_enumerate, _borrower_read_field, _borrower_context),
+    # LP-483 — the liability family (see its section above): the missing floor under all 14 liab.* tags.
+    "liability": SubjectType(_liability_enumerate, _liability_read_field, _liability_context),
 }
 
 KNOWN_CONTEXT_BUILDERS = frozenset(_SUBJECT_TYPES)

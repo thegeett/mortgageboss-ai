@@ -39,7 +39,9 @@ _VOCAB_EXTRA_YAML = _RULES_DIR / "vocabulary_extra.yaml"
 
 # The subject keys a production declaration may attach a tag to (resolved by the subjects registry).
 # LP-332 added `borrower` (a tag keyed by borrower_id, materialized from MISMO borrower.{n}.*).
-KNOWN_SUBJECTS = frozenset({"transaction", "document", "loan", "borrower"})
+# LP-483 — ``liability`` joins the four originals. Its absence is why every ``liab.*`` tag was declared
+# and unproduced; see tag_materialization/subjects.py's liability section.
+KNOWN_SUBJECTS = frozenset({"transaction", "document", "loan", "borrower", "liability"})
 
 # The subjects a DERIVED recipe may be declared for. LP-332 generalized the derived producer beyond
 # loan-only; the producer enumerates the subject registry and passes the subject's own raw object to the

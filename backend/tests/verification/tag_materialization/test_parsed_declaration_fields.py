@@ -65,7 +65,7 @@ from app.verification.tag_materialization.declarations import (
     TagDeclaration,
     load_declarations,
 )
-from app.verification.tag_materialization.subjects import _TXN_FIELDS
+from app.verification.tag_materialization.subjects import _LIABILITY_FIELD_ALIASES, _TXN_FIELDS
 from pydantic import BaseModel
 
 # Declarations whose field genuinely has NO producer today — a KNOWN missing-extraction gap, not a
@@ -201,6 +201,11 @@ def _resolves(decl: TagDeclaration, doc_fields: set[str]) -> bool:
                 True  # data-dependent slug — the documented residual gap (cannot validate the slug)
             )
         return _norm_index(field) in _MISMO_BORROWER_SUFFIXES
+    if decl.subject == "liability":
+        # LP-483 — the canonical names the liability family's alias map resolves, for EITHER source. A
+        # name only one source carries is legal (the other leg yields an absent tag — the normal
+        # couldnt_check path); a name NEITHER carries is the typo this guard exists to catch.
+        return field in {name for aliases in _LIABILITY_FIELD_ALIASES.values() for name in aliases}
     return True  # an unknown subject is out of this guard's scope
 
 
