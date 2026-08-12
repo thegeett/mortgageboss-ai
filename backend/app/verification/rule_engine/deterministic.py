@@ -84,6 +84,7 @@ def _result(
     verdict_confidence: float | None = None,
     threshold_used: Decimal | None = None,
     how_to_fix: str | None = None,
+    ratification_pending: bool = False,
 ) -> RuleEvaluation:
     assert spec.deterministic is not None
     return RuleEvaluation(
@@ -97,6 +98,10 @@ def _result(
         gated_pending_signoff=not spec.reference_values.priya_validated,
         reasoning=reasoning,
         how_to_fix=how_to_fix,
+        # LP-508 / ADR-377 — a DISTRUSTED-field degradation is confirmed by a human, not auto-asserted.
+        # Every other deterministic verdict keeps the default (False): `ships` is metadata with no runtime
+        # consumer, so this per-finding flag is the only real ratification mechanism (LP-508 Phase A §5).
+        ratification_pending=ratification_pending,
     )
 
 
@@ -255,6 +260,7 @@ def evaluate_deterministic_rule(
                     gate.reason or "",
                     subject_tags,
                     verdict_confidence=gate.verdict_confidence,
+                    ratification_pending=gate.ratification_pending,
                 )
             )
             continue

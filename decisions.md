@@ -14365,3 +14365,76 @@ against one bureau's spelling.
 LP-424 (`ships` is derived from kind — why there is no human in the loop here), ADR-286/289 (a declaration
 that silently reads absent — the adjacent silent-failure class), `docs/domain/priya-open-questions.md` (the
 vocabulary is listed there for confirmation).
+
+## ADR-377: A parsed value carries no confidence, so the gate's four defences cannot see a confidently-WRONG one — the fifth defence is a declared distrust list, and here is what it does not cover (LP-508)
+
+**Context.** `gate.py` (ADR-254) is the fail-closed core every rule runs first. It checks, in fixed order:
+a required tag **absent** → `couldnt_check`; a value of **`"unknown"`** → `couldnt_check`; a
+**contradiction** → `needs_review`; the **minimum load-bearing confidence** below the floor → `needs_review`.
+
+**⚠️ A confidently-wrong parsed value defeats all four by construction.** It is present, it is not
+`"unknown"`, nothing contradicts it — and the parsed producer sets `confidence=None` ("a deterministic
+passthrough, not a judgment", `parsed.py:46`), which the confidence minimum **filters out**:
+
+```python
+confidences = [t.confidence for t in load_bearing.values() if t is not None and t.confidence is not None]
+verdict_confidence = min(confidences) if confidences else None
+if verdict_confidence is not None and verdict_confidence < confidence_floor:
+```
+
+And worse than "excluded from the minimum": when **every** load-bearing tag is parsed, `confidences` is
+empty, `verdict_confidence` is `None`, and the floor check is **skipped entirely**. **IH-1 — whose only gated
+tag derives from a parsed field, and which ships `auto` — had no confidence defence at all.** Doc 104 read
+"coinsurance contract" as the loss-settlement basis off a replacement-cost HO3, and IH-1 auto-asserted an
+insurance-adequacy verdict on it.
+
+**The decision — a fifth check, driven by a declared list.** `distrusted_fields.yaml` names fields with a
+**confirmed wrong value in the corpus**, each with the document and the error behind it. `gate.py` gains a
+check, ordered after absent/`"unknown"` and before contradiction: a load-bearing tag whose source field is
+listed → `needs_review` with **`ratification_pending=True`** and a processor-facing reason. The finding still
+reaches the processor, marked; it is never suppressed and never fired.
+
+**⚠️ Distrusted is a FIFTH STATE, not a fourth.** It is not absent (the value is there), not empty, not
+`"unknown"` (the extractor was confident), and not low-confidence (there is no confidence to read). Collapsing
+it into any of the four would lose the one thing it says: *this value looks certain and should not be
+trusted.*
+
+**⚠️ WHAT THIS DOES NOT COVER — the boundary, stated so it is not rediscovered.** LP-474's per-extraction
+`must_differ` checks cover **3 of the 9** accuracy-ledger items (088, 049, 096 — each with 0 false
+positives). This list covers a different 4 (104, the two hallucinated licence fields, and the single-source
+dates). **Neither covers doc 253** — a gift read as $224,307.94 instead of $24,307.94. LP-474 recorded why: a
+lone amount with **no sibling to contradict it** is invisible to any self-consistency layer, and a
+field-level list cannot help either unless every gift amount on every file is distrusted. **Catching 253
+needs a source-magnitude check — a different layer that does not exist.** Nor is 244 covered (it needs a
+Box-10 field that was never extracted) or 293 (a plausible-but-wrong date).
+
+**⚠️ THE DIVISION OF LABOUR, learned by measurement.** The seed list included `txn.amount` for doc 049.
+`txn.amount` is load-bearing on **AS-1**, the flagship live rule, so listing it degraded **every deposit on
+every file** — 39 tests moved — to protect a case LP-474 already catches **exactly**. It was removed. The
+rule that came out of it: **LP-474 handles a wrong value with an INTERNAL SIGNATURE; the distrust list
+handles one with NONE.** Using the crude tool where the precise one already works costs a whole lane and buys
+nothing.
+
+**⚠️ THE COST, stated honestly and larger than forecast.** The list keys on the FIELD, not on whether a given
+extraction was wrong — so **every** file's value degrades. For IH-1 that is not "rarely auto-asserts": its
+only gated tag is distrusted, so it **never** auto-asserts. Every IH-1 finding is now
+`needs_review` + ratification-pending until the extractor improves and the entry is pruned. That is the trade,
+made deliberately, while `auto` is the default for ~54 of the 78 remaining rules and there is no ratify
+fallback. **The list must be pruned as extractors improve** — every entry carries its evidence precisely so
+it can be deleted with confidence rather than kept "just in case".
+
+**Option (a) — wiring LP-474's flag through to the verdict — remains worth doing later, as a complement.** It
+is precise where it applies. It was not chosen now for two measured reasons: its flag is a `DocumentFinding`
+row that **never reaches the snapshot** (nothing in `verification/snapshot/` reads document findings), so it
+needs a plumbing step; and it does **not** cover doc 104, the case that motivated this work.
+
+**A correction this ADR carries.** LP-485 and LP-486 both record "`ships: ratify` is not settable" as a
+structural constraint. **That is wrong.** `ships` is metadata with **no runtime consumer** — it appears in
+`registry.py`/`engine.py`/`verification_run.py` only in comments. The real mechanism is
+**`ratification_pending`**, a per-finding field on `RuleEvaluation` that `judgment.py` sets unconditionally
+and `deterministic.py` never did. A deterministic rule *can* be made to ratify per finding, with no change to
+its catalog `kind` and no lie about what it is. Both ticket docs are amended.
+
+**Cross-refs.** LP-508 (`docs/tickets/LP-508.md`), ADR-254 (the four-defence gate this extends), LP-474 (the
+per-extraction checks and their measured 3/9 coverage), ADR-376 (the same declared-data-with-reasons shape),
+LP-424 (`ships` derives from kind — and why that is not the ratification mechanism).

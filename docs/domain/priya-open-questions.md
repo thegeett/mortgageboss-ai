@@ -142,3 +142,27 @@ emit **`REV` / `AUTO` / `MTG` / `INST` / `OPEN`** (credit report) and
 **`MortgageLoan` / `Installment` / `Revolving`** (MISMO). **Which raw code maps to which enum value, and
 should an unmappable code abstain?** ADR-376's closed-vocabulary pattern is the shape to use once the
 mapping is confirmed.
+
+---
+
+## 8. From LP-508 (the distrusted-field guard) — one question for you
+
+**IH-1 is currently suspended, not merely degraded.** Its only gated input —the homeowners binder's
+loss-settlement basis — is on the distrusted-field list (doc 104 read "coinsurance contract" off a
+replacement-cost HO3, and IH-1 ships `auto` with no confidence defence). Because the guard keys on the
+**field**, every binder now returns `needs_review` awaiting a processor's confirmation: **replacement-cost
+and actual-cash-value alike, on 100% of files**, not just the wrong ones.
+
+**Question: is a distrusted field the right thing to block a verdict on, or should it annotate one?** Today
+it blocks — the finding reaches the processor marked "confirm this value" rather than asserting an
+insurance-adequacy answer. The alternative is to let the rule assert and attach a caution. We chose blocking
+because an auto-asserted verdict off a known-wrong field is the harm; you may weigh a processor's time
+differently.
+
+**Related: when should an entry be removed?** The list is meant to shrink. Each entry names the document and
+the error so it can be deleted once the extractor is fixed — but "fixed" needs a bar. Is one clean re-read of
+the failing document enough, or do you want a sample?
+
+⚠️ **What this does NOT cover, for the record:** doc 253's gift read as $224,307.94 instead of $24,307.94.
+A lone amount with no sibling to contradict it is invisible to both this layer and LP-474's consistency
+checks. Catching it needs a comparison against the source document — a layer that does not exist yet.
