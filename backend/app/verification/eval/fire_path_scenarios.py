@@ -97,6 +97,16 @@ _LOAN_INS_ACV = UUID(
 _LOAN_INS_BASIS_UNREADABLE = UUID(
     "95000000-0000-4000-8000-000000000017"
 )  # LP-447 — an UNRECOGNISED basis string (IH-1 couldnt_check — fail closed)
+# LP-487 — IH-2 (mortgagee clause) and IH-7 (condo master policy).
+_LOAN_IH2_MATCH = UUID("95000000-0000-4000-8000-000000000018")
+_LOAN_IH2_MISMATCH = UUID("95000000-0000-4000-8000-000000000019")
+_LOAN_IH2_NO_LENDER = UUID("95000000-0000-4000-8000-00000000001a")
+_LOAN_IH2_LE_ONLY = UUID("95000000-0000-4000-8000-00000000001b")
+_LOAN_IH7_ADEQUATE = UUID("95000000-0000-4000-8000-00000000001c")
+_LOAN_IH7_ABSENT = UUID("95000000-0000-4000-8000-00000000001d")
+_LOAN_IH7_LOW_LIABILITY = UUID("95000000-0000-4000-8000-00000000001e")
+_LOAN_IH7_NOT_CONDO = UUID("95000000-0000-4000-8000-00000000001f")
+_LOAN_IH7_BASIS_UNREADABLE = UUID("95000000-0000-4000-8000-000000000020")
 _RUN = UUID("95000000-0000-4000-8000-0000000000ff")
 # The file (snapshot) date every closing date is measured against (deterministic — never a wall-clock now()).
 _FILE_DATE = datetime(2026, 7, 1, tzinfo=UTC)
@@ -837,6 +847,137 @@ EXPECTED_INS_BASIS_RC = (
 )
 EXPECTED_INS_BASIS_ACV = "actual_cash_value"  # LP-447 — "Actual Cash Value" → IH-1 fired
 
+
+# --------------------------------------------------------------------------- #
+# LP-487 — IH-2 (mortgagee clause). Each scenario carries a homeowners binder (its mortgagee_name) plus a
+# closing document stating this loan's lender. ⚠️ THE MORTGAGEE NAMES ARE THE REAL CORPUS FORMS — the
+# ISAOA/ATIMA and c/o variants are what carriers actually print, not invented shapes.
+# --------------------------------------------------------------------------- #
+def _mortgagee_binder(cid: str, mortgagee_name: str | None) -> DocumentEntry:
+    fields = {
+        "carrier_name": "Rivertown Mutual",
+        "policy_number": "RM-0001",
+        "effective_date": "2026-06-01",
+        "expiration_date": "2027-06-01",
+    }
+    if mortgagee_name is not None:
+        fields["mortgagee_name"] = mortgagee_name
+    return _doc(cid, "homeowners_insurance", **fields)
+
+
+def _closing_disclosure(cid: str, lender_name: str) -> DocumentEntry:
+    return _doc(cid, "closing_disclosure", lender_name=lender_name, closing_date="2026-07-15")
+
+
+def build_ih2_clause_matches_snapshot() -> Snapshot:
+    """The clause names the lender, in the carrier's ISAOA form → IH-2 SATISFIED. The variance the
+    normaliser exists for: "United Wholesale Mortgage, LLC ISAOA" vs the CD's "United Wholesale
+    Mortgage, LLC"."""
+    return _snapshot(
+        _LOAN_IH2_MATCH,
+        [
+            _mortgagee_binder("95-binder-ih2-ok", "United Wholesale Mortgage, LLC ISAOA"),
+            _closing_disclosure("95-cd-ih2-ok", "United Wholesale Mortgage, LLC"),
+        ],
+    )
+
+
+def build_ih2_clause_mismatch_snapshot() -> Snapshot:
+    """THE CORRESPONDENT CASE, from the corpus: the CD names "Sistar Mortgage Company" and the clause
+    names "United Wholesale Mortgage". Both may be correct → IH-2 NEEDS_REVIEW, never fired."""
+    return _snapshot(
+        _LOAN_IH2_MISMATCH,
+        [
+            _mortgagee_binder("95-binder-ih2-x", "United Wholesale Mortgage"),
+            _closing_disclosure("95-cd-ih2-x", "Sistar Mortgage Company"),
+        ],
+    )
+
+
+def build_ih2_no_lender_snapshot() -> Snapshot:
+    """A binder with a mortgagee but NO closing document stating a lender → nothing to compare against →
+    IH-2 COULDNT_CHECK (never a guessed match)."""
+    return _snapshot(
+        _LOAN_IH2_NO_LENDER,
+        [_mortgagee_binder("95-binder-ih2-nolender", "United Wholesale Mortgage")],
+    )
+
+
+def build_ih2_loan_estimate_only_snapshot() -> Snapshot:
+    """No Closing Disclosure yet — the Loan Estimate is the FALLBACK, so a file early in processing is
+    still checkable → IH-2 SATISFIED."""
+    return _snapshot(
+        _LOAN_IH2_LE_ONLY,
+        [
+            _mortgagee_binder("95-binder-ih2-le", "ROCKET MORTGAGE, LLC."),
+            _doc("95-le-ih2", "loan_estimate", lender_name="Rocket Mortgage, LLC"),
+        ],
+    )
+
+
+# --------------------------------------------------------------------------- #
+# LP-487 — IH-7 (condo master policy). The property type comes from MISMO (property.type, the
+# PropertyType enum), the master policy from a master_insurance_policy_for_condominium document.
+# ⚠️ THE BASIS STRINGS ARE THE REAL CORPUS FORMS — free prose, not codes.
+# --------------------------------------------------------------------------- #
+def _master_policy(cid: str, *, basis: str | None, liability: str | None) -> DocumentEntry:
+    fields = {
+        "insurance_carrier": "Rivertown Commercial",
+        "policy_number": "MP-0001",
+        "condominium_project_name": "Birch Court Condominiums",
+    }
+    if basis is not None:
+        fields["replacement_cost_indicator"] = basis
+    if liability is not None:
+        fields["general_liability_each_occurrence_limit"] = liability
+    return _doc(cid, "master_insurance_policy_for_condominium", **fields)
+
+
+def build_ih7_adequate_snapshot() -> Snapshot:
+    """A condo with a master policy on a replacement-cost basis and $2M liability → IH-7 SATISFIED. The
+    basis string is the corpus's longest real form, which an EXACT-match vocabulary would abstain on."""
+    return _snapshot(
+        _LOAN_IH7_ADEQUATE,
+        [
+            _master_policy(
+                "95-mp-ok",
+                basis="REPLACEMENT COST AT AGREED VALUE WITH NO CO-INSURANCE",
+                liability="2000000",
+            )
+        ],
+        {"property.type": _f("condo")},
+    )
+
+
+def build_ih7_absent_snapshot() -> Snapshot:
+    """A condo with NO master policy in the file → IH-7 FIRED (a real, actionable gap)."""
+    return _snapshot(_LOAN_IH7_ABSENT, [], {"property.type": _f("condo")})
+
+
+def build_ih7_low_liability_snapshot() -> Snapshot:
+    """A condo master policy with only $500k general liability — below B7-4-01's $1M floor → IH-7 FIRED."""
+    return _snapshot(
+        _LOAN_IH7_LOW_LIABILITY,
+        [_master_policy("95-mp-low", basis="Replacement Cost", liability="500000")],
+        {"property.type": _f("condo")},
+    )
+
+
+def build_ih7_not_condo_snapshot() -> Snapshot:
+    """A single-family property → IH-7 NOT_APPLICABLE (no master policy is required)."""
+    return _snapshot(_LOAN_IH7_NOT_CONDO, [], {"property.type": _f("single_family")})
+
+
+def build_ih7_unreadable_basis_snapshot() -> Snapshot:
+    """A condo master policy whose coverage basis is not a recognised term → IH-7 COULDNT_CHECK. Fail
+    closed: an unrecognised basis is NEVER read as inadequate, and never as adequate."""
+    return _snapshot(
+        _LOAN_IH7_BASIS_UNREADABLE,
+        [_master_policy("95-mp-x", basis="Special Form — see schedule", liability="2000000")],
+        {"property.type": _f("condo")},
+    )
+
+
 __all__ = [
     "EXPECTED_HOA_MONTHLY",
     "EXPECTED_INS_BASIS_ACV",
@@ -850,6 +991,15 @@ __all__ = [
     "build_address_mismatch_snapshot",
     "build_address_unit_variant_snapshot",
     "build_far_future_closing_snapshot",
+    "build_ih2_clause_matches_snapshot",
+    "build_ih2_clause_mismatch_snapshot",
+    "build_ih2_loan_estimate_only_snapshot",
+    "build_ih2_no_lender_snapshot",
+    "build_ih7_absent_snapshot",
+    "build_ih7_adequate_snapshot",
+    "build_ih7_low_liability_snapshot",
+    "build_ih7_not_condo_snapshot",
+    "build_ih7_unreadable_basis_snapshot",
     "build_insurance_acv_snapshot",
     "build_insurance_binder_plus_decree_snapshot",
     "build_insurance_decree_only_snapshot",

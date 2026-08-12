@@ -39,6 +39,8 @@ _ACTIVATED = frozenset(
         # LP-485 — the date-compare family (deterministic; cited windows, no calibration gate).
         # LP-486 — CR-12 (disputed accounts; closed-vocabulary abstain, ADR-376).
         "CR-12",
+        "IH-2",  # LP-487 — mortgagee clause (normalised name compare; needs_review, never fires)
+        "IH-7",  # LP-487 — condo master policy (presence + adequacy; Fannie B7-4-01 / B7-3-03)
         "CL-1",
         "CR-13",
         "PR-6",
@@ -109,7 +111,9 @@ def test_eligible_rule_ids_is_sorted_and_matches() -> None:
         "CR-13",
         "ID-5",
         "IH-1",  # LP-447 (sorts between ID-5 and IH-3)
+        "IH-2",  # LP-487 (sorts between IH-1 and IH-3)
         "IH-3",  # LP-417 (sorts between ID-5 and IN-1)
+        "IH-7",  # LP-487 (sorts after IH-3, before IN-1)
         "IN-1",
         "IN-10",
         "IN-11",

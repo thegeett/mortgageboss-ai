@@ -17,6 +17,9 @@ section and page date, fetched from the live guide.
 | **PR-6** | **12 calendar months** | max appraisal age (beyond → **new appraisal**) | Fannie Mae Selling Guide **B4-1.2-04**, *Appraisal Age and Use Requirements* | 06/04/2025 |
 | **PR-6** | **4 calendar months** | beyond → an **appraisal update** (Form 1004D) is required | same as above | 06/04/2025 |
 | CL-1 | *none* | a date ordering (lock expiry vs closing); `zero` is a comparison boundary, not a domain number | — | — |
+| **IH-7** | **$1,000,000 per occurrence** | minimum condo-project general liability | Fannie Mae Selling Guide **B7-4-01**, *General Liability Insurance Requirements for Project Developments* | 08/05/2026 |
+| **IH-7** | **100% replacement cost** | required master property coverage basis | Fannie Mae Selling Guide **B7-3-03**, *Master Property Insurance Requirements for Project Developments* | 08/05/2026 |
+| IH-2 | *none* | a name compare; the matching tolerance (2-token prefix) is not a domain number | — | — |
 
 **Questions on these three:**
 
@@ -166,3 +169,56 @@ the failing document enough, or do you want a sample?
 ⚠️ **What this does NOT cover, for the record:** doc 253's gift read as $224,307.94 instead of $24,307.94.
 A lone amount with no sibling to contradict it is invisible to both this layer and LP-474's consistency
 checks. Catching it needs a comparison against the source document — a layer that does not exist yet.
+
+---
+
+## 9. From LP-487 (insurance: IH-2 mortgagee clause · IH-7 condo master policy)
+
+### 9a. ⚠️ IH-2 cannot fail a file — confirm that is what you want
+
+A mortgagee clause that does **not** match the lender on the Closing Disclosure returns **`needs_review`
+("confirm"), never `fired`.** The reason is in your territory rather than ours: the one file in our corpus
+that carries both documents reads **"Sistar Mortgage Company"** on the CD and **"United Wholesale
+Mortgage"** in the clause. Our understanding is that in broker and correspondent deals the CD names the
+creditor while the clause names the investor who will hold the loan, so the two legitimately differ.
+
+**Questions.** (1) Is that reading right? (2) **How often is a genuine mismatch a real defect** rather than
+this pattern? If it is usually a real defect, we have the direction wrong and IH-2 should fire. (3) Is there
+a signal on the file that distinguishes the two — a correspondent/wholesale indicator we could read — which
+would let us fire on the true mismatch and stay quiet on the legitimate one?
+
+### 9b. IH-2's matching tolerance — two tokens
+
+Two names agree when their token lists match or one is a token-prefix of the other covering **at least two
+tokens**, after stripping ISAOA/ATIMA, "c/o", corporate suffixes and punctuation. This absorbs the real
+corpus variance (`"United Wholesale Mortgage, LLC ISAOA"` vs `"United Wholesale Mortgage, LLC"`).
+
+⚠️ **The known false-satisfied direction, stated rather than discovered later:** a CD naming "First
+National" against a clause naming "First National Bank of Chicago" would **agree** under this rule, and
+`satisfied` is the one verdict no human re-reads. Is two tokens enough tolerance, or should a prefix match
+below full equality route to `needs_review` as well?
+
+### 9c. ⚠️ IH-7 does NOT check fidelity/crime coverage — a deliberate omission
+
+Fannie **B7-4-02** requires fidelity/crime coverage for projects above a unit-count threshold. We did not
+build it: the unit count lives on the condo questionnaire (`total_units`), which is **empty on the one
+questionnaire in our corpus**, and the master policy document carries `fidelity_crime_coverage_present` but
+no unit count. Building on an input that never resolves would have made IH-7 permanently `couldnt_check`
+and hidden the two checks that DO resolve.
+
+**Questions.** (1) Confirm the unit-count threshold you want us to use. (2) Is the questionnaire the right
+source, or is there a document that reliably carries the unit count? (3) Until then, is presence +
+replacement-cost basis + liability limit an acceptable IH-7?
+
+### 9d. IH-7's coverage-basis reading is a leading-phrase match, not an exact one
+
+The master policy's basis field is **prose, not a code**. The four real policies in our corpus read
+`"Guaranteed Replacement Cost"`, `"Replacement Cost"`, `"REPLACEMENT COST AT AGREED VALUE WITH NO
+CO-INSURANCE"` and `"Replacement Cost (RCV) at Agreed Value with no coinsurance; 100% replacement cost for
+portion of building insured by Association"`. An exact vocabulary match would abstain on three of the four.
+
+So we match the **leading phrase** and treat what follows as elaboration. Two protections are kept: an
+unrecognised phrase abstains (never "inadequate"), and a value naming **both** replacement cost and actual
+cash value abstains whichever leads — a mixed basis ("ACV roof, replacement cost dwelling") is your call,
+not ours. **Is treating the leading phrase as the policy's basis correct**, or can a policy state its real
+basis in a trailing qualifier we would then miss?

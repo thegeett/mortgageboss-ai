@@ -12389,6 +12389,40 @@ silently rot back into "just run a labeling round."
 invented ambiguity), LP-406-4 (OC-1's tag measures declaration consistency; LF-6T3N states no occupancy), LP-418
 (the voe/offer/continuance fixtures), LP-419 (`income.type` unscored; IN-12's self-employment gate).
 
+### Amendment (LP-487, 2026-08-12) — a self-authored LABEL is a second failure mode, distinct from a self-authored FIXTURE
+
+ADR-332 names ONE way self-authorship corrupts a score: **the fixture encodes the answer.** We invent the
+document, so the document already contains what we want the tag to say, and measuring against it measures
+nothing.
+
+**There is a second, and this ADR did not name it.** Scoring a model against ground truth WE read off a
+REAL document escapes the first failure mode entirely — the document is external, and the carrier or bureau
+who wrote it had no knowledge of our rule, so it cannot encode our answer. That distinction is real and
+should not be blurred: reading a printed clause off a PDF is **not** the same act as authoring a fixture.
+
+But it does not make the exercise sound, because **the same reader supplies the label and the logic.** Where
+a document is ambiguous — a mortgagee clause reading `UWM ISAOA ATIMA C/O CENLAR`, where the mortgagee could
+be read as UWM or as Cenlar — our ground-truth label and our matching rule encode the *same* judgment about
+how to resolve it. The score then measures **self-consistency, not correctness**, and it does so most
+strongly on exactly the cases that matter, because the unambiguous ones would score correctly under any
+sensible rule.
+
+**The practical consequence.** The two failure modes want different remedies:
+
+| | corrupts because | remedy |
+|---|---|---|
+| self-authored **fixture** (ADR-332 as written) | the artifact contains our answer | a real file |
+| self-authored **label** (this amendment) | our reading of an ambiguous real artifact matches our own logic | an independent reader — or removing the need for a score |
+
+A real file fixes the first and **not** the second. Where the perception step is already spent (typed
+extraction has read the field), the cheapest sound answer is usually the third column's second option:
+**drop the AI path so there is no threshold to calibrate.** LP-487 took it — IH-2 became a deterministic
+normalised compare, and the scoring run that would have needed self-authored labels was never run.
+
+**Cross-refs (amendment).** LP-487 (IH-2's catalog change from `ai_fuzzy_match` to `deterministic_only`),
+ADR-361 (threshold provenance — cite, never recall), ADR-376 (closed-vocabulary abstain, which LP-487 widens
+for a prose field and states the widening).
+
 ## ADR-333: The extraction→snapshot boundary is lossy for nested typed structures — a signal can be extracted correctly and still be invisible to every producer (LP-421)
 
 **The finding (named).** A document type's extractor can produce a field as fully TYPED CORE and that field can

@@ -60,9 +60,10 @@ def test_the_honest_activation_state_is_reported() -> None:
     )  # +IN-6 (LP-406-3b) +IN-12 (LP-423) +IN-8 +IN-9 (LP-426/LP-428) +AS-6 (LP-397/LP-429) — all now validated
     assert by.get("not-calibratable-yet", 0) >= 1 and by.get("no-ai-dependency", 0) >= 1
     assert (
-        by.get("no-ai-threshold-pending", 0) == 3
-    )  # PC-7 (LP-411) + CR-13 + PR-6 (LP-485 — both held on input_resolves; their windows are
-    # researched and cited in their specs' reference_values, not in this file)
+        by.get("no-ai-threshold-pending", 0) == 4
+    )  # PC-7 (LP-411) + CR-13 + PR-6 (LP-485) + IH-7 (LP-487) — their thresholds are researched and
+    # cited in their specs' reference_values, not in this file (IH-7: Fannie B7-4-01 / B7-3-03, both
+    # pages dated 08/05/2026)
     # LP-390-7 signed off AS-2 + AS-12; LP-390-9 signed off IN-3; LP-393-6 signed off IN-7/IN-10/IN-11/AS-11;
     # LP-429 signed off AS-6 — all validated calibratable-now rules.
     assert all(
@@ -161,11 +162,16 @@ def test_exactly_the_signed_off_bars_are_validated() -> None:
     # IN-6 (calibratable) + PC-7 (no-ai-threshold-pending) — LP-412 signed off the last two.
     # LP-485 adds CR-13 + PR-6: no-ai-threshold-pending bars whose windows are RESEARCHED AND CITED to the
     # publisher's live guide (in each spec's reference_values), not Priya-signed. See the file header.
+    # LP-487 adds IH-7 on the same footing: its $1M liability floor and replacement-cost basis are cited to
+    # Fannie B7-4-01 / B7-3-03 (both pages dated 08/05/2026) in the spec, not signed off by Priya.
+    # ⚠️ IH-2 is NOT here: it is no-ai-dependency with validated:false — a matching VOCABULARY, not a
+    # threshold, so there is nothing to validate (the CL-1 precedent).
     assert (
         validated
         == {
             "CR-13",
             "PR-6",
+            "IH-7",
             "IN-1",
             "IN-5",
             "AS-2",
@@ -301,6 +307,8 @@ def test_active_set_is_base_plus_lp389() -> None:
             "CR-13",
             "PR-6",
             "CR-12",
+            "IH-2",  # LP-487 — mortgagee clause (normalised name compare; needs_review, never fires)
+            "IH-7",  # LP-487 — condo master policy (presence + adequacy; Fannie B7-4-01 / B7-3-03)
         )
     )
     # A bar persists after activation as the record of WHY the rule went live, so the bars now intersect the
@@ -338,6 +346,8 @@ def test_active_set_is_base_plus_lp389() -> None:
             # researched + cited to Fannie B1-1-03 / B4-1.2-04 in their specs).
             "CL-1",
             "CR-12",  # LP-486 — disputed accounts (ADR-376)
+            "IH-2",  # LP-487 — mortgagee clause (normalised name compare; needs_review, never fires)
+            "IH-7",  # LP-487 — condo master policy (presence + adequacy; Fannie B7-4-01 / B7-3-03)
             "CR-13",
             "PR-6",
         }

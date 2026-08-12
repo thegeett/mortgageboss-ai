@@ -848,6 +848,313 @@ def _dwelling_settlement_basis(
 
 
 # --------------------------------------------------------------------------- #
+# LP-487 — IH-2's LENDER-NAME NORMALISATION. Declared data, mirrored in IH-2's spec reference_values;
+# test_ih2_vocabulary_matches_the_spec pins the two identical so the spec (where the vocabulary is
+# reviewed) and the recipe (which runs) cannot drift — the CR-12 arrangement.
+#
+# ⚠️ WHY THIS IS DETERMINISTIC AND NOT AI. The catalog planned IH-2 as `ai_fuzzy_match`, which predates
+# typed extraction: the PERCEPTION step — reading the clause off the binder — is already spent by the
+# extractor, which lands it in `mortgagee_name` on 14 of 15 binders. What remains is comparing two
+# strings that differ by ISAOA/ATIMA, a corporate suffix, case and punctuation. rule_kinds.csv is
+# amended accordingly (LP-487).
+#
+# ⚠️ AND WHY A MISMATCH IS NEVER `fired`. The corpus's one file pairing a binder with a Closing
+# Disclosure reads "Sistar Mortgage Company" on the CD against "United Wholesale Mortgage" in the
+# clause. In broker and correspondent deals the CD names the CREDITOR and the clause names the
+# INVESTOR/SERVICER who will hold the loan, and they legitimately differ. A rule that fires there is
+# WRONG ON A CORRECT FILE, so IH-2's spec routes a mismatch to needs_review — "the clause names X, the
+# file's lender is Y, confirm" — never to a failure.
+# --------------------------------------------------------------------------- #
+
+# Everything from a marker onward is ADDRESSING, not the mortgagee's identity: ISAOA/ATIMA ("its
+# successors and/or assigns, as their interests may appear") is a boilerplate assignment clause, and
+# "c/o" introduces the servicer's mailing agent — LAKEVIEW LOAN SERVICING LLC C/O LOAN CARE LLC is
+# Lakeview's clause, not Loan Care's.
+_CLAUSE_TRUNCATE_MARKERS: tuple[str, ...] = ("c/o", "isaoa", "atima", "its successors")
+
+# Dropped from BOTH sides, so the comparison stays symmetric and no name is privileged.
+_CORPORATE_SUFFIX_TOKENS: frozenset[str] = frozenset(
+    {
+        "llc",
+        "lc",
+        "inc",
+        "incorporated",
+        "corp",
+        "corporation",
+        "co",
+        "company",
+        "na",
+        "lp",
+        "llp",
+        "fsb",
+        "fa",
+        "ltd",
+        "plc",
+        "bank",
+    }
+)
+_NAME_PUNCT = re.compile(r"[.,/&'\"()\[\]\-]+")
+
+
+def _normalise_lender_name(raw: str) -> list[str]:
+    """A lender/mortgagee name reduced to comparable tokens. Declared steps only — no stemming, no
+    fuzzy distance, no inference.
+
+    casefold → collapse whitespace → truncate at the first assignment/care-of marker → strip
+    punctuation → drop corporate-suffix tokens. Returns ``[]`` when nothing identifying survives, which
+    the caller treats as an abstain rather than as an empty match.
+    """
+    text = _WS.sub(" ", raw).strip().casefold()
+    for marker in _CLAUSE_TRUNCATE_MARKERS:
+        index = text.find(marker)
+        if index != -1:
+            text = text[:index]
+    text = _NAME_PUNCT.sub(" ", text)
+    return [tok for tok in text.split() if tok and tok not in _CORPORATE_SUFFIX_TOKENS]
+
+
+def _lender_names_agree(clause: list[str], lender: list[str]) -> bool:
+    """Do two normalised names refer to the same entity?
+
+    Equal token lists, or one a TOKEN-PREFIX of the other with at least two tokens in common.
+
+    ⚠️ TOKEN-PREFIX, NOT SUBSTRING. Substring matching on the raw string would let a two-letter suffix
+    fragment match inside an unrelated word; comparing whole tokens in order cannot. The prefix rule is
+    what absorbs the real corpus variance — "amerihome mortgage company llc a delaware limited liability
+    company" against a CD's "amerihome mortgage" agrees on both tokens it states.
+
+    ⚠️ THE KNOWN FALSE-SATISFIED DIRECTION, stated rather than discovered later: a CD naming "First
+    National" against a clause naming "First National Bank of Chicago" agrees under this rule. Two
+    tokens of agreement is a real tolerance, and `satisfied` is the one verdict no human re-reads. It is
+    accepted because the alternative — demanding equality — would route the ordinary ISAOA/suffix
+    variance to needs_review on nearly every binder and train a processor to click past IH-2.
+    """
+    if not clause or not lender:
+        return False
+    if clause == lender:
+        return True
+    shorter, longer = (clause, lender) if len(clause) < len(lender) else (lender, clause)
+    return len(shorter) >= 2 and longer[: len(shorter)] == shorter
+
+
+def _parsed_strings(snapshot: Snapshot, tag_id: str) -> list[str]:
+    """Every non-empty, non-``unknown`` value of ``tag_id`` across the file's subjects, in subject order."""
+    if snapshot.tags.absent:
+        return []
+    out: list[str] = []
+    for tags in snapshot.tags.by_subject.values():
+        tag = tags.get(tag_id)
+        if tag is None or str(tag.value) == _UNKNOWN:
+            continue
+        text = str(tag.value).strip()
+        if text:
+            out.append(text)
+    return out
+
+
+def _file_lender_name(snapshot: Snapshot) -> tuple[str | None, str]:
+    """This loan's lender, and where it came from.
+
+    ⚠️ THE CD OUTRANKS THE LE, deliberately. The Closing Disclosure is the final, binding statement of
+    the creditor; a Loan Estimate is preliminary and can be superseded by a re-issue. The LE is a
+    FALLBACK so that a file early in processing — which has no CD yet — is still checkable rather than a
+    permanent couldnt_check.
+
+    ⚠️ Disagreement WITHIN a source abstains. Two Closing Disclosures naming different creditors is a
+    contradiction the file has to resolve; picking one would be a guess.
+    """
+    for tag_id, label in (
+        ("loan.lender_name_cd", "the Closing Disclosure"),
+        ("loan.lender_name_le", "the Loan Estimate"),
+    ):
+        values = _parsed_strings(snapshot, tag_id)
+        if not values:
+            continue
+        distinct = {_WS.sub(" ", v).strip().casefold(): v for v in values}
+        if len(distinct) > 1:
+            return None, (
+                f"{label} names more than one creditor ({', '.join(sorted(distinct.values()))}) — "
+                "ambiguous, so the mortgagee clause is not checked against a guess"
+            )
+        return next(iter(distinct.values())), label
+    return None, "no Closing Disclosure or Loan Estimate in the file states a lender"
+
+
+def _mortgagee_clause_correct(
+    snapshot: Snapshot, _subject_id: str, subject_raw: object
+) -> tuple[JsonValue | None, str]:
+    """ins.mortgagee_clause_correct — does THIS binder's mortgagee clause name this loan's lender? (IH-2)
+
+    Per BINDER, like IH-1: returns ``None`` (DECLINE — no tag materialises) for any non-homeowners
+    subject, so the tag lands only on the documents IH-2 reads. ``yes`` / ``no`` / ``unknown``; a ``no``
+    is routed to needs_review by the spec, never to a failure — see the module note above.
+    """
+    if (
+        not isinstance(subject_raw, DocumentEntry)
+        or subject_raw.document_type != "homeowners_insurance"
+    ):
+        return None, "not a homeowners insurance binder — no mortgagee-clause tag"
+    field = subject_raw.fields.get("mortgagee_name")
+    raw = field.value if isinstance(field, Field) and field.is_present else None
+    if raw is None or not str(raw).strip():
+        return _UNKNOWN, "this binder states no mortgagee name"
+    lender, source = _file_lender_name(snapshot)
+    if lender is None:
+        return _UNKNOWN, source
+    clause_tokens = _normalise_lender_name(str(raw))
+    lender_tokens = _normalise_lender_name(lender)
+    if not clause_tokens or not lender_tokens:
+        return _UNKNOWN, (
+            f"nothing identifying survives normalisation of {str(raw)!r} or {lender!r} — abstaining "
+            "rather than reading an empty name as a match"
+        )
+    if _lender_names_agree(clause_tokens, lender_tokens):
+        return "yes", (
+            f"the mortgagee clause names {str(raw)!r}, which matches the lender on {source} ({lender!r})"
+        )
+    return "no", (
+        f"the mortgagee clause names {str(raw)!r} but {source} names {lender!r} — these may both be "
+        "correct (a correspondent's creditor and the investor who will hold the loan differ), so this "
+        "is raised for confirmation rather than treated as an error"
+    )
+
+
+# --------------------------------------------------------------------------- #
+# LP-487 — IH-7's CONDO MASTER POLICY adequacy.
+#
+# THRESHOLD PROVENANCE (ADR-361 — cited, never recalled):
+#   general liability >= $1,000,000 per occurrence
+#     Fannie Mae Selling Guide B7-4-01, "General Liability Insurance Requirements for Project
+#     Developments", page dated 08/05/2026: "The amount of coverage must be at least $1 million for
+#     bodily injury and property damage for any single occurrence."
+#     ⚠️ B7-4-01, NOT B7-3-03 — B7-3-03 is MASTER PROPERTY insurance and states no liability limit.
+#   replacement-cost basis
+#     Fannie Mae Selling Guide B7-3-03, "Master Property Insurance Requirements for Project
+#     Developments", page dated 08/05/2026: "The master property insurance coverage amount must equal
+#     at least 100% of the estimated replacement cost value of the project improvements, including
+#     common elements and residential structures." The same section accepts GUARANTEED and EXTENDED
+#     replacement cost as ways to substantiate it — hence both are in the recognised vocabulary.
+#
+# ⚠️ THE BASIS FIELD IS PROSE, NOT A CODE — and this widens ADR-376 deliberately, so the widening is
+# stated rather than slipped in. The four master policies in the corpus read:
+#     "Guaranteed Replacement Cost"
+#     "Replacement Cost"
+#     "REPLACEMENT COST AT AGREED VALUE WITH NO CO-INSURANCE"
+#     "Replacement Cost (RCV) at Agreed Value with no coinsurance; 100% replacement cost for ..."
+# An EXACT closed-set match — CR-12's rule — would abstain on three of the four and leave IH-7
+# permanently couldnt_check. So the recognised phrases are matched as a LEADING PHRASE: every value
+# above STATES its basis first and then elaborates (agreed value, no coinsurance, the association's
+# portion), and an elaboration is not a contradiction.
+#
+# The abstain that ADR-376 actually protects is kept intact, in two places: an unrecognised leading
+# phrase is `unknown`, never "inadequate"; and an actual-cash-value phrase ANYWHERE in the string
+# abstains even when the value opens with a replacement-cost phrase, because a mixed basis ("ACV roof,
+# replacement cost dwelling") is a human question, not a pass.
+# --------------------------------------------------------------------------- #
+
+_CONDO_MIN_LIABILITY_PER_OCCURRENCE = Decimal("1000000")
+
+_MASTER_POLICY_RC_PHRASES: tuple[str, ...] = (
+    "guaranteed replacement cost",
+    "extended replacement cost",
+    "replacement cost",
+    "100% replacement cost",
+    "full replacement cost",
+)
+_MASTER_POLICY_ACV_PHRASES: tuple[str, ...] = (
+    "actual cash value",
+    "acv",
+)
+
+
+def _master_policy_basis(raw: str) -> str | None:
+    """``"replacement_cost"`` / ``"actual_cash_value"`` / ``None`` (unrecognised → abstain)."""
+    text = _NAME_PUNCT.sub(" ", _WS.sub(" ", raw).strip().casefold())
+    text = _WS.sub(" ", text).strip()
+    has_acv = any(phrase in text for phrase in _MASTER_POLICY_ACV_PHRASES)
+    has_rc = any(phrase in text for phrase in _MASTER_POLICY_RC_PHRASES)
+    # ⚠️ A MIXED BASIS ABSTAINS, whichever phrase leads. "ACV roof, replacement cost dwelling" states
+    # two bases for two parts of the building; neither reading is the policy's basis, and calling it
+    # actual_cash_value would fire IH-7 on a policy that may well be adequate for the structure.
+    if has_acv and has_rc:
+        return None
+    if has_acv and text.startswith(_MASTER_POLICY_ACV_PHRASES):
+        return "actual_cash_value"
+    if has_rc and text.startswith(_MASTER_POLICY_RC_PHRASES):
+        return "replacement_cost"
+    return None
+
+
+def _condo_master_policy(
+    snapshot: Snapshot, _subject_id: str, _subject_raw: object
+) -> tuple[JsonValue, str]:
+    """ins.condo_master_policy — is the condo master policy present and adequate? (IH-7)
+
+    LOAN-scoped, because ``absent`` is a statement about the FILE and no per-document tag can be
+    produced for a document that is not there.
+
+    ``n/a`` when the property is not a condo · ``absent`` when no master policy states a policy number ·
+    ``present_adequate`` / ``present_inadequate`` on the basis and liability limit · ``unknown`` whenever
+    an input is missing or unrecognised. Never reads a missing input as adequate.
+    """
+    property_types = {v.casefold() for v in _parsed_strings(snapshot, "property.type")}
+    if not property_types:
+        return _UNKNOWN, "the file does not state the property type, so condo scoping is undecided"
+    if len(property_types) > 1:
+        return _UNKNOWN, (
+            f"the file states more than one property type ({', '.join(sorted(property_types))}) — "
+            "ambiguous"
+        )
+    if next(iter(property_types)) != "condo":
+        return "n/a", "the subject property is not a condominium — no master policy is required"
+
+    if not _parsed_strings(snapshot, "condo.master_policy_number"):
+        return "absent", (
+            "the property is a condominium but the file carries no master insurance policy stating a "
+            "policy number"
+        )
+
+    bases = _parsed_strings(snapshot, "condo.master_policy_basis_raw")
+    if not bases:
+        return _UNKNOWN, "the master policy does not state a replacement-cost basis"
+    normalised = {_master_policy_basis(b) for b in bases}
+    if None in normalised:
+        unrecognised = [b for b in bases if _master_policy_basis(b) is None]
+        return _UNKNOWN, (
+            f"the master policy's coverage basis reads {unrecognised[0]!r}, which is not a recognised "
+            "replacement-cost or actual-cash-value term — abstaining rather than inferring"
+        )
+    if normalised != {"replacement_cost"}:
+        return "present_inadequate", (
+            "the condominium master policy is written on an actual-cash-value basis; Fannie Mae "
+            "B7-3-03 requires coverage equal to at least 100% of replacement cost"
+        )
+
+    limits = _parsed_strings(snapshot, "condo.master_liability_limit")
+    if not limits:
+        return _UNKNOWN, "the master policy does not state a general liability limit"
+    parsed_limits: list[Decimal] = []
+    for value in limits:
+        try:
+            parsed_limits.append(Decimal(value.replace(",", "").replace("$", "").strip()))
+        except (InvalidOperation, ValueError):
+            return _UNKNOWN, (
+                f"the master policy's general liability limit reads {value!r}, which is not a number — "
+                "abstaining rather than treating it as zero"
+            )
+    lowest = min(parsed_limits)
+    if lowest < _CONDO_MIN_LIABILITY_PER_OCCURRENCE:
+        return "present_inadequate", (
+            f"the master policy's general liability limit is ${lowest:,} per occurrence; Fannie Mae "
+            "B7-4-01 requires at least $1,000,000 for any single occurrence"
+        )
+    return "present_adequate", (
+        f"the condominium master policy is written on a replacement-cost basis with a general "
+        f"liability limit of ${lowest:,} per occurrence"
+    )
+
+
+# --------------------------------------------------------------------------- #
 # LP-453 (step D.2) — the tradelines list consumer: DETERMINISTIC numeric OBSERVATIONS over the credit
 # report's `tradelines` list. Scoped EXPLICITLY to credit_report documents (document_type filter, LP-453
 # review) — a list-name is not a unique key, so a future extractor reusing `tradelines` cannot pollute the
@@ -2204,6 +2511,8 @@ _RECIPES: dict[str, Recipe] = {
     # actual_cash_value / unknown, for IH-1 (insurance adequacy, ADR-340). Per-document; fails closed on an
     # unrecognised value; reads ONLY the typed field, never forms_and_endorsements (the anti-conflation).
     "dwelling_settlement_basis": _dwelling_settlement_basis,
+    "mortgagee_clause_correct": _mortgagee_clause_correct,  # LP-487 — IH-2
+    "condo_master_policy": _condo_master_policy,  # LP-487 — IH-7
     # LP-453 — DETERMINISTIC numeric observations over the credit report's tradelines list (loan-level). Pure
     # aggregates only (count + monthly-payment total) — the open-ended bureau vocabulary makes classification a
     # Priya/AI question (ADR). Fail closed: no tradelines → absent, never a fabricated 0.

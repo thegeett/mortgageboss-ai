@@ -952,3 +952,57 @@ CR-12:
     No AI tag and no threshold — a closed vocabulary recorded in the spec's reference_values (Priya's
     ruling). The producer recognises it and abstains on anything else, so the rule never classifies open
     bureau text. Resolves on real stored data in BOTH known encodings (Y/N and free text).
+
+# --------------------------------------------------------------------------- #
+# LP-487 — IH-2 (mortgagee clause) and IH-7 (condo master policy). Both deterministic; no AI tag is in
+# either chain.
+#
+# ⚠️ IH-2 CARRIES A CATALOG EDIT, not just a bar. rule_kinds.csv moved it from `ai_fuzzy_match` to
+# `deterministic_only` (the row count stays 135). That kind predates typed extraction: the perception
+# step is already spent by the extractor, which lands the mortgagee in `mortgagee_name` on 14 of 15
+# binders, so what remains is a normalised string compare. See the spec header and LP-487.md.
+#
+# ⚠️ `input_resolves: true` on both bars is the LP-485 DEVELOPMENT-MODE meaning — the inputs are declared,
+# their extraction fields exist, and the producers resolve them on real stored data. It is NOT the older
+# "verified end-to-end on a live loan file" meaning that the 11 pre-LP-485 bars use.
+IH-2:
+  status: no-ai-dependency
+  ships: auto
+  threshold: null
+  validated: false
+  input_resolves: true
+  load_bearing_ai_tags: []
+  fp_fn: >-
+    ⚠️ THE FP DIRECTION IS THE DANGEROUS ONE HERE, which is why this rule cannot fire. A correspondent's
+    creditor and the investor who will hold the loan legitimately differ — the corpus's one binder+CD
+    pairing reads "Sistar Mortgage Company" against "United Wholesale Mortgage" — so a firing rule would
+    be WRONG ON A CORRECT FILE, repeatedly, and train a processor to dismiss it. A mismatch therefore
+    routes to needs_review ("confirm"), where both the true mismatch and the legitimate difference get
+    the same cheap human glance. The residual FN (a wrong mortgagee reads as matching) is bounded by the
+    2-token prefix tolerance, which is recorded in the recipe as the known false-satisfied direction.
+  rationale: >-
+    No AI tag and no threshold — a declared normalisation vocabulary (truncation markers, corporate
+    suffixes, a token-prefix tolerance) recorded in the spec's reference_values, mirrored by the recipe
+    and pinned identical by test. Resolves on real stored data: mortgagee_name fills on 14/15 bench
+    binders, closing_disclosure.lender_name on 8/9 and loan_estimate.lender_name on 3/3.
+IH-7:
+  status: no-ai-threshold-pending
+  ships: auto
+  threshold: null
+  validated: true           # OUR calibration: both values researched + cited in the spec's reference_values
+  input_resolves: true
+  load_bearing_ai_tags: []
+  fp_fn: >-
+    FN (a condo closes with no master policy, or a thin one -> the building securing the loan is
+    effectively uninsured and the investor will not accept it) >> FP (a processor requests a certificate
+    the HOA can produce). The unrecognised-basis abstain keeps the FN direction closed on carrier wording
+    we have not seen.
+  rationale: >-
+    No AI to measure; both bounds are DOMAIN numbers, researched and cited: Fannie Mae Selling Guide
+    B7-4-01, page dated 08/05/2026 — general liability of at least $1 million for any single occurrence;
+    B7-3-03, page dated 08/05/2026 — master property coverage of at least 100% of replacement cost. Both
+    values + citations live in the spec's reference_values, which is the calibration record. ⚠️ The
+    liability floor is in B7-4-01, NOT B7-3-03 — the catalog rationale names no section and the two live
+    in different chapters. The fidelity/crime requirement (B7-4-02) is deliberately NOT evaluated: its
+    unit-count input never resolves, and building on it would make IH-7 permanently couldnt_check. Logged
+    in docs/domain/priya-open-questions.md.

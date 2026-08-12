@@ -295,6 +295,30 @@ tags:
   # (never the literal "unknown" the vocabulary lists — a gated rule reads couldnt_check on the absence).
   credit.report_date: {mode: parsed, subject: document, data: report_date, document_type: credit_report}
 
+  # --- LP-487 — IH-2 (mortgagee clause) and IH-7 (condo master policy). ------------------------------ #
+  #
+  # ⚠️ EVERY PARSED TAG HERE IS document_type-SCOPED. `lender_name` is a field on TEN document types and
+  # `policy_number` on many more; an unscoped declaration matches on FIELD NAME ALONE and would read a
+  # 1098's servicer, or a VOE's requester, as this loan's creditor. Scope is the whole safety of the
+  # compare — see the note in vocabulary_extra.yaml.
+  ins.mortgagee_name: {mode: parsed, subject: document, data: mortgagee_name, document_type: homeowners_insurance}
+  loan.lender_name_cd: {mode: parsed, subject: document, data: lender_name, document_type: closing_disclosure}
+  loan.lender_name_le: {mode: parsed, subject: document, data: lender_name, document_type: loan_estimate}
+  # IH-2's CONCLUSION tag, already in the generated fact_tags.csv (enum yes|no|unknown), declared DERIVED
+  # here — not AI. The catalog planned ai_fuzzy_match; typed extraction now reads the clause into
+  # mortgagee_name, so the perception step is spent and what remains is a normalised string compare
+  # (LP-487 / rule_kinds.csv edit). Per BINDER, like IH-1 — a file may carry several.
+  ins.mortgagee_clause_correct: {mode: derived, subject: document, data: mortgagee_clause_correct}
+
+  condo.master_policy_number: {mode: parsed, subject: document, data: policy_number, document_type: master_insurance_policy_for_condominium}
+  condo.master_policy_basis_raw: {mode: parsed, subject: document, data: replacement_cost_indicator, document_type: master_insurance_policy_for_condominium}
+  condo.master_liability_limit: {mode: parsed, subject: document, data: general_liability_each_occurrence_limit, document_type: master_insurance_policy_for_condominium}
+  # IH-7's CONCLUSION tag (enum present_adequate|present_inadequate|absent|n/a|unknown). LOAN-scoped, not
+  # per-document: "absent" is a statement about the FILE, and a per-document tag cannot be produced for a
+  # document that is not there. (Its vocabulary entity is `doc`; entity and materialisation subject are
+  # deliberately independent — see declarations.py's LP-325 note.)
+  ins.condo_master_policy: {mode: derived, subject: loan, data: condo_master_policy}
+
 # --- AI GROUPS — one structuring pass each: a subject, the tags it co-produces, a context-builder
 #     key, and the system prompt (the perceiver question, as DATA). The model answers per subject
 #     index with one JSON object per tag keyed by the tag's LAST segment; "unknown" is always legal

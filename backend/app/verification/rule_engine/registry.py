@@ -224,6 +224,17 @@ _LP485_ACTIVATED: tuple[str, ...] = ("CL-1", "CR-13", "PR-6")
 # free text on another's, so a rule that classified open text would silently miss disputes.
 _LP486_ACTIVATED: tuple[str, ...] = ("CR-12",)
 
+# LP-487 — the insurance pair. IH-2 (mortgagee clause) carries a CATALOG EDIT with it: rule_kinds.csv
+# moved it from `ai_fuzzy_match` to `deterministic_only`, because that kind predates typed extraction —
+# the perception step is already spent by the extractor (mortgagee_name fills on 14/15 bench binders) and
+# what remains is a normalised string compare. A MISMATCH IS needs_review, NEVER fired: a correspondent's
+# creditor and the investor who will hold the loan legitimately differ, so a firing rule would be wrong on
+# a correct file. IH-7 (condo master policy) is a presence + adequacy check whose two bounds are researched
+# and cited (Fannie B7-4-01 08/05/2026 — $1M general liability per occurrence; B7-3-03 08/05/2026 — 100% of
+# replacement cost); its fidelity/crime leg (B7-4-02) is deliberately unbuilt because the unit-count input
+# never resolves.
+_LP487_ACTIVATED: tuple[str, ...] = ("IH-2", "IH-7")
+
 # The gate is the source of truth: test_activation_gate_lp389 asserts ACTIVE_RULE_IDS - _BASE_ACTIVE ==
 # eligible_rule_ids() — a rule CANNOT enter this set without meeting the eligibility gate (not a hand-list).
 ACTIVE_RULE_IDS: tuple[str, ...] = (
@@ -246,6 +257,7 @@ ACTIVE_RULE_IDS: tuple[str, ...] = (
     *_LP447_ACTIVATED,
     *_LP485_ACTIVATED,
     *_LP486_ACTIVATED,
+    *_LP487_ACTIVATED,
 )
 
 

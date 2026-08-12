@@ -113,17 +113,26 @@ async def test_lf6t3n_full_verdict_distribution_is_stable() -> None:
     # gate routes each to couldnt_check. +3 couldnt_check → 434. ⚠️ THIS IS THE PROPERTY, ON A REAL FIXTURE:
     # a file missing the document reads couldnt_check, NEVER satisfied — the rules do not clear on absence.
     # satisfied / fired / needs_review stay 23 / 2 / 2.
+    # LP-487 ACTIVATED IH-2 (per_document over the 30 docs) + IH-7 (loan-scoped): LF-6T3N has no homeowners
+    # binder, so IH-2 gives 26 not_applicable + 4 couldnt_check on the unclassified docs (the IH-1 shape —
+    # an unclassified document cannot be ruled out as a binder). LF-6T3N's MISMO states no property type,
+    # so IH-7's applicability predicate is UNDETERMINED → 1 couldnt_check, NOT not_applicable: an unstated
+    # property type must not silently skip the condo check. +26 not_applicable +5 couldnt_check → 465.
+    # ⚠️ satisfied / fired / needs_review are UNCHANGED at 21 / 2 / 4. Neither new rule clears on absence,
+    # and no existing rule's verdict moved. Any other movement would be a regression.
     mat = await materialize_tags(
         build_lf6t3n_snapshot(), ai_reasoners=stub_materialization_reasoners()
     )
     results, _ = await evaluate_rules(mat)
-    assert len(results) == 434
+    assert len(results) == 465
     assert (
         Counter(r.verdict.value for r in results)
         == {
-            "couldnt_check": 207,  # +IH-1 x4 (LP-447); +CL-1/CR-13/PR-6 x1 each (LP-485 — no LE / credit
-            # report / appraisal on LF-6T3N, so each abstains rather than clearing)
-            "not_applicable": 200,  # +IH-1 x26 (LP-447 — 26 classified non-binder docs; no homeowners policy)
+            "couldnt_check": 212,  # +IH-1 x4 (LP-447); +CL-1/CR-13/PR-6 x1 each (LP-485 — no LE / credit
+            # report / appraisal on LF-6T3N, so each abstains rather than clearing); +IH-2 x4 + IH-7 x1
+            # (LP-487 — 4 unclassified docs that cannot be ruled out as binders, and an unstated property type)
+            "not_applicable": 226,  # +IH-1 x26 (LP-447 — 26 classified non-binder docs; no homeowners policy);
+            # +IH-2 x26 (LP-487 — the same 26 classified non-binder docs)
             # ⚠️ LP-508 review: satisfied 23 -> 21, needs_review 2 -> 4. TWO subjects that used to
             # AUTO-SATISFY now route to a human. That is the distrusted-field guard finally reaching the
             # rules it was written for: ID-5 gates on id.borrower_id_expiration, derived from a
@@ -143,6 +152,10 @@ async def test_lf6t3n_full_verdict_distribution_is_stable() -> None:
         "PC-7": "satisfied",
         "PC-2": "satisfied",  # LP-407-3 — the contract price matches the 1003 (365000)
         "IH-3": "couldnt_check",  # LP-417 — no homeowners binder on LF-6T3N (an honest absence)
+        # LP-487 — IH-7's applicability predicate (property.type) is UNDETERMINED on LF-6T3N, whose MISMO
+        # states no property type. ⚠️ couldnt_check, NOT not_applicable: an unstated property type must be
+        # surfaced, never silently read as "not a condo".
+        "IH-7": "couldnt_check",
         "PC-3": "couldnt_check",  # LP-407-4 — no MISMO subject-property address on LF-6T3N
         # LP-485 — the date-compare family. LF-6T3N has no loan estimate, no credit report and no
         # appraisal, so each abstains. ⚠️ NOT "satisfied": a rule must never clear on a missing document.

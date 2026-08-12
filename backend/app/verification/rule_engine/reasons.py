@@ -56,6 +56,9 @@ _FACT_LABELS: dict[str, str] = {
     "property.purchase_price": "purchase price stated in the loan file",  # PC-2 (LP-407-3)
     "ins.loan_effective_date": "insurance policy's effective date",  # IH-3 (LP-417)
     "ins.dwelling_settlement_basis": "dwelling loss-settlement basis",  # IH-1 (LP-447)
+    "ins.mortgagee_clause_correct": "mortgagee named on the insurance binder",  # IH-2 (LP-487)
+    "ins.condo_master_policy": "condominium project's master insurance policy",  # IH-7 (LP-487)
+    "property.type": "property type",  # IH-7's applicability predicate (LP-487)
     "property.address_normalized_match": "match between the contract and file property addresses",  # PC-3 (LP-407-4)
     # LP-384 — the second activation pass (AS-9 / IN-4 / AS-10 went live).
     "stmt.page_count_declared": "declared page count (the statement's 'of N')",  # AS-9

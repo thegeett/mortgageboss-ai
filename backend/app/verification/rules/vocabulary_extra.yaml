@@ -438,3 +438,69 @@ tags:
       COMPLETE calendar months from the credit report's pull date to the loan's closing date. Calendar
       months, not a 120-day approximation. "unknown" when either date is missing or disputed — never 0.
     produced_by: derived
+
+  # --- LP-487 — IH-2's and IH-7's PARSED inputs. The two CONCLUSION tags they gate on
+  #     (ins.mortgagee_clause_correct, ins.condo_master_policy) already exist in the generated
+  #     fact_tags.csv, so they are NOT redeclared here — only their inputs, which are new. ---------- #
+
+  # IH-2. ⚠️ THE LENDER NAME IS READ FROM TWO DOCUMENT TYPES UNDER TWO TAG IDS, deliberately. A parsed
+  # declaration carries ONE document_type filter, and `lender_name` is a field name shared by TEN
+  # document types whose meanings differ: form_1098.lender_name is the CURRENT SERVICER of an existing
+  # mortgage, voe.lender_name is whoever ORDERED the verification, other_property_note.lender_name is a
+  # DIFFERENT property's lender. An unscoped declaration would match all of them and poison the compare
+  # with a name that was never this loan's creditor. Two scoped tags, no inference.
+  ins.mortgagee_name:
+    entity: doc
+    value_type: string
+    allowed_values: null
+    description: >-
+      The mortgagee named on a homeowners binder's mortgagee clause, read from the typed-core
+      mortgagee_name field. The RAW carrier wording, un-normalised — IH-2's recipe normalises it.
+      Per binder (a file may carry several).
+    produced_by: parsed
+  loan.lender_name_cd:
+    entity: loan
+    value_type: string
+    allowed_values: null
+    description: >-
+      The creditor named on the Closing Disclosure. The AUTHORITY for "this loan's lender" — the CD is
+      the final, binding statement of the creditor, where a Loan Estimate is preliminary and supersedable.
+    produced_by: parsed
+  loan.lender_name_le:
+    entity: loan
+    value_type: string
+    allowed_values: null
+    description: >-
+      The lender named on a Loan Estimate. IH-2's FALLBACK, used only when no Closing Disclosure states a
+      creditor — early in processing the CD does not exist yet, and a file with only an LE should still be
+      checkable rather than a permanent couldnt_check.
+    produced_by: parsed
+
+  # IH-7. The condo master policy's three adequacy inputs. Each is PARSED off the master-policy document,
+  # so when the file carries NO master policy none of them materialise — which is exactly how the derived
+  # recipe distinguishes "absent" from "present but inadequate".
+  condo.master_policy_number:
+    entity: doc
+    value_type: string
+    allowed_values: null
+    description: >-
+      The condominium master policy's policy number — IH-7's PRESENCE signal. A master policy document
+      that states no policy number is not treated as evidence the policy exists.
+    produced_by: parsed
+  condo.master_policy_basis_raw:
+    entity: doc
+    value_type: string
+    allowed_values: null
+    description: >-
+      The master policy's replacement_cost_indicator, RAW. Carrier wording varies ("Replacement Cost",
+      "Guaranteed Replacement", "REPLACEMENT COST AT AG"), so IH-7's recipe matches a declared closed
+      vocabulary and abstains on anything else (ADR-376). Never read as inadequate by default.
+    produced_by: parsed
+  condo.master_liability_limit:
+    entity: doc
+    value_type: number
+    allowed_values: null
+    description: >-
+      The master policy's general liability limit per occurrence, in dollars. "unknown" when absent or
+      unparseable — never 0, which would read as a real limit of zero and fire IH-7 wrongly.
+    produced_by: parsed

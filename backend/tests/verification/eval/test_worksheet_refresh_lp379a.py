@@ -208,6 +208,8 @@ def test_no_rule_activation_changed() -> None:
             "CR-13",
             "PR-6",
             "CR-12",  # LP-486 — disputed accounts (ADR-376 closed-vocabulary abstain)
+            "IH-2",  # LP-487 — mortgagee clause (a normalised name compare; can only needs_review)
+            "IH-7",  # LP-487 — condo master policy (presence + adequacy, Fannie B7-4-01 / B7-3-03)
         )
     )
 

@@ -75,7 +75,7 @@ TI-4,Judgments / tax liens on title,Title,structural,deterministic_only,false,tr
 TI-5,Vesting,Title,judgmental,ai_judgment,false,,false,false,Vesting vs borrower/marital — judgment.
 TI-6,Chain of title / rapid transfer,Title,judgmental,ai_judgment,false,,false,false,Recent transfers/price jumps — flip/fraud judgment.
 IH-1,Insurance adequacy,Insurance,structural,deterministic_only,false,true,false,false,dwelling loss-settlement basis == replacement cost (ADR-340 — Priya retired the coverage-vs-loan arithmetic 2026-03-18); a basis check.
-IH-2,Mortgagee clause,Insurance,structural,ai_fuzzy_match,false,false,false,false,Clause names correct lender — presence/parse (AI for clause text).
+IH-2,Mortgagee clause,Insurance,structural,deterministic_only,false,true,false,false,"Clause names correct lender — normalised name compare (LP-487). Was ai_fuzzy_match; that kind predates typed extraction, which now reads the clause into mortgagee_name (14/15), so the perception step is already spent and only a string compare remains."
 IH-3,Insurance effective date,Insurance,structural,deterministic_only,false,true,false,false,effective date <= closing — date compare.
 IH-4,Premium matches DTI,Insurance,calculative,deterministic_bookend,true,,false,false,premium used vs binder — numeric compare (dup DT-5).
 IH-5,Flood zone determination,Insurance,structural,deterministic_only,false,true,false,false,Flood determination present + zone extracted — presence.

@@ -80,7 +80,7 @@ Generated from `backend/app/verification/rules/rule_kinds.csv` (the source of tr
 | TI-3 | Existing liens / unreleased mortgage | Title | structural | ai_fuzzy_match | false | false | false | false |
 | TI-4 | Judgments / tax liens on title | Title | structural | deterministic_only | false | true | false | false |
 | IH-1 | Insurance adequacy | Insurance | structural | deterministic_only | false | true | false | false |
-| IH-2 | Mortgagee clause | Insurance | structural | ai_fuzzy_match | false | false | false | false |
+| IH-2 | Mortgagee clause | Insurance | structural | deterministic_only | false | true | false | false |
 | IH-3 | Insurance effective date | Insurance | structural | deterministic_only | false | true | false | false |
 | IH-5 | Flood zone determination | Insurance | structural | deterministic_only | false | true | false | false |
 | IH-6 | Flood insurance required/present | Insurance | structural | ai_fuzzy_match | false | false | false | false |
