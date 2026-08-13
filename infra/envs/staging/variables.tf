@@ -220,8 +220,36 @@ variable "image_tag" {
 
     ⚠️ Must already be pushed. A task definition referencing a missing tag fails at
     launch with CannotPullContainerError, visible only in the service events.
+
+    The `deploy` stage of scripts/deploy derives this from git as
+    `<environment>-<short sha>` and writes it here, so the tag names the commit
+    whose bytes were built. Setting it by hand is what produced the two
+    CannotPullContainerError failures: bumping the tag without building, and
+    building without bumping.
   EOT
   type        = string
+}
+
+variable "allowed_deploy_branches" {
+  description = <<-EOT
+    Git branches `./scripts/deploy <env> deploy` will ship FROM.
+
+    ⚠️ CONSUMED BY THE SCRIPT, NOT BY TERRAFORM. No module reads it. It is declared
+    here so that a value in terraform.tfvars does not raise "Value for undeclared
+    variable" on every plan, and so the per-environment deploy policy lives with the
+    rest of that environment's configuration rather than inside the tool.
+
+    ⚠️ Why it exists: this machine has several git worktrees on different branches,
+    and `docker build` ships whatever is checked out in the directory it runs from.
+    A commit SHA in the image tag names the commit but not the line of work, so a
+    deploy from the wrong worktree produces a correctly-tagged image of the wrong
+    code and nothing downstream notices. The script refuses unless the current
+    branch is listed here; `--allow-branch` overrides it for the deliberate case.
+
+    An empty list permits nothing (fails closed).
+  EOT
+  type        = list(string)
+  default     = ["bedrock_integration"]
 }
 
 variable "cpu_architecture" {

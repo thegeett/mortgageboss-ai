@@ -20,7 +20,7 @@ REPO_ROOT=$(cd "$SCRIPT_DIR/.." && pwd)
 # shellcheck source=scripts/deploy-lib.sh
 . "$SCRIPT_DIR/deploy-lib.sh"
 
-STAGES="bootstrap phase1 dns images secrets migrate phase2 smoke all status bootstrap-admin add-user"
+STAGES="bootstrap phase1 dns images secrets migrate phase2 smoke all status bootstrap-admin add-user deploy"
 
 # How long `dns` waits for the registrar's delegation to propagate, and how long
 # `migrate` waits for the one-off task to stop. Both overridable for a slow
@@ -32,6 +32,16 @@ MIGRATE_TIMEOUT_SECONDS="${DEPLOY_MIGRATE_TIMEOUT_SECONDS:-900}"
 # How long `secrets` waits for an ElastiCache AUTH token rotation to become
 # effective. Minutes, not seconds -- the cluster applies it node by node.
 REDIS_AUTH_TIMEOUT_SECONDS="${DEPLOY_REDIS_AUTH_TIMEOUT_SECONDS:-900}"
+
+# How long `deploy` waits for all three services to finish rolling. Generous: a
+# rollout plus a circuit-breaker rollback is slower than a rollout alone, and
+# exiting early would report success for something still failing.
+DEPLOY_STEADY_TIMEOUT_SECONDS="${DEPLOY_STEADY_TIMEOUT_SECONDS:-900}"
+
+# Network for the deploy stage's one-off tasks, resolved once from the running
+# API service.
+DEPLOY_SUBNETS=""
+DEPLOY_SGS=""
 
 usage() {
   cat <<'EOF'
@@ -73,10 +83,20 @@ ARGUMENTS
     add-user   Add one user to an existing company, same mechanism. Refuses an
                unknown company slug or an email that is already taken.
 
+    deploy     Ship application code. Derives the image tag from git
+               (<env>-<short sha>), refuses a dirty tree or a branch the
+               environment's allowed_deploy_branches does not list, builds and
+               pushes both images with OCI provenance labels, runs migrations
+               BETWEEN the push and the service update but only when the deploy
+               introduces any, writes the tag into terraform.tfvars, applies, and
+               waits for all three services to finish rolling.
+
 OPTIONS
   --yes            Answer every confirmation with yes. Still prints what it does.
   --profile NAME   AWS profile. Default: $AWS_PROFILE, else mbai-<env>-admin.
   --force          secrets only: overwrite a secret that already has a value.
+  --allow-branch   deploy only: ship from a branch allowed_deploy_branches does
+                   not list. The branch is still recorded in the image labels.
   --help, -h       This text.
 
 EXIT CODES
@@ -103,6 +123,7 @@ ENV_NAME=""
 STAGE=""
 ASSUME_YES=0
 FORCE=0
+ALLOW_BRANCH=0
 PROFILE_OVERRIDE=""
 
 parse_args() {
@@ -112,6 +133,7 @@ parse_args() {
       -h | --help) usage; exit 0 ;;
       --yes | -y) ASSUME_YES=1 ;;
       --force) FORCE=1 ;;
+      --allow-branch) ALLOW_BRANCH=1 ;;
       --profile)
         [ $# -ge 2 ] || die "--profile needs a value."
         PROFILE_OVERRIDE="$2"; shift ;;
@@ -211,6 +233,10 @@ cleanup() {
   if [ -n "${SECRET_TMPDIR:-}" ] && [ -d "${SECRET_TMPDIR:-}" ]; then
     rm -rf "$SECRET_TMPDIR"
   fi
+  # The deploy stage prints how to get back to the previous image if it did not
+  # finish. In the trap rather than at each failure site so it also fires on
+  # Ctrl-C and on a die() deep inside the apply.
+  deploy_rollback_hint 2>/dev/null || true
   return 0
 }
 trap cleanup EXIT INT TERM
@@ -428,6 +454,11 @@ verify_image_arch() {
 # ECR repositories are IMMUTABLE-tagged (modules/registry/main.tf), so a re-push of
 # the same tag is rejected by the registry. That makes "already pushed" the only
 # possible idempotent behaviour: verify what is there and move on.
+# What build_and_push suggests when the tag is already in ECR. The advice differs
+# by caller: for `images` the answer is to bump image_tag, for `deploy` it is to
+# make a commit, since the tag is a function of HEAD.
+IMAGE_EXISTS_ADVICE=""
+
 image_already_pushed() {
   local repo="$1" tag="$2"
   awsx ecr describe-images --repository-name "$repo" --image-ids "imageTag=$tag" \
@@ -447,7 +478,7 @@ build_and_push() {
     awsx ecr describe-images --repository-name "$repo" --image-ids "imageTag=$tag" \
       --query 'imageDetails[0].[imageDigest,imagePushedAt]' --output text \
       | sed 's/^/       /' || true
-    info "  To ship new bytes, bump \`image_tag\` in $TFVARS and re-run phase1 + images."
+    info "  ${IMAGE_EXISTS_ADVICE:-To ship new bytes, bump \`image_tag\` in $TFVARS and re-run phase1 + images.}"
     return 0
   fi
 
@@ -1760,6 +1791,532 @@ stage_phase2() {
 }
 
 # --------------------------------------------------------------------------- #
+# Stage: deploy -- ship application code
+#
+# The infrastructure stages build an environment. This one ships a change to the
+# application into an environment that already exists. It is `images` + an apply
+# with three things those two do not do:
+#
+#   1. The tag is DERIVED FROM GIT, not typed. Both CannotPullContainerError
+#      failures this project has had came from the tag and the bytes disagreeing
+#      -- a tag bumped without a build, and a build without a bump. A tag that is
+#      a function of the commit cannot disagree with what was built from it.
+#   2. It checks WHICH BRANCH it is shipping. `docker build` ships the working
+#      tree of the directory it runs in; this machine has several worktrees on
+#      different branches, and a SHA names a commit but not a line of work.
+#   3. It runs MIGRATIONS BETWEEN the push and the service update, and only when
+#      the deploy actually introduces any. A service rolling onto code that
+#      expects a column which does not exist yet surfaces as an application bug,
+#      not as a deploy failure.
+# --------------------------------------------------------------------------- #
+
+# Values set for the rollback hint in cleanup(). See deploy_rollback_hint.
+DEPLOY_PREV_TAG=""
+DEPLOY_NEW_TAG=""
+DEPLOY_SUCCEEDED=0
+
+# Extract a list-valued tfvar as one entry per line. The generic tfvar() reader
+# returns the raw HCL (`["a", "b"]`); this pulls the quoted strings out of it.
+tfvar_list() {
+  local raw
+  raw=$(tfvar "$1" "$2") || return 1
+  printf '%s' "$raw" | tr ',' '\n' | sed -n 's/.*"\([^"]*\)".*/\1/p'
+}
+
+# --- git preflight --------------------------------------------------------- #
+
+# ⚠️ UNTRACKED FILES COUNT AS DIRTY, and that is not pedantry: `docker build`
+# sends the WORKING TREE as its context, not the commit. An untracked file that
+# .dockerignore does not exclude is in the image. A tag naming a commit that does
+# not describe the built bytes is the exact failure this stage exists to remove.
+deploy_require_clean_tree() {
+  local dirty
+  dirty=$(git -C "$REPO_ROOT" status --porcelain 2>/dev/null) || die \
+    "$REPO_ROOT is not a git repository." "The deploy stage derives its tag from git."
+  [ -z "$dirty" ] && return 0
+
+  info ""
+  printf '%s\n' "$dirty" | head -20 | sed 's/^/    /'
+  local n
+  n=$(printf '%s\n' "$dirty" | grep -c . | tr -d '[:space:]')
+  info ""
+  die "Refusing to deploy: the working tree has $n uncommitted change(s)." \
+    "The image tag would name HEAD, but the build context is the working tree, so" \
+    "the tag would describe bytes that no commit contains -- including untracked" \
+    "files, which docker sends whether or not git tracks them." \
+    "" \
+    "Commit them, stash them, or remove them, then re-run."
+}
+
+deploy_require_allowed_branch() {
+  local branch="$1" allowed found=0 entry
+  allowed=$(tfvar_list "$TFVARS" allowed_deploy_branches 2>/dev/null || printf '')
+
+  if [ -z "$allowed" ]; then
+    die "allowed_deploy_branches is unset or empty in $TFVARS." \
+      "It fails closed: with no branch permitted, nothing deploys. Set it to the" \
+      "branch this environment ships from, e.g." \
+      "  allowed_deploy_branches = [\"bedrock_integration\"]"
+  fi
+
+  while IFS= read -r entry; do
+    [ "$entry" = "$branch" ] && found=1
+  done <<EOF
+$allowed
+EOF
+
+  [ "$found" = "1" ] && return 0
+
+  if [ "${ALLOW_BRANCH:-0}" = "1" ]; then
+    hazard "--allow-branch: shipping from '$branch', which $TFVARS does not permit."
+    info "  Permitted: $(printf '%s' "$allowed" | tr '\n' ' ')"
+    info "  The branch is recorded in the image labels either way, so this deploy"
+    info "  stays identifiable afterwards."
+    return 0
+  fi
+
+  die "Refusing to deploy from branch '$branch'." \
+    "$TFVARS permits: $(printf '%s' "$allowed" | tr '\n' ' ')" \
+    "" \
+    "This machine has several worktrees on different branches, and docker build" \
+    "ships whatever is checked out where it runs. The image tag would carry the" \
+    "right commit SHA and the wrong line of work, and nothing downstream would" \
+    "notice." \
+    "" \
+    "Check you are in the right directory:  $REPO_ROOT" \
+    "Deliberate? Re-run with --allow-branch."
+}
+
+# Reports against the LAST FETCH -- this does not fetch, because a deploy command
+# should not quietly mutate refs. Being ahead is the case that matters most and
+# needs no fetch to detect: it means the code about to ship exists nowhere else.
+deploy_report_remote_divergence() {
+  local branch="$1" upstream counts ahead behind
+  upstream=$(git -C "$REPO_ROOT" rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null || printf '')
+
+  if [ -z "$upstream" ]; then
+    warn "Branch '$branch' has NO UPSTREAM."
+    warn "  Nothing to compare against: this code exists only on this machine, so"
+    warn "  the deployed image will be the only copy of it outside this worktree."
+    return 0
+  fi
+
+  counts=$(git -C "$REPO_ROOT" rev-list --left-right --count "${upstream}...HEAD" 2>/dev/null || printf '')
+  behind=$(printf '%s' "$counts" | awk '{print $1}')
+  ahead=$(printf '%s' "$counts" | awk '{print $2}')
+
+  if [ "${ahead:-0}" != "0" ]; then
+    warn "$ahead commit(s) ahead of $upstream -- shipping work that is not pushed."
+  fi
+  if [ "${behind:-0}" != "0" ]; then
+    warn "$behind commit(s) behind $upstream (as of the last fetch)."
+  fi
+  if [ "${ahead:-0}" = "0" ] && [ "${behind:-0}" = "0" ]; then
+    note "in sync with $upstream (as of the last fetch)"
+  else
+    note "  Run \`git fetch\` for a current comparison -- this reads local refs only."
+  fi
+}
+
+# --- alembic head comparison ----------------------------------------------- #
+
+# The revisions this checkout would apply. `alembic heads` reads the versions
+# directory and does NOT execute env.py, so it needs no database and no app
+# settings (verified).
+local_alembic_heads() {
+  local py out
+  py="$REPO_ROOT/backend/.venv/bin/python"
+  [ -x "$py" ] || die "backend/.venv is missing -- needed to read the local Alembic head." \
+    "Run: cd backend && uv sync"
+  out=$(cd "$REPO_ROOT/backend" && "$py" -m alembic heads 2>/dev/null) || die \
+    "Could not read the local Alembic heads."
+  printf '%s\n' "$out" | awk 'NF {print $1}' | sort
+}
+
+# The revisions the DEPLOYED database is at. Runs a one-off task on the CURRENT
+# migrate task definition -- reading alembic_version needs no new image.
+# Progress goes to stderr; only the revisions reach stdout.
+deployed_alembic_heads() {
+  local cluster="$1" taskdef="$2" container="$3" request logs
+  ensure_secret_tmpdir
+  request="$SECRET_TMPDIR/alembic-head.$$.json"
+
+  ONEOFF_CLUSTER="$cluster" ONEOFF_TD="$taskdef" ONEOFF_CONTAINER="$container" \
+  ONEOFF_SUBNETS="$DEPLOY_SUBNETS" ONEOFF_SGS="$DEPLOY_SGS" \
+  ONEOFF_PROG='
+import asyncio
+from sqlalchemy import text
+from app.core.database import async_session_maker
+
+async def main():
+    async with async_session_maker() as db:
+        try:
+            rows = (await db.execute(text("select version_num from alembic_version"))).scalars().all()
+        except Exception:
+            rows = []
+        for r in sorted(rows):
+            print("ALEMBIC_HEAD=%s" % r, flush=True)
+        print("ALEMBIC_HEAD_COUNT=%d" % len(rows), flush=True)
+
+asyncio.run(main())
+' jq -n '{
+    cluster: env.ONEOFF_CLUSTER, taskDefinition: env.ONEOFF_TD, launchType: "FARGATE",
+    networkConfiguration: {awsvpcConfiguration: {
+      subnets: (env.ONEOFF_SUBNETS | split(",")),
+      securityGroups: (env.ONEOFF_SGS | split(",")), assignPublicIp: "DISABLED"}},
+    overrides: {containerOverrides: [{
+      name: env.ONEOFF_CONTAINER,
+      command: ["uv","run","python","-c",env.ONEOFF_PROG]}]}
+  }' >"$request" || die "Could not build the alembic-head request."
+
+  logs=$(oneoff_task_logs "read deployed Alembic head" "$request" "$cluster" "$container") || return 1
+  printf '%s\n' "$logs" | sed -n 's/^[[:space:]]*ALEMBIC_HEAD=\(.*\)$/\1/p' | sort
+}
+
+# Run a task, wait, and return its LOG TEXT on stdout. Progress on stderr, so the
+# caller can capture the output -- the distinction that made the secrets stage
+# unusable when it was got wrong.
+oneoff_task_logs() {
+  local label="$1" request="$2" cluster="$3" container="$4"
+  local arn task_id status elapsed=0 group stream exit_code
+  {
+    would "aws ecs run-task --cli-input-json file://<request>   ($label)"
+    arn=$(awsx ecs run-task --cli-input-json "file://$request" \
+      --query 'tasks[0].taskArn' --output text) || { rm -f "$request"; die "run-task failed for $label."; }
+    rm -f "$request"
+    [ -n "$arn" ] && [ "$arn" != "None" ] || die "run-task returned no task ARN for $label."
+    task_id="${arn##*/}"
+    ok "task started: $task_id"
+    while [ "$elapsed" -lt "$MIGRATE_TIMEOUT_SECONDS" ]; do
+      status=$(awsx ecs describe-tasks --cluster "$cluster" --tasks "$arn" \
+        --query 'tasks[0].lastStatus' --output text 2>/dev/null || printf 'UNKNOWN')
+      [ "$status" = "STOPPED" ] && break
+      note "  ${elapsed}s: $status"
+      sleep 10
+      elapsed=$((elapsed + 10))
+    done
+    [ "$status" = "STOPPED" ] || die "$label did not stop within ${MIGRATE_TIMEOUT_SECONDS}s."
+    exit_code=$(awsx ecs describe-tasks --cluster "$cluster" --tasks "$arn" \
+      --query 'tasks[0].containers[0].exitCode' --output text 2>/dev/null || printf 'None')
+  } >&2
+
+  group=$(log_group_for api)
+  stream="migrate/${container}/${task_id}"
+  awsx logs get-log-events --log-group-name "$group" --log-stream-name "$stream" \
+    --start-from-head --query 'events[].message' --output text 2>/dev/null | tr '\t' '\n'
+
+  if [ "$exit_code" != "0" ]; then
+    printf '%s\n' "--- the task above exited $exit_code; its log is printed here ---" >&2
+    die "$label exited with code '$exit_code'."
+  fi
+}
+
+# --- running the migration on the NEW image -------------------------------- #
+
+# ⚠️ Why this registers a task definition instead of reusing the deployed one.
+#
+# The migration must run the NEW code: it is the new image that carries the new
+# revisions. But the deployed migrate task definition still points at the OLD
+# tag until Terraform applies, and that same apply also updates the SERVICES --
+# so waiting for it would put the services on new code before the migration ran,
+# which is precisely the ordering this stage exists to get right. ECS
+# containerOverrides can override the command and the environment but NOT the
+# image, so there is no way to redirect the existing definition at the new tag.
+#
+# The standard resolution, and the one used here: register one extra revision of
+# the same family with the image swapped, run that, and let Terraform carry on
+# managing its own revisions afterwards. Terraform tracks the revision IT
+# created, so an extra one is inert -- it costs a revision number, not
+# correctness. The alternative, `terraform apply -target` on the task definition,
+# keeps everything in Terraform but couples this script to a module-internal
+# resource address and doubles the applies.
+register_migrate_taskdef_for_image() {
+  local taskdef="$1" image="$2" src reg arn
+  ensure_secret_tmpdir
+  src="$SECRET_TMPDIR/td-src.$$.json"
+  reg="$SECRET_TMPDIR/td-reg.$$.json"
+
+  awsx ecs describe-task-definition --task-definition "$taskdef" \
+    --query 'taskDefinition' --output json >"$src" 2>/dev/null || die \
+    "Could not read the migrate task definition '$taskdef'."
+
+  # Strip the server-owned fields describe returns but register rejects, and
+  # swap the image on every container (there is one).
+  NEW_IMAGE="$image" jq '
+      del(.taskDefinitionArn, .revision, .status, .requiresAttributes,
+          .compatibilities, .registeredAt, .registeredBy, .deregisteredAt)
+      | .containerDefinitions |= map(.image = env.NEW_IMAGE)
+    ' "$src" >"$reg" || die "Could not build the task-definition registration."
+  rm -f "$src"
+
+  arn=$(awsx ecs register-task-definition --cli-input-json "file://$reg" \
+    --query 'taskDefinition.taskDefinitionArn' --output text) || {
+      rm -f "$reg"; die "register-task-definition failed."; }
+  rm -f "$reg"
+  printf '%s' "$arn"
+}
+
+# --- services -------------------------------------------------------------- #
+
+# ⚠️ Does not return while a deployment is still rolling. The circuit breaker can
+# still roll it back, so an exit here would report success for something that has
+# not finished failing yet.
+wait_for_services_steady() {
+  local cluster="$1" elapsed=0 svc name pending all_steady
+  local names=""
+  for svc in api worker frontend; do
+    name=$(out_map_opt ecs_service_names "$svc")
+    [ -n "$name" ] && names="$names $name"
+  done
+  [ -n "$names" ] || { warn "No service names in the outputs; skipping the steady-state wait."; return 0; }
+
+  info ""
+  info "Waiting for all services to reach steady state (rollout + circuit breaker)."
+  while [ "$elapsed" -lt "$DEPLOY_STEADY_TIMEOUT_SECONDS" ]; do
+    all_steady=1
+    pending=""
+    for name in $names; do
+      # A service is settled when it has exactly one deployment and it is PRIMARY
+      # with rolloutState COMPLETED. More than one deployment means it is mid-roll.
+      local state count
+      state=$(awsx ecs describe-services --cluster "$cluster" --services "$name" \
+        --query 'services[0].[length(deployments),deployments[0].rolloutState,runningCount,desiredCount]' \
+        --output text 2>/dev/null || printf '? ? ? ?')
+      count=$(printf '%s' "$state" | awk '{print $1}')
+      if [ "$count" = "1" ] && [ "$(printf '%s' "$state" | awk '{print $2}')" = "COMPLETED" ] \
+         && [ "$(printf '%s' "$state" | awk '{print $3}')" = "$(printf '%s' "$state" | awk '{print $4}')" ]; then
+        continue
+      fi
+      all_steady=0
+      pending="$pending $name($(printf '%s' "$state" | awk '{print $2}') $(printf '%s' "$state" | awk '{print $3}')/$(printf '%s' "$state" | awk '{print $4}'))"
+    done
+    [ "$all_steady" = "1" ] && { ok "all services steady after ${elapsed}s"; return 0; }
+    note "  ${elapsed}s: rolling —$pending"
+    sleep 15
+    elapsed=$((elapsed + 15))
+  done
+
+  die "Services did not reach steady state within ${DEPLOY_STEADY_TIMEOUT_SECONDS}s." \
+    "Still rolling:$pending" \
+    "The deployment may still be in progress or the circuit breaker may be rolling" \
+    "it back. Check the service events and the log streams before re-running."
+}
+
+report_service_revisions() {
+  local cluster="$1" svc name td
+  info ""
+  info "Running task definition per service:"
+  for svc in api worker frontend; do
+    name=$(out_map_opt ecs_service_names "$svc")
+    [ -n "$name" ] || continue
+    td=$(awsx ecs describe-services --cluster "$cluster" --services "$name" \
+      --query 'services[0].taskDefinition' --output text 2>/dev/null || printf 'unknown')
+    status_line "  $svc" "${td##*/}"
+  done
+}
+
+deploy_rollback_hint() {
+  [ -n "$DEPLOY_PREV_TAG" ] || return 0
+  [ "$DEPLOY_SUCCEEDED" = "1" ] && return 0
+  printf '\n' >&2
+  hr >&2
+  {
+    printf '%sTO RETURN TO THE PREVIOUS IMAGE%s\n' "$C_BOLD" "$C_RESET"
+    printf '\n'
+    printf '  The previous tag was: %s%s%s\n' "$C_BOLD" "$DEPLOY_PREV_TAG" "$C_RESET"
+    if [ -n "$DEPLOY_NEW_TAG" ]; then
+      printf '  %s was written into %s.\n' "$DEPLOY_NEW_TAG" "$TFVARS"
+    fi
+    printf '\n'
+    printf '    sed -i.bak '\''s/^image_tag *=.*/image_tag = "%s"/'\'' %s\n' "$DEPLOY_PREV_TAG" "$TFVARS"
+    printf '    rm -f %s.bak\n' "$TFVARS"
+    printf '    ./scripts/deploy %s %s\n' "$ENV_NAME" "$(deploy_apply_stage_name)"
+    printf '\n'
+    printf '  ⚠️ That reverts the IMAGE. It does not revert a migration that already\n'
+    printf '     ran: Alembic downgrades are not part of this stage, and the old code\n'
+    printf '     may not tolerate the new schema. Check what the migration did before\n'
+    printf '     assuming the rollback is complete.\n'
+  } >&2
+  hr >&2
+}
+
+# Whichever phase stage the current flags permit, so this works before and after
+# TLS: phase1 asserts both flags are false, phase2 requires both true.
+deploy_apply_stage_name() {
+  local tls cognito
+  tls=$(tfvar "$TFVARS" "enable_tls" || printf '')
+  cognito=$(tfvar "$TFVARS" "enable_cognito" || printf '')
+  if [ "$tls" = "true" ] && [ "$cognito" = "true" ]; then
+    printf 'phase2'
+  else
+    printf 'phase1'
+  fi
+}
+
+stage_deploy() {
+  banner "deploy -- ship application code to '$ENV_NAME'"
+  need_cmd git; need_cmd docker; need_cmd aws; need_cmd jq; need_cmd terraform
+  need_buildx
+  require_domain
+  require_identity "$ACCOUNT_ID"
+  require_outputs "$ENV_DIR"
+
+  # --- 1 + 2. git preflight ------------------------------------------------ #
+  local branch sha
+  deploy_require_clean_tree
+  branch=$(git -C "$REPO_ROOT" rev-parse --abbrev-ref HEAD 2>/dev/null)
+  sha=$(git -C "$REPO_ROOT" rev-parse --short HEAD 2>/dev/null)
+  [ -n "$branch" ] && [ -n "$sha" ] || die "Could not read the git branch/SHA."
+  [ "$branch" = "HEAD" ] && die "HEAD is detached." \
+    "The deploy stage records the branch in the image labels, and a detached HEAD" \
+    "has none. Check out the branch you mean to ship."
+
+  deploy_require_allowed_branch "$branch"
+  deploy_report_remote_divergence "$branch"
+
+  DEPLOY_NEW_TAG="${ENV_NAME}-${sha}"
+  DEPLOY_PREV_TAG=$(tfvar "$TFVARS" "image_tag" || printf '')
+
+  local cluster taskdef container api_uri fe_uri api_repo fe_repo new_api new_fe
+  cluster=$(out ecs_cluster_name)
+  taskdef=$(out_map ecs_task_definition_arns migrate)
+  container=$(oneoff_container_name "$taskdef")
+  api_uri=$(out_map container_image_uris api)
+  fe_uri=$(out_map container_image_uris frontend)
+  api_repo="${api_uri%:*}"; fe_repo="${fe_uri%:*}"
+  new_api="${api_repo}:${DEPLOY_NEW_TAG}"
+  new_fe="${fe_repo}:${DEPLOY_NEW_TAG}"
+
+  local netcfg
+  netcfg=$(oneoff_network "$cluster")
+  DEPLOY_SUBNETS=$(printf '%s' "$netcfg" | awk -F'\t' '{print $1}')
+  DEPLOY_SGS=$(printf '%s' "$netcfg" | awk -F'\t' '{print $2}')
+
+  hr
+  info "  worktree    : $REPO_ROOT"
+  info "  branch      : ${C_BOLD}${branch}${C_RESET}"
+  info "  commit      : $sha"
+  info "  new tag     : ${C_BOLD}${DEPLOY_NEW_TAG}${C_RESET}"
+  info "  current tag : ${DEPLOY_PREV_TAG:-（unset）}"
+  info "  apply via   : $(deploy_apply_stage_name)"
+  hr
+
+  if [ "$DEPLOY_NEW_TAG" = "$DEPLOY_PREV_TAG" ]; then
+    note "The environment already references this tag. Re-running is still useful"
+    note "if a previous attempt failed partway; the build will be skipped."
+  fi
+
+  # --- 3 + 4. build and push ---------------------------------------------- #
+  local registry api_present=0 fe_present=0
+  registry=$(uri_registry "$api_uri")
+  would "aws ecr get-login-password | docker login $registry"
+  awsx ecr get-login-password | docker login --username AWS --password-stdin "$registry" \
+    >/dev/null || die "ECR login failed for $registry."
+  ok "logged in to $registry"
+
+  image_already_pushed "$(uri_repo "$new_api")" "$DEPLOY_NEW_TAG" && api_present=1
+  image_already_pushed "$(uri_repo "$new_fe")" "$DEPLOY_NEW_TAG" && fe_present=1
+
+  if [ "$api_present" = "1" ] && [ "$fe_present" = "1" ]; then
+    ok "Both images for $DEPLOY_NEW_TAG are already in ECR -- skipping the build."
+    note "  Tags are immutable, so the same commit always means the same bytes."
+  fi
+
+  # OCI labels, so a deployed image is traceable to its branch and commit without
+  # consulting tfvars, git, or this script.
+  local labels
+  IMAGE_EXISTS_ADVICE="To ship new bytes, make a commit -- the tag is derived from HEAD."
+  build_and_push "api" "$new_api" "$REPO_ROOT/backend" \
+    --label "org.opencontainers.image.revision=$(git -C "$REPO_ROOT" rev-parse HEAD)" \
+    --label "org.opencontainers.image.source=$branch" \
+    --label "org.opencontainers.image.version=$DEPLOY_NEW_TAG"
+  build_and_push "frontend" "$new_fe" "$REPO_ROOT/frontend" \
+    --build-arg "NEXT_PUBLIC_API_URL=https://${DOMAIN}" \
+    --label "org.opencontainers.image.revision=$(git -C "$REPO_ROOT" rev-parse HEAD)" \
+    --label "org.opencontainers.image.source=$branch" \
+    --label "org.opencontainers.image.version=$DEPLOY_NEW_TAG"
+  IMAGE_EXISTS_ADVICE=""
+  labels=""
+
+  # --- 5. migrations, between the push and the service update -------------- #
+  banner "deploy -- migrations"
+  local local_heads deployed_heads
+  local_heads=$(local_alembic_heads)
+  info "local Alembic head(s)   : $(printf '%s' "$local_heads" | tr '\n' ' ')"
+  info "reading the deployed head (one-off task on the current image)…"
+  deployed_heads=$(deployed_alembic_heads "$cluster" "$taskdef" "$container") || deployed_heads=""
+  info "deployed Alembic head(s): ${deployed_heads:-（none — empty database）}"
+
+  if [ "$local_heads" = "$deployed_heads" ]; then
+    ok "No new migrations in this deploy -- skipping the migration task."
+    note "  The deployed database is already at the head this commit expects."
+  else
+    hazard "This deploy introduces schema changes. Migrating BEFORE the services roll."
+    info "  Running the migration on the NEW image, via a one-off task definition"
+    info "  revision -- the deployed one still points at ${DEPLOY_PREV_TAG:-the old tag}."
+    confirm "Run the migration now?" || die "Aborted before migrating." \
+      "The images are pushed; nothing else has changed. Re-run to continue."
+
+    local mig_td request
+    mig_td=$(register_migrate_taskdef_for_image "$taskdef" "$new_api")
+    ok "registered ${mig_td##*/} (image: $DEPLOY_NEW_TAG)"
+
+    ensure_secret_tmpdir
+    request="$SECRET_TMPDIR/deploy-migrate.$$.json"
+    ONEOFF_CLUSTER="$cluster" ONEOFF_TD="$mig_td" ONEOFF_CONTAINER="$container" \
+    ONEOFF_SUBNETS="$DEPLOY_SUBNETS" ONEOFF_SGS="$DEPLOY_SGS" \
+      jq -n '{cluster: env.ONEOFF_CLUSTER, taskDefinition: env.ONEOFF_TD,
+              launchType: "FARGATE",
+              networkConfiguration: {awsvpcConfiguration: {
+                subnets: (env.ONEOFF_SUBNETS | split(",")),
+                securityGroups: (env.ONEOFF_SGS | split(",")),
+                assignPublicIp: "DISABLED"}},
+              overrides: {containerOverrides: [{name: env.ONEOFF_CONTAINER,
+                command: ["uv","run","alembic","upgrade","head"]}]}}' >"$request" \
+      || die "Could not build the migration request."
+
+    run_oneoff_task "deploy migration" "$request" "$cluster" "$container"
+    ok "migration applied."
+  fi
+
+  # --- 6. write the tag and apply ------------------------------------------ #
+  banner "deploy -- apply"
+  if [ "$DEPLOY_NEW_TAG" != "$DEPLOY_PREV_TAG" ]; then
+    would "sed -i: image_tag = \"$DEPLOY_NEW_TAG\" in $TFVARS"
+    sed -i.bak "s|^\([[:space:]]*image_tag[[:space:]]*=[[:space:]]*\).*|\1\"${DEPLOY_NEW_TAG}\"|" "$TFVARS"
+    rm -f "${TFVARS}.bak"
+    local written
+    written=$(tfvar "$TFVARS" "image_tag" || printf '')
+    [ "$written" = "$DEPLOY_NEW_TAG" ] || die \
+      "Failed to write image_tag into $TFVARS (it now reads '${written}')." \
+      "Edit it by hand and re-run."
+    info ""
+    git -C "$REPO_ROOT" --no-pager diff -- "$TFVARS" | sed 's/^/  /'
+    info ""
+    ok "image_tag updated -- a tracked file, so it shows in git status."
+  else
+    note "image_tag already reads $DEPLOY_NEW_TAG; nothing to write."
+  fi
+
+  case "$(deploy_apply_stage_name)" in
+    phase2) stage_phase2 ;;
+    *) stage_phase1 ;;
+  esac
+
+  # --- 7. wait for steady state ------------------------------------------- #
+  banner "deploy -- rollout"
+  wait_for_services_steady "$cluster"
+  report_service_revisions "$cluster"
+
+  DEPLOY_SUCCEEDED=1
+  info ""
+  ok "deploy complete: $branch@$sha is live as $DEPLOY_NEW_TAG"
+  info ""
+  info "Verify: ./scripts/deploy $ENV_NAME status"
+  info "        ./scripts/deploy $ENV_NAME smoke"
+}
+
+# --------------------------------------------------------------------------- #
 # Stage: smoke
 # --------------------------------------------------------------------------- #
 
@@ -1985,6 +2542,56 @@ stage_status() {
     status_line "dns" "n/a (no domain_name, or dig not installed)"
   fi
 
+  # --- deployed code vs this worktree ---
+  # "Is staging running my latest commit" answered at a glance. The deployed tag
+  # comes from what the API service is RUNNING, not from tfvars: tfvars is the
+  # desired state and can be ahead of a failed or in-flight apply.
+  local running_td running_image running_tag wt_branch wt_sha wt_dirty expected
+  wt_branch=$(git -C "$REPO_ROOT" rev-parse --abbrev-ref HEAD 2>/dev/null || printf '?')
+  wt_sha=$(git -C "$REPO_ROOT" rev-parse --short HEAD 2>/dev/null || printf '?')
+  wt_dirty=$(git -C "$REPO_ROOT" status --porcelain 2>/dev/null | grep -c . | tr -d '[:space:]')
+  expected="${ENV_NAME}-${wt_sha}"
+
+  running_tag=""
+  if [ "$have_aws" = "1" ]; then
+    running_td=$(awsx ecs describe-services --cluster "$(out_opt ecs_cluster_name)" \
+      --services "$(out_map_opt ecs_service_names api)" \
+      --query 'services[0].taskDefinition' --output text 2>/dev/null || printf '')
+    if [ -n "$running_td" ] && [ "$running_td" != "None" ]; then
+      running_image=$(awsx ecs describe-task-definition --task-definition "$running_td" \
+        --query 'taskDefinition.containerDefinitions[0].image' --output text 2>/dev/null || printf '')
+      running_tag="${running_image##*:}"
+    fi
+  fi
+
+  status_line "deployed tag" "${running_tag:-unknown (no AWS access)}"
+  status_line "desired tag (tfvars)" "$(tfvar "$TFVARS" image_tag || echo '?')"
+  status_line "worktree" "$REPO_ROOT"
+  status_line "worktree branch/sha" "${wt_branch}@${wt_sha}$([ "${wt_dirty:-0}" != "0" ] && printf ' (+%s uncommitted)' "$wt_dirty")"
+
+  # The branch label is read from the image itself, so it is true even if tfvars
+  # or the working tree have since moved.
+  local deployed_branch=""
+  if [ -n "$running_tag" ] && command -v docker >/dev/null 2>&1 \
+     && docker buildx version >/dev/null 2>&1 && [ -n "${running_image:-}" ]; then
+    deployed_branch=$(docker buildx imagetools inspect "$running_image" \
+      --format '{{ index .Image.Config.Labels "org.opencontainers.image.source" }}' 2>/dev/null || printf '')
+  fi
+  case "$deployed_branch" in
+    "" | "<no value>" | "null") status_line "deployed branch label" "unknown (pre-label image, or no registry access)" ;;
+    *) status_line "deployed branch label" "$deployed_branch" ;;
+  esac
+
+  if [ -z "$running_tag" ]; then
+    status_line "in sync?" "unknown"
+  elif [ "$running_tag" = "$expected" ] && [ "${wt_dirty:-0}" = "0" ]; then
+    status_line "in sync?" "YES -- staging is running this worktree's HEAD"
+  elif [ "$running_tag" = "$expected" ]; then
+    status_line "in sync?" "HEAD matches, but the worktree has uncommitted changes"
+  else
+    status_line "in sync?" "NO -- deployed $running_tag, this worktree would ship $expected"
+  fi
+
   # --- images ---
   local kind uri repo tag
   for kind in api frontend; do
@@ -2163,6 +2770,7 @@ main() {
     status)    stage_status ;;
     bootstrap-admin) stage_bootstrap_admin ;;
     add-user)  stage_add_user ;;
+    deploy)    stage_deploy ;;
     *)         die "Unhandled stage: $STAGE" ;;
   esac
 }

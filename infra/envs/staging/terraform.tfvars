@@ -144,7 +144,18 @@ ecr_repository_names = {
 # ⚠️ The frontend image for THIS tag must be built with
 # NEXT_PUBLIC_API_URL=https://staging.mortgageboss.ai — it is inlined at BUILD time
 # and cannot be set as a task environment variable. See the result doc.
+#
+# ⚠️ OWNED BY `./scripts/deploy staging deploy` from here on. It derives the tag
+# from git (`staging-<short sha>`), builds those exact bytes, and rewrites this
+# line. Editing it by hand re-opens the failure it closes: a tag bumped without a
+# build, or a build without a bump, both of which produced CannotPullContainerError.
 image_tag = "staging-3"
+
+# Branches the deploy stage will ship FROM. Read by scripts/deploy, not by any
+# module. Several worktrees on this machine sit on different branches and
+# `docker build` ships whatever is checked out where it runs — see the variable's
+# description in variables.tf.
+allowed_deploy_branches = ["bedrock_integration"]
 
 # Verified in C3: the images are arm64. Fargate defaults to X86_64 and the mismatch
 # fails with `exec format error`, visible only in the CloudWatch log stream.
