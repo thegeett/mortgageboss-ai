@@ -14472,3 +14472,54 @@ its catalog `kind` and no lie about what it is. Both ticket docs are amended.
 **Cross-refs.** LP-508 (`docs/tickets/LP-508.md`), ADR-254 (the four-defence gate this extends), LP-474 (the
 per-extraction checks and their measured 3/9 coverage), ADR-376 (the same declared-data-with-reasons shape),
 LP-424 (`ships` derives from kind — and why that is not the ratification mechanism).
+
+## ADR-378: Activation on a SELF-CONSISTENCY rate with ratification as the safety substitute — the gate's principle, deliberately inverted (LP-490a)
+
+**Status.** Accepted — a product decision by Geet, taken with the trade-offs below stated rather than
+softened. **Mechanism shipped; no rule activated on it yet** (every candidate failed a precondition —
+see LP-490a.md).
+
+**1. The gate's stated principle is INVERTED.** `is_eligible()` documents itself as *"activation never
+trusts what it hasn't measured."* The new `ratify-pending` branch activates a rule whose load-bearing AI
+tag has **no measured accuracy at all**, on the strength of a **self-consistency rate** plus
+**ratification**. That is a real reversal, made knowingly. The three existing branches are unchanged, and
+`calibratable-now` still requires `measured_accuracy` — a consistency number can never open the
+calibrated door.
+
+**2. ⚠️ `self_consistency_rate` IS NOT EVIDENCE OF CORRECTNESS, and the field is named for what it
+measures.** It is the rate at which **two independent derivations** of the same tag, from the same source
+data in **fresh contexts** (the second never shown the first's answer), agreed with each other.
+
+- **Two agreeing derivations are STABLE, not RIGHT.** A systematically wrong tag scores **1.0**.
+- **Disagreement is a real signal; agreement is weak evidence.** The asymmetry is the whole value.
+- It is deliberately NOT same-context grading. The v2 bench measured misclassifications at **0.75–0.99
+  confidence**; a model with its own reasoning in front of it agrees with itself and returns ~1.0 on
+  everything, which would activate every rule and carry no information.
+- **The documented divergence case: AS-4's `stmt.is_reserve_eligible` measured 0/5 against Priya's
+  labels** (LP-390-5) — the model calls standard checking and savings reserve-eligible where she says no.
+  A *systematic* disagreement, so two derivations would agree with each other **every time**. That is why
+  the branch requires `measured_accuracy is None`: measured-and-failing is not unmeasured, and a
+  consistency rate must never override a measurement that already failed.
+
+**⚠️ The naming was load-bearing on the very first run.** CR-8's tags scored **1.0000 over 35 cases** —
+and every value was `unknown`, because the PII backstop redacts `payment_history_24mo` (a long digit run)
+before the model sees it. The model was answering correctly about a destroyed input. Had the field been
+called `self_assessed_accuracy`, a 1.0 would have activated a rule that **cannot function**.
+
+**3. The accepted cost.** A systematically wrong tag now surfaces as **repeated false findings** rather
+than being held. The mitigation is ratification — a human confirms every finding — **and it only holds if
+the wiring holds**. Before LP-490a `deterministic.py` **never set `ratification_pending`**, so every
+`ai_fuzzy_match` rule (CR-1, CR-4, CR-5, OC-1, TI-1, PC-1, RE-1, IN-6, PR-7 …) would have shipped an
+unmeasured AI judgment as an **auto** verdict with no human in the loop. That hole is closed at the point
+the verdict is built, not asserted in a comment.
+
+**4. The exit.** A processor's confirmations **are real labels**. `measured_accuracy` should be populated
+from them, and `self_consistency_rate` retired per rule as it is. The two fields must never be collapsed:
+a loader check rejects a bar carrying both, because the distinction is the only thing telling a future
+reader which kind of number a bar holds.
+
+**Cross-refs.** LP-484 (an uncalibrated AI rule cannot pass the gate — the constraint this changes),
+LP-425/ADR-336 (OC-2 live on an unscored tag *because* it ratifies — the precedent this generalises),
+LP-508/ADR-377 (`ratification_pending` is the real mechanism; `ships` is metadata), ADR-332 + its LP-487
+amendment (self-authored labels measure self-consistency, not correctness — the same trap, named there
+first), ADR-353 (position-parsing an open-format string).

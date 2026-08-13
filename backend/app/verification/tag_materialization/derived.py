@@ -1647,6 +1647,26 @@ def _shift_months(anchor: date, months: int) -> date:
     return date(year, month, min(anchor.day, last))
 
 
+def _completed_months(earlier: date, later: date) -> int:
+    """COMPLETE calendar months from ``earlier`` to ``later`` — a partial month does NOT count.
+
+    ⚠️ THE COUNTERPART TO :func:`_age_months_ceiling`, AND THE DIRECTION MATTERS MORE THAN THE NAME.
+    Rounding is not a stylistic choice here; it decides which way the rule fails:
+
+    * AGEING a document (CR-13, PR-6) — a bigger number makes the rule MORE likely to fire, so rounding
+      UP is the conservative side. That is :func:`_age_months_ceiling`.
+    * SEASONING an event (CR-6) — a bigger number makes the rule more likely to CLEAR the borrower, so
+      rounding up is the PERMISSIVE side. A bankruptcy discharged 47 months and 1 day before closing
+      ceilings to 48 and satisfies a 48-month waiting period ~29 days early. Seasoning uses THIS.
+
+    Reach for the one whose rounding closes the costly direction for the rule you are writing.
+    """
+    months = (later.year - earlier.year) * 12 + (later.month - earlier.month)
+    if later.day < earlier.day:
+        months -= 1
+    return months
+
+
 def _age_months_ceiling(earlier: date, later: date) -> int:
     """Calendar months from ``earlier`` to ``later``, ROUNDED UP on any partial month.
 
@@ -1667,6 +1687,10 @@ def _age_months_ceiling(earlier: date, later: date) -> int:
 
     Negative when ``later`` precedes ``earlier`` (the caller decides what that means — see
     :func:`_age_in_months_at_closing`, which refuses to age a document dated after closing).
+
+    ⚠️ FOR AGEING A DOCUMENT ONLY. Rounding up is conservative when a bigger number makes the rule
+    MORE likely to fire. For SEASONING — where a bigger number CLEARS the borrower — it is the
+    permissive direction and clears an event early; use :func:`_completed_months` there.
     """
     months = (later.year - earlier.year) * 12 + (later.month - earlier.month)
     if later.day < earlier.day:
@@ -2274,7 +2298,7 @@ def _derogatory_months_elapsed(
     closing, reason = _single_parsed_date(snapshot, "contract.closing_date")
     if closing is None:
         return _UNKNOWN, f"the loan's closing date is {reason}, so no seasoning can be measured"
-    months = _age_months_ceiling(parsed, closing)
+    months = _completed_months(parsed, closing)
     if months < 0:
         return _UNKNOWN, (
             f"the derogatory event's date ({parsed.isoformat()}) is AFTER the loan's closing date "
@@ -2286,8 +2310,90 @@ def _derogatory_months_elapsed(
     )
 
 
+def _non_medical_collection_balances(
+    snapshot: Snapshot, _subject_id: str, _subject_raw: object
+) -> tuple[list[Decimal] | None, str]:
+    """The borrower's non-medical collection balances, or ``(None, reason)`` when it cannot be measured.
+
+    THE ONE PLACE the row filter lives, so the aggregate, the largest-single figure and the
+    has-collections gate can never disagree about which rows count. Every guard below is a reported
+    finding from LP-490's review; each is commented where it applies.
+    """
+    from app.verification.rule_engine.enumerators import _SOURCE_CREDIT_REPORT, liability_rows
+
+    if snapshot.tags.absent:
+        return None, "no tags materialized, so no collection balances to aggregate"
+
+    # ⚠️ FILE-WIDE ROWS CANNOT BE ATTRIBUTED ON A JOINT FILE. LiabilityRow carries no borrower link, so
+    # every borrower would receive BOTH borrowers' collections while CR-10 compares against PER-BORROWER
+    # thresholds ($250/$1,000/$2,000/$5,000) — borrower B's collections pushing borrower A over. On a
+    # single-borrower file the file total IS that borrower's; on a joint file it is not. Attributing
+    # properly needs a document link on the row (an enumerator change), not a guess here.
+    borrowers = subject_type("borrower").enumerate(snapshot)
+    if len(borrowers) > 1:
+        return None, (
+            f"the file has {len(borrowers)} borrowers and a credit-report tradeline carries no borrower "
+            "attribution, so a per-borrower collection total cannot be computed without over-reporting "
+            "one borrower's balance against another's"
+        )
+
+    balances: list[Decimal] = []
+    reported_rows = 0
+    judged_rows = 0
+    for row in liability_rows(snapshot):
+        if row.source != _SOURCE_CREDIT_REPORT:
+            continue
+        reported_rows += 1
+        tags = snapshot.tags.by_subject.get(row.subject_id, {})
+        kind = tags.get("liab.derogatory_type")
+        if kind is None:
+            continue
+        judged_rows += 1
+        if str(kind.value) not in {"collection", "charge_off"}:
+            continue
+        # ⚠️ A charged-off MORTGAGE is not a collection for this rule. CR-10's prompt says "do not fold
+        # one into this decision" — which the model cannot do, because it only receives the summed
+        # aggregate. One six-figure mortgage charge-off cleared every threshold on a file whose real
+        # non-mortgage collections were zero. A charged-off mortgage seasons under CR-6 instead.
+        is_mortgage = tags.get("liab.is_mortgage")
+        if is_mortgage is not None and str(is_mortgage.value) == "yes":
+            continue
+        medical = tags.get("liab.is_medical_collection")
+        if medical is not None and str(medical.value) == "yes":
+            continue  # excluded from the Fannie payoff limits
+        balance = tags.get("liab.collection_balance")
+        if balance is None or str(balance.value) == _UNKNOWN:
+            return None, (
+                "a collection on this report states no readable balance — the total would be "
+                "understated, which could clear a threshold the file does not actually clear"
+            )
+        try:
+            balances.append(Decimal(str(balance.value)))
+        except (InvalidOperation, ValueError):
+            return None, (
+                f"a collection's balance ({balance.value!r}) is not a number — abstaining rather than "
+                "reporting a partial total"
+            )
+    if not balances:
+        # ⚠️ A CONFIDENT ZERO IS A FALSE ALL-CLEAR unless a credit report was actually read.
+        # _credit_undisclosed_tradeline abstains in exactly this situation, for exactly this reason:
+        # "no undisclosed debt on a file with no credit report is a false ALL-CLEAR, which is worse
+        # than saying nothing."
+        if reported_rows == 0:
+            return None, (
+                "no credit-report tradelines on the file — a $0 collection total would be a false "
+                "all-clear rather than a measurement"
+            )
+        if judged_rows == 0:
+            return None, (
+                f"{reported_rows} credit-report tradeline(s), but none carries a derogatory-type "
+                "judgment — the collection total cannot be concluded to be zero"
+            )
+    return balances, ""
+
+
 def _collection_aggregate_balance(
-    snapshot: Snapshot, subject_id: str, _subject_raw: object
+    snapshot: Snapshot, subject_id: str, subject_raw: object
 ) -> tuple[JsonValue, str]:
     """credit.collection_aggregate_balance — the borrower's NON-MEDICAL collection total (CR-10).
 
@@ -2297,41 +2403,61 @@ def _collection_aggregate_balance(
 
     ⚠️ MEDICAL collections are EXCLUDED (Fannie's payoff limits do not count them), and a tradeline
     whose medical status is unknown is treated as CONTRIBUTING: excluding an unknown would be the
-    permissive guess.
+    permissive guess. Row selection lives in :func:`_non_medical_collection_balances`.
     """
-    from app.verification.rule_engine.enumerators import _SOURCE_CREDIT_REPORT, liability_rows
-
-    if snapshot.tags.absent:
-        return _UNKNOWN, "no tags materialized, so no collection balances to aggregate"
-    total = Decimal(0)
-    counted = 0
-    for row in liability_rows(snapshot):
-        if row.source != _SOURCE_CREDIT_REPORT:
-            continue
-        tags = snapshot.tags.by_subject.get(row.subject_id, {})
-        kind = tags.get("liab.derogatory_type")
-        if kind is None or str(kind.value) not in {"collection", "charge_off"}:
-            continue
-        medical = tags.get("liab.is_medical_collection")
-        if medical is not None and str(medical.value) == "yes":
-            continue  # excluded from the Fannie payoff limits
-        balance = tags.get("liab.collection_balance")
-        if balance is None or str(balance.value) == _UNKNOWN:
-            return _UNKNOWN, (
-                "a collection on this report states no readable balance — the aggregate would be "
-                "understated, which could clear a threshold the file does not actually clear"
-            )
-        try:
-            total += Decimal(str(balance.value))
-        except (InvalidOperation, ValueError):
-            return _UNKNOWN, (
-                f"a collection's balance ({balance.value!r}) is not a number — abstaining rather than "
-                "summing a partial aggregate"
-            )
-        counted += 1
-    if counted == 0:
+    rows, why = _non_medical_collection_balances(snapshot, subject_id, subject_raw)
+    if rows is None:
+        return _UNKNOWN, why
+    if not rows:
         return "0", "no non-medical collections on this borrower's credit report"
-    return str(total), f"{counted} non-medical collection(s) totalling {total}"
+    total = sum(rows, Decimal(0))
+    return str(total), f"{len(rows)} non-medical collection(s) totalling {total}"
+
+
+def _collection_largest_single_balance(
+    snapshot: Snapshot, subject_id: str, subject_raw: object
+) -> tuple[JsonValue, str]:
+    """credit.largest_single_collection_balance — the biggest single non-medical collection (CR-10).
+
+    ⚠️ THE MISSING HALF OF THE DU MATRIX (reported finding). CR-10's prompt requires "payoff_required if
+    any INDIVIDUAL collection is $250 or more, OR the aggregate is above $1,000", but the model received
+    only the aggregate — so an investment property with one $300 collection gave aggregate 300 (<= $1,000)
+    and no per-collection view, and the model answered no_payoff_required for a collection that must be
+    paid. This supplies the individual figure the matrix asks about.
+
+    Shares every guard with the aggregate (same abstains, same mortgage/medical exclusions) by reading its
+    per-row work through the same helper, so the two can never disagree about which rows count.
+    """
+    rows, why = _non_medical_collection_balances(snapshot, subject_id, subject_raw)
+    if rows is None:
+        return _UNKNOWN, why
+    if not rows:
+        return "0", "no non-medical collections on this borrower's credit report"
+    return str(max(rows)), f"the largest single non-medical collection is {max(rows)}"
+
+
+def _has_collections(
+    snapshot: Snapshot, subject_id: str, subject_raw: object
+) -> tuple[JsonValue, str]:
+    """credit.has_collections — does this borrower have ANY non-medical collection? (CR-10's gate)
+
+    ⚠️ CR-10 had NO applicability predicate (reported finding), so every borrower on every file got an AI
+    call and a needs_review finding — including the overwhelmingly common file with zero collections (all
+    three real reports carry none). The spec's own applicability.trigger already said "a borrower with
+    none is not applicable"; this makes that expressible, since the predicate DSL is eq/ne on a tag and
+    cannot compare the aggregate numerically.
+    """
+    rows, why = _non_medical_collection_balances(snapshot, subject_id, subject_raw)
+    if rows is None:
+        return _UNKNOWN, why
+    return (
+        ("yes", f"{len(rows)} non-medical collection(s) on the credit report")
+        if rows
+        else (
+            "no",
+            "no non-medical collections on this borrower's credit report",
+        )
+    )
 
 
 def _decimal_or_none(tag: Tag | None) -> Decimal | None:
@@ -3042,7 +3168,11 @@ _RECIPES: dict[str, Recipe] = {
     "condo_questionnaire_present": _condo_questionnaire_present,  # LP-488 — CO-1
     "aus_recommendation": _aus_recommendation,  # LP-488 — AU-3
     "derogatory_months_elapsed": _derogatory_months_elapsed,  # LP-490 — CR-6
-    "collection_aggregate_balance": _collection_aggregate_balance,  # LP-490 — CR-10
+    "collection_aggregate_balance": _collection_aggregate_balance,
+    # LP-490 review — CR-10's missing inputs: the per-collection figure its DU matrix asks about, and the
+    # applicability gate its own trigger prose already described.
+    "credit_largest_single_collection_balance": _collection_largest_single_balance,
+    "credit_has_collections": _has_collections,  # LP-490 — CR-10
     "mortgagee_clause_correct": _mortgagee_clause_correct,  # LP-487 — IH-2
     "condo_master_policy": _condo_master_policy,  # LP-487 — IH-7
     # LP-453 — DETERMINISTIC numeric observations over the credit report's tradelines list (loan-level). Pure

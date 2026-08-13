@@ -594,6 +594,25 @@ tags:
       The MISMO-stated estimated property value — the LTV worksheet's FALLBACK appraised basis, used only
       when valuation_amount is absent. Absent when MISMO states none; never defaulted.
     produced_by: parsed
+  # LP-490 review — CR-10's two missing inputs.
+  credit.largest_single_collection_balance:
+    entity: borrower
+    value_type: number
+    allowed_values: null
+    description: >-
+      The largest SINGLE non-medical collection balance on the borrower's credit report. CR-10's DU
+      investment-property cell turns on "any individual collection is $250 or more", which the aggregate
+      alone cannot answer. "unknown" whenever the aggregate abstains — same rows, same guards.
+    produced_by: derived
+  credit.has_collections:
+    entity: borrower
+    value_type: enum
+    allowed_values: ["yes", "no", "unknown"]
+    description: >-
+      Does the borrower have ANY non-medical collection? CR-10's applicability gate — the predicate DSL is
+      eq/ne on a tag and cannot compare the aggregate numerically, so without this the rule ran on every
+      borrower including the common zero-collection file.
+    produced_by: derived
   condo.questionnaire_present:
     entity: loan
     value_type: enum

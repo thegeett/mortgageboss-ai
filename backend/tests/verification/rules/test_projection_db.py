@@ -39,7 +39,10 @@ async def test_projection_counts_match_files(db_session: AsyncSession) -> None:
     assert result.rules.inserted == 135  # LP-430 +IN-15; LP-433 +IN-16
     assert (
         result.tags.inserted
-        == 201  # LP-490 +10 (the credit AI cohort: liab.is_mortgage, liab.structured_history_confident, liab.mortgage_late_60_plus_last_12mo, liab.is_medical_collection, liab.collection_balance, credit.collection_aggregate_balance, credit.derogatory_months_elapsed, property.occupancy, and the two rule-judgment outputs credit.mortgage_history_assessment / credit.collection_treatment); LP-488 review +2 (property.valuation_amount, property.estimated_value — the LTV
+        == 203  # LP-490 review +2 (credit.largest_single_collection_balance — CR-10's DU matrix turns on an
+        # INDIVIDUAL collection, which the aggregate cannot answer; credit.has_collections — its
+        # applicability gate, since the predicate DSL is eq/ne and cannot compare a number);
+        # LP-490 +10 (the credit AI cohort: liab.is_mortgage, liab.structured_history_confident, liab.mortgage_late_60_plus_last_12mo, liab.is_medical_collection, liab.collection_balance, credit.collection_aggregate_balance, credit.derogatory_months_elapsed, property.occupancy, and the two rule-judgment outputs credit.mortgage_history_assessment / credit.collection_treatment); LP-488 review +2 (property.valuation_amount, property.estimated_value — the LTV
         # worksheet's own appraised-basis fields, so MI-1 stops diverging from it on MISMO-only
         # files); LP-488 +5 (…, condo.questionnaire_present); prior +4 (loan.ltv_percent, loan.note_amount, loan.refinance_type, mi.fha_ufmip_percent); prior LP-488 +3 (loan.ltv_percent, loan.note_amount, loan.refinance_type); LP-487 +6 (IH-2/IH-7's parsed inputs: ins.mortgagee_name, loan.lender_name_cd, loan.lender_name_le, condo.master_policy_number, condo.master_policy_basis_raw, condo.master_liability_limit — their two CONCLUSION tags already exist in fact_tags.csv); LP-485 +3 (the date-compare family); LP-453 +2 (credit.tradeline_count/_monthly_payment_total); LP-447 +1 (ins.dwelling_settlement_basis); LP-444 +1; LP-430 +2; LP-433 +1
     )  # +4 assets (LP-323-AS-B) +2 ID-5 (LP-389-A) +2 stmt +1 LP-417 (ins.loan_effective_date)
@@ -47,7 +50,8 @@ async def test_projection_counts_match_files(db_session: AsyncSession) -> None:
     # +1 LP-407-2 (contract.loan_sales_price — the PC-2 loan promotion)
     # +1 LP-418 (income.is_self_employed — the deterministic per-borrower self-employment promotion)
     # +1 LP-422 (income.has_rental_income — the deterministic per-borrower rental presence off Schedule E)
-    assert result.rule_tags.inserted == 203
+    # LP-490 review +7: the four credit rules' catalog rows corrected to what each rule actually reads.
+    assert result.rule_tags.inserted == 210
     assert result.rules.deleted == result.tags.deleted == 0
 
 

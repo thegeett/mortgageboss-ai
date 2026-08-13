@@ -61,7 +61,7 @@ def test_desired_state_shape() -> None:
     # LP-447 +1 (ins.dwelling_settlement_basis — the IH-1 basis tag, a vocabulary_extra overlay).
     # LP-453 +2 (credit.tradeline_count + credit.tradeline_monthly_payment_total — the tradelines consumer).
     assert (
-        len(tags) == 201
+        len(tags) == 203
     )  # LP-487 +6 (IH-2/IH-7's parsed inputs: ins.mortgagee_name, loan.lender_name_cd, loan.lender_name_le, condo.master_policy_number, condo.master_policy_basis_raw, condo.master_liability_limit — their two CONCLUSION tags already exist in fact_tags.csv);
     # LP-485 +3 (the date-compare family: rate_lock.days_to_closing,
     # credit.report_age_months_at_closing, property.appraisal_age_months_at_closing);
@@ -78,7 +78,12 @@ def test_desired_state_shape() -> None:
     # +1 LP-424 (loan.purpose — the parsed purchase/refinance scope tag). It adds NO rule_tags edge: its
     # consumer (the PC-2/PC-7 applicability predicate) is deferred (LF-6T3N carries no loan.purpose; no refi
     # fixture), so rule_tags stays 203 — an intentionally orphan-for-now tag.
-    assert len(rule_tags) == 203
+    # LP-490 review +7 rule_tags edges: the four credit rules' catalog rows were corrected to what each
+    # rule actually reads (CR-5 had NO row; CR-6/CR-8 pointed at their pre-fix predicates; CR-10 listed
+    # liab.balance/liab.derogatory_type rather than the aggregate, the gate and the reasoned-over set).
+    # Structural subject markers (document.document_type, liability.source) are deliberately NOT edges —
+    # the projection validates every edge against fact_tags.csv and rejects a non-vocabulary tag.
+    assert len(rule_tags) == 210
     # No depends_on authored yet (LP-311 Phase 0): the DAG is empty.
     assert tag_deps == set()
 

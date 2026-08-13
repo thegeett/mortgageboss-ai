@@ -364,6 +364,8 @@ tags:
   # Derived seasoning + collection aggregates (deterministic arithmetic over the AI facts above).
   credit.derogatory_months_elapsed: {mode: derived, subject: liability, data: derogatory_months_elapsed}
   credit.collection_aggregate_balance: {mode: derived, subject: borrower, data: collection_aggregate_balance}
+  credit.largest_single_collection_balance: {mode: derived, subject: borrower, data: credit_largest_single_collection_balance}
+  credit.has_collections: {mode: derived, subject: borrower, data: credit_has_collections}
   # CR-10's DU branch reads the subject property's OCCUPANCY. It is a MISMO fact that has always been in
   # the snapshot and was never declared, so it reached no rule. ⚠️ Absent occupancy must abstain, never
   # default to the most permissive cell (one-unit primary requires no payoff at all).
@@ -401,6 +403,12 @@ ai_groups:
     subject: borrower
     context_builder: borrower
     applies_to: [credit_report, letter_of_explanation]
+    # ⚠️ include_lists IS LOAD-BEARING (reported finding). `inquiries[]` and `tradelines[]` are GENERIC
+    # LISTS, and the borrower context serialises them ONLY on this opt-in. Without it the prompt asked the
+    # model to match each inquiry to the tradeline it produced and to an explanation letter while the
+    # context contained neither list — so credit.inquiry_explained was structurally always "unknown" and
+    # CR-5 permanently couldnt_check. credit_profile declares it for exactly this reason.
+    include_lists: true
     tags: [credit.inquiry_explained]
     system_prompt: |
       You are a senior mortgage loan processor STRUCTURING one factual credit tag. Your only job is to

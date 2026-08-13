@@ -107,12 +107,27 @@ guideline_reference: "Fannie Mae collection and charged-off account requirements
 
 judgment:
   subject: per_borrower
+  # ⚠️ THE GATE THIS RULE'S OWN TRIGGER PROSE ALREADY DESCRIBED (reported finding). applicability.trigger
+  # says "A borrower with none is not applicable", but the judgment block declared no predicate — so every
+  # borrower on every file got an AI CALL and a needs_review finding, including the overwhelmingly common
+  # zero-collection file (all three real reports carry none). The predicate DSL is eq/ne on a tag and
+  # cannot compare the aggregate numerically, which is why credit.has_collections exists.
+  applicability:
+    tag: credit.has_collections
+    op: eq
+    value: "yes"
   load_bearing_tags: [credit.collection_aggregate_balance, property.occupancy]
   reasoned_over:
     - credit.collection_aggregate_balance
     - property.occupancy
     - property.type
     - program.type
+    # ⚠️ THE INDIVIDUAL-THRESHOLD HALF OF THE DU MATRIX (reported finding). The prompt requires
+    # "payoff_required if any INDIVIDUAL collection is $250 or more, or the aggregate is above $1,000",
+    # but only the aggregate was passed — so an investment property with one $300 collection gave
+    # aggregate 300 (<= $1,000) with no per-collection view, and the model answered no_payoff_required
+    # for a collection that must be paid.
+    - credit.largest_single_collection_balance
   output_tag: credit.collection_treatment
   value_domain:
     - "no_payoff_required"

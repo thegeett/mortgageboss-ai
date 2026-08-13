@@ -45,6 +45,17 @@ criteria: >-
   can apply one. An event with no date of its own resolves to couldnt_check — the seasoning is never
   computed from the credit report's date.
 
+# ⚠️ A BANKRUPTCY HAS NO SUBJECT TO ATTACH TO — REPORTED, NOT FIXED HERE.
+# The scope below says "each derogatory event on a credit-report tradeline OR PUBLIC RECORD", and both the
+# activation bar and priya-open-questions §11b rest on "public_records[] carries discharge_or_satisfied_date,
+# so a bankruptcy has a real event date". It does not reach this rule: `liability_rows`
+# (rule_engine/enumerators.py) enumerates the `tradelines` list and MISMO stated liabilities ONLY —
+# `public_records` is never a subject, so no liab.derogatory_date can ever be produced from a discharge
+# record. The one event type the ticket calls workable is structurally unreachable, and the matrix will
+# abstain on all five rows rather than three.
+# Closing it means making public_records a subject family (an enumerator change touching every
+# per_liability rule), which is a ticket, not a review fix. Recorded here so the spec stops implying a
+# capability the engine does not have.
 applicability:
   scope: each derogatory event on a credit-report tradeline or public record
   trigger: >-
@@ -109,10 +120,16 @@ spec_version: 1
 # ⚠️ ORDERED, FIRST-MATCH-WINS. Each row pairs an event TYPE with its own window, so one rule can carry a
 # type-keyed matrix; `when_tags` and `when_compare` must BOTH hold for a row to match.
 deterministic:
+  # ⚠️ GATE ON THE DEROGATORY EVENT, not merely on the source (reported finding). Filtering only on
+  # liability.source meant every ordinary credit card reached the rule, and credit.derogatory_months_elapsed
+  # is `unknown` for a non-derogatory account — so the real corpus (35 tradelines, ZERO derogatory events)
+  # produced 35 unfixable couldnt_check findings telling a processor to "read the event's own date from the
+  # discharge order" for a credit card. That is the flooding CR-12 documents having fixed. liab.is_derogatory
+  # was declared and produced and read by NO spec — it is the predicate this rule was missing.
   applicability:
-    tag: liability.source
+    tag: liab.is_derogatory
     op: eq
-    value: credit_report_reported
+    value: "yes"
   load_bearing_tags:
     - credit.derogatory_months_elapsed
     - liab.derogatory_type

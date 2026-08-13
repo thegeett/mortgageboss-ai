@@ -88,10 +88,15 @@ guideline_reference: "Fannie Mae excessive prior mortgage delinquency — a 60/9
 judgment:
   subject: per_liability
   # ⚠️ GATED on is_mortgage: a non-mortgage or unknown-type tradeline couldnt_checks before any AI call.
+  # ⚠️ THE GATE THE COMMENT ALREADY CLAIMED (reported finding). The header said "GATED on is_mortgage: a
+  # non-mortgage or unknown-type tradeline couldnt_checks before any AI call" — but is_mortgage was only
+  # LOAD-BEARING, and the gate trips on absent/unknown, never on a confident "no". So every credit card and
+  # auto loan passed, spent an AI call, and produced a needs_review finding titled with a mortgage-payment
+  # verdict; the prompt has no branch for is_mortgage == "no" at all.
   applicability:
-    tag: liability.source
+    tag: liab.is_mortgage
     op: eq
-    value: credit_report_reported
+    value: "yes"
   load_bearing_tags: [liab.is_mortgage, liab.structured_history_confident]
   reasoned_over:
     - liab.is_mortgage
