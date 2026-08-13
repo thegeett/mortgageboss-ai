@@ -562,3 +562,23 @@ tags:
       may have been paid in cash). "unknown" when either amount is missing or the base is not positive —
       never 0, which would read as a real "nothing financed".
     produced_by: derived
+
+  # --- LP-488 — CO-1's condo questionnaire. ---------------------------------------------------------- #
+  #
+  # ⚠️ PRESENCE ONLY. Priya's standing point is that condo rules must distinguish WARRANTABLE from
+  # non-warrantable, not merely confirm a questionnaire exists — but that is CO-3/CO-5's job, and
+  # `property.is_warrantable_condo` has NO source field anywhere in the 121 schema specs (LP-487), so it
+  # stays inert. CO-1 answers the question it can answer honestly: is the document there?
+  #
+  # ⚠️ A DOCUMENT-TYPE PRESENCE READ (the IN-8/IN-9/IN-16 discipline) — the TYPE LABEL, not extracted
+  # fields. A questionnaire that classified correctly but extracted badly still EXISTS, and CO-1 is not
+  # the rule that judges its contents.
+  condo.questionnaire_present:
+    entity: loan
+    value_type: enum
+    allowed_values: ["yes", "no"]
+    description: >-
+      Whether the file carries a condo questionnaire (document-type presence). "no" when the file has
+      documents but none is a questionnaire; "unknown" when the file carries no documents at all — an
+      empty file is not evidence the questionnaire is missing.
+    produced_by: derived

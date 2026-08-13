@@ -61,6 +61,7 @@ _FACT_LABELS: dict[str, str] = {
     "property.type": "property type",  # IH-7's applicability predicate (LP-487)
     "loan.ltv_percent": "loan-to-value ratio",  # MI-1 (LP-488)
     "mi.fha_ufmip_percent": "upfront FHA mortgage insurance premium financed into the note",  # MI-4 (LP-488)
+    "condo.questionnaire_present": "condo questionnaire",  # CO-1 (LP-488)
     "loan.amount": "base loan amount",  # LP-488
     "loan.note_amount": "note amount",  # MI-4 (LP-488)
     "property.value_basis": "property value used for the loan-to-value",  # LP-488

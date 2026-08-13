@@ -1076,3 +1076,27 @@ MI-4:
     not an ADR-330 vacuity. ⚠️ Only the UPFRONT premium is evaluated: no document type in the system
     carries a monthly MIP figure, so the annual leg — and ML 2023-05's per-cell annual rate matrix, which
     was NOT obtained — is deliberately unbuilt rather than invented.
+
+# --------------------------------------------------------------------------- #
+# LP-488 — CO-1 (condo questionnaire present). Deterministic document-type presence; no AI tag, no
+# threshold, so eligibility is input_resolves alone and `validated` is not read.
+#
+# ⚠️ PRESENCE ONLY, deliberately. Warrantability (CO-3/CO-5) is NOT decided here and is not buildable:
+# property.is_warrantable_condo has no source field in any of the 121 schema specs, because it is a
+# project-review conclusion (Form 1076 / PERS), not a readable datum. Logged for Priya.
+CO-1:
+  status: no-ai-dependency
+  ships: auto
+  threshold: null
+  validated: false
+  input_resolves: true
+  load_bearing_ai_tags: []
+  fp_fn: >-
+    FN (a condo closes with no project review -> the loan is undeliverable) >> FP (a processor confirms a
+    questionnaire that is already in the file). The empty-file abstain keeps the FP direction closed on a
+    file nobody has uploaded to yet: no documents is not the same as a missing questionnaire.
+  rationale: >-
+    No AI tag and no threshold. A document-type PRESENCE read — the classifier's type label, never
+    extracted fields (the IN-8/IN-9/IN-16 discipline), which matters because the one questionnaire in the
+    bench corpus fills 0 of its unit-count fields and is still genuinely present. property.type is an
+    already-declared MISMO enum; the presence read resolves on any file carrying documents.

@@ -326,6 +326,11 @@ tags:
   # and loan.note_amount is TERMS_OF_LOAN/NoteAmount. On an FHA loan the difference IS the financed
   # upfront MIP — two independent MISMO elements, so this is not an ADR-330 vacuity.
   mi.fha_ufmip_percent: {mode: derived, subject: loan, data: fha_ufmip_percent}
+
+  # --- LP-488 — CO-1 (condo questionnaire present). A document-type PRESENCE read, loan-scoped because
+  #     "no questionnaire" is a statement about the FILE and cannot be produced on a document that is
+  #     not there (IH-7's reasoning). ------------------------------------------------------------------ #
+  condo.questionnaire_present: {mode: derived, subject: loan, data: condo_questionnaire_present}
   # IH-2's CONCLUSION tag, already in the generated fact_tags.csv (enum yes|no|unknown), declared DERIVED
   # here — not AI. The catalog planned ai_fuzzy_match; typed extraction now reads the clause into
   # mortgagee_name, so the perception step is spent and what remains is a normalised string compare

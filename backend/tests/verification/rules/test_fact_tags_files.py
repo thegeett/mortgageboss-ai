@@ -61,7 +61,7 @@ def test_desired_state_shape() -> None:
     # LP-447 +1 (ins.dwelling_settlement_basis — the IH-1 basis tag, a vocabulary_extra overlay).
     # LP-453 +2 (credit.tradeline_count + credit.tradeline_monthly_payment_total — the tradelines consumer).
     assert (
-        len(tags) == 188
+        len(tags) == 189
     )  # LP-487 +6 (IH-2/IH-7's parsed inputs: ins.mortgagee_name, loan.lender_name_cd, loan.lender_name_le, condo.master_policy_number, condo.master_policy_basis_raw, condo.master_liability_limit — their two CONCLUSION tags already exist in fact_tags.csv);
     # LP-485 +3 (the date-compare family: rate_lock.days_to_closing,
     # credit.report_age_months_at_closing, property.appraisal_age_months_at_closing);

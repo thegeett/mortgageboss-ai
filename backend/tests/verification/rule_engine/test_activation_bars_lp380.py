@@ -311,6 +311,7 @@ def test_active_set_is_base_plus_lp389() -> None:
             "IH-7",  # LP-487 — condo master policy (presence + adequacy; Fannie B7-4-01 / B7-3-03)
             "MI-1",  # LP-488 — conventional MI requirement (the PROGRAM axis's first use)
             "MI-4",  # LP-488 — FHA upfront MIP (the FHA side of the program axis)
+            "CO-1",  # LP-488 — condo questionnaire presence (document-type read)
         )
     )
     # A bar persists after activation as the record of WHY the rule went live, so the bars now intersect the
@@ -352,6 +353,7 @@ def test_active_set_is_base_plus_lp389() -> None:
             "IH-7",  # LP-487 — condo master policy (presence + adequacy; Fannie B7-4-01 / B7-3-03)
             "MI-1",  # LP-488 — conventional MI requirement (the PROGRAM axis's first use)
             "MI-4",  # LP-488 — FHA upfront MIP (the FHA side of the program axis)
+            "CO-1",  # LP-488 — condo questionnaire presence (document-type read)
             "CR-13",
             "PR-6",
         }

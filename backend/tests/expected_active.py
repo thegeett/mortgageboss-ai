@@ -26,6 +26,7 @@ from __future__ import annotations
 # +IH-7 — condo master policy presence + adequacy, bounds cited to Fannie B7-4-01 / B7-3-03) → 43.
 # LP-488 (+MI-1 — conventional MI requirement; the PROGRAM axis's first use) -> 44.
 # LP-488 (+MI-4 — FHA upfront MIP, the FHA side of the program axis) -> 45.
-EXPECTED_ACTIVE_RULE_COUNT: int = 45
+# LP-488 (+CO-1 — condo questionnaire presence) -> 46.
+EXPECTED_ACTIVE_RULE_COUNT: int = 46
 
 __all__ = ["EXPECTED_ACTIVE_RULE_COUNT"]

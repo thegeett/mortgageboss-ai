@@ -1,0 +1,108 @@
+# CO-1 — Condo questionnaire present — DETERMINISTIC structural rule SPEC (LP-488).
+#
+# When the subject property is a condominium, the file must carry a condo questionnaire — the document
+# the project review is built on (unit counts, owner-occupancy, delinquency, litigation, the master
+# policy's carrier and limits).
+#
+# ⚠️ PRESENCE ONLY, AND THIS IS A DELIBERATE SCOPE LIMIT. Priya's standing point is that condo rules must
+# distinguish WARRANTABLE from non-warrantable rather than merely confirm a questionnaire exists. That is
+# CO-3/CO-5's job, and it is not buildable today: `property.is_warrantable_condo` has NO source field
+# anywhere in the 121 schema specs (LP-487 established this), because warrantability is a project-review
+# CONCLUSION (Form 1076 / PERS), not a readable datum. The tag stays inert. CO-1 answers the question it
+# can answer honestly — is the document there — and the warrantability gap is logged in
+# docs/domain/priya-open-questions.md rather than faked here.
+#
+# ⚠️ A DOCUMENT-TYPE PRESENCE READ (the IN-8/IN-9/IN-16 discipline): the classifier's TYPE LABEL, never
+# extracted fields. A questionnaire that classified correctly but extracted badly still EXISTS, and CO-1
+# is not the rule that judges its contents. This matters here: the one questionnaire in the corpus fills
+# 0 of its unit-count fields, and CO-1 is still correct to say it is present.
+#
+# ⚠️ THE CONDO SCOPING IS AN APPLICABILITY PREDICATE (LP-487's finding). The applicability layer resolves
+# an ABSENT or "unknown" predicate tag to COULDNT_CHECK and only a definitely-false one to
+# not_applicable — so a file that does not state its property type is surfaced, not silently skipped.
+
+rule_id: CO-1
+name: Condo questionnaire present
+category: Condo
+
+kind: structural            # must equal rule_kinds.csv (CO-1 = structural, deterministic_only)
+numeric_check: false        # must equal rule_kinds.csv — a document-presence check
+
+criteria: >-
+  When the subject property is a condominium, the file must carry a condo questionnaire. This reads the
+  derived condo.questionnaire_present, a document-type presence read. A file with no documents at all
+  abstains rather than reporting the questionnaire missing — an empty file is not evidence of a gap.
+  Whether the project is warrantable is NOT decided here; that is a project-review conclusion no field in
+  the system carries.
+
+applicability:
+  scope: the loan, when the subject property is a condominium
+  trigger: >-
+    property.type == condo. A non-condo property is not_applicable. A file that does not state the
+    property type couldnt_checks rather than being assumed not to be a condominium.
+
+reference_values:
+  priya_validated: false          # must equal rule_kinds.csv
+  threshold_needs_signoff: false  # must equal rule_kinds.csv — a presence check has no threshold
+  values: {}
+  guideline_text: >-
+    A condominium project must be reviewed for eligibility before the loan can be delivered, and the
+    project review rests on a completed condo questionnaire from the association or its management
+    company. This rule checks only that the document is in the file; the eligibility determination it
+    supports is a separate matter.
+
+required_inputs:
+  - name: questionnaire_present
+    snapshot_path: 'tags.by_subject["loan"]["condo.questionnaire_present"]'
+    description: >-
+      whether a condo questionnaire is in the file (derived, LP-488): "yes" / "no" from the document-type
+      label, "unknown" when the file carries no documents at all.
+
+subject_enumeration: loan
+subject_key_fields: [loan]
+
+evidence_required: >-
+  Whether a condo questionnaire is in the file, and the project name it covers when one is present — so
+  a processor can tell a questionnaire for the right project from one filed against another.
+
+guideline_reference: "A condominium project requires a project review before delivery, and the review rests on a completed condo questionnaire from the association or its management company."
+
+spec_version: 1
+
+# The MACHINE-READABLE deterministic body (LP-324). An "unknown" tag coerces through the gate to
+# couldnt_check BEFORE this body runs.
+deterministic:
+  applicability:
+    tag: property.type
+    op: eq
+    value: condo
+  load_bearing_tags:
+    - condo.questionnaire_present
+  gated_tags:
+    - condo.questionnaire_present
+  operands: {}
+  outcomes:
+    - verdict: satisfied
+      when_tags:
+        - {tag: condo.questionnaire_present, op: eq, value: "yes"}
+      reasoning: >-
+        the file carries a condo questionnaire for the project review
+    - verdict: fired
+      when_tags:
+        - {tag: condo.questionnaire_present, op: eq, value: "no"}
+      reasoning: >-
+        the subject property is a condominium but the file carries no condo questionnaire — the project
+        review cannot be completed without it
+      how_to_fix: >-
+        Request a completed condo questionnaire from the homeowners association or its management
+        company. Confirm it names the subject project, is signed and dated, and states the unit counts,
+        owner-occupancy, delinquency, litigation and master-policy details the project review needs.
+    - verdict: couldnt_check
+      # ⚠️ THE CATCH-ALL IS AN ABSTAIN, NOT A PASS. A file with no documents yet must not read as
+      # "questionnaire present", and must not read as a confirmed gap either.
+      default: true
+      reasoning: >-
+        whether the file carries a condo questionnaire could not be determined — the file has no
+        documents to read
+      how_to_fix: >-
+        This check settles once documents are uploaded to the file.

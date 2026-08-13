@@ -1992,6 +1992,29 @@ def _fha_ufmip_percent(
     )
 
 
+def _condo_questionnaire_present(
+    snapshot: Snapshot, _subject_id: str, _subject_raw: object
+) -> tuple[JsonValue, str]:
+    """condo.questionnaire_present — does the file carry a condo questionnaire? (CO-1, LP-488)
+
+    ⚠️ A DOCUMENT-TYPE PRESENCE READ — the classifier's type label, never extracted fields (the
+    IN-8/IN-9/IN-16 discipline). A questionnaire that classified correctly but extracted badly still
+    EXISTS; judging its contents is CO-3/CO-5's job, not CO-1's.
+
+    ⚠️ An empty file abstains rather than answering "no". A file with no documents at all is not
+    evidence that a questionnaire is missing — it is evidence that nothing has been uploaded yet.
+    """
+    if snapshot.documents.absent or not snapshot.documents.entries:
+        return (
+            _UNKNOWN,
+            "the file carries no documents, so the questionnaire's absence cannot be read",
+        )
+    for entry in snapshot.documents.entries:
+        if entry.document_type == "condo_questionnaire":
+            return "yes", "the file carries a condo questionnaire"
+    return "no", "no document in the file is classified as a condo questionnaire"
+
+
 def _decimal_or_none(tag: Tag | None) -> Decimal | None:
     """A statement balance tag's value as a Decimal, or None (absent / unknown / unparseable)."""
     if tag is None or str(tag.value) == _UNKNOWN:
@@ -2697,6 +2720,7 @@ _RECIPES: dict[str, Recipe] = {
     "property_value_basis": _property_value_basis,  # LP-488 — MI-1
     "loan_ltv_percent": _loan_ltv_percent,  # LP-488 — MI-1
     "fha_ufmip_percent": _fha_ufmip_percent,  # LP-488 — MI-4
+    "condo_questionnaire_present": _condo_questionnaire_present,  # LP-488 — CO-1
     "mortgagee_clause_correct": _mortgagee_clause_correct,  # LP-487 — IH-2
     "condo_master_policy": _condo_master_policy,  # LP-487 — IH-7
     # LP-453 — DETERMINISTIC numeric observations over the credit report's tradelines list (loan-level). Pure

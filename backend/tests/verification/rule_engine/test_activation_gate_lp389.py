@@ -43,6 +43,7 @@ _ACTIVATED = frozenset(
         "IH-7",  # LP-487 — condo master policy (presence + adequacy; Fannie B7-4-01 / B7-3-03)
         "MI-1",  # LP-488 — conventional MI requirement (the PROGRAM axis's first use)
         "MI-4",  # LP-488 — FHA upfront MIP (the FHA side of the program axis)
+        "CO-1",  # LP-488 — condo questionnaire presence (document-type read)
         "CL-1",
         "CR-13",
         "PR-6",
@@ -109,6 +110,7 @@ def test_eligible_rule_ids_is_sorted_and_matches() -> None:
         "AS-9",
         # LP-485 — the date-compare family, in sort order: CL-1/CR-13 before ID-5, PR-6 after PC-7.
         "CL-1",
+        "CO-1",  # LP-488 (sorts between CL-1 and CR-12)
         "CR-12",  # LP-486 (sorts between CL-1 and CR-13)
         "CR-13",
         "ID-5",

@@ -120,6 +120,11 @@ _LOAN_MI4_UNDER = UUID("95000000-0000-4000-8000-000000000028")
 _LOAN_MI4_NONE = UUID("95000000-0000-4000-8000-000000000029")
 _LOAN_MI4_CONVENTIONAL = UUID("95000000-0000-4000-8000-00000000002a")
 _LOAN_MI4_NO_NOTE = UUID("95000000-0000-4000-8000-00000000002b")
+# LP-488 — CO-1 (condo questionnaire present).
+_LOAN_CO1_PRESENT = UUID("95000000-0000-4000-8000-00000000002c")
+_LOAN_CO1_MISSING = UUID("95000000-0000-4000-8000-00000000002d")
+_LOAN_CO1_NOT_CONDO = UUID("95000000-0000-4000-8000-00000000002e")
+_LOAN_CO1_EMPTY = UUID("95000000-0000-4000-8000-00000000002f")
 _RUN = UUID("95000000-0000-4000-8000-0000000000ff")
 # The file (snapshot) date every closing date is measured against (deterministic — never a wall-clock now()).
 _FILE_DATE = datetime(2026, 7, 1, tzinfo=UTC)
@@ -1136,6 +1141,45 @@ def build_mi4_no_note_amount_snapshot() -> Snapshot:
     )
 
 
+# --------------------------------------------------------------------------- #
+# LP-488 — CO-1. A document-type PRESENCE read (the IN-8/IN-9/IN-16 discipline): the classifier's type
+# label, never extracted fields.
+# --------------------------------------------------------------------------- #
+def build_co1_questionnaire_present_snapshot() -> Snapshot:
+    """A condo whose file carries a questionnaire → CO-1 SATISFIED. ⚠️ The questionnaire states NO unit
+    counts — the same shape as the one real questionnaire in the corpus, which fills 0 of them. CO-1 is
+    still correct to say it is present: judging its contents is CO-3/CO-5's job."""
+    return _snapshot(
+        _LOAN_CO1_PRESENT,
+        [_doc("95-condo-q", "condo_questionnaire", project_name="Birch Court Condominiums")],
+        {"property.type": _f("condo")},
+    )
+
+
+def build_co1_questionnaire_missing_snapshot() -> Snapshot:
+    """A condo whose file has documents but no questionnaire → CO-1 FIRED."""
+    return _snapshot(
+        _LOAN_CO1_MISSING,
+        [_doc("95-condo-other", "pay_stub", employer_name="Rivertown Foods")],
+        {"property.type": _f("condo")},
+    )
+
+
+def build_co1_not_condo_snapshot() -> Snapshot:
+    """A single-family property with no questionnaire → CO-1 NOT_APPLICABLE."""
+    return _snapshot(
+        _LOAN_CO1_NOT_CONDO,
+        [_doc("95-sf-doc", "pay_stub", employer_name="Rivertown Foods")],
+        {"property.type": _f("single_family")},
+    )
+
+
+def build_co1_empty_file_snapshot() -> Snapshot:
+    """⚠️ A condo file with NO DOCUMENTS AT ALL → CO-1 COULDNT_CHECK, never fired. An empty file is not
+    evidence the questionnaire is missing — it is evidence nothing has been uploaded yet."""
+    return _snapshot(_LOAN_CO1_EMPTY, [], {"property.type": _f("condo")})
+
+
 __all__ = [
     "EXPECTED_HOA_MONTHLY",
     "EXPECTED_INS_BASIS_ACV",
@@ -1148,6 +1192,10 @@ __all__ = [
     "build_address_match_snapshot",
     "build_address_mismatch_snapshot",
     "build_address_unit_variant_snapshot",
+    "build_co1_empty_file_snapshot",
+    "build_co1_not_condo_snapshot",
+    "build_co1_questionnaire_missing_snapshot",
+    "build_co1_questionnaire_present_snapshot",
     "build_far_future_closing_snapshot",
     "build_ih2_clause_matches_snapshot",
     "build_ih2_clause_mismatch_snapshot",

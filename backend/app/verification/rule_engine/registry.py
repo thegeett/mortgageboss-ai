@@ -242,7 +242,8 @@ _LP487_ACTIVATED: tuple[str, ...] = ("IH-2", "IH-7")
 # certificate — so the requirement routes to needs_review for confirmation.
 # MI-4 is the FHA side of the same axis. Only the UPFRONT premium is evaluated — no document carries a
 # monthly MIP figure, so the annual leg is deliberately unbuilt rather than built on an invented input.
-_LP488_ACTIVATED: tuple[str, ...] = ("MI-1", "MI-4")
+# CO-1 is a document-type presence read, PRESENCE ONLY — warrantability (CO-3/CO-5) has no source field.
+_LP488_ACTIVATED: tuple[str, ...] = ("MI-1", "MI-4", "CO-1")
 
 # The gate is the source of truth: test_activation_gate_lp389 asserts ACTIVE_RULE_IDS - _BASE_ACTIVE ==
 # eligible_rule_ids() — a rule CANNOT enter this set without meeting the eligibility gate (not a hand-list).
