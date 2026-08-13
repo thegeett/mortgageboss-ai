@@ -113,6 +113,7 @@ _LOAN_MI1_LOW_LTV = UUID("95000000-0000-4000-8000-000000000022")
 _LOAN_MI1_FHA = UUID("95000000-0000-4000-8000-000000000023")
 _LOAN_MI1_NO_PROGRAM = UUID("95000000-0000-4000-8000-000000000024")
 _LOAN_MI1_NO_VALUE = UUID("95000000-0000-4000-8000-000000000025")
+_LOAN_MI1_TWO_APPRAISALS = UUID("95000000-0000-4000-8000-000000000036")
 # LP-488 — MI-4 (FHA upfront MIP).
 _LOAN_MI4_CORRECT = UUID("95000000-0000-4000-8000-000000000026")
 _LOAN_MI4_OVER = UUID("95000000-0000-4000-8000-000000000027")
@@ -1060,6 +1061,22 @@ def build_mi1_no_program_snapshot() -> Snapshot:
     )
 
 
+def build_mi1_two_appraisals_snapshot() -> Snapshot:
+    """⚠️ TWO APPRAISALS ON ONE FILE — the ordinary shape (an original plus a replacement, or a 1004D the
+    classifier cannot distinguish from a full report). $340,000 base against appraisals of $400,000 and
+    $360,000. The CONSERVATIVE pick is the LOWEST: 340000/360000 = 94.44%, over the threshold. Taking the
+    higher would give 85.00% — still over here, so the fixture also pins the VALUE, not just the verdict,
+    to catch a silent regression to first-wins."""
+    return _snapshot(
+        _LOAN_MI1_TWO_APPRAISALS,
+        [
+            _doc("95-appr-high", "appraisal", appraised_value="400000.00"),
+            _doc("95-appr-low", "appraisal", appraised_value="360000.00"),
+        ],
+        _mi_mismo(program="conventional", base_loan="340000.00", purchase_price=None),
+    )
+
+
 def build_mi1_no_value_snapshot() -> Snapshot:
     """Conventional with a loan amount but NO purchase price and no appraisal → no value basis → the LTV
     abstains → MI-1 COULDNT_CHECK. Never satisfied on a missing value."""
@@ -1314,6 +1331,7 @@ __all__ = [
     "build_mi1_low_ltv_snapshot",
     "build_mi1_no_program_snapshot",
     "build_mi1_no_value_snapshot",
+    "build_mi1_two_appraisals_snapshot",
     "build_mi4_conventional_snapshot",
     "build_mi4_correct_ufmip_snapshot",
     "build_mi4_no_note_amount_snapshot",

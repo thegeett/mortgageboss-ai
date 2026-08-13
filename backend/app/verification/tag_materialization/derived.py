@@ -1873,14 +1873,46 @@ def _liability_dispute_status(
 # --------------------------------------------------------------------------- #
 
 
-def _first_loan_decimal(snapshot: Snapshot, tag_id: str) -> Decimal | None:
-    """The one parseable value of a loan-scoped numeric tag, or None."""
+def _parsed_decimals(snapshot: Snapshot, tag_id: str) -> list[Decimal]:
+    """Every parseable value of a numeric tag across the file's subjects."""
+    out: list[Decimal] = []
     for raw in _parsed_strings(snapshot, tag_id):
         try:
-            return Decimal(raw.replace(",", "").replace("$", "").strip())
+            out.append(Decimal(raw.replace(",", "").replace("$", "").strip()))
         except (InvalidOperation, ValueError):
             continue
-    return None
+    return out
+
+
+def _first_loan_decimal(snapshot: Snapshot, tag_id: str) -> Decimal | None:
+    """The parseable value of a LOAN-SCOPED numeric tag, or None.
+
+    ⚠️ Correct only for a tag materialised on the loan subject, where there is exactly one — the MISMO
+    facts (``loan.amount``, ``loan.note_amount``, ``property.purchase_price``). A PER-DOCUMENT numeric
+    tag can appear many times on one file and the right pick is a policy decision, NOT "whichever subject
+    iterated first" — see :func:`_conservative_appraised_value`.
+    """
+    values = _parsed_decimals(snapshot, tag_id)
+    return values[0] if values else None
+
+
+def _conservative_appraised_value(snapshot: Snapshot) -> Decimal | None:
+    """The LOWEST appraised value on the file, or None.
+
+    ⚠️ THE LOWEST, NOT THE FIRST — a reported defect of the same shape as the LP-487 review findings.
+    ``property.appraised_value`` is PER APPRAISAL DOCUMENT, so a file carrying two appraisals (an
+    original plus a replacement, or a 1004D the classifier cannot distinguish from a full report) used to
+    get whichever subject happened to iterate first: an arbitrary LTV denominator on a real, ordinary
+    file shape.
+
+    The pick follows the policy LP-485 already set for this document family: where the guideline is
+    silent, take the CONSERVATIVE value — the one that makes the rule MORE likely to flag. A lower
+    appraised value means a HIGHER loan-to-value, so the lowest appraisal is the one that keeps MI-1's
+    costly direction closed. MI-1's own bar names the false-negative (an MI requirement silently cleared)
+    as the expensive error; a processor confirming which appraisal governs is the cheap one.
+    """
+    values = [v for v in _parsed_decimals(snapshot, "property.appraised_value") if v > 0]
+    return min(values) if values else None
 
 
 def _ltv_purpose(snapshot: Snapshot) -> LtvPurpose:
@@ -1908,7 +1940,7 @@ def _property_value_basis(
     """
     purpose = _ltv_purpose(snapshot)
     price = _first_loan_decimal(snapshot, "property.purchase_price")
-    appraised = _first_loan_decimal(snapshot, "property.appraised_value")
+    appraised = _conservative_appraised_value(snapshot)
     basis, label = value_basis(purpose, price, appraised)
     if basis is None:
         return _UNKNOWN, (
@@ -1938,7 +1970,7 @@ def _loan_ltv_percent(
             heloc_drawn=Decimal(0),
             heloc_limit=Decimal(0),
             purchase_price=_first_loan_decimal(snapshot, "property.purchase_price"),
-            appraised_value=_first_loan_decimal(snapshot, "property.appraised_value"),
+            appraised_value=_conservative_appraised_value(snapshot),
         ),
         purpose,
     )

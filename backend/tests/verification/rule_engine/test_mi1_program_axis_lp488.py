@@ -27,6 +27,7 @@ from app.verification.eval.fire_path_scenarios import (
     build_mi1_low_ltv_snapshot,
     build_mi1_no_program_snapshot,
     build_mi1_no_value_snapshot,
+    build_mi1_two_appraisals_snapshot,
 )
 from app.verification.eval.lf6t3n_fixture import build_lf6t3n_snapshot
 from app.verification.rule_engine.activation_bars import is_eligible, load_activation_bars
@@ -109,6 +110,28 @@ async def test_no_value_basis_couldnt_checks_never_satisfied() -> None:
     verdict = await _one(build_mi1_no_value_snapshot)
     assert verdict is Verdict.COULDNT_CHECK
     assert verdict is not Verdict.SATISFIED
+
+
+async def test_two_appraisals_take_the_lowest_value() -> None:
+    """⚠️ A REPORTED DEFECT, of the same shape as the LP-487 review findings: `property.appraised_value`
+    is PER APPRAISAL DOCUMENT, and the first version of this recipe took whichever subject iterated
+    FIRST — an arbitrary LTV denominator on an ordinary file (an original plus a replacement appraisal,
+    or a 1004D the classifier cannot tell from a full report).
+
+    The pick follows the policy LP-485 already set for this document family: where the guideline is
+    silent, take the CONSERVATIVE value. A lower appraisal means a HIGHER LTV, which keeps MI-1's costly
+    direction — an MI requirement silently cleared — closed.
+
+    Pinned by VALUE, not just verdict: both appraisals here produce an over-threshold LTV, so asserting
+    the verdict alone would not catch a regression to first-wins."""
+    snapshot = await materialize_tags(build_mi1_two_appraisals_snapshot(), only_groups=frozenset())
+    assert Decimal(str(snapshot.tags.by_subject["loan"]["property.value_basis"].value)) == Decimal(
+        "360000.00"
+    ), "the LOWEST appraisal must drive the LTV denominator"
+    assert Decimal(str(snapshot.tags.by_subject["loan"]["loan.ltv_percent"].value)) == Decimal(
+        "94.44"
+    )
+    assert await _one(build_mi1_two_appraisals_snapshot) is Verdict.NEEDS_REVIEW
 
 
 async def test_lf6t3n_abstains() -> None:
