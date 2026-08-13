@@ -319,6 +319,8 @@ def test_active_set_is_base_plus_lp389() -> None:
             "CR-6",  # LP-490a — ratify-pending (negative-case rate only, ADR-378)
             "CR-10",  # LP-490a — ratify-pending (negative-case rate only)
             "TI-1",  # LP-491 — title commitment parties (catalog edit to deterministic_only)
+            "TI-2",  # LP-491 — ratify-pending (verdict-level rate; ADR-378)
+            "TI-6",  # LP-491 — ratify-pending
         )
     )
     # A bar persists after activation as the record of WHY the rule went live, so the bars now intersect the
@@ -368,6 +370,8 @@ def test_active_set_is_base_plus_lp389() -> None:
             "CR-6",  # LP-490a — ratify-pending (negative-case rate only, ADR-378)
             "CR-10",  # LP-490a — ratify-pending (negative-case rate only)
             "TI-1",  # LP-491 — title commitment parties (catalog edit to deterministic_only)
+            "TI-2",  # LP-491 — ratify-pending (verdict-level rate; ADR-378)
+            "TI-6",  # LP-491 — ratify-pending
             "CR-13",
             "PR-6",
         }

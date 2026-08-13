@@ -33,6 +33,6 @@ from __future__ import annotations
 # substitute, ADR-378; NOT a measured accuracy) -> 50.
 # LP-491 (+TI-1 — title commitment parties; a CATALOG EDIT to deterministic_only, so no model in its
 # chain and no self-consistency rate needed) -> 53.
-EXPECTED_ACTIVE_RULE_COUNT: int = 53
+EXPECTED_ACTIVE_RULE_COUNT: int = 55
 
 __all__ = ["EXPECTED_ACTIVE_RULE_COUNT"]

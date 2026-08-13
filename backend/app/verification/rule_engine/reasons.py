@@ -65,6 +65,11 @@ _FACT_LABELS: dict[str, str] = {
     "title.vested_owner_matches": "owner of record on the title commitment",  # TI-1 (LP-491)
     "title.vested_owner_name": "owner of record on the title commitment",  # TI-1
     "contract.seller_name": "seller named on the purchase agreement",  # TI-1
+    "title.legal_description": "legal description on the title commitment",  # TI-2 (LP-491)
+    "title.property_address": "property address on the title commitment",  # TI-2
+    "title.chain_transfer_count": "number of transfers in the chain of title",  # TI-6
+    "title.chain_has_gap": "continuity of the chain of title",  # TI-6
+    "title.chain_shortest_interval_days": "shortest interval between transfers",  # TI-6
     "aus.recommendation": "AUS recommendation",  # AU-3 (LP-488)
     "credit.inquiry_explained": "credit inquiries and their explanations",  # CR-5 (LP-490)
     "liab.derogatory_type": "type of derogatory credit event",  # CR-6 (LP-490)

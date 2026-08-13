@@ -1,0 +1,98 @@
+# TI-2 — Legal description match — AI JUDGMENT rule SPEC (LP-491).
+#
+# Does the commitment's legal description describe the property at the address the commitment states?
+# A commitment for the wrong parcel insures the wrong property, and the street address is the only
+# human-readable handle on it.
+#
+# ⚠️ STAYS ai_judgment, and unlike TI-1 the catalog is RIGHT. Reading a metes-and-bounds description
+# ("thence North 12°14' East 148.60 feet…") or a lot/block recital against a street address is a genuine
+# interpretation, not a string compare — typed extraction hands over two fields that do not resemble each
+# other. This is exactly the distinction LP-487 drew for IH-2: the question is whether the PERCEPTION
+# step is spent, and here it is not.
+#
+# ⚠️ THE CR-8 CHECK WAS RUN BEFORE TRUSTING ANYTHING. `legal_description` is 337-1942 characters on the
+# four real commitments and contains ZERO 9+ digit runs, so `_scrub_list_value`'s PII scrub does not
+# reduce it to `[redacted]` the way it did `payment_history_24mo`. The input reaches the model.
+#
+# ⚠️ A JUDGMENT RULE RATIFIES EVERY VERDICT (needs_review / couldnt_check only), so an uncalibrated tag
+# can never auto-assert here — the OC-2/ADR-336 property.
+#
+# ⚠️ n=4. Four commitments is the whole corpus. This proves wiring and direction, not accuracy.
+
+rule_id: TI-2
+name: Legal description match
+category: Title
+
+kind: judgmental            # must equal rule_kinds.csv (TI-2 = judgmental, ai_judgment)
+numeric_check: false        # must equal rule_kinds.csv
+
+criteria: >-
+  The legal description on the title commitment must describe the property at the address the commitment
+  states. A description for a different parcel means the commitment insures the wrong property. Where
+  either the description or the address is missing, or the description cannot be read, the rule abstains
+  rather than guessing — a commitment is the document that establishes what is being insured.
+
+applicability:
+  scope: each title commitment in the file
+  trigger: >-
+    Any title_commitment document. A commitment stating no legal description or no address couldnt_checks.
+
+reference_values:
+  priya_validated: false          # must equal rule_kinds.csv
+  threshold_needs_signoff: false  # must equal rule_kinds.csv — a judgment, not a threshold
+  values: {}
+  guideline_text: >-
+    The title commitment must describe the property being financed. The legal description controls, and
+    the street address is the practical check that the description is for the right parcel; a mismatch
+    between them is resolved before closing.
+
+required_inputs:
+  - name: legal_description
+    snapshot_path: 'tags.by_subject[<commitment content_id>]["title.legal_description"]'
+    description: the commitment's legal description (parsed, LP-491). ⚠️ UNCALIBRATED consumer.
+  - name: property_address
+    snapshot_path: 'tags.by_subject[<commitment content_id>]["title.property_address"]'
+    description: the street address the commitment states for the same property (parsed, LP-491).
+
+subject_enumeration: per_document
+subject_key_fields:
+  - content_id
+
+evidence_required: >-
+  The legal description and the address exactly as the commitment states them — so a processor can read
+  the parcel themselves when the rule could not.
+
+guideline_reference: "The title commitment must describe the property being financed; the legal description controls and is checked against the stated address before closing."
+
+judgment:
+  subject: per_document
+  applicability:
+    tag: document.document_type
+    op: eq
+    value: title_commitment
+  load_bearing_tags: [title.legal_description, title.property_address]
+  reasoned_over: [title.legal_description, title.property_address]
+  output_tag: title.legal_description_matches
+  value_domain: ["yes", "no", "unknown"]
+  confidence_floor: 0.5
+  system_prompt: |
+    You are a senior mortgage loan processor making ONE judgment about a title commitment: does its LEGAL
+    DESCRIPTION describe the property at the ADDRESS the same commitment states?
+
+    You reason ONLY over the two structured values given. Judge as a processor would:
+    - A lot/block/subdivision recital naming the same subdivision, city and county as the address is a
+      match. A metes-and-bounds description is a match when its stated municipality, county and any
+      referenced subdivision or plat agree with the address.
+    - "no" ONLY when the description clearly describes a DIFFERENT parcel — a different subdivision, a
+      different municipality or county, a different lot in a way the address contradicts.
+    - "unknown" when either value is missing, when the description is truncated, or when it carries no
+      locating detail you can tie to the address. ⚠️ A description you cannot place is NOT a mismatch.
+
+    ⚠️ BE HONEST. A legal description rarely repeats the street address, so ABSENCE OF THE ADDRESS IN THE
+    DESCRIPTION IS NOT EVIDENCE OF A MISMATCH — that is the most likely way to get this wrong. "unknown"
+    is a correct, expected answer. Cite what you relied on.
+
+    STRICT OUTPUT — return ONLY a JSON OBJECT:
+    {"value": "yes|no|unknown", "confidence": <0.0-1.0>, "reasoning": "<why — cite the values>"}
+
+spec_version: 1

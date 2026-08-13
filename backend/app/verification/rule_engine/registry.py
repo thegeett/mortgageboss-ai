@@ -263,7 +263,10 @@ _LP490A_ACTIVATED: tuple[str, ...] = ("CR-1", "CR-4", "CR-8", "CR-6", "CR-10")
 # `deterministic_only` (IH-2's precedent, the second time typed extraction turned out to have already
 # spent the perception step), so it has no model in its chain and activates on input_resolves alone.
 # A mismatch is needs_review, never fired — a vesting difference is frequently legitimate.
-_LP491_ACTIVATED: tuple[str, ...] = ("TI-1",)
+# TI-2 and TI-6 are ai_judgment and activate on `ratify-pending` (ADR-378) — a judgment rule ratifies
+# every verdict, so an uncalibrated tag can never auto-assert. ⚠️ Their rates compare VERDICTS, which a
+# judgment rule collapses to needs_review, so they show pipeline stability rather than judgment stability.
+_LP491_ACTIVATED: tuple[str, ...] = ("TI-1", "TI-2", "TI-6")
 
 # The gate is the source of truth: test_activation_gate_lp389 asserts ACTIVE_RULE_IDS - _BASE_ACTIVE ==
 # eligible_rule_ids() — a rule CANNOT enter this set without meeting the eligibility gate (not a hand-list).

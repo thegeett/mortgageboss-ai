@@ -342,6 +342,12 @@ tags:
   title.vested_owner_name_2: {mode: parsed, subject: document, data: vested_owner_name_2, document_type: title_commitment}
   contract.seller_name: {mode: parsed, subject: document, data: seller_name, document_type: purchase_agreement}
   title.vested_owner_matches: {mode: derived, subject: document, data: title_vested_owner_matches}
+  # LP-491 — TI-2's two inputs, and TI-6's three deterministic chain facts. ⚠️ All document_type-scoped.
+  title.legal_description: {mode: parsed, subject: document, data: legal_description, document_type: title_commitment}
+  title.property_address: {mode: parsed, subject: document, data: property_address, document_type: title_commitment}
+  title.chain_transfer_count: {mode: derived, subject: document, data: title_chain_transfer_count}
+  title.chain_has_gap: {mode: derived, subject: document, data: title_chain_has_gap}
+  title.chain_shortest_interval_days: {mode: derived, subject: document, data: title_chain_shortest_interval}
 
   # --- LP-488 — AU-3 (AUS recommendation). ⚠️ DERIVED, NOT PARSED, and that is the whole point. The raw
   #     `recommendation` field is VENDOR-SPECIFIC: DU prints "Approve/Eligible", LPA prints "Accept" —

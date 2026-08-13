@@ -114,7 +114,7 @@ def test_every_ratify_pending_rule_is_wired_to_ratify() -> None:
     materialises tags and runs the real evaluator, then asserts every finding carries the flag. This test
     guards the SET: if a rule joins the status without that proof being extended to it, it fails."""
     on_status = {r for r, b in load_activation_bars().items() if b.status == "ratify-pending"}
-    assert on_status == {"CR-1", "CR-4", "CR-8", "CR-6", "CR-10"}, (
+    assert on_status == {"CR-1", "CR-4", "CR-8", "CR-6", "CR-10", "TI-2", "TI-6"}, (
         f"a rule joined ratify-pending without a ratification proof: {on_status ^ {'CR-1', 'CR-4', 'CR-8', 'CR-6', 'CR-10'}} "
         "— extend the per-rule evaluation proof before adding it here"
     )

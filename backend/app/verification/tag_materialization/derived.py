@@ -2598,6 +2598,113 @@ def _title_vested_owner_matches(
     )
 
 
+# --------------------------------------------------------------------------- #
+# LP-491 — TI-6's chain facts. ⚠️ NOT AN ADR-330 VACUITY, and this was the Phase A question. A chain gap
+# is grantee[n] vs grantor[n+1] — a continuity check ACROSS ROWS, which is exactly AS-8's shape (a
+# statement's ending balance against the next statement's opening). One field judged against itself would
+# be vacuous; consecutive rows judged against each other is a real comparison.
+#
+# ⚠️ DETERMINISTIC CODE COMPUTES THE FACTS; TI-6's AI JUDGES THEM. The count, the gap and the shortest
+# interval are arithmetic and a name compare — no judgment in them. Whether a 40-day resale with a price
+# jump is a flip is the judgment, and that is the rule's.
+#
+# ⚠️ THE CORPUS IS THIN HERE: the four real commitments carry 1, 2, 1 and 0 chain rows, so exactly ONE
+# consecutive pair exists to test a gap against. Recorded on the spec.
+# --------------------------------------------------------------------------- #
+
+
+def _chain_rows(subject_raw: object) -> list[dict[str, str]]:
+    """This commitment's chain_of_title rows as plain dicts, in listed order."""
+    if not isinstance(subject_raw, DocumentEntry):
+        return []
+    rows = (subject_raw.lists or {}).get("chain_of_title") or ()
+    out: list[dict[str, str]] = []
+    for row in rows:
+        out.append(
+            {
+                k: str(f.value)
+                for k, f in row.fields.items()
+                if isinstance(f, Field) and f.is_present and str(f.value).strip()
+            }
+        )
+    return out
+
+
+def _title_chain_transfer_count(
+    _snapshot: Snapshot, _subject_id: str, subject_raw: object
+) -> tuple[JsonValue | None, str]:
+    """title.chain_transfer_count — how many transfers the chain lists (TI-6)."""
+    if (
+        not isinstance(subject_raw, DocumentEntry)
+        or subject_raw.document_type != "title_commitment"
+    ):
+        return None, "not a title commitment — no chain tag"
+    rows = _chain_rows(subject_raw)
+    if not rows:
+        # ⚠️ NEVER 0. A commitment with no chain section is not a property with no transfers.
+        return _UNKNOWN, "this commitment lists no chain of title"
+    return str(len(rows)), f"the chain lists {len(rows)} transfer(s)"
+
+
+def _title_chain_has_gap(
+    _snapshot: Snapshot, _subject_id: str, subject_raw: object
+) -> tuple[JsonValue | None, str]:
+    """title.chain_has_gap — does a transfer's grantee fail to be the next transfer's grantor? (TI-6)
+
+    ⚠️ Uses the SAME name normaliser as TI-1 and IH-2, so a name-handling fix reaches all three. A name
+    that does not normalise abstains rather than reading as a gap: an unreadable name is not a break.
+    """
+    if (
+        not isinstance(subject_raw, DocumentEntry)
+        or subject_raw.document_type != "title_commitment"
+    ):
+        return None, "not a title commitment — no chain tag"
+    rows = _chain_rows(subject_raw)
+    if len(rows) < 2:
+        return _UNKNOWN, (
+            f"the chain lists {len(rows)} transfer(s) — at least two are needed to check continuity"
+        )
+    for earlier, later in pairwise(rows):
+        grantee = _normalise_party_name(earlier.get("grantee", ""))
+        grantor = _normalise_party_name(later.get("grantor", ""))
+        if not grantee or not grantor:
+            return _UNKNOWN, (
+                "a transfer states no readable grantee or grantor, so continuity cannot be checked — "
+                "an unreadable name is not a break in the chain"
+            )
+        if not _lender_names_agree(grantee, grantor):
+            return "yes", (
+                "a transfer's grantee is not the next transfer's grantor — the chain does not run "
+                "continuously through the listed owners"
+            )
+    return "no", "each transfer's grantee is the next transfer's grantor"
+
+
+def _title_chain_shortest_interval(
+    _snapshot: Snapshot, _subject_id: str, subject_raw: object
+) -> tuple[JsonValue | None, str]:
+    """title.chain_shortest_interval_days — the shortest gap between consecutive transfers (TI-6)."""
+    if (
+        not isinstance(subject_raw, DocumentEntry)
+        or subject_raw.document_type != "title_commitment"
+    ):
+        return None, "not a title commitment — no chain tag"
+    dates = [
+        parsed
+        for row in _chain_rows(subject_raw)
+        if (parsed := coerce_date(row.get("transfer_date", ""))) is not None
+    ]
+    if len(dates) < 2:
+        return _UNKNOWN, (
+            f"{len(dates)} dated transfer(s) — at least two are needed to measure an interval"
+        )
+    dates.sort()
+    shortest = min((b - a).days for a, b in pairwise(dates))
+    return str(
+        shortest
+    ), f"the shortest interval between consecutive transfers is {shortest} day(s)"
+
+
 def _decimal_or_none(tag: Tag | None) -> Decimal | None:
     """A statement balance tag's value as a Decimal, or None (absent / unknown / unparseable)."""
     if tag is None or str(tag.value) == _UNKNOWN:
@@ -3305,6 +3412,9 @@ _RECIPES: dict[str, Recipe] = {
     "fha_ufmip_percent": _fha_ufmip_percent,  # LP-488 — MI-4
     "condo_questionnaire_present": _condo_questionnaire_present,  # LP-488 — CO-1
     "title_vested_owner_matches": _title_vested_owner_matches,  # LP-491 — TI-1
+    "title_chain_transfer_count": _title_chain_transfer_count,  # LP-491 — TI-6
+    "title_chain_has_gap": _title_chain_has_gap,  # LP-491 — TI-6
+    "title_chain_shortest_interval": _title_chain_shortest_interval,  # LP-491 — TI-6
     "aus_recommendation": _aus_recommendation,  # LP-488 — AU-3
     "derogatory_months_elapsed": _derogatory_months_elapsed,  # LP-490 — CR-6
     "collection_aggregate_balance": _collection_aggregate_balance,

@@ -773,3 +773,62 @@ tags:
       when the loan purpose is unstated, when no counterparty is on the file, or when nothing identifying
       survives normalisation — never a guessed match.
     produced_by: derived
+
+  # --- LP-491 — TI-2 and TI-6. ---------------------------------------------------------------------- #
+  title.legal_description:
+    entity: doc
+    value_type: string
+    allowed_values: null
+    description: >-
+      The commitment's legal description, raw (337-1942 characters on the four real documents — metes and
+      bounds, or lot/block). ⚠️ Verified to contain NO 9+ digit runs, so the list-context PII scrub does
+      not redact it (the CR-8 trap, checked before use).
+    produced_by: parsed
+  title.property_address:
+    entity: doc
+    value_type: string
+    allowed_values: null
+    description: The street address the commitment states for the same property (4/4 real documents).
+    produced_by: parsed
+  title.legal_description_matches:
+    entity: doc
+    value_type: enum
+    allowed_values: ["yes", "no", "unknown"]
+    description: >-
+      TI-2's judgment: does the commitment's legal description describe the property at the address it
+      states? "unknown" when either is missing or the description cannot be read.
+    produced_by: AI
+  title.chain_transfer_count:
+    entity: doc
+    value_type: number
+    allowed_values: null
+    description: >-
+      How many transfers the commitment's chain of title lists. ⚠️ "unknown" when the commitment carries
+      no chain at all — never 0, which would read as a confirmed absence of transfers.
+    produced_by: derived
+  title.chain_has_gap:
+    entity: doc
+    value_type: enum
+    allowed_values: ["yes", "no", "unknown"]
+    description: >-
+      Does the chain break — is a transfer's grantee NOT the next transfer's grantor? A deterministic
+      continuity check across ROWS (AS-8's shape: ending balance == next opening), using the same name
+      normaliser TI-1 and IH-2 share. "unknown" with fewer than two transfers, or when a name does not
+      normalise.
+    produced_by: derived
+  title.chain_shortest_interval_days:
+    entity: doc
+    value_type: number
+    allowed_values: null
+    description: >-
+      The shortest gap in days between consecutive transfers in the chain — the rapid-transfer signal TI-6
+      judges. "unknown" with fewer than two dated transfers.
+    produced_by: derived
+  title.chain_of_title_assessment:
+    entity: doc
+    value_type: enum
+    allowed_values: ["clean", "rapid_transfer", "chain_gap", "insufficient_history", "unknown"]
+    description: >-
+      TI-6's judgment on the chain: clean, a rapid transfer worth review, a break in the chain, or too
+      little history to say.
+    produced_by: AI

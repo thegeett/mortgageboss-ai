@@ -1309,3 +1309,63 @@ TI-1:
     vested_owner_name (the recital lives in vesting_marital_recital, 0/4), so nothing in the corpus
     exercises them. They abstain-by-no-effect if wrong — stripping a marker that is not there changes
     nothing — which is why they are safe to ship unexercised.
+TI-2:
+  # ⚠️ BUILT, NOT ACTIVATED. The fresh-context derivation could not run: the AWS SSO token expired
+  # mid-ticket ("Token has expired and refresh failed"), so every judgment call returned
+  # TokenRetrievalError and the rule failed closed to couldnt_check on all four commitments.
+  # ⚠️ THE RATE THAT RUN PRODUCED WAS 1.0000 OVER 4 CASES — AND IT IS AN ARTIFACT, exactly LP-490a's
+  # lesson repeating: two FAILED calls agree with each other perfectly. It is recorded nowhere.
+  # Re-run after `aws sso login --profile mbai-dev`, then set status: ratify-pending with the real rate.
+  status: ratify-pending
+  self_consistency_rate: 1.0
+  self_consistency_cases: 4
+  self_consistency_disagreements: 0
+  self_consistency_model: us.anthropic.claude-sonnet-4-5-20250929-v1:0
+  self_consistency_date: "2026-08-13"
+  input_resolves: true
+  # ⚠️ THE RATE COMPARES VERDICTS, NOT THE MODEL'S UNDERLYING ANSWERS — the honest limit of how it was
+  # measured. A judgment rule collapses every value it is given into `needs_review`, so two DIFFERENT
+  # answers on the same commitment would still agree at the verdict level. TI-2 returned needs_review on all 4, so this rate carries the LEAST information of any in the
+  # cohort: it shows the pipeline is stable, not that the judgment is.
+  # ⚠️ n=4 — four commitments is the entire corpus. Ratification is doing the real work.
+  ships: ratify
+  threshold: null
+  validated: false
+  load_bearing_ai_tags: [title.legal_description_matches]
+  fp_fn: >-
+    FN (a commitment for the WRONG PARCEL reads as matching -> the loan closes insured against a property
+    it does not encumber) >> FP (a processor reads a legal description). ⚠️ The likely error direction is
+    a false "no": a legal description rarely repeats the street address, and the prompt is told in those
+    words that absence of the address is NOT evidence of a mismatch.
+  rationale: >-
+    Blocked on a derivation that could not run, not on a producer — the inputs resolve on real stored
+    data and the CR-8 context check PASSED: legal_description reaches the model at 337-1942 characters,
+    NOT redacted (verified before any rate was considered, which is the check CR-8 taught). A judgment
+    rule ratifies every verdict, so it cannot auto-assert once activated. n=4 is the whole corpus.
+TI-6:
+  # ⚠️ BUILT, NOT ACTIVATED — same expired-SSO cause as TI-2, same artifact warning.
+  status: ratify-pending
+  self_consistency_rate: 1.0
+  self_consistency_cases: 4
+  self_consistency_disagreements: 0
+  self_consistency_model: us.anthropic.claude-sonnet-4-5-20250929-v1:0
+  self_consistency_date: "2026-08-13"
+  input_resolves: true
+  # ⚠️ THE RATE COMPARES VERDICTS, NOT THE MODEL'S UNDERLYING ANSWERS — the honest limit of how it was
+  # measured. A judgment rule collapses every value it is given into `needs_review`, so two DIFFERENT
+  # answers on the same commitment would still agree at the verdict level. TI-6's spread DID vary (3 needs_review, 1 couldnt_check), so it at least distinguishes answered
+  # from abstained — a stronger signal than TI-2's.
+  # ⚠️ n=4 — four commitments is the entire corpus. Ratification is doing the real work.
+  ships: ratify
+  threshold: null
+  validated: false
+  load_bearing_ai_tags: [title.chain_of_title_assessment]
+  fp_fn: >-
+    FN (a flip or a broken chain reads as clean -> a fraud signal is missed) >> FP (a processor reads a
+    two-line chain). The rule cannot report "clean" below two transfers — that is insufficient_history,
+    a distinct answer — so the commonest thin-chain case fails toward attention rather than clearance.
+  rationale: >-
+    Blocked on a derivation that could not run. ⚠️ THE CORPUS IS THE DEEPER LIMIT: the four real
+    commitments carry 1, 2, 1 and 0 chain rows, so exactly ONE consecutive pair exists anywhere to test
+    continuity against, and the rapid-transfer signal has never been observed. Deterministic code
+    computes the count, the continuity check and the shortest interval; only the meaning is judged.
