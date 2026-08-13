@@ -1,7 +1,7 @@
-# CR-10 — Collections / charge-offs treatment — AI JUDGMENT rule SPEC (LP-490). ⚠️ BUILDS INERT.
+# CR-10 — Collections / charge-offs treatment — AI JUDGMENT rule SPEC (LP-490). ⚠️ BUILDS LIVE (ratify-pending since LP-490a).
 #
 # ⚠️ INERT. Its load-bearing tags are AI tags with no measured accuracy → `not-calibratable-yet` →
-# `is_eligible()` False (LP-484). NOT in ACTIVE_RULE_IDS.
+# `is_eligible()` False (LP-484). LIVE in ACTIVE_RULE_IDS since LP-490a (ratify-pending).
 #
 # ⚠️ THERE IS NEVER ONE DOLLAR THRESHOLD ACROSS AGENCIES — Priya's ruling, and the reason this rule is a
 # judgment over an occupancy/property-type matrix rather than a single numeric compare:

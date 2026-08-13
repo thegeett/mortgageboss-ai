@@ -2329,13 +2329,18 @@ def _non_medical_collection_balances(
     # thresholds ($250/$1,000/$2,000/$5,000) — borrower B's collections pushing borrower A over. On a
     # single-borrower file the file total IS that borrower's; on a joint file it is not. Attributing
     # properly needs a document link on the row (an enumerator change), not a guess here.
+    # ⚠️ THE JOINT-FILE ABSTAIN IS DEFERRED UNTIL IT MATTERS (reported finding — mine, from the previous
+    # review). Abstaining on EVERY multi-borrower file was right in principle and wrong in effect: once
+    # CR-10 went live, `credit.has_collections` resolved to "unknown" for both borrowers, and
+    # resolve_applicability maps an unknown predicate to couldnt_check — so every joint file (the common
+    # case, LF-6T3N included) got a per-borrower finding whose reason a processor cannot act on. That is
+    # the flooding CR-6's predicate was added to stop, reintroduced one rule over.
+    #
+    # The asymmetry that fixes it: when the file-wide set is EMPTY, "this borrower has no collections" is
+    # unambiguous for every borrower — no attribution is needed to answer no. Attribution only matters
+    # when collections EXIST and must be assigned. So the count is gathered first and the abstain moved
+    # below, where it fires on a joint file WITH collections — correct, and rare.
     borrowers = subject_type("borrower").enumerate(snapshot)
-    if len(borrowers) > 1:
-        return None, (
-            f"the file has {len(borrowers)} borrowers and a credit-report tradeline carries no borrower "
-            "attribution, so a per-borrower collection total cannot be computed without over-reporting "
-            "one borrower's balance against another's"
-        )
 
     balances: list[Decimal] = []
     reported_rows = 0
@@ -2374,6 +2379,12 @@ def _non_medical_collection_balances(
                 f"a collection's balance ({balance.value!r}) is not a number — abstaining rather than "
                 "reporting a partial total"
             )
+    if balances and len(borrowers) > 1:
+        return None, (
+            f"the file has {len(borrowers)} borrowers and a credit-report tradeline carries no borrower "
+            "attribution, so this borrower's share of the {n} collection(s) on the report cannot be "
+            "separated from the co-borrower's".format(n=len(balances))
+        )
     if not balances:
         # ⚠️ A CONFIDENT ZERO IS A FALSE ALL-CLEAR unless a credit report was actually read.
         # _credit_undisclosed_tradeline abstains in exactly this situation, for exactly this reason:
@@ -2489,18 +2500,40 @@ _VESTING_TRUNCATE_MARKERS: tuple[str, ...] = (
 )
 
 
+_VESTING_MARKER_RE = re.compile(
+    r"\b(?:" + "|".join(re.escape(m) for m in _VESTING_TRUNCATE_MARKERS) + r")\b"
+)
+
+
 def _normalise_party_name(raw: str) -> list[str]:
-    """A title party's name reduced to comparable tokens — IH-2's normaliser plus vesting recitals."""
+    """A title party's name reduced to comparable tokens — IH-2's normaliser plus vesting recitals.
+
+    ⚠️ MARKERS MATCH ON WORD BOUNDARIES, and that is the whole correctness of this function. A bare
+    ``str.find`` matched a marker INSIDE an ordinary name and truncated it to a shared prefix, which does
+    not merely lose precision — it manufactures agreement:
+
+        'Margaret Alonso'  -> ['margar']   |  'Margaret Alvarez'  -> ['margar']   -> MATCH
+        'Janet Allen'      -> ['jan']      |  'Janet Alonzo'      -> ['jan']      -> MATCH
+
+    because "margar|et al|onso" contains "et al". So a title vested in one person and a contract naming a
+    different person returned ``title.vested_owner_matches = "yes"`` and TI-1 reported SATISFIED — the one
+    verdict the spec says no human re-reads. IH-2's older markers (``c/o``, ``isaoa``, ``atima``) are long
+    enough that this never bit; the short vesting recitals ("et al", "et ux") are not.
+    """
     text = _WS.sub(" ", raw).strip().casefold()
-    for marker in _VESTING_TRUNCATE_MARKERS:
-        index = text.find(marker)
-        if index != -1:
-            text = text[:index]
+    match = _VESTING_MARKER_RE.search(text)
+    if match is not None:
+        text = text[: match.start()]
     return _normalise_lender_name(text)
 
 
-def _file_counterparty(snapshot: Snapshot) -> tuple[list[str], str]:
-    """The party the vested owner should match, chosen by loan purpose.
+def _file_counterparty(snapshot: Snapshot) -> tuple[list[list[str]], str]:
+    """The parties the vested owner should match, chosen by loan purpose.
+
+    ⚠️ RETURNS EVERY NAME, not the first (reported finding). _title_vested_owner_matches deliberately
+    matches against vested_owner_name OR vested_owner_name_2 because 3 of 4 real commitments are
+    co-owned — but this side took sellers[0] / names[0] only, so a couple selling jointly whose
+    commitment vests in the SECOND seller produced a needs_review on a correct file.
 
     ⚠️ THE PURPOSE BRANCH LIVES HERE, NOT IN AN APPLICABILITY PREDICATE, and the reason is that TI-1
     applies to BOTH purposes — there is no single predicate value to scope on. The abstain that a
@@ -2524,14 +2557,16 @@ def _file_counterparty(snapshot: Snapshot) -> tuple[list[str], str]:
                 [],
                 "no purchase agreement on the file names a seller to compare the vested owner with",
             )
-        return _normalise_party_name(
-            sellers[0]
-        ), f"the purchase agreement's seller ({sellers[0]!r})"
+        parties = [_normalise_party_name(name) for name in sellers]
+        return [p for p in parties if p], (
+            f"the purchase agreement's seller(s) ({', '.join(repr(x) for x in sellers)})"
+        )
     if purpose == "refinance":
         names = _borrower_display_names(snapshot)
         if not names:
             return [], "the file states no borrower name to compare the vested owner with"
-        return _normalise_party_name(names[0]), f"the borrower ({names[0]!r})"
+        parties = [_normalise_party_name(name) for name in names]
+        return [p for p in parties if p], (f"the borrower(s) ({', '.join(repr(x) for x in names)})")
     return [], f"the loan purpose {purpose!r} is not one this check knows how to scope"
 
 
@@ -2589,7 +2624,16 @@ def _title_vested_owner_matches(
         return _UNKNOWN, label
     for owner in owners:
         tokens = _normalise_party_name(owner)
-        if tokens and _lender_names_agree(tokens, counterparty):
+        if not tokens:
+            # ⚠️ ABSTAIN, don't answer "no" (reported finding). The vocabulary declares this tag
+            # "unknown" when nothing identifying survives normalisation — "never a guessed match" — and
+            # IH-2 abstains in exactly this case. Falling through to "no" turned an unreadable name into
+            # a needs_review finding instead of an honest couldnt_check.
+            return _UNKNOWN, (
+                f"the commitment's vested owner ({owner!r}) leaves nothing identifying after normalising "
+                "the vesting recital — abstaining rather than guessing a match"
+            )
+        if any(_lender_names_agree(tokens, party) for party in counterparty):
             return "yes", f"the vested owner ({owner!r}) matches {label}"
     return "no", (
         f"the commitment's vested owner ({', '.join(repr(o) for o in owners)}) does not match {label} — "
@@ -2664,6 +2708,21 @@ def _title_chain_has_gap(
         return _UNKNOWN, (
             f"the chain lists {len(rows)} transfer(s) — at least two are needed to check continuity"
         )
+    # ⚠️ SORT BY TRANSFER DATE FIRST (reported finding). This paired grantee->grantor in RAW LIST ORDER,
+    # and nothing guarantees oldest-first: the extraction prompt gives the model no ordering instruction,
+    # and real title commitments commonly list transfers NEWEST-first. On a reversed chain the comparison
+    # is inverted and almost always fails, reporting `chain_gap` on a perfectly continuous chain. The
+    # sibling _title_chain_shortest_interval already sorts for exactly this reason. A row with no readable
+    # date cannot be ordered, so the gap check abstains rather than guessing a sequence.
+    datable = [
+        (parsed, r) for r in rows if (parsed := coerce_date(r.get("transfer_date", ""))) is not None
+    ]
+    if len(datable) != len(rows):
+        return _UNKNOWN, (
+            "a transfer in the chain of title states no readable date, so the transfers cannot be put in "
+            "order — abstaining rather than reading an unordered chain as a gap"
+        )
+    rows = [r for _, r in sorted(datable, key=lambda pair: pair[0])]
     for earlier, later in pairwise(rows):
         grantee = _normalise_party_name(earlier.get("grantee", ""))
         grantor = _normalise_party_name(later.get("grantor", ""))

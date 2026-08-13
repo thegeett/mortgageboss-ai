@@ -1189,6 +1189,13 @@ CR-6:
   # ⚠️ INERT. The seasoning arithmetic is deterministic, but its inputs (liab.derogatory_type / _date)
   # are uncalibrated AI tags, so the CHAIN is uncalibrated.
   status: ratify-pending
+  # ⚠️ READ THE DENOMINATOR BEFORE QUOTING THE RATE. All 35 'cases' are NEGATIVE rows: this rule's
+  # trigger matched none of them (the corpus holds zero derogatory events / zero collection
+  # codes), so both derivations were answering "no" every time. The rate therefore measures that
+  # the model consistently finds nothing — NOT that it judges the thing correctly when it exists.
+  # parse_bar's `cases <= 0` guard is satisfied only because non-triggering rows are counted; the
+  # rule ships live under the development-mode policy and ratifies every verdict to a human.
+  # Re-derive once the corpus contains a real instance, and replace this rate then.
   self_consistency_rate: 1.0
   self_consistency_cases: 35
   self_consistency_disagreements: 0
@@ -1249,6 +1256,13 @@ CR-8:
 CR-10:
   # ⚠️ INERT. Judgmental → ratifies; held on calibration regardless.
   status: ratify-pending
+  # ⚠️ READ THE DENOMINATOR BEFORE QUOTING THE RATE. All 35 'cases' are NEGATIVE rows: this rule's
+  # trigger matched none of them (the corpus holds zero derogatory events / zero collection
+  # codes), so both derivations were answering "no" every time. The rate therefore measures that
+  # the model consistently finds nothing — NOT that it judges the thing correctly when it exists.
+  # parse_bar's `cases <= 0` guard is satisfied only because non-triggering rows are counted; the
+  # rule ships live under the development-mode policy and ratifies every verdict to a human.
+  # Re-derive once the corpus contains a real instance, and replace this rate then.
   self_consistency_rate: 1.0
   self_consistency_cases: 35
   self_consistency_disagreements: 0
@@ -1310,12 +1324,20 @@ TI-1:
     exercises them. They abstain-by-no-effect if wrong — stripping a marker that is not there changes
     nothing — which is why they are safe to ship unexercised.
 TI-2:
-  # ⚠️ BUILT, NOT ACTIVATED. The fresh-context derivation could not run: the AWS SSO token expired
+  # ⚠️ LIVE — see the reconciliation note below. The fresh-context derivation could not run: the AWS SSO token expired
   # mid-ticket ("Token has expired and refresh failed"), so every judgment call returned
   # TokenRetrievalError and the rule failed closed to couldnt_check on all four commitments.
   # ⚠️ THE RATE THAT RUN PRODUCED WAS 1.0000 OVER 4 CASES — AND IT IS AN ARTIFACT, exactly LP-490a's
   # lesson repeating: two FAILED calls agree with each other perfectly. It is recorded nowhere.
-  # Re-run after `aws sso login --profile mbai-dev`, then set status: ratify-pending with the real rate.
+  # ⚠️ LIVE ANYWAY, DELIBERATELY — and the text above used to instruct the opposite of what the next
+  # line does, which is the defect the review caught. Reconciled here rather than left contradicting:
+  # under the development-mode policy a rule ships BEFORE its evidence exists, so `ratify-pending` is
+  # the intended status. But be exact about what the number below is and is NOT:
+  #   * it is NOT a measurement — no model call succeeded, so 1.0000/4 is two FAILED calls agreeing.
+  #   * it is NOT protecting anything — the rule is `ai_judgment`, so EVERY verdict ratifies to
+  #     needs_review and a human reads it. That, not the rate, is what makes shipping it safe today.
+  # Re-run after `aws sso login --profile mbai-dev` and replace the rate with a real one; until then no
+  # reader should quote this figure as evidence of anything.
   status: ratify-pending
   self_consistency_rate: 1.0
   self_consistency_cases: 4
@@ -1343,7 +1365,11 @@ TI-2:
     NOT redacted (verified before any rate was considered, which is the check CR-8 taught). A judgment
     rule ratifies every verdict, so it cannot auto-assert once activated. n=4 is the whole corpus.
 TI-6:
-  # ⚠️ BUILT, NOT ACTIVATED — same expired-SSO cause as TI-2, same artifact warning.
+  # ⚠️ LIVE, and the header used to say "BUILT, NOT ACTIVATED" while the next line activated it —
+  # reconciled with TI-2's block. Same expired-SSO cause: the derivation never called the model, so the
+  # 1.0000/4 below is two FAILED calls agreeing, NOT a measurement. It ships under the development-mode
+  # policy, and what makes that safe is that `ai_judgment` ratifies every verdict to a human — not the
+  # rate. Re-derive after `aws sso login --profile mbai-dev` and replace the figure.
   status: ratify-pending
   self_consistency_rate: 1.0
   self_consistency_cases: 4

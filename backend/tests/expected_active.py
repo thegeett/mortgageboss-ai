@@ -30,9 +30,9 @@ from __future__ import annotations
 # LP-488 (+AU-3 — AUS recommendation, DU/LPA closed vocabulary) -> 47. ⚠️ RE-2 was in the LP-488 cohort
 # and is DROPPED, not deferred: no REO/retained-property concept exists in MISMO or the data model.
 # LP-490a (+CR-1, +CR-4, +CR-8 — activated on a SELF-CONSISTENCY rate with ratification as the safety
-# substitute, ADR-378; NOT a measured accuracy) -> 50.
+# substitute, ADR-378; NOT a measured accuracy) -> 55.
 # LP-491 (+TI-1 — title commitment parties; a CATALOG EDIT to deterministic_only, so no model in its
-# chain and no self-consistency rate needed) -> 53.
+# chain and no self-consistency rate needed) -> 55.
 EXPECTED_ACTIVE_RULE_COUNT: int = 55
 
 __all__ = ["EXPECTED_ACTIVE_RULE_COUNT"]

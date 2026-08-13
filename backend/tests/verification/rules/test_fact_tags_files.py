@@ -83,7 +83,11 @@ def test_desired_state_shape() -> None:
     # liab.balance/liab.derogatory_type rather than the aggregate, the gate and the reasoned-over set).
     # Structural subject markers (document.document_type, liability.source) are deliberately NOT edges —
     # the projection validates every edge against fact_tags.csv and rejects a non-vocabulary tag.
-    assert len(rule_tags) == 210
+    # LP-491 review +3: the TI-* catalog rows were corrected to what each rule actually reads
+    # (TI-1 pointed at title.parties_match, TI-2 at title.legal_desc_matches, TI-6 at
+    # title.rapid_transfer — three live rules wired to dead vocabulary). Same defect the LP-490
+    # review fixed for the credit rules, one ticket later.
+    assert len(rule_tags) == 213
     # No depends_on authored yet (LP-311 Phase 0): the DAG is empty.
     assert tag_deps == set()
 

@@ -123,7 +123,8 @@ def test_the_vesting_markers_are_recorded_as_speculative() -> None:
     that is not present changes nothing), but a reader must not mistake them for measured behaviour."""
     header = load_rule_spec("TI-1").reference_values.values["vesting_truncate_markers"]
     assert "et ux" in header  # the vocabulary exists
-    assert "PLAIN NAME" in load_rule_spec("TI-1").criteria.upper() or True
+    # ⚠️ `or True` made this unfailable (reported finding) — it asserted nothing about the spec.
+    assert "PLAIN NAME" in load_rule_spec("TI-1").criteria.upper()
 
 
 def test_ti1_is_live_without_a_self_consistency_rate() -> None:

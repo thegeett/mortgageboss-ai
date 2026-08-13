@@ -1,11 +1,11 @@
-# CR-6 — Derogatory seasoning — calculative rule SPEC (LP-490). ⚠️ BUILDS INERT.
+# CR-6 — Derogatory seasoning — calculative rule SPEC (LP-490). ⚠️ BUILDS LIVE (ratify-pending since LP-490a).
 #
 # A major derogatory event carries a waiting period before the borrower is eligible again. This measures
 # the elapsed time from THE EVENT'S OWN DATE and compares it with the period for that event type.
 #
 # ⚠️ INERT. `credit.derogatory_months_elapsed` is derived, but its inputs — `liab.derogatory_type` and
 # `liab.derogatory_date` — are AI tags with no measured accuracy, so the chain is uncalibrated:
-# `not-calibratable-yet` → `is_eligible()` False (LP-484). NOT in ACTIVE_RULE_IDS.
+# `not-calibratable-yet` → `is_eligible()` False (LP-484). LIVE in ACTIVE_RULE_IDS since LP-490a (ratify-pending).
 #
 # ⚠️ CR-6 NEVER RETURNS A FAILURE. Priya was explicit: extenuating-circumstance exceptions exist, and a
 # rule that returns FAIL on an unseasoned event asserts an ineligibility the file may well overcome. So

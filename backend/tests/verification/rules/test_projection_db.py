@@ -51,7 +51,11 @@ async def test_projection_counts_match_files(db_session: AsyncSession) -> None:
     # +1 LP-418 (income.is_self_employed — the deterministic per-borrower self-employment promotion)
     # +1 LP-422 (income.has_rental_income — the deterministic per-borrower rental presence off Schedule E)
     # LP-490 review +7: the four credit rules' catalog rows corrected to what each rule actually reads.
-    assert result.rule_tags.inserted == 210
+    # LP-491 review +3: the TI-* catalog rows were corrected to what each rule actually reads
+    # (TI-1 pointed at title.parties_match, TI-2 at title.legal_desc_matches, TI-6 at
+    # title.rapid_transfer — three live rules wired to dead vocabulary). Same defect the LP-490
+    # review fixed for the credit rules, one ticket later.
+    assert result.rule_tags.inserted == 213
     assert result.rules.deleted == result.tags.deleted == 0
 
 

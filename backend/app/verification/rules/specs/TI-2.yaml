@@ -46,6 +46,14 @@ reference_values:
     the street address is the practical check that the description is for the right parcel; a mismatch
     between them is resolved before closing.
 
+# ⚠️ REPORTED GAP, RECORDED NOT CLOSED. Both inputs below are fields of the SAME document, so TI-2
+# checks the commitment for INTERNAL consistency — and the failure its own bar names ("a commitment for
+# the WRONG PARCEL reads as matching → the loan closes insured against a property it does not encumber")
+# is precisely the case internal consistency cannot see: a commitment issued for another property has an
+# address and a legal description that agree with each other perfectly.
+# Catching it needs the FILE's subject property (`property.address_line`, already in the snapshot) as the
+# comparison side. That changes what the rule is — a cross-source match rather than a self-check — so it
+# is a spec decision, not a review edit. Until then the bar's fp_fn overstates what this rule detects.
 required_inputs:
   - name: legal_description
     snapshot_path: 'tags.by_subject[<commitment content_id>]["title.legal_description"]'

@@ -11,6 +11,7 @@ from collections.abc import AsyncIterator
 
 import pytest
 import pytest_asyncio
+from app.ai.client import get_anthropic_client
 from app.core.config import settings
 from app.main import app
 from app.models import Base
@@ -48,6 +49,19 @@ def _pin_ai_provider(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         settings, "anthropic_api_key", "sk-ant-test-not-a-real-key"
     )  # pragma: allowlist secret
+    # ⚠️ TWO REPORTED FOOTGUNS IN THE LINE ABOVE, closed here.
+    #  1. A dummy key is WEAKER than no key. With the key unset, client.py fails immediately with
+    #     AIClientError("ANTHROPIC_API_KEY is not configured") — offline, instant. With a dummy key it
+    #     BUILDS a real AsyncAnthropic and issues an HTTPS request that fails on auth, which in a
+    #     network-isolated CI is a socket timeout rather than a fast, legible error. The point of the
+    #     fixture is to surface a leaked call, so the client cache is cleared and the escape hatch below
+    #     is made real rather than implied.
+    #  2. `get_anthropic_client` is @cache'd, so "a test that genuinely needs a key sets its own" did not
+    #     work — it received the already-built dummy-key client. Clearing the cache on setup AND teardown
+    #     makes that sentence true.
+    get_anthropic_client.cache_clear()
+    yield
+    get_anthropic_client.cache_clear()
 
 
 @pytest.fixture

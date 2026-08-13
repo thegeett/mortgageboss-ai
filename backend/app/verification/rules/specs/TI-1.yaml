@@ -43,6 +43,11 @@ criteria: >-
   whole tokens in order. A mismatch is surfaced for confirmation rather than failed — a trust, an estate
   or a name change all produce a legitimate difference. A commitment stating no owner, a file stating no
   purpose, or a file with no counterparty resolves to couldnt_check, never a guessed match.
+  ⚠️ The vesting-recital markers are UNEXERCISED by the corpus: all four real commitments carry a PLAIN
+  NAME in vested_owner_name (the recital lives in vesting_marital_recital, which fills 0/4). Stripping a
+  marker that is not present changes nothing, so they are safe to ship — but nothing here is measured
+  behaviour. ⚠️ They match on WORD BOUNDARIES: an unbounded substring match truncated ordinary names
+  ("margarET ALonso" contains "et al") and manufactured agreement between different people.
 
 applicability:
   scope: each title commitment in the file

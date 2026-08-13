@@ -3,7 +3,7 @@
 ⚠️ THIS STATUS INVERTS THE GATE'S STATED PRINCIPLE ("activation never trusts what it hasn't measured").
 Ratification is the entire safety substitute, so these tests exist to keep the substitute real.
 
-⚠️ NO RULE IS ON THIS STATUS YET. Every candidate failed a precondition (see LP-490a.md), so the
+⚠️ SEVEN RULES ARE ON THIS STATUS (CR-1/CR-4/CR-6/CR-8/CR-10 at LP-490a, TI-2/TI-6 at LP-491). Every candidate failed a precondition (see LP-490a.md), so the
 mechanism ships proven-but-unused. These tests exercise it directly against constructed bars, which is
 legitimate for a LOADER contract; the rule-evaluation proof required by LP-487 lands with the first rule
 that actually activates, and `test_ratify_pending_wires_ratification_through_evaluation` below is written

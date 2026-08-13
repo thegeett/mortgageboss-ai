@@ -202,10 +202,13 @@ PR-8,property.in_disaster_area
 RE-1,property.is_retained_reo
 RE-1,property.retained_pitia
 RE-2,property.is_retained_reo
-TI-1,title.parties_match
-TI-2,title.legal_desc_matches
+TI-1,title.vested_owner_matches
+TI-2,title.legal_description
+TI-2,title.property_address
 TI-3,title.open_liens
 TI-4,liab.has_open_judgment_lien
 TI-4,title.open_liens
 TI-5,title.vesting
-TI-6,title.rapid_transfer
+TI-6,title.chain_has_gap
+TI-6,title.chain_shortest_interval_days
+TI-6,title.chain_transfer_count

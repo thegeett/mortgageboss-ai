@@ -240,7 +240,12 @@ def parse_bar(rule_id: str, body: object) -> ActivationBar:
     disagreements = body.get("self_consistency_disagreements")
     # ⚠️ A RATE WITHOUT A CASE COUNT IS UNREADABLE. A 1.0 over 2 cases and a 1.0 over 200 are different
     # claims, and the bar must say which.
-    if self_consistency_rate is not None and not isinstance(cases, int):
+    # ⚠️ `isinstance(True, int)` is True in Python, so `self_consistency_cases: true` loaded as ONE case
+    # and passed the `> 0` guard this same block calls non-negotiable. The rate check next to it
+    # already excludes bool; this one did not (reported finding).
+    if self_consistency_rate is not None and (
+        not isinstance(cases, int) or isinstance(cases, bool)
+    ):
         raise ActivationBarError(
             f"{rule_id}: a self_consistency_rate needs self_consistency_cases — a rate with no case count "
             f"cannot be read"
@@ -272,7 +277,9 @@ def parse_bar(rule_id: str, body: object) -> ActivationBar:
         self_consistency_rate=(
             float(self_consistency_rate) if self_consistency_rate is not None else None
         ),
-        self_consistency_cases=int(cases) if isinstance(cases, int) else None,
+        self_consistency_cases=(
+            int(cases) if isinstance(cases, int) and not isinstance(cases, bool) else None
+        ),
         self_consistency_disagreements=(
             int(disagreements) if isinstance(disagreements, int) else None
         ),
