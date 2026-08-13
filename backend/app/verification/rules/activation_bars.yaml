@@ -1030,9 +1030,10 @@ IH-7:
 # AI accuracy to measure. Setting `validated: true` here would be DECORATIVE, so it stays false and this
 # comment says why. (CL-1 is the precedent; LP-485 recorded the same reasoning.)
 #
-# ⚠️ THE THRESHOLD'S PROVENANCE IS TIER S, NOT P — Fannie Mae Selling Guide B7-1-01, section correct,
-# PAGE DATE NOT OBTAINED. It lives in the spec's reference_values with that caveat attached, and in
-# docs/domain/priya-open-questions.md. It is not written anywhere as a read-and-confirmed fact.
+# ⚠️ THE THRESHOLD IS NOW TIER P — Fannie Mae Selling Guide B7-1-01, page dated 04/02/2025, READ
+# 2026-08-13 (LP-491 follow-up). It shipped at LP-488 as tier S with the page date marked NOT OBTAINED;
+# the page has since been fetched and the wording confirmed verbatim, so the caveat is lifted rather
+# than left to rot. The value and its citation live in the spec's reference_values.
 MI-1:
   status: no-ai-dependency
   ships: auto
@@ -1048,7 +1049,7 @@ MI-1:
     instead: a rule that cannot compute an LTV abstains rather than clearing the MI requirement.
   rationale: >-
     No AI tag and no calibration to measure. The 80% threshold is a DOMAIN number recorded in the spec's
-    reference_values with its provenance tier (S — B7-1-01, page date not obtained). The inputs are MISMO
+    reference_values with its provenance tier (P — B7-1-01, page dated 04/02/2025, read 2026-08-13). The inputs are MISMO
     facts that were present in the snapshot all along but never declared: loan.amount (BaseLoanAmount),
     property.purchase_price, and the appraisal's appraised_value. The LTV arithmetic is not
     reimplemented — the recipe calls app/verification/ltv.py (LP-77), so the rule path and the display

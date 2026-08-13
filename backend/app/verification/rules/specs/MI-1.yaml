@@ -55,12 +55,19 @@ reference_values:
   priya_validated: false          # must equal rule_kinds.csv
   threshold_needs_signoff: true   # must equal rule_kinds.csv
   values:
-    # ⚠️ PROVENANCE TIER S — the section is right, the PAGE DATE WAS NOT OBTAINED this pass (ADR-361:
-    # a value is cited or it is marked unobtained; it is never recalled and dressed as read). The 80%
-    # figure is universally reported and uncontroversial, but the page itself was not read.
-    #   value:    MI required when LTV > 80%
-    #   source:   Fannie Mae Selling Guide B7-1-01, "Provision of Mortgage Insurance"
-    #   page date: ⚠️ NOT OBTAINED — logged in docs/domain/priya-open-questions.md
+    # ⚠️ PROVENANCE TIER P — the publisher's own page, READ 2026-08-13 (LP-491 follow-up). It shipped at
+    # LP-488 as tier S with the page date marked NOT OBTAINED; the page has since been fetched and the
+    # value confirmed verbatim, so the tier is raised. ADR-361: a value is cited or it is marked
+    # unobtained — never recalled and dressed as read.
+    #   value:     MI required when LTV > 80%
+    #   source:    Fannie Mae Selling Guide B7-1-01, "Provision of Mortgage Insurance"
+    #   page date: 04/02/2025
+    #   verbatim:  "the lender must obtain a primary mortgage insurance policy for a conventional first
+    #              mortgage loan that has an LTV ratio greater than 80% at the time it is purchased"
+    #   ⚠️ NOTE THE MEASUREMENT POINT: the guide states the test "at the time it is purchased" (by
+    #   Fannie). MI-1 evaluates the LTV on the file before closing, which is the processor-facing
+    #   question and the earlier of the two. Recorded so the difference is not mistaken for the same
+    #   moment; logged for Priya.
     # Coverage AMOUNTS are B7-1-02 and are out of scope: MI-1 asks whether MI is required, not how much.
     mi_required_above_ltv_percent: "80"
   guideline_text: >-
@@ -84,7 +91,7 @@ evidence_required: >-
   price or appraised value) — inline on the finding, so a processor can see the arithmetic without
   reopening the file.
 
-guideline_reference: "Fannie Mae Selling Guide B7-1-01, Provision of Mortgage Insurance — mortgage insurance is required on a conventional first mortgage with LTV above 80% (⚠️ page date not obtained; see the spec's reference_values)."
+guideline_reference: "Fannie Mae Selling Guide B7-1-01, Provision of Mortgage Insurance (page dated 04/02/2025) — the lender must obtain a primary mortgage insurance policy for a conventional first mortgage loan with an LTV ratio greater than 80%."
 
 spec_version: 1
 

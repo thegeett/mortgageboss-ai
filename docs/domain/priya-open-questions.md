@@ -20,7 +20,7 @@ section and page date, fetched from the live guide.
 | **IH-7** | **$1,000,000 per occurrence** | minimum condo-project general liability | Fannie Mae Selling Guide **B7-4-01**, *General Liability Insurance Requirements for Project Developments* | 08/05/2026 |
 | **IH-7** | **100% replacement cost** | required master property coverage basis | Fannie Mae Selling Guide **B7-3-03**, *Master Property Insurance Requirements for Project Developments* | 08/05/2026 |
 | IH-2 | *none* | a name compare; the matching tolerance (2-token prefix) is not a domain number | — | — |
-| **MI-1** | **LTV > 80%** | conventional MI requirement | Fannie Mae Selling Guide **B7-1-01**, *Provision of Mortgage Insurance* | ⚠️ **NOT OBTAINED — tier S** |
+| **MI-1** | **LTV > 80%** | conventional MI requirement | Fannie Mae Selling Guide **B7-1-01**, *Provision of Mortgage Insurance* | **04/02/2025** (tier P) |
 | **MI-4** | **1.75% (175 bps)** of base loan amount | FHA upfront MIP | HUD **Mortgagee Letter 2023-05** | **2023-02-22** (tier P) |
 
 **Questions on these three:**
@@ -229,12 +229,20 @@ basis in a trailing qualifier we would then miss?
 
 ## 10. From LP-488 (MI-1 · MI-4 · CO-1 · AU-3; RE-2 dropped)
 
-### 10a. ⚠️ MI-1's 80% — the page date was NOT obtained
+### 10a. ✅ MI-1's 80% — page date now obtained (was tier S)
 
-The value is Fannie Mae Selling Guide **B7-1-01**, and the 80% figure is universally reported — but **we
-did not read the page this pass**, so it is recorded as **tier S**, not tier P. Per ADR-361 a value is
-cited or it is marked unobtained; it is never recalled and dressed as read. **Please confirm the figure
-and the current page date**, or point us at your investor overlay if it is stricter.
+**Resolved 2026-08-13.** The page was fetched and the value confirmed verbatim: Fannie Mae Selling Guide
+**B7-1-01**, *Provision of Mortgage Insurance*, page dated **04/02/2025** — *"the lender must obtain a
+primary mortgage insurance policy for a conventional first mortgage loan that has an LTV ratio greater
+than 80% at the time it is purchased."* Tier **S → P**; the spec and the bar are updated.
+
+⚠️ **One difference worth your ruling.** The guide states the test **"at the time it is purchased"** — i.e.
+when Fannie buys the loan. **MI-1 evaluates the LTV on the file before closing**, which is the
+processor-facing question and the earlier of the two moments. They agree on almost every file, but not on
+one where the loan amount changes between closing and delivery.
+
+**Question: is the pre-closing LTV the right measurement point for a processor's check**, or should MI-1
+say explicitly that it is checking the closing LTV as a proxy for the delivery test?
 
 ### 10b. ⚠️ MI-1 cannot confirm that MI is PRESENT — an input gap, not a design choice
 
