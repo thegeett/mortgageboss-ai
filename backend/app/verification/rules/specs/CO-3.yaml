@@ -1,0 +1,137 @@
+# CO-3 — Master insurance / fidelity — DETERMINISTIC structural rule SPEC (LP-494).
+#
+# ⚠️ THIS RULE WAS DROPPED EARLIER IN LP-494 AND THAT DROP WAS WRONG. The reasoning was that CO-3
+# duplicates live IH-7 (ADR-375, one matcher per comparison). It does not: IH-7's own spec header says
+# "WHAT THIS RULE DOES NOT CHECK ... Fannie also requires FIDELITY/CRIME coverage (B7-4-02) ... NOT
+# evaluated by this rule". So the fidelity leg is the one condo-insurance question NO live rule asks —
+# the gap IH-7 documented and left open — and building it duplicates nothing. The drop came from
+# searching too narrowly; recorded rather than quietly reversed.
+#
+# ⚠️ AND IT IS A PRESENCE READ, NOT AN ADEQUACY ONE. B7-4-02 sets the required amount at "the sum of
+# three months of assessments on all units in the project" and exempts projects of 20 units or fewer.
+# NEITHER the unit count NOR the assessment base is stated on any document in the corpus: `total_units`
+# lives on the condo questionnaire (0/4) and on hoa_certification (0 documents exist). So this rule does
+# NOT compare the amount against anything. It answers what it can answer honestly — is fidelity/crime
+# coverage EVIDENCED, itself a requirement the lender must verify — and carries the amount inline so a
+# processor can finish the arithmetic the file cannot. CO-1's discipline exactly.
+#
+# ⚠️ ABSENT COVERAGE IS needs_review, NEVER fired, and the exemption is why. A project of 20 units or
+# fewer needs no fidelity coverage at all, and nothing in the file states the unit count — so firing
+# would call a CORRECT file defective. IH-2's and TI-1's precedent, on the same reasoning.
+#
+# THRESHOLD PROVENANCE (ADR-361 — cited, never recalled from memory):
+#   Fannie Mae Selling Guide B7-4-02, "Fidelity/Crime Insurance Requirements for Project Developments",
+#   page dated 08/05/2026 (tier P, fetched 2026-08-13):
+#     exemptions: "...condo or co-op projects consisting of 20 units or less, or condo or co-op projects
+#     that would need fidelity/crime insurance coverage of $5,000 or less"
+#     amount: "...the fidelity/crime insurance coverage amount must equal at least ... the sum of three
+#     months of assessments on all units in the project."
+#   ⚠️ A SILENT 404 WAS CAUGHT HERE: the slug is "fidelitycrime-", not "fidelity-crime-".
+#
+# INPUT STRENGTH: `fidelity_crime_coverage_present` and `fidelity_crime_coverage_amount` fill 8/8 on the
+# bench's master policies — the strongest-resolving input in the condo lane.
+
+rule_id: CO-3
+name: Master insurance / fidelity
+category: Condo
+
+kind: structural            # must equal rule_kinds.csv
+numeric_check: false        # must equal rule_kinds.csv — a presence read, not a ratio
+
+criteria: >-
+  When the subject property is a condominium and the project's master insurance policy is in the file,
+  that policy must evidence fidelity/crime coverage for the association's funds (Fannie Mae B7-4-02).
+  This reads the derived ins.condo_fidelity_coverage. A policy that states no coverage is needs_review
+  rather than fired, because projects of 20 units or fewer are exempt and no document in the file states
+  the unit count. The coverage AMOUNT is reported but deliberately NOT judged: B7-4-02 measures it
+  against three months of assessments on all units, and neither the unit count nor the assessment base
+  resolves. A non-condominium property is not_applicable; a missing master policy, a missing property
+  type or an unrecognised indicator resolves to couldnt_check.
+
+applicability:
+  scope: the loan, when the subject property is a condominium
+  trigger: >-
+    property.type == condo. A non-condo property is not_applicable; a file that does not state the
+    property type, or states more than one, couldnt_checks rather than assuming the property is not a
+    condominium.
+
+reference_values:
+  priya_validated: false          # must equal rule_kinds.csv
+  threshold_needs_signoff: false  # must equal rule_kinds.csv — structural; the figures are tier P
+  values:
+    # Recorded for the reasoning text and pinned by test. ⚠️ NEITHER IS APPLIED — see the header.
+    fidelity_exempt_max_units: "20"
+    fidelity_exempt_max_required_coverage: "5000"
+  guideline_text: >-
+    The HOA or co-op corporation must have fidelity/crime insurance coverage for the dishonest or
+    fraudulent acts of anyone who handles or is responsible for funds it holds or administers (Fannie Mae
+    Selling Guide B7-4-02, page dated 08/05/2026). Projects consisting of 20 units or less, projects that
+    qualify for a waiver of project review, and projects that would need coverage of $5,000 or less are
+    excepted. Where required, the coverage must equal at least the sum of three months of assessments on
+    all units in the project.
+
+required_inputs:
+  - name: condo_fidelity_coverage
+    snapshot_path: 'tags.by_subject["loan"]["ins.condo_fidelity_coverage"]'
+    description: >-
+      whether the condominium project's master policy evidences fidelity/crime coverage (derived,
+      LP-494): "n/a" when the property is not a condominium, "present" / "absent" from the master
+      policy's own indicator, and "unknown" when there is no master policy on file, no stated property
+      type, or an unrecognised indicator.
+
+subject_enumeration: loan
+subject_key_fields: [loan]
+
+evidence_required: >-
+  Whether the master policy evidences fidelity/crime coverage and, when it does, the coverage amount —
+  inline on the finding, together with the statement that the amount has NOT been measured against
+  B7-4-02's three-months-of-assessments test, so a processor knows exactly what remains to check.
+
+guideline_reference: "Fannie Mae Selling Guide B7-4-02 (08/05/2026) — fidelity/crime insurance is required for condo and co-op projects, excepting projects of 20 units or less and projects needing $5,000 of coverage or less; where required, coverage must equal at least three months of assessments on all units."
+
+spec_version: 1
+
+deterministic:
+  # ⚠️ THE CONDO SCOPING IS AN APPLICABILITY PREDICATE, NOT AN OUTCOME — IH-7's finding (LP-487).
+  applicability:
+    tag: property.type
+    op: eq
+    value: condo
+  load_bearing_tags:
+    - ins.condo_fidelity_coverage
+  gated_tags:
+    - ins.condo_fidelity_coverage
+  operands: {}
+  outcomes:
+    - verdict: satisfied
+      when_tags:
+        - {tag: ins.condo_fidelity_coverage, op: eq, value: "present"}
+      reasoning: >-
+        the condominium project's master policy evidences fidelity/crime coverage for the association's
+        funds — the amount is reported on the finding but is not measured against B7-4-02's
+        three-months-of-assessments requirement, which the file does not state the inputs for
+    - verdict: needs_review
+      # ⚠️ needs_review, NEVER fired — a project of 20 units or fewer is exempt and no document states the
+      # count, so firing would call a correct file defective.
+      when_tags:
+        - {tag: ins.condo_fidelity_coverage, op: eq, value: "absent"}
+      reasoning: >-
+        the condominium project's master policy states that no fidelity/crime coverage is carried — Fannie
+        B7-4-02 requires it unless the project has 20 units or fewer, or would need $5,000 of coverage or
+        less, and the file does not state the project's unit count
+      how_to_fix: >-
+        Confirm the project's total unit count with the association or its management company. If the
+        project has more than 20 units, request evidence of fidelity/crime coverage (often a separate
+        crime policy rather than a line on the property certificate) and confirm the amount is at least
+        three months of assessments on all units. If the project has 20 units or fewer, note the
+        exemption in the file so the gap is not raised again.
+    - verdict: couldnt_check
+      default: true
+      reasoning: >-
+        the condominium project's fidelity/crime coverage could not be determined — the file does not
+        state the property type, carries no master insurance policy, or the policy's coverage indicator is
+        missing or not in a recognised form
+      how_to_fix: >-
+        Confirm the property type on the application. If a master policy certificate is in the file, read
+        its fidelity/crime line directly; if the wording is a carrier variant we should recognise, add it
+        to the rule's vocabulary.

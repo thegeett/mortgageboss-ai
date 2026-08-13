@@ -64,6 +64,9 @@ _FACT_LABELS: dict[str, str] = {
     "condo.questionnaire_present": "condo questionnaire",  # CO-1 (LP-488)
     # LP-494 — the condo project lane (CO-4 reserves, CO-5 eligibility).
     "condo.reserve_pct": "HOA budgeted replacement-reserve percentage",
+    "ins.condo_fidelity_coverage": "condominium project's fidelity / crime coverage",
+    "condo.fidelity_present_raw": "master policy's fidelity / crime indicator",
+    "condo.fidelity_amount": "fidelity / crime coverage amount",
     "condo.reserve_adequacy": "HOA replacement-reserve adequacy",
     "condo.delinquent_units_pct": "percentage of units 60+ days delinquent on assessments",
     "condo.commercial_space_pct": "project's commercial / mixed-use share",

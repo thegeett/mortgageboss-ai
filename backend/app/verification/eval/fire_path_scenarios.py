@@ -1555,7 +1555,7 @@ def build_co5_clear_snapshot() -> Snapshot:
         [
             _questionnaire(
                 "95-cq-clear",
-                delinquency_percentage="4",
+                units_delinquent_over_60_days="2",
                 commercial_space_percentage="10",
                 total_units="60",
                 single_entity_owned_units="6",
@@ -1573,7 +1573,7 @@ def build_co5_delinquent_snapshot() -> Snapshot:
         [
             _questionnaire(
                 "95-cq-delinq",
-                delinquency_percentage="22",
+                units_delinquent_over_60_days="22",
                 commercial_space_percentage="10",
                 total_units="60",
                 single_entity_owned_units="6",
@@ -1592,7 +1592,7 @@ def build_co5_concentration_snapshot() -> Snapshot:
         [
             _questionnaire(
                 "95-cq-conc",
-                delinquency_percentage="4",
+                units_delinquent_over_60_days="2",
                 commercial_space_percentage="10",
                 total_units="60",
                 single_entity_owned_units="18",
@@ -1611,7 +1611,7 @@ def build_co5_litigation_snapshot() -> Snapshot:
         [
             _questionnaire(
                 "95-cq-lit",
-                delinquency_percentage="4",
+                units_delinquent_over_60_days="2",
                 commercial_space_percentage="10",
                 total_units="60",
                 single_entity_owned_units="6",
@@ -1640,7 +1640,7 @@ def build_co5_unrecognised_litigation_snapshot() -> Snapshot:
         [
             _questionnaire(
                 "95-cq-lit-x",
-                delinquency_percentage="4",
+                units_delinquent_over_60_days="2",
                 commercial_space_percentage="10",
                 total_units="60",
                 single_entity_owned_units="6",

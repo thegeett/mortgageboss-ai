@@ -44,6 +44,11 @@ _ACTIVATED = frozenset(
         "MI-1",  # LP-488 — conventional MI requirement (the PROGRAM axis's first use)
         "MI-4",  # LP-488 — FHA upfront MIP (the FHA side of the program axis)
         "CO-1",  # LP-488 — condo questionnaire presence (document-type read)
+        # LP-494 — the condo lane. CO-3 is the FIDELITY leg IH-7 explicitly excludes (inputs 8/8);
+        # CO-4 reads the reserve percentage off the HOA STATEMENT type, where HOA budgets classify.
+        # ⚠️ CO-5 is deliberately absent: not one of its five inputs resolves on any document.
+        "CO-3",
+        "CO-4",
         "CL-1",
         "CR-13",
         "PR-6",
@@ -124,7 +129,7 @@ def test_exactly_the_eligible_candidates_pass() -> None:
     # none was recorded. 8 -> 9 held.
     # LP-494 +CO-4 +CO-5 — BUILT AND HELD on input_resolves: false. No loan file carries a condo
     # questionnaire, and the two in the bench corpus are a cancellation notice and an unanswered form.
-    assert len(held) == 11 and not (held & _ACTIVATED)  # every other candidate is held
+    assert len(held) == 10 and not (held & _ACTIVATED)  # every other candidate is held
 
 
 def test_eligible_rule_ids_is_sorted_and_matches() -> None:
@@ -139,6 +144,8 @@ def test_eligible_rule_ids_is_sorted_and_matches() -> None:
         "AU-3",
         "CL-1",
         "CO-1",
+        "CO-3",  # LP-494 — fidelity presence (the leg IH-7 explicitly excludes)
+        "CO-4",  # LP-494 — date-keyed reserve floor (ADR-379)
         "CR-1",  # LP-490a — ratify-pending (ADR-378)
         "CR-10",  # LP-490a
         "CR-12",

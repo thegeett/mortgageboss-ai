@@ -423,8 +423,22 @@ tags:
   # CANCELLATION NOTICE and a genuinely UNANSWERED standard form (all 90 of its catch-all labels carry an
   # empty value — verified at the document, not inferred from a fill rate). Declared because the fields
   # exist and the document type is real, NOT because data has been seen. Both rules are INERT.
-  condo.reserve_pct: {mode: parsed, subject: document, data: reserve_contribution_percentage, document_type: condo_questionnaire}
-  condo.delinquent_units_pct: {mode: parsed, subject: document, data: delinquency_percentage, document_type: condo_questionnaire}
+  # ⚠️ TWO SOURCES, AND THE SECOND IS THE ONE THAT RESOLVES (LP-494 follow-up). The reserve percentage
+  # was first declared on the condo questionnaire, where it fills 0/4. The HOA STATEMENT carries its own
+  # `reserve_percentage`, and that fills on 6 of 59 real statements — four of them stating exactly "10",
+  # the current Fannie floor. So `condo.reserve_pct` reads the HOA statement (the resolving source) and
+  # the questionnaire keeps its own tag for the day a completed form arrives. The recipe reads BOTH and
+  # abstains if they disagree — the IH-7 no-cross-document-pooling discipline.
+  condo.reserve_pct: {mode: parsed, subject: document, data: reserve_percentage, document_type: hoa_statement}
+  condo.reserve_pct_questionnaire: {mode: parsed, subject: document, data: reserve_contribution_percentage, document_type: condo_questionnaire}
+  # ⚠️ THE 60-DAY MEASURE, NOT THE GENERIC ONE (reported finding). This was parsed straight from the
+  # questionnaire's `delinquency_percentage`, a field the extractor prompt attaches NO definition to —
+  # while the vocabulary, every reason string and CO-5 all describe it as "units 60+ days past due" and
+  # compare it to B4-2.2-02's 60-day 15% cap. A form reporting "% delinquent (30+ days): 22%" made CO-5
+  # fire on a project that is compliant on the measure Fannie states. Now DERIVED from the pair that
+  # matches the citation — units_delinquent_over_60_days over total_units — and absent when either is.
+  condo.delinquent_units_pct: {mode: derived, subject: loan, data: condo_delinquent_60day_pct}
+  condo.units_delinquent_over_60_days: {mode: parsed, subject: document, data: units_delinquent_over_60_days, document_type: condo_questionnaire}
   condo.commercial_space_pct: {mode: parsed, subject: document, data: commercial_space_percentage, document_type: condo_questionnaire}
   condo.total_units: {mode: parsed, subject: document, data: total_units, document_type: condo_questionnaire}
   condo.single_entity_owned_units: {mode: parsed, subject: document, data: single_entity_owned_units, document_type: condo_questionnaire}
@@ -434,6 +448,12 @@ tags:
   loan.application_received_date: {mode: parsed, subject: loan, data: loan.application_received_date}
   # The two LOAN-scoped verdicts, derived. Loan-scoped for IH-7's reason: "absent" is a statement about the
   # FILE, and no per-document tag can be produced for a document that is not there.
+  # LP-494 (revised) — CO-3's fidelity leg. ⚠️ NOT A DUPLICATE OF IH-7: IH-7's spec header explicitly
+  # excludes fidelity/crime, so this is the one condo-insurance question no live rule asks. Both fields
+  # fill 8/8 on the bench's master policies — the strongest-resolving input in the whole condo lane.
+  condo.fidelity_present_raw: {mode: parsed, subject: document, data: fidelity_crime_coverage_present, document_type: master_insurance_policy_for_condominium}
+  condo.fidelity_amount: {mode: parsed, subject: document, data: fidelity_crime_coverage_amount, document_type: master_insurance_policy_for_condominium}
+  ins.condo_fidelity_coverage: {mode: derived, subject: loan, data: condo_fidelity_coverage}
   condo.reserve_adequacy: {mode: derived, subject: loan, data: condo_reserve_adequacy}
   condo.project_eligibility: {mode: derived, subject: loan, data: condo_project_eligibility}
   # IH-7's CONCLUSION tag (enum present_adequate|present_inadequate|absent|n/a|unknown). LOAN-scoped, not

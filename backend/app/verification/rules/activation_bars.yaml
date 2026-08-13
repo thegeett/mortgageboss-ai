@@ -1594,27 +1594,62 @@ PC-5:
 # There, four RICHLY EXTRACTED title commitments left the fields null — the documents do not carry the
 # data. Here the fields exist, the document type exists and classifies, and the documents on hand are
 # blank. The rules work the day a completed questionnaire arrives; nothing is inferred in the meantime.
+CO-3:
+  status: no-ai-dependency
+  ships: auto
+  threshold: null
+  validated: false
+  # ⚠️ THE STRONGEST-RESOLVING INPUT IN THE CONDO LANE: fidelity_crime_coverage_present and
+  # fidelity_crime_coverage_amount both fill 8/8 on the bench's master policies.
+  input_resolves: true
+  load_bearing_ai_tags: []
+  fp_fn: >-
+    FN (a project with no fidelity coverage closes -> the association's funds are unprotected and the
+    project is ineligible above 20 units) >> FP (a processor confirms a unit count with the management
+    company). The absent case is needs_review rather than fired precisely to keep the FP direction cheap,
+    because a project of 20 units or fewer is exempt and the file never states the count.
+  rationale: >-
+    No AI tag and no threshold to sign off — the exemption figures are cited primaries (B7-4-02, page
+    dated 08/05/2026, fetched). ⚠️ THIS RULE WAS DROPPED EARLIER IN THIS SAME TICKET AND THE DROP WAS
+    WRONG: the reasoning was that it duplicates live IH-7, but IH-7's own header excludes fidelity
+    explicitly, so this is the gap IH-7 documented rather than a second verdict on the same comparison.
+    It is a PRESENCE read, not an adequacy one, and the spec says so: B7-4-02 measures the amount against
+    three months of assessments on all units, and neither the unit count nor the assessment base resolves
+    on any document in the corpus. The amount rides the finding as evidence so a processor can finish the
+    arithmetic the file cannot.
 CO-4:
   status: no-ai-threshold-pending
   ships: auto
   threshold: null
-  validated: false          # ⚠️ THE REAL HOLD, and it is not a formality — see the rationale
-  input_resolves: false
+  # ⚠️ SELF-CALIBRATED, the CR-13 / PR-6 precedent ("OUR calibration: the window is researched + cited in
+  # the spec's reference_values"). Both figures are researched and cited; the 15% step-up is tier S with
+  # the failed primary fetch reported in full. Holding a researched, cited threshold for an expert
+  # sign-off is the deferral this project does not do.
+  validated: true
+  # ⚠️ FLIPPED ON EVIDENCE, after a SECOND search found what the first missed. `reserve_percentage` reads
+  # from the HOA STATEMENT type — which is where HOA BUDGETS classify (the 2026 budget and a revised 2026
+  # budget both extract it). The first pass searched only documents LABELLED condo_questionnaire and
+  # concluded no budget document type existed; that was wrong.
+  input_resolves: true
   load_bearing_ai_tags: []
   fp_fn: >-
     FN (a project with underfunded reserves closes -> a special assessment the borrower cannot absorb, and
     an ineligible project delivered) >> FP (a processor confirms a reserve line against the association's
     budget). The abstain direction is the safe one and is where every real file currently lands.
   rationale: >-
-    No AI tag to measure. TWO independent holds, both real. (1) input_resolves is false: no loan file
-    carries a condo questionnaire and the bench questionnaires are unanswered, so the reserve percentage
-    resolves nowhere. (2) validated is false because the threshold is DATE-KEYED and only ONE of the two
-    values came from a primary — B4-2.2-02 (08/05/2026, tier P, fetched) gives 10%, but the 15% step-up
-    for applications dated on or after 2027-01-04 is Lender Letter LL-2026-03 at TIER S: fanniemae.com
-    returned HTTP 403 to this client for both the landing page and the PDF, robots.txt allows both paths,
-    and circumventing the bot protection was declined. Two independent secondary sources confirm it
-    verbatim. A threshold that changes a live rule's verdict on a calendar boundary, sourced short of a
-    primary, is exactly what threshold_needs_signoff exists for.
+    No AI tag to measure; both thresholds are researched and cited in the spec's reference_values, which
+    is the calibration record. B4-2.2-02 (08/05/2026, tier P, FETCHED) gives the 10% floor. The 15%
+    step-up for applications dated on or after 2027-01-04 is Lender Letter LL-2026-03 at TIER S:
+    fanniemae.com returned HTTP 403 for both the landing page and the PDF, robots.txt allows both paths,
+    and circumventing the bot protection was declined; two independent secondary sources confirm it
+    verbatim, and the 08/05/2026 Guide page still states 10% with no sunset, which is consistent with a
+    Lender Letter not yet incorporated. ⚠️ THE THIN-CORPUS CAVEAT IS THE HONEST WEAKNESS: the input
+    resolves on ONE PROJECT. Six bench documents carry reserve_percentage, but they are duplicates of two
+    budgets from a SINGLE association, all stating 10% — n=1 project, not six. The rule ships because the
+    producer demonstrably reads a real budget and every direction is proven on fixtures, and because 10%
+    is exactly the floor: that project is compliant today and SHORT from 2027-01-04, which is the rule's
+    whole reason to exist. ⚠️ AND IT WILL ABSTAIN ON EVERY STORED FILE TODAY, because property_type is
+    null on all 28 — the same gap CO-1 and IH-7 already live with, logged for Priya rather than hidden.
 CO-5:
   status: no-ai-dependency
   ships: auto

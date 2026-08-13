@@ -45,7 +45,7 @@ from app.verification.rule_engine.registry import ACTIVE_RULE_IDS, evaluate_rule
 from app.verification.rule_engine.result import Verdict
 from app.verification.rules.distrust import distrusted_tag_ids
 from app.verification.rules.kinds import EvaluationPath, RuleKindName, load_rule_kinds
-from app.verification.rules.specs import RuleSpecNotFound, load_rule_spec
+from app.verification.rules.specs import load_rule_spec
 from app.verification.snapshot.model import Snapshot
 from app.verification.tag_materialization.declarations import load_declarations
 from app.verification.tag_materialization.derived import (
@@ -137,6 +137,8 @@ async def test_co5_a_clean_project_is_satisfied() -> None:
 
 
 async def test_co5_delinquency_above_the_limit_fires() -> None:
+    """22 of 60 units 60+ days past due = 36.7%, above B4-2.2-02's 15%. ⚠️ The COUNT drives it, not a
+    generic delinquency percentage — the cap is stated on units 60 or more days past due."""
     evaluation = await _one(build_co5_delinquent_snapshot, "CO-5")
     assert evaluation.verdict is Verdict.FIRED
 
@@ -172,14 +174,26 @@ async def test_co5_an_unrecognised_litigation_answer_abstains() -> None:
 # --------------------------------------------------------------------------- #
 # The scope fences, the thresholds, and the inert state
 # --------------------------------------------------------------------------- #
-def test_both_rules_are_built_and_inert() -> None:
-    """⚠️ NEITHER SHIPS. `input_resolves` is false on both, and honestly so: no loan file carries a condo
-    questionnaire, and the two in the bench are a cancellation notice and an unanswered form."""
+def test_co3_and_co4_are_live_and_co5_is_held() -> None:
+    """⚠️ THE SPLIT, AND WHY IT IS NOT ARBITRARY.
+
+    CO-3 and CO-4 activate because their inputs RESOLVE ON REAL STORED DATA — LP-485's development-mode
+    bar. CO-3's fidelity pair fills 8/8 on the bench's master policies; CO-4's reserve percentage reads
+    from the HOA STATEMENT type, which is where HOA BUDGETS classify.
+
+    ⚠️ CO-5 IS HELD, and it is the one blocker research could not remove: NOT ONE of its five inputs
+    resolves on any document of any type. `hoa_certification` declares every one of them and ZERO such
+    documents exist — ADR-354 exactly. Activating it would couldnt_check on 100% of files forever with
+    every test green (ADR-286/289)."""
     bars = load_activation_bars()
-    for rule_id in ("CO-4", "CO-5"):
-        assert bars[rule_id].input_resolves is False, rule_id
-        assert is_eligible(bars[rule_id]) is False, rule_id
-        assert rule_id not in ACTIVE_RULE_IDS, rule_id
+    for rule_id in ("CO-3", "CO-4"):
+        assert bars[rule_id].input_resolves is True, rule_id
+        assert is_eligible(bars[rule_id]) is True, rule_id
+        assert rule_id in ACTIVE_RULE_IDS, rule_id
+    assert bars["CO-5"].input_resolves is False
+    assert is_eligible(bars["CO-5"]) is False
+    assert "CO-5" not in ACTIVE_RULE_IDS
+    for rule_id in ("CO-3", "CO-4", "CO-5"):
         # ⚠️ AND NEITHER MAY EVER CARRY A SELF-CONSISTENCY RATE. There are ZERO cases to derive over, and
         # both rules are deterministic — a rate here could only ever be an artifact (the CR-8 / LP-491
         # shape), which is why no model call was made for this ticket.
@@ -199,16 +213,25 @@ def test_neither_rule_reads_the_sourceless_warrantability_tag() -> None:
         assert "property.is_warrantable_condo" not in tags, rule_id
 
 
-def test_co3_was_dropped_rather_than_built() -> None:
-    """⚠️ A DROP WITH EVIDENCE, pinned so it cannot be quietly reversed. CO-3's master half duplicates LIVE
-    IH-7 (ADR-375, one matcher per comparison — the rule that dropped PC-1), and its fidelity half needs
-    the project's UNIT COUNT and assessment base to know whether coverage is even required (B7-4-02,
-    08/05/2026: exempt at 20 units or fewer; required amount = three months of assessments on all units).
-    Neither reaches the snapshot. It could only ever have said "coverage exists", never "adequate"."""
-    with pytest.raises(RuleSpecNotFound):
-        load_rule_spec("CO-3")
-    assert "CO-3" not in ACTIVE_RULE_IDS
-    assert "CO-3" not in load_activation_bars()
+def test_co3_checks_fidelity_only_and_never_duplicates_ih7() -> None:
+    """⚠️ THE UN-DROP, PINNED IN BOTH DIRECTIONS. CO-3 was dropped earlier in this ticket as an IH-7
+    duplicate; that was wrong. IH-7 reads ins.condo_master_policy (presence, replacement-cost basis,
+    liability limit); CO-3 reads ins.condo_fidelity_coverage — the leg IH-7's OWN header excludes."""
+    co3 = load_rule_spec("CO-3").deterministic
+    ih7 = load_rule_spec("IH-7").deterministic
+    assert co3 is not None and ih7 is not None
+    assert set(co3.gated_tags) == {"ins.condo_fidelity_coverage"}
+    assert set(ih7.gated_tags) == {"ins.condo_master_policy"}
+    assert not (set(co3.gated_tags) & set(ih7.gated_tags))
+
+
+def test_co3_absent_fidelity_is_needs_review_never_fired() -> None:
+    """⚠️ A project of 20 units or fewer is EXEMPT (B7-4-02) and no document states the unit count, so
+    firing would call a correct file defective. Pinned as a spec property."""
+    spec = load_rule_spec("CO-3")
+    assert spec.deterministic is not None
+    for outcome in spec.deterministic.outcomes:
+        assert outcome.verdict != Verdict.FIRED.value, outcome.verdict
 
 
 def test_the_catalog_edits_are_recorded_and_the_row_count_is_unchanged() -> None:
@@ -276,8 +299,6 @@ def test_every_parsed_condo_tag_is_document_type_scoped() -> None:
     unscoped read would let an unrelated document decide a project's concentration tier."""
     declarations = load_declarations()
     for tag_id in (
-        "condo.reserve_pct",
-        "condo.delinquent_units_pct",
         "condo.commercial_space_pct",
         "condo.total_units",
         "condo.single_entity_owned_units",

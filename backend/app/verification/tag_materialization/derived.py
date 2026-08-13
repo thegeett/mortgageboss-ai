@@ -1076,6 +1076,7 @@ _CONDO_MASTER_POLICY_DOC_TYPES = frozenset({"master_insurance_policy_for_condomi
 #   _CONDO_PROJECT_ADJACENT_DOC_TYPES — the sibling the classifier is told is confusable with it. Its
 #   presence is not a pass, but it is not a confirmed gap either: CO-1 abstains so a human can judge.
 _CONDO_QUESTIONNAIRE_DOC_TYPES = frozenset({"condo_questionnaire"})
+_CONDO_RESERVE_DOC_TYPES = frozenset({"condo_questionnaire", "hoa_statement"})
 _CONDO_PROJECT_ADJACENT_DOC_TYPES = frozenset({"hoa_certification"})
 
 _MASTER_POLICY_RC_PHRASES: tuple[str, ...] = (
@@ -1151,11 +1152,16 @@ _CONDO_MAX_COMMERCIAL_PCT = Decimal("35")
 _CONDO_SINGLE_ENTITY_MAX_PCT_21_PLUS = Decimal("20")
 _CONDO_SINGLE_ENTITY_MAX_UNITS_SMALL = Decimal("2")
 _CONDO_QUESTIONNAIRE_DOC_TYPES = frozenset({"condo_questionnaire"})
+_CONDO_RESERVE_DOC_TYPES = frozenset({"condo_questionnaire", "hoa_statement"})
 
 # ⚠️ A CLOSED VOCABULARY (ADR-376) — an unrecognised litigation answer ABSTAINS, and that direction is the
 # whole point: "PENDING - SEE ATTACHED" must never be read as "no litigation" and clear the project.
 _CONDO_LITIGATION_YES = frozenset({"yes", "y", "true", "pending", "disclosed"})
-_CONDO_LITIGATION_NO = frozenset({"no", "n", "false", "none", "n/a", "na"})
+# ⚠️ "n/a"/"na" are NOT here (reported finding). They assert NOTHING about litigation — a form that
+# leaves the line not-applicable has not told us there is none — so reading them as "no" is exactly
+# the direction this block's own comment and the vocabulary description forbid ("an unfamiliar answer
+# can never be read as 'no litigation'"). They fall through to the abstain.
+_CONDO_LITIGATION_NO = frozenset({"no", "n", "false", "none"})
 
 
 def _condo_scope(snapshot: Snapshot) -> tuple[str | None, str]:
@@ -1199,6 +1205,80 @@ def _condo_decimal(snapshot: Snapshot, tag_id: str) -> tuple[Decimal | None, str
     return next(iter(parsed)), None
 
 
+_CONDO_FIDELITY_YES = frozenset({"yes", "y", "true", "present", "included", "covered"})
+_CONDO_FIDELITY_NO = frozenset(
+    {"no", "n", "false", "none", "not included", "not covered", "excluded"}
+)
+# B7-4-02 (08/05/2026, tier P): exempt at 20 units or fewer, or where the required coverage would be
+# $5,000 or less. Recorded for the reasoning text — NOT applied, because no document states the count.
+_CONDO_FIDELITY_EXEMPT_MAX_UNITS = 20
+
+
+def _condo_fidelity_coverage(
+    snapshot: Snapshot, _subject_id: str, _subject_raw: object
+) -> tuple[JsonValue, str]:
+    """ins.condo_fidelity_coverage — does the project's master policy EVIDENCE fidelity/crime cover? (CO-3)
+
+    ⚠️ THIS IS THE ONE CONDO-INSURANCE QUESTION NO LIVE RULE ASKS. IH-7's spec header excludes fidelity
+    explicitly, so this is not a second verdict on the same comparison (ADR-375) — it is the gap IH-7
+    documented and left open.
+
+    ⚠️ PRESENCE, NOT ADEQUACY, AND THE LIMIT IS STATED RATHER THAN FUDGED. B7-4-02 sets the required
+    amount at "the sum of three months of assessments on all units in the project" and exempts projects of
+    20 units or fewer. NEITHER the unit count NOR the assessment base resolves on any document in the
+    corpus, so this recipe does not compare the amount against anything. It reports whether coverage is
+    EVIDENCED — itself a Fannie requirement the lender must verify — and carries the amount inline so a
+    processor can finish the arithmetic the file cannot.
+    """
+    scope, reason = _condo_scope(snapshot)
+    if scope != "condo":
+        return (scope or _UNKNOWN), (
+            reason
+            if scope != "n/a"
+            else "the subject property is not a condominium — no project fidelity coverage is required"
+        )
+
+    has_policy = any(
+        entry.document_type in _CONDO_MASTER_POLICY_DOC_TYPES
+        for entry in (() if snapshot.documents.absent else snapshot.documents.entries)
+    )
+    if not has_policy:
+        return _UNKNOWN, (
+            "the file carries no condominium master insurance policy, so the project's fidelity/crime "
+            "coverage cannot be read — IH-7 reports the missing policy itself"
+        )
+
+    answers = {
+        v.casefold().strip() for v in _parsed_strings(snapshot, "condo.fidelity_present_raw")
+    }
+    if not answers:
+        return (
+            _UNKNOWN,
+            "the master policy on file does not state whether fidelity/crime coverage is carried",
+        )
+    if answers <= _CONDO_FIDELITY_YES:
+        amount, problem = _condo_decimal(snapshot, "condo.fidelity_amount")
+        if problem is not None:
+            return _UNKNOWN, problem
+        detail = f" of ${amount:,}" if amount is not None else ""
+        return "present", (
+            f"the condominium project's master policy evidences fidelity/crime coverage{detail}. ⚠️ The "
+            "AMOUNT is not verified against Fannie B7-4-02's requirement (three months of assessments on "
+            "all units): neither the project's unit count nor its assessment base is stated on any "
+            "document in the file"
+        )
+    if answers <= _CONDO_FIDELITY_NO:
+        return "absent", (
+            "the condominium project's master policy states that no fidelity/crime coverage is carried; "
+            f"Fannie B7-4-02 requires it unless the project has {_CONDO_FIDELITY_EXEMPT_MAX_UNITS} units "
+            "or fewer, or would need $5,000 of coverage or less"
+        )
+    return _UNKNOWN, (
+        f"the master policy's fidelity/crime indicator reads {sorted(answers)[0]!r}, which is not a "
+        "recognised yes/no answer — abstaining rather than reporting the project as uncovered"
+    )
+
+
 def _condo_reserve_adequacy(
     snapshot: Snapshot, _subject_id: str, _subject_raw: object
 ) -> tuple[JsonValue, str]:
@@ -1218,18 +1298,38 @@ def _condo_reserve_adequacy(
             else "the subject property is not a condominium — no HOA reserve floor applies"
         )
 
+    # ⚠️ TWO INDEPENDENT SOURCES, NEITHER PREFERRED. The HOA statement's reserve_percentage resolves on
+    # real data (6/59, four of them "10"); the condo questionnaire's is the same fact from the association's
+    # own form. Read together so a disagreement ABSTAINS instead of one silently overriding the other —
+    # IH-7's no-cross-document-pooling finding, applied across document TYPES rather than copies.
     reserve_pct, problem = _condo_decimal(snapshot, "condo.reserve_pct")
     if problem is not None:
         return _UNKNOWN, problem
+    questionnaire_pct, problem = _condo_decimal(snapshot, "condo.reserve_pct_questionnaire")
+    if problem is not None:
+        return _UNKNOWN, problem
+    if (
+        reserve_pct is not None
+        and questionnaire_pct is not None
+        and reserve_pct != questionnaire_pct
+    ):
+        return _UNKNOWN, (
+            f"the HOA statement states a replacement-reserve allocation of {reserve_pct}% and the condo "
+            f"questionnaire states {questionnaire_pct}% — abstaining rather than judging the project by "
+            "one of two figures the association itself reports differently"
+        )
+    reserve_pct = reserve_pct if reserve_pct is not None else questionnaire_pct
     if reserve_pct is None:
-        has_questionnaire = any(
-            entry.document_type in _CONDO_QUESTIONNAIRE_DOC_TYPES
+        has_source = any(
+            entry.document_type in _CONDO_RESERVE_DOC_TYPES
             for entry in (() if snapshot.documents.absent else snapshot.documents.entries)
         )
         return _UNKNOWN, (
-            "the condo questionnaire on file does not state the budgeted replacement-reserve percentage"
-            if has_questionnaire
-            else "the file carries no condo questionnaire stating the budgeted replacement-reserve percentage"
+            "neither the condo questionnaire nor the HOA statement on file states the budgeted "
+            "replacement-reserve percentage"
+            if has_source
+            else "the file carries no condo questionnaire or HOA statement stating the budgeted "
+            "replacement-reserve percentage"
         )
 
     application_dates = _parsed_strings(snapshot, "loan.application_received_date")
@@ -1262,6 +1362,39 @@ def _condo_reserve_adequacy(
     return "adequate", (
         f"the association budgets {reserve_pct}% of its annual assessment income to replacement reserves, "
         f"at or above the {floor}% required for an application dated {application_date} ({citation})"
+    )
+
+
+def _condo_delinquent_60day_pct(
+    snapshot: Snapshot, _subject_id: str, _subject_raw: object
+) -> tuple[JsonValue, str]:
+    """condo.delinquent_units_pct — units 60+ DAYS past due as a percent of total units (CO-5).
+
+    ⚠️ COMPUTED FROM THE 60-DAY COUNT, not the questionnaire's generic ``delinquency_percentage``
+    (reported finding). B4-2.2-02's 15% cap is stated on units **60 or more days** past due; the generic
+    field carries whatever period the form chose — commonly 30+ — and the extractor prompt attaches no
+    definition to it. Comparing a 30-day figure to a 60-day cap fires CO-5 on a compliant project.
+
+    Abstains when either input is missing or ``total_units`` is not positive: a percentage cannot be
+    built from half a fraction, and a fabricated 0 would read as a clean project.
+    """
+    count, problem = _condo_decimal(snapshot, "condo.units_delinquent_over_60_days")
+    if problem is not None:
+        return _UNKNOWN, problem
+    total, problem = _condo_decimal(snapshot, "condo.total_units")
+    if problem is not None:
+        return _UNKNOWN, problem
+    if count is None or total is None:
+        return _UNKNOWN, (
+            "the questionnaire does not state both the 60-day delinquent unit count and the total unit "
+            "count, so the 60-day delinquency rate cannot be computed"
+        )
+    if total <= 0:
+        return _UNKNOWN, "the questionnaire states a total unit count of zero or less"
+    pct = (count / total * Decimal(100)).quantize(Decimal("0.01"))
+    return str(pct), (
+        f"{count} of the project's {total} units are 60+ days past due on common expense assessments "
+        f"({pct}%)"
     )
 
 
@@ -1310,10 +1443,15 @@ def _condo_project_eligibility(
         )
     concentration_read = False
     if total_units is not None and single_entity_units is not None and total_units > 0:
-        # ⚠️ TIERED, per B4-2.1-03 — and the tiers do not extend below 5 units, so a 4-unit project has no
-        # stated single-entity limit and this leg stays unread rather than inventing one.
+        # ⚠️ READ, not "missing" (reported finding). B4-2.1-03's tiers do not extend below 5 units, so a
+        # 4-unit project has no stated single-entity limit — but that is the leg being ANSWERED (no limit
+        # applies), not unanswered. Setting it here rather than inside the tiers stops the roll-call below
+        # reporting "the condo questionnaire does not answer the single-entity concentration" about a form
+        # that answered it, which made every small project permanently couldnt_check and sent a processor
+        # to chase a figure already on the page. The genuinely missing case is total_units or
+        # single_entity_units being ABSENT, which this branch already excludes.
+        concentration_read = True
         if total_units >= 21:
-            concentration_read = True
             share = single_entity_units / total_units * Decimal(100)
             if share > _CONDO_SINGLE_ENTITY_MAX_PCT_21_PLUS:
                 return "ineligible_threshold", (
@@ -1322,7 +1460,6 @@ def _condo_project_eligibility(
                     f"{_CONDO_SINGLE_ENTITY_MAX_PCT_21_PLUS}% in a project of 21 or more units"
                 )
         elif total_units >= 5:
-            concentration_read = True
             if single_entity_units > _CONDO_SINGLE_ENTITY_MAX_UNITS_SMALL:
                 return "ineligible_threshold", (
                     f"a single entity owns {single_entity_units} of the project's {total_units} units; "
@@ -1338,6 +1475,18 @@ def _condo_project_eligibility(
             litigation_disclosed = True
         elif litigation_answers <= _CONDO_LITIGATION_NO:
             litigation_disclosed = False
+        elif litigation_answers & _CONDO_LITIGATION_YES and (
+            litigation_answers & _CONDO_LITIGATION_NO
+        ):
+            # ⚠️ DISAGREEMENT IS ITS OWN ANSWER (reported finding). Two questionnaires answering "Yes"
+            # and "No" match neither subset and fell into the unrecognised-value branch, which then
+            # reported sorted(...)[0] — rendering "the litigation answer reads 'no', which is not a
+            # recognised yes/no answer". The verdict was right and the reason was false, and it hid a
+            # contradiction BETWEEN DOCUMENTS. _condo_decimal already carries this branch.
+            return _UNKNOWN, (
+                f"the file's questionnaires disagree about litigation "
+                f"({', '.join(sorted(litigation_answers))}) — abstaining rather than picking one"
+            )
         else:
             return _UNKNOWN, (
                 f"the questionnaire's litigation answer reads {sorted(litigation_answers)[0]!r}, which is "
@@ -1383,15 +1532,14 @@ def _condo_master_policy(
     ``present_adequate`` / ``present_inadequate`` on the basis and liability limit · ``unknown`` whenever
     an input is missing or unrecognised. Never reads a missing input as adequate.
     """
-    property_types = {v.casefold() for v in _parsed_strings(snapshot, "property.type")}
-    if not property_types:
-        return _UNKNOWN, "the file does not state the property type, so condo scoping is undecided"
-    if len(property_types) > 1:
-        return _UNKNOWN, (
-            f"the file states more than one property type ({', '.join(sorted(property_types))}) — "
-            "ambiguous"
-        )
-    if next(iter(property_types)) != "condo":
+    # ⚠️ THE SHARED SCOPE (reported finding). _condo_scope's docstring claims to be "ONE implementation
+    # ... so CO-4 and CO-5 can never disagree", while this byte-identical block sat inline here for live
+    # IH-7 — so a future fix (accepting a MISMO "Condominium" spelling, say) would land in one copy and
+    # IH-7 would then disagree with CO-4/CO-5 about whether the subject is a condo.
+    scope, why = _condo_scope(snapshot)
+    if scope is None:
+        return _UNKNOWN, why
+    if scope == "n/a":
         return "n/a", "the subject property is not a condominium — no master policy is required"
 
     # ⚠️ PRESENCE IS ABOUT THE DOCUMENT, not one extracted field (reported finding). Keying `absent` on
@@ -3884,6 +4032,9 @@ _RECIPES: dict[str, Recipe] = {
     "credit_has_collections": _has_collections,  # LP-490 — CR-10
     "mortgagee_clause_correct": _mortgagee_clause_correct,  # LP-487 — IH-2
     "condo_master_policy": _condo_master_policy,  # LP-487 — IH-7
+    # LP-494 review — the 60-day delinquency rate the B4-2.2-02 citation actually names.
+    "condo_delinquent_60day_pct": _condo_delinquent_60day_pct,
+    "condo_fidelity_coverage": _condo_fidelity_coverage,  # LP-494 — CO-3
     "condo_reserve_adequacy": _condo_reserve_adequacy,  # LP-494 — CO-4
     "condo_project_eligibility": _condo_project_eligibility,  # LP-494 — CO-5
     # LP-453 — DETERMINISTIC numeric observations over the credit report's tradelines list (loan-level). Pure

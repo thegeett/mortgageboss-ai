@@ -40,6 +40,7 @@ from __future__ import annotations
 # uniform abstain BEFORE LP-493a's context fixes; the re-derivation after them scored a MEASURED
 # 0.5000 (2 cases, 1 disagreement), so PC-5 is held on a measured failure, not on an absent number. PC-1 DROPPED: duplicate
 # matcher + a 0/5 field) -> 61.
-EXPECTED_ACTIVE_RULE_COUNT: int = 61
+# LP-494 +CO-3 +CO-4 (the condo lane; CO-5 built and held — no input resolves on any document) -> 63.
+EXPECTED_ACTIVE_RULE_COUNT: int = 63
 
 __all__ = ["EXPECTED_ACTIVE_RULE_COUNT"]

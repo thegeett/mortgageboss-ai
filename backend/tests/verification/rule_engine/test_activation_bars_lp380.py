@@ -167,9 +167,15 @@ def test_exactly_the_signed_off_bars_are_validated() -> None:
     # Fannie B7-4-01 / B7-3-03 (both pages dated 08/05/2026) in the spec, not signed off by Priya.
     # ⚠️ IH-2 is NOT here: it is no-ai-dependency with validated:false — a matching VOCABULARY, not a
     # threshold, so there is nothing to validate (the CL-1 precedent).
+    # LP-494 adds CO-4 on exactly the CR-13 / PR-6 / IH-7 footing: SELF-CALIBRATED, not Priya-signed. Both
+    # reserve floors are researched and cited in the spec's reference_values — 10% from B4-2.2-02
+    # (08/05/2026, tier P, fetched) and 15% from LL-2026-03 at tier S, with the failed primary fetch
+    # reported in full on the bar. Holding a researched, cited threshold for a sign-off is the deferral
+    # this project does not do.
     assert (
         validated
         == {
+            "CO-4",
             "CR-13",
             "PR-6",
             "IH-7",
@@ -328,6 +334,8 @@ def test_active_set_is_base_plus_lp389() -> None:
             "PR-4",  # LP-492 — appraisal completeness (ratify-pending)
             "PR-5",  # LP-492 — condition rating (ratify-pending)
             "PC-8",  # LP-493 — personal property (ratify-pending; surfaces only, no firing path)
+            "CO-3",  # LP-494 — condo lane (CO-3 fidelity presence; CO-4 date-keyed reserve floor)
+            "CO-4",
         )
     )
     # A bar persists after activation as the record of WHY the rule went live, so the bars now intersect the
@@ -385,6 +393,8 @@ def test_active_set_is_base_plus_lp389() -> None:
             "PR-4",  # LP-492 — appraisal completeness (ratify-pending)
             "PR-5",  # LP-492 — condition rating (ratify-pending)
             "PC-8",  # LP-493 — personal property (ratify-pending; surfaces only, no firing path)
+            "CO-3",  # LP-494 — condo lane (CO-3 fidelity presence; CO-4 date-keyed reserve floor)
+            "CO-4",
             "CR-13",
             "PR-6",
         }

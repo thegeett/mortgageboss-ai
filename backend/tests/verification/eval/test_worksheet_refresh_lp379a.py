@@ -228,6 +228,8 @@ def test_no_rule_activation_changed() -> None:
             "PR-4",  # LP-492 — appraisal completeness (ratify-pending)
             "PR-5",  # LP-492 — condition rating (ratify-pending)
             "PC-8",  # LP-493 — personal property (ratify-pending; surfaces only, no firing path)
+            "CO-3",  # LP-494 — condo lane (CO-3 fidelity presence; CO-4 date-keyed reserve floor)
+            "CO-4",
         )
     )
 

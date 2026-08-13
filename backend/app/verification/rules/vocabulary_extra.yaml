@@ -613,6 +613,18 @@ tags:
       eq/ne on a tag and cannot compare the aggregate numerically, so without this the rule ran on every
       borrower including the common zero-collection file.
     produced_by: derived
+  # LP-494 review — the 60-day delinquent unit COUNT, the numerator B4-2.2-02's cap is stated on.
+  # condo.delinquent_units_pct is now DERIVED from this over condo.total_units, because the
+  # questionnaire's generic `delinquency_percentage` carries whatever period the form chose (commonly
+  # 30+ days) and comparing that to a 60-day cap fires CO-5 on a compliant project.
+  condo.units_delinquent_over_60_days:
+    entity: doc
+    value_type: number
+    allowed_values: null
+    description: >-
+      The number of units 60 or more days past due on common expense assessments, as stated on the condo
+      questionnaire. Absent when the form does not state it; never defaulted to zero.
+    produced_by: parsed
   condo.questionnaire_present:
     entity: loan
     value_type: enum
@@ -1012,4 +1024,42 @@ tags:
       "clear" ONLY when all four legs were readable and none tripped; "n/a" for a non-condominium;
       "unknown" otherwise. ⚠️ "clear" requires the inputs to have been READ — a blank questionnaire is
       never a clean project.
+    produced_by: derived
+  condo.reserve_pct_questionnaire:
+    entity: doc
+    value_type: number
+    allowed_values: null
+    description: >-
+      The budgeted replacement-reserve percentage as stated on the CONDO QUESTIONNAIRE — the second source
+      for CO-4, beside condo.reserve_pct (the HOA statement's). Fills 0/4 today because the corpus's
+      questionnaires are unanswered; declared so a completed form is read the day one arrives. The recipe
+      abstains when the two sources disagree rather than preferring either.
+    produced_by: parsed
+  condo.fidelity_present_raw:
+    entity: doc
+    value_type: string
+    allowed_values: null
+    description: >-
+      The master policy's fidelity/crime coverage indicator, VERBATIM. A string, not an enum: the recipe
+      recognises a closed set of spellings (ADR-376) and abstains on anything else, so an unfamiliar
+      answer can never be read as "no coverage" and raise a finding against a covered project.
+    produced_by: parsed
+  condo.fidelity_amount:
+    entity: doc
+    value_type: number
+    allowed_values: null
+    description: >-
+      The fidelity/crime coverage amount on the project's master policy. Reported inline as evidence; it
+      is NOT compared against B7-4-02's "three months of assessments on all units", because the unit count
+      and assessment base resolve on no document in the corpus.
+    produced_by: parsed
+  ins.condo_fidelity_coverage:
+    entity: loan
+    value_type: enum
+    allowed_values: ["present", "absent", "n/a", "unknown"]
+    description: >-
+      Whether the condominium project's master policy evidences fidelity/crime coverage (CO-3, B7-4-02).
+      "n/a" for a non-condominium; "absent" when a master policy is on file and states no coverage;
+      "unknown" when there is no master policy, no property type, or an unrecognised indicator. ⚠️ This is
+      a PRESENCE read, not an adequacy one — see the recipe.
     produced_by: derived

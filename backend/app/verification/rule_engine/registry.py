@@ -284,6 +284,19 @@ _LP492_ACTIVATED: tuple[str, ...] = ("PR-2", "PR-7", "PR-3", "PR-4", "PR-5")
 # disclosed`, which is 0/5 on the real contracts (TI-3/4/5's shape).
 _LP493_ACTIVATED: tuple[str, ...] = ("PC-8",)
 
+# LP-494 — the condo lane. ⚠️ CO-3 AND CO-4 ACTIVATE; CO-5 IS BUILT AND HELD.
+# CO-3 was DROPPED mid-ticket and un-dropped on evidence: it is the FIDELITY leg, which IH-7's own spec
+# header excludes, so it duplicates nothing — and its two inputs fill 8/8, the lane's strongest.
+# CO-4's reserve percentage reads from the HOA STATEMENT type, which is where HOA BUDGETS classify; the
+# first search looked only at documents labelled condo_questionnaire and wrongly concluded no budget
+# document type existed.
+# ⚠️ CO-5 STAYS HELD, and it is the only one of the three whose blocker research could not remove: NOT ONE
+# of its five inputs (delinquency, commercial share, unit count, single-entity units, litigation) resolves
+# on any document of any type. hoa_certification declares every one of them and ZERO such documents exist
+# (ADR-354 exactly: schema present, data absent). Activating it would produce couldnt_check on 100% of
+# files forever with every test green — ADR-286/289, the pattern that has killed four live rules.
+_LP494_ACTIVATED: tuple[str, ...] = ("CO-3", "CO-4")
+
 # The gate is the source of truth: test_activation_gate_lp389 asserts ACTIVE_RULE_IDS - _BASE_ACTIVE ==
 # eligible_rule_ids() — a rule CANNOT enter this set without meeting the eligibility gate (not a hand-list).
 ACTIVE_RULE_IDS: tuple[str, ...] = (
@@ -312,6 +325,7 @@ ACTIVE_RULE_IDS: tuple[str, ...] = (
     *_LP491_ACTIVATED,
     *_LP492_ACTIVATED,
     *_LP493_ACTIVATED,
+    *_LP494_ACTIVATED,
 )
 
 
