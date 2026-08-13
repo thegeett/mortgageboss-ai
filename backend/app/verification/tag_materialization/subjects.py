@@ -49,6 +49,10 @@ class ContextOptions:
     include_lists: bool = False
     list_row_cap: int = _DEFAULT_LIST_ROW_CAP
     include_stated_liabilities: bool = False
+    # LP-493a — see the AiGroup fields for the reasoning. Both default off; an existing group's context
+    # is byte-identical.
+    include_unattributed_documents: bool = False
+    include_transactions: bool = False
     include_untyped: bool = False
 
 
@@ -312,6 +316,42 @@ def _scrub_list_value(value: object) -> object:
     return value
 
 
+def _serialize_transactions(entry: DocumentEntry, cap: int) -> dict[str, object]:
+    """A document's LEGACY ``transactions`` serialised for an AI context (LP-493a), capped and scrubbed.
+
+    ⚠️ These do NOT live in ``entry.lists``. They are the per-document ``transactions`` attribute that
+    ``all_transactions()`` reads and AS-1 rides, and nothing serialised them into a context before — so a
+    cross-source rule asking "did this deposit leave a verified account?" was shown account-level
+    balances and nothing else.
+
+    Same shape and same PII backstop as :func:`_serialize_lists`: a truncation is MARKED rather than
+    silent, and every value goes through :func:`_scrub_list_value` so an account number printed inside a
+    description cannot reach a reasoner.
+    """
+    rows = tuple(entry.transactions or ())
+    shown = rows[:cap]
+    out: dict[str, object] = {
+        "rows": [
+            {
+                name: _scrub_list_value(_field_value(field))
+                for name, field in (
+                    ("date", txn.date),
+                    ("amount", txn.amount),
+                    ("direction", txn.direction),
+                    ("description", txn.description),
+                )
+                if field is not None
+            }
+            for txn in shown
+        ]
+    }
+    if len(rows) > cap:
+        out["truncated"] = True
+        out["shown"] = len(shown)
+        out["total"] = len(rows)
+    return out
+
+
 def _serialize_lists(entry: DocumentEntry, cap: int) -> dict[str, object]:
     """A document's generic lists serialised for an AI context (LP-444) — opt-in, capped, scrubbed, marked.
 
@@ -472,7 +512,16 @@ def _borrower_context(
             attributed = entry.belongs_to is not None and any(
                 str(ref.borrower_id) == raw.borrower_id for ref in entry.belongs_to
             )
-            if not attributed:
+            # ⚠️ LP-493a — an UNATTRIBUTED document is file-level, not "someone else's". A purchase
+            # agreement, a title commitment or an appraisal has no belongs_to because it describes the
+            # PROPERTY, and dropping it silently is what left PC-5 reasoning about an earnest money
+            # deposit with the contract absent. A group that declares include_unattributed_documents
+            # gets them; one that does not is byte-unchanged.
+            # ⚠️ ANOTHER BORROWER'S document is still never gathered — that would be the guessed
+            # attribution LP-332/LP-336 forbid. Only genuinely unattributed documents are added.
+            if not attributed and not (
+                opts.include_unattributed_documents and entry.belongs_to in (None, ())
+            ):
                 continue  # unattributed → not this borrower's → the context is honestly incomplete
             # Fail-open doc-type filter (LP-385): drop only a KNOWN, confident type the group's applies_to
             # excludes; keep None/"unknown" (classifier abstained) and everything when applies_to is None.
@@ -490,6 +539,10 @@ def _borrower_context(
             # Only when the group declared include_lists → an existing borrower group is byte-unchanged.
             if opts.include_lists and entry.lists:
                 doc["lists"] = _serialize_lists(entry, opts.list_row_cap)
+            # ⚠️ LP-493a — a document's TRANSACTIONS live in the legacy `entry.transactions` attribute,
+            # NOT in `entry.lists`. Serialising them is the only way a cross-source rule can see a debit.
+            if opts.include_transactions and entry.transactions:
+                doc["transactions"] = _serialize_transactions(entry, opts.list_row_cap)
             documents.append(doc)
     context: dict[str, object] = {"borrower_mismo": mismo, "documents": documents}
     # LP-444 — opt-in: the app's file-level stated liabilities (the CR-4 comparison set). Off by default,

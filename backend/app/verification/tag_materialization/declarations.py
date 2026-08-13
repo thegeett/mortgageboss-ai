@@ -119,6 +119,21 @@ class AiGroup:
     # undisclosed tradeline) opts in here; the borrower context then adds `stated_liabilities`. Off by
     # default → an existing borrower group is byte-unchanged.
     include_stated_liabilities: bool = False
+    # LP-493a — the two opt-ins PC-5's investigation showed were missing. Both DEFAULT OFF, so every
+    # existing group's context is byte-identical.
+    #
+    # ⚠️ `include_unattributed_documents` — a borrower context gathers only documents ATTRIBUTED to that
+    # borrower (belongs_to), which is right for an income question and WRONG for a cross-source one: a
+    # purchase agreement is a PROPERTY document with no belongs_to, so PC-5 was asked about an earnest
+    # money deposit while the contract stating it was silently dropped. This adds UNATTRIBUTED documents
+    # of the group's declared types — never another BORROWER's, which would be the guessed attribution
+    # LP-332/LP-336 forbid.
+    include_unattributed_documents: bool = False
+    # ⚠️ `include_transactions` — a document's transactions live in the LEGACY per-document
+    # `entry.transactions` attribute (what all_transactions() reads and AS-1 rides), NOT in `entry.lists`.
+    # A group could declare include_lists, see an empty list, and conclude the data was absent when it was
+    # one attribute away. PC-5 was shown five bank statements' account-level fields and zero transactions.
+    include_transactions: bool = False
 
 
 def _parse_allowed(raw: str) -> tuple[str, ...] | None:
@@ -263,6 +278,30 @@ def load_ai_groups() -> dict[str, AiGroup]:
                 f"liability-subject group (the comparison set belongs to the subject that matches), "
                 f"got subject={subject!r}"
             )
+        include_unattributed = body.get("include_unattributed_documents", False)
+        if not isinstance(include_unattributed, bool):
+            raise DeclarationError(
+                f"ai group {key!r}: `include_unattributed_documents` must be a boolean, got "
+                f"{include_unattributed!r}"
+            )
+        # ⚠️ BORROWER-ONLY, and the restriction is the point: it exists to relax borrower ATTRIBUTION.
+        # No other subject filters by belongs_to, so asking for it elsewhere is a declaration error, not
+        # a no-op — a document-subject group already sees its own document.
+        if include_unattributed and subject != "borrower":
+            raise DeclarationError(
+                f"ai group {key!r}: `include_unattributed_documents` is only for a borrower-subject "
+                f"group (it relaxes borrower attribution), got subject={subject!r}"
+            )
+        include_txns = body.get("include_transactions", False)
+        if not isinstance(include_txns, bool):
+            raise DeclarationError(
+                f"ai group {key!r}: `include_transactions` must be a boolean, got {include_txns!r}"
+            )
+        if include_txns and subject not in ("document", "borrower"):
+            raise DeclarationError(
+                f"ai group {key!r}: `include_transactions` is only for a document- or borrower-subject "
+                f"group (it serialises a gathered DOCUMENT's transactions), got subject={subject!r}"
+            )
         groups[key] = AiGroup(
             key=key,
             subject=subject,
@@ -274,6 +313,8 @@ def load_ai_groups() -> dict[str, AiGroup]:
             include_lists=include_lists,
             list_row_cap=cap,
             include_stated_liabilities=include_liabilities,
+            include_unattributed_documents=include_unattributed,
+            include_transactions=include_txns,
         )
     return groups
 

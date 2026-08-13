@@ -436,6 +436,13 @@ ai_groups:
     subject: borrower
     context_builder: borrower
     applies_to: [purchase_agreement, bank_statement]
+    # ⚠️ LP-493a — BOTH opt-ins are load-bearing, and PC-5 abstained on LF-6T3N without them.
+    #   include_unattributed_documents: a purchase agreement is a PROPERTY document with no belongs_to,
+    #     so borrower-scoped gathering dropped it and the model never saw the deposit it was asked about.
+    #   include_transactions: a statement's transactions live in the legacy `entry.transactions`
+    #     attribute, not in `entry.lists`, so the model saw account balances and zero debits.
+    include_unattributed_documents: true
+    include_transactions: true
     tags: [contract.emd_sourced]
     system_prompt: |
       You are a senior mortgage loan processor STRUCTURING one factual tag: has the earnest money

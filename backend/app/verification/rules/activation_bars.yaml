@@ -1535,18 +1535,27 @@ PC-8:
     STATE FORM more than a bureau field does — the bench's free reader once projected Texas TREC fields
     onto a North Carolina form, so unrecognised wording abstains.
 PC-5:
-  # ⚠️ BUILT, NOT ACTIVATED — and the reason is the ticket's own pre-rate check 2.
+  # ⚠️ BUILT, NOT ACTIVATED — and LP-493a changed WHY.
   #
-  # The derivation ran cleanly on LF-6T3N (the rare file carrying BOTH a purchase agreement and bank
-  # statements): 2 cases, 0 disagreements, rate 1.0000, calls confirmed succeeded, context non-redacted.
-  # ⚠️ BUT EVERY DERIVATION RETURNED THE SAME ABSTAIN VALUE — the spread is {unknown: 2}. A rate over a
-  # uniform abstain is the CR-8 shape: perfectly consistent and carrying no information about whether the
-  # judgment works. Check 2 says refuse to record such a rate, so it is not recorded and PC-5 stays held.
+  # The FIRST derivation scored 1.0000 over 2 cases with the spread {unknown: 2}, and LP-493's pre-rate
+  # check 2 refused it as a uniform abstain. LP-493a then found the cause: the model was shown NEITHER
+  # the deposit NOR any transaction — the purchase agreement was dropped by borrower-attribution
+  # gathering, and transactions live in the legacy `entry.transactions` attribute that no context
+  # serialised. It could not have answered anything else.
   #
-  # ⚠️ WHY THE MODEL ABSTAINED IS THE NEXT QUESTION, not a defect in the rule: "unknown" is the answer
-  # the prompt asks for when the statements do not cover the account the deposit left, and LF-6T3N's
-  # statements may genuinely not. Distinguishing "correctly abstained" from "could not see the input"
-  # needs a file where the trace is known to exist — which the corpus may not contain.
+  # ⚠️ BOTH DEFECTS ARE NOW FIXED (the include_unattributed_documents / include_transactions opt-ins),
+  # and the RE-DERIVATION scores 0.5000 — 2 cases, 1 disagreement, {unknown: 2} against {no: 1,
+  # unknown: 1}. THE FIXES WORKED AND THE RULE STILL DOES NOT ACTIVATE: it is no longer "could not see",
+  # it is "sees the data and cannot decide consistently". ⚠️ A PERFECT RATE WAS HIDING A COIN-FLIP —
+  # the sharpest evidence yet that a self-consistency rate is not an accuracy.
+  #
+  # ⚠️ THE REMAINING BLOCKER IS A PROMPT/INPUT GAP, now identified: the prompt reserves "no" for when
+  # "you can see the statements covering that period", which asks the model to judge COMPLETENESS —
+  # and nothing tells it. No statement carries a period (start/end are absent on all five of LF-6T3N's)
+  # and there is no account roster. The no/unknown boundary is unjudgeable as written, so the rate will
+  # stay near 0.5 whatever the file. Fixing that, and widening the prompt to B3-4.3-09's full evidence
+  # list (a cancelled cheque OR the deposit holder's statement), is a build ticket with its own
+  # derivation.
   status: not-calibratable-yet
   ships: auto
   threshold: null
