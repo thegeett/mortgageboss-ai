@@ -9,6 +9,7 @@ import pytest
 from app.core.security import hash_password, verify_password
 from app.models.company import Company
 from app.models.user import User, UserRole
+from app.schemas.auth import LoginRequest
 from app.scripts._provisioning import ProvisioningError
 from app.scripts.bootstrap_admin import (
     ALLOWLIST_VAR,
@@ -85,6 +86,46 @@ async def test_the_supplied_hash_is_stored_verbatim(db_session: AsyncSession) ->
 
     assert user.hashed_password == supplied
     assert verify_password(PASSWORD, user.hashed_password) is True
+
+
+# --------------------------------------------------------------------------- #
+# Email normalization -- the stored value must be the one login searches for
+# --------------------------------------------------------------------------- #
+
+
+async def test_stores_the_email_in_the_form_login_will_look_up(
+    db_session: AsyncSession,
+) -> None:
+    _, user = await _bootstrap(db_session, _config(admin_email="Admin@Example.COM"))
+
+    # Exactly what LoginRequest.email yields for the same string: domain
+    # lowercased, local part untouched.
+    assert user.email == "Admin@example.com"
+
+
+async def test_a_mixed_case_email_can_actually_log_in(db_session: AsyncSession) -> None:
+    """Without normalization this account would be unreachable.
+
+    There is no signup route and no password reset, and this script refuses to
+    run a second time, so an admin nobody can log in as is close to unrecoverable.
+    """
+    typed = "Admin@Example.COM"
+    _, user = await _bootstrap(db_session, _config(admin_email=typed))
+    await db_session.flush()
+
+    # What the API hands authenticate_user after pydantic parses the body.
+    normalized = LoginRequest(email=typed, password=PASSWORD).email
+    authenticated = await authenticate_user(db_session, email=normalized, password=PASSWORD)
+
+    assert authenticated.id == user.id
+
+
+async def test_refuses_a_malformed_email_before_any_write(db_session: AsyncSession) -> None:
+    with pytest.raises(ProvisioningError, match="not a valid email address"):
+        await _bootstrap(db_session, _config(admin_email="admin.example.com"))
+
+    assert await db_session.scalar(select(func.count()).select_from(Company)) == 0
+    assert await db_session.scalar(select(func.count()).select_from(User)) == 0
 
 
 # --------------------------------------------------------------------------- #

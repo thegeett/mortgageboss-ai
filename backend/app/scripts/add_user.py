@@ -22,14 +22,18 @@ Environment variables, ALL REQUIRED, no defaults:
 ⚠️ **A HASH, not a password** -- same reasoning as the bootstrap script: the
 value travels through ``run-task --overrides`` and lands in CloudTrail.
 
-⚠️ **The company must already exist.** A typo'd slug silently creating a second
-company is the failure this refuses to allow. It matters more than it looks:
-``authenticate_user`` does not check ``company.is_active``, so a user attached to
-a stray company would log in perfectly well and see an empty, wrong tenant.
+⚠️ **The company must already exist and must not be soft-deleted.** A typo'd
+slug silently creating a second company is the failure this refuses to allow,
+and a slug that resolves to a decommissioned tenant is the same failure wearing
+a disguise. It matters more than it looks: ``authenticate_user`` does not check
+the company at all, so a user attached to a stray or deleted one would log in
+perfectly well and see an empty, wrong tenant.
 
 ⚠️ **Email is GLOBALLY unique**, not unique per company, so a collision with a
 user in a different company is possible. That is reported as a refusal rather
-than left to surface as an IntegrityError traceback.
+than left to surface as an IntegrityError traceback. The check is
+case-insensitive even though the database index is not — otherwise it would
+wave through the near-duplicate it exists to catch.
 
 Prints one line and no secret.
 """
@@ -42,7 +46,7 @@ import sys
 from dataclasses import dataclass
 
 import structlog
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -52,6 +56,7 @@ from app.models.user import User, UserRole
 from app.scripts._provisioning import (
     ProvisioningError,
     assert_environment_allowed,
+    normalize_email,
     require_env,
     validate_bcrypt_hash,
 )
@@ -93,7 +98,7 @@ def parse_role(raw: str) -> UserRole:
 def config_from_env() -> AddUserConfig:
     """Read and validate every input. Raises :class:`ProvisioningError`."""
     return AddUserConfig(
-        email=require_env("ADD_USER_EMAIL"),
+        email=normalize_email(require_env("ADD_USER_EMAIL"), var_name="ADD_USER_EMAIL"),
         password_hash=validate_bcrypt_hash(
             require_env("ADD_USER_PASSWORD_HASH"), var_name="ADD_USER_PASSWORD_HASH"
         ),
@@ -118,7 +123,8 @@ async def add_user(
 
     Raises:
         ProvisioningError: the environment is not allowlisted, the hash is
-            malformed, the company slug is unknown, or the email is taken.
+            malformed, the email is unparseable, the company slug is unknown or
+            soft-deleted, or the email is taken.
     """
     assert_environment_allowed(
         current=environment,
@@ -126,26 +132,47 @@ async def add_user(
         allowlist_var=ALLOWLIST_VAR,
     )
     validate_bcrypt_hash(config.password_hash, var_name="ADD_USER_PASSWORD_HASH")
+    # Re-normalized deliberately: config_from_env is not the only way to build an
+    # AddUserConfig, and this is the last point before a write.
+    email = normalize_email(config.email, var_name="ADD_USER_EMAIL")
 
-    company = await db.scalar(select(Company).where(Company.slug == config.company_slug))
+    # ⚠️ `deleted_at IS NULL`, not just a slug match. Companies carry
+    # SoftDeleteMixin and are soft-deleted rather than removed, so the slug of a
+    # decommissioned tenant still resolves. Attaching a user to one produces
+    # exactly the outcome the refusal below is written to prevent -- and worse,
+    # it is invisible: `authenticate_user` checks `user.is_active` and never
+    # looks at the company, so that user logs in perfectly well.
+    company = await db.scalar(
+        select(Company).where(
+            Company.slug == config.company_slug,
+            Company.deleted_at.is_(None),
+        )
+    )
     if company is None:
         raise ProvisioningError(
-            f"No company with slug {config.company_slug!r}. Refusing to create one: a "
-            f"typo'd slug that silently made a second company would produce a user who "
-            f"logs in successfully into the wrong, empty tenant."
+            f"No live company with slug {config.company_slug!r} (a soft-deleted one does "
+            f"not count). Refusing to create one: a typo'd slug that silently made a "
+            f"second company would produce a user who logs in successfully into the "
+            f"wrong, empty tenant."
         )
 
-    existing = await db.scalar(select(User).where(User.email == config.email))
+    # ⚠️ Case-insensitive, unlike the unique index on `users.email`. Email is
+    # case-insensitive in practice but the index is not, so an exact-match guard
+    # would let `Admin@example.com` through while `admin@example.com` exists --
+    # two rows for one human, possibly in two different companies. That is the
+    # tenant confusion the company guard above refuses, arriving by another door.
+    existing = await db.scalar(select(User).where(func.lower(User.email) == email.lower()))
     if existing is not None:
         raise ProvisioningError(
-            f"A user with email {config.email} already exists. Email is globally "
-            f"unique across all companies, not per company, so this collides even if "
-            f"the existing user belongs to a different one. Nothing was changed."
+            f"A user with email {email} already exists (matched without regard to case). "
+            f"Email is globally unique across all companies, not per company, so this "
+            f"collides even if the existing user belongs to a different one. Nothing was "
+            f"changed."
         )
 
     user = User(
         company_id=company.id,
-        email=config.email,
+        email=email,
         hashed_password=config.password_hash,
         first_name=config.first_name,
         last_name=config.last_name,

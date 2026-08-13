@@ -51,6 +51,7 @@ from app.models.user import User, UserRole
 from app.scripts._provisioning import (
     ProvisioningError,
     assert_environment_allowed,
+    normalize_email,
     require_env,
     validate_bcrypt_hash,
 )
@@ -77,10 +78,14 @@ def config_from_env() -> BootstrapConfig:
     """Read and validate every input. Raises :class:`ProvisioningError`.
 
     The hash is validated HERE, before the database is opened, so a malformed
-    value costs nothing and leaves nothing behind.
+    value costs nothing and leaves nothing behind. The email is normalized for
+    the same reason and one more: it must come out in the form the login
+    endpoint will search for. See :func:`normalize_email`.
     """
     return BootstrapConfig(
-        admin_email=require_env("BOOTSTRAP_ADMIN_EMAIL"),
+        admin_email=normalize_email(
+            require_env("BOOTSTRAP_ADMIN_EMAIL"), var_name="BOOTSTRAP_ADMIN_EMAIL"
+        ),
         admin_password_hash=validate_bcrypt_hash(
             require_env("BOOTSTRAP_ADMIN_PASSWORD_HASH"),
             var_name="BOOTSTRAP_ADMIN_PASSWORD_HASH",
@@ -117,6 +122,7 @@ async def bootstrap(
     # Re-validated deliberately: config_from_env is not the only way to build a
     # BootstrapConfig, and this is the last point before a write.
     validate_bcrypt_hash(config.admin_password_hash, var_name="BOOTSTRAP_ADMIN_PASSWORD_HASH")
+    email = normalize_email(config.admin_email, var_name="BOOTSTRAP_ADMIN_EMAIL")
 
     # ⚠️ GUARD (a). Counts EVERY user, including soft-deleted ones: a
     # soft-deleted row still means this database has been used, and "bootstrap"
@@ -139,7 +145,7 @@ async def bootstrap(
 
     user = User(
         company_id=company.id,
-        email=config.admin_email,
+        email=email,
         hashed_password=config.admin_password_hash,
         first_name=config.admin_first_name,
         last_name=config.admin_last_name,

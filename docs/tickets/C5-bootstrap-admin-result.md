@@ -64,13 +64,24 @@ the cost of a script instead of a Terraform change and an apply.
 
 | File | |
 |---|---|
-| `backend/app/scripts/_provisioning.py` | shared guards: required-env, bcrypt validation, environment allowlist |
+| `backend/app/scripts/_provisioning.py` | shared guards: required-env, email normalization, bcrypt validation, environment allowlist |
 | `backend/app/scripts/bootstrap_admin.py` | the first company + admin; refuses against a populated database |
-| `backend/app/scripts/add_user.py` | every user after that; refuses unknown company, duplicate email, bad role |
+| `backend/app/scripts/add_user.py` | every user after that; refuses unknown/deleted company, duplicate email, bad role |
 | `scripts/hash-password` | local bcrypt hashing via the app's own `hash_password` |
 | `scripts/deploy` | `bootstrap-admin` and `add-user` stages |
-| `backend/tests/test_bootstrap_admin.py` | 25 tests |
-| `backend/tests/test_add_user.py` | 28 tests |
+| `backend/tests/test_bootstrap_admin.py` | 28 tests |
+| `backend/tests/test_add_user.py` | 33 tests |
+
+**Email normalization is a guard, not a nicety.** Both scripts put the address
+through `email_validator` — the same library `LoginRequest.email: EmailStr` uses —
+and store the `.normalized` form (domain lowercased, local part untouched). The
+login lookup is an exact string match against a value pydantic has already
+normalized, so storing whatever the operator typed means an admin created as
+`Admin@Example.COM` is a row that the *same string*, typed at the login form,
+never finds. With no signup route, no password reset, and `bootstrap_admin`
+refusing to run twice, that mistake is close to unrecoverable. Normalizing at the
+write is what makes the two agree by construction; it also rejects a malformed
+address before anything is written.
 
 ### `bootstrap_admin.py`
 
@@ -117,13 +128,20 @@ Same shape, minus guard (a). Required: `ADD_USER_EMAIL`, `ADD_USER_PASSWORD_HASH
 
 Three refusals of its own:
 
-- **Unknown company slug** — it will not create one. A typo'd slug silently making a
-  second company is the failure to prevent, and it bites harder than it looks:
-  `authenticate_user` does not check `company.is_active`, so a user attached to a
-  stray company logs in perfectly well and sees an empty, wrong tenant.
+- **Unknown or soft-deleted company slug** — it will not create one. A typo'd slug
+  silently making a second company is the failure to prevent, and it bites harder
+  than it looks: `authenticate_user` does not check the company at all, so a user
+  attached to a stray one logs in perfectly well and sees an empty, wrong tenant.
+  The lookup filters `deleted_at IS NULL`: companies carry `SoftDeleteMixin` and are
+  soft-deleted rather than removed, so a decommissioned tenant's slug still resolves
+  and would produce exactly that outcome.
 - **Duplicate email** — email is **globally unique, not per tenant**, so a collision
   with a user in a *different* company is possible. Reported as a refusal naming that
-  fact, rather than surfacing as an `IntegrityError` traceback from the driver.
+  fact, rather than surfacing as an `IntegrityError` traceback from the driver. The
+  comparison is **case-insensitive**, unlike the unique index on `users.email`:
+  email is case-insensitive in practice, so an exact-match guard would wave through
+  `Admin@example.com` alongside `admin@example.com` — and so would Postgres —
+  leaving two rows for one human, possibly in two different companies.
 - **Bad role** — `ADMIN` or `PROCESSOR`, either case, no default. Defaulting would
   mean a typo silently producing either the less privileged role (confusing) or the
   more privileged one (dangerous).
@@ -216,7 +234,8 @@ transaction-rollback isolation:
 | malformed hash | plaintext password, wrong algorithm, truncated, too long, right-shape-unparseable, empty — each rejected with zero rows written |
 | authentication | the created user is authenticated by the app's own `authenticate_user`, not by `verify_password` in isolation |
 | output hygiene | success line and refusal messages contain no hash, no password, no `$2` |
-| add-user | unknown slug refuses and creates nothing; duplicate email refuses; cross-company duplicate refuses; bad role refuses; both roles settable; adds to a populated database |
+| add-user | unknown slug refuses and creates nothing; a **soft-deleted** company's slug refuses; duplicate email refuses; cross-company duplicate refuses; a duplicate **differing only in case** refuses; bad role refuses; both roles settable; adds to a populated database |
+| email normalization | the stored address is exactly what `LoginRequest.email` yields for the same input; a mixed-case address created by either script **logs in** through the app's own `authenticate_user`; a malformed address refuses with zero rows written |
 
 Also verified: `$2a$` hashes are accepted (a legitimate bcrypt variant), and the
 supplied hash is stored **verbatim** rather than re-hashed.
@@ -255,15 +274,28 @@ by default in this worktree.
 2. **The log stream shape is `migrate/<container>/<task-id>`** — the awslogs stream
    prefix is a property of the task definition, not of the command, so overriding the
    command does not change it.
-3. **`enable_cognito = true` is required.** Both stages refuse otherwise. Creating an
-   admin account that can log in to an environment with no authentication wall in
-   front of it is a state worth refusing to produce. This was specified for
-   `bootstrap-admin`; I applied it to `add-user` on the same reasoning.
+3. **An applied Cognito user pool is required.** Both stages refuse otherwise.
+   Creating an admin account that can log in to an environment with no
+   authentication wall in front of it is a state worth refusing to produce. This
+   was specified for `bootstrap-admin`; I applied it to `add-user` on the same
+   reasoning. The check reads the **`cognito_user_pool_id` output**, not
+   `enable_cognito` in `terraform.tfvars`: tfvars is what the operator intends to
+   apply, and editing it to `true` before running `phase2` would satisfy a tfvars
+   check while the load balancer still has no `authenticate-cognito` action. The
+   output is `var.enable_cognito ? ...[0].id : null`, so a non-empty value means
+   the pool — and the listener rule gated on the same variable — really exists.
+   The refusal still quotes the tfvars value, because that is usually the clue to
+   what the operator expected.
 4. **The container runs as root and `uv run` works** — the same invocation the migrate
    task uses today, with `UV_NO_SYNC=1` already set on the task definition.
-5. **`BOOTSTRAP_ALLOWED_ENVIRONMENTS` is set to the deploy target's own name** by the
-   stage (`$ENV_NAME`), so running `./scripts/deploy staging bootstrap-admin` permits
-   exactly `staging` and the script's own default is never relied on in practice.
+5. **The allowlist is a fixed list in `scripts/deploy`** (`PROVISIONING_ENVIRONMENTS`,
+   currently `staging`), **not `$ENV_NAME`.** Passing the target back as its own
+   allowlist would make the guard tautological — `./scripts/deploy production
+   bootstrap-admin` would set the allowlist to `production` and then pass it. The
+   deploy script also refuses a non-permitted target up front, before prompting
+   for a password, so the container-side check stays as defence in depth against a
+   mismatch between the target directory and the container's `ENVIRONMENT`.
+   Widening it means editing `scripts/deploy` in a reviewed commit.
 
 ---
 

@@ -5,10 +5,13 @@ it drops the no-users-yet guard and keeps every other one. Its refusals matter
 more, not less, for that reason.
 """
 
+from datetime import UTC, datetime
+
 import pytest
 from app.core.security import hash_password
 from app.models.company import Company
 from app.models.user import User, UserRole
+from app.schemas.auth import LoginRequest
 from app.scripts._provisioning import ProvisioningError
 from app.scripts.add_user import (
     ALLOWLIST_VAR,
@@ -108,8 +111,25 @@ async def test_adds_to_a_populated_database(db_session: AsyncSession) -> None:
 async def test_refuses_an_unknown_company_slug(db_session: AsyncSession) -> None:
     await _company(db_session, slug="example")
 
-    with pytest.raises(ProvisioningError, match="No company with slug"):
+    with pytest.raises(ProvisioningError, match="No live company with slug"):
         await _add(db_session, _config(company_slug="exmaple"))
+
+
+async def test_refuses_a_soft_deleted_company(db_session: AsyncSession) -> None:
+    """A decommissioned tenant's slug still resolves; it must not be usable.
+
+    Companies are soft-deleted rather than removed, so a plain slug match finds
+    one. Attaching a user to it is the same failure as the typo above, and less
+    visible: authenticate_user never looks at the company, so the user logs in.
+    """
+    company = await _company(db_session, slug="example")
+    company.deleted_at = datetime.now(UTC)
+    await db_session.flush()
+
+    with pytest.raises(ProvisioningError, match="No live company with slug"):
+        await _add(db_session, _config(company_slug="example"))
+
+    assert await db_session.scalar(select(func.count()).select_from(User)) == 0
 
 
 async def test_does_not_create_the_missing_company(db_session: AsyncSession) -> None:
@@ -156,6 +176,65 @@ async def test_refuses_a_duplicate_email_from_another_company(
 
     with pytest.raises(ProvisioningError, match="globally unique"):
         await _add(db_session, _config(company_slug="second"))
+
+
+async def test_refuses_a_duplicate_email_differing_only_in_case(
+    db_session: AsyncSession,
+) -> None:
+    """The guard has to be case-insensitive; the unique index is not.
+
+    Email is case-insensitive in practice, so an exact-match guard would let
+    this through -- and so would Postgres -- leaving two rows for one human,
+    here in two different companies.
+    """
+    await _company(db_session, slug="first")
+    await _company(db_session, slug="second")
+    await _add(db_session, _config(email="processor@example.com", company_slug="first"))
+
+    with pytest.raises(ProvisioningError, match="already exists"):
+        await _add(db_session, _config(email="Processor@Example.com", company_slug="second"))
+
+    assert await db_session.scalar(select(func.count()).select_from(User)) == 1
+
+
+# --------------------------------------------------------------------------- #
+# Email normalization -- the stored value must be the one login searches for
+# --------------------------------------------------------------------------- #
+
+
+async def test_stores_the_email_in_the_form_login_will_look_up(
+    db_session: AsyncSession,
+) -> None:
+    await _company(db_session)
+
+    user = await _add(db_session, _config(email="Processor@Example.COM"))
+
+    # Exactly what LoginRequest.email yields for the same string: domain
+    # lowercased, local part untouched.
+    assert user.email == "Processor@example.com"
+
+
+async def test_a_mixed_case_email_can_actually_log_in(db_session: AsyncSession) -> None:
+    """The whole point of normalizing. Goes through the app's own login path."""
+    await _company(db_session)
+    typed = "Processor@Example.COM"
+    await _add(db_session, _config(email=typed))
+    await db_session.flush()
+
+    # What the API hands authenticate_user after pydantic parses the body.
+    normalized = LoginRequest(email=typed, password=PASSWORD).email
+    user = await authenticate_user(db_session, email=normalized, password=PASSWORD)
+
+    assert user.email == normalized
+
+
+async def test_refuses_a_malformed_email_before_any_write(db_session: AsyncSession) -> None:
+    await _company(db_session)
+
+    with pytest.raises(ProvisioningError, match="not a valid email address"):
+        await _add(db_session, _config(email="not-an-email"))
+
+    assert await db_session.scalar(select(func.count()).select_from(User)) == 0
 
 
 # --------------------------------------------------------------------------- #

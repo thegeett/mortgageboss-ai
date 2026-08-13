@@ -1339,16 +1339,51 @@ ask_required() {
 # is not behind the ALB's authentication wall is a state worth refusing to
 # create: the account being made is an ADMIN in an environment that holds real
 # borrower files.
+#
+# ⚠️ This reads an APPLIED OUTPUT, not terraform.tfvars. The tfvars value is what
+# the operator intends to apply, which is not the same question. Editing
+# `enable_cognito = false` -> `true` and running this stage before `phase2` would
+# satisfy a tfvars check while the load balancer still has no authenticate-cognito
+# action on it -- the exact open door the refusal below describes.
+# `cognito_user_pool_id` is `var.enable_cognito ? ...[0].id : null` in the compute
+# module, so a non-empty value means the pool, and with it the listener rule
+# gated on the same variable, is really out there. Callers must run
+# require_outputs first.
 require_cognito_enabled() {
-  local cognito
-  cognito=$(tfvar "$TFVARS" "enable_cognito" || printf '')
-  [ "$cognito" = "true" ] && return 0
-  die "Refusing: enable_cognito is '${cognito:-unset}' in $TFVARS." \
+  local pool intent
+  pool=$(out_opt cognito_user_pool_id)
+  [ -n "$pool" ] && return 0
+  intent=$(tfvar "$TFVARS" "enable_cognito" || printf '')
+  die "Refusing: environment '$ENV_NAME' has no applied Cognito user pool." \
+    "enable_cognito is '${intent:-unset}' in $TFVARS, but that is the value you mean" \
+    "to apply -- the load balancer is what it is until phase2 runs." \
     "This stage creates an account that can log in to the application. Without" \
     "Cognito on the load balancer there is no authentication in front of it, and" \
     "an admin account in an environment holding borrower files is not something to" \
     "create into an open door." \
-    "Run phase2 first, or set enable_cognito = true and apply."
+    "Run:  ./scripts/deploy $ENV_NAME phase2"
+}
+
+# ⚠️ Where account provisioning is permitted, as a FIXED list -- deliberately not
+# "$ENV_NAME". Passing the target back to the container's own allowlist would
+# make the guard tautological: `./scripts/deploy production bootstrap-admin`
+# would set the allowlist to `production` and then pass it. The value below is
+# what the container checks its ENVIRONMENT against, so the two have to disagree
+# for the check to mean anything.
+PROVISIONING_ENVIRONMENTS="staging"
+
+# Refuse here as well as in the container, so an unintended target dies before it
+# prompts for a password rather than after.
+require_provisioning_environment() {
+  case ",$PROVISIONING_ENVIRONMENTS," in
+    *",$ENV_NAME,"*) return 0 ;;
+  esac
+  die "Refusing: account provisioning is not enabled for environment '$ENV_NAME'." \
+    "These stages create an account that can log in and read borrower files, so the" \
+    "environments they may run against are listed explicitly in this script rather" \
+    "than taken from the command line. Permitted: $PROVISIONING_ENVIRONMENTS." \
+    "To add one, edit PROVISIONING_ENVIRONMENTS in scripts/deploy -- deliberately, in" \
+    "a commit someone reviews."
 }
 
 # Hash the password on THIS machine. scripts/hash-password prompts on stderr and
@@ -1365,9 +1400,15 @@ hash_password_locally() {
 }
 
 # Resolve the container name from the task definition rather than assuming it.
+#
+# `|| printf ''` is load-bearing: 2>/dev/null hides the AWS error but not the
+# exit status, and under `set -e` a failing command substitution kills the script
+# on the spot -- taking with it the caller's own `die`, which is the only place
+# that explains what went wrong. Returning empty lets that guard run.
 oneoff_container_name() {
   awsx ecs describe-task-definition --task-definition "$1" \
-    --query 'taskDefinition.containerDefinitions[0].name' --output text 2>/dev/null
+    --query 'taskDefinition.containerDefinitions[0].name' --output text 2>/dev/null \
+    || printf ''
 }
 
 # Network configuration read off the running API service -- tasks are pinned to
@@ -1446,8 +1487,10 @@ stage_bootstrap_admin() {
   banner "bootstrap-admin -- the FIRST company and admin user in '$ENV_NAME'"
   need_cmd aws; need_cmd jq; need_cmd terraform
   require_identity "$ACCOUNT_ID"
-  require_cognito_enabled
+  require_provisioning_environment
+  # Outputs first: require_cognito_enabled reads one.
   require_outputs "$ENV_DIR"
+  require_cognito_enabled
 
   local cluster taskdef container subnets sgs netcfg request
   cluster=$(out ecs_cluster_name)
@@ -1503,7 +1546,7 @@ stage_bootstrap_admin() {
     BOOTSTRAP_ADMIN_EMAIL="$email" BOOTSTRAP_ADMIN_PASSWORD_HASH="$hash" \
     BOOTSTRAP_ADMIN_FIRST_NAME="$first" BOOTSTRAP_ADMIN_LAST_NAME="$last" \
     BOOTSTRAP_COMPANY_NAME="$coname" BOOTSTRAP_COMPANY_SLUG="$coslug" \
-    BOOTSTRAP_ALLOWED_ENVIRONMENTS="$ENV_NAME" \
+    BOOTSTRAP_ALLOWED_ENVIRONMENTS="$PROVISIONING_ENVIRONMENTS" \
       jq -n '{
         cluster: env.ONEOFF_CLUSTER,
         taskDefinition: env.ONEOFF_TD,
@@ -1541,8 +1584,10 @@ stage_add_user() {
   banner "add-user -- add a user to an existing company in '$ENV_NAME'"
   need_cmd aws; need_cmd jq; need_cmd terraform
   require_identity "$ACCOUNT_ID"
-  require_cognito_enabled
+  require_provisioning_environment
+  # Outputs first: require_cognito_enabled reads one.
   require_outputs "$ENV_DIR"
+  require_cognito_enabled
 
   local cluster taskdef container subnets sgs netcfg request
   cluster=$(out ecs_cluster_name)
@@ -1595,7 +1640,7 @@ stage_add_user() {
     ADD_USER_EMAIL="$email" ADD_USER_PASSWORD_HASH="$hash" \
     ADD_USER_FIRST_NAME="$first" ADD_USER_LAST_NAME="$last" \
     ADD_USER_ROLE="$role" ADD_USER_COMPANY_SLUG="$coslug" \
-    ADD_USER_ALLOWED_ENVIRONMENTS="$ENV_NAME" \
+    ADD_USER_ALLOWED_ENVIRONMENTS="$PROVISIONING_ENVIRONMENTS" \
       jq -n '{
         cluster: env.ONEOFF_CLUSTER,
         taskDefinition: env.ONEOFF_TD,

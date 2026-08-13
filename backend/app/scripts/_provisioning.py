@@ -24,6 +24,7 @@ from __future__ import annotations
 import os
 
 import bcrypt
+from email_validator import EmailNotValidError, validate_email
 
 # The two bcrypt variants this application produces or accepts. `$2y$` is
 # deliberately absent: it is a PHP-era marker for the same algorithm, and
@@ -48,6 +49,31 @@ def require_env(name: str) -> str:
     if not value.strip():
         raise ProvisioningError(f"{name} is required and was not set.")
     return value.strip()
+
+
+def normalize_email(value: str, *, var_name: str) -> str:
+    """Validate an email and return it in the exact form login will look up.
+
+    ⚠️ **The stored value has to match what the login endpoint searches for.**
+    ``POST /auth/login`` parses the body through ``LoginRequest.email: EmailStr``,
+    so pydantic hands ``authenticate_user`` an address already normalized by
+    email-validator — domain lowercased, local part left alone — and the lookup
+    is then an exact string match (``User.email == email``).
+
+    Storing whatever the operator typed breaks that agreement: an admin created
+    as ``Admin@Example.COM`` is a row that the *same string*, typed at the login
+    form, never finds, because the form's copy arrives as ``Admin@example.com``.
+    There is no signup route and no password reset, and ``bootstrap_admin``
+    refuses to run twice, so that mistake is expensive to undo.
+
+    Normalizing here with the library the API itself uses is what makes the two
+    agree by construction. It also rejects a malformed address before the write
+    rather than leaving an unusable row behind.
+    """
+    try:
+        return validate_email(value, check_deliverability=False).normalized
+    except EmailNotValidError as exc:
+        raise ProvisioningError(f"{var_name} is not a valid email address: {exc}") from exc
 
 
 def validate_bcrypt_hash(value: str, *, var_name: str) -> str:
