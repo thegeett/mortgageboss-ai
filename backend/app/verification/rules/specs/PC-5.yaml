@@ -3,6 +3,11 @@
 # The earnest money deposit stated on the contract must be traceable to a debit from a verified account.
 # A deposit nobody can trace is an unsourced large sum entering the transaction.
 #
+# ⚠️ CORRECTION (reported finding): the AMOUNT half below is NOT implemented. required_inputs and
+# deterministic.load_bearing_tags reference ONLY contract.emd_sourced, and contract.emd_amount could
+# not be read as declared anyway — it is produced on the DOCUMENT subject while PC-5 enumerates
+# per_borrower. So the "the file states no deposit" couldnt_check is never actually evaluated and the
+# rule delegates the whole question to the AI tag. Resolve before PC-5 is activated.
 # ⚠️ GENUINELY MIXED, and that is why it is worth building: `contract.emd_amount` is PARSED (the number
 # on the contract, 4 of the 5 real contracts state one) and `contract.emd_sourced` is an AI judgment (did
 # a matching debit leave a verified account?). Deterministic code reads the amount; the trace is a

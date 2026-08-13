@@ -79,6 +79,15 @@ judgment:
     op: eq
     value: purchase_agreement
   load_bearing_tags: [contract.personal_property]
+  # ⚠️ THE JUDGMENT SEES A YES/NO TAG, NOT THE CONTRACT'S WORDING (reported finding). reasoned_over
+  # carries only `contract.personal_property`, and _build_context passes {value, confidence, reasoning}
+  # for it — so `evidence_required` above promises "the included-items wording exactly as the contract
+  # states it" that the model never receives, and the `included` vs `fixtures_only` distinction it is
+  # asked to draw was ALREADY collapsed to yes/no by the structural prompt. In practice the judgment only
+  # ever sees "yes" and can only confirm it.
+  # Closing this needs a parsed free-text tag (contract.personal_property_text) the structural pass does
+  # not currently produce — a producer change, not a review edit. Recorded here so the promise and the
+  # inputs stop disagreeing; evidence_required below is narrowed to what the rule can actually show.
   reasoned_over: [contract.personal_property]
   output_tag: contract.personal_property_assessment
   value_domain: ["included", "fixtures_only", "none", "unknown"]

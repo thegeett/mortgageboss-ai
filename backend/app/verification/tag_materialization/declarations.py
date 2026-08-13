@@ -297,10 +297,17 @@ def load_ai_groups() -> dict[str, AiGroup]:
             raise DeclarationError(
                 f"ai group {key!r}: `include_transactions` must be a boolean, got {include_txns!r}"
             )
-        if include_txns and subject not in ("document", "borrower"):
+        # ⚠️ BORROWER ONLY (reported finding). The validator used to admit `document` as well, but only
+        # `_borrower_context` reads this opt-in — `_doc_context` ignores it entirely. So a document-subject
+        # group could declare it, pass validation, and silently receive account fields with ZERO
+        # transactions: the exact silent no-op the sibling checks call "a declaration error, not a silent
+        # no-op", and the exact failure LP-493a was written to eliminate. Widen this the day
+        # `_doc_context` serialises transactions, not before.
+        if include_txns and subject != "borrower":
             raise DeclarationError(
-                f"ai group {key!r}: `include_transactions` is only for a document- or borrower-subject "
-                f"group (it serialises a gathered DOCUMENT's transactions), got subject={subject!r}"
+                f"ai group {key!r}: `include_transactions` is only for a BORROWER-subject group (it "
+                f"serialises the borrower's gathered documents' transactions, and only the borrower "
+                f"context reads it), got subject={subject!r}"
             )
         groups[key] = AiGroup(
             key=key,

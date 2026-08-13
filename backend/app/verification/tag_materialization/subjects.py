@@ -66,6 +66,13 @@ LOAN_SUBJECT = "loan"
 # never used to drop a document.
 _UNKNOWN_DOC_TYPE = "unknown"
 
+# Document types that describe the PROPERTY rather than a borrower, so an absent `belongs_to` is a
+# genuine "file-level", not a failed attribution. ⚠️ A type NOT listed here (including an unclassified
+# document) is never handed to a borrower it was not linked to — see _borrower_context.
+_PROPERTY_LEVEL_DOC_TYPES = frozenset(
+    {"purchase_agreement", "title_commitment", "appraisal", "flood_certification"}
+)
+
 RawField = Field | PiiField
 Subject = tuple[str, object]  # (content_id, the raw object to read from)
 
@@ -330,6 +337,11 @@ def _serialize_transactions(entry: DocumentEntry, cap: int) -> dict[str, object]
     """
     rows = tuple(entry.transactions or ())
     shown = rows[:cap]
+    # ⚠️ ABSENT FIELDS ARE OMITTED, not emitted as null (reported finding). A TransactionRecord's
+    # date/amount/direction/description are REQUIRED Field objects, so `field is not None` filtered
+    # nothing and an absent value serialised as an explicit `"direction": null`. _serialize_row drops
+    # absent fields precisely to preserve absent != empty, and this function's docstring claims the same
+    # shape. An undeterminable direction is now simply unstated rather than asserted as null.
     out: dict[str, object] = {
         "rows": [
             {
@@ -340,7 +352,7 @@ def _serialize_transactions(entry: DocumentEntry, cap: int) -> dict[str, object]
                     ("direction", txn.direction),
                     ("description", txn.description),
                 )
-                if field is not None
+                if field.is_present
             }
             for txn in shown
         ]
@@ -519,8 +531,19 @@ def _borrower_context(
             # gets them; one that does not is byte-unchanged.
             # ⚠️ ANOTHER BORROWER'S document is still never gathered — that would be the guessed
             # attribution LP-332/LP-336 forbid. Only genuinely unattributed documents are added.
+            # ⚠️ SCOPED TO GENUINELY PROPERTY-LEVEL TYPES (reported finding). `belongs_to is None` does
+            # NOT only mean "file-level" — it also means ATTRIBUTION FAILED, and the fail-open doc-type
+            # filter below keeps None/"unknown" types. So the relaxation was handing a borrower
+            # unclassified, unattributed documents that may be a CO-BORROWER'S: on LF-6T3N borrower 2's
+            # context gained four of them. `bank_statement` is in contract_emd.applies_to and PC-5's
+            # prompt asks about "an account the BORROWER owns", so that is an answer off someone else's
+            # account. The comment's claim that another borrower's document is never gathered holds only
+            # where attribution SUCCEEDED. Restricted to the types that describe the PROPERTY, which is
+            # the case the opt-in was added for.
             if not attributed and not (
-                opts.include_unattributed_documents and entry.belongs_to in (None, ())
+                opts.include_unattributed_documents
+                and entry.belongs_to in (None, ())
+                and entry.document_type in _PROPERTY_LEVEL_DOC_TYPES
             ):
                 continue  # unattributed → not this borrower's → the context is honestly incomplete
             # Fail-open doc-type filter (LP-385): drop only a KNOWN, confident type the group's applies_to

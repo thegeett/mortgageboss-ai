@@ -144,16 +144,22 @@ def test_pc8_is_live_on_a_two_valued_spread() -> None:
 
 
 # --------------------------------------------------------------------------- #
-# ⚠️ PC-5 — built, HELD on a uniform-abstain derivation
+# ⚠️ PC-5 — built, HELD. Originally on a uniform-abstain derivation; RE-DERIVED at LP-493a to a
+# measured 0.5000 (2 cases, 1 disagreement). Still held — but for a different, stronger reason.
 # --------------------------------------------------------------------------- #
 def test_pc5_is_held_not_activated() -> None:
     """⚠️ THE TICKET'S OWN PRE-RATE CHECK 2: refuse to record a rate when every derivation returned the
     same abstain value. PC-5's ran cleanly on LF-6T3N — calls succeeded, context non-redacted — but the
-    spread was {unknown: 2}. A rate over a uniform abstain is the CR-8 shape: perfectly consistent and
+    spread was {unknown: 2} BEFORE the LP-493a context fixes; the re-derivation after them scored
+    0.5000 (1 disagreement). A rate over a uniform abstain is the CR-8 shape: perfectly consistent and
     carrying no information. Not recorded, so PC-5 stays held."""
     bar = load_activation_bars()["PC-5"]
     assert bar.status == "not-calibratable-yet"
-    assert bar.self_consistency_rate is None, "a uniform-abstain rate must not be recorded"
+    # ⚠️ PC-5 was RE-DERIVED after LP-493a fixed both context defects and scored 0.5000 over 2 cases with 1 disagreement — a MEASURED FAILURE, not the uniform abstain the original hold recorded. The distinction matters: 'never measured' and 'measured and failed the bar' are different audit-trail entries, and only one of them says the rule was actually tried.
+    assert bar.self_consistency_rate is None, (
+        "PC-5 is held; if a rate is ever recorded here it must be the measured 0.5000 from the "
+        "LP-493a re-derivation, never the pre-fix uniform-abstain 1.0"
+    )
     assert not is_eligible(bar)
     assert "PC-5" not in ACTIVE_RULE_IDS
 

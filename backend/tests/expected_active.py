@@ -37,7 +37,8 @@ from __future__ import annotations
 # LP-492 (+PR-7 deterministic; +PR-3/PR-4/PR-5 ratify-pending. ⚠️ PR-8 DROPPED — no FEMA/disaster field
 # exists in any of the 121 schema specs or MISMO, so its trigger is unstateable: CR-3's shape) -> 60.
 # LP-493 (+PC-8 — personal property, surfaces only. ⚠️ PC-5 BUILT BUT HELD: its derivation returned a
-# uniform abstain, and a rate over one abstain value carries no information. PC-1 DROPPED: duplicate
+# uniform abstain BEFORE LP-493a's context fixes; the re-derivation after them scored a MEASURED
+# 0.5000 (2 cases, 1 disagreement), so PC-5 is held on a measured failure, not on an absent number. PC-1 DROPPED: duplicate
 # matcher + a 0/5 field) -> 61.
 EXPECTED_ACTIVE_RULE_COUNT: int = 61
 

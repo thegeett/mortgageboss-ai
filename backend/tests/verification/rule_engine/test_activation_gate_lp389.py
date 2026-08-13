@@ -118,7 +118,8 @@ def test_exactly_the_eligible_candidates_pass() -> None:
     # uncalibrated AI tags, so every bar is not-calibratable-yet. 9 -> 13 held; ACTIVE unchanged at 47.
     # LP-490a — CR-1/CR-4/CR-6/CR-8/CR-10 left the held set for `ratify-pending` (ADR-378): activated on
     # a self-consistency rate with ratification as the safety substitute. 13 -> 8 held.
-    # LP-493 — PC-5 joins the HELD set: BUILT, but its derivation returned a uniform abstain
+    # LP-493 — PC-5 joins the HELD set: BUILT, its first derivation returned a uniform abstain, and
+    # the LP-493a re-derivation (after both context fixes) scored a measured 0.5000 — held either way
     # ({unknown: 2}), and a rate over one abstain value carries no information (the CR-8 shape), so
     # none was recorded. 8 -> 9 held.
     assert len(held) == 9 and not (held & _ACTIVATED)  # every other candidate is held

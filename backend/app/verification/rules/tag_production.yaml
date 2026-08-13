@@ -457,6 +457,11 @@ ai_groups:
                     a similar amount, at or shortly after the contract date, leaving an account the
                     borrower owns.
       - "no"      — you can see the statements covering that period and NO debit corresponds to it.
+      ⚠️ TRUNCATION. A statement's transaction list may be CAPPED — when it is, the context carries
+      `"truncated": true` alongside `"shown"` and `"total"` for that document. If any statement you would
+      need to rely on is truncated, answer "unknown", NEVER "no": the debit you are looking for may be
+      among the rows you were not shown, and a confirmed absence you cannot actually confirm is the one
+      answer that fires this rule wrongly.
       - "unknown" — no contract amount, no statements covering the period, or you cannot tell. ⚠️ This is
                     the RIGHT answer far more often than "no". Statements rarely cover every account.
 

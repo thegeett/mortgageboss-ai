@@ -95,7 +95,7 @@ contract.emd_amount,doc,number,,Earnest money amount.,parsed,"PC-5, AS-2",Determ
 contract.emd_sourced,doc,enum,"[""yes"", ""no"", ""unknown""]",EMD traced to a verified account debit.,AI,"PC-5, AS-2",AI-at-rule-time,enum: yes | no | unknown
 contract.closing_date,doc,date,,Contract closing date.,parsed,"PC-7, CL-1",Deterministic-once-tagged,date
 contract.addenda_signed,doc,enum,"[""yes"", ""no"", ""unknown""]",Addenda present & signed.,AI,PC-6,AI-at-rule-time,enum: yes | no | unknown
-contract.personal_property,doc,enum,"[""yes"", ""no + list""]",Personal property included that may inflate value.,AI,PC-8,AI-at-rule-time,enum: yes | no + list
+contract.personal_property,doc,enum,"[""yes"", ""no"", ""unknown""]",Does the contract include personal property that may inflate the price? yes | no | unknown (unknown when the contract does not say).,AI,PC-8,AI-at-rule-time,enum: yes | no | unknown
 contract.contingency_dates,doc,list,,Financing/appraisal contingency dates.,parsed,PC-9,Deterministic-once-tagged,list | null
 contract.arms_length,doc,enum,"[""yes"", ""no"", ""unknown""]",Arm's-length vs related-party/flip.,AI,"FR-2, PC-1",AI-at-rule-time,enum: yes | no | unknown
 mi.required,loan,enum,"[""yes"", ""no""]",Is MI required (LTV>80 conv).,derived,"MI-1, MI-3",Deterministic-once-tagged,enum: yes | no

@@ -8,8 +8,8 @@ things it must NOT do.
 from __future__ import annotations
 
 import json
-from pathlib import Path
 
+import pytest
 from app.verification.eval.lf6t3n_fixture import build_lf6t3n_snapshot
 from app.verification.tag_materialization.declarations import load_ai_groups
 from app.verification.tag_materialization.subjects import ContextOptions, subject_type
@@ -92,11 +92,44 @@ def test_only_pc5s_group_declares_the_new_opt_ins() -> None:
     assert with_transactions == {"contract_emd"}
 
 
-def test_the_loader_rejects_the_opt_ins_on_a_wrong_subject() -> None:
+@pytest.mark.parametrize(
+    ("opt_in", "subject"),
+    [
+        ("include_unattributed_documents", "document"),
+        ("include_unattributed_documents", "loan"),
+        ("include_transactions", "document"),
+        ("include_transactions", "loan"),
+    ],
+)
+def test_the_loader_rejects_the_opt_ins_on_a_wrong_subject(opt_in: str, subject: str) -> None:
     """A closed set, like `include_stated_liabilities`. Asking for borrower-attribution relaxation on a
-    subject that never filters by attribution is a declaration ERROR, not a silent no-op."""
+    subject that never filters by attribution is a declaration ERROR, not a silent no-op.
+
+    ⚠️ THIS USED TO GREP THE SOURCE FILE (reported finding), so inverting the very condition it claims to
+    pin left it green — the message string was still in the file. It now exercises the LOADER: build a
+    declaration with the opt-in on the wrong subject and require it to raise. `include_transactions` on a
+    `document` subject is in the table because the validator used to ADMIT it while only the borrower
+    context reads it, which is the silent no-op this guard exists to forbid.
+    """
     import app.verification.tag_materialization.declarations as decl
 
-    source = Path(decl.__file__).read_text()
-    assert "`include_unattributed_documents` is only for a borrower-subject" in source
-    assert "`include_transactions` is only for a document- or borrower-subject" in source
+    body = {
+        "ai_groups": {
+            "probe": {
+                "subject": subject,
+                "context_builder": subject,
+                "tags": ["contract.emd_sourced"],
+                "system_prompt": "probe",
+                opt_in: True,
+            }
+        }
+    }
+    decl.load_ai_groups.cache_clear()
+    original = decl._production_doc
+    decl._production_doc = lambda: body  # type: ignore[assignment]
+    try:
+        with pytest.raises(decl.DeclarationError):
+            decl.load_ai_groups()
+    finally:
+        decl._production_doc = original  # type: ignore[assignment]
+        decl.load_ai_groups.cache_clear()
