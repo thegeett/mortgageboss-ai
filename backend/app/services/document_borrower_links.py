@@ -101,25 +101,19 @@ async def assign_document_borrower_links(
     return rows
 
 
-async def get_document_borrower_links(
-    db: AsyncSession, document_id: UUID
-) -> list[DocumentBorrowerLink]:
-    """Fetch a document's borrower links (empty when there are none).
-
-    Excludes links whose document OR borrower has been soft-deleted: the link table
-    has no soft-delete of its own and its ``ondelete=CASCADE`` FKs never fire on a
-    soft delete (deleted_at is set, the row survives), so a borrower removed from
-    the file after matching would otherwise leak back a link to a borrower the file
-    no longer has. Joining the (soft-delete-aware) parents keeps reads honest.
-    """
-    stmt = (
-        select(DocumentBorrowerLink)
-        .join(Document, Document.id == DocumentBorrowerLink.document_id)
-        .join(Borrower, Borrower.id == DocumentBorrowerLink.borrower_id)
-        .where(DocumentBorrowerLink.document_id == document_id)
-        .order_by(DocumentBorrowerLink.confidence.desc())
-    )
-    stmt = only_active(stmt, Document)
-    stmt = only_active(stmt, Borrower)
-    result = await db.execute(stmt)
-    return list(result.scalars().all())
+# NOTE: a `get_document_borrower_links(db, document_id)` read helper lived here and
+# was removed — it had no caller outside its own tests. It filtered on
+# `document_id` ALONE, with no join back to the loan file, so it was the one
+# remaining instance of a query shape that returns a row without proving the
+# caller's company owns it. Nothing exposed it, but a route wired to it later
+# would have inherited a cross-tenant read.
+#
+# The behaviour it provided is not lost. The live reader is
+# `_links_by_document` in `app/verification/snapshot/documents_section.py`, which
+# excludes links to soft-deleted borrowers by resolving `borrower_id` against
+# `_active_borrower_names` — see the `if link.borrower_id in borrower_names`
+# filter there, covered by `test_link_to_soft_deleted_borrower_excluded`.
+#
+# Anything added here in future should take a `Document` object the caller has
+# already authorized (as `assign_document_borrower_links` does), or accept a
+# `company_id` and join through `LoanFile`. See docs/findings/loan-file-scoping.md.

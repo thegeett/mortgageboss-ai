@@ -11,8 +11,10 @@ For each active, current document → a :class:`DocumentEntry`:
 * ``belongs_to`` — the RESOLVED borrowers, read from ``document_borrower_links``
   (LP-202), as a tuple of ``{borrower_id, name}`` (option-2); ``None`` when no
   borrower resolved (appraisal / no-match / unprocessable). Joint documents →
-  multiple refs. The stored links are already soft-delete-safe (LP-202's read
-  helper excludes a link to a soft-deleted document/borrower).
+  multiple refs. A link to a soft-deleted borrower is excluded **here**, by
+  resolving ``borrower_id`` against ``_active_borrower_names`` — the stored rows
+  are NOT soft-delete-safe on their own (``ondelete=CASCADE`` never fires on a soft
+  delete, so the link survives the borrower's removal).
 * ``fields`` — each extracted typed field → a ``Field`` (``source=extracted``)
   carrying LP-201's nullable confidence FAITHFULLY (null stays null — never
   fabricated). The RAW asserted name the document printed is surfaced here as
