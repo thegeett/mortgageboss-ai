@@ -104,18 +104,20 @@ def test_as4_is_still_held() -> None:
     assert "AS-4" not in ACTIVE_RULE_IDS
 
 
-def test_ratify_pending_wires_ratification_through_evaluation() -> None:
-    """⚠️ THE SUBSTITUTE MUST BE REAL. `deterministic.py` never set `ratification_pending` before
-    LP-490a, so an ai_fuzzy_match rule on this status would have shipped an unmeasured AI judgment as an
-    AUTO verdict with no human in the loop.
+def test_every_ratify_pending_rule_is_wired_to_ratify() -> None:
+    """⚠️ THE SUBSTITUTE MUST BE REAL. `deterministic.py` never set `ratification_pending` before LP-490a,
+    so a ratify-pending ai_fuzzy_match rule would have shipped an unmeasured AI judgment as an AUTO
+    verdict with no human in the loop.
 
-    No rule is on this status yet, so this asserts the wiring exists and that the set is empty. ⚠️ WHEN
-    THE FIRST RULE ACTIVATES, this test FAILS — deliberately — and whoever adds it must replace this with
-    a per-rule proof THROUGH A RULE EVALUATION that every finding carries the flag (LP-487's standing
-    rule; LP-508's guard passed by calling the mechanism directly and reached 1 of 5 rules)."""
-    on_status = [r for r, b in load_activation_bars().items() if b.status == "ratify-pending"]
-    assert on_status == [], (
-        "a rule now uses ratify-pending — replace this test with a per-rule proof, through a real rule "
-        f"evaluation, that every finding from {on_status} carries ratification_pending=True"
+    The per-rule proof THROUGH A REAL RULE EVALUATION lives in
+    test_cr1_undisclosed_liability_lp490.py::test_ratify_pending_findings_carry_ratification — it
+    materialises tags and runs the real evaluator, then asserts every finding carries the flag. This test
+    guards the SET: if a rule joins the status without that proof being extended to it, it fails."""
+    on_status = {r for r, b in load_activation_bars().items() if b.status == "ratify-pending"}
+    assert on_status == {"CR-1", "CR-4", "CR-8", "CR-6", "CR-10"}, (
+        f"a rule joined ratify-pending without a ratification proof: {on_status ^ {'CR-1', 'CR-4', 'CR-8', 'CR-6', 'CR-10'}} "
+        "— extend the per-rule evaluation proof before adding it here"
     )
-    assert not ratifies_every_finding("CR-1")
+    for rule_id in on_status:
+        assert ratifies_every_finding(rule_id)
+    assert not ratifies_every_finding("CR-5")  # a held rule must NOT be wired to ratify

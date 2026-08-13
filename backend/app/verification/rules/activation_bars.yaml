@@ -846,7 +846,13 @@ CR-4:
   # (no measured accuracy, no Priya bar) → not-calibratable-yet, threshold null, validated false →
   # is_eligible=false → NOT activated. Calibrating the tag against Priya's labels + her bar is a separate
   # ticket; until then CR-4 is written + inert. (Mirrors OC-1 — a deterministic rule on an unscored AI tag.)
-  status: not-calibratable-yet
+  status: ratify-pending
+  self_consistency_rate: 1.0
+  self_consistency_cases: 13
+  self_consistency_disagreements: 0
+  self_consistency_model: us.anthropic.claude-sonnet-4-5-20250929-v1:0
+  self_consistency_date: "2026-08-13"
+  input_resolves: true
   ships: auto
   threshold: null
   validated: false
@@ -882,8 +888,8 @@ CL-1:
   ships: auto
   threshold: null
   validated: false
-  input_resolves: true
   load_bearing_ai_tags: []
+  input_resolves: true
   fp_fn: >-
     FN (a lock silently expiring before closing -> the borrower's rate and pricing change at the table) >>
     FP (a false expiry warning -> a processor checks one date).
@@ -1138,7 +1144,13 @@ CR-1:
   # CR-1 reads liab.in_application — the PER-LIABILITY judgment the credit_profile group produces
   # (LP-483 / ADR-375), the same tag CR-4's borrower rollup aggregates. ONE matcher, two views, so the
   # two rules cannot disagree on a file. Blocked on the same calibration as CR-4, by construction.
-  status: not-calibratable-yet
+  status: ratify-pending
+  self_consistency_rate: 1.0
+  self_consistency_cases: 13
+  self_consistency_disagreements: 0
+  self_consistency_model: us.anthropic.claude-sonnet-4-5-20250929-v1:0
+  self_consistency_date: "2026-08-13"
+  input_resolves: true
   ships: auto
   threshold: null
   validated: false
@@ -1176,7 +1188,18 @@ CR-5:
 CR-6:
   # ⚠️ INERT. The seasoning arithmetic is deterministic, but its inputs (liab.derogatory_type / _date)
   # are uncalibrated AI tags, so the CHAIN is uncalibrated.
-  status: not-calibratable-yet
+  status: ratify-pending
+  self_consistency_rate: 1.0
+  self_consistency_cases: 35
+  self_consistency_disagreements: 0
+  self_consistency_model: us.anthropic.claude-sonnet-4-5-20250929-v1:0
+  self_consistency_date: "2026-08-13"
+  input_resolves: true
+  # ⚠️ THE RATE COVERS NEGATIVE CASES ONLY, and that is the whole caveat. The corpus contains ZERO
+  # derogatory events or public records, so both derivations were answering "no / none / not applicable" on all 35 real
+  # tradelines. It measures the model's STABILITY AT SAYING NO — not its ability to recognise a bankruptcy, foreclosure or short sale.
+  # Ratification is doing the real work here; treat the rate as evidence of nothing more than that the
+  # producer runs and does not thrash. Re-derive when a file with a real a bankruptcy, foreclosure or short sale arrives.
   ships: auto
   threshold: null
   validated: false
@@ -1200,7 +1223,13 @@ CR-6:
 CR-8:
   # ⚠️ INERT. A judgmental rule RATIFIES every verdict (needs_review / couldnt_check only), so it could
   # never auto-assert — but it is held on calibration regardless.
-  status: not-calibratable-yet
+  status: ratify-pending
+  self_consistency_rate: 0.9714
+  self_consistency_cases: 35
+  self_consistency_disagreements: 1
+  self_consistency_model: us.anthropic.claude-sonnet-4-5-20250929-v1:0
+  self_consistency_date: "2026-08-13"
+  input_resolves: true
   ships: ratify
   threshold: null
   validated: false
@@ -1219,7 +1248,18 @@ CR-8:
     priority: it is the gate everything else hangs on.
 CR-10:
   # ⚠️ INERT. Judgmental → ratifies; held on calibration regardless.
-  status: not-calibratable-yet
+  status: ratify-pending
+  self_consistency_rate: 1.0
+  self_consistency_cases: 35
+  self_consistency_disagreements: 0
+  self_consistency_model: us.anthropic.claude-sonnet-4-5-20250929-v1:0
+  self_consistency_date: "2026-08-13"
+  input_resolves: true
+  # ⚠️ THE RATE COVERS NEGATIVE CASES ONLY, and that is the whole caveat. The corpus contains ZERO
+  # collection or charge-off codes, so both derivations were answering "no / none / not applicable" on all 35 real
+  # tradelines. It measures the model's STABILITY AT SAYING NO — not its ability to recognise a real collection.
+  # Ratification is doing the real work here; treat the rate as evidence of nothing more than that the
+  # producer runs and does not thrash. Re-derive when a file with a real a real collection arrives.
   ships: ratify
   threshold: null
   validated: false

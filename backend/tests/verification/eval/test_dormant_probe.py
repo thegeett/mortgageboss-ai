@@ -50,18 +50,26 @@ _DORMANT_EXPECTED = frozenset(
         "occupancy_rental",
         # LP-444 — credit_profile (CR-4's producer, borrower-subject) is declared but CR-4 is inert, so it is
         # dormant until CR-4 activates (its own calibration ticket).
-        "credit_profile",
         # LP-490 — the credit AI cohort's four groups. Every rule reading them (CR-5/CR-6/CR-8/CR-10) is
         # INERT (not-calibratable-yet → is_eligible False, LP-484), so all four are dormant by design.
         # They activate with their own calibration ticket, exactly as credit_profile will.
         "credit_inquiries",
-        "credit_derogatory",
-        "credit_mortgage_history",
-        "credit_collections",
+        # ⚠️ LP-490a — credit_profile / credit_derogatory / credit_mortgage_history / credit_collections
+        # LEFT the dormant set: CR-1, CR-4, CR-6, CR-8 and CR-10 went live on `ratify-pending` (ADR-378),
+        # so their groups are now REQUIRED and run on a live file. Only credit_inquiries stays dormant —
+        # CR-5 is the one credit rule still held (its trigger has one instance in the whole corpus, so
+        # there was nothing to derive twice).
     }
 )
 _LIVE_EXPECTED = frozenset(
     {
+        # ⚠️ LP-490a — the four credit groups JOINED the live set: CR-1, CR-4, CR-6, CR-8 and CR-10 went
+        # live on `ratify-pending` (ADR-378), so these now run on a live file. credit_inquiries stays
+        # dormant (CR-5 is still held — one inquiry row in the whole corpus).
+        "credit_profile",
+        "credit_derogatory",
+        "credit_mortgage_history",
+        "credit_collections",
         "id_address",
         "id_name",
         "id_poa",

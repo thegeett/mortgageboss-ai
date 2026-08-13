@@ -250,6 +250,15 @@ _LP487_ACTIVATED: tuple[str, ...] = ("IH-2", "IH-7")
 # and nothing states that a borrower RETAINS a property. Dropped with a reason (LP-488), not deferred.
 _LP488_ACTIVATED: tuple[str, ...] = ("MI-1", "MI-4", "CO-1", "AU-3")
 
+# LP-490a / ADR-378 — activated on a SELF-CONSISTENCY rate, not a measured accuracy, with RATIFICATION as
+# the safety substitute: every finding these produce carries ratification_pending=True (enforced in
+# deterministic.py), so a wrong tag costs a processor's attention and can never auto-assert.
+# ⚠️ Rates are model-produced and measure STABILITY, not correctness — a systematically wrong tag scores
+# 1.0. CR-1/CR-4 share one matcher (1.0000, 13 cases); CR-8 is 0.9714 over 35 real tradelines.
+# ⚠️ CR-6 and CR-10's rates cover NEGATIVE CASES ONLY — the corpus holds zero derogatory events and zero
+# collection codes, so both derivations were answering "no" on all 35 tradelines. Their bars say so.
+_LP490A_ACTIVATED: tuple[str, ...] = ("CR-1", "CR-4", "CR-8", "CR-6", "CR-10")
+
 # The gate is the source of truth: test_activation_gate_lp389 asserts ACTIVE_RULE_IDS - _BASE_ACTIVE ==
 # eligible_rule_ids() — a rule CANNOT enter this set without meeting the eligibility gate (not a hand-list).
 ACTIVE_RULE_IDS: tuple[str, ...] = (
@@ -274,6 +283,7 @@ ACTIVE_RULE_IDS: tuple[str, ...] = (
     *_LP486_ACTIVATED,
     *_LP487_ACTIVATED,
     *_LP488_ACTIVATED,
+    *_LP490A_ACTIVATED,
 )
 
 

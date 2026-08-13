@@ -65,6 +65,10 @@ _FACT_LABELS: dict[str, str] = {
     "aus.recommendation": "AUS recommendation",  # AU-3 (LP-488)
     "credit.inquiry_explained": "credit inquiries and their explanations",  # CR-5 (LP-490)
     "liab.derogatory_type": "type of derogatory credit event",  # CR-6 (LP-490)
+    "liab.in_application": "whether this debt is on the application",  # CR-1 (LP-490a)
+    "credit.undisclosed_tradeline": "debts on the report not stated on the application",  # CR-4
+    "liab.is_derogatory": "whether this account carries a derogatory mark",  # CR-6 (LP-490a)
+    "credit.has_collections": "collections on the credit report",  # CR-10 (LP-490a)
     "liab.derogatory_date": "date of the derogatory credit event",  # CR-6 (LP-490)
     "credit.derogatory_months_elapsed": "time since the derogatory event",  # CR-6 (LP-490)
     "liab.is_mortgage": "whether this account is a mortgage",  # CR-8 (LP-490)

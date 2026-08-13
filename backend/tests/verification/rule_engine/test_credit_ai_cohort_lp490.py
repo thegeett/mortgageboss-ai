@@ -23,7 +23,12 @@ from app.verification.rules.distrust import distrusted_tag_ids
 from app.verification.rules.specs import load_rule_spec
 from app.verification.tag_materialization.declarations import load_ai_groups, load_declarations
 
-_COHORT = ("CR-1", "CR-5", "CR-6", "CR-8", "CR-10")
+# ⚠️ UPDATED AT LP-490a: CR-1, CR-4 and CR-8 went LIVE on `ratify-pending` (a self-consistency rate plus
+# ratification, ADR-378). The three below stay INERT because their triggers have NO instances in the
+# corpus — one inquiry row, zero derogatory events, zero collection codes — so there was nothing to
+# derive twice, and a rate over zero cases is not a number.
+_COHORT = ("CR-5",)
+_ACTIVATED_AT_490A = ("CR-1", "CR-4", "CR-8", "CR-6", "CR-10")
 
 
 # --------------------------------------------------------------------------- #
@@ -40,8 +45,11 @@ def test_every_rule_in_the_cohort_is_inert(rule_id: str) -> None:
     assert rule_id not in ACTIVE_RULE_IDS
 
 
-def test_the_cohort_did_not_change_the_live_set() -> None:
-    assert len(ACTIVE_RULE_IDS) == 47
+def test_the_still_inert_rules_are_not_live() -> None:
+    """⚠️ Zero-case rules stay held. LP-490a activated three with real derivations; these three have no
+    instances of their trigger anywhere in the corpus."""
+    assert not set(_COHORT) & set(ACTIVE_RULE_IDS)
+    assert set(_ACTIVATED_AT_490A) <= set(ACTIVE_RULE_IDS)
 
 
 @pytest.mark.parametrize("rule_id", _COHORT)

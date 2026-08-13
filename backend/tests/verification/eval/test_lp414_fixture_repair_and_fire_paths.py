@@ -126,15 +126,20 @@ async def test_lf6t3n_full_verdict_distribution_is_stable() -> None:
     # satisfied / fired / needs_review stay 21 / 2 / 4. LP-488 adds MI-4 (+1) and CO-1 (+1, no property type stated) → 468, then AU-3 (per_document over the
     # 30 docs, like IH-1/IH-2): 26 classified non-AUS docs → not_applicable, 4 unclassified → couldnt_check
     # (an unclassified document cannot be ruled out as AUS findings) → 498.
+    # LP-490a ACTIVATED CR-1/CR-4/CR-6/CR-8/CR-10 on `ratify-pending` (ADR-378). LF-6T3N carries NO
+    # credit report, so the per-LIABILITY rules (CR-1, CR-6, CR-8) yield no subjects at all and the two
+    # per-BORROWER rules (CR-4, CR-10) abstain once per borrower: +4 couldnt_check → 502.
+    # ⚠️ satisfied / fired / needs_review are UNCHANGED at 21 / 2 / 4 — five rules activated and no
+    # existing verdict moved, and none of the five clears on a missing credit report.
     mat = await materialize_tags(
         build_lf6t3n_snapshot(), ai_reasoners=stub_materialization_reasoners()
     )
     results, _ = await evaluate_rules(mat)
-    assert len(results) == 498
+    assert len(results) == 502
     assert (
         Counter(r.verdict.value for r in results)
         == {
-            "couldnt_check": 219,  # +AU-3 x4 (LP-488 — the 4 unclassified docs; no AUS findings on LF-6T3N)  # +CO-1 x1 (LP-488 — LF-6T3N states no property type)  # +MI-4 x1 (LP-488 — same undetermined program predicate as MI-1)  # +MI-1 x1 (LP-488 — LF-6T3N states no loan program)  # +IH-1 x4 (LP-447); +CL-1/CR-13/PR-6 x1 each (LP-485 — no LE / credit
+            "couldnt_check": 223,  # +CR-4 x2 +CR-10 x2 (LP-490a — per-borrower, no credit report on LF-6T3N)  # +AU-3 x4 (LP-488 — the 4 unclassified docs; no AUS findings on LF-6T3N)  # +CO-1 x1 (LP-488 — LF-6T3N states no property type)  # +MI-4 x1 (LP-488 — same undetermined program predicate as MI-1)  # +MI-1 x1 (LP-488 — LF-6T3N states no loan program)  # +IH-1 x4 (LP-447); +CL-1/CR-13/PR-6 x1 each (LP-485 — no LE / credit
             # report / appraisal on LF-6T3N, so each abstains rather than clearing); +IH-2 x4 + IH-7 x1
             # (LP-487 — 4 unclassified docs that cannot be ruled out as binders, and an unstated property type)
             "not_applicable": 252,  # +AU-3 x26 (LP-488 — 26 classified non-AUS documents)  # +IH-1 x26 (LP-447 — 26 classified non-binder docs; no homeowners policy);

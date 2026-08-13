@@ -52,6 +52,11 @@ _ACTIVATED = frozenset(
         "ID-5",
         "AS-9",
         "AU-3",  # LP-488 — AUS recommendation (DU/LPA closed vocabulary, ADR-376)
+        "CR-1",  # LP-490a — ratify-pending (ADR-378)
+        "CR-4",  # LP-490a
+        "CR-6",  # LP-490a
+        "CR-8",  # LP-490a
+        "CR-10",  # LP-490a
         "IN-4",
         "AS-10",
         "AS-2",
@@ -102,7 +107,9 @@ def test_exactly_the_eligible_candidates_pass() -> None:
     # builds INERT by design — 8 -> 9 held, ACTIVE_RULE_IDS unchanged at 47.
     # LP-490 adds CR-5/CR-6/CR-8/CR-10 to the HELD set alongside CR-1 — the whole cohort reads
     # uncalibrated AI tags, so every bar is not-calibratable-yet. 9 -> 13 held; ACTIVE unchanged at 47.
-    assert len(held) == 13 and not (held & _ACTIVATED)  # every other candidate is held
+    # LP-490a — CR-1/CR-4/CR-6/CR-8/CR-10 left the held set for `ratify-pending` (ADR-378): activated on
+    # a self-consistency rate with ratification as the safety substitute. 13 -> 8 held.
+    assert len(held) == 8 and not (held & _ACTIVATED)  # every other candidate is held
 
 
 def test_eligible_rule_ids_is_sorted_and_matches() -> None:
@@ -111,39 +118,43 @@ def test_eligible_rule_ids_is_sorted_and_matches() -> None:
         "AS-11",
         "AS-12",
         "AS-2",
-        "AS-6",  # LP-429 (sorts between AS-2 and AS-8)
-        "AS-8",  # LP-406-2b
+        "AS-6",
+        "AS-8",
         "AS-9",
-        "AU-3",  # LP-488 (sorts between AS-9 and CL-1)
-        # LP-485 — the date-compare family, in sort order: CL-1/CR-13 before ID-5, PR-6 after PC-7.
+        "AU-3",
         "CL-1",
-        "CO-1",  # LP-488 (sorts between CL-1 and CR-12)
-        "CR-12",  # LP-486 (sorts between CL-1 and CR-13)
+        "CO-1",
+        "CR-1",  # LP-490a — ratify-pending (ADR-378)
+        "CR-10",  # LP-490a
+        "CR-12",
         "CR-13",
+        "CR-4",  # LP-490a
+        "CR-6",  # LP-490a
+        "CR-8",  # LP-490a
         "ID-5",
-        "IH-1",  # LP-447 (sorts between ID-5 and IH-3)
-        "IH-2",  # LP-487 (sorts between IH-1 and IH-3)
-        "IH-3",  # LP-417 (sorts between ID-5 and IN-1)
-        "IH-7",  # LP-487 (sorts after IH-3, before IN-1)
+        "IH-1",
+        "IH-2",
+        "IH-3",
+        "IH-7",
         "IN-1",
         "IN-10",
         "IN-11",
-        "IN-12",  # LP-423 (sorts between IN-11 and IN-3)
-        "IN-15",  # LP-430 (sorts between IN-12 and IN-3)
-        "IN-16",  # LP-433 (sorts between IN-15 and IN-3)
+        "IN-12",
+        "IN-15",
+        "IN-16",
         "IN-3",
         "IN-4",
         "IN-5",
-        "IN-6",  # LP-412
+        "IN-6",
         "IN-7",
-        "IN-8",  # LP-428 (sorts between IN-7 and IN-9)
-        "IN-9",  # LP-428
-        "MI-1",  # LP-488 (sorts after every IN-* and before PC-2)
-        "MI-4",  # LP-488
-        "PC-2",  # LP-407-3 (sorts before PC-7)
-        "PC-3",  # LP-407-4 (sorts between PC-2 and PC-7)
-        "PC-7",  # LP-412
-        "PR-6",  # LP-485 (sorts after PC-7)
+        "IN-8",
+        "IN-9",
+        "MI-1",
+        "MI-4",
+        "PC-2",
+        "PC-3",
+        "PC-7",
+        "PR-6",
     )  # sorted
 
 

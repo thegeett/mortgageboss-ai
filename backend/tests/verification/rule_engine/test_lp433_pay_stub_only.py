@@ -138,7 +138,7 @@ def test_in16_is_active_and_the_invariant_holds() -> None:
     assert bar.ships == "auto" and not bar.load_bearing_ai_tags  # deterministic, no AI tag
     assert is_eligible(bar) and "IN-16" in ACTIVE_RULE_IDS
     assert (
-        len(ACTIVE_RULE_IDS) == EXPECTED_ACTIVE_RULE_COUNT == 47
+        len(ACTIVE_RULE_IDS) == EXPECTED_ACTIVE_RULE_COUNT == 52
     )  # LP-447 +IH-1; LP-485 +CL-1/CR-13/PR-6
     assert set(ACTIVE_RULE_IDS) - set(_BASE_ACTIVE) == set(eligible_rule_ids())
 

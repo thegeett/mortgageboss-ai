@@ -158,15 +158,17 @@ async def _evaluate(snapshot: Snapshot, answers: dict[str, str], rule_id: str):
 # --------------------------------------------------------------------------- #
 # ⚠️ INERT — the first thing this cohort must prove
 # --------------------------------------------------------------------------- #
-def test_cr1_is_inert_and_cannot_be_eligible() -> None:
-    """`not-calibratable-yet` → is_eligible False (LP-484). If a later ticket sets validated:true or
-    changes the status to force this rule live without scoring liab.in_application, this fails."""
+def test_cr1_is_live_on_a_self_consistency_rate_not_a_measurement() -> None:
+    """⚠️ UPDATED AT LP-490a (ADR-378). CR-1 shipped INERT at LP-490; it is now LIVE on `ratify-pending`,
+    activated on a self-consistency rate (two independent Bedrock derivations, 13 cases, 0 disagreements)
+    with RATIFICATION as the safety substitute. The rate is NOT evidence of correctness — a
+    systematically wrong tag scores 1.0 — so `measured_accuracy` stays None and `validated` stays False."""
     bar = load_activation_bars()["CR-1"]
-    assert bar.status == "not-calibratable-yet"
+    assert bar.status == "ratify-pending"
     assert bar.validated is False
-    assert not is_eligible(bar)
-    assert "CR-1" not in ACTIVE_RULE_IDS
-    assert bar.load_bearing_ai_tags == ("liab.in_application",)
+    assert bar.measured_accuracy is None
+    assert bar.self_consistency_rate is not None and bar.self_consistency_cases
+    assert is_eligible(bar) and "CR-1" in ACTIVE_RULE_IDS
 
 
 # --------------------------------------------------------------------------- #
@@ -304,3 +306,25 @@ def test_the_catch_all_is_an_abstain_not_a_pass() -> None:
 def test_cr1_reads_no_distrusted_tag() -> None:
     gated = set(load_rule_spec("CR-1").deterministic.gated_tags)
     assert not (gated & set(distrusted_tag_ids()))
+
+
+# --------------------------------------------------------------------------- #
+# LP-490a / ADR-378 — ⚠️ THE RATIFICATION PROOF, through a REAL rule evaluation
+# --------------------------------------------------------------------------- #
+@pytest.mark.parametrize("rule_id", ["CR-1", "CR-4"])
+async def test_ratify_pending_findings_carry_ratification(rule_id: str) -> None:
+    """⚠️ RATIFICATION IS THE ENTIRE SAFETY SUBSTITUTE for the missing measurement (ADR-378), so it is
+    proven HERE — through materialisation and the real evaluator — not by calling the mechanism.
+
+    `deterministic.py` never set the flag before LP-490a. CR-1 and CR-4 both route through that path, so
+    without the fix they would have shipped an unmeasured AI judgment as an AUTO verdict with no human in
+    the loop. Every finding they produce must carry ratification_pending=True — including `satisfied`,
+    because a wrong `satisfied` is exactly what hides an undisclosed debt."""
+    answers = {**{r["creditor_name"]: "yes" for r in _LF96SV_ROWS}, "AMEX": "no"}
+    evaluations = await _evaluate(_snapshot(_LF96SV_ROWS, _LF96SV_STATED), answers, rule_id)
+    findings = [e for e in evaluations if e.verdict is not Verdict.NOT_APPLICABLE]
+    assert findings, f"{rule_id} produced no findings to check"
+    assert all(e.ratification_pending for e in findings), (
+        f"{rule_id} shipped a finding with no human in the loop: "
+        f"{[(e.subject_id, e.verdict.value) for e in findings if not e.ratification_pending]}"
+    )

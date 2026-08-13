@@ -29,6 +29,8 @@ from __future__ import annotations
 # LP-488 (+CO-1 — condo questionnaire presence) -> 46.
 # LP-488 (+AU-3 — AUS recommendation, DU/LPA closed vocabulary) -> 47. ⚠️ RE-2 was in the LP-488 cohort
 # and is DROPPED, not deferred: no REO/retained-property concept exists in MISMO or the data model.
-EXPECTED_ACTIVE_RULE_COUNT: int = 47
+# LP-490a (+CR-1, +CR-4, +CR-8 — activated on a SELF-CONSISTENCY rate with ratification as the safety
+# substitute, ADR-378; NOT a measured accuracy) -> 50.
+EXPECTED_ACTIVE_RULE_COUNT: int = 52
 
 __all__ = ["EXPECTED_ACTIVE_RULE_COUNT"]
