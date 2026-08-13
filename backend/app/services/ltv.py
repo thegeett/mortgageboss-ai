@@ -205,6 +205,11 @@ async def build_ltv_calculation(
     result = compute_ltv(inputs, purpose)
 
     lender_slug = await _lender_slug(db, loan_file)
+    # LP-496 — THE LIMIT COMPARISON TAKES THE **EXACT** RATIO, DELIBERATELY (ADR-383). The program
+    # caps here are of mixed authority and one is FRACTIONAL: `fha.ltv.purchase_max` is 96.5%. Passing
+    # B2-1.2-01's delivered whole percent would round 96.01 up to 97 and flip every FHA purchase in
+    # (96.00, 96.50] from `pass` to `over` — the band where real FHA purchases sit, since 96.5% IS FHA's
+    # maximum. Fannie's whole-percent rule governs the ratio DELIVERED TO FANNIE, not HUD's cap.
     limit = _resolve_limit(loan_file.loan_program, purpose, lender_slug, result.ltv_pct)
 
     in_scope = await open_in_scope_findings(
@@ -215,6 +220,11 @@ async def build_ltv_calculation(
         ltv=result.ltv_pct,
         cltv=result.cltv_pct,
         hcltv=result.hcltv_pct,
+        # LP-496 — carried alongside the exact figures, never instead of them, so a reader sees
+        # both "80.95%" and the 81% it is delivered as.
+        ltv_delivered=result.ltv_pct_delivered,
+        cltv_delivered=result.cltv_pct_delivered,
+        hcltv_delivered=result.hcltv_pct_delivered,
         value_basis=result.value_basis,
         value_basis_label=result.value_basis_label,
         appraised_value_source=appraised_source,

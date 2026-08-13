@@ -133,7 +133,11 @@ async def compute_loan_mi(
     ltv_calc = await build_ltv_calculation(
         db, loan_file=loan_file, confidence_cutoff=confidence_cutoff
     )
-    ltv_pct = ltv_calc.ltv
+    # LP-496 / ADR-383 — the DELIVERED whole percent (B2-1.2-01), because both consumers below are
+    # whole-percent ELIGIBILITY thresholds: PMI required above 80%, and the FHA MIP duration split at
+    # 90%. That is the Fannie/FHA question the delivered ratio is defined for. (The program CAPS in
+    # `ltv_calc.limit` keep the exact figure — one of them, FHA purchase, is fractional at 96.5%.)
+    ltv_pct = ltv_calc.ltv_delivered
     overrides = await _active_mi_overrides(db, loan_file.id)
 
     base_line, base_val = _line(

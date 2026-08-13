@@ -2471,13 +2471,24 @@ def _loan_ltv_percent(
         ),
         purpose,
     )
-    if result.ltv_pct is None:
+    if result.ltv_pct is None or result.ltv_pct_delivered is None:
         return _UNKNOWN, (
             f"the file states no {result.value_basis_label} to divide by, so no loan-to-value can be "
             "computed"
         )
-    return str(result.ltv_pct), (
-        f"the loan-to-value is {result.ltv_pct}% "
+    # LP-496 — THE TAG CARRIES THE DELIVERED WHOLE PERCENT (B2-1.2-01), because its consumer is an
+    # ELIGIBILITY threshold: MI-1 asks "is the LTV above 80%?", which is the Fannie question the
+    # delivered ratio is defined for. The EXACT figure rides the reasoning so a processor can still tell
+    # 80.01% from 80.99% — a bare "81%" on the finding would make the verdict uncheckable.
+    exact = f"{result.ltv_pct}%"
+    delivered = f"{result.ltv_pct_delivered}%"
+    shown = (
+        exact
+        if result.ltv_pct == result.ltv_pct_delivered
+        else f"{exact} (delivered as {delivered})"
+    )
+    return str(result.ltv_pct_delivered), (
+        f"the loan-to-value is {shown} "
         f"({first} over the {result.value_basis_label} of {result.value_basis})"
     )
 

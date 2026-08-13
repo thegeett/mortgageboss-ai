@@ -47,10 +47,22 @@ class LtvFindingsStatus(BaseModel):
 class LtvCalculation(BaseModel):
     """The full LTV calculation for a loan file — transparent + itemized."""
 
-    # The three ratios (percent, 2 dp; None when the value basis is unknown).
+    # The three ratios (percent, 2 dp; None when the value basis is unknown). These are the
+    # EXACT figures — what the arithmetic produced, for display and for a FRACTIONAL cap
+    # comparison (see `limit`, whose FHA purchase cap is 96.5%). LP-496 / ADR-383.
     ltv: Decimal | None
     cltv: Decimal | None
     hcltv: Decimal | None
+
+    # LP-496 — the DELIVERED ratios per Fannie Mae Selling Guide B2-1.2-01 (06/01/2022):
+    # truncated to two decimal places, then rounded up to the nearest whole percent. Shown
+    # ALONGSIDE the exact figure so `80.95% -> 81%` stays visible and checkable, and consumed
+    # by the whole-percent ELIGIBILITY thresholds (MI-1's 80%, the FHA MIP duration's 90%).
+    # Deliberately NOT used for `limit`, which compares against program caps of mixed
+    # authority — one of them fractional. See ADR-383.
+    ltv_delivered: Decimal | None
+    cltv_delivered: Decimal | None
+    hcltv_delivered: Decimal | None
 
     # The denominator made visible (the lesser-of / appraised value).
     value_basis: Decimal | None

@@ -11,6 +11,7 @@ from unittest.mock import AsyncMock, patch
 from uuid import uuid4
 
 from app.models.loan_file import LoanFile
+from app.verification.ltv import delivered_percent
 from app.verification.snapshot import calculations_section as cs
 from app.verification.snapshot.calculations_section import (
     _calc_confidence,
@@ -73,10 +74,17 @@ def _dti(back_end: Decimal | None = Decimal("43.10")) -> NS:
 
 
 def _ltv(ratio: Decimal | None = Decimal("80.00")) -> NS:
+    # LP-496 — the calculation now carries BOTH the exact ratio and B2-1.2-01's delivered whole
+    # percent, so the stub must too. `delivered_percent` is used rather than a literal: a stub that
+    # hard-coded the rounding would keep passing if the real rule changed.
+    delivered = delivered_percent(ratio)
     return NS(
         ltv=ratio,
         cltv=ratio,
         hcltv=ratio,
+        ltv_delivered=delivered,
+        cltv_delivered=delivered,
+        hcltv_delivered=delivered,
         value_basis=Decimal("1450000.00"),
         value_basis_label="lesser of (purchase price, appraised value)",
         appraised_value_source="valuation_amount",

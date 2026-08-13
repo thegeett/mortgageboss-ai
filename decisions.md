@@ -14693,3 +14693,61 @@ say so in those words — it is a stability check wearing a calibration's clothe
 
 **Related:** ADR-378 (ratify-pending and ratification as the substitute), ADR-336 (the OC-2 acceptance),
 ADR-381 (a number is only readable with what it ranged over), ADR-330 (vacuity).
+
+---
+
+## ADR-383
+
+**One rounding cannot serve every consumer of a calculated ratio. The split is by consumer NEED, not by
+call-site convenience.**
+
+**Context.** `app/verification/ltv.py` rounded every ratio one way — `ROUND_HALF_UP` to two decimals —
+and every consumer read that single value. Fannie Mae Selling Guide **B2-1.2-01** (page dated
+06/01/2022) requires the ratio a lender DELIVERS to be *"truncated (shortened) to two decimal places,
+then rounded up to the nearest whole percent"*, and the same page extends that to CLTV and HCLTV. The
+obvious fix — change the rounding in place — is wrong.
+
+**The concrete reason it is wrong.** `services/ltv.py::_resolve_limit` compares the ratio against a
+program cap, and **`fha.ltv.purchase_max` is 96.5% — a fractional limit**. Rounding up to a whole percent
+before that comparison turns 96.01 into 97 and fails a loan that is inside the cap:
+
+```
+raw 96.01   exact 96.01 -> pass      delivered 97 -> over
+raw 96.50   exact 96.50 -> pass      delivered 97 -> over
+```
+
+**96.5% is FHA's actual maximum**, so real FHA purchase files cluster in exactly the band that breaks.
+Fannie's whole-percent rule governs the ratio delivered **to Fannie**; HUD's cap is a different authority
+with an inherently fractional limit. No single rounded value is correct for both.
+
+**Decision.** `compute_ltv` returns **both** figures for each of the three ratios, computed once from the
+same raw quotient: `*_pct` (exact, two decimals) and `*_pct_delivered` (B2-1.2-01's whole percent). Each
+consumer takes the one its QUESTION requires:
+
+- a **whole-percent eligibility threshold** (MI-1's "MI above 80%", the FHA MIP duration's 90%) → the
+  **delivered** value;
+- a **fractional or mixed-authority cap** (`_resolve_limit`) → the **exact** value;
+- **display and finding evidence** → **both**, so `80.95% → 81%` remains visible and a verdict stays
+  checkable.
+
+**Consequences.**
+- **Rounding is never applied at a call site.** Both values are computed in `ltv.py` and read from there.
+  The defect this replaces was not the choice of rounding but that one value was reused for questions
+  that needed different ones — re-rounding downstream would reintroduce exactly that.
+- **The split is per-consumer-need, not per-call-site convenience.** "Which value does this comparison's
+  authority define?" is the test — not which is nearer to hand. A new consumer must answer it.
+- **The order of operations is load-bearing and is taken from the RAW quotient.** Truncation discards
+  everything past two decimals; only then is the ceiling of the whole percent taken. Deriving the
+  delivered value from the already-half-up figure smuggles a second rounding in ahead of the guide's —
+  it turns a raw 80.005 into 81 where the guide gives 80. LP-496's own first implementation had this
+  bug and its own test caught it.
+- **The fix RELAXES MI-1 in one narrow band**, `[80.005, 80.01)`: the old half-up value required MI
+  and the guideline does not. B2-1.2-01 permitted the old behaviour (*"the same or a higher LTV
+  ratio"*), so this is a move toward the guideline, not away from it — recorded because the ticket
+  expected a tightening.
+- **CLTV and HCLTV share the rule**, on the primary's own words: B2-1.2-01 says the rounding *"also
+  applies"* to both, and B2-1.2-02 (12/04/2018) / B2-1.2-03 (02/23/2016) are silent on rounding. One
+  shared helper is therefore correct rather than an over-generalisation.
+
+**Related:** ADR-361 (threshold provenance — cited, never recalled), ADR-381 (a number is only readable
+with what it ranged over), ADR-330 (vacuity).

@@ -128,9 +128,15 @@ async def test_two_appraisals_take_the_lowest_value() -> None:
     assert Decimal(str(snapshot.tags.by_subject["loan"]["property.value_basis"].value)) == Decimal(
         "360000.00"
     ), "the LOWEST appraisal must drive the LTV denominator"
-    assert Decimal(str(snapshot.tags.by_subject["loan"]["loan.ltv_percent"].value)) == Decimal(
-        "94.44"
-    )
+    # LP-496 — the tag now carries B2-1.2-01's DELIVERED whole percent (truncate to two decimals,
+    # then round up), because its consumer MI-1 asks a whole-percent eligibility question. The exact
+    # 94.44% is preserved in the tag's REASONING, asserted below, so the pin is still by value and a
+    # regression to first-wins would still be caught.
+    # This assertion previously read 94.44 and encoded the defect LP-496 fixes.
+    assert Decimal(str(snapshot.tags.by_subject["loan"]["loan.ltv_percent"].value)) == Decimal("95")
+    assert "94.44% (delivered as 95%)" in (
+        snapshot.tags.by_subject["loan"]["loan.ltv_percent"].reasoning or ""
+    ), "the exact ratio must stay visible on the finding — a bare 95% is not checkable"
     assert await _one(build_mi1_two_appraisals_snapshot) is Verdict.NEEDS_REVIEW
 
 

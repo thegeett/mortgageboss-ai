@@ -270,6 +270,11 @@ def map_ltv(ltv: LtvCalculation) -> CalculationEntry | None:
             "ltv": _money(ltv.ltv),
             "cltv": _money(ltv.cltv),
             "hcltv": _money(ltv.hcltv),
+            # LP-496 — the exact figures above, the B2-1.2-01 delivered whole percents here. Both
+            # are shown: a bare "81" would hide whether the ratio was 80.01 or 80.99.
+            "ltv_delivered": _money(ltv.ltv_delivered),
+            "cltv_delivered": _money(ltv.cltv_delivered),
+            "hcltv_delivered": _money(ltv.hcltv_delivered),
             "value_basis": _money(ltv.value_basis),
             "value_basis_label": ltv.value_basis_label,
             "appraised_value_source": ltv.appraised_value_source,
