@@ -144,7 +144,7 @@ ecr_repository_names = {
 # ⚠️ The frontend image for THIS tag must be built with
 # NEXT_PUBLIC_API_URL=https://staging.mortgageboss.ai — it is inlined at BUILD time
 # and cannot be set as a task environment variable. See the result doc.
-image_tag = "staging-2"
+image_tag = "staging-3"
 
 # Verified in C3: the images are arm64. Fargate defaults to X86_64 and the mismatch
 # fails with `exec format error`, visible only in the CloudWatch log stream.
