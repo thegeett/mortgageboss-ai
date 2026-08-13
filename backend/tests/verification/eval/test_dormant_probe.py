@@ -48,6 +48,10 @@ _DORMANT_EXPECTED = frozenset(
         # (income_docs left in LP-428, stmt_facts in LP-429 — as their rules went live.)
         "txn_nsf",
         "occupancy_rental",
+        # LP-495b — atr_documentation joins the dormant set: DT-7's producer is DECLARED this ticket and
+        # DT-7 is built but not yet activated, so no live rule consumes it. It leaves this set when
+        # DT-7 activates, exactly as occupancy_rental will with OC-3.
+        "atr_documentation",
         # LP-444 — credit_profile (CR-4's producer, borrower-subject) is declared but CR-4 is inert, so it is
         # dormant until CR-4 activates (its own calibration ticket).
         # LP-490 — the credit AI cohort's four groups. Every rule reading them (CR-5/CR-6/CR-8/CR-10) is

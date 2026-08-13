@@ -54,6 +54,12 @@ class ContextOptions:
     include_unattributed_documents: bool = False
     include_transactions: bool = False
     include_untyped: bool = False
+    # LP-495b — a LOAN-subject group that reasons about the file's DOCUMENTS opts in here. The loan
+    # context is otherwise MISMO facts only, so a loan group asked "does the file carry a lease / a
+    # document supporting each ATR factor" was shown ZERO documents and answered from 1003 facts alone —
+    # PC-5's failure shape (LP-493a), caught by printing the context before trusting a rate. Off by
+    # default, so `occupancy` (live OC-2's and OC-1's tag) is byte-identical.
+    include_documents: bool = False
 
 
 _DEFAULT_CONTEXT_OPTIONS = ContextOptions()
@@ -176,12 +182,39 @@ def _loan_read_field(raw: object, field: str) -> RawField | None:
 
 
 def _loan_context(
-    raw: object, _applies_to: frozenset[str] | None, _opts: ContextOptions
+    raw: object, _applies_to: frozenset[str] | None, opts: ContextOptions = _DEFAULT_CONTEXT_OPTIONS
 ) -> dict[str, object]:
-    assert isinstance(raw, Snapshot)
-    if raw.mismo.absent:
+    """The loan subject's context: the file's MISMO facts, plus its DOCUMENTS when the group opts in.
+
+    LP-495b — `include_documents` exists because the loan context carried MISMO facts ONLY. A loan-level
+    group whose prompt asks about the file's documents (does it carry a lease? a document supporting each
+    ATR factor?) was handed an empty document set and answered from 1003 facts alone. That is PC-5's
+    failure shape: a confident answer over a context missing its subject. Off by default, so every
+    existing loan group's context is byte-identical.
+
+    Documents are summarised as type + fields — the same shape the borrower context uses — because these
+    groups ask WHETHER a document is present and what it states, not for its full text.
+    """
+    if not isinstance(raw, Snapshot) or raw.mismo.absent:
         return {}
-    return {name: _field_value(field) for name, field in raw.mismo.facts.items()}
+    context: dict[str, object] = {
+        name: _field_value(field) for name, field in raw.mismo.facts.items()
+    }
+    if opts.include_documents:
+        documents: list[dict[str, object]] = []
+        if not raw.documents.absent:
+            for entry in raw.documents.entries:
+                doc: dict[str, object] = {
+                    "document_type": entry.document_type,
+                    "fields": {name: _field_value(field) for name, field in entry.fields.items()},
+                }
+                if opts.include_lists and entry.lists:
+                    doc["lists"] = _serialize_lists(entry, opts.list_row_cap)
+                if opts.include_transactions and entry.transactions:
+                    doc["transactions"] = _serialize_transactions(entry, opts.list_row_cap)
+                documents.append(doc)
+        context["documents"] = documents
+    return context
 
 
 # --------------------------------------------------------------------------- #

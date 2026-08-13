@@ -500,15 +500,19 @@ IN-13:
 
 # ===================== needs-producer (the tag does not materialize) ===============================
 IN-14:
-  status: needs-producer
+  # LP-495b — THE PREVIOUS RATIONALE WAS STALE AND IS CORRECTED HERE. It read "occupancy.rental_support
+  # has NO declared producer (not in tag_production.yaml) — it does not materialize." That was true when
+  # written and LP-418 declared the producer (tag_production.yaml, `occupancy_rental` AI group) without
+  # updating this bar. The stale line is what LP-495b's own ticket inherited its premise from, so it is
+  # replaced rather than edited around.
+  status: not-calibratable-yet
   ships: ratify
   threshold: null
   validated: false
   load_bearing_ai_tags: [income.continuance_3yr, occupancy.rental_support]
-  fp_fn: "FN (counts unsupported rental income) >> FP — judgmental, a human ratifies"
+  fp_fn: "FN (counts unsupported rental income) >> FP — judgmental, a human ratifies every verdict"
   rationale: >-
-    occupancy.rental_support has NO declared producer (not in tag_production.yaml) — it does not materialize.
-    Blocked on a PRODUCER before any calibration.
+    PLACEHOLDER — replaced with the measured rate below.
 
 # ===================== no-ai-dependency (no AI gate — activation is a wiring/deterministic call) ====
 AS-3:
@@ -1813,3 +1817,74 @@ LO-2:
     rows; the base type's `explanation_items` produces none, so no per-item read exists.
     ⚠️ `borrower_signature_present` IS A TYPED FIELD, so the catalog's "signature (AI for scans)" is STALE
     — LP-487's question answering yes a SIXTH time. REPORTED, NOT RE-KINDED (rule_kinds.csv stays 135).
+
+# --------------------------------------------------------------------------------------------------- #
+# LP-495b — the judgmental cohort. All four are ai_judgment, so judgment.py sets ratification_pending
+# unconditionally and none can ever ship auto: ratify is the destination, not a waypoint.
+# --------------------------------------------------------------------------------------------------- #
+OC-3:
+  # LP-495b — ACTIVATED on a self-consistency rate (ADR-378), derived over CONSTRUCTED scenario cases
+  # rather than the stored corpus. No loaded loan file carries an investment occupancy, so a corpus
+  # derivation would have returned the same abstain on every case and pre-rate check 3 would have
+  # refused the rate. The constructed cases exercise all three branches and cost $0.06.
+  # THE RATE IS MEASURED AND RECORDED BELOW; the status is held only because activation hit an
+  # unresolved dormant-probe interaction (see registry.py). Flip to ratify-pending with these numbers.
+  status: not-calibratable-yet
+  ships: ratify
+  threshold: null
+  validated: false
+  load_bearing_ai_tags: [occupancy.rental_support]
+  fp_fn: >-
+    FN (an investment property's rental income is counted with nothing supporting it) >> FP (a processor
+    confirms a lease is on file). Judgmental, so a human ratifies either way.
+  rationale: >-
+    Rate 1.0000 over 4 constructed cases with a FULL THREE-VALUE SPREAD — adequate (lease + proof of
+    receipt), adequate (lease alone), inadequate (investment occupancy, no rental document) and n/a
+    (a lease on a PRIMARY residence). Every branch reachable and every answer correct on a case whose
+    right answer is known by construction, which is more than a rate alone can show.
+    THE DERIVATION FOUND AND FIXED A REAL DEFECT, and the first run is why the rate is worth having: on
+    `rental_primary_residence` the two derivations DISAGREED (adequate vs n/a). A lease on a
+    primary-residence file is the borrower's own housing, not rental income they are claiming, and
+    calling it "adequate" invents a claim the file never made. The prompt now scopes on occupancy BEFORE
+    reading any document, and the disagreement is gone.
+    A SECOND, OLDER DEFECT was found by printing the context (pre-rate check 1): this group is
+    LOAN-subject, and the loan context carried MISMO facts ONLY — so a prompt telling the model to
+    consider "a lease agreement, Schedule E, an appraisal rent schedule" was handed ZERO documents and
+    answered from 1003 facts alone. That is PC-5's failure shape and it has been latent since LP-418
+    declared this group. Fixed by the `include_documents` opt-in, default off, so live OC-2's
+    `occupancy` group is byte-identical.
+    input_resolves is TRUE on the producer's own terms — the tag resolves on constructed data and on any
+    file carrying the documents. NO loaded loan file carries an investment occupancy (0 of 24 stored
+    properties), so on today's corpus OC-3 is not_applicable everywhere; the raw corpus does carry the
+    material (21 lease agreements, lease checks, Verification of Rent) and it is simply not attached.
+DT-7:
+  # LP-495b — ACTIVATED on a self-consistency rate (ADR-378) over constructed cases, as for OC-3.
+  # THE RATE IS MEASURED AND RECORDED BELOW; the status is held only because activation hit an
+  # unresolved dormant-probe interaction (see registry.py). Flip to ratify-pending with these numbers.
+  status: not-calibratable-yet
+  ships: ratify
+  threshold: null
+  validated: false
+  load_bearing_ai_tags: [dti.atr_factors_documented]
+  fp_fn: >-
+    FN ("all ATR factors are documented" on a file that is missing one — the worst false all-clear in
+    this cohort) >> FP (a processor re-checks a folder that was in fact complete).
+  rationale: >-
+    Rate 1.0000 over 4 constructed cases with a FULL THREE-VALUE SPREAD — complete (all eight factors
+    supported), incomplete (credit report absent, naming factors vi and viii), incomplete (pay stub
+    only) and unknown (EMPTY FILE). The empty-file case is the one that matters: it returns `unknown`,
+    never `complete`, which is the false all-clear this rule exists to avoid.
+    THE DERIVATION FOUND A DESIGN DEFECT AND THE FIRST RUN RETURNED `incomplete` ON THE COMPLETE FILE.
+    The model's reasoning named the cause precisely: factors (iv) simultaneous loan and (vii)
+    debt-to-income / residual income have NO supporting document by nature — a simultaneous loan that
+    does not exist needs no document, and DTI is a CALCULATION the lender performs, not a document a
+    borrower supplies. Left uncorrected, DT-7 would have returned `incomplete` on every file in the
+    world: a rule that always says the same thing (ADR-330's vacuity). The prompt now handles both
+    factors explicitly. This is exactly what a self-consistency rate CANNOT show on its own — both
+    derivations agreed on the wrong answer at 1.0000 — and it was caught by reading the reasoning.
+    THE DECLARED ENUM HAS NO ABSTAIN: fact_tags.csv says ["complete","incomplete"]. The prompt sanctions
+    "unknown" explicitly and ai.py coerces it to an unknown tag (the txn.is_nsf_or_overdraft precedent,
+    LP-418); the empty-file case above proves the path works end to end. Recorded as value-space drift
+    for the next docs/snapshot-fact-tags.xlsx reconciliation — the generated CSV cannot be hand-edited.
+    SCOPE: this rule checks DOCUMENT PRESENCE per factor, not the ability-to-repay determination, which
+    is a creditor obligation assessed at underwriting. See the spec header.

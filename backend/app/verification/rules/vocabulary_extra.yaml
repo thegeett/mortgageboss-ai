@@ -1122,3 +1122,29 @@ tags:
       exists" and from "this letter is incomplete", and the three must not collapse. The AMOUNT leg is
       deliberately absent: `referenced_amount` fills 0/34.
     produced_by: derived
+
+  # ------------------------------------------------------------------------------------------------- #
+  # LP-495b — the two judgment OUTPUT tags for the rules built this ticket. Vocabulary only: a judgment
+  # rule's output tag is emitted by the judgment evaluator, not by a producer, so neither gets a
+  # tag_production.yaml entry (the same shape as income.other_income_continues and
+  # income.rental_income_supportable).
+  # ------------------------------------------------------------------------------------------------- #
+  occupancy.investment_rental_supported:
+    entity: loan
+    value_type: enum
+    allowed_values: ["yes", "no", "unknown"]
+    description: >-
+      Does the loan's declared INVESTMENT occupancy have adequate rental-income support behind it (OC-3
+      verdict)? "unknown" for a non-investment occupancy, or when the support picture cannot be read.
+      Distinct from IN-14's per-borrower question about whether that income may be USED to qualify.
+    produced_by: AI
+  dti.atr_documentation_adequate:
+    entity: loan
+    value_type: enum
+    allowed_values: ["yes", "no", "unknown"]
+    description: >-
+      Does the file carry supporting DOCUMENTS for each of the eight ability-to-repay factors at 12 CFR
+      1026.43(c)(2)(i)-(viii) (DT-7 verdict)? A document-presence judgment, NOT the ability-to-repay
+      determination, which is the creditor's and is made at underwriting. "unknown" on an empty or
+      unreadable file — never "no", which would accuse a file nobody could read.
+    produced_by: AI

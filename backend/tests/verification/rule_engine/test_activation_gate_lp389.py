@@ -137,7 +137,9 @@ def test_exactly_the_eligible_candidates_pass() -> None:
     # LP-495a — OC-1 LEAVES the held set for `ratify-pending` (ADR-378), on the first NON-VACUOUS
     # self-consistency rate in this codebase: 0.9474 over 19 cases with a real spread and one real
     # disagreement, against PR-3/PR-4's n=2 single-valued 1.0. 10 -> 9 held.
-    assert len(held) == 9 and not (held & _ACTIVATED)  # every other candidate is held
+    # LP-495b +OC-3 +DT-7 — both BUILT this ticket with measured self-consistency rates recorded on
+    # their bars, and both HELD: activation hit an unresolved dormant-probe interaction. 9 -> 11 held.
+    assert len(held) == 11 and not (held & _ACTIVATED)  # every other candidate is held
 
 
 def test_eligible_rule_ids_is_sorted_and_matches() -> None:
@@ -218,8 +220,17 @@ def test_the_held_rules_each_fail_for_a_named_reason() -> None:
     # so a mis-set flag can never leak AS-5 live even though apparent_category is now measured.
     assert not is_eligible(bars["AS-5"]) and bars["AS-5"].status == "not-calibratable-yet"
     assert bars["AS-5"].threshold is None and not bars["AS-5"].validated
-    # a needs-producer rule: the tag doesn't even materialize → held
-    assert not is_eligible(bars["IN-14"]) and bars["IN-14"].status == "needs-producer"
+    # LP-495b — THIS ASSERTION ENCODED A STALE BELIEF AND IS CORRECTED, NOT DELETED. It used IN-14 as
+    # the needs-producer example on the grounds that occupancy.rental_support "has NO declared producer".
+    # LP-418 declared that producer and never updated IN-14's bar, so the example had been wrong for
+    # several tickets — and LP-495b's own ticket inherited the same belief from it. IN-14 is held for a
+    # DIFFERENT reason now (its continuance tag is underived), so it is asserted at its real status.
+    # There is no needs-producer rule left in the table, which is itself worth pinning: if one appears,
+    # this assertion tells the next reader the status is reachable rather than vestigial.
+    assert not is_eligible(bars["IN-14"]) and bars["IN-14"].status == "not-calibratable-yet"
+    assert not any(b.status == "needs-producer" for b in bars.values()), (
+        "a needs-producer rule reappeared — give it a named reason here, as IN-14 once had"
+    )
     # AS-3 — no-ai but its recipe is a STUB (no §3B cash-to-close calculator): the input never resolves → held
     assert not is_eligible(bars["AS-3"]) and not bars["AS-3"].input_resolves
     # OC-1 — the LP-406-4 rule STILL held: its AI tag occupancy.consistent_with_signals is unscored

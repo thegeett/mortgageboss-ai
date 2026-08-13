@@ -80,6 +80,15 @@ _FACT_LABELS: dict[str, str] = {
     "reo.statement_payment_coverage": "stated monthly payment against the servicer's billed payment",
     "loe.is_explanation_letter": "whether this document is a letter of explanation",
     "loe.completeness": "letter of explanation's explanation, date and signature",
+    # LP-495b — the judgmental cohort: other-income continuance, rental support, and ATR documentation.
+    "income.continuance_3yr": "whether this income will continue long enough to be used",
+    "income.type": "income category",
+    "income.other_income_continues": "other income's continuance and documentation",  # IN-13
+    "income.rental_income_supportable": "whether the rental income can be used to qualify",  # IN-14
+    "occupancy.rental_support": "rental-income supporting documents (lease, rent schedule, Schedule E)",
+    "occupancy.investment_rental_supported": "rental support behind the investment occupancy",  # OC-3
+    "dti.atr_factors_documented": "documents supporting each ability-to-repay factor",  # DT-7
+    "dti.atr_documentation_adequate": "ability-to-repay documentation completeness",  # DT-7 verdict
     "title.vested_owner_matches": "owner of record on the title commitment",  # TI-1 (LP-491)
     "title.vested_owner_name": "owner of record on the title commitment",  # TI-1
     "contract.seller_name": "seller named on the purchase agreement",  # TI-1

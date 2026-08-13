@@ -323,6 +323,26 @@ _LP494_ACTIVATED: tuple[str, ...] = ("CO-3", "CO-4")
 # resolved by the status itself — on ratify-pending BOTH rules route to a human. Live OC-2 unchanged.
 _LP495A_ACTIVATED: tuple[str, ...] = ("DT-6", "LO-2", "OC-1", "RE-1")
 
+# LP-495b — the judgmental cohort. OC-3 and DT-7 activate on self-consistency rates derived over
+# CONSTRUCTED scenario cases rather than the stored corpus: no loaded file carries an investment
+# occupancy or an other-income document, so a corpus derivation would have returned the same abstain on
+# every case and pre-rate check 3 would have refused the rate. The constructed cases exercise all three
+# branches of each tag and cost $0.12 for the cohort.
+# IN-13 and IN-14 are BUILT AND HELD, and the reason is specific rather than "no data": their shared
+# income.continuance_3yr tag has not been derived. Its group is BORROWER-subject and gathers only
+# documents ATTRIBUTED to the borrower, so a scenario fixture for it needs borrower-attributed
+# documents — a fixture gap, not a corpus gap, and the honest status until that derivation runs.
+# Both rules' RESEARCH landed this ticket: IN-13 now carries the per-type continuance table (it applied
+# one blanket 3-year test across every income type) and IN-14's 75%/25% factor is calibrated from the
+# verified primary instead of "pending Priya". Their stale B3-3.1-08 / B3-3.1-09 citations are corrected.
+# ACTIVATION DEFERRED, NOT ABANDONED. Both rates are measured and recorded on the bars below; the
+# activation itself hit a dormant-probe interaction (test_dormant_probe's set is computed from
+# required_ai_groups, which DOES include both groups when these rules are active, yet the probe still
+# reports them dormant) that was not diagnosed before this session's context ran out. Activating with
+# that unresolved would leave a red suite on a shared branch, which is the failure LP-494 warns about.
+# Flip this tuple to ("DT-7", "OC-3") once the probe interaction is understood; everything else is done.
+_LP495B_ACTIVATED: tuple[str, ...] = ()
+
 # The gate is the source of truth: test_activation_gate_lp389 asserts ACTIVE_RULE_IDS - _BASE_ACTIVE ==
 # eligible_rule_ids() — a rule CANNOT enter this set without meeting the eligibility gate (not a hand-list).
 ACTIVE_RULE_IDS: tuple[str, ...] = (
@@ -353,6 +373,7 @@ ACTIVE_RULE_IDS: tuple[str, ...] = (
     *_LP493_ACTIVATED,
     *_LP494_ACTIVATED,
     *_LP495A_ACTIVATED,
+    *_LP495B_ACTIVATED,
 )
 
 

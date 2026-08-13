@@ -4,9 +4,11 @@ category: Income
 kind: judgmental         # rule_kinds.csv: IN-13 = judgmental (ai_judgment)
 numeric_check: false
 criteria: >-
-  "Other" income (e.g. child support, alimony, a pension, an award) may be used only if it is likely to
-  CONTINUE at least 3 years and is documented (receipt history + the award/order). The AI judges
-  continuance + documentation against the income type; a human ratifies EVERY verdict. Evaluated per
+  "Other" income (child support, alimony, capital gains, Social Security, a pension, a housing
+  allowance) may be used only if its history of receipt and its expected continuance meet the
+  requirement FOR THAT INCOME TYPE — which differs by type and is not a single three-year test. The AI
+  judges continuance and documentation against the type; a human ratifies EVERY verdict. An income type
+  outside the researched list abstains rather than being judged against a default. Evaluated per
   borrower.
 applicability:
   scope: every borrower with "other" income
@@ -21,15 +23,37 @@ required_inputs:
 reference_values:
   priya_validated: false
   threshold_needs_signoff: false
+  # LP-495b — CONTINUANCE IS PER INCOME TYPE, NOT ONE BLANKET THREE-YEAR TEST. Each B3-3.4 subsection
+  # sets its own history-of-receipt and continuance requirement, and applying a single 3-year rule across
+  # every type is wrong in both directions: it demands 3 years where the guide asks only that the income
+  # be assessed (Social Security on the borrower's own record), and it asks for the wrong history length
+  # elsewhere. An income type NOT in this table ABSTAINS — it never falls through to a general rule.
+  values:
+    continuance_years_default: "3"
+    alimony_child_support_history_months: "6"
+    alimony_child_support_continuance_years: "3"
+    capital_gains_history_years: "2"
+    capital_gains_continuance_years: "3"
+    capital_gains_averaging_months: "24"
+    social_security_own_record_continuance: "no_defined_expiration_required"
+    social_security_family_benefit_continuance_years: "3"
+    housing_allowance_history_months: "12"
+    housing_allowance_continuance_years: "3"
   guideline_text: >-
-    Fannie Mae Selling Guide B3-3.1-09 — non-employment income must be likely to continue for at least 3
-    years and be documented (the source, the receipt history, and any ending date). The judgment flags
-    uncertainty and never auto-clears.
+    Fannie Mae Selling Guide B3-3.1-01 (page dated 03/04/2026): income must be stable, have a documented
+    history of receipt, and be reasonably expected to continue. The B3-3.4 family then sets the
+    requirement PER TYPE: alimony or child support — most recent 6 months of receipt, payor obligated at
+    least 3 years; capital gains — 2 years realized, assets sufficient for 3 years, averaged over 24
+    months; Social Security on the borrower own record — no defined expiration need be documented, and
+    it is assessed against SSA requirements; a Social-Security family-member benefit — remaining term at
+    least 3 years from application; a housing or parsonage allowance — most recent 12 months of receipt
+    and likely to continue 3 years. An income type outside this list is not judged against the default;
+    it abstains.
 subject_enumeration: per_borrower
 subject_key_fields:
   - borrower
 evidence_required: the other income's continuance + documentation and the judgment cited
-guideline_reference: "Fannie Mae Selling Guide B3-3.1-09 (other sources of income / continuance)."
+guideline_reference: "Fannie Mae Selling Guide B3-3.1-01 (03/04/2026) — stability, history of receipt and expected continuance; the B3-3.4 family for the per-type requirement. Supersedes the former B3-3.1-09 citation, which is stale numbering."
 judgment:
   subject: per_borrower
   load_bearing_tags: [income.continuance_3yr]
@@ -42,9 +66,22 @@ judgment:
     income be used — is it likely to CONTINUE 3+ years and documented?
 
     You reason ONLY over the STRUCTURED TAGS below — never raw documents. The tags are clean facts (the
-    continuance signal and the income type). Judge the way an underwriter would: income with a defined
-    end inside 3 years (e.g. child support ending in 18 months) does NOT qualify; stable, documented,
-    continuing income does. Missing documentation or an unclear end date is uncertainty, not a pass.
+    continuance signal and the income type).
+
+    THE REQUIREMENT DEPENDS ON THE INCOME TYPE. Do NOT apply one blanket three-year test:
+      - alimony / child support: 6 months of receipt, payor obligated at least 3 more years;
+      - capital gains: 2 years realized, assets sufficient to sustain 3 more years (24-month average);
+      - Social Security on the borrower's OWN record: no defined expiration need be documented;
+      - a Social-Security FAMILY-MEMBER benefit: at least 3 years remaining from application;
+      - a housing / parsonage allowance: 12 months of receipt, likely to continue 3 years.
+
+    IF THE INCOME TYPE IS NOT ONE OF THOSE, OR YOU CANNOT PLACE IT, ANSWER "unknown". Do NOT fall back
+    to a general three-year rule — a type this list does not cover is a type you have not been given the
+    requirement for. Answering "no" because a type you cannot place lacks 3 years of continuance is the
+    specific error this instruction exists to prevent.
+
+    Income with a defined end inside its required window does NOT qualify. Missing documentation or an
+    unclear end date is uncertainty, not a pass.
 
     BE HONEST. If the tags do not support a judgment, answer "unknown". NEVER guess. Cite the tags.
 

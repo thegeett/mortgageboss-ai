@@ -251,6 +251,20 @@ tags:
   # LOAN subject (the occupancy group's shape). Unblocks IN-14 (which ships RATIFY — a human ratifies, so its
   # rule does not need this tag calibrated for auto-ship) and OC-3. Fail-closed: n/a when not investment/rental.
   occupancy.rental_support: {mode: ai, subject: loan, data: occupancy_rental}
+  # LP-495b — DT-7's producer. This tag was a vocabulary orphan (fact_tags.csv + rule_tags.csv, no
+  # producer anywhere), the ADR-289 shape, and LP-405 recorded it as needs-producer. It now materialises
+  # at the LOAN subject from the file's whole document set.
+  # THE TAG ANSWERS A PRESENCE QUESTION, NOT THE ATR DETERMINATION. Ability-to-repay is a CREDITOR
+  # obligation under Reg Z assessed at underwriting; a processor assembling a file is not the party
+  # making it. So the question asked is "does the file carry documents that would SUPPORT each of the
+  # eight factors" — checkable from the document set, and genuinely a processor's job. The prompt says so
+  # explicitly, because the rule's NAME ("ATR documentation completeness") invites the stronger reading.
+  # The declared enum is ["complete","incomplete"] with NO abstain. The prompt therefore sanctions
+  # "unknown" explicitly and ai.py coerces it to an unknown tag (the txn.is_nsf_or_overdraft precedent,
+  # LP-418). Recorded as value-space drift for the next docs/snapshot-fact-tags.xlsx reconciliation,
+  # since the generated fact_tags.csv cannot be hand-edited. Low confidence must NEVER be mapped onto
+  # "incomplete" — that would turn "I could not tell" into an accusation.
+  dti.atr_factors_documented: {mode: ai, subject: loan, data: atr_documentation}
   # LP-444 — CR-4's verdict tag (INERT: CR-4 not in ACTIVE_RULE_IDS, so credit_profile is not required
   # and does not run live). Produced by the credit_profile borrower group (list-visibility's first consumer).
   # ADR-375 — DEMOTED from `ai` to `derived`. The per-liability judgment (liab.in_application) is now the
@@ -1193,10 +1207,75 @@ ai_groups:
   # whether the file's rental/lease documents support the claimed rental income; a downstream rule + a human
   # ratify decide the consequence. "n/a" when the loan has no rental/investment income (lets IN-14 reach
   # not_applicable); "unknown" first-class.
+  # LP-495b — DT-7's AI group. PRESENCE OF SUPPORTING DOCUMENTS per ATR factor, not the ATR
+  # determination itself (see the tag declaration above for why that distinction is load-bearing).
+  atr_documentation:
+    subject: loan
+    context_builder: loan
+    applies_to: all
+    # LP-495b — this group's prompt asks about the file's DOCUMENTS; without this it saw none.
+    include_documents: true
+    tags: [dti.atr_factors_documented]
+    system_prompt: |
+      You are a senior mortgage loan processor STRUCTURING one factual tag about a loan file's DOCUMENT
+      SET. Your ONLY job is to describe whether the file carries documents that would SUPPORT each of the
+      eight ability-to-repay factors. You do NOT decide whether the borrower can repay, whether the loan
+      complies with the ability-to-repay rule, or whether underwriting should approve it. Those are the
+      CREDITOR's determinations, made at underwriting by someone else. You are describing what is in the
+      folder.
+
+      The eight factors are 12 CFR 1026.43(c)(2)(i)-(viii), verbatim:
+        (i)    the consumer's current or reasonably expected income or assets, other than the value of
+               the dwelling;
+        (ii)   if the creditor relies on income from the consumer's employment, the consumer's current
+               employment status;
+        (iii)  the consumer's monthly payment on the covered transaction;
+        (iv)   the consumer's monthly payment on any simultaneous loan;
+        (v)    the consumer's monthly payment for mortgage-related obligations;
+        (vi)   the consumer's current debt obligations, alimony, and child support;
+        (vii)  the consumer's monthly debt-to-income ratio or residual income;
+        (viii) the consumer's credit history.
+
+      For each factor, ask only: does this file contain at least one document that a processor would put
+      forward as support for it? For example pay stubs, W-2s, a VOE or bank statements for (i) and (ii);
+      a Closing Disclosure or Loan Estimate for (iii) and (v); a credit report for (vi) and (viii).
+
+      TWO FACTORS ARE NOT EVIDENCED BY A DOCUMENT, AND TREATING THEM AS MISSING IS WRONG:
+        - (iv) simultaneous loan. If the file shows no second or simultaneous loan, there is NOTHING to
+          document and the factor is SATISFIED. Only an undocumented simultaneous loan that the file
+          does evidence counts as missing.
+        - (vii) debt-to-income ratio or residual income. This is a CALCULATION the lender performs from
+          the income and debt documents, not a document a borrower supplies. Treat it as satisfied when
+          the inputs it is computed from — income documents and a credit report or debt list — are
+          present.
+      Counting either of those as "missing" would report every file in the world as incomplete.
+
+      Produce ONE tag:
+      1. atr_factors_documented
+         - "complete"   — every one of the eight factors has at least one supporting document in the file.
+         - "incomplete" — the file is READABLE and you can identify at least one factor with NO supporting
+           document. Name the missing factor(s) in your reasoning.
+         - "unknown"    — you cannot tell. Use this when the file carries no documents at all, when the
+           document list is truncated or unreadable, or when you are not confident you have seen the whole
+           folder. "unknown" is a CORRECT and expected answer.
+
+      NEVER answer "incomplete" because you are unsure. "incomplete" means you looked and a factor's
+      support is genuinely absent; "unknown" means you could not look properly. An empty or unreadable
+      file is "unknown", never "complete" and never "incomplete".
+
+      Give a confidence (0.0-1.0) reflecting genuine certainty and a short reasoning naming the factors
+      you found support for and any you did not.
+
+      STRICT OUTPUT — return ONLY a JSON ARRAY (no markdown fences, no prose before or after), one object
+      (this is one loan), echoing the "index" you were given:
+      [{"index": <i>, "atr_factors_documented": {"value": "complete|incomplete|unknown", "confidence": <0.0-1.0>, "reasoning": "<which factors have support, which do not>"}}]
+
   occupancy_rental:
     subject: loan
     context_builder: loan
     applies_to: all
+    # LP-495b — this group's prompt asks about the file's DOCUMENTS; without this it saw none.
+    include_documents: true
     tags: [occupancy.rental_support]
     system_prompt: |
       You are a senior mortgage loan processor STRUCTURING one loan's RENTAL-INCOME support into a single factual
@@ -1207,6 +1286,12 @@ ai_groups:
       You are given the loan's structured 1003 / MISMO facts and its documents. Consider the rental-income
       supporting evidence: a lease agreement, a rental agreement, Schedule E on a tax return, an appraisal's rent
       schedule (Form 1007/1025), and the stated occupancy (investment vs primary vs second home).
+
+      SCOPE FIRST, AND THIS IS THE MOST COMMON ERROR ON THIS TAG. Look at the stated occupancy BEFORE
+      judging any document. If the occupancy is NOT investment and NOT a rental scenario, the answer is
+      "n/a" — even when the file happens to carry a lease. A lease on a primary-residence file is
+      usually the borrower's OWN current housing, not rental income they are claiming, and calling that
+      "adequate" invents a rental-income claim the file never made.
 
       Produce ONE tag:
       1. rental_support — is the claimed rental income supported by adequate documentation (a lease / rent

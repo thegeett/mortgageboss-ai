@@ -1,0 +1,108 @@
+# OC-3 — Investment rental support — JUDGMENTAL rule SPEC (LP-495b).
+#
+# When the subject property is stated as an INVESTMENT, the rental income the file leans on must be
+# supported by documentation a lender would accept. This reads the loan-level occupancy.rental_support,
+# which LP-418 produces from the file's leases, Schedule E and any appraisal rent schedule.
+#
+# NOT A DUPLICATE OF IN-14, and the difference is the axis. IN-14 asks a per-BORROWER income question:
+# may this borrower's rental income be used to qualify? OC-3 asks a per-LOAN occupancy question: does the
+# investment occupancy this file declares have rental support behind it at all? A file can fail one and
+# pass the other — a borrower with well-documented rental income on a property declared primary
+# residence, or an investment declaration with no rental documentation anywhere. Two questions, two
+# subjects; ADR-375's one-matcher discipline is satisfied because they read the same produced tag rather
+# than each deriving their own rental-support judgment.
+#
+# THE TAG HAS A PRODUCER. It was believed not to (LP-495b's ticket, inherited from IN-14's activation bar,
+# which still said so). LP-418 declared it at tag_production.yaml and the bar was never updated. OC-3 is
+# not a hollow rule wired to an invented source.
+#
+# TRIGGER OBSERVABILITY, stated rather than discovered later: no stored property carries an investment
+# occupancy (22 of 24 primary_residence, 2 null), so on today's loaded files the tag resolves "n/a" and
+# OC-3 is not_applicable everywhere. The raw corpus DOES carry the material — 21 lease agreements, lease
+# checks, Verification of Rent documents and a rental-holding entity's tax returns — it is simply not
+# attached to a loan file yet. The rule is built against the guideline, not against the corpus.
+#
+# NO NUMERIC THRESHOLD IN THIS RULE. The 75% vacancy factor belongs to IN-14, which computes the income;
+# OC-3 asks whether support exists at all. Declaring the factor here would put one number in two places.
+
+rule_id: OC-3
+name: Investment rental support
+category: Occupancy
+
+kind: judgmental          # must equal rule_kinds.csv (OC-3 = judgmental, ai_judgment)
+numeric_check: false      # a support-adequacy judgment, not a ratio
+
+criteria: >-
+  When the loan declares an INVESTMENT occupancy, the file must carry documentation supporting the rental
+  income the investment rests on — a lease agreement, an appraisal rent schedule (Form 1007 / 1025), or
+  Schedule E establishing the rent. This reads the loan-level occupancy.rental_support. A non-investment
+  occupancy is not_applicable. Inadequate support is surfaced for a human, never auto-asserted; a missing
+  or unclear occupancy, and an unreadable support picture, resolve to couldnt_check rather than to a
+  finding on an absent document.
+
+applicability:
+  scope: the loan, when the stated occupancy is investment
+  trigger: >-
+    occupancy.rental_support is produced at the loan subject and resolves to "n/a" for any non-investment
+    occupancy, which carries the scoping. A file that states no occupancy resolves to unknown and
+    couldnt_checks rather than being assumed not to be an investment.
+
+reference_values:
+  priya_validated: false          # must equal rule_kinds.csv
+  threshold_needs_signoff: false  # must equal rule_kinds.csv — no numeric threshold in this rule
+  values: {}
+  guideline_text: >-
+    Fannie Mae Selling Guide B3-3.8-01 (page dated 10/08/2025) names the acceptable rental-income
+    documentation: current lease agreements, or market rents reported on Form 1007 (one-unit) or Form
+    1025 (two- to four-unit). A lease must itself be supported by two months of consecutive bank
+    statements or electronic transfers for an existing lease, or by the security deposit and first full
+    month's rent check with proof of deposit for a newly executed one. An investment property whose
+    rental income has none of this behind it is not supportable.
+
+required_inputs:
+  - name: rental_support
+    snapshot_path: 'tags.by_subject["loan"]["occupancy.rental_support"]'
+    description: >-
+      whether the file's rental-income supporting documents are adequate (AI, LP-418): "adequate" /
+      "inadequate", "n/a" when the occupancy is not investment or rental, and "unknown" when the support
+      picture cannot be read.
+
+subject_enumeration: loan
+subject_key_fields: [loan]
+
+evidence_required: >-
+  Which rental-support documents the file carries and which the judgment found missing, inline on the
+  finding, so a processor knows what to request rather than being told support is inadequate.
+
+guideline_reference: "Fannie Mae Selling Guide B3-3.8-01 (page dated 10/08/2025) — acceptable rental income documentation: leases, Form 1007 / 1025 market rents, and the lease-support requirement."
+
+spec_version: 1
+
+judgment:
+  subject: loan
+  load_bearing_tags: [occupancy.rental_support]
+  reasoned_over: [occupancy.rental_support, occupancy.stated]
+  output_tag: occupancy.investment_rental_supported
+  value_domain: ["yes", "no", "unknown"]
+  confidence_floor: 0.5
+  system_prompt: |
+    You are a senior mortgage underwriter making ONE reasoned judgment: does THIS loan's declared
+    INVESTMENT occupancy have adequate rental-income support behind it?
+
+    You reason ONLY over the STRUCTURED TAGS below — never raw documents. The tags are clean facts (the
+    rental-support adequacy already assessed from the file's documents, and the stated occupancy).
+
+    Judge the way an underwriter would. An investment property whose file carries a current lease, an
+    appraisal rent schedule (Form 1007 / 1025), or Schedule E establishing the rent is supported. An
+    investment declaration with no rental documentation behind it is not. Gross rent with nothing
+    evidencing receipt is not support.
+
+    IF THE OCCUPANCY IS NOT INVESTMENT, this judgment does not apply — answer "unknown" and say so; the
+    rule's applicability layer handles the scoping and you must not manufacture a verdict for a primary
+    residence.
+
+    BE HONEST. If the tags do not support a judgment, answer "unknown". NEVER guess. An absent document
+    is not evidence of an unsupported investment — it is a reason to answer "unknown". Cite the tags.
+
+    STRICT OUTPUT — return ONLY a JSON OBJECT:
+    {"value": "yes|no|unknown", "confidence": <0.0-1.0>, "reasoning": "<why — cite the tags>"}

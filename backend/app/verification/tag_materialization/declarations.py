@@ -134,6 +134,10 @@ class AiGroup:
     # A group could declare include_lists, see an empty list, and conclude the data was absent when it was
     # one attribute away. PC-5 was shown five bank statements' account-level fields and zero transactions.
     include_transactions: bool = False
+    # LP-495b — a LOAN-subject group whose prompt reasons about the file's DOCUMENTS opts in here. The
+    # loan context is MISMO facts only without it, so such a group was shown zero documents (PC-5's
+    # shape). Off by default: every existing loan group's context is byte-identical.
+    include_documents: bool = False
 
 
 def _parse_allowed(raw: str) -> tuple[str, ...] | None:
@@ -292,6 +296,16 @@ def load_ai_groups() -> dict[str, AiGroup]:
                 f"ai group {key!r}: `include_unattributed_documents` is only for a borrower-subject "
                 f"group (it relaxes borrower attribution), got subject={subject!r}"
             )
+        include_docs = body.get("include_documents", False)
+        if not isinstance(include_docs, bool):
+            raise DeclarationError(
+                f"ai group {key!r}: `include_documents` must be a boolean, got {include_docs!r}"
+            )
+        if include_docs and body.get("subject") != "loan":
+            raise DeclarationError(
+                f"ai group {key!r}: `include_documents` is only for a LOAN-subject group (a document or "
+                f"borrower context already gathers documents)"
+            )
         include_txns = body.get("include_transactions", False)
         if not isinstance(include_txns, bool):
             raise DeclarationError(
@@ -322,6 +336,7 @@ def load_ai_groups() -> dict[str, AiGroup]:
             include_stated_liabilities=include_liabilities,
             include_unattributed_documents=include_unattributed,
             include_transactions=include_txns,
+            include_documents=include_docs,
         )
     return groups
 

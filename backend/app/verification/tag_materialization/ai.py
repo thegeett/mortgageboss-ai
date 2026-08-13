@@ -295,6 +295,7 @@ async def produce_ai_group_tags(
         include_stated_liabilities=group.include_stated_liabilities,
         include_unattributed_documents=group.include_unattributed_documents,
         include_transactions=group.include_transactions,
+        include_documents=group.include_documents,
     )
 
     def _context(raw: object) -> dict[str, object]:

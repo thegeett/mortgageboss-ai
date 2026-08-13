@@ -61,8 +61,11 @@ def test_desired_state_shape() -> None:
     # LP-447 +1 (ins.dwelling_settlement_basis — the IH-1 basis tag, a vocabulary_extra overlay).
     # LP-453 +2 (credit.tradeline_count + credit.tradeline_monthly_payment_total — the tradelines consumer).
     assert (
-        len(tags) == 241
-    )  # LP-495a +4 (reo.statement_disclosure + reo.statement_payment_coverage — ONE matcher
+        len(tags) == 243
+    )  # LP-495b +2 (occupancy.investment_rental_supported, dti.atr_documentation_adequate —
+    # OC-3's and DT-7's judgment OUTPUT tags; a judgment output is emitted by the evaluator, so neither
+    # gets a tag_production.yaml entry, the same shape as income.other_income_continues)
+    # LP-495a +4 (reo.statement_disclosure + reo.statement_payment_coverage — ONE matcher
     # serving RE-1 and DT-6, ADR-375; loe.is_explanation_letter — LO-2's applicability predicate, needed
     # because the applicability DSL has only eq/ne while LO-2's scope is 8 document types; loe.completeness.
     # ⚠️ property.is_retained_reo and property.retained_pitia are DELIBERATELY still absent from
