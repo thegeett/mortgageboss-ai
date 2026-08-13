@@ -20,6 +20,8 @@ section and page date, fetched from the live guide.
 | **IH-7** | **$1,000,000 per occurrence** | minimum condo-project general liability | Fannie Mae Selling Guide **B7-4-01**, *General Liability Insurance Requirements for Project Developments* | 08/05/2026 |
 | **IH-7** | **100% replacement cost** | required master property coverage basis | Fannie Mae Selling Guide **B7-3-03**, *Master Property Insurance Requirements for Project Developments* | 08/05/2026 |
 | IH-2 | *none* | a name compare; the matching tolerance (2-token prefix) is not a domain number | — | — |
+| **MI-1** | **LTV > 80%** | conventional MI requirement | Fannie Mae Selling Guide **B7-1-01**, *Provision of Mortgage Insurance* | ⚠️ **NOT OBTAINED — tier S** |
+| **MI-4** | **1.75% (175 bps)** of base loan amount | FHA upfront MIP | HUD **Mortgagee Letter 2023-05** | **2023-02-22** (tier P) |
 
 **Questions on these three:**
 
@@ -222,3 +224,91 @@ unrecognised phrase abstains (never "inadequate"), and a value naming **both** r
 cash value abstains whichever leads — a mixed basis ("ACV roof, replacement cost dwelling") is your call,
 not ours. **Is treating the leading phrase as the policy's basis correct**, or can a policy state its real
 basis in a trailing qualifier we would then miss?
+
+---
+
+## 10. From LP-488 (MI-1 · MI-4 · CO-1 · AU-3; RE-2 dropped)
+
+### 10a. ⚠️ MI-1's 80% — the page date was NOT obtained
+
+The value is Fannie Mae Selling Guide **B7-1-01**, and the 80% figure is universally reported — but **we
+did not read the page this pass**, so it is recorded as **tier S**, not tier P. Per ADR-361 a value is
+cited or it is marked unobtained; it is never recalled and dressed as read. **Please confirm the figure
+and the current page date**, or point us at your investor overlay if it is stricter.
+
+### 10b. ⚠️ MI-1 cannot confirm that MI is PRESENT — an input gap, not a design choice
+
+MI-1 computes the LTV and reports "MI is required — confirm the file carries it" (`needs_review`). It
+**never fires**, because nothing in the system can see whether mortgage insurance exists:
+
+- **No document type carries an MI certificate or an MI factor.** The only mortgage-insurance field in
+  all 121 schema specs is `form_1098.mortgage_insurance_premiums` — a *prior-year* figure for an
+  *existing* mortgage.
+- `mi.certificate_present` is an AI tag with no calibration, so it cannot gate a live rule.
+- `housing.mi_monthly` is undeclared and reaches nothing.
+
+**Question: is an MI certificate a document we should be extracting?** If your files carry one, adding a
+schema spec for it would turn MI-1 from an advisory into a real presence check (and would unblock MI-2,
+MI-3 and MI-5 as well).
+
+### 10c. ⚠️ MI-4's annual MIP is NOT evaluated, and its rate matrix was deliberately not written down
+
+MI-4 checks the **upfront** premium only — (note amount − base loan amount) against 1.75%. The **annual**
+premium is not checked because **no document carries a monthly MIP figure for this loan**. ML 2023-05's
+per-cell annual matrix (by LTV × term × base loan amount, reported as a 0.15%–0.75% range) was **not
+obtained**, so **no cell from it is written anywhere in the codebase** — a test enforces that, so nobody
+later builds against a number we never read.
+
+**Questions.** (1) Do you want the annual MIP checked at all, and against what document? (2) If yes, we
+need the matrix from ML 2023-05 itself, cell by cell.
+
+### 10d. ⚠️ Two FHA exemptions we cannot detect
+
+ML 2023-05: **Section 248** mortgages (Indian Lands) require **no upfront MIP**; **Section 247**
+(Hawaiian Home Lands) require **no annual MIP**. No field in the system identifies either. A loan
+financing no upfront premium therefore lands on `needs_review` — "confirm it was paid in cash or that
+this loan is exempt" — rather than failing. **Is that the right landing place**, and do your files carry
+anything that would identify a Section 247/248 loan?
+
+### 10e. ⚠️ CO-1 is presence only — warrantability is still unbuildable
+
+Your standing point is that condo rules must distinguish **warrantable from non-warrantable**, not merely
+confirm a questionnaire exists. CO-1 does the latter, deliberately: **`property.is_warrantable_condo` has
+no source field in any of the 121 schema specs**, because warrantability is a project-review *conclusion*
+(Form 1076 / PERS), not a readable datum. It is left inert and a test keeps it that way.
+
+**Question: how is warrantability actually determined on your files** — a lender project-review sheet, a
+PERS approval letter, or a judgment a processor makes from the questionnaire's contents? The answer
+decides whether CO-3/CO-5 are extraction work or a genuine judgment rule.
+
+### 10f. ⚠️ AU-3 is calibrated on ONE document — is it worth shipping?
+
+There is exactly **one `aus_findings` document across 303**, and it is an **LPA** reading `ACCEPT` /
+`ELIGIBLE`. That single file is genuinely valuable — it proved the DU-shaped catalog vocabulary would
+have misread every Freddie file — but it means:
+
+- the **DU spellings are researched, not observed**: `Approve/Eligible`, `Approve/Ineligible`, `Refer
+  with Caution`. No DU file has ever exercised them.
+- the **DU ↔ LPA equivalence is our domain claim**: DU splits recommendation from eligibility, LPA gives
+  a risk class plus eligibility. We treat LPA `Accept` as DU `Approve`. Standard industry equivalence —
+  but a mapping, not a reading.
+
+**Questions.** (1) Confirm the equivalence. (2) Are there engine wordings we are missing (LPA
+`Caution`, `Refer/Eligible`, `Out of Scope` variants)? (3) **Would you rather AU-3 waited for more AUS
+documents?** It abstains on anything unrecognised, so the failure mode is silence, not a wrong answer —
+but that is our call to check with you.
+
+### 10g. RE-2 was dropped — retained-property data does not exist
+
+RE-2 (*retained property → tax/insurance docs present*) is **not buildable and was not built hollow**:
+
+- **No REO or retained-property concept exists anywhere** — nothing in the MISMO section (21 facts, none
+  about another property) and nothing in the data model.
+- The non-subject property document types exist (`property_tax_bill_non_subject`,
+  `property_profile_non_subject`, `other_property_note`) but are **0 of 303** in the corpus.
+- Decisively: **nothing states that a borrower RETAINS a property.** Owning another property is not the
+  same as keeping it — the borrower may be selling it — and that trigger is the rule's whole premise.
+
+**Question: where does retained-property information live on your files today?** If it is the 1003's REO
+section, that is an import gap we can close; if it is something a processor knows and records manually,
+RE-2 needs a different shape entirely.
