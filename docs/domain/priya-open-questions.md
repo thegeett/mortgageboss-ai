@@ -404,3 +404,59 @@ So: CR-1 has **one** file supporting a bounded negative, and **CR-5, CR-6 and CR
 observed firing on real data at all.** Calibrating any of them needs real files, not fixtures — a
 self-authored derogatory event or collection leaks its own answer (ADR-332, and the LP-487 amendment on
 self-authored labels).
+
+---
+
+## 12. From LP-491 (title: TI-1 · TI-2 · TI-6)
+
+### 12a. ⚠️ Is a vesting mismatch usually a real defect, or a legitimate difference?
+
+**This decides TI-1's direction, and I chose the cautious side without you.** A mismatch between the
+commitment's vested owner and the file's counterparty currently returns **`needs_review`, never `fired`**,
+because the difference is frequently legitimate — a revocable trust whose trustee is the borrower, an
+estate selling, a name changed on marriage or divorce, a deed that has not yet recorded.
+
+**Question: in your experience, is a genuine vesting mismatch usually a real defect?** If it is, TI-1
+should fire and I have the direction wrong. If it is usually one of the above, the current behaviour is
+right and the finding is a confirmation step rather than a condition.
+
+### 12b. ⚠️ `vesting_type` holds the ESTATE, not the tenancy, on two of four documents
+
+The four real commitments return `fee simple`, `Fee Simple`, `Joint tenants`, `Fee Simple`. Two of those
+are an **estate** (fee simple vs life estate) and one is a **tenancy** (joint tenants vs tenants in
+common) — different questions in one field. TI-5 would need them separated.
+
+**Question: should the extractor split these into two fields?** That is LP-499's input, and it is why
+TI-5 is not built.
+
+### 12c. ⚠️ Do TI-3 / TI-4 / TI-5's fields appear on the source PDFs at all?
+
+`open_liens_indicator` **0/4** · `judgments_indicator` **0/4** · `vesting_marital_recital` **0/4** ·
+`schedule_b_items[is_satisfied]` **2/19 rows**. LP-451 called TI-4 a "nearest miss to write-now" because
+the *field exists*; the documents say otherwise (ADR-354).
+
+**Question: are these facts printed on your commitments and the extractor is missing them, or are they
+genuinely absent from the documents?** The answer decides whether LP-499 is a prompt fix or a dead end.
+
+### 12d. TI-1's vesting vocabulary is unexercised
+
+TI-1 strips `ET UX`, `ET AL`, `HUSBAND AND WIFE`, `AS TRUSTEE OF` and similar before comparing names —
+but **all four real commitments carry a plain 2–3 word name**, because the recital goes to
+`vesting_marital_recital` (0/4). **Do your commitments normally print the recital inside the vested-owner
+line?** If so the extractor is splitting it out and the stripping matters; if not, it is dead code.
+
+### 12e. ⚠️ TI-6 applies no rapid-transfer window
+
+A "rapid transfer" cutoff (90 or 180 days is commonly cited) is an investor-overlay and fraud-review
+convention, and **no page was read for it** — so TI-6 hands the interval to the judgment as a fact rather
+than comparing it against a number nobody confirmed. **What window do your investors actually use?**
+
+### 12f. ⚠️ Nine judgment rules now ask for a sign-off on every finding, including clean ones
+
+AS-12, CR-8, CR-10, ID-8, ID-9, IN-7, OC-2 and now TI-2 and TI-6. A judgment rule has no `satisfied`
+path — a clean title chain produces a `needs_review` identically to a broken one, and TI-2 produces one
+per commitment on every file regardless of the answer.
+
+That is the safety design (an AI verdict never auto-ships), and it is what lets these rules go live on an
+unmeasured tag. But it is a real load on the processor. **Is a "confirm this is fine" item acceptable, or
+should a confident clean answer resolve silently?** The second needs the tag measured first.
