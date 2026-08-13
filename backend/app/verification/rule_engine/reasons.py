@@ -63,6 +63,17 @@ _FACT_LABELS: dict[str, str] = {
     "mi.fha_ufmip_percent": "upfront FHA mortgage insurance premium financed into the note",  # MI-4 (LP-488)
     "condo.questionnaire_present": "condo questionnaire",  # CO-1 (LP-488)
     "aus.recommendation": "AUS recommendation",  # AU-3 (LP-488)
+    "credit.inquiry_explained": "credit inquiries and their explanations",  # CR-5 (LP-490)
+    "liab.derogatory_type": "type of derogatory credit event",  # CR-6 (LP-490)
+    "liab.derogatory_date": "date of the derogatory credit event",  # CR-6 (LP-490)
+    "credit.derogatory_months_elapsed": "time since the derogatory event",  # CR-6 (LP-490)
+    "liab.is_mortgage": "whether this account is a mortgage",  # CR-8 (LP-490)
+    "liab.structured_history_confident": "readability of the payment history",  # CR-8 (LP-490)
+    "liab.mortgage_late_60_plus_last_12mo": "recent 60-day-or-worse mortgage delinquency",  # CR-8
+    "liab.is_medical_collection": "whether this collection is medical",  # CR-10 (LP-490)
+    "liab.collection_balance": "collection balance",  # CR-10 (LP-490)
+    "credit.collection_aggregate_balance": "total of non-medical collections",  # CR-10 (LP-490)
+    "property.occupancy": "property occupancy",  # CR-10 (LP-490)
     "loan.amount": "base loan amount",  # LP-488
     "loan.note_amount": "note amount",  # MI-4 (LP-488)
     "property.value_basis": "property value used for the loan-to-value",  # LP-488

@@ -606,3 +606,114 @@ tags:
       documents but none is a questionnaire; "unknown" when the file carries no documents at all — an
       empty file is not evidence the questionnaire is missing.
     produced_by: derived
+
+  # --- LP-490 — the credit AI cohort's NEW tags. The rest of the cohort's tags already exist in the
+  #     generated fact_tags.csv and are declared in tag_production.yaml only.
+  #     ⚠️ EVERY TAG HERE IS UNCALIBRATED. Every rule reading one is INERT. -------------------------- #
+
+  # CR-8. ⚠️ PRIYA'S OWN GATE, and the most important tag in this cohort. `payment_history_24mo` runs
+  # 0–84 characters across 17 distinct formats on the three real reports; position-parsing it is the
+  # ADR-353 trap and the field name is misleading. So the model states whether it could read the history
+  # RELIABLY, and CR-8 routes "no" to needs_review — it NEVER converts an ambiguous string into a late.
+  liab.structured_history_confident:
+    entity: liability
+    value_type: enum
+    allowed_values: ["yes", "no", "unknown"]
+    description: >-
+      Could this tradeline's payment history be interpreted reliably? "no" when the history string is
+      absent, truncated, or in a format whose positions cannot be read with confidence. CR-8 evaluates
+      automatically only on "yes".
+    produced_by: ai
+  # ⚠️ NEVER creditor name alone — Priya was explicit. Account type, creditor type, MORTGAGE / REAL
+  # ESTATE indicators, HELOC markers, original/current balance and term, Metro 2 classification.
+  liab.is_mortgage:
+    entity: liability
+    value_type: enum
+    allowed_values: ["yes", "no", "unknown"]
+    description: >-
+      Is this tradeline a mortgage (including a HELOC secured by real estate)? Judged from account type,
+      creditor type, balance/term shape and Metro 2 classification — never from the creditor's name
+      alone, which is how a mortgage servicer and a card issuer get confused.
+    produced_by: ai
+  liab.mortgage_late_60_plus_last_12mo:
+    entity: liability
+    value_type: enum
+    allowed_values: ["yes", "no", "unknown"]
+    description: >-
+      Does this mortgage tradeline show a 60-, 90-, 120- or 150-day delinquency in the previous twelve
+      months? Fannie's excessive prior mortgage delinquency definition. "unknown" whenever the history
+      could not be read reliably — the same abstention as structured_history_confident.
+    produced_by: ai
+
+  # CR-10.
+  liab.is_medical_collection:
+    entity: liability
+    value_type: enum
+    allowed_values: ["yes", "no", "unknown"]
+    description: >-
+      Is this collection a MEDICAL collection? Medical collections are EXCLUDED from Fannie's payoff
+      limits and treated differently under FHA, so misreading one changes the requirement.
+    produced_by: ai
+  liab.collection_balance:
+    entity: liability
+    value_type: number
+    allowed_values: null
+    description: >-
+      The outstanding balance of THIS collection or charged-off account, in dollars. "unknown" when the
+      balance is not stated — never 0, which would read as a settled account and drop it out of the
+      aggregate.
+    produced_by: ai
+  credit.collection_aggregate_balance:
+    entity: borrower
+    value_type: number
+    allowed_values: null
+    description: >-
+      The sum of NON-MEDICAL collection balances for this borrower (derived). "unknown" when any
+      contributing balance is unreadable — a partial sum would understate the aggregate and could clear
+      a threshold the file does not actually clear.
+    produced_by: derived
+
+  # CR-6.
+  credit.derogatory_months_elapsed:
+    entity: liability
+    value_type: number
+    allowed_values: null
+    description: >-
+      Complete calendar months from THIS derogatory event's own date (discharge, dismissal or
+      completion) to the loan's closing date. ⚠️ "unknown" when the event has no date — the seasoning is
+      NEVER computed from the credit report's date, which would season an event to whenever the report
+      happened to be pulled.
+    produced_by: derived
+
+  # --- LP-490 — the two RULE-JUDGMENT output tags (CR-8, CR-10). These are produced by the judgment
+  #     evaluator at rule time, not by the materializer, so they are NOT declared in tag_production.yaml
+  #     (the as.borrowed_funds precedent). ⚠️ Both rules are INERT. ------------------------------------ #
+  credit.mortgage_history_assessment:
+    entity: liability
+    value_type: enum
+    allowed_values: ["acceptable", "one_30_day_late", "multiple_30_day_lates", "excessive_60_plus", "not_interpretable", "unknown"]
+    description: >-
+      CR-8's judgment on ONE mortgage tradeline's payment history. ⚠️ "not_interpretable" is Priya's own
+      gate — when the payment history cannot be read reliably the rule says so rather than converting an
+      ambiguous string into a delinquency.
+    produced_by: AI
+  credit.collection_treatment:
+    entity: borrower
+    value_type: enum
+    allowed_values: ["no_payoff_required", "payoff_required", "payment_plan_or_5pct_may_apply", "manual_underwriting_not_supported", "unknown"]
+    description: >-
+      CR-10's judgment on how this borrower's collections must be treated. ⚠️ The DU-vs-manual axis does
+      not exist as a fact (LP-501), so "manual_underwriting_not_supported" is the honest abstention for a
+      manually underwritten file rather than a guessed branch.
+    produced_by: AI
+
+  property.occupancy:
+    entity: loan
+    value_type: string
+    allowed_values: null
+    description: >-
+      The stated occupancy of the subject property (primary_residence / second_home / investment), from
+      MISMO. CR-10's Fannie DU branch is occupancy-keyed: a one-unit primary requires no collection
+      payoff at all, while an investment property requires payoff at $250 individually or $1,000 in
+      aggregate. ⚠️ Absent occupancy must ABSTAIN, never default to the permissive cell.
+    produced_by: parsed

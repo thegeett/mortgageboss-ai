@@ -1,0 +1,131 @@
+# CR-8 — Mortgage payment history — AI JUDGMENT rule SPEC (LP-490). ⚠️ BUILDS INERT.
+#
+# ⚠️ INERT. Its load-bearing tags are AI tags with no measured accuracy → `not-calibratable-yet` →
+# `is_eligible()` False (LP-484). NOT in ACTIVE_RULE_IDS.
+#
+# ⚠️ PRIYA SPECIFIED THIS RULE'S SHAPE HERSELF:
+#     structured_history_confident = true  → evaluate automatically
+#     structured_history_confident = false → NEEDS_REVIEW, "Mortgage payment history could not be
+#                                            reliably interpreted."
+# The gate is the FIRST instruction in the prompt, before any interpretation is attempted.
+#
+# ⚠️ WHY THAT GATE EXISTS — the measurement behind it. `payment_history_24mo` runs 0–84 characters across
+# 17 DISTINCT formats on the three real credit reports, and `worst_delinquency` fills on 2 of 35 rows in
+# two mutually incompatible formats ("30 DAYS (08/25)" and "4/24"). Position-parsing that string is the
+# ADR-353 trap, and the field name is misleading. Converting an ambiguous 84-character string into a
+# "60-day late" invents a derogatory event on a clean borrower — the worst outcome available here.
+#
+# ⚠️ A JUDGMENT RULE RATIFIES EVERY VERDICT. `judgment.py` produces needs_review or couldnt_check only —
+# a human signs each finding. That is the correct shape for this rule: even a confident 60+ late is an
+# underwriting decision, not an automatic failure.
+#
+# ⚠️ MORTGAGE DETECTION IS NEVER BY CREDITOR NAME (Priya, explicitly) — see the credit_mortgage_history
+# group's prompt. ⚠️ RENTAL HISTORY IS NOT EVALUATED HERE: Priya ruled it is not equivalent to mortgage
+# delinquency codes and must not be mapped onto them. Logged for her as an open question.
+
+rule_id: CR-8
+name: Mortgage payment history
+category: Credit
+
+kind: judgmental            # must equal rule_kinds.csv (CR-8 = judgmental, ai_judgment)
+numeric_check: false        # must equal rule_kinds.csv
+
+criteria: >-
+  A mortgage tradeline's payment history must be reviewed against the programme's tolerance. A 60-day or
+  worse delinquency in the previous twelve months is Fannie's excessive prior mortgage delinquency and is
+  a high-priority finding; a single recent 30-day late deserves attention without being automatically
+  fatal. Where the payment history cannot be interpreted reliably the rule reports exactly that, rather
+  than converting an ambiguous string into a delinquency.
+
+applicability:
+  scope: each credit-report tradeline the model identifies as a mortgage
+  trigger: >-
+    A credit-report liability. A tradeline that is not a mortgage yields "unknown" and couldnt_checks
+    rather than being assessed as one.
+
+reference_values:
+  priya_validated: false          # must equal rule_kinds.csv
+  threshold_needs_signoff: false  # must equal rule_kinds.csv
+  values:
+    # ⚠️ PROVENANCE TIER P — the domain expert's own rulings, given directly (LP-490).
+    #   0 x 30 in the last 12 months ....... clean
+    #   1 x 30 ............................. flag if recent; NOT automatically fatal
+    #   multiple 30s ....................... flag
+    #   any 60+ in the last 12 months ...... HIGH PRIORITY (excessive prior mortgage delinquency)
+    # Also from the same ruling: Fannie treats an existing mortgage as CURRENT at application when no more
+    # than 45 days have elapsed since the last paid installment date. Recorded because it governs what
+    # "current" means. ⚠️ This rule does NOT compute it — no last-paid-installment date is extracted.
+    # Logged for Priya.
+    mortgage_current_days_since_last_paid_installment: "45"
+    excessive_delinquency_days: "60"
+    excessive_delinquency_lookback_months: "12"
+  guideline_text: >-
+    A mortgage tradeline with a 60-, 90-, 120- or 150-day delinquency in the previous twelve months
+    represents excessive prior mortgage delinquency. An existing mortgage is considered current at
+    application when no more than 45 days have elapsed since the last paid installment date. A single
+    30-day late is weighed for recency and context rather than treated as automatically disqualifying.
+
+required_inputs:
+  - name: is_mortgage
+    snapshot_path: 'tags.by_subject[<tradeline row_id>]["liab.is_mortgage"]'
+    description: >-
+      is this tradeline a mortgage (AI, LP-490)? Judged from account/creditor type and Metro 2
+      classification, NEVER the creditor's name alone. ⚠️ UNCALIBRATED.
+  - name: structured_history_confident
+    snapshot_path: 'tags.by_subject[<tradeline row_id>]["liab.structured_history_confident"]'
+    description: >-
+      could the payment history be interpreted reliably (AI, LP-490)? Priya's own gate. ⚠️ UNCALIBRATED.
+
+subject_enumeration: per_liability
+subject_key_fields: [liability]
+
+evidence_required: >-
+  The tradeline's creditor and account type, the payment history exactly as the report states it, and
+  whether it could be interpreted — so a processor can read it themselves when the rule could not.
+
+guideline_reference: "Fannie Mae excessive prior mortgage delinquency — a 60/90/120/150-day mortgage delinquency in the previous twelve months; an existing mortgage is current at application when no more than 45 days have elapsed since the last paid installment date (domain expert's ruling, LP-490)."
+
+judgment:
+  subject: per_liability
+  # ⚠️ GATED on is_mortgage: a non-mortgage or unknown-type tradeline couldnt_checks before any AI call.
+  applicability:
+    tag: liability.source
+    op: eq
+    value: credit_report_reported
+  load_bearing_tags: [liab.is_mortgage, liab.structured_history_confident]
+  reasoned_over:
+    - liab.is_mortgage
+    - liab.structured_history_confident
+    - liab.payment_status
+    - liab.mortgage_late_60_plus_last_12mo
+  output_tag: credit.mortgage_history_assessment
+  value_domain: ["acceptable", "one_30_day_late", "multiple_30_day_lates", "excessive_60_plus", "not_interpretable", "unknown"]
+  confidence_floor: 0.5
+  system_prompt: |
+    You are a senior mortgage underwriter making ONE reasoned judgment about a single MORTGAGE tradeline's
+    payment history. You reason ONLY over the STRUCTURED TAGS below — never raw documents.
+
+    ⚠️ THE FIRST THING TO CHECK, BEFORE ANY INTERPRETATION. If structured_history_confident is "no" or
+    "unknown", answer "not_interpretable" and stop. Do not attempt to read the history, do not infer a
+    delinquency from a partial signal, and do not treat an absent history as clean. The payment-history
+    field on these reports runs from 0 to 84 characters across many different formats and is NOT a fixed
+    one-character-per-month encoding. Turning an ambiguous string into a "60-day late" invents a
+    derogatory event on a clean borrower — the single worst thing you can do here, and the reason this
+    gate exists.
+
+    WHEN structured_history_confident IS "yes", judge as an underwriter would:
+    - "excessive_60_plus" — a 60, 90, 120 or 150-day delinquency in the previous TWELVE months. This is
+      Fannie's excessive prior mortgage delinquency and is the highest-priority answer.
+    - "multiple_30_day_lates" — more than one 30-day late in the last twelve months.
+    - "one_30_day_late" — exactly one 30-day late. ⚠️ Flag it, especially if recent, but this is NOT
+      automatically fatal and must not be reported as though it were.
+    - "acceptable" — no 30-day or worse late in the last twelve months.
+    - "unknown" — the tags do not support any of the above.
+
+    BE HONEST. "not_interpretable" and "unknown" are correct, expected answers. NEVER guess. Cite the
+    tags you relied on.
+
+    STRICT OUTPUT — return ONLY a JSON OBJECT:
+    {"value": "acceptable|one_30_day_late|multiple_30_day_lates|excessive_60_plus|not_interpretable|unknown", "confidence": <0.0-1.0>, "reasoning": "<why — cite the tags>"}
+
+spec_version: 1

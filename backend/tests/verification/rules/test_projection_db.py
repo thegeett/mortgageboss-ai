@@ -39,7 +39,7 @@ async def test_projection_counts_match_files(db_session: AsyncSession) -> None:
     assert result.rules.inserted == 135  # LP-430 +IN-15; LP-433 +IN-16
     assert (
         result.tags.inserted
-        == 191  # LP-488 review +2 (property.valuation_amount, property.estimated_value — the LTV
+        == 201  # LP-490 +10 (the credit AI cohort: liab.is_mortgage, liab.structured_history_confident, liab.mortgage_late_60_plus_last_12mo, liab.is_medical_collection, liab.collection_balance, credit.collection_aggregate_balance, credit.derogatory_months_elapsed, property.occupancy, and the two rule-judgment outputs credit.mortgage_history_assessment / credit.collection_treatment); LP-488 review +2 (property.valuation_amount, property.estimated_value — the LTV
         # worksheet's own appraised-basis fields, so MI-1 stops diverging from it on MISMO-only
         # files); LP-488 +5 (…, condo.questionnaire_present); prior +4 (loan.ltv_percent, loan.note_amount, loan.refinance_type, mi.fha_ufmip_percent); prior LP-488 +3 (loan.ltv_percent, loan.note_amount, loan.refinance_type); LP-487 +6 (IH-2/IH-7's parsed inputs: ins.mortgagee_name, loan.lender_name_cd, loan.lender_name_le, condo.master_policy_number, condo.master_policy_basis_raw, condo.master_liability_limit — their two CONCLUSION tags already exist in fact_tags.csv); LP-485 +3 (the date-compare family); LP-453 +2 (credit.tradeline_count/_monthly_payment_total); LP-447 +1 (ins.dwelling_settlement_basis); LP-444 +1; LP-430 +2; LP-433 +1
     )  # +4 assets (LP-323-AS-B) +2 ID-5 (LP-389-A) +2 stmt +1 LP-417 (ins.loan_effective_date)
@@ -81,7 +81,7 @@ async def test_as1_projects_priya_validated_false_with_spec(db_session: AsyncSes
     # +PC-2 = 39; +IH-3 = 40; +PC-3 = 41; +IN-15 (LP-430) = 42; +IN-16 (LP-433) = 43; +CR-4 (LP-444, inert) = 44;
     # +IH-1 (LP-447 — its spec now exists) = 45; +CL-1/CR-13/PR-6 (LP-485 — specs now exist, all held) = 48.
     assert (
-        with_spec == 56
+        with_spec == 60  # +CR-5/CR-6/CR-8/CR-10 (LP-490, INERT — specs without live rules)
     )  # +CR-1 (LP-490, INERT — a spec exists without the rule being live); +MI-1/MI-4/CO-1/AU-3 (LP-488); +IH-2/IH-7 (LP-487); +CR-12 (LP-486)
 
 

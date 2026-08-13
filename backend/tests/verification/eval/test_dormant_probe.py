@@ -51,6 +51,13 @@ _DORMANT_EXPECTED = frozenset(
         # LP-444 — credit_profile (CR-4's producer, borrower-subject) is declared but CR-4 is inert, so it is
         # dormant until CR-4 activates (its own calibration ticket).
         "credit_profile",
+        # LP-490 — the credit AI cohort's four groups. Every rule reading them (CR-5/CR-6/CR-8/CR-10) is
+        # INERT (not-calibratable-yet → is_eligible False, LP-484), so all four are dormant by design.
+        # They activate with their own calibration ticket, exactly as credit_profile will.
+        "credit_inquiries",
+        "credit_derogatory",
+        "credit_mortgage_history",
+        "credit_collections",
     }
 )
 _LIVE_EXPECTED = frozenset(

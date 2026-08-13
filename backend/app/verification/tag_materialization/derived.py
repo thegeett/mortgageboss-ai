@@ -2234,6 +2234,106 @@ def _aus_recommendation(
     )
 
 
+# --------------------------------------------------------------------------- #
+# LP-490 — CR-6's seasoning arithmetic and CR-10's aggregate.
+#
+# ⚠️ THE SEASONING IS MEASURED FROM THE EVENT'S OWN DATE, never from the credit report's date. Priya was
+# explicit: a discharge, dismissal or completion date is the only honest anchor. Using the report date
+# would season an event to whenever the report happened to be pulled — a four-year bankruptcy waiting
+# period would "complete" the moment someone re-pulled credit. When the event has no date, this abstains.
+#
+# ⚠️ THESE RECIPES CARRY NO WAITING PERIOD. The matrix (4 years / 2 years / 7 years by event type) lives
+# in CR-6's reference_values, where it is reviewable and cited to Priya. The tag emits ELAPSED MONTHS and
+# the rule judges them — tags describe, rules judge.
+# --------------------------------------------------------------------------- #
+
+
+def _derogatory_months_elapsed(
+    snapshot: Snapshot, _subject_id: str, subject_raw: object
+) -> tuple[JsonValue | None, str]:
+    """credit.derogatory_months_elapsed — months from THIS event's own date to closing (CR-6, LP-490).
+
+    Per liability; declines (``None``) for a non-liability subject. Abstains to ``unknown`` when the
+    event has no date of its own — NEVER substituting the report date.
+    """
+    from app.verification.rule_engine.enumerators import LiabilityRow
+
+    if not isinstance(subject_raw, LiabilityRow):
+        return None, "not a liability subject"
+    tags = snapshot.tags.by_subject.get(_subject_id, {}) if not snapshot.tags.absent else {}
+    event = tags.get("liab.derogatory_date")
+    raw = None if event is None else str(event.value)
+    if raw is None or raw == _UNKNOWN or not raw.strip():
+        return _UNKNOWN, (
+            "this derogatory event states no discharge, dismissal or completion date — the seasoning "
+            "cannot be measured, and is NEVER computed from the credit report's own date"
+        )
+    parsed = coerce_date(raw)
+    if parsed is None:
+        return _UNKNOWN, f"the derogatory event's date {raw!r} could not be read as a date"
+    closing, reason = _single_parsed_date(snapshot, "contract.closing_date")
+    if closing is None:
+        return _UNKNOWN, f"the loan's closing date is {reason}, so no seasoning can be measured"
+    months = _age_months_ceiling(parsed, closing)
+    if months < 0:
+        return _UNKNOWN, (
+            f"the derogatory event's date ({parsed.isoformat()}) is AFTER the loan's closing date "
+            f"({closing.isoformat()}) — the file contradicts itself, so this is surfaced, not seasoned"
+        )
+    return str(months), (
+        f"{months} complete month(s) from the event ({parsed.isoformat()}) to closing "
+        f"({closing.isoformat()})"
+    )
+
+
+def _collection_aggregate_balance(
+    snapshot: Snapshot, subject_id: str, _subject_raw: object
+) -> tuple[JsonValue, str]:
+    """credit.collection_aggregate_balance — the borrower's NON-MEDICAL collection total (CR-10).
+
+    ⚠️ ABSTAINS IF ANY CONTRIBUTING BALANCE IS UNREADABLE. A partial sum understates the aggregate and
+    could clear a $1,000 or $2,000 threshold the file does not actually clear — the one direction that
+    turns a missing number into a pass.
+
+    ⚠️ MEDICAL collections are EXCLUDED (Fannie's payoff limits do not count them), and a tradeline
+    whose medical status is unknown is treated as CONTRIBUTING: excluding an unknown would be the
+    permissive guess.
+    """
+    from app.verification.rule_engine.enumerators import _SOURCE_CREDIT_REPORT, liability_rows
+
+    if snapshot.tags.absent:
+        return _UNKNOWN, "no tags materialized, so no collection balances to aggregate"
+    total = Decimal(0)
+    counted = 0
+    for row in liability_rows(snapshot):
+        if row.source != _SOURCE_CREDIT_REPORT:
+            continue
+        tags = snapshot.tags.by_subject.get(row.subject_id, {})
+        kind = tags.get("liab.derogatory_type")
+        if kind is None or str(kind.value) not in {"collection", "charge_off"}:
+            continue
+        medical = tags.get("liab.is_medical_collection")
+        if medical is not None and str(medical.value) == "yes":
+            continue  # excluded from the Fannie payoff limits
+        balance = tags.get("liab.collection_balance")
+        if balance is None or str(balance.value) == _UNKNOWN:
+            return _UNKNOWN, (
+                "a collection on this report states no readable balance — the aggregate would be "
+                "understated, which could clear a threshold the file does not actually clear"
+            )
+        try:
+            total += Decimal(str(balance.value))
+        except (InvalidOperation, ValueError):
+            return _UNKNOWN, (
+                f"a collection's balance ({balance.value!r}) is not a number — abstaining rather than "
+                "summing a partial aggregate"
+            )
+        counted += 1
+    if counted == 0:
+        return "0", "no non-medical collections on this borrower's credit report"
+    return str(total), f"{counted} non-medical collection(s) totalling {total}"
+
+
 def _decimal_or_none(tag: Tag | None) -> Decimal | None:
     """A statement balance tag's value as a Decimal, or None (absent / unknown / unparseable)."""
     if tag is None or str(tag.value) == _UNKNOWN:
@@ -2941,6 +3041,8 @@ _RECIPES: dict[str, Recipe] = {
     "fha_ufmip_percent": _fha_ufmip_percent,  # LP-488 — MI-4
     "condo_questionnaire_present": _condo_questionnaire_present,  # LP-488 — CO-1
     "aus_recommendation": _aus_recommendation,  # LP-488 — AU-3
+    "derogatory_months_elapsed": _derogatory_months_elapsed,  # LP-490 — CR-6
+    "collection_aggregate_balance": _collection_aggregate_balance,  # LP-490 — CR-10
     "mortgagee_clause_correct": _mortgagee_clause_correct,  # LP-487 — IH-2
     "condo_master_policy": _condo_master_policy,  # LP-487 — IH-7
     # LP-453 — DETERMINISTIC numeric observations over the credit report's tradelines list (loan-level). Pure

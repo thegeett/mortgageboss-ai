@@ -1,0 +1,165 @@
+# CR-10 — Collections / charge-offs treatment — AI JUDGMENT rule SPEC (LP-490). ⚠️ BUILDS INERT.
+#
+# ⚠️ INERT. Its load-bearing tags are AI tags with no measured accuracy → `not-calibratable-yet` →
+# `is_eligible()` False (LP-484). NOT in ACTIVE_RULE_IDS.
+#
+# ⚠️ THERE IS NEVER ONE DOLLAR THRESHOLD ACROSS AGENCIES — Priya's ruling, and the reason this rule is a
+# judgment over an occupancy/property-type matrix rather than a single numeric compare:
+#
+#   FANNIE DU
+#     one-unit PRIMARY residence ....... NO payoff required, regardless of amount
+#     2–4 unit primary / second home ... aggregate > $5,000 must be paid
+#     INVESTMENT property .............. individual >= $250 OR aggregate > $1,000
+#   FANNIE MANUAL ...................... individual >= $250 OR aggregate > $1,000
+#   FHA ................................ non-medical aggregate >= $2,000 → pay it, OR document a payment
+#                                        arrangement and use the required payment, OR count 5% of the
+#                                        outstanding balance as monthly debt
+#   MEDICAL collections are EXCLUDED from the Fannie payoff limits and treated differently under FHA.
+#
+# ⚠️ THE DU-vs-MANUAL AXIS DOES NOT EXIST AS A FACT (LP-501). No field carries it, and inventing
+# `loan.agency` or `loan.underwriting_method` to fill the gap would be fabricating an input. So this rule
+# builds the FANNIE DU branch, gates FHA on `program.type` (LP-488's applicability-predicate pattern),
+# and returns `manual_underwriting_not_supported` — an honest abstention — when the file is manually
+# underwritten. The prompt is told not to guess which path applies.
+#
+# ⚠️ OCCUPANCY AND PROPERTY TYPE DRIVE THE DU BRANCH, and an ABSENT one must ABSTAIN. Defaulting to the
+# permissive cell (one-unit primary, no payoff at any amount) would clear every collection on a file that
+# simply has not stated its occupancy yet.
+#
+# ⚠️ MORTGAGE CHARGE-OFFS ARE NOT ORDINARY COLLECTIONS. They carry a seasoning requirement (CR-6's
+# matrix) rather than a dollar test, and are deliberately kept out of this rule's dollar logic.
+#
+# ⚠️ ZERO COLLECTION OR CHARGE-OFF CODES EXIST ON ANY OF THE THREE REAL CREDIT REPORTS. The trigger is
+# entirely unexercised — this rule is built against the schema and the guideline, never observed firing.
+
+rule_id: CR-10
+name: Collections / charge-offs treatment
+category: Credit
+
+kind: judgmental            # must equal rule_kinds.csv (CR-10 = judgmental, ai_judgment)
+numeric_check: false        # must equal rule_kinds.csv
+
+criteria: >-
+  Collections and charged-off accounts must be treated according to the applicable agency requirement,
+  which varies by occupancy, property type and programme rather than by a single dollar figure. Medical
+  collections are excluded from the Fannie payoff limits. A file whose occupancy or property type is not
+  stated, or which is manually underwritten, resolves to an abstention — never to the most permissive
+  cell.
+
+applicability:
+  scope: each borrower with collections on the credit report
+  trigger: >-
+    A borrower whose credit report shows a collection or charged-off account. A borrower with none is not
+    applicable. Occupancy, property type or programme that cannot be read couldnt_checks.
+
+reference_values:
+  priya_validated: false          # must equal rule_kinds.csv
+  threshold_needs_signoff: false  # must equal rule_kinds.csv
+  values:
+    # ⚠️ PROVENANCE TIER P — the domain expert's own rulings, given directly (LP-490). Recorded here as
+    # declared data so the matrix is reviewable in one place rather than embedded in a prompt.
+    du_one_unit_primary: "no payoff required regardless of amount"
+    du_two_to_four_unit_or_second_home_aggregate: "5000"
+    du_investment_individual: "250"
+    du_investment_aggregate: "1000"
+    manual_individual: "250"
+    manual_aggregate: "1000"
+    fha_non_medical_aggregate: "2000"
+    fha_alternative_monthly_debt_percent: "5"
+    medical_collections_excluded: "yes"
+  guideline_text: >-
+    Under Fannie Mae's automated underwriting, collections on a one-unit primary residence need not be
+    paid off regardless of amount; on a two- to four-unit primary residence or a second home, an
+    aggregate above $5,000 must be paid; on an investment property, an individual collection of $250 or
+    more, or an aggregate above $1,000, must be paid. Manually underwritten loans apply the $250 /
+    $1,000 test. Under FHA, non-medical collections totalling $2,000 or more must be paid, or a payment
+    arrangement documented and the required payment counted, or 5% of the outstanding balance counted as
+    a monthly obligation. Medical collections are excluded from the Fannie limits and treated separately
+    under FHA. A charged-off MORTGAGE is subject to a waiting period rather than these tests.
+
+required_inputs:
+  - name: aggregate_balance
+    snapshot_path: 'tags.by_subject[<borrower_id>]["credit.collection_aggregate_balance"]'
+    description: >-
+      the borrower's NON-MEDICAL collection total (derived, LP-490). "unknown" when any contributing
+      balance is unreadable — a partial sum could clear a threshold the file does not clear.
+  - name: occupancy
+    snapshot_path: 'tags.by_subject["loan"]["property.occupancy"]'
+    description: >-
+      the subject property's stated occupancy (parsed, MISMO). ⚠️ Absent → abstain, never the permissive
+      cell.
+  - name: property_type
+    snapshot_path: 'tags.by_subject["loan"]["property.type"]'
+    description: the subject property type (parsed, MISMO) — one-unit vs 2–4 unit drives the DU cell.
+  - name: program
+    snapshot_path: 'tags.by_subject["loan"]["program.type"]'
+    description: conventional or FHA (parsed, MISMO) — selects the Fannie or FHA branch.
+
+subject_enumeration: per_borrower
+subject_key_fields: [borrower]
+
+evidence_required: >-
+  Each collection's creditor, balance and whether it is medical; the non-medical aggregate; and the
+  occupancy, property type and programme that selected the applicable requirement — so a processor can
+  see which cell was applied and why.
+
+guideline_reference: "Fannie Mae collection and charged-off account requirements by occupancy and property type, and FHA's non-medical aggregate test, as ruled by the domain expert (LP-490)."
+
+judgment:
+  subject: per_borrower
+  load_bearing_tags: [credit.collection_aggregate_balance, property.occupancy]
+  reasoned_over:
+    - credit.collection_aggregate_balance
+    - property.occupancy
+    - property.type
+    - program.type
+  output_tag: credit.collection_treatment
+  value_domain:
+    - "no_payoff_required"
+    - "payoff_required"
+    - "payment_plan_or_5pct_may_apply"
+    - "manual_underwriting_not_supported"
+    - "unknown"
+  confidence_floor: 0.5
+  system_prompt: |
+    You are a senior mortgage underwriter deciding how this borrower's COLLECTIONS must be treated. You
+    reason ONLY over the STRUCTURED TAGS below — never raw documents.
+
+    ⚠️ THERE IS NEVER ONE DOLLAR THRESHOLD. The requirement depends on the programme, the occupancy and
+    the property type. Apply the matrix:
+
+    FANNIE (conventional), automated underwriting:
+      - one-unit PRIMARY residence ....... "no_payoff_required" regardless of the amount
+      - 2-4 unit primary or SECOND HOME .. "payoff_required" if the aggregate is ABOVE $5,000
+      - INVESTMENT property .............. "payoff_required" if any individual collection is $250 OR MORE,
+                                           or the aggregate is ABOVE $1,000
+    FHA:
+      - non-medical aggregate of $2,000 OR MORE → "payment_plan_or_5pct_may_apply". FHA allows three
+        routes: pay the balances, document a payment arrangement and count the required payment, or count
+        5% of the outstanding balance as a monthly obligation. Do NOT report it as a flat payoff
+        requirement — the borrower has options a processor must be told about.
+      - below $2,000 → "no_payoff_required".
+
+    ⚠️ MEDICAL collections are EXCLUDED from the Fannie limits and treated differently under FHA. The
+    aggregate you are given is already NON-MEDICAL only.
+
+    ⚠️ ANSWER "manual_underwriting_not_supported" IF YOU CANNOT TELL THAT AUTOMATED UNDERWRITING APPLIES.
+    Nothing in this file states whether the loan is DU-underwritten or manually underwritten, and the two
+    have different thresholds. Do NOT guess: manually underwritten Fannie loans use the $250 / $1,000
+    test regardless of occupancy, so assuming the automated path could clear a collection that must be
+    paid.
+
+    ⚠️ ANSWER "unknown" IF OCCUPANCY OR PROPERTY TYPE IS MISSING. Do NOT fall back to the one-unit
+    primary cell — it is the most permissive in the matrix, and defaulting to it would clear every
+    collection on a file that simply has not stated its occupancy yet.
+
+    ⚠️ A charged-off MORTGAGE is NOT an ordinary collection: it carries a waiting period (CR-6) rather
+    than a dollar test. Do not fold one into this decision.
+
+    BE HONEST. "unknown" and "manual_underwriting_not_supported" are correct, expected answers. Cite the
+    tags you relied on.
+
+    STRICT OUTPUT — return ONLY a JSON OBJECT:
+    {"value": "no_payoff_required|payoff_required|payment_plan_or_5pct_may_apply|manual_underwriting_not_supported|unknown", "confidence": <0.0-1.0>, "reasoning": "<why — cite the tags>"}
+
+spec_version: 1

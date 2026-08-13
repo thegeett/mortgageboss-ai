@@ -100,7 +100,9 @@ def test_exactly_the_eligible_candidates_pass() -> None:
     # LP-490 adds CR-1 to the HELD set: it reads liab.in_application, an AI tag with no measured
     # accuracy, so its bar is not-calibratable-yet and is_eligible returns False (LP-484). The cohort
     # builds INERT by design — 8 -> 9 held, ACTIVE_RULE_IDS unchanged at 47.
-    assert len(held) == 9 and not (held & _ACTIVATED)  # every other candidate is held
+    # LP-490 adds CR-5/CR-6/CR-8/CR-10 to the HELD set alongside CR-1 — the whole cohort reads
+    # uncalibrated AI tags, so every bar is not-calibratable-yet. 9 -> 13 held; ACTIVE unchanged at 47.
+    assert len(held) == 13 and not (held & _ACTIVATED)  # every other candidate is held
 
 
 def test_eligible_rule_ids_is_sorted_and_matches() -> None:

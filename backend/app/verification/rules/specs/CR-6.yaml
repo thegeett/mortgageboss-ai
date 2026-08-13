@@ -1,0 +1,215 @@
+# CR-6 — Derogatory seasoning — calculative rule SPEC (LP-490). ⚠️ BUILDS INERT.
+#
+# A major derogatory event carries a waiting period before the borrower is eligible again. This measures
+# the elapsed time from THE EVENT'S OWN DATE and compares it with the period for that event type.
+#
+# ⚠️ INERT. `credit.derogatory_months_elapsed` is derived, but its inputs — `liab.derogatory_type` and
+# `liab.derogatory_date` — are AI tags with no measured accuracy, so the chain is uncalibrated:
+# `not-calibratable-yet` → `is_eligible()` False (LP-484). NOT in ACTIVE_RULE_IDS.
+#
+# ⚠️ CR-6 NEVER RETURNS A FAILURE. Priya was explicit: extenuating-circumstance exceptions exist, and a
+# rule that returns FAIL on an unseasoned event asserts an ineligibility the file may well overcome. So
+# an unseasoned event resolves to NEEDS_REVIEW — "standard eligibility is not met; an exception needs
+# underwriting review" — never to `fired`. A test pins that no outcome can produce `fired`.
+#
+# ⚠️ SEASONING IS MEASURED FROM THE EVENT'S OWN DATE, NEVER FROM THE CREDIT REPORT'S DATE. Priya was
+# explicit about this too, and it is the reason the producer abstains rather than substituting: using the
+# report date would let a four-year waiting period "complete" the moment someone re-pulled credit. An
+# event with no date of its own resolves to couldnt_check.
+#
+# ⚠️ ORDINARY CONSUMER LATES ARE A SEPARATE TRACK and are NOT evaluated here. Priya's guidance — last 12
+# months high attention, 13–24 months still relevant, beyond 24 months context rather than a finding,
+# weighed together with severity, frequency and re-established credit — is a JUDGMENT, not a waiting
+# period, and mixing it into this matrix would apply a four-year bar to a single 30-day late. Mortgage
+# lates are CR-8's; consumer lates are logged for Priya as an open question.
+#
+# ⚠️ AN INPUT GAP, RECORDED RATHER THAN PAPERED OVER. `public_records[]` carries
+# `discharge_or_satisfied_date`, so a BANKRUPTCY has a real event date. A FORECLOSURE, SHORT SALE or
+# DEED-IN-LIEU usually appears as a tradeline status rather than a public record, and no field states its
+# COMPLETION date. Where that date is absent this rule couldnt_checks — correctly, but it means those
+# three rows of the matrix will abstain far more often than the bankruptcy rows until the extraction
+# carries a completion date. Logged for Priya.
+
+rule_id: CR-6
+name: Derogatory seasoning
+category: Credit
+
+kind: calculative           # must equal rule_kinds.csv (CR-6 = calculative, deterministic_bookend+ai)
+numeric_check: true         # must equal rule_kinds.csv — elapsed months against a waiting period
+
+criteria: >-
+  A major derogatory event carries a waiting period before the borrower is eligible for financing, and
+  the period runs from the event's own completion, discharge or dismissal date. This compares the elapsed
+  months with the period for that event type. An event still inside its window is surfaced for
+  underwriting review, never failed: extenuating-circumstance exceptions exist and only an underwriter
+  can apply one. An event with no date of its own resolves to couldnt_check — the seasoning is never
+  computed from the credit report's date.
+
+applicability:
+  scope: each derogatory event on a credit-report tradeline or public record
+  trigger: >-
+    Any credit-report liability the model marks derogatory with a recognised event type. A tradeline with
+    no derogatory mark is not applicable; one whose event type or date cannot be read couldnt_checks.
+
+reference_values:
+  priya_validated: false          # must equal rule_kinds.csv
+  threshold_needs_signoff: true   # must equal rule_kinds.csv
+  values:
+    # ⚠️ PROVENANCE TIER P — these are the DOMAIN EXPERT'S OWN RULINGS, given directly (LP-490), stated
+    # as Fannie's waiting periods. Cited as domain rulings, not recalled from memory (ADR-361).
+    #   Chapter 7 / Chapter 11 ....... 4 years from discharge OR dismissal
+    #   Chapter 13 DISCHARGED ........ 2 years from discharge
+    #   Chapter 13 DISMISSED ......... 4 years from dismissal
+    #   Foreclosure .................. 7 years from completion
+    #   Short sale ................... 4 years from completion
+    #   Deed-in-lieu ................. 4 years from completion
+    #   Mortgage charge-off .......... 4 years from completion / charge-off
+    # ⚠️ THE CHAPTER 13 SPLIT IS NOT EXPRESSIBLE TODAY. `liab.derogatory_type` has ONE "bankruptcy"
+    # value; nothing distinguishes chapter, or discharge from dismissal. Applying the SHORTER 2-year
+    # period to an undifferentiated bankruptcy would clear a Chapter 7 two years early, so this spec
+    # applies the 4-year period to every bankruptcy — the conservative direction — and the missing
+    # distinction is logged for Priya. A discharged Chapter 13 will therefore be surfaced for review
+    # between years 2 and 4 rather than cleared, which is the safe error.
+    bankruptcy_months: "48"
+    foreclosure_months: "84"
+    short_sale_months: "48"
+    deed_in_lieu_months: "48"
+    charge_off_months: "48"
+  guideline_text: >-
+    A significant derogatory credit event requires a waiting period measured from its completion,
+    discharge or dismissal date before the borrower is eligible. Fannie's periods are four years from a
+    Chapter 7 or Chapter 11 discharge or dismissal, two years from a discharged Chapter 13 and four from
+    a dismissed one, seven years from a completed foreclosure, and four years from a completed short sale
+    or deed-in-lieu. A shorter period may apply where documented extenuating circumstances are
+    established, which is an underwriting determination rather than a calculation.
+
+required_inputs:
+  - name: months_elapsed
+    snapshot_path: 'tags.by_subject[<tradeline row_id>]["credit.derogatory_months_elapsed"]'
+    description: >-
+      complete calendar months from THIS event's own date to the loan's closing date (derived, LP-490).
+      "unknown" when the event states no date — never computed from the credit report's date.
+  - name: derogatory_type
+    snapshot_path: 'tags.by_subject[<tradeline row_id>]["liab.derogatory_type"]'
+    description: >-
+      the event type (AI, LP-490): bankruptcy / foreclosure / short_sale / deed_in_lieu / collection /
+      charge_off / none. ⚠️ UNCALIBRATED.
+
+subject_enumeration: per_liability
+subject_key_fields: [liability]
+
+evidence_required: >-
+  The event type, its own date (discharge, dismissal or completion), the elapsed months, and the waiting
+  period applied — so a processor can see which period was used and from when.
+
+guideline_reference: "Fannie Mae waiting periods for significant derogatory credit events, as ruled by the domain expert (LP-490): 4 years from a Chapter 7/11 discharge or dismissal, 2 years from a discharged Chapter 13, 4 from a dismissed one, 7 years from a completed foreclosure, 4 from a short sale or deed-in-lieu."
+
+spec_version: 1
+
+# ⚠️ ORDERED, FIRST-MATCH-WINS. Each row pairs an event TYPE with its own window, so one rule can carry a
+# type-keyed matrix; `when_tags` and `when_compare` must BOTH hold for a row to match.
+deterministic:
+  applicability:
+    tag: liability.source
+    op: eq
+    value: credit_report_reported
+  load_bearing_tags:
+    - credit.derogatory_months_elapsed
+    - liab.derogatory_type
+  gated_tags:
+    - credit.derogatory_months_elapsed
+    - liab.derogatory_type
+  operands:
+    months: {tag: credit.derogatory_months_elapsed}
+    bankruptcy: {reference: bankruptcy_months}
+    foreclosure: {reference: foreclosure_months}
+    short_sale: {reference: short_sale_months}
+    deed_in_lieu: {reference: deed_in_lieu_months}
+    charge_off: {reference: charge_off_months}
+  outcomes:
+    # --- SEASONED: the waiting period is complete. Tested per type, before the not-yet rows. ---
+    - verdict: satisfied
+      when_tags: [{tag: liab.derogatory_type, op: eq, value: "bankruptcy"}]
+      when_compare: {op: ">=", left: months, right: bankruptcy}
+      reasoning: >-
+        the bankruptcy is {months} month(s) past its discharge or dismissal date, meeting the
+        {bankruptcy}-month waiting period
+    - verdict: satisfied
+      when_tags: [{tag: liab.derogatory_type, op: eq, value: "foreclosure"}]
+      when_compare: {op: ">=", left: months, right: foreclosure}
+      reasoning: >-
+        the foreclosure completed {months} month(s) ago, meeting the {foreclosure}-month waiting period
+    - verdict: satisfied
+      when_tags: [{tag: liab.derogatory_type, op: eq, value: "short_sale"}]
+      when_compare: {op: ">=", left: months, right: short_sale}
+      reasoning: >-
+        the short sale completed {months} month(s) ago, meeting the {short_sale}-month waiting period
+    - verdict: satisfied
+      when_tags: [{tag: liab.derogatory_type, op: eq, value: "deed_in_lieu"}]
+      when_compare: {op: ">=", left: months, right: deed_in_lieu}
+      reasoning: >-
+        the deed-in-lieu completed {months} month(s) ago, meeting the {deed_in_lieu}-month waiting period
+    - verdict: satisfied
+      when_tags: [{tag: liab.derogatory_type, op: eq, value: "charge_off"}]
+      when_compare: {op: ">=", left: months, right: charge_off}
+      reasoning: >-
+        the charge-off is {months} month(s) old, meeting the {charge_off}-month waiting period
+    # --- NOT YET SEASONED → needs_review. ⚠️ NEVER `fired`: an extenuating-circumstance exception can
+    # shorten every one of these periods, and only an underwriter can apply one. ---
+    - verdict: needs_review
+      when_tags: [{tag: liab.derogatory_type, op: eq, value: "bankruptcy"}]
+      reasoning: >-
+        the bankruptcy is {months} month(s) past its discharge or dismissal date, inside the
+        {bankruptcy}-month standard waiting period — standard eligibility is not met, and an exception
+        needs underwriting review
+      how_to_fix: >-
+        Confirm the chapter and whether the case was discharged or dismissed: a DISCHARGED Chapter 13
+        carries a two-year period rather than four, which this rule cannot distinguish today. If the
+        borrower has documented extenuating circumstances, a shorter period may apply — that is an
+        underwriting determination, so route the file for review rather than treating it as ineligible.
+    - verdict: needs_review
+      when_tags: [{tag: liab.derogatory_type, op: eq, value: "foreclosure"}]
+      reasoning: >-
+        the foreclosure completed {months} month(s) ago, inside the {foreclosure}-month standard waiting
+        period — standard eligibility is not met, and an exception needs underwriting review
+      how_to_fix: >-
+        Confirm the completion date from the deed or the title record rather than the credit report's
+        reporting date. Documented extenuating circumstances can shorten the period; that is an
+        underwriting determination.
+    - verdict: needs_review
+      when_tags: [{tag: liab.derogatory_type, op: eq, value: "short_sale"}]
+      reasoning: >-
+        the short sale completed {months} month(s) ago, inside the {short_sale}-month standard waiting
+        period — standard eligibility is not met, and an exception needs underwriting review
+      how_to_fix: >-
+        Confirm the completion date from the closing documents. Documented extenuating circumstances can
+        shorten the period; that is an underwriting determination.
+    - verdict: needs_review
+      when_tags: [{tag: liab.derogatory_type, op: eq, value: "deed_in_lieu"}]
+      reasoning: >-
+        the deed-in-lieu completed {months} month(s) ago, inside the {deed_in_lieu}-month standard
+        waiting period — standard eligibility is not met, and an exception needs underwriting review
+      how_to_fix: >-
+        Confirm the completion date from the recorded deed. Documented extenuating circumstances can
+        shorten the period; that is an underwriting determination.
+    - verdict: needs_review
+      when_tags: [{tag: liab.derogatory_type, op: eq, value: "charge_off"}]
+      reasoning: >-
+        the charge-off is {months} month(s) old, inside the {charge_off}-month standard waiting period —
+        standard eligibility is not met, and an exception needs underwriting review
+      how_to_fix: >-
+        Confirm whether the charged-off account was a MORTGAGE: a mortgage charge-off carries this
+        seasoning requirement, while an ordinary consumer charge-off is treated as a collection (CR-10).
+        Documented extenuating circumstances can shorten the period.
+    # --- The terminal row. `collection` and `none` reach it (neither carries a waiting period), as does
+    # any future type. ⚠️ COULDNT_CHECK, not satisfied: an unrecognised event type must never read as
+    # seasoned. The gate already routes an absent/"unknown" months or type here first.
+    - verdict: couldnt_check
+      default: true
+      reasoning: >-
+        this account's seasoning could not be determined — it carries no recognised major derogatory
+        event, or the event states no discharge, dismissal or completion date of its own
+      how_to_fix: >-
+        Read the event's own date from the discharge order, the recorded deed or the closing documents.
+        ⚠️ Do not substitute the credit report's date: it records when the report was pulled, not when
+        the event completed.

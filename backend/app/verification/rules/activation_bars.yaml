@@ -1156,3 +1156,85 @@ CR-1:
     does — LF-96SV, 18 tradelines against 5 stated liabilities — so a scoring run needs real files, not
     fixtures (ADR-332): a self-authored pair leaks its own answer, and the naming-convention variance
     that makes this judgment hard is precisely what invented data does not reproduce.
+CR-5:
+  # ⚠️ INERT — `not-calibratable-yet` → is_eligible False (LP-484).
+  status: not-calibratable-yet
+  ships: auto
+  threshold: null
+  validated: false
+  load_bearing_ai_tags: [credit.inquiry_explained]
+  fp_fn: >-
+    FN (an unexplained inquiry masking new debt clears -> the DTI is understated by a debt nobody
+    counted) >> FP (a processor requests a letter of explanation the borrower can write in minutes).
+  rationale: >-
+    ⚠️ n≈0 IS THE BINDING PROBLEM HERE, not the producer. Exactly ONE inquiry row exists across all
+    THREE real credit reports, so there is almost nothing to score against. CALIBRATION WOULD REQUIRE:
+    per-BORROWER labels ("is every recent inquiry accounted for?") on files with REAL inquiry activity —
+    which the corpus does not contain, so this needs new real files, not fixtures (ADR-332). An invented
+    inquiry pattern would leak its own answer: we would be authoring both the inquiry and the tradeline
+    that supposedly explains it.
+CR-6:
+  # ⚠️ INERT. The seasoning arithmetic is deterministic, but its inputs (liab.derogatory_type / _date)
+  # are uncalibrated AI tags, so the CHAIN is uncalibrated.
+  status: not-calibratable-yet
+  ships: auto
+  threshold: null
+  validated: false
+  load_bearing_ai_tags: [liab.derogatory_type, liab.derogatory_date]
+  fp_fn: >-
+    ⚠️ ASYMMETRIC, AND THE RULE IS BUILT AROUND IT. A wrong TYPE applies the wrong period entirely (a
+    foreclosure waits seven years, a short sale four); a wrong DATE seasons an event that is not yet
+    seasoned. Both are FNs that clear an ineligible borrower. The FP direction is bounded by design:
+    CR-6 NEVER returns a failure — an unseasoned event is needs_review ("an exception needs underwriting
+    review"), because extenuating circumstances can shorten every period in the matrix.
+  rationale: >-
+    Blocked on calibration AND on an input gap, both recorded. CALIBRATION WOULD REQUIRE: per-EVENT
+    labels for derogatory_type and derogatory_date. ⚠️ ZERO public-record rows exist on any of the three
+    real reports, so there is no derogatory event in the corpus at all — this needs real files carrying
+    real bankruptcies and foreclosures (ADR-332). THE INPUT GAP: `public_records[]` carries
+    `discharge_or_satisfied_date`, so a bankruptcy has a real event date; a foreclosure, short sale or
+    deed-in-lieu usually appears as a tradeline status with NO completion date, so those rows will abstain
+    far more often until the extraction carries one. And `liab.derogatory_type` has one "bankruptcy"
+    value, so the Chapter 13 discharged/dismissed split (2 years vs 4) is not expressible — the spec
+    applies the conservative 4 years to every bankruptcy. All logged for Priya.
+CR-8:
+  # ⚠️ INERT. A judgmental rule RATIFIES every verdict (needs_review / couldnt_check only), so it could
+  # never auto-assert — but it is held on calibration regardless.
+  status: not-calibratable-yet
+  ships: ratify
+  threshold: null
+  validated: false
+  load_bearing_ai_tags: [liab.is_mortgage, liab.structured_history_confident]
+  fp_fn: >-
+    ⚠️ THE FP DIRECTION IS THE DANGEROUS ONE, which is why Priya designed the confidence gate. Reading a
+    60-day late out of an ambiguous 84-character history INVENTS a derogatory event on a clean borrower.
+    The FN direction (a real excessive delinquency read as unclear) lands on needs_review, where a human
+    reads the history — so the gate costs attention, not safety.
+  rationale: >-
+    Blocked on calibration. CALIBRATION WOULD REQUIRE: per-TRADELINE labels for is_mortgage and
+    structured_history_confident, and — the harder one — a ground truth for the payment history itself,
+    which means reading the raw report. ⚠️ `payment_history_24mo` runs 0-84 chars across 17 DISTINCT
+    formats and `worst_delinquency` fills 2/35 in two incompatible formats, so the labelling effort is
+    real and needs the source PDFs, not the extracted fields. Scoring structured_history_confident is the
+    priority: it is the gate everything else hangs on.
+CR-10:
+  # ⚠️ INERT. Judgmental → ratifies; held on calibration regardless.
+  status: not-calibratable-yet
+  ships: ratify
+  threshold: null
+  validated: false
+  load_bearing_ai_tags: [liab.is_medical_collection, liab.collection_balance]
+  fp_fn: >-
+    FN (a collection that must be paid reads as no-payoff -> the loan closes with an unmet condition and
+    fails at delivery) >> FP (a processor confirms a collection that did not need paying). The
+    permissive cell is the danger: a one-unit primary requires NO payoff at any amount, so an absent
+    occupancy defaulting there would clear every collection. The prompt is told to answer "unknown"
+    instead.
+  rationale: >-
+    ⚠️ THE TRIGGER IS ENTIRELY UNEXERCISED: ZERO collection or charge-off codes exist on any of the three
+    real credit reports. This rule is built against the schema and the guideline and has never been seen
+    to fire. CALIBRATION WOULD REQUIRE: per-COLLECTION labels for is_medical_collection and
+    collection_balance, on real files carrying real collections — which the corpus does not have at all
+    (ADR-332). ⚠️ ALSO BLOCKED ON A MISSING FACT, not just labels: the DU-vs-manual axis does not exist
+    (LP-501), so the rule abstains to `manual_underwriting_not_supported` rather than guessing a branch.
+    Even a perfectly calibrated model cannot answer a question the file does not state.
