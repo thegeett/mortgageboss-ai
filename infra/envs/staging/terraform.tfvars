@@ -55,7 +55,7 @@ domain_name = "staging.mortgageboss.ai"
 #
 # Flipping early is not destructive; ACM just sits in PENDING_VALIDATION until the
 # apply times out.
-enable_tls = false
+enable_tls = true
 
 # TLS 1.3 with a 1.2 floor.
 ssl_policy = "ELBSecurityPolicy-TLS13-1-2-2021-06"
@@ -73,7 +73,7 @@ ssl_policy = "ELBSecurityPolicy-TLS13-1-2-2021-06"
 # It shipped as `true` alongside `enable_tls = false`, which meant the guard fired
 # on the very first phase-1 plan and NOTHING could be created. The guard was right;
 # the value was wrong.
-enable_cognito        = false # ⚠️ phase 2: set true at the same time as enable_tls
+enable_cognito        = true # ⚠️ phase 2: set true at the same time as enable_tls
 cognito_domain_prefix = "mbai-staging-auth"
 
 # OPTIONAL, not ON: enforcing MFA before any user exists locks out the first
@@ -144,7 +144,7 @@ ecr_repository_names = {
 # ⚠️ The frontend image for THIS tag must be built with
 # NEXT_PUBLIC_API_URL=https://staging.mortgageboss.ai — it is inlined at BUILD time
 # and cannot be set as a task environment variable. See the result doc.
-image_tag = "staging"
+image_tag = "staging-2"
 
 # Verified in C3: the images are arm64. Fargate defaults to X86_64 and the mismatch
 # fails with `exec format error`, visible only in the CloudWatch log stream.
