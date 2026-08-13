@@ -358,6 +358,13 @@ tags:
   property.appraisal_property_type: {mode: parsed, subject: document, data: property_type, document_type: appraisal}
   property.appraisal_address_match: {mode: derived, subject: document, data: property_appraisal_address_match}
 
+  # --- LP-493 — PC-5 and PC-8. ⚠️ contract.emd_amount is ALREADY declared (parsed, purchase_agreement).
+  #     contract.arms_length and title.parties_match are deliberately NOT declared — see LP-493.md.
+  #     ⚠️ emd_sourced is BORROWER-scoped, not document-scoped: tracing a deposit needs the contract AND
+  #     the bank statements together, and a document-subject group sees only its own document.
+  contract.emd_sourced: {mode: ai, subject: borrower, data: contract_emd}
+  contract.personal_property: {mode: ai, subject: document, data: contract_personal_property}
+
   # --- LP-488 — AU-3 (AUS recommendation). ⚠️ DERIVED, NOT PARSED, and that is the whole point. The raw
   #     `recommendation` field is VENDOR-SPECIFIC: DU prints "Approve/Eligible", LPA prints "Accept" —
   #     and the ONE aus_findings document in the corpus is an LPA whose recommendation reads "ACCEPT",
@@ -421,6 +428,76 @@ ai_groups:
   # resulted from them, and any letters of explanation, together.
   # ⚠️ n≈0 — ONE inquiry row exists across all three real credit reports. This group is built and
   # UNCALIBRATED; CR-5 is inert.
+  # LP-493 — PC-5's earnest-money trace. PER BORROWER, because the question needs BOTH sides: the
+  # contract states the deposit, the bank statements show whether it left a verified account.
+  # ⚠️ THIS IS THE RARE TESTABLE CROSS-SOURCE RULE. LP-480 found most two-source combinations exist on no
+  # file at all; LF-6T3N carries a purchase agreement AND bank statements, so PC-5 can actually be proven.
+  contract_emd:
+    subject: borrower
+    context_builder: borrower
+    applies_to: [purchase_agreement, bank_statement]
+    tags: [contract.emd_sourced]
+    system_prompt: |
+      You are a senior mortgage loan processor STRUCTURING one factual tag: has the earnest money
+      deposit stated on the purchase contract been TRACED to a debit from a verified account?
+
+      WHY IT MATTERS: the deposit is an acceptable source for the down payment and closing costs, but the
+      lender must verify RECEIPT and, where it counts toward the borrower's minimum contribution, that
+      the funds came from an acceptable source. A deposit nobody can trace is an unsourced large sum.
+
+      ANSWER emd_sourced:
+      - "yes"     — a debit on a bank statement plausibly corresponds to the contract's earnest money:
+                    a similar amount, at or shortly after the contract date, leaving an account the
+                    borrower owns.
+      - "no"      — you can see the statements covering that period and NO debit corresponds to it.
+      - "unknown" — no contract amount, no statements covering the period, or you cannot tell. ⚠️ This is
+                    the RIGHT answer far more often than "no". Statements rarely cover every account.
+
+      ⚠️ DO NOT infer a trace from a matching amount alone if the DATE is wrong, and do not call it
+      untraced merely because you cannot see every account. "no" is a claim that the money did NOT move
+      from a verified account; make it only when the statements would have shown it.
+
+      ⚠️ A CONTRACT MAY STATE MORE THAN ONE DEPOSIT — an initial and an additional. If you see a second
+      deposit, say so in your reasoning even though this tag answers about the deposit as a whole.
+
+      Return ONLY a JSON array, one object per borrower, echoing the given "index":
+      [{"index": <i>, "emd_sourced": {"value","confidence","reasoning"}}]
+
+  # LP-493 — PC-8's personal property. PER DOCUMENT (the contract).
+  # ⚠️ THE FIELD IS FREE TEXT, not the yes/no the vocabulary row implies: the four real contracts read
+  # "None", "Gas Logs in fireplace...", "Refrigerator, Washer/Dryer". So this is a reading, not a lookup.
+  contract_personal_property:
+    subject: document
+    context_builder: document
+    applies_to: [purchase_agreement]
+    tags: [contract.personal_property]
+    system_prompt: |
+      You are a senior mortgage loan processor STRUCTURING one factual tag: does this purchase contract
+      include PERSONAL PROPERTY in the sale?
+
+      WHY IT MATTERS: personal property is not real estate. Its value does not support the mortgage, and
+      where it is material it is treated as a sales concession and deducted from the price for
+      loan-to-value purposes. You are NOT deciding whether value is inflated — a downstream rule surfaces
+      that for a human.
+
+      ANSWER personal_property:
+      - "yes"     — the contract includes items that are personal property: appliances not built in,
+                    furniture, a vehicle, a boat, farm equipment, window treatments listed as personal.
+      - "no"      — the contract states none, or lists only FIXTURES (built-in appliances, gas logs,
+                    light fittings, attached shelving), which are part of the real estate.
+      - "unknown" — the field is absent or you cannot tell what is meant.
+
+      ⚠️ THE FIXTURE / PERSONAL-PROPERTY LINE IS THE WHOLE JUDGMENT, and it is genuinely hard: a
+      refrigerator is usually personal property, a built-in oven is a fixture, gas logs in a fireplace
+      are normally a fixture. When the wording does not let you tell, answer "unknown" — do NOT guess
+      "yes", which would put a concession finding on an ordinary contract.
+
+      ⚠️ Contract wording varies by STATE FORM far more than a bureau's field does. Judge the words in
+      front of you; do not assume one form's phrasing.
+
+      Return ONLY a JSON array, one object per document, echoing the given "index":
+      [{"index": <i>, "personal_property": {"value","confidence","reasoning"}}]
+
   credit_inquiries:
     subject: borrower
     context_builder: borrower

@@ -77,6 +77,7 @@ _ACTIVATED = frozenset(
         "AS-8",  # LP-406-2b — the first Bucket 2 rule live (no-ai-dependency; stmt.continuity resolves)
         "IN-6",  # LP-412 — Priya signed off the 0.95 bar (calibratable-now, same tag/evidence as IN-5)
         "PC-7",  # LP-412 — Priya signed off the closing window (first rule live via no-ai-threshold-pending)
+        "PC-8",  # LP-493 — personal property (ratify-pending; surfaces only)
         "PC-2",  # LP-407-3 — purchase price matches loan terms (no-ai-dependency, exact compare, no threshold)
         "IH-3",  # LP-417 — insurance effective date vs closing (no-ai-dependency, native date compare)
         "PC-3",  # LP-407-4 — contract property address vs the loan file (no-ai-dependency, needs_review route)
@@ -117,7 +118,10 @@ def test_exactly_the_eligible_candidates_pass() -> None:
     # uncalibrated AI tags, so every bar is not-calibratable-yet. 9 -> 13 held; ACTIVE unchanged at 47.
     # LP-490a — CR-1/CR-4/CR-6/CR-8/CR-10 left the held set for `ratify-pending` (ADR-378): activated on
     # a self-consistency rate with ratification as the safety substitute. 13 -> 8 held.
-    assert len(held) == 8 and not (held & _ACTIVATED)  # every other candidate is held
+    # LP-493 — PC-5 joins the HELD set: BUILT, but its derivation returned a uniform abstain
+    # ({unknown: 2}), and a rate over one abstain value carries no information (the CR-8 shape), so
+    # none was recorded. 8 -> 9 held.
+    assert len(held) == 9 and not (held & _ACTIVATED)  # every other candidate is held
 
 
 def test_eligible_rule_ids_is_sorted_and_matches() -> None:
@@ -162,6 +166,7 @@ def test_eligible_rule_ids_is_sorted_and_matches() -> None:
         "PC-2",
         "PC-3",
         "PC-7",
+        "PC-8",  # LP-493 (sorts after PC-7)
         "PR-2",  # LP-492 (sorts before PR-6)
         "PR-3",  # LP-492
         "PR-4",  # LP-492

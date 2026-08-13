@@ -36,6 +36,9 @@ from __future__ import annotations
 # LP-492 (+PR-2 — appraised value vs purchase price; deterministic, no model in its chain) -> 56.
 # LP-492 (+PR-7 deterministic; +PR-3/PR-4/PR-5 ratify-pending. ⚠️ PR-8 DROPPED — no FEMA/disaster field
 # exists in any of the 121 schema specs or MISMO, so its trigger is unstateable: CR-3's shape) -> 60.
-EXPECTED_ACTIVE_RULE_COUNT: int = 60
+# LP-493 (+PC-8 — personal property, surfaces only. ⚠️ PC-5 BUILT BUT HELD: its derivation returned a
+# uniform abstain, and a rate over one abstain value carries no information. PC-1 DROPPED: duplicate
+# matcher + a 0/5 field) -> 61.
+EXPECTED_ACTIVE_RULE_COUNT: int = 61
 
 __all__ = ["EXPECTED_ACTIVE_RULE_COUNT"]

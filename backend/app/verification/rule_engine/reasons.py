@@ -77,6 +77,9 @@ _FACT_LABELS: dict[str, str] = {
     "property.appraisal_address_match": "property address on the appraisal",  # PR-7 (LP-492)
     "property.appraisal_completion_condition": "whether the appraisal is made subject to repairs",  # PR-4
     "property.appraisal_property_type": "property type stated on the appraisal",  # PR-3
+    "contract.emd_sourced": "earnest money deposit and the account it left",  # PC-5 (LP-493)
+    "contract.emd_amount": "earnest money deposit on the contract",  # PC-5
+    "contract.personal_property": "personal property included in the contract",  # PC-8 (LP-493)
     "aus.recommendation": "AUS recommendation",  # AU-3 (LP-488)
     "credit.inquiry_explained": "credit inquiries and their explanations",  # CR-5 (LP-490)
     "liab.derogatory_type": "type of derogatory credit event",  # CR-6 (LP-490)

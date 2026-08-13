@@ -276,6 +276,14 @@ _LP491_ACTIVATED: tuple[str, ...] = ("TI-1", "TI-2", "TI-6")
 # WEAKEST in any cohort: n=2 with a SINGLE-VERDICT spread, so they show pipeline stability, not judgment.
 _LP492_ACTIVATED: tuple[str, ...] = ("PR-2", "PR-7", "PR-3", "PR-4", "PR-5")
 
+# LP-493 — the purchase-contract lane. ⚠️ ONLY PC-8 ACTIVATES.
+# PC-5 is BUILT AND HELD: its derivation returned a uniform abstain ({unknown: 2}), and a rate over a
+# single abstain value carries no information (the CR-8 shape) — recording it would activate a rule on
+# nothing. PC-1 is DROPPED: its `title.parties_match` duplicates TI-1's live comparison (one matcher, one
+# comparison — LP-483), and its other input `contract.arms_length` has only `parties_relationship_
+# disclosed`, which is 0/5 on the real contracts (TI-3/4/5's shape).
+_LP493_ACTIVATED: tuple[str, ...] = ("PC-8",)
+
 # The gate is the source of truth: test_activation_gate_lp389 asserts ACTIVE_RULE_IDS - _BASE_ACTIVE ==
 # eligible_rule_ids() — a rule CANNOT enter this set without meeting the eligibility gate (not a hand-list).
 ACTIVE_RULE_IDS: tuple[str, ...] = (
@@ -303,6 +311,7 @@ ACTIVE_RULE_IDS: tuple[str, ...] = (
     *_LP490A_ACTIVATED,
     *_LP491_ACTIVATED,
     *_LP492_ACTIVATED,
+    *_LP493_ACTIVATED,
 )
 
 

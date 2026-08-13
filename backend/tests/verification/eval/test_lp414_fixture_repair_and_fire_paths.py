@@ -134,21 +134,21 @@ async def test_lf6t3n_full_verdict_distribution_is_stable() -> None:
     # LP-491 ACTIVATED TI-1 (per_document over the 30 docs, the IH-1/IH-2 shape): LF-6T3N carries no
     # title commitment, so 26 classified documents → not_applicable and the 4 unclassified → couldnt_check
     # (an unclassified document cannot be ruled out as a commitment). +26 na +4 cc → 532; then TI-2 and TI-6 the same way (+52 na, +8 cc) → 592. LP-492 adds PR-2 (+1 cc: LF-6T3N states no loan purpose, so its
-    # applicability predicate is undetermined and is SURFACED rather than skipped) → 593. LP-492 then adds the four per-document appraisal rules the same way (+104 na, +16 cc) → 713.
+    # applicability predicate is undetermined and is SURFACED rather than skipped) → 593. LP-492 then adds the four per-document appraisal rules the same way (+104 na, +16 cc) → 713. LP-493 adds PC-8 the same way (+25 na, +5 cc) → 743.
     # ⚠️ satisfied / fired / needs_review UNCHANGED at 21 / 2 / 4 — TI-1 never clears on a missing
     # commitment, which would be a false all-clear on the document that establishes ownership.
     mat = await materialize_tags(
         build_lf6t3n_snapshot(), ai_reasoners=stub_materialization_reasoners()
     )
     results, _ = await evaluate_rules(mat)
-    assert len(results) == 713
+    assert len(results) == 743
     assert (
         Counter(r.verdict.value for r in results)
         == {
-            "couldnt_check": 252,  # +PR-3/PR-4/PR-5/PR-7 x4 each (LP-492 — the 4 unclassified docs)  # +PR-2 x1 (LP-492 — LF-6T3N states no loan purpose)  # +TI-2 x4 +TI-6 x4 (LP-491 — the 4 unclassified docs, twice over)  # +TI-1 x4 (LP-491 — the 4 unclassified docs; no title commitment on LF-6T3N)  # +CR-4 x2 +CR-10 x2 (LP-490a — per-borrower, no credit report on LF-6T3N)  # +AU-3 x4 (LP-488 — the 4 unclassified docs; no AUS findings on LF-6T3N)  # +CO-1 x1 (LP-488 — LF-6T3N states no property type)  # +MI-4 x1 (LP-488 — same undetermined program predicate as MI-1)  # +MI-1 x1 (LP-488 — LF-6T3N states no loan program)  # +IH-1 x4 (LP-447); +CL-1/CR-13/PR-6 x1 each (LP-485 — no LE / credit
+            "couldnt_check": 257,  # +PC-8 x5 (LP-493 — the 4 unclassified docs + the purchase agreement)  # +PR-3/PR-4/PR-5/PR-7 x4 each (LP-492 — the 4 unclassified docs)  # +PR-2 x1 (LP-492 — LF-6T3N states no loan purpose)  # +TI-2 x4 +TI-6 x4 (LP-491 — the 4 unclassified docs, twice over)  # +TI-1 x4 (LP-491 — the 4 unclassified docs; no title commitment on LF-6T3N)  # +CR-4 x2 +CR-10 x2 (LP-490a — per-borrower, no credit report on LF-6T3N)  # +AU-3 x4 (LP-488 — the 4 unclassified docs; no AUS findings on LF-6T3N)  # +CO-1 x1 (LP-488 — LF-6T3N states no property type)  # +MI-4 x1 (LP-488 — same undetermined program predicate as MI-1)  # +MI-1 x1 (LP-488 — LF-6T3N states no loan program)  # +IH-1 x4 (LP-447); +CL-1/CR-13/PR-6 x1 each (LP-485 — no LE / credit
             # report / appraisal on LF-6T3N, so each abstains rather than clearing); +IH-2 x4 + IH-7 x1
             # (LP-487 — 4 unclassified docs that cannot be ruled out as binders, and an unstated property type)
-            "not_applicable": 434,  # +PR-3/PR-4/PR-5/PR-7 x26 each (LP-492 — the 26 classified non-appraisal docs)  # +TI-2 x26 +TI-6 x26 (LP-491 — the 26 classified non-commitment docs)  # +TI-1 x26 (LP-491 — 26 classified non-commitment documents)  # +AU-3 x26 (LP-488 — 26 classified non-AUS documents)  # +IH-1 x26 (LP-447 — 26 classified non-binder docs; no homeowners policy);
+            "not_applicable": 459,  # +PC-8 x25 (LP-493 — the 25 classified non-contract documents)  # +PR-3/PR-4/PR-5/PR-7 x26 each (LP-492 — the 26 classified non-appraisal docs)  # +TI-2 x26 +TI-6 x26 (LP-491 — the 26 classified non-commitment docs)  # +TI-1 x26 (LP-491 — 26 classified non-commitment documents)  # +AU-3 x26 (LP-488 — 26 classified non-AUS documents)  # +IH-1 x26 (LP-447 — 26 classified non-binder docs; no homeowners policy);
             # +IH-2 x26 (LP-487 — the same 26 classified non-binder docs)
             # ⚠️ LP-508 review: satisfied 23 -> 21, needs_review 2 -> 4. TWO subjects that used to
             # AUTO-SATISFY now route to a human. That is the distrusted-field guard finally reaching the

@@ -221,5 +221,6 @@ def test_no_rule_activation_changed() -> None:
             "PR-3",  # LP-492 — property type eligibility (ratify-pending)
             "PR-4",  # LP-492 — appraisal completeness (ratify-pending)
             "PR-5",  # LP-492 — condition rating (ratify-pending)
+            "PC-8",  # LP-493 — personal property (ratify-pending; surfaces only, no firing path)
         )
     )

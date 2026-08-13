@@ -528,3 +528,58 @@ Fannie **B2-1.2-01** (06/01/2022) requires the LTV result to be *"truncated to t
 rounded up to the nearest whole percent."* Our `ltv.py` rounds **half-up to two decimals**. It affects
 MI-1 and PR-1 rather than PR-2, and it can move a borderline file across the 80% line.
 **Question: worth fixing before more LTV consumers land?**
+
+---
+
+## 14. From LP-493 (purchase contract: PC-5 · PC-8; PC-1 dropped)
+
+### 14a. ⚠️ What is a "customary" earnest money deposit?
+
+Fannie **B3-4.3-09** (05/04/2022) says large deposits and *"deposits that exceed the amount customary for
+the area should be closely evaluated"* — and gives **no number**. I did not invent one, so PC-5 surfaces
+the trace and never sizes the deposit.
+
+**Question: is there a working rule of thumb** (1% of price? 2%?) that a processor actually applies, and
+does it vary by market? Without one there is no threshold to encode, and that may be correct.
+
+### 14b. ⚠️ A second earnest money deposit is currently lost
+
+Doc 183 stated a **$204,000 additional** deposit distinct from the primary figure. `earnest_money_amount`
+is **singular** and there is **no `additional_earnest_money_amount` field**, so only the first is
+captured.
+
+**Question: how common is a second deposit on your files?** If it is routine, this is an extraction
+change (LP-499) rather than an edge case — and today the larger of the two can be the one omitted.
+
+### 14c. ⚠️ Does contract wording need per-state handling?
+
+Free-text contracts are the least reliable class in our corpus: of ~8 purchase-agreement claims, **one**
+was real — the reader projected **Texas TREC** fields onto a **North Carolina** form. PC-8's judgment
+abstains on wording it cannot place, which is safe but will abstain often.
+
+**Question: which state forms do you actually see?** If it is two or three, per-form handling is
+tractable; if it is a long tail, abstaining is the right permanent answer.
+
+### 14d. Is a party mismatch usually a real defect?
+
+**PC-1 was dropped** — its `title.parties_match` asks the same question **TI-1 already answers**, and a
+second matcher on one comparison is what LP-483 forbade. So the question stands for TI-1 instead
+(see §12a): **is a mismatch between title's vested owner and the file's counterparty usually a real
+defect, or a trust/estate/name-change difference?**
+
+### 14e. ⚠️ Where would arm's-length evidence come from?
+
+`contract.arms_length` was **not built**: its only schema field, `parties_relationship_disclosed`, is
+**0 of 5** on the real contracts. FR-2 (fraud lane) is meant to consume this tag later.
+
+**Question: do your contracts disclose a party relationship in a field, or is it something a processor
+infers** from matching surnames, an unusual price, or a quick resale? The answer decides whether FR-2 has
+an input at all.
+
+### 14f. Personal property — fixture or not?
+
+PC-8 reads free text: "None", "Gas Logs in fireplace", "Refrigerator, Washer/Dryer". A refrigerator is
+usually personal property; a built-in oven is a fixture; gas logs normally are.
+
+**Question: where do you draw the line in practice, and at what value does it start to matter?**
+`personal_property_value` fills on 1 of 5 contracts and that one reads "0", so no value is available.

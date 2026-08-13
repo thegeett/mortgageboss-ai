@@ -54,6 +54,9 @@ _DORMANT_EXPECTED = frozenset(
         # INERT (not-calibratable-yet → is_eligible False, LP-484), so all four are dormant by design.
         # They activate with their own calibration ticket, exactly as credit_profile will.
         "credit_inquiries",
+        # LP-493 — contract_emd stays dormant: PC-5 is BUILT BUT HELD (its derivation returned a uniform
+        # abstain, so no rate was recorded). contract_personal_property went LIVE with PC-8.
+        "contract_emd",
         # ⚠️ LP-490a — credit_profile / credit_derogatory / credit_mortgage_history / credit_collections
         # LEFT the dormant set: CR-1, CR-4, CR-6, CR-8 and CR-10 went live on `ratify-pending` (ADR-378),
         # so their groups are now REQUIRED and run on a live file. Only credit_inquiries stays dormant —
@@ -70,6 +73,7 @@ _LIVE_EXPECTED = frozenset(
         "credit_derogatory",
         "credit_mortgage_history",
         "credit_collections",
+        "contract_personal_property",  # LP-493 — PC-8 is live
         "id_address",
         "id_name",
         "id_poa",

@@ -167,6 +167,7 @@ async def test_registry_dispatches_the_active_rule_set_by_kind() -> None:
             "PR-3",  # LP-492 — property type eligibility (ratify-pending)
             "PR-4",  # LP-492 — appraisal completeness (ratify-pending)
             "PR-5",  # LP-492 — condition rating (ratify-pending)
+            "PC-8",  # LP-493 — personal property (ratify-pending; surfaces only, no firing path)
             "CR-13",
             "PR-6",
         }

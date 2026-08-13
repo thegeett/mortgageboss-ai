@@ -1508,3 +1508,59 @@ PR-5:
     closed and abstains (ADR-376): both real appraisals are UAD 2.6-era, and the 3.6 cutover in Nov 2026
     may change the surface form. ⚠️ Freddie's stricter standard (C5 and C6 both ineligible) is NOT
     branched — the agency axis is not a fact on any file (LP-501). Logged for Priya.
+PC-8:
+  # ⚠️ ratify-pending (ADR-378). Judgmental → ratifies every verdict, and it has NO firing path at all.
+  status: ratify-pending
+  self_consistency_rate: 1.0
+  self_consistency_cases: 5
+  self_consistency_disagreements: 0
+  self_consistency_model: us.anthropic.claude-sonnet-4-5-20250929-v1:0
+  self_consistency_date: "2026-08-13"
+  input_resolves: true
+  ships: ratify
+  threshold: null
+  validated: false
+  load_bearing_ai_tags: [contract.personal_property]
+  fp_fn: >-
+    ⚠️ THE FP DIRECTION IS THE ONE THAT MATTERS, and the prompt is built around it: calling a FIXTURE
+    personal property puts a concession finding on an ordinary contract. Gas logs and built-in appliances
+    are real estate; a refrigerator usually is not, and the wording rarely says which. The FN (missing
+    included personal property) costs a value adjustment a human would likely catch at the appraisal.
+  rationale: >-
+    ⚠️ THE STRONGEST RATE IN ANY COHORT SO FAR — and still only 5 cases. Unlike LP-492's single-verdict
+    spreads, both derivations produced a GENUINELY TWO-VALUED answer ({unknown: 2, yes: 3}), so the rate
+    reflects the model agreeing on DIFFERENT answers rather than agreeing on one. All three pre-rate
+    checks passed: context non-redacted, no failed calls, spread reported. ⚠️ The field is FREE TEXT
+    ("None", "Gas Logs in fireplace...", "Refrigerator, Washer/Dryer"), and contract wording varies by
+    STATE FORM more than a bureau field does — the bench's free reader once projected Texas TREC fields
+    onto a North Carolina form, so unrecognised wording abstains.
+PC-5:
+  # ⚠️ BUILT, NOT ACTIVATED — and the reason is the ticket's own pre-rate check 2.
+  #
+  # The derivation ran cleanly on LF-6T3N (the rare file carrying BOTH a purchase agreement and bank
+  # statements): 2 cases, 0 disagreements, rate 1.0000, calls confirmed succeeded, context non-redacted.
+  # ⚠️ BUT EVERY DERIVATION RETURNED THE SAME ABSTAIN VALUE — the spread is {unknown: 2}. A rate over a
+  # uniform abstain is the CR-8 shape: perfectly consistent and carrying no information about whether the
+  # judgment works. Check 2 says refuse to record such a rate, so it is not recorded and PC-5 stays held.
+  #
+  # ⚠️ WHY THE MODEL ABSTAINED IS THE NEXT QUESTION, not a defect in the rule: "unknown" is the answer
+  # the prompt asks for when the statements do not cover the account the deposit left, and LF-6T3N's
+  # statements may genuinely not. Distinguishing "correctly abstained" from "could not see the input"
+  # needs a file where the trace is known to exist — which the corpus may not contain.
+  status: not-calibratable-yet
+  ships: auto
+  threshold: null
+  validated: false
+  load_bearing_ai_tags: [contract.emd_sourced]
+  fp_fn: >-
+    FN (an unsourced deposit clears -> a large sum enters the transaction undocumented) >> FP (a
+    processor produces a cancelled cheque). ⚠️ The prompt is told that "no" is a CLAIM the money did not
+    move from a verified account, to be made only when the statements would have shown it — because the
+    likely error here is calling a deposit untraced merely because not every account is in the file.
+  rationale: >-
+    Blocked on a derivation that produced no usable signal, NOT on a producer: the tag materialises on
+    both borrowers of LF-6T3N and the calls succeeded. CALIBRATION WOULD REQUIRE a file where the EMD
+    trace is KNOWN to exist, so "unknown" can be distinguished from a correct abstain. ⚠️ ALSO A REPORTED
+    INPUT GAP: `earnest_money_amount` is SINGULAR and no `additional_earnest_money_amount` field exists,
+    so a contract with an initial AND an additional deposit contributes only the first (doc 183's $204k
+    case). The prompt asks the model to name a second deposit in its reasoning; the tag cannot carry it.

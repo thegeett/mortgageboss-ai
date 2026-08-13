@@ -326,6 +326,7 @@ def test_active_set_is_base_plus_lp389() -> None:
             "PR-3",  # LP-492 — property type eligibility (ratify-pending)
             "PR-4",  # LP-492 — appraisal completeness (ratify-pending)
             "PR-5",  # LP-492 — condition rating (ratify-pending)
+            "PC-8",  # LP-493 — personal property (ratify-pending; surfaces only, no firing path)
         )
     )
     # A bar persists after activation as the record of WHY the rule went live, so the bars now intersect the
@@ -382,6 +383,7 @@ def test_active_set_is_base_plus_lp389() -> None:
             "PR-3",  # LP-492 — property type eligibility (ratify-pending)
             "PR-4",  # LP-492 — appraisal completeness (ratify-pending)
             "PR-5",  # LP-492 — condition rating (ratify-pending)
+            "PC-8",  # LP-493 — personal property (ratify-pending; surfaces only, no firing path)
             "CR-13",
             "PR-6",
         }

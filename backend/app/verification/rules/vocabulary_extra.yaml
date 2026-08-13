@@ -915,3 +915,14 @@ tags:
       PR-5's judgment on the condition rating against the agency requirement. ⚠️ ONLY C6 is ineligible;
       C1-C5 are eligible "as is" (Fannie B4-1.3-06).
     produced_by: AI
+
+  # --- LP-493 — PC-8's rule-judgment output (produced by the judgment evaluator, not the materializer,
+  #     so it is NOT declared in tag_production.yaml — the as.borrowed_funds precedent). ------------- #
+  contract.personal_property_assessment:
+    entity: doc
+    value_type: enum
+    allowed_values: ["included", "fixtures_only", "none", "unknown"]
+    description: >-
+      PC-8's judgment on what a purchase contract includes. ⚠️ SURFACES ONLY — it does not decide whether
+      value is inflated, and PC-8 has no firing path.
+    produced_by: AI
