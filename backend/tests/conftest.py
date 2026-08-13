@@ -39,6 +39,15 @@ def _pin_ai_provider(monkeypatch: pytest.MonkeyPatch) -> None:
     this fixture and wins within the test body, with both unwound cleanly at teardown.
     """
     monkeypatch.setattr(settings, "ai_provider", "anthropic")
+    # ⚠️ AND NEUTER THE KEY (LP-491). Pinning the provider makes the suite deterministic, but it also
+    # means any test that reaches a REAL reasoner bills the direct Anthropic API with the developer's
+    # own key. That is not hypothetical: LP-490 shipped a test whose reasoner seam covered ONE ai group
+    # while every other group fell through to the live model — roughly 40-60 real calls before the
+    # runtime (133s for one file) gave it away. A dummy key turns that from a silent charge into an
+    # auth error the test surfaces immediately. A test that genuinely needs a key sets its own.
+    monkeypatch.setattr(
+        settings, "anthropic_api_key", "sk-ant-test-not-a-real-key"
+    )  # pragma: allowlist secret
 
 
 @pytest.fixture

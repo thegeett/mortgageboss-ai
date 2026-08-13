@@ -188,8 +188,23 @@ def get_anthropic_client() -> AsyncAnthropic | AsyncAnthropicBedrock:
     cache is keyed on nothing, so a stale client would otherwise survive the flip.
     """
     if settings.ai_provider == "bedrock":
-        # No api_key: the SDK resolves AWS credentials from the default chain.
-        return AsyncAnthropicBedrock(aws_region=settings.bedrock_region, max_retries=0)
+        # ⚠️ PASS THE PROFILE EXPLICITLY (LP-491). The SDK otherwise resolves credentials from the
+        # default chain, which reads AWS_PROFILE from the ENVIRONMENT — it does not know about
+        # `settings.aws_profile`. Until now only the bench engine exported it (dev/bench/engine.py), so
+        # EVERY OTHER ENTRY POINT — a script, a Celery task, a self-consistency harness — got
+        # "could not resolve credentials from session", the AI call failed, and the producer failed
+        # CLOSED to `unknown` for every subject. That is silent: a broken pipeline and a
+        # confidently-abstaining one look identical downstream, and it cost LP-490a four derivation runs
+        # that scored a perfect 1.0000 while calling nothing at all.
+        #
+        # ⚠️ PASSED AS AN ARGUMENT, NOT EXPORTED TO os.environ — the first fix did the latter and broke
+        # 22 tests: a process-wide AWS_PROFILE leaks into every other boto3 client (S3 storage included)
+        # and persists across tests. Scope the credential to the client that needs it.
+        return AsyncAnthropicBedrock(
+            aws_region=settings.bedrock_region,
+            aws_profile=settings.aws_profile,  # None → the default chain, unchanged
+            max_retries=0,
+        )
     if not settings.anthropic_api_key:
         raise AIClientError("ANTHROPIC_API_KEY is not configured")
     return AsyncAnthropic(api_key=settings.anthropic_api_key, max_retries=0)
