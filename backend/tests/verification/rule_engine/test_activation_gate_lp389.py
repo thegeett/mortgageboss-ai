@@ -97,7 +97,10 @@ def test_exactly_the_eligible_candidates_pass() -> None:
     # Still 8 held after LP-485 — CL-1 / CR-13 / PR-6 ACTIVATED rather than held (they are deterministic;
     # their windows are researched + cited in their specs). The 8: CR-4 (LP-444) / OC-1 / IN-13 / AS-3 /
     # AS-4 / AS-5 / AS-7 / IN-14.
-    assert len(held) == 8 and not (held & _ACTIVATED)  # every other candidate is held
+    # LP-490 adds CR-1 to the HELD set: it reads liab.in_application, an AI tag with no measured
+    # accuracy, so its bar is not-calibratable-yet and is_eligible returns False (LP-484). The cohort
+    # builds INERT by design — 8 -> 9 held, ACTIVE_RULE_IDS unchanged at 47.
+    assert len(held) == 9 and not (held & _ACTIVATED)  # every other candidate is held
 
 
 def test_eligible_rule_ids_is_sorted_and_matches() -> None:

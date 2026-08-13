@@ -80,7 +80,9 @@ async def test_as1_projects_priya_validated_false_with_spec(db_session: AsyncSes
     # 34 = +10 AS-2..AS-12 (LP-323-AS-B); +OC-1 (LP-406-4); +AS-8 (LP-406-2b); +IN-6 (LP-406-3b); +PC-7 (LP-406-1b).
     # +PC-2 = 39; +IH-3 = 40; +PC-3 = 41; +IN-15 (LP-430) = 42; +IN-16 (LP-433) = 43; +CR-4 (LP-444, inert) = 44;
     # +IH-1 (LP-447 — its spec now exists) = 45; +CL-1/CR-13/PR-6 (LP-485 — specs now exist, all held) = 48.
-    assert with_spec == 55  # +MI-1/MI-4/CO-1/AU-3 (LP-488); +IH-2/IH-7 (LP-487); +CR-12 (LP-486)
+    assert (
+        with_spec == 56
+    )  # +CR-1 (LP-490, INERT — a spec exists without the rule being live); +MI-1/MI-4/CO-1/AU-3 (LP-488); +IH-2/IH-7 (LP-487); +CR-12 (LP-486)
 
 
 async def test_db_loses_to_files(db_session: AsyncSession) -> None:

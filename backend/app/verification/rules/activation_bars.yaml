@@ -1127,3 +1127,32 @@ AU-3:
     corpus: an LPA reading "ACCEPT" / "ELIGIBLE", which the DU-shaped catalog vocabulary does not contain
     at all — the concrete evidence that a field-equality rule would have been wrong. ⚠️ n=1: the DU half
     of the vocabulary is researched, not observed.
+
+# --------------------------------------------------------------------------- #
+# LP-490 — the credit AI cohort. ⚠️ EVERY BAR HERE IS `not-calibratable-yet`, FOR WHICH `is_eligible()`
+# RETURNS FALSE (LP-484). None of these rules is in ACTIVE_RULE_IDS; none runs on a live file. That is
+# the intended outcome of the ticket, not a blocker — the deliverable is a correct, CALIBRATABLE build,
+# and scoring is a later run against it. ⚠️ Do NOT set `validated: true` to force eligibility; the
+# loader would accept it and the rule would ship an unmeasured AI judgment as an auto verdict.
+CR-1:
+  # CR-1 reads liab.in_application — the PER-LIABILITY judgment the credit_profile group produces
+  # (LP-483 / ADR-375), the same tag CR-4's borrower rollup aggregates. ONE matcher, two views, so the
+  # two rules cannot disagree on a file. Blocked on the same calibration as CR-4, by construction.
+  status: not-calibratable-yet
+  ships: auto
+  threshold: null
+  validated: false
+  load_bearing_ai_tags: [liab.in_application]
+  fp_fn: >-
+    ⚠️ TWO-SIDED, and neither direction is safe — the note whoever sets the bar must weigh. A false MATCH
+    ("yes", disclosed) HIDES a real undisclosed debt, which is the exact thing this rule exists to catch
+    and Priya's #1 source of underwriting conditions. A false NON-MATCH ("no") FABRICATES a condition on
+    a clean file and sends a processor chasing a debt that was always disclosed. The prompt tells the
+    model both, in those words, and instructs it to answer "unknown" rather than lean either way.
+  rationale: >-
+    Blocked on calibration, NOT on a producer or an input — the matcher, the tags and the enumerator all
+    exist and resolve. CALIBRATION WOULD REQUIRE: per-TRADELINE labels ("is this debt on the
+    application?"), on files carrying BOTH a credit report and stated liabilities. Today exactly ONE file
+    does — LF-96SV, 18 tradelines against 5 stated liabilities — so a scoring run needs real files, not
+    fixtures (ADR-332): a self-authored pair leaks its own answer, and the naming-convention variance
+    that makes this judgment hard is precisely what invented data does not reproduce.
