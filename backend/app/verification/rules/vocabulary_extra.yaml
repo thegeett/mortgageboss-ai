@@ -504,3 +504,39 @@ tags:
       The master policy's general liability limit per occurrence, in dollars. "unknown" when absent or
       unparseable — never 0, which would read as a real limit of zero and fire IH-7 wrongly.
     produced_by: parsed
+
+  # --- LP-488 — MI-1's comparable LTV, and MI-4's note amount. --------------------------------------- #
+  #
+  # ⚠️ WHY loan.ltv_percent EXISTS WHEN calc.ltv ALREADY DOES. `calc.ltv` (fact_tags.csv) is an OBJECT —
+  # {value, breakdown[]} — built for PR-1's transparent display, and a rule cannot compare an object with
+  # a threshold. This is the same fact in the shape a rule can gate on: one number. `calc.ltv` stays
+  # undeclared/inert; when it is wired for display it must read the SAME arithmetic (app/verification/ltv.py),
+  # which this recipe calls rather than reimplements.
+  loan.ltv_percent:
+    entity: loan
+    value_type: number
+    allowed_values: null
+    description: >-
+      The loan-to-value ratio as a percent (e.g. 85.00), from the base loan amount over the value basis —
+      the lesser of purchase price and appraised value on a purchase, the appraised value on a refinance.
+      "unknown" when the loan amount or the value basis is missing — never 0, which would read as a
+      fully-collateralised loan.
+    produced_by: derived
+  loan.refinance_type:
+    entity: loan
+    value_type: string
+    allowed_values: null
+    description: >-
+      The MISMO refinance kind (cash_out / rate_term), or absent on a purchase. Read by the LTV purpose
+      resolver so it mirrors app.services.ltv.ltv_purpose_for. It does not change the LTV denominator —
+      both refinance kinds divide by the appraised value.
+    produced_by: parsed
+  loan.note_amount:
+    entity: loan
+    value_type: number
+    allowed_values: null
+    description: >-
+      The MISMO note amount (TERMS_OF_LOAN/NoteAmount) — what the borrower signs for, INCLUDING any
+      financed FHA upfront MIP. ⚠️ Distinct from loan.amount, which is the BASE loan amount
+      (TERMS_OF_LOAN/BaseLoanAmount). MI-4 reads the difference between the two.
+    produced_by: parsed

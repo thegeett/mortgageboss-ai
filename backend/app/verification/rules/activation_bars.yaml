@@ -1014,3 +1014,36 @@ IH-7:
     building the fidelity leg — stated here so the two do not read as contradicting each other. The rule
     ships under the build-first policy and fail-closes honestly; re-confirm when property.type has a
     producer.
+
+# --------------------------------------------------------------------------- #
+# LP-488 — MI-1 (conventional MI requirement). Deterministic: no AI tag in the chain.
+#
+# ⚠️ `validated` IS NOT READ FOR THIS BAR. `is_eligible()` reads `input_resolves` ALONE for
+# `no-ai-dependency`; `validated` is only consulted on `calibratable-now` / `no-ai-threshold-pending`.
+# MI-1 DOES carry a researched threshold (80% LTV), but the threshold is not what gates it — there is no
+# AI accuracy to measure. Setting `validated: true` here would be DECORATIVE, so it stays false and this
+# comment says why. (CL-1 is the precedent; LP-485 recorded the same reasoning.)
+#
+# ⚠️ THE THRESHOLD'S PROVENANCE IS TIER S, NOT P — Fannie Mae Selling Guide B7-1-01, section correct,
+# PAGE DATE NOT OBTAINED. It lives in the spec's reference_values with that caveat attached, and in
+# docs/domain/priya-open-questions.md. It is not written anywhere as a read-and-confirmed fact.
+MI-1:
+  status: no-ai-dependency
+  ships: auto
+  threshold: null
+  validated: false
+  input_resolves: true
+  load_bearing_ai_tags: []
+  fp_fn: >-
+    ⚠️ NEITHER DIRECTION IS A FIRING RISK, because MI-1 cannot fire. An LTV above 80% routes to
+    needs_review ("confirm the file carries MI") because the PRESENCE of mortgage insurance has no
+    deterministic source in the system — no document type carries an MI certificate. The residual FN is
+    a file whose LTV is understated by a missing appraisal, which the couldnt_check path catches
+    instead: a rule that cannot compute an LTV abstains rather than clearing the MI requirement.
+  rationale: >-
+    No AI tag and no calibration to measure. The 80% threshold is a DOMAIN number recorded in the spec's
+    reference_values with its provenance tier (S — B7-1-01, page date not obtained). The inputs are MISMO
+    facts that were present in the snapshot all along but never declared: loan.amount (BaseLoanAmount),
+    property.purchase_price, and the appraisal's appraised_value. The LTV arithmetic is not
+    reimplemented — the recipe calls app/verification/ltv.py (LP-77), so the rule path and the display
+    path cannot drift.

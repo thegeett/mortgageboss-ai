@@ -120,15 +120,19 @@ async def test_lf6t3n_full_verdict_distribution_is_stable() -> None:
     # property type must not silently skip the condo check. +26 not_applicable +5 couldnt_check → 465.
     # ⚠️ satisfied / fired / needs_review are UNCHANGED at 21 / 2 / 4. Neither new rule clears on absence,
     # and no existing rule's verdict moved. Any other movement would be a regression.
+    # LP-488 ACTIVATED MI-1 (loan-scoped): LF-6T3N's MISMO states NO loan program, so MI-1's applicability
+    # predicate is UNDETERMINED → 1 couldnt_check. ⚠️ NOT not_applicable — an unstated program must be
+    # surfaced, which is exactly why the program axis is scoped as a PREDICATE and not an outcome. +1 → 466.
+    # satisfied / fired / needs_review stay 21 / 2 / 4.
     mat = await materialize_tags(
         build_lf6t3n_snapshot(), ai_reasoners=stub_materialization_reasoners()
     )
     results, _ = await evaluate_rules(mat)
-    assert len(results) == 465
+    assert len(results) == 466
     assert (
         Counter(r.verdict.value for r in results)
         == {
-            "couldnt_check": 212,  # +IH-1 x4 (LP-447); +CL-1/CR-13/PR-6 x1 each (LP-485 — no LE / credit
+            "couldnt_check": 213,  # +MI-1 x1 (LP-488 — LF-6T3N states no loan program)  # +IH-1 x4 (LP-447); +CL-1/CR-13/PR-6 x1 each (LP-485 — no LE / credit
             # report / appraisal on LF-6T3N, so each abstains rather than clearing); +IH-2 x4 + IH-7 x1
             # (LP-487 — 4 unclassified docs that cannot be ruled out as binders, and an unstated property type)
             "not_applicable": 226,  # +IH-1 x26 (LP-447 — 26 classified non-binder docs; no homeowners policy);
@@ -156,6 +160,9 @@ async def test_lf6t3n_full_verdict_distribution_is_stable() -> None:
         # states no property type. ⚠️ couldnt_check, NOT not_applicable: an unstated property type must be
         # surfaced, never silently read as "not a condo".
         "IH-7": "couldnt_check",
+        # LP-488 — MI-1's applicability predicate (program.type) is UNDETERMINED: LF-6T3N states no loan
+        # program. ⚠️ couldnt_check, never not_applicable — an unstated program is surfaced, not skipped.
+        "MI-1": "couldnt_check",
         "PC-3": "couldnt_check",  # LP-407-4 — no MISMO subject-property address on LF-6T3N
         # LP-485 — the date-compare family. LF-6T3N has no loan estimate, no credit report and no
         # appraisal, so each abstains. ⚠️ NOT "satisfied": a rule must never clear on a missing document.

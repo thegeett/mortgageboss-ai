@@ -309,6 +309,7 @@ def test_active_set_is_base_plus_lp389() -> None:
             "CR-12",
             "IH-2",  # LP-487 — mortgagee clause (normalised name compare; needs_review, never fires)
             "IH-7",  # LP-487 — condo master policy (presence + adequacy; Fannie B7-4-01 / B7-3-03)
+            "MI-1",  # LP-488 — conventional MI requirement (the PROGRAM axis's first use)
         )
     )
     # A bar persists after activation as the record of WHY the rule went live, so the bars now intersect the
@@ -348,6 +349,7 @@ def test_active_set_is_base_plus_lp389() -> None:
             "CR-12",  # LP-486 — disputed accounts (ADR-376)
             "IH-2",  # LP-487 — mortgagee clause (normalised name compare; needs_review, never fires)
             "IH-7",  # LP-487 — condo master policy (presence + adequacy; Fannie B7-4-01 / B7-3-03)
+            "MI-1",  # LP-488 — conventional MI requirement (the PROGRAM axis's first use)
             "CR-13",
             "PR-6",
         }

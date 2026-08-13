@@ -304,6 +304,22 @@ tags:
   ins.mortgagee_name: {mode: parsed, subject: document, data: mortgagee_name, document_type: homeowners_insurance}
   loan.lender_name_cd: {mode: parsed, subject: document, data: lender_name, document_type: closing_disclosure}
   loan.lender_name_le: {mode: parsed, subject: document, data: lender_name, document_type: loan_estimate}
+
+  # --- LP-488 — MI-1 (conventional MI requirement). ------------------------------------------------- #
+  # loan.amount is the MISMO BASE loan amount (TERMS_OF_LOAN/BaseLoanAmount — the model's own comment
+  # records the mapping); loan.note_amount is TERMS_OF_LOAN/NoteAmount. Both already exist in the MISMO
+  # section; neither was ever declared, so neither reached a rule.
+  loan.amount: {mode: parsed, subject: loan, data: loan.amount}
+  # Read by the LTV purpose resolver so it mirrors app.services.ltv.ltv_purpose_for exactly. It does not
+  # change the DENOMINATOR (both refinance kinds divide by the appraised value) — it is declared so the
+  # resolver reads a real fact rather than silently defaulting.
+  loan.refinance_type: {mode: parsed, subject: loan, data: loan.refinance_type}
+  loan.note_amount: {mode: parsed, subject: loan, data: loan.note_amount}
+  # ⚠️ document_type-SCOPED. `appraised_value` is the appraisal's own field; reading it unscoped would let
+  # a future document reusing the name drive the LTV denominator.
+  property.appraised_value: {mode: parsed, subject: document, data: appraised_value, document_type: appraisal}
+  property.value_basis: {mode: derived, subject: loan, data: property_value_basis}
+  loan.ltv_percent: {mode: derived, subject: loan, data: loan_ltv_percent}
   # IH-2's CONCLUSION tag, already in the generated fact_tags.csv (enum yes|no|unknown), declared DERIVED
   # here — not AI. The catalog planned ai_fuzzy_match; typed extraction now reads the clause into
   # mortgagee_name, so the perception step is spent and what remains is a normalised string compare

@@ -24,6 +24,7 @@ from __future__ import annotations
 # LP-486 (+CR-12 — disputed accounts, closed-vocabulary abstain, ADR-376) → 41.
 # LP-487 (+IH-2 — mortgagee clause, a normalised name compare that can only needs_review, never fire;
 # +IH-7 — condo master policy presence + adequacy, bounds cited to Fannie B7-4-01 / B7-3-03) → 43.
-EXPECTED_ACTIVE_RULE_COUNT: int = 43
+# LP-488 (+MI-1 — conventional MI requirement; the PROGRAM axis's first use) -> 44.
+EXPECTED_ACTIVE_RULE_COUNT: int = 44
 
 __all__ = ["EXPECTED_ACTIVE_RULE_COUNT"]

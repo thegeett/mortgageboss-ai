@@ -107,6 +107,12 @@ _LOAN_IH7_ABSENT = UUID("95000000-0000-4000-8000-00000000001d")
 _LOAN_IH7_LOW_LIABILITY = UUID("95000000-0000-4000-8000-00000000001e")
 _LOAN_IH7_NOT_CONDO = UUID("95000000-0000-4000-8000-00000000001f")
 _LOAN_IH7_BASIS_UNREADABLE = UUID("95000000-0000-4000-8000-000000000020")
+# LP-488 — MI-1 (conventional MI requirement) and the PROGRAM axis.
+_LOAN_MI1_HIGH_LTV = UUID("95000000-0000-4000-8000-000000000021")
+_LOAN_MI1_LOW_LTV = UUID("95000000-0000-4000-8000-000000000022")
+_LOAN_MI1_FHA = UUID("95000000-0000-4000-8000-000000000023")
+_LOAN_MI1_NO_PROGRAM = UUID("95000000-0000-4000-8000-000000000024")
+_LOAN_MI1_NO_VALUE = UUID("95000000-0000-4000-8000-000000000025")
 _RUN = UUID("95000000-0000-4000-8000-0000000000ff")
 # The file (snapshot) date every closing date is measured against (deterministic — never a wall-clock now()).
 _FILE_DATE = datetime(2026, 7, 1, tzinfo=UTC)
@@ -978,6 +984,73 @@ def build_ih7_unreadable_basis_snapshot() -> Snapshot:
     )
 
 
+# --------------------------------------------------------------------------- #
+# LP-488 — MI-1. The PROGRAM AXIS's first use: `program.type` is an APPLICABILITY PREDICATE, so an FHA
+# file is not_applicable and a file stating NO program is couldnt_check (never silently skipped).
+# All facts are MISMO: loan.program, loan.amount (BaseLoanAmount), property.purchase_price.
+# --------------------------------------------------------------------------- #
+def _mi_mismo(
+    *, program: str | None, base_loan: str | None, purchase_price: str | None
+) -> dict[str, SnapshotField]:
+    facts: dict[str, SnapshotField] = {"loan.purpose": _f("purchase")}
+    if program is not None:
+        facts["loan.program"] = _f(program)
+    if base_loan is not None:
+        facts["loan.amount"] = _f(base_loan)
+    if purchase_price is not None:
+        facts["property.purchase_price"] = _f(purchase_price)
+    return facts
+
+
+def build_mi1_high_ltv_snapshot() -> Snapshot:
+    """Conventional, $340,000 on a $400,000 purchase = 85% LTV → MI-1 NEEDS_REVIEW (MI is required).
+    ⚠️ NOT fired — MI-1 cannot see whether an MI certificate is in the file."""
+    return _snapshot(
+        _LOAN_MI1_HIGH_LTV,
+        [],
+        _mi_mismo(program="conventional", base_loan="340000.00", purchase_price="400000.00"),
+    )
+
+
+def build_mi1_low_ltv_snapshot() -> Snapshot:
+    """Conventional, $300,000 on a $400,000 purchase = 75% LTV → MI-1 SATISFIED (no MI required)."""
+    return _snapshot(
+        _LOAN_MI1_LOW_LTV,
+        [],
+        _mi_mismo(program="conventional", base_loan="300000.00", purchase_price="400000.00"),
+    )
+
+
+def build_mi1_fha_snapshot() -> Snapshot:
+    """⚠️ THE PROGRAM-SCOPING PROOF, FHA side. An 85% LTV that WOULD trip MI-1 on a conventional file —
+    but the program is FHA, so MI-1 is NOT_APPLICABLE and never fires. MI-4 covers FHA."""
+    return _snapshot(
+        _LOAN_MI1_FHA,
+        [],
+        _mi_mismo(program="fha", base_loan="340000.00", purchase_price="400000.00"),
+    )
+
+
+def build_mi1_no_program_snapshot() -> Snapshot:
+    """⚠️ THE PROGRAM-SCOPING PROOF, absent side. The same 85% LTV with NO stated program →
+    COULDNT_CHECK, never silently skipped. This is why the scoping is a predicate, not an outcome."""
+    return _snapshot(
+        _LOAN_MI1_NO_PROGRAM,
+        [],
+        _mi_mismo(program=None, base_loan="340000.00", purchase_price="400000.00"),
+    )
+
+
+def build_mi1_no_value_snapshot() -> Snapshot:
+    """Conventional with a loan amount but NO purchase price and no appraisal → no value basis → the LTV
+    abstains → MI-1 COULDNT_CHECK. Never satisfied on a missing value."""
+    return _snapshot(
+        _LOAN_MI1_NO_VALUE,
+        [],
+        _mi_mismo(program="conventional", base_loan="340000.00", purchase_price=None),
+    )
+
+
 __all__ = [
     "EXPECTED_HOA_MONTHLY",
     "EXPECTED_INS_BASIS_ACV",
@@ -1008,6 +1081,11 @@ __all__ = [
     "build_insurance_replacement_cost_snapshot",
     "build_insurance_two_binder_snapshot",
     "build_insurance_unreadable_basis_snapshot",
+    "build_mi1_fha_snapshot",
+    "build_mi1_high_ltv_snapshot",
+    "build_mi1_low_ltv_snapshot",
+    "build_mi1_no_program_snapshot",
+    "build_mi1_no_value_snapshot",
     "build_other_income_continuance_snapshot",
     "build_past_closing_snapshot",
     "build_pay_stub_only_snapshot",

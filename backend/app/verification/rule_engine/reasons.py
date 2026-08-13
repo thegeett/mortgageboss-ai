@@ -59,6 +59,10 @@ _FACT_LABELS: dict[str, str] = {
     "ins.mortgagee_clause_correct": "mortgagee named on the insurance binder",  # IH-2 (LP-487)
     "ins.condo_master_policy": "condominium project's master insurance policy",  # IH-7 (LP-487)
     "property.type": "property type",  # IH-7's applicability predicate (LP-487)
+    "loan.ltv_percent": "loan-to-value ratio",  # MI-1 (LP-488)
+    "loan.amount": "base loan amount",  # LP-488
+    "loan.note_amount": "note amount",  # MI-4 (LP-488)
+    "property.value_basis": "property value used for the loan-to-value",  # LP-488
     "property.address_normalized_match": "match between the contract and file property addresses",  # PC-3 (LP-407-4)
     # LP-384 — the second activation pass (AS-9 / IN-4 / AS-10 went live).
     "stmt.page_count_declared": "declared page count (the statement's 'of N')",  # AS-9

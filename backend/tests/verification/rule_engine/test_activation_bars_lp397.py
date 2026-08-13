@@ -39,7 +39,7 @@ def test_the_sign_off_activated_as6() -> None:
 
     assert (
         len(eligible_rule_ids())
-        == 32  # LP-487 +IH-2/IH-7  # LP-486 +CR-12  # LP-485 +CL-1/CR-13/PR-6
+        == 33  # LP-488 +MI-1  # LP-487 +IH-2/IH-7  # LP-486 +CR-12  # LP-485 +CL-1/CR-13/PR-6
     )  # +AS-8 +PC-2 +IH-3 +PC-3 +IN-12 +IN-8 +IN-9 +AS-6 +IN-15 +IN-16 +IH-1 (LP-447 — insurance adequacy)
     assert len(ACTIVE_RULE_IDS) == EXPECTED_ACTIVE_RULE_COUNT
 

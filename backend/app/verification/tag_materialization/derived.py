@@ -17,6 +17,7 @@ from itertools import pairwise
 from pydantic import JsonValue
 
 from app.ai.extraction.parsing import coerce_date
+from app.verification.ltv import LtvInputs, LtvPurpose, compute_ltv, value_basis
 from app.verification.snapshot.fields import Field
 from app.verification.snapshot.model import DocumentEntry, Snapshot
 from app.verification.snapshot.pii import PiiField
@@ -1858,6 +1859,100 @@ def _liability_dispute_status(
     )
 
 
+# --------------------------------------------------------------------------- #
+# LP-488 — MI-1's LTV. ⚠️ THE ARITHMETIC IS NOT REIMPLEMENTED HERE. app/verification/ltv.py already owns
+# it (LP-77) as pure functions, with the two subtleties baked in: a PURCHASE divides by the LESSER OF
+# purchase price and appraised value, a REFINANCE by the appraised value alone. This recipe resolves the
+# inputs from the snapshot and calls that module, so the rule path and the display path can never drift
+# into two different LTVs for one file.
+#
+# ⚠️ THESE TAGS DESCRIBE, THEY DO NOT JUDGE. `mi.required` exists in fact_tags.csv as an enum "Is MI
+# required (LTV>80 conv)" — and it is deliberately left INERT, because materialising it would put the 80%
+# threshold inside a PRODUCER. The threshold belongs to MI-1's reference_values, where it is reviewable
+# and citable; the tag emits the number and the rule judges it.
+# --------------------------------------------------------------------------- #
+
+
+def _first_loan_decimal(snapshot: Snapshot, tag_id: str) -> Decimal | None:
+    """The one parseable value of a loan-scoped numeric tag, or None."""
+    for raw in _parsed_strings(snapshot, tag_id):
+        try:
+            return Decimal(raw.replace(",", "").replace("$", "").strip())
+        except (InvalidOperation, ValueError):
+            continue
+    return None
+
+
+def _ltv_purpose(snapshot: Snapshot) -> LtvPurpose:
+    """The LTV purpose from the loan's stated purpose + refinance type.
+
+    Mirrors ``app.services.ltv.ltv_purpose_for``, which takes a LoanFile ORM row this recipe does not
+    have. Defaults to PURCHASE, exactly as that function does.
+    """
+    purposes = {v.casefold() for v in _parsed_strings(snapshot, "loan.purpose")}
+    if "refinance" not in purposes:
+        return LtvPurpose.PURCHASE
+    kinds = {v.casefold() for v in _parsed_strings(snapshot, "loan.refinance_type")}
+    if "cash_out" in kinds:
+        return LtvPurpose.CASH_OUT_REFINANCE
+    return LtvPurpose.RATE_TERM_REFINANCE
+
+
+def _property_value_basis(
+    snapshot: Snapshot, _subject_id: str, _subject_raw: object
+) -> tuple[JsonValue, str]:
+    """property.value_basis — the LTV denominator (LP-488), via app.verification.ltv.value_basis.
+
+    Purchase → the lesser of purchase price and appraised value (whichever are present). Refinance →
+    the appraised value. "unknown" when neither forms a positive basis — never 0.
+    """
+    purpose = _ltv_purpose(snapshot)
+    price = _first_loan_decimal(snapshot, "property.purchase_price")
+    appraised = _first_loan_decimal(snapshot, "property.appraised_value")
+    basis, label = value_basis(purpose, price, appraised)
+    if basis is None:
+        return _UNKNOWN, (
+            f"the file states no {label} to divide by, so no loan-to-value can be computed"
+        )
+    return str(basis), f"the value basis is {basis} (the {label})"
+
+
+def _loan_ltv_percent(
+    snapshot: Snapshot, _subject_id: str, _subject_raw: object
+) -> tuple[JsonValue, str]:
+    """loan.ltv_percent — base loan amount over the value basis, as a percent (LP-488).
+
+    ⚠️ Reads the BASE loan amount (loan.amount = MISMO BaseLoanAmount), NOT the note amount. On an FHA
+    file the note amount includes financed upfront MIP, so dividing by it would overstate the LTV and
+    could push a conventional-equivalent file over the 80% line for the wrong reason. (MI-4 reads the
+    difference between the two deliberately; MI-1 must not.)
+    """
+    first = _first_loan_decimal(snapshot, "loan.amount")
+    if first is None or first <= 0:
+        return _UNKNOWN, "the file states no base loan amount"
+    purpose = _ltv_purpose(snapshot)
+    result = compute_ltv(
+        LtvInputs(
+            first_loan=first,
+            second_loan=Decimal(0),
+            heloc_drawn=Decimal(0),
+            heloc_limit=Decimal(0),
+            purchase_price=_first_loan_decimal(snapshot, "property.purchase_price"),
+            appraised_value=_first_loan_decimal(snapshot, "property.appraised_value"),
+        ),
+        purpose,
+    )
+    if result.ltv_pct is None:
+        return _UNKNOWN, (
+            f"the file states no {result.value_basis_label} to divide by, so no loan-to-value can be "
+            "computed"
+        )
+    return str(result.ltv_pct), (
+        f"the loan-to-value is {result.ltv_pct}% "
+        f"({first} over the {result.value_basis_label} of {result.value_basis})"
+    )
+
+
 def _decimal_or_none(tag: Tag | None) -> Decimal | None:
     """A statement balance tag's value as a Decimal, or None (absent / unknown / unparseable)."""
     if tag is None or str(tag.value) == _UNKNOWN:
@@ -2560,6 +2655,8 @@ _RECIPES: dict[str, Recipe] = {
     # actual_cash_value / unknown, for IH-1 (insurance adequacy, ADR-340). Per-document; fails closed on an
     # unrecognised value; reads ONLY the typed field, never forms_and_endorsements (the anti-conflation).
     "dwelling_settlement_basis": _dwelling_settlement_basis,
+    "property_value_basis": _property_value_basis,  # LP-488 — MI-1
+    "loan_ltv_percent": _loan_ltv_percent,  # LP-488 — MI-1
     "mortgagee_clause_correct": _mortgagee_clause_correct,  # LP-487 — IH-2
     "condo_master_policy": _condo_master_policy,  # LP-487 — IH-7
     # LP-453 — DETERMINISTIC numeric observations over the credit report's tradelines list (loan-level). Pure
