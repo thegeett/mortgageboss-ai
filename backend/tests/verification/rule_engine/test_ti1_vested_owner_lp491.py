@@ -15,6 +15,9 @@ names, because no borrower PII enters the repo. They prove wiring and direction,
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+from uuid import uuid4
+
 import pytest
 from app.verification.eval.fire_path_scenarios import (
     build_ti1_no_purpose_snapshot,
@@ -30,6 +33,15 @@ from app.verification.rule_engine.result import Verdict
 from app.verification.rules.distrust import distrusted_tag_ids
 from app.verification.rules.kinds import EvaluationPath, load_rule_kinds
 from app.verification.rules.specs import load_rule_spec
+from app.verification.snapshot.fields import Field, FieldSource
+from app.verification.snapshot.model import (
+    DocumentEntry,
+    DocumentsSection,
+    ListRow,
+    MismoSection,
+    Snapshot,
+    TagsSection,
+)
 from app.verification.tag_materialization.derived import _VESTING_TRUNCATE_MARKERS
 from app.verification.tag_materialization.producer import materialize_tags
 
@@ -141,3 +153,113 @@ def test_ti1_is_live_without_a_self_consistency_rate() -> None:
 def test_ti1_reads_no_distrusted_tag() -> None:
     gated = set(load_rule_spec("TI-1").deterministic.gated_tags)
     assert not (gated & set(distrusted_tag_ids()))
+
+
+# --------------------------------------------------------------------------- #
+# LP-491 follow-up — ⚠️ THE PER-RULE RATIFICATION PROOF for TI-2 and TI-6
+# --------------------------------------------------------------------------- #
+def _judgeable_commitment() -> Snapshot:
+    """A commitment carrying everything TI-2 and TI-6 gate on, so both REACH their judgment.
+
+    ⚠️ TI-1's builders deliberately omit `property_address` and the chain rows — they are not TI-1's
+    inputs — so reusing them left both rules gated to couldnt_check before the judge ran, and the proof
+    would have asserted nothing.
+    """
+    commitment = DocumentEntry(
+        content_id="95-tc-judge",
+        document_type="title_commitment",
+        belongs_to=None,
+        fields={
+            k: Field.present(v, source=FieldSource.EXTRACTED)
+            for k, v in {
+                "vested_owner_name": "Miriam Okonkwo",
+                "legal_description": "LOT 7, BLOCK 2, BIRCH COURT SUBDIVISION, RIVERTOWN, ILLINOIS",
+                "property_address": "34 Birch Rd, Rivertown IL 60000",
+            }.items()
+        },
+        lists={
+            "chain_of_title": tuple(
+                ListRow(
+                    fields={
+                        k: Field.present(v, source=FieldSource.EXTRACTED) for k, v in row.items()
+                    },
+                    row_id=f"95-tc-judge-c{i}",
+                )
+                for i, row in enumerate(
+                    [
+                        {
+                            "transfer_date": "2022-03-01",
+                            "grantor": "Alan Reeve",
+                            "grantee": "Miriam Okonkwo",
+                        },
+                        {
+                            "transfer_date": "2024-09-15",
+                            "grantor": "Miriam Okonkwo",
+                            "grantee": "Harold Vance",
+                        },
+                    ]
+                )
+            )
+        },
+    )
+    return Snapshot(
+        loan_file_id=uuid4(),
+        run_id=uuid4(),
+        created_at=datetime(2026, 8, 13, tzinfo=UTC),
+        documents=DocumentsSection.present([commitment]),
+        mismo=MismoSection.present({}),
+        tags=TagsSection.present({}),
+    )
+
+
+async def _judged(rule_id: str, value: str):
+    """Run a JUDGMENT rule end to end with a scripted judge, through the real evaluator.
+
+    The judge is injected per rule id (`judgment_reasoners`), so the rule's own applicability, gating and
+    result construction all run — which is the point. Nothing here calls the ratification mechanism
+    directly.
+    """
+    from app.ai.rule_judgment import RuleJudgment, RuleJudgmentResult
+
+    async def judge(_context_json: str) -> RuleJudgmentResult:
+        return RuleJudgmentResult(
+            judgment=RuleJudgment(value=value, confidence=0.9, reasoning="scripted for the test"),
+            input_tokens=1,
+            output_tokens=1,
+            model="stub-ti",
+            truncated=False,
+        )
+
+    snapshot = await materialize_tags(_judgeable_commitment(), only_groups=frozenset())
+    evaluations, _tags = await evaluate_rules(
+        snapshot, rule_ids=(rule_id,), judgment_reasoners={rule_id: judge}
+    )
+    return [e for e in evaluations if e.verdict is not Verdict.NOT_APPLICABLE]
+
+
+@pytest.mark.parametrize(
+    ("rule_id", "value"),
+    [("TI-2", "yes"), ("TI-2", "no"), ("TI-6", "clean"), ("TI-6", "chain_gap")],
+)
+async def test_ratify_pending_judgment_findings_carry_ratification(
+    rule_id: str, value: str
+) -> None:
+    """⚠️ THE GAP LP-491 SHIPPED WITH, now closed. Both rules activated on `ratify-pending` (ADR-378),
+    where RATIFICATION IS THE ENTIRE SAFETY SUBSTITUTE for the missing measurement — but the proof was
+    only ever SET-LEVEL: that the status set was as expected and `ratifies_every_finding()` returned
+    True. The per-rule evidence existed for CR-1 and CR-4 and was never extended here.
+
+    "It holds by construction because judgment.py sets the flag unconditionally" is an ARGUMENT, and
+    LP-508 is exactly the case where that argument was wrong: its guard was asserted the same way and
+    reached 1 of the 5 rules it claimed to protect. So this drives a real judgment through the real
+    evaluator, on BOTH the clean and the adverse value, and checks the finding itself.
+
+    ⚠️ Asserted on the ASSERTING verdicts. A judgment rule emits needs_review (an assertion a human must
+    confirm) or couldnt_check (an abstention, which asserts nothing and needs no ratification)."""
+    findings = await _judged(rule_id, value)
+    asserted = [e for e in findings if e.verdict is Verdict.NEEDS_REVIEW]
+    assert asserted, f"{rule_id} produced no asserting finding for value {value!r}"
+    assert all(e.ratification_pending for e in asserted), (
+        f"{rule_id} shipped an unmeasured AI judgment with NO HUMAN IN THE LOOP: "
+        f"{[(e.subject_id, e.verdict.value) for e in asserted if not e.ratification_pending]}"
+    )
